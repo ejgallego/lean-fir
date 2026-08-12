@@ -96,22 +96,34 @@ private def findLabelIndex? : List (Option FVarId) → FVarId → Option Nat
       else
         (findLabelIndex? rest label).map (· + 1)
 
-private def findImportTarget? (module : Module) : CallTarget → Option Nat
-  | .runtime operation =>
-      module.imports.findIdx? fun import_ => import_.operation? == some operation
-  | .declaration name =>
-      module.imports.findIdx? fun import_ => import_.declaration? == some name
+private structure EncodeIndex where
+  callTargets : Std.HashMap CallTarget Nat
+  functionTargets : Std.HashMap Name Nat
 
-private def findFunctionTarget? (module : Module) (name : Name) : Option Nat :=
-  (module.functions.findIdx? (·.name == name)).map (module.imports.size + ·)
+private def importCallTarget (import_ : Import) : CallTarget :=
+  match import_.key with
+  | .runtime operation => .runtime operation
+  | .external name => .declaration name
 
-private def findCallTarget? (module : Module) : CallTarget → Option Nat
-  | target@(.runtime _) => findImportTarget? module target
-  | target@(.declaration name) =>
-      findImportTarget? module target <|> findFunctionTarget? module name
+private def insertCallTarget
+    (targets : Std.HashMap CallTarget Nat) (target : CallTarget) (index : Nat) :
+    Std.HashMap CallTarget Nat :=
+  if targets.contains target then targets else targets.insert target index
+
+private def buildEncodeIndex (module : Module) : EncodeIndex :=
+  let callTargets := module.imports.foldl (init := {}) fun targets import_ =>
+    insertCallTarget targets (importCallTarget import_) targets.size
+  let (callTargets, functionTargets) := module.functions.foldl
+    (init := (callTargets, {})) fun (calls, functions) function =>
+      let index := module.imports.size + functions.size
+      (insertCallTarget calls (.declaration function.name) index,
+        if functions.contains function.name then functions
+        else functions.insert function.name index)
+  { callTargets, functionTargets }
 
 private structure Context where
   module : Module
+  index : EncodeIndex
   function : Function
   /-- Every Wasm control frame counts toward branch depth; only named FIR blocks match labels. -/
   labels : List (Option FVarId) := []
@@ -140,7 +152,7 @@ private partial def encodeInstruction (context : Context) : Instruction → Exce
   | .globalGet index _ => return #[0x23] ++ encodeU32 index
   | .globalSet index _ => return #[0x24] ++ encodeU32 index
   | .call target => do
-      let some index := findCallTarget? context.module target |
+      let some index := context.index.callTargets.get? target |
         throw (.unknownCallTarget context.function.name)
       return #[0x10] ++ encodeU32 index
   | .i32Eq => return #[0x46]
@@ -211,15 +223,17 @@ end
 private def encodeImport (index : Nat) (import_ : Import) : Bytes :=
   encodeName import_.moduleName ++ encodeName import_.itemName ++ #[0x00] ++ encodeU32 index
 
-private def encodeFunctionBody (module : Module) (function : Function) :
+private def encodeFunctionBody (module : Module) (checkIndex : CheckIndex)
+    (index : EncodeIndex) (function : Function) :
     Except EncodeError Bytes := do
   let localDeclarations := function.locals.toList.map fun (_, kind) =>
     encodeU32 1 ++ #[encodeValueType kind.valueType]
-  let body ← encodeInstructions { module, function } function.body
+  let body ← encodeInstructions { module, index, function } function.body
   let checkerContext : CheckContext := {
     module
     function
-    locals := (function.params ++ function.locals).toList }
+    locals := (function.params ++ function.locals).toList
+    index? := some checkIndex }
   let flow ←
     match checkInstructions checkerContext (some []) function.body with
     | .ok flow => pure flow
@@ -235,9 +249,9 @@ private def encodeFunctionBody (module : Module) (function : Function) :
   let payload := encodeVector localDeclarations ++ body ++ terminal ++ #[0x0b]
   return encodeU32 payload.size ++ payload
 
-private def encodeExport (module : Module) (name : Name) : Except EncodeError Bytes := do
-  let some index := findFunctionTarget? module name | throw (.unknownExport name)
-  return encodeName name.toString ++ #[0x00] ++ encodeU32 index
+private def encodeExport (index : EncodeIndex) (name : Name) : Except EncodeError Bytes := do
+  let some target := index.functionTargets.get? name | throw (.unknownExport name)
+  return encodeName name.toString ++ #[0x00] ++ encodeU32 target
 
 private def encodeMemoryExport (name : String) : Bytes :=
   encodeName name ++ #[0x02] ++ encodeU32 0
@@ -281,6 +295,9 @@ def encode (module : Module) : Except EncodeError ByteArray := do
   | .ok _ => pure ()
   | .error error => throw (.invalidModule error)
 
+  let checkIndex := module.checkIndex
+  let index := buildEncodeIndex module
+
   let signatures :=
     module.imports.toList.map (·.signature) ++
       module.functions.toList.map Function.signature
@@ -293,13 +310,14 @@ def encode (module : Module) : Except EncodeError ByteArray := do
   let globals :=
     module.cacheGlobalKinds.map zeroGlobal ++ module.globals
   let globalPayload := encodeVector <| globals.toList.map encodeGlobal
-  let functionExports ← module.exports.toList.mapM (encodeExport module)
+  let functionExports ← module.exports.toList.mapM (encodeExport index)
   let memoryExports :=
     match module.memory.bind (·.exportName) with
     | none => []
     | some name => [encodeMemoryExport name]
   let exportPayload := encodeVector (functionExports ++ memoryExports)
-  let codePayload ← encodeVector <$> module.functions.toList.mapM (encodeFunctionBody module)
+  let codePayload ← encodeVector <$> module.functions.toList.mapM
+    (encodeFunctionBody module checkIndex index)
 
   let mut bytes := header
   unless signatures.isEmpty do

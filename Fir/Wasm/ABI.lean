@@ -33,7 +33,7 @@ inductive AbiKind where
   | usize
   | float32
   | float
-  deriving Inhabited, BEq, Repr
+  deriving Inhabited, BEq, Hashable, Repr
 
 def AbiKind.valueType : AbiKind → ValueType
   | .object | .tagged | .tobject | .erased | .reuseToken
@@ -235,7 +235,7 @@ inductive RuntimeOp where
   | dec (amount : Nat) (check : Bool) (objectFields? : Option Nat)
   | delete
   | getTag
-  deriving Inhabited, BEq
+  deriving Inhabited, BEq, Hashable
 
 /-- The source declaration whose stable identity is stored in a closure header. -/
 def RuntimeOp.closureTarget? : RuntimeOp → Option Name

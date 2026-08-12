@@ -8,7 +8,7 @@ open Lean.Compiler
 inductive CallTarget where
   | declaration (name : Name)
   | runtime (operation : RuntimeOp)
-  deriving Inhabited, BEq
+  deriving Inhabited, BEq, Hashable
 
 inductive Instruction where
   | i32Const (kind : AbiKind) (value : UInt32)

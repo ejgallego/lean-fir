@@ -97,6 +97,48 @@ order.
 def Module.globalKinds (module : Module) : Array AbiKind :=
   module.cacheGlobalKinds ++ module.globals.map (·.kind)
 
+/--
+Module-wide lookups shared by every symbolic function check. The arrays in a
+`Module` remain authoritative and retain their stable order; this index only
+avoids rescanning them at every call and global instruction.
+-/
+structure CheckIndex where
+  runtimeCalls : Std.HashSet RuntimeOp
+  declarationCalls : Std.HashMap Name Signature
+  globalKinds : Array AbiKind
+
+private def insertDeclarationCall
+    (calls : Std.HashMap Name Signature) (name : Name) (signature : Signature) :
+    Std.HashMap Name Signature :=
+  if calls.contains name then calls else calls.insert name signature
+
+/-- Build the order-insensitive lookup view of one symbolic module. -/
+def Module.checkIndex (module : Module) : CheckIndex :=
+  let runtimeCalls := module.imports.foldl
+    (init := Std.HashSet.emptyWithCapacity module.runtimeOperations.size)
+    fun calls import_ =>
+      match import_.operation? with
+      | some operation => calls.insert operation
+      | none => calls
+  let declarationCalls := module.imports.foldl
+    (init := Std.HashMap.emptyWithCapacity
+      (module.imports.size + module.functions.size))
+    fun calls import_ =>
+      match import_.declaration? with
+      | some name => insertDeclarationCall calls name import_.signature
+      | none => calls
+  let declarationCalls := module.functions.foldl
+    (init := declarationCalls) fun calls function =>
+      insertDeclarationCall calls function.name function.signature
+  { runtimeCalls
+    declarationCalls
+    globalKinds := module.globalKinds }
+
+def CheckIndex.callSignature? (index : CheckIndex) : CallTarget → Option Signature
+  | .runtime operation =>
+      if index.runtimeCalls.contains operation then some operation.signature else none
+  | .declaration name => index.declarationCalls.get? name
+
 def validateOperations : List RuntimeOp → Nat → Except SymbolicError Unit
   | [], _ => pure ()
   | operation :: rest, index => do
@@ -214,6 +256,21 @@ structure CheckContext where
   function : Function
   locals : LocalKinds
   labels : List LabelTarget := []
+  /-- Omitted by external single-function consumers that prefer the canonical
+  array lookup; module validation and binary emission install one shared
+  index. -/
+  index? : Option CheckIndex := none
+
+def CheckContext.callSignature? (context : CheckContext)
+    (target : CallTarget) : Option Signature :=
+  match context.index? with
+  | some index => index.callSignature? target
+  | none => context.module.callSignature? target
+
+def CheckContext.globalKinds (context : CheckContext) : Array AbiKind :=
+  match context.index? with
+  | some index => index.globalKinds
+  | none => context.module.globalKinds
 
 def CheckContext.findLabel? (context : CheckContext) (fvarId : FVarId) :
     Option LabelTarget :=
@@ -276,20 +333,20 @@ partial def checkInstruction (context : CheckContext) (stack? : Option OperandSt
       let stack? ← stack?.mapM fun stack => popKinds context.function.name stack [kind]
       return { fallthrough := stack? }
   | .globalGet index kind => do
-      let some expected := context.module.globalKinds[index]? |
+      let some expected := context.globalKinds[index]? |
         throw (.unknownGlobal context.function.name index)
       unless kind == expected do
         throw (.invalidGlobalKind context.function.name index)
       return { fallthrough := stack?.map (· ++ [kind]) }
   | .globalSet index kind => do
-      let some expected := context.module.globalKinds[index]? |
+      let some expected := context.globalKinds[index]? |
         throw (.unknownGlobal context.function.name index)
       unless kind == expected do
         throw (.invalidGlobalKind context.function.name index)
       let stack? ← stack?.mapM fun stack => popKinds context.function.name stack [kind]
       return { fallthrough := stack? }
   | .call target => do
-      let some signature := context.module.callSignature? target |
+      let some signature := context.callSignature? target |
         throw (.unknownCallTarget context.function.name)
       let stack? ← stack?.mapM fun stack => do
         let stack ← popKinds context.function.name stack signature.params.toList
@@ -593,7 +650,8 @@ partial def checkInstructions (context : CheckContext) (stack? : Option OperandS
 
 end
 
-def validateFunction (module : Module) (function : Function) : Except SymbolicError Unit := do
+private def validateFunctionWithIndex (index : CheckIndex)
+    (module : Module) (function : Function) : Except SymbolicError Unit := do
   let fvarIds := (function.params ++ function.locals).toList.map (·.fst)
   if let some duplicate := firstDuplicateFVar? fvarIds then
     throw (.duplicateLocal function.name duplicate)
@@ -603,7 +661,8 @@ def validateFunction (module : Module) (function : Function) : Except SymbolicEr
   let context : CheckContext := {
     module
     function
-    locals := (function.params ++ function.locals).toList }
+    locals := (function.params ++ function.locals).toList
+    index? := some index }
   let flow ← checkInstructions context (some []) function.body
   if let some label := flow.branches.head? then
     throw (.escapingBranch function.name label)
@@ -612,9 +671,13 @@ def validateFunction (module : Module) (function : Function) : Except SymbolicEr
     unless stackMatches actual expected do
       throw (.stackMismatch function.name expected actual)
 
+def validateFunction (module : Module) (function : Function) : Except SymbolicError Unit :=
+  validateFunctionWithIndex module.checkIndex module function
+
 /-- Validate all module identities and every function's semantic operand stack. -/
 def validateModule (module : Module) : Except SymbolicError Unit := do
   validateModuleShape module
-  module.functions.forM (validateFunction module)
+  let index := module.checkIndex
+  module.functions.forM (validateFunctionWithIndex index module)
 
 end Fir.Wasm
