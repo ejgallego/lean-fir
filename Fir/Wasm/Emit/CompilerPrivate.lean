@@ -2,6 +2,7 @@ module
 
 public import Lean.Compiler.LCNF.Specialize
 public import Lean.EnvExtension
+import all Lean.Compiler.ClosedTermCache
 import all Lean.Compiler.LCNF.Specialize
 import all Lean.Environment
 
@@ -19,6 +20,45 @@ source declarations visible to the ordinary LCNF pipeline.
 -/
 def clearSpecializationCache (env : Environment) : Environment :=
   SimplePersistentEnvExtension.setState LCNF.Specialize.specCacheExt env {}
+
+/--
+Forget imported mappings from erased closed terms to generated names. Reusing
+these mappings while recompiling imported source can pair a new typed LCNF
+binding with a closed declaration generated in the original module unit.
+-/
+def clearClosedTermCache (env : Environment) : Environment :=
+  Lean.closedTermCacheExt.setState (asyncMode := .sync) env {}
+
+/--
+Treat imported generated closed terms and specializations as local names during
+source recompilation. Their original module indices make LCNF phase lookup
+prefer the imported signature over the freshly generated declaration with the
+same name. Ordinary source declarations keep their module mapping.
+-/
+def forgetGeneratedCompilerModuleMappings (env : Environment)
+    (moduleIndices : Array ModuleIdx) : Environment :=
+  let closedNames := (Lean.closedTermCacheExt.getState env).constNames
+  let specializationCache := LCNF.Specialize.specCacheExt.getState env
+  let originalMappings := env.base.private.const2ModIdx
+  let mappings := env.base.private.const2ModIdx.fold
+    (fun mappings name moduleIndex =>
+      if moduleIndices.contains moduleIndex && name.toString.contains "._closed_" then
+        mappings.erase name
+      else mappings)
+    env.base.private.const2ModIdx
+  let mappings := closedNames.foldl
+    (fun mappings name =>
+      match originalMappings[name]? with
+      | some moduleIndex =>
+          if moduleIndices.contains moduleIndex then mappings.erase name else mappings
+      | none => mappings) mappings
+  let mappings := SMap.fold
+    (fun mappings _ name =>
+      match originalMappings[name]? with
+      | some moduleIndex =>
+          if moduleIndices.contains moduleIndex then mappings.erase name else mappings
+      | none => mappings) mappings specializationCache
+  { env with base.private.const2ModIdx := mappings }
 
 /-- Match `leanir`'s target-module import phase without exposing Lean's private
 `ImportState.moduleNameMap` field to the ordinary FIR source module. -/

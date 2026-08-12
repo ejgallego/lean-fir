@@ -1,6 +1,7 @@
 import Fir.Validation.Corpus
 import Fir.Wasm.Emit.PrettyFormat
 import Fir.Wasm.Emit.Source
+import Fir.Wasm.Emit.SourceClosedFixture
 import Fir.Wasm.PrettyFormat
 import Lean.Elab.Command
 
@@ -12,6 +13,14 @@ open Fir.Wasm.Emit.Source
 def idFloat32Fixture (value : Float32) : Float32 := value
 
 def idFloatFixture (value : Float) : Float := value
+
+run_cmd do
+  let source ← liftCoreM <|
+    compileEntryFinalCapturedInternalized
+      ``Fir.Wasm.Emit.SourceClosedFixture.packedTable
+  unless source.program.findDecl?
+      ``Fir.Wasm.Emit.SourceClosedFixture.packedTable |>.isSome do
+    throwError "closed-term source fixture disappeared from final-LCNF capture"
 
 #guard validationSchemaAcceptsAbiKind .float32 .float32
 #guard validationSchemaAcceptsAbiKind .float64 .float

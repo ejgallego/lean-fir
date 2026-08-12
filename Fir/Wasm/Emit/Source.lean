@@ -66,8 +66,12 @@ initialize finalImpureCaptureExt : EnvExtension (Array (Array (LCNF.Decl .impure
 private def resetFinalImpureCapture : CoreM Unit := do
   modifyEnv fun env => finalImpureCaptureExt.modifyState env fun _ => #[]
 
-private def resetSpecializationCache : CoreM Unit := do
-  modifyEnv Fir.Wasm.Emit.CompilerPrivate.clearSpecializationCache
+private def resetCompilerCaches (moduleIndices : Array ModuleIdx) : CoreM Unit := do
+  modifyEnv fun environment =>
+    environment
+      |> (Fir.Wasm.Emit.CompilerPrivate.forgetGeneratedCompilerModuleMappings · moduleIndices)
+      |> Fir.Wasm.Emit.CompilerPrivate.clearSpecializationCache
+      |> Fir.Wasm.Emit.CompilerPrivate.clearClosedTermCache
 
 private def recordFinalImpureGroup (decls : Array (LCNF.Decl .impure)) :
     LCNF.CompilerM Unit := do
@@ -176,7 +180,18 @@ an external stub with the same generated name.
 -/
 private def compileEntryFinalCaptured (entry : Name) (dependencies : Array Name := #[]) :
     CoreM Fir.Validation.Lcnf.Artifact := do
+  -- Internalization grows the root set and recompiles the complete synthetic
+  -- unit. Generated specialization and closed-term names are only meaningful
+  -- within one such compiler run: retaining either the cache or earlier
+  -- captured groups can pair a regenerated name with a stale ABI.
+  resetFinalImpureCapture
   let roots := #[entry] ++ dependencies
+  let environment ← getEnv
+  let moduleIndices := roots.foldl (init := #[]) fun indices root =>
+    match environment.getModuleIdxFor? root with
+    | some index => if indices.contains index then indices else indices.push index
+    | none => indices
+  resetCompilerCaches moduleIndices
   LCNF.main roots (← getOptions)
   let capturedGroups := finalImpureCaptureExt.getState (← getEnv)
   let (ordinaryLocals, ordinaryExternalSigs) ← LCNF.collectUsedDecls roots
@@ -424,7 +439,7 @@ private def replayDeferredModuleFinalCaptured (moduleName entry : Name)
     (groups.foldl (fun state group =>
       group.declNames.foldl (·.insert · group) state) {}))
   resetFinalImpureCapture
-  resetSpecializationCache
+  resetCompilerCaches #[moduleIndex]
   installFinalImpureCaptureDirect
   for group in groups do
     for declaration in group.declNames do
@@ -527,7 +542,6 @@ def compileEntryFinalCapturedInternalized (entry : Name)
     (dependencies : Array Name := #[]) (retainedExternalNames : Array String := #[]) :
     CoreM Fir.Validation.Lcnf.Artifact := withoutModifyingEnv do
   resetFinalImpureCapture
-  resetSpecializationCache
   LCNF.addPass ``finalImpureCaptureInstaller
   compileEntryFinalCapturedInternalizedAux entry dependencies retainedExternalNames
 
