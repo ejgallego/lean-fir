@@ -1943,6 +1943,28 @@ preservation. A smaller direct-function maker was rejected before admission
 because compiler eta-normalization made its execution signature identical to
 the existing same-entry captured-mutation fixture.
 
+The aggregate-erasure ownership pair nests the captured `ByteArray` under
+`Option.some` in an outer structure with an erased proof field. The final LCNF
+constructor has two runtime fields for the three source fields, while the
+executed path constructs both aggregates, case-selects `Option.some`, projects
+its payload, creates and invokes the partial application, and dispatches
+`ByteArray.set!` exactly once. Static proof erasure and dynamic ownership are
+therefore separate, explicit claims.
+
+In `aggregate-erased-before-closure-application`, the outer owner is consumed
+before mutation. Its complete 37-transition trace has four `fap`, two `ctor`,
+one `pap`, one `fvar`, one `cases`, two `oproj`, two `inc`, and two `dec`, and
+returns `[42, 127, 128, 255]`. In
+`aggregate-retained-across-closure-application`, a noinline observer forces the
+whole owner to remain live until after mutation. The complete 48-transition
+trace adds an owner increment before closure construction and an ordered
+post-application call with a second case/projection, for five `fap`, three
+`ctor`, two `cases`, four `oproj`, four `inc`, and three `dec`. It returns the
+unchanged `[0, 127, 128, 255]` payload with the updated copy. Native Lean,
+final LCNF, and real V8 agree on all six focused comparisons, and V8 opens all
+four focused products under strace. Dedicated source and V8 domains require
+both the release-before-application and retain-across-application paths.
+
 The first read probe returned `ByteArray × UInt8` and exposed
 `FIR-BUG-validation-none-nested-boxed-scalar-result`: execution completed, but
 the validation result codec could not decode the boxed `UInt8` stored in

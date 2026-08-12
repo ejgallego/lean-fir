@@ -451,21 +451,6 @@
       },
       {
         "tier": "source-lcnf",
-        "tag": "proof-erasure",
-        "minimumCases": 2
-      },
-      {
-        "tier": "source-lcnf",
-        "tag": "release-before-application",
-        "minimumCases": 1
-      },
-      {
-        "tier": "source-lcnf",
-        "tag": "retain-across-application",
-        "minimumCases": 1
-      },
-      {
-        "tier": "source-lcnf",
         "tag": "alias-across-effect",
         "minimumCases": 2
       },
@@ -681,6 +666,11 @@
       },
       {
         "tier": "source-lcnf",
+        "tag": "proof-erasure",
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
         "tag": "read",
         "minimumCases": 3
       },
@@ -698,6 +688,11 @@
         "tier": "source-lcnf",
         "tag": "release",
         "minimumCases": 12
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "release-before-application",
+        "minimumCases": 1
       },
       {
         "tier": "source-lcnf",
@@ -728,6 +723,11 @@
         "tier": "source-lcnf",
         "tag": "retain",
         "minimumCases": 8
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "retain-across-application",
+        "minimumCases": 1
       },
       {
         "tier": "source-lcnf",
@@ -838,21 +838,6 @@
         "tier": "wasm-v8",
         "tag": "aggregate-erasure",
         "minimumCases": 2
-      },
-      {
-        "tier": "wasm-v8",
-        "tag": "proof-erasure",
-        "minimumCases": 2
-      },
-      {
-        "tier": "wasm-v8",
-        "tag": "release-before-application",
-        "minimumCases": 1
-      },
-      {
-        "tier": "wasm-v8",
-        "tag": "retain-across-application",
-        "minimumCases": 1
       },
       {
         "tier": "wasm-v8",
@@ -1021,6 +1006,11 @@
       },
       {
         "tier": "wasm-v8",
+        "tag": "proof-erasure",
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
         "tag": "recursive-release",
         "minimumCases": 4
       },
@@ -1028,6 +1018,11 @@
         "tier": "wasm-v8",
         "tag": "reference-count",
         "minimumCases": 4
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "release-before-application",
+        "minimumCases": 1
       },
       {
         "tier": "wasm-v8",
@@ -1048,6 +1043,11 @@
         "tier": "wasm-v8",
         "tag": "result-abi",
         "minimumCases": 20
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "retain-across-application",
+        "minimumCases": 1
       },
       {
         "tier": "wasm-v8",

@@ -19,11 +19,11 @@ exception text, or allocator identity.
 
 | Track | State | Scope | Immediate move |
 | --- | --- | --- | --- |
-| A Memory fidelity | active, primary | Allocation, retain/release, alias topology, mutation, copy-on-write, reuse, and persistence | Carry the S6 alias/effect checkpoint forward, then select the next undominated lifetime interaction |
+| A Memory fidelity | active, primary | Allocation, retain/release, alias topology, mutation, copy-on-write, reuse, and persistence | Carry the S8 aggregate-lifetime checkpoint forward, then select the next undominated lifetime interaction |
 | B Calls and control | active through A/B bridge | Application shapes, tail calls, recursion, branch topology, and depth behavior | Schedule B2 application shapes while preserving S4/B1 |
 | C Effects and termination | landed through S6 | Ordered external effects, output, caught/uncaught exceptions, runtime faults, exits, and controlled divergence | Maintain the S6 ownership baseline; queue caught exceptions only after the shared source-error contract is accepted by all participating backends |
 | D Floating semantics | contract-blocked | Bit-exact entry/result transport, arithmetic, comparison, conversion, NaNs, infinities, subnormals, and signed zero | Resolve `FIR-BUG-wasm-none-float-runtime-gap` in the shared runtime before execution fixtures |
-| E Aggregates, erasure, and initialization | queued | Inductive shapes, erased fields, polymorphic dictionaries, arrays, constants, caches, and initialization order | Add a compact source-generated aggregate/erasure pair without duplicating direct-machine reset tests |
+| E Aggregates, erasure, and initialization | active through S8 | Inductive shapes, erased fields, polymorphic dictionaries, arrays, constants, caches, and initialization order | Maintain the proof-erased `Option ByteArray` ownership pair, then choose one different aggregate shape only if it adds a new execution signature |
 | X Evidence and real-engine promotion | continuous | Exact traces/counts, semantic domains, native attestations, retained products, and V8 execution | Promote a representative pair from every eligible track |
 
 Memory remains the default source of new fixture slices. The other tracks enter
@@ -32,9 +32,9 @@ another exhaustive scalar matrix.
 
 ## Coverage gap snapshot
 
-At the current 657-case source checkpoint, case counts are concentrated in
+At the current 659-case source checkpoint, case counts are concentrated in
 scalar and pure-external behavior: 413 cases are tagged `scalar`, 302 `signed`,
-307 `external`, and 146 `arithmetic`. In contrast, only 27 are tagged
+311 `external`, and 146 `arithmetic`. In contrast, only 29 are tagged
 `constructor`, 12 `control-flow`, five `effect`, five `recursion`, three
 `tail-control`, two `tail-ownership`, and one `polymorphism`. The two float-tagged cases preserve
 captured `Float32`/`Float` words but return non-floating observations; they do
@@ -87,7 +87,7 @@ near-synonym drift:
 | S5 | `release-fidelity`, `recursive-release`, `repeated-child-alias`, `grow-delete-release`, plus the ownership/release stop boundary | `recursive-release-repeated-child`, `recursive-release-repeated-child-unique`, `recursive-release-repeated-child-shared-owner`, `grow-delete-release`, `grow-delete-release-unique-reuse`, `grow-delete-release-shared-stop` |
 | B2 | `application-shape` plus `nullary`, `underapplication`, `overapplication`, or `returned-closure` | One domain per admitted application shape |
 | C1 | `effect`, `ordered-effect`, `call-boundary`, `alias-across-effect` | `effect-call-order`, `effect-alias-retention` |
-| E1 | `aggregate`, `erasure`, and the exercised construction/case/projection action | `aggregate-erasure` and one result-shape domain |
+| E1 | `aggregate-erasure`, `proof-erasure`, and the release/retain boundary around construction, case selection, and projection | `aggregate-erasure-released-before-application` and `aggregate-erasure-retained-across-application` |
 
 ## Track A: memory-fidelity progress
 
@@ -101,7 +101,8 @@ near-synonym drift:
 | M5 Recursive release | landed through S5c | S5c adds one `del` on both growth paths and released-leaf reuse only on the unique-owner path to the landed S5a/S5b release matrix | Select the smallest undominated lifetime interaction outside the covered replacement/release matrix |
 | M6 Nonlocal control | landed through S6 | The fixture-only final-use/retained-use closure pair around the linked `recordByteArray` effect passes native/LCNF/V8 with exact 39/54-step traces | Add caught exceptions only after their shared protocol is accepted by all participating backends |
 | M7 Escaping closure ownership | landed | S7 returns a closure-bearing owner across a noinline maker, then distinguishes unique transfer from a retained outside alias during mutation with exact 27/29-step traces | Maintain the landed returned-closure baseline while B2 selects its next application shape |
-| M8 Real-engine promotion | continuous | Scalar closures, the complete zero/one/two/three-use matrix, and all returned/consumed/ignored/read capture-topology pairs run through native/LCNF/V8 | Promote at least one representative pair per ownership domain whenever W7 support is linked |
+| M8 Aggregate erasure ownership | prepared through S8 | A proof-erased outer owner contains `Option ByteArray`; releasing it before closure application is distinguished from retaining the whole owner through application and observing it afterward by exact 37/48-step traces | Land the clean native/LCNF/V8 checkpoint, then preserve it while E1 selects a different shape only when it adds signal |
+| M9 Real-engine promotion | continuous | Scalar closures, the complete zero/one/two/three-use matrix, returned/consumed/ignored/read capture topology, and the S8 aggregate-erasure pair run through native/LCNF/V8 | Promote at least one representative pair per ownership domain whenever W7 support is linked |
 
 States are `queued`, `active`, `prepared`, `landed`, `parked`, or
 `contract-blocked`. A prepared slice is committed and locally validated but
@@ -582,6 +583,32 @@ final-LCNF and executed-form evidence that erasure, construction, case
 selection, projection, and return actually ran. Add a schema contract through
 integration when the current observation vocabulary cannot express a result;
 do not flatten a structure merely to avoid that boundary.
+
+S8 selects a proof-bearing outer structure whose live payload is
+`Option ByteArray`. Final LCNF constructs the three-source-field owner with two
+runtime fields, providing the static proof-erasure witness. Both paths then
+execute the `Option.some` case and nested projection inside a real partial
+application before one `ByteArray.set!` dispatch.
+
+The released path consumes the outer owner before mutation and pins 37
+interpreter transitions: four `fap`, two `ctor`, one `pap`, one `fvar`, one
+`cases`, two `oproj`, two `inc`, and two `dec`. It returns the updated
+`[42, 127, 128, 255]`. The retained path uses a noinline post-application
+observer to prevent projection hoisting: final LCNF increments the whole owner
+before closure construction, invokes the observer only after mutation, and
+executes a second case/projection. Its 48-transition path contains five `fap`,
+three `ctor`, two `cases`, four `oproj`, four `inc`, and three `dec`, and
+returns the unchanged original alongside the updated copy. Native Lean, final
+LCNF, and real V8 agree on all six focused comparisons; all four focused Wasm
+products are opened under strace.
+
+The checkpoint advances to 659 source cases, 668 aggregate unique cases, 1,327
+tier cases, 1,986 equal comparisons, 7,063 interpreter steps, 146 tag floors,
+and 249 conjunctive domains. This remains fixture-only and consumes no active
+argument-alias, error, exception, or source-stream contract.
+
+State: S8 is prepared on `validation/closure-ownership-fixtures`; landing waits
+only for the complete post-rebase acceptance gate and clean mailbox handoff.
 
 ### E2: polymorphic and dictionary traffic
 
