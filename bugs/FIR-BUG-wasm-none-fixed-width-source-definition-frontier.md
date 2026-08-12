@@ -1,15 +1,15 @@
 ---
 id: FIR-BUG-wasm-none-fixed-width-source-definition-frontier
 status: fixed
-classification: runtime
+classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: d8b18978322de05a8f3dba51ef03cf5461676c17
 phase: wasm
 pass: none
 discovered-by: differential-test
 first-seen: 2026-08-12
-reproduction: integration/lean-zip/level1-smoke.mjs
-regression: none
+reproduction: integration/lean-zip/ProbeLevel1.lean
+regression: Fir/Wasm/Emit/ResidentFixedWidth.lean
 ---
 
 # Summary
@@ -37,8 +37,10 @@ therefore remains on the hot path.
 
 ```sh
 cd integration/lean-zip
-lake --keep-toolchain env lean Emit.lean
-node level1-smoke.mjs
+lake env lean ProbeLevel1.lean
+
+cd ../..
+lake build Fir.Wasm.Emit.ResidentFixedWidth
 ```
 
 ## Expected semantics
