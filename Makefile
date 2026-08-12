@@ -1,5 +1,9 @@
-FIR_GIT_COMMON_DIR := $(shell git rev-parse --path-format=absolute --git-common-dir)
-LAKE_CACHE_DIR ?= $(abspath $(FIR_GIT_COMMON_DIR)/../.lake_cache)
+ifeq ($(origin LAKE_CACHE_DIR), undefined)
+LAKE_CACHE_DIR := $(shell bash scripts/fir-lake-cache-path.sh)
+ifeq ($(strip $(LAKE_CACHE_DIR)),)
+$(error failed to initialize FIR's Lake artifact cache)
+endif
+endif
 LAKE_ARTIFACT_CACHE ?= true
 LAKE_RESTORE_ARTIFACTS ?= true
 export LAKE_CACHE_DIR LAKE_ARTIFACT_CACHE LAKE_RESTORE_ARTIFACTS

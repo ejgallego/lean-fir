@@ -18,9 +18,11 @@ These rules apply to every agent and worktree in this repository.
   share mutable build state between agents.
 - Share only Lake's content-addressed artifact cache across FIR worktrees. For
   direct `lake` or `lean-beam` commands, first run:
-  `export LAKE_CACHE_DIR="$(cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && pwd)/.lake_cache" LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true`.
-  The root `Makefile` exports the same location automatically. The cache is
-  ignored; never commit it or use it in place of a worktree's `.lake` state.
+  `export LAKE_CACHE_DIR="$(bash "$(git rev-parse --show-toplevel)/scripts/fir-lake-cache-path.sh")" LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true`.
+  The root `Makefile` initializes and exports the same FIR-local,
+  toolchain-scoped location automatically. Its boundary is mode 700. The
+  cache is ignored; never commit it or use it in place of a worktree's
+  `.lake` state.
 
 ## Ownership
 
