@@ -76,10 +76,26 @@ private def specializationSourceCaller? (env : Environment) (name : Name) :
       return some { name := candidate, companions }
   return none
 
+/--
+Recover the real extern declaration behind an upstream-generated boxed
+adapter. Compiling the extern through Lean's ordinary final-LCNF pipeline lets
+`LCNF.ExplicitBoxing.addBoxedVersions` derive the adapter from its exact raw
+signature; FIR does not reproduce that ABI policy or catalog wrapper names.
+-/
+private def boxedExternSourceRoot? (env : Environment) (name : Name) :
+    CoreM (Option SourceCompilationRoot) := do
+  let .str declaration "_boxed" := name | return none
+  unless env.constants.contains declaration do return none
+  unless isExtern env declaration do return none
+  unless ← LCNF.shouldGenerateCode declaration do return none
+  return some { name := declaration }
+
 private def sourceCompilationRoot? (env : Environment) (name : Name) :
     CoreM (Option SourceCompilationRoot) := do
   if let some caller ← specializationSourceCaller? env name then
     return some caller
+  if let some declaration ← boxedExternSourceRoot? env name then
+    return some declaration
   let some ancestor := environmentDeclarationAncestor? env name | return none
   match env.find? ancestor with
   | some (.ctorInfo _) | some (.inductInfo _) => return none

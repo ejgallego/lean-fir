@@ -63,6 +63,8 @@ private def ctzLoop : FVarId := ⟨`fixedWidthCtzLoop⟩
 private def modLoop : FVarId := ⟨`fixedWidthModLoop⟩
 
 def externalDeclarations : Array Name := #[
+  `UInt8.ofBitVec,
+  `UInt8.toBitVec,
   `UInt8.ofNat,
   `UInt8.toNat,
   `UInt8.toUInt32,
@@ -80,6 +82,7 @@ def externalDeclarations : Array Name := #[
   `UInt16.xor,
   `UInt16.shiftLeft,
   `UInt16.lor,
+  `UInt32.ofBitVec,
   `UInt32.ofNat,
   `UInt32.toNat,
   `UInt32.toUInt8,
@@ -307,8 +310,14 @@ def lorFunction : Function := {
 def uint8OfNatFunction : Function :=
   ofNat32Function `UInt8.ofNat .uint8 0xff
 
+def uint8OfBitVecFunction : Function :=
+  ofNat32Function `UInt8.ofBitVec .uint8 0xff
+
 def uint8ToNatFunction : Function :=
   toNat32Function `UInt8.toNat .uint8 .tagged
+
+def uint8ToBitVecFunction : Function :=
+  toNat32Function `UInt8.toBitVec .uint8 .tobject
 
 def uint8ToUInt32Function : Function :=
   widenI32Function `UInt8.toUInt32 .uint8 .uint32
@@ -336,6 +345,9 @@ def uint16ToUInt64Function : Function :=
 
 def uint32OfNatFunction : Function :=
   ofNat32Function `UInt32.ofNat .uint32 0xffffffff
+
+def uint32OfBitVecFunction : Function :=
+  ofNat32Function `UInt32.ofBitVec .uint32 0xffffffff
 
 def uint32ToNatFunction : Function :=
   toNat32Function `UInt32.toNat .uint32 .tobject
@@ -780,6 +792,8 @@ def uint64ModFunction : Function := {
       (uint64ResultLocal, .uint64)] }
 
 def functions : Array Function := #[
+  uint8OfBitVecFunction,
+  uint8ToBitVecFunction,
   uint8OfNatFunction,
   uint8ToNatFunction,
   uint8ToUInt32Function,
@@ -797,6 +811,7 @@ def functions : Array Function := #[
   xorFunction,
   shiftLeftFunction,
   lorFunction,
+  uint32OfBitVecFunction,
   uint32OfNatFunction,
   uint32ToNatFunction,
   uint32ToUInt8Function,
@@ -831,8 +846,10 @@ def functions : Array Function := #[
 private def expectedSignature? (declaration : Name) : Option Signature :=
   if #[`UInt8.decEq, `UInt8.decLt].contains declaration then
     some { params := #[.uint8, .uint8], results := #[.uint8] }
-  else if declaration == `UInt8.ofNat then
+  else if #[`UInt8.ofBitVec, `UInt8.ofNat].contains declaration then
     some { params := #[.tobject], results := #[.uint8] }
+  else if declaration == `UInt8.toBitVec then
+    some { params := #[.uint8], results := #[.tobject] }
   else if declaration == `UInt8.toNat then
     some { params := #[.uint8], results := #[.tagged] }
   else if declaration == `UInt8.toUInt32 then
@@ -860,7 +877,7 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
     some { params := #[.uint32, .uint32], results := #[.uint32] }
   else if #[`UInt32.decLt, `UInt32.decLe].contains declaration then
     some { params := #[.uint32, .uint32], results := #[.uint8] }
-  else if declaration == `UInt32.ofNat then
+  else if #[`UInt32.ofBitVec, `UInt32.ofNat].contains declaration then
     some { params := #[.tobject], results := #[.uint32] }
   else if declaration == `UInt32.toNat then
     some { params := #[.uint32], results := #[.tobject] }
@@ -912,9 +929,10 @@ private def internalizeSelected (module : Module) (declarations : Array Name)
   unless module.memory == some ResidentRuntime.residentMemory do
     throw .incompatibleMemory
   let needsFromNat := declarations.any fun declaration =>
-    #[`UInt8.ofNat, `UInt16.ofNat, `UInt32.ofNat, `UInt64.ofNat].contains declaration
+    #[`UInt8.ofBitVec, `UInt8.ofNat, `UInt16.ofNat, `UInt32.ofBitVec,
+      `UInt32.ofNat, `UInt64.ofNat].contains declaration
   let needsToNat := declarations.any fun declaration =>
-    #[`UInt8.toNat, `UInt16.toNat, `UInt32.toNat].contains declaration
+    #[`UInt8.toBitVec, `UInt8.toNat, `UInt16.toNat, `UInt32.toNat].contains declaration
   let needsHigh := declarations.contains `UInt64.ofNat
   let numericHelpers :=
     (if needsFromNat then

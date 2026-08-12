@@ -45,8 +45,8 @@ run_cmd do
         steps :=
           Fir.Wasm.Emit.ResidentLinker.availableCommonSteps module ++
           Fir.Wasm.Emit.ResidentLinker.closedApplicationFamilySteps
-        requireZeroImports := false
-        requireNoRuntimeOperations := false }
+        requireZeroImports := true
+        requireNoRuntimeOperations := true }
   let (linkedFunctions, remainingImports, remainingRuntimeOperations,
       linkingError) := match linkedResult with
     | .ok artifact =>
@@ -83,4 +83,4 @@ run_cmd do
   | .ok _ =>
       logInfo m!"captured {source.program.decls.size} Level-1 declarations with {source.externalNames.size} externals and {unsupported.size} unsupported declarations; linked to {remainingImports.size} imports and {remainingRuntimeOperations.size} runtime operations (capture {capturedAt - startedAt}ms, lower {loweredAt - capturedAt}ms, link {linkedAt - loweredAt}ms)"
   | .error error =>
-      logInfo m!"captured {source.program.decls.size} Level-1 declarations with {source.externalNames.size} externals and {unsupported.size} unsupported declarations; resident linking stopped at {repr error} (capture {capturedAt - startedAt}ms, lower {loweredAt - capturedAt}ms, link {linkedAt - loweredAt}ms)"
+      throwError "Level-1 zero-frontier ratchet failed after capturing {source.program.decls.size} declarations with {source.externalNames.size} externals and {unsupported.size} unsupported declarations: {repr error} (capture {capturedAt - startedAt}ms, lower {loweredAt - capturedAt}ms, link {linkedAt - loweredAt}ms)"
