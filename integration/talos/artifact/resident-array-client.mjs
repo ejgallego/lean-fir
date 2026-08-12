@@ -89,6 +89,10 @@ export async function checkResidentArrays(bytes) {
   const push = exports.fir_ext_Array_push;
   const uget = exports.fir_ext_Array_uget;
   const uset = exports.fir_ext_Array_uset;
+  const getInternal = exports.fir_ext_Array_getInternal;
+  const set = exports.fir_ext_Array_set;
+  const setBang = exports["fir_ext_Array_set!"];
+  const swap = exports.fir_ext_Array_swap;
   const pop = exports.fir_ext_Array_pop;
   const release = exports.resident_array_release;
   equal(typeof emptyWithCapacity, "function", "Array.emptyWithCapacity export");
@@ -96,6 +100,10 @@ export async function checkResidentArrays(bytes) {
   equal(typeof replicate, "function", "Array.replicate export");
   equal(typeof uget, "function", "Array.uget export");
   equal(typeof uset, "function", "Array.uset export");
+  equal(typeof getInternal, "function", "Array.getInternal export");
+  equal(typeof set, "function", "Array.set export");
+  equal(typeof setBang, "function", "Array.set! export");
+  equal(typeof swap, "function", "Array.swap export");
   equal(typeof pop, "function", "Array.pop export");
   equal(typeof release, "function", "array release export");
 
@@ -197,6 +205,68 @@ export async function checkResidentArrays(bytes) {
   expectTrap(() => uset(0, original, 3n, replacement, 0),
     "Array.uset out of bounds");
   expectTrap(() => replicate(0, 0, value), "Array.replicate invalid Nat");
+
+  let naturalIndexed = emptyWithCapacity(0, immediateNatural(3));
+  naturalIndexed = push(0, naturalIndexed, immediateNatural(10));
+  naturalIndexed = push(0, naturalIndexed, immediateNatural(20));
+  naturalIndexed = push(0, naturalIndexed, immediateNatural(30));
+  equal(set(0, naturalIndexed, immediateNatural(1), immediateNatural(21), 0),
+    naturalIndexed, "Array.set did not reuse its exclusive input");
+  equal(arrayState(exports.memory, naturalIndexed).words.join(","),
+    [10, 21, 30].map(immediateNatural).join(","),
+    "Array.set Nat-indexed replacement");
+  equal(setBang(0, naturalIndexed, immediateNatural(2), immediateNatural(31)),
+    naturalIndexed, "Array.set! did not reuse its in-bounds exclusive input");
+  equal(arrayState(exports.memory, naturalIndexed).words.join(","),
+    [10, 21, 31].map(immediateNatural).join(","),
+    "Array.set! in-bounds replacement");
+  const discardedReplacement = allocateOwnedOpaque(exports);
+  equal(setBang(
+    0, naturalIndexed, immediateNatural(30), discardedReplacement),
+  naturalIndexed, "Array.set! out-of-bounds identity");
+  equal(heapObjectState(exports.memory, discardedReplacement).kind, KIND_FREED,
+    "Array.set! out-of-bounds did not consume its replacement");
+  equal(swap(
+    0, naturalIndexed, immediateNatural(0), immediateNatural(2), 0, 0),
+  naturalIndexed, "Array.swap did not reuse its exclusive input");
+  equal(arrayState(exports.memory, naturalIndexed).words.join(","),
+    [31, 21, 10].map(immediateNatural).join(","),
+    "Array.swap exclusive elements");
+
+  let sharedSwap = emptyWithCapacity(0, immediateNatural(3));
+  sharedSwap = push(0, sharedSwap, immediateNatural(4));
+  sharedSwap = push(0, sharedSwap, immediateNatural(5));
+  sharedSwap = push(0, sharedSwap, immediateNatural(6));
+  new DataView(exports.memory.buffer).setUint32(sharedSwap + 8, 2, true);
+  const sharedSwapResult = swap(
+    0, sharedSwap, immediateNatural(0), immediateNatural(2), 0, 0);
+  expect(sharedSwapResult !== sharedSwap,
+    "Array.swap mutated a shared input");
+  equal(arrayState(exports.memory, sharedSwap).refCount, 1,
+    "Array.swap did not consume one shared input reference");
+  equal(arrayState(exports.memory, sharedSwap).words.join(","),
+    [4, 5, 6].map(immediateNatural).join(","),
+    "Array.swap mutated a shared alias");
+  equal(arrayState(exports.memory, sharedSwapResult).words.join(","),
+    [6, 5, 4].map(immediateNatural).join(","),
+    "Array.swap shared copy");
+  release(sharedSwap);
+  release(sharedSwapResult);
+
+  const getChild = allocateOwnedOpaque(exports);
+  const getOwnedArray = replicate(0, immediateNatural(1), getChild);
+  const getOwnedChild = getInternal(
+    0, getOwnedArray, immediateNatural(0), 0);
+  equal(getOwnedChild, getChild, "Array.getInternal owned child");
+  equal(heapObjectState(exports.memory, getChild).refCount, 2,
+    "Array.getInternal did not retain its result");
+  release(getOwnedArray);
+  equal(heapObjectState(exports.memory, getChild).refCount, 1,
+    "Array.getInternal result did not survive its source");
+  release(getOwnedChild);
+  equal(heapObjectState(exports.memory, getChild).kind, KIND_FREED,
+    "Array.getInternal result remained live after release");
+  release(naturalIndexed);
 
   const child = allocateOwnedOpaque(exports);
   const owned = replicate(0, immediateNatural(3), child);

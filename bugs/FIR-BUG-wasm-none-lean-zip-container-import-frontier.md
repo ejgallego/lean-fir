@@ -15,8 +15,10 @@ regression: integration/lean-zip/_build/level1-probe.json
 # Summary
 
 After closing the complete scalar and runtime-operation frontiers, the real
-`Zip.Wasm.compressLevel1` closure retains 22 ordinary imports across generic
-Array, ByteArray, Nat, List, String, and platform APIs.
+`Zip.Wasm.compressLevel1` closure initially retained 22 ordinary imports
+across generic Array, ByteArray, Nat, List, String, and platform APIs. The
+first Array slice internalizes owned lookup, Nat-indexed update, checked
+update, and swap, leaving 18 imports.
 
 ## Minimal reproduction
 
@@ -33,8 +35,7 @@ From `integration/lean-zip`, run the configured source-view build followed by
 
 - eight ByteArray operations: unchecked little-endian 32/64-bit loads and
   stores, `get`, `uget`, `push`, and `pushUInt64LE`;
-- six Array operations: `getInternal`, `set`, `set!`, `mk`, `toList`, and
-  `swap`;
+- two Array conversion operations: `mk` and `toList`;
 - four Nat operations: `mul`, `pow`, `land`, and `div`;
 - two specialized List loops: Array append-list fold and List zip;
 - `String.ofList`; and
@@ -48,9 +49,9 @@ unique-update behavior, and leave no host import.
 
 ## Actual behavior
 
-The linked module has 1,721 functions, zero runtime operations, and exactly
-these 22 declaration imports. It therefore cannot yet be published as a
-self-contained Level-1 package.
+The linked module after the Array mutation slice has 1,726 functions, zero
+runtime operations, and exactly these 18 declaration imports. It therefore
+cannot yet be published as a self-contained Level-1 package.
 
 ## Semantic impact
 
@@ -79,6 +80,12 @@ none
 none
 
 ## Resolution and regression
+
+The Array mutation slice adds zero-import resident implementations of
+`Array.getInternal`, `Array.set`, `Array.set!`, and `Array.swap`. Its external
+engine checks cover owned-result retention, exclusive update, out-of-bounds
+replacement consumption, exclusive swap, and shared copy-on-write swap. The
+real production probe confirms that all four imports disappear.
 
 Unresolved. Ratchet the exact real-source inventory after coherent resident
 family slices until `remainingImports` is empty.

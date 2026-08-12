@@ -38,6 +38,7 @@ private def u32 (value : Nat) : UInt32 := UInt32.ofNat value
 def arrayMarker : UInt32 := ResidentContainerLayout.arrayMarker
 
 def allocateEmptyName : Name := `fir_array_allocate_empty
+def swapElementsName : Name := `fir_array_swap_elements
 
 def externalDeclarations : Array Name := #[
   `Array.size,
@@ -55,20 +56,24 @@ historical strict `internalize` frontier remains source-compatible.
 -/
 def availableExternalDeclarations : Array Name :=
   externalDeclarations ++ #[`Array.usize, `Array.ugetBorrowed, `Array.uget,
-    `Array.uset, `Array.replicate, `Array.pop]
+    `Array.uset, `Array.replicate, `Array.pop, `Array.getInternal,
+    `Array.set, `Array.set!, `Array.swap]
 
 def externalName (declaration : Name) : Name :=
   Name.mkSimple s!"fir_ext_{declaration.toString.replace "." "_"}"
 
 def externalHelperNames : Array Name :=
   availableExternalDeclarations.map externalName
-def helperNames : Array Name := #[allocateEmptyName] ++ externalHelperNames
+def helperNames : Array Name :=
+  #[allocateEmptyName, swapElementsName] ++ externalHelperNames
 
 private def erasedParam : FVarId := ⟨`erased⟩
 private def defaultParam : FVarId := ⟨`default⟩
 private def arrayParam : FVarId := ⟨`array⟩
 private def indexParam : FVarId := ⟨`index⟩
+private def index2Param : FVarId := ⟨`index2⟩
 private def proofParam : FVarId := ⟨`proof⟩
+private def proof2Param : FVarId := ⟨`proof2⟩
 private def capacityParam : FVarId := ⟨`capacity⟩
 private def valueParam : FVarId := ⟨`value⟩
 
@@ -81,17 +86,21 @@ private def refCountLocal : FVarId := ⟨`refCount⟩
 private def exclusiveLocal : FVarId := ⟨`exclusive⟩
 private def reuseLocal : FVarId := ⟨`reuse⟩
 private def indexLocal : FVarId := ⟨`indexValue⟩
+private def index2Local : FVarId := ⟨`index2Value⟩
+private def indexHighLocal : FVarId := ⟨`indexHigh⟩
 private def countLocal : FVarId := ⟨`count⟩
 private def sourceCursorLocal : FVarId := ⟨`sourceCursor⟩
 private def targetCursorLocal : FVarId := ⟨`targetCursor⟩
 private def allocationBytesLocal : FVarId := ⟨`allocationBytes⟩
 private def elementLocal : FVarId := ⟨`element⟩
+private def element2Local : FVarId := ⟨`element2⟩
 private def rawLocal : FVarId := ⟨`raw⟩
 private def savedScratchLocal : FVarId := ⟨`savedScratch⟩
 private def objectResultLocal : FVarId := ⟨`objectResult⟩
 private def taggedResultLocal : FVarId := ⟨`taggedResult⟩
 
 private def elementLoopLabel : FVarId := ⟨`elementLoop⟩
+private def element2LoopLabel : FVarId := ⟨`element2Loop⟩
 private def copyLoopLabel : FVarId := ⟨`copyLoop⟩
 private def retainedCopyLoopLabel : FVarId := ⟨`retainedCopyLoop⟩
 
@@ -145,17 +154,20 @@ private def loadCapacity (array : FVarId) : List Instruction := [
   .i32Load .uint32 (u32 headerAux2Offset),
   .localSet capacityLocal]
 
-private def decodeIndex : List Instruction := [
-  .localGet indexParam,
+private def decodeNaturalIndex (param destination : FVarId) : List Instruction := [
+  .localGet param,
   .call (.declaration ResidentNumeric.validateNaturalName),
-  .localGet indexParam,
+  .localGet param,
   .call (.declaration ResidentNumeric.naturalHighName),
   .i32Const .uint32 0,
   .i32Eq,
   .ifElse [] [.unreachable],
-  .localGet indexParam,
+  .localGet param,
   .call (.declaration ResidentNumeric.naturalLowName),
-  .localSet indexLocal]
+  .localSet destination]
+
+private def decodeIndex : List Instruction :=
+  decodeNaturalIndex indexParam indexLocal
 
 private def storeHeaderWord (offset : Nat) (value : List Instruction) :
     List Instruction :=
@@ -315,27 +327,31 @@ def usizeFunction : Function := {
     .i64ExtendI32U .usize,
     .ret] }
 
-private def elementAddress : List Instruction := [
-  .localGet arrayParam,
+private def elementAddressFor (array index cursor loopLabel : FVarId) :
+    List Instruction := [
+  .localGet array,
   .i32Const .uint32 (u32 headerBytes),
   .i32Add,
-  .localSet sourceCursorLocal,
+  .localSet cursor,
   .i32Const .uint32 0,
   .localSet countLocal,
-  .loop elementLoopLabel [
+  .loop loopLabel [
     .localGet countLocal,
-    .localGet indexLocal,
+    .localGet index,
     .i32LtU,
     .ifElse [
-      .localGet sourceCursorLocal,
+      .localGet cursor,
       .i32Const .uint32 (u32 target.semanticSlotBytes),
       .i32Add,
-      .localSet sourceCursorLocal,
+      .localSet cursor,
       .localGet countLocal,
       .i32Const .uint32 1,
       .i32Add,
       .localSet countLocal,
-      .br elementLoopLabel] []]]
+      .br loopLabel] []]]
+
+private def elementAddress : List Instruction :=
+  elementAddressFor arrayParam indexLocal sourceCursorLocal elementLoopLabel
 
 private def getBody (useDefault owned : Bool) : List Instruction :=
   requireArray arrayParam ++ loadSize arrayParam ++ decodeIndex ++ [
@@ -381,6 +397,16 @@ def getBorrowedFunction : Function := {
     (countLocal, .uint32), (sourceCursorLocal, .uint32),
     (elementLocal, .tobject)]
   body := getBody false false }
+
+def getFunction : Function := {
+  name := externalName `Array.getInternal
+  params := #[(erasedParam, .erased), (arrayParam, .object),
+    (indexParam, .tobject), (proofParam, .erased)]
+  results := #[.tobject]
+  locals := #[(sizeLocal, .uint32), (indexLocal, .uint32),
+    (countLocal, .uint32), (sourceCursorLocal, .uint32),
+    (elementLocal, .tobject)]
+  body := getBody false true }
 
 def ugetBorrowedFunction : Function := {
   name := externalName `Array.ugetBorrowed
@@ -738,28 +764,8 @@ private def copyUpdatedElementsBody : List Instruction := [
       .localSet countLocal,
       .br copyLoopLabel] []]]
 
-def usetFunction : Function := {
-  name := externalName `Array.uset
-  params := #[(erasedParam, .erased), (arrayParam, .object),
-    (indexParam, .usize), (valueParam, .tobject), (proofParam, .erased)]
-  results := #[.object]
-  locals := #[(addressLocal, .uint32), (sizeLocal, .uint32),
-    (inputAddressLocal, .uint32),
-    (capacityLocal, .uint32), (exclusiveLocal, .uint32),
-    (refCountLocal, .uint32), (indexLocal, .uint32),
-    (countLocal, .uint32),
-    (sourceCursorLocal, .uint32), (targetCursorLocal, .uint32),
-    (allocationBytesLocal, .uint32), (savedScratchLocal, .uint32),
-    (objectResultLocal, .object), (elementLocal, .tobject)]
-  body := requireArray arrayParam ++ captureInputAddress ++ loadSize arrayParam ++ [
-    .localGet indexParam,
-    .localGet sizeLocal,
-    .i64ExtendI32U .usize,
-    .i64LtU,
-    .ifElse [] [.unreachable],
-    .localGet indexParam,
-    .i32WrapI64 .uint32,
-    .localSet indexLocal] ++ loadCapacity arrayParam ++ selectExclusive ++ [
+private def replaceAtDecodedIndexBody : List Instruction :=
+  loadCapacity arrayParam ++ selectExclusive ++ [
     .localGet exclusiveLocal,
     .ifElse (elementAddress ++ [
       .localGet sourceCursorLocal,
@@ -777,7 +783,151 @@ def usetFunction : Function := {
     .call (.declaration ResidentAllocator.allocateName),
     .localSet addressLocal] ++
     initializeHeader [.localGet sizeLocal] [.localGet capacityLocal] ++
-    copyUpdatedElementsBody ++ consumeSharedArray ++ retypeAddress }
+    copyUpdatedElementsBody ++ consumeSharedArray ++ retypeAddress
+
+private def setLocals : Array (FVarId × AbiKind) := #[(addressLocal, .uint32),
+  (sizeLocal, .uint32), (inputAddressLocal, .uint32),
+  (capacityLocal, .uint32), (exclusiveLocal, .uint32),
+  (refCountLocal, .uint32), (indexLocal, .uint32),
+  (countLocal, .uint32), (sourceCursorLocal, .uint32),
+  (targetCursorLocal, .uint32), (allocationBytesLocal, .uint32),
+  (savedScratchLocal, .uint32), (objectResultLocal, .object),
+  (elementLocal, .tobject)]
+
+def usetFunction : Function := {
+  name := externalName `Array.uset
+  params := #[(erasedParam, .erased), (arrayParam, .object),
+    (indexParam, .usize), (valueParam, .tobject), (proofParam, .erased)]
+  results := #[.object]
+  locals := setLocals
+  body := requireArray arrayParam ++ captureInputAddress ++ loadSize arrayParam ++ [
+    .localGet indexParam,
+    .localGet sizeLocal,
+    .i64ExtendI32U .usize,
+    .i64LtU,
+    .ifElse [] [.unreachable],
+    .localGet indexParam,
+    .i32WrapI64 .uint32,
+    .localSet indexLocal] ++ replaceAtDecodedIndexBody }
+
+def setFunction : Function := {
+  name := externalName `Array.set
+  params := #[(erasedParam, .erased), (arrayParam, .object),
+    (indexParam, .tobject), (valueParam, .tobject), (proofParam, .erased)]
+  results := #[.object]
+  locals := setLocals
+  body := requireArray arrayParam ++ captureInputAddress ++ loadSize arrayParam ++
+    decodeIndex ++ trapUnless [
+      .localGet indexLocal,
+      .localGet sizeLocal,
+      .i32LtU] ++ replaceAtDecodedIndexBody }
+
+private def decodeSetBangIndex : List Instruction := [
+  .localGet indexParam,
+  .call (.declaration ResidentNumeric.validateNaturalName),
+  .localGet indexParam,
+  .call (.declaration ResidentNumeric.naturalHighName),
+  .localSet indexHighLocal,
+  .localGet indexHighLocal,
+  .i32Const .uint32 0,
+  .i32Eq,
+  .ifElse [
+    .localGet indexParam,
+    .call (.declaration ResidentNumeric.naturalLowName),
+    .localSet indexLocal] [
+    .localGet valueParam,
+    .i32Const .uint32 1,
+    .call (.declaration ResidentRelease.decrementOnceName),
+    .localGet arrayParam,
+    .ret],
+  .localGet indexLocal,
+  .localGet sizeLocal,
+  .i32LtU,
+  .ifElse [] [
+    .localGet valueParam,
+    .i32Const .uint32 1,
+    .call (.declaration ResidentRelease.decrementOnceName),
+    .localGet arrayParam,
+    .ret]]
+
+def setBangFunction : Function := {
+  name := externalName `Array.set!
+  params := #[(erasedParam, .erased), (arrayParam, .object),
+    (indexParam, .tobject), (valueParam, .tobject)]
+  results := #[.object]
+  locals := setLocals.push (indexHighLocal, .uint32)
+  body := requireArray arrayParam ++ captureInputAddress ++ loadSize arrayParam ++
+    decodeSetBangIndex ++ replaceAtDecodedIndexBody }
+
+private def swapDecodedElementsFunction : Function := {
+  name := swapElementsName
+  params := #[(arrayParam, .uint32), (indexParam, .uint32),
+    (index2Param, .uint32)]
+  results := #[]
+  locals := #[(countLocal, .uint32), (sourceCursorLocal, .uint32),
+    (targetCursorLocal, .uint32), (elementLocal, .tobject),
+    (element2Local, .tobject)]
+  body :=
+  elementAddressFor arrayParam indexParam sourceCursorLocal elementLoopLabel ++
+  elementAddressFor arrayParam index2Param targetCursorLocal element2LoopLabel ++ [
+    .localGet sourceCursorLocal,
+    .i32Load .tobject 0,
+    .localSet elementLocal,
+    .localGet targetCursorLocal,
+    .i32Load .tobject 0,
+    .localSet element2Local,
+    .localGet sourceCursorLocal,
+    .localGet element2Local,
+    .i32Store .tobject 0,
+    .localGet targetCursorLocal,
+    .localGet elementLocal,
+    .i32Store .tobject 0,
+    .ret] }
+
+private def callSwapDecodedElements (array : FVarId) : List Instruction := [
+  .localGet array,
+  .localGet indexLocal,
+  .localGet index2Local,
+  .call (.declaration swapElementsName)]
+
+def swapFunction : Function := {
+  name := externalName `Array.swap
+  params := #[(erasedParam, .erased), (arrayParam, .object),
+    (indexParam, .tobject), (index2Param, .tobject),
+    (proofParam, .erased), (proof2Param, .erased)]
+  results := #[.object]
+  locals := #[(addressLocal, .uint32), (sizeLocal, .uint32),
+    (inputAddressLocal, .uint32), (capacityLocal, .uint32),
+    (exclusiveLocal, .uint32), (refCountLocal, .uint32),
+    (indexLocal, .uint32), (index2Local, .uint32),
+    (countLocal, .uint32), (sourceCursorLocal, .uint32),
+    (targetCursorLocal, .uint32), (allocationBytesLocal, .uint32),
+    (savedScratchLocal, .uint32), (objectResultLocal, .object),
+    (elementLocal, .tobject), (element2Local, .tobject)]
+  body := requireArray arrayParam ++ captureInputAddress ++ loadSize arrayParam ++
+    decodeNaturalIndex indexParam indexLocal ++ trapUnless [
+      .localGet indexLocal,
+      .localGet sizeLocal,
+      .i32LtU] ++
+    decodeNaturalIndex index2Param index2Local ++ trapUnless [
+      .localGet index2Local,
+      .localGet sizeLocal,
+      .i32LtU] ++ [
+    .localGet indexLocal,
+    .localGet index2Local,
+    .i32Eq,
+    .ifElse [.localGet arrayParam, .ret] []] ++
+    loadCapacity arrayParam ++ selectExclusive ++ [
+    .localGet exclusiveLocal,
+    .ifElse (callSwapDecodedElements inputAddressLocal ++ [
+      .localGet arrayParam,
+      .ret]) []] ++ allocationBytesBody ++ [
+    .localGet allocationBytesLocal,
+    .call (.declaration ResidentAllocator.allocateName),
+    .localSet addressLocal] ++
+    initializeHeader [.localGet sizeLocal] [.localGet capacityLocal] ++
+    copyElementsBody true ++ consumeSharedArray ++
+    callSwapDecodedElements addressLocal ++ retypeAddress }
 
 private def fillElementsBody : List Instruction := [
   .localGet addressLocal,
@@ -841,18 +991,23 @@ def replicateFunction : Function := {
 
 def functions : Array Function := #[
   allocateEmptyFunction,
+  swapDecodedElementsFunction,
   sizeFunction,
   usizeFunction,
   getBangBorrowedFunction,
   emptyWithCapacityFunction,
   mkEmptyFunction,
   getBorrowedFunction,
+  getFunction,
   ugetBorrowedFunction,
   ugetFunction,
   pushFunction,
   popFunction,
   getBangOwnedFunction,
   usetFunction,
+  setFunction,
+  setBangFunction,
+  swapFunction,
   replicateFunction]
 
 private partial def rewriteInstruction (declarations : Array Name) : Instruction → Instruction
@@ -884,6 +1039,10 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
     some {
       params := #[.erased, .object, .tobject, .erased]
       results := #[.tobject] }
+  else if declaration == `Array.getInternal then
+    some {
+      params := #[.erased, .object, .tobject, .erased]
+      results := #[.tobject] }
   else if declaration == `Array.ugetBorrowed then
     some {
       params := #[.erased, .object, .usize, .erased]
@@ -895,6 +1054,18 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
   else if declaration == `Array.uset then
     some {
       params := #[.erased, .object, .usize, .tobject, .erased]
+      results := #[.object] }
+  else if declaration == `Array.set then
+    some {
+      params := #[.erased, .object, .tobject, .tobject, .erased]
+      results := #[.object] }
+  else if declaration == `Array.set! then
+    some {
+      params := #[.erased, .object, .tobject, .tobject]
+      results := #[.object] }
+  else if declaration == `Array.swap then
+    some {
+      params := #[.erased, .object, .tobject, .tobject, .erased, .erased]
       results := #[.object] }
   else if declaration == `Array.replicate then
     some {
@@ -927,9 +1098,13 @@ private def internalizeSelected (module : Module) (declarations : Array Name)
       throw (.missingOwnershipHelper name)
   let needsEmptyAllocator := declarations.contains `Array.emptyWithCapacity ||
     declarations.contains `Array.mkEmpty
+  let needsSwap := declarations.contains `Array.swap
   let selectedHelperNames := declarations.map externalName
   let selectedHelperNames := if needsEmptyAllocator then
     #[allocateEmptyName] ++ selectedHelperNames
+  else selectedHelperNames
+  let selectedHelperNames := if needsSwap then
+    selectedHelperNames.push swapElementsName
   else selectedHelperNames
   for name in selectedHelperNames do
     if module.imports.any (·.declaration? == some name) ||
@@ -980,7 +1155,8 @@ def internalizeAvailable (module : Module) (validate : Bool := true) : Except Li
 
 private def exampleDeclarations : Array Name :=
   #[`Array.emptyWithCapacity, `Array.push, `Array.uget, `Array.uset,
-    `Array.replicate, `Array.pop]
+    `Array.replicate, `Array.pop, `Array.getInternal, `Array.set,
+    `Array.set!, `Array.swap]
 
 private def exampleReleaseOperation : RuntimeOp := .dec 1 true none
 
@@ -1009,6 +1185,15 @@ private def exampleExternalTypes (declaration : Name) : ExternalTypes :=
     { params := #[erased, object, usize, erased], result := tobject }
   else if declaration == `Array.uset then
     { params := #[erased, object, usize, tobject, erased], result := object }
+  else if declaration == `Array.getInternal then
+    { params := #[erased, object, tobject, erased], result := tobject }
+  else if declaration == `Array.set then
+    { params := #[erased, object, tobject, tobject, erased], result := object }
+  else if declaration == `Array.set! then
+    { params := #[erased, object, tobject, tobject], result := object }
+  else if declaration == `Array.swap then
+    { params := #[erased, object, tobject, tobject, erased, erased],
+      result := object }
   else if declaration == `Array.pop then
     { params := #[erased, object], result := object }
   else
