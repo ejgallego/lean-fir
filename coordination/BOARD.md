@@ -15,6 +15,34 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `ELIMDEAD-GENERIC-LOCAL-LEDGER-OPERATIONS`.
+- Integration owner: `lcnf-proof`, acting under the user-authorized temporary
+  integration lease. Branch `proof/simpcase` was rebased on accepted local
+  main `a25713a6` and landed through clean ready mailbox `5cae5958`;
+  functional head `5c607e0e` changes no shared contract.
+- Proof slice: `DeletedLedgerLetLocalReadyAt` packages one deleted reset or
+  concrete-token reuse with its source-only ownership bridges. Generic target
+  live-prefix premises derive ordinary and source-owned ledger readiness;
+  the retained-prefix fixture now consumes that interface through a singleton
+  adapter instead of classifying reset/reuse as whole-program states.
+- Lean 4.33 compatibility: two pre-existing ledger-owner projection examples
+  make `id` reduction explicit. This is an elaboration repair only and does
+  not alter the relation, interpreter, or compiler semantics.
+- Contracts and discrepancies: none. The slice is proof-owned and introduces
+  no bug card, semantic workaround, new axiom, or W6/W7 dependency.
+- Acceptance: Lean Beam reports zero errors for both edited modules (source
+  hashes `088ed97b5359b156` and `373fe5f8586eff26`); the 34-job examples cone,
+  `git diff --check`, and complete `make check` pass. The final gate covers 670
+  unique cases, 1,992/1,992 equal comparisons, 7,176 machine steps, 160/160
+  semantic-tag floors, 253/253 semantic-domain floors, 146 active bug cards,
+  and exactly one registered trusted axiom.
+- Result: `main` fast-forwards through the clean handoff and this acceptance
+  record; the lease is released. The next proof task derives the target
+  live-prefix premise for multi-location residual/control states, then removes
+  the singleton retained-prefix adapter from the next source-plan fixture.
+
+## Latest completed integration lease
+
 - Milestone: `VALIDATION-S9-DICTIONARY-OWNERSHIP`.
 - Integration owner: `test-fixtures`, acting under the user-authorized
   integration lease for this fixture-only milestone. The lane branch was
@@ -3225,7 +3253,7 @@ validation work continues; their historical handoff text remains unchanged.
 | Lane | Owner handle | Branch | Status | Current slice | Contract impact |
 |---|---|---|---|---|---|
 | Integration | integration owner | `upgrade/lean-4.33` | released | `LEAN-4.33-UPGRADE` landed at `476f001b`; the temporary lane may be retired after publication. | Moves the shared toolchain, compiler-source contracts, and versioned compact-Format package surface to Lean 4.33 without changing the semantic Wasm ABI, concrete layout, or resident-helper signatures. |
-| Lean pass proof | pass-proof owner | `proof/simpcase` | released | Ready mailbox head `52ad964a`, functional head `1640c7d4`, on corrected contract base `89fda41a` relates persistent, exclusive-transfer, and shared-retain closure application across AlphaEqv, SimpCase, and ElimDead. The 34-job examples cone and full root gate pass. | Changes no shared contract. The external waiting-runtime bug is resolved with a proof regression and landed in stack `229640de`. |
+| Lean pass proof | pass-proof owner | `proof/simpcase` | released | Ready mailbox `5cae5958`, functional head `5c607e0e`, on accepted base `a25713a6` packages deleted reset/reuse as generic local ledger operations and derives ordinary/source-owned readiness from live-prefix premises. The retained-prefix fixture no longer uses a finite special-state classifier. | Changes no shared contract. The 34-job examples cone and full root gate pass; next generalize the target live-prefix derivation beyond the singleton adapter. |
 | W6 runtime proof | W6 owner | `wasm/talos-runtime` | active | Global call entry landed through ready mailbox `1ecd63f3`, functional head `1bc6eb40`, on base `59ea914f`; the module-stable outcome hides current function indices, and named/saturated ready states re-enter it from one ordinary source step without dynamic side premises. Next retain suspended caller support/cache identity and close return pops globally. | No shared contract changed. Lean Beam, the 3,110-job focused cone, full root gate, all 1,968 repository comparisons, and all 3,133 Talos jobs pass. |
 | W7 generation | generation owner | `wasm/generation` | released | Ready mailbox `22540610`, package source head `8c7dfdd7`, on base `260ce30a`, publishes the real zero-import Verso complete-HTML package and repairs post-mutation field-kind tracking in the W7 concrete observer. | Six generic Array/scalar/String resident signatures are generation-ready without changing the semantic ABI or concrete layout; W6 owns their later refinement bridge. |
 | Compiler-native Wasm | integration owner | `wasm/lcnf-c` | parked | Landed checkpoint `a4855402` adds a separately packaged C/Emscripten `Std.Format.prettyM` facade on top of the optimized final-LCNF-to-C route from `2760e3e0`. The browser adapter shares the compact `Format` request and exact `{text, events}` trace contract with W7's FIR-native facade while retaining a private bulk wire, verified Emscripten loader, full pinned Lean runtime, and independent package. The differential suite compares Unicode, grouping, nesting, tags, arbitrary-precision values, initial columns, malformed requests, repeated calls, and a one-MiB UTF-8 transfer through both engines | No shared semantic contract changed and the packages remain physically independent. The lane consumes `Std.Format.prettyM`, final impure LCNF, and Lean's C ABI without changing the symbolic Wasm, W6 concrete-runtime, or W7 resident-runtime surfaces. Resume with controlled sampled profiling of the facade wire and generated C before accepting a runtime optimization |
