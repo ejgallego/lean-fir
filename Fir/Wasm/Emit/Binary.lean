@@ -79,14 +79,6 @@ private def encodeSignature (signature : Signature) : Bytes :=
     encodeVector (signature.params.toList.map fun kind => #[encodeValueType kind.valueType]) ++
     encodeVector (signature.results.toList.map fun kind => #[encodeValueType kind.valueType])
 
-private def findFVarIndex? : List (FVarId × α) → FVarId → Option Nat
-  | [], _ => none
-  | (candidate, _) :: rest, fvarId =>
-      if candidate.name == fvarId.name then
-        some 0
-      else
-        (findFVarIndex? rest fvarId).map (· + 1)
-
 private def findLabelIndex? : List (Option FVarId) → FVarId → Option Nat
   | [], _ => none
   | none :: rest, label => (findLabelIndex? rest label).map (· + 1)
@@ -125,8 +117,18 @@ private structure Context where
   module : Module
   index : EncodeIndex
   function : Function
+  localIndices : Std.HashMap Name Nat
   /-- Every Wasm control frame counts toward branch depth; only named FIR blocks match labels. -/
   labels : List (Option FVarId) := []
+
+private def buildLocalIndex (function : Function) : Std.HashMap Name Nat :=
+  let locals := function.params ++ function.locals
+  (locals.foldl
+    (init := (Std.HashMap.emptyWithCapacity locals.size, 0))
+    fun (indices, next) (fvarId, _) =>
+      let indices := if indices.contains fvarId.name then indices
+        else indices.insert fvarId.name next
+      (indices, next + 1)).1
 
 mutual
 
@@ -135,18 +137,15 @@ private partial def encodeInstruction (context : Context) : Instruction → Exce
   | .i64Const _ value => return #[0x42] ++ encodeI64 value
   | .f64Const bits => return #[0x44] ++ encodeF64 bits
   | .localGet fvarId => do
-      let locals := context.function.params.toList ++ context.function.locals.toList
-      let some index := findFVarIndex? locals fvarId |
+      let some index := context.localIndices.get? fvarId.name |
         throw (.unknownLocal context.function.name fvarId)
       return #[0x20] ++ encodeU32 index
   | .localGetObject fvarId => do
-      let locals := context.function.params.toList ++ context.function.locals.toList
-      let some index := findFVarIndex? locals fvarId |
+      let some index := context.localIndices.get? fvarId.name |
         throw (.unknownLocal context.function.name fvarId)
       return #[0x20] ++ encodeU32 index
   | .localSet fvarId => do
-      let locals := context.function.params.toList ++ context.function.locals.toList
-      let some index := findFVarIndex? locals fvarId |
+      let some index := context.localIndices.get? fvarId.name |
         throw (.unknownLocal context.function.name fvarId)
       return #[0x21] ++ encodeU32 index
   | .globalGet index _ => return #[0x23] ++ encodeU32 index
@@ -212,11 +211,13 @@ private partial def encodeInstruction (context : Context) : Instruction → Exce
   | .unreachable => return #[0x00]
 
 private partial def encodeInstructions (context : Context) :
-    List Instruction → Except EncodeError Bytes
-  | [] => return #[]
-  | instruction :: rest =>
-      return (← encodeInstruction context instruction) ++
-        (← encodeInstructions context rest)
+    List Instruction → Except EncodeError Bytes :=
+  let rec encode (bytes : Bytes) : List Instruction → Except EncodeError Bytes
+    | [] => return bytes
+    | instruction :: rest => do
+        let instructionBytes ← encodeInstruction context instruction
+        encode (bytes ++ instructionBytes) rest
+  encode #[]
 
 end
 
@@ -228,7 +229,8 @@ private def encodeFunctionBody (module : Module) (checkIndex : CheckIndex)
     Except EncodeError Bytes := do
   let localDeclarations := function.locals.toList.map fun (_, kind) =>
     encodeU32 1 ++ #[encodeValueType kind.valueType]
-  let body ← encodeInstructions { module, index, function } function.body
+  let body ← encodeInstructions {
+    module, index, function, localIndices := buildLocalIndex function } function.body
   let locals := function.params ++ function.locals
   let checkerContext : CheckContext := {
     module
