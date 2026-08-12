@@ -46,8 +46,8 @@
     "tiers": [
       {
         "id": "source-lcnf",
-        "minimumCases": 655,
-        "minimumComparisons": 655,
+        "minimumCases": 657,
+        "minimumComparisons": 657,
         "requiredBackends": [
           "lcnf",
           "native"
@@ -66,8 +66,8 @@
       },
       {
         "id": "wasm-v8",
-        "minimumCases": 655,
-        "minimumComparisons": 1310,
+        "minimumCases": 657,
+        "minimumComparisons": 1314,
         "requiredBackends": [
           "lcnf",
           "native",
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 664,
-      "minimumTierCases": 1319,
-      "minimumComparisons": 1974
+      "minimumUniqueCases": 666,
+      "minimumTierCases": 1323,
+      "minimumComparisons": 1980
     },
     "machine": {
-      "minimumCases": 664,
-      "minimumInterpreterSteps": 6922,
+      "minimumCases": 666,
+      "minimumInterpreterSteps": 6978,
       "requiredStaticForms": [
         "box",
         "cases",
@@ -456,6 +456,11 @@
       },
       {
         "tier": "source-lcnf",
+        "tag": "application-shape",
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
         "tag": "arithmetic",
         "minimumCases": 146
       },
@@ -503,6 +508,11 @@
         "tier": "source-lcnf",
         "tag": "closure-ownership",
         "minimumCases": 14
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "closure-return-boundary",
+        "minimumCases": 2
       },
       {
         "tier": "source-lcnf",
@@ -706,6 +716,11 @@
       },
       {
         "tier": "source-lcnf",
+        "tag": "returned-closure",
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
         "tag": "scalar",
         "minimumCases": 413
       },
@@ -806,6 +821,11 @@
       },
       {
         "tier": "wasm-v8",
+        "tag": "application-shape",
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
         "tag": "arithmetic",
         "minimumCases": 146
       },
@@ -833,6 +853,11 @@
         "tier": "wasm-v8",
         "tag": "closure-ownership",
         "minimumCases": 14
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "closure-return-boundary",
+        "minimumCases": 2
       },
       {
         "tier": "wasm-v8",
@@ -988,6 +1013,11 @@
         "tier": "wasm-v8",
         "tag": "return-capture",
         "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "returned-closure",
+        "minimumCases": 2
       },
       {
         "tier": "wasm-v8",
@@ -1647,6 +1677,34 @@
         "name": "remainder-zero-divisor",
         "allTags": ["remainder", "zero-divisor"],
         "minimumCases": 12
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "returned-closure-outside-alias",
+        "allTags": [
+          "application-shape",
+          "bytearray",
+          "closure-ownership",
+          "closure-return-boundary",
+          "copy-on-write",
+          "outside-alias",
+          "returned-closure"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "returned-closure-unique-transfer",
+        "allTags": [
+          "application-shape",
+          "bytearray",
+          "closure-ownership",
+          "closure-return-boundary",
+          "mutation",
+          "returned-closure",
+          "unique-transfer"
+        ],
+        "minimumCases": 1
       },
       {
         "tier": "source-lcnf",
@@ -2474,6 +2532,34 @@
         "name": "remainder-zero-divisor",
         "allTags": ["remainder", "zero-divisor"],
         "minimumCases": 12
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "returned-closure-outside-alias",
+        "allTags": [
+          "application-shape",
+          "bytearray",
+          "closure-ownership",
+          "closure-return-boundary",
+          "copy-on-write",
+          "outside-alias",
+          "returned-closure"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "returned-closure-unique-transfer",
+        "allTags": [
+          "application-shape",
+          "bytearray",
+          "closure-ownership",
+          "closure-return-boundary",
+          "mutation",
+          "returned-closure",
+          "unique-transfer"
+        ],
+        "minimumCases": 1
       },
       {
         "tier": "wasm-v8",

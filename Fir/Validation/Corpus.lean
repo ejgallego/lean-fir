@@ -1610,6 +1610,40 @@ def applyCapturedByteArrayMutation
     (f : UInt8 → ByteArray) (byte : UInt8) : ByteArray :=
   f byte
 
+structure ReturnedByteArrayMutator where
+  mutate : UInt8 → ByteArray
+
+/-- Return a closure-bearing owner across a named call boundary. -/
+@[noinline]
+def makeReturnedByteArrayMutator
+    (source : ByteArray) : ReturnedByteArrayMutator :=
+  { mutate := fun byte => source.set! 0 byte }
+
+/-- Apply a closure only after it has crossed the maker's return boundary. -/
+@[noinline]
+def applyReturnedByteArrayMutator
+    (mutator : ReturnedByteArrayMutator) (byte : UInt8) : ByteArray :=
+  mutator.mutate byte
+
+/--
+Transfer the sole ByteArray owner into a returned closure, then consume the
+capture on its unique final application.
+-/
+def returnedByteArrayClosureUniqueMutation
+    (source : ByteArray) : ByteArray :=
+  let mutator := makeReturnedByteArrayMutator source
+  applyReturnedByteArrayMutator mutator 42
+
+/--
+Retain the original ByteArray after returning its capturing closure. Applying
+the closure must copy before mutation and leave the outside alias unchanged.
+-/
+def returnedByteArrayClosureSharedMutation
+    (source : ByteArray) : ByteArray × ByteArray :=
+  let mutator := makeReturnedByteArrayMutator source
+  let updated := applyReturnedByteArrayMutator mutator 42
+  (source, updated)
+
 /-- Retain a ByteArray outside a closure while borrowing its captured alias. -/
 def capturedByteArrayOutsideAliasRead
     (source : ByteArray) : ByteArray × Nat :=
@@ -2822,6 +2856,15 @@ private def mixedClosureThriceFormTrace : Array String :=
     "unbox", "dec", "unbox", "dec", "unbox", "dec", "unbox", "dec",
     "fap", "ctor", "uset", "sset", "sset", "sset", "return", "return",
     "oproj", "inc", "dec", "ctor", "ctor", "return", "return"]
+
+private def returnedByteArrayClosureUniqueMutationFormTrace : Array String :=
+  #["fap", "pap", "return", "lit", "fap", "box", "fvar", "unbox", "fap",
+    "lit", "fap", "extern", "return", "return", "return", "return"]
+
+private def returnedByteArrayClosureSharedMutationFormTrace : Array String :=
+  #["inc", "fap", "pap", "return", "lit", "fap", "box", "fvar", "unbox",
+    "fap", "lit", "fap", "extern", "return", "return", "return", "ctor",
+    "return"]
 
 private def capturedByteArrayOutsideAliasReadFormTrace : Array String :=
   #["inc", "pap", "lit", "fap", "fvar", "fap", "fap", "extern", "fap",
@@ -6352,6 +6395,90 @@ private def postConversionCases : Array Case := #[
       #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind", "admin:yield-done"]
     provenance := firProvenance
       "Apply one mixed-kind closure twice while shared and once as its unique final use" },
+  { id := "returned-byte-array-closure-unique-mutation"
+    entry := ``Source.returnedByteArrayClosureUniqueMutation
+    dependencies :=
+      #[``Source.makeReturnedByteArrayMutator,
+        ``Source.applyReturnedByteArrayMutator]
+    args := #[byteArrayDatum mixedLayoutBytes]
+    argSchemas := #[.bytes]
+    resultSchema := .bytes
+    native := fun _ => byteArrayDatum
+      (Source.returnedByteArrayClosureUniqueMutation mixedLayoutBytes)
+    tags :=
+      #["stress", "closure", "closure-ownership", "capture",
+        "partial-application", "application-shape", "returned-closure",
+        "closure-return-boundary", "bytearray", "bytes", "external", "heap",
+        "ownership", "unique", "unique-transfer", "unique-final-application",
+        "consume", "mutation"]
+    requiredLcnfForms :=
+      #["fap", "pap", "return", "lit", "box", "fvar", "unbox", "extern"]
+    requiredExecutedLcnfForms :=
+      #["fap", "pap", "return", "lit", "box", "fvar", "unbox", "extern"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "fap", minimum := 4, maximum := some 4 },
+        { form := "pap", minimum := 1, maximum := some 1 },
+        { form := "return", minimum := 5, maximum := some 5 },
+        { form := "lit", minimum := 2, maximum := some 2 },
+        { form := "box", minimum := 1, maximum := some 1 },
+        { form := "fvar", minimum := 1, maximum := some 1 },
+        { form := "unbox", minimum := 1, maximum := some 1 },
+        { form := "extern", minimum := 1, maximum := some 1 }]
+    requiredExecutedLcnfFormTrace :=
+      some returnedByteArrayClosureUniqueMutationFormTrace
+    requiredExternals := #[``ByteArray.set!]
+    requiredExecutedExternals := #[``ByteArray.set!]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``ByteArray.set!]
+    requiredExecutedExternalTrace := some #[``ByteArray.set!]
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind",
+        "admin:yield-done"]
+    provenance := firProvenance
+      "Return a ByteArray-capturing closure, then transfer its unique capture into mutation" },
+  { id := "returned-byte-array-closure-shared-mutation"
+    entry := ``Source.returnedByteArrayClosureSharedMutation
+    dependencies :=
+      #[``Source.makeReturnedByteArrayMutator,
+        ``Source.applyReturnedByteArrayMutator]
+    args := #[byteArrayDatum mixedLayoutBytes]
+    argSchemas := #[.bytes]
+    resultSchema := byteArrayPairSchema
+    native := fun _ => byteArrayPairDatum
+      (Source.returnedByteArrayClosureSharedMutation mixedLayoutBytes)
+    tags :=
+      #["stress", "closure", "closure-ownership", "capture",
+        "partial-application", "application-shape", "returned-closure",
+        "closure-return-boundary", "bytearray", "bytes", "external", "heap",
+        "ownership", "shared", "outside-alias", "retain", "consume",
+        "mutation", "copy-on-write", "allocation"]
+    requiredLcnfForms :=
+      #["inc", "fap", "pap", "return", "lit", "box", "fvar", "unbox",
+        "extern", "ctor"]
+    requiredExecutedLcnfForms :=
+      #["inc", "fap", "pap", "return", "lit", "box", "fvar", "unbox",
+        "extern", "ctor"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "inc", minimum := 1, maximum := some 1 },
+        { form := "fap", minimum := 4, maximum := some 4 },
+        { form := "pap", minimum := 1, maximum := some 1 },
+        { form := "return", minimum := 5, maximum := some 5 },
+        { form := "lit", minimum := 2, maximum := some 2 },
+        { form := "box", minimum := 1, maximum := some 1 },
+        { form := "fvar", minimum := 1, maximum := some 1 },
+        { form := "unbox", minimum := 1, maximum := some 1 },
+        { form := "extern", minimum := 1, maximum := some 1 },
+        { form := "ctor", minimum := 1, maximum := some 1 }]
+    requiredExecutedLcnfFormTrace :=
+      some returnedByteArrayClosureSharedMutationFormTrace
+    requiredExternals := #[``ByteArray.set!]
+    requiredExecutedExternals := #[``ByteArray.set!]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``ByteArray.set!]
+    requiredExecutedExternalTrace := some #[``ByteArray.set!]
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind",
+        "admin:yield-done"]
+    provenance := firProvenance
+      "Return a ByteArray-capturing closure, then mutate while preserving an outside alias" },
   { id := "captured-byte-array-outside-alias-read"
     entry := ``Source.capturedByteArrayOutsideAliasRead
     dependencies := #[``Source.applyCapturedByteArrayRead]
