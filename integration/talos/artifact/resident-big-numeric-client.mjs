@@ -129,6 +129,12 @@ export async function checkResidentBigNumeric({ bytes, manifest }) {
   assert.equal(natDecLe(naturalInput(host, n384),
     naturalInput(host, n384)), 1);
 
+  const persistentNatural = naturalInput(host, n384);
+  host.markPersistentWord(persistentNatural);
+  assert.equal(host.readHeader(persistentNatural).persistent, true);
+  assert.equal(natDecLt(naturalInput(host, n384 - 1n), persistentNatural), 1,
+    "Nat.decLt rejected a persistent arbitrary-limb Natural");
+
   assert.equal(integerValue(host, intOfNat(naturalInput(host, a))), a);
   assert.equal(naturalValue(host, intNatAbs(integerInput(host, -a))), a);
   assert.equal(integerValue(host,
@@ -145,6 +151,12 @@ export async function checkResidentBigNumeric({ bytes, manifest }) {
     integerInput(host, -n384)), 1);
   assert.equal(intDecLt(integerInput(host, n384),
     integerInput(host, -n384)), 0);
+
+  const persistentInteger = integerInput(host, -n384);
+  host.markPersistentWord(persistentInteger);
+  assert.equal(host.readHeader(persistentInteger).persistent, true);
+  assert.equal(intDecLt(persistentInteger, integerInput(host, n384)), 1,
+    "Int.decLt rejected a persistent arbitrary-limb Integer");
 
   if (manifest.walkerControl !== undefined) {
     assert.equal(manifest.walkerControl, "structured-loop",

@@ -215,11 +215,15 @@ private def requirePersistent : List Instruction :=
     [.i32Const .uint32 persistentFlag, .i32And]) ++
   trapWhenTrue (load32 valueParam headerRefCountOffset)
 
-private def requireOrdinary : List Instruction :=
-  trapWhenTrue (
-    load32 valueParam headerFlagsOffset ++
-    [.i32Const .uint32 persistentFlag, .i32And]) ++
-  trapUnlessTrue (load32 valueParam headerRefCountOffset)
+private def requireOrdinaryOrPersistent : List Instruction :=
+  load32 valueParam headerFlagsOffset ++
+  equalsConst .uint32 (liveFlag + persistentFlag) ++
+  [.ifElse
+    (trapWhenTrue (load32 valueParam headerRefCountOffset))
+    (trapUnlessTrue (
+        load32 valueParam headerFlagsOffset ++
+        equalsConst .uint32 liveFlag) ++
+      trapUnlessTrue (load32 valueParam headerRefCountOffset))]
 
 private def requireReservedZero : List Instruction :=
   trapWhenTrue (load32 valueParam headerAux2Offset) ++
@@ -266,7 +270,7 @@ private def naturalPromotedValidation : List Instruction :=
     []]
 
 private def naturalBigValidation : List Instruction :=
-  requireOrdinary ++ requireReservedZero ++ requireTopNonzero ++
+  requireOrdinaryOrPersistent ++ requireReservedZero ++ requireTopNonzero ++
   [.localGet countLocal,
     .i32Const .uint32 1,
     .i32Eq,
@@ -331,7 +335,7 @@ private def requireCanonicalIntegerOneLimb : List Instruction := [
     []]
 
 private def integerHeapValidation : List Instruction :=
-  requireOrdinary ++
+  requireOrdinaryOrPersistent ++
   trapUnlessTrue (
     load32 valueParam headerAux0Offset ++
     equalsConst .uint32 integerSignMagnitudeMarker) ++
