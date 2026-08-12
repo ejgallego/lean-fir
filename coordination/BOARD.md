@@ -15,6 +15,35 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `FINAL-LCNF-GENERATED-NAME-ISOLATION`.
+- Integration owner: `wasm-gen` acting under the shared-compiler integration
+  lease; the functional branch was `integration/level1-capture-u8` from
+  `3f7bcbc8` through `8f872e1d`.
+- Compiler contract: each generic isolated final-LCNF compilation now forgets
+  imported module mappings for generated closed terms and specializations in
+  the source modules being recompiled, then clears the corresponding Lean
+  compiler caches. Ordinary source declarations and unrelated modules retain
+  their mappings.
+- Regression: `Fir.Wasm.Emit.SourceClosedFixture.packedTable` reproduces the
+  former generated-name ABI collision on the unpatched base and is compiled
+  through the public generic capture API by `SourceExamples`. Bug card
+  `FIR-BUG-wasm-none-final-capture-generated-name-abi` is fixed.
+- Production confirmation: the repaired generic API captures the real
+  `Zip.Wasm.compressLevel1` entry as 391 declarations and 110 externals. Its
+  former `UInt8`/object ABI failure is gone; lowering now reaches one ordinary
+  unsupported declaration, `List.MergeSort.Internal.mergeTR.go`, which is the
+  next W7 admission slice.
+- Acceptance: Lean Beam update/sync with zero errors; focused dependency cone;
+  `git diff --check`; complete `make check` with 122 harness tests, 662 unique
+  cases, and 1,968/1,968 comparisons; all 3,149 Talos jobs; and the complete
+  deterministic artifact gate. The prettyM binaries reproduced at 122,384 and
+  126,462 bytes.
+- Result: `main` fast-forwards to `8f872e1d`. W7 rebases its Level1 probe and
+  continues through the generic single-unit API; the module-wise API remains
+  reserved for source views containing deferred compiler groups.
+
+## Latest completed integration lease
+
 - Milestone: `W7-RESIDENT-CONTAINER-OWNERSHIP`.
 - Integration owner: `wasm-gen`; this lease aligns the executable resident
   Array and String families with Lean's uniqueness and copy-on-write model.
