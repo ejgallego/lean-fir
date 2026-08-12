@@ -611,7 +611,8 @@ private partial def discoverFinalCapturedRoots (roots frontier : Array Name)
     (retainedExternalNames : Array String) :
     CoreM (Array Name × Option Fir.Validation.Lcnf.Artifact) := do
   let some entry := frontier[0]? | return (roots, none)
-  let artifact ← compileEntryFinalCaptured entry (frontier.extract 1 frontier.size)
+  let artifact ← withoutModifyingEnv <|
+    compileEntryFinalCaptured entry (frontier.extract 1 frontier.size)
   let discovered ← discoveredFinalSourceRoots artifact retainedExternalNames roots
   let additions := discovered.foldl (init := #[]) fun names root =>
     (#[root.name] ++ root.companions).foldl (fun names name =>
@@ -627,7 +628,8 @@ private partial def compileEntryFinalCapturedInternalizedAux (entry : Name)
     discoverFinalCapturedRoots roots frontier retainedExternalNames
   let artifact ← match completeArtifact? with
     | some artifact => pure artifact
-    | none => compileEntryFinalCaptured entry (roots.extract 1 roots.size)
+    | none => withoutModifyingEnv <|
+        compileEntryFinalCaptured entry (roots.extract 1 roots.size)
   let discovered ← discoveredFinalSourceRoots artifact retainedExternalNames roots
   let additions := discovered.foldl (init := #[]) fun names root =>
     (#[root.name] ++ root.companions).foldl (fun names name =>

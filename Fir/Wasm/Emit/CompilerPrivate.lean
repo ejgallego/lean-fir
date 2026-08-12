@@ -54,26 +54,23 @@ def specializationCalleeCandidates (name : Name) : Array Name := Id.run do
       candidates := candidates.push candidate
   return candidates.reverse
 
-private partial def kernelDeclarationAncestor? (env : Environment) (name : Name) :
+private partial def sourceDeclarationAncestor? (sourceNames : Array Name) (name : Name) :
     Option Name :=
-  if env.constants.contains name then
+  if sourceNames.contains name then
     some name
   else if name.isAnonymous then
     none
   else
-    kernelDeclarationAncestor? env name.getPrefix
+    sourceDeclarationAncestor? sourceNames name.getPrefix
 
-private def generatedNameOwnedBy (env : Environment)
-    (selectedModules : Std.HashSet ModuleIdx) (sourceRoots : Array Name)
+private def generatedNameOwnedBy (env : Environment) (sourceRoots : Array Name)
     (name : Name) : Bool := Id.run do
   let callers := specializationCallerCandidates name
   if !callers.isEmpty then
     return callers.any sourceRoots.contains
-  return match env.getModuleIdxFor? name with
-  | none => false
-  | some moduleIndex =>
-      selectedModules.contains moduleIndex &&
-        (kernelDeclarationAncestor? env name).any sourceRoots.contains
+  let some moduleIndex := env.getModuleIdxFor? name | return false
+  let sourceNames := env.header.moduleData[moduleIndex]!.constNames
+  return (sourceDeclarationAncestor? sourceNames name).any sourceRoots.contains
 
 /--
 Forget precisely the compiler state generated on behalf of the source roots
@@ -84,10 +81,14 @@ from the imported module.
 
 The roots themselves are hidden as well: otherwise recursive calls consult the
 imported mono declaration and can be rewritten to a stale `_redArg` child. An
-ordinary generated descendant belongs to its nearest kernel declaration in
-the same module. Specializations instead use the caller provenance encoded by
-Lean after `._at_.`; their apparent module may be the private namespace of the
-generic callee, so it is not an ownership constraint.
+ordinary generated descendant belongs to its nearest real source declaration
+in the owning module's `constNames` index. Do not search `env.constants`:
+compiler-generated closed terms are themselves environment constants and
+would stop that search too early. Do not use a plain name prefix either:
+nested source declarations such as a `where` helper compile independently.
+Specializations instead use the caller provenance encoded by Lean after
+`._at_.`; their apparent module may be the private namespace of the generic
+callee, so it is not an ownership constraint.
 Unrelated helpers from the same module remain imported. They are ordinary
 dependencies of this synthetic unit and can be discovered and compiled in a
 later unit. This is intentionally rooted in Lean's generated-name conventions,
@@ -99,10 +100,7 @@ it does not scan every imported constant mapping.
 -/
 def forgetGeneratedCompilerModuleMappings (env : Environment)
     (moduleIndices : Array ModuleIdx) (sourceRoots : Array Name) : Environment :=
-  let selectedModules := moduleIndices.foldl
-    (init := Std.HashSet.emptyWithCapacity moduleIndices.size)
-    fun modules moduleIndex => modules.insert moduleIndex
-  let isOwned := generatedNameOwnedBy env selectedModules sourceRoots
+  let isOwned := generatedNameOwnedBy env sourceRoots
   let mappings := sourceRoots.foldl (init := env.base.private.const2ModIdx)
     fun mappings name => mappings.erase name
   let mappings := moduleIndices.foldl (init := mappings)

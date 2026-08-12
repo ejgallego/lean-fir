@@ -97,6 +97,14 @@ none
 FIR now decodes Lean's `._at_.<caller>.spec_N` convention with the upstream
 name-demangling primitives, validates the embedded caller as compilable source,
 and clears only compiler-cache entries owned by the roots being recompiled.
+Ordinary `_closed_N`, `_lam_N`, and `_redArg` ownership walks name prefixes to
+the nearest declaration in the owning module's `constNames` source index.
+Environment-constant ancestry is not used because generated closed terms are
+themselves constants; plain name-prefix ancestry is not used because nested
+`where` declarations compile independently.
+Frontier discovery compilations run under `withoutModifyingEnv`: their pure
+captured artifact is retained, but their generated-name and closed-term caches
+cannot pollute the next frontier or the final complete-root compilation.
 The growing unit adds the caller and generic callee together so Lean's own
 specialization pass reconstructs the generated declaration without an imported
 stale name or a handwritten specialization.
