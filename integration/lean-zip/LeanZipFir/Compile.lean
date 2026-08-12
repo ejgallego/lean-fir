@@ -25,15 +25,11 @@ def captureStored : CoreM Fir.Validation.Lcnf.Artifact :=
     Fir.Wasm.Emit.ResidentLinker.closedApplicationRetainedExternalNames
 
 /--
-Capture the real Level-1 source closure module by module, preserving Lean's
-ordinary closed-term and specialization boundaries.
+Capture the real Level-1 source closure through the repaired generic
+final-LCNF path. The capture owns the generated closed-term and specialization
+names in its synthetic compiler unit while retaining the real source entry.
 -/
 def captureLevel1 : CoreM Fir.Validation.Lcnf.Artifact :=
-  Fir.Wasm.Emit.Source.compileEntryModuleWiseInternalized level1Entry
-    Fir.Wasm.Emit.ResidentLinker.closedApplicationRetainedExternalNames
-
-/-- Diagnostic single-unit capture for the generated-closure ABI regression. -/
-def captureLevel1SingleUnit : CoreM Fir.Validation.Lcnf.Artifact :=
   Fir.Wasm.Emit.Source.compileEntriesFinalCapturedInternalized #[level1Entry]
     Fir.Wasm.Emit.ResidentLinker.closedApplicationRetainedExternalNames
 

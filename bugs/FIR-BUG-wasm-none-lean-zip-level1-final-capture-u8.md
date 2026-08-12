@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-lean-zip-level1-final-capture-u8
-status: active
+status: fixed
 classification: compiler
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: d8b18978322de05a8f3dba51ef03cf5461676c17
@@ -8,7 +8,7 @@ phase: wasm
 pass: none
 discovered-by: source-closure-test
 first-seen: 2026-08-12
-reproduction: integration/lean-zip/ProbeLevel1SingleUnit.lean
+reproduction: integration/lean-zip/ProbeLevel1.lean
 regression: integration/lean-zip/ProbeLevel1.lean
 ---
 
@@ -73,10 +73,19 @@ closed-term reconstruction lost a fixed-width capture convention.
 
 ## Workaround
 
-None accepted yet. The module-wise final-LCNF API may be used only if it
-captures the same real entry from the postponed source views and preserves the
-closed-term boundary; copying or restating the compressor in FIR is forbidden.
+None. The module-wise API cannot be used for this legacy source view because
+its oleans contain no deferred compiler groups.
 
 ## Upstream tracking
 
 none
+
+## Resolution and regression
+
+The shared repair in
+`FIR-BUG-wasm-none-final-capture-generated-name-abi` makes each isolated
+final-LCNF run forget imported module mappings for generated closed terms and
+specializations in the modules being recompiled, then clears those caches.
+The public generic API now captures this real entry as 391 declarations and
+110 externals. The probe reaches FIR lowering, where its next frontier is the
+independent `List.MergeSort.Internal.mergeTR.go` admission case.

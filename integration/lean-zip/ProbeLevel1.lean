@@ -13,6 +13,7 @@ private def runtimeOperationArrayJson (operations : Array Fir.Wasm.RuntimeOp) : 
     | .ok json => json
     | .error error => Json.mkObj [("manifestError", error)]
 
+set_option maxHeartbeats 0 in
 run_cmd do
   IO.FS.createDirAll "_build"
   let startedAt ← IO.monoMsNow
