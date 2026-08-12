@@ -900,6 +900,24 @@ def kindsRefine (actual expected : Array AbiKind) : Bool :=
   actual.size == expected.size &&
     (actual.zip expected).all fun pair => pair.fst.refines pair.snd
 
+/-- Ordinary arguments supplied to an already allocated Lean closure use the
+same object-family calling convention as named calls and joins. Capture
+descriptors remain exact and semantic refinement remains directional. -/
+def kindsLeanCompatible (actual expected : Array AbiKind) : Bool :=
+  actual.size == expected.size &&
+    (actual.zip expected).all fun pair => pair.fst.leanCompatible pair.snd
+
+@[simp] theorem kindsLeanCompatible_of_kindsRefine
+    {actual expected : Array AbiKind}
+    (refines : kindsRefine actual expected = true) :
+    kindsLeanCompatible actual expected = true := by
+  simp only [kindsRefine, Bool.and_eq_true] at refines
+  simp only [kindsLeanCompatible, Bool.and_eq_true]
+  refine ⟨refines.1, ?_⟩
+  rw [Array.all_eq_true] at refines ⊢
+  intro index indexLt
+  exact AbiKind.leanCompatible_of_refines (refines.2 index indexLt)
+
 def compileFixedClosureField (closureId : FVarId) (target : LCNF.Decl .impure)
     (arity fixed : Nat) (kinds : Array AbiKind) (index : Nat) :
     List Instruction :=
@@ -922,7 +940,7 @@ def compileClosureCandidateAt (declId closureId : FVarId) (resultKind : AbiKind)
   if fixed >= paramKinds.size || fixed + argumentKinds.size > paramKinds.size then none else
   let newFixed := fixed + argumentKinds.size
   let expectedArgs := paramKinds.extract fixed newFixed
-  if !kindsRefine argumentKinds expectedArgs then none else
+  if !kindsLeanCompatible argumentKinds expectedArgs then none else
   let matcher := [
     .localGet closureId,
     .call (.runtime (.closureMatches target.name paramKinds.size fixed))]
@@ -938,7 +956,7 @@ def compileClosureCandidateAt (declId closureId : FVarId) (resultKind : AbiKind)
     some (matcher, body)
   else
     let targetResult ← effectiveDeclarationResultKind? target
-    if !targetResult.refines resultKind then none else
+    if !targetResult.leanCompatible resultKind then none else
     some (matcher, fields ++ [.call (.declaration target.name), .localSet declId])
 
 def compileClosureCandidatesForTarget (program : Fir.LeanIR.ImpureProgram)

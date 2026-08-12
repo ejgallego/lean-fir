@@ -136,8 +136,8 @@ def supportedClosureCall (program : Fir.LeanIR.ImpureProgram)
             argKinds.size <= paramKinds.size &&
               let fixed := paramKinds.size - argKinds.size
               fixed < paramKinds.size &&
-                kindsRefine argKinds (paramKinds.extract fixed paramKinds.size) &&
-                resultKind.refines declared
+                kindsLeanCompatible argKinds (paramKinds.extract fixed paramKinds.size) &&
+                resultKind.leanCompatible declared
         | _, _ => false
   | _, _ => false
 

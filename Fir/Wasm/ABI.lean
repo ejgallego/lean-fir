@@ -70,6 +70,11 @@ an unrelated scalar merely because it shares a physical Wasm value type.
 def AbiKind.leanCompatible (actual expected : AbiKind) : Bool :=
   actual.refines expected || (actual.isObjectLike && expected.isObjectLike)
 
+@[simp] theorem AbiKind.leanCompatible_of_refines
+    {actual expected : AbiKind} (refines : actual.refines expected = true) :
+    actual.leanCompatible expected = true := by
+  simp [AbiKind.leanCompatible, refines]
+
 def AbiKind.isObjectField : AbiKind → Bool
   | .object | .tagged | .tobject | .erased => true
   | _ => false

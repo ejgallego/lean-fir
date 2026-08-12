@@ -290,6 +290,46 @@ def abiClosureCallProgram : Fir.LeanIR.ImpureProgram :=
 #guard supportedProgram abiDirectCallProgram
 #guard supportedProgram abiClosureCallProgram
 
+/-- A generic helper may hold a closure in the precise heap-object lane while
+its applied arguments retain coarse `tobject` annotations. The target lambda
+uses precise heap-object parameters, exactly as Lean's specialized comparator
+closures do after generic list traversal. -/
+def objectFamilyClosureTargetDecl : LCNF.Decl .impure :=
+  decl `objectFamilyClosureTarget
+    #[param x objType, param y objType] taggedType (.code <|
+      .let (letDecl r taggedType (.ctor trueInfo #[])) (.return r))
+
+def objectFamilyClosureApplyDecl : LCNF.Decl .impure :=
+  decl `objectFamilyClosureApply
+    #[param c objType, param x LCNF.ImpureType.tobject,
+      param y LCNF.ImpureType.tobject,
+      param z LCNF.ImpureType.uint32]
+    LCNF.ImpureType.uint32 (.code <|
+      .let (letDecl r taggedType (.fvar c #[.fvar x, .fvar y])) (.return z))
+
+def objectFamilyClosureCallProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[objectFamilyClosureTargetDecl, objectFamilyClosureApplyDecl] }
+
+#guard objectFamilyClosureCallProgram.decls.all
+  (supportedDecl objectFamilyClosureCallProgram)
+#guard match lowerSupported objectFamilyClosureCallProgram with
+  | .ok module => (validateModule module).isOk
+  | .error _ => false
+
+/-- Sharing the i32 representation still rejects a scalar argument at an
+object-family closure boundary. -/
+def scalarClosureApplyDecl : LCNF.Decl .impure :=
+  decl `scalarClosureApply
+    #[param c objType, param x LCNF.ImpureType.uint32,
+      param y LCNF.ImpureType.tobject, param z LCNF.ImpureType.uint32]
+    LCNF.ImpureType.uint32 (.code <|
+      .let (letDecl r taggedType (.fvar c #[.fvar x, .fvar y])) (.return z))
+
+def scalarClosureCallProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[objectFamilyClosureTargetDecl, scalarClosureApplyDecl] }
+
+#guard !supportedDecl scalarClosureCallProgram scalarClosureApplyDecl
+
 def erasedCapture : FVarId := ⟨`erasedCapture⟩
 def erasedClosure : FVarId := ⟨`erasedClosure⟩
 def erasedArgument : FVarId := ⟨`erasedArgument⟩
