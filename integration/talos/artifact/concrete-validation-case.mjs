@@ -49,6 +49,8 @@ export const CONCRETE_VALIDATION_BLOCKED_CASES = Object.freeze([
   "byte-array-size",
   "captured-byte-array-outside-alias-mutation",
   "captured-byte-array-outside-alias-read",
+  "captured-dictionary-retained-observer",
+  "captured-dictionary-unique-final-mutation",
   "conditional-byte-array-get-skipped",
   "conditional-byte-array-get-taken",
   "effect-captured-byte-array-final-use",
