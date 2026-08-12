@@ -15,6 +15,39 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `FIR-SCOPED-LAKE-ARTIFACT-CACHE`.
+- Integration owner: `test-fixtures`, consuming the compile-performance
+  handoff `af3ed1e0` and hardening it on branch
+  `integration/fir-scoped-cache`; functional head `6597c4ce` is based on the
+  accepted Level1 container frontier `9dc37c59`.
+- Cache boundary: every FIR worktree shares only Lake 4.33's content-addressed
+  artifact cache under repository-local `.lake_cache/<toolchain>`. The helper
+  resolves the current worktree's `lean-toolchain`, the Git common directory
+  locates the shared repository root, and both cache boundaries are mode 700.
+  `.lake`, `.beam`, and `.deps` remain private to each lane. Make targets export
+  the cache automatically; direct Lake and Lean Beam commands use the exact
+  environment command in `AGENTS.md`.
+- Contracts and discrepancies: no semantic contract, proof, runtime,
+  compiler, corpus case, or W6/W7-owned implementation changed. The standalone
+  Talos environment-prefix candidate `aa9e0191` is superseded because the root
+  Makefile exports the same scoped environment to nested workspaces. No bug
+  card was required.
+- Acceptance: a cold self-contained Talos admission passed all 3,149 jobs in
+  9m59.743s, including the 592s `Interpreter.Wasm.SmallStep` target. A fresh
+  detached consumer then restored the 22-job root build in 0.206s and the full
+  Talos cone in 8.033s. Representative 27MB simulation and 80MB interpreter
+  artifacts are read-only hard links to the scoped cache. `git diff --check`
+  and complete `make check` pass with 670 unique cases, 1,992/1,992 equal
+  comparisons, 7,176 machine steps, all semantic coverage floors, 150 active
+  bug cards, and exactly one registered trusted axiom.
+- Result: the 4.2GB Lean 4.33 namespace contains 21,793 artifacts and can be
+  audited or retired independently of other Lean projects. Per-lane Talos
+  dependency checkout and mathlib unpack remain lane-local and cost about
+  6.4GB; reducing that footprint is a separate task and must not introduce
+  shared mutable package state.
+
+## Latest completed integration lease
+
 - Milestone: `W7-LEVEL1-BYTEARRAY-STRING-NAT-FRONTIER`.
 - Integration owner: `wasm-gen-2`, acting under the user-authorized temporary
   integration lease. Branch `wasm/gen-bytearray-level1` was rebased on
