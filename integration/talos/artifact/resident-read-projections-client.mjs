@@ -9,6 +9,7 @@ const EXPECTED_ENTRIES = [
   { entry: "fir_sproj_u8_1_0", kind: "scalarProj", width: 1, offset: 0, result: "uint8" },
   { entry: "fir_sproj_u8_1_1", kind: "scalarProj", width: 1, offset: 1, result: "uint8" },
   { entry: "fir_sproj_u8_2_0", kind: "scalarProj", width: 2, offset: 0, result: "uint8" },
+  { entry: "fir_sproj_u64_1_0", kind: "scalarProj", width: 1, offset: 0, result: "uint64" },
 ];
 
 const HEADER_BYTES = 32;
@@ -99,6 +100,14 @@ function rawLayoutChecks(instance, memory) {
   expect((instance.exports.fir_sproj_u8_2_0(scalar2) >>> 0) === 0xd4,
     "resident scalar projection 2/0 returned the wrong byte");
 
+  const scalar64 = 7680;
+  const scalar64Value = 0xfedcba9876543210n;
+  writeHeader(view, scalar64, { aux1: 1, aux3: 8 });
+  view.setBigUint64(scalar64 + HEADER_BYTES + SLOT_BYTES, scalar64Value, true);
+  expect(BigInt.asUintN(64, instance.exports.fir_sproj_u64_1_0(scalar64)) ===
+      scalar64Value,
+    "resident scalar projection 1/0 returned the wrong UInt64");
+
   const dead = 8192;
   writeHeader(view, dead, { flags: 0, aux1: 1 });
   const wrongKind = 9216;
@@ -167,6 +176,25 @@ function concreteHostChecks(module, memoryExport) {
       expect((instance.exports[entry](scalar) >>> 0) === value,
         `${entry} disagreed with the concrete host`);
     }
+
+    const uint64Value = BigInt.asIntN(64, 0x8123456789abcdefn);
+    const scalar64 = host.allocCtor({
+      fields: ["tobject"],
+      size: 1,
+      usize: 0,
+      ssize: 8,
+      tag: "6",
+    }, [host.encodeTagged(0n)]);
+    host.scalarSet({
+      kind: "scalarSet",
+      width: 1,
+      offset: 0,
+      field: "uint64",
+    }, [scalar64, uint64Value]);
+    expect(BigInt.asUintN(64,
+      instance.exports.fir_sproj_u64_1_0(scalar64)) ===
+        BigInt.asUintN(64, uint64Value),
+    "fir_sproj_u64_1_0 disagreed with the concrete host");
   });
 }
 

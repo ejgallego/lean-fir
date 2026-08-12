@@ -16,6 +16,9 @@ const ENTRIES = [
   ["fir_cproj_4_object", 4, "object"],
   ["fir_cproj_5_float32", 5, "float32"],
   ["fir_cproj_6_float", 6, "float"],
+  ["fir_cproj_7_uint16", 7, "uint16"],
+  ["fir_cproj_8_uint64", 8, "uint64"],
+  ["fir_cproj_9_usize", 9, "usize"],
 ];
 
 const HEADER_BYTES = 32;
@@ -41,6 +44,9 @@ function expectTrap(action, label) {
 const BITS = new DataView(new ArrayBuffer(8));
 
 function sameCapture(kind, actual, expected) {
+  if (kind === "uint64" || kind === "usize") {
+    return BigInt.asUintN(64, actual) === BigInt.asUintN(64, expected);
+  }
   if (kind === "float32") {
     BITS.setFloat32(0, actual, true);
     const actualBits = BITS.getUint32(0, true);
@@ -59,6 +65,8 @@ function sameCapture(kind, actual, expected) {
 function rawCapture(kind, ordinal) {
   if (kind === "float32") return Math.fround(-13.25 - ordinal);
   if (kind === "float") return -0;
+  if (kind === "uint64") return 0xfedcba9876543210n + BigInt(ordinal);
+  if (kind === "usize") return 0x8123456789abcdefn + BigInt(ordinal);
   return 0x100001 + ordinal * 17;
 }
 
@@ -68,6 +76,8 @@ function writeRawCapture(view, address, kind, value) {
     view.setUint32(address + 4, 0, true);
   } else if (kind === "float") {
     view.setFloat64(address, value, true);
+  } else if (kind === "uint64" || kind === "usize") {
+    view.setBigUint64(address, value, true);
   } else {
     view.setUint32(address, value, true);
     view.setUint32(address + 4, 0, true);
@@ -78,7 +88,7 @@ function writeHeader(view, address, {
   kind = 2,
   flags = 2,
   refCount = 1,
-  allocationBytes = 80,
+  allocationBytes = 112,
   aux0 = 0,
   aux1 = 6,
   aux2 = 5,
@@ -141,7 +151,10 @@ function concreteValue(host, kind, ordinal, leaf) {
     case "tagged": return host.encodeTagged(BigInt(20 + ordinal));
     case "tobject": return host.encodeTagged(BigInt(20 + ordinal));
     case "uint8": return 0x80 + ordinal;
+    case "uint16": return 0x8000 + ordinal;
     case "uint32": return (0xf0000000 + ordinal) | 0;
+    case "uint64": return BigInt.asIntN(64, 0xfedcba9876543210n + BigInt(ordinal));
+    case "usize": return BigInt.asIntN(64, 0x8123456789abcdefn + BigInt(ordinal));
     case "float32": return Math.fround(ordinal + 0.25);
     case "float": return -(ordinal + 0.5);
     default: throw new Error(`unsupported closure capture test kind: ${kind}`);

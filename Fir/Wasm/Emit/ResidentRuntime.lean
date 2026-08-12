@@ -200,6 +200,16 @@ private def objectProjectionSuffix? : AbiKind → Option String
   | .erased => some "erased"
   | _ => none
 
+private def scalarProjectionSuffix? : AbiKind → Option String
+  | .uint8 => some "u8"
+  | .uint16 => some "u16"
+  | .uint32 => some "u32"
+  | .uint64 => some "u64"
+  | .usize => some "usize"
+  | .float32 => some "f32"
+  | .float => some "f64"
+  | _ => none
+
 /--
 Reserved declaration/export name for one supported resident projection.
 The full semantic descriptor is encoded in the name so two distinct runtime
@@ -209,8 +219,9 @@ def readProjectionName? : RuntimeOp → Option Name
   | .objectProj index result =>
       (objectProjectionSuffix? result).map fun suffix =>
         Name.mkSimple s!"fir_oproj_{index}_{suffix}"
-  | .scalarProj width byteOffset .uint8 =>
-      some <| Name.mkSimple s!"fir_sproj_u8_{width}_{byteOffset}"
+  | .scalarProj width byteOffset result =>
+      (scalarProjectionSuffix? result).map fun suffix =>
+        Name.mkSimple s!"fir_sproj_{suffix}_{width}_{byteOffset}"
   | _ => none
 
 def supportsReadProjection (operation : RuntimeOp) : Bool :=
@@ -258,31 +269,38 @@ private def objectProjectionFunction (index : Nat) (result : AbiKind) :
         .localSet resultLocal] ++
       [.localGet resultLocal, .ret] }
 
-private def scalarUInt8ProjectionFunction (width byteOffset : Nat) :
+private def scalarProjectionFunction (width byteOffset : Nat)
+    (result : AbiKind) :
     Except LinkError Function := do
-  let some name := readProjectionName? (.scalarProj width byteOffset .uint8) |
-    throw (.unsupportedProjection width byteOffset .uint8)
+  let some name := readProjectionName? (.scalarProj width byteOffset result) |
+    throw (.unsupportedProjection width byteOffset result)
   let fieldOffset ← checkedProjectionOffset <|
     headerBytes + target.semanticSlotBytes * width + byteOffset
+  let load := match result with
+    | .uint8 => [.i32Load8U .uint8 fieldOffset]
+    | .uint16 => [.i32Load16U .uint16 fieldOffset]
+    | .uint32 => [.i32Load .uint32 fieldOffset]
+    | .uint64 => [.i64Load .uint64 fieldOffset]
+    | .usize => [.i64Load .usize fieldOffset]
+    | .float32 =>
+        [.i32Load .uint32 fieldOffset, .f32ReinterpretI32 .float32]
+    | .float => [.i64Load .uint64 fieldOffset, .f64ReinterpretI64 .float]
+    | _ => []
   return {
     name
     params := #[(objectParam, .tobject)]
-    results := #[.uint8]
-    locals := #[(resultLocal, .uint8)]
+    results := #[result]
+    locals := #[(resultLocal, result)]
     body := projectionHeapBody
-      [.localGet objectParam,
-        .i32Load8U .uint8 fieldOffset,
-        .localSet resultLocal] ++
+      ([.localGet objectParam] ++ load ++ [.localSet resultLocal]) ++
       [.localGet resultLocal, .ret] }
 
 private def readProjectionFunction (operation : RuntimeOp) :
     Except LinkError Function :=
   match operation with
   | .objectProj index result => objectProjectionFunction index result
-  | .scalarProj width byteOffset .uint8 =>
-      scalarUInt8ProjectionFunction width byteOffset
   | .scalarProj width byteOffset result =>
-      throw (.unsupportedProjection width byteOffset result)
+      scalarProjectionFunction width byteOffset result
   | _ => throw (.unsupportedProjection 0 0 .erased)
 
 private partial def rewriteRuntimeInstruction (operation : RuntimeOp)
@@ -431,9 +449,8 @@ def internalizeIsShared (module : Module) : Except LinkError Module :=
   internalizeOperation .isShared isSharedName isSharedFunction module
 
 /--
-Internalize every object projection and packed `UInt8` projection supported by
-the current resident load surface. Other scalar widths stay explicit semantic
-imports until their typed load instructions land.
+Internalize every supported object and packed scalar projection through the
+typed resident load selected by its ABI result.
 
 The helpers trap on recognized non-heap, misaligned, dead, and non-constructor
 inputs. Their generation relies on the W6 related-state precondition for
@@ -451,7 +468,7 @@ def internalizeReadProjections (module : Module) : Except LinkError Module := do
   let result ← internalizeOperationsUnchecked bindings module
   validateOutput result
 
-/-- The exact projection family exercised by compiler-produced Lean 4.33 `prettyM`. -/
+/-- Projection coordinates exercised by the reviewed prettyM and Level-1 closures. -/
 def prettyFormatReadProjections : Array RuntimeOp := #[
   .objectProj 0 .object,
   .objectProj 0 .tobject,
@@ -460,11 +477,12 @@ def prettyFormatReadProjections : Array RuntimeOp := #[
   .scalarProj 0 0 .uint8,
   .scalarProj 1 0 .uint8,
   .scalarProj 1 1 .uint8,
-  .scalarProj 2 0 .uint8]
+  .scalarProj 2 0 .uint8,
+  .scalarProj 1 0 .uint64]
 
 /--
-Import-free module exposing the complete read-projection family needed by
-`prettyM`, independently of compiler linking.
+Import-free module exposing the reviewed read-projection family independently
+of compiler linking.
 -/
 def prettyFormatReadProjectionModule : Except LinkError Module := do
   let functions ← prettyFormatReadProjections.mapM readProjectionFunction
@@ -481,7 +499,10 @@ private def closureProjectionSuffix? : AbiKind → Option String
   | .tagged => some "tagged"
   | .tobject => some "tobject"
   | .uint8 => some "uint8"
+  | .uint16 => some "uint16"
   | .uint32 => some "uint32"
+  | .uint64 => some "uint64"
+  | .usize => some "usize"
   | .float32 => some "float32"
   | .float => some "float"
   | _ => none
@@ -706,7 +727,10 @@ def prettyFormatClosureProjectionCoordinates : Array (Nat × AbiKind) := #[
   (3, .tobject),
   (4, .object),
   (5, .float32),
-  (6, .float)]
+  (6, .float),
+  (7, .uint16),
+  (8, .uint64),
+  (9, .usize)]
 
 def prettyFormatClosureProjectionModule : Except LinkError Module := do
   let globals : ClosureApplicationGlobals := { object := 0, remaining := 1 }
@@ -968,13 +992,21 @@ private def readProjectionEntryJson (operation : RuntimeOp) : Json :=
         ("kind", "objectProj"),
         ("index", index),
         ("result", (objectProjectionSuffix? result).getD "unsupported")]
-  | .scalarProj width byteOffset .uint8 =>
+  | .scalarProj width byteOffset result =>
       Json.mkObj [
         ("entry", (readProjectionName? operation).getD .anonymous |>.toString),
         ("kind", "scalarProj"),
         ("width", width),
         ("offset", byteOffset),
-        ("result", "uint8")]
+        ("result", (scalarProjectionSuffix? result).getD "unsupported" |>
+          fun suffix => match suffix with
+            | "u8" => "uint8"
+            | "u16" => "uint16"
+            | "u32" => "uint32"
+            | "u64" => "uint64"
+            | "f32" => "float32"
+            | "f64" => "float"
+            | other => other)]
   | _ => Json.mkObj [("kind", "unsupported")]
 
 def prettyFormatReadProjectionManifest : Json :=

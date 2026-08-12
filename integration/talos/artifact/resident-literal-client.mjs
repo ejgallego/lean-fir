@@ -36,6 +36,7 @@ export async function checkResidentLiterals(bytes) {
   for (const name of [
     "resident_literal_nat_zero",
     "resident_literal_nat_one",
+    "resident_literal_nat_promoted",
     "resident_literal_empty_string",
     "resident_literal_unicode_string",
     "fir_heap_frontier",
@@ -53,17 +54,27 @@ export async function checkResidentLiterals(bytes) {
   equal(exports.fir_heap_frontier(), 1024,
     "immediate naturals unexpectedly allocated");
 
+  const promoted = exports.resident_literal_nat_promoted() >>> 0;
+  equal(promoted, 1024, "promoted natural returned the wrong address");
+  equal(exports.fir_heap_frontier() >>> 0, 1064,
+    "promoted natural advanced the wrong allocation extent");
+  expect(header(exports.memory, promoted).every((value, index) =>
+    value === [5, 3, 0, 40, 1, 1, 0, 0][index]),
+  `promoted natural header drifted: ${header(exports.memory, promoted)}`);
+  equal(new DataView(exports.memory.buffer).getBigUint64(promoted + 32, true),
+    4294967296n, "promoted natural payload drifted");
+
   const empty = exports.resident_literal_empty_string() >>> 0;
-  equal(empty, 1024, "empty string returned the wrong address");
-  equal(exports.fir_heap_frontier() >>> 0, 1056,
+  equal(empty, 1064, "empty string returned the wrong address");
+  equal(exports.fir_heap_frontier() >>> 0, 1096,
     "empty string advanced the wrong allocation extent");
   expect(header(exports.memory, empty).every((value, index) =>
     value === [4, 2, 1, 32, 1, 0, 0, 0][index]),
   `empty string header drifted: ${header(exports.memory, empty)}`);
 
   const unicode = exports.resident_literal_unicode_string() >>> 0;
-  equal(unicode, 1056, "Unicode string returned the wrong address");
-  equal(exports.fir_heap_frontier() >>> 0, 1096,
+  equal(unicode, 1096, "Unicode string returned the wrong address");
+  equal(exports.fir_heap_frontier() >>> 0, 1136,
     "Unicode string advanced the wrong allocation extent");
   expect(header(exports.memory, unicode).every((value, index) =>
     value === [4, 2, 1, 40, 1, 3, 0, 0][index]),
@@ -85,6 +96,9 @@ export async function checkResidentLiterals(bytes) {
     concrete.fir_heap_frontier,
     concrete.fir_heap_set_frontier,
   );
+  const concretePromoted = concrete.resident_literal_nat_promoted() >>> 0;
+  equal(host.taggedPayload(concretePromoted), 4294967296n,
+    "ConcreteHost did not decode the resident promoted natural");
   const concreteString = concrete.resident_literal_unicode_string() >>> 0;
   host.synchronizeResidentFrontierBeforeImport();
   equal(host.readString(concreteString), "λ\n",
@@ -92,7 +106,7 @@ export async function checkResidentLiterals(bytes) {
   equal(host.heapCursor, concrete.fir_heap_frontier() >>> 0,
     "ConcreteHost did not consume the resident literal frontier");
 
-  return "PASS zero-import resident immediate Natural and UTF-8 String literals";
+  return "PASS zero-import resident immediate/promoted Natural and UTF-8 String literals";
 }
 
 export async function checkFetchedResidentLiterals(url) {

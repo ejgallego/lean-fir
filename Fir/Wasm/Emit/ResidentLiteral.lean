@@ -24,9 +24,9 @@ private def u32 (value : Nat) : UInt32 := UInt32.ofNat value
 
 /--
 The resident literal slice deliberately supports the exact representation
-families it can construct without a host: immediate naturals and UTF-8 string
-objects. Larger naturals retain their semantic import until the big-natural
-allocator is internalized.
+families it can construct without a host: immediate and promoted tagged
+naturals plus UTF-8 string objects. Naturals above Lean's semantic tagged limit
+retain their semantic import until the big-natural allocator is internalized.
 -/
 def isImmediateNatural : RuntimeOp → Bool
   | .literal (.nat value) result =>
@@ -34,13 +34,23 @@ def isImmediateNatural : RuntimeOp → Bool
         (result == .tagged || result == .tobject)
   | _ => false
 
+def isPromotedNatural : RuntimeOp → Bool
+  | .literal (.nat value) result =>
+      decide (maxImmediatePayload < value) &&
+        decide (value ≤ Fir.LeanIR.Impure.maxTaggedPayload) &&
+        (result == .tagged || result == .tobject)
+  | _ => false
+
+def isNaturalLiteral (operation : RuntimeOp) : Bool :=
+  isImmediateNatural operation || isPromotedNatural operation
+
 def isStringLiteral : RuntimeOp → Bool
   | .literal (.str _) result =>
       result == .object || result == .tobject
   | _ => false
 
 def isSupportedLiteral (operation : RuntimeOp) : Bool :=
-  isImmediateNatural operation || isStringLiteral operation
+  isNaturalLiteral operation || isStringLiteral operation
 
 def naturalName (ordinal : Nat) : Name :=
   Name.mkSimple s!"fir_nat_literal_{ordinal}"
@@ -115,16 +125,48 @@ private def retagAddress (result : AbiKind) : List Instruction := [
 
 private def naturalFunction (name : Name) (value : Nat)
     (result : AbiKind) : Except LinkError Function := do
-  unless value ≤ maxImmediatePayload &&
+  unless value ≤ Fir.LeanIR.Impure.maxTaggedPayload &&
       (result == .tagged || result == .tobject) do
     throw .unsupportedOperation
-  let encoded ← checkedWord "immediate natural literal" (value * 2 + 1)
-  return {
-    name
-    params := #[]
-    results := #[result]
-    locals := #[]
-    body := [.i32Const result encoded, .ret] }
+  if value ≤ maxImmediatePayload then
+    let encoded ← checkedWord "immediate natural literal" (value * 2 + 1)
+    return {
+      name
+      params := #[]
+      results := #[result]
+      locals := #[]
+      body := [.i32Const result encoded, .ret] }
+  else
+    let payload := UInt64.ofNat value
+    let allocationSize := align8 (headerBytes + target.semanticSlotBytes)
+    let allocationBytes ← checkedWord "promoted natural allocation bytes"
+      allocationSize
+    return {
+      name
+      params := #[]
+      results := #[result]
+      locals := #[(addressLocal, .uint32), (savedScratchLocal, .uint32),
+        (resultLocal, result)]
+      body :=
+        [.i32Const .uint32 allocationBytes,
+          .call (.declaration ResidentAllocator.allocateName),
+          .localSet addressLocal] ++
+        zeroAllocation allocationSize ++
+        store32 [.i32Const .uint32 ObjectKind.natural.code]
+          (u32 headerKindOffset) ++
+        store32 [.i32Const .uint32 (liveFlag + persistentFlag)]
+          (u32 headerFlagsOffset) ++
+        store32 [.i32Const .uint32 0] (u32 headerRefCountOffset) ++
+        store32 [.i32Const .uint32 allocationBytes]
+          (u32 headerAllocationBytesOffset) ++
+        store32 [.i32Const .uint32 promotedTagMarker] (u32 headerAux0Offset) ++
+        store32 [.i32Const .uint32 1] (u32 headerAux1Offset) ++
+        store32 [.i32Const .uint32 0] (u32 headerAux2Offset) ++
+        store32 [.i32Const .uint32 0] (u32 headerAux3Offset) ++ [
+          .localGet addressLocal,
+          .i64Const .uint64 payload,
+          .i64Store .uint64 (u32 headerBytes)] ++
+        retagAddress result }
 
 private def stringFunction (name : Name) (value : String)
     (result : AbiKind) : Except LinkError Function := do
@@ -170,6 +212,8 @@ private partial def rewriteInstruction (operation : RuntimeOp)
         .call (.runtime candidate)
   | .block label body =>
       .block label (body.map (rewriteInstruction operation name))
+  | .loop label body =>
+      .loop label (body.map (rewriteInstruction operation name))
   | .ifElse thenBody elseBody =>
       .ifElse
         (thenBody.map (rewriteInstruction operation name))
@@ -222,8 +266,13 @@ private def internalizeMatching (predicate : RuntimeOp → Bool)
   | .ok () => return result
   | .error error => throw (.invalidOutput error)
 
+/--
+Internalize natural literals through Lean's semantic tagged limit. The
+historical name is retained for policy/API compatibility; generated helpers
+select an immediate word or promoted natural from the literal value.
+-/
 def internalizeImmediateNaturals (module : Module) : Except LinkError Module :=
-  internalizeMatching isImmediateNatural module
+  internalizeMatching isNaturalLiteral module
 
 def internalizeStrings (module : Module) : Except LinkError Module :=
   internalizeMatching isStringLiteral module
@@ -235,6 +284,7 @@ def internalizeLiterals (module : Module) : Except LinkError Module := do
 def exampleOperations : Array RuntimeOp := #[
   .literal (.nat 0) .tagged,
   .literal (.nat 1) .tobject,
+  .literal (.nat 4294967296) .tagged,
   .literal (.str "") .object,
   .literal (.str "λ\n") .object]
 
@@ -249,8 +299,9 @@ private def exampleCaller (index : Nat) (name : Name)
 def exampleFunctions : Array Function := #[
   exampleCaller 0 `resident_literal_nat_zero .tagged,
   exampleCaller 1 `resident_literal_nat_one .tobject,
-  exampleCaller 2 `resident_literal_empty_string .object,
-  exampleCaller 3 `resident_literal_unicode_string .object]
+  exampleCaller 2 `resident_literal_nat_promoted .tagged,
+  exampleCaller 3 `resident_literal_empty_string .object,
+  exampleCaller 4 `resident_literal_unicode_string .object]
 
 def exampleModule : Module := {
   imports := exampleOperations.mapIdx Fir.Wasm.runtimeImport
@@ -272,6 +323,8 @@ def manifest : Json :=
         ("value", 0)],
       Json.mkObj [("entry", "resident_literal_nat_one"), ("kind", "nat"),
         ("value", 1)],
+      Json.mkObj [("entry", "resident_literal_nat_promoted"), ("kind", "nat"),
+        ("value", "4294967296")],
       Json.mkObj [("entry", "resident_literal_empty_string"), ("kind", "string"),
         ("value", "")],
       Json.mkObj [("entry", "resident_literal_unicode_string"), ("kind", "string"),

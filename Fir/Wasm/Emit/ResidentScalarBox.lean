@@ -1,4 +1,4 @@
-import Fir.Wasm.Emit.ResidentRuntime
+import Fir.Wasm.Emit.ResidentAllocator
 
 namespace Fir.Wasm.Emit.ResidentScalarBox
 
@@ -38,16 +38,23 @@ private def raw64Local : FVarId := ⟨`raw64⟩
 private def savedScratchLocal : FVarId := ⟨`savedScratch⟩
 private def taggedResultLocal : FVarId := ⟨`taggedResult⟩
 private def uint8ResultLocal : FVarId := ⟨`uint8Result⟩
+private def uint16ResultLocal : FVarId := ⟨`uint16Result⟩
+private def objectResultLocal : FVarId := ⟨`objectResult⟩
+private def addressLocal : FVarId := ⟨`address⟩
 
 def boxUInt8Name : Name := `fir_box_uint8
+def boxUInt16Name : Name := `fir_box_uint16
+def boxUInt32Name : Name := `fir_box_uint32
 def unboxUInt8Name : Name := `fir_unbox_uint8
+def unboxUInt16Name : Name := `fir_unbox_uint16
 def unboxUInt32Name : Name := `fir_unbox_uint32
 def uint32DecEqName : Name := `fir_ext_UInt32_decEq
 
 def externalDeclarations : Array Name := #[`UInt32.decEq]
 
 def helperNames : Array Name :=
-  #[boxUInt8Name, unboxUInt8Name, unboxUInt32Name, uint32DecEqName]
+  #[boxUInt8Name, boxUInt16Name, boxUInt32Name, unboxUInt8Name,
+    unboxUInt16Name, unboxUInt32Name, uint32DecEqName]
 
 private def equalsConst (kind : AbiKind) (value : UInt32) : List Instruction :=
   [.i32Const kind value, .i32Eq]
@@ -87,6 +94,22 @@ def boxUInt8Function : Function := {
     .localSet rawLocal] ++
     retypeRaw .tagged taggedResultLocal }
 
+/-- Upstream `lean_box` specialized to the complete `UInt16` range. -/
+def boxUInt16Function : Function := {
+  name := boxUInt16Name
+  params := #[(valueParam, .uint16)]
+  results := #[.tobject]
+  locals := #[(rawLocal, .uint32), (savedScratchLocal, .uint32),
+    (objectResultLocal, .tobject)]
+  body := [
+    .localGet valueParam,
+    .localGet valueParam,
+    .i32Add,
+    .i32Const .uint32 1,
+    .i32Add,
+    .localSet rawLocal] ++
+    retypeRaw .tobject objectResultLocal }
+
 /-- Upstream `lean_unbox` specialized to a tagged `UInt8`. -/
 def unboxUInt8Function : Function := {
   name := unboxUInt8Name
@@ -104,6 +127,24 @@ def unboxUInt8Function : Function := {
     trapUnless ([.localGet rawLocal, .i32Const .uint32 0xffffff00, .i32And] ++
       equalsConst .uint32 0) ++
     retypeRaw .uint8 uint8ResultLocal }
+
+/-- Upstream `lean_unbox` specialized to a tagged `UInt16`. -/
+def unboxUInt16Function : Function := {
+  name := unboxUInt16Name
+  params := #[(objectParam, .tobject)]
+  results := #[.uint16]
+  locals := #[(rawLocal, .uint32), (savedScratchLocal, .uint32),
+    (uint16ResultLocal, .uint16)]
+  body :=
+    trapUnless ([.localGet objectParam, .i32Const .uint32 1, .i32And] ++
+      equalsConst .uint32 1) ++ [
+      .localGet objectParam,
+      .i32Const .uint32 1,
+      .i32ShrU,
+      .localSet rawLocal] ++
+    trapUnless ([.localGet rawLocal, .i32Const .uint32 0xffff0000, .i32And] ++
+      equalsConst .uint32 0) ++
+    retypeRaw .uint16 uint16ResultLocal }
 
 private def requireHeapAddress : List Instruction :=
   trapUnless ([.localGet objectParam, .i32Const .uint32 (u32 heapBase),
@@ -154,6 +195,56 @@ def unboxUInt32Function : Function := {
     .i32And,
     .ifElse immediateUInt32Body promotedUInt32Body] }
 
+private def storeAddress32 (value : List Instruction) (byteOffset : Nat) :
+    List Instruction :=
+  [.localGet addressLocal] ++ value ++ [.i32Store .uint32 (u32 byteOffset)]
+
+private def promotedUInt32BoxBody : List Instruction :=
+  [.i32Const .uint32 40,
+    .call (.declaration ResidentAllocator.allocateName),
+    .localSet addressLocal] ++
+  storeAddress32 [.i32Const .uint32 ObjectKind.natural.code]
+    headerKindOffset ++
+  storeAddress32 [.i32Const .uint32 (liveFlag + persistentFlag)]
+    headerFlagsOffset ++
+  storeAddress32 [.i32Const .uint32 0] headerRefCountOffset ++
+  storeAddress32 [.i32Const .uint32 40] headerAllocationBytesOffset ++
+  storeAddress32 [.i32Const .uint32 promotedTagMarker] headerAux0Offset ++
+  storeAddress32 [.i32Const .uint32 1] headerAux1Offset ++
+  storeAddress32 [.i32Const .uint32 0] headerAux2Offset ++
+  storeAddress32 [.i32Const .uint32 0] headerAux3Offset ++
+  storeAddress32 [.localGet valueParam] headerBytes ++
+  storeAddress32 [.i32Const .uint32 0] (headerBytes + 4) ++ [
+    .localGet addressLocal,
+    .localSet rawLocal] ++
+  retypeRaw .tobject objectResultLocal
+
+private def immediateUInt32BoxBody : List Instruction := [
+  .localGet valueParam,
+  .localGet valueParam,
+  .i32Add,
+  .i32Const .uint32 1,
+  .i32Add,
+  .localSet rawLocal] ++ retypeRaw .tobject objectResultLocal
+
+/--
+Upstream's integer box split adapted to FIR's wasm32 object lane. Values that
+fit the physical immediate payload are encoded directly; the remaining
+semantic tagged `UInt32` values use the canonical persistent promoted-natural
+layout.
+-/
+def boxUInt32Function : Function := {
+  name := boxUInt32Name
+  params := #[(valueParam, .uint32)]
+  results := #[.tobject]
+  locals := #[(rawLocal, .uint32), (addressLocal, .uint32),
+    (savedScratchLocal, .uint32), (objectResultLocal, .tobject)]
+  body := [
+    .localGet valueParam,
+    .i32Const .uint32 2147483648,
+    .i32LtU,
+    .ifElse immediateUInt32BoxBody promotedUInt32BoxBody] }
+
 /-- Upstream fixed-width equality is physical wasm32 equality. -/
 def uint32DecEqFunction : Function := {
   name := uint32DecEqName
@@ -169,13 +260,19 @@ def uint32DecEqFunction : Function := {
 
 private def runtimeName? : RuntimeOp → Option Name
   | .box .uint8 .tagged => some boxUInt8Name
+  | .box .uint16 .tobject => some boxUInt16Name
+  | .box .uint32 .tobject => some boxUInt32Name
   | .unbox .uint8 => some unboxUInt8Name
+  | .unbox .uint16 => some unboxUInt16Name
   | .unbox .uint32 => some unboxUInt32Name
   | _ => none
 
 private def runtimeFunction : RuntimeOp → Except LinkError Function
   | .box .uint8 .tagged => pure boxUInt8Function
+  | .box .uint16 .tobject => pure boxUInt16Function
+  | .box .uint32 .tobject => pure boxUInt32Function
   | .unbox .uint8 => pure unboxUInt8Function
+  | .unbox .uint16 => pure unboxUInt16Function
   | .unbox .uint32 => pure unboxUInt32Function
   | _ => throw .unsupportedOperation
 
@@ -270,12 +367,17 @@ def internalizeAvailable (module : Module) : Except LinkError Module :=
     module.runtimeOperations.filter (runtimeName? · |>.isSome)
 
 private def roundtripName : Name := `resident_scalar_box_uint8_roundtrip
+private def roundtripUInt16Name : Name := `resident_scalar_box_uint16_roundtrip
+private def roundtripUInt32Name : Name := `resident_scalar_box_uint32_roundtrip
 private def unboxUInt32ExampleName : Name := `resident_scalar_unbox_uint32
 
 private def exampleOperations : Array RuntimeOp := #[
   .box .uint8 .tagged,
   .unbox .uint8,
-  .unbox .uint32]
+  .unbox .uint32,
+  .box .uint16 .tobject,
+  .unbox .uint16,
+  .box .uint32 .tobject]
 
 private def roundtripFunction : Function := {
   name := roundtripName
@@ -292,6 +394,22 @@ private def unboxUInt32ExampleFunction : Function := {
   locals := #[]
   body := [.localGet objectParam, .call (.runtime exampleOperations[2]!), .ret] }
 
+private def roundtripUInt16Function : Function := {
+  name := roundtripUInt16Name
+  params := #[(valueParam, .uint16)]
+  results := #[.uint16]
+  locals := #[]
+  body := [.localGet valueParam, .call (.runtime exampleOperations[3]!),
+    .call (.runtime exampleOperations[4]!), .ret] }
+
+private def roundtripUInt32Function : Function := {
+  name := roundtripUInt32Name
+  params := #[(valueParam, .uint32)]
+  results := #[.uint32]
+  locals := #[]
+  body := [.localGet valueParam, .call (.runtime exampleOperations[5]!),
+    .call (.runtime exampleOperations[2]!), .ret] }
+
 def exampleModule : Module := {
   imports := exampleOperations.mapIdx Fir.Wasm.runtimeImport ++ #[{
     key := .external `UInt32.decEq
@@ -301,14 +419,19 @@ def exampleModule : Module := {
     externalTypes? := some {
       params := #[LCNF.ImpureType.uint32, LCNF.ImpureType.uint32]
       result := LCNF.ImpureType.uint8 } }]
-  functions := #[roundtripFunction, unboxUInt32ExampleFunction]
-  exports := #[roundtripName, unboxUInt32ExampleName]
+  functions := #[roundtripFunction, unboxUInt32ExampleFunction,
+    roundtripUInt16Function, roundtripUInt32Function]
+  exports := #[roundtripName, roundtripUInt16Name, roundtripUInt32Name,
+    unboxUInt32ExampleName]
   initializers := #[]
   runtimeOperations := exampleOperations
   memory := some ResidentRuntime.residentMemory }
 
-def residentExampleModule : Except LinkError Module :=
-  internalizeAvailable exampleModule
+def residentExampleModule : Except String Module := do
+  let module ← ResidentAllocator.install exampleModule
+    |>.mapError fun error => s!"allocator: {repr error}"
+  internalizeAvailable module
+    |>.mapError fun error => s!"scalar box: {repr error}"
 
 def manifest : Json :=
   Json.mkObj [
@@ -320,6 +443,14 @@ def manifest : Json :=
       Json.mkObj [
         ("entry", unboxUInt32ExampleName.toString),
         ("params", Json.arr #["tobject"]),
+        ("result", "uint32")],
+      Json.mkObj [
+        ("entry", roundtripUInt16Name.toString),
+        ("params", Json.arr #["uint16"]),
+        ("result", "uint16")],
+      Json.mkObj [
+        ("entry", roundtripUInt32Name.toString),
+        ("params", Json.arr #["uint32"]),
         ("result", "uint32")]]),
     ("helpers", Json.arr <| helperNames.map fun name => (name.toString : Json)),
     ("memory", "memory"),
@@ -331,7 +462,8 @@ def manifest : Json :=
 #guard match residentExampleModule with
   | .ok module =>
       module.imports.isEmpty && module.runtimeOperations.isEmpty &&
-      module.functions.size == 6 &&
+      module.functions.size ==
+        4 + helperNames.size + ResidentAllocator.helperNames.size &&
       helperNames.all module.exports.contains &&
       (Fir.Wasm.validateModule module).isOk && (Fir.Wasm.Emit.encode module).isOk
   | .error _ => false
