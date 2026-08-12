@@ -495,8 +495,8 @@ def internalizeReadProjections (module : Module) (validate : Bool := true) :
   let result ← internalizeOperationsUnchecked bindings module
   validateOutput validate result
 
-/-- Projection coordinates exercised by the reviewed prettyM and Level-1 closures. -/
-def prettyFormatReadProjections : Array RuntimeOp := #[
+/-- The exact projection coordinates exercised by compiler-produced `prettyM`. -/
+def prettyFormatSourceReadProjections : Array RuntimeOp := #[
   .objectProj 0 .object,
   .objectProj 0 .tobject,
   .objectProj 1 .tobject,
@@ -504,8 +504,11 @@ def prettyFormatReadProjections : Array RuntimeOp := #[
   .scalarProj 0 0 .uint8,
   .scalarProj 1 0 .uint8,
   .scalarProj 1 1 .uint8,
-  .scalarProj 2 0 .uint8,
-  .scalarProj 1 0 .uint64]
+  .scalarProj 2 0 .uint8]
+
+/-- Projection coordinates exercised by the reviewed prettyM and Level-1 closures. -/
+def prettyFormatReadProjections : Array RuntimeOp :=
+  prettyFormatSourceReadProjections.push (.scalarProj 1 0 .uint64)
 
 /--
 Import-free module exposing the reviewed read-projection family independently
@@ -737,12 +740,9 @@ def internalizeClosureProjections (module : Module) (validate : Bool := true) :
   let result ← internalizeOperationsUnchecked bindings module
   validateOutput validate result
 
-/-- Physical closure-capture reads reachable from the control and Flat `prettyM` entries.
-The standalone module below isolates layout and typed-load behavior; linked
-source artifacts additionally enable the matcher/projection ownership protocol. -/
-def prettyFormatClosureProjectionCoordinates : Array (Nat × AbiKind) := #[
+/-- Physical closure-capture reads reachable from compiler-produced `prettyM`. -/
+def prettyFormatSourceClosureProjectionCoordinates : Array (Nat × AbiKind) := #[
   (0, .object),
-  (0, .tagged),
   (0, .tobject),
   (0, .uint8),
   (1, .object),
@@ -753,12 +753,33 @@ def prettyFormatClosureProjectionCoordinates : Array (Nat × AbiKind) := #[
   (2, .tobject),
   (3, .object),
   (3, .tobject),
-  (4, .object),
-  (5, .float32),
-  (6, .float),
-  (7, .uint16),
-  (8, .uint64),
-  (9, .usize)]
+  (4, .object)]
+
+/--
+Physical closure-capture reads reachable from the reviewed prettyM and
+Level-1 entries. The standalone module below isolates layout and typed-load
+behavior; linked source artifacts additionally enable the matcher/projection
+ownership protocol.
+-/
+def prettyFormatClosureProjectionCoordinates : Array (Nat × AbiKind) :=
+  #[(0, .object),
+    (0, .tagged),
+    (0, .tobject),
+    (0, .uint8),
+    (1, .object),
+    (1, .tobject),
+    (1, .uint8),
+    (1, .uint32),
+    (2, .object),
+    (2, .tobject),
+    (3, .object),
+    (3, .tobject),
+    (4, .object),
+    (5, .float32),
+    (6, .float),
+    (7, .uint16),
+    (8, .uint64),
+    (9, .usize)]
 
 def prettyFormatClosureProjectionModule : Except LinkError Module := do
   let globals : ClosureApplicationGlobals := { object := 0, remaining := 1 }

@@ -735,6 +735,9 @@ The default artifact check uses the same final-only native path for both plain
 and styled facades. The historical checkpoint-by-checkpoint generation remains
 available as the explicit slow acceptance mode
 `FIR_PRETTYM_EXHAUSTIVE_CHECKPOINTS=1 bash integration/talos/artifact/check.sh`.
+Browser acceptance consumes every intermediate checkpoint and therefore
+requires that exhaustive mode; `check.sh` rejects `FIR_BROWSER` without it
+instead of reusing ignored `_build` products from an earlier revision.
 
 The raw Wasm ABI remains explicitly experimental and unversioned. Its module
 owns its memory and allocator and has zero imports while preserving the exact

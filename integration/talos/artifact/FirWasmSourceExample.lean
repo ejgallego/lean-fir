@@ -274,11 +274,15 @@ run_cmd do
   let readProjections := residentRuntimeArtifact.module.runtimeOperations.filter
     Fir.Wasm.Emit.ResidentRuntime.supportsReadProjection
   let expectedReadProjections :=
-    Fir.Wasm.Emit.ResidentRuntime.prettyFormatReadProjections
+    Fir.Wasm.Emit.ResidentRuntime.prettyFormatSourceReadProjections
   unless readProjections.size == expectedReadProjections.size &&
       readProjections.all expectedReadProjections.contains &&
       expectedReadProjections.all readProjections.contains do
-    throwError "resident Format read-projection inventory changed"
+    let render := fun operations => operations.map fun operation =>
+      match Fir.Wasm.Emit.Manifest.operationJson operation with
+      | .ok json => json.compress
+      | .error error => error
+    throwError "resident Format read-projection inventory changed ({readProjections.size} actual, {expectedReadProjections.size} expected): actual={repr (render readProjections)}; expected={repr (render expectedReadProjections)}"
   let residentProjectionArtifact ← match
       Fir.Wasm.Emit.ResidentPrettyFormat.internalizeReadProjections
         residentRuntimeArtifact with
@@ -304,8 +308,8 @@ run_cmd do
     residentProjectionArtifact.module.runtimeOperations.filter
       Fir.Wasm.Emit.ResidentRuntime.supportsClosureProjection
   let expectedClosureCoordinates :=
-    Fir.Wasm.Emit.ResidentRuntime.prettyFormatClosureProjectionCoordinates
-  unless closureProjections.size == 87 &&
+    Fir.Wasm.Emit.ResidentRuntime.prettyFormatSourceClosureProjectionCoordinates
+  unless closureProjections.size == 101 &&
       closureProjections.all (fun operation =>
         (Fir.Wasm.Emit.ResidentRuntime.closureProjectionCoordinate? operation).any
           expectedClosureCoordinates.contains) &&
@@ -313,7 +317,13 @@ run_cmd do
         closureProjections.any fun operation =>
           Fir.Wasm.Emit.ResidentRuntime.closureProjectionCoordinate? operation ==
             some coordinate) do
-    throwError "resident Format closure-projection inventory changed"
+    let actualCoordinates := closureProjections.foldl (init := #[])
+      fun coordinates operation =>
+        match Fir.Wasm.Emit.ResidentRuntime.closureProjectionCoordinate? operation with
+        | some coordinate =>
+            if coordinates.contains coordinate then coordinates else coordinates.push coordinate
+        | none => coordinates
+    throwError "resident Format closure-projection inventory changed ({closureProjections.size} actual operations, {expectedClosureCoordinates.size} expected coordinates): actual={repr actualCoordinates}; expected={repr expectedClosureCoordinates}"
   let residentClosureArtifact ← match
       Fir.Wasm.Emit.ResidentPrettyFormat.internalizeClosureProjections
         residentProjectionArtifact with
@@ -346,7 +356,7 @@ run_cmd do
       throwError "failed to write resident closure-projection Format module: {repr error}"
   let closureMatches := residentClosureArtifact.module.runtimeOperations.filter
     Fir.Wasm.Emit.ResidentRuntime.isClosureMatch
-  unless closureMatches.size == 77 do
+  unless closureMatches.size == 105 do
     throwError "resident Format closure-match inventory changed"
   let residentMatchArtifact ← match
       Fir.Wasm.Emit.ResidentPrettyFormat.internalizeClosureMatches
@@ -401,7 +411,7 @@ run_cmd do
       throwError "failed to write resident-allocator Format module: {repr error}"
   let constructors := residentAllocatorArtifact.module.runtimeOperations.filter
     Fir.Wasm.Emit.ResidentConstructor.isConstructor
-  unless constructors.size == 23 do
+  unless constructors.size == 24 do
     throwError "resident Format constructor-allocation inventory changed"
   let residentConstructorArtifact ← match
       Fir.Wasm.Emit.ResidentPrettyFormat.internalizeConstructors
@@ -467,7 +477,7 @@ run_cmd do
   let partialApplications :=
     residentNaturalArtifact.module.runtimeOperations.filter
       Fir.Wasm.Emit.ResidentClosureAllocation.isPartialApplication
-  unless partialApplications.size == 87 do
+  unless partialApplications.size == 131 do
     throwError "resident Format partial-application inventory changed"
   let residentPartialApplicationArtifact ← match
       Fir.Wasm.Emit.ResidentPrettyFormat.internalizePartialApplications

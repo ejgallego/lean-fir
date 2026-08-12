@@ -114,7 +114,9 @@ generates the plain and styled final artifacts twice and compares them
 byte-for-byte. Set `FIR_PRETTYM_EXHAUSTIVE_CHECKPOINTS=1` when running
 `integration/talos/artifact/check.sh` to additionally generate and compare every
 intermediate checkpoint; that slow mode is intended for explicit acceptance
-runs, not the development loop.
+runs, not the development loop. Browser acceptance requires the same
+exhaustive setting so every checkpoint it executes was produced by the current
+source.
 
 The canonical package path is:
 

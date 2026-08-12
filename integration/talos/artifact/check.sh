@@ -8,6 +8,10 @@ if [[ "$exhaustive_pretty" != 0 && "$exhaustive_pretty" != 1 ]]; then
   echo "FIR_PRETTYM_EXHAUSTIVE_CHECKPOINTS must be 0 or 1" >&2
   exit 1
 fi
+if [[ -n "${FIR_BROWSER:-}" && "$exhaustive_pretty" != 1 ]]; then
+  echo "FIR_BROWSER requires FIR_PRETTYM_EXHAUSTIVE_CHECKPOINTS=1" >&2
+  exit 1
+fi
 first="$(mktemp -d)"
 second="$(mktemp -d)"
 trap 'rm -rf "$first" "$second"' EXIT

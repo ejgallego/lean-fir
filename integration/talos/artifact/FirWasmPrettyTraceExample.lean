@@ -71,7 +71,7 @@ run_cmd do
   unless Fir.Wasm.Emit.ResidentAllocator.helperNames.all
       constructorArtifact.module.exports.contains do
     throwError "resident styled Format module lost allocator exports"
-  unless constructorArtifact.module.imports.size == 157 &&
+  unless constructorArtifact.module.imports.size == 201 &&
       constructorArtifact.module.runtimeOperations.all fun operation =>
         !Fir.Wasm.Emit.ResidentConstructor.isConstructor operation do
     throwError "resident styled Format constructor frontier changed"
@@ -90,7 +90,7 @@ run_cmd do
     | .ok artifact => pure artifact
     | .error error =>
         throwError "failed to compile resident styled Natural facade: {repr error}"
-  unless naturalArtifact.module.imports.size == 153 &&
+  unless naturalArtifact.module.imports.size == 197 &&
       naturalArtifact.module.runtimeOperations.all fun operation =>
         !Fir.Wasm.Emit.ResidentLiteral.isImmediateNatural operation do
     throwError "resident styled Format Natural frontier changed"
@@ -109,7 +109,7 @@ run_cmd do
       throwError "failed to write resident styled Natural module: {repr error}"
   let partialApplications := naturalArtifact.module.runtimeOperations.filter
     Fir.Wasm.Emit.ResidentClosureAllocation.isPartialApplication
-  unless partialApplications.size == 87 do
+  unless partialApplications.size == 131 do
     throwError "resident styled Format partial-application inventory changed"
   let partialApplicationArtifact ← match
       Fir.Wasm.Emit.ResidentPrettyFormat.internalizePartialApplications

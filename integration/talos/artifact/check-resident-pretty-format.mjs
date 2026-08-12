@@ -117,17 +117,17 @@ assert.equal(operationCount(residentProjections, "objectProj"), 0,
   "resident-projection prettyM retained semantic object projections");
 assert.equal(operationCount(residentProjections, "scalarProj"), 0,
   "resident-projection prettyM retained semantic scalar projections");
-assert.equal(operationCount(residentProjections, "closureProj"), 87,
+assert.equal(operationCount(residentProjections, "closureProj"), 101,
   "resident-projection prettyM closure-projection inventory changed");
 assert.equal(operationCount(residentClosures, "closureProj"), 0,
   "resident-closure prettyM retained semantic closure projections");
-assert.equal(operationCount(residentClosures, "closureMatches"), 77,
+assert.equal(operationCount(residentClosures, "closureMatches"), 105,
   "resident-closure prettyM closure-match inventory changed");
 assert.equal(operationCount(residentMatches, "closureMatches"), 0,
   "resident-match prettyM retained semantic closure matches");
 assert.equal(operationCount(residentAllocator, "closureMatches"), 0,
   "resident-allocator prettyM regained semantic closure matches");
-assert.equal(operationCount(residentAllocator, "allocCtor"), 23,
+assert.equal(operationCount(residentAllocator, "allocCtor"), 24,
   "resident-allocator prettyM constructor inventory changed");
 assert.equal(operationCount(residentConstructors, "allocCtor"), 0,
   "resident-constructor prettyM retained constructor imports");
@@ -139,7 +139,7 @@ assert.equal(operationCount(residentNaturals, "naturalLiteral"), 0,
   "resident-Natural prettyM retained supported natural literals");
 assert.equal(operationCount(residentNaturals, "stringLiteral"), 4,
   "resident-Natural prettyM moved strings across the host boundary");
-assert.equal(operationCount(residentNaturals, "partialApply"), 87,
+assert.equal(operationCount(residentNaturals, "partialApply"), 131,
   "resident-Natural prettyM partial-application inventory changed");
 assert.equal(operationCount(residentPartialApplications, "partialApply"), 0,
   "resident partial-application prettyM retained closure allocations");
@@ -204,9 +204,9 @@ assert.equal(
   "resident-projection prettyM descriptor and Wasm imports disagree",
 );
 assert.equal(
-  functionImportCount(residentClosures) + 87,
+  functionImportCount(residentClosures) + 101,
   functionImportCount(residentProjections),
-  "resident-closure prettyM did not remove exactly 87 function imports",
+  "resident-closure prettyM did not remove exactly 101 function imports",
 );
 assert.equal(
   residentClosures.manifest.imports.length,
@@ -214,9 +214,9 @@ assert.equal(
   "resident-closure prettyM descriptor and Wasm imports disagree",
 );
 assert.equal(
-  functionImportCount(residentMatches) + 77,
+  functionImportCount(residentMatches) + 105,
   functionImportCount(residentClosures),
-  "resident-match prettyM did not remove exactly 77 function imports",
+  "resident-match prettyM did not remove exactly 105 function imports",
 );
 assert.equal(
   residentMatches.manifest.imports.length,
@@ -234,9 +234,9 @@ assert.equal(
   "resident-allocator prettyM descriptor and Wasm imports disagree",
 );
 assert.equal(
-  functionImportCount(residentConstructors) + 23,
+  functionImportCount(residentConstructors) + 24,
   functionImportCount(residentAllocator),
-  "resident constructors did not remove exactly 23 function imports",
+  "resident constructors did not remove exactly 24 function imports",
 );
 assert.equal(
   residentConstructors.manifest.imports.length,
@@ -254,9 +254,9 @@ assert.equal(
   "resident-Natural prettyM descriptor and Wasm imports disagree",
 );
 assert.equal(
-  functionImportCount(residentPartialApplications) + 87,
+  functionImportCount(residentPartialApplications) + 131,
   functionImportCount(residentNaturals),
-  "resident closure allocation did not remove exactly 87 function imports",
+  "resident closure allocation did not remove exactly 131 function imports",
 );
 assert.equal(functionImportCount(residentPartialApplications), 65,
   "resident partial-application prettyM frontier changed");
@@ -875,7 +875,7 @@ assert.ok(residentConstructors.exports.some(({ name, kind }) =>
 assert.ok(residentConstructors.exports.some(({ name, kind }) =>
   name === "memory" && kind === "memory"),
 "resident-constructor prettyM memory export is missing");
-for (let ordinal = 0; ordinal < 23; ordinal += 1) {
+for (let ordinal = 0; ordinal < 24; ordinal += 1) {
   const name = `fir_alloc_ctor_${ordinal}`;
   assert.ok(residentConstructors.exports.some((entry) =>
     entry.name === name && entry.kind === "function"),
@@ -899,7 +899,7 @@ assert.ok(residentPartialApplications.exports.some(({ name, kind }) =>
 assert.ok(residentPartialApplications.exports.some(({ name, kind }) =>
   name === "memory" && kind === "memory"),
 "resident partial-application prettyM memory export is missing");
-for (let ordinal = 0; ordinal < 87; ordinal += 1) {
+for (let ordinal = 0; ordinal < 131; ordinal += 1) {
   const name = `fir_alloc_closure_${ordinal}`;
   assert.ok(residentPartialApplications.exports.some((entry) =>
     entry.name === name && entry.kind === "function"),
