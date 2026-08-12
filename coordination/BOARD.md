@@ -15,6 +15,46 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-STRONG-RUNNABLE-CONTROL-CLOSURE`.
+- Integration owner: `wasm-proof`; this lease closes the first
+  constructor-complete, module-stable one-source-step theorem for the strong
+  compiler relation without adding future-execution certificates.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`, based directly on `main` at `4d9668a1`.
+- Published stack: active-slice record `420270c0`, functional proof head
+  `716cc1f1`, and clean ready mailbox `5814b810`.
+- Strong pointwise closure:
+  `ConcreteStructuredCodePointwiseRel.advance_supportedGlobal` transports the
+  aligned static/resource caller stack through direct values and returns and
+  preserves it across generated named and saturated call staging. Exact frame
+  equalities are exposed by the direct-value and return classifiers rather
+  than assumed by the global relation.
+- Branch-complete relation: `ConcreteStructuredRunnableOutcome` combines
+  ordinary code, named-call ready, saturated-call ready, and returned control
+  with the exact aligned stack evidence needed by that branch. Ordinary code
+  contains only its current-node admission and budget; no successor admission,
+  callee evaluation, termination proof, or target execution path is stored.
+- Module-wide theorem: `ConcreteStructuredRunnableGlobalOutcome` hides the
+  active generated function, entry anchor, budget, and result ABI. It forgets
+  to `ConcreteStructuredSupportedGlobalOutcome`, preserves exact observations,
+  and advances every ordinary source step through a finite structured-Wasm
+  path back to the supported global relation. Empty target paths are permitted
+  only with strict `compilerStructuredControlRank` descent.
+- Contracts: none. This slice changes W6 proof code and W6 roadmaps only; it
+  changes no compiler/runtime semantics, concrete layout, symbolic-Wasm
+  surface, or resident-helper signature.
+- Acceptance: Talos setup at `0e05edbc`; Lean Beam update/sync/save at version
+  16 with zero errors; direct `FirTalos.ConcreteStructuredSimulation` build
+  (3,119 jobs); `git diff --check`; complete `make check` with 122 harness
+  tests and native/V8 validation; and all 3,143 Talos jobs. No bug card was
+  required.
+- Result: `main` fast-forwards through the clean ready mailbox. W6 next widens
+  the runnable control sum over the already proved external, lazy/cache, case,
+  and effect laws, then packages the fresh source-local classifier into the
+  public ranked finite-prefix simulation.
+
+## Latest completed integration lease
+
 - Milestone: `W6-SUPPORTED-GENERATED-CALL-STACK`.
 - Integration owner: `wasm-proof`; this lease makes generated call entry and
   return recursively stable across arbitrarily nested supported callers.
