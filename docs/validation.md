@@ -460,7 +460,7 @@ can consume the same envelope contract independently.
 
 `validation-plans/native-oracle-attestations.json` makes the source of truth
 explicit. It requires complete matching `native -> lcnf` and `native -> v8`
-edges over all 655 currently accepted real-engine cases. Required oracle edges
+edges over all 657 currently accepted real-engine cases. Required oracle edges
 must share one matrix
 selection, run identity, and ordered case set; every case must have an equal
 observation witness and there may be no comparison findings. Additional edges
@@ -550,7 +550,7 @@ the ordered tier list that observed it.
 Policy-required items remain in the inventory even when no tier observed them,
 so an aggregate failure has a direct uncovered-item witness. Per-tier summaries
 also retain contribution counts and the exact items unique to that tier. In the
-current baseline, the 655 source cases are shared by the source-LCNF and V8
+current baseline, the 657 source cases are shared by the source-LCNF and V8
 tiers, the nine direct cases are unique to the direct tier, and
 `admin:yield-apply` is the direct tier's unique administrative contribution.
 The erased-reset fixture also makes `erased`, `reset`, and `reuse`
@@ -1925,6 +1925,24 @@ real V8 agree on both results with no finding. Source and V8 domains separately
 require call order, alias retention, final release, and retained reuse, so a
 single result-only effect case cannot satisfy the S6 claim.
 
+The escaping-closure ownership pair adds the first source-generated closure
+that crosses a named maker return before later application. A single-field
+closure-bearing wrapper prevents eta-normalization while compiling away as a
+runtime allocation: both complete traces begin with a named `fap`, execute the
+maker's `pap` and `return`, and only then enter the later closure consumer. The
+unique path has 27 transitions, no ownership increment, four `fap`, one `pap`,
+one `fvar`, five `return`, and one `ByteArray.set!`; it returns
+`[42, 127, 128, 255]`. The shared path retains the input with exactly one
+`inc`, then executes the same returned-closure mutation and constructs the
+pair containing the unchanged `[0, 127, 128, 255]` alias and updated copy. Its
+complete trace has 29 transitions. Native Lean, final LCNF, and real V8 agree
+on both observations, and the V8 consumer opens all four generated products
+under strace. Dedicated source and V8 domains require the combined
+returned-closure boundary with either unique transfer or outside-alias
+preservation. A smaller direct-function maker was rejected before admission
+because compiler eta-normalization made its execution signature identical to
+the existing same-entry captured-mutation fixture.
+
 The first read probe returned `ByteArray × UInt8` and exposed
 `FIR-BUG-validation-none-nested-boxed-scalar-result`: execution completed, but
 the validation result codec could not decode the boxed `UInt8` stored in
@@ -1948,7 +1966,7 @@ copy.  The independent artifact corpus separately compares external
 world/trace effects and a two-call lazy-cache hit/miss sequence against Talos.
 Compiler-generated `Int.ofNat` and `Int.neg` calls construct positive and
 negative literals at both immediate/heap representation boundaries.
-The default native-to-V8 matrix covers all 655 corpus cases, including a natural
+The default native-to-V8 matrix covers all 657 corpus cases, including a natural
 above `UInt64`, a recursive list containing that value, tagged-to-heap
 `Nat.add`, heap-input `Nat.add`, tagged and multi-limb `Nat.mul`, multi-limb
 and saturating `Nat.sub`, paired `Nat.div`/`Nat.mod` including zero, all three

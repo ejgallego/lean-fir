@@ -32,7 +32,7 @@ another exhaustive scalar matrix.
 
 ## Coverage gap snapshot
 
-At the current 655-case source checkpoint, case counts are concentrated in
+At the current 657-case source checkpoint, case counts are concentrated in
 scalar and pure-external behavior: 413 cases are tagged `scalar`, 302 `signed`,
 307 `external`, and 146 `arithmetic`. In contrast, only 27 are tagged
 `constructor`, 12 `control-flow`, five `effect`, five `recursion`, three
@@ -59,7 +59,7 @@ conjunctive-domain floors are green.
 | `coverage-index.json` | Cross-tier regression ratchet | Exact tier, aggregate, machine, tag, and conjunctive-domain floors |
 
 The `-scalars` suffix on the V8 plan and its provider/adapter files is
-historical: the plan currently selects all 655 eligible cases, not a scalar
+historical: the plan currently selects all 657 eligible cases, not a scalar
 subset. Rename those root-wired assets through the integration owner rather
 than creating a second semantically identical plan in this lane.
 
@@ -100,7 +100,7 @@ near-synonym drift:
 | M4 Allocation and reuse | active through S5 | Constructor, String, ByteArray, reset/reuse, growth, and copy-on-write fixtures already provide a base | Use the first S5 pair to distinguish post-release constructor reuse from shared-path allocation |
 | M5 Recursive release | landed through S5c | S5c adds one `del` on both growth paths and released-leaf reuse only on the unique-owner path to the landed S5a/S5b release matrix | Select the smallest undominated lifetime interaction outside the covered replacement/release matrix |
 | M6 Nonlocal control | landed through S6 | The fixture-only final-use/retained-use closure pair around the linked `recordByteArray` effect passes native/LCNF/V8 with exact 39/54-step traces | Add caught exceptions only after their shared protocol is accepted by all participating backends |
-| M7 Escaping closure ownership | active | Existing closure-ownership cases create and consume their partial applications within one source entry | S7 returns a heap-capturing closure across a noinline call, then distinguishes unique transfer from a retained outside alias during mutation |
+| M7 Escaping closure ownership | prepared | S7 returns a closure-bearing owner across a noinline maker, then distinguishes unique transfer from a retained outside alias during mutation with exact 27/29-step traces | Land rebased functional head `d695bd66` after the clean fixture handoff |
 | M8 Real-engine promotion | continuous | Scalar closures, the complete zero/one/two/three-use matrix, and all returned/consumed/ignored/read capture-topology pairs run through native/LCNF/V8 | Promote at least one representative pair per ownership domain whenever W7 support is linked |
 
 States are `queued`, `active`, `prepared`, `landed`, `parked`, or
@@ -461,8 +461,26 @@ ByteArray runtime surfaces. It does not use or duplicate the active
 argument-alias, effectful-native-oracle, IO-error, or source-termination
 contracts.
 
-State: S7 active on `validation/closure-ownership-fixtures` from base
-`8051df3c`; no shared contract changes are planned.
+The first candidate returned a bare function from the maker, but final-LCNF
+eta-normalization removed the named return boundary and produced the same
+dynamic signature as the landed same-entry captured mutation. It was rejected
+by the dominance filter rather than admitted as nominal coverage.
+
+The narrowed source returns a single-field structure containing the closure.
+The structure prevents eta-normalization but itself compiles away: both paths
+execute a named maker `fap`, then `pap` and `return`, before the later consumer
+invokes the closure. Unique transfer pins 27 transitions with zero `inc`, four
+`fap`, one `pap`, one `fvar`, five `return`, and one `ByteArray.set!`, returning
+the updated `[42, 127, 128, 255]`. The shared path pins 29 transitions and adds
+exactly one `inc` plus its result-pair `ctor`; it preserves the original
+`[0, 127, 128, 255]` alongside the updated copy. Native Lean, final LCNF, and
+real V8 agree with zero findings; V8 opens all four focused products under
+strace. The full checkpoint advances to 657 source cases, 666 aggregate unique
+cases, 1,323 tier cases, 1,980 equal comparisons, 6,978 interpreter steps,
+138 tag floors, and 245 conjunctive domains.
+
+State: S7 prepared on `validation/closure-ownership-fixtures`; rebased
+functional head `d695bd66` changes no shared contract.
 
 ## Track B: calls and control
 
