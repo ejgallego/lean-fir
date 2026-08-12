@@ -32,7 +32,7 @@ inductive LinkError where
 private def u32 (value : Nat) : UInt32 := UInt32.ofNat value
 
 def externalDeclarations : Array Name := #[
-  `Nat.mul, `Nat.pow, `Nat.land, `Nat.div]
+  `Nat.mul, `Nat.pow, `Nat.land, `Nat.div, `Nat.mod]
 
 def externalName (declaration : Name) : Name :=
   ResidentNumeric.externalName declaration
@@ -41,7 +41,8 @@ def externalHelperNames : Array Name := externalDeclarations.map externalName
 
 def mulGenericName : Name := `fir_nat_mul_generic
 def divGenericName : Name := `fir_nat_div_generic
-def internalHelperNames : Array Name := #[mulGenericName, divGenericName]
+def modGenericName : Name := `fir_nat_mod_generic
+def internalHelperNames : Array Name := #[mulGenericName, divGenericName, modGenericName]
 
 private def leftParam : FVarId := ⟨`left⟩
 private def rightParam : FVarId := ⟨`right⟩
@@ -623,7 +624,10 @@ private def genericDivStep : List Instruction :=
 private def divFinish : List Instruction :=
   releaseLocal remainderLocal ++ [.localGet quotientLocal, .ret]
 
-private def divLeadingBody : List Instruction := [
+private def modFinish : List Instruction :=
+  releaseLocal quotientLocal ++ [.localGet remainderLocal, .ret]
+
+private def divLeadingBody (finish : List Instruction) : List Instruction := [
   .localGet wordLocal,
   .localGet maskLocal,
   .i32And,
@@ -637,7 +641,7 @@ private def divLeadingBody : List Instruction := [
     .localGet maskLocal,
     .i32Const .uint32 0,
     .i32Eq,
-    .ifElse divFinish [],
+    .ifElse finish [],
     .br divLeadingLoop] []]
 
 private def divBitBody : List Instruction := [
@@ -646,11 +650,11 @@ private def divBitBody : List Instruction := [
   .i32Eq,
   .ifElse [.br divPartLoop] []] ++ genericDivStep ++ [.br divBitLoop]
 
-private def divPartBody : List Instruction := [
+private def divPartBody (finish : List Instruction) : List Instruction := [
   .localGet partIndexLocal,
   .i32Const .uint32 0,
   .i32Eq,
-  .ifElse divFinish [],
+  .ifElse finish [],
   .localGet partIndexLocal,
   .i32Const .uint32 1,
   .i32Sub,
@@ -662,10 +666,10 @@ private def divPartBody : List Instruction := [
   .i32Add,
   .localGet partCountLocal,
   .i32Eq,
-  .ifElse [.loop divLeadingLoop divLeadingBody] [],
+  .ifElse [.loop divLeadingLoop (divLeadingBody finish)] [],
   .loop divBitLoop divBitBody]
 
-private def genericDivBody : List Instruction := [
+private def genericDivBody (finish : List Instruction) : List Instruction := [
   .i32Const .tobject 1,
   .localSet remainderLocal,
   .i32Const .tobject 1,
@@ -674,7 +678,7 @@ private def genericDivBody : List Instruction := [
   .localSet resultParam] ++ computePartCount leftParam leftCountLocal ++ [
   .localGet partCountLocal,
   .localSet partIndexLocal,
-  .loop divPartLoop divPartBody]
+  .loop divPartLoop (divPartBody finish)]
 
 def divGenericFunction : Function := {
   name := divGenericName
@@ -685,12 +689,29 @@ def divGenericFunction : Function := {
     (maskLocal, .uint32), (remainderLocal, .tobject),
     (quotientLocal, .tobject), (resultParam, .tobject),
     (temporaryLocal, .tobject), (comparisonLocal, .uint32)]
-  body := validateInputs ++ naturalCount leftParam leftCountLocal ++ genericDivBody }
+  body := validateInputs ++ naturalCount leftParam leftCountLocal ++ genericDivBody divFinish }
+
+def modGenericFunction : Function := {
+  name := modGenericName
+  params := #[(leftParam, .tobject), (rightParam, .tobject)]
+  results := #[.tobject]
+  locals := #[(leftCountLocal, .uint32), (partCountLocal, .uint32),
+    (partIndexLocal, .uint32), (wordLocal, .uint32),
+    (maskLocal, .uint32), (remainderLocal, .tobject),
+    (quotientLocal, .tobject), (resultParam, .tobject),
+    (temporaryLocal, .tobject), (comparisonLocal, .uint32)]
+  body := validateInputs ++ naturalCount leftParam leftCountLocal ++ genericDivBody modFinish }
 
 private def callGenericDiv : List Instruction := [
   .localGet leftParam,
   .localGet rightParam,
   .call (.declaration divGenericName),
+  .ret]
+
+private def callGenericMod : List Instruction := [
+  .localGet leftParam,
+  .localGet rightParam,
+  .call (.declaration modGenericName),
   .ret]
 
 def divFunction : Function := {
@@ -712,10 +733,30 @@ def divFunction : Function := {
     .i32And,
     .ifElse (returnImmediate 1) callGenericDiv] }
 
-def externalFunctions : Array Function := #[
-  mulFunction, powFunction, landFunction, divFunction]
+def modFunction : Function := {
+  name := externalName `Nat.mod
+  params := #[(leftParam, .tobject), (rightParam, .tobject)]
+  results := #[.tobject]
+  locals := #[]
+  body := validateInputs ++ [
+    .localGet rightParam,
+    .i32Const .uint32 0,
+    .call (.declaration ResidentBigNumeric.naturalLowName),
+    .i32Const .uint32 0,
+    .i32Eq,
+    .localGet rightParam,
+    .i32Const .uint32 0,
+    .call (.declaration ResidentBigNumeric.naturalHighName),
+    .i32Const .uint32 0,
+    .i32Eq,
+    .i32And,
+    .ifElse (incrementLocal leftParam ++ [.localGet leftParam, .ret]) callGenericMod] }
 
-def internalFunctions : Array Function := #[mulGenericFunction, divGenericFunction]
+def externalFunctions : Array Function := #[
+  mulFunction, powFunction, landFunction, divFunction, modFunction]
+
+def internalFunctions : Array Function := #[
+  mulGenericFunction, divGenericFunction, modGenericFunction]
 
 private partial def rewriteInstruction : Instruction → Instruction
   | .call (.declaration declaration) =>
@@ -773,7 +814,8 @@ def internalizeAvailable (module : Module) (validate : Bool := true) :
   let selectedInternalFunctions := internalFunctions.filter fun function =>
     (function.name == mulGenericName &&
       (present.contains `Nat.mul || present.contains `Nat.pow)) ||
-    (function.name == divGenericName && present.contains `Nat.div)
+    (function.name == divGenericName && present.contains `Nat.div) ||
+    (function.name == modGenericName && present.contains `Nat.mod)
   for function in selectedInternalFunctions do
     if module.imports.any (·.declaration? == some function.name) ||
         module.functions.any (·.name == function.name) ||

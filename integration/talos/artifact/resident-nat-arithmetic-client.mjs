@@ -52,6 +52,7 @@ export async function checkResidentNatArithmetic({ bytes, manifest }) {
   const pow = exported(instance, "fir_ext_Nat_pow");
   const land = exported(instance, "fir_ext_Nat_land");
   const div = exported(instance, "fir_ext_Nat_div");
+  const mod = exported(instance, "fir_ext_Nat_mod");
   const apply = (operation, left, right) => naturalValue(host,
     operation(naturalInput(host, left), naturalInput(host, right)));
 
@@ -82,6 +83,14 @@ export async function checkResidentNatArithmetic({ bytes, manifest }) {
   const divisor = (1n << 257n) + (1n << 64n) + 11n;
   assert.equal(apply(div, dividend, divisor), dividend / divisor);
   assert.equal(apply(div, divisor - 1n, divisor), 0n);
+
+  assert.equal(apply(mod, 5n, 0n), 5n);
+  assert.equal(apply(mod, 0n, 5n), 0n);
+  assert.equal(apply(mod, 17n, 5n), 2n);
+  assert.equal(apply(mod, (1n << 63n) + 123n, (1n << 32n) + 7n),
+    ((1n << 63n) + 123n) % ((1n << 32n) + 7n));
+  assert.equal(apply(mod, dividend, divisor), dividend % divisor);
+  assert.equal(apply(mod, divisor - 1n, divisor), divisor - 1n);
 
   const borrowedLeft = naturalInput(host, mulLeft);
   const borrowedRight = naturalInput(host, mulRight);
