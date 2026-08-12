@@ -18,8 +18,8 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 - Milestone: `W7-GENERIC-LEVEL1-STANDARD-RUNTIME-FRONTIER`.
 - Integration owner: `wasm-gen`, acting under the user-authorized integration
   lease. Branch `wasm/generation` was rebased on accepted local main
-  `fbfc98cf` and landed through clean ready mailbox `97110b63`; functional
-  head `751da256` changes no shared contract or W6-owned file.
+  `c792df8c` and landed through clean ready mailbox `90aea67d`; functional
+  head `22f79355` changes no shared contract or W6-owned file.
 - Runtime slice: the complete fixed-width and USize frontier is resident,
   including 61 zero-import helpers and `USize.repr`. Generic Array lookup,
   update, swap, List conversion, and the wasm32/Lean64 platform-width helper
@@ -28,8 +28,9 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   remains 391 declarations and 110 externals with zero unsupported
   declarations and zero runtime operations. Its ordinary import frontier
   moves from 47 to 15 while the complete linked module reaches 1,730
-  functions. Measured phases are 57.309s capture, 15.321s lowering, and
-  119.920s resident linking.
+  functions. On the final indexed-validator base, measured phases are 54.040s
+  capture, 13.876s lowering, and 108.402s resident linking; link time is 9.6%
+  below the immediately preceding transaction-boundary baseline.
 - Contracts and discrepancies: no shared contract changed. The executable
   helpers are generation-ready; W6 refinement remains separate. The
   fixed-width frontier card is fixed. The remaining container-frontier card
