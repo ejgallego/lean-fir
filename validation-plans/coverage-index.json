@@ -46,8 +46,8 @@
     "tiers": [
       {
         "id": "source-lcnf",
-        "minimumCases": 657,
-        "minimumComparisons": 657,
+        "minimumCases": 659,
+        "minimumComparisons": 659,
         "requiredBackends": [
           "lcnf",
           "native"
@@ -66,8 +66,8 @@
       },
       {
         "id": "wasm-v8",
-        "minimumCases": 657,
-        "minimumComparisons": 1314,
+        "minimumCases": 659,
+        "minimumComparisons": 1318,
         "requiredBackends": [
           "lcnf",
           "native",
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 666,
-      "minimumTierCases": 1323,
-      "minimumComparisons": 1980
+      "minimumUniqueCases": 668,
+      "minimumTierCases": 1327,
+      "minimumComparisons": 1986
     },
     "machine": {
-      "minimumCases": 666,
-      "minimumInterpreterSteps": 6978,
+      "minimumCases": 668,
+      "minimumInterpreterSteps": 7063,
       "requiredStaticForms": [
         "box",
         "cases",
@@ -443,6 +443,26 @@
         "tier": "direct-lcnf-machine",
         "tag": "reuse",
         "minimumCases": 7
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "aggregate-erasure",
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "proof-erasure",
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "release-before-application",
+        "minimumCases": 1
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "retain-across-application",
+        "minimumCases": 1
       },
       {
         "tier": "source-lcnf",
@@ -816,6 +836,26 @@
       },
       {
         "tier": "wasm-v8",
+        "tag": "aggregate-erasure",
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "proof-erasure",
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "release-before-application",
+        "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "retain-across-application",
+        "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
         "tag": "alias-across-effect",
         "minimumCases": 2
       },
@@ -1117,6 +1157,30 @@
         "name": "reset-reuse",
         "allTags": ["reset", "reuse"],
         "minimumCases": 7
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "aggregate-erasure-released-before-application",
+        "allTags": [
+          "aggregate-erasure",
+          "bytearray",
+          "closure-ownership",
+          "proof-erasure",
+          "release-before-application"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "aggregate-erasure-retained-across-application",
+        "allTags": [
+          "aggregate-erasure",
+          "copy-on-write",
+          "outside-alias",
+          "proof-erasure",
+          "retain-across-application"
+        ],
+        "minimumCases": 1
       },
       {
         "tier": "source-lcnf",
@@ -1983,6 +2047,30 @@
         "name": "unsigned-scalar-entry-zero",
         "allTags": ["entry-abi", "unsigned", "zero"],
         "minimumCases": 5
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "aggregate-erasure-released-before-application",
+        "allTags": [
+          "aggregate-erasure",
+          "bytearray",
+          "closure-ownership",
+          "proof-erasure",
+          "release-before-application"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "aggregate-erasure-retained-across-application",
+        "allTags": [
+          "aggregate-erasure",
+          "copy-on-write",
+          "outside-alias",
+          "proof-erasure",
+          "retain-across-application"
+        ],
+        "minimumCases": 1
       },
       {
         "tier": "wasm-v8",

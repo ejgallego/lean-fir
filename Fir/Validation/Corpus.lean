@@ -1644,6 +1644,63 @@ def returnedByteArrayClosureSharedMutation
   let updated := applyReturnedByteArrayMutator mutator 42
   (source, updated)
 
+/--
+A proof-erased aggregate whose live payload is nested under an inductive case.
+The proof field must not occupy a runtime slot.
+-/
+structure ErasedNestedCaptureOwner where
+  proof : True
+  payload : Option ByteArray
+  marker : Nat
+
+@[noinline]
+def mkErasedNestedCaptureOwner
+    (source : ByteArray) : ErasedNestedCaptureOwner :=
+  { proof := True.intro, payload := some source, marker := 41 }
+
+/-- Project and case-select the nested payload before capturing it. -/
+@[noinline]
+def makeErasedNestedCaptureMutator
+    (owner : ErasedNestedCaptureOwner) : UInt8 → ByteArray :=
+  match owner.payload with
+  | none => fun _ => ⟨#[]⟩
+  | some source => fun byte => source.set! 0 byte
+
+@[noinline]
+def applyErasedNestedCaptureMutator
+    (mutator : UInt8 → ByteArray) (byte : UInt8) : ByteArray :=
+  mutator byte
+
+/-- Observe the nested payload only after the ownership-sensitive application. -/
+@[noinline]
+def observeErasedNestedCaptureOwner
+    (owner : ErasedNestedCaptureOwner) : ByteArray :=
+  match owner.payload with
+  | none => ⟨#[]⟩
+  | some source => source
+
+/--
+Release the proof-bearing aggregate after projecting its nested payload, before
+the final closure application. The captured ByteArray should then be unique.
+-/
+def aggregateErasedBeforeClosureApplication
+    (source : ByteArray) : ByteArray :=
+  let owner := mkErasedNestedCaptureOwner source
+  let mutator := makeErasedNestedCaptureMutator owner
+  applyErasedNestedCaptureMutator mutator 42
+
+/--
+Retain the proof-bearing aggregate across final closure application. Its nested
+payload keeps the captured ByteArray shared, so mutation must preserve it.
+-/
+def aggregateRetainedAcrossClosureApplication
+    (source : ByteArray) : ByteArray × ByteArray :=
+  let owner := mkErasedNestedCaptureOwner source
+  let mutator := makeErasedNestedCaptureMutator owner
+  let updated := applyErasedNestedCaptureMutator mutator 42
+  let original := observeErasedNestedCaptureOwner owner
+  (original, updated)
+
 /-- Retain a ByteArray outside a closure while borrowing its captured alias. -/
 def capturedByteArrayOutsideAliasRead
     (source : ByteArray) : ByteArray × Nat :=
@@ -2865,6 +2922,19 @@ private def returnedByteArrayClosureSharedMutationFormTrace : Array String :=
   #["inc", "fap", "pap", "return", "lit", "fap", "box", "fvar", "unbox",
     "fap", "lit", "fap", "extern", "return", "return", "return", "ctor",
     "return"]
+
+private def aggregateErasedBeforeClosureApplicationFormTrace : Array String :=
+  #["fap", "ctor", "lit", "ctor", "return", "pap", "lit", "fap", "box",
+    "fvar", "unbox", "fap", "oproj", "inc", "dec", "cases", "oproj",
+    "inc", "dec", "lit", "fap", "extern", "return", "return", "return",
+    "return"]
+
+private def aggregateRetainedAcrossClosureApplicationFormTrace : Array String :=
+  #["fap", "ctor", "lit", "ctor", "return", "inc", "pap", "lit", "fap",
+    "box", "fvar", "unbox", "fap", "oproj", "inc", "dec", "cases",
+    "oproj", "inc", "dec", "lit", "fap", "extern", "return", "return",
+    "return", "fap", "oproj", "cases", "oproj", "inc", "return", "dec",
+    "ctor", "return"]
 
 private def capturedByteArrayOutsideAliasReadFormTrace : Array String :=
   #["inc", "pap", "lit", "fap", "fvar", "fap", "fap", "extern", "fap",
@@ -6479,6 +6549,105 @@ private def postConversionCases : Array Case := #[
         "admin:yield-done"]
     provenance := firProvenance
       "Return a ByteArray-capturing closure, then mutate while preserving an outside alias" },
+  { id := "aggregate-erased-before-closure-application"
+    entry := ``Source.aggregateErasedBeforeClosureApplication
+    dependencies :=
+      #[``Source.mkErasedNestedCaptureOwner,
+        ``Source.makeErasedNestedCaptureMutator,
+        ``Source.applyErasedNestedCaptureMutator]
+    args := #[byteArrayDatum mixedLayoutBytes]
+    argSchemas := #[.bytes]
+    resultSchema := .bytes
+    native := fun _ => byteArrayDatum
+      (Source.aggregateErasedBeforeClosureApplication mixedLayoutBytes)
+    tags :=
+      #["stress", "aggregate", "aggregate-erasure", "erased", "proof-erasure",
+        "nested", "option", "constructor", "case-selection", "projection",
+        "closure", "closure-ownership", "capture", "partial-application",
+        "bytearray", "bytes", "external", "heap", "ownership", "unique",
+        "release-before-application", "unique-final-application", "mutation",
+        "reuse"]
+    requiredLcnfForms :=
+      #["fap", "ctor", "lit", "return", "pap", "box", "fvar", "unbox",
+        "oproj", "inc", "dec", "cases", "extern"]
+    requiredExecutedLcnfForms :=
+      #["fap", "ctor", "lit", "return", "pap", "box", "fvar", "unbox",
+        "oproj", "inc", "dec", "cases", "extern"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "fap", minimum := 4, maximum := some 4 },
+        { form := "ctor", minimum := 2, maximum := some 2 },
+        { form := "lit", minimum := 3, maximum := some 3 },
+        { form := "return", minimum := 5, maximum := some 5 },
+        { form := "pap", minimum := 1, maximum := some 1 },
+        { form := "box", minimum := 1, maximum := some 1 },
+        { form := "fvar", minimum := 1, maximum := some 1 },
+        { form := "unbox", minimum := 1, maximum := some 1 },
+        { form := "oproj", minimum := 2, maximum := some 2 },
+        { form := "inc", minimum := 2, maximum := some 2 },
+        { form := "dec", minimum := 2, maximum := some 2 },
+        { form := "cases", minimum := 1, maximum := some 1 },
+        { form := "extern", minimum := 1, maximum := some 1 }]
+    requiredExecutedLcnfFormTrace :=
+      some aggregateErasedBeforeClosureApplicationFormTrace
+    requiredExternals := #[``ByteArray.set!]
+    requiredExecutedExternals := #[``ByteArray.set!]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``ByteArray.set!]
+    requiredExecutedExternalTrace := some #[``ByteArray.set!]
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind",
+        "admin:yield-done"]
+    provenance := firProvenance
+      "Release a proof-erased nested aggregate before mutating its projected closure capture" },
+  { id := "aggregate-retained-across-closure-application"
+    entry := ``Source.aggregateRetainedAcrossClosureApplication
+    dependencies :=
+      #[``Source.mkErasedNestedCaptureOwner,
+        ``Source.makeErasedNestedCaptureMutator,
+        ``Source.applyErasedNestedCaptureMutator,
+        ``Source.observeErasedNestedCaptureOwner]
+    args := #[byteArrayDatum mixedLayoutBytes]
+    argSchemas := #[.bytes]
+    resultSchema := byteArrayPairSchema
+    native := fun _ => byteArrayPairDatum
+      (Source.aggregateRetainedAcrossClosureApplication mixedLayoutBytes)
+    tags :=
+      #["stress", "aggregate", "aggregate-erasure", "erased", "proof-erasure",
+        "nested", "option", "constructor", "case-selection", "projection",
+        "closure", "closure-ownership", "capture", "partial-application",
+        "bytearray", "bytes", "external", "heap", "ownership", "shared",
+        "retain-across-application", "outside-alias", "mutation", "copy-on-write",
+        "allocation", "path-exclusion"]
+    requiredLcnfForms :=
+      #["fap", "ctor", "lit", "return", "inc", "pap", "box", "fvar",
+        "unbox", "oproj", "dec", "cases", "extern"]
+    requiredExecutedLcnfForms :=
+      #["fap", "ctor", "lit", "return", "inc", "pap", "box", "fvar",
+        "unbox", "oproj", "dec", "cases", "extern"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "fap", minimum := 5, maximum := some 5 },
+        { form := "ctor", minimum := 3, maximum := some 3 },
+        { form := "lit", minimum := 3, maximum := some 3 },
+        { form := "return", minimum := 6, maximum := some 6 },
+        { form := "inc", minimum := 4, maximum := some 4 },
+        { form := "pap", minimum := 1, maximum := some 1 },
+        { form := "box", minimum := 1, maximum := some 1 },
+        { form := "fvar", minimum := 1, maximum := some 1 },
+        { form := "unbox", minimum := 1, maximum := some 1 },
+        { form := "oproj", minimum := 4, maximum := some 4 },
+        { form := "dec", minimum := 3, maximum := some 3 },
+        { form := "cases", minimum := 2, maximum := some 2 },
+        { form := "extern", minimum := 1, maximum := some 1 }]
+    requiredExecutedLcnfFormTrace :=
+      some aggregateRetainedAcrossClosureApplicationFormTrace
+    requiredExternals := #[``ByteArray.set!]
+    requiredExecutedExternals := #[``ByteArray.set!]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``ByteArray.set!]
+    requiredExecutedExternalTrace := some #[``ByteArray.set!]
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind",
+        "admin:yield-done"]
+    provenance := firProvenance
+      "Retain a proof-erased nested aggregate across captured ByteArray mutation" },
   { id := "captured-byte-array-outside-alias-read"
     entry := ``Source.capturedByteArrayOutsideAliasRead
     dependencies := #[``Source.applyCapturedByteArrayRead]
