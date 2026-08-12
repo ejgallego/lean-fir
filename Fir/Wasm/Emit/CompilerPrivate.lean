@@ -4,6 +4,7 @@ public import Lean.Compiler.LCNF.Specialize
 public import Lean.EnvExtension
 import all Lean.Compiler.ClosedTermCache
 import all Lean.Compiler.LCNF.Specialize
+import all Lean.Compiler.NameDemangling
 import all Lean.Environment
 
 public section
@@ -14,57 +15,124 @@ open Lean
 open Lean.Compiler
 
 /--
-Forget imported specialization-name mappings inside an already isolated
-compiler environment.  Lean can then rebuild those private helpers from the
-source declarations visible to the ordinary LCNF pipeline.
+Recover the caller contexts embedded by Lean's generic LCNF specializer.
+
+`LCNF.Specialize.mkSpecDecl` names a specialization by appending `._at_.`,
+the declaration currently being compiled, and a `spec_N` component to the
+specialized declaration's name. Reuse Lean's demangler primitives so FIR
+follows that compiler convention instead of parsing a rendered name.
+
+Candidates are returned from the innermost context out. Callers still require
+source-environment validation.
 -/
-def clearSpecializationCache (env : Environment) : Environment :=
-  SimplePersistentEnvExtension.setState LCNF.Specialize.specCacheExt env {}
+def specializationCallerCandidates (name : Name) : Array Name := Id.run do
+  let parts := Lean.Name.Demangle.nameToNameParts name
+  let mut candidates : Array Name := #[]
+  for index in [:parts.size] do
+    unless parts[index]! == .str "_at_" do continue
+    let start := index + 1
+    let mut stop := start
+    while h : stop < parts.size do
+      if Lean.Name.Demangle.isSpecIndex parts[stop] then break
+      stop := stop + 1
+    if stop == start || stop == parts.size then continue
+    let candidate := Lean.Name.Demangle.namePartsToName
+      (parts.extract start stop)
+    unless candidate.isAnonymous || candidates.contains candidate do
+      candidates := candidates.push candidate
+  return candidates.reverse
+
+/-- Recover the generic declaration before each `._at_.` caller marker. -/
+def specializationCalleeCandidates (name : Name) : Array Name := Id.run do
+  let parts := Lean.Name.Demangle.nameToNameParts name
+  let mut candidates : Array Name := #[]
+  for index in [:parts.size] do
+    unless parts[index]! == .str "_at_" do continue
+    if index == 0 then continue
+    let candidate := Lean.Name.Demangle.namePartsToName (parts.extract 0 index)
+    unless candidate.isAnonymous || candidates.contains candidate do
+      candidates := candidates.push candidate
+  return candidates.reverse
+
+private partial def kernelDeclarationAncestor? (env : Environment) (name : Name) :
+    Option Name :=
+  if env.constants.contains name then
+    some name
+  else if name.isAnonymous then
+    none
+  else
+    kernelDeclarationAncestor? env name.getPrefix
+
+private def generatedNameOwnedBy (env : Environment)
+    (selectedModules : Std.HashSet ModuleIdx) (sourceRoots : Array Name)
+    (name : Name) : Bool := Id.run do
+  let callers := specializationCallerCandidates name
+  if !callers.isEmpty then
+    return callers.any sourceRoots.contains
+  return match env.getModuleIdxFor? name with
+  | none => false
+  | some moduleIndex =>
+      selectedModules.contains moduleIndex &&
+        (kernelDeclarationAncestor? env name).any sourceRoots.contains
 
 /--
-Forget imported mappings from erased closed terms to generated names. Reusing
-these mappings while recompiling imported source can pair a new typed LCNF
-binding with a closed declaration generated in the original module unit.
--/
-def clearClosedTermCache (env : Environment) : Environment :=
-  Lean.closedTermCacheExt.setState (asyncMode := .sync) env {}
+Forget precisely the compiler state generated on behalf of the source roots
+being recompiled. Upstream never imports a module's own saved LCNF phases while
+compiling it; FIR's source view does, so leaving these entries visible makes a
+fresh root resolve stale `_redArg`, closed-term, or specialization declarations
+from the imported module.
 
-/--
-Treat imported generated closed terms and specializations as local names during
-source recompilation. Their original module indices make LCNF phase lookup
-prefer the imported signature over the freshly generated declaration with the
-same name. Ordinary source declarations keep their module mapping. Use each
-selected module's `extraConstNames`, the environment's reverse index for
-compiler auxiliaries, instead of scanning every imported constant mapping.
+The roots themselves are hidden as well: otherwise recursive calls consult the
+imported mono declaration and can be rewritten to a stale `_redArg` child. An
+ordinary generated descendant belongs to its nearest kernel declaration in
+the same module. Specializations instead use the caller provenance encoded by
+Lean after `._at_.`; their apparent module may be the private namespace of the
+generic callee, so it is not an ownership constraint.
+Unrelated helpers from the same module remain imported. They are ordinary
+dependencies of this synthetic unit and can be discovered and compiled in a
+later unit. This is intentionally rooted in Lean's generated-name conventions,
+not in a textual suffix list.
+
+Candidate mappings come from the selected modules' `extraConstNames` reverse
+index and the two compiler caches. This preserves the indexed mainline path;
+it does not scan every imported constant mapping.
 -/
 def forgetGeneratedCompilerModuleMappings (env : Environment)
-    (moduleIndices : Array ModuleIdx) : Environment :=
-  let closedNames := (Lean.closedTermCacheExt.getState env).constNames
-  let specializationCache := LCNF.Specialize.specCacheExt.getState env
-  let originalMappings := env.base.private.const2ModIdx
+    (moduleIndices : Array ModuleIdx) (sourceRoots : Array Name) : Environment :=
   let selectedModules := moduleIndices.foldl
     (init := Std.HashSet.emptyWithCapacity moduleIndices.size)
     fun modules moduleIndex => modules.insert moduleIndex
-  let mappings := moduleIndices.foldl (init := env.base.private.const2ModIdx)
+  let isOwned := generatedNameOwnedBy env selectedModules sourceRoots
+  let mappings := sourceRoots.foldl (init := env.base.private.const2ModIdx)
+    fun mappings name => mappings.erase name
+  let mappings := moduleIndices.foldl (init := mappings)
     fun mappings moduleIndex =>
       let moduleData := env.header.moduleData[moduleIndex]!
       moduleData.extraConstNames.foldl
         (fun mappings name =>
-          if name.toString.contains "._closed_" then mappings.erase name else mappings)
+          if isOwned name then mappings.erase name else mappings)
         mappings
-  let mappings := closedNames.foldl
-    (fun mappings name =>
-      match originalMappings[name]? with
-      | some moduleIndex =>
-          if selectedModules.contains moduleIndex then mappings.erase name else mappings
-      | none => mappings) mappings
-  let mappings := SMap.fold
-    (fun mappings _ name =>
-      match originalMappings[name]? with
-      | some moduleIndex =>
-          if selectedModules.contains moduleIndex then mappings.erase name else mappings
-      | none => mappings) mappings specializationCache
-  { env with base.private.const2ModIdx := mappings }
+  let (mappings, specializationCache) := SMap.fold
+    (fun (mappings, cache) key name =>
+      if isOwned name then (mappings.erase name, cache)
+      else (mappings, cache.insert key name))
+    (mappings, {}) (LCNF.Specialize.specCacheExt.getState env)
+  let oldClosedCache := Lean.closedTermCacheExt.getState env
+  let (mappings, closedMap) := oldClosedCache.map.foldl
+    (init := (mappings, {})) fun (mappings, cache) key name =>
+      if isOwned name then (mappings.erase name, cache)
+      else (mappings, cache.insert key name)
+  let closedNames := closedMap.foldl (init := {}) fun names _ name =>
+    names.insert name
+  let closedExprs := oldClosedCache.revExprs.filter fun key =>
+    match oldClosedCache.map.find? key with
+    | some name => !isOwned name
+    | none => false
+  let env := { env with base.private.const2ModIdx := mappings }
+  let env := SimplePersistentEnvExtension.setState
+    LCNF.Specialize.specCacheExt env specializationCache
+  Lean.closedTermCacheExt.setState (asyncMode := .sync) env {
+    map := closedMap, constNames := closedNames, revExprs := closedExprs }
 
 /-- Match `leanir`'s target-module import phase without exposing Lean's private
 `ImportState.moduleNameMap` field to the ordinary FIR source module. -/

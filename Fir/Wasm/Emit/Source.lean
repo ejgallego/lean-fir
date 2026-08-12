@@ -44,8 +44,57 @@ private partial def sourceDeclarationAncestor? (env : Environment) (name : Name)
       return some name
   sourceDeclarationAncestor? env name.getPrefix
 
+structure SourceCompilationRoot where
+  name : Name
+  companions : Array Name := #[]
+
 private def addUniqueName (names : Array Name) (name : Name) : Array Name :=
   if names.contains name then names else names.push name
+
+/--
+Resolve a generated specialization to the source caller that owns its body.
+Lean embeds the caller after `._at_.`; accept that provenance when the caller
+is an independently compilable final-LCNF source declaration. The generated
+name's apparent module is not authoritative: a specialization of a private
+generic callee retains the callee's private-module prefix. Include the generic
+callee in the next growing unit so the specializer reconstructs the caller's
+source context in the same pass-manager run.
+-/
+private def specializationSourceCaller? (env : Environment) (name : Name) :
+    CoreM (Option SourceCompilationRoot) := do
+  for candidate in
+      Fir.Wasm.Emit.CompilerPrivate.specializationCallerCandidates name do
+    let some source ← sourceDeclarationAncestor? env candidate | continue
+    if source == candidate then
+      let mut companions : Array Name := #[]
+      for callee in
+          Fir.Wasm.Emit.CompilerPrivate.specializationCalleeCandidates name do
+        unless env.constants.contains callee do continue
+        if isExtern env callee then continue
+        unless ← LCNF.shouldGenerateCode callee do continue
+        companions := addUniqueName companions callee
+      return some { name := candidate, companions }
+  return none
+
+private def sourceCompilationRoot? (env : Environment) (name : Name) :
+    CoreM (Option SourceCompilationRoot) := do
+  if let some caller ← specializationSourceCaller? env name then
+    return some caller
+  let some ancestor := environmentDeclarationAncestor? env name | return none
+  match env.find? ancestor with
+  | some (.ctorInfo _) | some (.inductInfo _) => return none
+  | _ => pure ()
+  if isExtern env ancestor then return none
+  unless ← LCNF.shouldGenerateCode ancestor do return none
+  return some { name := ancestor }
+
+private def addSourceCompilationRoot (roots : Array SourceCompilationRoot)
+    (root : SourceCompilationRoot) : Array SourceCompilationRoot :=
+  match roots.findIdx? (·.name == root.name) with
+  | none => roots.push root
+  | some index => roots.modify index fun existing =>
+      { existing with
+        companions := root.companions.foldl addUniqueName existing.companions }
 
 /-!
 Lean's ordinary `LCNF.main` entry returns `Unit`: it sends each completed
@@ -54,10 +103,12 @@ named closure from the LCNF environment extensions.  That recovery loses
 private specializations which exist in the completed SCC but are not published
 as independently compilable source declarations.
 
-The pass below is an identity consumer installed after Lean's real final
-impure pipeline.  It records the exact declaration groups immediately before
-the built-in `Lean.IR.toIR` handoff.  FIR continues to consume LCNF; the later
-IR conversion performed by the stock compiler is deliberately ignored.
+The pass below is a terminal consumer installed after Lean's real final impure
+pipeline. It records the exact declaration groups immediately before the
+built-in `Lean.IR.toIR` handoff, then consumes them. The stock driver therefore
+still selects and runs Lean's complete configured LCNF pipeline, while its
+mandatory IR phase receives an empty group. FIR consumes the captured LCNF
+directly and does not pay for, or depend on, a throwaway IR compilation.
 -/
 
 initialize finalImpureCaptureExt : EnvExtension (Array (Array (LCNF.Decl .impure))) ←
@@ -66,12 +117,11 @@ initialize finalImpureCaptureExt : EnvExtension (Array (Array (LCNF.Decl .impure
 private def resetFinalImpureCapture : CoreM Unit := do
   modifyEnv fun env => finalImpureCaptureExt.modifyState env fun _ => #[]
 
-private def resetCompilerCaches (moduleIndices : Array ModuleIdx) : CoreM Unit := do
+private def resetCompilerCaches (moduleIndices : Array ModuleIdx)
+    (sourceRoots : Array Name) : CoreM Unit := do
   modifyEnv fun environment =>
-    environment
-      |> (Fir.Wasm.Emit.CompilerPrivate.forgetGeneratedCompilerModuleMappings · moduleIndices)
-      |> Fir.Wasm.Emit.CompilerPrivate.clearSpecializationCache
-      |> Fir.Wasm.Emit.CompilerPrivate.clearClosedTermCache
+    Fir.Wasm.Emit.CompilerPrivate.forgetGeneratedCompilerModuleMappings
+      environment moduleIndices sourceRoots
 
 private def recordFinalImpureGroup (decls : Array (LCNF.Decl .impure)) :
     LCNF.CompilerM Unit := do
@@ -83,7 +133,7 @@ def finalImpureCapturePass : LCNF.Pass where
   name := `firCaptureFinalImpure
   run decls := do
     recordFinalImpureGroup decls
-    return decls
+    return #[]
 
 /-- Dynamically installed only inside one isolated source-compilation call. -/
 def finalImpureCaptureInstaller : LCNF.PassInstaller :=
@@ -191,7 +241,7 @@ private def compileEntryFinalCaptured (entry : Name) (dependencies : Array Name 
     match environment.getModuleIdxFor? root with
     | some index => if indices.contains index then indices else indices.push index
     | none => indices
-  resetCompilerCaches moduleIndices
+  resetCompilerCaches moduleIndices roots
   LCNF.main roots (← getOptions)
   let capturedGroups := finalImpureCaptureExt.getState (← getEnv)
   let (ordinaryLocals, ordinaryExternalSigs) ← LCNF.collectUsedDecls roots
@@ -297,8 +347,9 @@ private def mergeSeparatelyCompiledArtifacts (entry : Name)
     externalNames
     forms := Fir.Validation.Lcnf.collectForms program }
 
-private def discoveredSourceRoots (artifact : Fir.Validation.Lcnf.Artifact)
-    (retainedExternalNames : Array String) (excluded : Array Name) : CoreM (Array Name) := do
+private def discoveredOrdinarySourceRoots (artifact : Fir.Validation.Lcnf.Artifact)
+    (retainedExternalNames : Array String) (excluded : Array Name) :
+    CoreM (Array Name) := do
   let env ← getEnv
   return artifact.externalNames.foldl (init := #[]) fun additions name =>
     if retainedExternalNames.contains name.toString then
@@ -310,6 +361,18 @@ private def discoveredSourceRoots (artifact : Fir.Validation.Lcnf.Artifact)
           else addUniqueName additions ancestor
       | none => additions
 
+private def discoveredFinalSourceRoots (artifact : Fir.Validation.Lcnf.Artifact)
+    (retainedExternalNames : Array String) (excluded : Array Name) :
+    CoreM (Array SourceCompilationRoot) := do
+  let env ← getEnv
+  artifact.externalNames.foldlM (init := #[]) fun additions name => do
+    if retainedExternalNames.contains name.toString then
+      return additions
+    else
+      let some root ← sourceCompilationRoot? env name | return additions
+      if excluded.contains root.name then return additions
+      return addSourceCompilationRoot additions root
+
 private partial def compileEntrySeparatelyInternalizedAux (entry : Name)
     (retainedExternalNames : Array String)
     (entryArtifact : Fir.Validation.Lcnf.Artifact) (dependencies : Array Name) :
@@ -319,7 +382,7 @@ private partial def compileEntrySeparatelyInternalizedAux (entry : Name)
   let dependencyArtifact ← withoutModifyingEnv <|
     Fir.Validation.Lcnf.compileEntry dependencies[0]!
       (dependencies.extract 1 dependencies.size)
-  let additions ← discoveredSourceRoots dependencyArtifact retainedExternalNames
+  let additions ← discoveredOrdinarySourceRoots dependencyArtifact retainedExternalNames
     (#[entry] ++ dependencies)
   if additions.isEmpty then
     mergeSeparatelyCompiledArtifacts entry #[entryArtifact, dependencyArtifact]
@@ -338,7 +401,7 @@ def compileEntrySeparatelyInternalized (entry : Name)
     (retainedExternalNames : Array String := #[]) : CoreM Fir.Validation.Lcnf.Artifact := do
   let entryArtifact ← withoutModifyingEnv <|
     Fir.Validation.Lcnf.compileEntry entry
-  let dependencies ← discoveredSourceRoots entryArtifact retainedExternalNames #[entry]
+  let dependencies ← discoveredOrdinarySourceRoots entryArtifact retainedExternalNames #[entry]
   compileEntrySeparatelyInternalizedAux entry retainedExternalNames entryArtifact dependencies
 
 private def initializePersistentExtension {α β σ} [Inhabited σ]
@@ -439,7 +502,8 @@ private def replayDeferredModuleFinalCaptured (moduleName entry : Name)
     (groups.foldl (fun state group =>
       group.declNames.foldl (·.insert · group) state) {}))
   resetFinalImpureCapture
-  resetCompilerCaches #[moduleIndex]
+  let sourceRoots := groups.flatMap (·.declNames)
+  resetCompilerCaches #[moduleIndex] sourceRoots
   installFinalImpureCaptureDirect
   for group in groups do
     for declaration in group.declNames do
@@ -532,7 +596,10 @@ private partial def discoverFinalCapturedRoots (roots frontier : Array Name)
     CoreM (Array Name × Option Fir.Validation.Lcnf.Artifact) := do
   let some entry := frontier[0]? | return (roots, none)
   let artifact ← compileEntryFinalCaptured entry (frontier.extract 1 frontier.size)
-  let additions ← discoveredSourceRoots artifact retainedExternalNames roots
+  let discovered ← discoveredFinalSourceRoots artifact retainedExternalNames roots
+  let additions := discovered.foldl (init := #[]) fun names root =>
+    (#[root.name] ++ root.companions).foldl (fun names name =>
+      if roots.contains name then names else addUniqueName names name) names
   if additions.isEmpty then
     return (roots, if roots == frontier then some artifact else none)
   discoverFinalCapturedRoots (roots ++ additions) additions retainedExternalNames
@@ -545,7 +612,10 @@ private partial def compileEntryFinalCapturedInternalizedAux (entry : Name)
   let artifact ← match completeArtifact? with
     | some artifact => pure artifact
     | none => compileEntryFinalCaptured entry (roots.extract 1 roots.size)
-  let additions ← discoveredSourceRoots artifact retainedExternalNames roots
+  let discovered ← discoveredFinalSourceRoots artifact retainedExternalNames roots
+  let additions := discovered.foldl (init := #[]) fun names root =>
+    (#[root.name] ++ root.companions).foldl (fun names name =>
+      if roots.contains name then names else addUniqueName names name) names
   if additions.isEmpty then
     return artifact
   compileEntryFinalCapturedInternalizedAux entry (roots ++ additions) additions
@@ -593,16 +663,8 @@ partial def compileEntryInternalized (entry : Name) (dependencies : Array Name :
     (retainedExternalNames : Array String := #[]) : CoreM Fir.Validation.Lcnf.Artifact := do
   let artifact ← withoutModifyingEnv <|
     Fir.Validation.Lcnf.compileEntry entry dependencies
-  let env ← getEnv
-  let additions := artifact.externalNames.foldl (init := #[]) fun additions name =>
-    if retainedExternalNames.contains name.toString then
-      additions
-    else
-      match environmentDeclarationAncestor? env name with
-      | some ancestor =>
-          if ancestor == entry || dependencies.contains ancestor then additions
-          else addUniqueName additions ancestor
-      | none => additions
+  let additions ← discoveredOrdinarySourceRoots artifact retainedExternalNames
+    (#[entry] ++ dependencies)
   if additions.isEmpty then
     return artifact
   compileEntryInternalized entry (dependencies ++ additions) retainedExternalNames

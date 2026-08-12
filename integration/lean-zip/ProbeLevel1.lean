@@ -22,6 +22,10 @@ run_cmd do
   let startedAt ← IO.monoMsNow
   let source ← liftCoreM LeanZipFir.Compile.captureLevel1
   let capturedAt ← IO.monoMsNow
+  let externalSpecializations := source.externalNames.filter fun name =>
+    !(Fir.Wasm.Emit.CompilerPrivate.specializationCallerCandidates name).isEmpty
+  unless externalSpecializations.isEmpty do
+    throwError "Level-1 capture retained generated specializations: {externalSpecializations}"
   let unsupported := source.program.decls.filter fun declaration =>
     !Fir.Wasm.supportedDecl source.program declaration
   let unsupportedText ← unsupported.mapM fun declaration => do

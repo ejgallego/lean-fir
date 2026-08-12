@@ -14,6 +14,18 @@ def idFloat32Fixture (value : Float32) : Float32 := value
 
 def idFloatFixture (value : Float) : Float := value
 
+#guard Fir.Wasm.Emit.CompilerPrivate.specializationCallerCandidates
+    `List.foldl._at_.Array.appendList.spec_0._redArg == #[`Array.appendList]
+
+#guard Fir.Wasm.Emit.CompilerPrivate.specializationCallerCandidates
+    `List.zipWith._at_.List.zip.spec_0._redArg == #[`List.zip]
+
+#guard Fir.Wasm.Emit.CompilerPrivate.specializationCalleeCandidates
+    `List.foldl._at_.Array.appendList.spec_0._redArg == #[`List.foldl]
+
+#guard Fir.Wasm.Emit.CompilerPrivate.specializationCalleeCandidates
+    `List.zipWith._at_.List.zip.spec_0._redArg == #[`List.zipWith]
+
 run_cmd do
   let source ← liftCoreM <|
     compileEntryFinalCapturedInternalized
