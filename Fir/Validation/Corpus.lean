@@ -2120,6 +2120,31 @@ def recordByteArray (value : ByteArray) (byte : UInt8) : ByteArray :=
 def recordByteArrayTwice (value : ByteArray) : ByteArray :=
   recordByteArray (recordByteArray value 1) 2
 
+/--
+Use a captured ByteArray for the final time before passing its outside alias to
+an ordered effect. The post-effect read observes the updated result.
+-/
+def effectCapturedByteArrayFinalUse
+    (source : ByteArray) : ByteArray × Nat × Nat :=
+  let reader := fun index => (source.get! index).toNat
+  let before := applyCapturedByteArrayRead reader 1
+  let updated := recordByteArray source 42
+  let after := (updated.get! 0).toNat
+  (updated, before, after)
+
+/--
+Keep a captured ByteArray live across an ordered effect, then invoke the same
+closure again. The effect must return an updated copy while the capture still
+observes the original array.
+-/
+def effectCapturedByteArrayRetainedUse
+    (source : ByteArray) : ByteArray × Nat × Nat :=
+  let reader := fun index => (source.get! index).toNat
+  let before := applyCapturedByteArrayRead reader 1
+  let updated := recordByteArray source 42
+  let after := applyCapturedByteArrayRead reader 0
+  (updated, before, after)
+
 @[noinline]
 def idByteArray (value : ByteArray) : ByteArray :=
   value
@@ -2327,6 +2352,11 @@ private def byteArrayNatPairDatum
 private def byteArrayByteArrayNatDatum
     (value : ByteArray × ByteArray × Nat) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[byteArrayDatum value.1, byteArrayNatPairDatum value.2]
+
+private def byteArrayNatNatDatum
+    (value : ByteArray × Nat × Nat) : ValidationDatum :=
+  .ctor "Prod.mk" 0 #[byteArrayDatum value.1,
+    .ctor "Prod.mk" 0 #[.nat value.2.1, .nat value.2.2]]
 
 private def repeatedCaptureBoxDatum
     (value : Source.RepeatedCaptureBox) : ValidationDatum :=
@@ -2621,6 +2651,9 @@ private def byteArrayTripleSchema : ValidationSchema :=
 private def byteArrayByteArrayNatSchema : ValidationSchema :=
   .ctor "Prod.mk" 0 #[.bytes, .ctor "Prod.mk" 0 #[.bytes, .nat]]
 
+private def byteArrayNatNatSchema : ValidationSchema :=
+  .ctor "Prod.mk" 0 #[.bytes, .ctor "Prod.mk" 0 #[.nat, .nat]]
+
 private def repeatedCaptureBoxSchema : ValidationSchema :=
   .ctor "RepeatedCaptureBox.mk" 0 #[.nat, .string]
 
@@ -2797,6 +2830,19 @@ private def capturedByteArrayOutsideAliasReadFormTrace : Array String :=
 private def capturedByteArrayOutsideAliasMutationFormTrace : Array String :=
   #["inc", "pap", "lit", "fap", "box", "fvar", "unbox", "fap", "lit",
     "fap", "extern", "return", "return", "return", "ctor", "return"]
+
+private def effectCapturedByteArrayFinalUseFormTrace : Array String :=
+  #["inc", "pap", "lit", "fap", "fvar", "fap", "fap", "extern", "fap",
+    "extern", "return", "dec", "dec", "return", "return", "lit", "fap",
+    "extern", "lit", "fap", "extern", "fap", "extern", "ctor", "ctor",
+    "return"]
+
+private def effectCapturedByteArrayRetainedUseFormTrace : Array String :=
+  #["inc", "pap", "lit", "inc", "fap", "fvar", "fap", "fap", "extern",
+    "fap", "extern", "return", "dec", "dec", "return", "return", "lit",
+    "fap", "extern", "lit", "fap", "fvar", "fap", "fap", "extern", "fap",
+    "extern", "return", "dec", "dec", "return", "return", "ctor", "ctor",
+    "return"]
 
 private def repeatedCapturedByteArrayReturnedFormTrace : Array String :=
   #["inc", "pap", "fap", "box", "fvar", "unbox", "fap", "cases", "ctor",
@@ -6383,6 +6429,115 @@ private def postConversionCases : Array Case := #[
       #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind", "admin:yield-done"]
     provenance := firProvenance
       "Consume a captured ByteArray through copy-on-write while preserving its outside alias" },
+  { id := "effect-captured-byte-array-final-use"
+    entry := ``Source.effectCapturedByteArrayFinalUse
+    dependencies := #[``Source.applyCapturedByteArrayRead]
+    args := #[byteArrayDatum mixedLayoutBytes]
+    argSchemas := #[.bytes]
+    resultSchema := byteArrayNatNatSchema
+    native := fun _ => byteArrayNatNatDatum
+      (Source.effectCapturedByteArrayFinalUse mixedLayoutBytes)
+    nativeBefore := NativeEffects.reset
+    nativeEffects := fun _ => NativeEffects.take
+    tags :=
+      #["stress", "effect", "ordered-effect", "call-boundary",
+        "alias-across-effect", "closure", "closure-ownership", "capture",
+        "partial-application", "bytearray", "bytes", "external", "heap",
+        "ownership", "outside-alias", "unique-final-application", "single-use",
+        "unique", "release", "mutation", "copy-on-write", "snapshot",
+        "post-effect-read"]
+    requiredLcnfForms :=
+      #["inc", "pap", "lit", "fap", "fvar", "extern", "return", "dec", "ctor"]
+    requiredExecutedLcnfForms :=
+      #["inc", "pap", "lit", "fap", "fvar", "extern", "return", "dec", "ctor"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "inc", minimum := 1, maximum := some 1 },
+        { form := "pap", minimum := 1, maximum := some 1 },
+        { form := "lit", minimum := 3, maximum := some 3 },
+        { form := "fap", minimum := 7, maximum := some 7 },
+        { form := "fvar", minimum := 1, maximum := some 1 },
+        { form := "extern", minimum := 5, maximum := some 5 },
+        { form := "return", minimum := 4, maximum := some 4 },
+        { form := "dec", minimum := 2, maximum := some 2 },
+        { form := "ctor", minimum := 2, maximum := some 2 }]
+    requiredExecutedLcnfFormTrace := some effectCapturedByteArrayFinalUseFormTrace
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind",
+        "admin:yield-done"]
+    requiredExternals :=
+      #[``ByteArray.get!, ``UInt8.toNat, ``NativeEffects.recordByteArrayImpl]
+    requiredExecutedExternals :=
+      #[``ByteArray.get!, ``UInt8.toNat, ``NativeEffects.recordByteArrayImpl]
+    requiredExecutedExternalCounts :=
+      #[{ external := ``ByteArray.get!, minimum := 2, maximum := some 2 },
+        { external := ``UInt8.toNat, minimum := 2, maximum := some 2 },
+        { external := ``NativeEffects.recordByteArrayImpl,
+          minimum := 1, maximum := some 1 }]
+    requiredExecutedExternalTrace :=
+      some #[``ByteArray.get!, ``UInt8.toNat,
+        ``NativeEffects.recordByteArrayImpl, ``ByteArray.get!, ``UInt8.toNat]
+    effectProjections := #[{
+      external := ``NativeEffects.recordByteArrayImpl
+      operation := "validation.recordByteArray"
+      argSchemas := #[.bytes, .bits 8]
+      resultSchema := some .bytes }]
+    provenance := firProvenance
+      "Release a final-use ByteArray capture before an ordered mutating effect" },
+  { id := "effect-captured-byte-array-retained-use"
+    entry := ``Source.effectCapturedByteArrayRetainedUse
+    dependencies := #[``Source.applyCapturedByteArrayRead]
+    args := #[byteArrayDatum mixedLayoutBytes]
+    argSchemas := #[.bytes]
+    resultSchema := byteArrayNatNatSchema
+    native := fun _ => byteArrayNatNatDatum
+      (Source.effectCapturedByteArrayRetainedUse mixedLayoutBytes)
+    nativeBefore := NativeEffects.reset
+    nativeEffects := fun _ => NativeEffects.take
+    tags :=
+      #["stress", "effect", "ordered-effect", "call-boundary",
+        "alias-across-effect", "closure", "closure-ownership", "capture",
+        "partial-application", "bytearray", "bytes", "external", "heap",
+        "ownership", "outside-alias", "shared-intermediate-application",
+        "repeated-application", "two-use", "shared", "retain", "mutation",
+        "copy-on-write", "allocation", "snapshot", "post-effect-read"]
+    requiredLcnfForms :=
+      #["inc", "pap", "lit", "fap", "fvar", "extern", "return", "dec", "ctor"]
+    requiredExecutedLcnfForms :=
+      #["inc", "pap", "lit", "fap", "fvar", "extern", "return", "dec", "ctor"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "inc", minimum := 2, maximum := some 2 },
+        { form := "pap", minimum := 1, maximum := some 1 },
+        { form := "lit", minimum := 3, maximum := some 3 },
+        { form := "fap", minimum := 9, maximum := some 9 },
+        { form := "fvar", minimum := 2, maximum := some 2 },
+        { form := "extern", minimum := 5, maximum := some 5 },
+        { form := "return", minimum := 7, maximum := some 7 },
+        { form := "dec", minimum := 4, maximum := some 4 },
+        { form := "ctor", minimum := 2, maximum := some 2 }]
+    requiredExecutedLcnfFormTrace :=
+      some effectCapturedByteArrayRetainedUseFormTrace
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind",
+        "admin:yield-done"]
+    requiredExternals :=
+      #[``ByteArray.get!, ``UInt8.toNat, ``NativeEffects.recordByteArrayImpl]
+    requiredExecutedExternals :=
+      #[``ByteArray.get!, ``UInt8.toNat, ``NativeEffects.recordByteArrayImpl]
+    requiredExecutedExternalCounts :=
+      #[{ external := ``ByteArray.get!, minimum := 2, maximum := some 2 },
+        { external := ``UInt8.toNat, minimum := 2, maximum := some 2 },
+        { external := ``NativeEffects.recordByteArrayImpl,
+          minimum := 1, maximum := some 1 }]
+    requiredExecutedExternalTrace :=
+      some #[``ByteArray.get!, ``UInt8.toNat,
+        ``NativeEffects.recordByteArrayImpl, ``ByteArray.get!, ``UInt8.toNat]
+    effectProjections := #[{
+      external := ``NativeEffects.recordByteArrayImpl
+      operation := "validation.recordByteArray"
+      argSchemas := #[.bytes, .bits 8]
+      resultSchema := some .bytes }]
+    provenance := firProvenance
+      "Retain a ByteArray capture across an ordered mutating effect and reread it" },
   { id := "repeated-captured-byte-array-returned"
     entry := ``Source.repeatedCapturedByteArrayOutsideAlias
     dependencies :=
