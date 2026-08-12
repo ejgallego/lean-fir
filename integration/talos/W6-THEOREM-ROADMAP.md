@@ -1520,11 +1520,17 @@ acceptance tests pass.
      has a constructor-complete one-source-step `advance` theorem. The theorem
      returns the same admission-free supported relation after a finite target
      path; an empty path is accepted only with strict compiler-rank descent.
+     Current-node admission and the strong dispatcher now also cover
+     compiler-erased default-only cases and persistent `inc`/`dec`. The
+     successful source step reconstructs the default branch selection; all
+     three laws preserve the hereditary resource and supported stacks through
+     exact frame equality while taking a reflexive target path.
      Admission for a newly reached code node is attached after that dynamic
      successor is known, so neither relation contains future execution or
-     termination evidence. The next slice widens the runnable constructors to
-     the established external, lazy, case, and effect laws, then packages the
-     local admission classifier into the public finite-prefix simulation.
+     termination evidence. The next slice widens this same current-node
+     boundary to a non-erased operation family—preferably the staged pure
+     external protocol—then packages the local admission classifier into the
+     public finite-prefix simulation.
      Heap-valued cache misses and target-only loop unwinding remain later
      widenings.
    - **W6.7f — public certificate-free finite-trace theorem.** From a

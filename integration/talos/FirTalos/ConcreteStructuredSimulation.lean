@@ -16082,6 +16082,7 @@ theorem ConcreteStructuredCodeFocus.advance_defaultOnlyCase_ranked
       ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
         sourceRuntime sourceEnv selected targetStore targetLocals targetCode
         witness sourceAfter target ∧
+      sourceAfter.frames = source.frames ∧
       compilerStructuredControlRank sourceAfter <
         compilerStructuredControlRank source := by
   let sourceAfter : MachineState := { source with control := .code selected }
@@ -16125,6 +16126,7 @@ theorem ConcreteStructuredCodeFocus.advance_defaultOnlyCase_ranked
       related.sourceControlEq]
     exact compilerCodeSilenceDepth_defaultOnly_lt supported
   exact ⟨sourceAfter, selectSourceStep, .refl target, selectedFocus,
+    by simp [sourceAfter],
     compilerStructuredControlRank_lt_of_codeSilenceRank_lt
       related.sourceControlEq selectedFocus.sourceControlEq silenceDecreases⟩
 
@@ -16205,10 +16207,12 @@ theorem ConcreteStructuredCodeFocus.advance_incPersistent
       ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
         sourceRuntime sourceEnv continuation targetStore targetLocals targetCode
         witness sourceAfter target ∧
-      compilerCodeSilenceRank sourceAfter < compilerCodeSilenceRank source := by
+      sourceAfter.frames = source.frames ∧
+      compilerStructuredControlRank sourceAfter <
+        compilerStructuredControlRank source := by
   let sourceAfter : MachineState :=
     { source with control := .code continuation }
-  refine ⟨sourceAfter, ?_, .refl target, ?_, ?_⟩
+  refine ⟨sourceAfter, ?_, .refl target, ?_, by simp [sourceAfter], ?_⟩
   · rcases source with
       ⟨program, control, env, joins, frames, runtime⟩
     have controlEq := related.sourceControlEq
@@ -16225,7 +16229,11 @@ theorem ConcreteStructuredCodeFocus.advance_incPersistent
       adapted := CodeAdaptedWithSuffix.incPersistent_eq related.adapted
       stateRelated := related.stateRelated
       frameAligned := related.frameAligned }
-  · simp [compilerCodeSilenceRank, compilerCodeSilenceDepth, sourceAfter,
+  · apply compilerStructuredControlRank_lt_of_codeSilenceRank_lt
+      (beforeCode := .inc objectId amount check true continuation)
+      (afterCode := continuation) related.sourceControlEq
+      (by simp [sourceAfter])
+    simp [compilerCodeSilenceRank, compilerCodeSilenceDepth, sourceAfter,
       related.sourceControlEq]
 
 /-- A persistent decrement has the same ranked zero-step target match as a
@@ -16261,10 +16269,12 @@ theorem ConcreteStructuredCodeFocus.advance_decPersistent
       ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
         sourceRuntime sourceEnv continuation targetStore targetLocals targetCode
         witness sourceAfter target ∧
-      compilerCodeSilenceRank sourceAfter < compilerCodeSilenceRank source := by
+      sourceAfter.frames = source.frames ∧
+      compilerStructuredControlRank sourceAfter <
+        compilerStructuredControlRank source := by
   let sourceAfter : MachineState :=
     { source with control := .code continuation }
-  refine ⟨sourceAfter, ?_, .refl target, ?_, ?_⟩
+  refine ⟨sourceAfter, ?_, .refl target, ?_, by simp [sourceAfter], ?_⟩
   · rcases source with
       ⟨program, control, env, joins, frames, runtime⟩
     have controlEq := related.sourceControlEq
@@ -16281,7 +16291,11 @@ theorem ConcreteStructuredCodeFocus.advance_decPersistent
       adapted := CodeAdaptedWithSuffix.decPersistent_eq related.adapted
       stateRelated := related.stateRelated
       frameAligned := related.frameAligned }
-  · simp [compilerCodeSilenceRank, compilerCodeSilenceDepth, sourceAfter,
+  · apply compilerStructuredControlRank_lt_of_codeSilenceRank_lt
+      (beforeCode := .dec objectId amount check true objectFields? continuation)
+      (afterCode := continuation) related.sourceControlEq
+      (by simp [sourceAfter])
+    simp [compilerCodeSilenceRank, compilerCodeSilenceDepth, sourceAfter,
       related.sourceControlEq]
 
 /-- Lift direct-call entry through the recursive caller stack.  This is the
@@ -17553,6 +17567,39 @@ inductive ConcreteStructuredCodeStepAdmission
           ClosureRetainCapacity parentRuntime resolution.captures.toList) :
       ConcreteStructuredCodeStepAdmission context expectedResult facts
         sourceRuntime sourceEnv 0 (.let decl continuation)
+  | defaultOnlyCase
+      {facts : ReuseCapacityFacts}
+      {sourceRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {cases : Lean.Compiler.LCNF.Cases .impure}
+      {selected : Lean.Compiler.LCNF.Code .impure}
+      (supported :
+        DefaultOnlyCaseSupported sourceRuntime sourceEnv cases selected) :
+      ConcreteStructuredCodeStepAdmission context expectedResult facts
+        sourceRuntime sourceEnv 0 (.cases cases)
+  | incPersistent
+      {facts : ReuseCapacityFacts}
+      {sourceRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {objectId : Lean.FVarId}
+      {amount : Nat}
+      {check : Bool}
+      {continuation : Lean.Compiler.LCNF.Code .impure} :
+      ConcreteStructuredCodeStepAdmission context expectedResult facts
+        sourceRuntime sourceEnv 0
+          (.inc objectId amount check true continuation)
+  | decPersistent
+      {facts : ReuseCapacityFacts}
+      {sourceRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {objectId : Lean.FVarId}
+      {amount : Nat}
+      {check : Bool}
+      {objectFields? : Option Nat}
+      {continuation : Lean.Compiler.LCNF.Code .impure} :
+      ConcreteStructuredCodeStepAdmission context expectedResult facts
+        sourceRuntime sourceEnv 0
+          (.dec objectId amount check true objectFields? continuation)
 
 theorem ConcreteStructuredCodeStepAdmission.return_cases
     {context : Fir.Wasm.Context} {expectedResult : AbiKind}
@@ -20414,6 +20461,62 @@ theorem ConcreteStructuredCodePointwiseRel.root
     exact resourcesAtRoot
   exact ⟨contextCaches, focus, resources, admitted, budget⟩
 
+/-- A successful interpreter step at a default-only case recovers the source
+branch-selection boundary.  The admission fixes the unique selected branch;
+the ordinary step supplies only the successful discriminator lookup and tag. -/
+theorem ConcreteStructuredCodeFocus.defaultOnlyCaseResult_of_step
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {selected : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.cases cases) targetStore targetLocals
+      targetCode witness source target)
+    (supported :
+      DefaultOnlyCaseSupported sourceRuntime sourceEnv cases selected)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    SourceCaseResult sourceRuntime sourceEnv cases selected := by
+  rcases source with
+    ⟨sourceProgram, sourceControl, actualEnv, sourceJoins, sourceFrames,
+      actualRuntime⟩
+  have programEq := related.sourceProgramEq
+  change sourceProgram = context.program at programEq
+  subst sourceProgram
+  have controlEq := related.sourceControlEq
+  change sourceControl = .code (.cases cases) at controlEq
+  subst sourceControl
+  have envEq := related.sourceEnvEq
+  change actualEnv = sourceEnv at envEq
+  subst actualEnv
+  have runtimeEq := related.sourceRuntimeEq
+  change actualRuntime = sourceRuntime at runtimeEq
+  subst actualRuntime
+  cases found : lookupValue sourceEnv cases.discr with
+  | error fault =>
+      simp [executeStep, coreStep, found, fail] at sourceStep
+  | ok discrValue =>
+      cases tagged : getTag sourceRuntime discrValue with
+      | error fault =>
+          simp [executeStep, coreStep, found, tagged, fail] at sourceStep
+      | ok tag =>
+          have chosen :
+              chooseAlt tag cases.alts.toList = some selected := by
+            unfold DefaultOnlyCaseSupported at supported
+            rw [supported]
+            simp [chooseAlt, findCtorAlt, findDefaultAlt]
+          exact ⟨discrValue, tag, found, tagged, chosen⟩
+
 /-- A successful interpreter step at an admitted direct-value node exposes the
 existing source semantic boundary.  The focus identifies the actual machine
 with the compiled code state; static direct-value admission rules out both
@@ -20798,6 +20901,198 @@ theorem ConcreteStructuredCodePointwiseRel.advance_return
         yielded, actualCompatible, resourcesAfter, sourceFramesEq,
         targetFramesEq⟩
 
+/-- A default-only case preserves the complete resource core across its
+compiler-erased source step. -/
+theorem ConcreteStructuredCodePointwiseRel.advance_defaultOnlyCase_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {selected : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredCodePointwiseRel program context functionCode
+      sourceModule sourceFunction targetModule hosts spec externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts 0 remainingBytes sourceRuntime sourceEnv (.cases cases) targetStore
+      targetLocals targetCode witness source target)
+    (supported :
+      DefaultOnlyCaseSupported sourceRuntime sourceEnv cases selected)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 0 target
+        target ∧
+      sourceAfter.frames = source.frames ∧
+      ConcreteStructuredCodeCoreRel program context sourceModule
+        sourceFunction externals labels entryRuntime entryStore entryWitness
+        functionResult callerExpectedResult facts remainingBytes sourceRuntime
+        sourceEnv selected targetStore targetLocals targetCode witness
+        sourceAfter target ∧
+      compilerStructuredControlRank sourceAfter <
+        compilerStructuredControlRank source := by
+  have sourceResult :=
+    related.focus.defaultOnlyCaseResult_of_step supported sourceStep
+  obtain ⟨computedAfter, computedStep, targetPath, nextFocus, framesEq, rank⟩ :=
+    related.focus.advance_defaultOnlyCase_ranked supported sourceResult
+  have afterEq : sourceAfter = computedAfter := by
+    rw [sourceStep] at computedStep
+    exact ExecResult.next.inj computedStep
+  subst computedAfter
+  have nextResources :
+      ConcreteStructuredResourceStack program context sourceModule
+        sourceFunction externals entryRuntime sourceRuntime entryStore
+        targetStore entryWitness witness facts remainingBytes sourceEnv
+        targetLocals functionResult callerExpectedResult sourceAfter.frames
+        target.frames := by
+    rw [framesEq]
+    exact related.resources
+  exact ⟨targetPath, framesEq, ⟨nextFocus, nextResources⟩, rank⟩
+
+/-- Persistent increments are erased by lowering and preserve the complete
+resource core while consuming one ranked source step. -/
+theorem ConcreteStructuredCodePointwiseRel.advance_incPersistent_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {amount : Nat}
+    {check : Bool}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredCodePointwiseRel program context functionCode
+      sourceModule sourceFunction targetModule hosts spec externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts 0 remainingBytes sourceRuntime sourceEnv
+      (.inc objectId amount check true continuation) targetStore targetLocals
+      targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 0 target
+        target ∧
+      sourceAfter.frames = source.frames ∧
+      ConcreteStructuredCodeCoreRel program context sourceModule
+        sourceFunction externals labels entryRuntime entryStore entryWitness
+        functionResult callerExpectedResult facts remainingBytes sourceRuntime
+        sourceEnv continuation targetStore targetLocals targetCode witness
+        sourceAfter target ∧
+      compilerStructuredControlRank sourceAfter <
+        compilerStructuredControlRank source := by
+  obtain ⟨computedAfter, computedStep, targetPath, nextFocus, framesEq, rank⟩ :=
+    related.focus.advance_incPersistent
+      (module := targetModule.wasmModule) (hostEnv := hosts.env)
+  have afterEq : sourceAfter = computedAfter := by
+    rw [sourceStep] at computedStep
+    exact ExecResult.next.inj computedStep
+  subst computedAfter
+  have nextResources :
+      ConcreteStructuredResourceStack program context sourceModule
+        sourceFunction externals entryRuntime sourceRuntime entryStore
+        targetStore entryWitness witness facts remainingBytes sourceEnv
+        targetLocals functionResult callerExpectedResult sourceAfter.frames
+        target.frames := by
+    rw [framesEq]
+    exact related.resources
+  exact ⟨targetPath, framesEq, ⟨nextFocus, nextResources⟩, rank⟩
+
+/-- Persistent decrements have the same resource-preserving erased-step law. -/
+theorem ConcreteStructuredCodePointwiseRel.advance_decPersistent_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {amount : Nat}
+    {check : Bool}
+    {objectFields? : Option Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredCodePointwiseRel program context functionCode
+      sourceModule sourceFunction targetModule hosts spec externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts 0 remainingBytes sourceRuntime sourceEnv
+      (.dec objectId amount check true objectFields? continuation) targetStore
+      targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 0 target
+        target ∧
+      sourceAfter.frames = source.frames ∧
+      ConcreteStructuredCodeCoreRel program context sourceModule
+        sourceFunction externals labels entryRuntime entryStore entryWitness
+        functionResult callerExpectedResult facts remainingBytes sourceRuntime
+        sourceEnv continuation targetStore targetLocals targetCode witness
+        sourceAfter target ∧
+      compilerStructuredControlRank sourceAfter <
+        compilerStructuredControlRank source := by
+  obtain ⟨computedAfter, computedStep, targetPath, nextFocus, framesEq, rank⟩ :=
+    related.focus.advance_decPersistent
+      (module := targetModule.wasmModule) (hostEnv := hosts.env)
+  have afterEq : sourceAfter = computedAfter := by
+    rw [sourceStep] at computedStep
+    exact ExecResult.next.inj computedStep
+  subst computedAfter
+  have nextResources :
+      ConcreteStructuredResourceStack program context sourceModule
+        sourceFunction externals entryRuntime sourceRuntime entryStore
+        targetStore entryWitness witness facts remainingBytes sourceEnv
+        targetLocals functionResult callerExpectedResult sourceAfter.frames
+        target.frames := by
+    rw [framesEq]
+    exact related.resources
+  exact ⟨targetPath, framesEq, ⟨nextFocus, nextResources⟩, rank⟩
+
 /-- The first relation-wide one-source-step law for compiler-produced code.
 
 It dispatches solely from admission of the current node, derives every target
@@ -20899,15 +21194,31 @@ theorem ConcreteStructuredCodePointwiseRel.advance
       subst computedAfter
       exact ⟨0, target, targetPath,
         .saturatedReady site resolution sharedCapacity row ready, fun _ => rank⟩
+  | defaultOnlyCase supported =>
+      obtain ⟨targetPath, _sourceFramesEq, nextCore, rank⟩ :=
+        related.advance_defaultOnlyCase_of_step supported sourceStep
+      exact ⟨0, target, targetPath,
+        .code related.contextCaches nextCore, fun _ => rank⟩
+  | incPersistent =>
+      obtain ⟨targetPath, _sourceFramesEq, nextCore, rank⟩ :=
+        related.advance_incPersistent_of_step sourceStep
+      exact ⟨0, target, targetPath,
+        .code related.contextCaches nextCore, fun _ => rank⟩
+  | decPersistent =>
+      obtain ⟨targetPath, _sourceFramesEq, nextCore, rank⟩ :=
+        related.advance_decPersistent_of_step sourceStep
+      exact ⟨0, target, targetPath,
+        .code related.contextCaches nextCore, fun _ => rank⟩
 
 /-- Strong form of the pointwise ordinary-code step law.
 
 Besides classifying the generated successor, this theorem transports the
 static supported-call stack across the exact frame equalities established by
-direct values and returns.  Call staging leaves that stack unchanged; the
-subsequent entry laws push the caller.  Consequently every successor already
-belongs to the recursively stable module-wide relation.  The sole empty
-target path remains the ranked saturated-call staging transition. -/
+direct values, returns, default-only cases, and persistent ownership erasure.
+Call staging leaves that stack unchanged; the subsequent entry laws push the
+caller.  Consequently every successor already belongs to the recursively
+stable module-wide relation.  Every empty target path carries strict
+compiler-control-rank descent. -/
 theorem ConcreteStructuredCodePointwiseRel.advance_supportedGlobal
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
@@ -21067,6 +21378,72 @@ theorem ConcreteStructuredCodePointwiseRel.advance_supportedGlobal
       have nextSupported : nextOutcome.Supported :=
         ⟨source.frames, target.frames, supported, ready.resources.suspended,
           owns, nextAgrees⟩
+      exact ⟨0, target, targetPath,
+        nextOutcome.toSupportedGlobal related.contextCaches nextSupported,
+        fun _ => rank⟩
+  | defaultOnlyCase caseSupported =>
+      obtain ⟨targetPath, sourceFramesEq, nextCore, rank⟩ :=
+        related.advance_defaultOnlyCase_of_step caseSupported sourceStep
+      let nextOutcome :
+          ConcreteStructuredCodeStepOutcome program context functionCode
+            sourceModule sourceFunction targetModule hosts spec externals labels
+            entryRuntime entryStore entryWitness functionResult
+            callerExpectedResult facts remainingBytes sourceAfter target :=
+        .code related.contextCaches nextCore
+      have owns : nextOutcome.OwnsResourceStack
+          nextCore.resources.suspended := by
+        simpa [nextOutcome] using
+          (ConcreteStructuredCodeStepOutcome.OwnsResourceStack.code
+            (contextCaches := related.contextCaches) (related := nextCore))
+      obtain ⟨supportedAfter, agreesAfter⟩ :=
+        agrees.reindex sourceFramesEq (by rfl) nextCore.resources.suspended
+      have nextSupported : nextOutcome.Supported :=
+        ⟨sourceAfter.frames, target.frames, supportedAfter,
+          nextCore.resources.suspended, owns, agreesAfter⟩
+      exact ⟨0, target, targetPath,
+        nextOutcome.toSupportedGlobal related.contextCaches nextSupported,
+        fun _ => rank⟩
+  | incPersistent =>
+      obtain ⟨targetPath, sourceFramesEq, nextCore, rank⟩ :=
+        related.advance_incPersistent_of_step sourceStep
+      let nextOutcome :
+          ConcreteStructuredCodeStepOutcome program context functionCode
+            sourceModule sourceFunction targetModule hosts spec externals labels
+            entryRuntime entryStore entryWitness functionResult
+            callerExpectedResult facts remainingBytes sourceAfter target :=
+        .code related.contextCaches nextCore
+      have owns : nextOutcome.OwnsResourceStack
+          nextCore.resources.suspended := by
+        simpa [nextOutcome] using
+          (ConcreteStructuredCodeStepOutcome.OwnsResourceStack.code
+            (contextCaches := related.contextCaches) (related := nextCore))
+      obtain ⟨supportedAfter, agreesAfter⟩ :=
+        agrees.reindex sourceFramesEq (by rfl) nextCore.resources.suspended
+      have nextSupported : nextOutcome.Supported :=
+        ⟨sourceAfter.frames, target.frames, supportedAfter,
+          nextCore.resources.suspended, owns, agreesAfter⟩
+      exact ⟨0, target, targetPath,
+        nextOutcome.toSupportedGlobal related.contextCaches nextSupported,
+        fun _ => rank⟩
+  | decPersistent =>
+      obtain ⟨targetPath, sourceFramesEq, nextCore, rank⟩ :=
+        related.advance_decPersistent_of_step sourceStep
+      let nextOutcome :
+          ConcreteStructuredCodeStepOutcome program context functionCode
+            sourceModule sourceFunction targetModule hosts spec externals labels
+            entryRuntime entryStore entryWitness functionResult
+            callerExpectedResult facts remainingBytes sourceAfter target :=
+        .code related.contextCaches nextCore
+      have owns : nextOutcome.OwnsResourceStack
+          nextCore.resources.suspended := by
+        simpa [nextOutcome] using
+          (ConcreteStructuredCodeStepOutcome.OwnsResourceStack.code
+            (contextCaches := related.contextCaches) (related := nextCore))
+      obtain ⟨supportedAfter, agreesAfter⟩ :=
+        agrees.reindex sourceFramesEq (by rfl) nextCore.resources.suspended
+      have nextSupported : nextOutcome.Supported :=
+        ⟨sourceAfter.frames, target.frames, supportedAfter,
+          nextCore.resources.suspended, owns, agreesAfter⟩
       exact ⟨0, target, targetPath,
         nextOutcome.toSupportedGlobal related.contextCaches nextSupported,
         fun _ => rank⟩

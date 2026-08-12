@@ -6006,7 +6006,9 @@ combines the staging phase with recursive silence depth, proving strict descent
 for empty-argument staging, persistent ownership erasure, and nested
 default-only case erasure. `advance_defaultOnlyCase_ranked` packages that last
 zero-target transition locally. The relation-wide per-source-step `advance`
-law is now the next proof boundary.
+law now admits default-only cases and persistent `inc`/`dec` directly, derives
+the selected default branch from the successful ordinary source step, and
+preserves the complete resource stack through exact frame equality.
 `ConcreteStructuredFrameRel` supplies its previously missing recursive stack
 component. It relates each suspended source bind to the exact generated direct
 call frame or saturated call-plus-matcher-label protocol, indexes the head by
@@ -6115,11 +6117,14 @@ relation and proves exact observation agreement. The wrapper's `advance`
 theorem dispatches ordinary code, both generated call-entry protocols, and
 both return-pop protocols, returning
 `ConcreteStructuredSupportedGlobalOutcome` after a finite target path. The
-only empty target path is guarded by strict compiler-control-rank descent.
+compiler-erased default-only cases and persistent `inc`/`dec` are now ordinary
+code branches of this same dispatcher; their reflexive target paths are
+guarded by strict compiler-control-rank descent.
 Fresh admission for successor code is attached after that dynamic state is
-known rather than stored as a recursive certificate. The next widening adds
-the established external, lazy, case, and effect laws to this runnable sum and
-then packages the local classifier into the public finite-prefix theorem.
+known rather than stored as a recursive certificate. The next widening adds a
+non-erased operation family—preferably the staged pure external protocol—to
+this runnable sum and then packages the local classifier into the public
+finite-prefix theorem.
 Heap-valued cache misses remain the facts-aware transport redesign after
 saturated calls.
 
