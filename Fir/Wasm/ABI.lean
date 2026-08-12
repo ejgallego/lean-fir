@@ -359,7 +359,7 @@ def RuntimeOp.stem : RuntimeOp → String
 inductive ImportKey where
   | runtime (operation : RuntimeOp)
   | external (declaration : Name)
-  deriving Inhabited, BEq
+  deriving Inhabited, BEq, Hashable
 
 structure Import where
   key : ImportKey

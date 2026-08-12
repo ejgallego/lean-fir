@@ -63,6 +63,23 @@ def firstDuplicateFVar? : List FVarId → Option FVarId
   | fvarId :: rest =>
       if rest.any (·.name == fvarId.name) then some fvarId else firstDuplicateFVar? rest
 
+private def firstDuplicateIndexed? [BEq α] [Hashable α]
+    (values : Array α) : Option α := Id.run do
+  let mut seen := Std.HashSet.emptyWithCapacity values.size
+  let mut duplicates := Std.HashSet.emptyWithCapacity values.size
+  for value in values do
+    if seen.contains value then duplicates := duplicates.insert value
+    else seen := seen.insert value
+  for value in values do
+    if duplicates.contains value then return some value
+  return none
+
+private def hashSetOfArray [BEq α] [Hashable α]
+    (values : Array α) : Std.HashSet α :=
+  values.foldl
+    (init := Std.HashSet.emptyWithCapacity values.size) fun seen value =>
+      seen.insert value
+
 def RuntimeOp.isClosure : RuntimeOp → Bool
   | .closureApply .. => true
   | _ => false
@@ -171,20 +188,23 @@ def validateImportPrefix : List Import → List Import → Nat → Except Symbol
         throw (.invalidRuntimeImport index)
       validateImportPrefix expectedRest actualRest (index + 1)
 
-def validateModuleShape (module : Module) : Except SymbolicError Unit := do
-  let functionNames := module.functions.toList.map (·.name)
-  if let some name := firstDuplicate? functionNames then
+private def validateModuleShapeWithIndex (index : CheckIndex)
+    (module : Module) : Except SymbolicError Unit := do
+  let functionNames := module.functions.map (·.name)
+  if let some name := firstDuplicateIndexed? functionNames then
     throw (.duplicateFunction name)
-  if let some name := firstDuplicate? module.closureDispatch.toList then
+  if let some name := firstDuplicateIndexed? module.closureDispatch then
     throw (.duplicateClosureTarget name)
-  if let some descriptor := firstDuplicate? module.closureDescriptors.toList then
+  if let some descriptor := firstDuplicateIndexed? module.closureDescriptors then
     throw (.duplicateClosureDescriptor descriptor)
+  let closureTargets := hashSetOfArray module.closureDispatch
+  let closureDescriptors := hashSetOfArray module.closureDescriptors
   for operation in module.runtimeOperations do
     if let some name := operation.closureTarget? then
-      unless module.closureDispatch.contains name do
+      unless closureTargets.contains name do
         throw (.missingClosureTarget name)
     if let some descriptor := operation.closureDescriptor? then
-      unless module.closureDescriptors.contains descriptor do
+      unless closureDescriptors.contains descriptor do
         throw (.missingClosureDescriptor descriptor)
   let expectedOperations := collectRuntimeOps module.functions
   unless module.runtimeOperations == expectedOperations do
@@ -192,19 +212,20 @@ def validateModuleShape (module : Module) : Except SymbolicError Unit := do
   validateOperations module.runtimeOperations.toList 0
   let expectedImports := module.runtimeOperations.mapIdx runtimeImport
   validateImportPrefix expectedImports.toList module.imports.toList 0
-  unless listAllUnique (module.imports.toList.map (·.key)) do
+  if (firstDuplicateIndexed? (module.imports.map (·.key))).isSome then
     throw .duplicateImportKey
-  let importNames := module.imports.toList.map fun import_ =>
+  let importNames := module.imports.map fun import_ =>
     (import_.moduleName, import_.itemName)
-  if let some (moduleName, itemName) := firstDuplicate? importNames then
+  if let some (moduleName, itemName) := firstDuplicateIndexed? importNames then
     throw (.duplicateImportName moduleName itemName)
-  let externalNames := module.imports.toList.filterMap (·.declaration?)
-  if let some name := firstDuplicate? (externalNames ++ functionNames) then
+  let externalNames := module.imports.filterMap (·.declaration?)
+  if let some name := firstDuplicateIndexed? (externalNames ++ functionNames) then
     throw (.duplicateDeclaration name)
-  if let some name := firstDuplicate? module.exports.toList then
+  if let some name := firstDuplicateIndexed? module.exports then
     throw (.duplicateExport name)
+  let functionNameSet := hashSetOfArray functionNames
   for name in module.exports do
-    unless module.functions.any (·.name == name) do
+    unless functionNameSet.contains name do
       throw (.unknownExport name)
   if let some memory := module.memory then
     unless memory.pagesMin.toNat ≤ 65536 do
@@ -216,16 +237,19 @@ def validateModuleShape (module : Module) : Except SymbolicError Unit := do
     if let some exportName := memory.exportName then
       if module.exports.any (·.toString == exportName) then
         throw (.duplicateExport (Name.mkSimple exportName))
-  unless listAllUnique module.initializers.toList do
+  if (firstDuplicateIndexed? module.initializers).isSome then
     throw (.invalidInitializer module.initializers[0]!)
   for initializer in module.initializers do
-    let some signature := module.callSignature? (.declaration initializer) |
+    let some signature := index.callSignature? (.declaration initializer) |
       throw (.invalidInitializer initializer)
     unless signature.params.isEmpty && signature.results.size == 1 do
       throw (.invalidInitializer initializer)
   for (global, index) in module.globals.toList.zipIdx do
     unless global.kind.valueType == global.init.valueType do
       throw (.invalidGlobalInitializer index)
+
+def validateModuleShape (module : Module) : Except SymbolicError Unit :=
+  validateModuleShapeWithIndex module.checkIndex module
 
 abbrev OperandStack := List AbiKind
 
@@ -652,16 +676,17 @@ end
 
 private def validateFunctionWithIndex (index : CheckIndex)
     (module : Module) (function : Function) : Except SymbolicError Unit := do
-  let fvarIds := (function.params ++ function.locals).toList.map (·.fst)
-  if let some duplicate := firstDuplicateFVar? fvarIds then
+  let locals := function.params ++ function.locals
+  let fvarIds := locals.map (·.fst)
+  if let some duplicate := firstDuplicateIndexed? fvarIds then
     throw (.duplicateLocal function.name duplicate)
   let labels := collectLabels function.body
-  if let some duplicate := firstDuplicateFVar? labels then
+  if let some duplicate := firstDuplicateIndexed? labels.toArray then
     throw (.duplicateLabel function.name duplicate)
   let context : CheckContext := {
     module
     function
-    locals := (function.params ++ function.locals).toList
+    locals := locals.toList
     index? := some index }
   let flow ← checkInstructions context (some []) function.body
   if let some label := flow.branches.head? then
@@ -676,8 +701,8 @@ def validateFunction (module : Module) (function : Function) : Except SymbolicEr
 
 /-- Validate all module identities and every function's semantic operand stack. -/
 def validateModule (module : Module) : Except SymbolicError Unit := do
-  validateModuleShape module
   let index := module.checkIndex
+  validateModuleShapeWithIndex index module
   module.functions.forM (validateFunctionWithIndex index module)
 
 end Fir.Wasm
