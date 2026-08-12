@@ -14,6 +14,7 @@ import Fir.Wasm.Emit.ResidentMutation
 import Fir.Wasm.Emit.ResidentNatMod
 import Fir.Wasm.Emit.ResidentNatShift
 import Fir.Wasm.Emit.ResidentNumeric
+import Fir.Wasm.Emit.ResidentPlatform
 import Fir.Wasm.Emit.ResidentReferenceCount
 import Fir.Wasm.Emit.ResidentRelease
 import Fir.Wasm.Emit.ResidentRuntime
@@ -66,6 +67,7 @@ inductive Step where
   | natModStrict
   | natModAvailable
   | natShiftAvailable
+  | platformAvailable
   | usizeAvailable
   | directSelfTailCallsRequired
   | directSelfTailCallsAvailable
@@ -205,6 +207,9 @@ private def applyStep (validate : Bool) (step : Step) (module : Module) :
   | .natShiftAvailable =>
       transform "available Nat.shiftRight"
         (ResidentNatShift.internalizeAvailable · validate) module
+  | .platformAvailable =>
+      transform "available platform operations"
+        (ResidentPlatform.internalizeAvailable · validate) module
   | .usizeAvailable =>
       transform "available USize operations"
         (ResidentUSize.internalizeAvailable · validate) module
@@ -362,6 +367,7 @@ def closedApplicationExternalDeclarations : Array Name :=
     ResidentArray.availableExternalDeclarations ++
     ResidentByteArray.externalDeclarations ++
     #[ResidentNatMod.declaration, ResidentNatShift.declaration] ++
+    #[ResidentPlatform.declaration] ++
     ResidentUSize.externalDeclarations ++
     ResidentString.availableExternalDeclarations ++
     ResidentScalarBox.externalDeclarations ++
@@ -381,6 +387,7 @@ def closedApplicationFamilySteps : Array Step := #[
   .byteArraysAvailable,
   .natModAvailable,
   .natShiftAvailable,
+  .platformAvailable,
   .usizeAvailable,
   .stringOperationsAvailable,
   .stringLiterals,

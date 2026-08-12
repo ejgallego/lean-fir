@@ -12,6 +12,7 @@ import Fir.Wasm.Emit.ResidentLiteral
 import Fir.Wasm.Emit.ResidentMutation
 import Fir.Wasm.Emit.ResidentBigNumeric
 import Fir.Wasm.Emit.ResidentNumeric
+import Fir.Wasm.Emit.ResidentPlatform
 import Fir.Wasm.Emit.ResidentReferenceCount
 import Fir.Wasm.Emit.ResidentRelease
 import Fir.Wasm.Emit.ResidentRuntime
@@ -291,6 +292,21 @@ def emitResidentBigNumeric (path : System.FilePath) : IO Unit := do
   IO.println
     s!"resident-big-numeric: wrote {bytes.size} bytes to {path} and {manifestPath}"
 
+def emitResidentPlatform (path : System.FilePath) : IO Unit := do
+  let module ← IO.ofExcept <|
+    Fir.Wasm.Emit.ResidentPlatform.residentExampleModule.mapError fun error =>
+      s!"resident platform linking failed: {repr error}"
+  let bytes ← IO.ofExcept <| (Fir.Wasm.Emit.encode module).mapError fun error =>
+    s!"resident platform encoding failed: {repr error}"
+  if let some parent := path.parent then
+    IO.FS.createDirAll parent
+  IO.FS.writeBinFile path bytes
+  let manifestPath : System.FilePath := path.toString ++ ".json"
+  IO.FS.writeFile manifestPath <|
+    Fir.Wasm.Emit.ResidentPlatform.manifest.compress
+  IO.println
+    s!"resident-platform: wrote {bytes.size} bytes to {path} and {manifestPath}"
+
 def emitResidentString (path : System.FilePath) : IO Unit := do
   let module ← IO.ofExcept <|
     Fir.Wasm.Emit.ResidentString.residentExampleModule
@@ -395,6 +411,7 @@ def usage : String :=
     "       fir-wasm-artifact resident-cache <output.wasm>\n" ++
     "       fir-wasm-artifact resident-numeric <output.wasm>\n" ++
     "       fir-wasm-artifact resident-big-numeric <output.wasm>\n" ++
+    "       fir-wasm-artifact resident-platform <output.wasm>\n" ++
     "       fir-wasm-artifact resident-string <output.wasm>\n" ++
     "       fir-wasm-artifact resident-fallbacks <output.wasm>\n" ++
     "       fir-wasm-artifact resident-is-shared <output.wasm>\n" ++
@@ -464,6 +481,9 @@ def main (args : List String) : IO UInt32 := do
         return 0
     | ["resident-big-numeric", output] =>
         emitResidentBigNumeric output
+        return 0
+    | ["resident-platform", output] =>
+        emitResidentPlatform output
         return 0
     | ["resident-string", output] =>
         emitResidentString output

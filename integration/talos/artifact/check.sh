@@ -63,6 +63,9 @@ node run-resident-numeric.mjs _build/resident-numeric.wasm
 lake exe fir-wasm-artifact resident-big-numeric \
   _build/resident-big-numeric.wasm
 node run-resident-big-numeric.mjs _build/resident-big-numeric.wasm
+lake exe fir-wasm-artifact resident-platform \
+  _build/resident-platform.wasm
+node run-resident-platform.mjs _build/resident-platform.wasm
 lake exe fir-wasm-artifact resident-string \
   _build/resident-string.wasm
 node run-resident-string.mjs _build/resident-string.wasm \
@@ -555,6 +558,13 @@ lake exe fir-wasm-artifact resident-big-numeric \
 cmp "$first/resident/big-numeric.wasm" "$second/resident/big-numeric.wasm"
 cmp "$first/resident/big-numeric.wasm.json" \
   "$second/resident/big-numeric.wasm.json"
+lake exe fir-wasm-artifact resident-platform \
+  "$first/resident/platform.wasm"
+lake exe fir-wasm-artifact resident-platform \
+  "$second/resident/platform.wasm"
+cmp "$first/resident/platform.wasm" "$second/resident/platform.wasm"
+cmp "$first/resident/platform.wasm.json" \
+  "$second/resident/platform.wasm.json"
 lake exe fir-wasm-artifact resident-string \
   "$first/resident/string.wasm"
 lake exe fir-wasm-artifact resident-string \
