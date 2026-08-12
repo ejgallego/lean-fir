@@ -523,19 +523,32 @@ def compileEntryModuleWiseInternalized (entry : Name)
 /--
 Compile an entry and its recursively discovered source dependencies as one
 compiler unit, obtaining that unit from the exact final-impure SCCs observed
-before Lean's IR handoff. Recompiling the growing root set avoids having to
-equate independently generated binder identifiers while retaining private
-specializations as ordinary local declarations.
+before Lean's IR handoff. Dependency discovery compiles only each new frontier;
+one final compilation of the complete root set owns all generated binder
+identifiers and retains private specializations as ordinary local declarations.
 -/
+private partial def discoverFinalCapturedRoots (roots frontier : Array Name)
+    (retainedExternalNames : Array String) :
+    CoreM (Array Name × Option Fir.Validation.Lcnf.Artifact) := do
+  let some entry := frontier[0]? | return (roots, none)
+  let artifact ← compileEntryFinalCaptured entry (frontier.extract 1 frontier.size)
+  let additions ← discoveredSourceRoots artifact retainedExternalNames roots
+  if additions.isEmpty then
+    return (roots, if roots == frontier then some artifact else none)
+  discoverFinalCapturedRoots (roots ++ additions) additions retainedExternalNames
+
 private partial def compileEntryFinalCapturedInternalizedAux (entry : Name)
-    (dependencies : Array Name := #[]) (retainedExternalNames : Array String := #[]) :
+    (roots frontier : Array Name) (retainedExternalNames : Array String) :
     CoreM Fir.Validation.Lcnf.Artifact := do
-  let artifact ← compileEntryFinalCaptured entry dependencies
-  let additions ← discoveredSourceRoots artifact retainedExternalNames
-    (#[entry] ++ dependencies)
+  let (roots, completeArtifact?) ←
+    discoverFinalCapturedRoots roots frontier retainedExternalNames
+  let artifact ← match completeArtifact? with
+    | some artifact => pure artifact
+    | none => compileEntryFinalCaptured entry (roots.extract 1 roots.size)
+  let additions ← discoveredSourceRoots artifact retainedExternalNames roots
   if additions.isEmpty then
     return artifact
-  compileEntryFinalCapturedInternalizedAux entry (dependencies ++ additions)
+  compileEntryFinalCapturedInternalizedAux entry (roots ++ additions) additions
     retainedExternalNames
 
 def compileEntryFinalCapturedInternalized (entry : Name)
@@ -543,7 +556,8 @@ def compileEntryFinalCapturedInternalized (entry : Name)
     CoreM Fir.Validation.Lcnf.Artifact := withoutModifyingEnv do
   resetFinalImpureCapture
   LCNF.addPass ``finalImpureCaptureInstaller
-  compileEntryFinalCapturedInternalizedAux entry dependencies retainedExternalNames
+  let roots := #[entry] ++ dependencies
+  compileEntryFinalCapturedInternalizedAux entry roots roots retainedExternalNames
 
 /--
 Compile several public source entries in one exact final-LCNF unit, internalize
