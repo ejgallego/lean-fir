@@ -15,6 +15,40 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-SUPPORTED-GENERATED-CALL-STACK`.
+- Integration owner: `wasm-proof`; this lease makes generated call entry and
+  return recursively stable across arbitrarily nested supported callers.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`, rebased directly on `main` at `a03b034f`.
+- Published stack: active-slice record `40bc4ca6`, functional proof head
+  `e3f946b8`, Lean 4.33 suffix-contract alignment `bf92264b`, and clean ready
+  mailbox `2b528bd0`.
+- Static/dynamic alignment: `ConcreteStructuredSupportedFrameStack` retains
+  each suspended caller's supported-function identity, canonical cache table,
+  result ABI, and exact generated continuation-with-suffix proof. Its `Agrees`
+  relation ties that stack constructor-by-constructor to the existing dynamic
+  resource stack over the same source and structured-Wasm frames.
+- Transition closure: direct and exactly saturated generated calls push both
+  descriptions at entry. A yielded callee follows the established exact
+  direct or matcher-label pop path, reconstructs the caller core, and restores
+  `ConcreteStructuredSupportedGlobalOutcome`; the empty/root return is
+  impossible for a nonterminal source successor. No rule evaluates a callee
+  as a whole or assumes termination.
+- Contracts: none. This slice changes W6 proof code and W6 roadmaps only; it
+  changes no compiler/runtime semantics, concrete layout, symbolic-Wasm
+  surface, or resident-helper signature.
+- Acceptance: Talos setup at `0e05edbc`; Lean Beam update/sync/save with zero
+  errors; direct `FirTalos.ConcreteStructuredSimulation` build (3,119 jobs);
+  `git diff --check`; complete `make check` with 122 harness tests, 662 unique
+  cases, 1,968/1,968 equal comparisons, 6,829 machine steps, and zero
+  findings; and all 3,143 Talos jobs. No bug card was required.
+- Result: `main` fast-forwards through the clean ready mailbox. W6 next proves
+  the relation-wide pointwise advance theorem over direct values, staged and
+  entered generated calls, and returns, then widens the dispatcher to the
+  already proved external, lazy, case, effect, and ranked silent-step laws.
+
+## Latest completed integration lease
+
 - Milestone: `LEAN-4.33-UPGRADE`.
 - Integration owner: `integration`; this was the special one-off release lane
   for moving the repository, Talos bridge, and published browser contracts to
