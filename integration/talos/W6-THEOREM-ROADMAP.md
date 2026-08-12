@@ -1507,9 +1507,24 @@ acceptance tests pass.
      restores the caller after the exact generated target suffix. The root
      return case is impossible for an ordinary `.next` source step. No rule
      contains a callee evaluation, termination premise, future admission, or
-     target execution certificate. The next slice closes the pointwise
-     outcome law over this strong relation, then widens admission to the
-     established external, lazy, case, and effect laws.
+     target execution certificate. The pointwise strong closure is now
+     complete for this admitted code family.
+     `ConcreteStructuredCodePointwiseRel.advance_supportedGlobal` transports
+     aligned support through direct values and returns and preserves it across
+     generated call staging. `ConcreteStructuredRunnableOutcome` is the
+     branch-exact strong control sum: ordinary code carries only its current
+     local admission, while ready calls and yielded control reuse their exact
+     existing transition data. Its module-stable wrapper
+     `ConcreteStructuredRunnableGlobalOutcome` forgets to
+     `ConcreteStructuredSupportedGlobalOutcome`, preserves observations, and
+     has a constructor-complete one-source-step `advance` theorem. The theorem
+     returns the same admission-free supported relation after a finite target
+     path; an empty path is accepted only with strict compiler-rank descent.
+     Admission for a newly reached code node is attached after that dynamic
+     successor is known, so neither relation contains future execution or
+     termination evidence. The next slice widens the runnable constructors to
+     the established external, lazy, case, and effect laws, then packages the
+     local admission classifier into the public finite-prefix simulation.
      Heap-valued cache misses and target-only loop unwinding remain later
      widenings.
    - **W6.7f — public certificate-free finite-trace theorem.** From a

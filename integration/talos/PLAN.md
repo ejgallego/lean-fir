@@ -5832,7 +5832,7 @@ correctness becomes a corollary; a backward simulation is deliberately later.
 | W6.7b instruction-boundary Talos adequacy | complete | finite residual-instruction paths agree with Talos `exec` above one common fuel bound and recover exact `Wasm.run` exits |
 | W6.7c emitted structured target | complete | frame laws plus the explicit label/loop/call stack expose progress through calls, branches, loops, returns, and halting |
 | W6.7d structured terminal adequacy | complete | every reachable canonical-entry-to-halted path collapses to the exact instruction-boundary/Talos run; stack shape and arities are proved, not assumed at the public boundary |
-| W6.7e compiler relation and rank | in progress; direct return, silence, the complete resource-indexed direct-value spine, pure external-result lets, generated lazy-cache hits and non-heap misses, erased default-only cases, arbitrary normalized object-constructor and scalar `UInt8` dispatch, all persistent and ordinary ownership effects through explicit deletion, constructor-tag, both FVar/erased object-field mutation, `USize` and all supported packed-integer field mutations, and arbitrary finite nesting of generated named and exactly saturated closure calls are complete; the terminating fragment now starts at compiler-produced canonical source/target body entries | each admitted LCNF `executeStep` produces a finite structured path restoring compiled code, locals/environment, heap, continuation, trace, closure, ownership, cache, allocation, and ABI invariants; zero-step matches decrease a compiler-derived structural rank |
+| W6.7e compiler relation and rank | in progress; the branch-complete strong one-step dispatcher now closes direct values, generated named/saturated call staging and entry, and direct/saturated return-pop in one module-stable relation; direct return, silence, the complete resource-indexed direct-value spine, pure external-result lets, generated lazy-cache hits and non-heap misses, erased default-only cases, arbitrary normalized object-constructor and scalar `UInt8` dispatch, all persistent and ordinary ownership effects through explicit deletion, constructor-tag, both FVar/erased object-field mutation, `USize` and all supported packed-integer field mutations, and arbitrary finite nesting of generated named and exactly saturated closure calls are complete; the terminating fragment starts at compiler-produced canonical source/target body entries | each currently runnable LCNF `executeStep` produces a finite structured path restoring the aligned supported global relation; zero-step matches decrease a compiler-derived structural rank; newly reached code receives only a fresh local admission, never a future execution certificate |
 | W6.7f public finite-trace theorem | pending | `ConcreteSupportedExport` constructs `ConcreteFiniteTraceCorrect` for compiler-produced initial states without a target path, simulation/certificate, resolver package, or termination premise |
 | W6.7g corollaries | pending | finite whole-export correctness follows from W6.7d/f; infinite source progress and trace preservation follow from W6.7e/f; backward weak simulation remains explicitly deferred |
 
@@ -6104,9 +6104,22 @@ rules out an impossible root return, executes the exact two-step direct or
 `matcherCount + 5` saturated target suffix, and restores the caller in the same
 strong relation. These laws use only the ordinary current source step; they
 contain no whole-callee evaluation, termination premise, or execution
-certificate. The next pointwise closure theorem carries this support package
-through ordinary code/ready/returned outcomes, then widens admission over the
-already established external, lazy, case, and effect operations.
+certificate. That pointwise closure is now implemented.
+`ConcreteStructuredCodePointwiseRel.advance_supportedGlobal` carries the
+aligned support package through direct values and returns and preserves it
+during named/saturated call staging. `ConcreteStructuredRunnableOutcome`
+combines the branch-exact supported state with only the premise needed to run
+the current source node; its module-stable wrapper
+`ConcreteStructuredRunnableGlobalOutcome` both forgets to the existing strong
+relation and proves exact observation agreement. The wrapper's `advance`
+theorem dispatches ordinary code, both generated call-entry protocols, and
+both return-pop protocols, returning
+`ConcreteStructuredSupportedGlobalOutcome` after a finite target path. The
+only empty target path is guarded by strict compiler-control-rank descent.
+Fresh admission for successor code is attached after that dynamic state is
+known rather than stored as a recursive certificate. The next widening adds
+the established external, lazy, case, and effect laws to this runnable sum and
+then packages the local classifier into the public finite-prefix theorem.
 Heap-valued cache misses remain the facts-aware transport redesign after
 saturated calls.
 
