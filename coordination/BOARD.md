@@ -15,6 +15,40 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `VALIDATION-S6-NONLOCAL-CLOSURE-OWNERSHIP`.
+- Integration owner: `test-fixtures`, acting under the user-authorized
+  integration lease for this fixture-only milestone. The lane branch was
+  `validation/closure-ownership-fixtures` from `f996628c` through ready head
+  `e48e70d7`; functional head `4a17f43b` changes no shared contract.
+- Semantic pair: both cases capture the input `ByteArray` in a real partial
+  application, read through it, cross the linked `recordByteArray` effect, and
+  read again. Final use releases the capture before the effect and observes
+  byte `42` from the returned array. Retained use preserves the capture across
+  the effect, invokes the closure afterward, and observes the original byte
+  `0`, making incorrect shared mutation observable.
+- Executed evidence: the complete final/retained LCNF paths contain 39/54
+  transitions, one/two `fvar`, one/two `inc`, and two/four `dec`. Both pin the
+  exact five-dispatch order `ByteArray.get!`, `UInt8.toNat`,
+  `recordByteArrayImpl`, `ByteArray.get!`, `UInt8.toNat` plus exact event-time
+  original/updated ByteArray snapshots.
+- Contracts: none. The slice consumes accepted closure-application ownership,
+  effect projection, and V8 provider behavior. It neither consumes nor
+  duplicates the active argument-alias, IO-entry, error, or source-stream
+  contracts; their queued fixtures remain fenced.
+- Acceptance: Lean Beam update/sync/save at version 5 with zero diagnostics;
+  focused native/LCNF and native/LCNF/V8 probes; `git diff --check`; dependency
+  cone build; and complete `make check`. The final snapshot has 655 source
+  cases, 664 unique cases, 1,319 tier cases, 1,974/1,974 equal comparisons,
+  6,922 interpreter steps, 132/132 tag floors, 241/241 semantic domains, 1,310
+  native-oracle witnesses, and zero findings. V8 opened all 1,310 products
+  under strace. No bug card was required.
+- Result: `main` fast-forwards through the clean ready handoff and this
+  acceptance record. S6 becomes the landed nonlocal-memory baseline; caught
+  exceptions and explicit argument-alias materialization remain behind their
+  named shared contracts.
+
+## Latest completed integration lease
+
 - Milestone: `WASM-LEAN-OBJECT-FAMILY-CLOSURE-ABI`.
 - Integration owner: `wasm-gen` acting under the shared-compiler integration
   lease; the isolated branch was `integration/object-family-closure-call`

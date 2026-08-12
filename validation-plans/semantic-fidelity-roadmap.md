@@ -21,7 +21,7 @@ exception text, or allocator identity.
 | --- | --- | --- | --- |
 | A Memory fidelity | active, primary | Allocation, retain/release, alias topology, mutation, copy-on-write, reuse, and persistence | Carry the S6 alias/effect checkpoint forward, then select the next undominated lifetime interaction |
 | B Calls and control | active through A/B bridge | Application shapes, tail calls, recursion, branch topology, and depth behavior | Schedule B2 application shapes while preserving S4/B1 |
-| C Effects and termination | prepared through S6 | Ordered external effects, output, caught/uncaught exceptions, runtime faults, exits, and controlled divergence | Land the S6 ordered-effect ownership pair; queue caught exceptions only after the shared source-error contract is accepted by all participating backends |
+| C Effects and termination | landed through S6 | Ordered external effects, output, caught/uncaught exceptions, runtime faults, exits, and controlled divergence | Maintain the S6 ownership baseline; queue caught exceptions only after the shared source-error contract is accepted by all participating backends |
 | D Floating semantics | contract-blocked | Bit-exact entry/result transport, arithmetic, comparison, conversion, NaNs, infinities, subnormals, and signed zero | Resolve `FIR-BUG-wasm-none-float-runtime-gap` in the shared runtime before execution fixtures |
 | E Aggregates, erasure, and initialization | queued | Inductive shapes, erased fields, polymorphic dictionaries, arrays, constants, caches, and initialization order | Add a compact source-generated aggregate/erasure pair without duplicating direct-machine reset tests |
 | X Evidence and real-engine promotion | continuous | Exact traces/counts, semantic domains, native attestations, retained products, and V8 execution | Promote a representative pair from every eligible track |
@@ -99,7 +99,7 @@ near-synonym drift:
 | M3 Tail-call ownership (A/B bridge) | landed | `local-tail` supplies the control baseline; S4 adds a nested ByteArray owner whose unique path executes three in-place outer updates while its outside-aliased path allocates once and then reuses twice, with exact 121/126-step traces | Maintain the landed pair while S5 varies recursive release/reuse |
 | M4 Allocation and reuse | active through S5 | Constructor, String, ByteArray, reset/reuse, growth, and copy-on-write fixtures already provide a base | Use the first S5 pair to distinguish post-release constructor reuse from shared-path allocation |
 | M5 Recursive release | landed through S5c | S5c adds one `del` on both growth paths and released-leaf reuse only on the unique-owner path to the landed S5a/S5b release matrix | Select the smallest undominated lifetime interaction outside the covered replacement/release matrix |
-| M6 Nonlocal control | prepared through S6 | The fixture-only final-use/retained-use closure pair around the linked `recordByteArray` effect passes native/LCNF/V8 with exact 39/54-step traces | Land the pair, then add caught exceptions only after their shared protocol is accepted by all participating backends |
+| M6 Nonlocal control | landed through S6 | The fixture-only final-use/retained-use closure pair around the linked `recordByteArray` effect passes native/LCNF/V8 with exact 39/54-step traces | Add caught exceptions only after their shared protocol is accepted by all participating backends |
 | M7 Real-engine promotion | continuous | Scalar closures, the complete zero/one/two/three-use matrix, and all returned/consumed/ignored/read capture-topology pairs run through native/LCNF/V8 | Promote at least one representative pair per ownership domain whenever W7 support is linked |
 
 States are `queued`, `active`, `prepared`, `landed`, `parked`, or
@@ -436,6 +436,9 @@ aggregate unique cases, 1,319 tier cases, 1,974 equal comparisons, 6,922
 interpreter steps, 132 tag floors, and 241 conjunctive domains, with no
 finding. The active argument-alias and IO/error contracts remain outside this
 fixture-only slice.
+
+State: S6 landed on `main` through ready handoff `e48e70d7`; functional head
+`4a17f43b` changes no shared contract.
 
 ## Track B: calls and control
 
