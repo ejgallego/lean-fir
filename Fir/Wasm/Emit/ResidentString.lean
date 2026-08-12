@@ -57,6 +57,7 @@ private def byte0Param : FVarId := ⟨`byte0⟩
 private def byte1Param : FVarId := ⟨`byte1⟩
 private def byte2Param : FVarId := ⟨`byte2⟩
 private def byte3Param : FVarId := ⟨`byte3⟩
+private def usizeParam : FVarId := ⟨`usize⟩
 
 private def copyBytesLoop : FVarId := ⟨`copyBytesLoop⟩
 private def countLeadingLoop : FVarId := ⟨`countLeadingLoop⟩
@@ -99,6 +100,11 @@ private def effectiveEndLocal : FVarId := ⟨`effectiveEnd⟩
 private def copyLengthLocal : FVarId := ⟨`copyLength⟩
 private def decodeIndexLocal : FVarId := ⟨`decodeIndex⟩
 private def decodedCodePointLocal : FVarId := ⟨`decodedCodePoint⟩
+private def decimalRemainderLocal : FVarId := ⟨`decimalRemainder⟩
+private def decimalLengthLocal : FVarId := ⟨`decimalLength⟩
+private def decimalDigitLocal : FVarId := ⟨`decimalDigit⟩
+private def decimalStartedLocal : FVarId := ⟨`decimalStarted⟩
+private def decimalBorrowLocal : FVarId := ⟨`decimalBorrow⟩
 
 def validateName : Name := `fir_string_validate
 def byteLengthName : Name := `fir_string_byte_length
@@ -154,7 +160,8 @@ def availableExternalDeclarations : Array Name :=
     `String.append,
     `String.push,
     `String.Pos.next,
-    `String.decodeChar]
+    `String.decodeChar,
+    `USize.repr]
 
 def externalName (declaration : Name) : Name :=
   ResidentNumeric.externalName declaration
@@ -1434,6 +1441,140 @@ def decodeCharFunction : Function := {
       decodeWidthBranch 3 decodeThreeBytes <|
       decodeWidthBranch 4 decodeFourBytes [.unreachable]) }
 
+private def decimalPowers : List UInt64 :=
+  (List.range 20).reverse.map fun exponent => UInt64.ofNat (10 ^ exponent)
+
+private def decimalLoopLabel (index : Nat) : FVarId :=
+  ⟨Name.mkSimple s!"usizeReprDigitLoop{index}"⟩
+
+private def uint64Low (value : UInt64) : UInt32 :=
+  UInt32.ofNat value.toNat
+
+private def uint64High (value : UInt64) : UInt32 :=
+  UInt32.ofNat (value.toNat / UInt32.size)
+
+private def splitDecimalRemainder : List Instruction := [
+  .localGet decimalRemainderLocal,
+  .i32WrapI64 .uint32,
+  .localSet lowLocal,
+  .localGet decimalRemainderLocal,
+  .i64Const .uint64 32,
+  .i64ShrU,
+  .i32WrapI64 .uint32,
+  .localSet highLocal]
+
+private def combineDecimalRemainder : List Instruction := [
+  .localGet highLocal,
+  .i64ExtendI32U .uint64,
+  .i64Const .uint64 32,
+  .i64Shl,
+  .localGet lowLocal,
+  .i64ExtendI32U .uint64,
+  .i64Or,
+  .localSet decimalRemainderLocal]
+
+private def writeDecimalDigit : List Instruction := [
+  .localGet addressLocal,
+  .localGet decimalLengthLocal,
+  .i32Add,
+  .localGet decimalDigitLocal,
+  .i32Const .uint32 48,
+  .i32Add,
+  .i32Store8 .uint32 (u32 headerBytes),
+  .localGet decimalLengthLocal,
+  .i32Const .uint32 1,
+  .i32Add,
+  .localSet decimalLengthLocal,
+  .i32Const .uint32 1,
+  .localSet decimalStartedLocal]
+
+private def emitDecimalDigit (last : Bool) : List Instruction :=
+  if last then
+    writeDecimalDigit
+  else [
+    .localGet decimalStartedLocal,
+    .i32Const .uint32 0,
+    .i32Eq,
+    .ifElse
+      [.localGet decimalDigitLocal,
+        .i32Const .uint32 0,
+        .i32Eq,
+        .ifElse [] writeDecimalDigit]
+      writeDecimalDigit]
+
+private def decimalDigitBody (index : Nat) (divisor : UInt64) :
+    List Instruction := [
+  .i32Const .uint32 0,
+  .localSet decimalDigitLocal,
+  .loop (decimalLoopLabel index) ([
+    .localGet decimalRemainderLocal,
+    .i64Const .uint64 divisor,
+    .i64LtU,
+    .ifElse [] (
+      splitDecimalRemainder ++ [
+        .localGet lowLocal,
+        .i32Const .uint32 (uint64Low divisor),
+        .i32Sub,
+        .localSet lowLocal,
+        .localGet decimalRemainderLocal,
+        .i32WrapI64 .uint32,
+        .i32Const .uint32 (uint64Low divisor),
+        .i32LtU,
+        .localSet decimalBorrowLocal,
+        .localGet highLocal,
+        .i32Const .uint32 (uint64High divisor),
+        .i32Sub,
+        .localGet decimalBorrowLocal,
+        .i32Sub,
+        .localSet highLocal] ++
+      combineDecimalRemainder ++ [
+        .localGet decimalDigitLocal,
+        .i32Const .uint32 1,
+        .i32Add,
+        .localSet decimalDigitLocal,
+        .br (decimalLoopLabel index)])])] ++
+  emitDecimalDigit (index == 19)
+
+/-- Decimal rendering for the native word-sized integer frontier. -/
+def usizeReprFunction : Function := {
+  name := externalName `USize.repr
+  params := #[(usizeParam, .usize)]
+  results := #[.object]
+  locals := #[(addressLocal, .uint32), (savedScratchLocal, .uint64),
+    (objectResultLocal, .object), (decimalRemainderLocal, .uint64),
+    (decimalLengthLocal, .uint32), (decimalDigitLocal, .uint32),
+    (decimalStartedLocal, .uint32), (decimalBorrowLocal, .uint32),
+    (lowLocal, .uint32), (highLocal, .uint32)]
+  body := [
+    .i32Const .uint32 0,
+    .i64Load .uint64 0,
+    .localSet savedScratchLocal,
+    .i32Const .uint32 0,
+    .localGet usizeParam,
+    .i64Store .usize 0,
+    .i32Const .uint32 0,
+    .i64Load .uint64 0,
+    .localSet decimalRemainderLocal,
+    .i32Const .uint32 0,
+    .localGet savedScratchLocal,
+    .i64Store .uint64 0,
+    .i32Const .uint32 0,
+    .i32Const .uint32 20,
+    .call (.declaration allocateCapacityName),
+    .localSet addressLocal,
+    .i32Const .uint32 0,
+    .localSet decimalLengthLocal,
+    .i32Const .uint32 0,
+    .localSet decimalStartedLocal] ++
+    (decimalPowers.zipIdx.flatMap fun (divisor, index) =>
+      decimalDigitBody index divisor) ++ [
+    .localGet addressLocal,
+    .localGet decimalLengthLocal,
+    .i32Store .uint32 (u32 headerAux1Offset),
+    .localGet addressLocal,
+    .call (.declaration retypeObjectName),
+    .ret] }
+
 def externalFunctions : Array Function := #[
   pushnFunction,
   appendFunction,
@@ -1446,7 +1587,8 @@ def externalFunctions : Array Function := #[
   publicAppendFunction,
   publicPushFunction,
   positionNextFunction,
-  decodeCharFunction]
+  decodeCharFunction,
+  usizeReprFunction]
 
 def internalFunctions : Array Function := #[
   expectedAllocationFunction,
@@ -1517,6 +1659,8 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
     some {
       params := #[.object, .tobject, .erased]
       results := #[.uint32] }
+  else if declaration == `USize.repr then
+    some { params := #[.usize], results := #[.object] }
   else
     none
 
@@ -1634,6 +1778,8 @@ private def externalTypes? (declaration : Name) : Option ExternalTypes :=
     some {
       params := #[object, tobject, LCNF.ImpureType.erased]
       result := uint32 }
+  else if declaration == `USize.repr then
+    some { params := #[LCNF.ImpureType.usize], result := object }
   else
     none
 

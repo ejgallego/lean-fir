@@ -89,6 +89,7 @@ export async function checkResidentString({ bytes, manifest }) {
   const publicPush = optionalExport(instance, "fir_ext_String_push");
   const positionNext = optionalExport(instance, "fir_ext_String_Pos_next");
   const decodeChar = optionalExport(instance, "fir_ext_String_decodeChar");
+  const usizeRepr = exported(instance, "fir_ext_USize_repr");
 
   const zeroPushSource = stringInput(host, "unique");
   const zeroPushFrontier = instance.exports.fir_heap_frontier();
@@ -247,6 +248,20 @@ export async function checkResidentString({ bytes, manifest }) {
       stringInput(host, "A💩λ"), naturalInput(host, 1n), 0), 0x1f4a9);
     assert.equal(decodeChar(
       stringInput(host, "A💩λ"), naturalInput(host, 5n), 0), 0x03bb);
+  }
+  for (const value of [
+    0n,
+    1n,
+    9n,
+    10n,
+    307n,
+    0xffffffffn,
+    0x100000000n,
+    0x0123456789abcdefn,
+    0xffffffffffffffffn,
+  ]) {
+    assert.equal(stringValue(host, usizeRepr(value)), value.toString(),
+      `USize.repr(${value})`);
   }
 
   expectTrap(() =>

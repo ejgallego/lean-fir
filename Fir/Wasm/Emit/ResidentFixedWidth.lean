@@ -1,4 +1,5 @@
 import Fir.Wasm.Emit.ResidentNumeric
+import Fir.Wasm.Emit.ResidentUSize
 
 namespace Fir.Wasm.Emit.ResidentFixedWidth
 
@@ -42,6 +43,24 @@ private def objectResultLocal : FVarId := ⟨`objectResult⟩
 private def taggedResultLocal : FVarId := ⟨`taggedResult⟩
 private def lowLocal : FVarId := ⟨`low⟩
 private def highLocal : FVarId := ⟨`high⟩
+private def leftLowLocal : FVarId := ⟨`leftLow⟩
+private def leftHighLocal : FVarId := ⟨`leftHigh⟩
+private def rightLowLocal : FVarId := ⟨`rightLow⟩
+private def rightHighLocal : FVarId := ⟨`rightHigh⟩
+private def carryLocal : FVarId := ⟨`carry⟩
+private def borrowLocal : FVarId := ⟨`borrow⟩
+private def multiplierLocal : FVarId := ⟨`multiplier⟩
+private def multiplicandLocal : FVarId := ⟨`multiplicand⟩
+private def result32Local : FVarId := ⟨`result32⟩
+private def wordLocal : FVarId := ⟨`word⟩
+private def countLocal : FVarId := ⟨`count⟩
+private def indexLocal : FVarId := ⟨`index⟩
+private def remainder64Local : FVarId := ⟨`remainder64⟩
+private def remainderLowLocal : FVarId := ⟨`remainderLow⟩
+private def remainderHighLocal : FVarId := ⟨`remainderHigh⟩
+private def multiplyLoop : FVarId := ⟨`fixedWidthMultiplyLoop⟩
+private def ctzLoop : FVarId := ⟨`fixedWidthCtzLoop⟩
+private def modLoop : FVarId := ⟨`fixedWidthModLoop⟩
 
 def externalDeclarations : Array Name := #[
   `UInt8.ofNat,
@@ -59,6 +78,8 @@ def externalDeclarations : Array Name := #[
   `UInt16.toUInt64,
   `UInt16.land,
   `UInt16.xor,
+  `UInt16.shiftLeft,
+  `UInt16.lor,
   `UInt32.ofNat,
   `UInt32.toNat,
   `UInt32.toUInt8,
@@ -72,13 +93,23 @@ def externalDeclarations : Array Name := #[
   `UInt32.shiftRight,
   `UInt32.decLt,
   `UInt32.decLe,
+  `UInt32.shiftLeft,
+  `UInt32.lor,
+  `UInt32.mul,
   `UInt64.ofNat,
   `UInt64.toUInt8,
   `UInt64.toUInt16,
   `UInt64.toUSize,
   `UInt64.shiftLeft,
   `UInt64.shiftRight,
-  `UInt64.decEq]
+  `UInt64.decEq,
+  `UInt64.add,
+  `UInt64.sub,
+  `UInt64.land,
+  `UInt64.lor,
+  `UInt64.xor,
+  `UInt64.ctzFast,
+  `UInt64.mod]
 
 def externalName (declaration : Name) : Name :=
   Name.mkSimple s!"fir_ext_{declaration.toString.replace "." "_"}"
@@ -240,6 +271,39 @@ def xorFunction : Function := {
       (intersectionLocal, .uint32), (savedScratchLocal, .uint64),
       (uint16ResultLocal, .uint16)] }
 
+def shiftLeftFunction : Function :=
+  retypedI32Function `UInt16.shiftLeft
+    #[(leftParam, .uint16), (rightParam, .uint16)] .uint16 [
+    .localGet leftParam,
+    .i64ExtendI32U .uint64,
+    .localGet rightParam,
+    .i32Const .uint32 16,
+    .i32RemU,
+    .i64ExtendI32U .uint64,
+    .i64Shl,
+    .i32WrapI64 .uint32,
+    .i32Const .uint32 0xffff,
+    .i32And]
+
+/-- `a or b = a + b - (a and b)` in the wasm32 bit ring. -/
+def lorFunction : Function := {
+  (retypedI32Function `UInt16.lor
+    #[(leftParam, .uint16), (rightParam, .uint16)] .uint16 [
+    .localGet leftParam,
+    .localGet rightParam,
+    .i32Add,
+    .localSet sumLocal,
+    .localGet leftParam,
+    .localGet rightParam,
+    .i32And,
+    .localSet intersectionLocal,
+    .localGet sumLocal,
+    .localGet intersectionLocal,
+    .i32Sub]) with
+    locals := #[(rawLocal, .uint32), (sumLocal, .uint32),
+      (intersectionLocal, .uint32), (savedScratchLocal, .uint64),
+      (uint16ResultLocal, .uint16)] }
+
 def uint8OfNatFunction : Function :=
   ofNat32Function `UInt8.ofNat .uint8 0xff
 
@@ -339,6 +403,75 @@ def uint32DecLeFunction : Function :=
       .i32Const .uint32 0,
       .i32Eq]
 
+def uint32ShiftLeftFunction : Function :=
+  retypedI32Function `UInt32.shiftLeft
+    #[(leftParam, .uint32), (rightParam, .uint32)] .uint32 [
+    .localGet leftParam,
+    .i64ExtendI32U .uint64,
+    .localGet rightParam,
+    .i32Const .uint32 32,
+    .i32RemU,
+    .i64ExtendI32U .uint64,
+    .i64Shl,
+    .i32WrapI64 .uint32]
+
+def uint32LorFunction : Function := {
+  (retypedI32Function `UInt32.lor
+    #[(leftParam, .uint32), (rightParam, .uint32)] .uint32 [
+    .localGet leftParam,
+    .localGet rightParam,
+    .i32Add,
+    .localSet sumLocal,
+    .localGet leftParam,
+    .localGet rightParam,
+    .i32And,
+    .localSet intersectionLocal,
+    .localGet sumLocal,
+    .localGet intersectionLocal,
+    .i32Sub]) with
+    locals := #[(rawLocal, .uint32), (sumLocal, .uint32),
+      (intersectionLocal, .uint32), (savedScratchLocal, .uint64),
+      (uint32ResultLocal, .uint32)] }
+
+/-- Shift-and-add multiplication in the modulo-2^32 ring. -/
+def uint32MulFunction : Function := {
+  (retypedI32Function `UInt32.mul
+    #[(leftParam, .uint32), (rightParam, .uint32)] .uint32 [
+    .localGet leftParam,
+    .localSet multiplicandLocal,
+    .localGet rightParam,
+    .localSet multiplierLocal,
+    .i32Const .uint32 0,
+    .localSet result32Local,
+    .loop multiplyLoop [
+      .localGet multiplierLocal,
+      .i32Const .uint32 0,
+      .i32Eq,
+      .ifElse [] [
+        .localGet multiplierLocal,
+        .i32Const .uint32 1,
+        .i32And,
+        .i32Const .uint32 0,
+        .i32Eq,
+        .ifElse [] [
+          .localGet result32Local,
+          .localGet multiplicandLocal,
+          .i32Add,
+          .localSet result32Local],
+        .localGet multiplicandLocal,
+        .localGet multiplicandLocal,
+        .i32Add,
+        .localSet multiplicandLocal,
+        .localGet multiplierLocal,
+        .i32Const .uint32 1,
+        .i32ShrU,
+        .localSet multiplierLocal,
+        .br multiplyLoop]],
+    .localGet result32Local]) with
+    locals := #[(rawLocal, .uint32), (multiplierLocal, .uint32),
+      (multiplicandLocal, .uint32), (result32Local, .uint32),
+      (savedScratchLocal, .uint64), (uint32ResultLocal, .uint32)] }
+
 def uint64OfNatFunction : Function := {
   name := externalName `UInt64.ofNat
   params := #[(valueParam, .tobject)]
@@ -405,6 +538,247 @@ def uint64DecEqFunction : Function :=
       .i32Eq,
       .i32And]
 
+private def splitUInt64 (source low high : FVarId) : List Instruction := [
+  .localGet source,
+  .i32WrapI64 .uint32,
+  .localSet low,
+  .localGet source,
+  .i64Const .uint64 32,
+  .i64ShrU,
+  .i32WrapI64 .uint32,
+  .localSet high]
+
+private def combineUInt64 (low high : FVarId) : List Instruction := [
+  .localGet high,
+  .i64ExtendI32U .uint64,
+  .i64Const .uint64 32,
+  .i64Shl,
+  .localGet low,
+  .i64ExtendI32U .uint64,
+  .i64Or]
+
+private def uint64BinaryLocals : Array (FVarId × AbiKind) := #[
+  (leftLowLocal, .uint32), (leftHighLocal, .uint32),
+  (rightLowLocal, .uint32), (rightHighLocal, .uint32),
+  (lowLocal, .uint32), (highLocal, .uint32),
+  (raw64Local, .uint64), (savedScratchLocal, .uint64),
+  (uint64ResultLocal, .uint64)]
+
+def uint64AddFunction : Function := {
+  (retypedI64Function `UInt64.add
+    #[(leftParam, .uint64), (rightParam, .uint64)] .uint64 <|
+    splitUInt64 leftParam leftLowLocal leftHighLocal ++
+    splitUInt64 rightParam rightLowLocal rightHighLocal ++ [
+      .localGet leftLowLocal,
+      .localGet rightLowLocal,
+      .i32Add,
+      .localSet lowLocal,
+      .localGet lowLocal,
+      .localGet leftLowLocal,
+      .i32LtU,
+      .localSet carryLocal,
+      .localGet leftHighLocal,
+      .localGet rightHighLocal,
+      .i32Add,
+      .localGet carryLocal,
+      .i32Add,
+      .localSet highLocal] ++ combineUInt64 lowLocal highLocal) with
+    locals := uint64BinaryLocals.insertIdx 6 (carryLocal, .uint32) }
+
+def uint64SubFunction : Function := {
+  (retypedI64Function `UInt64.sub
+    #[(leftParam, .uint64), (rightParam, .uint64)] .uint64 <|
+    splitUInt64 leftParam leftLowLocal leftHighLocal ++
+    splitUInt64 rightParam rightLowLocal rightHighLocal ++ [
+      .localGet leftLowLocal,
+      .localGet rightLowLocal,
+      .i32Sub,
+      .localSet lowLocal,
+      .localGet leftLowLocal,
+      .localGet rightLowLocal,
+      .i32LtU,
+      .localSet borrowLocal,
+      .localGet leftHighLocal,
+      .localGet rightHighLocal,
+      .i32Sub,
+      .localGet borrowLocal,
+      .i32Sub,
+      .localSet highLocal] ++ combineUInt64 lowLocal highLocal) with
+    locals := uint64BinaryLocals.insertIdx 6 (borrowLocal, .uint32) }
+
+def uint64LandFunction : Function := {
+  (retypedI64Function `UInt64.land
+    #[(leftParam, .uint64), (rightParam, .uint64)] .uint64 <|
+    splitUInt64 leftParam leftLowLocal leftHighLocal ++
+    splitUInt64 rightParam rightLowLocal rightHighLocal ++ [
+      .localGet leftLowLocal,
+      .localGet rightLowLocal,
+      .i32And,
+      .localSet lowLocal,
+      .localGet leftHighLocal,
+      .localGet rightHighLocal,
+      .i32And,
+      .localSet highLocal] ++ combineUInt64 lowLocal highLocal) with
+    locals := uint64BinaryLocals }
+
+def uint64LorFunction : Function :=
+  retypedI64Function `UInt64.lor
+    #[(leftParam, .uint64), (rightParam, .uint64)] .uint64 [
+    .localGet leftParam,
+    .localGet rightParam,
+    .i64Or]
+
+def uint64XorFunction : Function := {
+  (retypedI64Function `UInt64.xor
+    #[(leftParam, .uint64), (rightParam, .uint64)] .uint64 <|
+    splitUInt64 leftParam leftLowLocal leftHighLocal ++
+    splitUInt64 rightParam rightLowLocal rightHighLocal ++ [
+      .localGet leftLowLocal,
+      .localGet rightLowLocal,
+      .i32Add,
+      .localGet leftLowLocal,
+      .localGet rightLowLocal,
+      .i32And,
+      .localGet leftLowLocal,
+      .localGet rightLowLocal,
+      .i32And,
+      .i32Add,
+      .i32Sub,
+      .localSet lowLocal,
+      .localGet leftHighLocal,
+      .localGet rightHighLocal,
+      .i32Add,
+      .localGet leftHighLocal,
+      .localGet rightHighLocal,
+      .i32And,
+      .localGet leftHighLocal,
+      .localGet rightHighLocal,
+      .i32And,
+      .i32Add,
+      .i32Sub,
+      .localSet highLocal] ++ combineUInt64 lowLocal highLocal) with
+    locals := uint64BinaryLocals }
+
+def uint64CtzFastFunction : Function := {
+  (retypedI64Function `UInt64.ctzFast #[(valueParam, .uint64)] .uint64 <|
+    splitUInt64 valueParam lowLocal highLocal ++ [
+      .i32Const .uint32 64,
+      .localSet countLocal,
+      .localGet lowLocal,
+      .i32Const .uint32 0,
+      .i32Eq,
+      .localGet highLocal,
+      .i32Const .uint32 0,
+      .i32Eq,
+      .i32And,
+      .ifElse
+        []
+        [.localGet lowLocal,
+          .i32Const .uint32 0,
+          .i32Eq,
+          .ifElse
+            [.localGet highLocal,
+              .localSet wordLocal,
+              .i32Const .uint32 32,
+              .localSet countLocal]
+            [.localGet lowLocal,
+              .localSet wordLocal,
+              .i32Const .uint32 0,
+              .localSet countLocal],
+          .loop ctzLoop [
+            .localGet wordLocal,
+            .i32Const .uint32 1,
+            .i32And,
+            .i32Const .uint32 0,
+            .i32Eq,
+            .ifElse
+              [.localGet wordLocal,
+                .i32Const .uint32 1,
+                .i32ShrU,
+                .localSet wordLocal,
+                .localGet countLocal,
+                .i32Const .uint32 1,
+                .i32Add,
+                .localSet countLocal,
+                .br ctzLoop]
+              []],
+          ],
+      .localGet countLocal,
+      .i64ExtendI32U .uint64]) with
+    locals := #[(lowLocal, .uint32), (highLocal, .uint32),
+      (wordLocal, .uint32), (countLocal, .uint32),
+      (raw64Local, .uint64), (savedScratchLocal, .uint64),
+      (uint64ResultLocal, .uint64)] }
+
+/-- Restoring unsigned remainder; Lean specifies `a % 0 = a`. -/
+def uint64ModFunction : Function := {
+  (retypedI64Function `UInt64.mod
+    #[(leftParam, .uint64), (rightParam, .uint64)] .uint64 [
+    .localGet rightParam,
+    .i64Const .uint64 1,
+    .i64LtU,
+    .ifElse
+      [.localGet leftParam,
+        .localSet remainder64Local]
+      [.i64Const .uint64 0,
+        .localSet remainder64Local,
+        .i32Const .uint32 64,
+        .localSet indexLocal,
+        .loop modLoop [
+          .localGet indexLocal,
+          .i32Const .uint32 1,
+          .i32Sub,
+          .localSet indexLocal,
+          .localGet remainder64Local,
+          .i64Const .uint64 1,
+          .i64Shl,
+          .localGet leftParam,
+          .localGet indexLocal,
+          .i64ExtendI32U .uint64,
+          .i64ShrU,
+          .i32WrapI64 .uint32,
+          .i32Const .uint32 1,
+          .i32And,
+          .i64ExtendI32U .uint64,
+          .i64Or,
+          .localSet remainder64Local,
+          .localGet remainder64Local,
+          .localGet rightParam,
+          .i64LtU,
+          .i32Const .uint32 0,
+          .i32Eq,
+          .ifElse
+            (splitUInt64 remainder64Local remainderLowLocal remainderHighLocal ++
+              splitUInt64 rightParam rightLowLocal rightHighLocal ++ [
+                .localGet remainderLowLocal,
+                .localGet rightLowLocal,
+                .i32Sub,
+                .localSet lowLocal,
+                .localGet remainderLowLocal,
+                .localGet rightLowLocal,
+                .i32LtU,
+                .localSet borrowLocal,
+                .localGet remainderHighLocal,
+                .localGet rightHighLocal,
+                .i32Sub,
+                .localGet borrowLocal,
+                .i32Sub,
+                .localSet highLocal] ++
+              combineUInt64 lowLocal highLocal ++
+              [.localSet remainder64Local])
+            [],
+          .localGet indexLocal,
+          .i32Const .uint32 0,
+          .i32Eq,
+          .ifElse [] [.br modLoop]]],
+    .localGet remainder64Local]) with
+    locals := #[(indexLocal, .uint32), (remainder64Local, .uint64),
+      (remainderLowLocal, .uint32), (remainderHighLocal, .uint32),
+      (rightLowLocal, .uint32), (rightHighLocal, .uint32),
+      (lowLocal, .uint32), (highLocal, .uint32), (borrowLocal, .uint32),
+      (raw64Local, .uint64), (savedScratchLocal, .uint64),
+      (uint64ResultLocal, .uint64)] }
+
 def functions : Array Function := #[
   uint8OfNatFunction,
   uint8ToNatFunction,
@@ -421,6 +795,8 @@ def functions : Array Function := #[
   uint16ToUInt64Function,
   landFunction,
   xorFunction,
+  shiftLeftFunction,
+  lorFunction,
   uint32OfNatFunction,
   uint32ToNatFunction,
   uint32ToUInt8Function,
@@ -434,13 +810,23 @@ def functions : Array Function := #[
   uint32ShiftRightFunction,
   uint32DecLtFunction,
   uint32DecLeFunction,
+  uint32ShiftLeftFunction,
+  uint32LorFunction,
+  uint32MulFunction,
   uint64OfNatFunction,
   uint64ToUInt8Function,
   uint64ToUInt16Function,
   uint64ToUSizeFunction,
   uint64ShiftLeftFunction,
   uint64ShiftRightFunction,
-  uint64DecEqFunction]
+  uint64DecEqFunction,
+  uint64AddFunction,
+  uint64SubFunction,
+  uint64LandFunction,
+  uint64LorFunction,
+  uint64XorFunction,
+  uint64CtzFastFunction,
+  uint64ModFunction]
 
 private def expectedSignature? (declaration : Name) : Option Signature :=
   if #[`UInt8.decEq, `UInt8.decLt].contains declaration then
@@ -455,7 +841,8 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
     some { params := #[.uint8], results := #[.uint64] }
   else if declaration == `UInt8.toUSize then
     some { params := #[.uint8], results := #[.usize] }
-  else if #[`UInt16.shiftRight, `UInt16.land, `UInt16.xor].contains declaration then
+  else if #[`UInt16.shiftRight, `UInt16.land, `UInt16.xor,
+      `UInt16.shiftLeft, `UInt16.lor].contains declaration then
     some { params := #[.uint16, .uint16], results := #[.uint16] }
   else if declaration == `UInt16.ofNat then
     some { params := #[.tobject], results := #[.uint16] }
@@ -468,7 +855,8 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
   else if declaration == `UInt16.toUInt64 then
     some { params := #[.uint16], results := #[.uint64] }
   else if #[`UInt32.add, `UInt32.sub, `UInt32.land, `UInt32.xor,
-      `UInt32.shiftRight].contains declaration then
+      `UInt32.shiftRight, `UInt32.shiftLeft, `UInt32.lor,
+      `UInt32.mul].contains declaration then
     some { params := #[.uint32, .uint32], results := #[.uint32] }
   else if #[`UInt32.decLt, `UInt32.decLe].contains declaration then
     some { params := #[.uint32, .uint32], results := #[.uint8] }
@@ -484,8 +872,11 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
     some { params := #[.uint32], results := #[.uint64] }
   else if declaration == `UInt32.toUSize then
     some { params := #[.uint32], results := #[.usize] }
-  else if #[`UInt64.shiftLeft, `UInt64.shiftRight].contains declaration then
+  else if #[`UInt64.shiftLeft, `UInt64.shiftRight, `UInt64.add, `UInt64.sub,
+      `UInt64.land, `UInt64.lor, `UInt64.xor, `UInt64.mod].contains declaration then
     some { params := #[.uint64, .uint64], results := #[.uint64] }
+  else if declaration == `UInt64.ctzFast then
+    some { params := #[.uint64], results := #[.uint64] }
   else if declaration == `UInt64.decEq then
     some { params := #[.uint64, .uint64], results := #[.uint8] }
   else if declaration == `UInt64.ofNat then
@@ -583,13 +974,16 @@ private def impureType (kind : AbiKind) : Expr :=
   | .usize => LCNF.ImpureType.usize
   | .tagged => LCNF.ImpureType.tagged
   | .tobject => LCNF.ImpureType.tobject
+  | .erased => LCNF.ImpureType.erased
   | _ => LCNF.ImpureType.tobject
 
-private def externalTypes (declaration : Name) : ExternalTypes :=
-  let signature := (expectedSignature? declaration).get!
+private def externalTypesForSignature (signature : Signature) : ExternalTypes :=
   {
     params := signature.params.map impureType
     result := impureType signature.results[0]! }
+
+private def externalTypes (declaration : Name) : ExternalTypes :=
+  externalTypesForSignature (expectedSignature? declaration).get!
 
 private def externalImport (declaration : Name) : Import := {
   key := .external declaration
@@ -598,17 +992,29 @@ private def externalImport (declaration : Name) : Import := {
   signature := (expectedSignature? declaration).get!
   externalTypes? := some (externalTypes declaration) }
 
+private def usizeExternalImport (declaration : Name) : Import := {
+  key := .external declaration
+  moduleName := "lean.extern"
+  itemName := declaration.toString
+  signature := (ResidentUSize.expectedSignature? declaration).get!
+  externalTypes? := some <| externalTypesForSignature
+    (ResidentUSize.expectedSignature? declaration).get! }
+
 def residentExampleModule : Except String Module := do
   let numeric ← ResidentNumeric.residentExampleModule
   let module : Module := {
     numeric with
-    imports := numeric.imports ++ externalDeclarations.map externalImport }
-  internalizeSelected module externalDeclarations true
+    imports := numeric.imports ++ externalDeclarations.map externalImport ++
+      ResidentUSize.externalDeclarations.map usizeExternalImport }
+  let module ← internalizeSelected module externalDeclarations true
     |>.mapError fun error => s!"fixed-width: {repr error}"
+  ResidentUSize.internalizeAvailable module
+    |>.mapError fun error => s!"usize: {repr error}"
 
 def manifest : Json :=
   Json.mkObj [
-    ("entries", Json.arr <| externalDeclarations.map fun declaration =>
+    ("entries", Json.arr <| (externalDeclarations ++
+        ResidentUSize.externalDeclarations).map fun declaration =>
       Json.mkObj [
         ("sourceEntry", declaration.toString),
         ("entry", externalName declaration |>.toString)]),
@@ -620,6 +1026,8 @@ def manifest : Json :=
       module.imports.isEmpty && module.runtimeOperations.isEmpty &&
       externalDeclarations.all fun declaration =>
         module.exports.contains (externalName declaration) &&
+      ResidentUSize.externalDeclarations.all fun declaration =>
+        module.exports.contains (ResidentUSize.externalName declaration) &&
       module.memory == some ResidentRuntime.residentMemory &&
       (Fir.Wasm.validateModule module |>.isOk) &&
       (Fir.Wasm.Emit.encode module |>.isOk)

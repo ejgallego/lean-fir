@@ -7,6 +7,10 @@ function equal(actual, expected, message) {
     `${message}: expected ${expected}, got ${actual}`);
 }
 
+function u64(value) {
+  return BigInt.asUintN(64, value);
+}
+
 function naturalValue(memory, physical) {
   const word = physical >>> 0;
   if ((word & 1) === 1) return BigInt(word >>> 1);
@@ -38,6 +42,8 @@ export async function checkResidentFixedWidth(bytes) {
     "fir_ext_UInt16_toUInt64",
     "fir_ext_UInt16_land",
     "fir_ext_UInt16_xor",
+    "fir_ext_UInt16_shiftLeft",
+    "fir_ext_UInt16_lor",
     "fir_ext_UInt32_ofNat",
     "fir_ext_UInt32_toNat",
     "fir_ext_UInt32_toUInt8",
@@ -51,6 +57,9 @@ export async function checkResidentFixedWidth(bytes) {
     "fir_ext_UInt32_shiftRight",
     "fir_ext_UInt32_decLt",
     "fir_ext_UInt32_decLe",
+    "fir_ext_UInt32_shiftLeft",
+    "fir_ext_UInt32_lor",
+    "fir_ext_UInt32_mul",
     "fir_ext_UInt64_ofNat",
     "fir_ext_UInt64_toUInt8",
     "fir_ext_UInt64_toUInt16",
@@ -58,6 +67,27 @@ export async function checkResidentFixedWidth(bytes) {
     "fir_ext_UInt64_shiftLeft",
     "fir_ext_UInt64_shiftRight",
     "fir_ext_UInt64_decEq",
+    "fir_ext_UInt64_add",
+    "fir_ext_UInt64_sub",
+    "fir_ext_UInt64_land",
+    "fir_ext_UInt64_lor",
+    "fir_ext_UInt64_xor",
+    "fir_ext_UInt64_ctzFast",
+    "fir_ext_UInt64_mod",
+    "fir_ext_USize_decLt",
+    "fir_ext_USize_add",
+    "fir_ext_USize_sub",
+    "fir_ext_USize_ofNat",
+    "fir_ext_USize_toUInt32",
+    "fir_ext_USize_toNat",
+    "fir_ext_USize_land",
+    "fir_ext_USize_shiftLeft",
+    "fir_ext_USize_decLe",
+    "fir_ext_USize_decEq",
+    "fir_ext_USize_complement",
+    "fir_ext_USize_shiftRight",
+    "fir_ext_USize_mod",
+    "fir_ext_USize_ofNatLT",
   ]) {
     equal(typeof exports[name], "function", `missing export ${name}`);
   }
@@ -89,6 +119,10 @@ export async function checkResidentFixedWidth(bytes) {
     "UInt16.land");
   equal(exports.fir_ext_UInt16_xor(0xa55a, 0x0ff0) >>> 0, 0xaaaa,
     "UInt16.xor");
+  equal(exports.fir_ext_UInt16_shiftLeft(0x8001, 17) >>> 0, 2,
+    "UInt16.shiftLeft masks count");
+  equal(exports.fir_ext_UInt16_lor(0xa500, 0x0a5a) >>> 0, 0xaf5a,
+    "UInt16.lor");
 
   for (const value of [0, 1, 0x7f, 0xff]) {
     const natural = 2 * value + 1;
@@ -146,6 +180,19 @@ export async function checkResidentFixedWidth(bytes) {
     "UInt32.decLe equal");
   equal(exports.fir_ext_UInt32_decLe(0xffffffff, 0), 0,
     "UInt32.decLe false");
+  equal(exports.fir_ext_UInt32_shiftLeft(0x80000001, 33) >>> 0, 2,
+    "UInt32.shiftLeft masks count");
+  equal(exports.fir_ext_UInt32_lor(0xa500a500, 0x0a5a0a5a) >>> 0,
+    0xaf5aaf5a, "UInt32.lor");
+  for (const [left, right] of [
+    [0, 0],
+    [0xffffffff, 0],
+    [0xffffffff, 2],
+    [0x12345678, 0x9abcdef0],
+  ]) {
+    equal(exports.fir_ext_UInt32_mul(left, right) >>> 0,
+      Math.imul(left, right) >>> 0, `UInt32.mul(${left}, ${right})`);
+  }
 
   const wideNatural = exports.fir_numeric_make_natural(0x89abcdef, 0x01234567);
   const wide = 0x0123456789abcdefn;
@@ -162,6 +209,99 @@ export async function checkResidentFixedWidth(bytes) {
   equal(exports.fir_ext_UInt64_decEq(wide, wide), 1, "UInt64.decEq equal");
   equal(exports.fir_ext_UInt64_decEq(wide, wide + 1n), 0,
     "UInt64.decEq unequal");
+
+  const mask64 = 0xffffffffffffffffn;
+  equal(exports.fir_ext_UInt64_add(mask64, 2n), 1n,
+    "UInt64.add wraps");
+  equal(u64(exports.fir_ext_UInt64_sub(0n, 1n)), mask64,
+    "UInt64.sub wraps");
+  equal(u64(exports.fir_ext_UInt64_land(
+    0xa55aa55aa55aa55an, 0x0ff00ff00ff00ff0n)),
+    0x0550055005500550n, "UInt64.land");
+  equal(u64(exports.fir_ext_UInt64_lor(
+    0xa500a500a500a500n, 0x0a5a0a5a0a5a0a5an)),
+    0xaf5aaf5aaf5aaf5an, "UInt64.lor");
+  equal(u64(exports.fir_ext_UInt64_xor(
+    0xf0f0f0f00f0f0f0fn, 0x0ff00ff0f00ff00fn)),
+    0xff00ff00ff00ff00n, "UInt64.xor");
+  for (const [value, expected] of [
+    [0n, 64n],
+    [1n, 0n],
+    [2n, 1n],
+    [0x100000000n, 32n],
+    [0x8000000000000000n, 63n],
+    [0x0123456789abcdefn, 0n],
+  ]) {
+    equal(exports.fir_ext_UInt64_ctzFast(value), expected,
+      `UInt64.ctzFast(${value})`);
+  }
+  for (const [left, right] of [
+    [0n, 0n],
+    [mask64, 0n],
+    [mask64, 1n],
+    [mask64, 0x100000001n],
+    [0x0123456789abcdefn, 0x12345n],
+    [0x8000000000000000n, 3n],
+  ]) {
+    const expected = right === 0n ? left : left % right;
+    equal(u64(exports.fir_ext_UInt64_mod(left, right)), expected,
+      `UInt64.mod(${left}, ${right})`);
+  }
+  let randomWord = 0x123456789abcdef0n;
+  for (let index = 0; index < 1000; index += 1) {
+    randomWord = (randomWord * 6364136223846793005n +
+      1442695040888963407n) & mask64;
+    const left = randomWord;
+    randomWord = (randomWord * 6364136223846793005n +
+      1442695040888963407n) & mask64;
+    const right = randomWord;
+    const expected = right === 0n ? left : left % right;
+    equal(u64(exports.fir_ext_UInt64_mod(left, right)), expected,
+      `UInt64.mod deterministic differential case ${index}`);
+  }
+
+  equal(exports.fir_ext_USize_decLt(1n, mask64), 1,
+    "USize.decLt unsigned");
+  equal(u64(exports.fir_ext_USize_add(mask64, 2n)), 1n,
+    "USize.add wraps");
+  equal(u64(exports.fir_ext_USize_sub(0n, 1n)), mask64,
+    "USize.sub wraps");
+  equal(u64(exports.fir_ext_USize_ofNat(wideNatural)), wide,
+    "USize.ofNat");
+  equal(u64(exports.fir_ext_USize_ofNatLT(wideNatural, 0)), wide,
+    "USize.ofNatLT");
+  equal(exports.fir_ext_USize_toUInt32(0x0123456789abcdefn) >>> 0,
+    0x89abcdef, "USize.toUInt32");
+  equal(naturalValue(exports.memory,
+    exports.fir_ext_USize_toNat(wide)), wide, "USize.toNat");
+  equal(u64(exports.fir_ext_USize_land(
+    0xa55aa55aa55aa55an, 0x0ff00ff00ff00ff0n)),
+    0x0550055005500550n, "USize.land");
+  equal(u64(exports.fir_ext_USize_shiftLeft(1n, 65n)), 2n,
+    "USize.shiftLeft masks count");
+  equal(u64(exports.fir_ext_USize_shiftRight(
+    0x8000000000000001n, 65n)), 0x4000000000000000n,
+    "USize.shiftRight masks count");
+  equal(exports.fir_ext_USize_decLe(mask64, mask64), 1,
+    "USize.decLe equal");
+  equal(exports.fir_ext_USize_decLe(mask64, 0n), 0,
+    "USize.decLe false");
+  equal(exports.fir_ext_USize_decEq(wide, wide), 1,
+    "USize.decEq equal");
+  equal(exports.fir_ext_USize_decEq(wide, wide + 1n), 0,
+    "USize.decEq unequal");
+  equal(u64(exports.fir_ext_USize_complement(0x0123456789abcdefn)),
+    0xfedcba9876543210n, "USize.complement");
+  for (const [left, right] of [
+    [0n, 0n],
+    [mask64, 0n],
+    [mask64, 0x100000001n],
+    [0x0123456789abcdefn, 0x12345n],
+  ]) {
+    const expected = right === 0n ? left : left % right;
+    equal(u64(exports.fir_ext_USize_mod(left, right)), expected,
+      `USize.mod(${left}, ${right})`);
+  }
 
   equal(view.getBigUint64(0, true), scratch,
     "fixed-width helpers did not restore eight-byte scratch memory");

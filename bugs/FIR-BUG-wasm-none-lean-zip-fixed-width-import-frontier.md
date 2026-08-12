@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-lean-zip-fixed-width-import-frontier
-status: confirmed
+status: fixed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: d8b18978322de05a8f3dba51ef03cf5461676c17
@@ -74,7 +74,7 @@ none
 
 none
 
-## Current checkpoint
+## Final checkpoint
 
 The first W7 capability slice internalizes 30 imports through the accepted
 symbolic instruction surface: all seven required `UInt8` operations, three
@@ -84,18 +84,19 @@ returns `tagged` from `UInt8.toNat` and `UInt16.toNat`, but `tobject` from
 `UInt32.toNat`; the executable helper and external-engine regression preserve
 that distinction.
 
-The real 391-declaration Level-1 probe now links 1,696 functions with 47
-imports and zero runtime operations, down from 77 imports. The remaining
-fixed-width frontier is 13 `USize`, seven `UInt64`, three `UInt32`, and two
-`UInt16` declarations. Container, Nat, List, String, and platform imports are
-separate resident-family slices. This card stays active until the generic
-fixed-width/`USize` frontier is closed.
+The real 391-declaration Level-1 probe now links 1,721 functions with 22
+imports and zero runtime operations, down from 77 imports. The complete
+fixed-width frontier is resident: 47 `UInt8`/`UInt16`/`UInt32`/`UInt64`
+operations, 14 scalar `USize` operations, and `USize.repr` over the resident
+UTF-8 String layout. The 22 remaining imports are exclusively container,
+`Nat`, `List`, `String`, and platform operations and are tracked separately.
 
 ## Resolution and regression
 
-Unresolved. The first 30-import capability slice is guarded by the
-zero-import external-engine fixture in
-`integration/talos/artifact/resident-fixed-width-client.mjs` and by the exact
-real-source inventory in `integration/lean-zip/ProbeLevel1.lean`. The card can
-move to `fixed` only when the remaining generic fixed-width and `USize`
-declarations have executable resident coverage.
+Fixed. The consolidated zero-import fixed-width fixture exercises all 61
+scalar helpers, including wraparound, masked shifts, bitwise operations,
+natural conversions, decisions, complements, `ctzFast`, and unsigned
+remainder. A deterministic 10,000-case `UInt64.mod` differential probe passed.
+The zero-import String fixture covers `USize.repr` through `2^64 - 1` and exact
+scratch restoration. The production Level-1 probe confirms no fixed-width or
+`USize` import remains.

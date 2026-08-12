@@ -1,0 +1,84 @@
+---
+id: FIR-BUG-wasm-none-lean-zip-container-import-frontier
+status: confirmed
+classification: wasm-adapter
+lean-toolchain: leanprover/lean4:v4.33.0
+lean-revision: d8b18978322de05a8f3dba51ef03cf5461676c17
+phase: wasm
+pass: none
+discovered-by: source-closure-test
+first-seen: 2026-08-12
+reproduction: integration/lean-zip/ProbeLevel1.lean
+regression: integration/lean-zip/_build/level1-probe.json
+---
+
+# Summary
+
+After closing the complete scalar and runtime-operation frontiers, the real
+`Zip.Wasm.compressLevel1` closure retains 22 ordinary imports across generic
+Array, ByteArray, Nat, List, String, and platform APIs.
+
+## Minimal reproduction
+
+Capture and resident-link `Zip.Wasm.compressLevel1` through
+`integration/lean-zip/ProbeLevel1.lean`, then inspect `remainingImports` in
+`_build/level1-probe.json`.
+
+## Exact commands
+
+From `integration/lean-zip`, run the configured source-view build followed by
+`lake env lean ProbeLevel1.lean`, as documented in `README.md`.
+
+## Exact frontier
+
+- eight ByteArray operations: unchecked little-endian 32/64-bit loads and
+  stores, `get`, `uget`, `push`, and `pushUInt64LE`;
+- six Array operations: `getInternal`, `set`, `set!`, `mk`, `toList`, and
+  `swap`;
+- four Nat operations: `mul`, `pow`, `land`, and `div`;
+- two specialized List loops: Array append-list fold and List zip;
+- `String.ofList`; and
+- `System.Platform.getNumBits`.
+
+## Expected semantics
+
+The generic closed-application linker should internalize these standard Lean
+operations over the accepted resident layouts, retain Lean ownership and
+unique-update behavior, and leave no host import.
+
+## Actual behavior
+
+The linked module has 1,721 functions, zero runtime operations, and exactly
+these 22 declaration imports. It therefore cannot yet be published as a
+self-contained Level-1 package.
+
+## Semantic impact
+
+Packed binary applications reach final-LCNF and lower completely but still
+need host functions for standard container and numeric operations.
+
+## Proof or differential evidence
+
+The exact production inventory is generated from the real Lean 4.33
+final-LCNF closure. Each repair slice must additionally pass its zero-import
+standalone external-engine fixture before the inventory is ratcheted.
+
+## Classification and triage
+
+W7 owns executable resident helpers and package acceptance. W6 owns later
+implementation-to-concrete-runtime refinement. Each family must keep exact
+signatures, explicit layout capabilities, and external-engine differential
+coverage; no JavaScript fallback is acceptable.
+
+## Workaround
+
+none
+
+## Upstream tracking
+
+none
+
+## Resolution and regression
+
+Unresolved. Ratchet the exact real-source inventory after coherent resident
+family slices until `remainingImports` is empty.
