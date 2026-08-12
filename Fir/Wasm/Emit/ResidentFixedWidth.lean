@@ -851,7 +851,7 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
   else if declaration == `UInt8.toBitVec then
     some { params := #[.uint8], results := #[.tobject] }
   else if declaration == `UInt8.toNat then
-    some { params := #[.uint8], results := #[.tagged] }
+    some { params := #[.uint8], results := #[.tobject] }
   else if declaration == `UInt8.toUInt32 then
     some { params := #[.uint8], results := #[.uint32] }
   else if declaration == `UInt8.toUInt64 then

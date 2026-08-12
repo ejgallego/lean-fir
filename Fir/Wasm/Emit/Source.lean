@@ -239,6 +239,22 @@ private def appendCapturedDecl (decls : Array (LCNF.Decl .impure))
   | none => decls.push decl
 
 /--
+Keep Lean-generated adapters for extern declarations local, but restore the
+original declarations themselves to their native boundary. Asking Lean to
+compile an extern is how `ExplicitBoxing` derives its exact `_boxed` adapter;
+the extern's Lean fallback body is not part of the application's source
+closure and must not make its implementation dependencies discoverable.
+-/
+private def restoreCapturedExternBoundaries (environment : Environment)
+    (decls : Array (LCNF.Decl .impure)) : Array (LCNF.Decl .impure) :=
+  decls.map fun decl =>
+    if isExtern environment decl.name then
+      let data := getExternAttrData? environment decl.name |>.getD { entries := [.opaque] }
+      { decl with value := .extern data, inlineAttr? := none }
+    else
+      decl
+
+/--
 Compile one source unit and build its artifact from the declaration groups
 observed by the final-impure identity pass.  Ordinary `collectUsedDecls`
 continues to supply imported signatures, but a captured body always wins over
@@ -275,6 +291,7 @@ private def compileEntryFinalCaptured (entry : Name) (dependencies : Array Name 
         match saved.value with
         | .code _ => return saved
         | .extern _ => return decl
+  localDecls := restoreCapturedExternBoundaries environment localDecls
   unless localDecls.any (fun decl => decl.name == entry) do
     throwError "final-impure capture did not contain entry `{entry}`"
   let mut localNames : NameSet := localDecls.foldl (init := {}) fun names decl =>

@@ -55,6 +55,12 @@ for ordinary calls whose native operation belongs at the resident boundary,
 but it also prevents the generic compiler pass from producing the derived
 boxed adapter.
 
+## Proof or differential evidence
+
+The Level-1 probe requires all three upstream-generated adapters to be local,
+reports zero unsupported declarations, and links the complete artifact with
+zero imports and zero remaining runtime operations.
+
 ## Semantic impact
 
 Otherwise self-contained Wasm applications retain host imports whenever a

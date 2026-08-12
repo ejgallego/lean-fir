@@ -22,6 +22,12 @@ run_cmd do
   let startedAt ← IO.monoMsNow
   let source ← liftCoreM LeanZipFir.Compile.captureLevel1
   let capturedAt ← IO.monoMsNow
+  let environment ← liftCoreM getEnv
+  let localizedExterns := source.program.decls.filter fun declaration =>
+    isExtern environment declaration.name &&
+      !source.externalNames.contains declaration.name
+  unless localizedExterns.isEmpty do
+    throwError "Level-1 capture localized native extern fallbacks: {localizedExterns.map (·.name)}"
   let externalSpecializations := source.externalNames.filter fun name =>
     !(Fir.Wasm.Emit.CompilerPrivate.specializationCallerCandidates name).isEmpty
   unless externalSpecializations.isEmpty do

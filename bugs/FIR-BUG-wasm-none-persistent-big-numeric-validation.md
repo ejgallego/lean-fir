@@ -1,15 +1,15 @@
 ---
 id: FIR-BUG-wasm-none-persistent-big-numeric-validation
 status: fixed
-classification: runtime
+classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: d8b18978322de05a8f3dba51ef03cf5461676c17
 phase: wasm
 pass: none
 discovered-by: differential-test
 first-seen: 2026-08-12
-reproduction: integration/lean-zip/level1-smoke.mjs
-regression: none
+reproduction: integration/talos/artifact/resident-big-numeric-client.mjs
+regression: integration/talos/artifact/resident-big-numeric-client.mjs
 ---
 
 # Summary
@@ -28,9 +28,9 @@ and the existing cache-publication helper marks it persistent. The next
 ## Exact commands
 
 ```sh
-cd integration/lean-zip
-lake --keep-toolchain env lean Emit.lean
-node level1-smoke.mjs
+cd integration/talos/artifact
+lake exe fir-wasm-artifact resident-big-numeric _build/resident-big-numeric.wasm
+node run-resident-big-numeric.mjs _build/resident-big-numeric.wasm
 ```
 
 ## Expected semantics
