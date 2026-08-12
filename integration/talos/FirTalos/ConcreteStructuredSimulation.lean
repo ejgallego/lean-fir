@@ -19183,7 +19183,7 @@ inductive ConcreteStructuredSupportedFrameStack
         callerContext.cachedDeclarations =
           Fir.Wasm.cachedDeclarationNames program)
       (continuationAdapted :
-        CodeAdapted callerContext sourceModule callerFunction labels
+        CodeAdaptedWithSuffix callerContext sourceModule callerFunction labels
           continuation targetRest)
       (resultFound :
         findFVar? (functionBindings callerFunction) result = some resultIndex)
@@ -19221,7 +19221,7 @@ inductive ConcreteStructuredSupportedFrameStack
         callerContext.cachedDeclarations =
           Fir.Wasm.cachedDeclarationNames program)
       (continuationAdapted :
-        CodeAdapted callerContext sourceModule callerFunction labels
+        CodeAdaptedWithSuffix callerContext sourceModule callerFunction labels
           continuation targetRest)
       (resultFound :
         findFVar? (functionBindings callerFunction) result = some resultIndex)
@@ -19316,7 +19316,7 @@ inductive ConcreteStructuredSupportedFrameStack.Agrees
         activeEntryStore callerLocals activeEntryWitness)
       (programEq : program = callerContext.program)
       (continuationAdapted :
-        CodeAdapted callerContext sourceModule callerFunction labels
+        CodeAdaptedWithSuffix callerContext sourceModule callerFunction labels
           continuation targetRest)
       (resultFound :
         findFVar? (functionBindings callerFunction) result = some resultIndex)
@@ -19374,7 +19374,7 @@ inductive ConcreteStructuredSupportedFrameStack.Agrees
         activeEntryWitness)
       (programEq : program = callerContext.program)
       (continuationAdapted :
-        CodeAdapted callerContext sourceModule callerFunction labels
+        CodeAdaptedWithSuffix callerContext sourceModule callerFunction labels
           continuation targetRest)
       (resultFound :
         findFVar? (functionBindings callerFunction) result = some resultIndex)
