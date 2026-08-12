@@ -460,7 +460,7 @@ can consume the same envelope contract independently.
 
 `validation-plans/native-oracle-attestations.json` makes the source of truth
 explicit. It requires complete matching `native -> lcnf` and `native -> v8`
-edges over all 653 currently accepted real-engine cases. Required oracle edges
+edges over all 655 currently accepted real-engine cases. Required oracle edges
 must share one matrix
 selection, run identity, and ordered case set; every case must have an equal
 observation witness and there may be no comparison findings. Additional edges
@@ -550,7 +550,7 @@ the ordered tier list that observed it.
 Policy-required items remain in the inventory even when no tier observed them,
 so an aggregate failure has a direct uncovered-item witness. Per-tier summaries
 also retain contribution counts and the exact items unique to that tier. In the
-current baseline, the 653 source cases are shared by the source-LCNF and V8
+current baseline, the 655 source cases are shared by the source-LCNF and V8
 tiers, the nine direct cases are unique to the direct tier, and
 `admin:yield-apply` is the direct tier's unique administrative contribution.
 The erased-reset fixture also makes `erased`, `reset`, and `reuse`
@@ -1907,6 +1907,24 @@ trace has ten `inc`, five `dec`, six `ctor`, four `oproj`, and exactly zero
 Dedicated source/V8 domains require the combined grow/delete, release-stop,
 surviving-alias, and reuse claims rather than counting the cases alone.
 
+The first nonlocal-ownership pair carries that alias reasoning across the
+already linked `recordByteArray` effect. Both cases build one real partial
+application over the input `ByteArray`, read index one through it, execute the
+effect, and then read index zero. In the final-use case the first invocation
+releases the closure capture before the outside alias enters the effect; the
+post-effect read uses the returned array and observes `42`. Its complete LCNF
+path has 39 transitions, one `inc`, one `pap`, one `fvar`, two `dec`, and five
+external dispatches. In the retained-use case the closure remains shared
+across the effect and is invoked again afterward; the effect returns the
+updated array while the capture still observes the original zero. That path
+has 54 transitions, two `inc`, one `pap`, two `fvar`, four `dec`, and the same
+five external dispatches. Both pin the exact order `ByteArray.get!`,
+`UInt8.toNat`, recorded mutation, `ByteArray.get!`, `UInt8.toNat` and the
+event-time original/updated ByteArray snapshots. Native Lean, final LCNF, and
+real V8 agree on both results with no finding. Source and V8 domains separately
+require call order, alias retention, final release, and retained reuse, so a
+single result-only effect case cannot satisfy the S6 claim.
+
 The first read probe returned `ByteArray × UInt8` and exposed
 `FIR-BUG-validation-none-nested-boxed-scalar-result`: execution completed, but
 the validation result codec could not decode the boxed `UInt8` stored in
@@ -1930,7 +1948,7 @@ copy.  The independent artifact corpus separately compares external
 world/trace effects and a two-call lazy-cache hit/miss sequence against Talos.
 Compiler-generated `Int.ofNat` and `Int.neg` calls construct positive and
 negative literals at both immediate/heap representation boundaries.
-The default native-to-V8 matrix covers all 653 corpus cases, including a natural
+The default native-to-V8 matrix covers all 655 corpus cases, including a natural
 above `UInt64`, a recursive list containing that value, tagged-to-heap
 `Nat.add`, heap-input `Nat.add`, tagged and multi-limb `Nat.mul`, multi-limb
 and saturating `Nat.sub`, paired `Nat.div`/`Nat.mod` including zero, all three
@@ -1940,8 +1958,8 @@ ownership-sensitive String construction, exact UTF-8 String equality and orderin
 multi-limb `Int.add`/`Int.mul`/`Int.sub` growth, sign changes, and cancellation,
 all Euclidean `Int.ediv`/`Int.emod` sign quadrants and zero, cross-domain
 `Int.natAbs` signs and representation boundaries, signed equality and
-strict/non-strict ordering, all three
-controlled-effect programs, and all five mixed-layout projections.
+strict/non-strict ordering, all five controlled-effect programs, including the
+two closure-ownership boundary cases, and all five mixed-layout projections.
 `make validate-v8` delegates whole-corpus selection to the plan rather than
 maintaining a second case allowlist, so every new shared fixture enters the
 real-engine triangle by default.
