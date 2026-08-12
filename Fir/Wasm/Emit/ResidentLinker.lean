@@ -11,6 +11,7 @@ import Fir.Wasm.Emit.ResidentFloat
 import Fir.Wasm.Emit.ResidentFixedWidth
 import Fir.Wasm.Emit.ResidentLiteral
 import Fir.Wasm.Emit.ResidentMutation
+import Fir.Wasm.Emit.ResidentNatArithmetic
 import Fir.Wasm.Emit.ResidentNatMod
 import Fir.Wasm.Emit.ResidentNatShift
 import Fir.Wasm.Emit.ResidentNumeric
@@ -53,6 +54,7 @@ inductive Step where
   | numericStrict
   | numericAvailable
   | bigNumeric
+  | natArithmeticAvailable
   | fixedWidthAvailable
   | stringOperations
   | stringOperationsAvailable
@@ -172,6 +174,9 @@ private def applyStep (validate : Bool) (step : Step) (module : Module) :
   | .bigNumeric =>
       transform "arbitrary-precision Nat/Int operations"
         (ResidentBigNumeric.internalize · validate) module
+  | .natArithmeticAvailable =>
+      transform "available arbitrary-precision Nat arithmetic"
+        (ResidentNatArithmetic.internalizeAvailable · validate) module
   | .fixedWidthAvailable =>
       transform "available fixed-width operations"
         (ResidentFixedWidth.internalizeAvailable · validate) module
@@ -543,6 +548,7 @@ names and replaces per-application retained-external lists.
 def closedApplicationExternalDeclarations : Array Name :=
   let declarations :=
     ResidentNumeric.externalDeclarations ++
+    ResidentNatArithmetic.externalDeclarations ++
     ResidentFixedWidth.externalDeclarations ++
     ResidentFloat.externalDeclarations ++
     ExternalRuntime.mathDeclarations ++
@@ -563,6 +569,7 @@ def closedApplicationRetainedExternalNames : Array String :=
 def closedApplicationFamilySteps : Array Step := #[
   .numericAvailable,
   .bigNumeric,
+  .natArithmeticAvailable,
   .fixedWidthAvailable,
   .floatAvailable,
   .arraysAvailable,

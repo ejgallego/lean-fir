@@ -11,6 +11,7 @@ import Fir.Wasm.Emit.ResidentFixedWidth
 import Fir.Wasm.Emit.ResidentLiteral
 import Fir.Wasm.Emit.ResidentMutation
 import Fir.Wasm.Emit.ResidentBigNumeric
+import Fir.Wasm.Emit.ResidentNatArithmetic
 import Fir.Wasm.Emit.ResidentNumeric
 import Fir.Wasm.Emit.ResidentPlatform
 import Fir.Wasm.Emit.ResidentReferenceCount
@@ -292,6 +293,20 @@ def emitResidentBigNumeric (path : System.FilePath) : IO Unit := do
   IO.println
     s!"resident-big-numeric: wrote {bytes.size} bytes to {path} and {manifestPath}"
 
+def emitResidentNatArithmetic (path : System.FilePath) : IO Unit := do
+  let module ← IO.ofExcept <|
+    Fir.Wasm.Emit.ResidentNatArithmetic.residentExampleModule
+  let bytes ← IO.ofExcept <| (Fir.Wasm.Emit.encode module).mapError fun error =>
+    s!"resident Nat arithmetic encoding failed: {repr error}"
+  if let some parent := path.parent then
+    IO.FS.createDirAll parent
+  IO.FS.writeBinFile path bytes
+  let manifestPath : System.FilePath := path.toString ++ ".json"
+  IO.FS.writeFile manifestPath <|
+    Fir.Wasm.Emit.ResidentNatArithmetic.manifest.compress
+  IO.println
+    s!"resident-nat-arithmetic: wrote {bytes.size} bytes to {path} and {manifestPath}"
+
 def emitResidentPlatform (path : System.FilePath) : IO Unit := do
   let module ← IO.ofExcept <|
     Fir.Wasm.Emit.ResidentPlatform.residentExampleModule.mapError fun error =>
@@ -411,6 +426,7 @@ def usage : String :=
     "       fir-wasm-artifact resident-cache <output.wasm>\n" ++
     "       fir-wasm-artifact resident-numeric <output.wasm>\n" ++
     "       fir-wasm-artifact resident-big-numeric <output.wasm>\n" ++
+    "       fir-wasm-artifact resident-nat-arithmetic <output.wasm>\n" ++
     "       fir-wasm-artifact resident-platform <output.wasm>\n" ++
     "       fir-wasm-artifact resident-string <output.wasm>\n" ++
     "       fir-wasm-artifact resident-fallbacks <output.wasm>\n" ++
@@ -481,6 +497,9 @@ def main (args : List String) : IO UInt32 := do
         return 0
     | ["resident-big-numeric", output] =>
         emitResidentBigNumeric output
+        return 0
+    | ["resident-nat-arithmetic", output] =>
+        emitResidentNatArithmetic output
         return 0
     | ["resident-platform", output] =>
         emitResidentPlatform output

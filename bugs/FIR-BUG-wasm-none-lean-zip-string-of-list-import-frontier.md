@@ -24,6 +24,18 @@ resident layouts.
 Capture and resident-link `Zip.Wasm.compressLevel1`, then inspect the remaining
 ordinary imports in `_build/level1-probe.json`.
 
+## Exact commands
+
+```sh
+cd integration/lean-zip
+lake --keep-toolchain env lean ProbeLevel1.lean
+jq '.remainingImports' _build/level1-probe.json
+
+cd ../talos/artifact
+lake exe fir-wasm-artifact resident-string _build/resident-string.wasm
+node run-resident-string.mjs _build/resident-string.wasm --require-of-list
+```
+
 ## Expected semantics
 
 The helper consumes an arbitrary valid resident `List Char`, preserves every
@@ -34,6 +46,15 @@ semantics. It must not use a host callback.
 ## Actual behavior
 
 `String.ofList` remains in the external import frontier.
+
+## Proof or differential evidence
+
+Before the repair, the production Level-1 inventory retained
+`String.ofList`. After internalization, the zero-import standalone artifact
+passes Node/V8 comparisons for empty, ASCII, BMP, and supplementary Unicode
+inputs. It also checks that unique spines are reclaimed and shared spines
+consume exactly one reference. The production probe no longer lists
+`String.ofList` among its two remaining generated List imports.
 
 ## Semantic impact
 
