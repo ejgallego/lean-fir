@@ -84,33 +84,39 @@ def inhabitedFunction : Function := {
 
 def functions : Array Function := #[panicFunction, inhabitedFunction]
 
-private partial def rewriteInstruction : Instruction → Instruction
+private partial def rewriteInstruction (declarations : Array Name) :
+    Instruction → Instruction
   | .call (.declaration declaration) =>
-      if externalDeclarations.contains declaration then
+      if declarations.contains declaration then
         .call (.declaration (externalName declaration))
       else
         .call (.declaration declaration)
   | .block label body =>
-      .block label (body.map rewriteInstruction)
+      .block label (body.map (rewriteInstruction declarations))
+  | .loop label body =>
+      .loop label (body.map (rewriteInstruction declarations))
   | .ifElse thenBody elseBody =>
       .ifElse
-        (thenBody.map rewriteInstruction)
-        (elseBody.map rewriteInstruction)
+        (thenBody.map (rewriteInstruction declarations))
+        (elseBody.map (rewriteInstruction declarations))
   | instruction => instruction
 
-private def rewriteFunction (function : Function) : Function :=
-  { function with body := function.body.map rewriteInstruction }
+private def rewriteFunction (declarations : Array Name)
+    (function : Function) : Function :=
+  { function with body := function.body.map (rewriteInstruction declarations) }
 
-def internalize (module : Module) : Except LinkError Module := do
+private def internalizeSelected (module : Module) (declarations : Array Name) :
+    Except LinkError Module := do
   match Fir.Wasm.validateModule module with
   | .ok () => pure ()
   | .error error => throw (.invalidInput error)
-  for name in helperNames do
+  let selectedHelperNames := declarations.map externalName
+  for name in selectedHelperNames do
     if module.imports.any (·.declaration? == some name) ||
         module.functions.any (·.name == name) ||
         module.exports.contains name then
       throw (.reservedDeclaration name)
-  for declaration in externalDeclarations do
+  for declaration in declarations do
     let imports := module.imports.filter (·.declaration? == some declaration)
     unless imports.size == 1 do
       throw (.missingExternal declaration)
@@ -120,28 +126,32 @@ def internalize (module : Module) : Except LinkError Module := do
       throw (.incompatibleExternal declaration)
   let imports := module.imports.filter fun import_ =>
     match import_.declaration? with
-    | some declaration => !externalDeclarations.contains declaration
+    | some declaration => !declarations.contains declaration
     | none => true
   let result : Module := {
     module with
     imports
-    functions := module.functions.map rewriteFunction ++ functions
-    exports := helperNames.foldl Fir.Wasm.addUnique module.exports }
+    functions := module.functions.map (rewriteFunction declarations) ++
+      functions.filter fun function => selectedHelperNames.contains function.name
+    exports := selectedHelperNames.foldl Fir.Wasm.addUnique module.exports }
   match Fir.Wasm.validateModule result with
   | .ok () => return result
   | .error error => throw (.invalidOutput error)
 
+/-- Internalize the complete historical fallback pair, rejecting omissions. -/
+def internalize (module : Module) : Except LinkError Module :=
+  internalizeSelected module externalDeclarations
+
 /--
-Install the fail-closed fallback pair only when a captured closure retains it.
-If just one declaration is present, the strict linker reports the incomplete
-frontier instead of manufacturing an application-specific substitute.
+Install exactly the fail-closed fallbacks retained by a captured closure. The
+strict `internalize` entry above continues to require the complete historical
+prettyM pair; generic closed applications use this capability-sensitive entry.
 -/
 def internalizeAvailable (module : Module) : Except LinkError Module := do
-  if externalDeclarations.any fun declaration =>
-      module.imports.any (·.declaration? == some declaration) then
-    internalize module
-  else
-    return module
+  let declarations := externalDeclarations.filter fun declaration =>
+    module.imports.any (·.declaration? == some declaration)
+  if declarations.isEmpty then return module
+  internalizeSelected module declarations
 
 private def exampleImport (declaration : Name) : Import := {
   key := .external declaration
@@ -188,6 +198,31 @@ def manifest : Json :=
     initializers := #[]
     runtimeOperations := #[] } with
   | .ok module => module.imports.isEmpty && module.functions.isEmpty
+  | .error _ => false
+
+private def singleExampleModule (declaration : Name) : Module := {
+  imports := #[exampleImport declaration]
+  functions := #[]
+  exports := #[]
+  initializers := #[]
+  runtimeOperations := #[] }
+
+#guard match internalizeAvailable (singleExampleModule `panicCore) with
+  | .ok module =>
+      module.imports.isEmpty &&
+      module.functions.map (·.name) == #[externalName `panicCore] &&
+      module.exports == #[externalName `panicCore] &&
+      (Fir.Wasm.validateModule module |>.isOk)
+  | .error _ => false
+
+#guard match internalizeAvailable
+    (singleExampleModule `instInhabitedOfMonad._redArg) with
+  | .ok module =>
+      module.imports.isEmpty &&
+      module.functions.map (·.name) ==
+        #[externalName `instInhabitedOfMonad._redArg] &&
+      module.exports == #[externalName `instInhabitedOfMonad._redArg] &&
+      (Fir.Wasm.validateModule module |>.isOk)
   | .error _ => false
 
 end Fir.Wasm.Emit.ResidentFallback

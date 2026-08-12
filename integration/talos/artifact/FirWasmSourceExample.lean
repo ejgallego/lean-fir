@@ -206,7 +206,7 @@ run_cmd do
     | .error error => throwError "failed to compile Format facade: {repr error}"
   -- The direct concrete-state facade retains these compiler-generated closure
   -- targets and descriptor shapes without rewriting their final-LCNF kinds.
-  unless moduleArtifact.module.closureDispatch.size == 40 &&
+  unless moduleArtifact.module.closureDispatch.size == 42 &&
       moduleArtifact.module.closureDispatch ==
         Fir.Wasm.collectClosureDispatch moduleArtifact.module.runtimeOperations do
     throwError "compiler Format closure-dispatch inventory changed ({moduleArtifact.module.closureDispatch.size}): {repr moduleArtifact.module.closureDispatch}"

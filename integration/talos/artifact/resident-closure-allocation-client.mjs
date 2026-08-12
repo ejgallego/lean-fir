@@ -43,6 +43,8 @@ export async function checkResidentClosureAllocation(bytes) {
     "resident captured-closure export is missing");
   equal(typeof exports.resident_closure_inside_loop, "function",
     "resident loop-closure export is missing");
+  equal(typeof exports.resident_closure_tagged, "function",
+    "resident tagged-closure export is missing");
   equal(typeof exports.fir_heap_frontier, "function",
     "resident closure-allocation frontier export is missing");
 
@@ -90,6 +92,17 @@ export async function checkResidentClosureAllocation(bytes) {
   expect(header(exports.memory, insideLoop).every((value, index) =>
     value === [2, 2, 1, 32, 1, 3, 0, 1][index]),
   `loop-nested closure header drifted: ${header(exports.memory, insideLoop)}`);
+
+  const tagged = exports.resident_closure_tagged();
+  equal(tagged, 1144,
+    "tagged object-family closure returned the wrong address");
+  equal(exports.fir_heap_frontier(), 1176,
+    "tagged object-family closure advanced the wrong extent");
+  expect(header(exports.memory, tagged).every((value, index) =>
+    value === [2, 2, 1, 32, 1, 3, 0, 1][index]),
+  `tagged object-family closure header drifted: ${header(exports.memory, tagged)}`);
+  equal(u32(exports.memory, 0), 0xdecafbad,
+    "tagged closure failed to restore the scratch word");
 
   const { exports: concrete } = await WebAssembly.instantiate(module, {});
   const host = new ConcreteHost(

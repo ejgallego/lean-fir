@@ -127,7 +127,7 @@ def partialApplicationFunction (module : Module) (ordinal : Nat)
     throw .unsupportedOperation
   unless operation.abiWellFormed do
     throw .unsupportedOperation
-  unless result == .object || result == .tobject do
+  unless result.isObjectLike do
     throw (.unsupportedResult result)
   let some targetIndex := module.closureDispatch.findIdx? (· == targetName) |
     throw (.missingClosureTarget targetName)
@@ -232,7 +232,8 @@ def exampleTarget : Name := `ResidentClosureAllocation.target
 def exampleOperations : Array RuntimeOp := #[
   .partialApply exampleTarget 3 0 #[] .object,
   .partialApply exampleTarget 4 3 #[.tobject, .uint8, .usize] .tobject,
-  .partialApply exampleTarget 3 2 #[.float32, .float] .object]
+  .partialApply exampleTarget 3 2 #[.float32, .float] .object,
+  .partialApply exampleTarget 3 0 #[] .tagged]
 
 def exampleClosureDispatch : Array Name := #[
   exampleUnrelatedTarget,
@@ -288,12 +289,22 @@ def exampleFloatCaller : Function := {
     .call (.runtime exampleOperations[2]!),
     .ret] }
 
+/-- Lean's generic object-family calling convention may retain a `tagged`
+annotation for a closure value. It is still the raw address of the allocated
+heap closure in the shared i32 object lane. -/
+def exampleTaggedCaller : Function := {
+  name := `resident_closure_tagged
+  params := #[]
+  results := #[.tagged]
+  locals := #[]
+  body := [.call (.runtime exampleOperations[3]!), .ret] }
+
 def exampleModule : Module := {
   imports := exampleOperations.mapIdx Fir.Wasm.runtimeImport
   functions := #[exampleEmptyCaller, exampleCapturedCaller, exampleLoopCaller,
-    exampleFloatCaller]
+    exampleFloatCaller, exampleTaggedCaller]
   exports := #[exampleEmptyCaller.name, exampleCapturedCaller.name,
-    exampleLoopCaller.name, exampleFloatCaller.name]
+    exampleLoopCaller.name, exampleFloatCaller.name, exampleTaggedCaller.name]
   initializers := #[]
   runtimeOperations := exampleOperations
   closureDispatch := exampleClosureDispatch
@@ -323,11 +334,12 @@ def manifest : Json :=
       module.imports.isEmpty &&
       module.runtimeOperations.isEmpty &&
       module.functions.size ==
-        4 + ResidentAllocator.helperNames.size + exampleOperations.size &&
+        5 + ResidentAllocator.helperNames.size + exampleOperations.size &&
       module.exports.contains exampleEmptyCaller.name &&
       module.exports.contains exampleCapturedCaller.name &&
       module.exports.contains exampleLoopCaller.name &&
       module.exports.contains exampleFloatCaller.name &&
+      module.exports.contains exampleTaggedCaller.name &&
       module.closureDispatch == exampleClosureDispatch &&
       module.closureDescriptors == exampleClosureDescriptors &&
       module.memory == some ResidentRuntime.residentMemory &&
