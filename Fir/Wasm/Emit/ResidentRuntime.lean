@@ -328,15 +328,19 @@ module. Runtime imports are rebuilt from the rewritten function bodies
 because their presentation names contain ordinals; external declaration
 imports retain their original stable names and order.
 -/
-private def validateInput (module : Module) : Except LinkError Unit :=
-  match Fir.Wasm.validateModule module with
-  | .ok () => pure ()
-  | .error error => throw (.invalidInput error)
+private def validateInput (validate : Bool) (module : Module) : Except LinkError Unit :=
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => pure ()
+    | .error error => throw (.invalidInput error)
+  else pure ()
 
-private def validateOutput (module : Module) : Except LinkError Module :=
-  match Fir.Wasm.validateModule module with
-  | .ok () => return module
-  | .error error => throw (.invalidOutput error)
+private def validateOutput (validate : Bool) (module : Module) : Except LinkError Module :=
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => return module
+    | .error error => throw (.invalidOutput error)
+  else return module
 
 private def internalizeOperationUnchecked (operation : RuntimeOp) (name : Name)
     (function : Function) (module : Module) : Except LinkError Module := do
@@ -438,15 +442,15 @@ private def internalizeOperationsUnchecked (bindings : Array RuntimeBinding)
     memory := some memory }
 
 private def internalizeOperation (operation : RuntimeOp) (name : Name)
-    (function : Function) (module : Module) : Except LinkError Module := do
-  validateInput module
-  validateOutput (← internalizeOperationUnchecked operation name function module)
+    (function : Function) (module : Module) (validate : Bool) : Except LinkError Module := do
+  validateInput validate module
+  validateOutput validate (← internalizeOperationUnchecked operation name function module)
 
-def internalizeGetTag (module : Module) : Except LinkError Module :=
-  internalizeOperation .getTag getTagName getTagFunction module
+def internalizeGetTag (module : Module) (validate : Bool := true) : Except LinkError Module :=
+  internalizeOperation .getTag getTagName getTagFunction module validate
 
-def internalizeIsShared (module : Module) : Except LinkError Module :=
-  internalizeOperation .isShared isSharedName isSharedFunction module
+def internalizeIsShared (module : Module) (validate : Bool := true) : Except LinkError Module :=
+  internalizeOperation .isShared isSharedName isSharedFunction module validate
 
 /--
 Internalize every supported object and packed scalar projection through the
@@ -457,8 +461,9 @@ inputs. Their generation relies on the W6 related-state precondition for
 descriptor bounds and packed-coordinate validity; proving that implication is
 separate proof-lane work.
 -/
-def internalizeReadProjections (module : Module) : Except LinkError Module := do
-  validateInput module
+def internalizeReadProjections (module : Module) (validate : Bool := true) :
+    Except LinkError Module := do
+  validateInput validate module
   let operations := module.runtimeOperations.filter supportsReadProjection
   let bindings ← operations.mapM fun operation => do
     let some name := readProjectionName? operation |
@@ -466,7 +471,7 @@ def internalizeReadProjections (module : Module) : Except LinkError Module := do
     let function ← readProjectionFunction operation
     return { operation, name, function : RuntimeBinding }
   let result ← internalizeOperationsUnchecked bindings module
-  validateOutput result
+  validateOutput validate result
 
 /-- Projection coordinates exercised by the reviewed prettyM and Level-1 closures. -/
 def prettyFormatReadProjections : Array RuntimeOp := #[
@@ -691,8 +696,9 @@ private def closureProjectionFunction (globals : ClosureApplicationGlobals)
       [.localSet resultLocal]) ++ applicationSuffix ++
       [.localGet resultLocal, .ret] }
 
-def internalizeClosureProjections (module : Module) : Except LinkError Module := do
-  validateInput module
+def internalizeClosureProjections (module : Module) (validate : Bool := true) :
+    Except LinkError Module := do
+  validateInput validate module
   let hasApplicationOperations :=
     module.runtimeOperations.any isClosureApplicationOperation
   let (module, globals) :=
@@ -707,7 +713,7 @@ def internalizeClosureProjections (module : Module) : Except LinkError Module :=
     let function ← closureProjectionFunction globals true index kind
     return { operation, name, function : RuntimeBinding }
   let result ← internalizeOperationsUnchecked bindings module
-  validateOutput result
+  validateOutput validate result
 
 /-- Physical closure-capture reads reachable from the control and Flat `prettyM` entries.
 The standalone module below isolates layout and typed-load behavior; linked
@@ -920,8 +926,9 @@ The W6 related-state precondition remains responsible for target-table and
 capture-descriptor validity. The separate proof theorem must establish that
 these physical header comparisons implement semantic `closureMatches`.
 -/
-def internalizeClosureMatches (module : Module) : Except LinkError Module := do
-  validateInput module
+def internalizeClosureMatches (module : Module) (validate : Bool := true) :
+    Except LinkError Module := do
+  validateInput validate module
   let operations := module.runtimeOperations.filter isClosureMatch
   if operations.isEmpty then
     return module
@@ -941,7 +948,7 @@ def internalizeClosureMatches (module : Module) : Except LinkError Module := do
     let function ← closureMatchFunction module.closureDispatch true operation
     return { operation, name, function : RuntimeBinding }
   let result ← internalizeOperationsUnchecked bindings module
-  validateOutput result
+  validateOutput validate result
 
 def closureMatchExampleDispatch : Array Name := #[`callee, `other]
 

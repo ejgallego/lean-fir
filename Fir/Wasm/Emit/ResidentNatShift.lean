@@ -130,10 +130,12 @@ private partial def rewriteInstruction : Instruction → Instruction
   | instruction => instruction
 
 /-- Internalize `Nat.shiftRight` when the captured source closure imports it. -/
-def internalizeAvailable (module : Module) : Except LinkError Module := do
-  match Fir.Wasm.validateModule module with
-  | .ok () => pure ()
-  | .error error => throw (.invalidInput error)
+def internalizeAvailable (module : Module) (validate : Bool := true) :
+    Except LinkError Module := do
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => pure ()
+    | .error error => throw (.invalidInput error)
   unless module.memory == some ResidentRuntime.residentMemory do
     throw .incompatibleMemory
   if !module.imports.any (·.declaration? == some declaration) then
@@ -161,8 +163,10 @@ def internalizeAvailable (module : Module) : Except LinkError Module := do
     functions
     exports := Fir.Wasm.addUnique module.exports helperName
     runtimeOperations := Fir.Wasm.collectRuntimeOps functions }
-  match Fir.Wasm.validateModule result with
-  | .ok () => return result
-  | .error error => throw (.invalidOutput error)
+  if validate then
+    match Fir.Wasm.validateModule result with
+    | .ok () => return result
+    | .error error => throw (.invalidOutput error)
+  else return result
 
 end Fir.Wasm.Emit.ResidentNatShift

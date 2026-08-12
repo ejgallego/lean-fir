@@ -511,11 +511,13 @@ private partial def rewriteInstruction (declarations : Array Name) :
         (elseBody.map (rewriteInstruction declarations))
   | instruction => instruction
 
-private def internalizeSelected (module : Module) (declarations : Array Name) :
+private def internalizeSelected (module : Module) (declarations : Array Name)
+    (validate : Bool) :
     Except LinkError Module := do
-  match Fir.Wasm.validateModule module with
-  | .ok () => pure ()
-  | .error error => throw (.invalidInput error)
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => pure ()
+    | .error error => throw (.invalidInput error)
   unless module.memory == some ResidentRuntime.residentMemory do
     throw .incompatibleMemory
   let needsFromNat := declarations.any fun declaration =>
@@ -560,15 +562,17 @@ private def internalizeSelected (module : Module) (declarations : Array Name) :
     imports
     exports := selectedHelperNames.foldl Fir.Wasm.addUnique module.exports
     runtimeOperations := Fir.Wasm.collectRuntimeOps linkedFunctions }
-  match Fir.Wasm.validateModule result with
-  | .ok () => return result
-  | .error error => throw (.invalidOutput error)
+  if validate then
+    match Fir.Wasm.validateModule result with
+    | .ok () => return result
+    | .error error => throw (.invalidOutput error)
+  else return result
 
 /-- Internalize exactly the supported fixed-width operations present. -/
-def internalizeAvailable (module : Module) : Except LinkError Module :=
+def internalizeAvailable (module : Module) (validate : Bool := true) : Except LinkError Module :=
   let declarations := externalDeclarations.filter fun declaration =>
     module.imports.any (·.declaration? == some declaration)
-  if declarations.isEmpty then pure module else internalizeSelected module declarations
+  if declarations.isEmpty then pure module else internalizeSelected module declarations validate
 
 private def impureType (kind : AbiKind) : Expr :=
   match kind with
@@ -599,7 +603,7 @@ def residentExampleModule : Except String Module := do
   let module : Module := {
     numeric with
     imports := numeric.imports ++ externalDeclarations.map externalImport }
-  internalizeSelected module externalDeclarations
+  internalizeSelected module externalDeclarations true
     |>.mapError fun error => s!"fixed-width: {repr error}"
 
 def manifest : Json :=

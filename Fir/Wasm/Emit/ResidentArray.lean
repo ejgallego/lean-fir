@@ -906,11 +906,13 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
     some { params := #[.erased, .object], results := #[.object] }
   else none
 
-private def internalizeSelected (module : Module) (declarations : Array Name) :
+private def internalizeSelected (module : Module) (declarations : Array Name)
+    (validate : Bool) :
     Except LinkError Module := do
-  match Fir.Wasm.validateModule module with
-  | .ok () => pure ()
-  | .error error => throw (.invalidInput error)
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => pure ()
+    | .error error => throw (.invalidInput error)
   unless module.functions.any (·.name == ResidentAllocator.allocateName) do
     throw .missingAllocator
   unless module.memory == some ResidentRuntime.residentMemory do
@@ -956,23 +958,25 @@ private def internalizeSelected (module : Module) (declarations : Array Name) :
     imports
     exports := selectedHelperNames.foldl Fir.Wasm.addUnique module.exports
     runtimeOperations := Fir.Wasm.collectRuntimeOps linkedFunctions }
-  match Fir.Wasm.validateModule result with
-  | .ok () => return result
-  | .error error => throw (.invalidOutput error)
+  if validate then
+    match Fir.Wasm.validateModule result with
+    | .ok () => return result
+    | .error error => throw (.invalidOutput error)
+  else return result
 
 /-- Internalize the complete historical array frontier, rejecting omissions. -/
-def internalize (module : Module) : Except LinkError Module :=
-  internalizeSelected module externalDeclarations
+def internalize (module : Module) (validate : Bool := true) : Except LinkError Module :=
+  internalizeSelected module externalDeclarations validate
 
 /--
 Internalize exactly the array operations imported by a source closure.  This
 keeps narrowly linked resident packages independent of unrelated array APIs
 while preserving the same fail-closed signature checks as `internalize`.
 -/
-def internalizeAvailable (module : Module) : Except LinkError Module :=
+def internalizeAvailable (module : Module) (validate : Bool := true) : Except LinkError Module :=
   let declarations := availableExternalDeclarations.filter fun declaration =>
     module.imports.any (·.declaration? == some declaration)
-  internalizeSelected module declarations
+  internalizeSelected module declarations validate
 
 private def exampleDeclarations : Array Name :=
   #[`Array.emptyWithCapacity, `Array.push, `Array.uget, `Array.uset,
@@ -1035,7 +1039,7 @@ def residentExampleModule : Except String Module := do
   let module : Module := {
     releases with
     imports := releases.imports ++ exampleDeclarations.map exampleExternalImport }
-  internalizeSelected module exampleDeclarations
+  internalizeSelected module exampleDeclarations true
     |>.mapError fun error => s!"array: {repr error}"
 
 def manifest : Json :=

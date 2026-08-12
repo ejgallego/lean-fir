@@ -309,11 +309,13 @@ private def installBinding (functions : Array Function) (binding : Binding) :
       return functions
 
 /-- Internalize an explicit dependency-closed set of small-scalar operations. -/
-def internalizeOperations (module : Module) (operations : Array RuntimeOp) :
+def internalizeOperations (module : Module) (operations : Array RuntimeOp)
+    (validate : Bool := true) :
     Except LinkError Module := do
-  match Fir.Wasm.validateModule module with
-  | .ok () => pure ()
-  | .error error => throw (.invalidInput error)
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => pure ()
+    | .error error => throw (.invalidInput error)
   unless module.memory == some ResidentRuntime.residentMemory do
     throw .incompatibleMemory
   let presentExternal := module.imports.any
@@ -357,14 +359,16 @@ def internalizeOperations (module : Module) (operations : Array RuntimeOp) :
     runtimeOperations
     imports := runtimeOperations.mapIdx Fir.Wasm.runtimeImport ++ externalImports
     exports }
-  match Fir.Wasm.validateModule result with
-  | .ok () => return result
-  | .error error => throw (.invalidOutput error)
+  if validate then
+    match Fir.Wasm.validateModule result with
+    | .ok () => return result
+    | .error error => throw (.invalidOutput error)
+  else return result
 
 /-- Internalize exactly the supported small-scalar operations present. -/
-def internalizeAvailable (module : Module) : Except LinkError Module :=
-  internalizeOperations module <|
-    module.runtimeOperations.filter (runtimeName? · |>.isSome)
+def internalizeAvailable (module : Module) (validate : Bool := true) : Except LinkError Module :=
+  internalizeOperations module
+    (module.runtimeOperations.filter (runtimeName? · |>.isSome)) validate
 
 private def roundtripName : Name := `resident_scalar_box_uint8_roundtrip
 private def roundtripUInt16Name : Name := `resident_scalar_box_uint16_roundtrip

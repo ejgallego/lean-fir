@@ -269,38 +269,46 @@ helpers validate the recognized live-constructor boundary and the exact W6
 header coordinates before writing module-owned memory. They intentionally do
 not perform ownership updates: LCNF emits `inc`/`dec` as separate operations.
 -/
-def internalizeSetters (module : Module) : Except LinkError Module := do
-  match Fir.Wasm.validateModule module with
-  | .ok () => pure ()
-  | .error error => throw (.invalidInput error)
+def internalizeSetters (module : Module) (validate : Bool := true) :
+    Except LinkError Module := do
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => pure ()
+    | .error error => throw (.invalidInput error)
   unless module.memory == some ResidentRuntime.residentMemory do
     throw .incompatibleMemory
   let operations := module.runtimeOperations.filter isSetter
   let result ← operations.toList.zipIdx.foldlM (init := module)
     fun result (operation, ordinal) =>
       internalizeOne ordinal operation result
-  match Fir.Wasm.validateModule result with
-  | .ok () => return result
-  | .error error => throw (.invalidOutput error)
+  if validate then
+    match Fir.Wasm.validateModule result with
+    | .ok () => return result
+    | .error error => throw (.invalidOutput error)
+  else return result
 
 /--
 Internalize constructor-tag writes. Each helper accepts the physical `.object`
 word used by LCNF mutation calls, validates the aligned live-constructor
 boundary, and writes the operation's fixed tag to header `aux0`.
 -/
-def internalizeTagSetters (module : Module) : Except LinkError Module := do
-  match Fir.Wasm.validateModule module with
-  | .ok () => pure ()
-  | .error error => throw (.invalidInput error)
+def internalizeTagSetters (module : Module) (validate : Bool := true) :
+    Except LinkError Module := do
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => pure ()
+    | .error error => throw (.invalidInput error)
   unless module.memory == some ResidentRuntime.residentMemory do
     throw .incompatibleMemory
   let operations := module.runtimeOperations.filter isTagSetter
   let result ← operations.toList.zipIdx.foldlM (init := module)
     fun result (operation, ordinal) =>
       internalizeTagSetterOne ordinal operation result
-  match Fir.Wasm.validateModule result with
-  | .ok () => return result
-  | .error error => throw (.invalidOutput error)
+  if validate then
+    match Fir.Wasm.validateModule result with
+    | .ok () => return result
+    | .error error => throw (.invalidOutput error)
+  else return result
 
 def exampleOperations : Array RuntimeOp := #[
   .objectSet 1 .tobject,

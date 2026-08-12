@@ -1731,10 +1731,11 @@ private partial def rewriteInstruction : Instruction → Instruction
 private def rewriteFunction (function : Function) : Function :=
   { function with body := function.body.map rewriteInstruction }
 
-def internalize (module : Module) : Except LinkError Module := do
-  match Fir.Wasm.validateModule module with
-  | .ok () => pure ()
-  | .error error => throw (.invalidInput error)
+def internalize (module : Module) (validate : Bool := true) : Except LinkError Module := do
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => pure ()
+    | .error error => throw (.invalidInput error)
   unless module.functions.any (·.name == ResidentAllocator.allocateName) do
     throw .missingAllocator
   unless module.memory == some ResidentRuntime.residentMemory do
@@ -1752,9 +1753,11 @@ def internalize (module : Module) : Except LinkError Module := do
     functions :=
       module.functions.map rewriteFunction ++ internalFunctions ++ externalFunctions
     exports := helperNames.foldl Fir.Wasm.addUnique module.exports }
-  match Fir.Wasm.validateModule result with
-  | .ok () => return result
-  | .error error => throw (.invalidOutput error)
+  if validate then
+    match Fir.Wasm.validateModule result with
+    | .ok () => return result
+    | .error error => throw (.invalidOutput error)
+  else return result
 
 def residentExampleModule : Except String Module := do
   let module ← ResidentNumeric.residentExampleModule

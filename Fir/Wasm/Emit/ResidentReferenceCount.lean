@@ -184,10 +184,12 @@ promoted-tag representations are no-ops; their unchecked variants trap.
 Persistent heap objects are no-ops, while ordinary live heap objects receive
 an overflow-checked direct reference-count update.
 -/
-def internalizeIncrements (module : Module) : Except LinkError Module := do
-  match Fir.Wasm.validateModule module with
-  | .ok () => pure ()
-  | .error error => throw (.invalidInput error)
+def internalizeIncrements (module : Module) (validate : Bool := true) :
+    Except LinkError Module := do
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => pure ()
+    | .error error => throw (.invalidInput error)
   unless module.memory == some ResidentRuntime.residentMemory do
     throw .incompatibleMemory
   if module.imports.any (·.declaration? == some incrementOnceName) ||
@@ -201,9 +203,11 @@ def internalizeIncrements (module : Module) : Except LinkError Module := do
   let result ← operations.toList.zipIdx.foldlM (init := module)
     fun result (operation, ordinal) =>
       internalizeOne ordinal operation result
-  match Fir.Wasm.validateModule result with
-  | .ok () => return result
-  | .error error => throw (.invalidOutput error)
+  if validate then
+    match Fir.Wasm.validateModule result with
+    | .ok () => return result
+    | .error error => throw (.invalidOutput error)
+  else return result
 
 def exampleOperations : Array RuntimeOp := #[
   .inc 1 true,

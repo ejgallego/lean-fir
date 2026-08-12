@@ -216,18 +216,21 @@ The pass recognizes both the direct `call; return` form and Lean final LCNF's
 single-result `call; local.set; local.get; return` round trip. It validates the
 symbolic module on both sides of the rewrite.
 -/
-def eliminateDirectSelfCalls (module : Module) : Except String Result := do
-  match Fir.Wasm.validateModule module with
-  | .ok () => pure ()
-  | .error error => throw s!"tail-call input module is invalid: {repr error}"
+def eliminateDirectSelfCalls (module : Module) (validate : Bool := true) :
+    Except String Result := do
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => pure ()
+    | .error error => throw s!"tail-call input module is invalid: {repr error}"
   let (functions, count) := module.functions.foldl
     (init := (#[], 0)) fun (functions, count) function =>
       let (function, rewritten) := rewriteFunction function
       (functions.push function, count + rewritten)
   let result := { module with functions }
-  match Fir.Wasm.validateModule result with
-  | .ok () => pure ()
-  | .error error => throw s!"tail-call output module is invalid: {repr error}"
+  if validate then
+    match Fir.Wasm.validateModule result with
+    | .ok () => pure ()
+    | .error error => throw s!"tail-call output module is invalid: {repr error}"
   return { module := result, rewrittenCalls := count }
 
 private def argument : FVarId := ⟨`argument⟩

@@ -1085,10 +1085,11 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
   else
     none
 
-def internalize (module : Module) : Except LinkError Module := do
-  match Fir.Wasm.validateModule module with
-  | .ok () => pure ()
-  | .error error => throw (.invalidInput error)
+def internalize (module : Module) (validate : Bool := true) : Except LinkError Module := do
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => pure ()
+    | .error error => throw (.invalidInput error)
   unless module.functions.any (·.name == ResidentAllocator.allocateName) do
     throw .missingAllocator
   unless module.memory == some ResidentRuntime.residentMemory do
@@ -1117,9 +1118,11 @@ def internalize (module : Module) : Except LinkError Module := do
     imports
     functions
     exports := helperNames.foldl Fir.Wasm.addUnique module.exports }
-  match Fir.Wasm.validateModule result with
-  | .ok () => return result
-  | .error error => throw (.invalidOutput error)
+  if validate then
+    match Fir.Wasm.validateModule result with
+    | .ok () => return result
+    | .error error => throw (.invalidOutput error)
+  else return result
 
 /--
 Install the resident numeric helper family while replacing only recognized
@@ -1127,10 +1130,12 @@ Nat/Int imports that are present in the source module. This keeps the strict
 `prettyM` inventory gate above unchanged and gives larger source closures a
 fail-closed, signature-checked incremental linker.
 -/
-def internalizeAvailable (module : Module) : Except LinkError Module := do
-  match Fir.Wasm.validateModule module with
-  | .ok () => pure ()
-  | .error error => throw (.invalidInput error)
+def internalizeAvailable (module : Module) (validate : Bool := true) :
+    Except LinkError Module := do
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => pure ()
+    | .error error => throw (.invalidInput error)
   unless module.functions.any (·.name == ResidentAllocator.allocateName) do
     throw .missingAllocator
   unless module.memory == some ResidentRuntime.residentMemory do
@@ -1161,9 +1166,11 @@ def internalizeAvailable (module : Module) : Except LinkError Module := do
     imports
     functions
     exports := helperNames.foldl Fir.Wasm.addUnique module.exports }
-  match Fir.Wasm.validateModule result with
-  | .ok () => return result
-  | .error error => throw (.invalidOutput error)
+  if validate then
+    match Fir.Wasm.validateModule result with
+    | .ok () => return result
+    | .error error => throw (.invalidOutput error)
+  else return result
 
 private def externalTypes? (declaration : Name) : Option ExternalTypes :=
   let nat := LCNF.ImpureType.tobject

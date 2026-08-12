@@ -193,10 +193,12 @@ object values. Floating lanes use the symbolic reinterpret operations before
 the existing integer stores, so this helper does not introduce a second
 physical closure layout.
 -/
-def internalizePartialApplications (module : Module) : Except LinkError Module := do
-  match Fir.Wasm.validateModule module with
-  | .ok () => pure ()
-  | .error error => throw (.invalidInput error)
+def internalizePartialApplications (module : Module) (validate : Bool := true) :
+    Except LinkError Module := do
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => pure ()
+    | .error error => throw (.invalidInput error)
   unless module.functions.any (·.name == ResidentAllocator.allocateName) do
     throw .missingAllocator
   unless module.memory == some ResidentRuntime.residentMemory do
@@ -222,9 +224,11 @@ def internalizePartialApplications (module : Module) : Except LinkError Module :
       (fun exports binding => Fir.Wasm.addUnique exports binding.name)
       module.exports
     runtimeOperations }
-  match Fir.Wasm.validateModule result with
-  | .ok () => return result
-  | .error error => throw (.invalidOutput error)
+  if validate then
+    match Fir.Wasm.validateModule result with
+    | .ok () => return result
+    | .error error => throw (.invalidOutput error)
+  else return result
 
 def exampleUnrelatedTarget : Name := `ResidentClosureAllocation.unrelated
 def exampleTarget : Name := `ResidentClosureAllocation.target

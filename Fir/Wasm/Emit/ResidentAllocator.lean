@@ -249,10 +249,11 @@ raw stores without rewriting semantic runtime operations. The resident global
 is appended after every lazy-cache global and prior resident global, so all
 existing physical indices remain stable.
 -/
-def install (module : Module) : Except LinkError Module := do
-  match Fir.Wasm.validateModule module with
-  | .ok () => pure ()
-  | .error error => throw (.invalidInput error)
+def install (module : Module) (validate : Bool := true) : Except LinkError Module := do
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => pure ()
+    | .error error => throw (.invalidInput error)
   let memory ←
     match module.memory with
     | none => pure ResidentRuntime.residentMemory
@@ -273,9 +274,11 @@ def install (module : Module) : Except LinkError Module := do
     memory := some memory
     globals := module.globals.push
       { kind := .uint32, init := .i32 (u32 heapBase) } }
-  match Fir.Wasm.validateModule result with
-  | .ok () => return result
-  | .error error => throw (.invalidOutput error)
+  if validate then
+    match Fir.Wasm.validateModule result with
+    | .ok () => return result
+    | .error error => throw (.invalidOutput error)
+  else return result
 
 def manifest : Json :=
   Json.mkObj [

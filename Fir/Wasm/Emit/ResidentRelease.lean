@@ -408,10 +408,12 @@ Internalize recursive `dec` and nonrecursive `delete`. Parent headers are
 marked freed before descending into constructor fields or statically described
 closure captures, so cycles fail on a dead header rather than recurring.
 -/
-def internalizeReleases (module : Module) : Except LinkError Module := do
-  match Fir.Wasm.validateModule module with
-  | .ok () => pure ()
-  | .error error => throw (.invalidInput error)
+def internalizeReleases (module : Module) (validate : Bool := true) :
+    Except LinkError Module := do
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => pure ()
+    | .error error => throw (.invalidInput error)
   unless module.memory == some ResidentRuntime.residentMemory do
     throw .incompatibleMemory
   let operations := module.runtimeOperations.filter isRelease
@@ -438,9 +440,11 @@ def internalizeReleases (module : Module) : Except LinkError Module := do
     functions
     exports
     runtimeOperations }
-  match Fir.Wasm.validateModule result with
-  | .ok () => return result
-  | .error error => throw (.invalidOutput error)
+  if validate then
+    match Fir.Wasm.validateModule result with
+    | .ok () => return result
+    | .error error => throw (.invalidOutput error)
+  else return result
 
 def exampleDescriptors : Array (Array AbiKind) :=
   #[#[.tobject, .uint8, .tobject]]

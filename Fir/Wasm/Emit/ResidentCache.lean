@@ -284,10 +284,12 @@ physical result and initialized flag in module globals; these helpers replace
 the host call that marks the complete reachable object graph persistent and
 returns the physical lane unchanged.
 -/
-def internalizeCacheSets (module : Module) : Except LinkError Module := do
-  match Fir.Wasm.validateModule module with
-  | .ok () => pure ()
-  | .error error => throw (.invalidInput error)
+def internalizeCacheSets (module : Module) (validate : Bool := true) :
+    Except LinkError Module := do
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => pure ()
+    | .error error => throw (.invalidInput error)
   unless module.memory == some ResidentRuntime.residentMemory do
     throw .incompatibleMemory
   let operations := module.runtimeOperations.filter isCacheSet
@@ -327,9 +329,11 @@ def internalizeCacheSets (module : Module) : Except LinkError Module := do
     functions
     exports
     runtimeOperations }
-  match Fir.Wasm.validateModule result with
-  | .ok () => return result
-  | .error error => throw (.invalidOutput error)
+  if validate then
+    match Fir.Wasm.validateModule result with
+    | .ok () => return result
+    | .error error => throw (.invalidOutput error)
+  else return result
 
 /-!
 Rewindable consumers cannot retain a lazy singleton allocated above their

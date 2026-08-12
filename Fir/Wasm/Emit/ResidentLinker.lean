@@ -78,6 +78,9 @@ direct-call graph. The postconditions make package closure fail closed.
 -/
 structure Policy where
   steps : Array Step
+  /-- Revalidate both sides of every internal step for diagnostics. The
+  production default validates once at linker entry and once at exit. -/
+  validateEachStep : Bool := false
   publicExports : Option (Array Name) := none
   allowedExternalImports : Option (Array Name) := none
   requireResidentMemory : Bool := true
@@ -121,83 +124,105 @@ private def transform [Repr error] (label : String)
   link module |>.mapError fun error =>
     .manifest s!"failed to internalize resident {label}: {repr error}"
 
-private def applyStep (step : Step) (module : Module) :
+private def applyStep (validate : Bool) (step : Step) (module : Module) :
     Except Source.CompileError Module :=
   match step with
-  | .getTag => transform "getTag" ResidentRuntime.internalizeGetTag module
-  | .isShared => transform "isShared" ResidentRuntime.internalizeIsShared module
+  | .getTag => transform "getTag" (ResidentRuntime.internalizeGetTag · validate) module
+  | .isShared => transform "isShared" (ResidentRuntime.internalizeIsShared · validate) module
   | .readProjections =>
-      transform "read projections" ResidentRuntime.internalizeReadProjections module
+      transform "read projections"
+        (ResidentRuntime.internalizeReadProjections · validate) module
   | .closureProjections =>
-      transform "closure projections" ResidentRuntime.internalizeClosureProjections module
+      transform "closure projections"
+        (ResidentRuntime.internalizeClosureProjections · validate) module
   | .closureMatches =>
-      transform "closure matches" ResidentRuntime.internalizeClosureMatches module
-  | .allocator => transform "allocator" ResidentAllocator.install module
+      transform "closure matches"
+        (ResidentRuntime.internalizeClosureMatches · validate) module
+  | .allocator => transform "allocator" (ResidentAllocator.install · validate) module
   | .constructors =>
-      transform "constructor allocation" ResidentConstructor.internalizeConstructors module
+      transform "constructor allocation"
+        (ResidentConstructor.internalizeConstructors · validate) module
   | .immediateNaturals =>
-      transform "immediate Naturals" ResidentLiteral.internalizeImmediateNaturals module
+      transform "immediate Naturals"
+        (ResidentLiteral.internalizeImmediateNaturals · validate) module
   | .partialApplications =>
       transform "partial applications"
-        ResidentClosureAllocation.internalizePartialApplications module
-  | .setters => transform "setters" ResidentMutation.internalizeSetters module
+        (ResidentClosureAllocation.internalizePartialApplications · validate) module
+  | .setters =>
+      transform "setters" (ResidentMutation.internalizeSetters · validate) module
   | .increments =>
-      transform "increments" ResidentReferenceCount.internalizeIncrements module
-  | .releases => transform "releases" ResidentRelease.internalizeReleases module
-  | .tagSetters => transform "tag setters" ResidentMutation.internalizeTagSetters module
+      transform "increments"
+        (ResidentReferenceCount.internalizeIncrements · validate) module
+  | .releases =>
+      transform "releases" (ResidentRelease.internalizeReleases · validate) module
+  | .tagSetters =>
+      transform "tag setters" (ResidentMutation.internalizeTagSetters · validate) module
   | .cacheSets =>
-      transform "cache publication" ResidentCache.internalizeCacheSets module
+      transform "cache publication" (ResidentCache.internalizeCacheSets · validate) module
   | .scalarBoxesAvailable =>
-      transform "available scalar boxes" ResidentScalarBox.internalizeAvailable module
+      transform "available scalar boxes"
+        (ResidentScalarBox.internalizeAvailable · validate) module
   | .numericStrict =>
-      transform "Nat/Int operations" ResidentNumeric.internalize module
+      transform "Nat/Int operations" (ResidentNumeric.internalize · validate) module
   | .numericAvailable =>
-      transform "available Nat/Int operations" ResidentNumeric.internalizeAvailable module
+      transform "available Nat/Int operations"
+        (ResidentNumeric.internalizeAvailable · validate) module
   | .bigNumeric =>
-      transform "arbitrary-precision Nat/Int operations" ResidentBigNumeric.internalize module
+      transform "arbitrary-precision Nat/Int operations"
+        (ResidentBigNumeric.internalize · validate) module
   | .fixedWidthAvailable =>
       transform "available fixed-width operations"
-        ResidentFixedWidth.internalizeAvailable module
+        (ResidentFixedWidth.internalizeAvailable · validate) module
   | .stringOperations =>
-      transform "String operations" ResidentString.internalize module
+      transform "String operations" (ResidentString.internalize · validate) module
   | .stringOperationsAvailable =>
-      transform "available String operations" ResidentString.internalizeAvailable module
+      transform "available String operations"
+        (ResidentString.internalizeAvailable · validate) module
   | .stringLiterals =>
-      transform "String literals" ResidentLiteral.internalizeStrings module
-  | .fallbacks => transform "fallbacks" ResidentFallback.internalize module
+      transform "String literals" (ResidentLiteral.internalizeStrings · validate) module
+  | .fallbacks =>
+      transform "fallbacks" (ResidentFallback.internalize · validate) module
   | .fallbacksAvailable =>
-      transform "available fallbacks" ResidentFallback.internalizeAvailable module
-  | .floatStrict => transform "Float operations" ResidentFloat.internalize module
+      transform "available fallbacks"
+        (ResidentFallback.internalizeAvailable · validate) module
+  | .floatStrict =>
+      transform "Float operations" (ResidentFloat.internalize · validate) module
   | .floatAvailable =>
-      transform "available Float operations" ResidentFloat.internalizeAvailable module
-  | .arraysStrict => transform "Array operations" ResidentArray.internalize module
+      transform "available Float operations"
+        (ResidentFloat.internalizeAvailable · validate) module
+  | .arraysStrict =>
+      transform "Array operations" (ResidentArray.internalize · validate) module
   | .arraysAvailable =>
-      transform "available Array operations" ResidentArray.internalizeAvailable module
+      transform "available Array operations"
+        (ResidentArray.internalizeAvailable · validate) module
   | .byteArraysAvailable =>
       transform "available ByteArray operations"
-        ResidentByteArray.internalizeAvailable module
-  | .natModStrict => transform "Nat.mod" ResidentNatMod.internalize module
+        (ResidentByteArray.internalizeAvailable · validate) module
+  | .natModStrict =>
+      transform "Nat.mod" (ResidentNatMod.internalize · validate) module
   | .natModAvailable =>
-      transform "available Nat.mod" ResidentNatMod.internalizeAvailable module
+      transform "available Nat.mod" (ResidentNatMod.internalizeAvailable · validate) module
   | .natShiftAvailable =>
-      transform "available Nat.shiftRight" ResidentNatShift.internalizeAvailable module
+      transform "available Nat.shiftRight"
+        (ResidentNatShift.internalizeAvailable · validate) module
   | .usizeAvailable =>
-      transform "available USize operations" ResidentUSize.internalizeAvailable module
+      transform "available USize operations"
+        (ResidentUSize.internalizeAvailable · validate) module
   | .directSelfTailCallsRequired => do
-      let result ← TailCall.eliminateDirectSelfCalls module
+      let result ← TailCall.eliminateDirectSelfCalls module validate
         |>.mapError Source.CompileError.manifest
       unless result.rewrittenCalls > 0 do
         throw (.manifest "resident linker found no direct self-tail calls")
       return result.module
   | .directSelfTailCallsAvailable =>
-      return (← TailCall.eliminateDirectSelfCalls module
+      return (← TailCall.eliminateDirectSelfCalls module validate
         |>.mapError Source.CompileError.manifest).module
 
-private def applySteps (steps : List Step) (module : Module) :
+private def applySteps (validate : Bool) (steps : List Step) (module : Module) :
     Except Source.CompileError Module := do
   match steps with
   | [] => return module
-  | step :: steps => applySteps steps (← applyStep step module)
+  | step :: steps => applySteps validate steps (← applyStep validate step module)
 
 private def checkPostconditions (policy : Policy) (module : Module) :
     Except Source.CompileError Unit := do
@@ -230,12 +255,17 @@ private def checkPostconditions (policy : Policy) (module : Module) :
 def linkModule (policy : Policy) (module : Module) :
     Except Source.CompileError Module := do
   validatePolicy policy
-  let module ← applySteps policy.steps.toList module
+  match Fir.Wasm.validateModule module with
+  | .ok () => pure ()
+  | .error error =>
+      throw (.manifest s!"resident linker received an invalid module: {repr error}")
+  let module ← applySteps policy.validateEachStep policy.steps.toList module
   let module ← match policy.publicExports with
     | none => pure module
     | some exports =>
         transform "dead-code pruning"
-          (fun module => ResidentDeadCode.pruneToExports module exports) module
+          (fun module => ResidentDeadCode.pruneToExports module exports
+            policy.validateEachStep) module
   checkPostconditions policy module
   return module
 

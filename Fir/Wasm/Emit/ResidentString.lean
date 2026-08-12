@@ -1520,11 +1520,13 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
   else
     none
 
-private def internalizeSelected (module : Module) (declarations : Array Name) :
+private def internalizeSelected (module : Module) (declarations : Array Name)
+    (validate : Bool) :
     Except LinkError Module := do
-  match Fir.Wasm.validateModule module with
-  | .ok () => pure ()
-  | .error error => throw (.invalidInput error)
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => pure ()
+    | .error error => throw (.invalidInput error)
   unless module.functions.any (·.name == ResidentAllocator.allocateName) do
     throw .missingAllocator
   unless module.memory == some ResidentRuntime.residentMemory do
@@ -1576,22 +1578,25 @@ private def internalizeSelected (module : Module) (declarations : Array Name) :
     functions
     exports := selectedHelperNames.foldl Fir.Wasm.addUnique module.exports
     runtimeOperations := Fir.Wasm.collectRuntimeOps functions }
-  match Fir.Wasm.validateModule result with
-  | .ok () => return result
-  | .error error => throw (.invalidOutput error)
+  if validate then
+    match Fir.Wasm.validateModule result with
+    | .ok () => return result
+    | .error error => throw (.invalidOutput error)
+  else return result
 
 /-- Internalize the complete historical String frontier, rejecting omissions. -/
-def internalize (module : Module) : Except LinkError Module :=
-  internalizeSelected module externalDeclarations
+def internalize (module : Module) (validate : Bool := true) : Except LinkError Module :=
+  internalizeSelected module externalDeclarations validate
 
 /-- Internalize exactly the supported String operations imported by a source
 closure, including any resident implementation dependencies of exposed API
 wrappers. Each source import retains fail-closed signature checking. -/
-def internalizeAvailable (module : Module) : Except LinkError Module := do
+def internalizeAvailable (module : Module) (validate : Bool := true) :
+    Except LinkError Module := do
   let declarations := availableExternalDeclarations.filter fun declaration =>
     module.imports.any (·.declaration? == some declaration)
   if declarations.isEmpty then return module
-  internalizeSelected module declarations
+  internalizeSelected module declarations validate
 
 private def externalTypes? (declaration : Name) : Option ExternalTypes :=
   let object := LCNF.ImpureType.object

@@ -723,11 +723,13 @@ private partial def rewriteInstruction (declarations : Array Name) :
         (elseBody.map (rewriteInstruction declarations))
   | instruction => instruction
 
-private def internalizeSelected (module : Module) (declarations : Array Name) :
+private def internalizeSelected (module : Module) (declarations : Array Name)
+    (validate : Bool) :
     Except LinkError Module := do
-  match Fir.Wasm.validateModule module with
-  | .ok () => pure ()
-  | .error error => throw (.invalidInput error)
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => pure ()
+    | .error error => throw (.invalidInput error)
   unless module.memory == some ResidentRuntime.residentMemory do
     throw .incompatibleMemory
   unless module.functions.any (·.name == ResidentAllocator.allocateName) do
@@ -772,12 +774,14 @@ private def internalizeSelected (module : Module) (declarations : Array Name) :
     imports
     exports := selectedHelperNames.foldl Fir.Wasm.addUnique module.exports
     runtimeOperations := Fir.Wasm.collectRuntimeOps linkedFunctions }
-  match Fir.Wasm.validateModule result with
-  | .ok () => return result
-  | .error error => throw (.invalidOutput error)
+  if validate then
+    match Fir.Wasm.validateModule result with
+    | .ok () => return result
+    | .error error => throw (.invalidOutput error)
+  else return result
 
 /-- Internalize exactly the supported ByteArray operations present. -/
-def internalizeAvailable (module : Module) : Except LinkError Module :=
+def internalizeAvailable (module : Module) (validate : Bool := true) : Except LinkError Module :=
   let declarations := externalDeclarations.filter fun declaration =>
     module.imports.any (·.declaration? == some declaration)
   if declarations.isEmpty then pure module else do
@@ -785,9 +789,9 @@ def internalizeAvailable (module : Module) : Except LinkError Module :=
         module.functions.any (·.name == ResidentScalarBox.unboxUInt8Name) then
       pure module
     else
-      ResidentScalarBox.internalizeOperations module #[.unbox .uint8]
+      ResidentScalarBox.internalizeOperations module #[.unbox .uint8] validate
         |>.mapError .scalarHelperLink
-    internalizeSelected module declarations
+    internalizeSelected module declarations validate
 
 private def externalTypes (declaration : Name) : ExternalTypes :=
   if declaration == `ByteArray.copySlice then
@@ -835,7 +839,7 @@ def residentExampleModule : Except String Module := do
   let module : Module := {
     scalar with
     imports := scalar.imports ++ externalDeclarations.map externalImport }
-  internalizeSelected module externalDeclarations
+  internalizeSelected module externalDeclarations true
     |>.mapError fun error => s!"byte-array: {repr error}"
 
 def manifest : Json :=

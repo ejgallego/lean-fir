@@ -112,10 +112,11 @@ private partial def rewriteInstruction : Instruction → Instruction
       .ifElse (thenBody.map rewriteInstruction) (elseBody.map rewriteInstruction)
   | instruction => instruction
 
-def internalize (module : Module) : Except LinkError Module := do
-  match Fir.Wasm.validateModule module with
-  | .ok () => pure ()
-  | .error error => throw (.invalidInput error)
+def internalize (module : Module) (validate : Bool := true) : Except LinkError Module := do
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => pure ()
+    | .error error => throw (.invalidInput error)
   unless module.memory == some ResidentRuntime.residentMemory do
     throw .incompatibleMemory
   for name in #[ResidentNumeric.validateNaturalName,
@@ -141,17 +142,21 @@ def internalize (module : Module) : Except LinkError Module := do
     functions := functions.push function
     exports := Fir.Wasm.addUnique module.exports helperName
     runtimeOperations := Fir.Wasm.collectRuntimeOps (functions.push function) }
-  match Fir.Wasm.validateModule result with
-  | .ok () => return result
-  | .error error => throw (.invalidOutput error)
+  if validate then
+    match Fir.Wasm.validateModule result with
+    | .ok () => return result
+    | .error error => throw (.invalidOutput error)
+  else return result
 
 /-- Internalizes `Nat.mod` when the source closure imports it. -/
-def internalizeAvailable (module : Module) : Except LinkError Module := do
+def internalizeAvailable (module : Module) (validate : Bool := true) :
+    Except LinkError Module := do
   if module.imports.any (·.declaration? == some declaration) then
-    internalize module
-  else
+    internalize module validate
+  else if validate then
     match Fir.Wasm.validateModule module with
     | .ok () => return module
     | .error error => throw (.invalidInput error)
+  else return module
 
 end Fir.Wasm.Emit.ResidentNatMod

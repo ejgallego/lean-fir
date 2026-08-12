@@ -162,10 +162,12 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
     none
 
 /-- Internalize exactly the `USize` operations imported by the source closure. -/
-def internalizeAvailable (module : Module) : Except LinkError Module := do
-  match Fir.Wasm.validateModule module with
-  | .ok () => pure ()
-  | .error error => throw (.invalidInput error)
+def internalizeAvailable (module : Module) (validate : Bool := true) :
+    Except LinkError Module := do
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => pure ()
+    | .error error => throw (.invalidInput error)
   unless module.memory == some ResidentRuntime.residentMemory do
     throw .incompatibleMemory
   let present := externalDeclarations.filter fun declaration =>
@@ -197,8 +199,10 @@ def internalizeAvailable (module : Module) : Except LinkError Module := do
     functions
     exports := selectedHelperNames.foldl Fir.Wasm.addUnique module.exports
     runtimeOperations := Fir.Wasm.collectRuntimeOps functions }
-  match Fir.Wasm.validateModule result with
-  | .ok () => return result
-  | .error error => throw (.invalidOutput error)
+  if validate then
+    match Fir.Wasm.validateModule result with
+    | .ok () => return result
+    | .error error => throw (.invalidOutput error)
+  else return result
 
 end Fir.Wasm.Emit.ResidentUSize

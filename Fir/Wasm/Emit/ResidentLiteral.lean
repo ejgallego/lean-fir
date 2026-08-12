@@ -250,10 +250,11 @@ resident allocator has been installed. Unsupported literal representations
 remain imports rather than being silently reinterpreted.
 -/
 private def internalizeMatching (predicate : RuntimeOp → Bool)
-    (module : Module) : Except LinkError Module := do
-  match Fir.Wasm.validateModule module with
-  | .ok () => pure ()
-  | .error error => throw (.invalidInput error)
+    (module : Module) (validate : Bool) : Except LinkError Module := do
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => pure ()
+    | .error error => throw (.invalidInput error)
   unless module.functions.any (·.name == ResidentAllocator.allocateName) do
     throw .missingAllocator
   unless module.memory == some ResidentRuntime.residentMemory do
@@ -262,24 +263,27 @@ private def internalizeMatching (predicate : RuntimeOp → Bool)
   let result ← operations.toList.zipIdx.foldlM (init := module)
     fun result (operation, ordinal) =>
       internalizeOne ordinal operation result
-  match Fir.Wasm.validateModule result with
-  | .ok () => return result
-  | .error error => throw (.invalidOutput error)
+  if validate then
+    match Fir.Wasm.validateModule result with
+    | .ok () => return result
+    | .error error => throw (.invalidOutput error)
+  else return result
 
 /--
 Internalize natural literals through Lean's semantic tagged limit. The
 historical name is retained for policy/API compatibility; generated helpers
 select an immediate word or promoted natural from the literal value.
 -/
-def internalizeImmediateNaturals (module : Module) : Except LinkError Module :=
-  internalizeMatching isNaturalLiteral module
+def internalizeImmediateNaturals (module : Module) (validate : Bool := true) :
+    Except LinkError Module :=
+  internalizeMatching isNaturalLiteral module validate
 
-def internalizeStrings (module : Module) : Except LinkError Module :=
-  internalizeMatching isStringLiteral module
+def internalizeStrings (module : Module) (validate : Bool := true) : Except LinkError Module :=
+  internalizeMatching isStringLiteral module validate
 
-def internalizeLiterals (module : Module) : Except LinkError Module := do
-  let module ← internalizeImmediateNaturals module
-  internalizeStrings module
+def internalizeLiterals (module : Module) (validate : Bool := true) : Except LinkError Module := do
+  let module ← internalizeImmediateNaturals module validate
+  internalizeStrings module validate
 
 def exampleOperations : Array RuntimeOp := #[
   .literal (.nat 0) .tagged,

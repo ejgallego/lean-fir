@@ -90,10 +90,11 @@ Remove declarations with no direct-call path from a public export. Lazy-cache
 global indices are compacted and rewritten as one checked operation; resident
 globals retain their declaration order after the shorter cache prefix.
 -/
-def prune (module : Module) : Except PruneError Module := do
-  match Fir.Wasm.validateModule module with
-  | .ok () => pure ()
-  | .error error => throw (.invalidInput error)
+def prune (module : Module) (validate : Bool := true) : Except PruneError Module := do
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => pure ()
+    | .error error => throw (.invalidInput error)
   for root in module.exports do
     unless module.functions.any (·.name == root) do
       throw (.missingRoot root)
@@ -116,9 +117,11 @@ def prune (module : Module) : Except PruneError Module := do
     initializers
     runtimeOperations
     imports := runtimeOperations.mapIdx Fir.Wasm.runtimeImport ++ externalImports }
-  match Fir.Wasm.validateModule result with
-  | .ok () => return result
-  | .error error => throw (.invalidOutput error)
+  if validate then
+    match Fir.Wasm.validateModule result with
+    | .ok () => return result
+    | .error error => throw (.invalidOutput error)
+  else return result
 
 /--
 Restrict a linked module to an explicit public function surface and remove
@@ -126,12 +129,12 @@ everything unreachable from that surface. Requested names must already be
 exports: this operation can hide linker exports, but cannot accidentally make
 an internal helper public.
 -/
-def pruneToExports (module : Module) (exports : Array Name) :
+def pruneToExports (module : Module) (exports : Array Name) (validate : Bool := true) :
     Except PruneError Module := do
   for name in exports do
     unless module.exports.contains name do
       throw (.unavailableExport name)
-  prune { module with exports }
+  prune { module with exports } validate
 
 private def publicRootName : Name := `residentDeadCodePublicRoot
 private def retainedHelperName : Name := `residentDeadCodeRetainedHelper

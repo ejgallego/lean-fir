@@ -105,11 +105,13 @@ private def rewriteFunction (declarations : Array Name)
     (function : Function) : Function :=
   { function with body := function.body.map (rewriteInstruction declarations) }
 
-private def internalizeSelected (module : Module) (declarations : Array Name) :
+private def internalizeSelected (module : Module) (declarations : Array Name)
+    (validate : Bool) :
     Except LinkError Module := do
-  match Fir.Wasm.validateModule module with
-  | .ok () => pure ()
-  | .error error => throw (.invalidInput error)
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => pure ()
+    | .error error => throw (.invalidInput error)
   let selectedHelperNames := declarations.map externalName
   for name in selectedHelperNames do
     if module.imports.any (·.declaration? == some name) ||
@@ -134,24 +136,27 @@ private def internalizeSelected (module : Module) (declarations : Array Name) :
     functions := module.functions.map (rewriteFunction declarations) ++
       functions.filter fun function => selectedHelperNames.contains function.name
     exports := selectedHelperNames.foldl Fir.Wasm.addUnique module.exports }
-  match Fir.Wasm.validateModule result with
-  | .ok () => return result
-  | .error error => throw (.invalidOutput error)
+  if validate then
+    match Fir.Wasm.validateModule result with
+    | .ok () => return result
+    | .error error => throw (.invalidOutput error)
+  else return result
 
 /-- Internalize the complete historical fallback pair, rejecting omissions. -/
-def internalize (module : Module) : Except LinkError Module :=
-  internalizeSelected module externalDeclarations
+def internalize (module : Module) (validate : Bool := true) : Except LinkError Module :=
+  internalizeSelected module externalDeclarations validate
 
 /--
 Install exactly the fail-closed fallbacks retained by a captured closure. The
 strict `internalize` entry above continues to require the complete historical
 prettyM pair; generic closed applications use this capability-sensitive entry.
 -/
-def internalizeAvailable (module : Module) : Except LinkError Module := do
+def internalizeAvailable (module : Module) (validate : Bool := true) :
+    Except LinkError Module := do
   let declarations := externalDeclarations.filter fun declaration =>
     module.imports.any (·.declaration? == some declaration)
   if declarations.isEmpty then return module
-  internalizeSelected module declarations
+  internalizeSelected module declarations validate
 
 private def exampleImport (declaration : Name) : Import := {
   key := .external declaration
