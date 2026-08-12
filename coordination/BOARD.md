@@ -15,6 +15,45 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-STAGED-EXTERNAL-RUNNABLE-CLOSURE`.
+- Integration owner: `wasm-proof`; this lease adds the first non-erased
+  runtime family to the certificate-free, module-stable one-source-step
+  theorem without collapsing its source protocol.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`, based directly on `main` at `e7288dfc`.
+- Published stack: active-slice record `07e09c1c`, functional proof head
+  `36a67502`, and clean ready mailbox `a5d4e7fb`.
+- Current-node admission: `ConcreteStructuredCodeStepAdmission` is now
+  parameterized by the installed external implementation and admits the
+  proved pure Int, Nat, and scalar result families at their exact
+  response-selected allocation cost. It stores no future execution.
+- Staged protocol: `ConcreteStructuredExternalCallReadyCoreRel` and
+  `ConcreteStructuredExternalBindCoreRel` expose the source request/import/
+  bind phases individually. The imported call transports the complete
+  entry-relative facts, cache, witness, closure tables, ABI alignment, and
+  caller stack while preserving the pre-bind fact map. The generated
+  destination write then erases exactly the shadowed destination fact and
+  returns to ordinary compiled code.
+- Strong closure: both intermediate states are constructors of the open and
+  runnable outcome sums. Staging, imported call, and bind each take one
+  ordinary source step, construct the exact finite structured-Wasm path, and
+  return the same aligned supported global relation. Empty compiled argument
+  prefixes use the existing strict compiler-control-rank descent.
+- Contracts: none. This slice changes W6 proof admission/intermediate
+  relations and W6 roadmaps only; it changes no compiler/runtime semantics,
+  concrete layout, symbolic-Wasm surface, or resident-helper signature.
+- Acceptance: Talos setup at `0e05edbc`; Lean Beam update/sync/save at version
+  8 with zero errors; direct `FirTalos.ConcreteStructuredSimulation` build
+  (3,119 jobs); `git diff --check`; complete `make check` with 122 harness
+  tests, 662 unique cases, and 1,968/1,968 equal comparisons; and all 3,143
+  Talos jobs. No bug card was required.
+- Result: `main` fast-forwards through the clean ready mailbox. W6 next
+  packages root/current-node admission into the public certificate-free
+  finite-prefix theorem; subsequent operation families are admission
+  widenings rather than changes to the theorem's shape.
+
+## Latest completed integration lease
+
 - Milestone: `W6-SILENT-RUNNABLE-WIDENING`.
 - Integration owner: `wasm-proof`; this lease extends the certificate-free,
   module-stable one-source-step theorem across compiler-erased case and
