@@ -58,7 +58,15 @@ def externalDeclarations : Array Name := #[
   `ByteArray.copySlice,
   `ByteArray.size,
   `ByteArray.mk,
-  `ByteArray.emptyWithCapacity]
+  `ByteArray.emptyWithCapacity,
+  `ByteArray.usetUInt32LE,
+  `ByteArray.usetUInt64LE,
+  `ByteArray.ugetUInt64LE,
+  `ByteArray.pushUInt64LE,
+  `ByteArray.get,
+  `ByteArray.ugetUInt32LE,
+  `ByteArray.uget,
+  `ByteArray.push]
 
 def externalName (declaration : Name) : Name :=
   Name.mkSimple s!"fir_ext_{declaration.toString.replace "." "_"}"
@@ -67,22 +75,38 @@ def externalHelperNames : Array Name := externalDeclarations.map externalName
 def helperNames : Array Name := internalHelperNames ++ externalHelperNames
 
 private def selectedInternalHelperNames (declarations : Array Name) : Array Name :=
-  let needsValidation :=
-    declarations.contains `ByteArray.size ||
-      declarations.contains `ByteArray.copySlice
+  let needsRead := declarations.any fun declaration => #[
+    `ByteArray.size,
+    `ByteArray.copySlice,
+    `ByteArray.usetUInt32LE,
+    `ByteArray.usetUInt64LE,
+    `ByteArray.ugetUInt64LE,
+    `ByteArray.pushUInt64LE,
+    `ByteArray.get,
+    `ByteArray.ugetUInt32LE,
+    `ByteArray.uget,
+    `ByteArray.push].contains declaration
+  let needsMutation := declarations.any fun declaration => #[
+    `ByteArray.usetUInt32LE,
+    `ByteArray.usetUInt64LE,
+    `ByteArray.pushUInt64LE,
+    `ByteArray.push].contains declaration
   let needsAllocation :=
     declarations.contains `ByteArray.mk ||
       declarations.contains `ByteArray.emptyWithCapacity ||
-      declarations.contains `ByteArray.copySlice
-  let names := if needsValidation then #[validateName] else #[]
-  let names := if needsValidation || needsAllocation then
+      declarations.contains `ByteArray.copySlice || needsMutation
+  let needsNaturalDecode :=
+    declarations.contains `ByteArray.emptyWithCapacity ||
+      declarations.contains `ByteArray.copySlice ||
+      declarations.contains `ByteArray.get
+  let names := if needsRead then #[validateName] else #[]
+  let names := if needsRead || needsAllocation then
     names.push expectedAllocationName else names
   let names := if needsAllocation then names.push allocateName else names
   let names := if needsAllocation then names.push retypeObjectName else names
-  let names := if declarations.contains `ByteArray.emptyWithCapacity ||
-      declarations.contains `ByteArray.copySlice then
+  let names := if needsNaturalDecode then
     names.push decodeNatural32Name else names
-  if declarations.contains `ByteArray.copySlice then
+  if declarations.contains `ByteArray.copySlice || needsMutation then
     (names.push copyBytesName).push releaseConsumedName else names
 
 private def sourceParam : FVarId := ⟨`source⟩
@@ -96,6 +120,9 @@ private def sizeParam : FVarId := ⟨`size⟩
 private def arrayParam : FVarId := ⟨`array⟩
 private def rawParam : FVarId := ⟨`raw⟩
 private def countParam : FVarId := ⟨`count⟩
+private def indexParam : FVarId := ⟨`index⟩
+private def proofParam : FVarId := ⟨`proof⟩
+private def valueParam : FVarId := ⟨`value⟩
 
 private def addressLocal : FVarId := ⟨`address⟩
 private def rawLocal : FVarId := ⟨`rawValue⟩
@@ -123,9 +150,14 @@ private def elementLocal : FVarId := ⟨`element⟩
 private def flagsLocal : FVarId := ⟨`flags⟩
 private def refCountLocal : FVarId := ⟨`refCount⟩
 private def reuseLocal : FVarId := ⟨`reuseDestination⟩
+private def indexLocal : FVarId := ⟨`indexValue⟩
+private def appendCountLocal : FVarId := ⟨`appendCount⟩
+private def wideValueLocal : FVarId := ⟨`wideValue⟩
 
 private def copyLoopLabel : FVarId := ⟨`copyLoop⟩
 private def packLoopLabel : FVarId := ⟨`packLoop⟩
+private def appendLoopLabel : FVarId := ⟨`appendLoop⟩
+private def appendAllocatedLoopLabel : FVarId := ⟨`appendAllocatedLoop⟩
 
 private def scalarPrerequisiteName : Name := `fir_byte_array_scalar_prerequisite
 
@@ -540,6 +572,298 @@ private def selectReusableDestination : List Instruction := [
             .i32Const .uint32 1,
             .localSet reuseLocal] []]) []])]
 
+private def decodeUSizeOffset (width : Nat) : List Instruction :=
+  trapWhenTrue [
+    .localGet sizeLocal,
+    .i32Const .uint32 (u32 width),
+    .i32LtU] ++
+  trapWhenTrue [
+    .localGet sizeLocal,
+    .i32Const .uint32 (u32 width),
+    .i32Sub,
+    .i64ExtendI32U .usize,
+    .localGet indexParam,
+    .i64LtU] ++ [
+    .localGet indexParam,
+    .i32WrapI64 .uint32,
+    .localSet indexLocal]
+
+private def dataAddress (object index : FVarId) : List Instruction := [
+  .localGet object,
+  .i32Const .uint32 (u32 headerBytes),
+  .i32Add,
+  .localGet index,
+  .i32Add]
+
+def getFunction : Function := {
+  name := externalName `ByteArray.get
+  params := #[(sourceParam, .object), (indexParam, .tobject),
+    (proofParam, .erased)]
+  results := #[.uint8]
+  locals := #[(sizeLocal, .uint32), (indexLocal, .uint32)]
+  body := [
+    .localGet sourceParam,
+    .call (.declaration validateName),
+    .localGet sourceParam,
+    .i32Load .uint32 (u32 headerAux1Offset),
+    .localSet sizeLocal,
+    .localGet indexParam,
+    .call (.declaration decodeNatural32Name),
+    .localSet indexLocal] ++
+    trapUnlessTrue [
+      .localGet indexLocal,
+      .localGet sizeLocal,
+      .i32LtU] ++
+    dataAddress sourceParam indexLocal ++ [
+      .i32Load8U .uint8 0,
+      .ret] }
+
+private def ugetFunction (declaration : Name) (width : Nat)
+    (result : AbiKind) (load : Instruction) : Function := {
+  name := externalName declaration
+  params := #[(sourceParam, .object), (indexParam, .usize),
+    (proofParam, .erased)]
+  results := #[result]
+  locals := #[(sizeLocal, .uint32), (indexLocal, .uint32)]
+  body := [
+    .localGet sourceParam,
+    .call (.declaration validateName),
+    .localGet sourceParam,
+    .i32Load .uint32 (u32 headerAux1Offset),
+    .localSet sizeLocal] ++
+    decodeUSizeOffset width ++ dataAddress sourceParam indexLocal ++
+    [load, .ret] }
+
+def ugetByteFunction : Function :=
+  ugetFunction `ByteArray.uget 1 .uint8 (.i32Load8U .uint8 0)
+
+def ugetUInt32LEFunction : Function :=
+  ugetFunction `ByteArray.ugetUInt32LE 4 .uint32 (.i32Load .uint32 0)
+
+def ugetUInt64LEFunction : Function :=
+  ugetFunction `ByteArray.ugetUInt64LE 8 .uint64 (.i64Load .uint64 0)
+
+private def wideSetFunction (declaration : Name) (width : Nat)
+    (valueKind : AbiKind) (store : Instruction) : Function := {
+  name := externalName declaration
+  params := #[(destinationParam, .object), (indexParam, .usize),
+    (valueParam, valueKind), (proofParam, .erased)]
+  results := #[.object]
+  locals := #[(addressLocal, .uint32), (sizeLocal, .uint32),
+    (capacityLocal, .uint32), (newSizeLocal, .uint32),
+    (reuseLocal, .uint32), (indexLocal, .uint32),
+    (rawLocal, .uint32), (savedScratchLocal, .uint32),
+    (objectResultLocal, .object)]
+  body := [
+    .localGet destinationParam,
+    .call (.declaration validateName),
+    .localGet destinationParam,
+    .i32Load .uint32 (u32 headerAux1Offset),
+    .localSet sizeLocal,
+    .localGet destinationParam,
+    .i32Load .uint32 (u32 headerAux2Offset),
+    .localSet capacityLocal] ++
+    decodeUSizeOffset width ++ [
+    .localGet sizeLocal,
+    .localSet newSizeLocal,
+    .i32Const .uint32 0,
+    .localSet reuseLocal] ++
+    selectReusableDestination ++ [
+    .localGet reuseLocal,
+    .ifElse
+      (dataAddress destinationParam indexLocal ++ [
+        .localGet valueParam,
+        store,
+        .localGet destinationParam,
+        .ret])
+      ([.localGet sizeLocal,
+        .localGet capacityLocal,
+        .call (.declaration allocateName),
+        .localSet addressLocal,
+        .localGet addressLocal,
+        .i32Const .uint32 (u32 headerBytes),
+        .i32Add,
+        .localGet destinationParam,
+        .i32Const .uint32 (u32 headerBytes),
+        .i32Add,
+        .localGet sizeLocal,
+        .call (.declaration copyBytesName)] ++
+        dataAddress addressLocal indexLocal ++ [
+        .localGet valueParam,
+        store,
+        .localGet destinationParam,
+        .call (.declaration releaseConsumedName),
+        .localGet addressLocal,
+        .call (.declaration retypeObjectName),
+        .ret])] }
+
+def usetUInt32LEFunction : Function :=
+  wideSetFunction `ByteArray.usetUInt32LE 4 .uint32 (.i32Store .uint32 0)
+
+def usetUInt64LEFunction : Function :=
+  wideSetFunction `ByteArray.usetUInt64LE 8 .uint64 (.i64Store .uint64 0)
+
+private def prepareAppend : List Instruction := [
+  .localGet destinationParam,
+  .call (.declaration validateName),
+  .localGet destinationParam,
+  .i32Load .uint32 (u32 headerAux1Offset),
+  .localSet sizeLocal,
+  .localGet destinationParam,
+  .i32Load .uint32 (u32 headerAux2Offset),
+  .localSet capacityLocal,
+  .localGet sizeLocal,
+  .localGet appendCountLocal,
+  .i32Add,
+  .localSet newSizeLocal] ++
+  trapWhenTrue [
+    .localGet newSizeLocal,
+    .localGet sizeLocal,
+    .i32LtU] ++ [
+  .localGet appendCountLocal] ++ equalsConst .uint32 0 ++ [
+  .ifElse [.localGet destinationParam, .ret] [],
+  .localGet capacityLocal,
+  .localSet newCapacityLocal,
+  .localGet capacityLocal,
+  .localGet newSizeLocal,
+  .i32LtU,
+  .ifElse [
+    .localGet newSizeLocal,
+    .localGet newSizeLocal,
+    .i32Add,
+    .localSet newCapacityLocal] []] ++
+  trapWhenTrue [
+    .localGet newCapacityLocal,
+    .localGet newSizeLocal,
+    .i32LtU] ++ [
+  .i32Const .uint32 0,
+  .localSet reuseLocal] ++
+  selectReusableDestination
+
+private def appendByteAddress (object : FVarId) : List Instruction := [
+  .localGet object,
+  .i32Const .uint32 (u32 headerBytes),
+  .i32Add,
+  .localGet sizeLocal,
+  .i32Add]
+
+def pushFunction : Function := {
+  name := externalName `ByteArray.push
+  params := #[(destinationParam, .object), (valueParam, .uint8)]
+  results := #[.object]
+  locals := #[(addressLocal, .uint32), (sizeLocal, .uint32),
+    (capacityLocal, .uint32), (newSizeLocal, .uint32),
+    (newCapacityLocal, .uint32), (appendCountLocal, .uint32),
+    (reuseLocal, .uint32), (rawLocal, .uint32),
+    (savedScratchLocal, .uint32), (objectResultLocal, .object)]
+  body := [
+    .i32Const .uint32 1,
+    .localSet appendCountLocal] ++ prepareAppend ++ [
+    .localGet reuseLocal,
+    .ifElse
+      (appendByteAddress destinationParam ++ [
+        .localGet valueParam,
+        .i32Store8 .uint8 0,
+        .localGet destinationParam,
+        .i32Const .uint32 0,
+        .i32Add,
+        .localGet newSizeLocal,
+        .i32Store .uint32 (u32 headerAux1Offset),
+        .localGet destinationParam,
+        .ret])
+      ([.localGet newSizeLocal,
+        .localGet newCapacityLocal,
+        .call (.declaration allocateName),
+        .localSet addressLocal,
+        .localGet addressLocal,
+        .i32Const .uint32 (u32 headerBytes),
+        .i32Add,
+        .localGet destinationParam,
+        .i32Const .uint32 (u32 headerBytes),
+        .i32Add,
+        .localGet sizeLocal,
+        .call (.declaration copyBytesName)] ++
+        appendByteAddress addressLocal ++ [
+        .localGet valueParam,
+        .i32Store8 .uint8 0,
+        .localGet destinationParam,
+        .call (.declaration releaseConsumedName),
+        .localGet addressLocal,
+        .call (.declaration retypeObjectName),
+        .ret])] }
+
+private def appendWideBytes (object loopLabel : FVarId) : List Instruction :=
+  appendByteAddress object ++ [.localSet destinationCursorLocal] ++ [
+  .loop loopLabel (
+    [.localGet appendCountLocal] ++ equalsConst .uint32 0 ++ [
+    .ifElse [] [
+      .localGet destinationCursorLocal,
+      .localGet wideValueLocal,
+      .i32WrapI64 .uint8,
+      .i32Store8 .uint8 0,
+      .localGet destinationCursorLocal,
+      .i32Const .uint32 1,
+      .i32Add,
+      .localSet destinationCursorLocal,
+      .localGet wideValueLocal,
+      .i64Const .uint64 8,
+      .i64ShrU,
+      .localSet wideValueLocal,
+      .localGet appendCountLocal,
+      .i32Const .uint32 1,
+      .i32Sub,
+      .localSet appendCountLocal,
+      .br loopLabel]])]
+
+def pushUInt64LEFunction : Function := {
+  name := externalName `ByteArray.pushUInt64LE
+  params := #[(destinationParam, .object), (valueParam, .uint64),
+    (countParam, .usize), (proofParam, .erased)]
+  results := #[.object]
+  locals := #[(addressLocal, .uint32), (sizeLocal, .uint32),
+    (capacityLocal, .uint32), (newSizeLocal, .uint32),
+    (newCapacityLocal, .uint32), (appendCountLocal, .uint32),
+    (reuseLocal, .uint32), (destinationCursorLocal, .uint32),
+    (wideValueLocal, .uint64), (rawLocal, .uint32),
+    (savedScratchLocal, .uint32), (objectResultLocal, .object)]
+  body := trapWhenTrue [
+    .i64Const .usize 8,
+    .localGet countParam,
+    .i64LtU] ++ [
+    .localGet countParam,
+    .i32WrapI64 .uint32,
+    .localSet appendCountLocal,
+    .localGet valueParam,
+    .localSet wideValueLocal] ++ prepareAppend ++ [
+    .localGet reuseLocal,
+    .ifElse
+      (appendWideBytes destinationParam appendLoopLabel ++ [
+        .localGet destinationParam,
+        .i32Const .uint32 0,
+        .i32Add,
+        .localGet newSizeLocal,
+        .i32Store .uint32 (u32 headerAux1Offset),
+        .localGet destinationParam,
+        .ret])
+      ([.localGet newSizeLocal,
+        .localGet newCapacityLocal,
+        .call (.declaration allocateName),
+        .localSet addressLocal,
+        .localGet addressLocal,
+        .i32Const .uint32 (u32 headerBytes),
+        .i32Add,
+        .localGet destinationParam,
+        .i32Const .uint32 (u32 headerBytes),
+        .i32Add,
+        .localGet sizeLocal,
+        .call (.declaration copyBytesName)] ++
+        appendWideBytes addressLocal appendAllocatedLoopLabel ++ [
+        .localGet destinationParam,
+        .call (.declaration releaseConsumedName),
+        .localGet addressLocal,
+        .call (.declaration retypeObjectName),
+        .ret])] }
+
 def copySliceFunction : Function := {
   name := externalName `ByteArray.copySlice
   params := #[(sourceParam, .object), (sourceOffsetParam, .tobject),
@@ -692,6 +1016,14 @@ def functions : Array Function := #[
   decodeNatural32Function,
   copyBytesFunction,
   releaseConsumedFunction,
+  getFunction,
+  ugetByteFunction,
+  ugetUInt32LEFunction,
+  ugetUInt64LEFunction,
+  usetUInt32LEFunction,
+  usetUInt64LEFunction,
+  pushFunction,
+  pushUInt64LEFunction,
   copySliceFunction,
   sizeFunction,
   mkFunction,
@@ -708,6 +1040,36 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
     some { params := #[.object], results := #[.object] }
   else if declaration == `ByteArray.emptyWithCapacity then
     some { params := #[.tobject], results := #[.object] }
+  else if declaration == `ByteArray.usetUInt32LE then
+    some {
+      params := #[.object, .usize, .uint32, .erased]
+      results := #[.object] }
+  else if declaration == `ByteArray.usetUInt64LE then
+    some {
+      params := #[.object, .usize, .uint64, .erased]
+      results := #[.object] }
+  else if declaration == `ByteArray.ugetUInt64LE then
+    some {
+      params := #[.object, .usize, .erased]
+      results := #[.uint64] }
+  else if declaration == `ByteArray.pushUInt64LE then
+    some {
+      params := #[.object, .uint64, .usize, .erased]
+      results := #[.object] }
+  else if declaration == `ByteArray.get then
+    some {
+      params := #[.object, .tobject, .erased]
+      results := #[.uint8] }
+  else if declaration == `ByteArray.ugetUInt32LE then
+    some {
+      params := #[.object, .usize, .erased]
+      results := #[.uint32] }
+  else if declaration == `ByteArray.uget then
+    some {
+      params := #[.object, .usize, .erased]
+      results := #[.uint8] }
+  else if declaration == `ByteArray.push then
+    some { params := #[.object, .uint8], results := #[.object] }
   else none
 
 private partial def rewriteInstruction (declarations : Array Name) :
@@ -735,7 +1097,8 @@ private def internalizeSelected (module : Module) (declarations : Array Name)
   unless module.functions.any (·.name == ResidentAllocator.allocateName) do
     throw .missingAllocator
   if declarations.contains `ByteArray.emptyWithCapacity ||
-      declarations.contains `ByteArray.copySlice then
+      declarations.contains `ByteArray.copySlice ||
+      declarations.contains `ByteArray.get then
     for name in #[ResidentNumeric.validateNaturalName,
         ResidentNumeric.naturalLowName, ResidentNumeric.naturalHighName] do
       unless module.functions.any (·.name == name) do
@@ -803,8 +1166,35 @@ private def externalTypes (declaration : Name) : ExternalTypes :=
     { params := #[LCNF.ImpureType.object], result := LCNF.ImpureType.tagged }
   else if declaration == `ByteArray.mk then
     { params := #[LCNF.ImpureType.object], result := LCNF.ImpureType.object }
-  else
+  else if declaration == `ByteArray.emptyWithCapacity then
     { params := #[LCNF.ImpureType.tobject], result := LCNF.ImpureType.object }
+  else if declaration == `ByteArray.usetUInt32LE then
+    { params := #[LCNF.ImpureType.object, LCNF.ImpureType.usize,
+        LCNF.ImpureType.uint32, LCNF.ImpureType.erased],
+      result := LCNF.ImpureType.object }
+  else if declaration == `ByteArray.usetUInt64LE then
+    { params := #[LCNF.ImpureType.object, LCNF.ImpureType.usize,
+        LCNF.ImpureType.uint64, LCNF.ImpureType.erased],
+      result := LCNF.ImpureType.object }
+  else if declaration == `ByteArray.ugetUInt64LE then
+    { params := #[LCNF.ImpureType.object, LCNF.ImpureType.usize,
+        LCNF.ImpureType.erased], result := LCNF.ImpureType.uint64 }
+  else if declaration == `ByteArray.pushUInt64LE then
+    { params := #[LCNF.ImpureType.object, LCNF.ImpureType.uint64,
+        LCNF.ImpureType.usize, LCNF.ImpureType.erased],
+      result := LCNF.ImpureType.object }
+  else if declaration == `ByteArray.get then
+    { params := #[LCNF.ImpureType.object, LCNF.ImpureType.tobject,
+        LCNF.ImpureType.erased], result := LCNF.ImpureType.uint8 }
+  else if declaration == `ByteArray.ugetUInt32LE then
+    { params := #[LCNF.ImpureType.object, LCNF.ImpureType.usize,
+        LCNF.ImpureType.erased], result := LCNF.ImpureType.uint32 }
+  else if declaration == `ByteArray.uget then
+    { params := #[LCNF.ImpureType.object, LCNF.ImpureType.usize,
+        LCNF.ImpureType.erased], result := LCNF.ImpureType.uint8 }
+  else
+    { params := #[LCNF.ImpureType.object, LCNF.ImpureType.uint8],
+      result := LCNF.ImpureType.object }
 
 private def externalImport (declaration : Name) : Import := {
   key := .external declaration

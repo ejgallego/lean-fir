@@ -110,6 +110,14 @@ export async function checkResidentByteArray(bytes) {
     "fir_ext_ByteArray_size",
     "fir_ext_ByteArray_mk",
     "fir_ext_ByteArray_emptyWithCapacity",
+    "fir_ext_ByteArray_get",
+    "fir_ext_ByteArray_uget",
+    "fir_ext_ByteArray_ugetUInt32LE",
+    "fir_ext_ByteArray_ugetUInt64LE",
+    "fir_ext_ByteArray_usetUInt32LE",
+    "fir_ext_ByteArray_usetUInt64LE",
+    "fir_ext_ByteArray_push",
+    "fir_ext_ByteArray_pushUInt64LE",
   ]) {
     equal(typeof exports[name], "function", `missing export ${name}`);
   }
@@ -235,6 +243,112 @@ export async function checkResidentByteArray(bytes) {
     "copySlice mutated persistent input");
   deepEqual(decodeByteArray(exports, persistentResult).bytes, [9, 8, 3],
     "copySlice persistent copy bytes");
+
+  equal(exports.fir_ext_ByteArray_get(source, nat(4)) >>> 0, 255,
+    "ByteArray.get last byte");
+  equal(exports.fir_ext_ByteArray_uget(source, 3n) >>> 0, 128,
+    "ByteArray.uget byte");
+  expectTrap(() => exports.fir_ext_ByteArray_get(source, nat(5)),
+    "ByteArray.get accepted its upper bound");
+  expectTrap(() => exports.fir_ext_ByteArray_uget(source, 5n),
+    "ByteArray.uget accepted its upper bound");
+
+  const wide = makeByteArray([
+    0xef, 0xcd, 0xab, 0x89, 0x67, 0x45, 0x23, 0x01, 0xde,
+  ]);
+  equal(exports.fir_ext_ByteArray_ugetUInt32LE(wide, 1n) >>> 0,
+    0x6789abcd, "ByteArray.ugetUInt32LE unaligned bits");
+  equal(BigInt.asUintN(64,
+    exports.fir_ext_ByteArray_ugetUInt64LE(wide, 0n)),
+  0x0123456789abcdefn, "ByteArray.ugetUInt64LE bits");
+  expectTrap(() => exports.fir_ext_ByteArray_ugetUInt32LE(wide, 6n),
+    "ByteArray.ugetUInt32LE accepted an incomplete word");
+  expectTrap(() => exports.fir_ext_ByteArray_ugetUInt64LE(wide, 2n),
+    "ByteArray.ugetUInt64LE accepted an incomplete word");
+
+  const set32 = makeByteArray([0, 1, 2, 3, 4, 5, 6, 7]);
+  const set32Frontier = exports.fir_heap_frontier() >>> 0;
+  const set32Result = exports.fir_ext_ByteArray_usetUInt32LE(
+    set32, 2n, 0x89abcdef) >>> 0;
+  equal(set32Result, set32, "exclusive usetUInt32LE identity");
+  equal(exports.fir_heap_frontier() >>> 0, set32Frontier,
+    "exclusive usetUInt32LE allocated");
+  deepEqual(decodeByteArray(exports, set32).bytes,
+    [0, 1, 0xef, 0xcd, 0xab, 0x89, 6, 7],
+  "exclusive usetUInt32LE bytes");
+
+  const set64Shared = makeByteArray([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+  const set64SharedView = new DataView(exports.memory.buffer);
+  set64SharedView.setUint32(set64Shared + 8, 2, true);
+  const set64Result = exports.fir_ext_ByteArray_usetUInt64LE(
+    set64Shared, 1n, 0x0123456789abcdefn) >>> 0;
+  expect(set64Result !== set64Shared,
+    "shared usetUInt64LE reused its input");
+  equal(decodeByteArray(exports, set64Shared).refCount, 1,
+    "shared usetUInt64LE did not consume one reference");
+  deepEqual(decodeByteArray(exports, set64Shared).bytes,
+    [0, 1, 2, 3, 4, 5, 6, 7, 8],
+  "shared usetUInt64LE mutated its alias");
+  deepEqual(decodeByteArray(exports, set64Result).bytes,
+    [0, 0xef, 0xcd, 0xab, 0x89, 0x67, 0x45, 0x23, 0x01],
+  "shared usetUInt64LE copied bytes");
+  expectTrap(() => exports.fir_ext_ByteArray_usetUInt32LE(
+    set32, 5n, 0), "usetUInt32LE accepted an incomplete destination");
+
+  const pushRoomy = exports.fir_ext_ByteArray_emptyWithCapacity(nat(8)) >>> 0;
+  const pushSeed = makeByteArray([1, 2, 3]);
+  const pushPrepared = exports.fir_ext_ByteArray_copySlice(
+    pushSeed, nat(0), pushRoomy, nat(0), nat(3), 1) >>> 0;
+  equal(pushPrepared, pushRoomy, "push roomy preparation identity");
+  const pushFrontier = exports.fir_heap_frontier() >>> 0;
+  const pushed = exports.fir_ext_ByteArray_push(pushPrepared, 0xfe) >>> 0;
+  equal(pushed, pushPrepared, "exclusive ByteArray.push identity");
+  equal(exports.fir_heap_frontier() >>> 0, pushFrontier,
+    "exclusive ByteArray.push allocated despite capacity");
+  deepEqual(decodeByteArray(exports, pushed).bytes, [1, 2, 3, 0xfe],
+    "ByteArray.push bytes");
+
+  const pushGrowthInput = makeByteArray([4, 5]);
+  const pushGrowth = exports.fir_ext_ByteArray_push(
+    pushGrowthInput, 6) >>> 0;
+  expect(pushGrowth !== pushGrowthInput,
+    "ByteArray.push failed to replace a full input");
+  equal(new DataView(exports.memory.buffer).getUint32(
+    pushGrowthInput, true), KIND_FREED,
+  "ByteArray.push did not consume a grown exclusive input");
+  const decodedPushGrowth = decodeByteArray(exports, pushGrowth);
+  deepEqual(decodedPushGrowth.bytes, [4, 5, 6],
+    "ByteArray.push growth bytes");
+  equal(decodedPushGrowth.capacity, 6, "ByteArray.push growth capacity");
+
+  const pushShared = makeByteArray([7, 8]);
+  new DataView(exports.memory.buffer).setUint32(pushShared + 8, 2, true);
+  const pushSharedResult = exports.fir_ext_ByteArray_push(
+    pushShared, 9) >>> 0;
+  expect(pushSharedResult !== pushShared,
+    "ByteArray.push reused a shared input");
+  equal(decodeByteArray(exports, pushShared).refCount, 1,
+    "ByteArray.push did not consume one shared reference");
+  deepEqual(decodeByteArray(exports, pushShared).bytes, [7, 8],
+    "ByteArray.push mutated a shared alias");
+  deepEqual(decodeByteArray(exports, pushSharedResult).bytes, [7, 8, 9],
+    "ByteArray.push shared result");
+
+  const pushWide = exports.fir_ext_ByteArray_emptyWithCapacity(nat(16)) >>> 0;
+  const zeroWideFrontier = exports.fir_heap_frontier() >>> 0;
+  const zeroWide = exports.fir_ext_ByteArray_pushUInt64LE(
+    pushWide, 0xffffffffffffffffn, 0n) >>> 0;
+  equal(zeroWide, pushWide, "pushUInt64LE zero-count identity");
+  equal(exports.fir_heap_frontier() >>> 0, zeroWideFrontier,
+    "pushUInt64LE zero-count allocated");
+  const pushedWide = exports.fir_ext_ByteArray_pushUInt64LE(
+    zeroWide, 0x0123456789abcdefn, 8n) >>> 0;
+  equal(pushedWide, pushWide, "exclusive pushUInt64LE identity");
+  deepEqual(decodeByteArray(exports, pushedWide).bytes,
+    [0xef, 0xcd, 0xab, 0x89, 0x67, 0x45, 0x23, 0x01],
+  "pushUInt64LE bytes");
+  expectTrap(() => exports.fir_ext_ByteArray_pushUInt64LE(
+    pushedWide, 0n, 9n), "pushUInt64LE accepted a count above eight");
 
   const malformedArray = encodeArray(exports, [0]);
   new DataView(exports.memory.buffer).setUint32(
