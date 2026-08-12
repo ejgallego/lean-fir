@@ -643,9 +643,8 @@ The discrepancy was carded rather than allowlisted; S9 preserves the intended
 runtime ownership experiment behind the explicit owner boundary while that
 compiler/capture issue remains unresolved.
 
-State: S9 is prepared on the fixture lane as a fixture-only consumer of the
-linked closure-application and ByteArray contracts; it changes no shared
-contract.
+State: S9 landed on `main` through clean ready handoff `5937df70`; functional
+head `84ef07e9` changes no shared contract.
 
 ### E3: constants, caches, and initialization
 

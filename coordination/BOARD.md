@@ -15,6 +15,44 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `VALIDATION-S9-DICTIONARY-OWNERSHIP`.
+- Integration owner: `test-fixtures`, acting under the user-authorized
+  integration lease for this fixture-only milestone. The lane branch was
+  rebased on accepted local main `66aeb6d1` and landed through clean ready head
+  `5937df70`; functional head `84ef07e9` changes no shared contract.
+- Semantic pair: a runtime class dictionary holds mutator and observer method
+  closures that capture the same `ByteArray`. The unique path consumes the
+  owner before mutation and returns `[42, 127, 128, 255]`; the retained path
+  preserves the owner across mutation, invokes the observer sibling, and
+  returns the updated copy paired with original-byte observation `0`.
+- Executed evidence: complete 42/71-transition paths pin two `pap` forms,
+  dictionary and owner construction, method projection, indirect `fvar`
+  invocation, ownership increments/decrements, and exact external order. The
+  retained path executes `ByteArray.set!`, `ByteArray.get!`, `UInt8.toNat`
+  after mutation; the unique path executes only `ByteArray.set!` after sibling
+  release.
+- Discrepancy: the rejected implicit-class formulation exposed
+  `FIR-BUG-impure-none-dictionary-specialization-capture`. Isolated final-LCNF
+  capture retains opaque external stubs instead of generated method
+  specialization bodies. The generated names were not allowlisted; the
+  admitted runtime experiment uses a named non-class owner boundary.
+- Contracts: none. The slice consumes the linked closure-application,
+  aggregate, ByteArray, compiler, and real-engine surfaces while active proof,
+  W6, W7, error, exception, and source-stream contracts remain fenced.
+- Acceptance: Lean Beam update/sync/save at version 6 with zero diagnostics;
+  dependency-cone build; focused native/LCNF and native/LCNF/V8 probes;
+  `git diff --check`; and complete `make check`. The final snapshot has 661
+  source cases, 670 unique cases, 1,331 tier cases, 1,992/1,992 equal
+  comparisons, 7,176 interpreter steps, 160/160 tag floors, 253/253 semantic
+  domains, 1,322 native-oracle witnesses, and zero findings. V8 opened all
+  1,322 products under strace; 146 bug cards validate.
+- Result: `main` fast-forwards through the clean handoff and this acceptance
+  record. S9 is the dictionary sibling-lifetime baseline. Further E2 work must
+  add a polymorphic runtime-shape signature not dominated by S9 or scalar ABI
+  coverage.
+
+## Latest completed integration lease
+
 - Milestone: `VALIDATION-S8-AGGREGATE-ERASURE-OWNERSHIP`.
 - Integration owner: `test-fixtures`, acting under the user-authorized
   integration lease for this fixture-only milestone. The lane branch was
