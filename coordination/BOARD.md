@@ -15,6 +15,34 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `WASM-LEAN-OBJECT-FAMILY-CLOSURE-ABI`.
+- Integration owner: `wasm-gen` acting under the shared-compiler integration
+  lease; the isolated branch was `integration/object-family-closure-call`
+  from `88ea55dd` through `b2d6f45c`.
+- Compiler contract: ordinary arguments supplied to an allocated closure and
+  its saturated result now use the same symmetric Lean object-family call ABI
+  as named calls and joins. Capture descriptors and semantic refinement remain
+  directional; scalar and erased lanes remain exact.
+- Proof bridge: the shared ABI records that directional refinement implies
+  Lean call compatibility, so the existing W6 closure-resolution hypotheses
+  prove the widened compiler admission without changing W6-owned contracts.
+- Regression: a generic `[tobject, tobject]` closure application resolves a
+  target with `[object, object]` parameters and emits a valid module, while a
+  `UInt32` argument remains rejected. Bug card
+  `FIR-BUG-wasm-none-generic-object-family-closure-call-admission` is fixed.
+- Production confirmation: this removes the last unsupported declaration in
+  the 391-declaration `Zip.Wasm.compressLevel1` final-LCNF closure. The exact
+  resident-helper inventory is the next W7 probe.
+- Acceptance: Lean Beam update/sync/save with zero errors; `git diff --check`;
+  complete `make check` through 662 unique cases and 1,968/1,968 comparisons;
+  and all 3,143 Talos jobs. The deterministic artifact gate reaches its strict
+  prettyM closure-inventory ratchet: the reviewed count moves from 40 to 42,
+  which W7 updates as the immediate consumer adaptation before republishing.
+- Result: `main` fast-forwards to `b2d6f45c`; W7 rebases, ratchets the exact
+  artifact inventory, reruns the complete gate, and then resumes Level1.
+
+## Latest completed integration lease
+
 - Milestone: `FINAL-LCNF-GENERATED-NAME-ISOLATION`.
 - Integration owner: `wasm-gen` acting under the shared-compiler integration
   lease; the functional branch was `integration/level1-capture-u8` from
@@ -3062,7 +3090,7 @@ validation work continues; their historical handoff text remains unchanged.
 | `WASM-DECLARATION-PARAMETER-UNIQUENESS` | integration/W6 proof | W6, W7, validation | released | queue/card `03547684`; isolated contract `dfa8153e`; bug card `FIR-BUG-wasm-none-duplicate-declaration-parameters` | Adds duplicate-free same-scope declaration parameters to `supportedDecl`. This aligns validator parameter kinds with the deduplicating symbolic-local row and prevents an accepted program from lowering to an invalid call signature. Existing well-formed generated programs are unaffected; consumers rebase after landing. |
 | `WASM-DECLARATION-NAME-UNIQUENESS` | W6 proof | W6 compiler-correctness clients | released | isolated proof contract `b6030300`; functional proof `f215c995`; bug card `FIR-BUG-wasm-none-supported-export-declaration-name-uniqueness` | Retains the existing phase-level `Program.NamesUnique` fact at `ConcreteSupportedExport`, proving that source lookup, symbolic function selection, and adapter numeric lookup identify the same internal declaration. No lowering, validator, ABI, runtime, or interpreter behavior changes. |
 | `CLOSURE-PROJECTION-KIND-REFINEMENT` | W6 proof/runtime | W6 compiler correctness, W7 resident projection, validation | released | functional head `625d4883`; ready mailbox `22d15cf3`; bug card `FIR-BUG-wasm-none-closure-projection-kind-refinement` | A closure retains its captured argument's precise descriptor kind, while generated callee entry may request the wider target-parameter kind. Live and post-application projection accept exactly `actualKind.refines expectedKind`, read at the actual descriptor kind, and preserve the physical lane while widening `PhysicalValueRel`. W7's resident helper already loads the same raw slot and requires no implementation change. |
-| `WASM-LEAN-OBJECT-FAMILY-CALL-ABI` | W7/shared lowering | W6, W7, validation, artifact clients | released | isolated contract `bd7a5e55`; W7 consumer `a13fa2ad`; package ratchet `e5a8612b` | Follows Lean's generic call representation: `object`, `tagged`, and `tobject` are mutually compatible at named-call, result, and symbolic-stack boundaries, while scalar and erased lanes stay exact. Directional semantic/proof refinement and every concrete layout remain unchanged. W7 removes caller-name repairs and preserves captured `tobject` helper results; W6 rebases before proving the stable signatures. |
+| `WASM-LEAN-OBJECT-FAMILY-CALL-ABI` | W7/shared lowering | W6, W7, validation, artifact clients | released | initial contract `bd7a5e55`; W7 consumer `a13fa2ad`; package ratchet `e5a8612b`; closure-call extension `b2d6f45c` | Follows Lean's generic call representation: `object`, `tagged`, and `tobject` are mutually compatible at named calls, joins, results, symbolic-stack boundaries, and ordinary allocated-closure invocation, while scalar and erased lanes stay exact. Directional semantic/proof refinement, closure capture descriptors, and every concrete layout remain unchanged. The shared refinement-to-call-compatibility lemma keeps the existing W6 closure-resolution proof hypotheses sufficient. W7 removes caller-name repairs, preserves captured `tobject` helper results, and ratchets the reviewed prettyM closure inventory from 40 to 42 before continuing Level1. |
 | `ARGUMENT-ALIAS-MATERIALIZATION` | integration/validation | W7, V8 adapter, W6 refinement | active | `181a098f` | Adds a canonical target-sorted root-to-later-argument alias graph to every corpus descriptor. LCNF allocates each root once and retains one owned reference per aliased argument; malformed, chained, non-heap, schema-mismatched, and datum-mismatched graphs fail closed. The V8 adapter requires one compiler-manifest heap location per root with exact initial multiplicity and tests reference counts two and three plus two independent roots. W7 should thread `argumentAliases` through compiler invocation only after its current slice, then admit the three queued alias fixtures; W6 owns any later concrete refinement, not this validation implementation. |
 | `NATIVE-TERMINATION-SUPERVISION` | integration/validation | native adapter, LCNF adapter, W7/V8, Talos runners | active | `6fef4802`; divergence `6f0487ee`; typed policy `9e00c614`; source exit `8618f1f1` | Adds `timeoutMs` plus the backend-neutral `processTermination` enum: `protocol`, `timeoutDivergence`, or `sourceExit`. Native timeout is a typed backend timeout unless opted into divergence; ordinary nonzero status and signals remain crashes unless an exact source-exit fixture opts in, and signals always remain crashes. LCNF promotes only same-step, well-typed `Source.exitNat` terminal evidence under `sourceExit`, without changing the canonical interpreter result theorem. The divergence fixture pins 256 steps; source-exit fixtures pin statuses zero/seven and one exact external step. Retained V8 evidence excludes both. W7 or Talos should consume this policy only when admitting corresponding real-engine cases; no compiler-side work is requested now. |
 | `EFFECTFUL-NATIVE-ORACLE` | integration/validation | native and direct-native adapters; future V8/Talos adapter authors | active | `b3f4f5d9` | Replaces `Case.native : Unit → ValidationDatum` with a delayed `Unit → IO ValidationDatum` action and makes semantic effect/stderr drains independent of a successful return value. Existing pure fixtures lift explicitly and the current 699 source plus 9 direct observations pass. This is the foundation for comparing true Lean `IO.Error` exceptions and source output; it changes no descriptor, compiler ABI, canonical interpreter theorem, or W6/W7 implementation surface. |
