@@ -29,18 +29,56 @@ private def valueParam : FVarId := ⟨`value⟩
 private def leftParam : FVarId := ⟨`left⟩
 private def rightParam : FVarId := ⟨`right⟩
 private def rawLocal : FVarId := ⟨`raw⟩
+private def raw64Local : FVarId := ⟨`raw64⟩
 private def sumLocal : FVarId := ⟨`sum⟩
 private def intersectionLocal : FVarId := ⟨`intersection⟩
 private def savedScratchLocal : FVarId := ⟨`savedScratch⟩
 private def uint8ResultLocal : FVarId := ⟨`uint8Result⟩
 private def uint16ResultLocal : FVarId := ⟨`uint16Result⟩
+private def uint32ResultLocal : FVarId := ⟨`uint32Result⟩
+private def uint64ResultLocal : FVarId := ⟨`uint64Result⟩
+private def usizeResultLocal : FVarId := ⟨`usizeResult⟩
+private def objectResultLocal : FVarId := ⟨`objectResult⟩
+private def taggedResultLocal : FVarId := ⟨`taggedResult⟩
+private def lowLocal : FVarId := ⟨`low⟩
+private def highLocal : FVarId := ⟨`high⟩
 
 def externalDeclarations : Array Name := #[
+  `UInt8.ofNat,
+  `UInt8.toNat,
+  `UInt8.toUInt32,
+  `UInt8.toUInt64,
+  `UInt8.toUSize,
+  `UInt8.decEq,
+  `UInt8.decLt,
   `UInt16.shiftRight,
   `UInt16.ofNat,
   `UInt16.toUInt8,
+  `UInt16.toNat,
+  `UInt16.toUInt32,
+  `UInt16.toUInt64,
   `UInt16.land,
-  `UInt16.xor]
+  `UInt16.xor,
+  `UInt32.ofNat,
+  `UInt32.toNat,
+  `UInt32.toUInt8,
+  `UInt32.toUInt16,
+  `UInt32.toUInt64,
+  `UInt32.toUSize,
+  `UInt32.add,
+  `UInt32.sub,
+  `UInt32.land,
+  `UInt32.xor,
+  `UInt32.shiftRight,
+  `UInt32.decLt,
+  `UInt32.decLe,
+  `UInt64.ofNat,
+  `UInt64.toUInt8,
+  `UInt64.toUInt16,
+  `UInt64.toUSize,
+  `UInt64.shiftLeft,
+  `UInt64.shiftRight,
+  `UInt64.decEq]
 
 def externalName (declaration : Name) : Name :=
   Name.mkSimple s!"fir_ext_{declaration.toString.replace "." "_"}"
@@ -51,7 +89,7 @@ private def retypeRaw (result : AbiKind) (resultLocal : FVarId) :
     List Instruction := [
   .localSet rawLocal,
   .i32Const .uint32 0,
-  .i32Load .uint32 0,
+  .i64Load .uint64 0,
   .localSet savedScratchLocal,
   .i32Const .uint32 0,
   .localGet rawLocal,
@@ -61,68 +99,130 @@ private def retypeRaw (result : AbiKind) (resultLocal : FVarId) :
   .localSet resultLocal,
   .i32Const .uint32 0,
   .localGet savedScratchLocal,
-  .i32Store .uint32 0,
+  .i64Store .uint64 0,
   .localGet resultLocal,
   .ret]
 
-def shiftRightFunction : Function := {
-  name := externalName `UInt16.shiftRight
-  params := #[(leftParam, .uint16), (rightParam, .uint16)]
-  results := #[.uint16]
-  locals := #[(rawLocal, .uint32), (savedScratchLocal, .uint32),
-    (uint16ResultLocal, .uint16)]
-  body := [
-    .localGet leftParam,
-    .localGet rightParam,
-    .i32Const .uint32 16,
-    .i32RemU,
-    .i32ShrU] ++ retypeRaw .uint16 uint16ResultLocal }
+private def retypeRaw64 (result : AbiKind) (resultLocal : FVarId) :
+    List Instruction := [
+  .localSet raw64Local,
+  .i32Const .uint32 0,
+  .i64Load .uint64 0,
+  .localSet savedScratchLocal,
+  .i32Const .uint32 0,
+  .localGet raw64Local,
+  .i64Store .uint64 0,
+  .i32Const .uint32 0,
+  .i64Load result 0,
+  .localSet resultLocal,
+  .i32Const .uint32 0,
+  .localGet savedScratchLocal,
+  .i64Store .uint64 0,
+  .localGet resultLocal,
+  .ret]
 
-def ofNatFunction : Function := {
-  name := externalName `UInt16.ofNat
-  params := #[(valueParam, .tobject)]
-  results := #[.uint16]
-  locals := #[(rawLocal, .uint32), (savedScratchLocal, .uint32),
-    (uint16ResultLocal, .uint16)]
-  body := [
+private def i32ResultLocal (kind : AbiKind) : FVarId :=
+  if kind == .uint8 then uint8ResultLocal
+  else if kind == .uint16 then uint16ResultLocal
+  else if kind == .tagged then taggedResultLocal
+  else if kind == .tobject then objectResultLocal
+  else uint32ResultLocal
+
+private def i64ResultLocal (kind : AbiKind) : FVarId :=
+  if kind == .usize then usizeResultLocal else uint64ResultLocal
+
+private def retypedI32Function (declaration : Name) (params : Array (FVarId × AbiKind))
+    (result : AbiKind) (body : List Instruction) : Function :=
+  let resultLocal := i32ResultLocal result
+  {
+    name := externalName declaration
+    params
+    results := #[result]
+    locals := #[(rawLocal, .uint32), (savedScratchLocal, .uint64),
+      (resultLocal, result)]
+    body := body ++ retypeRaw result resultLocal }
+
+private def retypedI64Function (declaration : Name) (params : Array (FVarId × AbiKind))
+    (result : AbiKind) (body : List Instruction) : Function :=
+  let resultLocal := i64ResultLocal result
+  {
+    name := externalName declaration
+    params
+    results := #[result]
+    locals := #[(raw64Local, .uint64), (savedScratchLocal, .uint64),
+      (resultLocal, result)]
+    body := body ++ retypeRaw64 result resultLocal }
+
+private def ofNat32Function (declaration : Name) (result : AbiKind)
+    (mask : UInt32) : Function :=
+  retypedI32Function declaration #[(valueParam, .tobject)] result [
     .localGet valueParam,
     .call (.declaration ResidentNumeric.validateNaturalName),
     .localGet valueParam,
     .call (.declaration ResidentNumeric.naturalLowName),
-    .i32Const .uint32 0xffff,
-    .i32And] ++ retypeRaw .uint16 uint16ResultLocal }
+    .i32Const .uint32 mask,
+    .i32And]
 
-def toUInt8Function : Function := {
-  name := externalName `UInt16.toUInt8
-  params := #[(valueParam, .uint16)]
-  results := #[.uint8]
-  locals := #[(rawLocal, .uint32), (savedScratchLocal, .uint32),
-    (uint8ResultLocal, .uint8)]
-  body := [
+private def toNat32Function (declaration : Name) (param result : AbiKind) : Function :=
+  retypedI32Function declaration #[(valueParam, param)] result [
     .localGet valueParam,
-    .i32Const .uint32 0xff,
-    .i32And] ++ retypeRaw .uint8 uint8ResultLocal }
+    .i32Const .uint32 0xffffffff,
+    .i32And,
+    .i32Const .uint32 0,
+    .call (.declaration ResidentNumeric.makeNaturalName)]
 
-def landFunction : Function := {
-  name := externalName `UInt16.land
-  params := #[(leftParam, .uint16), (rightParam, .uint16)]
-  results := #[.uint16]
-  locals := #[(rawLocal, .uint32), (savedScratchLocal, .uint32),
-    (uint16ResultLocal, .uint16)]
-  body := [
+private def widenI32Function (declaration : Name) (param result : AbiKind) : Function :=
+  retypedI32Function declaration #[(valueParam, param)] result [
+    .localGet valueParam,
+    .i32Const .uint32 0xffffffff,
+    .i32And]
+
+private def extendI32Function (declaration : Name) (param result : AbiKind) : Function := {
+  name := externalName declaration
+  params := #[(valueParam, param)]
+  results := #[result]
+  locals := #[]
+  body := [.localGet valueParam, .i64ExtendI32U result, .ret] }
+
+private def decisionI32Function (declaration : Name) (param : AbiKind)
+    (comparison : Instruction) : Function :=
+  retypedI32Function declaration #[(leftParam, param), (rightParam, param)] .uint8 [
     .localGet leftParam,
     .localGet rightParam,
-    .i32And] ++ retypeRaw .uint16 uint16ResultLocal }
+    comparison]
+
+private def binaryI32Function (declaration : Name) (param : AbiKind)
+    (operation : Instruction) : Function :=
+  retypedI32Function declaration #[(leftParam, param), (rightParam, param)] param [
+    .localGet leftParam,
+    .localGet rightParam,
+    operation]
+
+def shiftRightFunction : Function :=
+  retypedI32Function `UInt16.shiftRight
+    #[(leftParam, .uint16), (rightParam, .uint16)] .uint16 [
+    .localGet leftParam,
+    .localGet rightParam,
+    .i32Const .uint32 16,
+    .i32RemU,
+    .i32ShrU]
+
+def ofNatFunction : Function :=
+  ofNat32Function `UInt16.ofNat .uint16 0xffff
+
+def toUInt8Function : Function :=
+  retypedI32Function `UInt16.toUInt8 #[(valueParam, .uint16)] .uint8 [
+    .localGet valueParam,
+    .i32Const .uint32 0xff,
+    .i32And]
+
+def landFunction : Function :=
+  binaryI32Function `UInt16.land .uint16 .i32And
 
 /-- `a xor b = a + b - 2 * (a and b)` in the wasm32 bit ring. -/
 def xorFunction : Function := {
-  name := externalName `UInt16.xor
-  params := #[(leftParam, .uint16), (rightParam, .uint16)]
-  results := #[.uint16]
-  locals := #[(rawLocal, .uint32), (sumLocal, .uint32),
-    (intersectionLocal, .uint32), (savedScratchLocal, .uint32),
-    (uint16ResultLocal, .uint16)]
-  body := [
+  (retypedI32Function `UInt16.xor
+    #[(leftParam, .uint16), (rightParam, .uint16)] .uint16 [
     .localGet leftParam,
     .localGet rightParam,
     .i32Add,
@@ -135,23 +235,267 @@ def xorFunction : Function := {
     .localGet intersectionLocal,
     .localGet intersectionLocal,
     .i32Add,
-    .i32Sub] ++ retypeRaw .uint16 uint16ResultLocal }
+    .i32Sub]) with
+    locals := #[(rawLocal, .uint32), (sumLocal, .uint32),
+      (intersectionLocal, .uint32), (savedScratchLocal, .uint64),
+      (uint16ResultLocal, .uint16)] }
+
+def uint8OfNatFunction : Function :=
+  ofNat32Function `UInt8.ofNat .uint8 0xff
+
+def uint8ToNatFunction : Function :=
+  toNat32Function `UInt8.toNat .uint8 .tagged
+
+def uint8ToUInt32Function : Function :=
+  widenI32Function `UInt8.toUInt32 .uint8 .uint32
+
+def uint8ToUInt64Function : Function :=
+  extendI32Function `UInt8.toUInt64 .uint8 .uint64
+
+def uint8ToUSizeFunction : Function :=
+  extendI32Function `UInt8.toUSize .uint8 .usize
+
+def uint8DecEqFunction : Function :=
+  decisionI32Function `UInt8.decEq .uint8 .i32Eq
+
+def uint8DecLtFunction : Function :=
+  decisionI32Function `UInt8.decLt .uint8 .i32LtU
+
+def uint16ToNatFunction : Function :=
+  toNat32Function `UInt16.toNat .uint16 .tagged
+
+def uint16ToUInt32Function : Function :=
+  widenI32Function `UInt16.toUInt32 .uint16 .uint32
+
+def uint16ToUInt64Function : Function :=
+  extendI32Function `UInt16.toUInt64 .uint16 .uint64
+
+def uint32OfNatFunction : Function :=
+  ofNat32Function `UInt32.ofNat .uint32 0xffffffff
+
+def uint32ToNatFunction : Function :=
+  toNat32Function `UInt32.toNat .uint32 .tobject
+
+private def narrowUInt32Function (declaration : Name) (result : AbiKind)
+    (mask : UInt32) : Function :=
+  retypedI32Function declaration #[(valueParam, .uint32)] result [
+    .localGet valueParam,
+    .i32Const .uint32 mask,
+    .i32And]
+
+def uint32ToUInt8Function : Function :=
+  narrowUInt32Function `UInt32.toUInt8 .uint8 0xff
+
+def uint32ToUInt16Function : Function :=
+  narrowUInt32Function `UInt32.toUInt16 .uint16 0xffff
+
+def uint32ToUInt64Function : Function :=
+  extendI32Function `UInt32.toUInt64 .uint32 .uint64
+
+def uint32ToUSizeFunction : Function :=
+  extendI32Function `UInt32.toUSize .uint32 .usize
+
+def uint32AddFunction : Function :=
+  binaryI32Function `UInt32.add .uint32 .i32Add
+
+def uint32SubFunction : Function :=
+  binaryI32Function `UInt32.sub .uint32 .i32Sub
+
+def uint32LandFunction : Function :=
+  binaryI32Function `UInt32.land .uint32 .i32And
+
+def uint32XorFunction : Function := {
+  (retypedI32Function `UInt32.xor
+    #[(leftParam, .uint32), (rightParam, .uint32)] .uint32 [
+      .localGet leftParam,
+      .localGet rightParam,
+      .i32Add,
+      .localSet sumLocal,
+      .localGet leftParam,
+      .localGet rightParam,
+      .i32And,
+      .localSet intersectionLocal,
+      .localGet sumLocal,
+      .localGet intersectionLocal,
+      .localGet intersectionLocal,
+      .i32Add,
+      .i32Sub]) with
+    locals := #[(rawLocal, .uint32), (sumLocal, .uint32),
+      (intersectionLocal, .uint32), (savedScratchLocal, .uint64),
+      (uint32ResultLocal, .uint32)] }
+
+def uint32ShiftRightFunction : Function :=
+  binaryI32Function `UInt32.shiftRight .uint32 .i32ShrU
+
+def uint32DecLtFunction : Function :=
+  decisionI32Function `UInt32.decLt .uint32 .i32LtU
+
+def uint32DecLeFunction : Function :=
+  retypedI32Function `UInt32.decLe
+    #[(leftParam, .uint32), (rightParam, .uint32)] .uint8 [
+      .localGet rightParam,
+      .localGet leftParam,
+      .i32LtU,
+      .i32Const .uint32 0,
+      .i32Eq]
+
+def uint64OfNatFunction : Function := {
+  name := externalName `UInt64.ofNat
+  params := #[(valueParam, .tobject)]
+  results := #[.uint64]
+  locals := #[]
+  body := [
+    .localGet valueParam,
+    .call (.declaration ResidentNumeric.validateNaturalName),
+    .localGet valueParam,
+    .call (.declaration ResidentNumeric.naturalHighName),
+    .i64ExtendI32U .uint64,
+    .i64Const .uint64 32,
+    .i64Shl,
+    .localGet valueParam,
+    .call (.declaration ResidentNumeric.naturalLowName),
+    .i64ExtendI32U .uint64,
+    .i64Or,
+    .ret] }
+
+private def narrowUInt64Function (declaration : Name) (result : AbiKind)
+    (mask : UInt32) : Function :=
+  retypedI32Function declaration #[(valueParam, .uint64)] result [
+    .localGet valueParam,
+    .i32WrapI64 .uint32,
+    .i32Const .uint32 mask,
+    .i32And]
+
+def uint64ToUInt8Function : Function :=
+  narrowUInt64Function `UInt64.toUInt8 .uint8 0xff
+
+def uint64ToUInt16Function : Function :=
+  narrowUInt64Function `UInt64.toUInt16 .uint16 0xffff
+
+def uint64ToUSizeFunction : Function :=
+  retypedI64Function `UInt64.toUSize #[(valueParam, .uint64)] .usize [
+    .localGet valueParam]
+
+def uint64ShiftLeftFunction : Function :=
+  retypedI64Function `UInt64.shiftLeft
+    #[(leftParam, .uint64), (rightParam, .uint64)] .uint64 [
+      .localGet leftParam,
+      .localGet rightParam,
+      .i64Shl]
+
+def uint64ShiftRightFunction : Function :=
+  retypedI64Function `UInt64.shiftRight
+    #[(leftParam, .uint64), (rightParam, .uint64)] .uint64 [
+      .localGet leftParam,
+      .localGet rightParam,
+      .i64ShrU]
+
+def uint64DecEqFunction : Function :=
+  retypedI32Function `UInt64.decEq
+    #[(leftParam, .uint64), (rightParam, .uint64)] .uint8 [
+      .localGet leftParam,
+      .localGet rightParam,
+      .i64LtU,
+      .i32Const .uint32 0,
+      .i32Eq,
+      .localGet rightParam,
+      .localGet leftParam,
+      .i64LtU,
+      .i32Const .uint32 0,
+      .i32Eq,
+      .i32And]
 
 def functions : Array Function := #[
+  uint8OfNatFunction,
+  uint8ToNatFunction,
+  uint8ToUInt32Function,
+  uint8ToUInt64Function,
+  uint8ToUSizeFunction,
+  uint8DecEqFunction,
+  uint8DecLtFunction,
   shiftRightFunction,
   ofNatFunction,
   toUInt8Function,
+  uint16ToNatFunction,
+  uint16ToUInt32Function,
+  uint16ToUInt64Function,
   landFunction,
-  xorFunction]
+  xorFunction,
+  uint32OfNatFunction,
+  uint32ToNatFunction,
+  uint32ToUInt8Function,
+  uint32ToUInt16Function,
+  uint32ToUInt64Function,
+  uint32ToUSizeFunction,
+  uint32AddFunction,
+  uint32SubFunction,
+  uint32LandFunction,
+  uint32XorFunction,
+  uint32ShiftRightFunction,
+  uint32DecLtFunction,
+  uint32DecLeFunction,
+  uint64OfNatFunction,
+  uint64ToUInt8Function,
+  uint64ToUInt16Function,
+  uint64ToUSizeFunction,
+  uint64ShiftLeftFunction,
+  uint64ShiftRightFunction,
+  uint64DecEqFunction]
 
 private def expectedSignature? (declaration : Name) : Option Signature :=
-  if declaration == `UInt16.shiftRight || declaration == `UInt16.land ||
-      declaration == `UInt16.xor then
+  if #[`UInt8.decEq, `UInt8.decLt].contains declaration then
+    some { params := #[.uint8, .uint8], results := #[.uint8] }
+  else if declaration == `UInt8.ofNat then
+    some { params := #[.tobject], results := #[.uint8] }
+  else if declaration == `UInt8.toNat then
+    some { params := #[.uint8], results := #[.tagged] }
+  else if declaration == `UInt8.toUInt32 then
+    some { params := #[.uint8], results := #[.uint32] }
+  else if declaration == `UInt8.toUInt64 then
+    some { params := #[.uint8], results := #[.uint64] }
+  else if declaration == `UInt8.toUSize then
+    some { params := #[.uint8], results := #[.usize] }
+  else if #[`UInt16.shiftRight, `UInt16.land, `UInt16.xor].contains declaration then
     some { params := #[.uint16, .uint16], results := #[.uint16] }
   else if declaration == `UInt16.ofNat then
     some { params := #[.tobject], results := #[.uint16] }
   else if declaration == `UInt16.toUInt8 then
     some { params := #[.uint16], results := #[.uint8] }
+  else if declaration == `UInt16.toNat then
+    some { params := #[.uint16], results := #[.tagged] }
+  else if declaration == `UInt16.toUInt32 then
+    some { params := #[.uint16], results := #[.uint32] }
+  else if declaration == `UInt16.toUInt64 then
+    some { params := #[.uint16], results := #[.uint64] }
+  else if #[`UInt32.add, `UInt32.sub, `UInt32.land, `UInt32.xor,
+      `UInt32.shiftRight].contains declaration then
+    some { params := #[.uint32, .uint32], results := #[.uint32] }
+  else if #[`UInt32.decLt, `UInt32.decLe].contains declaration then
+    some { params := #[.uint32, .uint32], results := #[.uint8] }
+  else if declaration == `UInt32.ofNat then
+    some { params := #[.tobject], results := #[.uint32] }
+  else if declaration == `UInt32.toNat then
+    some { params := #[.uint32], results := #[.tobject] }
+  else if declaration == `UInt32.toUInt8 then
+    some { params := #[.uint32], results := #[.uint8] }
+  else if declaration == `UInt32.toUInt16 then
+    some { params := #[.uint32], results := #[.uint16] }
+  else if declaration == `UInt32.toUInt64 then
+    some { params := #[.uint32], results := #[.uint64] }
+  else if declaration == `UInt32.toUSize then
+    some { params := #[.uint32], results := #[.usize] }
+  else if #[`UInt64.shiftLeft, `UInt64.shiftRight].contains declaration then
+    some { params := #[.uint64, .uint64], results := #[.uint64] }
+  else if declaration == `UInt64.decEq then
+    some { params := #[.uint64, .uint64], results := #[.uint8] }
+  else if declaration == `UInt64.ofNat then
+    some { params := #[.tobject], results := #[.uint64] }
+  else if declaration == `UInt64.toUInt8 then
+    some { params := #[.uint64], results := #[.uint8] }
+  else if declaration == `UInt64.toUInt16 then
+    some { params := #[.uint64], results := #[.uint16] }
+  else if declaration == `UInt64.toUSize then
+    some { params := #[.uint64], results := #[.usize] }
   else none
 
 private partial def rewriteInstruction (declarations : Array Name) :
@@ -174,9 +518,19 @@ private def internalizeSelected (module : Module) (declarations : Array Name) :
   | .error error => throw (.invalidInput error)
   unless module.memory == some ResidentRuntime.residentMemory do
     throw .incompatibleMemory
-  if declarations.contains `UInt16.ofNat then
-    for name in #[ResidentNumeric.validateNaturalName,
-        ResidentNumeric.naturalLowName] do
+  let needsFromNat := declarations.any fun declaration =>
+    #[`UInt8.ofNat, `UInt16.ofNat, `UInt32.ofNat, `UInt64.ofNat].contains declaration
+  let needsToNat := declarations.any fun declaration =>
+    #[`UInt8.toNat, `UInt16.toNat, `UInt32.toNat].contains declaration
+  let needsHigh := declarations.contains `UInt64.ofNat
+  let numericHelpers :=
+    (if needsFromNat then
+      #[ResidentNumeric.validateNaturalName, ResidentNumeric.naturalLowName]
+    else #[]) ++
+    (if needsHigh then #[ResidentNumeric.naturalHighName] else #[]) ++
+    (if needsToNat then #[ResidentNumeric.makeNaturalName] else #[])
+  if !numericHelpers.isEmpty then
+    for name in numericHelpers do
       unless module.functions.any (·.name == name) do
         throw (.missingNumericHelper name)
   let selectedHelperNames := declarations.map externalName
@@ -216,14 +570,22 @@ def internalizeAvailable (module : Module) : Except LinkError Module :=
     module.imports.any (·.declaration? == some declaration)
   if declarations.isEmpty then pure module else internalizeSelected module declarations
 
+private def impureType (kind : AbiKind) : Expr :=
+  match kind with
+  | .uint8 => LCNF.ImpureType.uint8
+  | .uint16 => LCNF.ImpureType.uint16
+  | .uint32 => LCNF.ImpureType.uint32
+  | .uint64 => LCNF.ImpureType.uint64
+  | .usize => LCNF.ImpureType.usize
+  | .tagged => LCNF.ImpureType.tagged
+  | .tobject => LCNF.ImpureType.tobject
+  | _ => LCNF.ImpureType.tobject
+
 private def externalTypes (declaration : Name) : ExternalTypes :=
-  if declaration == `UInt16.ofNat then
-    { params := #[LCNF.ImpureType.tobject], result := LCNF.ImpureType.uint16 }
-  else if declaration == `UInt16.toUInt8 then
-    { params := #[LCNF.ImpureType.uint16], result := LCNF.ImpureType.uint8 }
-  else
-    { params := #[LCNF.ImpureType.uint16, LCNF.ImpureType.uint16],
-      result := LCNF.ImpureType.uint16 }
+  let signature := (expectedSignature? declaration).get!
+  {
+    params := signature.params.map impureType
+    result := impureType signature.results[0]! }
 
 private def externalImport (declaration : Name) : Import := {
   key := .external declaration
