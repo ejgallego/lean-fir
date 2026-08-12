@@ -15,6 +15,40 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W7-GENERIC-LEVEL1-RUNTIME-AND-FIXED-WIDTH-FRONTIER`.
+- Integration owner: `wasm-gen`; branch `wasm/generation` was rebased directly
+  on `main` at `8051df3c`, with functional head `45ee2ff9` and clean ready
+  mailbox `3178f37c`.
+- Production closure: the generic single-unit source path captures the real
+  Lean 4.33 `Zip.Wasm.compressLevel1` final-LCNF closure as 391 declarations
+  and 110 externals, with no copied compressor and no unsupported
+  declarations. Resident linking now reports linking errors separately from a
+  successful empty runtime-operation frontier.
+- Runtime closure: object-family closure calls, capability-sensitive
+  fallbacks, scalar projections/boxing, and promoted literals reduce the
+  unresolved runtime-operation inventory from 55 to zero. The first generic
+  fixed-width slice adds 30 exact helpers, reducing ordinary declaration
+  imports from 77 to 47 and increasing resident functions from 1,666 to
+  1,696. It preserves the exact final-LCNF distinction between tagged
+  `UInt8.toNat`/`UInt16.toNat` and tobject `UInt32.toNat` results.
+- Contracts: no shared contract changed. The executable helper signatures are
+  generation-ready; W6 refinement remains separate. The post-rebase artifact
+  adaptation only ratchets the two newly accepted ByteArray ownership cases
+  into the explicit 47-case layout blocker inventory.
+- Acceptance: Lean Beam refresh/save with zero errors; `git diff --check`;
+  complete `make check` with 655 source cases, 664 unique cases, 1,974/1,974
+  equal comparisons, and zero findings; Talos setup at `0e05edbc` and all
+  3,143 Talos jobs; and the complete deterministic artifact/package gate.
+  The zero-import fixed-width fixture exports all 35 helpers in 7,793 bytes;
+  prettyM and PrettyTrace reproduce at 138,755 and 142,833 bytes.
+- Result: `main` fast-forwards through the clean W7 mailbox. The active card
+  `FIR-BUG-wasm-none-lean-zip-fixed-width-import-frontier` tracks the remaining
+  25 fixed-width/USize imports; another 22 Array/ByteArray/Nat/List/String/
+  platform imports follow before Level1 package publication. Generic compiler
+  latency profiling proceeds independently on `perf/compilation-perf`.
+
+## Latest completed integration lease
+
 - Milestone: `VALIDATION-S6-NONLOCAL-CLOSURE-OWNERSHIP`.
 - Integration owner: `test-fixtures`, acting under the user-authorized
   integration lease for this fixture-only milestone. The lane branch was
