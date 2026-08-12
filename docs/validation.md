@@ -1971,6 +1971,37 @@ the validation result codec could not decode the boxed `UInt8` stored in
 generic `Prod`. The discrepancy was recorded before the compact fixture
 changed its observation to `Nat`; the general boxed-scalar protocol repair is
 kept separate from this ownership slice.
+
+The dictionary-ownership pair moves the same alias question through a runtime
+class value. Its mutator and observer methods are separate closures capturing
+the same `ByteArray`, stored together in a class dictionary and then in a
+named non-class owner. This boundary prevents elaborator specialization from
+erasing the runtime dictionary, so both final-LCNF paths construct two `pap`
+closures and the two aggregates, project the selected method twice, and invoke
+it through `fvar`.
+
+`captured-dictionary-unique-final-mutation` consumes the owner on its final
+method application. The exact 42-transition trace executes five `fap`, three
+`inc`, two `dec`, two `pap`, two `ctor`, two `oproj`, and exactly one
+`ByteArray.set!`; releasing the unused observer closure before mutation lets
+the updated array return as `[42, 127, 128, 255]`.
+`captured-dictionary-retained-observer` retains the owner across mutation and
+then invokes the observer sibling. Its exact 71-transition trace executes nine
+`fap`, six `inc`, five `dec`, four `oproj`, two `fvar`, and the exact external
+order `ByteArray.set!`, `ByteArray.get!`, `UInt8.toNat`. The result pairs the
+updated copy with `0`, proving that the observer still sees the original
+capture. Native Lean, final LCNF, and real V8 agree on all six focused
+comparisons, and V8 opens all four focused products under strace. Dedicated
+source and V8 domains require the sibling-release/unique and
+sibling-retain/post-mutation-observer intersections.
+
+The first implicit-class formulation was rejected before admission because it
+exposed `FIR-BUG-impure-none-dictionary-specialization-capture`: isolated
+final-LCNF capture retained opaque external stubs instead of the generated
+method-specialization bodies. The generated names were not added to the host
+external allowlist. The bug card preserves the discrepancy while the accepted
+fixtures keep the same runtime dictionary and ownership signal behind the
+explicit owner boundary.
 A heap-backed Unicode `String → String` round trip retains the
 compiler-produced ownership increment and returns the reconstructed string
 through the semantic host.  Signed `Int` identity programs cover positive and

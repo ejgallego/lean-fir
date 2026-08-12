@@ -616,6 +616,37 @@ Exercise a polymorphic function at multiple runtime shapes, a captured
 typeclass dictionary, and a higher-order dictionary method. The claim is
 runtime representation and call fidelity, not elaborator or proof irrelevance.
 
+S9 starts this track with a two-method class dictionary whose mutator and
+observer closures capture the same `ByteArray`. A named non-class owner keeps
+the dictionary runtime-visible: both compiled paths execute two `pap` forms,
+construct the dictionary and its owner, project the selected method through
+two `oproj` forms, and invoke it indirectly through `fvar`.
+
+The unique-final path consumes the owner before mutation. Releasing the unused
+observer sibling drops its duplicate capture, and the exact 42-transition
+trace executes five `fap`, three `inc`, two `dec`, two `pap`, two `ctor`, two
+`oproj`, and one `ByteArray.set!`, returning `[42, 127, 128, 255]`. The retained
+path keeps the owner live across mutation, then invokes the sibling observer.
+Its exact 71-transition trace executes nine `fap`, six `inc`, five `dec`, four
+`oproj`, two `fvar`, and the ordered external sequence `ByteArray.set!`,
+`ByteArray.get!`, `UInt8.toNat`; it returns the updated copy paired with the
+observer's original-byte result `0`.
+
+Native Lean, final LCNF, and real V8 agree on all six focused comparisons; V8
+opens all four generated products under strace. The checkpoint advances to 661
+source cases, 670 aggregate unique cases, 1,331 tier cases, 1,992 equal
+comparisons, 7,176 interpreter steps, 160 tag floors, and 253 conjunctive
+domains. An initially smaller implicit-dictionary version exposed
+`FIR-BUG-impure-none-dictionary-specialization-capture`: isolated final-LCNF
+capture leaves compiler-generated method specializations as opaque externals.
+The discrepancy was carded rather than allowlisted; S9 preserves the intended
+runtime ownership experiment behind the explicit owner boundary while that
+compiler/capture issue remains unresolved.
+
+State: S9 is prepared on the fixture lane as a fixture-only consumer of the
+linked closure-application and ByteArray contracts; it changes no shared
+contract.
+
 ### E3: constants, caches, and initialization
 
 Add native-oracle cases for zero-argument constants, initialization order,

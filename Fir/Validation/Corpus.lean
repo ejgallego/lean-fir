@@ -1701,6 +1701,63 @@ def aggregateRetainedAcrossClosureApplication
   let original := observeErasedNestedCaptureOwner owner
   (original, updated)
 
+/--
+A runtime typeclass dictionary whose sibling method closures capture the same
+ByteArray. Consuming or retaining the dictionary changes whether mutation may
+reuse that capture.
+-/
+class CapturedByteArrayOps where
+  mutate : UInt8 → ByteArray
+  observe : Unit → Nat
+
+set_option warn.classDefReducibility false in
+@[noinline]
+def makeCapturedByteArrayOps (source : ByteArray) : CapturedByteArrayOps :=
+  { mutate := fun byte => source.set! 0 byte
+    observe := fun _ => (source.get! 0).toNat }
+
+/-- Keep the dictionary behind a named, non-class owner boundary. -/
+structure CapturedByteArrayOpsOwner where
+  operations : CapturedByteArrayOps
+  marker : Nat
+
+@[noinline]
+def makeCapturedByteArrayOpsOwner
+    (source : ByteArray) : CapturedByteArrayOpsOwner :=
+  { operations := makeCapturedByteArrayOps source, marker := 41 }
+
+/-- Project and indirectly invoke the mutating dictionary method. -/
+@[noinline]
+def applyCapturedDictionaryMutation
+    (owner : CapturedByteArrayOpsOwner) (byte : UInt8) : ByteArray :=
+  owner.operations.mutate byte
+
+/-- Project and invoke the sibling observer after an ownership-sensitive call. -/
+@[noinline]
+def observeCapturedDictionary
+    (owner : CapturedByteArrayOpsOwner) : Nat :=
+  owner.operations.observe ()
+
+/--
+Consume the dictionary during its final method application. Releasing the
+unused observer closure must release its duplicate capture before mutation.
+-/
+def capturedDictionaryUniqueFinalMutation
+    (source : ByteArray) : ByteArray :=
+  let owner := makeCapturedByteArrayOpsOwner source
+  applyCapturedDictionaryMutation owner 42
+
+/--
+Retain the dictionary across mutation, then invoke its sibling observer. The
+mutator must copy and the observer must still see the original byte.
+-/
+def capturedDictionaryRetainedObserver
+    (source : ByteArray) : ByteArray × Nat :=
+  let owner := makeCapturedByteArrayOpsOwner source
+  let updated := applyCapturedDictionaryMutation owner 42
+  let original := observeCapturedDictionary owner
+  (updated, original)
+
 /-- Retain a ByteArray outside a closure while borrowing its captured alias. -/
 def capturedByteArrayOutsideAliasRead
     (source : ByteArray) : ByteArray × Nat :=
@@ -2935,6 +2992,20 @@ private def aggregateRetainedAcrossClosureApplicationFormTrace : Array String :=
     "oproj", "inc", "dec", "lit", "fap", "extern", "return", "return",
     "return", "fap", "oproj", "cases", "oproj", "inc", "return", "dec",
     "ctor", "return"]
+
+private def capturedDictionaryUniqueFinalMutationFormTrace : Array String :=
+  #["fap", "fap", "inc", "pap", "pap", "ctor", "return", "lit", "ctor",
+    "return", "lit", "fap", "oproj", "inc", "dec", "oproj", "inc", "dec",
+    "box", "fvar", "unbox", "fap", "lit", "fap", "extern", "return",
+    "return", "return", "return"]
+
+private def capturedDictionaryRetainedObserverFormTrace : Array String :=
+  #["fap", "fap", "inc", "pap", "pap", "ctor", "return", "lit", "ctor",
+    "return", "lit", "inc", "fap", "oproj", "inc", "dec", "oproj", "inc",
+    "dec", "box", "fvar", "unbox", "fap", "lit", "fap", "extern", "return",
+    "return", "return", "fap", "oproj", "inc", "dec", "oproj", "inc", "dec",
+    "ctor", "fvar", "fap", "lit", "fap", "extern", "fap", "extern",
+    "return", "dec", "return", "return", "ctor", "return"]
 
 private def capturedByteArrayOutsideAliasReadFormTrace : Array String :=
   #["inc", "pap", "lit", "fap", "fvar", "fap", "fap", "extern", "fap",
@@ -6648,6 +6719,106 @@ private def postConversionCases : Array Case := #[
         "admin:yield-done"]
     provenance := firProvenance
       "Retain a proof-erased nested aggregate across captured ByteArray mutation" },
+  { id := "captured-dictionary-unique-final-mutation"
+    entry := ``Source.capturedDictionaryUniqueFinalMutation
+    dependencies :=
+      #[``Source.makeCapturedByteArrayOps,
+        ``Source.makeCapturedByteArrayOpsOwner,
+        ``Source.applyCapturedDictionaryMutation]
+    args := #[byteArrayDatum mixedLayoutBytes]
+    argSchemas := #[.bytes]
+    resultSchema := .bytes
+    native := fun _ => byteArrayDatum
+      (Source.capturedDictionaryUniqueFinalMutation mixedLayoutBytes)
+    tags :=
+      #["stress", "aggregate", "dictionary", "typeclass", "polymorphism",
+        "higher-order", "closure", "closure-ownership", "capture",
+        "repeated-capture", "constructor", "projection", "indirect-call",
+        "bytearray", "bytes", "external", "heap", "ownership", "unique",
+        "unique-final-application", "recursive-release", "sibling-release",
+        "mutation", "reuse"]
+    requiredLcnfForms :=
+      #["fap", "inc", "pap", "ctor", "return", "lit", "oproj", "dec",
+        "box", "fvar", "unbox", "extern"]
+    requiredExecutedLcnfForms :=
+      #["fap", "inc", "pap", "ctor", "return", "lit", "oproj", "dec",
+        "box", "fvar", "unbox", "extern"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "fap", minimum := 5, maximum := some 5 },
+        { form := "inc", minimum := 3, maximum := some 3 },
+        { form := "pap", minimum := 2, maximum := some 2 },
+        { form := "ctor", minimum := 2, maximum := some 2 },
+        { form := "return", minimum := 6, maximum := some 6 },
+        { form := "lit", minimum := 3, maximum := some 3 },
+        { form := "oproj", minimum := 2, maximum := some 2 },
+        { form := "dec", minimum := 2, maximum := some 2 },
+        { form := "box", minimum := 1, maximum := some 1 },
+        { form := "fvar", minimum := 1, maximum := some 1 },
+        { form := "unbox", minimum := 1, maximum := some 1 },
+        { form := "extern", minimum := 1, maximum := some 1 }]
+    requiredExecutedLcnfFormTrace :=
+      some capturedDictionaryUniqueFinalMutationFormTrace
+    requiredExternals := #[``ByteArray.set!]
+    requiredExecutedExternals := #[``ByteArray.set!]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``ByteArray.set!]
+    requiredExecutedExternalTrace := some #[``ByteArray.set!]
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind",
+        "admin:yield-done"]
+    provenance := firProvenance
+      "Consume a two-method dictionary and release its sibling capture before mutation" },
+  { id := "captured-dictionary-retained-observer"
+    entry := ``Source.capturedDictionaryRetainedObserver
+    dependencies :=
+      #[``Source.makeCapturedByteArrayOps,
+        ``Source.makeCapturedByteArrayOpsOwner,
+        ``Source.applyCapturedDictionaryMutation,
+        ``Source.observeCapturedDictionary]
+    args := #[byteArrayDatum mixedLayoutBytes]
+    argSchemas := #[.bytes]
+    resultSchema := .ctor "Prod.mk" 0 #[.bytes, .nat]
+    native := fun _ => byteArrayNatPairDatum
+      (Source.capturedDictionaryRetainedObserver mixedLayoutBytes)
+    tags :=
+      #["stress", "aggregate", "dictionary", "typeclass", "polymorphism",
+        "higher-order", "closure", "closure-ownership", "capture",
+        "repeated-capture", "constructor", "projection", "indirect-call",
+        "bytearray", "bytes", "external", "heap", "ownership", "shared",
+        "retain-across-application", "recursive-release", "sibling-retain",
+        "mutation", "copy-on-write", "allocation", "post-mutation-observer"]
+    requiredLcnfForms :=
+      #["fap", "inc", "pap", "ctor", "return", "lit", "oproj", "dec",
+        "box", "fvar", "unbox", "extern"]
+    requiredExecutedLcnfForms :=
+      #["fap", "inc", "pap", "ctor", "return", "lit", "oproj", "dec",
+        "box", "fvar", "unbox", "extern"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "fap", minimum := 9, maximum := some 9 },
+        { form := "inc", minimum := 6, maximum := some 6 },
+        { form := "pap", minimum := 2, maximum := some 2 },
+        { form := "ctor", minimum := 4, maximum := some 4 },
+        { form := "return", minimum := 9, maximum := some 9 },
+        { form := "lit", minimum := 4, maximum := some 4 },
+        { form := "oproj", minimum := 4, maximum := some 4 },
+        { form := "dec", minimum := 5, maximum := some 5 },
+        { form := "box", minimum := 1, maximum := some 1 },
+        { form := "fvar", minimum := 2, maximum := some 2 },
+        { form := "unbox", minimum := 1, maximum := some 1 },
+        { form := "extern", minimum := 3, maximum := some 3 }]
+    requiredExecutedLcnfFormTrace :=
+      some capturedDictionaryRetainedObserverFormTrace
+    requiredExternals := #[``ByteArray.set!, ``ByteArray.get!, ``UInt8.toNat]
+    requiredExecutedExternals :=
+      #[``ByteArray.set!, ``ByteArray.get!, ``UInt8.toNat]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``ByteArray.set!, ``ByteArray.get!, ``UInt8.toNat]
+    requiredExecutedExternalTrace :=
+      some #[``ByteArray.set!, ``ByteArray.get!, ``UInt8.toNat]
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind",
+        "admin:yield-done"]
+    provenance := firProvenance
+      "Retain a two-method dictionary across mutation and observe its original capture" },
   { id := "captured-byte-array-outside-alias-read"
     entry := ``Source.capturedByteArrayOutsideAliasRead
     dependencies := #[``Source.applyCapturedByteArrayRead]

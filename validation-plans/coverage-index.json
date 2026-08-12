@@ -46,8 +46,8 @@
     "tiers": [
       {
         "id": "source-lcnf",
-        "minimumCases": 659,
-        "minimumComparisons": 659,
+        "minimumCases": 661,
+        "minimumComparisons": 661,
         "requiredBackends": [
           "lcnf",
           "native"
@@ -66,8 +66,8 @@
       },
       {
         "id": "wasm-v8",
-        "minimumCases": 659,
-        "minimumComparisons": 1318,
+        "minimumCases": 661,
+        "minimumComparisons": 1322,
         "requiredBackends": [
           "lcnf",
           "native",
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 668,
-      "minimumTierCases": 1327,
-      "minimumComparisons": 1986
+      "minimumUniqueCases": 670,
+      "minimumTierCases": 1331,
+      "minimumComparisons": 1992
     },
     "machine": {
-      "minimumCases": 668,
-      "minimumInterpreterSteps": 7063,
+      "minimumCases": 670,
+      "minimumInterpreterSteps": 7176,
       "requiredStaticForms": [
         "box",
         "cases",
@@ -541,6 +541,11 @@
       },
       {
         "tier": "source-lcnf",
+        "tag": "dictionary",
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
         "tag": "effect",
         "minimumCases": 5
       },
@@ -593,6 +598,11 @@
         "tier": "source-lcnf",
         "tag": "heap",
         "minimumCases": 100
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "higher-order",
+        "minimumCases": 2
       },
       {
         "tier": "source-lcnf",
@@ -661,8 +671,18 @@
       },
       {
         "tier": "source-lcnf",
+        "tag": "polymorphism",
+        "minimumCases": 3
+      },
+      {
+        "tier": "source-lcnf",
         "tag": "post-effect-read",
         "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "post-mutation-observer",
+        "minimumCases": 1
       },
       {
         "tier": "source-lcnf",
@@ -766,6 +786,16 @@
       },
       {
         "tier": "source-lcnf",
+        "tag": "sibling-release",
+        "minimumCases": 1
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "sibling-retain",
+        "minimumCases": 1
+      },
+      {
+        "tier": "source-lcnf",
         "tag": "sign-bit",
         "minimumCases": 20
       },
@@ -802,6 +832,11 @@
       {
         "tier": "source-lcnf",
         "tag": "two-use",
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "typeclass",
         "minimumCases": 2
       },
       {
@@ -901,6 +936,11 @@
       },
       {
         "tier": "wasm-v8",
+        "tag": "dictionary",
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
         "tag": "effect",
         "minimumCases": 5
       },
@@ -933,6 +973,11 @@
         "tier": "wasm-v8",
         "tag": "heap",
         "minimumCases": 100
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "higher-order",
+        "minimumCases": 2
       },
       {
         "tier": "wasm-v8",
@@ -1001,8 +1046,18 @@
       },
       {
         "tier": "wasm-v8",
+        "tag": "polymorphism",
+        "minimumCases": 3
+      },
+      {
+        "tier": "wasm-v8",
         "tag": "post-effect-read",
         "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "post-mutation-observer",
+        "minimumCases": 1
       },
       {
         "tier": "wasm-v8",
@@ -1081,6 +1136,16 @@
       },
       {
         "tier": "wasm-v8",
+        "tag": "sibling-release",
+        "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "sibling-retain",
+        "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
         "tag": "sign-bit",
         "minimumCases": 20
       },
@@ -1112,6 +1177,11 @@
       {
         "tier": "wasm-v8",
         "tag": "two-use",
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "typeclass",
         "minimumCases": 2
       },
       {
@@ -1456,6 +1526,29 @@
         "name": "conditional-bytes-control",
         "allTags": ["bytes", "control-flow"],
         "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "dictionary-sibling-release-unique",
+        "allTags": [
+          "dictionary",
+          "sibling-release",
+          "typeclass",
+          "unique"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "dictionary-sibling-retain-observer",
+        "allTags": [
+          "dictionary",
+          "post-mutation-observer",
+          "shared",
+          "sibling-retain",
+          "typeclass"
+        ],
+        "minimumCases": 1
       },
       {
         "tier": "source-lcnf",
@@ -2341,6 +2434,29 @@
         "name": "conditional-bytes-control",
         "allTags": ["bytes", "control-flow"],
         "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "dictionary-sibling-release-unique",
+        "allTags": [
+          "dictionary",
+          "sibling-release",
+          "typeclass",
+          "unique"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "dictionary-sibling-retain-observer",
+        "allTags": [
+          "dictionary",
+          "post-mutation-observer",
+          "shared",
+          "sibling-retain",
+          "typeclass"
+        ],
+        "minimumCases": 1
       },
       {
         "tier": "wasm-v8",
