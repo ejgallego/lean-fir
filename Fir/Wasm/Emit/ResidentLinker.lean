@@ -465,23 +465,47 @@ def linkModule (policy : Policy) (module : Module) :
 def linkArtifact (policy : Policy) (artifact : Source.ModuleArtifact) :
     Except Source.CompileError Source.ModuleArtifact := do
   let module ← linkModule policy artifact.module
-  let bytes ← Fir.Wasm.Emit.encode module |>.mapError Source.CompileError.encoding
+  let bytes ← Fir.Wasm.Emit.encodeValidated module
+    |>.mapError Source.CompileError.encoding
   return { artifact with module, bytes }
 
 /--
-Prepare a source artifact for an instance-lifetime arena. Pure lazy constants
-become direct calls so no runtime root can retain scratch values; the source
-module must then contain no globals before the resident allocator is linked.
+Prepare a symbolic source module for an instance-lifetime arena. Pure lazy
+constants become direct calls so no runtime root can retain scratch values;
+the source module must then contain no globals before the resident allocator
+is linked.
 -/
-def prepareArenaArtifact (artifact : Source.ModuleArtifact) :
-    Except Source.CompileError Source.ModuleArtifact := do
-  let module ← ResidentCache.eliminateLazyInitializers artifact.module
+def prepareArenaModule (module : Module) (validate : Bool := true) :
+    Except Source.CompileError Module := do
+  let module ← ResidentCache.eliminateLazyInitializers module validate
     |>.mapError fun error =>
       Source.CompileError.manifest
         s!"failed to eliminate lazy initializers for the arena: {repr error}"
   unless module.globals.isEmpty do
     throw (.manifest "arena source module retained resident globals")
-  let bytes ← Fir.Wasm.Emit.encode module |>.mapError Source.CompileError.encoding
+  return module
+
+/-- Prepare and encode a standalone source artifact for an instance-lifetime arena. -/
+def prepareArenaArtifact (artifact : Source.ModuleArtifact) :
+    Except Source.CompileError Source.ModuleArtifact := do
+  let module ← prepareArenaModule artifact.module
+  let bytes ← Fir.Wasm.Emit.encodeValidated module
+    |>.mapError Source.CompileError.encoding
+  return { artifact with module, bytes }
+
+/--
+Prepare an arena module, choose its resident-link policy from that prepared
+module, and encode only the final linked artifact. `linkModule` supplies the
+validation boundary for the unchecked arena rewrite and validates its output
+before `encodeValidated` consumes it.
+-/
+def prepareArenaAndLinkArtifact (policyFor : Module → Policy)
+    (artifact : Source.ModuleArtifact) :
+    Except Source.CompileError Source.ModuleArtifact := do
+  let module ← prepareArenaModule artifact.module false
+  let module ← linkModule (policyFor module) module
+  let bytes ← Fir.Wasm.Emit.encodeValidated module
+    |>.mapError Source.CompileError.encoding
   return { artifact with module, bytes }
 
 /-- The accepted common physical helper prefix, in dependency order. -/

@@ -33,20 +33,24 @@ def captureLevel1 : CoreM Fir.Validation.Lcnf.Artifact :=
   Fir.Wasm.Emit.Source.compileEntriesFinalCapturedInternalized #[level1Entry]
     Fir.Wasm.Emit.ResidentLinker.closedApplicationRetainedExternalNames
 
+private def compileStoredUnprepared : CoreM (Except Fir.Wasm.Emit.Source.CompileError
+    Fir.Wasm.Emit.Source.ModuleArtifact) := do
+  let source ← captureStored
+  Fir.Wasm.Emit.Source.compileModuleArtifact source
+
 /-- Lower the unmodified source closure before adding resident ByteArray code. -/
 def compileStoredBase : CoreM (Except Fir.Wasm.Emit.Source.CompileError
     Fir.Wasm.Emit.Source.ModuleArtifact) := do
-  let source ← captureStored
-  let result ← Fir.Wasm.Emit.Source.compileModuleArtifact source
+  let result ← compileStoredUnprepared
   return result.bind Fir.Wasm.Emit.ResidentLinker.prepareArenaArtifact
 
 /-- Complete zero-import resident package frontier for stored DEFLATE. -/
 def compileStored : CoreM (Except Fir.Wasm.Emit.Source.CompileError
     Fir.Wasm.Emit.Source.ModuleArtifact) := do
-  let base ← compileStoredBase
-  return base.bind fun artifact =>
-    Fir.Wasm.Emit.ResidentLinker.linkArtifact
-      (Fir.Wasm.Emit.ResidentLinker.closedApplicationAvailablePolicy
-        artifact.module #[storedEntry]) artifact
+  let result ← compileStoredUnprepared
+  return result.bind <|
+    Fir.Wasm.Emit.ResidentLinker.prepareArenaAndLinkArtifact fun module =>
+      Fir.Wasm.Emit.ResidentLinker.closedApplicationAvailablePolicy
+        module #[storedEntry]
 
 end LeanZipFir.Compile

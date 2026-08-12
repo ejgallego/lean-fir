@@ -36,15 +36,13 @@ run_cmd do
           Json.null)
     | .error error =>
         (0, #[], (toString (repr error) : Json))
-  let linkedResult := result.bind Fir.Wasm.Emit.ResidentLinker.prepareArenaArtifact
-    |>.bind fun artifact =>
-      let policy : Fir.Wasm.Emit.ResidentLinker.Policy := {
+  let linkedResult := result.bind <|
+    Fir.Wasm.Emit.ResidentLinker.prepareArenaAndLinkArtifact fun module => {
         steps :=
-          Fir.Wasm.Emit.ResidentLinker.availableCommonSteps artifact.module ++
+          Fir.Wasm.Emit.ResidentLinker.availableCommonSteps module ++
           Fir.Wasm.Emit.ResidentLinker.closedApplicationFamilySteps
         requireZeroImports := false
         requireNoRuntimeOperations := false }
-      Fir.Wasm.Emit.ResidentLinker.linkArtifact policy artifact
   let (linkedFunctions, remainingImports, remainingRuntimeOperations,
       linkingError) := match linkedResult with
     | .ok artifact =>

@@ -418,10 +418,12 @@ preserving the persistent ownership contract already assumed by final LCNF
 without retaining a module-global root. Run this before cache-set
 internalization; no initializer or cache global remains.
 -/
-def eliminateLazyInitializers (module : Module) : Except LinkError Module := do
-  match Fir.Wasm.validateModule module with
-  | .ok () => pure ()
-  | .error error => throw (.invalidInput error)
+def eliminateLazyInitializers (module : Module) (validate : Bool := true) :
+    Except LinkError Module := do
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => pure ()
+    | .error error => throw (.invalidInput error)
   let cacheGlobalCount := module.cacheGlobalKinds.size
   let functions ← module.functions.mapM fun function => do
     let body ← eliminateLazyCacheInstructions module.initializers
@@ -435,9 +437,11 @@ def eliminateLazyInitializers (module : Module) : Except LinkError Module := do
     initializers := #[]
     runtimeOperations
     imports := runtimeOperations.mapIdx Fir.Wasm.runtimeImport ++ externalImports }
-  match Fir.Wasm.validateModule result with
-  | .ok () => return result
-  | .error error => throw (.invalidOutput error)
+  if validate then
+    match Fir.Wasm.validateModule result with
+    | .ok () => pure ()
+    | .error error => throw (.invalidOutput error)
+  return result
 
 def exampleDescriptors : Array (Array AbiKind) :=
   #[#[.tobject, .uint8, .tobject]]

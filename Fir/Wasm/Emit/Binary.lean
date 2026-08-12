@@ -229,10 +229,14 @@ private def encodeFunctionBody (module : Module) (checkIndex : CheckIndex)
   let localDeclarations := function.locals.toList.map fun (_, kind) =>
     encodeU32 1 ++ #[encodeValueType kind.valueType]
   let body ← encodeInstructions { module, index, function } function.body
+  let locals := function.params ++ function.locals
   let checkerContext : CheckContext := {
     module
     function
-    locals := (function.params ++ function.locals).toList
+    locals := locals.toList
+    localIndex? := some <| locals.foldl
+      (init := Std.HashMap.emptyWithCapacity locals.size)
+      fun localIndex (fvarId, kind) => localIndex.insert fvarId.name kind
     index? := some checkIndex }
   let flow ←
     match checkInstructions checkerContext (some []) function.body with
@@ -290,10 +294,12 @@ Serialize a statically validated FIR symbolic module as a deterministic
 WebAssembly 1.0 binary. Types are deliberately retained in declaration order
 instead of deduplicated: this keeps indices simple, stable, and inspectable.
 -/
-def encode (module : Module) : Except EncodeError ByteArray := do
-  match validateModule module with
-  | .ok _ => pure ()
-  | .error error => throw (.invalidModule error)
+private def encodeCore (module : Module) (validate : Bool) :
+    Except EncodeError ByteArray := do
+  if validate then
+    match validateModule module with
+    | .ok _ => pure ()
+    | .error error => throw (.invalidModule error)
 
   let checkIndex := module.checkIndex
   let index := buildEncodeIndex module
@@ -335,5 +341,18 @@ def encode (module : Module) : Except EncodeError ByteArray := do
   unless module.functions.isEmpty do
     bytes := bytes ++ encodeSection 0x0a codePayload
   return ByteArray.mk bytes
+
+/-- Validate and serialize one FIR symbolic module. -/
+def encode (module : Module) : Except EncodeError ByteArray :=
+  encodeCore module true
+
+/--
+Serialize a module already accepted by `validateModule`. This retains the
+per-function flow check needed to emit explicit unreachable terminals, but
+does not repeat the module's entry/exit validation. Keep this at a composition
+boundary that has the validated module as its immediate input.
+-/
+def encodeValidated (module : Module) : Except EncodeError ByteArray :=
+  encodeCore module false
 
 end Fir.Wasm.Emit
