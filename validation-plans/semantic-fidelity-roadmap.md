@@ -100,7 +100,7 @@ near-synonym drift:
 | M4 Allocation and reuse | active through S5 | Constructor, String, ByteArray, reset/reuse, growth, and copy-on-write fixtures already provide a base | Use the first S5 pair to distinguish post-release constructor reuse from shared-path allocation |
 | M5 Recursive release | landed through S5c | S5c adds one `del` on both growth paths and released-leaf reuse only on the unique-owner path to the landed S5a/S5b release matrix | Select the smallest undominated lifetime interaction outside the covered replacement/release matrix |
 | M6 Nonlocal control | landed through S6 | The fixture-only final-use/retained-use closure pair around the linked `recordByteArray` effect passes native/LCNF/V8 with exact 39/54-step traces | Add caught exceptions only after their shared protocol is accepted by all participating backends |
-| M7 Escaping closure ownership | prepared | S7 returns a closure-bearing owner across a noinline maker, then distinguishes unique transfer from a retained outside alias during mutation with exact 27/29-step traces | Land rebased functional head `d695bd66` after the clean fixture handoff |
+| M7 Escaping closure ownership | landed | S7 returns a closure-bearing owner across a noinline maker, then distinguishes unique transfer from a retained outside alias during mutation with exact 27/29-step traces | Maintain the landed returned-closure baseline while B2 selects its next application shape |
 | M8 Real-engine promotion | continuous | Scalar closures, the complete zero/one/two/three-use matrix, and all returned/consumed/ignored/read capture-topology pairs run through native/LCNF/V8 | Promote at least one representative pair per ownership domain whenever W7 support is linked |
 
 States are `queued`, `active`, `prepared`, `landed`, `parked`, or
@@ -479,8 +479,8 @@ strace. The full checkpoint advances to 657 source cases, 666 aggregate unique
 cases, 1,323 tier cases, 1,980 equal comparisons, 6,978 interpreter steps,
 138 tag floors, and 245 conjunctive domains.
 
-State: S7 prepared on `validation/closure-ownership-fixtures`; rebased
-functional head `d695bd66` changes no shared contract.
+State: S7 landed on `main` through ready handoff `1cfcb9b8`; rebased functional
+head `d695bd66` changes no shared contract.
 
 ## Track B: calls and control
 

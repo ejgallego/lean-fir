@@ -15,6 +15,39 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `VALIDATION-S7-ESCAPING-CLOSURE-OWNERSHIP`.
+- Integration owner: `test-fixtures`, acting under the user-authorized
+  integration lease for this fixture-only milestone. The lane branch was
+  rebased on accepted main `d286e41a` and landed through clean ready head
+  `1cfcb9b8`; functional head `d695bd66` changes no shared contract.
+- Semantic pair: both cases return a closure-bearing owner from a noinline
+  maker before later application. Unique transfer consumes the sole captured
+  ByteArray and returns `[42, 127, 128, 255]`; the shared path retains an
+  outside alias and returns both unchanged `[0, 127, 128, 255]` and the updated
+  copy.
+- Executed evidence: complete 27/29-transition LCNF paths pin the named maker
+  `fap`, its `pap` and `return`, the later `fvar` closure invocation, and one
+  `ByteArray.set!`. The unique path executes zero ownership increments; the
+  shared path adds exactly one `inc` and its result-pair `ctor`. A smaller bare
+  function candidate was rejected because eta-normalization erased the return
+  boundary and duplicated an existing execution signature.
+- Contracts: none. The slice consumes accepted closure application, ByteArray,
+  compiler, and real-engine surfaces while leaving the active argument-alias,
+  effectful-native-oracle, IO-error, exception, and source-stream contracts
+  fenced.
+- Acceptance: post-rebase Lean Beam refresh/save with zero diagnostics;
+  focused pinned native/LCNF and native/LCNF/V8 probes; `git diff --check`; and
+  complete `make check`. The final snapshot has 657 source cases, 666 unique
+  cases, 1,323 tier cases, 1,980/1,980 equal comparisons, 6,978 interpreter
+  steps, 138/138 tag floors, 245/245 semantic domains, 1,314 native-oracle
+  witnesses, and zero findings. V8 opened all 1,314 products under strace. No
+  bug card was required.
+- Result: `main` fast-forwards through the clean handoff and this acceptance
+  record. S7 lands the first source-generated returned-closure ownership
+  boundary; E1 aggregate/erasure is the next fixture-only portfolio candidate.
+
+## Latest completed integration lease
+
 - Milestone: `W7-GENERIC-LEVEL1-RUNTIME-AND-FIXED-WIDTH-FRONTIER`.
 - Integration owner: `wasm-gen`; branch `wasm/generation` was rebased directly
   on `main` at `8051df3c`, with functional head `45ee2ff9` and clean ready
