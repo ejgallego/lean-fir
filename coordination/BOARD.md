@@ -18,8 +18,8 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 - Milestone: `W7-GENERIC-LEVEL1-STANDARD-RUNTIME-FRONTIER`.
 - Integration owner: `wasm-gen`, acting under the user-authorized integration
   lease. Branch `wasm/generation` was rebased on accepted local main
-  `c792df8c` and landed through clean ready mailbox `90aea67d`; functional
-  head `22f79355` changes no shared contract or W6-owned file.
+  `0c1e5b91` and landed through clean ready mailbox `1a00ba85`; functional
+  head `9bd136d7` changes no shared contract or W6-owned file.
 - Runtime slice: the complete fixed-width and USize frontier is resident,
   including 61 zero-import helpers and `USize.repr`. Generic Array lookup,
   update, swap, List conversion, and the wasm32/Lean64 platform-width helper
@@ -43,7 +43,10 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   artifact gate passes resident helpers, double generation, packages,
   checksums, browser/stack safety, the repeated 661-case V8 triangle, 44/44
   concrete artifacts, and 15/15 source probes. The explicit concrete fence is
-  608/661 executed with exactly 53 ByteArray-layout blockers.
+  608/661 executed with exactly 53 ByteArray-layout blockers. The final
+  cache-only rebase additionally regenerates the exact 14,558-byte zero-import
+  Array fixture through the writable user toolchain cache and its Node
+  ownership suite passes.
 - Result: `main` fast-forwards through the clean W7 handoff and this acceptance
   record. ByteArray closure continues independently on
   `wasm/gen-bytearray-level1`; W7 next addresses the principled generic Nat,
