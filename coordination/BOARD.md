@@ -15,6 +15,39 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-SILENT-RUNNABLE-WIDENING`.
+- Integration owner: `wasm-proof`; this lease extends the certificate-free,
+  module-stable one-source-step theorem across compiler-erased case and
+  ownership operations.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`, based directly on `main` at `872d061d`.
+- Published stack: active-slice record `af2e9539`, functional proof head
+  `0a7f8866`, and clean ready mailbox `4348302a`.
+- Current-node admission: `ConcreteStructuredCodeStepAdmission` now admits
+  default-only cases and persistent `inc`/`dec` at exact cost zero. It stores
+  only the static current-node shape; the successful ordinary source step
+  reconstructs the unique selected default branch dynamically.
+- Strong closure: the three resource-indexed pointwise laws take one source
+  step against a reflexive target path, preserve the concrete resource core
+  and aligned supported caller stack through exact frame equality, and
+  strictly decrease `compilerStructuredControlRank`. Both pointwise and
+  module-wide runnable dispatchers return the same admission-free supported
+  global relation.
+- Contracts: none. This slice changes W6 proof admission and roadmaps only; it
+  changes no compiler/runtime semantics, concrete layout, symbolic-Wasm
+  surface, or resident-helper signature.
+- Acceptance: Talos setup at `0e05edbc`; Lean Beam update/sync/save at version
+  24 with zero errors; direct `FirTalos.ConcreteStructuredSimulation` build
+  (3,119 jobs); `git diff --check`; complete `make check` with 122 harness
+  tests, 662 unique cases, and 1,968/1,968 equal comparisons; and all 3,143
+  Talos jobs. No bug card was required.
+- Result: `main` fast-forwards through the clean ready mailbox. W6 next adds a
+  non-erased family to this current-node boundary, preferably the staged pure
+  external protocol with resource-indexed ready/bind relations, before
+  packaging the public certificate-free finite-prefix theorem.
+
+## Latest completed integration lease
+
 - Milestone: `W6-STRONG-RUNNABLE-CONTROL-CLOSURE`.
 - Integration owner: `wasm-proof`; this lease closes the first
   constructor-complete, module-stable one-source-step theorem for the strong
