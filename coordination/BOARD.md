@@ -15,6 +15,41 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W7-GENERIC-LEVEL1-STANDARD-RUNTIME-FRONTIER`.
+- Integration owner: `wasm-gen`, acting under the user-authorized integration
+  lease. Branch `wasm/generation` was rebased on accepted local main
+  `fbfc98cf` and landed through clean ready mailbox `97110b63`; functional
+  head `751da256` changes no shared contract or W6-owned file.
+- Runtime slice: the complete fixed-width and USize frontier is resident,
+  including 61 zero-import helpers and `USize.repr`. Generic Array lookup,
+  update, swap, List conversion, and the wasm32/Lean64 platform-width helper
+  preserve unique/shared/persistent ownership without host fallbacks.
+- Production evidence: the real Lean 4.33 `Zip.Wasm.compressLevel1` closure
+  remains 391 declarations and 110 externals with zero unsupported
+  declarations and zero runtime operations. Its ordinary import frontier
+  moves from 47 to 15 while the complete linked module reaches 1,730
+  functions. Measured phases are 57.309s capture, 15.321s lowering, and
+  119.920s resident linking.
+- Contracts and discrepancies: no shared contract changed. The executable
+  helpers are generation-ready; W6 refinement remains separate. The
+  fixed-width frontier card is fixed. The remaining container-frontier card
+  names exactly eight ByteArray, four Nat, two generated List, and one String
+  import. No semantic workaround or new discrepancy was introduced.
+- Acceptance: Lean Beam and focused dependency-cone builds pass; standalone
+  zero-import Node ownership/differential fixtures pass; `git diff --check`
+  and complete `make check` pass with 670 unique cases and 1,992/1,992 equal
+  comparisons; all 3,143 Talos jobs pass; and the complete deterministic
+  artifact gate passes resident helpers, double generation, packages,
+  checksums, browser/stack safety, the repeated 661-case V8 triangle, 44/44
+  concrete artifacts, and 15/15 source probes. The explicit concrete fence is
+  608/661 executed with exactly 53 ByteArray-layout blockers.
+- Result: `main` fast-forwards through the clean W7 handoff and this acceptance
+  record. ByteArray closure continues independently on
+  `wasm/gen-bytearray-level1`; W7 next addresses the principled generic Nat,
+  String, and generated-List frontier before publishing Level1.
+
+## Latest completed integration lease
+
 - Milestone: `ELIMDEAD-GENERIC-LOCAL-LEDGER-OPERATIONS`.
 - Integration owner: `lcnf-proof`, acting under the user-authorized temporary
   integration lease. Branch `proof/simpcase` was rebased on accepted local
