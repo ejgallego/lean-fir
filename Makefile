@@ -1,3 +1,9 @@
+FIR_GIT_COMMON_DIR := $(shell git rev-parse --path-format=absolute --git-common-dir)
+LAKE_CACHE_DIR ?= $(abspath $(FIR_GIT_COMMON_DIR)/../.lake_cache)
+LAKE_ARTIFACT_CACHE ?= true
+LAKE_RESTORE_ARTIFACTS ?= true
+export LAKE_CACHE_DIR LAKE_ARTIFACT_CACHE LAKE_RESTORE_ARTIFACTS
+
 .PHONY: build examples inspect validate validate-direct-lcnf validate-v8 validate-native-oracle-attestations validate-coverage-index bug-cards trusted-assumptions no-placeholders check beam talos-setup talos-check clean
 
 build:

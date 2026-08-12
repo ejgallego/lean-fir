@@ -2,11 +2,6 @@ name = "Fir"
 version = "0.1.0"
 defaultTargets = ["Fir"]
 
-# Share content-addressed build products across same-toolchain lane worktrees.
-# Keep the conventional build layout for validation scripts and external tools.
-enableArtifactCache = true
-restoreAllArtifacts = true
-
 [[lean_lib]]
 name = "Fir"
 
