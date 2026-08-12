@@ -1484,10 +1484,10 @@ acceptance tests pass.
      hereditary constructor. Saturated bind pop exposes the resumed compiler
      focus and restores the complete caller core after every matcher label is
      unwound. These local rules contain no whole-callee evaluation or
-     termination premise. `ConcreteStructuredCodeStepOutcome` records exactly
-     the four successors of that first relation-wide slice: admission-free
-     continued code, named-call ready, saturated-call ready, or returned
-     control. `ConcreteStructuredCodeCoreRel.withAdmission` makes the remaining
+     termination premise. `ConcreteStructuredCodeStepOutcome` records the six
+     currently open successors: admission-free continued code, named-call
+     ready, saturated-call ready, pure-external call-ready, pure-external bind,
+     or returned control. `ConcreteStructuredCodeCoreRel.withAdmission` makes the remaining
      locality obligation explicit: fresh current-node admission is attached
      only after the dynamic successor is known.
      `ConcreteStructuredGlobalOutcome` existentially hides the active
@@ -1525,12 +1525,22 @@ acceptance tests pass.
      successful source step reconstructs the default branch selection; all
      three laws preserve the hereditary resource and supported stacks through
      exact frame equality while taking a reflexive target path.
+     Pure integer-, natural-, and scalar-result externals are now the first
+     non-erased family in this same closure. Current-node admission fixes only
+     the semantic response and its exact allocation cost. The staging rule
+     derives the production argument prefix, resolved import, and destination;
+     `ConcreteStructuredExternalCallReadyCoreRel` matches the source request
+     with one imported target call and transports the complete entry-relative
+     facts/cache/closure scope. `ConcreteStructuredExternalBindCoreRel` then
+     matches the saved bind frame with the generated destination write, erases
+     exactly the shadowed destination fact, and re-enters ordinary code. Both
+     intermediate relations retain the same aligned supported caller stack and
+     contain no whole external execution or target certificate.
      Admission for a newly reached code node is attached after that dynamic
      successor is known, so neither relation contains future execution or
-     termination evidence. The next slice widens this same current-node
-     boundary to a non-erased operation family—preferably the staged pure
-     external protocol—then packages the local admission classifier into the
-     public finite-prefix simulation.
+     termination evidence. The next slice packages the root/current-node
+     classifier into the public finite-prefix simulation; later runtime
+     families widen admission without changing this theorem shape.
      Heap-valued cache misses and target-only loop unwinding remain later
      widenings.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
