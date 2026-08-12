@@ -24,6 +24,9 @@ Options:
   --heap-view             Expose Module.HEAPU8 for bulk bridge transfers.
   --start <symbol>        Run a zero-argument IO UInt32 export after module init.
   --root <directory>      Lean source root (default: repository root).
+  --lake-root <directory> Lake environment used to invoke Lean (default: repository root).
+  --manifest-root <directory>
+                         Common root used for manifest source identities.
   --out-dir <directory>  Artifact directory.
   --name <name>           Output basename (default: entry filename).
   --rebuild               Rebuild every compilation and link stage.
@@ -190,6 +193,8 @@ object_key() {
 
 entry_source=""
 lean_root="$repo_root"
+lake_root="$repo_root"
+manifest_root=""
 out_dir=""
 artifact_name=""
 start_symbol=""
@@ -235,6 +240,16 @@ while (($# > 0)); do
     --root)
       require_option_value "$1" "$#"
       lean_root="$2"
+      shift 2
+      ;;
+    --lake-root)
+      require_option_value "$1" "$#"
+      lake_root="$2"
+      shift 2
+      ;;
+    --manifest-root)
+      require_option_value "$1" "$#"
+      manifest_root="$2"
       shift 2
       ;;
     --out-dir)
@@ -284,6 +299,17 @@ if [[ ! -d "$lean_root" ]]; then
   die "Lean source root does not exist: $lean_root"
 fi
 lean_root="$(cd "$lean_root" && pwd)"
+if [[ ! -d "$lake_root" ]]; then
+  die "Lake root does not exist: $lake_root"
+fi
+lake_root="$(cd "$lake_root" && pwd)"
+if [[ -z "$manifest_root" ]]; then
+  manifest_root="$lean_root"
+elif [[ ! -d "$manifest_root" ]]; then
+  die "manifest root does not exist: $manifest_root"
+else
+  manifest_root="$(cd "$manifest_root" && pwd)"
+fi
 
 if [[ -z "$artifact_name" ]]; then
   artifact_name="$(basename "$entry_source" .lean)"
@@ -317,11 +343,11 @@ if [[ ! -f "$lean_include/lean/lean.h" ]]; then
   die "Emscripten Lean headers are not ready; run $lane_dir/setup-emscripten.sh"
 fi
 
-lean_version="$(lake -d "$repo_root" env lean --version)"
+lean_version="$(lake -d "$lake_root" env lean --version)"
 if [[ "$lean_version" != *"commit $FIR_LCNF_C_LEAN_COMMIT"* ]]; then
   die "Lean compiler does not match the pinned runtime: $lean_version"
 fi
-lean_prefix="$(lake -d "$repo_root" env lean --print-prefix)"
+lean_prefix="$(lake -d "$lake_root" env lean --print-prefix)"
 lean_tool="$lean_prefix/bin/lean"
 if [[ ! -x "$lean_tool" ]]; then
   die "Lean compiler binary is not executable: $lean_tool"
@@ -430,7 +456,7 @@ for source_index in "${!sources[@]}"; do
   generated_c="$out_dir/$stem.c"
   generated_o="$out_dir/$stem.o"
   deps_snapshot="$build_tmp/lean-$source_index.deps"
-  lake -d "$repo_root" env lean \
+  lake -d "$lake_root" env lean \
     --deps \
     -R "$lean_root" \
     "$source" > "$deps_snapshot"
@@ -449,6 +475,7 @@ for source_index in "${!sources[@]}"; do
     done < "$deps_snapshot"
     key_field repo-root "$repo_root"
     key_field lean-root "$lean_root"
+    key_field lake-root "$lake_root"
     key_field option.0 -c
     key_field option.1 -R
     key_field lean "$lean_tool"
@@ -464,7 +491,7 @@ for source_index in "${!sources[@]}"; do
   else
     printf 'BUILD lean-c %s\n' "$stem"
     generated_c_tmp="$build_tmp/$stem.c"
-    lake -d "$repo_root" env lean \
+    lake -d "$lake_root" env lean \
       -c "$generated_c_tmp" \
       -R "$lean_root" \
       "$source"
@@ -647,7 +674,7 @@ manifest_args=(
   --module "$module"
   --wasm "$artifact"
   --name "$artifact_name"
-  --root "$lean_root"
+  --root "$manifest_root"
   --entry "$entry_source"
   --initializer "$module_initializer"
   --lean-version "$FIR_LCNF_C_LEAN_VERSION"

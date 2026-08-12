@@ -269,6 +269,21 @@ requests and requires exact trace equality. The detailed client and ownership
 contract is in
 [`prettyM-emscripten-package/README.md`](prettyM-emscripten-package/README.md).
 
+The companion complete-renderer package compiles the source-owned
+`VersoSlides.Pretty.formatHtmlForRuntime` function through the same pipeline:
+
+```sh
+VERSO_ROOT=/path/to/clean/verso \
+  integration/lcnf-c-wasm/package-prettyM-html-emscripten.sh
+```
+
+Its adapter accepts the same compact format together with sparse tagged
+annotations and returns `verso-token-html/v1` before DOM commit. Packaging
+requires byte-identical escaped HTML from the FIR-native HTML artifact across
+escaping, nested annotations, widths, initial columns, and repeated calls.
+See
+[`prettyM-html-emscripten-package/README.md`](prettyM-html-emscripten-package/README.md).
+
 ## Measuring native versus Emscripten
 
 `benchmark.sh` builds `RuntimeSmoke` once through the production Emscripten

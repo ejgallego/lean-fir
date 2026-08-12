@@ -269,6 +269,21 @@ function writeFormat(writer, encoder, root, maximumNodes) {
   return nodes;
 }
 
+/**
+ * Shared compact-format wire primitives for sibling Emscripten endpoints.
+ *
+ * This is producer-internal API: browser clients should use the versioned
+ * public adapters. Keeping the encoder here ensures the layout and complete
+ * HTML packages accept byte-for-byte identical compact `Std.Format` values.
+ */
+export const PrettyMWireInternals = Object.freeze({
+  ByteWriter,
+  natural,
+  writeNatural,
+  writeString,
+  writeFormat,
+});
+
 function encodeRequest(request, {
   maximumNodes,
   maximumBytes,
