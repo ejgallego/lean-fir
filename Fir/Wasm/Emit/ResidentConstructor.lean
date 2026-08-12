@@ -135,44 +135,36 @@ def constructorFunction (ordinal : Nat) (operation : RuntimeOp) :
       fieldStores fields ++
       retagAddress result }
 
-private partial def rewriteInstruction (operation : RuntimeOp)
-    (name : Name) : Instruction → Instruction
+private structure Binding where
+  operation : RuntimeOp
+  name : Name
+  function : Function
+
+private partial def rewriteInstruction
+    (names : Std.HashMap RuntimeOp Name) : Instruction → Instruction
   | .call (.runtime candidate) =>
-      if candidate == operation then
-        .call (.declaration name)
-      else
-        .call (.runtime candidate)
+      match names.get? candidate with
+      | some name => .call (.declaration name)
+      | none => .call (.runtime candidate)
   | .block label body =>
-      .block label (body.map (rewriteInstruction operation name))
+      .block label (body.map (rewriteInstruction names))
+  | .loop label body =>
+      .loop label (body.map (rewriteInstruction names))
   | .ifElse thenBody elseBody =>
       .ifElse
-        (thenBody.map (rewriteInstruction operation name))
-        (elseBody.map (rewriteInstruction operation name))
+        (thenBody.map (rewriteInstruction names))
+        (elseBody.map (rewriteInstruction names))
   | instruction => instruction
 
-private def rewriteFunction (operation : RuntimeOp) (name : Name)
+private def rewriteFunction (names : Std.HashMap RuntimeOp Name)
     (function : Function) : Function :=
-  { function with body := function.body.map (rewriteInstruction operation name) }
+  { function with body := function.body.map (rewriteInstruction names) }
 
-private def internalizeOne (ordinal : Nat) (operation : RuntimeOp)
-    (module : Module) : Except LinkError Module := do
-  let name := constructorName ordinal
-  if module.imports.any (·.declaration? == some name) ||
-      module.functions.any (·.name == name) ||
-      module.exports.contains name then
-    throw (.reservedDeclaration name)
-  let function ← constructorFunction ordinal operation
-  let functions :=
-    (module.functions.map (rewriteFunction operation name)).push function
-  let runtimeOperations := Fir.Wasm.collectRuntimeOps functions
-  let externalImports := module.imports.filter (·.operation?.isNone)
-  let imports := runtimeOperations.mapIdx Fir.Wasm.runtimeImport ++ externalImports
-  return {
-    module with
-    imports
-    functions
-    exports := Fir.Wasm.addUnique module.exports name
-    runtimeOperations }
+private def installBinding (functions : Array Function) (binding : Binding) :
+    Except LinkError (Array Function) := do
+  if functions.any (·.name == binding.name) then
+    throw (.reservedDeclaration binding.name)
+  return functions.push binding.function
 
 /--
 Internalize every constructor-allocation runtime operation after the resident
@@ -191,9 +183,29 @@ def internalizeConstructors (module : Module) (validate : Bool := true) :
   unless module.memory == some ResidentRuntime.residentMemory do
     throw .incompatibleMemory
   let operations := module.runtimeOperations.filter isConstructor
-  let result ← operations.toList.zipIdx.foldlM (init := module)
-    fun result (operation, ordinal) =>
-      internalizeOne ordinal operation result
+  let bindings ← operations.toList.zipIdx.toArray.mapM fun (operation, ordinal) => do
+    let name := constructorName ordinal
+    if module.imports.any (·.declaration? == some name) ||
+        module.functions.any (·.name == name) || module.exports.contains name then
+      throw (.reservedDeclaration name)
+    let function ← constructorFunction ordinal operation
+    return { operation, name, function : Binding }
+  let names := bindings.foldl
+    (init := Std.HashMap.emptyWithCapacity bindings.size)
+    fun names binding => names.insert binding.operation binding.name
+  let functions := module.functions.map (rewriteFunction names)
+  let functions ← bindings.foldlM (init := functions) installBinding
+  let runtimeOperations := Fir.Wasm.updateRuntimeOps module.runtimeOperations operations
+    (bindings.map (·.function))
+  let externalImports := module.imports.filter (·.operation?.isNone)
+  let result : Module := {
+    module with
+    imports := runtimeOperations.mapIdx Fir.Wasm.runtimeImport ++ externalImports
+    functions
+    exports := bindings.foldl
+      (fun exports binding => Fir.Wasm.addUnique exports binding.name)
+      module.exports
+    runtimeOperations }
   if validate then
     match Fir.Wasm.validateModule result with
     | .ok () => return result

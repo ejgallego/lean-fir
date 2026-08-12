@@ -158,50 +158,71 @@ private partial def freshLoopLabel (function : Function) (ordinal : Nat := 0) : 
 
 mutual
 
-private partial def rewriteInstructions (function : Function) (loopLabel : FVarId) :
+private partial def rewriteInstructions (function : Function) (loopLabel : FVarId)
+    (restart : List Instruction) :
     List Instruction → List Instruction × Nat
   | [.call (.declaration callee), .ret] =>
       if callee == function.name then
-        (restartInstructions function loopLabel, 1)
+        (restart, 1)
       else
         ([.call (.declaration callee), .ret], 0)
   | [.call (.declaration callee), .localSet result,
       .localGet returned, .ret] =>
       if callee == function.name && sameFVar result returned &&
           function.results.size == 1 then
-        (restartInstructions function loopLabel, 1)
+        (restart, 1)
       else
         ([.call (.declaration callee), .localSet result,
           .localGet returned, .ret], 0)
   | instruction :: rest =>
       let (instruction, instructionCount) :=
-        rewriteInstruction function loopLabel instruction
-      let (rest, restCount) := rewriteInstructions function loopLabel rest
+        rewriteInstruction function loopLabel restart instruction
+      let (rest, restCount) := rewriteInstructions function loopLabel restart rest
       (instruction :: rest, instructionCount + restCount)
   | [] => ([], 0)
 
-private partial def rewriteInstruction (function : Function) (loopLabel : FVarId) :
+private partial def rewriteInstruction (function : Function) (loopLabel : FVarId)
+    (restart : List Instruction) :
     Instruction → Instruction × Nat
   | .block label body =>
-      let (body, count) := rewriteInstructions function loopLabel body
+      let (body, count) := rewriteInstructions function loopLabel restart body
       (.block label body, count)
   | .loop label body =>
-      let (body, count) := rewriteInstructions function loopLabel body
+      let (body, count) := rewriteInstructions function loopLabel restart body
       (.loop label body, count)
   | .ifElse thenBody elseBody =>
-      let (thenBody, thenCount) := rewriteInstructions function loopLabel thenBody
-      let (elseBody, elseCount) := rewriteInstructions function loopLabel elseBody
+      let (thenBody, thenCount) :=
+        rewriteInstructions function loopLabel restart thenBody
+      let (elseBody, elseCount) :=
+        rewriteInstructions function loopLabel restart elseBody
       (.ifElse thenBody elseBody, thenCount + elseCount)
   | instruction => (instruction, 0)
 
 end
 
+private partial def containsDirectSelfTailCall (function : Function) :
+    List Instruction → Bool
+  | [.call (.declaration callee), .ret] => callee == function.name
+  | [.call (.declaration callee), .localSet result,
+      .localGet returned, .ret] =>
+      callee == function.name && sameFVar result returned && function.results.size == 1
+  | .block _ body :: rest | .loop _ body :: rest =>
+      containsDirectSelfTailCall function body ||
+        containsDirectSelfTailCall function rest
+  | .ifElse thenBody elseBody :: rest =>
+      containsDirectSelfTailCall function thenBody ||
+        containsDirectSelfTailCall function elseBody ||
+        containsDirectSelfTailCall function rest
+  | _ :: rest => containsDirectSelfTailCall function rest
+  | [] => false
+
 def rewriteFunction (function : Function) : Function × Nat :=
-  let loopLabel := freshLoopLabel function
-  let (body, count) := rewriteInstructions function loopLabel function.body
-  if count == 0 then
+  if !containsDirectSelfTailCall function function.body then
     (function, 0)
   else
+    let loopLabel := freshLoopLabel function
+    let restart := restartInstructions function loopLabel
+    let (body, count) := rewriteInstructions function loopLabel restart function.body
     ({ function with body := [.loop loopLabel body] }, count)
 
 /--

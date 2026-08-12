@@ -121,7 +121,9 @@ private def retagAddress (result : AbiKind) : List Instruction := [
   .localGet resultLocal,
   .ret]
 
-def partialApplicationFunction (module : Module) (ordinal : Nat)
+private def partialApplicationFunctionIndexed
+    (targetIndices : Std.HashMap Name Nat)
+    (descriptorIndices : Std.HashMap (Array AbiKind) Nat) (ordinal : Nat)
     (operation : RuntimeOp) : Except LinkError Function := do
   let .partialApply targetName arity fixed fields result := operation |
     throw .unsupportedOperation
@@ -129,9 +131,9 @@ def partialApplicationFunction (module : Module) (ordinal : Nat)
     throw .unsupportedOperation
   unless result.isObjectLike do
     throw (.unsupportedResult result)
-  let some targetIndex := module.closureDispatch.findIdx? (· == targetName) |
+  let some targetIndex := targetIndices.get? targetName |
     throw (.missingClosureTarget targetName)
-  let some descriptorIndex := module.closureDescriptors.findIdx? (· == fields) |
+  let some descriptorIndex := descriptorIndices.get? fields |
     throw (.missingClosureDescriptor fields)
   let targetId ← checkedWord "closure target id" targetIndex
   let descriptorId ← checkedWord "closure descriptor id" descriptorIndex
@@ -157,31 +159,36 @@ def partialApplicationFunction (module : Module) (ordinal : Nat)
       stores ++
       retagAddress result }
 
+def partialApplicationFunction (module : Module) (ordinal : Nat)
+    (operation : RuntimeOp) : Except LinkError Function :=
+  let targetIndices := module.closureDispatch.mapIdx (fun index name => (name, index))
+    |>.foldl (init := Std.HashMap.emptyWithCapacity module.closureDispatch.size)
+      fun indices entry => indices.insert entry.1 entry.2
+  let descriptorIndices := module.closureDescriptors.mapIdx
+    (fun index descriptor => (descriptor, index))
+    |>.foldl (init := Std.HashMap.emptyWithCapacity module.closureDescriptors.size)
+      fun indices entry => indices.insert entry.1 entry.2
+  partialApplicationFunctionIndexed targetIndices descriptorIndices ordinal operation
+
 private structure Binding where
   operation : RuntimeOp
   name : Name
   function : Function
 
-private partial def rewriteInstruction (bindings : Array Binding) :
+private partial def rewriteInstruction (names : Std.HashMap RuntimeOp Name) :
     Instruction → Instruction
   | .call (.runtime operation) =>
-      match bindings.find? (fun binding => binding.operation == operation) with
-      | some binding => .call (.declaration binding.name)
+      match names.get? operation with
+      | some name => .call (.declaration name)
       | none => .call (.runtime operation)
   | .block label body =>
-      .block label (body.map (rewriteInstruction bindings))
+      .block label (body.map (rewriteInstruction names))
   | .loop label body =>
-      .loop label (body.map (rewriteInstruction bindings))
+      .loop label (body.map (rewriteInstruction names))
   | .ifElse thenBody elseBody =>
-      .ifElse (thenBody.map (rewriteInstruction bindings))
-        (elseBody.map (rewriteInstruction bindings))
+      .ifElse (thenBody.map (rewriteInstruction names))
+        (elseBody.map (rewriteInstruction names))
   | instruction => instruction
-
-private def installBinding (functions : Array Function) (binding : Binding) :
-    Except LinkError (Array Function) := do
-  if functions.any (·.name == binding.name) then
-    throw (.reservedDeclaration binding.name)
-  return functions.push binding.function
 
 /--
 Internalize every supported closure allocation after the resident allocator is
@@ -204,25 +211,47 @@ def internalizePartialApplications (module : Module) (validate : Bool := true) :
   unless module.memory == some ResidentRuntime.residentMemory do
     throw .incompatibleMemory
   let operations := module.runtimeOperations.filter isPartialApplication
+  let targetIndices := module.closureDispatch.mapIdx (fun index name => (name, index))
+    |>.foldl (init := Std.HashMap.emptyWithCapacity module.closureDispatch.size)
+      fun indices entry => indices.insert entry.1 entry.2
+  let descriptorIndices := module.closureDescriptors.mapIdx
+    (fun index descriptor => (descriptor, index))
+    |>.foldl (init := Std.HashMap.emptyWithCapacity module.closureDescriptors.size)
+      fun indices entry => indices.insert entry.1 entry.2
+  let importedDeclarations := module.imports.foldl
+    (init := Std.HashSet.emptyWithCapacity module.imports.size)
+    fun declarations import_ =>
+      match import_.declaration? with
+      | some name => declarations.insert name
+      | none => declarations
+  let functionNames := module.functions.foldl
+    (init := Std.HashSet.emptyWithCapacity (module.functions.size + operations.size))
+    fun names function => names.insert function.name
+  let exportedNames := module.exports.foldl
+    (init := Std.HashSet.emptyWithCapacity (module.exports.size + operations.size))
+    fun names name => names.insert name
   let bindings ← operations.toList.zipIdx.toArray.mapM fun (operation, ordinal) => do
     let name := partialApplicationName ordinal
-    if module.imports.any (·.declaration? == some name) ||
-        module.functions.any (·.name == name) || module.exports.contains name then
+    if importedDeclarations.contains name || functionNames.contains name ||
+        exportedNames.contains name then
       throw (.reservedDeclaration name)
-    let function ← partialApplicationFunction module ordinal operation
+    let function ← partialApplicationFunctionIndexed targetIndices descriptorIndices
+      ordinal operation
     return { operation, name, function : Binding }
+  let names := bindings.foldl
+    (init := Std.HashMap.emptyWithCapacity bindings.size)
+    fun names binding => names.insert binding.operation binding.name
   let functions := module.functions.map fun function =>
-    { function with body := function.body.map (rewriteInstruction bindings) }
-  let functions ← bindings.foldlM (init := functions) installBinding
-  let runtimeOperations := Fir.Wasm.collectRuntimeOps functions
+    { function with body := function.body.map (rewriteInstruction names) }
+  let functions := functions ++ bindings.map (·.function)
+  let runtimeOperations := Fir.Wasm.updateRuntimeOps module.runtimeOperations operations
+    (bindings.map (·.function))
   let externalImports := module.imports.filter (·.operation?.isNone)
   let result : Module := {
     module with
     imports := runtimeOperations.mapIdx Fir.Wasm.runtimeImport ++ externalImports
     functions
-    exports := bindings.foldl
-      (fun exports binding => Fir.Wasm.addUnique exports binding.name)
-      module.exports
+    exports := module.exports ++ bindings.map (·.name)
     runtimeOperations }
   if validate then
     match Fir.Wasm.validateModule result with

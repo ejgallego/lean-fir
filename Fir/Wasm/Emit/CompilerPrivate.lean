@@ -40,9 +40,12 @@ def forgetGeneratedCompilerModuleMappings (env : Environment)
   let closedNames := (Lean.closedTermCacheExt.getState env).constNames
   let specializationCache := LCNF.Specialize.specCacheExt.getState env
   let originalMappings := env.base.private.const2ModIdx
+  let selectedModules := moduleIndices.foldl
+    (init := Std.HashSet.emptyWithCapacity moduleIndices.size)
+    fun modules moduleIndex => modules.insert moduleIndex
   let mappings := env.base.private.const2ModIdx.fold
     (fun mappings name moduleIndex =>
-      if moduleIndices.contains moduleIndex && name.toString.contains "._closed_" then
+      if selectedModules.contains moduleIndex && name.toString.contains "._closed_" then
         mappings.erase name
       else mappings)
     env.base.private.const2ModIdx
@@ -50,13 +53,13 @@ def forgetGeneratedCompilerModuleMappings (env : Environment)
     (fun mappings name =>
       match originalMappings[name]? with
       | some moduleIndex =>
-          if moduleIndices.contains moduleIndex then mappings.erase name else mappings
+          if selectedModules.contains moduleIndex then mappings.erase name else mappings
       | none => mappings) mappings
   let mappings := SMap.fold
     (fun mappings _ name =>
       match originalMappings[name]? with
       | some moduleIndex =>
-          if moduleIndices.contains moduleIndex then mappings.erase name else mappings
+          if selectedModules.contains moduleIndex then mappings.erase name else mappings
       | none => mappings) mappings specializationCache
   { env with base.private.const2ModIdx := mappings }
 

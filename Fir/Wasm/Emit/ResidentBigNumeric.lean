@@ -1708,28 +1708,30 @@ def internalHelperNames : Array Name := #[
 
 def helperNames : Array Name := internalHelperNames ++ externalHelperNames
 
-private def replacement? (name : Name) : Option Name := do
-  let declaration ← ResidentNumeric.externalDeclarations.find? fun declaration =>
-    ResidentNumeric.externalName declaration == name
-  return externalName declaration
+private def replacementNames : Std.HashMap Name Name :=
+  ResidentNumeric.externalDeclarations.foldl
+    (init := Std.HashMap.emptyWithCapacity ResidentNumeric.externalDeclarations.size)
+    fun names declaration =>
+      names.insert (ResidentNumeric.externalName declaration) (externalName declaration)
 
-private partial def rewriteInstruction : Instruction → Instruction
+private partial def rewriteInstruction
+    (replacements : Std.HashMap Name Name) : Instruction → Instruction
   | .call (.declaration name) =>
-      match replacement? name with
+      match replacements.get? name with
       | some replacement => .call (.declaration replacement)
       | none => .call (.declaration name)
   | .block label body =>
-      .block label (body.map rewriteInstruction)
+      .block label (body.map (rewriteInstruction replacements))
   | .loop label body =>
-      .loop label (body.map rewriteInstruction)
+      .loop label (body.map (rewriteInstruction replacements))
   | .ifElse thenBody elseBody =>
       .ifElse
-        (thenBody.map rewriteInstruction)
-        (elseBody.map rewriteInstruction)
+        (thenBody.map (rewriteInstruction replacements))
+        (elseBody.map (rewriteInstruction replacements))
   | instruction => instruction
 
 private def rewriteFunction (function : Function) : Function :=
-  { function with body := function.body.map rewriteInstruction }
+  { function with body := function.body.map (rewriteInstruction replacementNames) }
 
 def internalize (module : Module) (validate : Bool := true) : Except LinkError Module := do
   if validate then

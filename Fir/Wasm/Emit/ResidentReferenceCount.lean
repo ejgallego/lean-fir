@@ -137,46 +137,26 @@ private def incrementOnceFunction : Function := {
         (checkedImmediateBody true)
         (heapBody 1 true)] }
 
-private partial def rewriteInstruction (operation : RuntimeOp)
-    (name : Name) : Instruction → Instruction
+private structure Binding where
+  operation : RuntimeOp
+  name : Name
+  function : Function
+
+private partial def rewriteInstruction
+    (names : Std.HashMap RuntimeOp Name) : Instruction → Instruction
   | .call (.runtime candidate) =>
-      if candidate == operation then
-        .call (.declaration name)
-      else
-        .call (.runtime candidate)
+      match names.get? candidate with
+      | some name => .call (.declaration name)
+      | none => .call (.runtime candidate)
   | .block label body =>
-      .block label (body.map (rewriteInstruction operation name))
+      .block label (body.map (rewriteInstruction names))
+  | .loop label body =>
+      .loop label (body.map (rewriteInstruction names))
   | .ifElse thenBody elseBody =>
       .ifElse
-        (thenBody.map (rewriteInstruction operation name))
-        (elseBody.map (rewriteInstruction operation name))
+        (thenBody.map (rewriteInstruction names))
+        (elseBody.map (rewriteInstruction names))
   | instruction => instruction
-
-private def rewriteFunction (operation : RuntimeOp) (name : Name)
-    (function : Function) : Function :=
-  { function with body := function.body.map (rewriteInstruction operation name) }
-
-private def internalizeOne (ordinal : Nat) (operation : RuntimeOp)
-    (module : Module) : Except LinkError Module := do
-  let name := incrementName ordinal
-  if module.imports.any (·.declaration? == some name) ||
-      module.functions.any (·.name == name) ||
-      module.exports.contains name then
-    throw (.reservedDeclaration name)
-  let function ← match operation with
-    | .inc amount check => incrementFunction ordinal amount check
-    | _ => throw .unsupportedOperation
-  let functions :=
-    (module.functions.map (rewriteFunction operation name)).push function
-  let runtimeOperations := Fir.Wasm.collectRuntimeOps functions
-  let externalImports := module.imports.filter (·.operation?.isNone)
-  let imports := runtimeOperations.mapIdx Fir.Wasm.runtimeImport ++ externalImports
-  return {
-    module with
-    imports
-    functions
-    exports := Fir.Wasm.addUnique module.exports name
-    runtimeOperations }
 
 /--
 Internalize nonrecursive reference-count increments. Checked immediate and
@@ -200,9 +180,33 @@ def internalizeIncrements (module : Module) (validate : Bool := true) :
     module with
     functions := module.functions.push incrementOnceFunction }
   let operations := module.runtimeOperations.filter isIncrement
-  let result ← operations.toList.zipIdx.foldlM (init := module)
-    fun result (operation, ordinal) =>
-      internalizeOne ordinal operation result
+  let bindings ← operations.toList.zipIdx.toArray.mapM fun (operation, ordinal) => do
+    let name := incrementName ordinal
+    if module.imports.any (·.declaration? == some name) ||
+        module.functions.any (·.name == name) || module.exports.contains name then
+      throw (.reservedDeclaration name)
+    let function ← match operation with
+      | .inc amount check => incrementFunction ordinal amount check
+      | _ => throw .unsupportedOperation
+    return { operation, name, function : Binding }
+  let names := bindings.foldl
+    (init := Std.HashMap.emptyWithCapacity bindings.size)
+    fun names binding => names.insert binding.operation binding.name
+  let mut functions := module.functions.map fun function =>
+    { function with body := function.body.map (rewriteInstruction names) }
+  for binding in bindings do
+    if functions.any (·.name == binding.name) then
+      throw (.reservedDeclaration binding.name)
+    functions := functions.push binding.function
+  let runtimeOperations := Fir.Wasm.collectRuntimeOps functions
+  let externalImports := module.imports.filter (·.operation?.isNone)
+  let result : Module := {
+    module with
+    imports := runtimeOperations.mapIdx Fir.Wasm.runtimeImport ++ externalImports
+    functions
+    exports := bindings.foldl
+      (fun exports binding => Fir.Wasm.addUnique exports binding.name) module.exports
+    runtimeOperations }
   if validate then
     match Fir.Wasm.validateModule result with
     | .ok () => return result

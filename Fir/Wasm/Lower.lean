@@ -1788,9 +1788,42 @@ partial def collectRuntimeOpsInstruction (operations : Array RuntimeOp) : Instru
         (thenBody.foldl collectRuntimeOpsInstruction operations)
   | _ => operations
 
+def collectRuntimeOpsFrom (operations : Array RuntimeOp)
+    (functions : Array Function) : Array RuntimeOp :=
+  let rec collectInstruction
+      (state : Array RuntimeOp × Std.HashSet RuntimeOp) :
+      Instruction → Array RuntimeOp × Std.HashSet RuntimeOp
+    | .call (.runtime operation) =>
+        if state.2.contains operation then state
+        else (state.1.push operation, state.2.insert operation)
+    | .block _ body | .loop _ body => body.foldl collectInstruction state
+    | .ifElse thenBody elseBody =>
+        elseBody.foldl collectInstruction (thenBody.foldl collectInstruction state)
+    | _ => state
+  let seen := operations.foldl
+    (init := Std.HashSet.emptyWithCapacity (operations.size + functions.size))
+    fun seen operation => seen.insert operation
+  let state := functions.foldl
+    (init := (operations, seen))
+    fun state function => function.body.foldl collectInstruction state
+  state.1
+
 def collectRuntimeOps (functions : Array Function) : Array RuntimeOp :=
-  functions.foldl (init := #[]) fun operations function =>
-    function.body.foldl collectRuntimeOpsInstruction operations
+  collectRuntimeOpsFrom #[] functions
+
+/--
+Update first-use-ordered runtime-operation metadata after a linker pass removes
+operations from existing functions and appends helper functions. This avoids
+rescanning the already indexed function prefix after every resident family.
+-/
+def updateRuntimeOps (operations removed : Array RuntimeOp)
+    (helpers : Array Function) : Array RuntimeOp :=
+  let removed := removed.foldl
+    (init := Std.HashSet.emptyWithCapacity removed.size)
+    fun removed operation => removed.insert operation
+  collectRuntimeOpsFrom
+    (operations.filter fun operation => !removed.contains operation)
+    helpers
 
 def lowerDecl (program : Fir.LeanIR.ImpureProgram)
     (cachedDeclarations : Array Name) (decl : LCNF.Decl .impure) :

@@ -229,6 +229,184 @@ private def applySteps (validate : Bool) (steps : List Step) (module : Module) :
   | [] => return module
   | step :: steps => applySteps validate steps (← applyStep validate step module)
 
+private structure RewritePlan where
+  runtimeNames : Std.HashMap RuntimeOp Name := {}
+  declarationNames : Std.HashMap Name Name := {}
+  deriving Inhabited
+
+private partial def rewriteInstructionBatch (plan : RewritePlan) :
+    Instruction → Instruction
+  | .call (.runtime operation) =>
+      match plan.runtimeNames.get? operation with
+      | some name => .call (.declaration name)
+      | none => .call (.runtime operation)
+  | .call (.declaration declaration) =>
+      match plan.declarationNames.get? declaration with
+      | some name => .call (.declaration name)
+      | none => .call (.declaration declaration)
+  | .block label body => .block label (body.map (rewriteInstructionBatch plan))
+  | .loop label body => .loop label (body.map (rewriteInstructionBatch plan))
+  | .ifElse thenBody elseBody =>
+      .ifElse (thenBody.map (rewriteInstructionBatch plan))
+        (elseBody.map (rewriteInstructionBatch plan))
+  | instruction => instruction
+
+private def rewriteFunctionBatch (plan : RewritePlan) (function : Function) : Function :=
+  if plan.runtimeNames.isEmpty && plan.declarationNames.isEmpty then function
+  else { function with body := function.body.map (rewriteInstructionBatch plan) }
+
+private structure RewriteCohort where
+  start : Nat
+  stop : Nat
+  firstPlan : Nat := 0
+
+private def resolveDeclaration (plan : RewritePlan) (name : Name) : Name :=
+  plan.declarationNames.getD name name
+
+/-- Compose call rewrites in policy order: `later (earlier call)`. -/
+private def composeRewritePlans (earlier later : RewritePlan) : RewritePlan :=
+  let runtimeNames := earlier.runtimeNames.fold
+    (fun names operation target =>
+      names.insert operation (resolveDeclaration later target))
+    (Std.HashMap.emptyWithCapacity
+      (earlier.runtimeNames.size + later.runtimeNames.size))
+  let runtimeNames := later.runtimeNames.fold
+    (fun names operation target =>
+      if earlier.runtimeNames.contains operation then names
+      else names.insert operation target)
+    runtimeNames
+  let declarationNames := earlier.declarationNames.fold
+    (fun names source target =>
+      names.insert source (resolveDeclaration later target))
+    (Std.HashMap.emptyWithCapacity
+      (earlier.declarationNames.size + later.declarationNames.size))
+  let declarationNames := later.declarationNames.fold
+    (fun names source target =>
+      if earlier.declarationNames.contains source then names
+      else names.insert source target)
+    declarationNames
+  { runtimeNames, declarationNames }
+
+private def rewriteCohortsFor (size : Nat) : Array RewriteCohort :=
+  if size == 0 then #[] else #[{ start := 0, stop := size }]
+
+private def rewritePlanSuffixes (plans : Array RewritePlan) : Array RewritePlan :=
+  (plans.foldr
+    (fun plan suffixes => suffixes.push
+      (composeRewritePlans plan suffixes.back!))
+    #[{}]).reverse
+
+private def applyRewriteCohorts (plans : Array RewritePlan)
+    (cohorts : Array RewriteCohort)
+    (module : Module) : Module :=
+  let suffixes := rewritePlanSuffixes plans
+  { module with
+    functions := cohorts.flatMap fun cohort =>
+      let plan := suffixes[cohort.firstPlan]!
+      (module.functions.extract cohort.start cohort.stop).map
+        (rewriteFunctionBatch plan) }
+
+private def isTailStep : Step → Bool
+  | .directSelfTailCallsRequired | .directSelfTailCallsAvailable => true
+  | _ => false
+
+private def rewriteProbeName : Name := `_fir_resident_link_rewrite_probe
+
+/--
+Run one helper-family installer against function headers and a synthetic call
+probe. The installer still performs all dependency, signature, collision and
+helper-generation work, while the probe records its exact call substitutions.
+Real function bodies are rewritten once when the accumulated plan is flushed.
+-/
+private def planStep (step : Step) (module : Module) :
+    Except Source.CompileError (RewritePlan × Module) := do
+  if module.functions.any (·.name == rewriteProbeName) then
+    throw (.manifest s!"reserved linker rewrite-probe declaration {rewriteProbeName}")
+  let externalDeclarations := module.imports.filterMap (·.declaration?)
+  let declarations := externalDeclarations.foldl
+    (init := module.functions.map (·.name)) addUnique
+  let targets := module.runtimeOperations.map CallTarget.runtime ++
+    declarations.map CallTarget.declaration
+  let probe : Function := {
+    name := rewriteProbeName
+    params := #[]
+    results := #[]
+    locals := #[]
+    body := targets.toList.map Instruction.call }
+  let skeletons := module.functions.map fun function => { function with body := [] }
+  let prefixSize := skeletons.size + 1
+  let planned ← applyStep false step { module with functions := skeletons.push probe }
+  unless prefixSize ≤ planned.functions.size do
+    throw (.manifest s!"resident {repr step} removed function declarations")
+  for index in [:skeletons.size] do
+    let before := skeletons[index]!
+    let after := planned.functions[index]!
+    unless before.name == after.name && before.params == after.params &&
+        before.results == after.results && before.locals == after.locals &&
+        after.body.isEmpty do
+      throw (.manifest s!"resident {repr step} changed a function declaration shape")
+  let rewrittenProbe := planned.functions[skeletons.size]!
+  unless rewrittenProbe.name == rewriteProbeName &&
+      rewrittenProbe.body.length == targets.size do
+    throw (.manifest s!"resident {repr step} changed the linker rewrite probe shape")
+  let mut runtimeNames : Std.HashMap RuntimeOp Name := {}
+  let mut declarationNames : Std.HashMap Name Name := {}
+  let mut removedOperations := #[]
+  for (target, instruction) in targets.zip rewrittenProbe.body.toArray do
+    match target, instruction with
+    | .runtime operation, .call (.declaration name) =>
+        runtimeNames := runtimeNames.insert operation
+          (declarationNames.getD name name)
+        removedOperations := removedOperations.push operation
+    | .runtime operation, .call (.runtime remaining) =>
+        unless operation == remaining do
+          throw (.manifest s!"resident {repr step} changed a runtime probe operation")
+    | .declaration declaration, .call (.declaration name) =>
+        if declaration != name then
+          runtimeNames := runtimeNames.fold
+            (fun names operation target =>
+              names.insert operation (if target == declaration then name else target))
+            (Std.HashMap.emptyWithCapacity runtimeNames.size)
+          declarationNames := declarationNames.fold
+            (fun names source target =>
+              names.insert source (if target == declaration then name else target))
+            (Std.HashMap.emptyWithCapacity declarationNames.size)
+            |>.insert declaration name
+    | _, _ =>
+        throw (.manifest s!"resident {repr step} changed a rewrite probe instruction")
+  let newFunctions := planned.functions.extract prefixSize planned.functions.size
+  let runtimeOperations := Fir.Wasm.updateRuntimeOps module.runtimeOperations
+    removedOperations newFunctions
+  let externalImports := planned.imports.filter (·.operation?.isNone)
+  let result : Module := {
+    planned with
+    functions := module.functions ++ newFunctions
+    imports := runtimeOperations.mapIdx Fir.Wasm.runtimeImport ++ externalImports
+    runtimeOperations }
+  return ({ runtimeNames, declarationNames }, result)
+
+private def applyStepsPlanned (steps : List Step) (plans : Array RewritePlan)
+    (cohorts : Array RewriteCohort)
+    (module : Module) : Except Source.CompileError Module := do
+  match steps with
+  | [] => return applyRewriteCohorts plans cohorts module
+  | step :: steps =>
+      if isTailStep step then
+        let module := applyRewriteCohorts plans cohorts module
+        let module ← applyStep false step module
+        applyStepsPlanned steps #[] (rewriteCohortsFor module.functions.size) module
+      else
+        let oldSize := module.functions.size
+        let (stepPlan, module) ← planStep step module
+        let plans := plans.push stepPlan
+        let mut cohorts := cohorts
+        if oldSize < module.functions.size then
+          cohorts := cohorts.push {
+            start := oldSize
+            stop := module.functions.size
+            firstPlan := plans.size }
+        applyStepsPlanned steps plans cohorts module
+
 private def checkPostconditions (policy : Policy) (module : Module) :
     Except Source.CompileError Unit := do
   match Fir.Wasm.validateModule module with
@@ -264,7 +442,11 @@ def linkModule (policy : Policy) (module : Module) :
   | .ok () => pure ()
   | .error error =>
       throw (.manifest s!"resident linker received an invalid module: {repr error}")
-  let module ← applySteps policy.validateEachStep policy.steps.toList module
+  let module ← if policy.validateEachStep then
+      applySteps true policy.steps.toList module
+    else do
+      applyStepsPlanned policy.steps.toList
+        #[] (rewriteCohortsFor module.functions.size) module
   let module ← match policy.publicExports with
     | none => pure module
     | some exports =>

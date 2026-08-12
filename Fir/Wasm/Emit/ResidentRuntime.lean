@@ -381,29 +381,20 @@ private structure RuntimeBinding where
   function : Function
 
 private partial def rewriteRuntimeInstructionBatch
-    (bindings : Array RuntimeBinding) : Instruction → Instruction
+    (names : Std.HashMap RuntimeOp Name) : Instruction → Instruction
   | .call (.runtime operation) =>
-      match bindings.find? (fun binding => binding.operation == operation) with
-      | some binding => .call (.declaration binding.name)
+      match names.get? operation with
+      | some name => .call (.declaration name)
       | none => .call (.runtime operation)
   | .block label body =>
-      .block label (body.map (rewriteRuntimeInstructionBatch bindings))
+      .block label (body.map (rewriteRuntimeInstructionBatch names))
   | .loop label body =>
-      .loop label (body.map (rewriteRuntimeInstructionBatch bindings))
+      .loop label (body.map (rewriteRuntimeInstructionBatch names))
   | .ifElse thenBody elseBody =>
       .ifElse
-        (thenBody.map (rewriteRuntimeInstructionBatch bindings))
-        (elseBody.map (rewriteRuntimeInstructionBatch bindings))
+        (thenBody.map (rewriteRuntimeInstructionBatch names))
+        (elseBody.map (rewriteRuntimeInstructionBatch names))
   | instruction => instruction
-
-private def installRuntimeBinding (functions : Array Function)
-    (binding : RuntimeBinding) : Except LinkError (Array Function) := do
-  match functions.find? (·.name == binding.name) with
-  | none => return functions.push binding.function
-  | some existing =>
-      unless existing == binding.function do
-        throw (.reservedDeclaration binding.name)
-      return functions
 
 /--
 Internalize one complete helper family with a single whole-module rewrite.
@@ -414,10 +405,19 @@ private def internalizeOperationsUnchecked (bindings : Array RuntimeBinding)
     (module : Module) : Except LinkError Module := do
   if bindings.isEmpty then
     return module
+  let availableOperations := module.runtimeOperations.foldl
+    (init := Std.HashSet.emptyWithCapacity module.runtimeOperations.size)
+    fun operations operation => operations.insert operation
+  let importedDeclarations := module.imports.foldl
+    (init := Std.HashSet.emptyWithCapacity module.imports.size)
+    fun declarations import_ =>
+      match import_.declaration? with
+      | some name => declarations.insert name
+      | none => declarations
   for binding in bindings do
-    unless module.runtimeOperations.contains binding.operation do
+    unless availableOperations.contains binding.operation do
       throw (.missingOperation binding.name)
-    if module.imports.any (·.declaration? == some binding.name) then
+    if importedDeclarations.contains binding.name then
       throw (.reservedDeclaration binding.name)
   let memory ← match module.memory with
     | none => pure residentMemory
@@ -425,19 +425,41 @@ private def internalizeOperationsUnchecked (bindings : Array RuntimeBinding)
         unless memory == residentMemory do
           throw .incompatibleMemory
         pure memory
-  let functions := module.functions.map fun function =>
+  let names := bindings.foldl
+    (init := Std.HashMap.emptyWithCapacity bindings.size)
+    fun names binding => names.insert binding.operation binding.name
+  let mut functions := module.functions.map fun function =>
     { function with
-      body := function.body.map (rewriteRuntimeInstructionBatch bindings) }
-  let functions ← bindings.foldlM (init := functions) installRuntimeBinding
-  let runtimeOperations := Fir.Wasm.collectRuntimeOps functions
+      body := function.body.map (rewriteRuntimeInstructionBatch names) }
+  let mut functionsByName := functions.foldl
+    (init := Std.HashMap.emptyWithCapacity (functions.size + bindings.size))
+    fun byName function => byName.insert function.name function
+  let mut addedFunctions := #[]
+  for binding in bindings do
+    match functionsByName.get? binding.name with
+    | none =>
+        functions := functions.push binding.function
+        addedFunctions := addedFunctions.push binding.function
+        functionsByName := functionsByName.insert binding.name binding.function
+    | some existing =>
+        unless existing == binding.function do
+          throw (.reservedDeclaration binding.name)
+  let runtimeOperations := Fir.Wasm.updateRuntimeOps module.runtimeOperations
+    (bindings.map (·.operation)) addedFunctions
   let externalImports := module.imports.filter (·.operation?.isNone)
+  let mut exports := module.exports
+  let mut exportedNames := exports.foldl
+    (init := Std.HashSet.emptyWithCapacity (exports.size + bindings.size))
+    fun names name => names.insert name
+  for binding in bindings do
+    unless exportedNames.contains binding.name do
+      exports := exports.push binding.name
+      exportedNames := exportedNames.insert binding.name
   return {
     module with
     imports := runtimeOperations.mapIdx Fir.Wasm.runtimeImport ++ externalImports
     functions
-    exports := bindings.foldl
-      (fun exports binding => Fir.Wasm.addUnique exports binding.name)
-      module.exports
+    exports
     runtimeOperations
     memory := some memory }
 
