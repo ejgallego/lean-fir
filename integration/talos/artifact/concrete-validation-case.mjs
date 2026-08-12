@@ -26,6 +26,8 @@ const SUPPORTED_INITIAL_OBJECTS = new Set([
 ]);
 
 export const CONCRETE_VALIDATION_BLOCKED_CASES = Object.freeze([
+  "aggregate-erased-before-closure-application",
+  "aggregate-retained-across-closure-application",
   "aliased-byte-array-child-copy-on-write",
   "aliased-byte-array-self-replace",
   "aliased-byte-array-self-replace-child-copy-on-write",
@@ -71,6 +73,8 @@ export const CONCRETE_VALIDATION_BLOCKED_CASES = Object.freeze([
   "repeated-captured-byte-array-ignored",
   "repeated-captured-byte-array-read",
   "repeated-captured-byte-array-returned",
+  "returned-byte-array-closure-shared-mutation",
+  "returned-byte-array-closure-unique-mutation",
   "tail-byte-owner-shared-retain",
   "tail-byte-owner-unique-transfer",
 ]);

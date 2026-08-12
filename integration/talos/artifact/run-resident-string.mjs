@@ -5,9 +5,11 @@ import { checkResidentString } from "./resident-string-client.mjs";
 
 const artifactPath = process.argv[2];
 assert.ok(artifactPath,
-  "usage: node run-resident-string.mjs ARTIFACT.wasm");
+  "usage: node run-resident-string.mjs ARTIFACT.wasm [--require-usize-repr]");
+const requireUSizeRepr = process.argv[3] === "--require-usize-repr";
 
 console.log(await checkResidentString({
   bytes: fs.readFileSync(artifactPath),
   manifest: JSON.parse(fs.readFileSync(`${artifactPath}.json`, "utf8")),
+  requireUSizeRepr,
 }));

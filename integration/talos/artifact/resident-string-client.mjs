@@ -60,7 +60,11 @@ function expectTrap(action, message) {
   assert.ok(trapped, message);
 }
 
-export async function checkResidentString({ bytes, manifest }) {
+export async function checkResidentString({
+  bytes,
+  manifest,
+  requireUSizeRepr = false,
+}) {
   const host = new ConcreteHost(
     manifest.imports,
     undefined,
@@ -89,7 +93,11 @@ export async function checkResidentString({ bytes, manifest }) {
   const publicPush = optionalExport(instance, "fir_ext_String_push");
   const positionNext = optionalExport(instance, "fir_ext_String_Pos_next");
   const decodeChar = optionalExport(instance, "fir_ext_String_decodeChar");
-  const usizeRepr = exported(instance, "fir_ext_USize_repr");
+  const usizeRepr = optionalExport(instance, "fir_ext_USize_repr");
+  if (requireUSizeRepr) {
+    assert.equal(typeof usizeRepr, "function",
+      "standalone resident String artifact must export USize.repr");
+  }
 
   const zeroPushSource = stringInput(host, "unique");
   const zeroPushFrontier = instance.exports.fir_heap_frontier();
@@ -249,19 +257,21 @@ export async function checkResidentString({ bytes, manifest }) {
     assert.equal(decodeChar(
       stringInput(host, "A💩λ"), naturalInput(host, 5n), 0), 0x03bb);
   }
-  for (const value of [
-    0n,
-    1n,
-    9n,
-    10n,
-    307n,
-    0xffffffffn,
-    0x100000000n,
-    0x0123456789abcdefn,
-    0xffffffffffffffffn,
-  ]) {
-    assert.equal(stringValue(host, usizeRepr(value)), value.toString(),
-      `USize.repr(${value})`);
+  if (usizeRepr !== undefined) {
+    for (const value of [
+      0n,
+      1n,
+      9n,
+      10n,
+      307n,
+      0xffffffffn,
+      0x100000000n,
+      0x0123456789abcdefn,
+      0xffffffffffffffffn,
+    ]) {
+      assert.equal(stringValue(host, usizeRepr(value)), value.toString(),
+        `USize.repr(${value})`);
+    }
   }
 
   expectTrap(() =>
