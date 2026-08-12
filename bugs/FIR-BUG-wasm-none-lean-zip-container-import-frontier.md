@@ -9,7 +9,7 @@ pass: none
 discovered-by: source-closure-test
 first-seen: 2026-08-12
 reproduction: integration/lean-zip/ProbeLevel1.lean
-regression: integration/lean-zip/_build/level1-probe.json
+regression: integration/lean-zip/ProbeLevel1.lean
 ---
 
 # Summary
