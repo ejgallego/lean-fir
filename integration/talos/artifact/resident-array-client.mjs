@@ -117,8 +117,12 @@ export async function checkResidentArrays(bytes) {
   const replicate = exports.fir_ext_Array_replicate;
   const emptyWithCapacity = exports.fir_ext_Array_emptyWithCapacity;
   const push = exports.fir_ext_Array_push;
+  const ugetBorrowed = exports.fir_ext_Array_ugetBorrowed;
   const uget = exports.fir_ext_Array_uget;
   const uset = exports.fir_ext_Array_uset;
+  const getBangBorrowed = exports["fir_ext_Array_get!InternalBorrowed"];
+  const getBang = exports["fir_ext_Array_get!Internal"];
+  const getInternalBorrowed = exports.fir_ext_Array_getInternalBorrowed;
   const getInternal = exports.fir_ext_Array_getInternal;
   const set = exports.fir_ext_Array_set;
   const setBang = exports["fir_ext_Array_set!"];
@@ -131,8 +135,14 @@ export async function checkResidentArrays(bytes) {
   equal(typeof emptyWithCapacity, "function", "Array.emptyWithCapacity export");
   equal(typeof push, "function", "Array.push export");
   equal(typeof replicate, "function", "Array.replicate export");
+  equal(typeof ugetBorrowed, "function", "Array.ugetBorrowed export");
   equal(typeof uget, "function", "Array.uget export");
   equal(typeof uset, "function", "Array.uset export");
+  equal(typeof getBangBorrowed, "function",
+    "Array.get!InternalBorrowed export");
+  equal(typeof getBang, "function", "Array.get!Internal export");
+  equal(typeof getInternalBorrowed, "function",
+    "Array.getInternalBorrowed export");
   equal(typeof getInternal, "function", "Array.getInternal export");
   equal(typeof set, "function", "Array.set export");
   equal(typeof setBang, "function", "Array.set! export");
@@ -379,6 +389,68 @@ export async function checkResidentArrays(bytes) {
   release(sharedSwap);
   release(sharedSwapResult);
 
+  let sharedEqualSwap = emptyWithCapacity(0, immediateNatural(3));
+  sharedEqualSwap = push(0, sharedEqualSwap, immediateNatural(7));
+  sharedEqualSwap = push(0, sharedEqualSwap, immediateNatural(8));
+  sharedEqualSwap = push(0, sharedEqualSwap, immediateNatural(9));
+  new DataView(exports.memory.buffer).setUint32(sharedEqualSwap + 8, 2, true);
+  const sharedEqualSwapResult = swap(
+    0, sharedEqualSwap, immediateNatural(1), immediateNatural(1), 0, 0);
+  expect(sharedEqualSwapResult !== sharedEqualSwap,
+    "Array.swap equal indices retained a shared input");
+  equal(arrayState(exports.memory, sharedEqualSwap).refCount, 1,
+    "Array.swap equal indices did not consume one shared input reference");
+  equal(arrayState(exports.memory, sharedEqualSwapResult).refCount, 1,
+    "Array.swap equal indices did not return an exclusive copy");
+  equal(arrayState(exports.memory, sharedEqualSwapResult).words.join(","),
+    [7, 8, 9].map(immediateNatural).join(","),
+    "Array.swap equal indices changed elements");
+  equal(uset(
+    0, sharedEqualSwapResult, 1n, immediateNatural(80), 0),
+  sharedEqualSwapResult,
+  "Array.swap equal-index result was not reusable by the next mutation");
+  release(sharedEqualSwap);
+  release(sharedEqualSwapResult);
+
+  const emptyGetBang = replicate(
+    0, immediateNatural(0), immediateNatural(0));
+  const defaultChild = allocateOwnedOpaque(exports);
+  equal(getBang(0, defaultChild, emptyGetBang, immediateNatural(0)),
+    defaultChild, "Array.get!Internal default result");
+  equal(heapObjectState(exports.memory, defaultChild).refCount, 2,
+    "Array.get!Internal did not retain its default result");
+  release(defaultChild);
+  equal(heapObjectState(exports.memory, defaultChild).refCount, 1,
+    "Array.get!Internal default release consumed its parent reference");
+  equal(getBangBorrowed(
+    0, defaultChild, emptyGetBang, immediateNatural(0)),
+  defaultChild, "Array.get!InternalBorrowed default result");
+  equal(heapObjectState(exports.memory, defaultChild).refCount, 2,
+    "Array.get!InternalBorrowed did not retain its default result");
+  release(defaultChild);
+  equal(heapObjectState(exports.memory, defaultChild).refCount, 1,
+    "Array.get!InternalBorrowed default release consumed its parent reference");
+  release(emptyGetBang);
+
+  const getBangChild = allocateOwnedOpaque(exports);
+  const getBangArray = replicate(0, immediateNatural(1), getBangChild);
+  equal(getBangBorrowed(
+    0, immediateNatural(0), getBangArray, immediateNatural(0)),
+  getBangChild, "Array.get!InternalBorrowed in-bounds result");
+  equal(heapObjectState(exports.memory, getBangChild).refCount, 1,
+    "Array.get!InternalBorrowed retained an in-bounds result");
+  equal(getBang(0, immediateNatural(0), getBangArray, immediateNatural(0)),
+    getBangChild, "Array.get!Internal in-bounds result");
+  equal(heapObjectState(exports.memory, getBangChild).refCount, 2,
+    "Array.get!Internal did not retain an in-bounds result");
+  release(getBangChild);
+  release(getBangArray);
+  equal(heapObjectState(exports.memory, getBangChild).kind, KIND_FREED,
+    "Array.get!Internal in-bounds result remained live");
+  release(defaultChild);
+  equal(heapObjectState(exports.memory, defaultChild).kind, KIND_FREED,
+    "Array.get!Internal default parent remained live");
+
   const getChild = allocateOwnedOpaque(exports);
   const getOwnedArray = replicate(0, immediateNatural(1), getChild);
   const getOwnedChild = getInternal(
@@ -459,6 +531,124 @@ export async function checkResidentArrays(bytes) {
   release(sharedPopResult);
   equal(heapObjectState(exports.memory, sharedPopChild).kind, KIND_FREED,
     "shared Array.pop copied children remained live");
+
+  const sharedPushChild = allocateOwnedOpaque(exports);
+  let sharedPushInput = emptyWithCapacity(0, immediateNatural(4));
+  sharedPushInput = push(0, sharedPushInput, sharedPushChild);
+  new DataView(exports.memory.buffer).setUint32(sharedPushInput + 8, 2, true);
+  const sharedPushValue = allocateOwnedOpaque(exports);
+  const sharedPushResult = push(0, sharedPushInput, sharedPushValue);
+  expect(sharedPushResult !== sharedPushInput,
+    "Array.push mutated a shared input");
+  equal(arrayState(exports.memory, sharedPushInput).refCount, 1,
+    "Array.push did not consume one shared input reference");
+  equal(arrayState(exports.memory, sharedPushResult).capacity, 4,
+    "Array.push expanded a shared input with sufficient retained capacity");
+  equal(heapObjectState(exports.memory, sharedPushChild).refCount, 2,
+    "Array.push did not retain a copied shared child");
+  equal(heapObjectState(exports.memory, sharedPushValue).refCount, 1,
+    "Array.push did not transfer its appended child");
+  release(sharedPushInput);
+  equal(heapObjectState(exports.memory, sharedPushChild).refCount, 1,
+    "Array.push copied child did not survive the source release");
+  release(sharedPushResult);
+  equal(heapObjectState(exports.memory, sharedPushChild).kind, KIND_FREED,
+    "Array.push copied child remained live");
+  equal(heapObjectState(exports.memory, sharedPushValue).kind, KIND_FREED,
+    "Array.push appended child remained live");
+
+  const persistentPushInput = replicate(
+    0, immediateNatural(1), immediateNatural(91));
+  const persistentPushView = new DataView(exports.memory.buffer);
+  persistentPushView.setUint32(persistentPushInput + 4, LIVE_PERSISTENT, true);
+  persistentPushView.setUint32(persistentPushInput + 8, 0, true);
+  const persistentPushValue = allocateOwnedOpaque(exports);
+  const persistentPushResult = push(
+    0, persistentPushInput, persistentPushValue);
+  expect(persistentPushResult !== persistentPushInput,
+    "Array.push mutated a persistent input");
+  equal(arrayState(exports.memory, persistentPushInput).size, 1,
+    "Array.push changed a persistent input size");
+  equal(arrayState(exports.memory, persistentPushResult).flags, LIVE,
+    "Array.push did not return an ordinary copy of a persistent input");
+  equal(arrayState(exports.memory, persistentPushResult).words.join(","),
+    [immediateNatural(91), persistentPushValue].join(","),
+    "Array.push persistent copy elements");
+  release(persistentPushResult);
+  equal(heapObjectState(exports.memory, persistentPushValue).kind, KIND_FREED,
+    "Array.push persistent appended child remained live");
+
+  const sharedEmptyPop = emptyWithCapacity(0, immediateNatural(3));
+  new DataView(exports.memory.buffer).setUint32(sharedEmptyPop + 8, 2, true);
+  const sharedEmptyPopResult = pop(0, sharedEmptyPop);
+  expect(sharedEmptyPopResult !== sharedEmptyPop,
+    "Array.pop retained a shared empty input");
+  equal(arrayState(exports.memory, sharedEmptyPop).refCount, 1,
+    "Array.pop did not consume one shared empty input reference");
+  equal(arrayState(exports.memory, sharedEmptyPopResult).capacity, 3,
+    "Array.pop changed shared empty capacity");
+  release(sharedEmptyPop);
+  release(sharedEmptyPopResult);
+
+  const persistentPopInput = replicate(
+    0, immediateNatural(2), immediateNatural(92));
+  const persistentPopView = new DataView(exports.memory.buffer);
+  persistentPopView.setUint32(persistentPopInput + 4, LIVE_PERSISTENT, true);
+  persistentPopView.setUint32(persistentPopInput + 8, 0, true);
+  const persistentPopResult = pop(0, persistentPopInput);
+  expect(persistentPopResult !== persistentPopInput,
+    "Array.pop mutated a persistent input");
+  equal(arrayState(exports.memory, persistentPopInput).size, 2,
+    "Array.pop changed a persistent input size");
+  equal(arrayState(exports.memory, persistentPopResult).size, 1,
+    "Array.pop persistent result size");
+  release(persistentPopResult);
+
+  let persistentSwapInput = emptyWithCapacity(0, immediateNatural(2));
+  persistentSwapInput = push(0, persistentSwapInput, immediateNatural(93));
+  persistentSwapInput = push(0, persistentSwapInput, immediateNatural(94));
+  const persistentSwapView = new DataView(exports.memory.buffer);
+  persistentSwapView.setUint32(persistentSwapInput + 4, LIVE_PERSISTENT, true);
+  persistentSwapView.setUint32(persistentSwapInput + 8, 0, true);
+  const persistentSwapResult = swap(
+    0, persistentSwapInput, immediateNatural(0), immediateNatural(1), 0, 0);
+  expect(persistentSwapResult !== persistentSwapInput,
+    "Array.swap mutated a persistent input");
+  equal(arrayState(exports.memory, persistentSwapInput).words.join(","),
+    [93, 94].map(immediateNatural).join(","),
+    "Array.swap changed persistent input elements");
+  equal(arrayState(exports.memory, persistentSwapResult).words.join(","),
+    [94, 93].map(immediateNatural).join(","),
+    "Array.swap persistent result elements");
+  release(persistentSwapResult);
+
+  const sharedSetBangOob = replicate(
+    0, immediateNatural(1), immediateNatural(95));
+  new DataView(exports.memory.buffer).setUint32(sharedSetBangOob + 8, 2, true);
+  const sharedSetBangDiscarded = allocateOwnedOpaque(exports);
+  equal(setBang(0, sharedSetBangOob, immediateNatural(1),
+    sharedSetBangDiscarded), sharedSetBangOob,
+  "Array.set! out-of-bounds changed shared identity");
+  equal(arrayState(exports.memory, sharedSetBangOob).refCount, 2,
+    "Array.set! out-of-bounds changed shared reference count");
+  equal(heapObjectState(exports.memory, sharedSetBangDiscarded).kind,
+    KIND_FREED, "Array.set! did not consume a shared-path replacement");
+  release(sharedSetBangOob);
+  release(sharedSetBangOob);
+
+  const borrowedReadChild = allocateOwnedOpaque(exports);
+  const borrowedReadArray = replicate(
+    0, immediateNatural(1), borrowedReadChild);
+  equal(ugetBorrowed(0, borrowedReadArray, 0n, 0), borrowedReadChild,
+    "Array.ugetBorrowed result");
+  equal(getInternalBorrowed(
+    0, borrowedReadArray, immediateNatural(0), 0),
+  borrowedReadChild, "Array.getInternalBorrowed result");
+  equal(heapObjectState(exports.memory, borrowedReadChild).refCount, 1,
+    "borrowed Array reads retained their result");
+  release(borrowedReadArray);
+  equal(heapObjectState(exports.memory, borrowedReadChild).kind, KIND_FREED,
+    "borrowed Array read source remained live");
 
   return "PASS zero-import resident arrays";
 }

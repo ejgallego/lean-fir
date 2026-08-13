@@ -135,6 +135,26 @@ export async function checkResidentString({
   assert.equal(instance.exports.fir_heap_frontier(), zeroPushFrontier,
     "String.Internal.pushn zero must not allocate");
 
+  const zeroSharedPushSource = stringInput(host, "shared-zero");
+  host.writeHeader(zeroSharedPushSource, {
+    ...host.readHeader(zeroSharedPushSource), rc: 2,
+  });
+  const zeroSharedPushResult = pushn(
+    zeroSharedPushSource, 0x21, naturalInput(host, 0n));
+  assert.equal(zeroSharedPushResult, zeroSharedPushSource,
+    "String.Internal.pushn zero changed shared identity");
+  assert.equal(host.readHeader(zeroSharedPushSource).rc, 2,
+    "String.Internal.pushn zero changed shared ownership");
+
+  const zeroPersistentPushSource = stringInput(host, "persistent-zero");
+  host.markPersistentWord(zeroPersistentPushSource);
+  const zeroPersistentPushResult = pushn(
+    zeroPersistentPushSource, 0x21, naturalInput(host, 0n));
+  assert.equal(zeroPersistentPushResult, zeroPersistentPushSource,
+    "String.Internal.pushn zero changed persistent identity");
+  assert.equal(host.readHeader(zeroPersistentPushSource).persistent, true,
+    "String.Internal.pushn zero changed persistent ownership");
+
   const reusableLeft = stringInput(host, "abc");
   const reusableRight = stringInput(host, "d");
   const reusableRightHeader = host.readHeader(reusableRight);
@@ -185,6 +205,31 @@ export async function checkResidentString({
   assert.equal(host.readHeader(sharedRight).rc, 1,
     "shared String append consumed its borrowed right input");
 
+  const sharedEmptyLeft = stringInput(host, "shared-empty");
+  host.writeHeader(sharedEmptyLeft, {
+    ...host.readHeader(sharedEmptyLeft), rc: 2,
+  });
+  const sharedEmptyAppend = append(
+    sharedEmptyLeft, stringInput(host, ""));
+  assert.notEqual(sharedEmptyAppend, sharedEmptyLeft,
+    "String append retained a shared input for an empty suffix");
+  assert.equal(host.readHeader(sharedEmptyLeft).rc, 1,
+    "String append empty suffix did not consume one shared input reference");
+  assert.equal(stringValue(host, sharedEmptyAppend), "shared-empty",
+    "String append empty suffix payload");
+
+  const selfAppendInput = stringInput(host, "self");
+  host.writeHeader(selfAppendInput, {
+    ...host.readHeader(selfAppendInput), rc: 2,
+  });
+  const selfAppendResult = append(selfAppendInput, selfAppendInput);
+  assert.notEqual(selfAppendResult, selfAppendInput,
+    "String self-append reused its aliased input");
+  assert.equal(host.readHeader(selfAppendInput).rc, 1,
+    "String self-append did not consume one owned input reference");
+  assert.equal(stringValue(host, selfAppendResult), "selfself",
+    "String self-append payload");
+
   const persistentLeft = stringInput(host, "fixed");
   host.markPersistentWord(persistentLeft);
   const persistentRight = stringInput(host, "!");
@@ -197,6 +242,32 @@ export async function checkResidentString({
     "persistent String append payload");
   assert.equal(host.readHeader(persistentLeft).persistent, true,
     "String append changed persistent source ownership");
+
+  const sharedPushSource = stringInput(host, "copy");
+  host.writeHeader(sharedPushSource, {
+    ...host.readHeader(sharedPushSource), rc: 2,
+  });
+  const sharedPushResult = pushn(
+    sharedPushSource, 0x21, naturalInput(host, 1n));
+  assert.notEqual(sharedPushResult, sharedPushSource,
+    "String.Internal.pushn mutated a shared input");
+  assert.equal(host.readHeader(sharedPushSource).rc, 1,
+    "String.Internal.pushn did not consume one shared input reference");
+  assert.equal(stringValue(host, sharedPushSource), "copy",
+    "String.Internal.pushn mutated a shared alias");
+  assert.equal(stringValue(host, sharedPushResult), "copy!",
+    "String.Internal.pushn shared payload");
+
+  const persistentPushSource = stringInput(host, "fixed");
+  host.markPersistentWord(persistentPushSource);
+  const persistentPushResult = pushn(
+    persistentPushSource, 0x21, naturalInput(host, 1n));
+  assert.notEqual(persistentPushResult, persistentPushSource,
+    "String.Internal.pushn mutated a persistent input");
+  assert.equal(stringValue(host, persistentPushSource), "fixed",
+    "String.Internal.pushn changed persistent source bytes");
+  assert.equal(stringValue(host, persistentPushResult), "fixed!",
+    "String.Internal.pushn persistent payload");
 
   let pushed = stringInput(host, "");
   pushed = pushn(pushed, 0x61, naturalInput(host, 1n));
@@ -321,6 +392,13 @@ export async function checkResidentString({
       "String.ofList shared-spine payload");
     assert.equal(host.readHeader(sharedHead).rc, 1,
       "String.ofList must consume exactly one shared List reference");
+
+    const persistentList = charListInput(host, "p");
+    host.markPersistentWord(persistentList.list);
+    assert.equal(stringValue(host, ofList(persistentList.list)), "p",
+      "String.ofList persistent-spine payload");
+    assert.equal(host.readHeader(persistentList.list).persistent, true,
+      "String.ofList changed persistent List ownership");
   }
 
   expectTrap(() =>

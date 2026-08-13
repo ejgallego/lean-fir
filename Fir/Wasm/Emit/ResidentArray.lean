@@ -613,7 +613,11 @@ private def getBody (useDefault owned : Bool) : List Instruction :=
         else []) ++ [
         .localGet elementLocal,
         .ret])
-      (if useDefault then [.localGet defaultParam, .ret]
+      (if useDefault then [
+        .localGet defaultParam,
+        .call (.declaration ResidentReferenceCount.incrementOnceName),
+        .localGet defaultParam,
+        .ret]
        else [.unreachable])]
 
 private def getBangFunction (declaration : Name) (owned : Bool) : Function := {
@@ -1156,11 +1160,7 @@ def swapFunction : Function := {
     decodeNaturalIndex index2Param index2Local ++ trapUnless [
       .localGet index2Local,
       .localGet sizeLocal,
-      .i32LtU] ++ [
-    .localGet indexLocal,
-    .localGet index2Local,
-    .i32Eq,
-    .ifElse [.localGet arrayParam, .ret] []] ++
+      .i32LtU] ++
     loadCapacity arrayParam ++ selectExclusive ++ [
     .localGet exclusiveLocal,
     .ifElse (callSwapDecodedElements inputAddressLocal ++ [
@@ -1409,8 +1409,10 @@ def internalizeAvailable (module : Module) (validate : Bool := true) : Except Li
   internalizeSelected module declarations validate
 
 private def exampleDeclarations : Array Name :=
-  #[`Array.emptyWithCapacity, `Array.push, `Array.uget, `Array.uset,
-    `Array.replicate, `Array.pop, `Array.getInternal, `Array.set,
+  #[`Array.emptyWithCapacity, `Array.push, `Array.ugetBorrowed, `Array.uget,
+    `Array.get!InternalBorrowed, `Array.get!Internal,
+    `Array.uset, `Array.replicate, `Array.pop,
+    `Array.getInternalBorrowed, `Array.getInternal, `Array.set,
     `Array.set!, `Array.swap, `Array.mk, `Array.toList]
 
 private def exampleReleaseOperation : RuntimeOp := .dec 1 true none
@@ -1436,11 +1438,15 @@ private def exampleExternalTypes (declaration : Name) : ExternalTypes :=
     { params := #[erased, tobject], result := object }
   else if declaration == `Array.push then
     { params := #[erased, object, tobject], result := object }
-  else if declaration == `Array.uget then
+  else if declaration == `Array.ugetBorrowed || declaration == `Array.uget then
     { params := #[erased, object, usize, erased], result := tobject }
   else if declaration == `Array.uset then
     { params := #[erased, object, usize, tobject, erased], result := object }
-  else if declaration == `Array.getInternal then
+  else if declaration == `Array.get!InternalBorrowed ||
+      declaration == `Array.get!Internal then
+    { params := #[erased, tobject, object, tobject], result := tobject }
+  else if declaration == `Array.getInternalBorrowed ||
+      declaration == `Array.getInternal then
     { params := #[erased, object, tobject, erased], result := tobject }
   else if declaration == `Array.set then
     { params := #[erased, object, tobject, tobject, erased], result := object }

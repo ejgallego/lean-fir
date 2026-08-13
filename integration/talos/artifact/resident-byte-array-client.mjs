@@ -216,6 +216,28 @@ export async function checkResidentByteArray(bytes) {
   equal(unchanged, unchangedDestination,
     "copySlice past-source result identity");
 
+  const sharedPastSource = makeByteArray([1, 2, 3]);
+  new DataView(exports.memory.buffer).setUint32(
+    sharedPastSource + 8, 2, true);
+  const sharedPastSourceResult = exports.fir_ext_ByteArray_copySlice(
+    src, nat(99), sharedPastSource, nat(0), nat(1), 1) >>> 0;
+  equal(sharedPastSourceResult, sharedPastSource,
+    "copySlice past-source changed shared destination identity");
+  equal(decodeByteArray(exports, sharedPastSource).refCount, 2,
+    "copySlice past-source changed shared destination ownership");
+
+  const sharedEmptySlice = makeByteArray([1, 2, 3]);
+  new DataView(exports.memory.buffer).setUint32(
+    sharedEmptySlice + 8, 2, true);
+  const sharedEmptySliceResult = exports.fir_ext_ByteArray_copySlice(
+    src, nat(4), sharedEmptySlice, nat(0), nat(7), 1) >>> 0;
+  expect(sharedEmptySliceResult !== sharedEmptySlice,
+    "copySlice retained a shared destination for an in-range empty slice");
+  equal(decodeByteArray(exports, sharedEmptySlice).refCount, 1,
+    "copySlice empty slice did not consume one shared destination reference");
+  deepEqual(decodeByteArray(exports, sharedEmptySliceResult).bytes,
+    [1, 2, 3], "copySlice in-range empty-slice contents");
+
   const sharedDestination = makeByteArray([1, 2, 3]);
   const sharedView = new DataView(exports.memory.buffer);
   sharedView.setUint32(sharedDestination + 8, 2, true);
@@ -292,6 +314,21 @@ export async function checkResidentByteArray(bytes) {
   deepEqual(decodeByteArray(exports, set64Result).bytes,
     [0, 0xef, 0xcd, 0xab, 0x89, 0x67, 0x45, 0x23, 0x01],
   "shared usetUInt64LE copied bytes");
+
+  const set32Persistent = makeByteArray([0, 1, 2, 3, 4]);
+  const set32PersistentView = new DataView(exports.memory.buffer);
+  set32PersistentView.setUint32(
+    set32Persistent + 4, LIVE_PERSISTENT, true);
+  set32PersistentView.setUint32(set32Persistent + 8, 0, true);
+  const set32PersistentResult = exports.fir_ext_ByteArray_usetUInt32LE(
+    set32Persistent, 1n, 0x89abcdef) >>> 0;
+  expect(set32PersistentResult !== set32Persistent,
+    "persistent usetUInt32LE reused its input");
+  deepEqual(decodeByteArray(exports, set32Persistent).bytes,
+    [0, 1, 2, 3, 4], "persistent usetUInt32LE mutated its input");
+  deepEqual(decodeByteArray(exports, set32PersistentResult).bytes,
+    [0, 0xef, 0xcd, 0xab, 0x89],
+  "persistent usetUInt32LE copied bytes");
   expectTrap(() => exports.fir_ext_ByteArray_usetUInt32LE(
     set32, 5n, 0), "usetUInt32LE accepted an incomplete destination");
 
@@ -334,6 +371,19 @@ export async function checkResidentByteArray(bytes) {
   deepEqual(decodeByteArray(exports, pushSharedResult).bytes, [7, 8, 9],
     "ByteArray.push shared result");
 
+  const pushPersistent = makeByteArray([10, 11]);
+  const pushPersistentView = new DataView(exports.memory.buffer);
+  pushPersistentView.setUint32(pushPersistent + 4, LIVE_PERSISTENT, true);
+  pushPersistentView.setUint32(pushPersistent + 8, 0, true);
+  const pushPersistentResult = exports.fir_ext_ByteArray_push(
+    pushPersistent, 12) >>> 0;
+  expect(pushPersistentResult !== pushPersistent,
+    "ByteArray.push reused a persistent input");
+  deepEqual(decodeByteArray(exports, pushPersistent).bytes, [10, 11],
+    "ByteArray.push mutated a persistent input");
+  deepEqual(decodeByteArray(exports, pushPersistentResult).bytes,
+    [10, 11, 12], "ByteArray.push persistent result");
+
   const pushWide = exports.fir_ext_ByteArray_emptyWithCapacity(nat(16)) >>> 0;
   const zeroWideFrontier = exports.fir_heap_frontier() >>> 0;
   const zeroWide = exports.fir_ext_ByteArray_pushUInt64LE(
@@ -341,6 +391,25 @@ export async function checkResidentByteArray(bytes) {
   equal(zeroWide, pushWide, "pushUInt64LE zero-count identity");
   equal(exports.fir_heap_frontier() >>> 0, zeroWideFrontier,
     "pushUInt64LE zero-count allocated");
+
+  const zeroWideShared = makeByteArray([0x44]);
+  new DataView(exports.memory.buffer).setUint32(
+    zeroWideShared + 8, 2, true);
+  const zeroWideSharedResult = exports.fir_ext_ByteArray_pushUInt64LE(
+    zeroWideShared, 0xffffffffffffffffn, 0n) >>> 0;
+  equal(zeroWideSharedResult, zeroWideShared,
+    "pushUInt64LE zero-count changed shared identity");
+  equal(decodeByteArray(exports, zeroWideShared).refCount, 2,
+    "pushUInt64LE zero-count changed shared ownership");
+
+  const oneWideShared = exports.fir_ext_ByteArray_pushUInt64LE(
+    zeroWideShared, 0xaan, 1n) >>> 0;
+  expect(oneWideShared !== zeroWideShared,
+    "pushUInt64LE nonempty append reused a shared input");
+  equal(decodeByteArray(exports, zeroWideShared).refCount, 1,
+    "pushUInt64LE nonempty append did not consume one shared reference");
+  deepEqual(decodeByteArray(exports, oneWideShared).bytes, [0x44, 0xaa],
+    "pushUInt64LE shared append bytes");
   const pushedWide = exports.fir_ext_ByteArray_pushUInt64LE(
     zeroWide, 0x0123456789abcdefn, 8n) >>> 0;
   equal(pushedWide, pushWide, "exclusive pushUInt64LE identity");
