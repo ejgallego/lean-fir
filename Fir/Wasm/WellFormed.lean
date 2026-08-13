@@ -312,9 +312,26 @@ def supportedJumpArgs (locals : LocalKinds) (facts : SupportedCaseFacts)
               guardedObjectJoinArgumentSafe facts sharing decl args pair.fst pair.snd)
       | _, _ => false
 
+private theorem supportedCode_caseAlts_sizeOf_lt (cases : LCNF.Cases .impure) :
+    sizeOf cases.alts.toList < sizeOf (LCNF.Code.cases cases) := by
+  rcases cases with ⟨typeName, resultType, discr, alts⟩
+  rcases alts with ⟨alts⟩
+  simp [LCNF.Cases.alts]
+  omega
+
+private theorem supportedCode_funDeclValue_sizeOf_lt
+    (declaration : LCNF.FunDecl .impure)
+    (continuation : LCNF.Code .impure) :
+    sizeOf declaration.value <
+      sizeOf (LCNF.Code.jp declaration continuation) := by
+  cases declaration
+  simp_wf
+  simp only [LCNF.FunDecl.value]
+  omega
+
 mutual
 
-partial def supportedCodeWithJoins (program : Fir.LeanIR.ImpureProgram)
+def supportedCodeWithJoins (program : Fir.LeanIR.ImpureProgram)
     (joins : JoinPoints) (locals : LocalKinds) (expectedResult : Option AbiKind)
     (facts : SupportedCaseFacts) (sharing : SupportedSharingFacts) :
     LCNF.Code .impure → Bool
@@ -355,8 +372,8 @@ partial def supportedCodeWithJoins (program : Fir.LeanIR.ImpureProgram)
         | some kind =>
             match supportedCaseDiscriminatorMode? kind with
             | some mode =>
-                cases.alts.all (supportedAltWithJoins program joins locals expectedResult
-                  facts sharing mode cases.discr)
+                supportedAltsWithJoins program joins locals expectedResult facts
+                  sharing mode cases.discr cases.alts.toList
             | none => false
         | none => false
       resultKnown &&
@@ -404,7 +421,40 @@ partial def supportedCodeWithJoins (program : Fir.LeanIR.ImpureProgram)
       findLocalKind? locals objectId == some .object &&
         supportedCodeWithJoins program joins locals expectedResult facts sharing continuation
 
-partial def supportedAltWithJoins (program : Fir.LeanIR.ImpureProgram)
+termination_by code => sizeOf code
+decreasing_by
+  all_goals simp_all <;> try omega
+  all_goals first
+    | apply supportedCode_caseAlts_sizeOf_lt
+    | apply supportedCode_funDeclValue_sizeOf_lt
+
+def supportedAltsWithJoins (program : Fir.LeanIR.ImpureProgram)
+    (joins : JoinPoints) (locals : LocalKinds) (expectedResult : Option AbiKind)
+    (facts : SupportedCaseFacts) (sharing : SupportedSharingFacts)
+    (mode : CaseDiscriminatorMode) (discr : FVarId) :
+    List (LCNF.Alt .impure) → Bool
+  | [] => true
+  | .ctorAlt info code :: rest =>
+      caseConstructorTagFits mode info &&
+        supportedCodeWithJoins program joins locals expectedResult
+          (insertSupportedCaseFact facts discr info.cidx) sharing code &&
+        supportedAltsWithJoins program joins locals expectedResult facts sharing
+          mode discr rest
+  | .default code :: rest =>
+      supportedCodeWithJoins program joins locals expectedResult
+          (eraseSupportedCaseFact facts discr) sharing code &&
+        supportedAltsWithJoins program joins locals expectedResult facts sharing
+          mode discr rest
+  | .alt _ _ _ h :: _ => nomatch h
+
+termination_by alts => sizeOf alts
+decreasing_by all_goals simp_all <;> omega
+
+end
+
+/-- Validate one alternative in the same residual state used by the total
+list traversal. -/
+def supportedAltWithJoins (program : Fir.LeanIR.ImpureProgram)
     (joins : JoinPoints) (locals : LocalKinds) (expectedResult : Option AbiKind)
     (facts : SupportedCaseFacts) (sharing : SupportedSharingFacts)
     (mode : CaseDiscriminatorMode) (discr : FVarId) : LCNF.Alt .impure → Bool
@@ -416,7 +466,76 @@ partial def supportedAltWithJoins (program : Fir.LeanIR.ImpureProgram)
       (eraseSupportedCaseFact facts discr) sharing code
   | .alt _ _ _ h => nomatch h
 
-end
+/-- The proof-visible list traversal is extensionally the ordinary
+one-alternative validation of every member. -/
+theorem supportedAltsWithJoins_eq_all
+    (program : Fir.LeanIR.ImpureProgram)
+    (joins : JoinPoints) (locals : LocalKinds)
+    (expectedResult : Option AbiKind) (facts : SupportedCaseFacts)
+    (sharing : SupportedSharingFacts) (mode : CaseDiscriminatorMode)
+    (discr : FVarId) (alternatives : List (LCNF.Alt .impure)) :
+    supportedAltsWithJoins program joins locals expectedResult facts sharing mode
+        discr alternatives =
+      alternatives.all (supportedAltWithJoins program joins locals
+        expectedResult facts sharing mode discr) := by
+  induction alternatives with
+  | nil => simp [supportedAltsWithJoins]
+  | cons alternative rest ih =>
+      cases alternative with
+      | alt ctorName params code impossible => nomatch impossible
+      | ctorAlt info code purity =>
+          simp [supportedAltsWithJoins, supportedAltWithJoins, ih,
+            Bool.and_assoc]
+      | default code =>
+          simp [supportedAltsWithJoins, supportedAltWithJoins, ih]
+
+/-- In particular, the total traversal used by `supportedCodeWithJoins`
+accepts exactly the alternatives accepted by the former `Array.all` shape. -/
+theorem supportedAltsWithJoins_toList_eq_arrayAll
+    (program : Fir.LeanIR.ImpureProgram)
+    (joins : JoinPoints) (locals : LocalKinds)
+    (expectedResult : Option AbiKind) (facts : SupportedCaseFacts)
+    (sharing : SupportedSharingFacts) (mode : CaseDiscriminatorMode)
+    (discr : FVarId) (alternatives : Array (LCNF.Alt .impure)) :
+    supportedAltsWithJoins program joins locals expectedResult facts sharing mode
+        discr alternatives.toList =
+      alternatives.all (supportedAltWithJoins program joins locals
+        expectedResult facts sharing mode discr) := by
+  rw [supportedAltsWithJoins_eq_all]
+  simp
+
+/-- Every member accepted by the total alternative-list traversal is accepted
+by the corresponding one-alternative judgment. -/
+theorem supportedAltWithJoins_of_mem
+    {program : Fir.LeanIR.ImpureProgram}
+    {joins : JoinPoints} {locals : LocalKinds}
+    {expectedResult : Option AbiKind} {facts : SupportedCaseFacts}
+    {sharing : SupportedSharingFacts} {mode : CaseDiscriminatorMode}
+    {discr : FVarId} {alternatives : List (LCNF.Alt .impure)}
+    {selected : LCNF.Alt .impure}
+    (supported : supportedAltsWithJoins program joins locals expectedResult facts
+      sharing mode discr alternatives = true)
+    (member : selected ∈ alternatives) :
+    supportedAltWithJoins program joins locals expectedResult facts sharing mode
+      discr selected = true := by
+  induction alternatives with
+  | nil => simp_all
+  | cons alternative rest ih =>
+      have member' := List.mem_cons.mp member
+      cases alternative with
+      | alt ctorName params code impossible => nomatch impossible
+      | ctorAlt info code purity =>
+          simp only [supportedAltsWithJoins, Bool.and_eq_true] at supported
+          rcases member' with selectedHead | selectedRest
+          · subst selected
+            simpa [supportedAltWithJoins, Bool.and_eq_true] using supported.1
+          · exact ih supported.2 selectedRest
+      | default code =>
+          simp only [supportedAltsWithJoins, Bool.and_eq_true] at supported
+          rcases member' with selectedHead | selectedRest
+          · subst selected
+            simpa [supportedAltWithJoins] using supported.1
+          · exact ih supported.2 selectedRest
 
 def supportedCode (program : Fir.LeanIR.ImpureProgram)
     (locals : LocalKinds) (expectedResult : Option AbiKind) :
