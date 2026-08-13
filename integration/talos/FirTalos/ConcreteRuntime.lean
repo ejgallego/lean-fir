@@ -2527,6 +2527,11 @@ theorem ConcreteRuntimeRel.constructorDescriptor_of_getConstructor
                         liveEq, ↓reduceIte, Bind.bind, Except.bind] at decoded
                       rw [objectEq] at decoded
                       contradiction
+                  | array _ objectEq _ _ _ _ =>
+                      simp only [getConstructor, getLiveCell, semanticFound,
+                        liveEq, ↓reduceIte, Bind.bind, Except.bind] at decoded
+                      rw [objectEq] at decoded
+                      contradiction
                   | closure closureRelated =>
                       cases closureRelated with
                       | closure objectEq _ _ _ _ _ _ _ _ _ =>
@@ -4134,6 +4139,8 @@ theorem takeClosureApplication_runtimeAux
       | integer value =>
           simp [objectEq] at operation
       | string value =>
+          simp [objectEq] at operation
+      | array elements capacity =>
           simp [objectEq] at operation
       | byteArray bytes =>
           simp [objectEq] at operation
@@ -5816,6 +5823,12 @@ theorem resetStep_of_refines
                     rw [if_neg fallback, objectEq] at impossible
                     contradiction
                 | string value =>
+                    have impossible := updated
+                    simp only [reset, getLiveCell, found, live, ↓reduceIte,
+                      Bind.bind, Except.bind] at impossible
+                    rw [if_neg fallback, objectEq] at impossible
+                    contradiction
+                | array elements capacity =>
                     have impossible := updated
                     simp only [reset, getLiveCell, found, live, ↓reduceIte,
                       Bind.bind, Except.bind] at impossible
