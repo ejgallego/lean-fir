@@ -109,8 +109,8 @@ inductive ValidationSchema where
   A scalar transported through Lean's generic object representation.
 
   This marker is physical: it does not add a node to `ValidationDatum`.
-  Consumers must reject inner schemas other than the fixed-width integer,
-  `USize`, and floating-point scalar schemas accepted by
+  Consumers must reject inner schemas other than `Bool`, the fixed-width
+  integer, `USize`, and floating-point scalar schemas accepted by
   `isBoxableScalar`.
   -/
   | boxed (scalar : ValidationSchema)
@@ -119,7 +119,7 @@ inductive ValidationSchema where
 
 /-- Whether a schema denotes a scalar accepted by final-LCNF `box`/`unbox`. -/
 def ValidationSchema.isBoxableScalar : ValidationSchema → Bool
-  | .usize | .bits 8 | .bits 16 | .bits 32 | .bits 64
+  | .bool | .usize | .bits 8 | .bits 16 | .bits 32 | .bits 64
   | .float32 | .float64 => true
   | _ => false
 
@@ -451,6 +451,7 @@ private def protocolRoundTripRequest : CaseRequest := {
 #guard !ValidationSchema.float32.accepts (.bits 64 0x7fc00001)
 #guard ValidationSchema.float64.accepts (.bits 64 0x7ff8000000000001)
 #guard !ValidationSchema.float64.accepts (.bits 32 0x7fc00001)
+#guard (ValidationSchema.boxed .bool).accepts (.bool true)
 #guard (ValidationSchema.boxed (.bits 8)).accepts (.bits 8 0xff)
 #guard !(ValidationSchema.boxed (.bits 8)).accepts (.bits 16 0xff)
 #guard !(ValidationSchema.boxed .nat).accepts (.nat 1)
