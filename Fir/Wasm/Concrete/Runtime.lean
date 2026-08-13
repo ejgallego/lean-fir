@@ -761,6 +761,15 @@ def writeResidentArrayElementRaw (state : MemoryState) (object : Word32)
     (object.value + headerBytes + target.semanticSlotBytes * index) element
   return { state with memory }
 
+/-- Swap two live resident-Array elements without retain/release traffic. The
+operation is ownership-neutral because it preserves the element multiset. -/
+def swapResidentArrayElementsRaw (state : MemoryState) (object : Word32)
+    (left right : Nat) : Except ConcreteError MemoryState := do
+  let leftValue ← readResidentArrayElementBorrowed state object left
+  let rightValue ← readResidentArrayElementBorrowed state object right
+  let state ← writeResidentArrayElementRaw state object left rightValue
+  writeResidentArrayElementRaw state object right leftValue
+
 /-- Allocate the canonical resident generic Array and initialize exactly its
 live `tobject` prefix. `capacity` determines the retained extent; spare slots
 remain allocator-zeroed and are not semantic ownership. -/

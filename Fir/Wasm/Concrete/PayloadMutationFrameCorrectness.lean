@@ -19,6 +19,29 @@ structure MemoryState.TargetMutationFrame (before after : MemoryState)
       otherAddress.value + otherBytes ≤ targetAddress.value →
     before.AllocationFrame after otherAddress otherBytes
 
+/-- Sequential mutations contained in the same allocation compose into one
+target frame. This is the shared proof boundary for multi-store helpers such
+as resident Array swap and later header-plus-payload updates. -/
+theorem MemoryState.TargetMutationFrame.trans
+    {first second third : MemoryState} {targetAddress : Word32}
+    {targetBytes : Nat}
+    (left : first.TargetMutationFrame second targetAddress targetBytes)
+    (right : second.TargetMutationFrame third targetAddress targetBytes) :
+    first.TargetMutationFrame third targetAddress targetBytes := by
+  refine {
+    cursor := right.cursor.trans left.cursor
+    memorySize := right.memorySize.trans left.memorySize
+    targetHeader := right.targetHeader.trans left.targetHeader
+    other := ?_ }
+  intro otherAddress otherBytes disjoint
+  have leftFrame := left.other otherAddress otherBytes disjoint
+  have rightFrame := right.other otherAddress otherBytes disjoint
+  exact {
+    cursor := rightFrame.cursor.trans leftFrame.cursor
+    memorySize := rightFrame.memorySize.trans leftFrame.memorySize
+    readByte := fun offset within =>
+      (rightFrame.readByte offset within).trans (leftFrame.readByte offset within) }
+
 theorem MemoryState.TargetMutationFrame.targetLiveHeader
     {before after : MemoryState} {targetAddress : Word32} {targetBytes : Nat}
     (frame : before.TargetMutationFrame after targetAddress targetBytes) :

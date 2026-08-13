@@ -190,4 +190,135 @@ theorem LiveHeapRel.writeResidentArrayElementRaw_refines
       rw [objectEq] at storedObjectEq
       contradiction
 
+/-- The two raw stores used by resident `Array.swap` implement Lean's exact
+semantic Array swap and compose to one complete target-allocation frame. -/
+theorem ResidentArrayObjectRel.swapElementsRaw_targetFrame
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {elements : Array Value} {capacity : Nat} {header : Header}
+    (related :
+      ResidentArrayObjectRel state witness address elements capacity header)
+    (valid : state.FrontierInvariant)
+    (left right : Nat) (leftValid : left < elements.size)
+    (rightValid : right < elements.size) :
+    ∃ result,
+      swapResidentArrayElementsRaw state address left right = .ok result ∧
+      state.TargetMutationFrame result address header.allocationBytes.toNat ∧
+      result.FrontierInvariant ∧
+      ResidentArrayObjectRel result witness address
+        (elements.swap left right leftValid rightValid) capacity header := by
+  let leftValue := elements[left]
+  let rightValue := elements[right]
+  have leftAt : elements[left]? = some leftValue :=
+    Array.getElem?_eq_getElem leftValid
+  have rightAt : elements[right]? = some rightValue :=
+    Array.getElem?_eq_getElem rightValid
+  obtain ⟨leftWord, leftRead, leftRelated⟩ :=
+    related.readElementBorrowed leftAt
+  obtain ⟨rightWord, rightRead, rightRelated⟩ :=
+    related.readElementBorrowed rightAt
+  obtain ⟨middle, leftWrite, leftFrame, middleValid, middleRelated⟩ :=
+    related.writeElementRaw_targetFrame valid left rightValue rightWord leftValid
+      rightRelated
+  have rightValidMiddle :
+      right < (elements.set left rightValue leftValid).size := by simpa
+  obtain ⟨result, rightWrite, rightFrame, finalValid, finalRelated⟩ :=
+    middleRelated.writeElementRaw_targetFrame middleValid right leftValue leftWord
+      rightValidMiddle (leftRelated.witnessExtension (RefinementWitness.Extends.refl witness))
+  have operation :
+      swapResidentArrayElementsRaw state address left right = .ok result := by
+    unfold swapResidentArrayElementsRaw
+    rw [leftRead, rightRead]
+    simp only [Bind.bind, Except.bind]
+    rw [leftWrite]
+    simp only
+    exact rightWrite
+  have arrayEq :
+      (elements.set left rightValue leftValid).set right leftValue
+          rightValidMiddle = elements.swap left right leftValid rightValid := by
+    rfl
+  refine ⟨result, operation, leftFrame.trans rightFrame, finalValid, ?_⟩
+  simpa [arrayEq] using finalRelated
+
+/-- Whole-heap refinement for ownership-neutral resident Array swap. The
+semantic cell changes by `Array.swap`; reference counts are unchanged because
+the operation only permutes already-owned children. -/
+theorem LiveHeapRel.swapResidentArrayElementsRaw_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    {elements : Array Value} {capacity : Nat}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .array elements capacity)
+    (descriptorFound : witness.descriptors.lookup? address =
+      some (.array capacity))
+    (left right : Nat) (leftValid : left < elements.size)
+    (rightValid : right < elements.size) :
+    ∃ result nextRuntime,
+      swapResidentArrayElementsRaw state address left right = .ok result ∧
+      setCell runtime location
+          { cell with
+            object := .array
+              (elements.swap left right leftValid rightValid) capacity } =
+        .ok nextRuntime ∧
+      LiveHeapRel result witness nextRuntime ∧
+      MappedHeaderCapacityTransport state result witness ∧
+      result.heapCursor = state.heapCursor := by
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  let replacement : HeapCell := {
+    cell with
+    object := .array (elements.swap left right leftValid rightValid) capacity }
+  cases targetRelated with
+  | constructor descriptor storedObjectEq objectRelated headerRead headerKind
+      refCount persistent cellLive => rw [objectEq] at storedObjectEq; contradiction
+  | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq; contradiction
+  | natural descriptor storedObjectEq headerRead headerKind marker extent limbsFit
+      decoded refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq; contradiction
+  | integer descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq; contradiction
+  | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq; contradiction
+  | array descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [descriptor] at descriptorFound
+      have descriptorEq := Option.some.inj descriptorFound
+      cases descriptorEq
+      rw [objectEq] at storedObjectEq
+      have objectParts := HeapObject.array.inj storedObjectEq
+      cases objectParts.1
+      cases objectParts.2
+      obtain ⟨result, operation, targetFrame, finalValid, objectAfter⟩ :=
+        objectRelated.swapElementsRaw_targetFrame related.frontier left right
+          leftValid rightValid
+      obtain ⟨_, targetRawRead, _, _, _, _⟩ :=
+        MemoryState.PrefixExtension.readLiveHeader_facts state address _
+          objectRelated.headerRead
+      have targetAfter : CellRel result witness address replacement := by
+        apply CellRel.live
+        apply LiveCellRel.array descriptor (by rfl)
+          (by simpa [replacement] using objectAfter)
+        · simpa [replacement] using refCount
+        · simpa [replacement] using persistent
+        · simpa [replacement] using cellLive
+      obtain ⟨nextRuntime, semanticSet, heapRelated⟩ :=
+        related.setCell_of_targetMutation mapped found descriptor targetRawRead
+          targetFrame finalValid targetAfter
+      have capacityTransport :=
+        related.mappedHeaderCapacity_of_targetMutation descriptor targetRawRead
+          targetFrame
+      exact ⟨result, nextRuntime, operation, by
+          simpa [replacement] using semanticSet,
+        heapRelated, capacityTransport, targetFrame.cursor⟩
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, storedObjectEq⟩ := closureRelated.objectEq
+      rw [objectEq] at storedObjectEq
+      contradiction
+
 end Fir.Wasm.Concrete
