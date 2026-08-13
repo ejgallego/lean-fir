@@ -4757,7 +4757,8 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainFinitePath
             .running { targetLocals with values := targetLocals.values }
               selectedTarget,
             structuredWasmCaseLabels (targetLocals.values.drop 0)
-                targetSuffix testCount ++ frames⟩ := by
+                targetSuffix testCount ++ frames⟩ ∧
+        (testCount = 0 → alts = [.default selected]) := by
   induction supported generalizing chainTarget targetSuffix selected frames with
   | nil =>
       simp [chooseAlt, findCtorAlt, findDefaultAlt] at selection
@@ -4778,7 +4779,7 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainFinitePath
             (CaseChainAdapted.default_eq chainAdapted)⟩
       exact ⟨chainTarget ++ targetSuffix, 0,
         CodeAdapted.withSuffix (targetSuffix := targetSuffix) branchAdapted,
-        .refl _⟩
+        .refl _, fun _ => rfl⟩
   | @ctor info alts code fits rest ih =>
       have fallbackCompiledRest :
           Fir.Wasm.compileCaseFallback context alts = .ok fallback := by
@@ -4836,7 +4837,7 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainFinitePath
               using selection
           exact branchEq.symm
         subst selected
-        refine ⟨thenTarget, 1, CodeAdapted.withEmptySuffix thenAdapted, ?_⟩
+        refine ⟨thenTarget, 1, CodeAdapted.withEmptySuffix thenAdapted, ?_, ?_⟩
         rw [targetEq]
         simpa [structuredWasmCaseLabels] using
           structuredWasmObjectCaseHitPrefixFinitePath
@@ -4850,6 +4851,7 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainFinitePath
             (expectedTag := info.cidx) hit targetLookup imported
             spec.hostsSatisfy inBounds getTagContracted parameterCount
             resultCount tagOperation
+        omega
       · have reverseMiss : info.cidx ≠ actualTag :=
           fun equal => hit equal.symm
         have selectionRest : chooseAlt actualTag alts = some selected := by
@@ -4857,7 +4859,8 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainFinitePath
             using selection
         let caseLabel : StructuredWasmFrame :=
           .label 0 (targetLocals.values.drop 0) targetSuffix
-        obtain ⟨selectedTarget, testCount, selectedAdapted, tailPath⟩ :=
+        obtain ⟨selectedTarget, testCount, selectedAdapted, tailPath,
+            _tailZero⟩ :=
           ih selectionRest fallbackCompiledRest elseAdapted
             (targetSuffix := []) (frames := caseLabel :: frames)
         have headPath :
@@ -4881,11 +4884,12 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainFinitePath
               (expectedTag := info.cidx) hit actualFits expectedFits
               targetLookup imported spec.hostsSatisfy inBounds
               getTagContracted parameterCount resultCount tagOperation
-        refine ⟨selectedTarget, testCount + 1, selectedAdapted, ?_⟩
+        refine ⟨selectedTarget, testCount + 1, selectedAdapted, ?_, ?_⟩
         simp only [List.append_nil] at tailPath
         simpa [caseLabel, Nat.mul_add, Nat.add_comm,
           structuredWasmCaseLabels_empty_then_outer] using
             headPath.trans tailPath
+        omega
 
 /-- Exact five-step structured prefix for the singleton object-constructor
 case admitted by the pointwise simulation.  This is the non-WP presentation
@@ -5051,7 +5055,8 @@ theorem ConcreteSupportedFunction.scalarUInt8CaseChainFinitePath
             .running { targetLocals with values := targetLocals.values }
               selectedTarget,
             structuredWasmCaseLabels (targetLocals.values.drop 0)
-                targetSuffix testCount ++ frames⟩ := by
+                targetSuffix testCount ++ frames⟩ ∧
+        (testCount = 0 → alts = [.default selected]) := by
   induction supported generalizing chainTarget targetSuffix selected frames with
   | nil =>
       simp [chooseAlt, findCtorAlt, findDefaultAlt] at selection
@@ -5072,7 +5077,7 @@ theorem ConcreteSupportedFunction.scalarUInt8CaseChainFinitePath
             (CaseChainAdapted.default_eq chainAdapted)⟩
       exact ⟨chainTarget ++ targetSuffix, 0,
         CodeAdapted.withSuffix (targetSuffix := targetSuffix) branchAdapted,
-        .refl _⟩
+        .refl _, fun _ => rfl⟩
   | @ctor info alts code fits rest ih =>
       have fallbackCompiledRest :
           Fir.Wasm.compileCaseFallback context alts = .ok fallback := by
@@ -5100,7 +5105,7 @@ theorem ConcreteSupportedFunction.scalarUInt8CaseChainFinitePath
               using selection
           exact branchEq.symm
         subst selected
-        refine ⟨thenTarget, 1, CodeAdapted.withEmptySuffix thenAdapted, ?_⟩
+        refine ⟨thenTarget, 1, CodeAdapted.withEmptySuffix thenAdapted, ?_, ?_⟩
         rw [targetEq]
         simpa [structuredWasmCaseLabels] using
           structuredWasmScalarUInt8CaseHitPrefixFinitePath
@@ -5110,6 +5115,7 @@ theorem ConcreteSupportedFunction.scalarUInt8CaseChainFinitePath
             (thenTarget := thenTarget) (elseTarget := elseTarget)
             (discrIndex := discrIndex) (actualTag := actualTag)
             (expectedTag := info.cidx) hit localFound
+        omega
       · have reverseMiss : info.cidx ≠ actualTag :=
           fun equal => hit equal.symm
         have selectionRest : chooseAlt actualTag alts = some selected := by
@@ -5117,7 +5123,8 @@ theorem ConcreteSupportedFunction.scalarUInt8CaseChainFinitePath
             using selection
         let caseLabel : StructuredWasmFrame :=
           .label 0 (targetLocals.values.drop 0) targetSuffix
-        obtain ⟨selectedTarget, testCount, selectedAdapted, tailPath⟩ :=
+        obtain ⟨selectedTarget, testCount, selectedAdapted, tailPath,
+            _tailZero⟩ :=
           ih selectionRest fallbackCompiledRest elseAdapted
             (targetSuffix := []) (frames := caseLabel :: frames)
         have headPath :
@@ -5138,11 +5145,153 @@ theorem ConcreteSupportedFunction.scalarUInt8CaseChainFinitePath
               (elseTarget := elseTarget) (discrIndex := discrIndex)
               (actualTag := actualTag) (expectedTag := info.cidx) hit
               actualFits expectedFits localFound
-        refine ⟨selectedTarget, testCount + 1, selectedAdapted, ?_⟩
+        refine ⟨selectedTarget, testCount + 1, selectedAdapted, ?_, ?_⟩
         simp only [List.append_nil] at tailPath
         simpa [caseLabel, Nat.mul_add, Nat.add_comm,
           structuredWasmCaseLabels_empty_then_outer] using
             headPath.trans tailPath
+        omega
+
+/-- Lift the arbitrary object-constructor chain theorem through production
+case adaptation.  Besides the exact selected-arm path, the theorem exposes
+the only way that path can be empty: the source table itself is default-only.
+This is the rank fact needed by the pointwise weak simulation. -/
+theorem ConcreteSupportedFunction.objectConstructorCasesFinitePath
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context sourceCode sourceModule
+      sourceFunction target hosts)
+    {labels : List Lean.FVarId}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {selected : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {frames : List StructuredWasmFrame}
+    (supported : ObjectConstructorCasesSupported context sourceRuntime
+      sourceEnv cases selected)
+    (sourceResult : SourceCaseResult sourceRuntime sourceEnv cases selected)
+    (stateRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      targetStore targetLocals witness)
+    (adapted : CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+      (.cases cases) targetCode) :
+    ∃ selectedTarget testCount targetSuffix,
+      CodeAdaptedWithSuffix context sourceModule sourceFunction labels selected
+          selectedTarget ∧
+        FinitePath (StructuredWasmStep target.wasmModule hosts.env)
+          (5 * testCount)
+          ⟨targetStore, .running targetLocals targetCode, frames⟩
+          ⟨targetStore,
+            .running { targetLocals with values := targetLocals.values }
+              selectedTarget,
+            structuredWasmCaseLabels (targetLocals.values.drop 0)
+                targetSuffix testCount ++ frames⟩ ∧
+        (testCount = 0 →
+          DefaultOnlyCaseSupported sourceRuntime sourceEnv cases selected) := by
+  rcases supported with
+    ⟨altsSupported, modeEq, discrCompiled, actualTagFits⟩
+  rcases sourceResult with
+    ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩
+  have sourceLookup : lookup sourceEnv cases.discr = some sourceObject := by
+    cases lookupEq : lookup sourceEnv cases.discr with
+    | none => simp [lookupValue, lookupEq] at lookupFound
+    | some value =>
+        have valueEq : value = sourceObject := by
+          simpa [lookupValue, lookupEq] using lookupFound
+        subst value
+        rfl
+  have actualFits : actualTag < UInt32.size :=
+    actualTagFits lookupFound tagged
+  rcases CodeAdaptedWithSuffix.cases_eq adapted with
+    ⟨fallback, targetCore, targetSuffix, fallbackCompiled, chainAdapted,
+      targetCodeEq⟩
+  obtain ⟨selectedTarget, testCount, selectedAdapted, rawTargetPrefix,
+      zeroTests⟩ :=
+    spec.objectConstructorCaseChainFinitePath altsSupported modeEq
+      discrCompiled chosen sourceLookup tagged actualFits stateRelated
+      fallbackCompiled chainAdapted (targetSuffix := targetSuffix)
+      (frames := frames)
+  refine ⟨selectedTarget, testCount, targetSuffix, selectedAdapted, ?_, ?_⟩
+  · rw [targetCodeEq]
+    exact rawTargetPrefix
+  · intro testCountEq
+    exact zeroTests testCountEq
+
+/-- Scalar `UInt8` analogue of `objectConstructorCasesFinitePath`.  Each
+executed test costs four target steps, and a zero-test selection is exposed as
+the compiler-erased default-only case needed by the pointwise rank law. -/
+theorem ConcreteSupportedFunction.scalarUInt8CasesFinitePath
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context sourceCode sourceModule
+      sourceFunction target hosts)
+    {labels : List Lean.FVarId}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {selected : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {frames : List StructuredWasmFrame}
+    (supported : ScalarUInt8CasesSupported context sourceRuntime sourceEnv
+      cases selected)
+    (sourceResult : SourceCaseResult sourceRuntime sourceEnv cases selected)
+    (stateRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      targetStore targetLocals witness)
+    (adapted : CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+      (.cases cases) targetCode) :
+    ∃ selectedTarget testCount targetSuffix,
+      CodeAdaptedWithSuffix context sourceModule sourceFunction labels selected
+          selectedTarget ∧
+        FinitePath (StructuredWasmStep target.wasmModule hosts.env)
+          (4 * testCount)
+          ⟨targetStore, .running targetLocals targetCode, frames⟩
+          ⟨targetStore,
+            .running { targetLocals with values := targetLocals.values }
+              selectedTarget,
+            structuredWasmCaseLabels (targetLocals.values.drop 0)
+                targetSuffix testCount ++ frames⟩ ∧
+        (testCount = 0 →
+          DefaultOnlyCaseSupported sourceRuntime sourceEnv cases selected) := by
+  rcases supported with ⟨altsSupported, modeEq, discrCompiled⟩
+  rcases sourceResult with
+    ⟨sourceValue, actualTag, lookupFound, tagged, chosen⟩
+  have sourceLookup : lookup sourceEnv cases.discr = some sourceValue := by
+    cases lookupEq : lookup sourceEnv cases.discr with
+    | none => simp [lookupValue, lookupEq] at lookupFound
+    | some value =>
+        have valueEq : value = sourceValue := by
+          simpa [lookupValue, lookupEq] using lookupFound
+        subst value
+        rfl
+  rcases CodeAdaptedWithSuffix.cases_eq adapted with
+    ⟨fallback, targetCore, targetSuffix, fallbackCompiled, chainAdapted,
+      targetCodeEq⟩
+  obtain ⟨selectedTarget, testCount, selectedAdapted, rawTargetPrefix,
+      zeroTests⟩ :=
+    spec.scalarUInt8CaseChainFinitePath altsSupported modeEq discrCompiled
+      chosen sourceLookup tagged stateRelated fallbackCompiled chainAdapted
+      (targetSuffix := targetSuffix) (frames := frames)
+  refine ⟨selectedTarget, testCount, targetSuffix, selectedAdapted, ?_, ?_⟩
+  · rw [targetCodeEq]
+    exact rawTargetPrefix
+  · intro testCountEq
+    exact zeroTests testCountEq
 
 /-- Compiler-derived structured simulation of one generated lazy-cache hit.
 
@@ -14566,7 +14715,7 @@ theorem
         ⟨fallback, targetCore, targetSuffix, fallbackCompiled, chainAdapted,
           targetCodeEq⟩
       obtain ⟨selectedTarget, testCount, selectedAdapted,
-          rawTargetPrefix⟩ :=
+          rawTargetPrefix, _zeroTests⟩ :=
         functionSpec.objectConstructorCaseChainFinitePath altsSupported
           modeEq discrCompiled chosen sourceLookup tagged actualFits
           related.stateRelated fallbackCompiled chainAdapted
@@ -14706,7 +14855,7 @@ theorem
         ⟨fallback, targetCore, targetSuffix, fallbackCompiled, chainAdapted,
           targetCodeEq⟩
       obtain ⟨selectedTarget, testCount, selectedAdapted,
-          rawTargetPrefix⟩ :=
+          rawTargetPrefix, _zeroTests⟩ :=
         functionSpec.scalarUInt8CaseChainFinitePath altsSupported modeEq
           discrCompiled chosen sourceLookup tagged related.stateRelated
           fallbackCompiled chainAdapted (targetSuffix := targetSuffix)
@@ -18092,14 +18241,24 @@ inductive ConcreteStructuredCodeStepAdmission
         DefaultOnlyCaseSupported sourceRuntime sourceEnv cases selected) :
       ConcreteStructuredCodeStepAdmission context externals expectedResult facts
         sourceRuntime sourceEnv 0 (.cases cases)
-  | singleObjectCase
+  | objectCases
       {facts : ReuseCapacityFacts}
       {sourceRuntime : RuntimeState}
       {sourceEnv : Env}
       {cases : Lean.Compiler.LCNF.Cases .impure}
       {selected : Lean.Compiler.LCNF.Code .impure}
-      (supported : SingleObjectConstructorCaseSupported context sourceRuntime
+      (supported : ObjectConstructorCasesSupported context sourceRuntime
         sourceEnv cases selected) :
+      ConcreteStructuredCodeStepAdmission context externals expectedResult facts
+        sourceRuntime sourceEnv 0 (.cases cases)
+  | scalarUInt8Cases
+      {facts : ReuseCapacityFacts}
+      {sourceRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {cases : Lean.Compiler.LCNF.Cases .impure}
+      {selected : Lean.Compiler.LCNF.Code .impure}
+      (supported : ScalarUInt8CasesSupported context sourceRuntime sourceEnv
+        cases selected) :
       ConcreteStructuredCodeStepAdmission context externals expectedResult facts
         sourceRuntime sourceEnv 0 (.cases cases)
   | incPersistent
@@ -21897,11 +22056,11 @@ theorem ConcreteStructuredCodeFocus.defaultOnlyCaseResult_of_step
             simp [chooseAlt, findCtorAlt, findDefaultAlt]
           exact ⟨discrValue, tag, found, tagged, chosen⟩
 
-/-- A successful interpreter step at a singleton object-constructor case
-recovers both its source selection fact and the exact selected-arm machine
-state.  The compiler admission fixes the only possible arm; no execution
-certificate is retained after this current step. -/
-theorem ConcreteStructuredCodeFocus.singleObjectCaseResult_of_step
+/-- A successful interpreter step at any admitted case recovers its source
+selection fact and the exact selected-arm machine state.  Static table
+admission is intentionally unnecessary here: successful source execution
+already exposes the dynamic branch selected at this current node. -/
+theorem ConcreteStructuredCodeFocus.caseResult_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
@@ -21910,7 +22069,6 @@ theorem ConcreteStructuredCodeFocus.singleObjectCaseResult_of_step
     {sourceRuntime : RuntimeState}
     {sourceEnv : Env}
     {cases : Lean.Compiler.LCNF.Cases .impure}
-    {selected : Lean.Compiler.LCNF.Code .impure}
     {targetStore : Wasm.Store Host}
     {targetLocals : Wasm.Locals}
     {targetCode : Wasm.Program}
@@ -21920,14 +22078,10 @@ theorem ConcreteStructuredCodeFocus.singleObjectCaseResult_of_step
     (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
       labels sourceRuntime sourceEnv (.cases cases) targetStore targetLocals
       targetCode witness source target)
-    (supported : SingleObjectConstructorCaseSupported context sourceRuntime
-      sourceEnv cases selected)
     (sourceStep : executeStep externals source = .next sourceAfter) :
-    SourceCaseResult sourceRuntime sourceEnv cases selected ∧
-      sourceAfter = { source with control := .code selected } := by
-  rcases supported with
-    ⟨info, altsEq, _modeEq, _expectedTagFits, _discrCompiled,
-      _actualTagFits⟩
+    ∃ selected,
+      SourceCaseResult sourceRuntime sourceEnv cases selected ∧
+        sourceAfter = { source with control := .code selected } := by
   rcases source with
     ⟨sourceProgram, sourceControl, actualEnv, sourceJoins, sourceFrames,
       actualRuntime⟩
@@ -21955,21 +22109,17 @@ theorem ConcreteStructuredCodeFocus.singleObjectCaseResult_of_step
           | none =>
               simp [executeStep, coreStep, found, tagged, chosen, fail] at sourceStep
           | some selectedArm =>
-              have selectedEq : selectedArm = selected := by
-                rw [altsEq] at chosen
-                simp [chooseAlt, findCtorAlt, findDefaultAlt] at chosen
-                simp_all
-              subst selectedArm
               have afterEq :
                   ({ program := context.program
-                     control := .code selected
+                     control := .code selectedArm
                      env := sourceEnv
                      joins := sourceJoins
                      frames := sourceFrames
                      runtime := sourceRuntime } : MachineState) = sourceAfter := by
                 simpa [executeStep, coreStep, found, tagged, chosen] using
                   sourceStep
-              exact ⟨⟨discrValue, tag, found, tagged, chosen⟩, afterEq.symm⟩
+              exact ⟨selectedArm,
+                ⟨discrValue, tag, found, tagged, chosen⟩, afterEq.symm⟩
 
 /-- A successful interpreter step at an admitted direct-value node exposes the
 existing source semantic boundary.  The focus identifies the actual machine
@@ -22419,12 +22569,12 @@ theorem ConcreteStructuredCodePointwiseRel.advance_defaultOnlyCase_of_step
     exact related.resources
   exact ⟨targetPath, framesEq, ⟨nextFocus, nextResources⟩, rank⟩
 
-/-- A singleton object-constructor case executes its generated five-step tag
-test and enters the selected arm under one target-only case label.  The active
-resource scope is unchanged (modulo the compiler's stack-value reset), while
-the suspended stack records exactly the label that must be unwound when the
-arm returns. -/
-theorem ConcreteStructuredCodePointwiseRel.advance_singleObjectCase_of_step
+/-- An arbitrary normalized object-constructor table executes the exact
+generated five-step tests up to its dynamically selected arm.  One target-only
+case label is retained per test; the source has no corresponding frame.  A
+zero-test path is necessarily the compiler-erased default-only case and hence
+strictly decreases the source structural rank. -/
+theorem ConcreteStructuredCodePointwiseRel.advance_objectCases_of_step
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {functionCode : Lean.Compiler.LCNF.Code .impure}
@@ -22445,7 +22595,7 @@ theorem ConcreteStructuredCodePointwiseRel.advance_singleObjectCase_of_step
     {remainingBytes : Nat}
     {sourceEnv : Env}
     {cases : Lean.Compiler.LCNF.Cases .impure}
-    {selected : Lean.Compiler.LCNF.Code .impure}
+    {admittedSelected : Lean.Compiler.LCNF.Code .impure}
     {targetLocals : Wasm.Locals}
     {targetCode : Wasm.Program}
     {source sourceAfter : MachineState}
@@ -22455,26 +22605,35 @@ theorem ConcreteStructuredCodePointwiseRel.advance_singleObjectCase_of_step
       entryRuntime entryStore entryWitness functionResult callerExpectedResult
       facts 0 remainingBytes sourceRuntime sourceEnv (.cases cases) targetStore
       targetLocals targetCode witness source target)
-    (supported : SingleObjectConstructorCaseSupported context sourceRuntime
-      sourceEnv cases selected)
+    (supported : ObjectConstructorCasesSupported context sourceRuntime
+      sourceEnv cases admittedSelected)
     (sourceStep : executeStep externals source = .next sourceAfter) :
-    ∃ targetAfter selectedTarget, ∃ targetSuffix : Wasm.Program,
-      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 5 target
-          targetAfter ∧
+    ∃ testCount targetAfter selected selectedTarget,
+      ∃ targetSuffix : Wasm.Program,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          (5 * testCount) target targetAfter ∧
         sourceAfter.frames = source.frames ∧
         targetAfter.frames =
-          structuredWasmCaseLabels (targetLocals.values.drop 0) targetSuffix 1 ++
-            target.frames ∧
+          structuredWasmCaseLabels (targetLocals.values.drop 0) targetSuffix
+              testCount ++ target.frames ∧
         ConcreteStructuredCodeCoreRel program context sourceModule
           sourceFunction externals labels entryRuntime entryStore entryWitness
           functionResult callerExpectedResult facts remainingBytes sourceRuntime
           sourceEnv selected targetStore
           { targetLocals with values := targetLocals.values } selectedTarget
-          witness sourceAfter targetAfter := by
-  obtain ⟨sourceResult, sourceAfterEq⟩ :=
-    related.focus.singleObjectCaseResult_of_step supported sourceStep
-  obtain ⟨selectedTarget, targetSuffix, selectedAdapted, rawTargetPrefix⟩ :=
-    spec.singleObjectConstructorCaseFinitePath supported sourceResult
+          witness sourceAfter targetAfter ∧
+        (5 * testCount = 0 →
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source) := by
+  obtain ⟨selected, sourceResult, sourceAfterEq⟩ :=
+    related.focus.caseResult_of_step sourceStep
+  have selectedSupported :
+      ObjectConstructorCasesSupported context sourceRuntime sourceEnv cases
+        selected := by
+    simpa [ObjectConstructorCasesSupported] using supported
+  obtain ⟨selectedTarget, testCount, targetSuffix, selectedAdapted,
+      rawTargetPrefix, zeroDefault⟩ :=
+    spec.objectConstructorCasesFinitePath selectedSupported sourceResult
       related.focus.stateRelated related.focus.adapted
       (frames := target.frames)
   let targetAfter : StructuredWasmState Host := {
@@ -22482,10 +22641,10 @@ theorem ConcreteStructuredCodePointwiseRel.advance_singleObjectCase_of_step
     control := .running
       { targetLocals with values := targetLocals.values } selectedTarget
     frames := structuredWasmCaseLabels (targetLocals.values.drop 0)
-      targetSuffix 1 ++ target.frames }
+      targetSuffix testCount ++ target.frames }
   have targetPrefix :
-      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 5 target
-        targetAfter := by
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+        (5 * testCount) target targetAfter := by
     rcases target with ⟨actualStore, actualControl, actualFrames⟩
     have storeEq := related.focus.targetStoreEq
     change actualStore = targetStore at storeEq
@@ -22511,7 +22670,7 @@ theorem ConcreteStructuredCodePointwiseRel.advance_singleObjectCase_of_step
       simpa using related.focus.sourceRuntimeEq
     targetStoreEq := by simp [targetAfter]
     targetControlEq := by simp [targetAfter]
-    adapted := CodeAdapted.withEmptySuffix selectedAdapted
+    adapted := selectedAdapted
     stateRelated := related.focus.stateRelated.withValues targetLocals.values
     frameAligned := related.focus.frameAligned.withValues targetLocals.values }
   have nextScope :
@@ -22531,11 +22690,166 @@ theorem ConcreteStructuredCodePointwiseRel.advance_singleObjectCase_of_step
     simpa [targetAfter] using
       (ConcreteStructuredSuspendedResourceStack.case
         (belowStack := targetLocals.values.drop 0)
-        (targetRest := targetSuffix) (testCount := 1)
+        (targetRest := targetSuffix) (testCount := testCount)
         related.resources.suspended)
-  exact ⟨targetAfter, selectedTarget, targetSuffix, targetPrefix,
-    by simp [sourceAfterEq], by simp [targetAfter],
-    ⟨nextFocus, nextResources⟩⟩
+  have zeroRank :
+      5 * testCount = 0 →
+        compilerStructuredControlRank sourceAfter <
+          compilerStructuredControlRank source := by
+    intro targetCountZero
+    have testCountZero : testCount = 0 := by omega
+    have defaultSupported := zeroDefault testCountZero
+    have silenceDecreases :
+        compilerCodeSilenceRank sourceAfter <
+          compilerCodeSilenceRank source := by
+      simp only [compilerCodeSilenceRank, nextFocus.sourceControlEq,
+        related.focus.sourceControlEq]
+      exact compilerCodeSilenceDepth_defaultOnly_lt defaultSupported
+    exact compilerStructuredControlRank_lt_of_codeSilenceRank_lt
+      related.focus.sourceControlEq nextFocus.sourceControlEq silenceDecreases
+  exact ⟨testCount, targetAfter, selected, selectedTarget, targetSuffix,
+    targetPrefix, by simp [sourceAfterEq], by simp [targetAfter],
+    ⟨nextFocus, nextResources⟩, zeroRank⟩
+
+/-- Scalar `UInt8` case tables preserve the same pointwise relation.  Their
+comparisons are resident Wasm operations, so each tested constructor costs
+four target steps; case-label resources and the zero-test rank argument are
+identical to the object-table protocol. -/
+theorem ConcreteStructuredCodePointwiseRel.advance_scalarUInt8Cases_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {admittedSelected : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredCodePointwiseRel program context functionCode
+      sourceModule sourceFunction targetModule hosts spec externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts 0 remainingBytes sourceRuntime sourceEnv (.cases cases) targetStore
+      targetLocals targetCode witness source target)
+    (supported : ScalarUInt8CasesSupported context sourceRuntime sourceEnv cases
+      admittedSelected)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ testCount targetAfter selected selectedTarget,
+      ∃ targetSuffix : Wasm.Program,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          (4 * testCount) target targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames =
+          structuredWasmCaseLabels (targetLocals.values.drop 0) targetSuffix
+              testCount ++ target.frames ∧
+        ConcreteStructuredCodeCoreRel program context sourceModule
+          sourceFunction externals labels entryRuntime entryStore entryWitness
+          functionResult callerExpectedResult facts remainingBytes sourceRuntime
+          sourceEnv selected targetStore
+          { targetLocals with values := targetLocals.values } selectedTarget
+          witness sourceAfter targetAfter ∧
+        (4 * testCount = 0 →
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source) := by
+  obtain ⟨selected, sourceResult, sourceAfterEq⟩ :=
+    related.focus.caseResult_of_step sourceStep
+  have selectedSupported :
+      ScalarUInt8CasesSupported context sourceRuntime sourceEnv cases selected := by
+    simpa [ScalarUInt8CasesSupported] using supported
+  obtain ⟨selectedTarget, testCount, targetSuffix, selectedAdapted,
+      rawTargetPrefix, zeroDefault⟩ :=
+    spec.scalarUInt8CasesFinitePath selectedSupported sourceResult
+      related.focus.stateRelated related.focus.adapted
+      (frames := target.frames)
+  let targetAfter : StructuredWasmState Host := {
+    store := targetStore
+    control := .running
+      { targetLocals with values := targetLocals.values } selectedTarget
+    frames := structuredWasmCaseLabels (targetLocals.values.drop 0)
+      targetSuffix testCount ++ target.frames }
+  have targetPrefix :
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+        (4 * testCount) target targetAfter := by
+    rcases target with ⟨actualStore, actualControl, actualFrames⟩
+    have storeEq := related.focus.targetStoreEq
+    change actualStore = targetStore at storeEq
+    subst actualStore
+    have controlEq := related.focus.targetControlEq
+    change actualControl = .running targetLocals targetCode at controlEq
+    subst actualControl
+    simpa [targetAfter] using rawTargetPrefix
+  have nextFocus :
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+        sourceRuntime sourceEnv selected targetStore
+        { targetLocals with values := targetLocals.values } selectedTarget
+        witness sourceAfter targetAfter := {
+    sourceProgramEq := by
+      rw [sourceAfterEq]
+      simp [related.focus.sourceProgramEq]
+    sourceControlEq := by simp [sourceAfterEq]
+    sourceEnvEq := by
+      rw [sourceAfterEq]
+      simpa using related.focus.sourceEnvEq
+    sourceRuntimeEq := by
+      rw [sourceAfterEq]
+      simpa using related.focus.sourceRuntimeEq
+    targetStoreEq := by simp [targetAfter]
+    targetControlEq := by simp [targetAfter]
+    adapted := selectedAdapted
+    stateRelated := related.focus.stateRelated.withValues targetLocals.values
+    frameAligned := related.focus.frameAligned.withValues targetLocals.values }
+  have nextScope :
+      ConcreteStructuredResourceScope context sourceModule sourceFunction
+        externals entryRuntime entryStore entryWitness facts remainingBytes
+        sourceRuntime sourceEnv targetStore
+        { targetLocals with values := targetLocals.values } witness :=
+    related.resources.current.withValues targetLocals.values
+  have nextResources :
+      ConcreteStructuredResourceStack program context sourceModule
+        sourceFunction externals entryRuntime sourceRuntime entryStore
+        targetStore entryWitness witness facts remainingBytes sourceEnv
+        { targetLocals with values := targetLocals.values } functionResult
+        callerExpectedResult sourceAfter.frames targetAfter.frames := by
+    refine ⟨nextScope, ?_⟩
+    rw [sourceAfterEq]
+    simpa [targetAfter] using
+      (ConcreteStructuredSuspendedResourceStack.case
+        (belowStack := targetLocals.values.drop 0)
+        (targetRest := targetSuffix) (testCount := testCount)
+        related.resources.suspended)
+  have zeroRank :
+      4 * testCount = 0 →
+        compilerStructuredControlRank sourceAfter <
+          compilerStructuredControlRank source := by
+    intro targetCountZero
+    have testCountZero : testCount = 0 := by omega
+    have defaultSupported := zeroDefault testCountZero
+    have silenceDecreases :
+        compilerCodeSilenceRank sourceAfter <
+          compilerCodeSilenceRank source := by
+      simp only [compilerCodeSilenceRank, nextFocus.sourceControlEq,
+        related.focus.sourceControlEq]
+      exact compilerCodeSilenceDepth_defaultOnly_lt defaultSupported
+    exact compilerStructuredControlRank_lt_of_codeSilenceRank_lt
+      related.focus.sourceControlEq nextFocus.sourceControlEq silenceDecreases
+  exact ⟨testCount, targetAfter, selected, selectedTarget, targetSuffix,
+    targetPrefix, by simp [sourceAfterEq], by simp [targetAfter],
+    ⟨nextFocus, nextResources⟩, zeroRank⟩
 
 /-- Persistent increments are erased by lowering and preserve the complete
 resource core while consuming one ranked source step. -/
@@ -23368,12 +23682,18 @@ theorem ConcreteStructuredCodePointwiseRel.advance
         related.advance_defaultOnlyCase_of_step supported sourceStep
       exact ⟨0, target, targetPath,
         .code related.contextCaches nextCore, fun _ => rank⟩
-  | singleObjectCase caseSupported =>
-      obtain ⟨targetAfter, selectedTarget, targetSuffix, targetPath,
-          _sourceFramesEq, _targetFramesEq, nextCore⟩ :=
-        related.advance_singleObjectCase_of_step caseSupported sourceStep
-      exact ⟨5, targetAfter, targetPath,
-        .code related.contextCaches nextCore, by omega⟩
+  | objectCases caseSupported =>
+      obtain ⟨testCount, targetAfter, selected, selectedTarget, targetSuffix,
+          targetPath, _sourceFramesEq, _targetFramesEq, nextCore, rank⟩ :=
+        related.advance_objectCases_of_step caseSupported sourceStep
+      exact ⟨5 * testCount, targetAfter, targetPath,
+        .code related.contextCaches nextCore, rank⟩
+  | scalarUInt8Cases caseSupported =>
+      obtain ⟨testCount, targetAfter, selected, selectedTarget, targetSuffix,
+          targetPath, _sourceFramesEq, _targetFramesEq, nextCore, rank⟩ :=
+        related.advance_scalarUInt8Cases_of_step caseSupported sourceStep
+      exact ⟨4 * testCount, targetAfter, targetPath,
+        .code related.contextCaches nextCore, rank⟩
   | incPersistent =>
       obtain ⟨targetPath, _sourceFramesEq, nextCore, rank⟩ :=
         related.advance_incPersistent_of_step sourceStep
@@ -23600,18 +23920,18 @@ theorem ConcreteStructuredCodePointwiseRel.advance_supportedGlobal
         .code related.contextCaches nextCore supportedAfter agreesAfter
       exact ⟨0, target, targetPath,
         nextActive.toGlobal, fun _ => rank⟩
-  | singleObjectCase caseSupported =>
-      obtain ⟨targetAfter, selectedTarget, targetSuffix, targetPath,
-          sourceFramesEq, targetFramesEq, nextCore⟩ :=
-        related.advance_singleObjectCase_of_step caseSupported sourceStep
+  | objectCases caseSupported =>
+      obtain ⟨testCount, targetAfter, selected, selectedTarget, targetSuffix,
+          targetPath, sourceFramesEq, targetFramesEq, nextCore, rank⟩ :=
+        related.advance_objectCases_of_step caseSupported sourceStep
       let stackedSupported :=
         ConcreteStructuredSupportedFrameStack.case
           (belowStack := targetLocals.values.drop 0)
-          (targetRest := targetSuffix) (testCount := 1) supported
+          (targetRest := targetSuffix) (testCount := testCount) supported
       let stackedResources :=
         ConcreteStructuredSuspendedResourceStack.case
           (belowStack := targetLocals.values.drop 0)
-          (targetRest := targetSuffix) (testCount := 1)
+          (targetRest := targetSuffix) (testCount := testCount)
           related.resources.suspended
       have stackedAgrees : stackedSupported.Agrees stackedResources := by
         exact ConcreteStructuredSupportedFrameStack.Agrees.case supported
@@ -23624,7 +23944,32 @@ theorem ConcreteStructuredCodePointwiseRel.advance_supportedGlobal
           externals labels entryRuntime entryStore entryWitness functionResult
           callerExpectedResult sourceAfter targetAfter :=
         .code related.contextCaches nextCore supportedAfter agreesAfter
-      exact ⟨5, targetAfter, targetPath, nextActive.toGlobal, by omega⟩
+      exact ⟨5 * testCount, targetAfter, targetPath, nextActive.toGlobal, rank⟩
+  | scalarUInt8Cases caseSupported =>
+      obtain ⟨testCount, targetAfter, selected, selectedTarget, targetSuffix,
+          targetPath, sourceFramesEq, targetFramesEq, nextCore, rank⟩ :=
+        related.advance_scalarUInt8Cases_of_step caseSupported sourceStep
+      let stackedSupported :=
+        ConcreteStructuredSupportedFrameStack.case
+          (belowStack := targetLocals.values.drop 0)
+          (targetRest := targetSuffix) (testCount := testCount) supported
+      let stackedResources :=
+        ConcreteStructuredSuspendedResourceStack.case
+          (belowStack := targetLocals.values.drop 0)
+          (targetRest := targetSuffix) (testCount := testCount)
+          related.resources.suspended
+      have stackedAgrees : stackedSupported.Agrees stackedResources := by
+        exact ConcreteStructuredSupportedFrameStack.Agrees.case supported
+          related.resources.suspended agrees
+      obtain ⟨supportedAfter, agreesAfter⟩ :=
+        stackedAgrees.reindex sourceFramesEq targetFramesEq
+          nextCore.resources.suspended
+      let nextActive : ConcreteStructuredSupportedOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec
+          externals labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult sourceAfter targetAfter :=
+        .code related.contextCaches nextCore supportedAfter agreesAfter
+      exact ⟨4 * testCount, targetAfter, targetPath, nextActive.toGlobal, rank⟩
   | incPersistent =>
       obtain ⟨targetPath, sourceFramesEq, nextCore, rank⟩ :=
         related.advance_incPersistent_of_step sourceStep

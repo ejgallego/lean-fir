@@ -1540,14 +1540,17 @@ acceptance tests pass.
      prefixes. Each operation derives its canonical source step from
      source/compiler admission, preserves the same witness and entry-relative
      resource scope through the existing concrete refinement, and returns an
-     admission-free continuation under arbitrary join labels. Singleton
-     object-constructor dispatch now belongs to the same pointwise closure.
-     Its exact five-step generated prefix enters the selected arm under one
-     target-only case-label layer; the resource, structural, and supported
-     stacks agree on that layer, and return-pop unwinds it before consuming a
-     source caller frame. Arbitrary object/scalar tables and lazy/cache control
-     remain explicit pointwise widenings despite already having terminating
-     hereditary laws.
+     admission-free continuation under arbitrary join labels. Arbitrary
+     normalized object-constructor and scalar-`UInt8` tables now belong to the
+     same pointwise closure. The source step determines the selected arm;
+     compiler-derived paths cost exactly five target steps per tested object
+     tag or four per tested byte. Each test adds one target-only case-label
+     layer on which the resource, structural, and supported stacks agree, and
+     return-pop unwinds all such layers before consuming a source caller
+     frame. If no test runs, the chain theorem proves that the source node is
+     default-only, supplying the strict silence-rank decrease required by the
+     weak simulation. Lazy/cache control remains the next explicit pointwise
+     widening despite already having a terminating hereditary law.
      Pure integer-, natural-, and scalar-result externals are now the first
      non-erased family in this same closure. Current-node admission fixes only
      the semantic response and its exact allocation cost. The staging rule
