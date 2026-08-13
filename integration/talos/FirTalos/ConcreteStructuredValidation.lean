@@ -527,6 +527,145 @@ theorem ConcreteStructuredValidatedCodeCoreRel.decSuccessor
       nextWitness nextSource nextTarget :=
   related.withSuccessor nextCore related.validation.decContinuation
 
+/-- A validated persistent increment needs no caller-supplied classifier:
+its syntax determines the zero-cost admission, its generated target stutters,
+and the residual validator state advances with the source control. -/
+theorem ConcreteStructuredValidatedCodeCoreRel.advance_incPersistent_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    (related : ConcreteStructuredValidatedCodeCoreRel program context
+      sourceModule sourceFunction externals labels entryRuntime entryStore
+      entryWitness functionResult callerExpectedResult facts remainingBytes
+      sourceRuntime sourceEnv (.inc objectId amount check true continuation)
+      targetStore targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+        functionResult facts sourceRuntime sourceEnv 0
+        (.inc objectId amount check true continuation) ∧
+      FinitePath (StructuredWasmStep module hostEnv) 0 target target ∧
+      sourceAfter.frames = source.frames ∧
+      ConcreteStructuredValidatedCodeCoreRel program context sourceModule
+        sourceFunction externals labels entryRuntime entryStore entryWitness
+        functionResult callerExpectedResult facts remainingBytes sourceRuntime
+        sourceEnv continuation targetStore targetLocals targetCode witness
+        sourceAfter target ∧
+      compilerStructuredControlRank sourceAfter <
+        compilerStructuredControlRank source := by
+  obtain ⟨computedAfter, computedStep, targetPath, nextFocus, framesEq, rank⟩ :=
+    related.core.focus.advance_incPersistent
+      (module := module) (hostEnv := hostEnv)
+  have afterEq : sourceAfter = computedAfter := by
+    rw [sourceStep] at computedStep
+    exact ExecResult.next.inj computedStep
+  subst computedAfter
+  have nextResources :
+      ConcreteStructuredResourceStack program context sourceModule
+        sourceFunction externals entryRuntime sourceRuntime entryStore
+        targetStore entryWitness witness facts remainingBytes sourceEnv
+        targetLocals functionResult callerExpectedResult sourceAfter.frames
+        target.frames := by
+    rw [framesEq]
+    exact related.core.resources
+  have nextCore :
+      ConcreteStructuredCodeCoreRel program context sourceModule
+        sourceFunction externals labels entryRuntime entryStore entryWitness
+        functionResult callerExpectedResult facts remainingBytes sourceRuntime
+        sourceEnv continuation targetStore targetLocals targetCode witness
+        sourceAfter target :=
+    ⟨nextFocus, nextResources⟩
+  exact ⟨.incPersistent, targetPath, framesEq,
+    related.incSuccessor nextCore, rank⟩
+
+/-- Persistent decrement has the same admission-producing, validator-
+preserving zero-target-step transition. -/
+theorem ConcreteStructuredValidatedCodeCoreRel.advance_decPersistent_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
+    {objectFields? : Option Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    (related : ConcreteStructuredValidatedCodeCoreRel program context
+      sourceModule sourceFunction externals labels entryRuntime entryStore
+      entryWitness functionResult callerExpectedResult facts remainingBytes
+      sourceRuntime sourceEnv
+      (.dec objectId amount check true objectFields? continuation) targetStore
+      targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+        functionResult facts sourceRuntime sourceEnv 0
+        (.dec objectId amount check true objectFields? continuation) ∧
+      FinitePath (StructuredWasmStep module hostEnv) 0 target target ∧
+      sourceAfter.frames = source.frames ∧
+      ConcreteStructuredValidatedCodeCoreRel program context sourceModule
+        sourceFunction externals labels entryRuntime entryStore entryWitness
+        functionResult callerExpectedResult facts remainingBytes sourceRuntime
+        sourceEnv continuation targetStore targetLocals targetCode witness
+        sourceAfter target ∧
+      compilerStructuredControlRank sourceAfter <
+        compilerStructuredControlRank source := by
+  obtain ⟨computedAfter, computedStep, targetPath, nextFocus, framesEq, rank⟩ :=
+    related.core.focus.advance_decPersistent
+      (module := module) (hostEnv := hostEnv)
+  have afterEq : sourceAfter = computedAfter := by
+    rw [sourceStep] at computedStep
+    exact ExecResult.next.inj computedStep
+  subst computedAfter
+  have nextResources :
+      ConcreteStructuredResourceStack program context sourceModule
+        sourceFunction externals entryRuntime sourceRuntime entryStore
+        targetStore entryWitness witness facts remainingBytes sourceEnv
+        targetLocals functionResult callerExpectedResult sourceAfter.frames
+        target.frames := by
+    rw [framesEq]
+    exact related.core.resources
+  have nextCore :
+      ConcreteStructuredCodeCoreRel program context sourceModule
+        sourceFunction externals labels entryRuntime entryStore entryWitness
+        functionResult callerExpectedResult facts remainingBytes sourceRuntime
+        sourceEnv continuation targetStore targetLocals targetCode witness
+        sourceAfter target :=
+    ⟨nextFocus, nextResources⟩
+  exact ⟨.decPersistent, targetPath, framesEq,
+    related.decSuccessor nextCore, rank⟩
+
 /-- Object-field writes retain the residual state after their executable kind
 guards have succeeded. -/
 theorem ConcreteStructuredValidationFocus.osetContinuation
