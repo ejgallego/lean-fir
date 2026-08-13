@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-validation-packed-constructor-argument-materialization
-status: candidate
+status: fixed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: d8b18978322de05a8f3dba51ef03cf5461676c17
@@ -9,7 +9,7 @@ pass: none
 discovered-by: differential-test
 first-seen: 2026-08-13
 reproduction: Fir/Validation/Corpus.lean
-regression: none
+regression: Fir/Validation/Corpus.lean
 ---
 
 # Summary
@@ -73,4 +73,15 @@ none
 
 ## Resolution and regression
 
-pending
+The validation encoder and decoder now derive constructor storage from the
+same logical schema convention used by the generated-Wasm runner. Reference
+fields retain source order in the object vector, `USize` fields retain source
+order in their own vector, and packed scalars use Lean's descending-width byte
+groups while preserving source order within each width.
+
+`effect-record-nested-aliased-byte-array-mixed-layout` transfers and returns a
+real structure containing two aliased `ByteArray` fields, one `USize`, and one
+`UInt32`. Its first array is updated through copy-on-write while native Lean,
+the LCNF interpreter, and V8 agree on the untouched alias and both packed
+values. A Lean round-trip guard additionally covers all supported integer and
+floating packed widths in deliberately interleaved source order.

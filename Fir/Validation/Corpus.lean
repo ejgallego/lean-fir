@@ -2301,10 +2301,21 @@ structure NestedAliasedByteArrays where
   first : ByteArray
   second : ByteArray
 
+structure MixedLayoutAliasedByteArrays where
+  first : ByteArray
+  second : ByteArray
+  cursor : USize
+  marker : UInt32
+
 @[noinline]
 def recordNestedAliasedByteArrayLayout (value : NestedAliasedByteArrays) :
     ByteArray × ByteArray :=
   (recordByteArray value.first 42, value.second)
+
+@[noinline]
+def recordNestedAliasedByteArrayMixedLayout
+    (value : MixedLayoutAliasedByteArrays) : MixedLayoutAliasedByteArrays :=
+  { value with first := recordByteArray value.first 42 }
 
 @[noinline]
 def recordNestedAliasedByteArrayList (values : List ByteArray) :
@@ -2836,6 +2847,18 @@ private def byteArrayPairSchema : ValidationSchema :=
 
 private def aliasedByteArrayLayoutSchema : ValidationSchema :=
   .ctor "NestedAliasedByteArrays.mk" 0 #[.bytes, .bytes]
+
+private def mixedLayoutAliasedByteArraySchema : ValidationSchema :=
+  .ctor "MixedLayoutAliasedByteArrays.mk" 0
+    #[.bytes, .bytes, .usize, .bits 32]
+
+private def mixedLayoutAliasedByteArrayDatum
+    (value : Source.MixedLayoutAliasedByteArrays) : ValidationDatum :=
+  .ctor "MixedLayoutAliasedByteArrays.mk" 0 #[
+    byteArrayDatum value.first,
+    byteArrayDatum value.second,
+    .usize (UInt64.ofNat value.cursor.toNat),
+    .bits 32 (UInt64.ofNat value.marker.toNat)]
 
 private def byteArrayTripleSchema : ValidationSchema :=
   .ctor "Prod.mk" 0 #[.bytes, byteArrayPairSchema]
@@ -9338,6 +9361,48 @@ private def postConversionCases : Array Case := #[
       resultSchema := some .bytes }]
     provenance := firProvenance
       "Preserve one ByteArray across two owning List elements before copy-on-write" },
+  { id := "effect-record-nested-aliased-byte-array-mixed-layout"
+    entry := ``Source.recordNestedAliasedByteArrayMixedLayout
+    args := #[.ctor "MixedLayoutAliasedByteArrays.mk" 0 #[
+      .bytes #[0, 127, 128, 255],
+      .bytes #[0, 127, 128, 255],
+      .usize 17,
+      .bits 32 0xdecafbad]]
+    argSchemas := #[mixedLayoutAliasedByteArraySchema]
+    nestedArgumentAliases := #[{
+      source := { argument := 0, children := #[0] }
+      target := { argument := 0, children := #[1] } }]
+    resultSchema := mixedLayoutAliasedByteArraySchema
+    native := fun _ =>
+      let shared : ByteArray := ⟨#[0, 127, 128, 255]⟩
+      let input : Source.MixedLayoutAliasedByteArrays := {
+        first := shared
+        second := shared
+        cursor := 17
+        marker := 0xdecafbad }
+      mixedLayoutAliasedByteArrayDatum
+        (Source.recordNestedAliasedByteArrayMixedLayout input)
+    nativeBefore := NativeEffects.reset
+    nativeEffects := fun _ => NativeEffects.take
+    tags :=
+      #["stress", "effect", "external", "bytes", "heap", "constructor",
+        "mixed-layout", "packed-scalar", "usize", "uint32", "mutation",
+        "ownership", "shared", "copy-on-write", "alias",
+        "nested-argument-alias"]
+    requiredLcnfForms := #["oproj", "lit", "fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["oproj", "lit", "fap", "extern", "return"]
+    requiredExternals := #[``NativeEffects.recordByteArrayImpl]
+    requiredExecutedExternals := #[``NativeEffects.recordByteArrayImpl]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``NativeEffects.recordByteArrayImpl]
+    requiredExecutedExternalTrace := some #[``NativeEffects.recordByteArrayImpl]
+    effectProjections := #[{
+      external := ``NativeEffects.recordByteArrayImpl
+      operation := "validation.recordByteArray"
+      argSchemas := #[.bytes, .bits 8]
+      resultSchema := some .bytes }]
+    provenance := firProvenance
+      "Preserve a nested ByteArray alias while materializing and returning the surrounding USize/UInt32 constructor lanes" },
   { id := "effect-record-triply-aliased-byte-array-arguments"
     entry := ``Source.recordTriplyAliasedByteArrays
     args :=
