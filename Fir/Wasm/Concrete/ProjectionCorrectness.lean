@@ -597,6 +597,111 @@ theorem LiveHeapRel.readObjectField_refines
       have impossible := Option.some.inj descriptor
       cases impossible
 
+/-- The checked resident-Array size projection observes exactly the semantic
+live prefix. Physical capacity is retained in the relation but is not exposed
+as logical size. -/
+theorem LiveHeapRel.readResidentArraySize_refines
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {elements : Array Value} {capacity : Nat}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .array elements capacity) :
+    readResidentArraySize state address = .ok elements.size := by
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  cases targetRelated with
+  | constructor descriptor storedObjectEq objectRelated headerRead headerKind
+        refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | natural descriptor storedObjectEq headerRead headerKind marker extent limbsFit
+        decoded refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | integer descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | @array storedElements storedCapacity header _ descriptor storedObjectEq
+        objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      obtain ⟨elementsEq, capacityEq⟩ := HeapObject.array.inj storedObjectEq
+      subst storedElements
+      subst storedCapacity
+      exact objectRelated.readSize
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, storedObjectEq⟩ := closureRelated.objectEq
+      rw [objectEq] at storedObjectEq
+      contradiction
+
+/-- A borrowed resident-Array read returns the exact semantic live element.
+Because both the checked decoder and the semantic observation are pure, the
+complete heap relation is preserved without a retain or witness change. -/
+theorem LiveHeapRel.readResidentArrayElementBorrowed_refines
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {elements : Array Value} {capacity index : Nat}
+    {value : Value}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .array elements capacity)
+    (valueAt : elements[index]? = some value) :
+    ∃ word,
+      readResidentArrayElementBorrowed state address index = .ok word ∧
+      ValueRel witness .tobject (.word32 word) value ∧
+      LiveHeapRel state witness runtime := by
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  cases targetRelated with
+  | constructor descriptor storedObjectEq objectRelated headerRead headerKind
+        refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | natural descriptor storedObjectEq headerRead headerKind marker extent limbsFit
+        decoded refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | integer descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | @array storedElements storedCapacity header _ descriptor storedObjectEq
+        objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      obtain ⟨elementsEq, capacityEq⟩ := HeapObject.array.inj storedObjectEq
+      subst storedElements
+      subst storedCapacity
+      obtain ⟨word, read, valueRelated⟩ :=
+        objectRelated.readElementBorrowed valueAt
+      exact ⟨word, read, valueRelated, related⟩
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, storedObjectEq⟩ := closureRelated.objectEq
+      rw [objectEq] at storedObjectEq
+      contradiction
+
 /-- The checked concrete `USize` projection refines the actual W2 semantic
 `getUSizeField` operation. -/
 theorem LiveHeapRel.readUSizeField_refines

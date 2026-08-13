@@ -718,6 +718,37 @@ def readResidentArrayOwnedReferences (state : MemoryState) (object : Word32)
     liftMemory <| state.memory.readWord32
       (object.value + headerBytes + target.semanticSlotBytes * index)
 
+/-- Checked common decoder for the resident generic Array layout. This is the
+W6 semantic boundary consumed by read and mutation proofs; clients do not need
+to repeat the physical `opaque/ARRY/size/capacity` checks. -/
+def readResidentArrayHeader (state : MemoryState) (object : Word32) :
+    Except ConcreteError Header := do
+  unless object.classify = .heap do
+    throw (.source .expectedObject)
+  let header ← liftMemory <| state.readLiveHeader object
+  unless header.kind == .opaque && header.aux0 == residentArrayMarker &&
+      header.aux3 == 0 && header.aux1.toNat ≤ header.aux2.toNat &&
+      header.allocationBytes.toNat ==
+        residentArrayAllocationBytes header.aux2.toNat do
+    throw (.target (.malformedHeader object.value header.allocationBytes.toNat))
+  return header
+
+/-- Read the logical size without exposing retained spare capacity. -/
+def readResidentArraySize (state : MemoryState) (object : Word32) :
+    Except ConcreteError Nat := do
+  let header ← readResidentArrayHeader state object
+  return header.aux1.toNat
+
+/-- Borrow one live resident-Array slot. The operation reads the low `tobject`
+word only; it performs no retain and changes no concrete runtime state. -/
+def readResidentArrayElementBorrowed (state : MemoryState) (object : Word32)
+    (index : Nat) : Except ConcreteError Word32 := do
+  let header ← readResidentArrayHeader state object
+  unless index < header.aux1.toNat do
+    throw (.source (.objectFieldOutOfBounds index header.aux1.toNat))
+  liftMemory <| state.memory.readWord32
+    (object.value + headerBytes + target.semanticSlotBytes * index)
+
 /-- Load references owned by the current concrete object before marking it
 dead. Constructors use their physical object-field count; closures recover
 their immutable ordered capture kinds through the checked `aux3` descriptor

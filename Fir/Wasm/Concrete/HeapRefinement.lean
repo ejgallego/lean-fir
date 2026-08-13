@@ -576,6 +576,89 @@ theorem ResidentArrayObjectRel.witnessExtension
     related.liveElements index value valueAt
   exact ⟨word, read, valueRelated.witnessExtension extension⟩
 
+/-- The shared checked Array decoder recovers the exact related header. -/
+theorem ResidentArrayObjectRel.readHeader
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {elements : Array Value} {capacity : Nat}
+    {header : Header}
+    (related :
+      ResidentArrayObjectRel state witness address elements capacity header) :
+    readResidentArrayHeader state address = .ok header := by
+  obtain ⟨heap, _, _, _, _, _⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts state address header
+      related.headerRead
+  have valid :
+      header.kind == ObjectKind.opaque &&
+        header.aux0 == residentArrayMarker && header.aux3 == 0 &&
+        header.aux1.toNat ≤ header.aux2.toNat &&
+        header.allocationBytes.toNat ==
+          residentArrayAllocationBytes header.aux2.toNat := by
+    have opaqueEq : (ObjectKind.opaque == ObjectKind.opaque) = true := by decide
+    simpa [opaqueEq, related.headerKind, related.marker, related.reserved,
+      related.logicalSize, related.physicalCapacity, related.sizeCapacity,
+      related.allocationBytes] using related.sizeCapacity
+  unfold readResidentArrayHeader
+  rw [heap]
+  simp only [Bind.bind, Except.bind, liftMemory]
+  rw [related.headerRead]
+  simp only
+  rw [if_pos valid]
+  rfl
+
+/-- The resident size projection observes semantic live length, not capacity. -/
+theorem ResidentArrayObjectRel.readSize
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {elements : Array Value} {capacity : Nat}
+    {header : Header}
+    (related :
+      ResidentArrayObjectRel state witness address elements capacity header) :
+    readResidentArraySize state address = .ok elements.size := by
+  unfold readResidentArraySize
+  rw [related.readHeader]
+  simpa [related.logicalSize]
+
+/-- A successful borrowed read returns the exact related semantic element and
+does not perform any ownership transition. -/
+theorem ResidentArrayObjectRel.readElementBorrowed
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {elements : Array Value} {capacity : Nat}
+    {header : Header} {index : Nat} {value : Value}
+    (related :
+      ResidentArrayObjectRel state witness address elements capacity header)
+    (valueAt : elements[index]? = some value) :
+    ∃ word,
+      readResidentArrayElementBorrowed state address index = .ok word ∧
+      ValueRel witness .tobject (.word32 word) value := by
+  obtain ⟨word, read, valueRelated⟩ :=
+    related.liveElements index value valueAt
+  have indexLt : index < elements.size :=
+    (Array.getElem?_eq_some_iff.mp valueAt).1
+  unfold readResidentArrayElementBorrowed
+  rw [related.readHeader]
+  simp only [Bind.bind, Except.bind]
+  rw [if_pos (by simpa [related.logicalSize] using indexLt)]
+  exact ⟨word, by simpa using read, valueRelated⟩
+
+/-- Borrowed reads beyond the semantic live prefix fail at the shared source
+bounds boundary; spare physical capacity is never readable as a live value. -/
+theorem ResidentArrayObjectRel.readElementBorrowed_outOfBounds
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {elements : Array Value} {capacity : Nat}
+    {header : Header} {index : Nat}
+    (related :
+      ResidentArrayObjectRel state witness address elements capacity header)
+    (outOfBounds : elements.size ≤ index) :
+    readResidentArrayElementBorrowed state address index =
+      .error (.source (.objectFieldOutOfBounds index elements.size)) := by
+  unfold readResidentArrayElementBorrowed
+  rw [related.readHeader]
+  simp only [Bind.bind, Except.bind]
+  have notLt : ¬index < header.aux1.toNat := by
+    rw [related.logicalSize]
+    omega
+  rw [if_neg notLt]
+  simpa [related.logicalSize]
+
 /-- Cell-level resident Array relation. This keeps the semantic identity,
 capacity, reference count, persistence flag, and liveness together without
 admitting ordinary opaque objects. -/
