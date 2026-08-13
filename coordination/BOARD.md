@@ -15,6 +15,37 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-POINTWISE-LAZY-CACHE`.
+- Integration owner: `wasm-proof`, continuing the user-authorized integration
+  lease. The proof slice rebased without conflict onto accepted `main` at
+  `3e63192d`, with functional head `47abc3f6` and clean ready mailbox
+  `a91cb594`; no shared semantic or executable runtime contract changed.
+- Pointwise proof: current-node admission now covers compiler-generated cache
+  hits and admitted empty non-heap misses. Staging takes one source step with
+  target stutter. Hits take one source lookup and four exact target steps to
+  the shared bind protocol. Misses take one source and three target steps into
+  the compiler-selected generated initializer.
+- Hereditary return: miss entry pushes an exact lazy caller in both resource
+  and supported stacks. A related non-heap callee yield then takes one source
+  publication step and seven exact target steps for call return, concrete
+  `cacheSet`, value/flag global publication, conditional exit, and value
+  reload before the ordinary bind rule resumes the caller. The proof restores
+  cache, ownership, budget, closure-table, ABI, and supported-caller
+  invariants without an initializer evaluation or termination premise.
+- Acceptance: Lean Beam update/sync/save reports zero errors and save-ready
+  source hash `dc74789b10667059`; the 3,120-job focused simulation/importer
+  cone, `git diff --check`, `make talos-setup` at `0e05edbc`, all 3,143 Talos
+  jobs, and complete `make check` pass after rebase. The root gate covers 125
+  harness tests, 666 source cases, 9 direct-machine cases, 666
+  native/LCNF/V8 cases, 675 unique cases, 2,007/2,007 equal comparisons,
+  7,252 machine steps, and zero findings. No bug card was required.
+- Result: `main` fast-forwards through the clean W6 mailbox. W6 next proves
+  production current-step coverage and the canonical export root needed by
+  `ConcreteFiniteTraceCorrect`. Heap-valued miss publication remains a
+  separate facts-aware widening; target-only loop unwinding remains later.
+
+## Latest completed integration lease
+
 - Milestone: `W6-POINTWISE-ARBITRARY-CASE-TABLES`.
 - Integration owner: `wasm-proof`, continuing the user-authorized integration
   lease. The coherent proof checkpoint rebased without conflict onto accepted
