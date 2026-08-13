@@ -17,7 +17,9 @@ below are inversions of the executable validator equations.
 namespace FirTalos.Concrete
 
 open Fir.Wasm
+open Fir.Wasm.Concrete
 open Fir.LeanIR.Impure
+open FirTalos.Correctness
 
 /-- The exact residual state of source validation at one current LCNF node. -/
 structure ConcreteStructuredValidationFocus
@@ -31,6 +33,103 @@ structure ConcreteStructuredValidationFocus
   supported :
     Fir.Wasm.supportedCodeWithJoins program joins locals expectedResult facts
       sharing code = true
+
+/-- Existential package for the complete residual validator state at an
+active generated-function node.  The indices retain only the stable program,
+function result, and current code; joins, local kinds, case facts, and sharing
+facts are exposed as fields so transition theorems can evolve them without
+changing the compiler/resource relation's public indices. -/
+def ConcreteStructuredValidationState
+    (program : Fir.LeanIR.ImpureProgram)
+    (functionResult : Fir.Wasm.AbiKind)
+    (code : Lean.Compiler.LCNF.Code .impure) : Prop :=
+  ∃ joins : Fir.Wasm.JoinPoints,
+    ∃ locals : Fir.Wasm.LocalKinds,
+      ∃ facts : Fir.Wasm.SupportedCaseFacts,
+        ∃ sharing : Fir.Wasm.SupportedSharingFacts,
+          ConcreteStructuredValidationFocus program joins locals
+            (some functionResult) facts sharing code
+
+/-- Admission-free compiler/resource core strengthened by the exact residual
+validation state of its current source node.  This companion relation is the
+incremental bridge to universal compiler admission: it adds no source step,
+target path, allocation budget, future admission, or termination evidence. -/
+structure ConcreteStructuredValidatedCodeCoreRel
+    (program : Fir.LeanIR.ImpureProgram)
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (externals : ExternalImpl)
+    (labels : List Lean.FVarId)
+    (entryRuntime : RuntimeState)
+    (entryStore : Wasm.Store Host)
+    (entryWitness : RefinementWitness)
+    (functionResult : AbiKind)
+    (callerExpectedResult : Option AbiKind)
+    (facts : ReuseCapacityFacts)
+    (remainingBytes : Nat)
+    (sourceRuntime : RuntimeState)
+    (sourceEnv : Env)
+    (sourceCode : Lean.Compiler.LCNF.Code .impure)
+    (targetStore : Wasm.Store Host)
+    (targetLocals : Wasm.Locals)
+    (targetCode : Wasm.Program)
+    (witness : RefinementWitness)
+    (source : MachineState)
+    (target : StructuredWasmState Host) : Prop where
+  core : ConcreteStructuredCodeCoreRel program context sourceModule
+    sourceFunction externals labels entryRuntime entryStore entryWitness
+    functionResult callerExpectedResult facts remainingBytes sourceRuntime
+    sourceEnv sourceCode targetStore targetLocals targetCode witness source
+    target
+  validation : ConcreteStructuredValidationState program functionResult
+    sourceCode
+
+/-- Attach a dynamically reached core to a separately advanced residual
+validator state.  Keeping this operation explicit is important: successor
+validation is proved from the current syntax node, never guessed from target
+instructions or stored as a future execution certificate. -/
+theorem ConcreteStructuredValidatedCodeCoreRel.withSuccessor
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts nextFacts : ReuseCapacityFacts}
+    {remainingBytes nextRemainingBytes : Nat}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv nextEnv : Env}
+    {sourceCode nextCode : Lean.Compiler.LCNF.Code .impure}
+    {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals}
+    {targetCode nextTargetCode : Wasm.Program}
+    {witness nextWitness : RefinementWitness}
+    {source nextSource : MachineState}
+    {target nextTarget : StructuredWasmState Host}
+    (_related : ConcreteStructuredValidatedCodeCoreRel program context
+      sourceModule sourceFunction externals labels entryRuntime entryStore
+      entryWitness functionResult callerExpectedResult facts remainingBytes
+      sourceRuntime sourceEnv sourceCode targetStore targetLocals targetCode
+      witness source target)
+    (nextCore : ConcreteStructuredCodeCoreRel program context sourceModule
+      sourceFunction externals labels entryRuntime entryStore entryWitness
+      functionResult callerExpectedResult nextFacts nextRemainingBytes
+      nextRuntime nextEnv nextCode nextStore nextLocals nextTargetCode
+      nextWitness nextSource nextTarget)
+    (nextValidation : ConcreteStructuredValidationState program functionResult
+      nextCode) :
+    ConcreteStructuredValidatedCodeCoreRel program context sourceModule
+      sourceFunction externals labels entryRuntime entryStore entryWitness
+      functionResult callerExpectedResult nextFacts nextRemainingBytes
+      nextRuntime nextEnv nextCode nextStore nextLocals nextTargetCode
+      nextWitness nextSource nextTarget :=
+  ⟨nextCore, nextValidation⟩
 
 /-- Production validation supplies the root residual state at the active
 generated function's exact result ABI. -/
@@ -54,6 +153,66 @@ theorem ConcreteSupportedFunction.rootValidation
   obtain ⟨rootLocals, parameters, supported⟩ :=
     spec.validatedBodyAt activeResult
   exact ⟨rootLocals, parameters, ⟨supported⟩⟩
+
+/-- The production-supported function constructs the packaged validation
+state at its generated entry. -/
+theorem ConcreteSupportedFunction.rootValidationState
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction target hosts)
+    {functionResult : Fir.Wasm.AbiKind}
+    (activeResult : spec.sourceResultKind = functionResult) :
+    ConcreteStructuredValidationState program functionResult functionCode := by
+  obtain ⟨rootLocals, _parameters, validated⟩ :=
+    spec.rootValidation activeResult
+  exact ⟨[], rootLocals, [], [], validated⟩
+
+/-- Attach production root validation to any compiler/resource core at the
+generated function's entry code.  The dynamic core may use arbitrary entry
+runtime, budget, and witness indices; validation depends only on the accepted
+source declaration and its active result ABI. -/
+theorem ConcreteStructuredCodeCoreRel.withRootValidation
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts)
+    (activeResult : spec.sourceResultKind = functionResult)
+    (core : ConcreteStructuredCodeCoreRel program context sourceModule
+      sourceFunction externals labels entryRuntime entryStore entryWitness
+      functionResult callerExpectedResult facts remainingBytes sourceRuntime
+      sourceEnv functionCode targetStore targetLocals targetCode witness source
+      target) :
+    ConcreteStructuredValidatedCodeCoreRel program context sourceModule
+      sourceFunction externals labels entryRuntime entryStore entryWitness
+      functionResult callerExpectedResult facts remainingBytes sourceRuntime
+      sourceEnv functionCode targetStore targetLocals targetCode witness source
+      target :=
+  ⟨core, spec.rootValidationState activeResult⟩
 
 /-- A validated direct `let` exposes the exact kind inserted into the residual
 local row and the guarded-sharing update used for its continuation. -/
@@ -93,6 +252,77 @@ theorem ConcreteStructuredValidationFocus.let_eq
         | _ => Fir.Wasm.eraseSupportedSharingFact sharing decl.fvarId)
         continuation = true at supported
       exact ⟨kind, rfl, ⟨supported⟩⟩
+
+/-- A validated `let` advances the packaged residual state with exactly the
+local-kind and guarded-sharing updates performed by the executable validator. -/
+theorem ConcreteStructuredValidationState.letContinuation
+    {program : Fir.LeanIR.ImpureProgram}
+    {functionResult : Fir.Wasm.AbiKind}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredValidationState program functionResult
+      (.let decl continuation)) :
+    ∃ kind,
+      ∃ locals,
+      Fir.Wasm.supportedLetDeclKind? program locals decl = some kind ∧
+        ConcreteStructuredValidationState program functionResult
+          continuation := by
+  obtain ⟨joins, locals, facts, sharing, focus⟩ := validated
+  obtain ⟨kind, kindFound, next⟩ := focus.let_eq
+  exact ⟨kind, locals, kindFound,
+    ⟨joins,
+      Fir.Wasm.insertLocal locals decl.fvarId kind,
+      facts,
+      (match decl.value with
+      | .isShared objectId =>
+          Fir.Wasm.insertSupportedSharingFact sharing decl.fvarId
+            objectId
+      | _ =>
+          Fir.Wasm.eraseSupportedSharingFact sharing decl.fvarId),
+      next⟩⟩
+
+/-- Any compiler/resource successor of a validated direct `let` continuation
+inherits the exact residual validator state, even when the concrete operation
+changes heap facts, remaining address-space budget, or refinement witness. -/
+theorem ConcreteStructuredValidatedCodeCoreRel.letSuccessor
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime nextRuntime : RuntimeState}
+    {entryStore targetStore nextStore : Wasm.Store Host}
+    {entryWitness witness nextWitness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts nextFacts : ReuseCapacityFacts}
+    {remainingBytes nextRemainingBytes : Nat}
+    {sourceEnv nextEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals nextLocals : Wasm.Locals}
+    {targetCode nextTargetCode : Wasm.Program}
+    {source nextSource : MachineState}
+    {target nextTarget : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeCoreRel program context
+      sourceModule sourceFunction externals labels entryRuntime entryStore
+      entryWitness functionResult callerExpectedResult facts remainingBytes
+      sourceRuntime sourceEnv (.let decl continuation) targetStore targetLocals
+      targetCode witness source target)
+    (nextCore : ConcreteStructuredCodeCoreRel program context sourceModule
+      sourceFunction externals labels entryRuntime entryStore entryWitness
+      functionResult callerExpectedResult nextFacts nextRemainingBytes
+      nextRuntime nextEnv continuation nextStore nextLocals nextTargetCode
+      nextWitness nextSource nextTarget) :
+    ConcreteStructuredValidatedCodeCoreRel program context sourceModule
+      sourceFunction externals labels entryRuntime entryStore entryWitness
+      functionResult callerExpectedResult nextFacts nextRemainingBytes
+      nextRuntime nextEnv continuation nextStore nextLocals nextTargetCode
+      nextWitness nextSource nextTarget := by
+  obtain ⟨_kind, _locals, _kindFound, nextValidation⟩ :=
+    related.validation.letContinuation
+  exact related.withSuccessor nextCore nextValidation
 
 /-- Persistent ownership increments are erased by lowering and preserve the
 complete residual validator state. -/
@@ -165,6 +395,19 @@ theorem ConcreteStructuredValidationFocus.incContinuation
       simp [Fir.Wasm.supportedCodeWithJoins] at supported
       exact ⟨supported⟩
 
+/-- Ownership increment advances only the source code; every residual
+validator component is unchanged. -/
+theorem ConcreteStructuredValidationState.incContinuation
+    {program : Fir.LeanIR.ImpureProgram}
+    {functionResult : Fir.Wasm.AbiKind}
+    {objectId : Lean.FVarId} {amount : Nat} {check persistent : Bool}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredValidationState program functionResult
+      (.inc objectId amount check persistent continuation)) :
+    ConcreteStructuredValidationState program functionResult continuation := by
+  obtain ⟨joins, locals, facts, sharing, focus⟩ := validated
+  exact ⟨joins, locals, facts, sharing, focus.incContinuation⟩
+
 /-- Both decrement modes retain the same validator state at their
 continuation. -/
 theorem ConcreteStructuredValidationFocus.decContinuation
@@ -190,6 +433,99 @@ theorem ConcreteStructuredValidationFocus.decContinuation
   | true =>
       simp [Fir.Wasm.supportedCodeWithJoins] at supported
       exact ⟨supported⟩
+
+/-- Ownership decrement preserves the complete residual validator state. -/
+theorem ConcreteStructuredValidationState.decContinuation
+    {program : Fir.LeanIR.ImpureProgram}
+    {functionResult : Fir.Wasm.AbiKind}
+    {objectId : Lean.FVarId} {amount : Nat} {check persistent : Bool}
+    {objectFields? : Option Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredValidationState program functionResult
+      (.dec objectId amount check persistent objectFields? continuation)) :
+    ConcreteStructuredValidationState program functionResult continuation := by
+  obtain ⟨joins, locals, facts, sharing, focus⟩ := validated
+  exact ⟨joins, locals, facts, sharing, focus.decContinuation⟩
+
+/-- Uniform successor transport for ownership increments. -/
+theorem ConcreteStructuredValidatedCodeCoreRel.incSuccessor
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime nextRuntime : RuntimeState}
+    {entryStore targetStore nextStore : Wasm.Store Host}
+    {entryWitness witness nextWitness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts nextFacts : ReuseCapacityFacts}
+    {remainingBytes nextRemainingBytes : Nat}
+    {sourceEnv nextEnv : Env}
+    {objectId : Lean.FVarId} {amount : Nat} {check persistent : Bool}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals nextLocals : Wasm.Locals}
+    {targetCode nextTargetCode : Wasm.Program}
+    {source nextSource : MachineState}
+    {target nextTarget : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeCoreRel program context
+      sourceModule sourceFunction externals labels entryRuntime entryStore
+      entryWitness functionResult callerExpectedResult facts remainingBytes
+      sourceRuntime sourceEnv (.inc objectId amount check persistent continuation)
+      targetStore targetLocals targetCode witness source target)
+    (nextCore : ConcreteStructuredCodeCoreRel program context sourceModule
+      sourceFunction externals labels entryRuntime entryStore entryWitness
+      functionResult callerExpectedResult nextFacts nextRemainingBytes
+      nextRuntime nextEnv continuation nextStore nextLocals nextTargetCode
+      nextWitness nextSource nextTarget) :
+    ConcreteStructuredValidatedCodeCoreRel program context sourceModule
+      sourceFunction externals labels entryRuntime entryStore entryWitness
+      functionResult callerExpectedResult nextFacts nextRemainingBytes
+      nextRuntime nextEnv continuation nextStore nextLocals nextTargetCode
+      nextWitness nextSource nextTarget :=
+  related.withSuccessor nextCore related.validation.incContinuation
+
+/-- Uniform successor transport for ownership decrements. -/
+theorem ConcreteStructuredValidatedCodeCoreRel.decSuccessor
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime nextRuntime : RuntimeState}
+    {entryStore targetStore nextStore : Wasm.Store Host}
+    {entryWitness witness nextWitness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts nextFacts : ReuseCapacityFacts}
+    {remainingBytes nextRemainingBytes : Nat}
+    {sourceEnv nextEnv : Env}
+    {objectId : Lean.FVarId} {amount : Nat} {check persistent : Bool}
+    {objectFields? : Option Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals nextLocals : Wasm.Locals}
+    {targetCode nextTargetCode : Wasm.Program}
+    {source nextSource : MachineState}
+    {target nextTarget : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeCoreRel program context
+      sourceModule sourceFunction externals labels entryRuntime entryStore
+      entryWitness functionResult callerExpectedResult facts remainingBytes
+      sourceRuntime sourceEnv
+      (.dec objectId amount check persistent objectFields? continuation)
+      targetStore targetLocals targetCode witness source target)
+    (nextCore : ConcreteStructuredCodeCoreRel program context sourceModule
+      sourceFunction externals labels entryRuntime entryStore entryWitness
+      functionResult callerExpectedResult nextFacts nextRemainingBytes
+      nextRuntime nextEnv continuation nextStore nextLocals nextTargetCode
+      nextWitness nextSource nextTarget) :
+    ConcreteStructuredValidatedCodeCoreRel program context sourceModule
+      sourceFunction externals labels entryRuntime entryStore entryWitness
+      functionResult callerExpectedResult nextFacts nextRemainingBytes
+      nextRuntime nextEnv continuation nextStore nextLocals nextTargetCode
+      nextWitness nextSource nextTarget :=
+  related.withSuccessor nextCore related.validation.decContinuation
 
 /-- Object-field writes retain the residual state after their executable kind
 guards have succeeded. -/
@@ -219,6 +555,18 @@ theorem ConcreteStructuredValidationFocus.osetContinuation
     | true => rfl
   exact ⟨continuationSupported⟩
 
+theorem ConcreteStructuredValidationState.osetContinuation
+    {program : Fir.LeanIR.ImpureProgram}
+    {functionResult : Fir.Wasm.AbiKind}
+    {objectId : Lean.FVarId} {fieldIndex : Nat}
+    {arg : Lean.Compiler.LCNF.Arg .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredValidationState program functionResult
+      (.oset objectId fieldIndex arg continuation)) :
+    ConcreteStructuredValidationState program functionResult continuation := by
+  obtain ⟨joins, locals, facts, sharing, focus⟩ := validated
+  exact ⟨joins, locals, facts, sharing, focus.osetContinuation⟩
+
 /-- `USize` field writes preserve the residual validator state. -/
 theorem ConcreteStructuredValidationFocus.usetContinuation
     {program : Fir.LeanIR.ImpureProgram}
@@ -237,6 +585,17 @@ theorem ConcreteStructuredValidationFocus.usetContinuation
   have supported := validated.supported
   simp only [Fir.Wasm.supportedCodeWithJoins, Bool.and_eq_true] at supported
   exact ⟨supported.2⟩
+
+theorem ConcreteStructuredValidationState.usetContinuation
+    {program : Fir.LeanIR.ImpureProgram}
+    {functionResult : Fir.Wasm.AbiKind}
+    {objectId : Lean.FVarId} {fieldIndex : Nat} {fieldId : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredValidationState program functionResult
+      (.uset objectId fieldIndex fieldId continuation)) :
+    ConcreteStructuredValidationState program functionResult continuation := by
+  obtain ⟨joins, locals, facts, sharing, focus⟩ := validated
+  exact ⟨joins, locals, facts, sharing, focus.usetContinuation⟩
 
 /-- Packed scalar field writes preserve the residual validator state. -/
 theorem ConcreteStructuredValidationFocus.ssetContinuation
@@ -265,6 +624,18 @@ theorem ConcreteStructuredValidationFocus.ssetContinuation
     | true => rfl
   exact ⟨continuationSupported⟩
 
+theorem ConcreteStructuredValidationState.ssetContinuation
+    {program : Fir.LeanIR.ImpureProgram}
+    {functionResult : Fir.Wasm.AbiKind}
+    {objectId : Lean.FVarId} {byteOffset fieldIndex : Nat}
+    {fieldId : Lean.FVarId} {type : Lean.Expr}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredValidationState program functionResult
+      (.sset objectId byteOffset fieldIndex fieldId type continuation)) :
+    ConcreteStructuredValidationState program functionResult continuation := by
+  obtain ⟨joins, locals, facts, sharing, focus⟩ := validated
+  exact ⟨joins, locals, facts, sharing, focus.ssetContinuation⟩
+
 /-- Constructor-tag writes preserve the residual validator state. -/
 theorem ConcreteStructuredValidationFocus.setTagContinuation
     {program : Fir.LeanIR.ImpureProgram}
@@ -283,6 +654,17 @@ theorem ConcreteStructuredValidationFocus.setTagContinuation
   simp only [Fir.Wasm.supportedCodeWithJoins, Bool.and_eq_true] at supported
   exact ⟨supported.2⟩
 
+theorem ConcreteStructuredValidationState.setTagContinuation
+    {program : Fir.LeanIR.ImpureProgram}
+    {functionResult : Fir.Wasm.AbiKind}
+    {objectId : Lean.FVarId} {tag : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredValidationState program functionResult
+      (.setTag objectId tag continuation)) :
+    ConcreteStructuredValidationState program functionResult continuation := by
+  obtain ⟨joins, locals, facts, sharing, focus⟩ := validated
+  exact ⟨joins, locals, facts, sharing, focus.setTagContinuation⟩
+
 /-- Explicit deletion preserves the residual validator state. -/
 theorem ConcreteStructuredValidationFocus.delContinuation
     {program : Fir.LeanIR.ImpureProgram}
@@ -300,6 +682,17 @@ theorem ConcreteStructuredValidationFocus.delContinuation
   have supported := validated.supported
   simp only [Fir.Wasm.supportedCodeWithJoins, Bool.and_eq_true] at supported
   exact ⟨supported.2⟩
+
+theorem ConcreteStructuredValidationState.delContinuation
+    {program : Fir.LeanIR.ImpureProgram}
+    {functionResult : Fir.Wasm.AbiKind}
+    {objectId : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredValidationState program functionResult
+      (.del objectId continuation)) :
+    ConcreteStructuredValidationState program functionResult continuation := by
+  obtain ⟨joins, locals, facts, sharing, focus⟩ := validated
+  exact ⟨joins, locals, facts, sharing, focus.delContinuation⟩
 
 /-- Return validation identifies the residual local kind and the exact
 compiler-level compatibility check against the active result ABI. -/
