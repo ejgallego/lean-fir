@@ -100,6 +100,16 @@ structure MemoryDecl where
   exportName : Option String := none
   deriving Inhabited, BEq
 
+/--
+One active data segment copied into the module-owned wasm32 memory during
+instantiation. FIR deliberately starts with constant offsets: resident-runtime
+images need deterministic bytes, not a second initializer expression language.
+-/
+structure DataSegment where
+  offset : UInt32
+  bytes : Array UInt8
+  deriving Inhabited, BEq
+
 inductive GlobalInit where
   | i32 (value : UInt32)
   | i64 (value : UInt64)
@@ -141,6 +151,8 @@ structure Module where
   closureDescriptors : Array (Array AbiKind) := #[]
   /-- Optional module-owned wasm32 memory. Existing semantic-host modules omit it. -/
   memory : Option MemoryDecl := none
+  /-- Ordered active segments initialized in the module-owned memory. -/
+  dataSegments : Array DataSegment := #[]
   /-- Resident-runtime globals, physically appended after lazy-cache globals. -/
   globals : Array GlobalDecl := #[]
   deriving Inhabited, BEq

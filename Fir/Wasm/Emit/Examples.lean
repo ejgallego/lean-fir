@@ -448,7 +448,10 @@ def residentMemorySurfaceModule : Module := {
     `residentMemoryGrow]
   initializers := #[]
   runtimeOperations := #[]
-  memory := some { pagesMin := 1, exportName := some "memory" } }
+  memory := some { pagesMin := 1, exportName := some "memory" }
+  dataSegments := #[{
+    offset := 2048
+    bytes := #[0xde, 0xad, 0xbe, 0xef] }] }
 
 #guard validateModule residentMemorySurfaceModule |>.isOk
 #guard encode residentMemorySurfaceModule |>.isOk
@@ -491,7 +494,8 @@ def residentGlobalSurfaceModule : Module := {
   | .error (.invalidGlobalInitializer 0) => true
   | _ => false
 
-#guard match validateModule { residentMemorySurfaceModule with memory := none } with
+#guard match validateModule {
+    residentMemorySurfaceModule with memory := none, dataSegments := #[] } with
   | .error (.memoryInstructionWithoutMemory `residentLoad) => true
   | _ => false
 
@@ -499,6 +503,17 @@ def residentGlobalSurfaceModule : Module := {
     residentMemorySurfaceModule with
     memory := some { pagesMin := 65537 } } with
   | .error .invalidMemoryLimits => true
+  | _ => false
+
+#guard match validateModule {
+    residentMemorySurfaceModule with memory := none } with
+  | .error (.dataSegmentWithoutMemory 0) => true
+  | _ => false
+
+#guard match validateModule {
+    residentMemorySurfaceModule with
+    dataSegments := #[{ offset := 65535, bytes := #[0, 1] }] } with
+  | .error (.dataSegmentOutOfBounds 0) => true
   | _ => false
 
 def w5ManifestOperations : Array RuntimeOp := #[

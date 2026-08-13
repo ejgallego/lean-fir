@@ -41,6 +41,8 @@ inductive SymbolicError where
   | invalidConstant (function : Name) (kind : AbiKind) (physical : ValueType)
   | invalidLocalRefinement (function : Name) (fvarId : FVarId) (kind : AbiKind)
   | invalidMemoryLimits
+  | dataSegmentWithoutMemory (index : Nat)
+  | dataSegmentOutOfBounds (index : Nat)
   | memoryInstructionWithoutMemory (function : Name)
   | stackUnderflow (function : Name) (expected : List AbiKind)
   | stackMismatch (function : Name) (expected actual : List AbiKind)
@@ -237,6 +239,13 @@ private def validateModuleShapeWithIndex (index : CheckIndex)
     if let some exportName := memory.exportName then
       if module.exports.any (·.toString == exportName) then
         throw (.duplicateExport (Name.mkSimple exportName))
+  else if !module.dataSegments.isEmpty then
+    throw (.dataSegmentWithoutMemory 0)
+  if let some memory := module.memory then
+    let initialBytes := memory.pagesMin.toNat * 65536
+    for (segment, index) in module.dataSegments.toList.zipIdx do
+      unless segment.offset.toNat + segment.bytes.size ≤ initialBytes do
+        throw (.dataSegmentOutOfBounds index)
   if (firstDuplicateIndexed? module.initializers).isSome then
     throw (.invalidInitializer module.initializers[0]!)
   for initializer in module.initializers do

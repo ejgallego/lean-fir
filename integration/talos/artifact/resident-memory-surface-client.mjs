@@ -28,6 +28,10 @@ export async function checkResidentMemorySurface(bytes) {
   const size = exportedFunction(instance, "residentMemorySize");
   const grow = exportedFunction(instance, "residentMemoryGrow");
 
+  expect(new Uint8Array(memory.buffer, 2048, 4).every(
+    (value, index) => value === [0xde, 0xad, 0xbe, 0xef][index]),
+  "resident active data segment was not initialized");
+
   expect((arithmetic() >>> 0) === 1,
     "resident i32 add/sub/lt_u sequence drifted");
   expect((size() >>> 0) === 1,

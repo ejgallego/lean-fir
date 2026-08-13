@@ -268,6 +268,11 @@ private def encodeMemory (memory : MemoryDecl) : Bytes :=
   | some pagesMax =>
       #[0x01] ++ encodeU32 memory.pagesMin.toNat ++ encodeU32 pagesMax.toNat
 
+private def encodeDataSegment (segment : DataSegment) : Bytes :=
+  /- Active segment for memory 0, followed by an i32.const offset expression. -/
+  #[0x00, 0x41] ++ encodeI32 segment.offset ++ #[0x0b] ++
+    encodeU32 segment.bytes.size ++ segment.bytes
+
 private def zeroGlobal (kind : AbiKind) : GlobalDecl := {
   kind
   init :=
@@ -326,6 +331,8 @@ private def encodeCore (module : Module) (validate : Bool) :
   let exportPayload := encodeVector (functionExports ++ memoryExports)
   let codePayload ← encodeVector <$> module.functions.toList.mapM
     (encodeFunctionBody module checkIndex index)
+  let dataPayload := encodeVector <|
+    module.dataSegments.toList.map encodeDataSegment
 
   let mut bytes := header
   unless signatures.isEmpty do
@@ -342,6 +349,8 @@ private def encodeCore (module : Module) (validate : Bool) :
     bytes := bytes ++ encodeSection 0x07 exportPayload
   unless module.functions.isEmpty do
     bytes := bytes ++ encodeSection 0x0a codePayload
+  unless module.dataSegments.isEmpty do
+    bytes := bytes ++ encodeSection 0x0b dataPayload
   return ByteArray.mk bytes
 
 /-- Validate and serialize one FIR symbolic module. -/
