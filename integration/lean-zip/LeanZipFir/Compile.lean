@@ -12,6 +12,10 @@ def storedEntry : Name := ``Zip.Wasm.compressStored
 /-- First production DEFLATE matcher/emitter root. -/
 def level1Entry : Name := ``Zip.Wasm.compressLevel1
 
+/-- Package-lifetime initializer retained by the Level-1 two-region arena. -/
+def level1PersistentInitializer : Name :=
+  Fir.Wasm.Emit.ResidentCache.persistentInitializerName
+
 /--
 Capture the real stored-block entry through FIR's legacy-source final-LCNF
 pipeline. This lean-zip revision predates Lean's `module` / `public section`
@@ -62,15 +66,16 @@ private def compileLevel1Unprepared : CoreM (Except Fir.Wasm.Emit.Source.Compile
 def compileLevel1Base : CoreM (Except Fir.Wasm.Emit.Source.CompileError
     Fir.Wasm.Emit.Source.ModuleArtifact) := do
   let result ← compileLevel1Unprepared
-  return result.bind Fir.Wasm.Emit.ResidentLinker.prepareArenaArtifact
+  return result.bind
+    Fir.Wasm.Emit.ResidentLinker.preparePersistentCacheArenaArtifact
 
 /-- Complete zero-import resident package frontier for Level-1 DEFLATE. -/
 def compileLevel1 : CoreM (Except Fir.Wasm.Emit.Source.CompileError
     Fir.Wasm.Emit.Source.ModuleArtifact) := do
   let result ← compileLevel1Unprepared
   return result.bind <|
-    Fir.Wasm.Emit.ResidentLinker.prepareArenaAndLinkArtifact fun module =>
+    Fir.Wasm.Emit.ResidentLinker.preparePersistentCacheArenaAndLinkArtifact fun module =>
       Fir.Wasm.Emit.ResidentLinker.closedApplicationAvailablePolicy
-        module #[level1Entry]
+        module #[level1Entry, level1PersistentInitializer]
 
 end LeanZipFir.Compile

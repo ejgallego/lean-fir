@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-eliminated-lazy-cache-amplification
-status: confirmed
+status: fixed
 classification: compiler
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: d8b18978322de05a8f3dba51ef03cf5461676c17
@@ -86,9 +86,25 @@ none
 
 ## Resolution and regression
 
-Pending. The repair will preserve the compiler cache globals, synthesize an
-idempotent module initializer from their exact typed layout, run it before
-input allocation, and establish its post-initialization frontier as the lower
-bound for every public-call rewind. The focused cache probe must agree with the
-native oracle, initialize once, and retain a flat checkpoint across repeats
-before the complete Level-1 path is accepted.
+`ResidentCache.installPersistentInitializer` preserves the compiler's exact
+typed flag/value globals and synthesizes the exported, idempotent
+`fir_initialize_persistent_caches` entry. Each miss calls the original
+initializer, publishes recursive persistence through the existing cache-set
+helper, stores the value, and sets its initialized flag. The separate
+`preparePersistentCacheArenaAndLinkArtifact` API leaves existing
+cache-eliminating packages unchanged.
+
+The augmented zero-import resident-cache artifact proves the two-region
+protocol in Node and Chrome: initialization allocates a persistent constructor
+graph once, a second initialization leaves the frontier unchanged, scratch is
+allocated at the checkpoint, rewind restores it, and the cached root remains
+valid.
+
+The real Level-1 package now retains its compiler cache and passes the complete
+five-case native differential. For an 83-byte representative, a local run
+changed from roughly 46.7 seconds and 935,103,808 scratch bytes to about 15 ms
+of entry execution and 525,584 scratch bytes after a one-time 8,031,880-byte
+cache initialization. The exact `distanceCodeCacheProbe` at lean-zip source
+revision `74e4826cee362d815a11c213894f072ced5e6b0a` additionally passes four
+native-oracle cases twice each, including 4,096 repeated bytes, while every
+call returns to the same persistent checkpoint.

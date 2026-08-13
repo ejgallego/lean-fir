@@ -71,13 +71,15 @@ function verifyDescriptor(descriptor, entry) {
   "module descriptor must declare zero imports");
 }
 
-function verifyModule(module, entry, label) {
+function verifyModule(module, entry, label, persistentInitializer) {
   requireCondition(WebAssembly.Module.imports(module).length === 0,
     `${label} module must have zero imports`);
   const exports = WebAssembly.Module.exports(module);
   const actual = exports.map(({ name, kind }) => `${kind}:${name}`);
   const expected = [
     `function:${entry}`,
+    ...(persistentInitializer === null
+      ? [] : [`function:${persistentInitializer}`]),
     "function:fir_heap_frontier",
     "function:fir_heap_set_frontier",
     "function:fir_heap_rewind",
@@ -90,12 +92,13 @@ function verifyModule(module, entry, label) {
 }
 
 class LeanZipByteArrayAdapter {
-  constructor(instance, now, entry) {
+  constructor(instance, now, entry, initialization) {
     this.instance = instance;
     this.exports = instance.exports;
     this.memory = this.exports.memory;
     this.now = now;
     this.entry = entry;
+    this.initialization = initialization;
   }
 
   frontier() {
@@ -155,6 +158,8 @@ class LeanZipByteArrayAdapter {
   compress(value) {
     const totalStarted = this.now();
     const frontierBefore = this.frontier();
+    requireCondition(frontierBefore === this.initialization.checkpoint,
+      "scratch arena moved below or above its persistent checkpoint");
     const input = asBytes(value);
     let encodeMs = 0;
     let executeMs = 0;
@@ -221,23 +226,53 @@ export async function createLeanZipByteArrayAdapter({
   bytes,
   module,
   descriptor,
+  persistentInitializer = null,
   now = () => performance.now(),
 } = {}) {
   requireCondition(typeof entry === "string" && entry.length > 0,
     "entry must be a nonempty string");
   requireCondition(typeof now === "function", "now must be a function");
+  requireCondition(persistentInitializer === null ||
+    (typeof persistentInitializer === "string" && persistentInitializer.length > 0),
+  "persistentInitializer must be null or a nonempty string");
   verifyDescriptor(descriptor, entry);
   const compiled = module ?? await WebAssembly.compile(bytes);
   requireCondition(compiled instanceof WebAssembly.Module,
     "module must be a WebAssembly.Module");
-  verifyModule(compiled, entry, label);
+  verifyModule(compiled, entry, label, persistentInitializer);
   const instance = await WebAssembly.instantiate(compiled, {});
-  return new LeanZipByteArrayAdapter(instance, now, entry);
+  const initialFrontier = instance.exports.fir_heap_frontier() >>> 0;
+  let initializeMs = 0;
+  let idempotenceMs = 0;
+  if (persistentInitializer !== null) {
+    const initializeStarted = now();
+    instance.exports[persistentInitializer]();
+    initializeMs = elapsed(now, initializeStarted);
+    const checkpoint = instance.exports.fir_heap_frontier() >>> 0;
+    requireCondition(checkpoint >= initialFrontier,
+      "persistent initializer moved the arena frontier backwards");
+    const idempotenceStarted = now();
+    instance.exports[persistentInitializer]();
+    idempotenceMs = elapsed(now, idempotenceStarted);
+    requireCondition((instance.exports.fir_heap_frontier() >>> 0) === checkpoint,
+      "persistent initializer was not idempotent");
+  }
+  const checkpoint = instance.exports.fir_heap_frontier() >>> 0;
+  const initialization = Object.freeze({
+    entry: persistentInitializer,
+    initialFrontier,
+    checkpoint,
+    frontierGrowth: checkpoint - initialFrontier,
+    initializeMs,
+    idempotenceMs,
+    pages: instance.exports.memory.buffer.byteLength / PAGE_BYTES,
+  });
+  return new LeanZipByteArrayAdapter(instance, now, entry, initialization);
 }
 
 /** Fetch and instantiate any supported self-contained ByteArray entry. */
 export async function fetchLeanZipByteArrayAdapter({
-  entry, label, wasmUrl, descriptorUrl, now,
+  entry, label, wasmUrl, descriptorUrl, persistentInitializer, now,
 }) {
   const [wasmResponse, descriptorResponse] = await Promise.all([
     fetch(wasmUrl),
@@ -252,6 +287,7 @@ export async function fetchLeanZipByteArrayAdapter({
     label,
     bytes: await wasmResponse.arrayBuffer(),
     descriptor: await descriptorResponse.json(),
+    persistentInitializer,
     now,
   });
 }

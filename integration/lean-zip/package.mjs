@@ -24,6 +24,7 @@ import {
 import {
   LEAN_ZIP_LEVEL1_ADAPTER_API_VERSION,
   LEAN_ZIP_LEVEL1_OWNERSHIP_VERSION,
+  LEAN_ZIP_LEVEL1_PERSISTENT_INITIALIZER,
 } from "./lean-zip-level1-browser-adapter.mjs";
 
 const directory = dirname(fileURLToPath(import.meta.url));
@@ -342,6 +343,7 @@ const level1Exports = WebAssembly.Module.exports(level1Module);
 assert.deepEqual(level1Imports, []);
 assert.deepEqual(level1Exports, [
   { name: "Zip.Wasm.compressLevel1", kind: "function" },
+  { name: LEAN_ZIP_LEVEL1_PERSISTENT_INITIALIZER, kind: "function" },
   { name: "fir_heap_frontier", kind: "function" },
   { name: "fir_heap_set_frontier", kind: "function" },
   { name: "fir_heap_rewind", kind: "function" },
@@ -370,7 +372,7 @@ run(process.execPath, [join(directory, "level1-smoke.mjs")],
 const level1AdapterBytes = readFileSync(level1AdapterPath);
 const level1SmokeBytes = readFileSync(level1SmokePath);
 const level1Build = {
-  schemaVersion: "fir.lean-zip.level1.build/v1",
+  schemaVersion: "fir.lean-zip.level1.build/v2",
   sources: {
     fir,
     leanZip: {
@@ -397,6 +399,7 @@ const level1Build = {
     sourceName: "Zip.Wasm.compressLevel1",
     parameters: [{ name: "input", lean: "ByteArray", fir: "object" }],
     result: { lean: "ByteArray", fir: "object" },
+    persistentInitializer: LEAN_ZIP_LEVEL1_PERSISTENT_INITIALIZER,
   },
   wasm: {
     file: "lean-zip-level1.wasm",
@@ -414,6 +417,9 @@ const level1Build = {
   closure: {
     capture: "compileEntriesFinalCapturedInternalized",
     residentPolicy: "closedApplicationAvailablePolicy",
+    arenaPreparation: "preparePersistentCacheArenaAndLinkArtifact",
+    lazyCaches:
+      "compiler flag/value globals retained behind one explicit initializer",
     capturedDeclarations: level1Inventory.capturedDeclarations,
     reviewedExternalsBeforeLink:
       level1Inventory.reviewedExternalsBeforeLink,
@@ -441,6 +447,15 @@ const level1Build = {
       operation: "adapter.compressLevel1(Uint8Array)",
       result: "copied Uint8Array",
       timings: ["encodeMs", "executeMs", "decodeMs", "totalMs", "overheadMs"],
+      initialization: "adapter.initialization",
+      initializationTimings: ["initializeMs", "idempotenceMs"],
+    },
+    persistentCaches: {
+      initializer: LEAN_ZIP_LEVEL1_PERSISTENT_INITIALIZER,
+      invocation: "once per Wasm instance before scratch input allocation",
+      roots: "recursively persistent object graphs below the checkpoint",
+      checkpoint: "post-initializer fir_heap_frontier",
+      idempotent: true,
     },
     ownership: {
       version: LEAN_ZIP_LEVEL1_OWNERSHIP_VERSION,
@@ -451,13 +466,15 @@ const level1Build = {
       output: "copied JavaScript bytes before rewind",
       rawAddressesExposed: false,
       reclamation: "per-call scratch checkpoint rewind, including failures",
+      persistentRegion:
+        "compiler cache roots and graphs retained below the instance checkpoint",
       runtimeRootsAboveCheckpoint: false,
     },
   },
   performance: {
-    status: "correctness artifact; no performance claim",
+    status: "correctness artifact with separately measured cache initialization",
     caveat:
-      "generic resident Nat and closure paths remain allocation-heavy for Level-1",
+      "one-time persistent-cache initialization is excluded from per-call executeMs; no cross-runtime performance claim",
   },
   proofStatus: {
     generation: "native-oracle and Node/Chrome real-engine checked",

@@ -6,7 +6,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inflateRawSync } from "node:zlib";
 
-import { createLeanZipLevel1Adapter } from
+import {
+  LEAN_ZIP_LEVEL1_PERSISTENT_INITIALIZER,
+  createLeanZipLevel1Adapter,
+} from
   "./lean-zip-level1-browser-adapter.mjs";
 
 const directory = dirname(fileURLToPath(import.meta.url));
@@ -34,6 +37,14 @@ const cases = [
 ];
 
 const adapter = await createLeanZipLevel1Adapter({ bytes: wasm, descriptor });
+assert.equal(adapter.initialization.entry,
+  LEAN_ZIP_LEVEL1_PERSISTENT_INITIALIZER);
+assert.ok(adapter.initialization.checkpoint >
+  adapter.initialization.initialFrontier,
+"persistent cache initialization must grow the lower arena");
+assert.equal(adapter.initialization.frontierGrowth,
+  adapter.initialization.checkpoint - adapter.initialization.initialFrontier);
+const persistentCheckpoint = adapter.initialization.checkpoint;
 const temporary = mkdtempSync(join(tmpdir(), "fir-lean-zip-level1-"));
 try {
   for (const [name, input] of cases) {
@@ -50,6 +61,8 @@ try {
       `${name}: raw DEFLATE roundtrip`);
     assert.equal(result.memory.frontierAfter, result.memory.frontierBefore,
       `${name}: scratch rewind`);
+    assert.equal(result.memory.frontierBefore, persistentCheckpoint,
+      `${name}: persistent checkpoint moved`);
   }
 
   let clock = 0;
@@ -58,6 +71,8 @@ try {
     descriptor,
     now: () => clock++,
   });
+  assert.equal(timed.initialization.initializeMs, 1);
+  assert.equal(timed.initialization.idempotenceMs, 1);
   assert.deepEqual(timed.compressLevel1(Uint8Array.of(1, 2, 3)).timings, {
     encodeMs: 1,
     executeMs: 1,
@@ -67,7 +82,7 @@ try {
   });
   console.log(`native/Wasm Level-1 differential: PASS (${cases.length} cases)`);
   console.log("zero-import Level-1 ByteArray adapter: PASS");
-  console.log("scratch checkpoint reclamation: PASS");
+  console.log("persistent-cache + scratch checkpoint reclamation: PASS");
 } finally {
   rmSync(temporary, { recursive: true, force: true });
 }

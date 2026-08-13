@@ -47,12 +47,10 @@ run_cmd do
     | .error error =>
         (0, #[], (toString (repr error) : Json))
   let linkedResult := result.bind <|
-    Fir.Wasm.Emit.ResidentLinker.prepareArenaAndLinkArtifact fun module => {
-        steps :=
-          Fir.Wasm.Emit.ResidentLinker.availableCommonSteps module ++
-          Fir.Wasm.Emit.ResidentLinker.closedApplicationFamilySteps
-        requireZeroImports := true
-        requireNoRuntimeOperations := true }
+    Fir.Wasm.Emit.ResidentLinker.preparePersistentCacheArenaAndLinkArtifact fun module =>
+      Fir.Wasm.Emit.ResidentLinker.closedApplicationAvailablePolicy module
+        #[LeanZipFir.Compile.level1Entry,
+          LeanZipFir.Compile.level1PersistentInitializer]
   let (linkedFunctions, remainingImports, remainingRuntimeOperations,
       linkingError) := match linkedResult with
     | .ok artifact =>

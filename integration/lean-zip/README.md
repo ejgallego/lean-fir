@@ -73,6 +73,14 @@ const level1Result = level1.compressLevel1(inputBytes);
 Every call uses a scratch checkpoint: the adapter copies the result, rewinds
 the module-owned arena even on failure, and exposes no Wasm address.
 
+Level-1 additionally preserves Lean's compiler-generated lazy constants. The
+adapter calls the module's idempotent `fir_initialize_persistent_caches` entry
+once at instance creation, retains the recursively persistent cache graphs
+below the resulting frontier, and uses that frontier as the lower bound for
+all later scratch rewinds. `adapter.initialization` reports the initial and
+checkpoint frontiers plus initialization/idempotence timings; per-call timing
+continues to cover only encoding, execution, decoding, and total call time.
+
 Both public wrappers reuse the same versioned ByteArray encoder, decoder,
 module validator, timing, and scratch-ownership implementation. Level-1 has
 zero imports and is suitable for correctness testing in Node and browsers. It

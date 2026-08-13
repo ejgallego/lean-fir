@@ -8,6 +8,7 @@ import { inflateRawSync } from "node:zlib";
 import {
   LEAN_ZIP_LEVEL1_ADAPTER_API_VERSION,
   LEAN_ZIP_LEVEL1_OWNERSHIP_VERSION,
+  LEAN_ZIP_LEVEL1_PERSISTENT_INITIALIZER,
   createLeanZipLevel1Adapter,
 } from "./lean-zip-level1-browser-adapter.mjs";
 import { LEAN_ZIP_BYTE_ARRAY_LAYOUT_VERSION } from
@@ -26,7 +27,7 @@ for (const line of readFileSync(join(directory, "SHA256SUMS"), "utf8")
   assert.equal(sha256(readFileSync(join(directory, name))), expected, name);
 }
 
-assert.equal(build.schemaVersion, "fir.lean-zip.level1.build/v1");
+assert.equal(build.schemaVersion, "fir.lean-zip.level1.build/v2");
 assert.equal(build.capabilities.byteArray.layoutVersion,
   LEAN_ZIP_BYTE_ARRAY_LAYOUT_VERSION);
 assert.equal(build.capabilities.adapter.apiVersion,
@@ -35,12 +36,19 @@ assert.equal(build.capabilities.ownership.version,
   LEAN_ZIP_LEVEL1_OWNERSHIP_VERSION);
 assert.equal(build.wasm.functionImportCount, 0);
 assert.equal(build.wasm.memoryImportCount, 0);
+assert.equal(build.entry.persistentInitializer,
+  LEAN_ZIP_LEVEL1_PERSISTENT_INITIALIZER);
+assert.equal(build.capabilities.persistentCaches.idempotent, true);
 
 const adapter = await createLeanZipLevel1Adapter({ bytes: wasm, descriptor });
+assert.equal(adapter.initialization.entry,
+  LEAN_ZIP_LEVEL1_PERSISTENT_INITIALIZER);
+assert.ok(adapter.initialization.frontierGrowth > 0);
 const input = Uint8Array.of(0, 1, 127, 128, 254, 255);
 const result = adapter.compressLevel1(input);
 assert.deepEqual(Array.from(result.bytes), [99, 96, 172, 111, 248, 247, 31, 0]);
 assert.deepEqual(new Uint8Array(inflateRawSync(result.bytes)), input);
 assert.equal(result.memory.frontierAfter, result.memory.frontierBefore);
+assert.equal(result.memory.frontierBefore, adapter.initialization.checkpoint);
 
 console.log("lean-zip Level-1 package smoke: PASS");
