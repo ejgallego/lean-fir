@@ -52,6 +52,9 @@ failed to internalize resident partial applications:
 
 The linker has the same latent gap for `Float32` captures.
 
+This diagnostic is historical: the fixed implementation no longer retains
+the `unsupportedCaptureKind` error constructor.
+
 ## Proof or differential evidence
 
 The exact final-LCNF closure has zero unsupported declarations and lowers to
