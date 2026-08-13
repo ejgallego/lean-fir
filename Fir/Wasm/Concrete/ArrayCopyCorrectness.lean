@@ -31,6 +31,70 @@ def pushResidentArrayElementCopied (state : MemoryState) (source : Word32)
   let final ← decrementReferenceOnce pushed source true descriptors
   return (final, fresh)
 
+/-- Retain an already-decoded Array prefix. Shared pop uses this narrower
+operation because the removed last element is not copied into the fresh
+Array and therefore must not receive an ownership increment. -/
+def retainResidentArrayWords (state : MemoryState) (words : Array Word32) :
+    Except ConcreteError MemoryState :=
+  words.toList.foldlM (init := state) retainClosureCapture
+
+/-- The proof-side shape of W7's non-exclusive `Array.pop` path, including
+the empty-Array case. `words` is exactly the new live prefix (`old.pop`), so
+the operation retains only values actually published in the fresh Array. -/
+def popResidentArrayCopied (state : MemoryState) (source : Word32)
+    (words : Array Word32) (capacity : Nat)
+    (descriptors : ClosureDescriptorTable) :
+    Except ConcreteError (MemoryState × Word32) := do
+  let retained ← retainResidentArrayWords state words
+  let (allocated, fresh) ← allocateResidentArray retained words capacity
+  let final ← decrementReferenceOnce allocated source true descriptors
+  return (final, fresh)
+
+private theorem OwnershipValuesRel.ofListEach
+    {witness : RefinementWitness} {words : List Word32} {values : List Value}
+    (count : words.length = values.length)
+    (each : ∀ (index : Nat) (value : Value),
+      values[index]? = some value →
+      ∃ word, words[index]? = some word ∧
+        OwnershipValueRel witness word value) :
+    OwnershipValuesRel witness words values := by
+  induction values generalizing words with
+  | nil =>
+      cases words <;> simp_all
+      exact .nil
+  | cons value values ih =>
+      cases words with
+      | nil => simp at count
+      | cons word words =>
+          obtain ⟨headWord, headAt, headRelated⟩ :=
+            each 0 value (by simp)
+          simp at headAt
+          subst headWord
+          apply OwnershipValuesRel.cons headRelated
+          apply ih
+          · simpa using count
+          · intro index tailValue tailAt
+            obtain ⟨tailWord, tailWordAt, tailRelated⟩ :=
+              each (index + 1) tailValue (by simpa using tailAt)
+            exact ⟨tailWord, by simpa using tailWordAt, tailRelated⟩
+
+private theorem OwnershipValuesRel.ofArrayEach
+    {witness : RefinementWitness} {words : Array Word32}
+    {values : Array Value}
+    (count : words.size = values.size)
+    (each : ∀ (index : Nat) (value : Value),
+      values[index]? = some value →
+      ∃ word, words[index]? = some word ∧
+        ValueRel witness .tobject (.word32 word) value) :
+    OwnershipValuesRel witness words.toList values.toList := by
+  apply OwnershipValuesRel.ofListEach
+  · simpa using count
+  · intro index value valueAt
+    have arrayAt : values[index]? = some value := by simpa using valueAt
+    obtain ⟨word, wordAt, related⟩ := each index value arrayAt
+    exact ⟨word, by simpa using wordAt,
+      .intro .tobject (by decide) related⟩
+
 /-- A capacity frame proved for an extended allocation witness also frames
 the allocations named by its prefix witness. -/
 theorem MappedHeaderCapacityTransport.witnessRestriction
@@ -166,6 +230,37 @@ theorem LiveHeapRel.retainResidentArrayElements_refines
   unfold retainResidentArrayElements
   rw [wordsRead]
   exact concreteOperation
+
+/-- Ordered refinement for a caller-selected Array prefix. This is the
+ownership boundary needed by shared pop: unlike the complete-source retain
+helper, it can state and prove that the removed suffix receives no retain. -/
+theorem LiveHeapRel.retainResidentArrayWords_refines
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime finalRuntime : RuntimeState}
+    {words : Array Word32} {values : Array Value}
+    (related : LiveHeapRel state witness runtime)
+    (count : words.size = values.size)
+    (each : ∀ (index : Nat) (value : Value),
+      values[index]? = some value →
+      ∃ word, words[index]? = some word ∧
+        ValueRel witness .tobject (.word32 word) value)
+    (capacity : ClosureRetainCapacity runtime values.toList)
+    (semanticOperation :
+      values.toList.foldlM (init := runtime) retainOwnedValue =
+        .ok finalRuntime) :
+    ∃ finalState,
+      retainResidentArrayWords state words = .ok finalState ∧
+      LiveHeapRel finalState witness finalRuntime ∧
+      MappedHeaderCapacityTransport state finalState witness ∧
+      finalState.heapCursor = state.heapCursor := by
+  have valuesRelated :
+      OwnershipValuesRel witness words.toList values.toList :=
+    OwnershipValuesRel.ofArrayEach count each
+  obtain ⟨finalState, concreteOperation, finalRelated, capacityTransport,
+      cursor⟩ :=
+    valuesRelated.foldlM_retainClosureCaptures_refines related capacity
+      semanticOperation
+  exact ⟨finalState, concreteOperation, finalRelated, capacityTransport, cursor⟩
 
 private theorem setCell_semanticArrayResult_fresh_push
     (runtime : RuntimeState) (elements : Array Value) (capacity : Nat)
@@ -354,6 +449,149 @@ theorem LiveHeapRel.pushResidentArrayElementCopied_refines
   rw [allocated]
   simp only [Bind.bind, Except.bind]
   rw [concretePush]
+  simp only [Bind.bind, Except.bind]
+  rw [concreteConsumeOldDescriptors]
+  rfl
+
+/-- End-to-end refinement of the non-exclusive resident `Array.pop` copy
+path. Only `elements.pop` is retained and published; in particular, for a
+nonempty source the removed last value receives no compensating retain. The
+empty source is handled by the same statement with an empty copied prefix.
+
+As for shared push, one source reference is consumed after publication, the
+fresh witness remains valid, and all pre-existing allocation extents survive
+the complete operation. -/
+theorem LiveHeapRel.popResidentArrayCopied_refines
+    {state retainedState allocatedState : MemoryState}
+    {witness : RefinementWitness}
+    {runtime retainedRuntime finalRuntime : RuntimeState}
+    {sourceLocation : Location} {sourceAddress : Word32}
+    {elements : Array Value} {sourceCapacity : Nat} {sourceHeader : Header}
+    {words : Array Word32} {newCapacity : Nat} {address : Word32}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? sourceLocation = some sourceAddress)
+    (sourceRelated : ResidentArrayObjectRel state witness sourceAddress
+      elements sourceCapacity sourceHeader)
+    (count : words.size = elements.pop.size)
+    (sizeCapacity : elements.pop.size ≤ newCapacity)
+    (sizeFits : elements.pop.size < UInt32.size)
+    (capacityFits : newCapacity < UInt32.size)
+    (copied : ∀ (index : Nat) (element : Value),
+      elements.pop[index]? = some element →
+      ∃ word,
+        words[index]? = some word ∧
+        state.memory.readWord32
+            (sourceAddress.value + headerBytes +
+              target.semanticSlotBytes * index) = .ok word)
+    (retainCapacity : ClosureRetainCapacity runtime elements.pop.toList)
+    (semanticRetain :
+      elements.pop.toList.foldlM (init := runtime) retainOwnedValue =
+        .ok retainedRuntime)
+    (concreteRetain :
+      retainResidentArrayWords state words = .ok retainedState)
+    (allocated :
+      allocateResidentArray retainedState words newCapacity =
+        .ok (allocatedState, address))
+    (semanticConsume :
+      decValueOnce (semanticArrayResult retainedRuntime elements.pop newCapacity)
+          (.object (.heap sourceLocation)) true = .ok finalRuntime) :
+    let nextWitness :=
+      witness.bindArray retainedRuntime.nextLocation address newCapacity
+    ∃ finalState,
+      popResidentArrayCopied state sourceAddress words newCapacity
+          witness.closureDescriptors = .ok (finalState, address) ∧
+      witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
+      LiveHeapRel finalState nextWitness finalRuntime ∧
+      MappedHeaderCapacityTransport state finalState witness ∧
+      sourceAddress ≠ address ∧
+      ValueRel nextWitness .object (.word32 address)
+        (.object (.heap retainedRuntime.nextLocation)) ∧
+      finalState.heapCursor = allocatedState.heapCursor := by
+  dsimp only
+  have each : ∀ (index : Nat) (element : Value),
+      elements.pop[index]? = some element →
+      ∃ copiedWord, words[index]? = some copiedWord ∧
+        ValueRel witness .tobject (.word32 copiedWord) element := by
+    intro index element elementAt
+    obtain ⟨copiedWord, copiedAt, copiedRead⟩ := copied index element elementAt
+    have sourceAt : elements[index]? = some element := by
+      rw [Array.getElem?_pop] at elementAt
+      split at elementAt
+      · exact elementAt
+      · contradiction
+    obtain ⟨sourceWord, sourceRead, elementRelated⟩ :=
+      sourceRelated.liveElements index element sourceAt
+    rw [copiedRead] at sourceRead
+    have sourceWordEq : sourceWord = copiedWord :=
+      (Except.ok.inj sourceRead).symm
+    subst sourceWord
+    exact ⟨copiedWord, copiedAt, elementRelated⟩
+  obtain ⟨actualRetainedState, actualConcreteRetain, retainedRelated,
+      retainTransport, retainedCursor⟩ :=
+    related.retainResidentArrayWords_refines count each retainCapacity
+      semanticRetain
+  rw [concreteRetain] at actualConcreteRetain
+  have actualRetainedEq : actualRetainedState = retainedState :=
+    (Except.ok.inj actualConcreteRetain).symm
+  subst actualRetainedState
+  obtain ⟨witnessExtension, closurePersistent, allocatedRelated, freshRelated,
+      _⟩ :=
+    allocateResidentArray_liveHeapRel retainedState allocatedState witness
+      retainedRuntime words elements.pop newCapacity address retainedRelated count
+        sizeCapacity sizeFits capacityFits each allocated
+  let nextWitness :=
+    witness.bindArray retainedRuntime.nextLocation address newCapacity
+  have wordsCapacity : words.size ≤ newCapacity := by omega
+  have wordsFits : words.size < UInt32.size := by omega
+  have allocationExtension : retainedState.PrefixExtension allocatedState :=
+    allocateResidentArray_prefixExtension retainedState allocatedState words
+      newCapacity address retainedRelated.frontier wordsCapacity wordsFits
+        capacityFits allocated
+  have allocationTransport :
+      MappedHeaderCapacityTransport retainedState allocatedState witness :=
+    MappedHeaderCapacityTransport.ofPrefixExtension witness allocationExtension
+  obtain ⟨middle, objectAllocation, _, _⟩ :=
+    allocateResidentArray_decompose retainedState allocatedState words
+      newCapacity address wordsCapacity wordsFits capacityFits allocated
+  have freshAddress :=
+    retainedRelated.frontier.allocateObject_address objectAllocation
+  have sourceFresh : sourceAddress ≠ address := by
+    intro equal
+    subst address
+    have owned := sourceRelated.headerOwned
+    rw [freshAddress, retainedCursor] at owned
+    simp [headerBytes] at owned
+    omega
+  have sourceMapped :
+      nextWitness.locations.lookup? sourceLocation = some sourceAddress :=
+    witnessExtension.locations sourceLocation sourceAddress mapped
+  have semanticDecrement :
+      decLocation (semanticArrayResult retainedRuntime elements.pop newCapacity)
+          sourceLocation = .ok finalRuntime := by
+    simpa [decValueOnce] using semanticConsume
+  obtain ⟨actualFinalState, concreteConsume, finalRelated,
+      consumeTransport⟩ :=
+    allocatedRelated.decrementReferenceOnce_refines_with_capacity sourceMapped
+      true semanticDecrement
+  have concreteConsumeOldDescriptors :
+      decrementReferenceOnce allocatedState sourceAddress true
+          witness.closureDescriptors = .ok actualFinalState := by
+    simpa [witnessExtension.closureDescriptors] using concreteConsume
+  have oldConsumeTransport :
+      MappedHeaderCapacityTransport allocatedState actualFinalState witness :=
+    consumeTransport.witnessRestriction witnessExtension
+  have finalTransport :=
+    retainTransport.trans <|
+      allocationTransport.trans oldConsumeTransport
+  have finalCursor : actualFinalState.heapCursor = allocatedState.heapCursor :=
+    decrementReferenceOnce_preserves_heapCursor concreteConsumeOldDescriptors
+  refine ⟨actualFinalState, ?_, witnessExtension, closurePersistent, finalRelated,
+    finalTransport, sourceFresh, freshRelated, finalCursor⟩
+  unfold popResidentArrayCopied
+  rw [concreteRetain]
+  simp only [Bind.bind, Except.bind]
+  rw [allocated]
   simp only [Bind.bind, Except.bind]
   rw [concreteConsumeOldDescriptors]
   rfl
