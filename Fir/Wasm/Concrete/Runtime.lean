@@ -749,6 +749,22 @@ def readResidentArrayElementBorrowed (state : MemoryState) (object : Word32)
   liftMemory <| state.memory.readWord32
     (object.value + headerBytes + target.semanticSlotBytes * index)
 
+/-- Allocate the canonical resident generic Array and initialize exactly its
+live `tobject` prefix. `capacity` determines the retained extent; spare slots
+remain allocator-zeroed and are not semantic ownership. -/
+def allocateResidentArray (state : MemoryState) (elements : Array Word32)
+    (capacity : Nat) : Except ConcreteError (MemoryState × Word32) := do
+  unless elements.size ≤ capacity do
+    throw (.source (.malformed "Array logical size exceeds capacity"))
+  let logicalSize ← uint32Field "Array logical size" elements.size
+  let physicalCapacity ← uint32Field "Array capacity" capacity
+  let (state, address) ← liftMemory <|
+    state.allocateObject .opaque (target.semanticSlotBytes * capacity) false
+      residentArrayMarker logicalSize physicalCapacity 0
+  let memory ← liftMemory <|
+    writeObjectFields state.memory address.value 0 elements.toList
+  return ({ state with memory }, address)
+
 /-- Load references owned by the current concrete object before marking it
 dead. Constructors use their physical object-field count; closures recover
 their immutable ordered capture kinds through the checked `aux3` descriptor

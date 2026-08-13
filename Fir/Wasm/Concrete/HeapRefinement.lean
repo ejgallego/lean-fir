@@ -615,7 +615,9 @@ theorem ResidentArrayObjectRel.readSize
     readResidentArraySize state address = .ok elements.size := by
   unfold readResidentArraySize
   rw [related.readHeader]
-  simpa [related.logicalSize]
+  change (Except.ok header.aux1.toNat : Except ConcreteError Nat) =
+    Except.ok elements.size
+  rw [related.logicalSize]
 
 /-- A successful borrowed read returns the exact related semantic element and
 does not perform any ownership transition. -/
@@ -637,7 +639,9 @@ theorem ResidentArrayObjectRel.readElementBorrowed
   rw [related.readHeader]
   simp only [Bind.bind, Except.bind]
   rw [if_pos (by simpa [related.logicalSize] using indexLt)]
-  exact ⟨word, by simpa using read, valueRelated⟩
+  refine ⟨word, ?_, valueRelated⟩
+  rw [read]
+  rfl
 
 /-- Borrowed reads beyond the semantic live prefix fail at the shared source
 bounds boundary; spare physical capacity is never readable as a live value. -/
@@ -657,7 +661,11 @@ theorem ResidentArrayObjectRel.readElementBorrowed_outOfBounds
     rw [related.logicalSize]
     omega
   rw [if_neg notLt]
-  simpa [related.logicalSize]
+  change (Except.error
+      (.source (.objectFieldOutOfBounds index header.aux1.toNat)) :
+      Except ConcreteError Word32) =
+    Except.error (.source (.objectFieldOutOfBounds index elements.size))
+  rw [related.logicalSize]
 
 /-- Cell-level resident Array relation. This keeps the semantic identity,
 capacity, reference count, persistence flag, and liveness together without
