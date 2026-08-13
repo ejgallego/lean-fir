@@ -91,6 +91,18 @@ The publisher atomically advances the canonical pointer only after it has
 linked the shared C/libm runtime, verified zero imports and exact exports, run
 the packaged smoke, and checked every package digest.
 
+Run the order-balanced FIR reference/spatial comparison with at least seven
+measured rounds after warmup:
+
+```sh
+node benchmark.mjs
+```
+
+The raw samples and median, p95, MAD, minima, maxima, paired query delta,
+creation delta, resident bytes, and Wasm sizes are written to
+`_build/spatial-benchmark.json`. Production `hitTest` is measured externally;
+the benchmark does not insert clocks into the untimed adapter path.
+
 ## Ratcheted coverage
 
 The closure contains 194 source declarations and 41 reviewed externals. The
