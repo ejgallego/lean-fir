@@ -1627,4 +1627,86 @@ for (const [handler, leftValue, rightValue, expected] of [
   );
 }
 
+{
+  const setArray = validationExternalRegistry["Array.set!"];
+  const getArray = validationExternalRegistry["Array.get!Internal"];
+  const inhabitedUInt8 = validationExternalRegistry["instInhabitedUInt8"];
+  const erased = { kind: "erased" };
+  const taggedIndex = value => ({ kind: "tagged", payload: BigInt(value) });
+
+  const uniqueHost = new SemanticHost();
+  const old = uniqueHost.alloc({ kind: "natural", value: 0x100000000n });
+  const retained = uniqueHost.alloc({ kind: "natural", value: 0x100000001n });
+  const replacement = uniqueHost.alloc({ kind: "natural", value: 0x100000002n });
+  const unique = uniqueHost.alloc({
+    kind: "array",
+    elements: [old, retained],
+    capacity: 4,
+  });
+  assert.deepStrictEqual(
+    invoke(setArray, uniqueHost, [erased, unique, taggedIndex(0), replacement]),
+    unique,
+  );
+  assert.throws(() => uniqueHost.liveCell(old.location));
+  assert.deepStrictEqual(
+    uniqueHost.liveCell(unique.location).object,
+    { kind: "array", elements: [replacement, retained], capacity: 4 },
+  );
+  assert.equal(uniqueHost.liveCell(replacement.location).rc, 1);
+  assert.equal(uniqueHost.liveCell(retained.location).rc, 1);
+  assert.deepStrictEqual(
+    invoke(inhabitedUInt8, uniqueHost, []),
+    { kind: "scalar", scalarKind: "uint8", value: 0n },
+  );
+  assert.deepStrictEqual(
+    invoke(getArray, uniqueHost,
+      [erased, taggedIndex(0), unique, taggedIndex(0)]),
+    replacement,
+  );
+  assert.equal(uniqueHost.liveCell(replacement.location).rc, 2);
+  uniqueHost.decValueOnce(replacement, true);
+  const fallback = uniqueHost.alloc({ kind: "natural", value: 0x100000007n });
+  assert.deepStrictEqual(
+    invoke(getArray, uniqueHost,
+      [erased, fallback, unique, taggedIndex(9)]),
+    fallback,
+  );
+  assert.equal(uniqueHost.liveCell(fallback.location).rc, 2);
+  uniqueHost.decValueOnce(fallback, true);
+
+  const sharedHost = new SemanticHost();
+  const replaced = sharedHost.alloc({ kind: "natural", value: 0x100000003n });
+  const sharedChild = sharedHost.alloc({ kind: "natural", value: 0x100000004n });
+  const sharedReplacement =
+    sharedHost.alloc({ kind: "natural", value: 0x100000005n });
+  const shared = sharedHost.alloc({
+    kind: "array",
+    elements: [replaced, sharedChild],
+    capacity: 5,
+  });
+  sharedHost.incLocation(shared.location, 1);
+  const copied = invoke(
+    setArray, sharedHost, [erased, shared, taggedIndex(0), sharedReplacement]);
+  assert.notDeepStrictEqual(copied, shared);
+  assert.equal(sharedHost.liveCell(shared.location).rc, 1);
+  assert.deepStrictEqual(
+    sharedHost.liveCell(shared.location).object.elements, [replaced, sharedChild]);
+  assert.deepStrictEqual(
+    sharedHost.liveCell(copied.location).object,
+    { kind: "array", elements: [sharedReplacement, sharedChild], capacity: 5 },
+  );
+  assert.equal(sharedHost.liveCell(replaced.location).rc, 1);
+  assert.equal(sharedHost.liveCell(sharedChild.location).rc, 2);
+  assert.equal(sharedHost.liveCell(sharedReplacement.location).rc, 1);
+
+  const outOfBoundsReplacement =
+    sharedHost.alloc({ kind: "natural", value: 0x100000006n });
+  assert.deepStrictEqual(
+    invoke(setArray, sharedHost,
+      [erased, shared, taggedIndex(7), outOfBoundsReplacement]),
+    shared,
+  );
+  assert.throws(() => sharedHost.liveCell(outOfBoundsReplacement.location));
+}
+
 console.log("PASS shared Wasm String and arithmetic external contracts");

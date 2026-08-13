@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
 import { ConcreteHost } from "./concrete-host.mjs";
+import {
+  concreteValidationExternalRegistry,
+} from "./concrete-validation-external-registry.mjs";
 
 const FLOAT32_NEGATIVE_ZERO = 0x80000000n;
 const FLOAT32_NAN_PAYLOAD = 0x7fc01234n;
@@ -156,6 +159,72 @@ assert.throws(() => new ConcreteHost([], {
     object: { kind: "array", elements: [], capacity: -1 },
   }],
 }), /capacity must cover its live elements/);
+
+const setArray = concreteValidationExternalRegistry["Array.set!"];
+const getArray = concreteValidationExternalRegistry["Array.get!Internal"];
+const inhabitedUInt8 = concreteValidationExternalRegistry["instInhabitedUInt8"];
+const erased = { kind: "erased" };
+const taggedIndex = value => ({ kind: "tagged", payload: BigInt(value) });
+const heapNatural = (target, value) =>
+  target.decode("object", target.allocateNatural(value));
+
+const uniqueArrayHost = new ConcreteHost([]);
+const uniqueOld = heapNatural(uniqueArrayHost, 1n << 64n);
+const uniqueRetained = heapNatural(uniqueArrayHost, (1n << 64n) + 1n);
+const uniqueReplacement = heapNatural(uniqueArrayHost, (1n << 64n) + 2n);
+const uniqueArray =
+  uniqueArrayHost.allocateArray([uniqueOld, uniqueRetained], 4);
+const uniqueResult = setArray({
+  args: [erased, uniqueArray, taggedIndex(0), uniqueReplacement],
+  host: uniqueArrayHost,
+  world: 0,
+}).value;
+assert.deepStrictEqual(uniqueResult, uniqueArray);
+assert.deepStrictEqual(
+  uniqueArrayHost.arrayInfo(uniqueArray).elements,
+  [uniqueReplacement, uniqueRetained],
+);
+assert.equal(
+  uniqueArrayHost.readHeader(uniqueArrayHost.addressOf(uniqueOld.location), false).kind,
+  255,
+);
+assert.deepStrictEqual(inhabitedUInt8({ args: [], world: 0 }).value,
+  { kind: "scalar", scalarKind: "uint8", value: 0n });
+assert.deepStrictEqual(getArray({
+  args: [erased, taggedIndex(0), uniqueArray, taggedIndex(0)],
+  host: uniqueArrayHost,
+  world: 0,
+}).value, uniqueReplacement);
+assert.equal(
+  uniqueArrayHost.readHeader(uniqueArrayHost.addressOf(uniqueReplacement.location)).rc,
+  2,
+);
+uniqueArrayHost.releaseValue(uniqueReplacement);
+
+const sharedArrayHost = new ConcreteHost([]);
+const sharedOld = heapNatural(sharedArrayHost, (1n << 64n) + 3n);
+const sharedRetained = heapNatural(sharedArrayHost, (1n << 64n) + 4n);
+const sharedReplacement = heapNatural(sharedArrayHost, (1n << 64n) + 5n);
+const sharedArray = sharedArrayHost.allocateArray([sharedOld, sharedRetained], 5);
+sharedArrayHost.retainValue(sharedArray);
+const sharedResult = setArray({
+  args: [erased, sharedArray, taggedIndex(0), sharedReplacement],
+  host: sharedArrayHost,
+  world: 0,
+}).value;
+assert.notDeepStrictEqual(sharedResult, sharedArray);
+assert.deepStrictEqual(
+  sharedArrayHost.arrayInfo(sharedArray).elements, [sharedOld, sharedRetained]);
+assert.deepStrictEqual(
+  sharedArrayHost.arrayInfo(sharedResult).elements,
+  [sharedReplacement, sharedRetained],
+);
+assert.equal(
+  sharedArrayHost.readHeader(sharedArrayHost.addressOf(sharedRetained.location)).rc,
+  2,
+);
+assert.equal(sharedArrayHost.arrayInfo(sharedArray).header.rc, 1);
+assert.equal(sharedArrayHost.arrayInfo(sharedResult).capacity, 5);
 
 // A constructor slot has no runtime tag of its own. Track the physical kind
 // supplied by the latest mutation so an object-only slot can subsequently hold

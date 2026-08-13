@@ -156,6 +156,19 @@ def idBoolArray (xs : Array Bool) : Array Bool :=
 def idFloatArray (xs : Array Float) : Array Float :=
   xs
 
+@[noinline]
+def uint8ArrayGet (xs : Array UInt8) (index : Nat) : UInt8 :=
+  xs[index]!
+
+@[noinline]
+def uint8ArraySetUnique (xs : Array UInt8) : Array UInt8 :=
+  xs.set! 0 255
+
+@[noinline]
+def uint8ArraySetShared (xs : Array UInt8) : Array UInt8 × Array UInt8 :=
+  let updated := xs.set! 2 255
+  (xs, updated)
+
 def firstUInt8List : List UInt8 → UInt8
   | value :: _ => value
   | [] => 0
@@ -2606,6 +2619,10 @@ private def boolArrayDatum (xs : Array Bool) : ValidationDatum :=
 private def floatArrayDatum (xs : Array Float) : ValidationDatum :=
   .seq (xs.map fun value => .bits 64 value.toBits)
 
+private def uint8ArrayPairDatum
+    (value : Array UInt8 × Array UInt8) : ValidationDatum :=
+  .ctor "Prod.mk" 0 #[uint8ArrayDatum value.1, uint8ArrayDatum value.2]
+
 private def genericContainerFloat : Float :=
   Float.ofBits 0x7ff8123456789abc
 
@@ -4083,6 +4100,62 @@ private def preConversionCases : Array Case := #[
     requiredExecutedLcnfForms := #["inc", "return"]
     provenance := firProvenance
       "Round-trip a generic Array containing a heap-only bit-exact Float box" },
+  { id := "generic-uint8-array-get"
+    entry := ``Source.uint8ArrayGet
+    args := #[uint8ArrayDatum #[0, 127, 255], .nat 2]
+    argSchemas := #[.array (.boxed (.bits 8)), .nat]
+    resultSchema := .bits 8
+    native := fun _ =>
+      .bits 8 (UInt64.ofNat (Source.uint8ArrayGet #[0, 127, 255] 2).toNat)
+    tags := #["quick", "array", "generic", "boxed", "uint8", "projection",
+      "ownership"]
+    requiredLcnfForms := #["fap", "box", "dec", "unbox", "return", "extern"]
+    requiredExecutedLcnfForms :=
+      #["fap", "extern", "box", "dec", "unbox", "return"]
+    requiredExternals := #[``instInhabitedUInt8, ``Array.get!Internal]
+    requiredExecutedExternals := #[``instInhabitedUInt8, ``Array.get!Internal]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``instInhabitedUInt8, ``Array.get!Internal]
+    requiredExecutedExternalTrace :=
+      some #[``instInhabitedUInt8, ``Array.get!Internal]
+    provenance := firProvenance
+      "Read and unbox a UInt8 through Array generic object-valued storage" },
+  { id := "generic-uint8-array-set-unique"
+    entry := ``Source.uint8ArraySetUnique
+    args := #[uint8ArrayDatum #[0, 127, 128, 42]]
+    argSchemas := #[.array (.boxed (.bits 8))]
+    resultSchema := .array (.boxed (.bits 8))
+    native := fun _ =>
+      uint8ArrayDatum (Source.uint8ArraySetUnique #[0, 127, 128, 42])
+    tags := #["stress", "array", "generic", "boxed", "uint8", "mutation",
+      "ownership", "unique"]
+    requiredLcnfForms := #["lit", "box", "fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["lit", "box", "fap", "extern", "return"]
+    requiredExternals := #[``Array.set!]
+    requiredExecutedExternals := #[``Array.set!]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``Array.set!]
+    requiredExecutedExternalTrace := some #[``Array.set!]
+    provenance := firProvenance
+      "Mutate a uniquely owned generic Array through Array.set!" },
+  { id := "generic-uint8-array-set-shared"
+    entry := ``Source.uint8ArraySetShared
+    args := #[uint8ArrayDatum #[0, 127, 128, 42]]
+    argSchemas := #[.array (.boxed (.bits 8))]
+    resultSchema := .ctor "Prod.mk" 0
+      #[.array (.boxed (.bits 8)), .array (.boxed (.bits 8))]
+    native := fun _ =>
+      uint8ArrayPairDatum (Source.uint8ArraySetShared #[0, 127, 128, 42])
+    tags := #["stress", "array", "generic", "boxed", "uint8", "mutation",
+      "ownership", "shared", "copy-on-write"]
+    requiredLcnfForms := #["lit", "box", "inc", "fap", "extern", "ctor", "return"]
+    requiredExecutedLcnfForms :=
+      #["lit", "box", "inc", "fap", "extern", "ctor", "return"]
+    requiredExternals := #[``Array.set!]
+    requiredExecutedExternals := #[``Array.set!]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``Array.set!]
+    requiredExecutedExternalTrace := some #[``Array.set!]
+    provenance := firProvenance
+      "Copy a shared generic Array while preserving its original alias through Array.set!" },
   { id := "generic-uint8-list-head"
     entry := ``Source.firstUInt8List
     args := #[uint8ListDatum [255, 1]]

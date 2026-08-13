@@ -330,6 +330,17 @@ private def externalByteArray (request : ExternalRequest) (runtime : RuntimeStat
   let (_, _, value) ← externalByteArrayCell request runtime value
   return value
 
+private def externalArrayCell (request : ExternalRequest) (runtime : RuntimeState)
+    (value : Value) : Except RuntimeFault (Location × HeapCell × Array Value × Nat) := do
+  let .object (.heap location) := value
+    | throw (.externalFailure request.name "expected an Array")
+  let cell ← getLiveCell runtime location
+  let .array elements capacity := cell.object
+    | throw (.externalFailure request.name "expected an Array")
+  if capacity < elements.size then
+    throw (.externalFailure request.name "Array size exceeds capacity")
+  return (location, cell, elements, capacity)
+
 private structure FixedWidthValueCodec (α : Type) where
   name : String
   decode? : Value → Option α
@@ -1270,6 +1281,71 @@ private def byteArraySetExternal (request : ExternalRequest) (runtime : RuntimeS
   let (runtime, reference) := alloc runtime (.byteArray bytes)
   return {
     value := .object reference
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def arraySetExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [typeArg, array, index, replacement] := request.args.toList
+    | throw (.arityMismatch 4 request.args.size)
+  unless typeArg == .erased do
+    throw (.externalFailure request.name "Array.set! type argument must be erased")
+  let (location, cell, elements, capacity) ← externalArrayCell request runtime array
+  let index ← externalNat request runtime index
+  if index >= elements.size then
+    let runtime ← decValueOnce runtime replacement true
+    return {
+      value := array
+      heap := runtime.heap
+      nextLocation := runtime.nextLocation
+      world := runtime.world }
+  let old := elements[index]!
+  let elements := elements.set! index replacement
+  if !cell.persistent && cell.rc == 1 then
+    let runtime ← decValueOnce runtime old true
+    let runtime ← setCell runtime location { cell with object := .array elements capacity }
+    return {
+      value := array
+      heap := runtime.heap
+      nextLocation := runtime.nextLocation
+      world := runtime.world }
+  let runtime ← elements.foldlM (init := runtime) fun runtime element =>
+    retainOwnedValue runtime element
+  let runtime ← decValueOnce runtime replacement true
+  let runtime ← if cell.persistent then pure runtime else decLocation runtime location
+  let (runtime, reference) := alloc runtime (.array elements capacity)
+  return {
+    value := .object reference
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def inhabitedUInt8External
+    (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  unless request.args.isEmpty do
+    throw (.arityMismatch 0 request.args.size)
+  return {
+    value := .scalar (.uint8 0)
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def arrayGetBangExternal
+    (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [typeArg, fallback, array, index] := request.args.toList
+    | throw (.arityMismatch 4 request.args.size)
+  unless typeArg == .erased do
+    throw (.externalFailure request.name
+      "Array.get!Internal type argument must be erased")
+  let (_, _, elements, _) ← externalArrayCell request runtime array
+  let index ← externalNat request runtime index
+  let value := elements[index]?.getD fallback
+  let runtime ← incValue runtime value 1 true
+  return {
+    value
     heap := runtime.heap
     nextLocation := runtime.nextLocation
     world := runtime.world }
@@ -3011,6 +3087,12 @@ private def validationExternals : ExternalImpl where
       byteArrayGetExternal request runtime
     else if request.name == ``ByteArray.set! then
       byteArraySetExternal request runtime
+    else if request.name == ``Array.set! then
+      arraySetExternal request runtime
+    else if request.name == ``instInhabitedUInt8 then
+      inhabitedUInt8External request runtime
+    else if request.name == ``Array.get!Internal then
+      arrayGetBangExternal request runtime
     else if request.name == ``Int.ofNat then
       intOfNatExternal request runtime
     else if request.name == ``Int.neg then

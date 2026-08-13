@@ -402,10 +402,57 @@ function recordEffect(host, operation, argument, result) {
   });
 }
 
+function setArray({ args, host, world }) {
+  assert.equal(args.length, 4, "Array.set! external arity mismatch");
+  assert.deepStrictEqual(args[0], { kind: "erased" },
+    "Array.set! type argument must be erased");
+  const source = args[1];
+  const array = host.arrayInfo(source);
+  const index = naturalValue(host, args[2], "Array.set! index");
+  const replacement = args[3];
+  if (index >= BigInt(array.size)) {
+    host.releaseValue(replacement);
+    return { value: source, world };
+  }
+  const slot = Number(index);
+  if (!array.header.persistent && array.header.rc === 1) {
+    host.writeArrayElement(source, slot, replacement);
+    host.releaseValue(array.elements[slot]);
+    return { value: source, world };
+  }
+  const elements = [...array.elements];
+  elements[slot] = replacement;
+  elements.forEach(element => host.retainValue(element));
+  host.releaseValue(replacement);
+  if (!array.header.persistent) host.releaseValue(source);
+  return { value: host.allocateArray(elements, array.capacity), world };
+}
+
+function inhabitedUInt8({ args, world }) {
+  assert.equal(args.length, 0, "instInhabitedUInt8 external arity mismatch");
+  return { value: { kind: "scalar", scalarKind: "uint8", value: 0n }, world };
+}
+
+function getArrayBang({ args, host, world }) {
+  assert.equal(args.length, 4, "Array.get!Internal external arity mismatch");
+  assert.deepStrictEqual(args[0], { kind: "erased" },
+    "Array.get!Internal type argument must be erased");
+  const fallback = args[1];
+  const array = host.arrayInfo(args[2]);
+  const index = naturalValue(host, args[3], "Array.get!Internal index");
+  const value = index < BigInt(array.size)
+    ? array.elements[Number(index)]
+    : fallback;
+  host.retainValue(value);
+  return { value, world };
+}
+
 /**
  * Validation-only externals layered over the ordinary concrete artifact
- * registry. ByteArray declarations stay absent until their physical layout is
- * implemented; the product gate therefore fails closed before instantiation.
+ * registry. Generic Array operations use the same opaque/ARRY layout as the
+ * resident implementation. ByteArray declarations stay absent until their
+ * physical layout is implemented, so that gate still fails closed before
+ * instantiation.
  */
 export const concreteValidationExternalRegistry = Object.freeze({
   ...concreteArtifactExternalRegistry,
@@ -425,6 +472,9 @@ export const concreteValidationExternalRegistry = Object.freeze({
     stringBinaryUInt8("String.decidableLT",
       (left, right) => stringCompare(left, right) === 0n ? 1n : 0n),
   "String.compare": stringBinaryUInt8("String.compare", stringCompare),
+  "instInhabitedUInt8": inhabitedUInt8,
+  "Array.get!Internal": getArrayBang,
+  "Array.set!": setArray,
   "Int.neg": ({ args, host, world }) => {
     assert.equal(args.length, 1, "Int.neg external arity mismatch");
     const value = integerValue(host, args[0], "Int.neg operand");

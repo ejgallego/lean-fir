@@ -609,6 +609,69 @@ function setByteArray({ args, host, world }) {
   return { value: host.alloc({ kind: "byteArray", value: bytes }), world };
 }
 
+function setArray({ args, host, world }) {
+  assert.equal(args.length, 4, "Array.set! external arity mismatch");
+  assert.deepStrictEqual(args[0], { kind: "erased" },
+    "Array.set! type argument must be erased");
+  const source = args[1];
+  assert.equal(source.kind, "heap", "Array.set! operand must be a heap Array");
+  const cell = host.liveCell(source.location);
+  assert.equal(cell.object.kind, "array", "Array.set! heap object must be an Array");
+  assert.ok(Number.isSafeInteger(cell.object.capacity) &&
+    cell.object.capacity >= cell.object.elements.length,
+    "Array.set! source has invalid capacity");
+  const index = naturalValue(host, args[2], "Array.set! index");
+  const replacement = args[3];
+  if (index >= BigInt(cell.object.elements.length)) {
+    host.decValueOnce(replacement, true);
+    return { value: source, world };
+  }
+  const elements = [...cell.object.elements];
+  const old = elements[Number(index)];
+  elements[Number(index)] = replacement;
+  if (!cell.persistent && cell.rc === 1) {
+    host.decValueOnce(old, true);
+    cell.object = { kind: "array", elements, capacity: cell.object.capacity };
+    return { value: source, world };
+  }
+  for (const element of elements) {
+    if (element.kind === "heap") host.incLocation(element.location, 1);
+  }
+  host.decValueOnce(replacement, true);
+  if (!cell.persistent) host.decLocation(source.location);
+  return {
+    value: host.alloc({ kind: "array", elements, capacity: cell.object.capacity }),
+    world,
+  };
+}
+
+function inhabitedUInt8({ args, world }) {
+  assert.equal(args.length, 0, "instInhabitedUInt8 external arity mismatch");
+  return { value: { kind: "scalar", scalarKind: "uint8", value: 0n }, world };
+}
+
+function getArrayBang({ args, host, world }) {
+  assert.equal(args.length, 4, "Array.get!Internal external arity mismatch");
+  assert.deepStrictEqual(args[0], { kind: "erased" },
+    "Array.get!Internal type argument must be erased");
+  const fallback = args[1];
+  const source = args[2];
+  assert.equal(source.kind, "heap",
+    "Array.get!Internal operand must be a heap Array");
+  const object = host.liveCell(source.location).object;
+  assert.equal(object.kind, "array",
+    "Array.get!Internal heap object must be an Array");
+  assert.ok(Number.isSafeInteger(object.capacity) &&
+    object.capacity >= object.elements.length,
+    "Array.get!Internal source has invalid capacity");
+  const index = naturalValue(host, args[3], "Array.get!Internal index");
+  const value = index < BigInt(object.elements.length)
+    ? object.elements[Number(index)]
+    : fallback;
+  if (value.kind === "heap") host.incLocation(value.location, 1);
+  return { value, world };
+}
+
 export const validationExternalRegistry = {
   "Nat.add": naturalBinary("Nat.add", (left, right) => left + right),
   "Nat.sub": naturalBinary(
@@ -775,6 +838,9 @@ export const validationExternalRegistry = {
     };
   },
   "ByteArray.set!": setByteArray,
+  "instInhabitedUInt8": inhabitedUInt8,
+  "Array.get!Internal": getArrayBang,
+  "Array.set!": setArray,
   "Fir.Validation.Corpus.NativeEffects.recordImpl": ({ args, host, world }) => {
     assert.equal(args.length, 1, "validation.record external arity mismatch");
     const value = naturalValue(host, args[0], "validation.record operand");

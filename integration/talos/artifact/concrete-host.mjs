@@ -744,6 +744,60 @@ export class ConcreteHost {
     return address;
   }
 
+  arrayInfo(value) {
+    assert.equal(value.kind, "heap", "Array value must be a heap object");
+    const address = this.addressOf(value.location);
+    const header = this.readHeader(address);
+    assert.equal(header.kind, KIND.opaque, "Array must use the opaque object kind");
+    assert.equal(header.aux0, ARRAY_MARKER, "Array marker mismatch");
+    assert.ok(header.aux1 <= header.aux2, "Array size exceeds capacity");
+    assert.equal(header.bytes, align8(HEADER_BYTES + SLOT_BYTES * header.aux2),
+      "Array allocation extent is noncanonical");
+    const elements = Array.from({ length: header.aux1 }, (_, index) =>
+      this.decode("tobject", signed32(
+        this.readWordSlot(address + HEADER_BYTES + SLOT_BYTES * index))));
+    return { address, header, elements, size: header.aux1, capacity: header.aux2 };
+  }
+
+  writeArrayElement(value, index, replacement) {
+    const array = this.arrayInfo(value);
+    assert.ok(Number.isSafeInteger(index) && index >= 0 && index < array.size,
+      "Array replacement index is out of bounds");
+    this.writeWordSlot(
+      array.address + HEADER_BYTES + SLOT_BYTES * index,
+      this.encode("tobject", replacement),
+    );
+  }
+
+  allocateArray(elements, capacity) {
+    assert.ok(Array.isArray(elements), "Array elements must be an array");
+    assert.ok(Number.isSafeInteger(capacity) && capacity >= elements.length &&
+      capacity <= 0xffffffff, "Array capacity is invalid");
+    const address = this.allocate(KIND.opaque, SLOT_BYTES * capacity, {
+      aux0: ARRAY_MARKER,
+      aux1: elements.length,
+      aux2: capacity,
+      aux3: 0,
+    });
+    this.descriptors.set(address, {
+      kind: "array",
+      fieldKinds: Array.from({ length: elements.length }, () => "tobject"),
+    });
+    elements.forEach((element, index) =>
+      this.writeWordSlot(
+        address + HEADER_BYTES + SLOT_BYTES * index,
+        this.encode("tobject", element)));
+    return this.decode("object", signed32(address));
+  }
+
+  retainValue(value) {
+    this.inc({ amount: 1, check: true }, [this.encode("tobject", value)]);
+  }
+
+  releaseValue(value) {
+    this.releaseWord(this.encode("tobject", value), true);
+  }
+
   writeWordSlot(address, word) {
     this.writeU32(address, word);
     this.writeU32(address + 4, 0);
