@@ -113,7 +113,7 @@ export async function checkResidentClosureAllocation(bytes) {
     value === [2, 2, 1, 32, 0, 5, 0, 1][index]),
   `shared-shape closure metadata drifted: ${header(exports.memory, sharedShape)}`);
   equal(u32(exports.memory, 0), 0xdecafbad,
-    "tagged closure failed to restore the scratch word");
+    "shared-shape closure failed to restore the scratch word");
 
   const { exports: concrete } = await WebAssembly.instantiate(module, {});
   const host = new ConcreteHost(

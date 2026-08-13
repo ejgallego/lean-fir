@@ -594,13 +594,13 @@ node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-partial-applications.wasm
 ```
 
-The text facade advances from 152 to 65 imports, while the exact-event styled
-facade advances from 153 to 66. Both preserve final LCNF and the complete
-retained closure tables. The current source closures use only i32 captures;
-the standalone fixture additionally checks an i64 `USize` capture. Float
-captures fail closed until the resident symbolic surface has typed float
-stores. The text audit is now
-`351 → 350 → 349 → 341 → 254 → 177 → 177 → 154 → 152 → 65`.
+The current Lean 4.33 text facade carries 131 semantic partial applications,
+which collapse to 37 typed helpers and advance its frontier to 65 imports; the
+exact-event styled facade advances to 66. Both preserve final LCNF and the
+complete retained closure tables. The standalone fixture checks i32 and i64
+captures plus bit-exact `Float32` and `Float` storage in the same eight-byte
+slots. It also gives two empty/object calls different target IDs and arities,
+proving that a shared helper preserves call-site metadata.
 
 The following checkpoint internalizes all direct constructor mutations:
 seven `objectSet` plus four `scalarSet` operations in the text facade, and ten

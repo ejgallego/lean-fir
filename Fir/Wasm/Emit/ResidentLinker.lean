@@ -235,8 +235,7 @@ private def applySteps (validate : Bool) (steps : List Step) (module : Module) :
   | step :: steps => applySteps validate steps (← applyStep validate step module)
 
 private structure RewritePlan where
-  runtimeInstructions : Std.HashMap RuntimeOp (List Instruction) := {}
-  declarationNames : Std.HashMap Name Name := {}
+  callRewrites : Std.HashMap CallTarget (List Instruction) := {}
   deriving Inhabited
 
 mutual
@@ -246,10 +245,7 @@ mutual
 
   private partial def rewriteInstructionBatch (plan : RewritePlan) :
       Instruction → List Instruction
-    | .call (.runtime operation) =>
-        plan.runtimeInstructions.getD operation [.call (.runtime operation)]
-    | .call (.declaration declaration) =>
-        [.call (.declaration (plan.declarationNames.getD declaration declaration))]
+    | .call target => plan.callRewrites.getD target [.call target]
     | .block label body =>
         [.block label (rewriteInstructionsBatch plan body)]
     | .loop label body =>
@@ -261,7 +257,7 @@ mutual
 end
 
 private def rewriteFunctionBatch (plan : RewritePlan) (function : Function) : Function :=
-  if plan.runtimeInstructions.isEmpty && plan.declarationNames.isEmpty then function
+  if plan.callRewrites.isEmpty then function
   else { function with body := rewriteInstructionsBatch plan function.body }
 
 private structure RewriteCohort where
@@ -269,32 +265,40 @@ private structure RewriteCohort where
   stop : Nat
   firstPlan : Nat := 0
 
-private def resolveDeclaration (plan : RewritePlan) (name : Name) : Name :=
-  plan.declarationNames.getD name name
-
-/-- Compose call rewrites in policy order: `later (earlier call)`. -/
+/-- Compose call-to-instruction rewrites in policy order: `later (earlier call)`. -/
 private def composeRewritePlans (earlier later : RewritePlan) : RewritePlan :=
-  let runtimeInstructions := earlier.runtimeInstructions.fold
-    (fun rewrites operation instructions =>
-      rewrites.insert operation (rewriteInstructionsBatch later instructions))
+  let callRewrites := earlier.callRewrites.fold
+    (fun rewrites target body =>
+      rewrites.insert target (rewriteInstructionsBatch later body))
     (Std.HashMap.emptyWithCapacity
-      (earlier.runtimeInstructions.size + later.runtimeInstructions.size))
-  let runtimeInstructions := later.runtimeInstructions.fold
-    (fun rewrites operation instructions =>
-      if earlier.runtimeInstructions.contains operation then rewrites
-      else rewrites.insert operation instructions)
-    runtimeInstructions
-  let declarationNames := earlier.declarationNames.fold
-    (fun names source target =>
-      names.insert source (resolveDeclaration later target))
-    (Std.HashMap.emptyWithCapacity
-      (earlier.declarationNames.size + later.declarationNames.size))
-  let declarationNames := later.declarationNames.fold
-    (fun names source target =>
-      if earlier.declarationNames.contains source then names
-      else names.insert source target)
-    declarationNames
-  { runtimeInstructions, declarationNames }
+      (earlier.callRewrites.size + later.callRewrites.size))
+  let callRewrites := later.callRewrites.fold
+    (fun rewrites target body =>
+      if earlier.callRewrites.contains target then rewrites
+      else rewrites.insert target body)
+    callRewrites
+  { callRewrites }
+
+private def rewriteCompositionProbePlan : RewritePlan := {
+  callRewrites := ({} : Std.HashMap CallTarget (List Instruction))
+    |>.insert (.runtime .getTag) [
+      .call (.declaration `_fir_probe_intermediate),
+      .call (.runtime .isShared)] }
+
+private def rewriteCompositionProbeSuffix : RewritePlan := {
+  callRewrites := ({} : Std.HashMap CallTarget (List Instruction))
+    |>.insert (.declaration `_fir_probe_intermediate)
+      [.call (.declaration `_fir_probe_final)]
+    |>.insert (.runtime .isShared) [
+      .i32Const .uint32 7,
+      .call (.declaration `_fir_probe_shared)] }
+
+#guard rewriteInstructionsBatch
+    (composeRewritePlans rewriteCompositionProbePlan rewriteCompositionProbeSuffix)
+    [.call (.runtime .getTag)] == [
+      .call (.declaration `_fir_probe_final),
+      .i32Const .uint32 7,
+      .call (.declaration `_fir_probe_shared)]
 
 private def rewriteCohortsFor (size : Nat) : Array RewriteCohort :=
   if size == 0 then #[] else #[{ start := 0, stop := size }]
@@ -368,8 +372,7 @@ private def planStep (step : Step) (module : Module) :
   unless rewrittenProbe.name == rewriteProbeName &&
       rewrittenProbe.body.length == targets.size do
     throw (.manifest s!"resident {repr step} changed the linker rewrite probe shape")
-  let mut runtimeInstructions : Std.HashMap RuntimeOp (List Instruction) := {}
-  let mut declarationNames : Std.HashMap Name Name := {}
+  let mut callRewrites : Std.HashMap CallTarget (List Instruction) := {}
   let mut removedOperations := #[]
   for ((target, instruction), index) in
       (targets.zip rewrittenProbe.body.toArray).zipIdx do
@@ -377,39 +380,23 @@ private def planStep (step : Step) (module : Module) :
       throw (.manifest s!"resident {repr step} removed a rewrite probe boundary")
     unless label == rewriteProbeLabel index do
       throw (.manifest s!"resident {repr step} changed a rewrite probe label")
-    match target, body with
-    | .runtime operation, [.call (.runtime remaining)] =>
-        unless operation == remaining do
-          throw (.manifest s!"resident {repr step} changed a runtime probe operation")
-    | .runtime operation, instructions =>
-        runtimeInstructions := runtimeInstructions.insert operation instructions
+    unless body == [.call target] do
+      callRewrites := callRewrites.insert target body
+      if let .runtime operation := target then
         removedOperations := removedOperations.push operation
-    | .declaration declaration, [.call (.declaration name)] =>
-      if declaration != name then
-          runtimeInstructions := runtimeInstructions.fold
-            (fun rewrites operation instructions =>
-              rewrites.insert operation <| rewriteInstructionsBatch {
-                declarationNames :=
-                  ({} : Std.HashMap Name Name).insert declaration name
-              } instructions)
-            (Std.HashMap.emptyWithCapacity runtimeInstructions.size)
-          declarationNames := declarationNames.fold
-            (fun names source target =>
-              names.insert source (if target == declaration then name else target))
-            (Std.HashMap.emptyWithCapacity declarationNames.size)
-            |>.insert declaration name
-    | _, _ =>
-        throw (.manifest s!"resident {repr step} changed a rewrite probe instruction")
   let newFunctions := planned.functions.extract prefixSize planned.functions.size
+  /- The rewritten probe is metadata-only, but scanning it is essential: an
+  expanding call rewrite may introduce a runtime operation directly in its
+  replacement sequence rather than through a generated helper. -/
   let runtimeOperations := Fir.Wasm.updateRuntimeOps module.runtimeOperations
-    removedOperations newFunctions
+    removedOperations (#[rewrittenProbe] ++ newFunctions)
   let externalImports := planned.imports.filter (·.operation?.isNone)
   let result : Module := {
     planned with
     functions := module.functions ++ newFunctions
     imports := runtimeOperations.mapIdx Fir.Wasm.runtimeImport ++ externalImports
     runtimeOperations }
-  return ({ runtimeInstructions, declarationNames }, result)
+  return ({ callRewrites }, result)
 
 private def applyStepsPlanned (steps : List Step) (plans : Array RewritePlan)
     (cohorts : Array RewriteCohort)

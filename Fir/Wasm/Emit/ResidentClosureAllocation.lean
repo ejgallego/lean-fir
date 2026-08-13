@@ -21,7 +21,6 @@ inductive LinkError where
   | reservedDeclaration (name : Name)
   | unsupportedOperation
   | unsupportedResult (result : AbiKind)
-  | unsupportedCaptureKind (kind : AbiKind)
   | metadataOverflow (label : String) (value : Nat)
   | incompatibleMemory
   | invalidOutput (error : SymbolicError)
@@ -457,6 +456,15 @@ def manifest : Json :=
       module.memory == some ResidentRuntime.residentMemory &&
       (Fir.Wasm.validateModule module |>.isOk) &&
       (Fir.Wasm.Emit.encode module |>.isOk)
+  | .error _ => false
+
+#guard match residentExampleModule with
+  | .ok module =>
+      match module.functions.find? fun function =>
+          function.name == partialApplicationName 0 with
+      | some helper =>
+          helper.params == #[(targetIdLocal, .uint32), (arityLocal, .uint32)]
+      | none => false
   | .error _ => false
 
 end Fir.Wasm.Emit.ResidentClosureAllocation
