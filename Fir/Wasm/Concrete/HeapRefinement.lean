@@ -1625,4 +1625,11 @@ theorem ValueRel.new_string_result (witness : RefinementWitness)
   .object (.mapped
     (RefinementWitness.lookup_bindString_location witness location address value))
 
+theorem ValueRel.new_array_result (witness : RefinementWitness)
+    (location : Location) (address : Word32) (capacity : Nat) :
+    ValueRel (witness.bindArray location address capacity)
+      .object (.word32 address) (.object (.heap location)) :=
+  .object (.mapped
+    (RefinementWitness.lookup_bindArray_location witness location address capacity))
+
 end Fir.Wasm.Concrete

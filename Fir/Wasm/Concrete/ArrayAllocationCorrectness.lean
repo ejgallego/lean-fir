@@ -56,6 +56,45 @@ theorem allocateResidentArray_decompose
           subst address
           exact ⟨middle, rfl, fieldsWrite, rfl⟩
 
+/-- Fresh resident-Array allocation preserves every byte owned below the old
+frontier. The live-prefix writer touches only the newly allocated region. -/
+theorem allocateResidentArray_prefixExtension
+    (state result : MemoryState) (elements : Array Word32) (capacity : Nat)
+    (address : Word32) (valid : state.FrontierInvariant)
+    (sizeCapacity : elements.size ≤ capacity)
+    (sizeFits : elements.size < UInt32.size)
+    (capacityFits : capacity < UInt32.size)
+    (allocated :
+      allocateResidentArray state elements capacity = .ok (result, address)) :
+    state.PrefixExtension result := by
+  obtain ⟨middle, objectAllocation, fieldsWrite, cursorEq⟩ :=
+    allocateResidentArray_decompose state result elements capacity address
+      sizeCapacity sizeFits capacityFits allocated
+  have fieldsEnd :
+      objectFieldAddress address.value elements.toList.length ≤
+        address.value +
+          align8 (headerBytes + target.semanticSlotBytes * capacity) := by
+    simp [objectFieldAddress, target]
+    have aligned := align8_ge (headerBytes + 8 * capacity)
+    omega
+  have objectExtension := valid.allocateObject_prefixExtension objectAllocation
+  obtain ⟨_, _, fieldsPost, _⟩ :=
+    valid.allocateObject_writeObjectFields objectAllocation fieldsEnd fieldsWrite
+  have freshAddress := valid.allocateObject_address objectAllocation
+  refine {
+    cursor := by simpa [cursorEq] using objectExtension.cursor
+    memorySize := Nat.le_trans objectExtension.memorySize (by
+      rw [fieldsPost.size]
+      exact Nat.le_refl _)
+    readByte := ?_ }
+  intro byte beforeCursor
+  calc
+    result.memory.readByte byte = middle.memory.readByte byte :=
+      fieldsPost.byteFrame byte (.inl (by
+        simp [objectFieldAddress, target, freshAddress]
+        omega))
+    _ = state.memory.readByte byte := objectExtension.readByte byte beforeCursor
+
 /-- The resident allocator establishes the exact Array relation. Only live
 slots require pointwise `tobject` refinement; spare capacity is retained and
 allocator-zeroed but receives no semantic child relation. -/

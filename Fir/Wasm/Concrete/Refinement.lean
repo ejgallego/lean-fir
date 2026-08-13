@@ -361,6 +361,34 @@ theorem RefinementWitness.lookup_bindString_descriptor_other
       witness.descriptors.lookup? other := by
   simp [RefinementWitness.bindString, DescriptorMap.lookup?, different]
 
+@[simp] theorem RefinementWitness.lookup_bindArray_location
+    (witness : RefinementWitness) (location : Location) (address : Word32)
+    (capacity : Nat) :
+    (witness.bindArray location address capacity).locations.lookup? location =
+      some address := by
+  simp [RefinementWitness.bindArray, LocationMap.lookup?]
+
+@[simp] theorem RefinementWitness.lookup_bindArray_descriptor
+    (witness : RefinementWitness) (location : Location) (address : Word32)
+    (capacity : Nat) :
+    (witness.bindArray location address capacity).descriptors.lookup? address =
+      some (.array capacity) := by
+  simp [RefinementWitness.bindArray, DescriptorMap.lookup?]
+
+theorem RefinementWitness.lookup_bindArray_location_other
+    (witness : RefinementWitness) (location other : Location) (address : Word32)
+    (capacity : Nat) (different : other ≠ location) :
+    (witness.bindArray location address capacity).locations.lookup? other =
+      witness.locations.lookup? other := by
+  simp [RefinementWitness.bindArray, LocationMap.lookup?, Ne.symm different]
+
+theorem RefinementWitness.lookup_bindArray_descriptor_other
+    (witness : RefinementWitness) (location : Location) (address other : Word32)
+    (capacity : Nat) (different : address.value ≠ other.value) :
+    (witness.bindArray location address capacity).descriptors.lookup? other =
+      witness.descriptors.lookup? other := by
+  simp [RefinementWitness.bindArray, DescriptorMap.lookup?, different]
+
 @[simp] theorem RefinementWitness.lookup_bindBoxed_location
     (witness : RefinementWitness) (location : Location) (address : Word32)
     (kind : BoxedScalarKind) :
@@ -529,6 +557,15 @@ theorem bindString
       (witness.bindString location address value) := by
   unfold RefinementWitness.bindString
   exact pushNonClosure witness address (.string value)
+    (by intro function arity captureKinds; simp)
+
+theorem bindArray
+    (witness : RefinementWitness) (location : Location) (address : Word32)
+    (capacity : Nat) :
+    ClosureAllocationsPersistent witness
+      (witness.bindArray location address capacity) := by
+  unfold RefinementWitness.bindArray
+  exact pushNonClosure witness address (.array capacity)
     (by intro function arity captureKinds; simp)
 
 theorem bindBoxed
@@ -723,6 +760,37 @@ theorem RefinementWitness.bindString_extends
     exact found
   · intro old descriptor found
     rw [witness.lookup_bindString_descriptor_other location address old value
+      (descriptorFresh old descriptor found)]
+    exact found
+
+/-- Binding a fresh resident generic Array extends all previously visible
+proof metadata. Capacity is recorded only in the new allocation descriptor. -/
+theorem RefinementWitness.bindArray_extends
+    (witness : RefinementWitness) (location : Location) (address : Word32)
+    (capacity : Nat)
+    (locationFresh : witness.locations.lookup? location = none)
+    (descriptorFresh : ∀ old descriptor,
+      witness.descriptors.lookup? old = some descriptor →
+      address.value ≠ old.value) :
+    witness.Extends (witness.bindArray location address capacity) := by
+  refine {
+    locations := ?_
+    promotedTags := ?_
+    descriptors := ?_
+    closureDispatch := rfl
+    closureDescriptors := rfl }
+  · intro old oldAddress found
+    have different : old ≠ location := by
+      intro equal
+      subst old
+      simp [locationFresh] at found
+    rw [witness.lookup_bindArray_location_other location old address capacity
+      different]
+    exact found
+  · intro payload oldAddress found
+    exact found
+  · intro old descriptor found
+    rw [witness.lookup_bindArray_descriptor_other location address old capacity
       (descriptorFresh old descriptor found)]
     exact found
 
@@ -1105,6 +1173,32 @@ theorem RefinementWitness.WellFormed.bindString
         isNew] at locationFound
       exact valid.locationPromotionDisjoint old payload left right locationFound
         promotedFound
+
+/-- Resident Array binding has the same fresh-address identity shape as
+String binding; its capacity descriptor does not affect witness injectivity. -/
+theorem RefinementWitness.WellFormed.bindArray
+    {witness : RefinementWitness} (valid : witness.WellFormed)
+    (location : Location) (address : Word32) (capacity : Nat)
+    (addressHeap : address.classify = .heap)
+    (locationAddressFresh : ∀ old oldAddress,
+      witness.locations.lookup? old = some oldAddress → oldAddress ≠ address)
+    (promotedAddressFresh : ∀ payload oldAddress,
+      witness.promotedTags.Contains payload oldAddress → address ≠ oldAddress) :
+    (witness.bindArray location address capacity).WellFormed := by
+  have stringValid := valid.bindString location address "" addressHeap
+    locationAddressFresh promotedAddressFresh
+  exact {
+    locationHeap := by
+      simpa [RefinementWitness.bindArray, RefinementWitness.bindString] using
+        stringValid.locationHeap
+    locationInjective := by
+      simpa [RefinementWitness.bindArray, RefinementWitness.bindString] using
+        stringValid.locationInjective
+    promotedHeap := stringValid.promotedHeap
+    promotedInjective := stringValid.promotedInjective
+    locationPromotionDisjoint := by
+      simpa [RefinementWitness.bindArray, RefinementWitness.bindString] using
+        stringValid.locationPromotionDisjoint }
 
 /-- Adding a fresh concrete address for a promoted tag preserves witness
 well-formedness even when the same payload already has another address. -/
