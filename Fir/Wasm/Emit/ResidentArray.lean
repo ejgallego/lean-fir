@@ -105,8 +105,6 @@ private def objectResultLocal : FVarId := ⟨`objectResult⟩
 private def taggedResultLocal : FVarId := ⟨`taggedResult⟩
 private def tobjectResultLocal : FVarId := ⟨`tobjectResult⟩
 
-private def elementLoopLabel : FVarId := ⟨`elementLoop⟩
-private def element2LoopLabel : FVarId := ⟨`element2Loop⟩
 private def copyLoopLabel : FVarId := ⟨`copyLoop⟩
 private def retainedCopyLoopLabel : FVarId := ⟨`retainedCopyLoop⟩
 private def listCountLoopLabel : FVarId := ⟨`arrayListCountLoop⟩
@@ -571,31 +569,29 @@ def toListFunction : Function := {
     .localGet listLocal,
     .ret] }
 
-private def elementAddressFor (array index cursor loopLabel : FVarId) :
-    List Instruction := [
-  .localGet array,
-  .i32Const .uint32 (u32 headerBytes),
-  .i32Add,
-  .localSet cursor,
-  .i32Const .uint32 0,
-  .localSet countLocal,
-  .loop loopLabel [
-    .localGet countLocal,
-    .localGet index,
-    .i32LtU,
-    .ifElse [
-      .localGet cursor,
-      .i32Const .uint32 (u32 target.semanticSlotBytes),
-      .i32Add,
-      .localSet cursor,
-      .localGet countLocal,
-      .i32Const .uint32 1,
-      .i32Add,
-      .localSet countLocal,
-      .br loopLabel] []]]
+private def elementAddressFor (array index cursor : FVarId) :
+    List Instruction :=
+  /- `semanticSlotBytes` is the fixed W6 object-lane width. Compute
+  `array + headerBytes + index * 8` in constant time with three doublings;
+  the symbolic instruction layer does not otherwise need an `i32.mul`. -/
+  [.localGet index,
+    .localSet cursor] ++
+  (List.range 3).flatMap (fun _ => [
+    .localGet cursor,
+    .localGet cursor,
+    .i32Add,
+    .localSet cursor]) ++
+  [.localGet array,
+    .i32Const .uint32 (u32 headerBytes),
+    .i32Add,
+    .localGet cursor,
+    .i32Add,
+    .localSet cursor]
+
+#guard target.semanticSlotBytes == 8
 
 private def elementAddress : List Instruction :=
-  elementAddressFor arrayParam indexLocal sourceCursorLocal elementLoopLabel
+  elementAddressFor arrayParam indexLocal sourceCursorLocal
 
 private def getBody (useDefault owned : Bool) : List Instruction :=
   requireArray arrayParam ++ loadSize arrayParam ++ decodeIndex ++ [
@@ -1116,8 +1112,8 @@ private def swapDecodedElementsFunction : Function := {
     (targetCursorLocal, .uint32), (elementLocal, .tobject),
     (element2Local, .tobject)]
   body :=
-  elementAddressFor arrayParam indexParam sourceCursorLocal elementLoopLabel ++
-  elementAddressFor arrayParam index2Param targetCursorLocal element2LoopLabel ++ [
+  elementAddressFor arrayParam indexParam sourceCursorLocal ++
+  elementAddressFor arrayParam index2Param targetCursorLocal ++ [
     .localGet sourceCursorLocal,
     .i32Load .tobject 0,
     .localSet elementLocal,
