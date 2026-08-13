@@ -16,10 +16,6 @@ def level1Entry : Name := ``Zip.Wasm.compressLevel1
 /-- Complete production raw-DEFLATE dispatcher. -/
 def rawEntry : Name := ``Zip.Wasm.compressRaw
 
-/-- Package-lifetime initializer retained by the Level-1 two-region arena. -/
-def level1PersistentInitializer : Name :=
-  Fir.Wasm.Emit.ResidentCache.persistentInitializerName
-
 /--
 Capture the real stored-block entry through FIR's legacy-source final-LCNF
 pipeline. This lean-zip revision predates Lean's `module` / `public section`
@@ -74,18 +70,19 @@ private def compileLevel1Unprepared : CoreM (Except Fir.Wasm.Emit.Source.Compile
 /-- Lower the unmodified Level-1 closure before resident linking. -/
 def compileLevel1Base : CoreM (Except Fir.Wasm.Emit.Source.CompileError
     Fir.Wasm.Emit.Source.ModuleArtifact) := do
-  let result ← compileLevel1Unprepared
-  return result.bind
-    Fir.Wasm.Emit.ResidentLinker.preparePersistentCacheArenaArtifact
+  compileLevel1Unprepared
 
-/-- Complete zero-import resident package frontier for Level-1 DEFLATE. -/
+/-- Complete zero-import resident package frontier for Level-1 DEFLATE.
+Compiler lazy caches remain lazy; publishing an object cache advances the
+cache-aware rewind floor exactly as in the complete raw dispatcher. -/
 def compileLevel1 : CoreM (Except Fir.Wasm.Emit.Source.CompileError
     Fir.Wasm.Emit.Source.ModuleArtifact) := do
   let result ← compileLevel1Unprepared
   return result.bind <|
-    Fir.Wasm.Emit.ResidentLinker.preparePersistentCacheArenaAndLinkArtifact fun module =>
-      Fir.Wasm.Emit.ResidentLinker.closedApplicationAvailablePolicy
-        module #[level1Entry, level1PersistentInitializer]
+    fun artifact => Fir.Wasm.Emit.ResidentLinker.linkArtifact
+      (Fir.Wasm.Emit.ResidentLinker.closedApplicationAvailablePolicy
+        artifact.module #[level1Entry])
+      artifact
 
 private def compileRawUnprepared : CoreM (Except Fir.Wasm.Emit.Source.CompileError
     Fir.Wasm.Emit.Source.ModuleArtifact) := do

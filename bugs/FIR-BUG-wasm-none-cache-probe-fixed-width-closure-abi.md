@@ -30,7 +30,7 @@ Compile the unmodified read-only lean-zip diagnostic entry
 Configure `integration/lean-zip` with lean-zip's `vir-fir-wasm-port` source
 worktree and compile the entry through
 `compileEntriesFinalCapturedInternalized`, followed by
-`preparePersistentCacheArenaAndLinkArtifact`.
+the then-current eager persistent-cache arena linker.
 
 ## Expected semantics
 

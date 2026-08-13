@@ -83,20 +83,15 @@ const rawResult = raw.compressRaw(inputBytes, level); // level in 1..10
 Every call uses a scratch checkpoint: the adapter copies the result, rewinds
 the module-owned arena even on failure, and exposes no Wasm address.
 
-Level-1 additionally preserves Lean's compiler-generated lazy constants. The
-adapter calls the module's idempotent `fir_initialize_persistent_caches` entry
-once at instance creation, retains the recursively persistent cache graphs
-below the resulting frontier, and uses that frontier as the lower bound for
-all later scratch rewinds. `adapter.initialization` reports the initial and
-checkpoint frontiers plus initialization/idempotence timings; per-call timing
-continues to cover only encoding, execution, decoding, and total call time.
-
-The levels 1--10 raw dispatcher instead keeps compiler lazy constants lazy.
-When a cold call publishes an object cache, the resident runtime advances a
-monotonic rewind floor through the newly persistent graph. The adapter accepts
-that one-time checkpoint growth; repeating the same call is required to rewind
-flat to the resulting floor. This avoids forcing panic-only fallback constants
-that are present in the captured closure but unreachable in ordinary execution.
+Level-1 and the levels 1--10 raw dispatcher preserve Lean's compiler-generated
+lazy constants at their original use sites. When a cold call publishes an
+object cache, the resident runtime recursively marks its graph persistent and
+advances a monotonic rewind floor through the published prefix. The adapters
+accept that one-time checkpoint growth; repeating the same call is required to
+rewind flat to the resulting floor. This avoids forcing panic-only fallback
+constants that are present in the captured closure but unreachable in ordinary
+execution. `adapter.initialization` therefore reports no eager initializer;
+cold first-use cache work is included honestly in the entry's execute timing.
 
 Both public wrappers reuse the same versioned ByteArray encoder, decoder,
 module validator, timing, and scratch-ownership implementation. Level-1 has

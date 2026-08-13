@@ -343,7 +343,6 @@ const level1Exports = WebAssembly.Module.exports(level1Module);
 assert.deepEqual(level1Imports, []);
 assert.deepEqual(level1Exports, [
   { name: "Zip.Wasm.compressLevel1", kind: "function" },
-  { name: LEAN_ZIP_LEVEL1_PERSISTENT_INITIALIZER, kind: "function" },
   { name: "fir_heap_frontier", kind: "function" },
   { name: "fir_heap_set_frontier", kind: "function" },
   { name: "fir_heap_rewind", kind: "function" },
@@ -372,7 +371,7 @@ run(process.execPath, [join(directory, "level1-smoke.mjs")],
 const level1AdapterBytes = readFileSync(level1AdapterPath);
 const level1SmokeBytes = readFileSync(level1SmokePath);
 const level1Build = {
-  schemaVersion: "fir.lean-zip.level1.build/v2",
+  schemaVersion: "fir.lean-zip.level1.build/v3",
   sources: {
     fir,
     leanZip: {
@@ -417,9 +416,9 @@ const level1Build = {
   closure: {
     capture: "compileEntriesFinalCapturedInternalized",
     residentPolicy: "closedApplicationAvailablePolicy",
-    arenaPreparation: "preparePersistentCacheArenaAndLinkArtifact",
+    arenaPreparation: "linkArtifact with cache-aware lazy publication",
     lazyCaches:
-      "compiler flag/value globals retained behind one explicit initializer",
+      "compiler flag/value globals retained at their original lazy use sites",
     capturedDeclarations: level1Inventory.capturedDeclarations,
     reviewedExternalsBeforeLink:
       level1Inventory.reviewedExternalsBeforeLink,
@@ -448,14 +447,17 @@ const level1Build = {
       result: "copied Uint8Array",
       timings: ["encodeMs", "executeMs", "decodeMs", "totalMs", "overheadMs"],
       initialization: "adapter.initialization",
-      initializationTimings: ["initializeMs", "idempotenceMs"],
+      initializationTimings: ["initializeMs=0", "idempotenceMs=0"],
     },
     persistentCaches: {
       initializer: LEAN_ZIP_LEVEL1_PERSISTENT_INITIALIZER,
-      invocation: "once per Wasm instance before scratch input allocation",
-      roots: "recursively persistent object graphs below the checkpoint",
-      checkpoint: "post-initializer fir_heap_frontier",
-      idempotent: true,
+      invocation: "lazy at the original Lean use site",
+      roots:
+        "recursively persistent object graphs retained by compiler cache globals",
+      checkpoint:
+        "rewind floor advances through the cold-call prefix when an object cache is published",
+      cacheAwareRewind: true,
+      warmCallStable: true,
     },
     ownership: {
       version: LEAN_ZIP_LEVEL1_OWNERSHIP_VERSION,
@@ -465,16 +467,17 @@ const level1Build = {
       residentResults: "ordinary Lean-owned values with checked reference counts",
       output: "copied JavaScript bytes before rewind",
       rawAddressesExposed: false,
-      reclamation: "per-call scratch checkpoint rewind, including failures",
+      reclamation:
+        "warm-call scratch rewind; a cold object-cache miss retains the prefix through its published graph",
       persistentRegion:
-        "compiler cache roots and graphs retained below the instance checkpoint",
+        "compiler cache roots define a monotonic cache-aware rewind floor",
       runtimeRootsAboveCheckpoint: false,
     },
   },
   performance: {
-    status: "correctness artifact with separately measured cache initialization",
+    status: "correctness artifact with lazy compiler-cache publication",
     caveat:
-      "one-time persistent-cache initialization is excluded from per-call executeMs; no cross-runtime performance claim",
+      "cold executeMs may include first-use compiler-cache publication; no cross-runtime performance claim",
   },
   proofStatus: {
     generation: "native-oracle and Node/Chrome real-engine checked",

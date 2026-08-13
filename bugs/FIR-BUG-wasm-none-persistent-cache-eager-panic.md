@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-persistent-cache-eager-panic
-status: candidate
+status: fixed
 classification: compiler
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: d8b18978322de05a8f3dba51ef03cf5461676c17
@@ -111,7 +111,14 @@ passes 5 input families at all 10 levels against the native oracle and
 independent raw inflate, with deterministic repeated frontier and complete
 bytes, zero imports, and warm-call flat rewinds.
 
-The older explicit eager-initializer API remains available to the accepted
-Level-1 package and still has eager semantics. Before this card is marked
-fixed, migrate that remaining consumer to the lazy cache-floor protocol and
-remove or make the eager API explicitly unsafe for general captured closures.
+The accepted Level-1 package now uses the same lazy cache-floor protocol and
+no longer exports or invokes `fir_initialize_persistent_caches`. Its Node and
+browser regressions require a zero-growth initialization phase, permit only
+monotonic cold-call floor growth, and require an immediate warm repeat to
+rewind flat while returning the native-oracle bytes. The package metadata and
+exact export ratchet record the lazy ownership protocol and reject the former
+initializer export.
+
+The remaining eager construction helper is retained only as an explicitly
+unsafe diagnostic fixture for testing cache publication; no production
+package consumes it.

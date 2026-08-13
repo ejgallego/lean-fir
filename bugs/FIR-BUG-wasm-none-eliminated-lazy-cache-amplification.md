@@ -86,12 +86,11 @@ none
 
 ## Resolution and regression
 
-`ResidentCache.installPersistentInitializer` preserves the compiler's exact
-typed flag/value globals and synthesizes the exported, idempotent
+The former eager initializer repair preserved the compiler's exact typed
+flag/value globals and synthesized the exported, idempotent
 `fir_initialize_persistent_caches` entry. Each miss calls the original
 initializer, publishes recursive persistence through the existing cache-set
-helper, stores the value, and sets its initialized flag. The separate
-`preparePersistentCacheArenaAndLinkArtifact` API leaves existing
+helper, stores the value, and sets its initialized flag while leaving existing
 cache-eliminating packages unchanged.
 
 The augmented zero-import resident-cache artifact proves the two-region
@@ -108,3 +107,7 @@ cache initialization. The exact `distanceCodeCacheProbe` at lean-zip source
 revision `74e4826cee362d815a11c213894f072ced5e6b0a` additionally passes four
 native-oracle cases twice each, including 4,096 repeated bytes, while every
 call returns to the same persistent checkpoint.
+
+The later lazy cache-floor repair supersedes that production design. The eager
+helper is now named `installUnsafeEagerPersistentInitializer` and remains only
+for the diagnostic fixture; accepted packages publish caches lazily.

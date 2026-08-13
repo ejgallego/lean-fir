@@ -39,12 +39,10 @@ const cases = [
 const adapter = await createLeanZipLevel1Adapter({ bytes: wasm, descriptor });
 assert.equal(adapter.initialization.entry,
   LEAN_ZIP_LEVEL1_PERSISTENT_INITIALIZER);
-assert.ok(adapter.initialization.checkpoint >
-  adapter.initialization.initialFrontier,
-"persistent cache initialization must grow the lower arena");
-assert.equal(adapter.initialization.frontierGrowth,
-  adapter.initialization.checkpoint - adapter.initialization.initialFrontier);
-const persistentCheckpoint = adapter.initialization.checkpoint;
+assert.equal(adapter.initialization.checkpoint,
+  adapter.initialization.initialFrontier);
+assert.equal(adapter.initialization.frontierGrowth, 0);
+let persistentCheckpoint = adapter.initialization.checkpoint;
 const temporary = mkdtempSync(join(tmpdir(), "fir-lean-zip-level1-"));
 try {
   for (const [name, input] of cases) {
@@ -59,10 +57,17 @@ try {
     assert.deepEqual(input, before, `${name}: borrowed input mutated`);
     assert.deepEqual(new Uint8Array(inflateRawSync(result.bytes)), input,
       `${name}: raw DEFLATE roundtrip`);
-    assert.equal(result.memory.frontierAfter, result.memory.frontierBefore,
-      `${name}: scratch rewind`);
     assert.equal(result.memory.frontierBefore, persistentCheckpoint,
       `${name}: persistent checkpoint moved`);
+    assert.ok(result.memory.frontierAfter >= persistentCheckpoint,
+      `${name}: cache-aware rewind moved backwards`);
+    persistentCheckpoint = result.memory.frontierAfter;
+    const warm = adapter.compressLevel1(input);
+    assert.deepEqual(warm.bytes, expected, `${name}: warm native differential`);
+    assert.equal(warm.memory.frontierBefore, persistentCheckpoint,
+      `${name}: warm checkpoint moved`);
+    assert.equal(warm.memory.frontierAfter, persistentCheckpoint,
+      `${name}: warm scratch rewind`);
   }
 
   let clock = 0;
@@ -71,8 +76,8 @@ try {
     descriptor,
     now: () => clock++,
   });
-  assert.equal(timed.initialization.initializeMs, 1);
-  assert.equal(timed.initialization.idempotenceMs, 1);
+  assert.equal(timed.initialization.initializeMs, 0);
+  assert.equal(timed.initialization.idempotenceMs, 0);
   assert.deepEqual(timed.compressLevel1(Uint8Array.of(1, 2, 3)).timings, {
     encodeMs: 1,
     executeMs: 1,
@@ -82,7 +87,7 @@ try {
   });
   console.log(`native/Wasm Level-1 differential: PASS (${cases.length} cases)`);
   console.log("zero-import Level-1 ByteArray adapter: PASS");
-  console.log("persistent-cache + scratch checkpoint reclamation: PASS");
+  console.log("lazy persistent-cache floor + scratch reclamation: PASS");
 } finally {
   rmSync(temporary, { recursive: true, force: true });
 }

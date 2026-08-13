@@ -35,10 +35,9 @@
           descriptorUrl:
             "./_build/lean-zip-level1-current/lean-zip-level1.wasm.json",
         });
-        if (level1.initialization.entry !==
-              "fir_initialize_persistent_caches" ||
-            level1.initialization.frontierGrowth <= 0) {
-          throw new Error("Level-1 persistent cache was not initialized");
+        if (level1.initialization.entry !== null ||
+            level1.initialization.frontierGrowth !== 0) {
+          throw new Error("Level-1 eagerly initialized a persistent cache");
         }
         const level1Input = Uint8Array.of(0, 1, 127, 128, 254, 255);
         const level1Result = level1.compressLevel1(level1Input);
@@ -49,13 +48,20 @@
               byte === level1Expected[index])) {
           throw new Error(`unexpected Level-1 result: ${level1Result.bytes}`);
         }
-        if (level1Result.memory.frontierAfter !==
-            level1Result.memory.frontierBefore) {
-          throw new Error("Level-1 scratch checkpoint was not restored");
-        }
         if (level1Result.memory.frontierBefore !==
             level1.initialization.checkpoint) {
           throw new Error("Level-1 persistent checkpoint moved");
+        }
+        if (level1Result.memory.frontierAfter <
+            level1Result.memory.frontierBefore) {
+          throw new Error("Level-1 cache-aware rewind moved backwards");
+        }
+        const level1Warm = level1.compressLevel1(level1Input);
+        if (level1Warm.memory.frontierBefore !==
+              level1Result.memory.frontierAfter ||
+            level1Warm.memory.frontierAfter !==
+              level1Result.memory.frontierAfter) {
+          throw new Error("Level-1 warm call did not rewind flat");
         }
         output.textContent = "PASS browser lean-zip stored + Level-1 packages";
         document.documentElement.dataset.result = "pass";

@@ -6,12 +6,12 @@ import {
 const ENTRY = "Zip.Wasm.compressLevel1";
 
 export const LEAN_ZIP_LEVEL1_PERSISTENT_INITIALIZER =
-  "fir_initialize_persistent_caches";
+  null;
 
 export const LEAN_ZIP_LEVEL1_ADAPTER_API_VERSION =
-  "fir.lean-zip.level1.browser/v2";
+  "fir.lean-zip.level1.browser/v3";
 export const LEAN_ZIP_LEVEL1_OWNERSHIP_VERSION =
-  "fir.lean-zip.level1.scratch-transfer/v2";
+  "fir.lean-zip.level1.lazy-cache-floor/v3";
 
 export function createLeanZipLevel1Adapter(options = {}) {
   return createLeanZipByteArrayAdapter({
@@ -19,6 +19,7 @@ export function createLeanZipLevel1Adapter(options = {}) {
     entry: ENTRY,
     label: "lean-zip Level-1",
     persistentInitializer: LEAN_ZIP_LEVEL1_PERSISTENT_INITIALIZER,
+    allowPersistentCheckpointGrowth: true,
   });
 }
 
@@ -28,5 +29,6 @@ export function fetchLeanZipLevel1Adapter(options) {
     entry: ENTRY,
     label: "lean-zip Level-1",
     persistentInitializer: LEAN_ZIP_LEVEL1_PERSISTENT_INITIALIZER,
+    allowPersistentCheckpointGrowth: true,
   });
 }

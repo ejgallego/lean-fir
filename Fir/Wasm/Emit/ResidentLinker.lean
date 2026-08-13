@@ -513,28 +513,30 @@ def prepareArenaAndLinkArtifact (policyFor : Module → Policy)
   return { artifact with module, bytes }
 
 /--
-Prepare a two-region instance arena while preserving compiler lazy caches.
+Diagnostic-only preparation of a two-region instance arena by eagerly forcing
+compiler lazy caches.
 The synthesized idempotent initializer is exported from the source module and
 must be called by the consumer before input allocation. Its post-call frontier
 becomes the persistent lower region; public-call scratch is allocated above
 that checkpoint and may be rewound safely.
 
-This is deliberately separate from `prepareArenaModule`: existing consumers
-keep reconstructing closed values per call until they opt into an explicit
-persistent-initialization phase.
+This is unsafe for arbitrary source closures because it changes lazy
+evaluation. Production packages use ordinary `linkArtifact` and the
+cache-aware rewind floor instead.
 -/
-def preparePersistentCacheArenaModule
+def prepareUnsafeEagerPersistentCacheArenaModule
     (module : Module) (validate : Bool := true) :
     Except Source.CompileError Module :=
-  ResidentCache.installPersistentInitializer module validate
+  ResidentCache.installUnsafeEagerPersistentInitializer module validate
     |>.mapError fun error =>
       Source.CompileError.manifest
         s!"failed to install persistent lazy-cache initializer: {repr error}"
 
 /-- Prepare and encode a source artifact with persistent lazy-cache globals. -/
-def preparePersistentCacheArenaArtifact (artifact : Source.ModuleArtifact) :
+def prepareUnsafeEagerPersistentCacheArenaArtifact
+    (artifact : Source.ModuleArtifact) :
     Except Source.CompileError Source.ModuleArtifact := do
-  let module ← preparePersistentCacheArenaModule artifact.module
+  let module ← prepareUnsafeEagerPersistentCacheArenaModule artifact.module
   let bytes ← Fir.Wasm.Emit.encodeValidated module
     |>.mapError Source.CompileError.encoding
   return { artifact with module, bytes }
@@ -543,10 +545,12 @@ def preparePersistentCacheArenaArtifact (artifact : Source.ModuleArtifact) :
 Prepare the persistent-cache arena, derive its resident policy from the
 prepared module, link it, and encode the final zero-import artifact.
 -/
-def preparePersistentCacheArenaAndLinkArtifact (policyFor : Module → Policy)
+def prepareUnsafeEagerPersistentCacheArenaAndLinkArtifact
+    (policyFor : Module → Policy)
     (artifact : Source.ModuleArtifact) :
     Except Source.CompileError Source.ModuleArtifact := do
-  let module ← preparePersistentCacheArenaModule artifact.module false
+  let module ← prepareUnsafeEagerPersistentCacheArenaModule
+    artifact.module false
   let module ← linkModule (policyFor module) module
   let bytes ← Fir.Wasm.Emit.encodeValidated module
     |>.mapError Source.CompileError.encoding
