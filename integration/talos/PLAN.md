@@ -6144,8 +6144,20 @@ layer in both the resource and supported stacks. Return-pop unwinds every such
 layer, so nested calls inside any selected arm remain compositional. A
 zero-test path is constructively exposed as a default-only source table and
 uses the same compiler-silence rank as the erased case rule. Lazy/cache
-control remains the next separate pointwise widening even though its
-terminating hereditary law already exists.
+control is now pointwise as well. Current-node admission distinguishes a
+populated semantic cache from an admitted empty non-heap initializer without
+recording future execution. Staging takes one source step and a reflexive
+target path. A hit then takes one source lookup step and exactly four target
+steps to the existing bind protocol. A miss takes one source and three target
+steps into the compiler-selected generated initializer while pushing an exact
+lazy caller frame. When that callee yields, one source publication step is
+matched by the seven target steps for call return, concrete `cacheSet`, both
+Wasm-global writes, conditional exit, and value reload; the existing final
+bind rule then resumes ordinary code. The complete cache, ownership, budget,
+closure-table, and supported-caller invariants are reconstructed at each
+boundary. No rule evaluates the initializer as a whole or assumes it
+terminates. Heap-valued miss publication remains a separate facts-aware
+transport widening.
 Pure external calls now use that same runnable relation without collapsing
 their three source steps. Current-node admission selects the response and
 exact allocation cost, staging derives the production argument prefix and
@@ -6160,15 +6172,15 @@ known rather than stored as a recursive certificate.
 non-structural source-local coverage law: an ordinary compiler-related code
 node that actually steps has a current-node admission whose exact allocation
 cost fits the retained budget. Its `toCurrentStepClassifier` theorem derives
-the global classifier by inversion: ordinary code uses that law, while the
-five staged call/bind/return shapes are already runnable. The corresponding
+the global classifier by inversion: ordinary code uses that law, while the six
+staged call/cache/bind/return shapes are already runnable. The corresponding
 `toGeneratedTraceSimulation` and `toFiniteTraceCorrect` wrappers therefore do
 not expose the intermediate classifier to callers. The next slices widen
 current-node admission across the remaining production families, then prove
 the coverage law and canonical root relation from the compiler-produced export
 boundary.
-Heap-valued cache misses remain the facts-aware transport redesign after
-saturated calls.
+Heap-valued cache misses remain the facts-aware transport redesign after the
+current non-heap lazy protocol.
 
 ## Parallel agent packages
 

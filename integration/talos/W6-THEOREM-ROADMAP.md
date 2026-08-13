@@ -1484,12 +1484,13 @@ acceptance tests pass.
      hereditary constructor. Saturated bind pop exposes the resumed compiler
      focus and restores the complete caller core after every matcher label is
      unwound. These local rules contain no whole-callee evaluation or
-     termination premise. `ConcreteStructuredCodeStepOutcome` records the six
+     termination premise. `ConcreteStructuredCodeStepOutcome` records the seven
      currently open successors: admission-free continued code, named-call
-     ready, saturated-call ready, pure-external call-ready, pure-external bind,
-     or returned control. `ConcreteStructuredCodeCoreRel.withAdmission` makes the remaining
-     locality obligation explicit: fresh current-node admission is attached
-     only after the dynamic successor is known.
+     ready, saturated-call ready, lazy-cache ready, pure-external call-ready,
+     pure-external bind, or returned control.
+     `ConcreteStructuredCodeCoreRel.withAdmission` makes the remaining locality
+     obligation explicit: fresh current-node admission is attached only after
+     the dynamic successor is known.
      `ConcreteStructuredGlobalOutcome` existentially hides the active
      generated function, entry anchor, and resource budget, and
      `advance_global` lifts the pointwise code law to that module-stable type.
@@ -1549,8 +1550,26 @@ acceptance tests pass.
      return-pop unwinds all such layers before consuming a source caller
      frame. If no test runs, the chain theorem proves that the source node is
      default-only, supplying the strict silence-rank decrease required by the
-     weak simulation. Lazy/cache control remains the next explicit pointwise
-     widening despite already having a terminating hereditary law.
+     weak simulation. Lazy/cache control now crosses the same pointwise
+     boundary. `ConcreteStructuredCodeStepAdmission.lazyHit` and `lazyMiss`
+     classify only the current semantic lookup and compiler-produced cache
+     environment. One source staging step takes a reflexive target path to
+     `ConcreteStructuredLazyCallReadyCoreRel`. A hit takes one source lookup
+     step and exactly four target steps through the flag, conditional, and
+     value reload, stopping at the shared bind protocol. A miss takes one
+     source initializer-entry step and exactly three target steps into the
+     compiler-selected generated nullary function, pushing one exact lazy
+     caller frame in both hereditary stacks. When that callee yields a
+     non-heap result, `advance_pop_supportedGlobal_of_step` matches the source
+     cache-publication step with exactly seven target steps: return from the
+     generated call, concrete `cacheSet`, value/flag publication, conditional
+     exit, and value reload. It reconstructs the complete cache, ownership,
+     budget, closure-table, ABI, and supported-caller scope and rejoins
+     `ConcreteStructuredExternalBindCoreRel` for the final destination write.
+     These are local transitions only: no rule contains an initializer
+     evaluation, termination premise, future admission, or target execution
+     certificate. Heap-valued miss publication remains a later facts-aware
+     widening.
      Pure integer-, natural-, and scalar-result externals are now the first
      non-erased family in this same closure. Current-node admission fixes only
      the semantic response and its exact allocation cost. The staging rule
@@ -1569,8 +1588,9 @@ acceptance tests pass.
      compiler-related code node that actually steps has an admission whose
      exact allocation cost fits its retained budget. Its
      `toCurrentStepClassifier` theorem derives the global classifier by
-     structural inversion; the five staged call/bind/return shapes require no
-     extra coverage. The coverage object's `toGeneratedTraceSimulation` and
+     structural inversion; the six staged call/cache/bind/return shapes
+     require no extra coverage. The coverage object's
+     `toGeneratedTraceSimulation` and
      `toFiniteTraceCorrect` wrappers no longer expose that intermediate
      classifier to callers. The next slice proves the coverage law and root
      relation from the compiler-produced export boundary; later runtime

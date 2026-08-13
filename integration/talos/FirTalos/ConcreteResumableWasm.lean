@@ -94,7 +94,7 @@ structure ConcreteStructuredCompilerCurrentStepCoverage
           target →
         Fir.LeanIR.Impure.executeStep externals source = .next sourceAfter →
         ∃ requiredBytes,
-          ConcreteStructuredCodeStepAdmission context externals functionResult
+          ConcreteStructuredCodeStepAdmission context sourceModule externals functionResult
               facts sourceRuntime sourceEnv requiredBytes sourceCode ∧
             requiredBytes ≤ remainingBytes
 
@@ -125,8 +125,9 @@ structure ConcreteStructuredCurrentStepClassifier
 of the global classifier.
 
 Ordinary code asks the coverage law for its source-only admission and budget.
-The five staged call/bind/return shapes are already branch-exact in the strong
-supported outcome, so their runnable constructors are recovered by inversion.
+The six staged call/cache/bind/return shapes are already branch-exact in the
+strong supported outcome, so their runnable constructors are recovered by
+inversion.
 No future source transition or target execution is inspected. -/
 theorem ConcreteStructuredCompilerCurrentStepCoverage.toCurrentStepClassifier
     {program : Fir.LeanIR.ImpureProgram}
@@ -160,6 +161,10 @@ theorem ConcreteStructuredCompilerCurrentStepCoverage.toCurrentStepClassifier
           (functionCode := functionCode) (spec := spec)
         exact .saturatedReady row sharedCapacity ready contextCaches supported
           agrees
+    | lazyReady path ready contextCaches supported agrees =>
+        apply ConcreteStructuredRunnableOutcome.toRunnableGlobal
+          (functionCode := functionCode) (spec := spec)
+        exact .lazyReady path ready contextCaches supported agrees
     | externalReady ready contextCaches supported agrees =>
         apply ConcreteStructuredRunnableOutcome.toRunnableGlobal
           (functionCode := functionCode) (spec := spec)
