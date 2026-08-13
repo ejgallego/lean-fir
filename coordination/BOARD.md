@@ -15,6 +15,40 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W7-VALIDATION-BOXED-SCALAR-LAYOUT`.
+- Integration owner: `root`, consuming the wasm-gen-2 slice on
+  `wasm/nested-boxed-scalar-layout`. The implementation rebased without
+  conflict onto accepted `main` at `ceec6a59`, with clean functional head
+  `1d3c23d1`; the standalone validation-schema contract is `64903ee7`.
+- Contract and lowering: `ValidationSchema.boxed` marks the physical object
+  representation of a logically scalar fixed-width integer, `USize`,
+  `Float32`, or `Float`. LCNF input materialization uses the existing
+  final-LCNF `box` operation, result decoding uses `unbox`, and packed concrete
+  scalar fields continue to use their ordinary unboxed schemas. This removes
+  constructor-name heuristics without changing `ValidationDatum`, the
+  symbolic-Wasm surface, concrete layouts, or resident-helper signatures.
+- Regression: real-source fixtures cover a tagged boxed `UInt8` nested beside
+  a `ByteArray` and a heap boxed `UInt8` returned after a closure reads the
+  captured array. Manifest parsing, source ABI classification, semantic host
+  loading, and V8 decoding also cover heap `UInt64` and bit-exact heap
+  `Float`, while mismatched scalar kinds and tagged floating values fail
+  closed. `FIR-BUG-validation-none-nested-boxed-scalar-result` is fixed.
+- Acceptance: Lean Beam reports zero diagnostics for every edited Lean module;
+  focused native/LCNF/V8 tests pass; `git diff --check`, complete `make check`,
+  all 3,143 Talos jobs, and the complete artifact gate pass after rebase. The
+  root gate covers 125 harness tests, 669 source cases, 9 direct-machine cases,
+  a 669-case native/LCNF/V8 triangle, 678 unique cases, 2,016/2,016 equal
+  comparisons, 7,303 machine steps, 167 active bug cards, and zero findings.
+  The concrete artifact runner executes 608 cases and retains its existing 61
+  ByteArray-blocked inventory; the semantic generated-Wasm triangle executes
+  both new fixtures.
+- Result: `VALIDATION-BOXED-SCALAR-SCHEMA` is released with its W7/validation
+  consumers. Generic constructor fields can now carry boxed scalar values
+  according to final-LCNF representation, completing the schema-derived packed
+  constructor and nested-alias materialization sequence.
+
+## Latest completed integration lease
+
 - Milestone: `W6-STRUCTURED-EXPORT-ROOT`.
 - Integration owner: `wasm-proof`, continuing the user-authorized integration
   lease. The proof slice rebased without conflict onto accepted `main` at
@@ -3734,7 +3768,7 @@ validation work continues; their historical handoff text remains unchanged.
 | `WASM-DECLARATION-NAME-UNIQUENESS` | W6 proof | W6 compiler-correctness clients | released | isolated proof contract `b6030300`; functional proof `f215c995`; bug card `FIR-BUG-wasm-none-supported-export-declaration-name-uniqueness` | Retains the existing phase-level `Program.NamesUnique` fact at `ConcreteSupportedExport`, proving that source lookup, symbolic function selection, and adapter numeric lookup identify the same internal declaration. No lowering, validator, ABI, runtime, or interpreter behavior changes. |
 | `CLOSURE-PROJECTION-KIND-REFINEMENT` | W6 proof/runtime | W6 compiler correctness, W7 resident projection, validation | released | functional head `625d4883`; ready mailbox `22d15cf3`; bug card `FIR-BUG-wasm-none-closure-projection-kind-refinement` | A closure retains its captured argument's precise descriptor kind, while generated callee entry may request the wider target-parameter kind. Live and post-application projection accept exactly `actualKind.refines expectedKind`, read at the actual descriptor kind, and preserve the physical lane while widening `PhysicalValueRel`. W7's resident helper already loads the same raw slot and requires no implementation change. |
 | `WASM-LEAN-OBJECT-FAMILY-CALL-ABI` | W7/shared lowering | W6, W7, validation, artifact clients | released | initial contract `bd7a5e55`; W7 consumer `a13fa2ad`; package ratchet `e5a8612b`; closure-call extension `b2d6f45c` | Follows Lean's generic call representation: `object`, `tagged`, and `tobject` are mutually compatible at named calls, joins, results, symbolic-stack boundaries, and ordinary allocated-closure invocation, while scalar and erased lanes stay exact. Directional semantic/proof refinement, closure capture descriptors, and every concrete layout remain unchanged. The shared refinement-to-call-compatibility lemma keeps the existing W6 closure-resolution proof hypotheses sufficient. W7 removes caller-name repairs, preserves captured `tobject` helper results, and ratchets the reviewed prettyM closure inventory from 40 to 42 before continuing Level1. |
-| `VALIDATION-BOXED-SCALAR-SCHEMA` | integration/validation | LCNF validator, W7/V8 adapter, validation fixtures | candidate | standalone schema commit on `wasm/nested-boxed-scalar-layout` | Adds an explicit physical `.boxed` marker around a logical fixed-width, `USize`, or floating-point scalar schema. It distinguishes generic object fields such as `Prod`'s boxed `UInt8` from concrete packed scalar fields without constructor-name heuristics or changing `ValidationDatum`. Consumers must implement Lean's existing final-LCNF `box`/`unbox` representation before fixtures use the marker. |
+| `VALIDATION-BOXED-SCALAR-SCHEMA` | integration/validation | LCNF validator, W7/V8 adapter, validation fixtures | released | standalone schema `64903ee7`; consumer `1d3c23d1` | Adds an explicit physical `.boxed` marker around a logical fixed-width, `USize`, or floating-point scalar schema. It distinguishes generic object fields such as `Prod`'s boxed `UInt8` from concrete packed scalar fields without constructor-name heuristics or changing `ValidationDatum`. LCNF materialization and decoding, Wasm ABI classification, manifests, the semantic host, and V8 validation now implement Lean's existing final-LCNF `box`/`unbox` representation; tagged integer and heap integer/float regressions pass. |
 | `ARGUMENT-ALIAS-MATERIALIZATION` | integration/validation | W7, V8 adapter, W6 refinement | active | `181a098f` | Adds a canonical target-sorted root-to-later-argument alias graph to every corpus descriptor. LCNF allocates each root once and retains one owned reference per aliased argument; malformed, chained, non-heap, schema-mismatched, and datum-mismatched graphs fail closed. The V8 adapter requires one compiler-manifest heap location per root with exact initial multiplicity and tests reference counts two and three plus two independent roots. W7 should thread `argumentAliases` through compiler invocation only after its current slice, then admit the three queued alias fixtures; W6 owns any later concrete refinement, not this validation implementation. |
 | `NATIVE-TERMINATION-SUPERVISION` | integration/validation | native adapter, LCNF adapter, W7/V8, Talos runners | active | `6fef4802`; divergence `6f0487ee`; typed policy `9e00c614`; source exit `8618f1f1` | Adds `timeoutMs` plus the backend-neutral `processTermination` enum: `protocol`, `timeoutDivergence`, or `sourceExit`. Native timeout is a typed backend timeout unless opted into divergence; ordinary nonzero status and signals remain crashes unless an exact source-exit fixture opts in, and signals always remain crashes. LCNF promotes only same-step, well-typed `Source.exitNat` terminal evidence under `sourceExit`, without changing the canonical interpreter result theorem. The divergence fixture pins 256 steps; source-exit fixtures pin statuses zero/seven and one exact external step. Retained V8 evidence excludes both. W7 or Talos should consume this policy only when admitting corresponding real-engine cases; no compiler-side work is requested now. |
 | `EFFECTFUL-NATIVE-ORACLE` | integration/validation | native and direct-native adapters; future V8/Talos adapter authors | active | `b3f4f5d9` | Replaces `Case.native : Unit → ValidationDatum` with a delayed `Unit → IO ValidationDatum` action and makes semantic effect/stderr drains independent of a successful return value. Existing pure fixtures lift explicitly and the current 699 source plus 9 direct observations pass. This is the foundation for comparing true Lean `IO.Error` exceptions and source output; it changes no descriptor, compiler ABI, canonical interpreter theorem, or W6/W7 implementation surface. |
