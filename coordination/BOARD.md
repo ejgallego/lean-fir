@@ -15,6 +15,33 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-STRUCTURED-VALIDATION-PROVENANCE`.
+- Integration owner: `wasm-proof`, continuing the user-authorized integration
+  lease. The proof slice is based on accepted `main` at `7fd2d2d9`, with
+  functional head `f459d5b1`; no shared semantic, generated-code, or executable
+  runtime contract changed.
+- Compiler provenance: every `ConcreteSupportedFunction` now retains the exact
+  source declaration/body selected by production lowering, its declaration
+  lookup, and the exact effective result ABI. Generated internal rows preserve
+  the same identity across direct, saturated, and lazy calls.
+- Validation theorem: `ConcreteSupportedFunction.validatedBodyAt` reconstructs
+  the real root `supportedCode` judgment implied by `WasmSupported`, indexed by
+  the active result equality already carried by the global structured relation.
+  `ConcreteStructuredCompilerCurrentStepAdmission.code` now receives that
+  equality instead of dropping it at the compiler-proof boundary.
+- Acceptance: Lean Beam update/sync/save reports zero proof errors for all four
+  affected proof modules; the direct 3,120-job target build, `git diff --check`,
+  complete `make check`, `make talos-setup`, and all 3,143 Talos jobs pass.
+  The root gate includes 125 interpreter-harness tests and all coverage,
+  native-oracle, bug-card, placeholder, and trusted-assumption checks.
+- Result: `main` accepts the clean W6 stack through mailbox head `9269b57f`.
+  `FIR-BUG-wasm-none-structured-validation-provenance` remains confirmed: the
+  next slice retains and advances residual local/join/case/sharing validation
+  state alongside `ConcreteStructuredCodeCoreRel`, then derives the universal
+  current-node admission constructors without a recursive caller certificate.
+
+## Latest completed integration lease
+
 - Milestone: `W6-FINITE-TRACE-RESOURCE-BOUNDARY`.
 - Integration owner: `wasm-proof`, continuing the user-authorized integration
   lease. The proof slice is based on accepted `main` at `8bcafc05`, with
