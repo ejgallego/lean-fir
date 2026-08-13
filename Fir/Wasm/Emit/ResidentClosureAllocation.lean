@@ -181,22 +181,6 @@ private def partialApplicationFunctionForKey
       stores ++
       retagAddress result }
 
-def partialApplicationFunction (module : Module) (ordinal : Nat)
-    (operation : RuntimeOp) : Except LinkError Function := do
-  let .partialApply targetName _arity _fixed _fields _result := operation |
-    throw .unsupportedOperation
-  unless operation.abiWellFormed do
-    throw .unsupportedOperation
-  unless module.closureDispatch.contains targetName do
-    throw (.missingClosureTarget targetName)
-  let some key := helperKey? operation |
-    throw .unsupportedOperation
-  let descriptorIndices := module.closureDescriptors.mapIdx
-    (fun index descriptor => (descriptor, index))
-    |>.foldl (init := Std.HashMap.emptyWithCapacity module.closureDescriptors.size)
-      fun indices entry => indices.insert entry.1 entry.2
-  partialApplicationFunctionForKey descriptorIndices ordinal key
-
 private structure Binding where
   key : HelperKey
   name : Name
