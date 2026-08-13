@@ -105,8 +105,23 @@ inductive ValidationSchema where
   | string
   | bytes
   | seq (element : ValidationSchema)
+  /--
+  A scalar transported through Lean's generic object representation.
+
+  This marker is physical: it does not add a node to `ValidationDatum`.
+  Consumers must reject inner schemas other than the fixed-width integer,
+  `USize`, and floating-point scalar schemas accepted by
+  `isBoxableScalar`.
+  -/
+  | boxed (scalar : ValidationSchema)
   | ctor (name : String) (tag : Nat) (fields : Array ValidationSchema)
   deriving Inhabited, BEq, Repr, ToJson, FromJson
+
+/-- Whether a schema denotes a scalar accepted by final-LCNF `box`/`unbox`. -/
+def ValidationSchema.isBoxableScalar : ValidationSchema → Bool
+  | .usize | .bits 8 | .bits 16 | .bits 32 | .bits 64
+  | .float32 | .float64 => true
+  | _ => false
 
 /-- Check that a datum has the recursive shape promised by a case. -/
 partial def ValidationSchema.accepts : ValidationSchema → ValidationDatum → Bool
@@ -121,6 +136,7 @@ partial def ValidationSchema.accepts : ValidationSchema → ValidationDatum → 
   | .string, .string _ => true
   | .bytes, .bytes values => values.all (· < 256)
   | .seq element, .seq values => values.all (element.accepts ·)
+  | .boxed scalar, datum => scalar.isBoxableScalar && scalar.accepts datum
   | .ctor expectedName expectedTag expectedFields,
       .ctor actualName actualTag actualFields =>
       expectedName == actualName && expectedTag == actualTag &&
@@ -435,6 +451,14 @@ private def protocolRoundTripRequest : CaseRequest := {
 #guard !ValidationSchema.float32.accepts (.bits 64 0x7fc00001)
 #guard ValidationSchema.float64.accepts (.bits 64 0x7ff8000000000001)
 #guard !ValidationSchema.float64.accepts (.bits 32 0x7fc00001)
+#guard (ValidationSchema.boxed (.bits 8)).accepts (.bits 8 0xff)
+#guard !(ValidationSchema.boxed (.bits 8)).accepts (.bits 16 0xff)
+#guard !(ValidationSchema.boxed .nat).accepts (.nat 1)
+
+#guard match (fromJson? (toJson (ValidationSchema.boxed (.bits 8))) :
+    Except String ValidationSchema) with
+  | .ok schema => schema == .boxed (.bits 8)
+  | .error _ => false
 
 #guard toJson (.nat 18446744073709551617 : ValidationDatum) ==
   Json.mkObj [("nat", Json.mkObj [("value", "18446744073709551617")])]
