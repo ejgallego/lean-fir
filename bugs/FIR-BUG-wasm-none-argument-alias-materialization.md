@@ -74,8 +74,8 @@ none
 
 ## Resolution and regression
 
-W7 revision `cb9206e7` forwards the canonical alias graph into initial heap
-encoding. Revisions `14e1d6e4` and `07607587` add the shared-root, multiplicity,
+W7 revision `d23ffd02` forwards the canonical alias graph into initial heap
+encoding. Revisions `4a5de29a` and `bee07a8e` add the shared-root, multiplicity,
 and independent-group corpus fixtures. `Fir/Wasm/Emit/SourceExamples.lean`
 also pins manifest location reuse and the exact initial reference count before
 external-engine execution.
