@@ -8,7 +8,7 @@ phase: wasm
 pass: none
 discovered-by: source-closure-test
 first-seen: 2026-08-13
-reproduction: Zip.Wasm.distanceCodeCacheProbe
+reproduction: Fir/Wasm/Emit/ResidentFixedWidth.lean
 regression: Fir/Wasm/Emit/ResidentFixedWidth.lean
 ---
 
