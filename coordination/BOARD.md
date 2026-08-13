@@ -15,6 +15,39 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-SHARED-RESIDENT-ARRAY-COPY-REFINEMENT`.
+- Integration owner: `root`, consuming the clean `wasm/talos-runtime`
+  handoff based on accepted generic-Array main `515bf401`. The functional
+  proof head is `0b3f466c`; the accepted mailbox head is `e8800c2c`.
+- Shared push: W6 retains the complete old live prefix in semantic/concrete
+  order, allocates and relates a fresh Array, transfers the pushed argument
+  without retaining it, publishes the pushed Array, and only then consumes
+  one reference to the old shared or persistent Array.
+- Shared pop: W6 retains and publishes exactly `elements.pop`, including the
+  uniform empty case, before consuming one source reference. Consequently the
+  removed last element receives no compensating retain and spare capacity
+  never becomes semantic ownership.
+- Refinement frame: both paths extend the allocation witness, preserve closure
+  allocations and every pre-existing physical allocation extent, expose the
+  exact fresh semantic reference and source/fresh address distinction, retain
+  complete live-heap refinement through the final decrement, and preserve the
+  post-allocation heap frontier exactly.
+- Contracts: none. The stack consumes the accepted
+  `HeapObject.array elements capacity` and resident `ARRY` layout contracts;
+  it changes no shared semantics, emitted-helper signature, compiler,
+  symbolic-Wasm, or W7 generation surface.
+- Acceptance: Lean Beam update/sync/save and direct root/Talos compilation of
+  `Fir.Wasm.Concrete.ArrayCopyCorrectness` pass. `git diff --check`, complete
+  `make check` (125 tests), `make talos-setup`, and all 3,148 Talos jobs pass.
+  No bug card was required.
+- Result: `main` fast-forwards through the clean W6 mailbox. W6 next connects
+  the complete resident copy-path contracts to compiler-facing finite-trace
+  current-step admission when emitted Array calls enter that structured proof
+  surface. Active-data-segment initialization remains conditional on a
+  nonempty segment entering W6's proof model.
+
+## Latest completed integration lease
+
 - Milestone: `VALIDATION-GENERIC-ARRAY`.
 - Integration owner: `root`, assembling the isolated shared contract and its
   W7, W6, and pass-proof consumers on `integration/generic-array`. The
