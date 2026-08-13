@@ -19,6 +19,7 @@ import {
 } from "./concrete-validation-external-registry.mjs";
 
 const SUPPORTED_INITIAL_OBJECTS = new Set([
+  "array",
   "ctor",
   "boxed",
   "integer",
@@ -148,6 +149,12 @@ function semanticObject(host, location) {
       const scalarKind = value.kind === "usize" ? "usize" : value.scalarKind;
       return { kind: "boxed", scalarKind, value };
     }
+    case "array":
+      return {
+        kind: "array",
+        elements: object.elements.map(decodedValueJson),
+        capacity: object.capacity,
+      };
     default:
       throw new Error(`unsupported concrete validation object kind ${object.kind}`);
   }

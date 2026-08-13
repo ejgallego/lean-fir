@@ -202,6 +202,15 @@ def heapObjectJson : HeapObject → Except String Json
       return Json.mkObj [
         ("kind", "byteArray"),
         ("value", Json.arr (value.map fun byte => (byte.toNat : Json)))]
+  | .array elements capacity => do
+      unless elements.size ≤ capacity do
+        throw s!"initial Array size {elements.size} exceeds capacity {capacity}"
+      unless capacity ≤ UInt32.size do
+        throw s!"initial Array capacity {capacity} exceeds the wasm32 boundary"
+      return Json.mkObj [
+        ("kind", "array"),
+        ("elements", Json.arr (elements.map valueJson)),
+        ("capacity", capacity)]
   | .boxed type value => do
       let kind ← boxedScalarAbiKind type
       unless kind.acceptsValue value do
@@ -247,6 +256,7 @@ private def validateHeapObjectReferences (runtime : RuntimeState) : HeapObject �
   | .ctor object => object.objectFields.forM (validateRuntimeValue runtime)
   | .closure _ _ fixed => fixed.forM (validateRuntimeValue runtime)
   | .boxed _ value => validateRuntimeValue runtime value
+  | .array elements _ => elements.forM (validateRuntimeValue runtime)
   | _ => pure ()
 
 def runtimeJson (runtime : RuntimeState) : Except String Json := do

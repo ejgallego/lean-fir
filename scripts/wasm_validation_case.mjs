@@ -221,6 +221,25 @@ export function semanticDatum(schema, value, host, context, validationExternals)
       `${context} scalar value is out of range`);
     return { bits: { width, value: value.value.toString() } };
   }
+  if (schema.array !== undefined) {
+    assert.equal(value.kind, "heap", `${context} must be a heap Array`);
+    const object = host.liveCell(value.location).object;
+    assert.equal(object.kind, "array", `${context} heap object must be an Array`);
+    assert.ok(Number.isSafeInteger(object.capacity) &&
+      object.capacity >= object.elements.length,
+    `${context} Array capacity must cover its live elements`);
+    return {
+      seq: {
+        value: object.elements.map((element, index) => semanticDatum(
+          schema.array.element,
+          element,
+          host,
+          `${context} element ${index}`,
+          validationExternals,
+        )),
+      },
+    };
+  }
   if (schema.seq !== undefined) {
     const elements = [];
     const locations = new Set();
@@ -396,6 +415,18 @@ function materializedArgumentPath(caseId, path, schemas, semanticArguments, host
   assert.notEqual(schema, undefined,
     `${caseId} nested argument path root ${path.argument} is out of bounds`);
   for (const child of path.children) {
+    if (schema?.array !== undefined) {
+      assert.equal(value?.kind, "heap",
+        `${caseId} nested Array path did not reach a heap object`);
+      const object = host.liveCell(value.location).object;
+      assert.equal(object.kind, "array",
+        `${caseId} nested Array path did not reach an Array`);
+      assert.ok(child < object.elements.length,
+        `${caseId} nested Array child ${child} is out of bounds`);
+      value = object.elements[child];
+      schema = schema.array.element;
+      continue;
+    }
     if (schema?.seq !== undefined) {
       let cursor = value;
       for (let index = 0; index <= child; ++index) {

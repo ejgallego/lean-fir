@@ -147,6 +147,15 @@ def idNatList (xs : List Nat) : List Nat :=
 def idUInt8List (xs : List UInt8) : List UInt8 :=
   xs
 
+def idUInt8Array (xs : Array UInt8) : Array UInt8 :=
+  xs
+
+def idBoolArray (xs : Array Bool) : Array Bool :=
+  xs
+
+def idFloatArray (xs : Array Float) : Array Float :=
+  xs
+
 def firstUInt8List : List UInt8 → UInt8
   | value :: _ => value
   | [] => 0
@@ -2588,6 +2597,15 @@ private def boolListDatum (xs : List Bool) : ValidationDatum :=
 private def floatListDatum (xs : List Float) : ValidationDatum :=
   .seq (xs.toArray.map fun value => .bits 64 value.toBits)
 
+private def uint8ArrayDatum (xs : Array UInt8) : ValidationDatum :=
+  .seq (xs.map fun value => .bits 8 (UInt64.ofNat value.toNat))
+
+private def boolArrayDatum (xs : Array Bool) : ValidationDatum :=
+  .seq (xs.map .bool)
+
+private def floatArrayDatum (xs : Array Float) : ValidationDatum :=
+  .seq (xs.map fun value => .bits 64 value.toBits)
+
 private def genericContainerFloat : Float :=
   Float.ofBits 0x7ff8123456789abc
 
@@ -4030,6 +4048,41 @@ private def preConversionCases : Array Case := #[
     requiredExecutedLcnfForms := #["inc", "return"]
     provenance := firProvenance
       "Round-trip UInt8 through List's generic object-valued head field" },
+  { id := "generic-uint8-array-roundtrip"
+    entry := ``Source.idUInt8Array
+    args := #[uint8ArrayDatum #[0, 127, 255]]
+    argSchemas := #[.array (.boxed (.bits 8))]
+    resultSchema := .array (.boxed (.bits 8))
+    native := fun _ => uint8ArrayDatum (Source.idUInt8Array #[0, 127, 255])
+    tags := #["quick", "array", "generic", "boxed", "uint8", "roundtrip",
+      "ownership"]
+    requiredLcnfForms := #["inc", "return"]
+    requiredExecutedLcnfForms := #["inc", "return"]
+    provenance := firProvenance
+      "Round-trip a nonempty generic Array with tagged boxed UInt8 elements" },
+  { id := "generic-bool-array-empty-roundtrip"
+    entry := ``Source.idBoolArray
+    args := #[boolArrayDatum #[]]
+    argSchemas := #[.array (.boxed .bool)]
+    resultSchema := .array (.boxed .bool)
+    native := fun _ => boolArrayDatum (Source.idBoolArray #[])
+    tags := #["quick", "array", "generic", "boxed", "bool", "empty", "roundtrip"]
+    requiredLcnfForms := #["inc", "return"]
+    requiredExecutedLcnfForms := #["inc", "return"]
+    provenance := firProvenance
+      "Round-trip an empty generic Array as a heap object rather than List.nil" },
+  { id := "generic-float-array-roundtrip"
+    entry := ``Source.idFloatArray
+    args := #[floatArrayDatum #[genericContainerFloat]]
+    argSchemas := #[.array (.boxed .float64)]
+    resultSchema := .array (.boxed .float64)
+    native := fun _ => floatArrayDatum (Source.idFloatArray #[genericContainerFloat])
+    tags := #["quick", "array", "generic", "boxed", "float", "heap", "roundtrip",
+      "bit-exact"]
+    requiredLcnfForms := #["inc", "return"]
+    requiredExecutedLcnfForms := #["inc", "return"]
+    provenance := firProvenance
+      "Round-trip a generic Array containing a heap-only bit-exact Float box" },
   { id := "generic-uint8-list-head"
     entry := ``Source.firstUInt8List
     args := #[uint8ListDatum [255, 1]]

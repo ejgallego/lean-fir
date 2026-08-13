@@ -328,6 +328,16 @@ function runtimeHeapObject(object) {
           "runtime byte-array element must be a byte");
       }
       return { kind: "byteArray", value: [...object.value] };
+    case "array":
+      assert.ok(Array.isArray(object.elements), "runtime Array elements must be an array");
+      assert.ok(Number.isSafeInteger(object.capacity) && object.capacity >= object.elements.length,
+        "runtime Array capacity must cover its live elements");
+      assert.ok(object.capacity <= 0xffffffff, "runtime Array capacity must fit UInt32");
+      return {
+        kind: "array",
+        elements: object.elements.map(runtimeValue),
+        capacity: object.capacity,
+      };
     default:
       throw new Error(`unsupported initial-runtime heap object: ${object.kind}`);
   }
@@ -789,6 +799,12 @@ export class SemanticHost {
         return { kind: "integer", value: object.value };
       case "byteArray":
         return { kind: "byteArray", value: [...object.value] };
+      case "array":
+        return {
+          kind: "array",
+          elements: object.elements.map((value) => this.cloneValue(value)),
+          capacity: object.capacity,
+        };
       default:
         throw new Error(`cannot snapshot heap object kind ${object.kind}`);
     }
@@ -962,6 +978,8 @@ export class SemanticHost {
         return [object.value];
       case "closure":
         return object.fixed;
+      case "array":
+        return object.elements;
       default:
         return [];
     }
@@ -1296,6 +1314,12 @@ export class SemanticHost {
         return { kind: "integer", value: object.value.toString() };
       case "byteArray":
         return { kind: "byteArray", value: [...object.value] };
+      case "array":
+        return {
+          kind: "array",
+          elements: object.elements.map((value) => this.valueJson(value)),
+          capacity: object.capacity,
+        };
       default:
         throw new Error(`cannot observe heap object kind ${object.kind}`);
     }

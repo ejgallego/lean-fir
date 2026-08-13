@@ -3283,6 +3283,16 @@ private partial def encodeDatum (nestedAliases : Array NestedArgumentAlias)
           let bytes := values.map (UInt8.ofNat ·)
           let (runtime, reference) := alloc runtime (.byteArray bytes)
           return record runtime (.object reference) materialized
+      | .array element, .seq values => do
+          let (_, runtime, elements, materialized) ← values.foldlM
+            (init := (0, runtime, #[], materialized))
+            fun (index, runtime, elements, materialized) datum => do
+              let (runtime, value, materialized) ←
+                encodeDatum nestedAliases (childArgumentPath path index) materialized
+                  runtime element datum
+              return (index + 1, runtime, elements.push value, materialized)
+          let (runtime, reference) := alloc runtime (.array elements elements.size)
+          return record runtime (.object reference) materialized
       | .seq element, .seq values => do
           let (_, runtime, heads, materialized) ← values.foldlM
             (init := (0, runtime, #[], materialized))
@@ -3614,6 +3624,12 @@ private partial def decodeValue (runtime : RuntimeState) (schema : ValidationSch
       let cell ← getLiveCell runtime location |>.mapError (fun fault => toString (repr fault))
       let .byteArray value := cell.object | throw "expected a byte-array heap object"
       return .bytes (value.map (UInt8.toNat ·))
+  | .array element, .object (.heap location) => do
+      let cell ← getLiveCell runtime location |>.mapError (fun fault => toString (repr fault))
+      let .array elements capacity := cell.object | throw "expected an Array heap object"
+      unless elements.size ≤ capacity do
+        throw s!"Array size {elements.size} exceeds capacity {capacity}"
+      return .seq (← elements.mapM (decodeValue runtime element))
   | .seq _, .object (.tagged 0) => return .seq #[]
   | .seq element, .object (.heap location) =>
       let cell ← getLiveCell runtime location |>.mapError (fun fault => toString (repr fault))

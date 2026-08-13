@@ -102,6 +102,61 @@ assert.throws(() => new ConcreteHost([], boxedRuntime(
   { kind: "scalar", scalar: { kind: "float32", value: "4294967296" } },
 )), /out of float32 range/);
 
+const arrayRuntime = {
+  nextLocation: 2,
+  heap: [
+    {
+      location: 1,
+      rc: 1,
+      persistent: false,
+      live: true,
+      object: {
+        kind: "array",
+        elements: [
+          { kind: "object", reference: { kind: "heap", location: 0 } },
+          { kind: "object", reference: { kind: "tagged", payload: "1" } },
+        ],
+        capacity: 4,
+      },
+    },
+    {
+      location: 0,
+      rc: 1,
+      persistent: false,
+      live: true,
+      object: {
+        kind: "boxed",
+        scalarKind: "uint8",
+        value: { kind: "scalar", scalar: { kind: "uint8", value: "255" } },
+      },
+    },
+  ],
+};
+const arrayHost = new ConcreteHost([], arrayRuntime);
+const arrayAddress = arrayHost.addressOf(1);
+const arrayHeader = arrayHost.readHeader(arrayAddress);
+assert.equal(arrayHeader.kind, 8);
+assert.equal(arrayHeader.aux0, 0x41525259);
+assert.equal(arrayHeader.aux1, 2);
+assert.equal(arrayHeader.aux2, 4);
+assert.equal(arrayHeader.bytes, 64);
+assert.deepStrictEqual(arrayHost.objectJson(arrayAddress, arrayHeader),
+  arrayRuntime.heap[0].object);
+const boxedAddress = arrayHost.addressOf(0);
+arrayHost.dec({ amount: 1, check: true }, [arrayAddress]);
+assert.equal(arrayHost.readHeader(arrayAddress, false).kind, 255);
+assert.equal(arrayHost.readHeader(boxedAddress, false).kind, 255);
+assert.throws(() => new ConcreteHost([], {
+  nextLocation: 1,
+  heap: [{
+    location: 0,
+    rc: 1,
+    persistent: false,
+    live: true,
+    object: { kind: "array", elements: [], capacity: -1 },
+  }],
+}), /capacity must cover its live elements/);
+
 // A constructor slot has no runtime tag of its own. Track the physical kind
 // supplied by the latest mutation so an object-only slot can subsequently hold
 // a tagged value and still be decoded faithfully.
@@ -196,4 +251,4 @@ assert.throws(() => new ConcreteHost([], initialRuntime([
   { width: 2, offset: 0, value: { kind: "float", value: "01" } },
 ])), /must use a canonical unsigned decimal string/);
 
-console.log("PASS concrete packed constructors and boxed initial runtime");
+console.log("PASS concrete packed constructors, boxed values, and generic Array initial runtime");

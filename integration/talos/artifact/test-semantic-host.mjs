@@ -114,6 +114,51 @@ function ctorRuntime() {
 }
 
 {
+  const host = new SemanticHost({
+    nextLocation: 2,
+    heap: [
+      {
+        location: 1,
+        rc: 1,
+        persistent: false,
+        live: true,
+        object: {
+          kind: "array",
+          elements: [
+            { kind: "object", reference: { kind: "heap", location: 0 } },
+            { kind: "object", reference: { kind: "tagged", payload: "1" } },
+          ],
+          capacity: 4,
+        },
+      },
+      {
+        location: 0,
+        rc: 1,
+        persistent: false,
+        live: true,
+        object: {
+          kind: "boxed",
+          scalarKind: "uint8",
+          value: { kind: "scalar", scalar: { kind: "uint8", value: "255" } },
+        },
+      },
+    ],
+  });
+  assert.deepStrictEqual(host.liveCell(1).object, {
+    kind: "array",
+    elements: [{ kind: "heap", location: 0 }, tagged(1)],
+    capacity: 4,
+  });
+  host.decLocation(1);
+  for (const location of [0, 1]) {
+    assert.throws(
+      () => host.liveCell(location),
+      (error) => error instanceof SemanticFault && error.fault.kind === "deadObject",
+    );
+  }
+}
+
+{
   const host = new SemanticHost();
   const maximum = scalar("uint64", 0xffffffffffffffffn);
   const boxed = host.importFunction({ kind: "box", scalar: "uint64", result: "tobject" })(

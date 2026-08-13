@@ -14,6 +14,7 @@ const MAX_IMMEDIATE_PAYLOAD = 0x7fffffffn;
 const MAX_TAGGED_PAYLOAD = 0x7fffffffffffffffn;
 const STRING_UTF8_MARKER = 1;
 const INTEGER_SIGN_MAGNITUDE_MARKER = 1;
+const ARRAY_MARKER = 0x41525259;
 
 const OBJECT_KINDS = new Set(["object", "tagged", "tobject"]);
 const SCALAR_WIDTHS = new Map([
@@ -467,6 +468,26 @@ export class ConcreteHost {
           payload,
         };
       }
+      case "array": {
+        assert.ok(Array.isArray(object.elements),
+          "initial Array elements must be an array");
+        assert.ok(Number.isSafeInteger(object.capacity) &&
+          object.capacity >= object.elements.length && object.capacity <= 0xffffffff,
+        "initial Array capacity must cover its live elements and fit UInt32");
+        const fieldKinds = object.elements.map((value) =>
+          this.initialObjectFieldKind(value));
+        return {
+          kind: KIND.opaque,
+          payloadBytes: SLOT_BYTES * object.capacity,
+          auxiliaries: {
+            aux0: ARRAY_MARKER,
+            aux1: object.elements.length,
+            aux2: object.capacity,
+            aux3: 0,
+          },
+          descriptor: { kind: "array", fieldKinds },
+        };
+      }
       default:
         throw new Error(`unsupported concrete initial-runtime heap object: ${object.kind}`);
     }
@@ -585,6 +606,10 @@ export class ConcreteHost {
           .set(layout.bytes);
       } else if (cell.object.kind === "boxed") {
         this.writeU64(address + HEADER_BYTES, layout.payload);
+      } else if (cell.object.kind === "array") {
+        cell.object.elements.forEach((value, index) =>
+          this.writeWordSlot(address + HEADER_BYTES + SLOT_BYTES * index,
+            this.initialObjectWord(value)));
       }
       const header = this.readHeader(address);
       this.writeHeader(address, {
@@ -1461,7 +1486,9 @@ export class ConcreteHost {
   }
 
   ownedWords(address, header) {
-    const kinds = header.kind === KIND.constructor
+    const kinds = header.kind === KIND.opaque && header.aux0 === ARRAY_MARKER
+      ? Array.from({ length: header.aux1 }, () => "tobject")
+      : header.kind === KIND.constructor
       ? this.constructorDescriptor(address, header).fieldKinds
       : header.kind === KIND.closure
         ? this.closureDescriptors[header.aux3]
@@ -1816,11 +1843,26 @@ export class ConcreteHost {
         : { kind: "scalar", scalarKind: kind, value: this.readU64(address + HEADER_BYTES) };
       return { kind: "boxed", type: scalarTypeRepr(kind), value: this.valueJson(value) };
     }
+    if (header.kind === KIND.opaque && header.aux0 === ARRAY_MARKER) {
+      assert.ok(header.aux1 <= header.aux2,
+        "concrete Array size exceeds capacity");
+      assert.equal(header.bytes, align8(HEADER_BYTES + SLOT_BYTES * header.aux2),
+        "concrete Array allocation size mismatch");
+      return {
+        kind: "array",
+        elements: Array.from({ length: header.aux1 }, (_, index) =>
+          this.valueJson(this.decode("tobject", signed32(
+            this.readWordSlot(address + HEADER_BYTES + SLOT_BYTES * index))))),
+        capacity: header.aux2,
+      };
+    }
     throw new Error(`cannot observe concrete heap object kind ${header.kind}`);
   }
 
   ownedAddresses(address, header) {
-    const kinds = header.kind === KIND.constructor
+    const kinds = header.kind === KIND.opaque && header.aux0 === ARRAY_MARKER
+      ? Array.from({ length: header.aux1 }, () => "tobject")
+      : header.kind === KIND.constructor
       ? this.constructorDescriptor(address, header).fieldKinds
       : header.kind === KIND.closure
         ? this.closureDescriptors[header.aux3]
