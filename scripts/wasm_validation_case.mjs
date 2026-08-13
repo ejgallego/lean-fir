@@ -26,7 +26,23 @@ function jsonInteger(value, context) {
   return value.toString();
 }
 
+function boxedScalarKind(schema, context) {
+  if (schema === "usize") return "usize";
+  if (schema === "float32") return "float32";
+  if (schema === "float64") return "float";
+  if (schema && typeof schema === "object" && schema.bits !== undefined) {
+    const kind = SCALAR_KINDS.get(schema.bits.width);
+    assert.ok(kind, `${context} uses unsupported boxed scalar width ${schema.bits.width}`);
+    return kind;
+  }
+  throw new Error(`${context} does not describe a boxable scalar`);
+}
+
 function constructorFieldKind(schema, context) {
+  if (schema && typeof schema === "object" && schema.boxed !== undefined) {
+    boxedScalarKind(schema.boxed.scalar, context);
+    return { kind: "object" };
+  }
   if (schema === "usize") {
     return { kind: "usize" };
   }
@@ -101,6 +117,22 @@ function constructorSchemaLayout(schemas, context) {
   };
 }
 
+function unboxSemanticValue(schema, value, host, context) {
+  const scalarKind = boxedScalarKind(schema, context);
+  if (value.kind === "tagged") {
+    assert.ok(scalarKind !== "float32" && scalarKind !== "float",
+      `${context} floating scalar cannot use a tagged box`);
+    return scalarKind === "usize"
+      ? { kind: "usize", value: value.payload }
+      : { kind: "scalar", scalarKind, value: value.payload };
+  }
+  assert.equal(value.kind, "heap", `${context} must be a tagged or heap box`);
+  const object = host.liveCell(value.location).object;
+  assert.equal(object.kind, "boxed", `${context} heap object must be a scalar box`);
+  assert.equal(object.scalarKind, scalarKind, `${context} boxed scalar kind mismatch`);
+  return object.value;
+}
+
 export function semanticDatum(schema, value, host, context, validationExternals) {
   if (typeof schema === "string") {
     switch (schema) {
@@ -168,6 +200,16 @@ export function semanticDatum(schema, value, host, context, validationExternals)
   }
 
   assert.ok(schema && typeof schema === "object", `${context} schema must be an object`);
+  if (schema.boxed !== undefined) {
+    const scalar = schema.boxed.scalar;
+    return semanticDatum(
+      scalar,
+      unboxSemanticValue(scalar, value, host, context),
+      host,
+      context,
+      validationExternals,
+    );
+  }
   if (schema.bits !== undefined) {
     const width = schema.bits.width;
     const scalarKind = SCALAR_KINDS.get(width);

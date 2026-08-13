@@ -338,6 +338,91 @@ function fixedWidthScalarValue(scalarKind, value) {
       validationExternals,
     ));
 
+  const boxedUInt8Schema = { boxed: { scalar: { bits: { width: 8 } } } };
+  assert.deepStrictEqual(
+    semanticDatum(
+      boxedUInt8Schema,
+      { kind: "tagged", payload: 255n },
+      host,
+      "tagged boxed UInt8",
+      validationExternals,
+    ),
+    { bits: { width: 8, value: "255" } },
+  );
+  const boxedUInt64Schema = { boxed: { scalar: { bits: { width: 64 } } } };
+  const boxedUInt64 = host.alloc({
+    kind: "boxed",
+    scalarKind: "uint64",
+    value: fixedWidthScalarValue("uint64", 0xffffffffffffffffn),
+  });
+  assert.deepStrictEqual(
+    semanticDatum(
+      boxedUInt64Schema,
+      boxedUInt64,
+      host,
+      "heap boxed UInt64",
+      validationExternals,
+    ),
+    { bits: { width: 64, value: "18446744073709551615" } },
+  );
+  assert.throws(() => semanticDatum(
+    boxedUInt8Schema,
+    boxedUInt64,
+    host,
+    "mismatched boxed scalar",
+    validationExternals,
+  ));
+  const boxedFloat = host.alloc({
+    kind: "boxed",
+    scalarKind: "float",
+    value: float64,
+  });
+  assert.deepStrictEqual(
+    semanticDatum(
+      { boxed: { scalar: "float64" } },
+      boxedFloat,
+      host,
+      "heap boxed Float",
+      validationExternals,
+    ),
+    { bits: { width: 64, value: "9221140253039434428" } },
+  );
+  assert.throws(() => semanticDatum(
+    { boxed: { scalar: "float64" } },
+    { kind: "tagged", payload: 0n },
+    host,
+    "tagged boxed Float",
+    validationExternals,
+  ));
+
+  const initialBoxHost = new SemanticHost({
+    nextLocation: 1,
+    heap: [{
+      location: 0,
+      rc: 1,
+      persistent: false,
+      live: true,
+      object: {
+        kind: "boxed",
+        scalarKind: "uint64",
+        value: {
+          kind: "scalar",
+          scalar: { kind: "uint64", value: "18446744073709551615" },
+        },
+      },
+    }],
+  });
+  assert.deepStrictEqual(
+    semanticDatum(
+      boxedUInt64Schema,
+      { kind: "heap", location: 0 },
+      initialBoxHost,
+      "initial-runtime boxed UInt64",
+      validationExternals,
+    ),
+    { bits: { width: 64, value: "18446744073709551615" } },
+  );
+
   const mixedSchema = {
     ctor: {
       name: "Mixed.mk",

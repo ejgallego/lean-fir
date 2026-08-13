@@ -3104,6 +3104,26 @@ private def constructorFieldKind : ValidationSchema → Except String Constructo
   | .float64 => return .scalar 8
   | _ => return .object
 
+private def boxedScalarType : ValidationSchema → Except String Expr
+  | .usize => return LCNF.ImpureType.usize
+  | .bits 8 => return LCNF.ImpureType.uint8
+  | .bits 16 => return LCNF.ImpureType.uint16
+  | .bits 32 => return LCNF.ImpureType.uint32
+  | .bits 64 => return LCNF.ImpureType.uint64
+  | .float32 => return LCNF.ImpureType.float32
+  | .float64 => return LCNF.ImpureType.float
+  | schema => throw s!"schema {repr schema} is not a boxable scalar"
+
+private def boxedScalarValue : ValidationSchema → ValidationDatum → Except String Value
+  | .usize, .usize value => return .usize value
+  | .bits 8, .bits 8 value => return .scalar (.uint8 value.toUInt8)
+  | .bits 16, .bits 16 value => return .scalar (.uint16 value.toUInt16)
+  | .bits 32, .bits 32 value => return .scalar (.uint32 value.toUInt32)
+  | .bits 64, .bits 64 value => return .scalar (.uint64 value)
+  | .float32, .bits 32 value => return .scalar (.float32Bits value.toUInt32)
+  | .float64, .bits 64 value => return .scalar (.float64Bits value)
+  | schema, datum => mismatch schema datum
+
 private structure ConstructorFieldCounts where
   objects : Nat := 0
   usizes : Nat := 0
@@ -3247,6 +3267,12 @@ private partial def encodeDatum (nestedAliases : Array NestedArgumentAlias)
           return record runtime (.scalar (.float32Bits value.toUInt32)) materialized
       | .float64, .bits 64 value =>
           return record runtime (.scalar (.float64Bits value)) materialized
+      | .boxed scalar, datum => do
+          let type ← boxedScalarType scalar
+          let scalarValue ← boxedScalarValue scalar datum
+          let (runtime, value) ← box runtime type scalarValue
+            |>.mapError (fun fault => toString (repr fault))
+          return record runtime value materialized
       | .string, .string value =>
           let (runtime, reference) := alloc runtime (.string value)
           return record runtime (.object reference) materialized
@@ -3572,6 +3598,11 @@ private partial def decodeValue (runtime : RuntimeState) (schema : ValidationSch
       return .bits 32 (UInt64.ofNat bits.toNat)
   | .float64, .scalar (.float64Bits bits) =>
       return .bits 64 bits
+  | .boxed scalar, value => do
+      let type ← boxedScalarType scalar
+      let scalarValue ← unbox runtime type value
+        |>.mapError (fun fault => toString (repr fault))
+      decodeValue runtime scalar scalarValue
   | .string, .object (.heap location) =>
       let cell ← getLiveCell runtime location |>.mapError (fun fault => toString (repr fault))
       let .string value := cell.object | throw "expected a string heap object"
@@ -3654,6 +3685,34 @@ private def mixedConstructorScalarRoundTripGuard : Bool :=
           | .error _ => false
 
 #guard mixedConstructorScalarRoundTripGuard
+
+private def boxedConstructorScalarRoundTripGuard : Bool :=
+  let schema := ValidationSchema.ctor "GenericScalarLayout" 0 #[
+    .boxed (.bits 8), .boxed (.bits 64), .boxed .float32,
+    .boxed .float64, .boxed .usize]
+  let datum := ValidationDatum.ctor "GenericScalarLayout" 0 #[
+    .bits 8 0xff,
+    .bits 64 0xffffffffffffffff,
+    .bits 32 0x7fc12345,
+    .bits 64 0x7ff8123456789abc,
+    .usize 0xffffffffffffffff]
+  match encodeArgs #[schema] #[datum] with
+  | .error _ => false
+  | .ok (runtime, values) =>
+      match values[0]? with
+      | some (Value.object (ObjectRef.heap location)) =>
+          match getLiveCell runtime location,
+              decodeValue runtime schema (Value.object (ObjectRef.heap location)) with
+          | .ok { object := .ctor object, .. }, .ok decoded =>
+              object.objectFields.size == 5 && object.usizeFields.isEmpty &&
+                object.scalarFields.isEmpty &&
+                object.objectFields[0]? ==
+                  some (Value.object (ObjectRef.tagged 0xff)) &&
+                decoded == datum
+          | _, _ => false
+      | _ => false
+
+#guard boxedConstructorScalarRoundTripGuard
 
 private def decodedSignedScalarResultsUseAbiGuard : Bool :=
   let encoded : Array (ValidationSchema × Value) := #[

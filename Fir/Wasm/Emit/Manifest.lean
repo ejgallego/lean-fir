@@ -177,6 +177,16 @@ def scalarFieldJson (field : ScalarField) : Json :=
     ("offset", field.offset),
     ("value", scalarValueJson field.value)]
 
+private def boxedScalarAbiKind (type : Expr) : Except String AbiKind :=
+  if type == Compiler.LCNF.ImpureType.uint8 then return .uint8
+  else if type == Compiler.LCNF.ImpureType.uint16 then return .uint16
+  else if type == Compiler.LCNF.ImpureType.uint32 then return .uint32
+  else if type == Compiler.LCNF.ImpureType.uint64 then return .uint64
+  else if type == Compiler.LCNF.ImpureType.usize then return .usize
+  else if type == Compiler.LCNF.ImpureType.float32 then return .float32
+  else if type == Compiler.LCNF.ImpureType.float then return .float
+  else throw s!"boxed initial-runtime value has unsupported scalar type {type}"
+
 def heapObjectJson : HeapObject → Except String Json
   | .ctor object =>
       return Json.mkObj [
@@ -192,8 +202,15 @@ def heapObjectJson : HeapObject → Except String Json
       return Json.mkObj [
         ("kind", "byteArray"),
         ("value", Json.arr (value.map fun byte => (byte.toNat : Json)))]
+  | .boxed type value => do
+      let kind ← boxedScalarAbiKind type
+      unless kind.acceptsValue value do
+        throw s!"boxed initial-runtime value {repr value} does not match {repr kind}"
+      return Json.mkObj [
+        ("kind", "boxed"),
+        ("scalarKind", abiKindName kind),
+        ("value", valueJson value)]
   | .closure .. => throw "closure objects are outside the A0 initial-runtime contract"
-  | .boxed .. => throw "boxed objects are outside the A0 initial-runtime contract"
   | .opaque .. => throw "opaque objects are outside the A0 initial-runtime contract"
 
 def heapCellJson (entry : Location × HeapCell) : Except String Json := do

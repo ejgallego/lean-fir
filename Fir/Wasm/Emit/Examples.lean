@@ -531,6 +531,12 @@ def w5ManifestOperations : Array RuntimeOp := #[
 
 #guard (Fir.Wasm.Emit.Manifest.heapObjectJson (.integer (-2147483649))).isOk
 #guard (Fir.Wasm.Emit.Manifest.heapObjectJson (.byteArray #[0, 127, 128, 255])).isOk
+#guard (Fir.Wasm.Emit.Manifest.heapObjectJson
+  (.boxed LCNF.ImpureType.uint64 (.scalar (.uint64 0xffffffffffffffff)))).isOk
+#guard match Fir.Wasm.Emit.Manifest.heapObjectJson
+    (.boxed LCNF.ImpureType.uint8 (.scalar (.uint16 1))) with
+  | .error _ => true
+  | .ok _ => false
 
 private def float32NaNPayloadJson : Lean.Json :=
   Lean.Json.mkObj [("kind", "float32"), ("value", "2143289345")]

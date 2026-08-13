@@ -823,6 +823,7 @@ def validationSchemaAcceptsAbiKind : Fir.Validation.ValidationSchema → Fir.Was
   | .string, kind
   | .bytes, kind
   | .seq _, kind
+  | .boxed _, kind
   | .ctor .., kind => kind.isObjectLike
   | _, _ => false
 

@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-validation-none-nested-boxed-scalar-result
-status: candidate
+status: fixed
 classification: validation-harness
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -9,7 +9,7 @@ pass: none
 discovered-by: differential-test
 first-seen: 2026-08-02
 reproduction: Fir/Validation/Corpus.lean
-regression: none
+regression: Fir/Validation/Corpus.lean
 ---
 
 # Summary
@@ -22,7 +22,7 @@ source program to completion.
 
 Compile a source entry returning `ByteArray × UInt8`, where the `UInt8` is read
 from a captured ByteArray through `ByteArray.get!`, and describe the result as
-`.ctor "Prod.mk" 0 #[.bytes, .bits 8]`.
+`.ctor "Prod.mk" 0 #[.bytes, .boxed (.bits 8)]`.
 
 ## Exact commands
 
@@ -32,8 +32,8 @@ From the fixture worktree at the first S1 probe:
 lake --rehash build Fir.Validation fir-native-oracle
 python3 scripts/validate_interpreters.py \
   --plan validation-plans/native-lcnf.json \
-  --case captured-byte-array-outside-alias-read \
-  --case captured-byte-array-outside-alias-mutation \
+  --case boxed-byte-array-uint8-input \
+  --case captured-byte-array-outside-alias-byte-read \
   --out-dir _build/validation-closure-outside-alias
 ```
 
@@ -89,4 +89,14 @@ None.
 
 ## Resolution and regression
 
-Unresolved.
+The standalone `VALIDATION-BOXED-SCALAR-SCHEMA` contract landed as
+`64903ee7`. The LCNF materializer and decoder now apply the runtime's existing
+`box` and `unbox` operations at `.boxed` schema nodes, while ordinary scalar
+schemas continue to select concrete packed constructor lanes. The semantic
+Wasm manifest and JavaScript host also transport boxed initial-runtime cells
+and decode tagged or heap boxes without changing the logical datum.
+
+The regression covers both directions: a runner-supplied `ByteArray × UInt8`
+tests initial-runtime heap materialization, and a closure-produced
+`ByteArray × UInt8` tests returned generic scalar decoding. Both pass native
+Lean, the LCNF interpreter, and V8 with exact `UInt8` values.

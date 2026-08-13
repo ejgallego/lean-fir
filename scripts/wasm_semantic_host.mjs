@@ -308,6 +308,19 @@ function runtimeHeapObject(object) {
       return { kind: "natural", value: BigInt(object.value) };
     case "integer":
       return { kind: "integer", value: BigInt(object.value) };
+    case "boxed": {
+      assert.ok(object.scalarKind === "usize" || SCALAR_KINDS.has(object.scalarKind),
+        `unsupported initial-runtime boxed scalar kind: ${object.scalarKind}`);
+      const value = runtimeValue(object.value);
+      if (object.scalarKind === "usize") {
+        assert.equal(value.kind, "usize", "boxed USize must contain a USize value");
+      } else {
+        assert.equal(value.kind, "scalar", "boxed scalar must contain a scalar value");
+        assert.equal(value.scalarKind, object.scalarKind,
+          "boxed scalar payload kind mismatch");
+      }
+      return { kind: "boxed", scalarKind: object.scalarKind, value };
+    }
     case "byteArray":
       assert.ok(Array.isArray(object.value), "runtime byte-array value must be an array");
       for (const byte of object.value) {

@@ -1606,6 +1606,11 @@ def applyCapturedByteArrayRead
   f index
 
 @[noinline]
+def applyCapturedByteArrayByteRead
+    (f : Nat → UInt8) (index : Nat) : UInt8 :=
+  f index
+
+@[noinline]
 def applyCapturedByteArrayMutation
     (f : UInt8 → ByteArray) (byte : UInt8) : ByteArray :=
   f byte
@@ -1764,6 +1769,20 @@ def capturedByteArrayOutsideAliasRead
   let observed := applyCapturedByteArrayRead
     (fun index => (source.get! index).toNat) 0
   (source, observed)
+
+/--
+Retain a ByteArray outside a closure and expose the borrowed byte through the
+generic `Prod` field that boxes fixed-width scalars.
+-/
+def capturedByteArrayOutsideAliasByteRead
+    (source : ByteArray) : ByteArray × UInt8 :=
+  let observed := applyCapturedByteArrayByteRead
+    (fun index => source.get! index) 0
+  (source, observed)
+
+@[noinline]
+def boxedByteArrayUInt8Second (value : ByteArray × UInt8) : UInt8 :=
+  value.2
 
 /--
 Retain a ByteArray outside a closure while consuming its captured alias. The
@@ -2549,6 +2568,11 @@ private def byteArrayNatPairDatum
     (value : ByteArray × Nat) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[byteArrayDatum value.1, .nat value.2]
 
+private def byteArrayUInt8PairDatum
+    (value : ByteArray × UInt8) : ValidationDatum :=
+  .ctor "Prod.mk" 0 #[byteArrayDatum value.1,
+    .bits 8 (UInt64.ofNat value.2.toNat)]
+
 private def byteArrayByteArrayNatDatum
     (value : ByteArray × ByteArray × Nat) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[byteArrayDatum value.1, byteArrayNatPairDatum value.2]
@@ -2844,6 +2868,9 @@ private def byteArrayObjectSwapArgSchemas : Array ValidationSchema :=
 
 private def byteArrayPairSchema : ValidationSchema :=
   .ctor "Prod.mk" 0 #[.bytes, .bytes]
+
+private def byteArrayUInt8PairSchema : ValidationSchema :=
+  .ctor "Prod.mk" 0 #[.bytes, .boxed (.bits 8)]
 
 private def aliasedByteArrayLayoutSchema : ValidationSchema :=
   .ctor "NestedAliasedByteArrays.mk" 0 #[.bytes, .bytes]
@@ -6886,6 +6913,48 @@ private def postConversionCases : Array Case := #[
         "admin:yield-done"]
     provenance := firProvenance
       "Retain a two-method dictionary across mutation and observe its original capture" },
+  { id := "boxed-byte-array-uint8-input"
+    entry := ``Source.boxedByteArrayUInt8Second
+    args := #[byteArrayUInt8PairDatum (mixedLayoutBytes, 0xff)]
+    argSchemas := #[byteArrayUInt8PairSchema]
+    resultSchema := .bits 8
+    native := fun _ => .bits 8 (UInt64.ofNat
+      (Source.boxedByteArrayUInt8Second (mixedLayoutBytes, 0xff)).toNat)
+    tags :=
+      #["stress", "scalar", "uint8", "boxing", "generic-constructor",
+        "input", "bytearray", "bytes", "heap", "boundary"]
+    requiredLcnfForms := #["oproj", "unbox", "return"]
+    requiredExecutedLcnfForms := #["oproj", "unbox", "return"]
+    provenance := firProvenance
+      "Decode a boxed UInt8 field from a runner-materialized generic product" },
+  { id := "captured-byte-array-outside-alias-byte-read"
+    entry := ``Source.capturedByteArrayOutsideAliasByteRead
+    dependencies := #[``Source.applyCapturedByteArrayByteRead]
+    args := #[byteArrayDatum mixedLayoutBytes]
+    argSchemas := #[.bytes]
+    resultSchema := byteArrayUInt8PairSchema
+    native := fun _ => byteArrayUInt8PairDatum
+      (Source.capturedByteArrayOutsideAliasByteRead mixedLayoutBytes)
+    tags :=
+      #["stress", "closure", "closure-ownership", "capture", "partial-application",
+        "bytearray", "bytes", "external", "heap", "ownership", "outside-alias",
+        "shared", "borrow", "read", "retain", "release", "single-use",
+        "scalar", "uint8", "boxing", "generic-constructor"]
+    requiredLcnfForms :=
+      #["inc", "pap", "lit", "fap", "fvar", "extern", "return", "dec", "box",
+        "ctor"]
+    requiredExecutedLcnfForms :=
+      #["inc", "pap", "lit", "fap", "fvar", "extern", "return", "dec", "box",
+        "ctor"]
+    requiredExternals := #[``ByteArray.get!]
+    requiredExecutedExternals := #[``ByteArray.get!]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``ByteArray.get!]
+    requiredExecutedExternalTrace := some #[``ByteArray.get!]
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind",
+        "admin:yield-done"]
+    provenance := firProvenance
+      "Decode a closure-produced UInt8 boxed in the object field of generic Prod" },
   { id := "captured-byte-array-outside-alias-read"
     entry := ``Source.capturedByteArrayOutsideAliasRead
     dependencies := #[``Source.applyCapturedByteArrayRead]
