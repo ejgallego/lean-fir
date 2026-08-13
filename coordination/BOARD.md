@@ -15,6 +15,42 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-STRUCTURED-EXPORT-ROOT`.
+- Integration owner: `wasm-proof`, continuing the user-authorized integration
+  lease. The proof slice rebased without conflict onto accepted `main` at
+  `64903ee7`, with functional head `d9d74fdf` and clean ready mailbox
+  `b7ec16b5`; no shared semantic or executable runtime contract changed.
+- Export root: `ConcreteSupportedExport.supportedGlobalRootAt` constructs the
+  admission-free strong relation at the actual compiler-produced source and
+  structured-Wasm entries from the ordinary concrete cache/ABI frame. Both
+  hereditary caller stacks start canonically empty; no source evaluation,
+  target path, termination evidence, or future admission is accepted.
+- Finite-trace bridge: the export-facing theorem composes that root with the
+  ranked current-step classifier. Audit of the remaining coverage obligation
+  separates compiler-derived current-node admission from finite wasm32
+  address-space safety; lowering alone cannot prove that a positive allocation
+  fits an arbitrarily weakened budget or an indefinitely allocating execution.
+  `FIR-BUG-wasm-none-finite-trace-address-space-safety` records the resource
+  boundary. `FIR-BUG-wasm-none-structured-active-result-index` records that the
+  strong relation must still retain the selected symbolic function's exact
+  singleton result ABI before universal admission is non-vacuous.
+- Acceptance: Lean Beam update/sync/save reports zero errors and save-ready
+  hashes `233c4ea0d8a6361a` for `ConcreteStructuredSimulation` and
+  `111a1c8fc10ffd39` for `ConcreteResumableWasm`; `git diff --check`, complete
+  `make check`, `make talos-setup`, and all 3,143 Talos jobs pass before and
+  after rebase. The post-rebase root gate covers 125 harness tests, 667 source
+  cases, 9 direct-machine cases, a 667-case native/LCNF/V8 triangle, 676 unique
+  cases, 2,010/2,010 equal comparisons, 7,271 machine steps, 167 active bug
+  cards, and zero findings.
+- Result: `main` fast-forwards through the clean W6 mailbox. W6 next indexes the
+  strong relation by the active generated function's actual result ABI, then
+  separates compiler admission from address-space safety and closes either a
+  resource-safe whole simulation or an explicitly budgeted finite-prefix
+  theorem. Heap-valued lazy miss publication and target-only loop unwinding
+  remain independent widenings.
+
+## Latest completed integration lease
+
 - Milestone: `W6-POINTWISE-LAZY-CACHE`.
 - Integration owner: `wasm-proof`, continuing the user-authorized integration
   lease. The proof slice rebased without conflict onto accepted `main` at
