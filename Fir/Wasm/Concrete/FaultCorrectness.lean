@@ -528,6 +528,142 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_fault_refines
                           liveEq leafCell ordinary one fuel check
                     rw [semanticSuccess] at semanticOperation
                     contradiction
+                | @array elements capacity header _ descriptor objectEq
+                      objectRelated refCount persistent cellLive =>
+                    obtain ⟨words, ownedRead, ownershipRelated⟩ :=
+                      objectRelated.readOwnedReferences
+                    obtain ⟨released, memory, releasedOperation, releasedEq,
+                        headerWrite, finalValid, deadRelated⟩ :=
+                      releaseHeader related.frontier objectRelated.headerRead
+                        objectRelated.headerOwned
+                    obtain ⟨_, rawRead, _, _, _, _⟩ :=
+                      MemoryState.PrefixExtension.readLiveHeader_facts state
+                        address header objectRelated.headerRead
+                    have headerInBounds :
+                        address.value + headerBytes ≤ state.memory.size :=
+                      Nat.le_trans objectRelated.headerOwned
+                        related.frontier.cursorInBounds
+                    let replacement : HeapCell :=
+                      { cell with rc := 0, live := false }
+                    have targetAfter :
+                        CellRel released witness address replacement :=
+                      .dead (by simp [replacement]) (by simp [replacement])
+                        ⟨.array capacity, descriptor⟩ deadRelated
+                    obtain ⟨parentRuntime, parentSemantic, parentRelated⟩ :=
+                      related.setCell_of_headerWrite mapped found descriptor
+                        rawRead releasedEq headerInBounds headerWrite rfl
+                          finalValid targetAfter
+                    let releaseChild :
+                        RuntimeState → Fir.LeanIR.Impure.Value →
+                          Except Fir.LeanIR.Impure.RuntimeFault RuntimeState :=
+                      fun next value =>
+                        match value with
+                        | .object (.heap child) =>
+                            Fir.LeanIR.Impure.decLocationFuel fuel next child
+                        | _ => .ok next
+                    have semanticFoldArray :
+                        Array.foldlM releaseChild parentRuntime elements =
+                          .error fault := by
+                      simp only [Fir.LeanIR.Impure.decLocationFuel, getLiveCell,
+                        found, liveEq, ↓reduceIte, Bind.bind, Except.bind]
+                        at semanticOperation
+                      rw [if_neg (by simp [ordinary])] at semanticOperation
+                      rw [if_neg zeroCase, if_neg oneLt] at semanticOperation
+                      rw [parentSemantic] at semanticOperation
+                      rw [objectEq] at semanticOperation
+                      change Array.foldlM releaseChild parentRuntime elements =
+                        .error fault at semanticOperation
+                      exact semanticOperation
+                    have semanticFoldList :
+                        elements.toList.foldlM
+                            (init := parentRuntime) releaseChild =
+                          .error fault := by
+                      simpa only [Array.foldlM_toList] using semanticFoldArray
+                    have recurseSuccess : ∀ {before : MemoryState}
+                        {semanticState nextSemantic : RuntimeState}
+                        {childLocation : Location} {childAddress : Word32},
+                        LiveHeapRel before witness semanticState →
+                        witness.locations.lookup? childLocation =
+                          some childAddress →
+                        Fir.LeanIR.Impure.decLocationFuel fuel semanticState
+                            childLocation =
+                          .ok nextSemantic →
+                        ∃ after,
+                          decrementReferenceOnceFuel fuel before childAddress
+                              true witness.closureDescriptors =
+                            .ok after ∧
+                          LiveHeapRel after witness nextSemantic := by
+                      intro before semanticState nextSemantic childLocation
+                        childAddress childRelated childMapped childOperation
+                      exact childRelated.decrementReferenceOnceFuel_refines
+                        childMapped true childOperation
+                    have recurseFault : ∀ {before : MemoryState}
+                        {semanticState : RuntimeState}
+                        {childLocation : Location} {childAddress : Word32}
+                        {childFault : RuntimeFault},
+                        LiveHeapRel before witness semanticState →
+                        witness.locations.lookup? childLocation =
+                          some childAddress →
+                        Fir.LeanIR.Impure.decLocationFuel fuel semanticState
+                            childLocation =
+                          .error childFault →
+                        childFault ≠
+                          .malformed
+                            "reference-count release fuel exhausted" →
+                        ∃ failure,
+                          decrementReferenceOnceFuel fuel before childAddress
+                              true witness.closureDescriptors =
+                            .error failure ∧
+                          ConcreteErrorSourceRel witness failure
+                            childFault := by
+                      intro before semanticState childLocation childAddress
+                        childFault childRelated childMapped childOperation
+                          childNotFuel
+                      exact ih childRelated childMapped true childNotFuel
+                        childOperation
+                    obtain ⟨failure, concreteFold, faultRelated⟩ :=
+                      ownershipRelated.foldlM_fault_refines parentRelated
+                        (fun childFault =>
+                          childFault ≠
+                            .malformed
+                              "reference-count release fuel exhausted")
+                        notFuel recurseSuccess recurseFault semanticFoldList
+                    have addressHeap :=
+                      (MemoryState.PrefixExtension.readLiveHeader_facts state
+                        address header objectRelated.headerRead).1
+                    have headerOrdinary : header.persistent = false :=
+                      persistent.trans ordinary
+                    have notPromoted : header.isPromotedTag = false := by
+                      have different :
+                          (ObjectKind.opaque == ObjectKind.natural) = false :=
+                        by decide
+                      simp [Header.isPromotedTag, objectRelated.headerKind,
+                        headerOrdinary, different]
+                    have concreteOperation :
+                        decrementReferenceOnceFuel (fuel + 1) state address
+                            check witness.closureDescriptors =
+                          .error failure := by
+                      simp only [decrementReferenceOnceFuel]
+                      rw [addressHeap, objectRelated.headerRead]
+                      simp only [Bind.bind, Except.bind, liftMemory]
+                      rw [if_neg (by simp [notPromoted])]
+                      rw [if_neg (by simp [headerOrdinary])]
+                      have headerNonzero : header.refCount ≠ 0 := by
+                        intro zero
+                        rw [zero] at refCount
+                        simp at refCount
+                        omega
+                      rw [if_neg (by simpa using headerNonzero)]
+                      rw [refCount, if_neg oneLt]
+                      have ownedReadWithDescriptors :
+                          readOwnedReferences state address header
+                              witness.closureDescriptors =
+                            .ok words := by
+                        simpa [readOwnedReferences,
+                          objectRelated.headerKind] using ownedRead
+                      rw [ownedReadWithDescriptors, releasedOperation]
+                      exact concreteFold
+                    exact ⟨failure, concreteOperation, faultRelated⟩
                 | @constructor info fieldKinds semantic header _ descriptor
                       objectEq objectRelated headerRead headerKind refCount
                       persistent cellLive =>
@@ -1396,6 +1532,9 @@ theorem LiveHeapRel.resetObject_unique_fault_refines
   | string descriptor objectEq objectRelated refCount persistent cellLive =>
       rw [constructor] at objectEq
       contradiction
+  | array descriptor objectEq objectRelated refCount persistent cellLive =>
+      rw [constructor] at objectEq
+      contradiction
   | closure closureRelated =>
       obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
       rw [constructor] at closureEq
@@ -1536,6 +1675,9 @@ theorem LiveHeapRel.resetObject_unique_ne_releaseFuelExhausted
       rw [constructor] at objectEq
       contradiction
   | string descriptor objectEq objectRelated refCount persistent cellLive =>
+      rw [constructor] at objectEq
+      contradiction
+  | array descriptor objectEq objectRelated refCount persistent cellLive =>
       rw [constructor] at objectEq
       contradiction
   | closure closureRelated =>
