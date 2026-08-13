@@ -23774,6 +23774,106 @@ theorem ConcreteStructuredCodePointwiseRel.root
     exact resourcesAtRoot
   exact ⟨contextCaches, focus, resources, admitted, budget⟩
 
+/-- Admission-free strong relation at a compiler-produced export and a
+caller-supplied function-result ABI index.
+
+The export proof selects the source function, its adapted target body, and the
+initialized target locals. The ordinary concrete cache/ABI frame supplies the
+root resource scope, while both hereditary caller stacks start empty. No
+current-node admission, source execution, target path, or termination evidence
+is needed to construct this relation. The result index remains explicit until
+the strong global relation retains its equality with the active symbolic
+function's singleton result row. -/
+theorem ConcreteSupportedExport.supportedGlobalRootAt
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec : ConcreteSupportedExport program context sourceCode sourceModule
+      sourceFunction targetModule hosts exportName)
+    (contextCaches :
+      context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    {externals : ExternalImpl}
+    {functionResult : AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters : List Wasm.Value}
+    (invariant : ConcreteReuseCapacityCacheAbiFrame context sourceModule
+      sourceFunction externals facts remainingBytes sourceRuntime sourceEnv
+      initial (spec.targetFunction.toLocals parameters.reverse)
+      initialWitness) :
+    ConcreteStructuredSupportedGlobalOutcome program sourceModule targetModule
+      hosts externals
+      (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+      (concreteStructuredFunctionEntry spec.targetFunction initial
+        parameters) := by
+  let sourceInitial :=
+    sourceCodeState context sourceRuntime sourceEnv sourceCode
+  let targetLocals := spec.targetFunction.toLocals parameters.reverse
+  let targetInitial :=
+    concreteStructuredFunctionEntry spec.targetFunction initial parameters
+  have focus :
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+        sourceRuntime sourceEnv sourceCode initial targetLocals
+        spec.targetFunction.body initialWitness sourceInitial targetInitial := {
+    sourceProgramEq := by simp [sourceInitial, sourceCodeState]
+    sourceControlEq := by simp [sourceInitial, sourceCodeState]
+    sourceEnvEq := by simp [sourceInitial, sourceCodeState]
+    sourceRuntimeEq := by simp [sourceInitial, sourceCodeState]
+    targetStoreEq := by
+      simp [targetInitial, concreteStructuredFunctionEntry]
+    targetControlEq := by
+      simp [targetInitial, targetLocals, concreteStructuredFunctionEntry]
+    adapted := by
+      rw [spec.targetBodyEq]
+      exact CodeAdapted.withSuffix spec.bodyAdapted
+    stateRelated := invariant.cacheFrame.stateRelated.stateRelated
+    frameAligned := invariant.cacheFrame.1.1.1.2.2.1 }
+  have scope := ConcreteStructuredResourceScope.root invariant
+  have resourcesAtRoot :
+      ConcreteStructuredResourceStack program context sourceModule
+        sourceFunction externals sourceRuntime sourceRuntime initial initial
+        initialWitness initialWitness facts remainingBytes sourceEnv targetLocals
+        functionResult none [] [] :=
+    ConcreteStructuredResourceStack.root scope
+  have core :
+      ConcreteStructuredCodeCoreRel program context sourceModule sourceFunction
+        externals [] sourceRuntime initial initialWitness functionResult none
+        facts remainingBytes sourceRuntime sourceEnv sourceCode initial
+        targetLocals spec.targetFunction.body initialWitness sourceInitial
+        targetInitial := by
+    refine ⟨focus, ?_⟩
+    simpa [sourceInitial, sourceCodeState, targetInitial,
+      concreteStructuredFunctionEntry] using resourcesAtRoot
+  let supported :
+      ConcreteStructuredSupportedFrameStack program sourceModule targetModule
+        hosts functionResult none [] [] := .nil
+  have agrees : supported.Agrees core.resources.suspended := by
+    simpa [supported, sourceInitial, sourceCodeState, targetInitial,
+      concreteStructuredFunctionEntry] using
+      (ConcreteStructuredSupportedFrameStack.Agrees.nil
+        (program := program) (sourceModule := sourceModule)
+        (targetModule := targetModule) (hosts := hosts)
+        (externals := externals) (entryRuntime := sourceRuntime)
+        (entryStore := initial) (entryWitness := initialWitness)
+        (functionResult := functionResult))
+  let active :
+      ConcreteStructuredSupportedOutcome program context sourceCode sourceModule
+        sourceFunction targetModule hosts spec.toConcreteSupportedFunction
+        externals [] sourceRuntime initial initialWitness functionResult none
+        sourceInitial targetInitial :=
+    .code contextCaches core (by simpa [sourceInitial, sourceCodeState,
+      targetInitial, concreteStructuredFunctionEntry] using supported) agrees
+  simpa [sourceInitial, targetInitial] using active.toGlobal
+
 /-- A successful interpreter step at a default-only case recovers the source
 branch-selection boundary.  The admission fixes the unique selected branch;
 the ordinary step supplies only the successful discriminator lookup and tag. -/

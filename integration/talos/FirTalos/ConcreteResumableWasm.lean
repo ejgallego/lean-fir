@@ -54,13 +54,16 @@ def ConcreteGeneratedTraceSimulation
   ConcreteRankedTraceSimulation externals
     (concreteStructuredWasmMachine module env)
 
-/-- Compiler-derived coverage for one currently executing ordinary-code node.
+/-- Combined admission and finite-address-space coverage for one currently
+executing ordinary-code node.
 
 The law is local to the source step presented to the simulation.  It contains
 no successor admission, recursive evaluator, target path, or termination
-evidence.  The target-facing core occurs only to identify a node reached from
-the compiler's lowering and resource invariants; the conclusion is the
-source-only admission and budget for that one node. -/
+evidence.  Its two conjuncts nevertheless have different provenance: the
+compiler proof is expected to derive the source-only admission and exact
+allocation cost, while `requiredBytes ≤ remainingBytes` is an execution
+resource-safety condition.  The latter cannot follow from lowering alone for
+an unbounded source heap and a wasm32 target. -/
 structure ConcreteStructuredCompilerCurrentStepCoverage
     (program : Fir.LeanIR.ImpureProgram)
     (sourceModule : Fir.Wasm.Module)
@@ -121,7 +124,7 @@ structure ConcreteStructuredCurrentStepClassifier
         ConcreteStructuredRunnableGlobalOutcome program sourceModule
           targetModule hosts externals source target
 
-/-- Compiler current-node coverage discharges the only non-structural branch
+/-- Combined current-node coverage discharges the only non-structural branch
 of the global classifier.
 
 Ordinary code asks the coverage law for its source-only admission and budget.
@@ -225,7 +228,7 @@ theorem ConcreteStructuredCurrentStepClassifier.toFiniteTraceCorrect
       sourceInitial targetInitial :=
   ⟨classifier.toGeneratedTraceSimulation, initial⟩
 
-/-- Compiler current-node coverage directly constructs the ranked generated
+/-- Combined current-node coverage directly constructs the ranked generated
 trace simulation; callers never supply the intermediate global classifier. -/
 def ConcreteStructuredCompilerCurrentStepCoverage.toGeneratedTraceSimulation
     {program : Fir.LeanIR.ImpureProgram}
@@ -239,7 +242,7 @@ def ConcreteStructuredCompilerCurrentStepCoverage.toGeneratedTraceSimulation
       hosts.env :=
   coverage.toCurrentStepClassifier.toGeneratedTraceSimulation
 
-/-- Compiler current-node coverage and the admission-free compiler root imply
+/-- Combined current-node coverage and the admission-free compiler root imply
 finite-prefix correctness of the concrete structured Wasm machine. -/
 theorem ConcreteStructuredCompilerCurrentStepCoverage.toFiniteTraceCorrect
     {program : Fir.LeanIR.ImpureProgram}
@@ -257,5 +260,53 @@ theorem ConcreteStructuredCompilerCurrentStepCoverage.toFiniteTraceCorrect
       (concreteStructuredWasmMachine targetModule.wasmModule hosts.env)
       sourceInitial targetInitial :=
   coverage.toCurrentStepClassifier.toFiniteTraceCorrect initial
+
+/-- Combined current-step coverage plus the ordinary concrete export-entry
+frame imply finite-prefix correctness at the actual source and structured-Wasm
+entries.
+
+Unlike `ConcreteStructuredCompilerCurrentStepCoverage.toFiniteTraceCorrect`,
+this export-facing bridge does not ask its caller to construct the simulation's
+initial relation. `ConcreteSupportedExport.supportedGlobalRootAt` derives it
+from production lowering/adaptation and the concrete cache/ABI frame. The
+remaining `coverage` premise contains no target path or future execution
+evidence, but it does include the explicit wasm32 address-space safety law
+described on `ConcreteStructuredCompilerCurrentStepCoverage`. -/
+theorem ConcreteSupportedExport.finiteTraceCorrect_of_currentStepCoverage
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec : ConcreteSupportedExport program context sourceCode sourceModule
+      sourceFunction targetModule hosts exportName)
+    {externals : Fir.LeanIR.Impure.ExternalImpl}
+    (coverage : ConcreteStructuredCompilerCurrentStepCoverage program
+      sourceModule targetModule hosts externals)
+    (contextCaches :
+      context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    (functionResult : Fir.Wasm.AbiKind)
+    {facts : Fir.Wasm.ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceRuntime : Fir.LeanIR.Impure.RuntimeState}
+    {sourceEnv : Fir.LeanIR.Impure.Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : Fir.Wasm.Concrete.RefinementWitness}
+    {parameters : List Wasm.Value}
+    (invariant : ConcreteReuseCapacityCacheAbiFrame context sourceModule
+      sourceFunction externals facts remainingBytes sourceRuntime sourceEnv
+      initial (spec.targetFunction.toLocals parameters.reverse)
+      initialWitness) :
+    ConcreteFiniteTraceCorrect externals
+      (concreteStructuredWasmMachine targetModule.wasmModule hosts.env)
+      (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+      (concreteStructuredFunctionEntry spec.targetFunction initial
+        parameters) :=
+  coverage.toFiniteTraceCorrect
+    (spec.supportedGlobalRootAt contextCaches
+      (functionResult := functionResult) invariant)
 
 end FirTalos.Concrete

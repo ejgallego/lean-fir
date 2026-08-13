@@ -1584,26 +1584,39 @@ acceptance tests pass.
      Admission for a newly reached code node is attached after that dynamic
      successor is known, so neither relation contains future execution or
      termination evidence. `ConcreteStructuredCompilerCurrentStepCoverage`
-     now isolates the only non-structural source-local law: an ordinary
-     compiler-related code node that actually steps has an admission whose
-     exact allocation cost fits its retained budget. Its
+     currently combines an ordinary code node's compiler-derived admission
+     with the dynamic requirement that its exact allocation cost fits the
+     retained wasm32 budget. Its
      `toCurrentStepClassifier` theorem derives the global classifier by
      structural inversion; the six staged call/cache/bind/return shapes
      require no extra coverage. The coverage object's
      `toGeneratedTraceSimulation` and
      `toFiniteTraceCorrect` wrappers no longer expose that intermediate
-     classifier to callers. The next slice proves the coverage law and root
-     relation from the compiler-produced export boundary; later runtime
-     families widen admission without changing this theorem shape.
+     classifier to callers. The actual compiler-produced root state is now
+     constructed by `ConcreteSupportedExport.supportedGlobalRootAt`, but two
+     independent invariants remain to make the bridge non-vacuous. The strong
+     relation must retain that `functionResult` is the active symbolic
+     function's singleton result kind. Compiler admission must then be split
+     from finite-address-space safety: lowering cannot prove that a positive
+     allocation fits an arbitrarily weakened budget, nor that a fixed wasm32
+     heap matches every prefix of an indefinitely allocating source.
+     `FIR-BUG-wasm-none-structured-active-result-index` and
+     `FIR-BUG-wasm-none-finite-trace-address-space-safety` record the exact
+     gaps. Later runtime families widen admission independently.
      Heap-valued cache misses and target-only loop unwinding remain later
      widenings.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
-     construct `ConcreteFiniteTraceCorrect` at the compiler-produced source
-     and structured-Wasm entries. The caller supplies no simulation relation,
-     target path, translation certificate, resolver package, or termination
-     premise. Applying `execSteps` must yield exact world/event traces modulo
-     the existing concrete address witness for every finite source prefix.
+     construct correctness at the compiler-produced source and structured-Wasm
+     entries without a caller-supplied simulation relation, target path,
+     translation certificate, resolver package, or termination premise.
+     Compiler admission is unconditional for supported operations. Finite
+     memory is not: the public statement must either construct
+     `ConcreteFiniteTraceCorrect` under an explicit resource-safety invariant,
+     or quantify over one finite source prefix whose cumulative allocation
+     fits the initial wasm32 headroom. An unconditional theorem for every
+     prefix of an indefinitely allocating source requires matching source OOM
+     semantics or an unbounded target memory model.
    - **W6.7g — consequences.** Recover finite whole-export partial correctness
      as a corollary using W6.7d, then state infinite-source progress/trace
      preservation from the rank condition. The initial theorem covers the
@@ -1612,12 +1625,13 @@ acceptance tests pass.
      supported target transition surface is closed enough for a useful weak
      bisimulation.
 
-   Thus the reusable W6.7e-to-W6.7f packaging bridge and the structural
-   coverage-to-classifier derivation are complete. The remaining proof-bearing
-   construction is the production proof of the ordinary-code coverage law and
-   the canonical root relation; W6.7g is principally consequences. Operation
-   coverage remains an explicit admission widening rather than a premise added
-   to the public caller.
+   Thus the reusable W6.7e-to-W6.7f packaging bridge, structural
+   coverage-to-classifier derivation, and export-entry root construction are
+   complete as conditional components. The next proof-bearing construction
+   strengthens the active result index, separates compiler admission from
+   address-space safety, and then closes the selected public finite-prefix
+   boundary. Operation coverage remains an explicit admission widening rather
+   than a target certificate supplied by the public caller.
 8. Let W7 generation proceed independently against the current concrete
    runtime surface, then prove T5 per internalized runtime function.
 9. Close with T6 and the pure `prettyM` acceptance theorem.

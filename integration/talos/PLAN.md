@@ -5833,7 +5833,7 @@ correctness becomes a corollary; a backward simulation is deliberately later.
 | W6.7c emitted structured target | complete | frame laws plus the explicit label/loop/call stack expose progress through calls, branches, loops, returns, and halting |
 | W6.7d structured terminal adequacy | complete | every reachable canonical-entry-to-halted path collapses to the exact instruction-boundary/Talos run; stack shape and arities are proved, not assumed at the public boundary |
 | W6.7e compiler relation and rank | in progress; the branch-complete strong one-step dispatcher now closes direct values, the staged pure-external request/import/bind protocol, generated named/saturated call staging and entry, direct/saturated return-pop, erased default-only cases, arbitrary normalized object-constructor and scalar-`UInt8` case tables, persistent `inc`/`dec`, ordinary nonpersistent increment/decrement/delete, constructor-tag mutation, and FVar/erased object, `USize`, and packed-integer scalar field mutation in one module-stable relation; every tested constructor retains one explicit target-only case-label stack layer which is unwound before caller return-pop; zero-test default selection is proved to be a compiler-erased default-only node and therefore decreases the structural rank; the older terminating hereditary theorem additionally covers lazy/cache operations, which remain the next explicit pointwise widening | each currently runnable LCNF `executeStep` produces a finite structured path restoring the aligned supported global relation; zero-step matches decrease a compiler-derived structural rank; newly reached code receives only a fresh local admission, never a future execution certificate |
-| W6.7f public finite-trace theorem | in progress; `ConcreteStructuredCompilerCurrentStepCoverage.toCurrentStepClassifier` now derives the global classifier by structural inversion, while its `toGeneratedTraceSimulation` and `toFiniteTraceCorrect` wrappers construct the ranked simulation over the stable admission-free strong relation | prove the ordinary-code current-node coverage law and canonical root relation from `ConcreteSupportedExport`, so the public caller supplies no classifier, target path, simulation/certificate, resolver package, or termination premise |
+| W6.7f public finite-trace theorem | in progress; the export-facing root state is now constructed by `ConcreteSupportedExport.supportedGlobalRootAt`, and combined current-step coverage packages the ranked simulation over the stable admission-free strong relation | first retain the active symbolic function's exact result ABI in the strong relation; then separate compiler-derived current-node admission from finite wasm32 address-space safety and state the public theorem either for resource-safe executions or for an explicitly budgeted finite source prefix |
 | W6.7g corollaries | pending | finite whole-export correctness follows from W6.7d/f; infinite source progress and trace preservation follow from W6.7e/f; backward weak simulation remains explicitly deferred |
 
 W6.7e initially follows the same admitted production fragment as
@@ -6168,17 +6168,25 @@ ordinary code resumes. Int, Nat, and scalar results share this path; no whole
 external execution or target certificate is stored in the relation.
 Fresh admission for successor code is attached after that dynamic state is
 known rather than stored as a recursive certificate.
-`ConcreteStructuredCompilerCurrentStepCoverage` now states the only
-non-structural source-local coverage law: an ordinary compiler-related code
-node that actually steps has a current-node admission whose exact allocation
-cost fits the retained budget. Its `toCurrentStepClassifier` theorem derives
-the global classifier by inversion: ordinary code uses that law, while the six
-staged call/cache/bind/return shapes are already runnable. The corresponding
-`toGeneratedTraceSimulation` and `toFiniteTraceCorrect` wrappers therefore do
-not expose the intermediate classifier to callers. The next slices widen
-current-node admission across the remaining production families, then prove
-the coverage law and canonical root relation from the compiler-produced export
-boundary.
+`ConcreteStructuredCompilerCurrentStepCoverage` currently packages two
+logically distinct obligations: compiler-derived admission for the current
+ordinary code node, and the dynamic inequality saying that its exact
+allocation cost fits the retained wasm32 address-space budget. Its
+`toCurrentStepClassifier` theorem correctly derives the global classifier by
+structural inversion, and the corresponding simulation wrappers expose no
+target path or future execution evidence. The root relation is now constructed
+at the actual source/structured-Wasm entries by
+`ConcreteSupportedExport.supportedGlobalRootAt`. Proof audit found that the
+combined coverage package cannot itself be a theorem of lowering: a valid
+budget can be weakened to zero, while supported allocating source steps have
+positive cost, and an indefinitely allocating source cannot be simulated
+forever by a fixed wasm32 address space. The next slices therefore (1) retain
+the active symbolic function's singleton result ABI in the strong relation,
+(2) prove compiler admission independently, and (3) select an honest
+resource-safe whole-simulation or explicitly budgeted finite-prefix theorem.
+`FIR-BUG-wasm-none-finite-trace-address-space-safety` and
+`FIR-BUG-wasm-none-structured-active-result-index` record these two proof
+contract gaps.
 Heap-valued cache misses remain the facts-aware transport redesign after the
 current non-heap lazy protocol.
 
