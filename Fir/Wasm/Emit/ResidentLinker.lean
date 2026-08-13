@@ -235,30 +235,34 @@ private def applySteps (validate : Bool) (steps : List Step) (module : Module) :
   | step :: steps => applySteps validate steps (← applyStep validate step module)
 
 private structure RewritePlan where
-  runtimeNames : Std.HashMap RuntimeOp Name := {}
+  runtimeInstructions : Std.HashMap RuntimeOp (List Instruction) := {}
   declarationNames : Std.HashMap Name Name := {}
   deriving Inhabited
 
-private partial def rewriteInstructionBatch (plan : RewritePlan) :
-    Instruction → Instruction
-  | .call (.runtime operation) =>
-      match plan.runtimeNames.get? operation with
-      | some name => .call (.declaration name)
-      | none => .call (.runtime operation)
-  | .call (.declaration declaration) =>
-      match plan.declarationNames.get? declaration with
-      | some name => .call (.declaration name)
-      | none => .call (.declaration declaration)
-  | .block label body => .block label (body.map (rewriteInstructionBatch plan))
-  | .loop label body => .loop label (body.map (rewriteInstructionBatch plan))
-  | .ifElse thenBody elseBody =>
-      .ifElse (thenBody.map (rewriteInstructionBatch plan))
-        (elseBody.map (rewriteInstructionBatch plan))
-  | instruction => instruction
+mutual
+  private partial def rewriteInstructionsBatch (plan : RewritePlan) :
+      List Instruction → List Instruction
+    | instructions => instructions.flatMap (rewriteInstructionBatch plan)
+
+  private partial def rewriteInstructionBatch (plan : RewritePlan) :
+      Instruction → List Instruction
+    | .call (.runtime operation) =>
+        plan.runtimeInstructions.getD operation [.call (.runtime operation)]
+    | .call (.declaration declaration) =>
+        [.call (.declaration (plan.declarationNames.getD declaration declaration))]
+    | .block label body =>
+        [.block label (rewriteInstructionsBatch plan body)]
+    | .loop label body =>
+        [.loop label (rewriteInstructionsBatch plan body)]
+    | .ifElse thenBody elseBody =>
+        [.ifElse (rewriteInstructionsBatch plan thenBody)
+          (rewriteInstructionsBatch plan elseBody)]
+    | instruction => [instruction]
+end
 
 private def rewriteFunctionBatch (plan : RewritePlan) (function : Function) : Function :=
-  if plan.runtimeNames.isEmpty && plan.declarationNames.isEmpty then function
-  else { function with body := function.body.map (rewriteInstructionBatch plan) }
+  if plan.runtimeInstructions.isEmpty && plan.declarationNames.isEmpty then function
+  else { function with body := rewriteInstructionsBatch plan function.body }
 
 private structure RewriteCohort where
   start : Nat
@@ -270,16 +274,16 @@ private def resolveDeclaration (plan : RewritePlan) (name : Name) : Name :=
 
 /-- Compose call rewrites in policy order: `later (earlier call)`. -/
 private def composeRewritePlans (earlier later : RewritePlan) : RewritePlan :=
-  let runtimeNames := earlier.runtimeNames.fold
-    (fun names operation target =>
-      names.insert operation (resolveDeclaration later target))
+  let runtimeInstructions := earlier.runtimeInstructions.fold
+    (fun rewrites operation instructions =>
+      rewrites.insert operation (rewriteInstructionsBatch later instructions))
     (Std.HashMap.emptyWithCapacity
-      (earlier.runtimeNames.size + later.runtimeNames.size))
-  let runtimeNames := later.runtimeNames.fold
-    (fun names operation target =>
-      if earlier.runtimeNames.contains operation then names
-      else names.insert operation target)
-    runtimeNames
+      (earlier.runtimeInstructions.size + later.runtimeInstructions.size))
+  let runtimeInstructions := later.runtimeInstructions.fold
+    (fun rewrites operation instructions =>
+      if earlier.runtimeInstructions.contains operation then rewrites
+      else rewrites.insert operation instructions)
+    runtimeInstructions
   let declarationNames := earlier.declarationNames.fold
     (fun names source target =>
       names.insert source (resolveDeclaration later target))
@@ -290,7 +294,7 @@ private def composeRewritePlans (earlier later : RewritePlan) : RewritePlan :=
       if earlier.declarationNames.contains source then names
       else names.insert source target)
     declarationNames
-  { runtimeNames, declarationNames }
+  { runtimeInstructions, declarationNames }
 
 private def rewriteCohortsFor (size : Nat) : Array RewriteCohort :=
   if size == 0 then #[] else #[{ start := 0, stop := size }]
@@ -315,18 +319,22 @@ private def applyRewriteCohorts (plans : Array RewritePlan)
 the skeleton/probe planning view. Flush accumulated rewrites first. -/
 private def requiresMaterializedBodies : Step → Bool
   | .cacheSets
-  | .partialApplications
   | .directSelfTailCallsRequired
   | .directSelfTailCallsAvailable => true
   | _ => false
 
 private def rewriteProbeName : Name := `_fir_resident_link_rewrite_probe
 
+private def rewriteProbeLabel (index : Nat) : FVarId :=
+  ⟨Name.mkSimple s!"_fir_resident_link_rewrite_probe_{index}"⟩
+
 /--
 Run one helper-family installer against function headers and a synthetic call
-probe. The installer still performs all dependency, signature, collision and
-helper-generation work, while the probe records its exact call substitutions.
-Real function bodies are rewritten once when the accumulated plan is flushed.
+probe. Each call occupies one uniquely labelled block, so the installer may
+replace it with any instruction sequence without losing the probe boundary.
+The installer still performs all dependency, signature, collision and
+helper-generation work, while the probe records its exact substitutions. Real
+function bodies are rewritten once when the accumulated plan is flushed.
 -/
 private def planStep (step : Step) (module : Module) :
     Except Source.CompileError (RewritePlan × Module) := do
@@ -342,7 +350,8 @@ private def planStep (step : Step) (module : Module) :
     params := #[]
     results := #[]
     locals := #[]
-    body := targets.toList.map Instruction.call }
+    body := targets.toList.zipIdx.map fun (target, index) =>
+      .block (rewriteProbeLabel index) [.call target] }
   let skeletons := module.functions.map fun function => { function with body := [] }
   let prefixSize := skeletons.size + 1
   let planned ← applyStep false step { module with functions := skeletons.push probe }
@@ -359,24 +368,31 @@ private def planStep (step : Step) (module : Module) :
   unless rewrittenProbe.name == rewriteProbeName &&
       rewrittenProbe.body.length == targets.size do
     throw (.manifest s!"resident {repr step} changed the linker rewrite probe shape")
-  let mut runtimeNames : Std.HashMap RuntimeOp Name := {}
+  let mut runtimeInstructions : Std.HashMap RuntimeOp (List Instruction) := {}
   let mut declarationNames : Std.HashMap Name Name := {}
   let mut removedOperations := #[]
-  for (target, instruction) in targets.zip rewrittenProbe.body.toArray do
-    match target, instruction with
-    | .runtime operation, .call (.declaration name) =>
-        runtimeNames := runtimeNames.insert operation
-          (declarationNames.getD name name)
-        removedOperations := removedOperations.push operation
-    | .runtime operation, .call (.runtime remaining) =>
+  for ((target, instruction), index) in
+      (targets.zip rewrittenProbe.body.toArray).zipIdx do
+    let .block label body := instruction |
+      throw (.manifest s!"resident {repr step} removed a rewrite probe boundary")
+    unless label == rewriteProbeLabel index do
+      throw (.manifest s!"resident {repr step} changed a rewrite probe label")
+    match target, body with
+    | .runtime operation, [.call (.runtime remaining)] =>
         unless operation == remaining do
           throw (.manifest s!"resident {repr step} changed a runtime probe operation")
-    | .declaration declaration, .call (.declaration name) =>
-        if declaration != name then
-          runtimeNames := runtimeNames.fold
-            (fun names operation target =>
-              names.insert operation (if target == declaration then name else target))
-            (Std.HashMap.emptyWithCapacity runtimeNames.size)
+    | .runtime operation, instructions =>
+        runtimeInstructions := runtimeInstructions.insert operation instructions
+        removedOperations := removedOperations.push operation
+    | .declaration declaration, [.call (.declaration name)] =>
+      if declaration != name then
+          runtimeInstructions := runtimeInstructions.fold
+            (fun rewrites operation instructions =>
+              rewrites.insert operation <| rewriteInstructionsBatch {
+                declarationNames :=
+                  ({} : Std.HashMap Name Name).insert declaration name
+              } instructions)
+            (Std.HashMap.emptyWithCapacity runtimeInstructions.size)
           declarationNames := declarationNames.fold
             (fun names source target =>
               names.insert source (if target == declaration then name else target))
@@ -393,7 +409,7 @@ private def planStep (step : Step) (module : Module) :
     functions := module.functions ++ newFunctions
     imports := runtimeOperations.mapIdx Fir.Wasm.runtimeImport ++ externalImports
     runtimeOperations }
-  return ({ runtimeNames, declarationNames }, result)
+  return ({ runtimeInstructions, declarationNames }, result)
 
 private def applyStepsPlanned (steps : List Step) (plans : Array RewritePlan)
     (cohorts : Array RewriteCohort)
@@ -725,5 +741,22 @@ private def emptyPolicyProbeModule : Module := {
 #guard match validatePolicy { steps := #[.numericStrict, .numericAvailable] } with
   | .error (.manifest _) => true
   | _ => false
+
+private def expandingRewriteProbePolicy (validateEachStep : Bool) : Policy := {
+  steps := #[.allocator, .partialApplications]
+  validateEachStep
+  publicExports := some ResidentClosureAllocation.exampleModule.exports }
+
+#guard match
+    linkModule (expandingRewriteProbePolicy false)
+      ResidentClosureAllocation.exampleModule,
+    linkModule (expandingRewriteProbePolicy true)
+      ResidentClosureAllocation.exampleModule with
+  | .ok planned, .ok materialized =>
+      match Fir.Wasm.Emit.encode planned, Fir.Wasm.Emit.encode materialized with
+      | .ok plannedBytes, .ok materializedBytes =>
+          plannedBytes == materializedBytes
+      | _, _ => false
+  | _, _ => false
 
 end Fir.Wasm.Emit.ResidentLinker
