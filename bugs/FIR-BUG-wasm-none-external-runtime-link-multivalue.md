@@ -25,6 +25,16 @@ runtime, and pass both modules to `integration/wasm-runtime/link-runtime.mjs`.
 The frontier validates in JavaScript and contains two reachable five-result
 functions, but `wasm-merge` rejects their tuple/block types.
 
+## Exact commands
+
+From the repository root, run:
+
+```text
+FIR_ALLOW_DIRTY_PACKAGE=1 \
+FIR_RAW_PACKAGE_PREVIEW_DIR=/tmp/fir-lean-zip-raw-preview \
+node integration/lean-zip/package-raw.mjs
+```
+
 ## Expected semantics
 
 The deterministic standard-runtime link preserves every Wasm feature already

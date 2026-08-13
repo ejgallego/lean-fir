@@ -25,6 +25,16 @@ Link the emitted `Zip.Wasm.compressRaw` frontier with the standard math
 runtime after enabling the multivalue feature. `wasm-merge` succeeds, then the
 linker disassembles the merged binary and calls `readFileSync(..., "utf8")`.
 
+## Exact commands
+
+From the repository root, run:
+
+```text
+FIR_ALLOW_DIRTY_PACKAGE=1 \
+FIR_RAW_PACKAGE_PREVIEW_DIR=/tmp/fir-lean-zip-raw-preview \
+node integration/lean-zip/package-raw.mjs
+```
+
 ## Expected semantics
 
 Runtime-only exports are hidden with a binary transformation whose memory use
