@@ -56,6 +56,11 @@ def heapObjectJson : HeapObject → Json
   | .string value => Json.mkObj [("kind", "string"), ("value", value)]
   | .natural value => Json.mkObj [("kind", "natural"), ("value", s!"{value}")]
   | .integer value => Json.mkObj [("kind", "integer"), ("value", s!"{value}")]
+  | .array elements capacity =>
+      Json.mkObj [
+        ("kind", "array"),
+        ("elements", Json.arr (elements.map valueJson)),
+        ("capacity", capacity)]
   | .byteArray value =>
       Json.mkObj [("kind", "byteArray"), ("value", Json.arr (value.map fun byte => byte.toNat))]
   | .opaque typeName => Json.mkObj [("kind", "opaque"), ("typeName", typeName.toString)]
