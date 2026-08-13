@@ -15,6 +15,37 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W7-ILLUMINATE-SPATIAL-HIT-SCENE`.
+- Integration owner: `root`, continuing the user-authorized short W7 lease.
+  The Spatial stack rebased onto the accepted resident-container audit at
+  `f65205c8`, with clean functional head `afc8b885` and ready mailbox
+  `f8f0b412`; patch-equivalent Level1 history was dropped rather than replayed.
+- Source boundary: FIR compiles the real Lean 4.33
+  `Illuminate.SpatialHitScene.ofHitScene` and `query` definitions from the
+  clean, hash-pinned Illuminate source view. A thin borrowed query façade uses
+  Lean's generated ownership convention for a scene retained below the
+  instance checkpoint; no spatial algorithm is duplicated in FIR or the
+  browser adapter.
+- Artifact: immutable package
+  `integration/illuminate-spatial-hit-scene/_build/illuminate-spatial-hit-scene-06a9c64aaa7f61c7`.
+  The 96,006-byte complete Wasm has SHA-256 `366d84059bd0d0ff`, zero imports,
+  module-owned memory, two application functions, four arena controls, and
+  memory. Deterministic frontier and complete-link repetition passed.
+- Acceptance: Node and Chrome each pass all 1,009 shared-oracle queries and
+  10,000 flat-frontier queries, with bit-exact coordinates, independent
+  scenes, disposal/error coverage, and exact checksums. Lean Beam and the
+  focused 73-job source cone pass. Complete `make check`, all 3,143 Talos jobs,
+  and the exhaustive browser artifact gate pass with 670 unique cases,
+  1,992/1,992 equal comparisons, 43 concrete artifacts, 15 source probes, and
+  zero findings. `FIR-BUG-wasm-none-spatial-hit-scene-retained-query-root` is
+  fixed.
+- Result: `main` fast-forwards through the ready W7 mailbox and this lease is
+  released. W7 next develops generic persistent lazy-cache initialization,
+  beginning with lean-zip's focused `distanceCodeCacheProbe` before rerunning
+  the complete Level1 compressor.
+
+## Latest completed integration lease
+
 - Milestone: `W7-RESIDENT-CONTAINER-OWNERSHIP-AUDIT`.
 - Integration owner: `root`, consuming the wasm-gen-2 handoff on
   `wasm/array-ownership-audit`. The patch-equivalent ready head was rebased
