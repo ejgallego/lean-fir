@@ -197,6 +197,9 @@ numeric cases or by retaining the same instruction-form inventory. Source,
 direct-machine, and Wasm/V8 floors are separate, so the index exposes which
 semantic dimensions have reached the real engine without claiming that the
 compiler-supported subset already equals the larger native/LCNF corpus.
+Both source and Wasm tiers pin three `argument-alias` cases, so aggregate
+growth cannot hide a regression back to independently materialized equal heap
+values.
 
 Single-tag totals do not prove that two important dimensions still intersect:
 an aggregate `scalar` and `overflow` count, for example, could both survive
@@ -1596,6 +1599,15 @@ external coverage telemetry.  A heap-valued effect then performs two dependent
 in-place ByteArray updates.  Native Lean and LCNF must preserve the original,
 intermediate, and final byte arrays in the correct argument/result positions,
 even though all runtime references point at the same uniquely owned location.
+Three further heap-valued effects exercise runner-supplied argument identity.
+Their canonical `argumentAliases` graphs cover one root used twice, one root
+used three times, and two independent roots each used twice. The LCNF and Wasm
+materializers encode each root once and increment its initial reference count
+for every additional owned argument. Mutating the first argument must therefore
+take Lean's shared copy-on-write path while preserving every original alias;
+native Lean, LCNF, and V8 compare equal for all three topologies. Malformed,
+chained, non-heap, schema-mismatched, and datum-mismatched alias graphs fail
+before execution.
 
 Protocol v3 encodes arbitrary `Nat` and `Int` datum payloads as canonical
 decimal strings; structural tags, widths, and bytes remain compact JSON
@@ -1614,7 +1626,8 @@ immutable runtime snapshots immediately
 before and after each successful external call, so heap effects are decoded at
 event time rather than through potentially mutated or dead final-heap
 references. The V8 adapter materializes the same schema-directed datums at the
-Wasm import boundary and retains its own private event-time heap views.
+Wasm import boundary, including canonical top-level alias identity and exact
+root multiplicity, and retains its own private event-time heap views.
 Runner-supplied `Bool` arguments use Lean's unboxed final-LCNF entry ABI,
 `.scalar (.uint8 0|1)`, rather than the tagged-object representation used by
 nullary constructors. Two native-oracle cases capture both Boolean values in a

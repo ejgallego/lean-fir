@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-argument-alias-materialization
-status: candidate
+status: fixed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: d8b18978322de05a8f3dba51ef03cf5461676c17
@@ -9,7 +9,7 @@ pass: none
 discovered-by: invariant-check
 first-seen: 2026-08-13
 reproduction: Fir/Wasm/Emit/SourceExamples.lean
-regression: none
+regression: Fir/Validation/Corpus.lean
 ---
 
 # Summary
@@ -74,5 +74,8 @@ none
 
 ## Resolution and regression
 
-Unresolved until the W7 forwarding repair and the external-engine alias
-fixtures land.
+W7 revision `cb9206e7` forwards the canonical alias graph into initial heap
+encoding. Revisions `14e1d6e4` and `07607587` add the shared-root, multiplicity,
+and independent-group corpus fixtures. `Fir/Wasm/Emit/SourceExamples.lean`
+also pins manifest location reuse and the exact initial reference count before
+external-engine execution.

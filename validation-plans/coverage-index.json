@@ -46,8 +46,8 @@
     "tiers": [
       {
         "id": "source-lcnf",
-        "minimumCases": 661,
-        "minimumComparisons": 661,
+        "minimumCases": 664,
+        "minimumComparisons": 664,
         "requiredBackends": [
           "lcnf",
           "native"
@@ -66,8 +66,8 @@
       },
       {
         "id": "wasm-v8",
-        "minimumCases": 661,
-        "minimumComparisons": 1322,
+        "minimumCases": 664,
+        "minimumComparisons": 1328,
         "requiredBackends": [
           "lcnf",
           "native",
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 670,
-      "minimumTierCases": 1331,
-      "minimumComparisons": 1992
+      "minimumUniqueCases": 673,
+      "minimumTierCases": 1337,
+      "minimumComparisons": 2001
     },
     "machine": {
-      "minimumCases": 670,
-      "minimumInterpreterSteps": 7176,
+      "minimumCases": 673,
+      "minimumInterpreterSteps": 7207,
       "requiredStaticForms": [
         "box",
         "cases",
@@ -463,6 +463,11 @@
         "tier": "source-lcnf",
         "tag": "application-shape",
         "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "argument-alias",
+        "minimumCases": 3
       },
       {
         "tier": "source-lcnf",
@@ -883,6 +888,11 @@
         "tier": "wasm-v8",
         "tag": "application-shape",
         "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "argument-alias",
+        "minimumCases": 3
       },
       {
         "tier": "wasm-v8",

@@ -9206,8 +9206,11 @@ private def postConversionCases : Array Case := #[
     requiredLcnfForms := #["lit", "fap", "extern", "ctor", "return"]
     requiredExecutedLcnfForms := #["lit", "fap", "extern", "ctor", "return"]
     requiredExecutedLcnfFormCounts :=
-      exactExecutedFormCounts
-        #[("lit", 1), ("fap", 1), ("extern", 1), ("ctor", 1), ("return", 1)]
+      #[{ form := "lit", minimum := 1, maximum := some 1 },
+        { form := "fap", minimum := 1, maximum := some 1 },
+        { form := "extern", minimum := 1, maximum := some 1 },
+        { form := "ctor", minimum := 1, maximum := some 1 },
+        { form := "return", minimum := 1, maximum := some 1 }]
     requiredExecutedLcnfFormTrace := some #["lit", "fap", "extern", "ctor", "return"]
     requiredAdministrativeStepKinds := #["admin:yield-bind", "admin:yield-done"]
     requiredExternals := #[``NativeEffects.recordByteArrayImpl]
@@ -9243,8 +9246,11 @@ private def postConversionCases : Array Case := #[
     requiredLcnfForms := #["lit", "fap", "extern", "ctor", "return"]
     requiredExecutedLcnfForms := #["lit", "fap", "extern", "ctor", "return"]
     requiredExecutedLcnfFormCounts :=
-      exactExecutedFormCounts
-        #[("lit", 1), ("fap", 1), ("extern", 1), ("ctor", 2), ("return", 1)]
+      #[{ form := "lit", minimum := 1, maximum := some 1 },
+        { form := "fap", minimum := 1, maximum := some 1 },
+        { form := "extern", minimum := 1, maximum := some 1 },
+        { form := "ctor", minimum := 2, maximum := some 2 },
+        { form := "return", minimum := 1, maximum := some 1 }]
     requiredExecutedLcnfFormTrace :=
       some #["lit", "fap", "extern", "ctor", "ctor", "return"]
     requiredAdministrativeStepKinds := #["admin:yield-bind", "admin:yield-done"]
@@ -9283,8 +9289,11 @@ private def postConversionCases : Array Case := #[
     requiredLcnfForms := #["lit", "fap", "extern", "ctor", "return"]
     requiredExecutedLcnfForms := #["lit", "fap", "extern", "ctor", "return"]
     requiredExecutedLcnfFormCounts :=
-      exactExecutedFormCounts
-        #[("lit", 2), ("fap", 2), ("extern", 2), ("ctor", 3), ("return", 1)]
+      #[{ form := "lit", minimum := 2, maximum := some 2 },
+        { form := "fap", minimum := 2, maximum := some 2 },
+        { form := "extern", minimum := 2, maximum := some 2 },
+        { form := "ctor", minimum := 3, maximum := some 3 },
+        { form := "return", minimum := 1, maximum := some 1 }]
     requiredExecutedLcnfFormTrace :=
       some #["lit", "fap", "extern", "lit", "fap", "extern",
         "ctor", "ctor", "ctor", "return"]
