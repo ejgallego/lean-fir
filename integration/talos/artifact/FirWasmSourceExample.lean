@@ -501,9 +501,12 @@ run_cmd do
       residentPartialApplicationArtifact.module.closureDescriptors ==
         moduleArtifact.module.closureDescriptors do
     throwError "partial-application linking changed stable closure metadata"
-  unless (List.range partialApplications.size).all fun ordinal =>
-      residentPartialApplicationArtifact.module.exports.contains
-        (Fir.Wasm.Emit.ResidentClosureAllocation.partialApplicationName ordinal) do
+  let partialApplicationHelpers :=
+    Fir.Wasm.Emit.ResidentClosureAllocation.partialApplicationHelperNames
+      partialApplications
+  unless partialApplicationHelpers.size < partialApplications.size &&
+      partialApplicationHelpers.all
+        residentPartialApplicationArtifact.module.exports.contains do
     throwError "resident Format partial-application helper exports changed"
   match ← residentPartialApplicationArtifact.write
       "_build/source-pretty-format-resident-partial-applications.wasm" with

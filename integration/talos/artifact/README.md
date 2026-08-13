@@ -582,11 +582,12 @@ its checkpoint moves from 157 to 153 imports while preserving the exact
 native-oracle event stream. The full text audit is now
 `351 → 350 → 349 → 341 → 254 → 177 → 177 → 154 → 152`.
 
-The next retained checkpoint internalizes every one of the 87 `partialApply`
-operations. Each helper allocates through the resident frontier, zeroes the
-complete aligned closure object, writes the stable dispatch and descriptor
-IDs plus arity/fixed metadata, copies typed capture slots, and returns the raw
-object word:
+The next retained checkpoint internalizes every retained `partialApply`
+operation. Operations with the same typed capture/result shape share one
+allocator helper; call sites supply the stable dispatch ID and arity, while
+the helper retains the statically checked descriptor and fixed count. Each
+helper allocates through the resident frontier, zeroes the complete aligned
+closure object, copies typed capture slots, and returns the raw object word:
 
 ```text
 node call-concrete-pretty-format.mjs \

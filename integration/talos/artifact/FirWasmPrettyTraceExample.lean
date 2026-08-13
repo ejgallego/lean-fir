@@ -133,9 +133,11 @@ run_cmd do
       partialApplicationArtifact.module.closureDescriptors ==
         naturalArtifact.module.closureDescriptors do
     throwError "resident styled partial applications changed closure metadata"
-  unless (List.range partialApplications.size).all fun ordinal =>
-      partialApplicationArtifact.module.exports.contains
-        (Fir.Wasm.Emit.ResidentClosureAllocation.partialApplicationName ordinal) do
+  let partialApplicationHelpers :=
+    Fir.Wasm.Emit.ResidentClosureAllocation.partialApplicationHelperNames
+      partialApplications
+  unless partialApplicationHelpers.size < partialApplications.size &&
+      partialApplicationHelpers.all partialApplicationArtifact.module.exports.contains do
     throwError "resident styled partial-application helper exports changed"
   match ← partialApplicationArtifact.write
       "_build/source-pretty-format-trace-resident-partial-applications.wasm" with

@@ -92,6 +92,14 @@ const operationCount = ({ manifest }, kind) =>
   manifest.imports.filter(({ operation }) => operation?.kind === kind).length;
 const functionImportCount = ({ imports }) =>
   imports.filter(({ kind }) => kind === "function").length;
+const partialApplicationHelperCount = ({ manifest }) => {
+  const seen = new Set();
+  for (const { operation } of manifest.imports) {
+    if (operation?.kind !== "partialApply") continue;
+    seen.add(JSON.stringify({ fields: operation.fields, result: operation.result }));
+  }
+  return seen.size;
+};
 
 assert.equal(operationCount(baseline, "getTag"), 1,
   "baseline prettyM must expose exactly one semantic getTag import");
@@ -899,12 +907,18 @@ assert.ok(residentPartialApplications.exports.some(({ name, kind }) =>
 assert.ok(residentPartialApplications.exports.some(({ name, kind }) =>
   name === "memory" && kind === "memory"),
 "resident partial-application prettyM memory export is missing");
-for (let ordinal = 0; ordinal < 131; ordinal += 1) {
+const partialApplicationHelpers = partialApplicationHelperCount(residentNaturals);
+assert.equal(partialApplicationHelpers, 37,
+  "resident partial-application typed-helper inventory changed");
+for (let ordinal = 0; ordinal < partialApplicationHelpers; ordinal += 1) {
   const name = `fir_alloc_closure_${ordinal}`;
   assert.ok(residentPartialApplications.exports.some((entry) =>
     entry.name === name && entry.kind === "function"),
   `resident partial-application prettyM helper export ${name} is missing`);
 }
+assert.equal(residentPartialApplications.exports.filter(({ name }) =>
+  name.startsWith("fir_alloc_closure_")).length, partialApplicationHelpers,
+"resident partial-application prettyM exported an unexpected helper");
 assert.ok(residentSetters.exports.some(({ name, kind }) =>
   name === residentSetters.manifest.entry && kind === "function"),
 "resident setter prettyM entry export is missing");

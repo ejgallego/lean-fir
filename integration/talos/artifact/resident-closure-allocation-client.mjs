@@ -45,6 +45,8 @@ export async function checkResidentClosureAllocation(bytes) {
     "resident loop-closure export is missing");
   equal(typeof exports.resident_closure_tagged, "function",
     "resident tagged-closure export is missing");
+  equal(typeof exports.resident_closure_shared_shape, "function",
+    "resident shared-shape closure export is missing");
   equal(typeof exports.fir_heap_frontier, "function",
     "resident closure-allocation frontier export is missing");
 
@@ -101,6 +103,15 @@ export async function checkResidentClosureAllocation(bytes) {
   expect(header(exports.memory, tagged).every((value, index) =>
     value === [2, 2, 1, 32, 1, 3, 0, 1][index]),
   `tagged object-family closure header drifted: ${header(exports.memory, tagged)}`);
+
+  const sharedShape = exports.resident_closure_shared_shape();
+  equal(sharedShape, 1176,
+    "shared-shape closure returned the wrong address");
+  equal(exports.fir_heap_frontier(), 1208,
+    "shared-shape closure advanced the wrong extent");
+  expect(header(exports.memory, sharedShape).every((value, index) =>
+    value === [2, 2, 1, 32, 0, 5, 0, 1][index]),
+  `shared-shape closure metadata drifted: ${header(exports.memory, sharedShape)}`);
   equal(u32(exports.memory, 0), 0xdecafbad,
     "tagged closure failed to restore the scratch word");
 
@@ -126,6 +137,7 @@ export async function checkResidentClosureAllocation(bytes) {
     255,
     0x0123456789abcdefn,
   );
+  const concreteSharedShape = concrete.resident_closure_shared_shape();
   const emptyMetadata = host.closureMetadata(concreteEmpty);
   equal(emptyMetadata.functionName, "ResidentClosureAllocation.target",
     "empty closure target ID drifted");
@@ -144,6 +156,17 @@ export async function checkResidentClosureAllocation(bytes) {
   equal(capturedMetadata.header.aux1, 4, "captured closure arity drifted");
   equal(capturedMetadata.header.aux2, 3,
     "captured closure fixed count drifted");
+  const sharedShapeMetadata = host.closureMetadata(concreteSharedShape);
+  equal(sharedShapeMetadata.functionName,
+    "ResidentClosureAllocation.unrelated",
+    "shared helper failed to preserve its call-site target ID");
+  expect(Array.isArray(sharedShapeMetadata.fields) &&
+    sharedShapeMetadata.fields.length === 0,
+  `shared closure descriptor drifted: ${sharedShapeMetadata.fields}`);
+  equal(sharedShapeMetadata.header.aux1, 5,
+    "shared helper failed to preserve its call-site arity");
+  equal(sharedShapeMetadata.header.aux2, 0,
+    "shared closure fixed count drifted");
   const projection = (index, result) => ({
     kind: "closureProj",
     function: "ResidentClosureAllocation.target",

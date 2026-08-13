@@ -10,6 +10,8 @@ open Lean
 private def addressLocal : FVarId := ⟨`address⟩
 private def savedScratchLocal : FVarId := ⟨`savedScratch⟩
 private def resultLocal : FVarId := ⟨`result⟩
+private def targetIdLocal : FVarId := ⟨`targetId⟩
+private def arityLocal : FVarId := ⟨`arity⟩
 
 inductive LinkError where
   | invalidInput (error : SymbolicError)
@@ -52,7 +54,7 @@ private def zeroAllocation (allocationBytes : Nat) : List Instruction :=
   (List.range (allocationBytes / 4)).flatMap fun index =>
     store32 .uint32 [.i32Const .uint32 0] (u32 (4 * index))
 
-private def headerStores (targetId arity fixed descriptorId allocationBytes : UInt32) :
+private def headerStores (fixed descriptorId allocationBytes : UInt32) :
     List Instruction :=
   store32 .uint32 [.i32Const .uint32 ObjectKind.closure.code]
       (u32 headerKindOffset) ++
@@ -62,9 +64,9 @@ private def headerStores (targetId arity fixed descriptorId allocationBytes : UI
       (u32 headerRefCountOffset) ++
     store32 .uint32 [.i32Const .uint32 allocationBytes]
       (u32 headerAllocationBytesOffset) ++
-    store32 .uint32 [.i32Const .uint32 targetId]
+    store32 .uint32 [.localGet targetIdLocal]
       (u32 headerAux0Offset) ++
-    store32 .uint32 [.i32Const .uint32 arity]
+    store32 .uint32 [.localGet arityLocal]
       (u32 headerAux1Offset) ++
     store32 .uint32 [.i32Const .uint32 fixed]
       (u32 headerAux2Offset) ++
@@ -121,30 +123,51 @@ private def retagAddress (result : AbiKind) : List Instruction := [
   .localGet resultLocal,
   .ret]
 
-private def partialApplicationFunctionIndexed
-    (targetIndices : Std.HashMap Name Nat)
+private structure HelperKey where
+  fields : Array AbiKind
+  result : AbiKind
+  deriving BEq, Hashable
+
+private def helperKey? : RuntimeOp → Option HelperKey
+  | .partialApply _ _ _ fields result => some { fields, result }
+  | _ => none
+
+private def collectHelperKeys (operations : Array RuntimeOp) : Array HelperKey :=
+  let initial : Array HelperKey × Std.HashSet HelperKey :=
+    (#[], Std.HashSet.emptyWithCapacity operations.size)
+  (operations.foldl (init := initial) fun (keys, seen) operation =>
+      match helperKey? operation with
+      | none => (keys, seen)
+      | some key =>
+          if seen.contains key then (keys, seen)
+          else (keys.push key, seen.insert key)).1
+
+/-- Number of typed resident helpers needed for a partial-application inventory. -/
+def partialApplicationHelperCount (operations : Array RuntimeOp) : Nat :=
+  (collectHelperKeys operations).size
+
+/-- Stable first-shape-order helper names for a partial-application inventory. -/
+def partialApplicationHelperNames (operations : Array RuntimeOp) : Array Name :=
+  (collectHelperKeys operations).mapIdx fun ordinal _ => partialApplicationName ordinal
+
+private def partialApplicationFunctionForKey
     (descriptorIndices : Std.HashMap (Array AbiKind) Nat) (ordinal : Nat)
-    (operation : RuntimeOp) : Except LinkError Function := do
-  let .partialApply targetName arity fixed fields result := operation |
-    throw .unsupportedOperation
-  unless operation.abiWellFormed do
-    throw .unsupportedOperation
+    (key : HelperKey) : Except LinkError Function := do
+  let { fields, result } := key
   unless result.isObjectLike do
     throw (.unsupportedResult result)
-  let some targetIndex := targetIndices.get? targetName |
-    throw (.missingClosureTarget targetName)
   let some descriptorIndex := descriptorIndices.get? fields |
     throw (.missingClosureDescriptor fields)
-  let targetId ← checkedWord "closure target id" targetIndex
   let descriptorId ← checkedWord "closure descriptor id" descriptorIndex
-  let arityField ← checkedWord "closure arity" arity
-  let fixedField ← checkedWord "closure fixed count" fixed
+  let fixedField ← checkedWord "closure fixed count" fields.size
   let layout := ClosureLayout.ofCaptures fields
   let allocationBytes ← checkedWord "closure allocation bytes" layout.allocationBytes
   let stores ← captureStores fields
   return {
     name := partialApplicationName ordinal
-    params := fields.mapIdx fun index kind => (captureId index, kind)
+    params := (fields.mapIdx fun index kind => (captureId index, kind)) ++ #[
+      (targetIdLocal, .uint32),
+      (arityLocal, .uint32)]
     results := #[result]
     locals := #[
       (addressLocal, .uint32),
@@ -155,45 +178,68 @@ private def partialApplicationFunctionIndexed
         .call (.declaration ResidentAllocator.allocateName),
         .localSet addressLocal] ++
       zeroAllocation layout.allocationBytes ++
-      headerStores targetId arityField fixedField descriptorId allocationBytes ++
+      headerStores fixedField descriptorId allocationBytes ++
       stores ++
       retagAddress result }
 
 def partialApplicationFunction (module : Module) (ordinal : Nat)
-    (operation : RuntimeOp) : Except LinkError Function :=
-  let targetIndices := module.closureDispatch.mapIdx (fun index name => (name, index))
-    |>.foldl (init := Std.HashMap.emptyWithCapacity module.closureDispatch.size)
-      fun indices entry => indices.insert entry.1 entry.2
+    (operation : RuntimeOp) : Except LinkError Function := do
+  let .partialApply targetName _arity _fixed _fields _result := operation |
+    throw .unsupportedOperation
+  unless operation.abiWellFormed do
+    throw .unsupportedOperation
+  unless module.closureDispatch.contains targetName do
+    throw (.missingClosureTarget targetName)
+  let some key := helperKey? operation |
+    throw .unsupportedOperation
   let descriptorIndices := module.closureDescriptors.mapIdx
     (fun index descriptor => (descriptor, index))
     |>.foldl (init := Std.HashMap.emptyWithCapacity module.closureDescriptors.size)
       fun indices entry => indices.insert entry.1 entry.2
-  partialApplicationFunctionIndexed targetIndices descriptorIndices ordinal operation
+  partialApplicationFunctionForKey descriptorIndices ordinal key
 
 private structure Binding where
-  operation : RuntimeOp
+  key : HelperKey
   name : Name
   function : Function
 
-private partial def rewriteInstruction (names : Std.HashMap RuntimeOp Name) :
-    Instruction → Instruction
-  | .call (.runtime operation) =>
-      match names.get? operation with
-      | some name => .call (.declaration name)
-      | none => .call (.runtime operation)
-  | .block label body =>
-      .block label (body.map (rewriteInstruction names))
-  | .loop label body =>
-      .loop label (body.map (rewriteInstruction names))
-  | .ifElse thenBody elseBody =>
-      .ifElse (thenBody.map (rewriteInstruction names))
-        (elseBody.map (rewriteInstruction names))
-  | instruction => instruction
+private structure RewriteBinding where
+  name : Name
+  targetId : UInt32
+  arity : UInt32
+
+mutual
+  private partial def rewriteInstructions
+      (bindings : Std.HashMap RuntimeOp RewriteBinding) :
+      List Instruction → List Instruction
+    | instructions => instructions.flatMap (rewriteInstruction bindings)
+
+  private partial def rewriteInstruction
+      (bindings : Std.HashMap RuntimeOp RewriteBinding) :
+      Instruction → List Instruction
+    | .call (.runtime operation) =>
+        match bindings.get? operation with
+        | some binding => [
+            .i32Const .uint32 binding.targetId,
+            .i32Const .uint32 binding.arity,
+            .call (.declaration binding.name)]
+        | none => [.call (.runtime operation)]
+    | .block label body =>
+        [.block label (rewriteInstructions bindings body)]
+    | .loop label body =>
+        [.loop label (rewriteInstructions bindings body)]
+    | .ifElse thenBody elseBody =>
+        [.ifElse (rewriteInstructions bindings thenBody)
+          (rewriteInstructions bindings elseBody)]
+    | instruction => [instruction]
+end
 
 /--
-Internalize every supported closure allocation after the resident allocator is
-installed. Stable target and capture-layout IDs come only from the retained
-module tables; removing runtime imports cannot renumber either header field.
+Internalize supported closure allocations after the resident allocator is
+installed. Calls with the same typed capture/result shape share one allocator
+helper; each call site supplies its stable target ID and arity, while the helper
+retains the statically checked capture layout and descriptor. Removing runtime
+imports therefore cannot renumber either header field.
 
 Scalar captures are stored bit-exactly in the same fixed eight-byte slots as
 object values. Floating lanes use the symbolic reinterpret operations before
@@ -230,19 +276,34 @@ def internalizePartialApplications (module : Module) (validate : Bool := true) :
   let exportedNames := module.exports.foldl
     (init := Std.HashSet.emptyWithCapacity (module.exports.size + operations.size))
     fun names name => names.insert name
-  let bindings ← operations.toList.zipIdx.toArray.mapM fun (operation, ordinal) => do
+  let keys := collectHelperKeys operations
+  let bindings ← keys.mapIdxM fun ordinal key => do
     let name := partialApplicationName ordinal
     if importedDeclarations.contains name || functionNames.contains name ||
         exportedNames.contains name then
       throw (.reservedDeclaration name)
-    let function ← partialApplicationFunctionIndexed targetIndices descriptorIndices
-      ordinal operation
-    return { operation, name, function : Binding }
-  let names := bindings.foldl
+    let function ← partialApplicationFunctionForKey descriptorIndices ordinal key
+    return { key, name, function : Binding }
+  let helperNames := bindings.foldl
     (init := Std.HashMap.emptyWithCapacity bindings.size)
-    fun names binding => names.insert binding.operation binding.name
+    fun names binding => names.insert binding.key binding.name
+  let rewrites ← operations.foldlM
+      (init := Std.HashMap.emptyWithCapacity operations.size) fun rewrites operation => do
+    let .partialApply targetName arity _fixed _fields _result := operation |
+      throw .unsupportedOperation
+    unless operation.abiWellFormed do
+      throw .unsupportedOperation
+    let some targetIndex := targetIndices.get? targetName |
+      throw (.missingClosureTarget targetName)
+    let some key := helperKey? operation |
+      throw .unsupportedOperation
+    let some name := helperNames.get? key |
+      throw .unsupportedOperation
+    let targetId ← checkedWord "closure target id" targetIndex
+    let arity ← checkedWord "closure arity" arity
+    return rewrites.insert operation { name, targetId, arity }
   let functions := module.functions.map fun function =>
-    { function with body := function.body.map (rewriteInstruction names) }
+    { function with body := rewriteInstructions rewrites function.body }
   let functions := functions ++ bindings.map (·.function)
   let runtimeOperations := Fir.Wasm.updateRuntimeOps module.runtimeOperations operations
     (bindings.map (·.function))
@@ -266,7 +327,8 @@ def exampleOperations : Array RuntimeOp := #[
   .partialApply exampleTarget 3 0 #[] .object,
   .partialApply exampleTarget 4 3 #[.tobject, .uint8, .usize] .tobject,
   .partialApply exampleTarget 3 2 #[.float32, .float] .object,
-  .partialApply exampleTarget 3 0 #[] .tagged]
+  .partialApply exampleTarget 3 0 #[] .tagged,
+  .partialApply exampleUnrelatedTarget 5 0 #[] .object]
 
 def exampleClosureDispatch : Array Name := #[
   exampleUnrelatedTarget,
@@ -332,12 +394,21 @@ def exampleTaggedCaller : Function := {
   locals := #[]
   body := [.call (.runtime exampleOperations[3]!), .ret] }
 
+/-- A different target and arity with the same empty/object helper shape. -/
+def exampleSharedShapeCaller : Function := {
+  name := `resident_closure_shared_shape
+  params := #[]
+  results := #[.object]
+  locals := #[]
+  body := [.call (.runtime exampleOperations[4]!), .ret] }
+
 def exampleModule : Module := {
   imports := exampleOperations.mapIdx Fir.Wasm.runtimeImport
   functions := #[exampleEmptyCaller, exampleCapturedCaller, exampleLoopCaller,
-    exampleFloatCaller, exampleTaggedCaller]
+    exampleFloatCaller, exampleTaggedCaller, exampleSharedShapeCaller]
   exports := #[exampleEmptyCaller.name, exampleCapturedCaller.name,
-    exampleLoopCaller.name, exampleFloatCaller.name, exampleTaggedCaller.name]
+    exampleLoopCaller.name, exampleFloatCaller.name, exampleTaggedCaller.name,
+    exampleSharedShapeCaller.name]
   initializers := #[]
   runtimeOperations := exampleOperations
   closureDispatch := exampleClosureDispatch
@@ -351,9 +422,12 @@ def residentExampleModule : Except String Module := do
 
 def manifest : Json :=
   Json.mkObj [
-    ("entries", Json.arr <| exampleOperations.mapIdx fun ordinal _operation =>
+    ("entries", Json.arr <| partialApplicationHelperNames exampleOperations |>.map fun name =>
       Json.mkObj [
-        ("entry", partialApplicationName ordinal |>.toString)]),
+        ("entry", name.toString)]),
+    ("operationCount", exampleOperations.size),
+    ("helperCount", partialApplicationHelperCount exampleOperations),
+    ("sharingPolicy", "typed-capture-and-result-shape"),
     ("closureDispatch", Json.arr <|
       exampleClosureDispatch.map fun name => (name.toString : Json)),
     ("closureDescriptors", Json.arr <|
@@ -367,12 +441,17 @@ def manifest : Json :=
       module.imports.isEmpty &&
       module.runtimeOperations.isEmpty &&
       module.functions.size ==
-        5 + ResidentAllocator.helperNames.size + exampleOperations.size &&
+        6 + ResidentAllocator.helperNames.size +
+          partialApplicationHelperCount exampleOperations &&
+      partialApplicationHelperCount exampleOperations == 4 &&
       module.exports.contains exampleEmptyCaller.name &&
       module.exports.contains exampleCapturedCaller.name &&
       module.exports.contains exampleLoopCaller.name &&
       module.exports.contains exampleFloatCaller.name &&
       module.exports.contains exampleTaggedCaller.name &&
+      module.exports.contains exampleSharedShapeCaller.name &&
+      (partialApplicationHelperNames exampleOperations).all
+        module.exports.contains &&
       module.closureDispatch == exampleClosureDispatch &&
       module.closureDescriptors == exampleClosureDescriptors &&
       module.memory == some ResidentRuntime.residentMemory &&
