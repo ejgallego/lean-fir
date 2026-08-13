@@ -29,6 +29,9 @@ def mathDeclarations : Array Name := #[
   `Float.acos,
   `Float.atan2,
   `Float.cbrt,
+  `Float.log2,
   `Float.floor]
+
+#guard mathDeclarations.contains `Float.log2
 
 end Fir.Wasm.Emit.ExternalRuntime

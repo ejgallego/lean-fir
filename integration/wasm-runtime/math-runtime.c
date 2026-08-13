@@ -115,5 +115,7 @@ EXPORT("Float.atan2")
 double fir_float_atan2(double y, double x) { return atan2(y, x); }
 EXPORT("Float.cbrt")
 double fir_float_cbrt(double value) { return cbrt(value); }
+EXPORT("Float.log2")
+double fir_float_log2(double value) { return log2(value); }
 EXPORT("Float.floor")
 double fir_float_floor(double value) { return floor(value); }
