@@ -198,6 +198,10 @@ def floatArrayPopShared (xs : Array Float) : Array Float × Array Float :=
   let updated := xs.pop
   (xs, updated)
 
+@[noinline]
+def floatArrayReplicate (count : Nat) (value : Float) : Array Float :=
+  Array.replicate count value
+
 def firstUInt8List : List UInt8 → UInt8
   | value :: _ => value
   | [] => 0
@@ -4307,6 +4311,40 @@ private def preConversionCases : Array Case := #[
     requiredExecutedExternalTrace := some #[``Array.pop]
     provenance := firProvenance
       "Copy a shared Float Array prefix while the original retains its removed heap box" },
+  { id := "generic-float-array-replicate-heap"
+    entry := ``Source.floatArrayReplicate
+    args := #[.nat 3, .bits 64 genericContainerFloat.toBits]
+    argSchemas := #[.nat, .float64]
+    resultSchema := .array (.boxed .float64)
+    native := fun _ => floatArrayDatum
+      (Source.floatArrayReplicate 3 genericContainerFloat)
+    tags := #["stress", "array", "generic", "boxed", "float", "heap",
+      "replicate", "ownership", "multiplicity", "bit-exact"]
+    requiredLcnfForms := #["box", "fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["box", "fap", "extern", "return"]
+    requiredExternals := #[``Array.replicate]
+    requiredExecutedExternals := #[``Array.replicate]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``Array.replicate]
+    requiredExecutedExternalTrace := some #[``Array.replicate]
+    provenance := firProvenance
+      "Replicate one heap Float box into three independently owned Array slots" },
+  { id := "generic-float-array-replicate-empty"
+    entry := ``Source.floatArrayReplicate
+    args := #[.nat 0, .bits 64 genericContainerFloat.toBits]
+    argSchemas := #[.nat, .float64]
+    resultSchema := .array (.boxed .float64)
+    native := fun _ => floatArrayDatum
+      (Source.floatArrayReplicate 0 genericContainerFloat)
+    tags := #["stress", "array", "generic", "boxed", "float", "heap",
+      "replicate", "empty", "ownership", "release", "bit-exact"]
+    requiredLcnfForms := #["box", "fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["box", "fap", "extern", "return"]
+    requiredExternals := #[``Array.replicate]
+    requiredExecutedExternals := #[``Array.replicate]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``Array.replicate]
+    requiredExecutedExternalTrace := some #[``Array.replicate]
+    provenance := firProvenance
+      "Consume an unused heap Float box when replicating an empty Array" },
   { id := "generic-uint8-list-head"
     entry := ``Source.firstUInt8List
     args := #[uint8ListDatum [255, 1]]

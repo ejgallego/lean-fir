@@ -1390,6 +1390,29 @@ private def arrayPopExternal (request : ExternalRequest) (runtime : RuntimeState
     nextLocation := runtime.nextLocation
     world := runtime.world }
 
+private def arrayReplicateExternal
+    (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [typeArg, countValue, value] := request.args.toList
+    | throw (.arityMismatch 3 request.args.size)
+  unless typeArg == .erased do
+    throw (.externalFailure request.name
+      "Array.replicate type argument must be erased")
+  let count ← externalNat request runtime countValue
+  let runtime ← decValueOnce runtime countValue true
+  let runtime ← if count == 0 then
+      decValueOnce runtime value true
+    else
+      (List.range (count - 1)).foldlM (init := runtime) fun runtime _ =>
+        retainOwnedValue runtime value
+  let (runtime, reference) := alloc runtime
+    (.array (Array.replicate count value) count)
+  return {
+    value := .object reference
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
 private def inhabitedUInt8External
     (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
@@ -3162,6 +3185,8 @@ private def validationExternals : ExternalImpl where
       arrayPushExternal request runtime
     else if request.name == ``Array.pop then
       arrayPopExternal request runtime
+    else if request.name == ``Array.replicate then
+      arrayReplicateExternal request runtime
     else if request.name == ``instInhabitedUInt8 then
       inhabitedUInt8External request runtime
     else if request.name == ``Array.get!Internal then

@@ -718,6 +718,32 @@ function popArray({ args, host, world }) {
   };
 }
 
+function replicateArray({ args, host, world }) {
+  assert.equal(args.length, 3, "Array.replicate external arity mismatch");
+  assert.deepStrictEqual(args[0], { kind: "erased" },
+    "Array.replicate type argument must be erased");
+  const countValue = args[1];
+  const count = naturalValue(host, countValue, "Array.replicate count");
+  assert.ok(count <= 0xffff_ffffn,
+    "Array.replicate count must fit the Wasm32 resident layout");
+  host.decValueOnce(countValue, true);
+  const value = args[2];
+  if (count === 0n) {
+    host.decValueOnce(value, true);
+  } else if (value.kind === "heap") {
+    host.incLocation(value.location, Number(count - 1n));
+  }
+  const size = Number(count);
+  return {
+    value: host.alloc({
+      kind: "array",
+      elements: Array(size).fill(value),
+      capacity: size,
+    }),
+    world,
+  };
+}
+
 function inhabitedUInt8({ args, world }) {
   assert.equal(args.length, 0, "instInhabitedUInt8 external arity mismatch");
   return { value: { kind: "scalar", scalarKind: "uint8", value: 0n }, world };
@@ -916,6 +942,7 @@ export const validationExternalRegistry = {
   "Array.set!": setArray,
   "Array.push": pushArray,
   "Array.pop": popArray,
+  "Array.replicate": replicateArray,
   "Fir.Validation.Corpus.NativeEffects.recordImpl": ({ args, host, world }) => {
     assert.equal(args.length, 1, "validation.record external arity mismatch");
     const value = naturalValue(host, args[0], "validation.record operand");

@@ -163,6 +163,7 @@ assert.throws(() => new ConcreteHost([], {
 const setArray = concreteValidationExternalRegistry["Array.set!"];
 const pushArray = concreteValidationExternalRegistry["Array.push"];
 const popArray = concreteValidationExternalRegistry["Array.pop"];
+const replicateArray = concreteValidationExternalRegistry["Array.replicate"];
 const getArray = concreteValidationExternalRegistry["Array.get!Internal"];
 const inhabitedUInt8 = concreteValidationExternalRegistry["instInhabitedUInt8"];
 const erased = { kind: "erased" };
@@ -270,6 +271,51 @@ assert.deepStrictEqual(
 assert.equal(fullArrayHost.arrayInfo(grownArray).capacity, 4);
 assert.equal(fullArrayHost.readHeader(fullArrayHost.addressOf(fullChild.location)).rc, 1);
 assert.equal(fullArrayHost.readHeader(fullArrayHost.addressOf(fullValue.location)).rc, 1);
+
+const replicateArrayHost = new ConcreteHost([]);
+const repeatedArrayValue = heapNatural(replicateArrayHost, (1n << 64n) + 11n);
+const replicatedArray = replicateArray({
+  args: [erased, taggedIndex(3), repeatedArrayValue],
+  host: replicateArrayHost,
+  world: 0,
+}).value;
+assert.deepStrictEqual(
+  replicateArrayHost.arrayInfo(replicatedArray).elements,
+  [repeatedArrayValue, repeatedArrayValue, repeatedArrayValue],
+);
+assert.equal(replicateArrayHost.arrayInfo(replicatedArray).capacity, 3);
+assert.equal(
+  replicateArrayHost.readHeader(
+    replicateArrayHost.addressOf(repeatedArrayValue.location)).rc,
+  3,
+);
+replicateArrayHost.releaseValue(replicatedArray);
+assert.equal(
+  replicateArrayHost.readHeader(
+    replicateArrayHost.addressOf(repeatedArrayValue.location), false).kind,
+  255,
+);
+
+const emptyReplicateArrayHost = new ConcreteHost([]);
+const unusedArrayValue = heapNatural(emptyReplicateArrayHost, (1n << 64n) + 12n);
+const emptyReplicatedArray = replicateArray({
+  args: [erased, taggedIndex(0), unusedArrayValue],
+  host: emptyReplicateArrayHost,
+  world: 0,
+}).value;
+assert.deepStrictEqual(emptyReplicateArrayHost.arrayInfo(emptyReplicatedArray), {
+  address: emptyReplicateArrayHost.addressOf(emptyReplicatedArray.location),
+  header: emptyReplicateArrayHost.readHeader(
+    emptyReplicateArrayHost.addressOf(emptyReplicatedArray.location)),
+  size: 0,
+  capacity: 0,
+  elements: [],
+});
+assert.equal(
+  emptyReplicateArrayHost.readHeader(
+    emptyReplicateArrayHost.addressOf(unusedArrayValue.location), false).kind,
+  255,
+);
 
 // A constructor slot has no runtime tag of its own. Track the physical kind
 // supplied by the latest mutation so an object-only slot can subsequently hold

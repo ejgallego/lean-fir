@@ -493,6 +493,28 @@ function popArray({ args, host, world }) {
   return { value: host.allocateArray(remaining, array.capacity), world };
 }
 
+function replicateArray({ args, host, world }) {
+  assert.equal(args.length, 3, "Array.replicate external arity mismatch");
+  assert.deepStrictEqual(args[0], { kind: "erased" },
+    "Array.replicate type argument must be erased");
+  const countValue = args[1];
+  const count = naturalValue(host, countValue, "Array.replicate count");
+  assert.ok(count <= 0xffff_ffffn,
+    "Array.replicate count must fit the Wasm32 resident layout");
+  host.releaseValue(countValue);
+  const value = args[2];
+  if (count === 0n) {
+    host.releaseValue(value);
+  } else {
+    for (let slot = 1n; slot < count; slot += 1n) host.retainValue(value);
+  }
+  const size = Number(count);
+  return {
+    value: host.allocateArray(Array(size).fill(value), size),
+    world,
+  };
+}
+
 /**
  * Validation-only externals layered over the ordinary concrete artifact
  * registry. Generic Array operations use the same opaque/ARRY layout as the
@@ -523,6 +545,7 @@ export const concreteValidationExternalRegistry = Object.freeze({
   "Array.set!": setArray,
   "Array.push": pushArray,
   "Array.pop": popArray,
+  "Array.replicate": replicateArray,
   "Int.neg": ({ args, host, world }) => {
     assert.equal(args.length, 1, "Int.neg external arity mismatch");
     const value = integerValue(host, args[0], "Int.neg operand");

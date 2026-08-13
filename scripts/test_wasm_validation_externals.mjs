@@ -1631,6 +1631,7 @@ for (const [handler, leftValue, rightValue, expected] of [
   const setArray = validationExternalRegistry["Array.set!"];
   const pushArray = validationExternalRegistry["Array.push"];
   const popArray = validationExternalRegistry["Array.pop"];
+  const replicateArray = validationExternalRegistry["Array.replicate"];
   const getArray = validationExternalRegistry["Array.get!Internal"];
   const inhabitedUInt8 = validationExternalRegistry["instInhabitedUInt8"];
   const erased = { kind: "erased" };
@@ -1753,6 +1754,31 @@ for (const [handler, leftValue, rightValue, expected] of [
   });
   assert.equal(fullHost.liveCell(fullChild.location).rc, 1);
   assert.equal(fullHost.liveCell(fullValue.location).rc, 1);
+
+  const replicateHost = new SemanticHost();
+  const repeated = replicateHost.alloc({ kind: "natural", value: 0x10000000cn });
+  const replicated = invoke(
+    replicateArray, replicateHost, [erased, taggedIndex(3), repeated]);
+  assert.deepStrictEqual(replicateHost.liveCell(replicated.location).object, {
+    kind: "array",
+    elements: [repeated, repeated, repeated],
+    capacity: 3,
+  });
+  assert.equal(replicateHost.liveCell(repeated.location).rc, 3);
+  replicateHost.decLocation(replicated.location);
+  assert.throws(() => replicateHost.liveCell(repeated.location));
+
+  const emptyReplicateHost = new SemanticHost();
+  const unused = emptyReplicateHost.alloc({
+    kind: "natural", value: 0x10000000dn,
+  });
+  const emptyReplicated = invoke(
+    replicateArray, emptyReplicateHost, [erased, taggedIndex(0), unused]);
+  assert.deepStrictEqual(
+    emptyReplicateHost.liveCell(emptyReplicated.location).object,
+    { kind: "array", elements: [], capacity: 0 },
+  );
+  assert.throws(() => emptyReplicateHost.liveCell(unused.location));
 }
 
 console.log("PASS shared Wasm String and arithmetic external contracts");
