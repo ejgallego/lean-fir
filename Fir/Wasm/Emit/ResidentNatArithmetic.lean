@@ -1,4 +1,5 @@
 import Fir.Wasm.Emit.ResidentBigNumeric
+import Fir.Wasm.Emit.ResidentNatShift
 import Fir.Wasm.Emit.ResidentReferenceCount
 import Fir.Wasm.Emit.ResidentRelease
 
@@ -32,7 +33,7 @@ inductive LinkError where
 private def u32 (value : Nat) : UInt32 := UInt32.ofNat value
 
 def externalDeclarations : Array Name := #[
-  `Nat.mul, `Nat.pow, `Nat.land, `Nat.div, `Nat.mod]
+  `Nat.mul, `Nat.pow, `Nat.land, `Nat.div, `Nat.mod, `Nat.shiftLeft]
 
 def externalName (declaration : Name) : Name :=
   ResidentNumeric.externalName declaration
@@ -600,6 +601,25 @@ def powFunction : Function := {
     .localSet partIndexLocal,
     .loop powPartLoop powPartBody] }
 
+/-- Exact arbitrary-precision left shift, expressed through the already
+resident generic arithmetic rather than a bounded machine-word shortcut. -/
+def shiftLeftFunction : Function := {
+  name := externalName `Nat.shiftLeft
+  params := #[(leftParam, .tobject), (rightParam, .tobject)]
+  results := #[.tobject]
+  locals := #[(factorLocal, .tobject), (resultLocal, .tobject)]
+  body := [
+    .i32Const .tobject 5,
+    .localGet rightParam,
+    .call (.declaration (externalName `Nat.pow)),
+    .localSet factorLocal,
+    .localGet leftParam,
+    .localGet factorLocal,
+    .call (.declaration (externalName `Nat.mul)),
+    .localSet resultLocal] ++ releaseLocal factorLocal ++ [
+    .localGet resultLocal,
+    .ret] }
+
 private def genericDivStep : List Instruction :=
   doubleLocal remainderLocal ++ [
   .localGet wordLocal,
@@ -753,7 +773,8 @@ def modFunction : Function := {
     .ifElse (incrementLocal leftParam ++ [.localGet leftParam, .ret]) callGenericMod] }
 
 def externalFunctions : Array Function := #[
-  mulFunction, powFunction, landFunction, divFunction, modFunction]
+  mulFunction, powFunction, landFunction, divFunction, modFunction,
+  shiftLeftFunction]
 
 def internalFunctions : Array Function := #[
   mulGenericFunction, divGenericFunction, modGenericFunction]
@@ -807,13 +828,20 @@ def internalizeAvailable (module : Module) (validate : Bool := true) :
       throw (.reservedDeclaration helper)
   let selectedExternalFunctions := externalFunctions.filter fun function =>
     present.any fun declaration => externalName declaration == function.name
+  let needsMul := present.contains `Nat.pow || present.contains `Nat.shiftLeft
+  let needsPow := present.contains `Nat.shiftLeft
   let selectedExternalFunctions :=
-    if present.contains `Nat.pow && !present.contains `Nat.mul then
+    if needsMul && !selectedExternalFunctions.any (·.name == mulFunction.name) then
       selectedExternalFunctions.push mulFunction
+    else selectedExternalFunctions
+  let selectedExternalFunctions :=
+    if needsPow && !selectedExternalFunctions.any (·.name == powFunction.name) then
+      selectedExternalFunctions.push powFunction
     else selectedExternalFunctions
   let selectedInternalFunctions := internalFunctions.filter fun function =>
     (function.name == mulGenericName &&
-      (present.contains `Nat.mul || present.contains `Nat.pow)) ||
+      (present.contains `Nat.mul || present.contains `Nat.pow ||
+        present.contains `Nat.shiftLeft)) ||
     (function.name == divGenericName && present.contains `Nat.div) ||
     (function.name == modGenericName && present.contains `Nat.mod)
   for function in selectedInternalFunctions do
@@ -851,6 +879,15 @@ private def exampleImport (declaration : Name) : Import := {
     params := #[LCNF.ImpureType.tobject, LCNF.ImpureType.tobject]
     result := LCNF.ImpureType.tobject } }
 
+private def log2ExampleImport : Import := {
+  key := .external ResidentNatShift.log2Declaration
+  moduleName := "lean.extern"
+  itemName := ResidentNatShift.log2Declaration.toString
+  signature := { params := #[.tobject], results := #[.tobject] }
+  externalTypes? := some {
+    params := #[LCNF.ImpureType.tobject]
+    result := LCNF.ImpureType.tobject } }
+
 def residentExampleModule : Except String Module := do
   let module ← ResidentBigNumeric.residentExampleModule
   let module ← ResidentReferenceCount.internalizeIncrements module
@@ -858,9 +895,12 @@ def residentExampleModule : Except String Module := do
   let module ← ResidentRelease.internalizeReleases module
     |>.mapError fun error => s!"releases: {repr error}"
   let module := { module with
-    imports := module.imports ++ externalDeclarations.map exampleImport }
-  internalizeAvailable module
+    imports := module.imports ++ externalDeclarations.map exampleImport ++
+      #[log2ExampleImport] }
+  let module ← internalizeAvailable module
     |>.mapError fun error => s!"Nat arithmetic: {repr error}"
+  ResidentNatShift.internalizeAvailable module
+    |>.mapError fun error => s!"Nat shift: {repr error}"
 
 def manifest : Json := Json.mkObj [
   ("sourceEntry", `Nat.mul |>.toString),
@@ -869,11 +909,14 @@ def manifest : Json := Json.mkObj [
   ("result", "tobject"),
   ("closureDispatch", Json.arr #[]),
   ("closureDescriptors", Json.arr #[]),
-  ("entries", Json.arr <| externalDeclarations.map fun declaration =>
+  ("entries", Json.arr <| (externalDeclarations.map fun declaration =>
     Json.mkObj [
       ("entry", externalName declaration |>.toString),
       ("params", Json.arr #["tobject", "tobject"]),
-      ("result", "tobject")]),
+      ("result", "tobject")]) |>.push <| Json.mkObj [
+        ("entry", ResidentNatShift.log2HelperName.toString),
+        ("params", Json.arr #["tobject"]),
+        ("result", "tobject")]),
   ("imports", Json.arr #[]),
   ("numericLimbBits", 64),
   ("walkerControl", "structured-loop"),

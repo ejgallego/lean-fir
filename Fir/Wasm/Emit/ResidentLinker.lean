@@ -618,7 +618,8 @@ def closedApplicationExternalDeclarations : Array Name :=
     ExternalRuntime.mathDeclarations ++
     ResidentArray.availableExternalDeclarations ++
     ResidentByteArray.externalDeclarations ++
-    #[ResidentNatMod.declaration, ResidentNatShift.declaration] ++
+    #[ResidentNatMod.declaration, ResidentNatShift.declaration,
+      ResidentNatShift.log2Declaration] ++
     #[ResidentPlatform.declaration] ++
     ResidentUSize.externalDeclarations ++
     ResidentString.availableExternalDeclarations ++

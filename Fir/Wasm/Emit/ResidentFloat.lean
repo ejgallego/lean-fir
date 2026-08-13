@@ -59,6 +59,7 @@ def externalDeclarations : Array Name := #[
   `Float.sub,
   `Float.div,
   `Float.mul,
+  `Float.decLt,
   `Float.decLe,
   `Float.round,
   `Float.toUInt64,
@@ -280,6 +281,18 @@ def subFunction : Function := binaryFloatFunction `Float.sub .f64Sub
 def divFunction : Function := binaryFloatFunction `Float.div .f64Div
 def mulFunction : Function := binaryFloatFunction `Float.mul .f64Mul
 
+def decLtFunction : Function := {
+  name := externalName `Float.decLt
+  params := #[(leftParam, .float), (rightParam, .float)]
+  results := #[.uint8]
+  locals := #[(raw32Local, .uint32), (savedScratchLocal, .uint32),
+    (uint8ResultLocal, .uint8)]
+  body := [
+    .localGet leftParam,
+    .localGet rightParam,
+    .f64Lt,
+    .localSet raw32Local] ++ retypeUInt8 }
+
 def decLeFunction : Function := {
   name := externalName `Float.decLe
   params := #[(leftParam, .float), (rightParam, .float)]
@@ -352,6 +365,7 @@ def externalFunctions : Array Function := #[
   subFunction,
   divFunction,
   mulFunction,
+  decLtFunction,
   decLeFunction,
   roundFunction,
   toUInt64Function,
@@ -374,7 +388,7 @@ private def expectedExternalSignature? (declaration : Name) : Option Signature :
   if declaration == `Float.sub || declaration == `Float.div ||
       declaration == `Float.mul then
     some { params := #[.float, .float], results := #[.float] }
-  else if declaration == `Float.decLe then
+  else if declaration == `Float.decLt || declaration == `Float.decLe then
     some { params := #[.float, .float], results := #[.uint8] }
   else if declaration == `Float.round then
     some { params := #[.float], results := #[.float] }

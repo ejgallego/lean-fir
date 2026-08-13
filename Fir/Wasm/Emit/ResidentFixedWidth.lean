@@ -27,6 +27,7 @@ inductive LinkError where
   deriving Inhabited, Repr
 
 private def valueParam : FVarId := ⟨`value⟩
+private def proofParam : FVarId := ⟨`proof⟩
 private def leftParam : FVarId := ⟨`left⟩
 private def rightParam : FVarId := ⟨`right⟩
 private def rawLocal : FVarId := ⟨`raw⟩
@@ -52,6 +53,7 @@ private def borrowLocal : FVarId := ⟨`borrow⟩
 private def multiplierLocal : FVarId := ⟨`multiplier⟩
 private def multiplicandLocal : FVarId := ⟨`multiplicand⟩
 private def result32Local : FVarId := ⟨`result32⟩
+private def result64Local : FVarId := ⟨`result64⟩
 private def wordLocal : FVarId := ⟨`word⟩
 private def countLocal : FVarId := ⟨`count⟩
 private def indexLocal : FVarId := ⟨`index⟩
@@ -59,6 +61,8 @@ private def remainder64Local : FVarId := ⟨`remainder64⟩
 private def remainderLowLocal : FVarId := ⟨`remainderLow⟩
 private def remainderHighLocal : FVarId := ⟨`remainderHigh⟩
 private def multiplyLoop : FVarId := ⟨`fixedWidthMultiplyLoop⟩
+private def multiply64Loop : FVarId := ⟨`fixedWidthMultiply64Loop⟩
+private def log2Loop : FVarId := ⟨`fixedWidthLog2Loop⟩
 private def ctzLoop : FVarId := ⟨`fixedWidthCtzLoop⟩
 private def modLoop : FVarId := ⟨`fixedWidthModLoop⟩
 
@@ -66,12 +70,17 @@ def externalDeclarations : Array Name := #[
   `UInt8.ofBitVec,
   `UInt8.toBitVec,
   `UInt8.ofNat,
+  `UInt8.ofNatLT,
   `UInt8.toNat,
   `UInt8.toUInt32,
   `UInt8.toUInt64,
   `UInt8.toUSize,
   `UInt8.decEq,
   `UInt8.decLt,
+  `UInt8.decLe,
+  `UInt8.shiftRight,
+  `UInt8.land,
+  `UInt8.lor,
   `UInt16.shiftRight,
   `UInt16.ofNat,
   `UInt16.toUInt8,
@@ -84,6 +93,8 @@ def externalDeclarations : Array Name := #[
   `UInt16.lor,
   `UInt32.ofBitVec,
   `UInt32.ofNat,
+  `UInt32.ofNatLT,
+  `UInt32.log2Clz,
   `UInt32.toNat,
   `UInt32.toUInt8,
   `UInt32.toUInt16,
@@ -111,6 +122,9 @@ def externalDeclarations : Array Name := #[
   `UInt64.land,
   `UInt64.lor,
   `UInt64.xor,
+  `UInt64.complement,
+  `UInt64.decLt,
+  `UInt64.mul,
   `UInt64.ctzFast,
   `UInt64.mod]
 
@@ -196,6 +210,19 @@ private def ofNat32Function (declaration : Name) (result : AbiKind)
     .call (.declaration ResidentNumeric.naturalLowName),
     .i32Const .uint32 mask,
     .i32And]
+
+/-- The bound proof is erased but remains a physical zero-valued parameter in
+final LCNF. The conversion body is otherwise identical to `ofNat32Function`. -/
+private def ofNatLT32Function (declaration : Name) (result : AbiKind)
+    (mask : UInt32) : Function :=
+  retypedI32Function declaration
+    #[(valueParam, .tobject), (proofParam, .erased)] result [
+      .localGet valueParam,
+      .call (.declaration ResidentNumeric.validateNaturalName),
+      .localGet valueParam,
+      .call (.declaration ResidentNumeric.naturalLowName),
+      .i32Const .uint32 mask,
+      .i32And]
 
 private def toNat32Function (declaration : Name) (param result : AbiKind) : Function :=
   retypedI32Function declaration #[(valueParam, param)] result [
@@ -310,6 +337,11 @@ def lorFunction : Function := {
 def uint8OfNatFunction : Function :=
   ofNat32Function `UInt8.ofNat .uint8 0xff
 
+/-- Proof arguments are erased by final LCNF, so the physical provider is the
+same checked natural-to-byte conversion as `UInt8.ofNat`. -/
+def uint8OfNatLTFunction : Function :=
+  ofNatLT32Function `UInt8.ofNatLT .uint8 0xff
+
 def uint8OfBitVecFunction : Function :=
   ofNat32Function `UInt8.ofBitVec .uint8 0xff
 
@@ -334,6 +366,46 @@ def uint8DecEqFunction : Function :=
 def uint8DecLtFunction : Function :=
   decisionI32Function `UInt8.decLt .uint8 .i32LtU
 
+def uint8DecLeFunction : Function :=
+  retypedI32Function `UInt8.decLe
+    #[(leftParam, .uint8), (rightParam, .uint8)] .uint8 [
+      .localGet rightParam,
+      .localGet leftParam,
+      .i32LtU,
+      .i32Const .uint32 0,
+      .i32Eq]
+
+def uint8ShiftRightFunction : Function :=
+  retypedI32Function `UInt8.shiftRight
+    #[(leftParam, .uint8), (rightParam, .uint8)] .uint8 [
+      .localGet leftParam,
+      .localGet rightParam,
+      .i32Const .uint32 8,
+      .i32RemU,
+      .i32ShrU]
+
+def uint8LandFunction : Function :=
+  binaryI32Function `UInt8.land .uint8 .i32And
+
+/-- `a or b = a + b - (a and b)`; byte inputs keep the result in range. -/
+def uint8LorFunction : Function := {
+  (retypedI32Function `UInt8.lor
+    #[(leftParam, .uint8), (rightParam, .uint8)] .uint8 [
+      .localGet leftParam,
+      .localGet rightParam,
+      .i32Add,
+      .localSet sumLocal,
+      .localGet leftParam,
+      .localGet rightParam,
+      .i32And,
+      .localSet intersectionLocal,
+      .localGet sumLocal,
+      .localGet intersectionLocal,
+      .i32Sub]) with
+    locals := #[(rawLocal, .uint32), (sumLocal, .uint32),
+      (intersectionLocal, .uint32), (savedScratchLocal, .uint64),
+      (uint8ResultLocal, .uint8)] }
+
 def uint16ToNatFunction : Function :=
   toNat32Function `UInt16.toNat .uint16 .tagged
 
@@ -346,8 +418,40 @@ def uint16ToUInt64Function : Function :=
 def uint32OfNatFunction : Function :=
   ofNat32Function `UInt32.ofNat .uint32 0xffffffff
 
+/-- The erased proof leaves the same physical conversion as `UInt32.ofNat`. -/
+def uint32OfNatLTFunction : Function :=
+  ofNatLT32Function `UInt32.ofNatLT .uint32 0xffffffff
+
 def uint32OfBitVecFunction : Function :=
   ofNat32Function `UInt32.ofBitVec .uint32 0xffffffff
+
+/-- Floor log2 with Lean's `0 ↦ 0` convention. The source declaration is
+lean-zip's transparent CLZ-backed override, but this provider is a generic
+UInt32 implementation and does not depend on compressor code. -/
+def uint32Log2ClzFunction : Function := {
+  (retypedI32Function `UInt32.log2Clz #[(valueParam, .uint32)] .uint32 [
+    .localGet valueParam,
+    .localSet wordLocal,
+    .i32Const .uint32 0,
+    .localSet countLocal,
+    .loop log2Loop [
+      .localGet wordLocal,
+      .i32Const .uint32 2,
+      .i32LtU,
+      .ifElse [] [
+        .localGet wordLocal,
+        .i32Const .uint32 1,
+        .i32ShrU,
+        .localSet wordLocal,
+        .localGet countLocal,
+        .i32Const .uint32 1,
+        .i32Add,
+        .localSet countLocal,
+        .br log2Loop]],
+    .localGet countLocal]) with
+    locals := #[(rawLocal, .uint32), (wordLocal, .uint32),
+      (countLocal, .uint32), (savedScratchLocal, .uint64),
+      (uint32ResultLocal, .uint32)] }
 
 def uint32ToNatFunction : Function :=
   toNat32Function `UInt32.toNat .uint32 .tobject
@@ -671,6 +775,86 @@ def uint64XorFunction : Function := {
       .localSet highLocal] ++ combineUInt64 lowLocal highLocal) with
     locals := uint64BinaryLocals }
 
+/-- Bitwise complement without requiring an additional symbolic opcode. -/
+def uint64ComplementFunction : Function := {
+  (retypedI64Function `UInt64.complement #[(valueParam, .uint64)] .uint64 <|
+    splitUInt64 valueParam lowLocal highLocal ++ [
+      .i32Const .uint32 0xffffffff,
+      .localGet lowLocal,
+      .i32Sub,
+      .localSet lowLocal,
+      .i32Const .uint32 0xffffffff,
+      .localGet highLocal,
+      .i32Sub,
+      .localSet highLocal] ++ combineUInt64 lowLocal highLocal) with
+    locals := #[(lowLocal, .uint32), (highLocal, .uint32),
+      (raw64Local, .uint64), (savedScratchLocal, .uint64),
+      (uint64ResultLocal, .uint64)] }
+
+def uint64DecLtFunction : Function :=
+  retypedI32Function `UInt64.decLt
+    #[(leftParam, .uint64), (rightParam, .uint64)] .uint8 [
+      .localGet leftParam,
+      .localGet rightParam,
+      .i64LtU]
+
+/-- Shift-and-add multiplication in the modulo-2^64 ring. -/
+def uint64MulFunction : Function := {
+  (retypedI64Function `UInt64.mul
+    #[(leftParam, .uint64), (rightParam, .uint64)] .uint64 <| [
+      .localGet leftParam,
+      .localSet multiplicandLocal,
+      .localGet rightParam,
+      .localSet multiplierLocal,
+      .i64Const .uint64 0,
+      .localSet result64Local,
+      .loop multiply64Loop [
+        .localGet multiplierLocal,
+        .i64Const .uint64 1,
+        .i64LtU,
+        .ifElse [] <|
+          [.localGet multiplierLocal,
+            .i32WrapI64 .uint32,
+            .i32Const .uint32 1,
+            .i32And,
+            .i32Const .uint32 0,
+            .i32Eq,
+            .ifElse [] <|
+              splitUInt64 result64Local leftLowLocal leftHighLocal ++
+              splitUInt64 multiplicandLocal rightLowLocal rightHighLocal ++ [
+                .localGet leftLowLocal,
+                .localGet rightLowLocal,
+                .i32Add,
+                .localSet lowLocal,
+                .localGet lowLocal,
+                .localGet leftLowLocal,
+                .i32LtU,
+                .localSet carryLocal,
+                .localGet leftHighLocal,
+                .localGet rightHighLocal,
+                .i32Add,
+                .localGet carryLocal,
+                .i32Add,
+                .localSet highLocal] ++
+              combineUInt64 lowLocal highLocal ++ [.localSet result64Local],
+            .localGet multiplicandLocal,
+            .i64Const .uint64 1,
+            .i64Shl,
+            .localSet multiplicandLocal,
+            .localGet multiplierLocal,
+            .i64Const .uint64 1,
+            .i64ShrU,
+            .localSet multiplierLocal,
+            .br multiply64Loop]],
+      .localGet result64Local]) with
+    locals := #[(multiplicandLocal, .uint64), (multiplierLocal, .uint64),
+      (result64Local, .uint64), (leftLowLocal, .uint32),
+      (leftHighLocal, .uint32), (rightLowLocal, .uint32),
+      (rightHighLocal, .uint32), (lowLocal, .uint32),
+      (highLocal, .uint32), (carryLocal, .uint32),
+      (raw64Local, .uint64), (savedScratchLocal, .uint64),
+      (uint64ResultLocal, .uint64)] }
+
 def uint64CtzFastFunction : Function := {
   (retypedI64Function `UInt64.ctzFast #[(valueParam, .uint64)] .uint64 <|
     splitUInt64 valueParam lowLocal highLocal ++ [
@@ -795,12 +979,17 @@ def functions : Array Function := #[
   uint8OfBitVecFunction,
   uint8ToBitVecFunction,
   uint8OfNatFunction,
+  uint8OfNatLTFunction,
   uint8ToNatFunction,
   uint8ToUInt32Function,
   uint8ToUInt64Function,
   uint8ToUSizeFunction,
   uint8DecEqFunction,
   uint8DecLtFunction,
+  uint8DecLeFunction,
+  uint8ShiftRightFunction,
+  uint8LandFunction,
+  uint8LorFunction,
   shiftRightFunction,
   ofNatFunction,
   toUInt8Function,
@@ -813,6 +1002,8 @@ def functions : Array Function := #[
   lorFunction,
   uint32OfBitVecFunction,
   uint32OfNatFunction,
+  uint32OfNatLTFunction,
+  uint32Log2ClzFunction,
   uint32ToNatFunction,
   uint32ToUInt8Function,
   uint32ToUInt16Function,
@@ -840,14 +1031,21 @@ def functions : Array Function := #[
   uint64LandFunction,
   uint64LorFunction,
   uint64XorFunction,
+  uint64ComplementFunction,
+  uint64DecLtFunction,
+  uint64MulFunction,
   uint64CtzFastFunction,
   uint64ModFunction]
 
 private def expectedSignature? (declaration : Name) : Option Signature :=
-  if #[`UInt8.decEq, `UInt8.decLt].contains declaration then
+  if #[`UInt8.decEq, `UInt8.decLt, `UInt8.decLe].contains declaration then
     some { params := #[.uint8, .uint8], results := #[.uint8] }
   else if #[`UInt8.ofBitVec, `UInt8.ofNat].contains declaration then
     some { params := #[.tobject], results := #[.uint8] }
+  else if declaration == `UInt8.ofNatLT then
+    some { params := #[.tobject, .erased], results := #[.uint8] }
+  else if #[`UInt8.shiftRight, `UInt8.land, `UInt8.lor].contains declaration then
+    some { params := #[.uint8, .uint8], results := #[.uint8] }
   else if declaration == `UInt8.toBitVec then
     some { params := #[.uint8], results := #[.tobject] }
   else if declaration == `UInt8.toNat then
@@ -879,6 +1077,10 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
     some { params := #[.uint32, .uint32], results := #[.uint8] }
   else if #[`UInt32.ofBitVec, `UInt32.ofNat].contains declaration then
     some { params := #[.tobject], results := #[.uint32] }
+  else if declaration == `UInt32.ofNatLT then
+    some { params := #[.tobject, .erased], results := #[.uint32] }
+  else if declaration == `UInt32.log2Clz then
+    some { params := #[.uint32], results := #[.uint32] }
   else if declaration == `UInt32.toNat then
     some { params := #[.uint32], results := #[.tobject] }
   else if declaration == `UInt32.toUInt8 then
@@ -890,11 +1092,14 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
   else if declaration == `UInt32.toUSize then
     some { params := #[.uint32], results := #[.usize] }
   else if #[`UInt64.shiftLeft, `UInt64.shiftRight, `UInt64.add, `UInt64.sub,
-      `UInt64.land, `UInt64.lor, `UInt64.xor, `UInt64.mod].contains declaration then
+      `UInt64.land, `UInt64.lor, `UInt64.xor, `UInt64.mul,
+      `UInt64.mod].contains declaration then
     some { params := #[.uint64, .uint64], results := #[.uint64] }
+  else if declaration == `UInt64.complement then
+    some { params := #[.uint64], results := #[.uint64] }
   else if declaration == `UInt64.ctzFast then
     some { params := #[.uint64], results := #[.uint64] }
-  else if declaration == `UInt64.decEq then
+  else if declaration == `UInt64.decEq || declaration == `UInt64.decLt then
     some { params := #[.uint64, .uint64], results := #[.uint8] }
   else if declaration == `UInt64.ofNat then
     some { params := #[.tobject], results := #[.uint64] }
@@ -937,8 +1142,9 @@ private def internalizeSelected (module : Module) (declarations : Array Name)
   unless module.memory == some ResidentRuntime.residentMemory do
     throw .incompatibleMemory
   let needsFromNat := declarations.any fun declaration =>
-    #[`UInt8.ofBitVec, `UInt8.ofNat, `UInt16.ofNat, `UInt32.ofBitVec,
-      `UInt32.ofNat, `UInt64.ofNat].contains declaration
+    #[`UInt8.ofBitVec, `UInt8.ofNat, `UInt8.ofNatLT, `UInt16.ofNat,
+      `UInt32.ofBitVec, `UInt32.ofNat, `UInt32.ofNatLT,
+      `UInt64.ofNat].contains declaration
   let needsToNat := declarations.any fun declaration =>
     #[`UInt8.toBitVec, `UInt8.toNat, `UInt16.toNat, `UInt32.toNat].contains declaration
   let needsHigh := declarations.contains `UInt64.ofNat

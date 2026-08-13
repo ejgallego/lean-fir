@@ -28,12 +28,17 @@ export async function checkResidentFixedWidth(bytes) {
   const { exports } = await WebAssembly.instantiate(module, {});
   for (const name of [
     "fir_ext_UInt8_ofNat",
+    "fir_ext_UInt8_ofNatLT",
     "fir_ext_UInt8_toNat",
     "fir_ext_UInt8_toUInt32",
     "fir_ext_UInt8_toUInt64",
     "fir_ext_UInt8_toUSize",
     "fir_ext_UInt8_decEq",
     "fir_ext_UInt8_decLt",
+    "fir_ext_UInt8_decLe",
+    "fir_ext_UInt8_shiftRight",
+    "fir_ext_UInt8_land",
+    "fir_ext_UInt8_lor",
     "fir_ext_UInt16_shiftRight",
     "fir_ext_UInt16_ofNat",
     "fir_ext_UInt16_toUInt8",
@@ -45,6 +50,8 @@ export async function checkResidentFixedWidth(bytes) {
     "fir_ext_UInt16_shiftLeft",
     "fir_ext_UInt16_lor",
     "fir_ext_UInt32_ofNat",
+    "fir_ext_UInt32_ofNatLT",
+    "fir_ext_UInt32_log2Clz",
     "fir_ext_UInt32_toNat",
     "fir_ext_UInt32_toUInt8",
     "fir_ext_UInt32_toUInt16",
@@ -72,6 +79,9 @@ export async function checkResidentFixedWidth(bytes) {
     "fir_ext_UInt64_land",
     "fir_ext_UInt64_lor",
     "fir_ext_UInt64_xor",
+    "fir_ext_UInt64_complement",
+    "fir_ext_UInt64_decLt",
+    "fir_ext_UInt64_mul",
     "fir_ext_UInt64_ctzFast",
     "fir_ext_UInt64_mod",
     "fir_ext_USize_decLt",
@@ -128,6 +138,8 @@ export async function checkResidentFixedWidth(bytes) {
     const natural = 2 * value + 1;
     equal(exports.fir_ext_UInt8_ofNat(natural) >>> 0, value,
       `UInt8.ofNat(${value})`);
+    equal(exports.fir_ext_UInt8_ofNatLT(natural, 0) >>> 0, value,
+      `UInt8.ofNatLT(${value})`);
     equal(naturalValue(exports.memory,
       exports.fir_ext_UInt8_toNat(value)), BigInt(value),
     `UInt8.toNat(${value})`);
@@ -142,6 +154,14 @@ export async function checkResidentFixedWidth(bytes) {
   equal(exports.fir_ext_UInt8_decEq(255, 0), 0, "UInt8.decEq unequal");
   equal(exports.fir_ext_UInt8_decLt(1, 255), 1, "UInt8.decLt true");
   equal(exports.fir_ext_UInt8_decLt(255, 1), 0, "UInt8.decLt false");
+  equal(exports.fir_ext_UInt8_decLe(255, 255), 1, "UInt8.decLe equal");
+  equal(exports.fir_ext_UInt8_decLe(255, 1), 0, "UInt8.decLe false");
+  equal(exports.fir_ext_UInt8_shiftRight(0x81, 9) >>> 0, 0x40,
+    "UInt8.shiftRight masks count");
+  equal(exports.fir_ext_UInt8_land(0xa5, 0x3c) >>> 0, 0x24,
+    "UInt8.land");
+  equal(exports.fir_ext_UInt8_lor(0xa5, 0x3c) >>> 0, 0xbd,
+    "UInt8.lor");
 
   equal(naturalValue(exports.memory,
     exports.fir_ext_UInt16_toNat(0xffff)), 0xffffn, "UInt16.toNat");
@@ -153,6 +173,19 @@ export async function checkResidentFixedWidth(bytes) {
   const naturalMax32 = exports.fir_numeric_make_natural(0xffffffff, 0);
   equal(exports.fir_ext_UInt32_ofNat(naturalMax32) >>> 0, 0xffffffff,
     "UInt32.ofNat upper boundary");
+  equal(exports.fir_ext_UInt32_ofNatLT(naturalMax32, 0) >>> 0, 0xffffffff,
+    "UInt32.ofNatLT upper boundary");
+  for (const [value, expected] of [
+    [0, 0],
+    [1, 0],
+    [2, 1],
+    [3, 1],
+    [0x80000000, 31],
+    [0xffffffff, 31],
+  ]) {
+    equal(exports.fir_ext_UInt32_log2Clz(value) >>> 0, expected,
+      `UInt32.log2Clz(${value})`);
+  }
   equal(naturalValue(exports.memory,
     exports.fir_ext_UInt32_toNat(0xffffffff)), 0xffffffffn,
   "UInt32.toNat upper boundary");
@@ -224,6 +257,21 @@ export async function checkResidentFixedWidth(bytes) {
   equal(u64(exports.fir_ext_UInt64_xor(
     0xf0f0f0f00f0f0f0fn, 0x0ff00ff0f00ff00fn)),
     0xff00ff00ff00ff00n, "UInt64.xor");
+  equal(u64(exports.fir_ext_UInt64_complement(wide)),
+    0xfedcba9876543210n, "UInt64.complement");
+  equal(exports.fir_ext_UInt64_decLt(0n, mask64), 1,
+    "UInt64.decLt true");
+  equal(exports.fir_ext_UInt64_decLt(mask64, 0n), 0,
+    "UInt64.decLt false");
+  for (const [left, right] of [
+    [0n, mask64],
+    [mask64, 2n],
+    [0x0123456789abcdefn, 0xfedcba9876543210n],
+    [0x8000000000000000n, 3n],
+  ]) {
+    equal(u64(exports.fir_ext_UInt64_mul(left, right)),
+      (left * right) & mask64, `UInt64.mul(${left}, ${right})`);
+  }
   for (const [value, expected] of [
     [0n, 64n],
     [1n, 0n],

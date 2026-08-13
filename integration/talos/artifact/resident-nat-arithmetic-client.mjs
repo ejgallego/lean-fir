@@ -53,8 +53,12 @@ export async function checkResidentNatArithmetic({ bytes, manifest }) {
   const land = exported(instance, "fir_ext_Nat_land");
   const div = exported(instance, "fir_ext_Nat_div");
   const mod = exported(instance, "fir_ext_Nat_mod");
+  const shiftLeft = exported(instance, "fir_ext_Nat_shiftLeft");
+  const log2 = exported(instance, "fir_ext_Nat_log2");
   const apply = (operation, left, right) => naturalValue(host,
     operation(naturalInput(host, left), naturalInput(host, right)));
+  const applyUnary = (operation, value) => naturalValue(host,
+    operation(naturalInput(host, value)));
 
   assert.equal(apply(mul, 0n, 0n), 0n);
   assert.equal(apply(mul, 0xffff_ffffn, 0xffff_ffffn),
@@ -91,6 +95,31 @@ export async function checkResidentNatArithmetic({ bytes, manifest }) {
     ((1n << 63n) + 123n) % ((1n << 32n) + 7n));
   assert.equal(apply(mod, dividend, divisor), dividend % divisor);
   assert.equal(apply(mod, divisor - 1n, divisor), divisor - 1n);
+
+  for (const [value, count] of [
+    [0n, 65n],
+    [1n, 0n],
+    [1n, 63n],
+    [1n, 64n],
+    [1n, 65n],
+    [(1n << 130n) + 3n, 67n],
+  ]) {
+    assert.equal(apply(shiftLeft, value, count), value << count,
+      `Nat.shiftLeft(${value}, ${count})`);
+  }
+
+  for (const [value, expected] of [
+    [0n, 0n],
+    [1n, 0n],
+    [2n, 1n],
+    [(1n << 63n) - 1n, 62n],
+    [1n << 63n, 63n],
+    [1n << 64n, 64n],
+    [1n << 65n, 65n],
+    [(1n << 257n) + (1n << 129n) + 3n, 257n],
+  ]) {
+    assert.equal(applyUnary(log2, value), expected, `Nat.log2(${value})`);
+  }
 
   const borrowedLeft = naturalInput(host, mulLeft);
   const borrowedRight = naturalInput(host, mulRight);
