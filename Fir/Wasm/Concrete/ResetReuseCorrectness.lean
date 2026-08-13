@@ -1096,6 +1096,33 @@ theorem LiveCellRel.rebindConstructor_other
             address reboundInfo reboundFieldKinds different]
           exact descriptor)
         objectEq objectRelated refCount persistent live
+  | array descriptor objectEq objectRelated refCount persistent live =>
+      exact .array
+        (by
+          rw [witness.lookup_rebindConstructor_descriptor_other reboundAddress
+            address reboundInfo reboundFieldKinds different]
+          exact descriptor)
+        objectEq
+        (by
+          refine {
+            headerRead := objectRelated.headerRead
+            headerKind := objectRelated.headerKind
+            marker := objectRelated.marker
+            logicalSize := objectRelated.logicalSize
+            physicalCapacity := objectRelated.physicalCapacity
+            reserved := objectRelated.reserved
+            sizeCapacity := objectRelated.sizeCapacity
+            allocationBytes := objectRelated.allocationBytes
+            headerOwned := objectRelated.headerOwned
+            extent := objectRelated.extent
+            liveElements := ?_ }
+          intro index value valueAt
+          obtain ⟨word, read, valueRelated⟩ :=
+            objectRelated.liveElements index value valueAt
+          exact ⟨word, read,
+            valueRelated.rebindConstructor reboundAddress reboundInfo
+              reboundFieldKinds⟩)
+        refCount persistent live
   | closure closureRelated =>
       cases closureRelated with
       | closure objectEq objectRelated headerRead headerKind descriptorLookup
@@ -2050,6 +2077,14 @@ theorem LiveHeapRel.resetObject_expectedConstructor_refines
           (by simp [objectRelated.headerKind])
           (by simp [Header.isPromotedTag, objectRelated.headerKind, different])
           refCount persistent
+    | array descriptor objectEq objectRelated refCount persistent cellLive =>
+        have different :
+            (ObjectKind.opaque == ObjectKind.natural) = false := by
+          decide
+        exact failOfHeader _ objectRelated.headerRead
+          (by simp [objectRelated.headerKind])
+          (by simp [Header.isPromotedTag, objectRelated.headerKind, different])
+          refCount persistent
     | closure closureRelated =>
         cases closureRelated with
         | closure objectEq objectRelated headerRead headerKind descriptorLookup
@@ -2161,6 +2196,9 @@ theorem LiveHeapRel.resetObject_outOfBounds_refines
         rw [constructor] at objectEq
         contradiction
     | string descriptor objectEq objectRelated refCount persistent cellLive =>
+      rw [constructor] at objectEq
+      contradiction
+    | array descriptor objectEq objectRelated refCount persistent cellLive =>
         rw [constructor] at objectEq
         contradiction
     | closure closureRelated =>
@@ -2520,6 +2558,9 @@ theorem LiveHeapRel.resetObject_refines_unique
   | string descriptor objectEq objectRelated refCount persistent cellLive =>
       rw [constructor] at objectEq
       contradiction
+  | array descriptor objectEq objectRelated refCount persistent cellLive =>
+      rw [constructor] at objectEq
+      contradiction
   | closure closureRelated =>
       obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
       rw [constructor] at closureEq
@@ -2668,6 +2709,9 @@ theorem LiveHeapRel.reuseObject_expectedConstructor_refines
         exact failOfHeader _ objectRelated.headerRead
           (by simp [objectRelated.headerKind])
     | string descriptor objectEq objectRelated refCount persistent cellLive =>
+        exact failOfHeader _ objectRelated.headerRead
+          (by simp [objectRelated.headerKind])
+    | array descriptor objectEq objectRelated refCount persistent cellLive =>
         exact failOfHeader _ objectRelated.headerRead
           (by simp [objectRelated.headerKind])
     | closure closureRelated =>

@@ -59,6 +59,9 @@ theorem LiveHeapRel.takeClosureApplication_refines
   | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
+  | array descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
   | closure closureRelated =>
       cases closureRelated with
       | @closure storedFunction storedArity captureKinds storedCaptures header _

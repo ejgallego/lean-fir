@@ -230,6 +230,74 @@ theorem ConstructorObjectRel.readOwnedReferences
   rw [semanticList] at wordsRelated
   exact ⟨words, wordsRead, wordsRelated⟩
 
+/-- The generic Array ownership decoder visits exactly the semantic live
+prefix in order. Capacity is checked by `ResidentArrayObjectRel`, but spare
+slots are absent from both lists and therefore cannot be retained, released,
+or marked persistent. -/
+theorem ResidentArrayObjectRel.readOwnedReferences
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {elements : Array Value} {capacity : Nat} {header : Header}
+    (related :
+      ResidentArrayObjectRel state witness address elements capacity header) :
+    ∃ words,
+      Fir.Wasm.Concrete.readOwnedReferences state address header = .ok words ∧
+      OwnershipValuesRel witness words elements.toList := by
+  have semanticLt (index : Fin elements.size) : index.val < elements.size :=
+    index.isLt
+  let semanticAt : Fin elements.size → Value := fun index =>
+    elements[index.val]'(semanticLt index)
+  have each : ∀ index : Fin elements.size, ∃ word,
+      state.memory.readWord32
+          (address.value + headerBytes + target.semanticSlotBytes * index.val) =
+        .ok word ∧
+      OwnershipValueRel witness word (semanticAt index) := by
+    intro index
+    have valueAt : elements[index.val]? = some (semanticAt index) := by
+      unfold semanticAt
+      exact Array.getElem?_eq_getElem (semanticLt index)
+    obtain ⟨word, wordRead, valueRelated⟩ :=
+      related.liveElements index.val (semanticAt index) valueAt
+    exact ⟨word, wordRead, .intro .tobject (by decide) valueRelated⟩
+  obtain ⟨words, wordsRead, wordsRelated⟩ :=
+    readOwnershipOfFn
+      (read := fun index : Fin elements.size =>
+        liftMemory <| state.memory.readWord32
+          (address.value + headerBytes +
+            target.semanticSlotBytes * index.val))
+      semanticAt (by
+        intro index
+        obtain ⟨word, wordRead, valueRelated⟩ := each index
+        refine ⟨word, ?_, valueRelated⟩
+        unfold liftMemory
+        rw [wordRead])
+  have semanticList : List.ofFn semanticAt = elements.toList := by
+    apply List.ext_getElem?
+    intro index
+    simp only [List.getElem?_ofFn, Array.getElem?_toList]
+    by_cases indexLt : index < elements.size
+    · simp [indexLt, semanticAt]
+    · simp [indexLt]
+  have valid :
+      header.kind == ObjectKind.opaque &&
+        header.aux0 == residentArrayMarker && header.aux3 == 0 &&
+        header.aux1.toNat ≤ header.aux2.toNat &&
+        header.allocationBytes.toNat ==
+          residentArrayAllocationBytes header.aux2.toNat := by
+    have opaqueEq :
+        (ObjectKind.opaque == ObjectKind.opaque) = true := by decide
+    simpa [opaqueEq, related.headerKind, related.marker, related.reserved,
+      related.logicalSize, related.physicalCapacity, related.sizeCapacity,
+      related.allocationBytes] using related.sizeCapacity
+  unfold Fir.Wasm.Concrete.readOwnedReferences
+  rw [related.headerKind]
+  simp only
+  rw [if_pos (by simp [related.marker])]
+  unfold readResidentArrayOwnedReferences
+  simp only [valid, ↓reduceIte]
+  rw [related.logicalSize]
+  rw [semanticList] at wordsRelated
+  exact ⟨words, wordsRead, wordsRelated⟩
+
 /-- Exact semantic-heap frame produced by replacing the first cell at one
 location. The target lookup changes and every other lookup is preserved. -/
 structure HeapReplacePost (before after : Heap) (location : Location)
@@ -711,7 +779,7 @@ theorem incrementReference_header
     (fits : oldCount + amount < UInt32.size)
     (check : Bool) :
     ∃ result updatedHeader memory,
-      incrementReference state address amount check = .ok result ∧
+      Fir.Wasm.Concrete.incrementReference state address amount check = .ok result ∧
       updatedHeader = { header with refCount := UInt32.ofNat (oldCount + amount) } ∧
       result = { state with memory } ∧
       updatedHeader.write state.memory address = .ok memory ∧
@@ -726,8 +794,9 @@ theorem incrementReference_header
   obtain ⟨memory, headerWrite, _⟩ :=
     Header.write_spec state.memory address updatedHeader headerInBounds
   let result : MemoryState := { state with memory }
-  have operation : incrementReference state address amount check = .ok result := by
-    unfold incrementReference
+  have operation : Fir.Wasm.Concrete.incrementReference state address amount check =
+      .ok result := by
+    unfold Fir.Wasm.Concrete.incrementReference
     rw [heap]
     simp only
     rw [headerRead]
@@ -1524,6 +1593,159 @@ theorem ConstructorObjectRel.writeOwnershipMetadata
     rw [operationEq]
     exact related.usizeFields index value valueAt
 
+/-- Rewriting an Array header's ownership metadata preserves its exact
+capacity and every live `tobject` slot. Spare capacity remains outside the
+pointwise relation. -/
+theorem ResidentArrayObjectRel.writeOwnershipMetadata
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {elements : Array Value} {capacity : Nat} {header : Header}
+    (related :
+      ResidentArrayObjectRel state witness address elements capacity header)
+    (valid : state.FrontierInvariant) (nextCount : UInt32)
+    (nextPersistent : Bool) :
+    ∃ result updatedHeader,
+      writeLiveHeader state address updatedHeader = .ok result ∧
+      updatedHeader = {
+        header with refCount := nextCount, persistent := nextPersistent } ∧
+      result.FrontierInvariant ∧
+      ResidentArrayObjectRel result witness address elements capacity updatedHeader := by
+  obtain ⟨heap, _, live, minimum, aligned, extentInMemory⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts state address header
+      related.headerRead
+  have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
+    Nat.le_trans related.headerOwned valid.cursorInBounds
+  let updatedHeader : Header := {
+    header with refCount := nextCount, persistent := nextPersistent }
+  obtain ⟨memory, headerWrite, _⟩ :=
+    Header.write_spec state.memory address updatedHeader headerInBounds
+  let result : MemoryState := { state with memory }
+  have operation : writeLiveHeader state address updatedHeader = .ok result := by
+    unfold writeLiveHeader
+    rw [headerWrite]
+    rfl
+  have memorySize : memory.size = state.memory.size :=
+    Header.write_preserves_size state.memory memory address updatedHeader
+      headerInBounds headerWrite
+  have decodedHeader : Header.read memory address = .ok updatedHeader :=
+    Header.read_of_write_eq_ok state.memory memory address updatedHeader
+      headerInBounds headerWrite
+  have headerReadAfter : result.readLiveHeader address = .ok updatedHeader := by
+    unfold MemoryState.readLiveHeader
+    simp [result, heap, decodedHeader]
+    simp only [Bind.bind, Except.bind]
+    simp [updatedHeader, live, minimum, aligned, memorySize, extentInMemory]
+    rfl
+  have finalValid : result.FrontierInvariant :=
+    valid.writeHeader related.headerOwned headerWrite
+  refine ⟨result, updatedHeader, operation, rfl, finalValid, ?_⟩
+  refine {
+    headerRead := headerReadAfter
+    headerKind := by simpa [updatedHeader] using related.headerKind
+    marker := by simpa [updatedHeader] using related.marker
+    logicalSize := by simpa [updatedHeader] using related.logicalSize
+    physicalCapacity := by simpa [updatedHeader] using related.physicalCapacity
+    reserved := by simpa [updatedHeader] using related.reserved
+    sizeCapacity := related.sizeCapacity
+    allocationBytes := by simpa [updatedHeader] using related.allocationBytes
+    headerOwned := related.headerOwned
+    extent := related.extent
+    liveElements := ?_ }
+  intro index value valueAt
+  obtain ⟨word, readBefore, valueRelated⟩ :=
+    related.liveElements index value valueAt
+  refine ⟨word, ?_, valueRelated⟩
+  change memory.readWord32 _ = .ok word
+  rw [Header.readWord32_of_write_eq_ok_payload state.memory memory address
+    updatedHeader
+    (address.value + headerBytes + target.semanticSlotBytes * index)
+    headerInBounds headerWrite (by omega)]
+  exact readBefore
+
+/-- Array increment changes only the ordinary reference count and preserves
+the entire live-prefix relation. -/
+theorem ResidentArrayObjectRel.incrementReference
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {elements : Array Value} {capacity : Nat} {header : Header}
+    (related :
+      ResidentArrayObjectRel state witness address elements capacity header)
+    (valid : state.FrontierInvariant) (oldCount amount : Nat)
+    (refCount : header.refCount.toNat = oldCount)
+    (ordinary : header.persistent = false)
+    (fits : oldCount + amount < UInt32.size) (check : Bool) :
+    ∃ result updatedHeader,
+      Fir.Wasm.Concrete.incrementReference state address amount check = .ok result ∧
+      updatedHeader = { header with
+        refCount := UInt32.ofNat (oldCount + amount) } ∧
+      result.FrontierInvariant ∧
+      ResidentArrayObjectRel result witness address elements capacity updatedHeader := by
+  obtain ⟨result, updatedHeader, write, updatedEq, finalValid, objectAfter⟩ :=
+    related.writeOwnershipMetadata valid
+      (UInt32.ofNat (oldCount + amount)) header.persistent
+  have heap :=
+    (MemoryState.PrefixExtension.readLiveHeader_facts state address header
+      related.headerRead).1
+  have notPromoted : header.isPromotedTag = false := by
+    have different : (ObjectKind.opaque == ObjectKind.natural) = false := by decide
+    simp [Header.isPromotedTag, related.headerKind, different]
+  have operation : Fir.Wasm.Concrete.incrementReference state address amount check =
+      .ok result := by
+    unfold Fir.Wasm.Concrete.incrementReference
+    rw [heap]
+    simp only
+    rw [related.headerRead]
+    simp only [Bind.bind, Except.bind, liftMemory]
+    rw [if_neg (by simp [notPromoted])]
+    rw [if_neg (by simp [ordinary])]
+    rw [refCount]
+    rw [uint32Field_eq_ok "reference count" (oldCount + amount) fits]
+    simpa [updatedEq] using write
+  exact ⟨result, updatedHeader, operation, by simpa using updatedEq,
+    finalValid, objectAfter⟩
+
+/-- Above one, Array decrement is the same nonrecursive header rewrite as for
+constructors; live children are untouched until the count reaches one. -/
+theorem ResidentArrayObjectRel.decrementReferenceOnce_above_one
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {elements : Array Value} {capacity : Nat} {header : Header}
+    (related :
+      ResidentArrayObjectRel state witness address elements capacity header)
+    (valid : state.FrontierInvariant) (oldCount : Nat)
+    (refCount : header.refCount.toNat = oldCount)
+    (ordinary : header.persistent = false) (oneLt : 1 < oldCount)
+    (check : Bool) :
+    ∃ result updatedHeader,
+      decrementReferenceOnce state address check = .ok result ∧
+      updatedHeader = { header with refCount := UInt32.ofNat (oldCount - 1) } ∧
+      result.FrontierInvariant ∧
+      ResidentArrayObjectRel result witness address elements capacity updatedHeader := by
+  obtain ⟨result, updatedHeader, write, updatedEq, finalValid, objectAfter⟩ :=
+    related.writeOwnershipMetadata valid
+      (UInt32.ofNat (oldCount - 1)) header.persistent
+  have heap :=
+    (MemoryState.PrefixExtension.readLiveHeader_facts state address header
+      related.headerRead).1
+  have notPromoted : header.isPromotedTag = false := by
+    have different : (ObjectKind.opaque == ObjectKind.natural) = false := by decide
+    simp [Header.isPromotedTag, related.headerKind, different]
+  have refCountNe : header.refCount ≠ 0 := by
+    intro zero
+    rw [zero] at refCount
+    simp at refCount
+    omega
+  have operation : decrementReferenceOnce state address check = .ok result := by
+    simp only [decrementReferenceOnce, decrementReferenceOnceFuel]
+    rw [heap]
+    simp only
+    rw [related.headerRead]
+    simp only [Bind.bind, Except.bind, liftMemory]
+    rw [if_neg (by simp [notPromoted])]
+    rw [if_neg (by simp [ordinary])]
+    rw [if_neg (by simpa using refCountNe)]
+    rw [refCount, if_pos oneLt]
+    simpa [updatedEq] using write
+  exact ⟨result, updatedHeader, operation, by simpa using updatedEq,
+    finalValid, objectAfter⟩
+
 /-- Reference-count-only constructor compatibility wrapper. -/
 theorem ConstructorObjectRel.writeReferenceCount
     {state : MemoryState} {witness : RefinementWitness} {address : Word32}
@@ -2239,6 +2461,10 @@ theorem LiveCellRel.decrementReferenceOnce_boxed_above_one
       obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
       rw [objectEq] at boxedEq
       contradiction
+  | array _ objectEq _ _ _ _ =>
+      obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
+      rw [objectEq] at boxedEq
+      contradiction
   | closure closureRelated =>
       obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
       obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
@@ -2284,6 +2510,10 @@ theorem LiveCellRel.incrementReference_boxed
       rw [objectEq] at boxedEq
       contradiction
   | string _ objectEq _ _ _ _ =>
+      obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
+      rw [objectEq] at boxedEq
+      contradiction
+  | array _ objectEq _ _ _ _ =>
       obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
       rw [objectEq] at boxedEq
       contradiction
@@ -2336,6 +2566,10 @@ theorem LiveCellRel.incrementReference_constructor
       rw [objectEq] at constructorEq
       contradiction
   | string _ objectEq _ _ _ _ =>
+      obtain ⟨semantic, constructorEq⟩ := constructorCell
+      rw [objectEq] at constructorEq
+      contradiction
+  | array _ objectEq _ _ _ _ =>
       obtain ⟨semantic, constructorEq⟩ := constructorCell
       rw [objectEq] at constructorEq
       contradiction
@@ -2392,6 +2626,10 @@ theorem LiveCellRel.decrementReferenceOnce_constructor_above_one
       rw [objectEq] at constructorEq
       contradiction
   | string _ objectEq _ _ _ _ =>
+      obtain ⟨semantic, constructorEq⟩ := constructorCell
+      rw [objectEq] at constructorEq
+      contradiction
+  | array _ objectEq _ _ _ _ =>
       obtain ⟨semantic, constructorEq⟩ := constructorCell
       rw [objectEq] at constructorEq
       contradiction
@@ -2468,6 +2706,10 @@ theorem LiveCellRel.incrementReference_natural
       rw [objectEq] at naturalEq
       contradiction
   | string _ objectEq _ _ _ _ =>
+      obtain ⟨value, naturalEq⟩ := naturalCell
+      rw [objectEq] at naturalEq
+      contradiction
+  | array _ objectEq _ _ _ _ =>
       obtain ⟨value, naturalEq⟩ := naturalCell
       rw [objectEq] at naturalEq
       contradiction
@@ -2568,6 +2810,10 @@ theorem LiveCellRel.decrementReferenceOnce_natural_above_one
       obtain ⟨value, naturalEq⟩ := naturalCell
       rw [objectEq] at naturalEq
       contradiction
+  | array _ objectEq _ _ _ _ =>
+      obtain ⟨value, naturalEq⟩ := naturalCell
+      rw [objectEq] at naturalEq
+      contradiction
   | closure closureRelated =>
       obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
       obtain ⟨value, naturalEq⟩ := naturalCell
@@ -2643,6 +2889,10 @@ theorem LiveCellRel.incrementReference_string
         exact UInt32.toNat_ofNat_of_lt' fits
       · simpa using persistent
       · simpa using live
+  | array _ objectEq _ _ _ _ =>
+      obtain ⟨value, stringEq⟩ := stringCell
+      rw [objectEq] at stringEq
+      contradiction
   | closure closureRelated =>
       obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
       obtain ⟨value, stringEq⟩ := stringCell
@@ -2742,6 +2992,10 @@ theorem LiveCellRel.decrementReferenceOnce_string_above_one
         exact UInt32.toNat_ofNat_of_lt' nextFits
       · simpa using persistent
       · simpa using live
+  | array _ objectEq _ _ _ _ =>
+      obtain ⟨value, stringEq⟩ := stringCell
+      rw [objectEq] at stringEq
+      contradiction
   | closure closureRelated =>
       obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
       obtain ⟨value, stringEq⟩ := stringCell
@@ -2855,6 +3109,20 @@ theorem LiveCellRel.decrementReferenceOnce_leaf_one
           headerOrdinary countOne owned check
       exact ⟨result, header, memory, operation, objectRelated.headerRead,
         resultEq, headerWrite, finalValid, deadRelated⟩
+  | array _ objectEq _ _ _ _ =>
+      rcases leafCell with ((boxedCell | naturalCell) | stringCell) | integerCell
+      · obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
+        rw [objectEq] at boxedEq
+        contradiction
+      · obtain ⟨value, naturalEq⟩ := naturalCell
+        rw [objectEq] at naturalEq
+        contradiction
+      · obtain ⟨value, stringEq⟩ := stringCell
+        rw [objectEq] at stringEq
+        contradiction
+      · obtain ⟨value, integerEq⟩ := integerCell
+        rw [objectEq] at integerEq
+        contradiction
   | closure closureRelated =>
       obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
       rcases leafCell with ((boxedCell | naturalCell) | stringCell) | integerCell
@@ -2942,6 +3210,20 @@ theorem LiveCellRel.decrementReferenceOnceFuel_leaf_one_eq_public
         simp [readOwnedReferences, objectRelated.headerKind]
       exact Fir.Wasm.Concrete.decrementReferenceOnceFuel_leaf_one_eq_public
         objectRelated.headerRead notPromoted headerOrdinary countOne owned fuel check
+  | array _ objectEq _ _ _ _ =>
+      rcases leafCell with ((boxedCell | naturalCell) | stringCell) | integerCell
+      · obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
+        rw [objectEq] at boxedEq
+        contradiction
+      · obtain ⟨value, naturalEq⟩ := naturalCell
+        rw [objectEq] at naturalEq
+        contradiction
+      · obtain ⟨value, stringEq⟩ := stringCell
+        rw [objectEq] at stringEq
+        contradiction
+      · obtain ⟨value, integerEq⟩ := integerCell
+        rw [objectEq] at integerEq
+        contradiction
   | closure closureRelated =>
       obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
       rcases leafCell with ((boxedCell | naturalCell) | stringCell) | integerCell
@@ -3008,6 +3290,20 @@ theorem LiveCellRel.incrementReference
         .string descriptor objectEq objectRelated refCount persistent live
       exact localRelated.incrementReference_string ⟨value, objectEq⟩ valid ordinary
         amount fits check
+  | @array elements capacity header _ descriptor objectEq objectRelated refCount
+      persistent live =>
+      have headerOrdinary : header.persistent = false := persistent.trans ordinary
+      obtain ⟨result, updatedHeader, operation, updatedEq, finalValid,
+          objectAfter⟩ :=
+        objectRelated.incrementReference valid cell.rc amount refCount
+          headerOrdinary fits check
+      subst updatedHeader
+      refine ⟨result, operation, finalValid, ?_⟩
+      apply LiveCellRel.array descriptor (by simpa using objectEq) objectAfter
+      · simp only
+        exact UInt32.toNat_ofNat_of_lt' fits
+      · simpa using persistent
+      · simpa using live
   | closure closureRelated =>
       obtain ⟨result, operation, finalValid, closureAfter⟩ :=
         closureRelated.incrementReference valid ordinary amount fits check
@@ -3067,6 +3363,24 @@ theorem LiveCellRel.decrementReferenceOnce_above_one
         .string descriptor objectEq objectRelated refCount persistent live
       exact localRelated.decrementReferenceOnce_string_above_one
         ⟨value, objectEq⟩ valid ordinary oneLt check
+  | @array elements capacity header _ descriptor objectEq objectRelated refCount
+      persistent live =>
+      have headerOrdinary : header.persistent = false := persistent.trans ordinary
+      obtain ⟨result, updatedHeader, operation, updatedEq, finalValid,
+          objectAfter⟩ :=
+        objectRelated.decrementReferenceOnce_above_one valid cell.rc refCount
+          headerOrdinary oneLt check
+      subst updatedHeader
+      have nextFits : cell.rc - 1 < UInt32.size := by
+        have oldFits := UInt32.toNat_lt_size header.refCount
+        rw [refCount] at oldFits
+        omega
+      refine ⟨result, operation, finalValid, ?_⟩
+      apply LiveCellRel.array descriptor (by simpa using objectEq) objectAfter
+      · simp only
+        exact UInt32.toNat_ofNat_of_lt' nextFits
+      · simpa using persistent
+      · simpa using live
   | closure closureRelated =>
       obtain ⟨result, operation, finalValid, closureAfter⟩ :=
         closureRelated.decrementReferenceOnce_above_one valid ordinary oneLt check
@@ -3082,6 +3396,7 @@ theorem LiveCellRel.live_eq_true
   | natural _ _ _ _ _ _ _ _ _ _ live => exact live
   | integer _ _ _ _ _ live => exact live
   | string _ _ _ _ _ live => exact live
+  | array _ _ _ _ _ live => exact live
   | closure closureRelated =>
       cases closureRelated with
       | closure _ _ _ _ _ _ _ _ _ live => exact live

@@ -703,6 +703,21 @@ def readClosureOwnedReferences (state : MemoryState) (object : Word32)
       else
         readClosureOwnedReferences state object (index + 1) rest
 
+/-- Decode exactly the live owned prefix of the canonical resident generic
+Array layout. `aux1` is the logical size and `aux2` is physical capacity;
+spare slots are deliberately not read and therefore never participate in
+recursive ownership. -/
+def readResidentArrayOwnedReferences (state : MemoryState) (object : Word32)
+    (header : Header) : Except ConcreteError (List Word32) := do
+  unless header.kind == .opaque && header.aux0 == residentArrayMarker &&
+      header.aux3 == 0 && header.aux1.toNat ≤ header.aux2.toNat &&
+      header.allocationBytes.toNat ==
+        residentArrayAllocationBytes header.aux2.toNat do
+    throw (.target (.malformedHeader object.value header.allocationBytes.toNat))
+  List.ofFnM fun index : Fin header.aux1.toNat =>
+    liftMemory <| state.memory.readWord32
+      (object.value + headerBytes + target.semanticSlotBytes * index)
+
 /-- Load references owned by the current concrete object before marking it
 dead. Constructors use their physical object-field count; closures recover
 their immutable ordered capture kinds through the checked `aux3` descriptor
@@ -720,8 +735,13 @@ def readOwnedReferences (state : MemoryState) (object : Word32) (header : Header
       unless captureKinds.size == header.aux2.toNat do
         throw (.target .closureMetadataMismatch)
       readClosureOwnedReferences state object 0 captureKinds.toList
+  | .opaque =>
+      if header.aux0 == residentArrayMarker then
+        readResidentArrayOwnedReferences state object header
+      else
+        .ok []
   | .freed => throw (.target (.unsupportedOwnershipKind .freed))
-  | .boxed | .string | .natural | .integer | .byteArray | .opaque => .ok []
+  | .boxed | .string | .natural | .integer | .byteArray => .ok []
 
 /-- A released allocation is a persistence no-op only when its complete
 retained header has the canonical shape installed by ownership release. This

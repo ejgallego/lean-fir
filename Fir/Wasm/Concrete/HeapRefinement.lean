@@ -483,6 +483,113 @@ theorem ConstructorObjectRel.witnessExtension
     related.objectFields index kind value kindAt valueAt
   exact ⟨word, read, valueRelated.witnessExtension extension⟩
 
+/-- Exact W6 relation for the canonical resident generic Array layout.
+`elements` is the semantic live prefix; `capacity` records the retained
+physical extent. The pointwise clause deliberately covers only live slots,
+so uninitialized spare capacity cannot become semantic ownership. -/
+structure ResidentArrayObjectRel (state : MemoryState)
+    (witness : RefinementWitness) (address : Word32) (elements : Array Value)
+    (capacity : Nat) (header : Header) : Prop where
+  headerRead : state.readLiveHeader address = .ok header
+  headerKind : header.kind = .opaque
+  marker : header.aux0 = residentArrayMarker
+  logicalSize : header.aux1.toNat = elements.size
+  physicalCapacity : header.aux2.toNat = capacity
+  reserved : header.aux3 = 0
+  sizeCapacity : elements.size ≤ capacity
+  allocationBytes : header.allocationBytes.toNat =
+    residentArrayAllocationBytes capacity
+  headerOwned : address.value + headerBytes ≤ state.heapCursor
+  extent : address.value + residentArrayAllocationBytes capacity ≤
+    state.heapCursor
+  liveElements : ∀ index value,
+    elements[index]? = some value →
+    ∃ word,
+      state.memory.readWord32
+          (address.value + headerBytes + target.semanticSlotBytes * index) =
+        .ok word ∧
+      ValueRel witness .tobject (.word32 word) value
+
+/-- A resident Array decoder is stable when fresh allocation extends memory
+above its complete retained capacity. -/
+theorem ResidentArrayObjectRel.prefixExtension
+    {before after : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {elements : Array Value} {capacity : Nat}
+    {header : Header}
+    (related : ResidentArrayObjectRel before witness address elements capacity header)
+    (extension : before.PrefixExtension after) :
+    ResidentArrayObjectRel after witness address elements capacity header := by
+  refine {
+    headerRead := extension.readLiveHeader_eq_ok address header
+      related.headerOwned related.headerRead
+    headerKind := related.headerKind
+    marker := related.marker
+    logicalSize := related.logicalSize
+    physicalCapacity := related.physicalCapacity
+    reserved := related.reserved
+    sizeCapacity := related.sizeCapacity
+    allocationBytes := related.allocationBytes
+    headerOwned := Nat.le_trans related.headerOwned extension.cursor
+    extent := Nat.le_trans related.extent extension.cursor
+    liveElements := ?_ }
+  intro index value valueAt
+  obtain ⟨word, readBefore, valueRelated⟩ :=
+    related.liveElements index value valueAt
+  have indexLt : index < elements.size :=
+    (Array.getElem?_eq_some_iff.mp valueAt).1
+  have fieldOwned :
+      address.value + headerBytes + target.semanticSlotBytes * index + 4 ≤
+        before.heapCursor := by
+    have sizeCapacity := related.sizeCapacity
+    have minimum := align8_ge
+      (headerBytes + target.semanticSlotBytes * capacity)
+    have extent := related.extent
+    simp [residentArrayAllocationBytes, target] at minimum extent ⊢
+    omega
+  refine ⟨word, ?_, valueRelated⟩
+  rw [extension.readWord32 _ fieldOwned]
+  exact readBefore
+
+/-- Resident Array element relations are monotone in proof-only witness
+metadata, just like constructor and closure fields. -/
+theorem ResidentArrayObjectRel.witnessExtension
+    {state : MemoryState} {before after : RefinementWitness}
+    {address : Word32} {elements : Array Value} {capacity : Nat}
+    {header : Header}
+    (related : ResidentArrayObjectRel state before address elements capacity header)
+    (extension : before.Extends after) :
+    ResidentArrayObjectRel state after address elements capacity header := by
+  refine {
+    headerRead := related.headerRead
+    headerKind := related.headerKind
+    marker := related.marker
+    logicalSize := related.logicalSize
+    physicalCapacity := related.physicalCapacity
+    reserved := related.reserved
+    sizeCapacity := related.sizeCapacity
+    allocationBytes := related.allocationBytes
+    headerOwned := related.headerOwned
+    extent := related.extent
+    liveElements := ?_ }
+  intro index value valueAt
+  obtain ⟨word, read, valueRelated⟩ :=
+    related.liveElements index value valueAt
+  exact ⟨word, read, valueRelated.witnessExtension extension⟩
+
+/-- Cell-level resident Array relation. This keeps the semantic identity,
+capacity, reference count, persistence flag, and liveness together without
+admitting ordinary opaque objects. -/
+inductive ResidentArrayCellRel (state : MemoryState)
+    (witness : RefinementWitness) (address : Word32) : HeapCell → Prop where
+  | array {elements : Array Value} {capacity : Nat} {header : Header} {cell : HeapCell}
+      (objectEq : cell.object = .array elements capacity)
+      (objectRelated :
+        ResidentArrayObjectRel state witness address elements capacity header)
+      (refCount : header.refCount.toNat = cell.rc)
+      (persistent : header.persistent = cell.persistent)
+      (live : cell.live = true) :
+      ResidentArrayCellRel state witness address cell
+
 /-- Exact decoded relation for one canonical heap-backed scalar box. The
 semantic type/value pair is recovered from `kind` and `scalar`; no source
 location identity is stored in linear memory. -/
@@ -584,6 +691,16 @@ inductive LiveCellRel (state : MemoryState) (witness : RefinementWitness)
       (descriptor : witness.descriptors.lookup? address = some (.string value))
       (objectEq : cell.object = .string value)
       (related : StringObjectRel state address value header)
+      (refCount : header.refCount.toNat = cell.rc)
+      (persistent : header.persistent = cell.persistent)
+      (live : cell.live = true) :
+      LiveCellRel state witness address cell
+
+  | array {elements capacity header cell}
+      (descriptor : witness.descriptors.lookup? address = some (.array capacity))
+      (objectEq : cell.object = .array elements capacity)
+      (related :
+        ResidentArrayObjectRel state witness address elements capacity header)
       (refCount : header.refCount.toNat = cell.rc)
       (persistent : header.persistent = cell.persistent)
       (live : cell.live = true) :
@@ -789,6 +906,9 @@ theorem LiveCellRel.prefixExtension
   | string descriptor objectEq objectRelated refCount persistent live =>
       exact .string descriptor objectEq (objectRelated.prefixExtension extension)
         refCount persistent live
+  | array descriptor objectEq objectRelated refCount persistent live =>
+      exact .array descriptor objectEq (objectRelated.prefixExtension extension)
+        refCount persistent live
   | closure closureRelated =>
       exact .closure (closureRelated.prefixExtension extension)
 
@@ -818,6 +938,9 @@ theorem LiveCellRel.witnessExtension
   | string descriptor objectEq objectRelated refCount persistent live =>
       exact .string (extension.descriptors _ _ descriptor) objectEq objectRelated
         refCount persistent live
+  | array descriptor objectEq objectRelated refCount persistent live =>
+      exact .array (extension.descriptors _ _ descriptor) objectEq
+        (objectRelated.witnessExtension extension) refCount persistent live
   | closure closureRelated =>
       exact .closure (closureRelated.witnessExtension extension)
 
@@ -859,6 +982,7 @@ theorem LiveCellRel.headerOwned
           (naturalLimbs (integerMagnitude value)).length)
       omega
   | string _ _ objectRelated _ _ _ => exact objectRelated.headerOwned
+  | array _ _ objectRelated _ _ _ => exact objectRelated.headerOwned
   | closure closureRelated => exact closureRelated.headerOwned
 
 /-- Whole-cell relation used once ownership can make semantic cells dead.
@@ -894,6 +1018,7 @@ theorem LiveCellRel.descriptor
   | natural descriptor _ _ _ _ _ _ _ _ _ _ => exact ⟨_, descriptor⟩
   | integer descriptor _ _ _ _ _ => exact ⟨_, descriptor⟩
   | string descriptor _ _ _ _ _ => exact ⟨_, descriptor⟩
+  | array descriptor _ _ _ _ _ => exact ⟨_, descriptor⟩
   | closure closureRelated =>
       cases closureRelated with
       | closure _ objectRelated _ _ _ _ _ _ _ _ =>
@@ -1077,6 +1202,7 @@ theorem LiveHeapRel.deadCellRel
           | natural _ _ _ _ _ _ _ _ _ _ live => simp_all
           | integer _ _ _ _ _ live => simp_all
           | string _ _ _ _ _ live => simp_all
+          | array _ _ _ _ _ live => simp_all
           | closure closureRelated =>
               cases closureRelated with
               | closure _ _ _ _ _ _ _ _ _ live => simp_all

@@ -35,6 +35,7 @@ inductive AllocationDescriptor where
   | natural (value : Nat)
   | integer (value : Int)
   | string (value : String)
+  | array (capacity : Nat)
   deriving Inhabited, BEq, Repr
 
 abbrev DescriptorMap := List (Word32 × AllocationDescriptor)
@@ -151,6 +152,16 @@ def RefinementWitness.bindString (witness : RefinementWitness)
   { witness with
       locations := (location, address) :: witness.locations
       descriptors := (address, .string value) :: witness.descriptors }
+
+/-- Bind one semantic generic Array to the canonical resident allocation at
+`address`. Capacity is proof-only decoding metadata; live elements remain in
+the semantic heap cell and in the related concrete slots. -/
+def RefinementWitness.bindArray (witness : RefinementWitness)
+    (location : Location) (address : Word32) (capacity : Nat) :
+    RefinementWitness :=
+  { witness with
+      locations := (location, address) :: witness.locations
+      descriptors := (address, .array capacity) :: witness.descriptors }
 
 def RefinementWitness.bindBoxed (witness : RefinementWitness)
     (location : Location) (address : Word32)

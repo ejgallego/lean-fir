@@ -201,6 +201,11 @@ def ObjectKind.code : ObjectKind → UInt32
   | .opaque => 8
   | .freed => 255
 
+/-- ASCII `ARRY`, stored in `opaque.aux0` for the canonical resident generic
+Array representation. This is a physical-layout discriminator, not a new
+`ObjectKind`: generic Arrays remain ordinary opaque runtime allocations. -/
+def residentArrayMarker : UInt32 := 0x41525259
+
 /-- Integer scalar kinds accepted by FIR's semantic boxing operation. The
 codes are stored in `boxed` header `aux0`; floats stay outside this enum until
 the shared FIR runtime has matching semantic scalar constructors. -/
@@ -287,6 +292,11 @@ def Header.forRelease (header : Header) : Header := {
   aux3 := 0 }
 
 def align8 (bytes : Nat) : Nat := ((bytes + 7) / 8) * 8
+
+/-- Exact retained extent of a resident generic Array with `capacity`
+`tobject` slots. Only the logical-size prefix is live and owned. -/
+def residentArrayAllocationBytes (capacity : Nat) : Nat :=
+  align8 (headerBytes + target.semanticSlotBytes * capacity)
 
 @[simp] theorem align8_mod (bytes : Nat) : align8 bytes % 8 = 0 := by
   simp [align8]

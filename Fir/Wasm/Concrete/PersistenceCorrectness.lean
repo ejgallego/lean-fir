@@ -204,6 +204,7 @@ theorem LiveHeapRel.markPersistentFuel_refines_dead
       | natural _ _ _ _ _ _ _ _ _ _ cellLive => simp_all
       | integer _ _ _ _ _ cellLive => simp_all
       | string _ _ _ _ _ cellLive => simp_all
+      | array _ _ _ _ _ cellLive => simp_all
       | closure closureRelated =>
           cases closureRelated with
           | closure _ _ _ _ _ _ _ _ _ cellLive => simp_all
@@ -358,6 +359,28 @@ theorem LiveCellRel.writePersistentMetadata
       refine ⟨{ state with memory }, header, memory, objectRelated.headerRead,
         operation, rfl, headerWrite, finalValid, ?_⟩
       apply LiveCellRel.string descriptor (by simpa [replacement] using objectEq)
+        objectAfter
+      · simp
+      · simp
+      · simpa [replacement] using live
+  | @array elements capacity header _ descriptor objectEq objectRelated refCount
+        persistent live =>
+      obtain ⟨result, updatedHeader, memory, operation, updatedEq, resultEq,
+          headerWrite, finalValid, headerAfter⟩ :=
+        writeOwnershipMetadata_header valid objectRelated.headerRead
+          objectRelated.headerOwned 0 true
+      subst updatedHeader
+      obtain ⟨objectResult, objectHeader, objectOperation, objectUpdatedEq,
+          _, objectAfter⟩ :=
+        objectRelated.writeOwnershipMetadata valid 0 true
+      subst objectHeader
+      rw [operation] at objectOperation
+      have objectResultEq := Except.ok.inj objectOperation
+      subst objectResult
+      let replacement : HeapCell := { cell with rc := 0, persistent := true }
+      refine ⟨result, header, memory, objectRelated.headerRead, operation,
+        resultEq, headerWrite, finalValid, ?_⟩
+      apply LiveCellRel.array descriptor (by simpa [replacement] using objectEq)
         objectAfter
       · simp
       · simp
@@ -605,6 +628,21 @@ theorem LiveHeapRel.markPersistentFuel_refines_leaf
             rw [owned]
             rw [operation]
             rfl
+        | @array elements capacity targetHeader _ descriptor objectEq objectRelated
+            refCount persistent cellLive =>
+            rcases leafCell with ((boxedCell | naturalCell) | stringCell) | integerCell
+            · obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
+              rw [objectEq] at boxedEq
+              contradiction
+            · obtain ⟨value, naturalEq⟩ := naturalCell
+              rw [objectEq] at naturalEq
+              contradiction
+            · obtain ⟨value, stringEq⟩ := stringCell
+              rw [objectEq] at stringEq
+              contradiction
+            · obtain ⟨value, integerEq⟩ := integerCell
+              rw [objectEq] at integerEq
+              contradiction
         | closure closureRelated =>
             obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
             rcases leafCell with ((boxedCell | naturalCell) | stringCell) | integerCell
@@ -1061,6 +1099,135 @@ theorem LiveHeapRel.markPersistentFuel_refines_constructor_step
   | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
+  | array descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, storedObjectEq⟩ := closureRelated.objectEq
+      rw [objectEq] at storedObjectEq
+      contradiction
+
+/-- One ordinary resident Array node plus any correct child recursion composes
+to the matching persistence step. The concrete decoder and semantic fold both
+visit exactly `elements`; retained spare capacity is framed but never traversed. -/
+theorem LiveHeapRel.markPersistentFuel_refines_array_step
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {elements : Array Value} {capacity : Nat}
+    {descriptors : ClosureDescriptorTable} {fuel : Nat}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true) (ordinary : cell.persistent = false)
+    (objectEq : cell.object = .array elements capacity)
+    (bound : ordinaryLiveCount runtime.heap ≤ fuel + 1)
+    (recurse : ∀ {before : MemoryState} {semanticState : RuntimeState}
+        {childLocation : Location} {childAddress : Word32},
+      LiveHeapRel before witness semanticState →
+      witness.locations.lookup? childLocation = some childAddress →
+      ordinaryLiveCount semanticState.heap ≤ fuel →
+      ∃ after,
+        markPersistentFuel fuel before childAddress descriptors = .ok after ∧
+        LiveHeapRel after witness
+          (markPersistentValueFuel fuel semanticState
+            (.object (.heap childLocation))) ∧
+        MappedHeaderCapacityTransport before after witness) :
+    ∃ result,
+      markPersistentFuel (fuel + 1) state address descriptors = .ok result ∧
+      LiveHeapRel result witness {
+        runtime with heap :=
+          markPersistentLocationFuel (fuel + 1) runtime.heap location } ∧
+      MappedHeaderCapacityTransport state result witness := by
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  cases targetRelated with
+  | constructor descriptor storedObjectEq objectRelated headerRead headerKind
+        refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | natural descriptor storedObjectEq headerRead headerKind marker extent limbsFit
+        decoded refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | integer descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | @array storedElements storedCapacity header _ descriptor storedObjectEq
+        objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      have identity := HeapObject.array.inj storedObjectEq
+      obtain ⟨elementsEq, capacityEq⟩ := identity
+      subst storedElements
+      subst storedCapacity
+      obtain ⟨words, ownedRead, ownershipRelated⟩ :=
+        objectRelated.readOwnedReferences
+      obtain ⟨parentState, parentRuntime, targetHeader, targetHeaderRead,
+          parentWrite, semanticUpdate, parentRelated, parentCapacity⟩ :=
+        related.writePersistentMetadata mapped found live
+      rw [objectRelated.headerRead] at targetHeaderRead
+      have targetHeaderEq := Except.ok.inj targetHeaderRead
+      subst targetHeader
+      unfold setCell at semanticUpdate
+      cases replacedEq : replaceCell runtime.heap location
+          { cell with rc := 0, persistent := true } with
+      | none =>
+          rw [replacedEq] at semanticUpdate
+          contradiction
+      | some parentHeap =>
+          rw [replacedEq] at semanticUpdate
+          have parentRuntimeEq := Except.ok.inj semanticUpdate
+          subst parentRuntime
+          have parentDrop := ordinaryLiveCount_replace_persistent found live ordinary
+            replacedEq
+          have parentBound : ordinaryLiveCount parentHeap ≤ fuel := by omega
+          obtain ⟨result, concreteFold, finalRelated, foldCapacity⟩ :=
+            ownershipRelated.foldlM_markPersistent_refines parentRelated parentBound
+              recurse
+          have rootHeapEq :
+              markPersistentLocationFuel (fuel + 1) runtime.heap location =
+                elements.toList.foldl (init := parentHeap)
+                  (fun heap value =>
+                    match value with
+                    | .object (.heap child) =>
+                        markPersistentLocationFuel fuel heap child
+                    | _ => heap) := by
+            simp only [markPersistentLocationFuel, found]
+            rw [if_neg (by simp [live, ordinary])]
+            rw [replacedEq, objectEq]
+            simp only [HeapObject.ownedValues]
+            rw [← Array.foldl_toList]
+            rfl
+          have addressHeap :=
+            (MemoryState.PrefixExtension.readLiveHeader_facts state address header
+              objectRelated.headerRead).1
+          have headerOrdinary : header.persistent = false :=
+            persistent.trans ordinary
+          have ownedWithDescriptors :
+              readOwnedReferences state address header descriptors = .ok words := by
+            simpa [readOwnedReferences, objectRelated.headerKind] using ownedRead
+          have concreteOperation :
+              markPersistentFuel (fuel + 1) state address descriptors =
+                .ok result := by
+            simp only [markPersistentFuel]
+            rw [addressHeap, objectRelated.headerRead]
+            simp only [Bind.bind, Except.bind]
+            rw [if_neg (by simp [headerOrdinary])]
+            rw [ownedWithDescriptors, parentWrite]
+            exact concreteFold
+          refine ⟨result, concreteOperation, ?_,
+            parentCapacity.trans foldCapacity⟩
+          · rw [foldl_markPersistentValueFuel] at finalRelated
+            simpa [rootHeapEq] using finalRelated
   | closure closureRelated =>
       obtain ⟨function, arity, captures, storedObjectEq⟩ := closureRelated.objectEq
       rw [objectEq] at storedObjectEq
@@ -1200,6 +1367,9 @@ theorem LiveHeapRel.markPersistentFuel_refines_closure_step
       rw [objectEq] at storedObjectEq
       contradiction
   | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | array descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
   | closure closureRelated =>
@@ -1404,6 +1574,10 @@ theorem LiveHeapRel.markPersistentFuel_refines
                   .inl (.inr ⟨value, objectEq⟩)
                 exact related.markPersistentFuel_refines_leaf mapped found liveEq ordinary
                   leafCell fuel
+            | @array elements capacity header _ descriptor objectEq objectRelated
+                  refCount persistent cellLive =>
+                exact related.markPersistentFuel_refines_array_step mapped found liveEq
+                  ordinary objectEq bound recurse
             | closure closureRelated =>
                 obtain ⟨function, arity, captures, objectEq⟩ := closureRelated.objectEq
                 exact related.markPersistentFuel_refines_closure_step mapped found liveEq

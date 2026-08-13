@@ -617,6 +617,10 @@ theorem LiveHeapRel.readBoxedScalar_heap_refines
       rw [storedDescriptor] at descriptor
       have impossible := Option.some.inj descriptor
       cases impossible
+  case array storedDescriptor objectEq objectRelated refCount persistent cellLive =>
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
   case closure closureRelated =>
       obtain ⟨function, arity, captureKinds, storedDescriptor⟩ :=
         closureRelated.descriptor
@@ -858,6 +862,15 @@ theorem LiveHeapRel.readBoxedScalar_expectedScalar_refines
                   cellLive =>
                   have different :
                       (ObjectKind.string == ObjectKind.natural) = false := by
+                    decide
+                  exact failOfHeader _ objectRelated.headerRead
+                    (by simp [objectRelated.headerKind])
+                    (by simp [Header.isPromotedTag, objectRelated.headerKind,
+                      different])
+              | array descriptor objectEq objectRelated refCount persistent
+                  cellLive =>
+                  have different :
+                      (ObjectKind.opaque == ObjectKind.natural) = false := by
                     decide
                   exact failOfHeader _ objectRelated.headerRead
                     (by simp [objectRelated.headerKind])

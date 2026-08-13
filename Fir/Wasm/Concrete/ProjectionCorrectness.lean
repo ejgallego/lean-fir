@@ -240,6 +240,11 @@ theorem LiveHeapRel.scalarField_of_projected
       simp only [Bind.bind, Except.bind] at projected
       rw [objectEq] at projected
       simp at projected
+  | array descriptor objectEq objectRelated refCount persistent cellLive =>
+      simp [getScalarField, getConstructor, getLiveCell, found, live] at projected
+      simp only [Bind.bind, Except.bind] at projected
+      rw [objectEq] at projected
+      simp at projected
   | closure closureRelated =>
       obtain ⟨function, arity, captures, objectEq⟩ := closureRelated.objectEq
       simp [getScalarField, getConstructor, getLiveCell, found, live] at projected
@@ -581,6 +586,10 @@ theorem LiveHeapRel.readObjectField_refines
       rw [storedDescriptor] at descriptor
       have impossible := Option.some.inj descriptor
       cases impossible
+  | array storedDescriptor _ _ _ _ _ =>
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
   | closure closureRelated =>
       obtain ⟨function, arity, captureKinds, storedDescriptor⟩ :=
         closureRelated.descriptor
@@ -635,6 +644,10 @@ theorem LiveHeapRel.readUSizeField_refines
       rw [objectEq] at projected
       simp at projected
   | string storedDescriptor _ _ _ _ _ =>
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
+  | array storedDescriptor _ _ _ _ _ =>
       rw [storedDescriptor] at descriptor
       have impossible := Option.some.inj descriptor
       cases impossible
@@ -718,6 +731,10 @@ theorem LiveHeapRel.readUSizeSlot_refines
       rw [storedDescriptor] at descriptor
       have impossible := Option.some.inj descriptor
       cases impossible
+  | array storedDescriptor _ _ _ _ _ =>
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
   | closure closureRelated =>
       obtain ⟨function, arity, captureKinds, storedDescriptor⟩ :=
         closureRelated.descriptor
@@ -776,6 +793,10 @@ theorem LiveHeapRel.readObjectField_outOfBounds_refines
       rw [storedDescriptor] at descriptor
       have impossible := Option.some.inj descriptor
       cases impossible
+  | array storedDescriptor _ _ _ _ _ =>
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
   | closure closureRelated =>
       obtain ⟨function, arity, captureKinds, storedDescriptor⟩ :=
         closureRelated.descriptor
@@ -831,6 +852,10 @@ theorem LiveHeapRel.readUSizeField_outOfBounds_refines
       have impossible := Option.some.inj descriptor
       cases impossible
   | string storedDescriptor _ _ _ _ _ =>
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
+  | array storedDescriptor _ _ _ _ _ =>
       rw [storedDescriptor] at descriptor
       have impossible := Option.some.inj descriptor
       cases impossible
@@ -911,6 +936,10 @@ theorem LiveHeapRel.readUSizeSlot_outOfBounds_refines
       have impossible := Option.some.inj descriptor
       cases impossible
   | string storedDescriptor _ _ _ _ _ =>
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
+  | array storedDescriptor _ _ _ _ _ =>
       rw [storedDescriptor] at descriptor
       have impossible := Option.some.inj descriptor
       cases impossible
@@ -1043,6 +1072,9 @@ theorem LiveHeapRel.writeObjectField_outOfBounds_refines
   | string _ storedObjectEq _ _ _ _ =>
       rw [objectEq] at storedObjectEq
       contradiction
+  | array _ storedObjectEq _ _ _ _ =>
+      rw [objectEq] at storedObjectEq
+      contradiction
   | closure closureRelated =>
       obtain ⟨function, arity, captures, storedObjectEq⟩ := closureRelated.objectEq
       rw [objectEq] at storedObjectEq
@@ -1092,6 +1124,9 @@ theorem LiveHeapRel.writeUSizeField_outOfBounds_refines
       rw [objectEq] at storedObjectEq
       contradiction
   | string _ storedObjectEq _ _ _ _ =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | array _ storedObjectEq _ _ _ _ =>
       rw [objectEq] at storedObjectEq
       contradiction
   | closure closureRelated =>
@@ -1160,6 +1195,9 @@ theorem LiveHeapRel.writeUSizeSlot_outOfBounds_refines
   | string _ storedObjectEq _ _ _ _ =>
       rw [objectEq] at storedObjectEq
       contradiction
+  | array _ storedObjectEq _ _ _ _ =>
+      rw [objectEq] at storedObjectEq
+      contradiction
   | closure closureRelated =>
       obtain ⟨function, arity, captures, storedObjectEq⟩ := closureRelated.objectEq
       rw [objectEq] at storedObjectEq
@@ -1208,6 +1246,11 @@ theorem LiveHeapRel.readTag_refines
       rw [objectEq] at semanticTag
       simp at semanticTag
   | string _ objectEq _ _ _ _ =>
+      simp [getTag, getLiveCell, found, live] at semanticTag
+      simp only [Bind.bind, Except.bind] at semanticTag
+      rw [objectEq] at semanticTag
+      simp at semanticTag
+  | array _ objectEq _ _ _ _ =>
       simp [getTag, getLiveCell, found, live] at semanticTag
       simp only [Bind.bind, Except.bind] at semanticTag
       rw [objectEq] at semanticTag
@@ -1580,6 +1623,15 @@ theorem LiveHeapRel.readTag_expectedConstructor_refines
                     (by simp [objectRelated.headerKind])
                     (by simp [Header.isPromotedTag, objectRelated.headerKind,
                       different])
+              | array descriptor objectEq objectRelated refCount persistent
+                  cellLive =>
+                  have different :
+                      (ObjectKind.opaque == ObjectKind.natural) = false := by
+                    decide
+                  exact failOfHeader _ objectRelated.headerRead
+                    (by simp [objectRelated.headerKind])
+                    (by simp [Header.isPromotedTag, objectRelated.headerKind,
+                      different])
               | closure closureRelated =>
                   cases closureRelated with
                   | closure objectEq objectRelated headerRead headerKind
@@ -1666,6 +1718,10 @@ theorem LiveHeapRel.readConstructorHeader_expectedConstructor_refines
                   exact failOfHeader _ objectRelated.headerRead
                     (by simp [objectRelated.headerKind])
               | string descriptor objectEq objectRelated refCount persistent
+                  cellLive =>
+                  exact failOfHeader _ objectRelated.headerRead
+                    (by simp [objectRelated.headerKind])
+              | array descriptor objectEq objectRelated refCount persistent
                   cellLive =>
                   exact failOfHeader _ objectRelated.headerRead
                     (by simp [objectRelated.headerKind])

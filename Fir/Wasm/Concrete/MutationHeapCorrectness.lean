@@ -548,6 +548,9 @@ theorem LiveHeapRel.writeTag_refines_with_capacity
   | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
+  | array descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
   | closure closureRelated =>
       obtain ⟨function, arity, captures, storedObjectEq⟩ := closureRelated.objectEq
       rw [objectEq] at storedObjectEq
@@ -653,6 +656,9 @@ theorem LiveHeapRel.writeUSizeField_refines_with_capacity
       rw [objectEq] at storedObjectEq
       contradiction
   | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | array descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
   | closure closureRelated =>
@@ -768,6 +774,9 @@ theorem LiveHeapRel.writeUSizeSlot_refines_with_capacity
       rw [objectEq] at storedObjectEq
       contradiction
   | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | array descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
   | closure closureRelated =>
@@ -895,6 +904,9 @@ theorem LiveHeapRel.writeScalarUInt64Field_refines_with_capacity
       rw [objectEq] at storedObjectEq
       contradiction
   | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | array descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
   | closure closureRelated =>
@@ -1031,6 +1043,9 @@ theorem LiveHeapRel.writeScalarUInt32Field_refines_with_capacity
   | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
+  | array descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
   | closure closureRelated =>
       obtain ⟨function, arity, captures, storedObjectEq⟩ := closureRelated.objectEq
       rw [objectEq] at storedObjectEq
@@ -1165,6 +1180,9 @@ theorem LiveHeapRel.writeScalarUInt16Field_refines_with_capacity
   | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
+  | array descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
   | closure closureRelated =>
       obtain ⟨function, arity, captures, storedObjectEq⟩ := closureRelated.objectEq
       rw [objectEq] at storedObjectEq
@@ -1297,6 +1315,9 @@ theorem LiveHeapRel.writeScalarUInt8Field_refines_with_capacity
       rw [objectEq] at storedObjectEq
       contradiction
   | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | array descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
   | closure closureRelated =>

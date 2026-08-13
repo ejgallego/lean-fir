@@ -25,6 +25,8 @@ theorem LiveCellRel.sharingHeader
       exact ⟨_, objectRelated.headerRead, refCount, persistent⟩
   | string _ _ objectRelated refCount persistent _ =>
       exact ⟨_, objectRelated.headerRead, refCount, persistent⟩
+  | array _ _ objectRelated refCount persistent _ =>
+      exact ⟨_, objectRelated.headerRead, refCount, persistent⟩
   | closure closureRelated =>
       cases closureRelated with
       | closure _ _ headerRead _ _ _ _ refCount persistent _ =>
