@@ -3088,6 +3088,124 @@ private def EncodedArgumentPaths.findValue?
     (paths : EncodedArgumentPaths) (path : ArgumentPath) : Option Value :=
   (paths.find? fun entry => entry.1 == path).map (fun entry => entry.2)
 
+private inductive ConstructorFieldKind where
+  | object
+  | usize
+  | scalar (bytes : Nat)
+
+private def constructorFieldKind : ValidationSchema → Except String ConstructorFieldKind
+  | .usize => return .usize
+  | .bits 8 => return .scalar 1
+  | .bits 16 => return .scalar 2
+  | .bits 32 => return .scalar 4
+  | .bits 64 => return .scalar 8
+  | .bits width => throw s!"unsupported packed constructor scalar width {width}"
+  | .float32 => return .scalar 4
+  | .float64 => return .scalar 8
+  | _ => return .object
+
+private structure ConstructorFieldCounts where
+  objects : Nat := 0
+  usizes : Nat := 0
+  scalars1 : Nat := 0
+  scalars2 : Nat := 0
+  scalars4 : Nat := 0
+  scalars8 : Nat := 0
+
+private def ConstructorFieldCounts.incrementScalar
+    (counts : ConstructorFieldCounts) : Nat → ConstructorFieldCounts
+  | 1 => { counts with scalars1 := counts.scalars1 + 1 }
+  | 2 => { counts with scalars2 := counts.scalars2 + 1 }
+  | 4 => { counts with scalars4 := counts.scalars4 + 1 }
+  | 8 => { counts with scalars8 := counts.scalars8 + 1 }
+  | _ => counts
+
+private def ConstructorFieldCounts.scalarCount
+    (counts : ConstructorFieldCounts) : Nat → Nat
+  | 1 => counts.scalars1
+  | 2 => counts.scalars2
+  | 4 => counts.scalars4
+  | 8 => counts.scalars8
+  | _ => 0
+
+private def ConstructorFieldCounts.scalarBytes (counts : ConstructorFieldCounts) : Nat :=
+  counts.scalars1 + 2 * counts.scalars2 +
+    4 * counts.scalars4 + 8 * counts.scalars8
+
+private def ConstructorFieldCounts.scalarFields (counts : ConstructorFieldCounts) : Nat :=
+  counts.scalars1 + counts.scalars2 + counts.scalars4 + counts.scalars8
+
+/-- Lean packs larger scalar fields before smaller ones, preserving source order per width. -/
+private def ConstructorFieldCounts.scalarBaseOffset
+    (counts : ConstructorFieldCounts) : Nat → Nat
+  | 8 => 0
+  | 4 => 8 * counts.scalars8
+  | 2 => 8 * counts.scalars8 + 4 * counts.scalars4
+  | 1 => 8 * counts.scalars8 + 4 * counts.scalars4 + 2 * counts.scalars2
+  | _ => 0
+
+private def constructorFieldCounts
+    (kinds : Array ConstructorFieldKind) : ConstructorFieldCounts :=
+  kinds.foldl (init := {}) fun counts kind =>
+    match kind with
+    | .object => { counts with objects := counts.objects + 1 }
+    | .usize => { counts with usizes := counts.usizes + 1 }
+    | .scalar bytes => counts.incrementScalar bytes
+
+private structure PackedConstructorFields where
+  objectFields : Array Value := #[]
+  usizeFields : Array UInt64 := #[]
+  scalarFields : Array ScalarField := #[]
+  seen : ConstructorFieldCounts := {}
+
+private def packConstructorFields (name : String)
+    (kinds : Array ConstructorFieldKind) (totals : ConstructorFieldCounts)
+    (values : Array Value) : Except String PackedConstructorFields := do
+  unless kinds.size == values.size do
+    throw s!"constructor {name} expected {kinds.size} fields, got {values.size}"
+  kinds.zip values |>.foldlM (init := {}) fun packed (kind, value) =>
+    match kind with
+    | .object => return {
+        packed with
+        objectFields := packed.objectFields.push value
+        seen := { packed.seen with objects := packed.seen.objects + 1 } }
+    | .usize => do
+        let .usize value := value |
+          throw s!"constructor {name} USize field has a non-USize value"
+        return {
+          packed with
+          usizeFields := packed.usizeFields.push value
+          seen := { packed.seen with usizes := packed.seen.usizes + 1 } }
+    | .scalar bytes => do
+        let .scalar value := value |
+          throw s!"constructor {name} packed scalar field has a non-scalar value"
+        let field : ScalarField := {
+          -- Final LCNF addresses the packed byte region at the first slot after
+          -- the object and USize lanes; `offset` selects a byte within it.
+          width := totals.objects + totals.usizes
+          offset := totals.scalarBaseOffset bytes + bytes * packed.seen.scalarCount bytes
+          value }
+        return {
+          packed with
+          scalarFields := packed.scalarFields.push field
+          seen := packed.seen.incrementScalar bytes }
+
+private def allocValidationCtor (runtime : RuntimeState) (name : String) (tag : Nat)
+    (schemas : Array ValidationSchema) (values : Array Value) :
+    Except String (RuntimeState × Value) := do
+  let kinds ← schemas.mapM constructorFieldKind
+  let totals := constructorFieldCounts kinds
+  let fields ← packConstructorFields name kinds totals values
+  if totals.objects == 0 && totals.usizes == 0 && totals.scalarBytes == 0 then
+    return (runtime, .object (.tagged (UInt64.ofNat tag)))
+  let object : ConstructorObject := {
+    tag
+    objectFields := fields.objectFields
+    usizeFields := fields.usizeFields
+    scalarFields := fields.scalarFields.toList }
+  let (runtime, reference) := alloc runtime (.ctor object)
+  return (runtime, .object reference)
+
 private partial def encodeDatum (nestedAliases : Array NestedArgumentAlias)
     (path : ArgumentPath) (materialized : EncodedArgumentPaths)
     (runtime : RuntimeState) (schema : ValidationSchema) (datum : ValidationDatum) :
@@ -3159,10 +3277,7 @@ private partial def encodeDatum (nestedAliases : Array NestedArgumentAlias)
                 encodeDatum nestedAliases (childArgumentPath path index) materialized
                   runtime schema field
               return (index + 1, runtime, values.push value, materialized)
-          let (runtime, value) ← allocCtor runtime {
-            name := Name.mkSimple name, cidx := tag, size := values.size,
-            usize := 0, ssize := 0 } values
-            |>.mapError (fun fault => toString (repr fault))
+          let (runtime, value) ← allocValidationCtor runtime name tag schemas values
           return record runtime value materialized
       | _, _ => mismatch schema datum
 
@@ -3320,6 +3435,37 @@ private def encodedNestedSequenceAliasGuard : Bool :=
           | _ => false
       | _ => false
 
+private def encodedMixedConstructorLayoutGuard : Bool :=
+  let schema := ValidationSchema.ctor "MixedLayoutInput" 0
+    #[.bytes, .bytes, .usize, .bits 32]
+  let datum := ValidationDatum.ctor "MixedLayoutInput" 0
+    #[.bytes #[3, 1, 4], .bytes #[3, 1, 4], .usize 17, .bits 32 0xdecafbad]
+  let aliases : Array NestedArgumentAlias := #[{
+    source := { argument := 0, children := #[0] }
+    target := { argument := 0, children := #[1] } }]
+  match encodeArgs #[schema] #[datum] #[] aliases with
+  | .error _ => false
+  | .ok (runtime, values) =>
+      match values[0]? with
+      | some (Value.object (.heap root)) =>
+          match findCell? runtime.heap root with
+          | some { object := .ctor object, .. } =>
+              object.usizeFields == #[17] &&
+                match object.objectFields[0]?, object.objectFields[1]?,
+                    object.scalarFields.find? fun field =>
+                      field.width == 3 && field.offset == 0 with
+                | some (Value.object (.heap first)),
+                    some (Value.object (.heap second)),
+                    some { value := .uint32 scalar, .. } =>
+                    first == second && scalar == 0xdecafbad &&
+                      match findCell? runtime.heap first with
+                      | some cell => cell.live && cell.rc == 2 &&
+                          cell.object == .byteArray #[3, 1, 4]
+                      | none => false
+                | _, _, _ => false
+          | _ => false
+      | _ => false
+
 private def rejectsNonHeapNestedArgumentAliasGuard : Bool :=
   let aliases : Array NestedArgumentAlias := #[{
     source := { argument := 0, children := #[0] }
@@ -3331,6 +3477,7 @@ private def rejectsNonHeapNestedArgumentAliasGuard : Bool :=
 
 #guard encodedNestedConstructorAliasGuard
 #guard encodedNestedSequenceAliasGuard
+#guard encodedMixedConstructorLayoutGuard
 #guard rejectsNonHeapNestedArgumentAliasGuard
 
 private def encodedBoolArgumentsUseScalarAbiGuard : Bool :=
@@ -3448,12 +3595,65 @@ private partial def decodeValue (runtime : RuntimeState) (schema : ValidationSch
   | .ctor name tag schemas, .object (.heap location) =>
       let cell ← getLiveCell runtime location |>.mapError (fun fault => toString (repr fault))
       let .ctor object := cell.object | throw s!"expected constructor {name}"
-      if object.tag != tag || object.objectFields.size != schemas.size then
+      let kinds ← schemas.mapM constructorFieldKind
+      let totals := constructorFieldCounts kinds
+      if object.tag != tag || object.objectFields.size != totals.objects ||
+          object.usizeFields.size != totals.usizes ||
+          object.scalarFields.length != totals.scalarFields then
         throw s!"constructor tag/arity mismatch for {name}"
-      let fields ← schemas.zip object.objectFields |>.mapM fun (schema, value) =>
-        decodeValue runtime schema value
+      let initial : Nat × Nat × ConstructorFieldCounts × Array ValidationDatum :=
+        (0, 0, {}, #[])
+      let (_, _, _, fields) ← schemas.zip kinds |>.foldlM (init := initial)
+        fun (objectIndex, usizeIndex, seen, fields) (schema, kind) => do
+          match kind with
+          | .object => do
+              let some value := object.objectFields[objectIndex]? |
+                throw s!"constructor {name} object field {objectIndex} is missing"
+              let field ← decodeValue runtime schema value
+              return (objectIndex + 1, usizeIndex,
+                { seen with objects := seen.objects + 1 }, fields.push field)
+          | .usize => do
+              let some value := object.usizeFields[usizeIndex]? |
+                throw s!"constructor {name} USize field {usizeIndex} is missing"
+              let field ← decodeValue runtime schema (.usize value)
+              return (objectIndex, usizeIndex + 1,
+                { seen with usizes := seen.usizes + 1 }, fields.push field)
+          | .scalar bytes => do
+              let slot := totals.objects + totals.usizes
+              let offset :=
+                totals.scalarBaseOffset bytes + bytes * seen.scalarCount bytes
+              let some value := object.scalarFields.find? fun field =>
+                  field.width == slot && field.offset == offset |
+                throw s!"constructor {name} scalar field [{slot}, {offset}] is missing"
+              let field ← decodeValue runtime schema (.scalar value.value)
+              return (objectIndex, usizeIndex, seen.incrementScalar bytes,
+                fields.push field)
       return .ctor name tag fields
   | _, _ => throw s!"cannot decode {repr value} as {repr schema}"
+
+private def mixedConstructorScalarRoundTripGuard : Bool :=
+  let schema := ValidationSchema.ctor "MixedScalarLayout" 0 #[
+    .bits 8, .bits 64, .bits 16, .bits 32, .float32, .float64, .usize, .bytes]
+  let datum := ValidationDatum.ctor "MixedScalarLayout" 0 #[
+    .bits 8 0x11,
+    .bits 64 0x1122334455667788,
+    .bits 16 0x2233,
+    .bits 32 0x44556677,
+    .bits 32 0x3f800000,
+    .bits 64 0x3ff0000000000000,
+    .usize 9,
+    .bytes #[5, 8, 13]]
+  match encodeArgs #[schema] #[datum] with
+  | .error _ => false
+  | .ok (runtime, values) =>
+      match values[0]? with
+      | none => false
+      | some value =>
+          match decodeValue runtime schema value with
+          | .ok decoded => decoded == datum
+          | .error _ => false
+
+#guard mixedConstructorScalarRoundTripGuard
 
 private def decodedSignedScalarResultsUseAbiGuard : Bool :=
   let encoded : Array (ValidationSchema × Value) := #[
