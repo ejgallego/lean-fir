@@ -143,6 +143,7 @@ def elabFirWasmEmitCase : CommandElab
         compileValidationInvocation validationCase.id validationCase.entry
           validationCase.argSchemas validationCase.args validationCase.resultSchema
           validationCase.dependencies validationCase.argumentAliases
+          validationCase.nestedArgumentAliases
   | _ => throwUnsupportedSyntax
 
 end Fir.Wasm.Emit.Source
