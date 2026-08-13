@@ -15,6 +15,35 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-POINTWISE-CONSTRUCTOR-FIELD-MUTATION`.
+- Integration owner: `wasm-proof`, continuing the user-authorized integration
+  lease. The slice is based directly on accepted `main` at `d73fb90a`, with
+  functional head `50909de2` and clean ready mailbox `0ee94f86`; no shared
+  semantic or executable runtime contract changes.
+- Pointwise proof: source/compiler-only current-node admission now covers
+  successful constructor-tag, FVar object-field, erased object-field,
+  `USize`-field, and packed-integer scalar-field mutation. It reconstructs the
+  canonical source step and derives the exact generated structured-Wasm path:
+  two target steps for tags and three for each field writer.
+- Resource closure: the low-level mutation theorems are polymorphic in the
+  active join-label stack. Existing concrete-runtime refinements preserve the
+  witness, heap frontier, entry-relative capacity/cache/closure resource
+  scope, and aligned suspended supported frames. The shared relation-level
+  transport is proof-only; neither admission nor the recursive relation stores
+  source/target execution evidence, and successor code remains admission-free.
+- Acceptance: Lean Beam update/sync/save reports zero errors and save-ready
+  source hash `7097e0e6188662c7`; the 3,120-job focused simulation/importer cone,
+  `git diff --check`, `make talos-setup` at `0e05edbc`, all 3,143 Talos jobs,
+  and complete `make check` pass. The root gate covers 661 source cases, 9
+  direct-machine cases, 661 native/LCNF/V8 cases, 670 unique cases,
+  1,992/1,992 equal comparisons, 7,176 machine steps, and zero findings. No
+  bug card was required.
+- Result: `main` fast-forwards through the clean W6 mailbox. Broader case and
+  lazy/cache control are the next pointwise families, followed by remaining
+  production current-step coverage and canonical export-root construction.
+
+## Latest completed integration lease
+
 - Milestone: `W6-POINTWISE-EXPLICIT-DELETE`.
 - Integration owner: `wasm-proof`, continuing the user-authorized integration
   lease. The slice is based directly on accepted `main` at `3d7803a0`, with
