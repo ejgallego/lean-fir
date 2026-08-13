@@ -2074,6 +2074,7 @@ theorem LiveHeapRel.resetObject_expectedConstructor_refines
     | natural value => rfl
     | integer value => rfl
     | byteArray value => rfl
+    | array elements capacity => rfl
     | «opaque» typeName => rfl
   exact ⟨concrete, semantic⟩
 
@@ -2696,6 +2697,7 @@ theorem LiveHeapRel.reuseObject_expectedConstructor_refines
     | natural value => rfl
     | integer value => rfl
     | byteArray value => rfl
+    | array elements capacity => rfl
     | «opaque» typeName => rfl
   exact ⟨concrete, semantic⟩
 
