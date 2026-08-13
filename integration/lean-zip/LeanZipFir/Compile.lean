@@ -1,6 +1,7 @@
 import Fir.Wasm.Emit.ResidentLinker
 import Zip.Wasm.Stored
 import Zip.Wasm.Level1
+import Zip.Wasm.Entry
 
 namespace LeanZipFir.Compile
 
@@ -12,8 +13,15 @@ def storedEntry : Name := ``Zip.Wasm.compressStored
 /-- First production DEFLATE matcher/emitter root. -/
 def level1Entry : Name := ``Zip.Wasm.compressLevel1
 
+/-- Complete production raw-DEFLATE dispatcher. -/
+def rawEntry : Name := ``Zip.Wasm.compressRaw
+
 /-- Package-lifetime initializer retained by the Level-1 two-region arena. -/
 def level1PersistentInitializer : Name :=
+  Fir.Wasm.Emit.ResidentCache.persistentInitializerName
+
+/-- Package-lifetime initializer shared by the production dispatcher. -/
+def rawPersistentInitializer : Name :=
   Fir.Wasm.Emit.ResidentCache.persistentInitializerName
 
 /--
@@ -35,6 +43,11 @@ names in its synthetic compiler unit while retaining the real source entry.
 -/
 def captureLevel1 : CoreM Fir.Validation.Lcnf.Artifact :=
   Fir.Wasm.Emit.Source.compileEntriesFinalCapturedInternalized #[level1Entry]
+    Fir.Wasm.Emit.ResidentLinker.closedApplicationRetainedExternalNames
+
+/-- Capture the complete production raw-DEFLATE dispatcher closure. -/
+def captureRaw : CoreM Fir.Validation.Lcnf.Artifact :=
+  Fir.Wasm.Emit.Source.compileEntriesFinalCapturedInternalized #[rawEntry]
     Fir.Wasm.Emit.ResidentLinker.closedApplicationRetainedExternalNames
 
 private def compileStoredUnprepared : CoreM (Except Fir.Wasm.Emit.Source.CompileError
@@ -77,5 +90,31 @@ def compileLevel1 : CoreM (Except Fir.Wasm.Emit.Source.CompileError
     Fir.Wasm.Emit.ResidentLinker.preparePersistentCacheArenaAndLinkArtifact fun module =>
       Fir.Wasm.Emit.ResidentLinker.closedApplicationAvailablePolicy
         module #[level1Entry, level1PersistentInitializer]
+
+private def compileRawUnprepared : CoreM (Except Fir.Wasm.Emit.Source.CompileError
+    Fir.Wasm.Emit.Source.ModuleArtifact) := do
+  let source ← captureRaw
+  Fir.Wasm.Emit.Source.compileModuleArtifact source
+
+/-- Lower the complete dispatcher closure before resident linking. -/
+def compileRawBase : CoreM (Except Fir.Wasm.Emit.Source.CompileError
+    Fir.Wasm.Emit.Source.ModuleArtifact) := do
+  let result ← compileRawUnprepared
+  return result.bind
+    Fir.Wasm.Emit.ResidentLinker.preparePersistentCacheArenaArtifact
+
+/-- Resident frontier for production levels 1 through 10. Exact Float
+conversion/logarithm externals remain for the separately linked standard math
+runtime; every other runtime dependency is closed here. -/
+def compileRaw : CoreM (Except Fir.Wasm.Emit.Source.CompileError
+    Fir.Wasm.Emit.Source.ModuleArtifact) := do
+  let result ← compileRawUnprepared
+  return result.bind <|
+    Fir.Wasm.Emit.ResidentLinker.preparePersistentCacheArenaAndLinkArtifact fun module =>
+      { Fir.Wasm.Emit.ResidentLinker.closedApplicationAvailablePolicy
+          module #[rawEntry, rawPersistentInitializer] with
+        allowedExternalImports :=
+          some Fir.Wasm.Emit.ExternalRuntime.mathDeclarations
+        requireZeroImports := false }
 
 end LeanZipFir.Compile

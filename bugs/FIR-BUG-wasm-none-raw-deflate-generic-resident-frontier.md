@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-raw-deflate-generic-resident-frontier
-status: candidate
+status: fixed
 classification: compiler
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: d8b18978322de05a8f3dba51ef03cf5461676c17
@@ -84,4 +84,10 @@ none
 
 ## Resolution and regression
 
-Pending.
+Commit `f24934ff` adds the exact fixed-width, arbitrary-Nat, direct Float
+comparison, and canonical UInt64 box/unbox resident support. The real raw probe
+now captures 702 declarations with 128 reviewed externals and zero unsupported
+declarations, then links to exactly `Float.ofNat`, `Float.ofScientific`, and
+`Float.log2` with zero runtime operations. The standard-runtime link closes
+those three imports into a 1,757,944-byte zero-import module with the unchanged
+seven-export surface. Persistent-cache eager forcing is tracked separately.

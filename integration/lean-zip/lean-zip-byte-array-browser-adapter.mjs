@@ -55,15 +55,16 @@ function writeHeader(view, address, size, capacity) {
   }
 }
 
-function verifyDescriptor(descriptor, entry) {
+function verifyDescriptor(descriptor, entry, parameterKinds) {
   if (descriptor === undefined) return;
   requireCondition(descriptor !== null && typeof descriptor === "object",
     "module descriptor must be an object");
   requireCondition(descriptor.entry === entry,
     `module descriptor entry must be ${entry}`);
   requireCondition(Array.isArray(descriptor.params) &&
-    descriptor.params.length === 1 && descriptor.params[0] === "object",
-  "module descriptor must expose one ByteArray object parameter");
+    descriptor.params.length === parameterKinds.length &&
+    descriptor.params.every((kind, index) => kind === parameterKinds[index]),
+  `module descriptor parameters must be ${parameterKinds.join(", ")}`);
   requireCondition(descriptor.result === "object",
     "module descriptor must expose one ByteArray object result");
   requireCondition(Array.isArray(descriptor.imports) &&
@@ -155,7 +156,7 @@ class LeanZipByteArrayAdapter {
       address + HEADER_BYTES, size).slice();
   }
 
-  compress(value) {
+  compress(value, extraArguments = []) {
     const totalStarted = this.now();
     const frontierBefore = this.frontier();
     requireCondition(frontierBefore === this.initialization.checkpoint,
@@ -173,7 +174,8 @@ class LeanZipByteArrayAdapter {
       peakFrontier = Math.max(peakFrontier, this.frontier());
 
       const executeStarted = this.now();
-      const outputAddress = this.exports[this.entry](encoded.address) >>> 0;
+      const outputAddress = this.exports[this.entry](
+        encoded.address, ...extraArguments) >>> 0;
       executeMs = elapsed(this.now, executeStarted);
       peakFrontier = Math.max(peakFrontier, this.frontier());
 
@@ -217,6 +219,14 @@ class LeanZipByteArrayAdapter {
       "adapter does not expose Zip.Wasm.compressLevel1");
     return this.compress(value);
   }
+
+  compressRaw(value, level) {
+    requireCondition(this.entry === "Zip.Wasm.compressRaw",
+      "adapter does not expose Zip.Wasm.compressRaw");
+    requireCondition(Number.isInteger(level) && level >= 1 && level <= 10,
+      "raw compression level must be an integer in 1..10");
+    return this.compress(value, [level]);
+  }
 }
 
 /** Compile/instantiate one self-contained module-owned ByteArray entry. */
@@ -226,22 +236,44 @@ export async function createLeanZipByteArrayAdapter({
   bytes,
   module,
   descriptor,
+  parameterKinds = ["object"],
   persistentInitializer = null,
+  reservedMemoryBytes = null,
   now = () => performance.now(),
 } = {}) {
   requireCondition(typeof entry === "string" && entry.length > 0,
     "entry must be a nonempty string");
   requireCondition(typeof now === "function", "now must be a function");
+  requireCondition(Array.isArray(parameterKinds) && parameterKinds.length > 0 &&
+    parameterKinds.every((kind) => typeof kind === "string" && kind.length > 0),
+  "parameterKinds must be a nonempty string array");
   requireCondition(persistentInitializer === null ||
     (typeof persistentInitializer === "string" && persistentInitializer.length > 0),
   "persistentInitializer must be null or a nonempty string");
-  verifyDescriptor(descriptor, entry);
+  requireCondition(reservedMemoryBytes === null ||
+    (Number.isSafeInteger(reservedMemoryBytes) &&
+      reservedMemoryBytes >= HEAP_BASE &&
+      reservedMemoryBytes <= 0xffffffff &&
+      reservedMemoryBytes % HEAP_ALIGNMENT === 0),
+  "reservedMemoryBytes must be null or an aligned wasm32 heap address");
+  verifyDescriptor(descriptor, entry, parameterKinds);
   const compiled = module ?? await WebAssembly.compile(bytes);
   requireCondition(compiled instanceof WebAssembly.Module,
     "module must be a WebAssembly.Module");
   verifyModule(compiled, entry, label, persistentInitializer);
   const instance = await WebAssembly.instantiate(compiled, {});
+  const freshFrontier = instance.exports.fir_heap_frontier() >>> 0;
+  const reservedFrontier = reservedMemoryBytes ?? freshFrontier;
+  requireCondition(freshFrontier <= reservedFrontier,
+    "fresh resident frontier overlaps the external runtime reservation");
+  requireCondition(reservedFrontier <= instance.exports.memory.buffer.byteLength,
+    "external runtime reservation exceeds module memory");
+  if (freshFrontier !== reservedFrontier) {
+    instance.exports.fir_heap_set_frontier(reservedFrontier);
+  }
   const initialFrontier = instance.exports.fir_heap_frontier() >>> 0;
+  requireCondition(initialFrontier === reservedFrontier,
+    "resident frontier did not advance past the external runtime reservation");
   let initializeMs = 0;
   let idempotenceMs = 0;
   if (persistentInitializer !== null) {
@@ -260,6 +292,9 @@ export async function createLeanZipByteArrayAdapter({
   const checkpoint = instance.exports.fir_heap_frontier() >>> 0;
   const initialization = Object.freeze({
     entry: persistentInitializer,
+    freshFrontier,
+    reservedFrontier,
+    reservedGrowth: reservedFrontier - freshFrontier,
     initialFrontier,
     checkpoint,
     frontierGrowth: checkpoint - initialFrontier,
@@ -272,7 +307,8 @@ export async function createLeanZipByteArrayAdapter({
 
 /** Fetch and instantiate any supported self-contained ByteArray entry. */
 export async function fetchLeanZipByteArrayAdapter({
-  entry, label, wasmUrl, descriptorUrl, persistentInitializer, now,
+  entry, label, wasmUrl, descriptorUrl, parameterKinds,
+  persistentInitializer, reservedMemoryBytes, now,
 }) {
   const [wasmResponse, descriptorResponse] = await Promise.all([
     fetch(wasmUrl),
@@ -287,7 +323,9 @@ export async function fetchLeanZipByteArrayAdapter({
     label,
     bytes: await wasmResponse.arrayBuffer(),
     descriptor: await descriptorResponse.json(),
+    parameterKinds,
     persistentInitializer,
+    reservedMemoryBytes,
     now,
   });
 }

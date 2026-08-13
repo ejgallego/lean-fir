@@ -5,6 +5,7 @@ This integration compiles the real Lean 4.32-compatible entries
 ```lean
 Zip.Wasm.compressStored : ByteArray → ByteArray
 Zip.Wasm.compressLevel1 : ByteArray → ByteArray
+Zip.Wasm.compressRaw : ByteArray → UInt8 → ByteArray
 ```
 
 from lean-zip commit `30737b4e2ebfd0fc889f0b2e265aae0635d668a1`.
@@ -30,6 +31,7 @@ lake --keep-toolchain --reconfigure \
   build LeanZipFir.Compile
 lake --keep-toolchain env lean Probe.lean
 lake --keep-toolchain env lean ProbeLevel1.lean
+lake --keep-toolchain env lean ProbeRaw.lean
 ```
 
 The produced artifact is not a host-backed ByteArray facade. `ByteArray.size`,
@@ -54,10 +56,15 @@ FIR_BROWSER=google-chrome \
 ```
 
 Immutable packages are under `_build/lean-zip-stored-packages/` and
-`_build/lean-zip-level1-packages/`. Their atomic canonical pointers are
-`_build/lean-zip-stored-current` and `_build/lean-zip-level1-current`. Each
-package contains seven checksummed files and can run `node smoke.mjs` without
-the FIR or lean-zip source trees.
+`_build/lean-zip-level1-packages/`; the production levels 1–10 package is
+produced by `node package-raw.mjs` under `_build/lean-zip-raw-packages/`.
+Their atomic canonical pointers end in `-current`. Every package is checksummed
+and can run `node smoke.mjs` without the FIR or lean-zip source trees.
+
+Do not advance the raw canonical pointer while validating a dirty or stale-base
+branch. `FIR_RAW_PACKAGE_PREVIEW_DIR=/tmp/PATH` selects an explicit preview
+destination and suppresses canonical publication; dirty previews additionally
+require the existing `FIR_ALLOW_DIRTY_PACKAGE=1` acknowledgment.
 
 The browser/Node API is:
 
@@ -68,6 +75,9 @@ const { bytes: compressed, timings, memory } =
 
 const level1 = await createLeanZipLevel1Adapter({ bytes, descriptor });
 const level1Result = level1.compressLevel1(inputBytes);
+
+const raw = await createLeanZipRawAdapter({ bytes, descriptor });
+const rawResult = raw.compressRaw(inputBytes, level); // level in 1..10
 ```
 
 Every call uses a scratch checkpoint: the adapter copies the result, rewinds
@@ -86,3 +96,10 @@ module validator, timing, and scratch-ownership implementation. Level-1 has
 zero imports and is suitable for correctness testing in Node and browsers. It
 is not yet a performance artifact: generic resident Nat and closure execution
 remain allocation-heavy, and `BUILD.json` records that limitation explicitly.
+
+The raw producer retains exactly `Float.ofNat`, `Float.ofScientific`, and
+`Float.log2` at its reviewed frontier and closes them with the pinned standard
+math runtime. Its published module has zero imports. The browser adapter
+reserves `STANDARD_MATH_RUNTIME_RESERVED_MEMORY_BYTES` before persistent-cache
+initialization or Lean allocation, and the package records both frontier and
+complete identities plus the runtime source, contract, and Emscripten identity.
