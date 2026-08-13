@@ -1775,6 +1775,7 @@ theorem takeClosureApplication_ordinaryPersistenceTransport
       | natural value => simp [objectEq] at operation
       | integer value => simp [objectEq] at operation
       | string value => simp [objectEq] at operation
+      | array elements capacity => simp [objectEq] at operation
       | byteArray bytes => simp [objectEq] at operation
       | «opaque» name => simp [objectEq] at operation
 
@@ -1959,6 +1960,8 @@ theorem reuse_preserves_persistent_false
                       simp [objectEq] at operation
                   | integer value =>
                       simp [objectEq] at operation
+                  | array elements capacity =>
+                      simp [objectEq] at operation
                   | byteArray value =>
                       simp [objectEq] at operation
                   | «opaque» typeName =>
@@ -2044,6 +2047,8 @@ theorem reuse_result_is_object
                   | natural value =>
                       simp [objectEq] at operation
                   | integer value =>
+                      simp [objectEq] at operation
+                  | array elements capacity =>
                       simp [objectEq] at operation
                   | byteArray value =>
                       simp [objectEq] at operation
@@ -2190,6 +2195,8 @@ private theorem reuse_missing_after_persistent_false
                   | natural value =>
                       simp [objectEq] at operation
                   | integer value =>
+                      simp [objectEq] at operation
+                  | array elements capacity =>
                       simp [objectEq] at operation
                   | byteArray value =>
                       simp [objectEq] at operation
@@ -4130,6 +4137,10 @@ theorem reuseStep_of_capacityEvidence
                 persistent cellLive =>
                 rw [objectEq] at relatedObjectEq
                 contradiction
+            | array descriptor relatedObjectEq objectRelated refCount
+                persistent cellLive =>
+                rw [objectEq] at relatedObjectEq
+                contradiction
             | closure closureRelated =>
                 obtain ⟨function, arity, captures, relatedObjectEq⟩ :=
                   closureRelated.objectEq
@@ -4154,6 +4165,12 @@ theorem reuseStep_of_capacityEvidence
             rw [objectEq] at impossible
             contradiction
         | string value =>
+            have impossible := semanticStep
+            simp [reuse, getLiveCell, found, live, semanticArity] at impossible
+            simp only [Bind.bind, Except.bind] at impossible
+            rw [objectEq] at impossible
+            contradiction
+        | array elements capacity =>
             have impossible := semanticStep
             simp [reuse, getLiveCell, found, live, semanticArity] at impossible
             simp only [Bind.bind, Except.bind] at impossible
