@@ -2,9 +2,9 @@
   "capturedDeclarations": 702,
   "reviewedExternalsBeforeLink": 128,
   "retainedSourceFunctions": 574,
-  "residentHelpers": 5265,
-  "completeFunctions": 5839,
+  "residentHelpers": 2703,
+  "completeFunctions": 3277,
   "baseWasmBytes": 1888508,
-  "frontierWasmBytes": 3265131,
-  "completeWasmBytes": 1753310
+  "frontierWasmBytes": 2639643,
+  "completeWasmBytes": 1622609
 }
