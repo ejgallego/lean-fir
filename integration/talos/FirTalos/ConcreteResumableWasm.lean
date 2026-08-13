@@ -54,17 +54,13 @@ def ConcreteGeneratedTraceSimulation
   ConcreteRankedTraceSimulation externals
     (concreteStructuredWasmMachine module env)
 
-/-- Combined admission and finite-address-space coverage for one currently
-executing ordinary-code node.
+/-- Compiler-derived admission for one currently executing ordinary-code node.
 
-The law is local to the source step presented to the simulation.  It contains
-no successor admission, recursive evaluator, target path, or termination
-evidence.  Its two conjuncts nevertheless have different provenance: the
-compiler proof is expected to derive the source-only admission and exact
-allocation cost, while `requiredBytes ≤ remainingBytes` is an execution
-resource-safety condition.  The latter cannot follow from lowering alone for
-an unbounded source heap and a wasm32 target. -/
-structure ConcreteStructuredCompilerCurrentStepCoverage
+The law is local to the successful source step presented to the simulation.
+It recovers only the source/compiler admission and its exact allocation cost;
+it contains no target execution, successor admission, recursive evaluator,
+termination evidence, or address-space claim. -/
+structure ConcreteStructuredCompilerCurrentStepAdmission
     (program : Fir.LeanIR.ImpureProgram)
     (sourceModule : Fir.Wasm.Module)
     (targetModule : AdaptedModule)
@@ -98,8 +94,92 @@ structure ConcreteStructuredCompilerCurrentStepCoverage
         Fir.LeanIR.Impure.executeStep externals source = .next sourceAfter →
         ∃ requiredBytes,
           ConcreteStructuredCodeStepAdmission context sourceModule externals functionResult
-              facts sourceRuntime sourceEnv requiredBytes sourceCode ∧
-            requiredBytes ≤ remainingBytes
+            facts sourceRuntime sourceEnv requiredBytes sourceCode
+
+/-- Dynamic finite-address-space safety for an admitted ordinary-code step.
+
+Unlike compiler admission, this law is indexed by the concrete frame's
+current `remainingBytes`.  It says that the exact cost selected by admission
+fits that retained wasm32 budget.  It is intentionally a separate execution
+premise: lowering an unbounded source program cannot establish it. -/
+structure ConcreteStructuredCurrentStepAddressSpaceSafety
+    (program : Fir.LeanIR.ImpureProgram)
+    (sourceModule : Fir.Wasm.Module)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (externals : Fir.LeanIR.Impure.ExternalImpl) : Prop where
+  code :
+    ∀ {context : Fir.Wasm.Context}
+      {functionCode : Lean.Compiler.LCNF.Code .impure}
+      {sourceFunction : Fir.Wasm.Function}
+      (spec : ConcreteSupportedFunction program context functionCode
+        sourceModule sourceFunction targetModule hosts)
+      {labels : List Lean.FVarId}
+      {entryRuntime sourceRuntime : Fir.LeanIR.Impure.RuntimeState}
+      {entryStore targetStore : Wasm.Store Host}
+      {entryWitness witness : Fir.Wasm.Concrete.RefinementWitness}
+      {functionResult : Fir.Wasm.AbiKind}
+      {callerExpectedResult : Option Fir.Wasm.AbiKind}
+      {facts : Fir.Wasm.ReuseCapacityFacts}
+      {requiredBytes remainingBytes : Nat}
+      {sourceEnv : Fir.LeanIR.Impure.Env}
+      {sourceCode : Lean.Compiler.LCNF.Code .impure}
+      {targetLocals : Wasm.Locals}
+      {targetCode : Wasm.Program}
+      {source sourceAfter : Fir.LeanIR.Impure.MachineState}
+      {target : StructuredWasmState Host},
+      ConcreteStructuredCodeCoreRel program context sourceModule
+          sourceFunction externals labels entryRuntime entryStore entryWitness
+          functionResult callerExpectedResult facts remainingBytes sourceRuntime
+          sourceEnv sourceCode targetStore targetLocals targetCode witness source
+          target →
+        Fir.LeanIR.Impure.executeStep externals source = .next sourceAfter →
+        ConcreteStructuredCodeStepAdmission context sourceModule externals
+            functionResult facts sourceRuntime sourceEnv requiredBytes sourceCode →
+        requiredBytes ≤ remainingBytes
+
+/-- Compatibility package for clients that already possess both independent
+laws.  The compiler-owned field cannot manufacture the execution-owned
+address-space premise. -/
+structure ConcreteStructuredCompilerCurrentStepCoverage
+    (program : Fir.LeanIR.ImpureProgram)
+    (sourceModule : Fir.Wasm.Module)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (externals : Fir.LeanIR.Impure.ExternalImpl) : Prop where
+  admission : ConcreteStructuredCompilerCurrentStepAdmission program
+    sourceModule targetModule hosts externals
+  addressSpaceSafety : ConcreteStructuredCurrentStepAddressSpaceSafety program
+    sourceModule targetModule hosts externals
+
+/-- The split laws reconstruct the former combined current-node conclusion. -/
+theorem ConcreteStructuredCompilerCurrentStepCoverage.code
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : Fir.LeanIR.Impure.ExternalImpl}
+    (coverage : ConcreteStructuredCompilerCurrentStepCoverage program
+      sourceModule targetModule hosts externals)
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    (spec : ConcreteSupportedFunction program context functionCode
+      sourceModule sourceFunction targetModule hosts)
+    (core : ConcreteStructuredCodeCoreRel program context sourceModule
+      sourceFunction externals labels entryRuntime entryStore entryWitness
+      functionResult callerExpectedResult facts remainingBytes sourceRuntime
+      sourceEnv sourceCode targetStore targetLocals targetCode witness source
+      target)
+    (sourceStep :
+      Fir.LeanIR.Impure.executeStep externals source = .next sourceAfter) :
+    ∃ requiredBytes,
+      ConcreteStructuredCodeStepAdmission context sourceModule externals
+          functionResult facts sourceRuntime sourceEnv requiredBytes sourceCode ∧
+        requiredBytes ≤ remainingBytes := by
+  obtain ⟨requiredBytes, admitted⟩ :=
+    coverage.admission.code spec core sourceStep
+  exact ⟨requiredBytes, admitted,
+    coverage.addressSpaceSafety.code spec core sourceStep admitted⟩
 
 /-- Source-local closure of the strong compiler relation.
 
@@ -124,21 +204,23 @@ structure ConcreteStructuredCurrentStepClassifier
         ConcreteStructuredRunnableGlobalOutcome program sourceModule
           targetModule hosts externals source target
 
-/-- Combined current-node coverage discharges the only non-structural branch
-of the global classifier.
+/-- Compiler admission plus independent address-space safety discharge the
+only non-structural branch of the global classifier.
 
 Ordinary code asks the coverage law for its source-only admission and budget.
 The six staged call/cache/bind/return shapes are already branch-exact in the
 strong supported outcome, so their runnable constructors are recovered by
 inversion.
 No future source transition or target execution is inspected. -/
-theorem ConcreteStructuredCompilerCurrentStepCoverage.toCurrentStepClassifier
+theorem ConcreteStructuredCompilerCurrentStepAdmission.toCurrentStepClassifier
     {program : Fir.LeanIR.ImpureProgram}
     {sourceModule : Fir.Wasm.Module}
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
     {externals : Fir.LeanIR.Impure.ExternalImpl}
-    (coverage : ConcreteStructuredCompilerCurrentStepCoverage program
+    (admission : ConcreteStructuredCompilerCurrentStepAdmission program
+      sourceModule targetModule hosts externals)
+    (addressSpaceSafety : ConcreteStructuredCurrentStepAddressSpaceSafety program
       sourceModule targetModule hosts externals) :
     ConcreteStructuredCurrentStepClassifier program sourceModule targetModule
       hosts externals where
@@ -150,8 +232,10 @@ theorem ConcreteStructuredCompilerCurrentStepCoverage.toCurrentStepClassifier
         activeResult, active⟩
     cases active with
     | code contextCaches core supported agrees =>
-        obtain ⟨requiredBytes, admitted, budget⟩ :=
-          coverage.code spec core sourceStep
+        obtain ⟨requiredBytes, admitted⟩ :=
+          admission.code spec core sourceStep
+        have budget :=
+          addressSpaceSafety.code spec core sourceStep admitted
         apply ConcreteStructuredRunnableOutcome.toRunnableGlobal
           (functionCode := functionCode) (spec := spec)
           (activeResult := activeResult)
@@ -188,6 +272,19 @@ theorem ConcreteStructuredCompilerCurrentStepCoverage.toCurrentStepClassifier
           (functionCode := functionCode) (spec := spec) (labels := labels)
           (activeResult := activeResult)
         exact .returned yielded compatible resources contextCaches supported agrees
+
+/-- Compatibility projection for callers that already package the two laws. -/
+theorem ConcreteStructuredCompilerCurrentStepCoverage.toCurrentStepClassifier
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : Fir.LeanIR.Impure.ExternalImpl}
+    (coverage : ConcreteStructuredCompilerCurrentStepCoverage program
+      sourceModule targetModule hosts externals) :
+    ConcreteStructuredCurrentStepClassifier program sourceModule targetModule
+      hosts externals :=
+  coverage.admission.toCurrentStepClassifier coverage.addressSpaceSafety
 
 /-- A source-local current-step classifier closes the admission-free strong
 relation into the generic ranked finite-prefix simulation object.  This is the
@@ -236,8 +333,24 @@ theorem ConcreteStructuredCurrentStepClassifier.toFiniteTraceCorrect
       sourceInitial targetInitial :=
   ⟨classifier.toGeneratedTraceSimulation, initial⟩
 
-/-- Combined current-node coverage directly constructs the ranked generated
-trace simulation; callers never supply the intermediate global classifier. -/
+/-- The orthogonal admission and address-space laws directly construct the
+ranked generated trace simulation; callers never supply the intermediate
+global classifier. -/
+def ConcreteStructuredCompilerCurrentStepAdmission.toGeneratedTraceSimulation
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : Fir.LeanIR.Impure.ExternalImpl}
+    (admission : ConcreteStructuredCompilerCurrentStepAdmission program
+      sourceModule targetModule hosts externals)
+    (addressSpaceSafety : ConcreteStructuredCurrentStepAddressSpaceSafety program
+      sourceModule targetModule hosts externals) :
+    ConcreteGeneratedTraceSimulation externals targetModule.wasmModule
+      hosts.env :=
+  (admission.toCurrentStepClassifier addressSpaceSafety).toGeneratedTraceSimulation
+
+/-- Compatibility wrapper for the paired coverage package. -/
 def ConcreteStructuredCompilerCurrentStepCoverage.toGeneratedTraceSimulation
     {program : Fir.LeanIR.ImpureProgram}
     {sourceModule : Fir.Wasm.Module}
@@ -248,7 +361,29 @@ def ConcreteStructuredCompilerCurrentStepCoverage.toGeneratedTraceSimulation
       sourceModule targetModule hosts externals) :
     ConcreteGeneratedTraceSimulation externals targetModule.wasmModule
       hosts.env :=
-  coverage.toCurrentStepClassifier.toGeneratedTraceSimulation
+  coverage.admission.toGeneratedTraceSimulation coverage.addressSpaceSafety
+
+/-- Independent compiler admission and execution resource safety, together
+with an admission-free initial relation, imply finite-prefix correctness. -/
+theorem ConcreteStructuredCompilerCurrentStepAdmission.toFiniteTraceCorrect
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : Fir.LeanIR.Impure.ExternalImpl}
+    (admission : ConcreteStructuredCompilerCurrentStepAdmission program
+      sourceModule targetModule hosts externals)
+    (addressSpaceSafety : ConcreteStructuredCurrentStepAddressSpaceSafety program
+      sourceModule targetModule hosts externals)
+    {sourceInitial : Fir.LeanIR.Impure.MachineState}
+    {targetInitial : StructuredWasmState Host}
+    (initial : ConcreteStructuredSupportedGlobalOutcome program sourceModule
+      targetModule hosts externals sourceInitial targetInitial) :
+    ConcreteFiniteTraceCorrect externals
+      (concreteStructuredWasmMachine targetModule.wasmModule hosts.env)
+      sourceInitial targetInitial :=
+  (admission.toCurrentStepClassifier addressSpaceSafety).toFiniteTraceCorrect
+    initial
 
 /-- Combined current-node coverage and the admission-free compiler root imply
 finite-prefix correctness of the concrete structured Wasm machine. -/
@@ -267,7 +402,7 @@ theorem ConcreteStructuredCompilerCurrentStepCoverage.toFiniteTraceCorrect
     ConcreteFiniteTraceCorrect externals
       (concreteStructuredWasmMachine targetModule.wasmModule hosts.env)
       sourceInitial targetInitial :=
-  coverage.toCurrentStepClassifier.toFiniteTraceCorrect initial
+  coverage.admission.toFiniteTraceCorrect coverage.addressSpaceSafety initial
 
 /-- Combined current-step coverage plus the ordinary concrete export-entry
 frame imply finite-prefix correctness at the actual source and structured-Wasm
@@ -313,6 +448,49 @@ theorem ConcreteSupportedExport.finiteTraceCorrect_of_currentStepCoverage
       (concreteStructuredFunctionEntry spec.targetFunction initial
         parameters) :=
   coverage.toFiniteTraceCorrect
+    (spec.supportedGlobalRoot contextCaches invariant)
+
+/-- Export-facing finite-prefix correctness with compiler admission and
+finite-memory safety stated as visibly independent hypotheses.
+
+This is the preferred theorem surface.  In particular, a future unconditional
+compiler theorem may discharge `admission` without acquiring any obligation
+to prove that an arbitrary or unbounded execution fits wasm32 memory. -/
+theorem ConcreteSupportedExport.finiteTraceCorrect_of_currentStepAdmission
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec : ConcreteSupportedExport program context sourceCode sourceModule
+      sourceFunction targetModule hosts exportName)
+    {externals : Fir.LeanIR.Impure.ExternalImpl}
+    (admission : ConcreteStructuredCompilerCurrentStepAdmission program
+      sourceModule targetModule hosts externals)
+    (addressSpaceSafety : ConcreteStructuredCurrentStepAddressSpaceSafety program
+      sourceModule targetModule hosts externals)
+    (contextCaches :
+      context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    {facts : Fir.Wasm.ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceRuntime : Fir.LeanIR.Impure.RuntimeState}
+    {sourceEnv : Fir.LeanIR.Impure.Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : Fir.Wasm.Concrete.RefinementWitness}
+    {parameters : List Wasm.Value}
+    (invariant : ConcreteReuseCapacityCacheAbiFrame context sourceModule
+      sourceFunction externals facts remainingBytes sourceRuntime sourceEnv
+      initial (spec.targetFunction.toLocals parameters.reverse)
+      initialWitness) :
+    ConcreteFiniteTraceCorrect externals
+      (concreteStructuredWasmMachine targetModule.wasmModule hosts.env)
+      (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+      (concreteStructuredFunctionEntry spec.targetFunction initial
+        parameters) :=
+  admission.toFiniteTraceCorrect addressSpaceSafety
     (spec.supportedGlobalRoot contextCaches invariant)
 
 end FirTalos.Concrete

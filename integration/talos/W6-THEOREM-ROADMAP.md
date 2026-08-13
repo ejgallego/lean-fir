@@ -1583,22 +1583,25 @@ acceptance tests pass.
      contain no whole external execution or target certificate.
      Admission for a newly reached code node is attached after that dynamic
      successor is known, so neither relation contains future execution or
-     termination evidence. `ConcreteStructuredCompilerCurrentStepCoverage`
-     currently combines an ordinary code node's compiler-derived admission
-     with the dynamic requirement that its exact allocation cost fits the
-     retained wasm32 budget. Its
-     `toCurrentStepClassifier` theorem derives the global classifier by
-     structural inversion; the six staged call/cache/bind/return shapes
-     require no extra coverage. The coverage object's
-     `toGeneratedTraceSimulation` and
-     `toFiniteTraceCorrect` wrappers no longer expose that intermediate
-     classifier to callers. The actual compiler-produced root state is now
+     termination evidence. Compiler-derived current-node admission and dynamic
+     wasm32 resource safety now have separate theorem types:
+     `ConcreteStructuredCompilerCurrentStepAdmission` recovers the exact cost
+     without a budget claim, while
+     `ConcreteStructuredCurrentStepAddressSpaceSafety` states only that an
+     admitted cost fits the retained frame. Their composition derives the
+     global classifier by structural inversion; the six staged
+     call/cache/bind/return shapes require no extra coverage. The preferred
+     export theorem
+     `ConcreteSupportedExport.finiteTraceCorrect_of_currentStepAdmission`
+     exposes both laws independently, while the old compiler-coverage name is
+     retained only as a compatibility pair. The actual compiler-produced root
+     state is now
      constructed by `ConcreteSupportedExport.supportedGlobalRoot`. The strong
      relation now retains that `functionResult` is the active symbolic
      function's exact singleton result kind. Generated call entry derives the
      callee kind from production lowering, supported frames retain the caller
      equality, and return/pop restores it. Compiler admission must next be
-     split from finite-address-space safety: lowering cannot prove that a positive
+     proved independently: lowering cannot prove that a positive
      allocation fits an arbitrarily weakened budget, nor that a fixed wasm32
      heap matches every prefix of an indefinitely allocating source.
      `FIR-BUG-wasm-none-structured-active-result-index` records the completed
@@ -1630,9 +1633,9 @@ acceptance tests pass.
    Thus the reusable W6.7e-to-W6.7f packaging bridge, structural
    coverage-to-classifier derivation, and export-entry root construction are
    complete as conditional components. The next proof-bearing construction
-   strengthens the active result index, separates compiler admission from
-   address-space safety, and then closes the selected public finite-prefix
-   boundary. Operation coverage remains an explicit admission widening rather
+   proves the now-separated compiler-admission law and then closes the selected
+   public finite-prefix resource-safety boundary. Operation coverage remains
+   an explicit admission widening rather
    than a target certificate supplied by the public caller.
 8. Let W7 generation proceed independently against the current concrete
    runtime surface, then prove T5 per internalized runtime function.

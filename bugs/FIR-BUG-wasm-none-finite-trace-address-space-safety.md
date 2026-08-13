@@ -1,15 +1,15 @@
 ---
 id: FIR-BUG-wasm-none-finite-trace-address-space-safety
-status: confirmed
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.33.0
-lean-revision: b28b05afb9029e61230e975108ea487ecd613cf0
+lean-revision: 8bcafc05cc6116beac056eaa192d60c89916acef
 phase: wasm
 pass: none
 discovered-by: proof
 first-seen: 2026-08-13
 reproduction: integration/talos/FirTalos/ConcreteResumableWasm.lean
-regression: none
+regression: integration/talos/FirTalos/ConcreteResumableWasm.lean
 ---
 
 # Summary
@@ -33,7 +33,8 @@ make talos-setup
 lake build FirTalos.ConcreteResumableWasm
 ```
 
-Inspect `ConcreteStructuredCompilerCurrentStepCoverage.code` and
+Inspect `ConcreteStructuredCompilerCurrentStepAdmission.code`,
+`ConcreteStructuredCurrentStepAddressSpaceSafety.code`, and
 `MemoryState.AddressSpaceBudget.weaken` in
 `Fir/Wasm/Concrete/AllocationCorrectness.lean`.
 
@@ -46,8 +47,8 @@ prefix, model a matching source OOM, or use an unbounded target memory model.
 
 ## Actual behavior
 
-The coverage structure quantifies over every `remainingBytes` index admitted
-by the concrete frame and concludes both current-node admission and
+The old coverage structure quantified over every `remainingBytes` index
+admitted by the concrete frame and concluded both current-node admission and
 `requiredBytes ≤ remainingBytes`. The roadmap described this entire law as a
 compiler theorem, although the inequality is a dynamic resource property.
 
@@ -83,6 +84,11 @@ none
 
 ## Resolution and regression
 
-Unresolved. The immediate roadmap correction makes the resource premise
-explicit; a follow-up proof slice will select and formalize the bounded-prefix
-or resource-safe simulation boundary.
+Fixed in `ConcreteResumableWasm`. Compiler admission now returns only the
+source/compiler judgment and its exact allocation cost. The independent
+`ConcreteStructuredCurrentStepAddressSpaceSafety` law is solely responsible
+for proving that cost fits the retained wasm32 budget. Their compatibility
+package is a pair, and the preferred export-facing theorem exposes both
+hypotheses separately. The remaining choice between a resource-safe execution
+invariant and an explicitly budgeted finite prefix is roadmap work, not a
+hidden compiler obligation.
