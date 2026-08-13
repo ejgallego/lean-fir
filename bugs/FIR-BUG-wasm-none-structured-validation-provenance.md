@@ -56,10 +56,11 @@ made it part of the compiler's supported domain.
 ## Proof or differential evidence
 
 `CodeAdaptedWithSuffix.return_eq` supplies the compiled local kind but not the
-directional result refinement required by
-`ConcreteStructuredCodeStepAdmission.ret`. That refinement belongs to source
-validation, not target adaptation. Similar gaps occur at joins and guarded
-case/sharing paths where validation carries path-sensitive facts.
+source validator's result compatibility judgment. Similar gaps occur at joins
+and guarded case/sharing paths where validation carries path-sensitive facts.
+The residual-state proof also exposed that `supportedCodeWithJoins` was an
+opaque `partial def`, so Lean provided no equations with which to invert even
+an available validator hypothesis.
 
 ## Semantic impact
 
@@ -80,13 +81,30 @@ none
 
 none
 
+## Resolution and regression
+
+Unresolved. `ConcreteStructuredValidationFocus` now supplies the root and
+proof-visible residual transition laws. Resolution requires attaching that
+state to active and suspended structured relations and deriving universal
+current-node admission from it.
+
 ## Progress
 
 The first repair slice makes every `ConcreteSupportedFunction` retain its
 exact source declaration, body identity, declaration lookup, and effective
 result ABI. `ConcreteSupportedFunction.validatedBodyAt` now reconstructs the
 real root `supportedCode` judgment at the active result kind, and the compiler
-admission law receives the existing active-result equality. The remaining
-work is to retain and advance the validator's current local/join/case/sharing
-state through the structured relation, then derive each dynamic admission
-constructor from that static state plus the successful source step.
+admission law receives the existing active-result equality.
+
+The second repair slice replaces the opaque validator with a terminating
+syntax traversal and proves that its alternative-list traversal is
+extensionally the former `Array.all` check. The new
+`ConcreteStructuredValidationFocus` stores the exact residual Boolean
+judgment, reconstructs its root from `validatedBodyAt`, and has checked
+inversion/continuation laws for `let`, join/jump, cases and selected
+alternatives, ownership, deletion, tag mutation, and every field-mutation
+form. The remaining work is to attach that focus to the structured code/frame
+relation and derive each current-node admission constructor from it plus the
+successful source step. Return admission has a separate compatibility
+overstrengthening recorded by
+`FIR-BUG-wasm-none-return-admission-refinement-direction`.

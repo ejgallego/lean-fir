@@ -6204,6 +6204,17 @@ structured relation must next retain the validator's evolving local, join,
 case, and sharing state so current-node admission follows without a recursive
 caller certificate; `FIR-BUG-wasm-none-structured-validation-provenance`
 records that remaining invariant.
+That residual source validator is now proof-visible and total. Its explicit
+alternative-list traversal is extensionally the previous `Array.all` check,
+and `ConcreteStructuredValidationFocus` reconstructs the production root and
+inverts all current structural nodes: `let`, join/jump, selected constructor
+and default alternatives, ownership, deletion, and tag/object/`USize`/scalar
+field mutation. This is static compiler state, not a caller-supplied execution
+certificate. The next W6 slice attaches it to active and suspended structured
+relations, then derives admission. The exact return inversion found a separate
+overstrong proof contract—`leanCompatible` in production versus directional
+`refines` in admission—tracked as
+`FIR-BUG-wasm-none-return-admission-refinement-direction`.
 
 ## Parallel agent packages
 

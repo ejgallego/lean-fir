@@ -1617,6 +1617,17 @@ acceptance tests pass.
      validator's local/join/case/sharing state with the structured code focus;
      `FIR-BUG-wasm-none-structured-validation-provenance` tracks this remaining
      proof-relation widening.
+     The validator itself is now a terminating traversal rather than an opaque
+     `partial def`; its case-list implementation is proved equivalent to the
+     former `Array.all` acceptance test. `ConcreteStructuredValidationFocus`
+     retains the exact residual join/local/case/sharing judgment, constructs
+     the production root, and exposes checked transition laws for every
+     supported continuation plus join and selected-case state changes. The
+     next slice attaches this focus to active and suspended structured
+     relations. Its return inversion also made one independent contract bug
+     precise: production accepts `leanCompatible`, while current admission
+     demands directional `refines`
+     (`FIR-BUG-wasm-none-return-admission-refinement-direction`).
      Heap-valued cache misses and target-only loop unwinding remain later
      widenings.
    - **W6.7f — public certificate-free finite-trace theorem.** From a

@@ -1,5 +1,6 @@
 import FirTalos.ConcreteTraceSimulation
 import FirTalos.ConcreteStructuredSimulation
+import FirTalos.ConcreteStructuredValidation
 import FirTalos.Correctness.ResumableWasm
 import FirTalos.Correctness.StructuredWasmAdequacy
 
