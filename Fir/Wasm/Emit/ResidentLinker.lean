@@ -315,6 +315,7 @@ private def applyRewriteCohorts (plans : Array RewritePlan)
 the skeleton/probe planning view. Flush accumulated rewrites first. -/
 private def requiresMaterializedBodies : Step → Bool
   | .cacheSets
+  | .partialApplications
   | .directSelfTailCallsRequired
   | .directSelfTailCallsAvailable => true
   | _ => false
