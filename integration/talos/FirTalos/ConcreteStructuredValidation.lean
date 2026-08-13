@@ -394,6 +394,50 @@ structure ConcreteStructuredValidatedCodeOutcome
     target.frames
   agrees : frames.supported.Agrees core.core.resources.suspended
 
+/-- Module-wide closed relation for active generated code.  The constructor
+hides the current generated function, entry anchor, resource budget, residual
+validator state, and compiler focus while retaining the proof that the active
+function's selected result ABI is the one validated at its root.
+
+Ready-call and yielded branches will join this sum as their validation
+transport lemmas are completed; the present relation is already stable across
+all active-code successors whose conclusion remains active code. -/
+inductive ConcreteStructuredValidatedCodeGlobalOutcome
+    (program : Fir.LeanIR.ImpureProgram)
+    (sourceModule : Fir.Wasm.Module)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (externals : ExternalImpl) :
+    MachineState → StructuredWasmState Host → Prop where
+  | code
+      {context : Fir.Wasm.Context}
+      {functionCode : Lean.Compiler.LCNF.Code .impure}
+      {sourceFunction : Fir.Wasm.Function}
+      {spec : ConcreteSupportedFunction program context functionCode
+        sourceModule sourceFunction targetModule hosts}
+      {labels : List Lean.FVarId}
+      {entryRuntime sourceRuntime : RuntimeState}
+      {entryStore targetStore : Wasm.Store Host}
+      {entryWitness witness : RefinementWitness}
+      {functionResult : AbiKind}
+      {callerExpectedResult : Option AbiKind}
+      {facts : ReuseCapacityFacts}
+      {remainingBytes : Nat}
+      {sourceEnv : Env}
+      {sourceCode : Lean.Compiler.LCNF.Code .impure}
+      {targetLocals : Wasm.Locals}
+      {targetCode : Wasm.Program}
+      {source : MachineState}
+      {target : StructuredWasmState Host}
+      (activeResult : spec.sourceResultKind = functionResult)
+      (related : ConcreteStructuredValidatedCodeOutcome program context
+        functionCode sourceModule sourceFunction targetModule hosts spec
+        externals labels entryRuntime entryStore entryWitness functionResult
+        callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+        sourceCode targetStore targetLocals targetCode witness source target) :
+      ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
+        targetModule hosts externals source target
+
 /-- Forget only the residual source-validation evidence.  The closed code
 branch projects to the established recursively stable supported relation
 without changing either machine state or any dynamic resource proof. -/
@@ -432,6 +476,24 @@ theorem ConcreteStructuredValidatedCodeOutcome.toSupportedOutcome
       entryStore entryWitness functionResult callerExpectedResult source target :=
   .code related.contextCaches related.core.core related.frames.supported
     related.agrees
+
+/-- The closed global active-code relation strengthens the established
+recursively stable supported relation. -/
+theorem ConcreteStructuredValidatedCodeGlobalOutcome.toSupportedGlobal
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : ExternalImpl}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeGlobalOutcome program
+      sourceModule targetModule hosts externals source target) :
+    ConcreteStructuredSupportedGlobalOutcome program sourceModule targetModule
+      hosts externals source target := by
+  cases related with
+  | code activeResult code =>
+      exact code.toSupportedOutcome.toGlobal activeResult
 
 /-- Reassemble the closed active-code branch after a local core theorem has
 advanced both controls and supplied the exact frame equalities.  Static caller
@@ -618,6 +680,159 @@ theorem ConcreteStructuredCodeCoreRel.withRootValidation
       sourceEnv functionCode targetStore targetLocals targetCode witness source
       target :=
   ⟨core, spec.rootValidationState activeResult⟩
+
+/-- A compiler-produced supported export starts in the closed validated
+active-code relation.  This strengthens `supportedGlobalRoot` at the same
+canonical source and target entries: root validation comes from the accepted
+source declaration, both caller stacks are empty, and the ordinary concrete
+cache/ABI frame supplies the dynamic resource root. -/
+theorem ConcreteSupportedExport.validatedCodeRoot
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec : ConcreteSupportedExport program context sourceCode sourceModule
+      sourceFunction targetModule hosts exportName)
+    (contextCaches :
+      context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters : List Wasm.Value}
+    (invariant : ConcreteReuseCapacityCacheAbiFrame context sourceModule
+      sourceFunction externals facts remainingBytes sourceRuntime sourceEnv
+      initial (spec.targetFunction.toLocals parameters.reverse)
+      initialWitness) :
+    ConcreteStructuredValidatedCodeOutcome program context sourceCode
+      sourceModule sourceFunction targetModule hosts
+      spec.toConcreteSupportedFunction externals [] sourceRuntime initial
+      initialWitness spec.sourceResultKind none facts remainingBytes
+      sourceRuntime sourceEnv sourceCode initial
+      (spec.targetFunction.toLocals parameters.reverse)
+      spec.targetFunction.body initialWitness
+      (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+      (concreteStructuredFunctionEntry spec.targetFunction initial
+        parameters) := by
+  let sourceInitial :=
+    sourceCodeState context sourceRuntime sourceEnv sourceCode
+  let targetLocals := spec.targetFunction.toLocals parameters.reverse
+  let targetInitial :=
+    concreteStructuredFunctionEntry spec.targetFunction initial parameters
+  have focus :
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+        sourceRuntime sourceEnv sourceCode initial targetLocals
+        spec.targetFunction.body initialWitness sourceInitial targetInitial := {
+    sourceProgramEq := by simp [sourceInitial, sourceCodeState]
+    sourceControlEq := by simp [sourceInitial, sourceCodeState]
+    sourceEnvEq := by simp [sourceInitial, sourceCodeState]
+    sourceRuntimeEq := by simp [sourceInitial, sourceCodeState]
+    targetStoreEq := by
+      simp [targetInitial, concreteStructuredFunctionEntry]
+    targetControlEq := by
+      simp [targetInitial, targetLocals, concreteStructuredFunctionEntry]
+    adapted := by
+      rw [spec.targetBodyEq]
+      exact CodeAdapted.withSuffix spec.bodyAdapted
+    stateRelated := invariant.cacheFrame.stateRelated.stateRelated
+    frameAligned := invariant.cacheFrame.1.1.1.2.2.1 }
+  have scope := ConcreteStructuredResourceScope.root invariant
+  have resourcesAtRoot :
+      ConcreteStructuredResourceStack program context sourceModule
+        sourceFunction externals sourceRuntime sourceRuntime initial initial
+        initialWitness initialWitness facts remainingBytes sourceEnv targetLocals
+        spec.sourceResultKind none [] [] :=
+    ConcreteStructuredResourceStack.root scope
+  have resources :
+      ConcreteStructuredResourceStack program context sourceModule
+        sourceFunction externals sourceRuntime sourceRuntime initial initial
+        initialWitness initialWitness facts remainingBytes sourceEnv targetLocals
+        spec.sourceResultKind none sourceInitial.frames targetInitial.frames := by
+    simpa [sourceInitial, sourceCodeState, targetInitial,
+      concreteStructuredFunctionEntry] using resourcesAtRoot
+  have core :
+      ConcreteStructuredCodeCoreRel program context sourceModule sourceFunction
+        externals [] sourceRuntime initial initialWitness spec.sourceResultKind
+        none facts remainingBytes sourceRuntime sourceEnv sourceCode initial
+        targetLocals spec.targetFunction.body initialWitness sourceInitial
+        targetInitial :=
+    ⟨focus, resources⟩
+  have validatedCore :
+      ConcreteStructuredValidatedCodeCoreRel program context sourceModule
+        sourceFunction externals [] sourceRuntime initial initialWitness
+        spec.sourceResultKind none facts remainingBytes sourceRuntime sourceEnv
+        sourceCode initial targetLocals spec.targetFunction.body initialWitness
+        sourceInitial targetInitial :=
+    ConcreteStructuredCodeCoreRel.withRootValidation
+      spec.toConcreteSupportedFunction rfl core
+  have frames :
+      ConcreteStructuredValidatedFrameStack program sourceModule targetModule
+        hosts spec.sourceResultKind none sourceInitial.frames
+        targetInitial.frames := by
+    simpa [sourceInitial, sourceCodeState, targetInitial,
+      concreteStructuredFunctionEntry] using
+      (ConcreteStructuredValidatedFrameStack.nil
+        (program := program) (sourceModule := sourceModule)
+        (targetModule := targetModule) (hosts := hosts)
+        (functionResult := spec.sourceResultKind))
+  have agrees : frames.supported.Agrees
+      validatedCore.core.resources.suspended := by
+    simpa [frames, sourceInitial, sourceCodeState, targetInitial,
+      concreteStructuredFunctionEntry] using
+      (ConcreteStructuredSupportedFrameStack.Agrees.nil
+        (program := program) (sourceModule := sourceModule)
+        (targetModule := targetModule) (hosts := hosts)
+        (externals := externals) (entryRuntime := sourceRuntime)
+        (entryStore := initial) (entryWitness := initialWitness)
+        (functionResult := spec.sourceResultKind))
+  change ConcreteStructuredValidatedCodeOutcome program context sourceCode
+    sourceModule sourceFunction targetModule hosts
+    spec.toConcreteSupportedFunction externals [] sourceRuntime initial
+    initialWitness spec.sourceResultKind none facts remainingBytes sourceRuntime
+    sourceEnv sourceCode initial targetLocals spec.targetFunction.body
+    initialWitness sourceInitial targetInitial
+  exact ⟨contextCaches, validatedCore, frames, agrees⟩
+
+/-- Hide the canonical export-entry indices behind the module-wide closed
+active-code relation. -/
+theorem ConcreteSupportedExport.validatedCodeGlobalRoot
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec : ConcreteSupportedExport program context sourceCode sourceModule
+      sourceFunction targetModule hosts exportName)
+    (contextCaches :
+      context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters : List Wasm.Value}
+    (invariant : ConcreteReuseCapacityCacheAbiFrame context sourceModule
+      sourceFunction externals facts remainingBytes sourceRuntime sourceEnv
+      initial (spec.targetFunction.toLocals parameters.reverse)
+      initialWitness) :
+    ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
+      targetModule hosts externals
+      (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+      (concreteStructuredFunctionEntry spec.targetFunction initial
+        parameters) :=
+  .code rfl (spec.validatedCodeRoot contextCaches invariant)
 
 /-- A validated direct `let` exposes the exact kind inserted into the residual
 local row and the guarded-sharing update used for its continuation. -/
