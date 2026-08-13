@@ -135,6 +135,7 @@ def descriptor(
         "args": [{"nat": {"value": "42"}}],
         "argSchemas": ["nat"],
         "argumentAliases": [],
+        "nestedArgumentAliases": [],
         "resultSchema": "nat",
         "tags": tags or ["quick"],
         "fuel": 1000,
@@ -1272,6 +1273,73 @@ class HarnessTests(unittest.TestCase):
             json.dumps(item), ["native", "--manifest"]
         )
         self.assertEqual(prepared[0]["argumentAliases"], item["argumentAliases"])
+
+    def test_manifest_nested_argument_alias_contract(self) -> None:
+        item = descriptor("nested-alias")
+        byte_value = {"bytes": {"value": [1, 2, 3]}}
+        item["args"] = [{
+            "ctor": {
+                "name": "NestedAliasInput",
+                "tag": 0,
+                "fields": [byte_value, byte_value],
+            }
+        }]
+        item["argSchemas"] = [{
+            "ctor": {
+                "name": "NestedAliasInput",
+                "tag": 0,
+                "fields": ["bytes", "bytes"],
+            }
+        }]
+        item["nestedArgumentAliases"] = [{
+            "source": {"argument": 0, "children": [0]},
+            "target": {"argument": 0, "children": [1]},
+        }]
+        prepared = harness.manifest_from_output(
+            json.dumps(item), ["native", "--manifest"]
+        )
+        self.assertEqual(
+            prepared[0]["nestedArgumentAliases"], item["nestedArgumentAliases"]
+        )
+
+        empty_path = dict(item)
+        empty_path["nestedArgumentAliases"] = [{
+            "source": {"argument": 0, "children": []},
+            "target": {"argument": 0, "children": [1]},
+        }]
+        with self.assertRaisesRegex(harness.ValidationError, "malformed nested argument path"):
+            harness.manifest_from_output(
+                json.dumps(empty_path), ["native", "--manifest"]
+            )
+
+        reversed_path = dict(item)
+        reversed_path["nestedArgumentAliases"] = [{
+            "source": {"argument": 0, "children": [1]},
+            "target": {"argument": 0, "children": [0]},
+        }]
+        with self.assertRaisesRegex(harness.ValidationError, "must precede target"):
+            harness.manifest_from_output(
+                json.dumps(reversed_path), ["native", "--manifest"]
+            )
+
+        fixture_mismatch = json.loads(json.dumps(item))
+        fixture_mismatch["args"][0]["ctor"]["fields"][1] = {
+            "bytes": {"value": [9]}
+        }
+        with self.assertRaisesRegex(harness.ValidationError, "different fixtures"):
+            harness.manifest_from_output(
+                json.dumps(fixture_mismatch), ["native", "--manifest"]
+            )
+
+        below_root_alias = json.loads(json.dumps(item))
+        below_root_alias["args"].append(below_root_alias["args"][0])
+        below_root_alias["argSchemas"].append(below_root_alias["argSchemas"][0])
+        below_root_alias["argumentAliases"] = [{"source": 0, "target": 1}]
+        below_root_alias["nestedArgumentAliases"][0]["target"]["argument"] = 1
+        with self.assertRaisesRegex(harness.ValidationError, "top-level alias target"):
+            harness.manifest_from_output(
+                json.dumps(below_root_alias), ["native", "--manifest"]
+            )
 
     def test_manifest_drives_tag_and_explicit_selection(self) -> None:
         manifest = [

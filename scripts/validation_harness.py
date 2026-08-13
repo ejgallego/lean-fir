@@ -27,6 +27,7 @@ MANIFEST_FIELDS = {
     "args",
     "argSchemas",
     "argumentAliases",
+    "nestedArgumentAliases",
     "resultSchema",
     "tags",
     "fuel",
@@ -1730,6 +1731,68 @@ def records_from_output(output: str, command: list[str]) -> list[dict]:
     return records
 
 
+def _argument_path_key(path: object, context: str) -> tuple[int, ...]:
+    if (
+        not isinstance(path, dict)
+        or set(path) != {"argument", "children"}
+        or not isinstance(path["argument"], int)
+        or isinstance(path["argument"], bool)
+        or path["argument"] < 0
+        or not isinstance(path["children"], list)
+        or not path["children"]
+        or not all(
+            isinstance(child, int) and not isinstance(child, bool) and child >= 0
+            for child in path["children"]
+        )
+    ):
+        raise ValidationError(f"{context}: malformed nested argument path")
+    return (path["argument"], *path["children"])
+
+
+def _resolve_argument_path(
+    arg_schemas: list[object], args: list[object], path: object, context: str
+) -> tuple[object, object]:
+    key = _argument_path_key(path, context)
+    argument = key[0]
+    if argument >= len(args):
+        raise ValidationError(f"{context}: argument {argument} is out of bounds")
+    schema = arg_schemas[argument]
+    datum = args[argument]
+    for child in key[1:]:
+        if isinstance(schema, dict) and set(schema) == {"seq"}:
+            sequence_schema = schema["seq"]
+            sequence_datum = datum.get("seq") if isinstance(datum, dict) else None
+            if (
+                not isinstance(sequence_schema, dict)
+                or set(sequence_schema) != {"element"}
+                or not isinstance(sequence_datum, dict)
+                or set(sequence_datum) != {"value"}
+                or not isinstance(sequence_datum["value"], list)
+                or child >= len(sequence_datum["value"])
+            ):
+                raise ValidationError(f"{context}: invalid sequence child {child}")
+            schema = sequence_schema["element"]
+            datum = sequence_datum["value"][child]
+            continue
+        if isinstance(schema, dict) and set(schema) == {"ctor"}:
+            constructor_schema = schema["ctor"]
+            constructor_datum = datum.get("ctor") if isinstance(datum, dict) else None
+            if (
+                not isinstance(constructor_schema, dict)
+                or not isinstance(constructor_schema.get("fields"), list)
+                or not isinstance(constructor_datum, dict)
+                or not isinstance(constructor_datum.get("fields"), list)
+                or child >= len(constructor_schema["fields"])
+                or child >= len(constructor_datum["fields"])
+            ):
+                raise ValidationError(f"{context}: invalid constructor child {child}")
+            schema = constructor_schema["fields"][child]
+            datum = constructor_datum["fields"][child]
+            continue
+        raise ValidationError(f"{context}: child {child} descends through a non-container")
+    return schema, datum
+
+
 def manifest_from_output(output: str, command: list[str]) -> list[dict]:
     """Parse neutral descriptors while preserving backend extension fields."""
     descriptors: list[dict] = []
@@ -1765,6 +1828,7 @@ def manifest_from_output(output: str, command: list[str]) -> list[dict]:
         args = value["args"]
         arg_schemas = value["argSchemas"]
         argument_aliases = value["argumentAliases"]
+        nested_argument_aliases = value["nestedArgumentAliases"]
         result_schema = value["resultSchema"]
         tags = value["tags"]
         fuel = value["fuel"]
@@ -1834,6 +1898,53 @@ def manifest_from_output(output: str, command: list[str]) -> list[dict]:
                 )
             alias_targets.add(target)
             last_alias_target = target
+        if not isinstance(nested_argument_aliases, list):
+            raise ValidationError(
+                f"native corpus manifest/{case_id}: malformed nestedArgumentAliases"
+            )
+        root_alias_targets = {alias["target"] for alias in argument_aliases}
+        nested_alias_targets: set[tuple[int, ...]] = set()
+        last_nested_target: tuple[int, ...] | None = None
+        for alias in nested_argument_aliases:
+            if not isinstance(alias, dict) or set(alias) != {"source", "target"}:
+                raise ValidationError(
+                    f"native corpus manifest/{case_id}: malformed nestedArgumentAliases"
+                )
+            context = f"native corpus manifest/{case_id}"
+            source_key = _argument_path_key(alias["source"], context)
+            target_key = _argument_path_key(alias["target"], context)
+            if source_key[0] in root_alias_targets or target_key[0] in root_alias_targets:
+                raise ValidationError(
+                    f"{context}: nested argument alias descends below a top-level alias target"
+                )
+            if source_key >= target_key:
+                raise ValidationError(
+                    f"{context}: nested argument alias source must precede target"
+                )
+            if last_nested_target is not None and last_nested_target >= target_key:
+                raise ValidationError(
+                    f"{context}: nested argument alias targets must be strictly increasing"
+                )
+            if source_key in nested_alias_targets:
+                raise ValidationError(
+                    f"{context}: nested argument alias source is not independently materialized"
+                )
+            source_schema, source_datum = _resolve_argument_path(
+                arg_schemas, args, alias["source"], f"{context} source"
+            )
+            target_schema, target_datum = _resolve_argument_path(
+                arg_schemas, args, alias["target"], f"{context} target"
+            )
+            if source_schema != target_schema:
+                raise ValidationError(
+                    f"{context}: nested argument alias connects different schemas"
+                )
+            if source_datum != target_datum:
+                raise ValidationError(
+                    f"{context}: nested argument alias connects different fixtures"
+                )
+            nested_alias_targets.add(target_key)
+            last_nested_target = target_key
         if result_schema is None:
             raise ValidationError(f"native corpus manifest/{case_id}: missing resultSchema")
         if not isinstance(tags, list) or not all(isinstance(tag, str) and tag for tag in tags):

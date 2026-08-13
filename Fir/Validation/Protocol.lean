@@ -147,6 +147,26 @@ structure ArgumentAlias where
   deriving Inhabited, BEq, Repr, ToJson, FromJson
 
 /--
+A logical position inside one runner-supplied argument. Each child index selects
+a constructor field or a sequence element. Empty child paths name argument
+roots and are reserved for `ArgumentAlias`.
+-/
+structure ArgumentPath where
+  argument : Nat
+  children : Array Nat
+  deriving Inhabited, BEq, Repr, ToJson, FromJson
+
+/--
+Declare that two nested positions in the runner-supplied argument graph are
+the same source object. The source is independently materialized and the later
+target reuses it, matching the canonical star convention of `ArgumentAlias`.
+-/
+structure NestedArgumentAlias where
+  source : ArgumentPath
+  target : ArgumentPath
+  deriving Inhabited, BEq, Repr, ToJson, FromJson
+
+/--
 Validate the backend-neutral argument-alias graph.
 
 Targets must be strictly increasing, sources must be earlier independently
@@ -182,6 +202,86 @@ def checkArgumentAliases (schemas : Array ValidationSchema)
         throw s!"argument alias target {alias.target} is out of bounds"
       unless sourceDatum == targetDatum do
         throw s!"argument alias {alias.source}->{alias.target} connects different fixtures"
+      return (some alias.target, targets.push alias.target)
+  return ()
+
+private def pathChildrenPrecede : List Nat → List Nat → Bool
+  | [], _ :: _ => true
+  | left :: lefts, right :: rights =>
+      left < right || (left == right && pathChildrenPrecede lefts rights)
+  | _, _ => false
+
+/-- Canonical preorder on logical argument-graph positions. -/
+def ArgumentPath.precedes (left right : ArgumentPath) : Bool :=
+  left.argument < right.argument ||
+    (left.argument == right.argument &&
+      pathChildrenPrecede left.children.toList right.children.toList)
+
+private partial def resolveArgumentPathChildren
+    (schema : ValidationSchema) (datum : ValidationDatum) :
+    List Nat → Except String (ValidationSchema × ValidationDatum)
+  | [] => return (schema, datum)
+  | index :: remaining =>
+      match schema, datum with
+      | .seq element, .seq values => do
+          let some value := values[index]? |
+            throw s!"sequence child {index} is out of bounds for {values.size} elements"
+          resolveArgumentPathChildren element value remaining
+      | .ctor _ _ schemas, .ctor _ _ fields => do
+          let some childSchema := schemas[index]? |
+            throw s!"constructor child {index} is out of bounds for {schemas.size} fields"
+          let some childDatum := fields[index]? |
+            throw s!"constructor child {index} is out of bounds for {fields.size} fixtures"
+          resolveArgumentPathChildren childSchema childDatum remaining
+      | _, _ =>
+          throw s!"child {index} descends through non-container schema {repr schema}"
+
+/-- Resolve one logical argument-graph path before a backend assigns locations. -/
+def resolveArgumentPath (schemas : Array ValidationSchema)
+    (data : Array ValidationDatum) (path : ArgumentPath) :
+    Except String (ValidationSchema × ValidationDatum) := do
+  let some schema := schemas[path.argument]? |
+    throw s!"argument {path.argument} is out of bounds for {schemas.size} schemas"
+  let some datum := data[path.argument]? |
+    throw s!"argument {path.argument} is out of bounds for {data.size} fixtures"
+  resolveArgumentPathChildren schema datum path.children.toList
+
+/--
+Validate nested input-graph aliases before a backend materializes the graph.
+
+Nested paths must be nonempty, targets must be strictly increasing in logical
+preorder, and a source must precede its target without itself being an alias
+target. Paths below top-level alias targets are rejected because the root alias
+already transfers the complete graph. Equal source/target schemas and fixtures
+ensure that identity metadata cannot change the semantic tree value.
+-/
+def checkNestedArgumentAliases (schemas : Array ValidationSchema)
+    (data : Array ValidationDatum) (argumentAliases : Array ArgumentAlias)
+    (aliases : Array NestedArgumentAlias) : Except String Unit := do
+  checkArgumentAliases schemas data argumentAliases
+  let rootTargets := argumentAliases.map (fun alias => alias.target)
+  let _ ← aliases.foldlM (init := (none, #[]))
+    fun (lastTarget?, targets) alias => do
+      if alias.source.children.isEmpty || alias.target.children.isEmpty then
+        throw "nested argument alias paths must contain at least one child"
+      if rootTargets.contains alias.source.argument ||
+          rootTargets.contains alias.target.argument then
+        throw "nested argument aliases cannot descend below a top-level alias target"
+      unless alias.source.precedes alias.target do
+        throw s!"nested argument alias source {repr alias.source} must precede target {repr alias.target}"
+      if let some lastTarget := lastTarget? then
+        unless lastTarget.precedes alias.target do
+          throw "nested argument alias targets must be strictly increasing"
+      if targets.contains alias.source then
+        throw s!"nested argument alias source {repr alias.source} must be independently materialized"
+      let (sourceSchema, sourceDatum) ← resolveArgumentPath schemas data alias.source
+        |>.mapError fun error => s!"nested argument alias source: {error}"
+      let (targetSchema, targetDatum) ← resolveArgumentPath schemas data alias.target
+        |>.mapError fun error => s!"nested argument alias target: {error}"
+      unless sourceSchema == targetSchema do
+        throw s!"nested argument alias {repr alias.source}->{repr alias.target} connects different schemas"
+      unless sourceDatum == targetDatum do
+        throw s!"nested argument alias {repr alias.source}->{repr alias.target} connects different fixtures"
       return (some alias.target, targets.push alias.target)
   return ()
 

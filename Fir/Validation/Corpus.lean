@@ -2420,6 +2420,8 @@ structure Case where
   argSchemas : Array ValidationSchema := #[]
   /-- Runner-supplied argument identities, before the source entry consumes them. -/
   argumentAliases : Array ArgumentAlias := #[]
+  /-- Runner-supplied identities between nested constructor or sequence children. -/
+  nestedArgumentAliases : Array NestedArgumentAlias := #[]
   resultSchema : ValidationSchema
   native : Unit → ValidationDatum
   /-- Reset native observation state immediately before running the source case. -/
@@ -2458,6 +2460,7 @@ structure CaseDescriptor where
   args : Array ValidationDatum
   argSchemas : Array ValidationSchema
   argumentAliases : Array ArgumentAlias
+  nestedArgumentAliases : Array NestedArgumentAlias
   resultSchema : ValidationSchema
   tags : Array String
   fuel : Nat
@@ -2481,6 +2484,7 @@ def Case.descriptor (validationCase : Case) : CaseDescriptor := {
   args := validationCase.args
   argSchemas := validationCase.argSchemas
   argumentAliases := validationCase.argumentAliases
+  nestedArgumentAliases := validationCase.nestedArgumentAliases
   resultSchema := validationCase.resultSchema
   tags := validationCase.tags
   fuel := validationCase.fuel
@@ -10405,6 +10409,10 @@ def requiredSourceAdministrativeStepKinds : Array String :=
 #guard cases.all fun validationCase =>
   (checkArgumentAliases validationCase.argSchemas validationCase.args
     validationCase.argumentAliases).isOk
+
+#guard cases.all fun validationCase =>
+  (checkNestedArgumentAliases validationCase.argSchemas validationCase.args
+    validationCase.argumentAliases validationCase.nestedArgumentAliases).isOk
 
 #guard cases.all fun validationCase =>
   match validationCase.requiredExecutedLcnfFormTrace with
