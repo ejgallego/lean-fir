@@ -15,6 +15,29 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `WASM-ACTIVE-DATA-SEGMENTS`.
+- Integration owner: `root`. The standalone shared-contract commit
+  `c8770e42` extends the symbolic Wasm module and binary emitter with ordered,
+  active memory-zero data segments carrying a constant wasm32 offset and raw
+  bytes.
+- Validation and compatibility: a module without memory cannot contain a data
+  segment, and every segment must fit its declared initial memory. The field
+  defaults to empty, so existing producers, artifacts, and proof-side modules
+  retain their previous bytes and behavior.
+- Acceptance: Lean Beam reports zero diagnostics for the changed Lean cone.
+  The real-engine regression observes the exact initialized bytes. `git diff
+  --check`, complete `make check`, `make talos-setup`, all 3,144 Talos jobs,
+  and the complete deterministic artifact gate pass. The root gate covers 125
+  harness tests, 676 native/LCNF/V8 cases, 9 direct-machine cases, 685 unique
+  cases, and 2,037/2,037 equal comparisons.
+- Consumers: W7 rebases before implementing fail-closed materialization of
+  eligible immutable closed compiler constants into module-owned persistent
+  memory. W6 needs a separate initialization/refinement theorem when a
+  nonempty data-segment module enters its proof surface; no current W6 theorem
+  or artifact changed.
+
+## Latest completed integration lease
+
 - Milestone: `W7-CONSTANT-TIME-RESIDENT-ARRAY-INDEXING`.
 - Integration owner: `root`, consuming the wasm-gen slice on
   `wasm/generation`. It is based directly on accepted `main` at `7ee984fb`,
