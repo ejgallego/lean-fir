@@ -962,14 +962,19 @@ private def internalizeSelected (module : Module) (declarations : Array Name)
     let definitions := module.functions.filter (·.name == declaration)
     unless imports.size + definitions.size == 1 do
       throw (.missingExternal declaration)
-    let some signature := expectedSignature? declaration |
+    let some expected := expectedSignature? declaration |
+      throw (.incompatibleExternal declaration)
+    let some helper := functions.find? (·.name == externalName declaration) |
+      throw (.incompatibleExternal declaration)
+    let helperSignature := functionSignature helper
+    unless sourceProviderCompatible helperSignature expected do
       throw (.incompatibleExternal declaration)
     match imports[0]?, definitions[0]? with
     | some import_, none =>
-        unless import_.signature == signature do
+        unless sourceProviderCompatible helperSignature import_.signature do
           throw (.incompatibleExternal declaration)
     | none, some function =>
-        unless sourceProviderCompatible signature (functionSignature function) do
+        unless sourceProviderCompatible helperSignature (functionSignature function) do
           throw (.incompatibleExternal declaration)
     | _, _ => throw (.missingExternal declaration)
   let linkedFunctions := module.functions.map fun function =>
@@ -1076,6 +1081,26 @@ def sourceDefinitionExampleModule : Except String Module := do
   internalizeAvailable module
     |>.mapError fun error => s!"fixed-width source definition: {repr error}"
 
+private def taggedUInt8ToNatSignature : Signature :=
+  functionSignature uint8ToNatFunction
+
+private def taggedUInt8ToNatExternalImport : Import := {
+  key := .external `UInt8.toNat
+  moduleName := "lean.extern"
+  itemName := "UInt8.toNat"
+  signature := taggedUInt8ToNatSignature
+  externalTypes? := some <| externalTypesForSignature taggedUInt8ToNatSignature }
+
+/-- Lean may capture `UInt8.toNat` with either its precise tagged result or
+the ordinary object-family `tobject` boundary. The same stricter resident
+helper is a valid implementation of both providers. -/
+def taggedUInt8ToNatExampleModule : Except String Module := do
+  let numeric ← ResidentNumeric.residentExampleModule
+  let module : Module := {
+    numeric with imports := numeric.imports.push taggedUInt8ToNatExternalImport }
+  internalizeAvailable module
+    |>.mapError fun error => s!"tagged UInt8.toNat: {repr error}"
+
 def manifest : Json :=
   Json.mkObj [
     ("entries", Json.arr <| (externalDeclarations ++
@@ -1106,6 +1131,15 @@ def manifest : Json :=
       (module.functions.find? (·.name == sourceUInt32OfNatCaller.name)).any
         fun function => function.body.contains
           (.call (.declaration (externalName `UInt32.ofNat)) ) &&
+      (Fir.Wasm.validateModule module).isOk &&
+      (Fir.Wasm.Emit.encode module).isOk
+  | .error _ => false
+
+#guard match taggedUInt8ToNatExampleModule with
+  | .ok module =>
+      module.imports.isEmpty && module.runtimeOperations.isEmpty &&
+      (module.functions.find? (·.name == externalName `UInt8.toNat)).any
+        fun function => functionSignature function == taggedUInt8ToNatSignature &&
       (Fir.Wasm.validateModule module).isOk &&
       (Fir.Wasm.Emit.encode module).isOk
   | .error _ => false
