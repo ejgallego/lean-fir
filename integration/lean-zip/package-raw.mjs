@@ -195,7 +195,6 @@ assert.deepEqual(inventory.frontierImports,
   frontierImports.map(({ name }) => name));
 assert.deepEqual(exports, [
   { name: "Zip.Wasm.compressRaw", kind: "function" },
-  { name: LEAN_ZIP_RAW_PERSISTENT_INITIALIZER, kind: "function" },
   { name: "fir_heap_frontier", kind: "function" },
   { name: "fir_heap_set_frontier", kind: "function" },
   { name: "fir_heap_rewind", kind: "function" },
@@ -226,7 +225,7 @@ const smokeBytes = readFileSync(smokePath);
 const leanToolchain = readFileSync(join(firRoot, "lean-toolchain"), "utf8").trim();
 const levels = Array.from({ length: 10 }, (_, index) => index + 1);
 const build = {
-  schemaVersion: "fir.lean-zip.raw.build/v1",
+  schemaVersion: "fir.lean-zip.raw.build/v2",
   sources: {
     fir,
     leanZip: {
@@ -282,7 +281,8 @@ const build = {
     capture: "compileEntriesFinalCapturedInternalized",
     residentPolicy:
       "closedApplicationAvailablePolicy with reviewed math imports retained",
-    arenaPreparation: "preparePersistentCacheArenaAndLinkArtifact",
+    arenaPreparation:
+      "compiler lazy caches retained with cache-aware rewind floor",
     capturedDeclarations: inventory.capturedDeclarations,
     reviewedExternalsBeforeLink: inventory.reviewedExternalsBeforeLink,
     retainedSourceFunctions: inventory.sourceFunctions,
@@ -316,10 +316,13 @@ const build = {
     },
     persistentCaches: {
       initializer: LEAN_ZIP_RAW_PERSISTENT_INITIALIZER,
-      invocation: "once per Wasm instance before scratch input allocation",
-      roots: "recursively persistent object graphs below the checkpoint",
-      checkpoint: "post-initializer fir_heap_frontier",
-      idempotent: true,
+      invocation: "lazy at the original Lean use site",
+      roots:
+        "recursively persistent object graphs retained by compiler cache globals",
+      checkpoint:
+        "rewind floor advances through the cold-call prefix when an object cache is published",
+      cacheAwareRewind: true,
+      warmCallStable: true,
     },
     ownership: {
       version: LEAN_ZIP_RAW_OWNERSHIP_VERSION,
@@ -327,11 +330,13 @@ const build = {
       encodedInput: "fresh packed ByteArray in module-owned memory",
       output: "copied JavaScript bytes before rewind",
       rawAddressesExposed: false,
-      reclamation: "per-call scratch checkpoint rewind, including failures",
-      persistentRegion: "compiler cache roots retained below the instance checkpoint",
+      reclamation:
+        "warm-call scratch rewind; a cold object-cache miss retains the prefix through its published graph",
+      persistentRegion:
+        "compiler cache roots define a monotonic cache-aware rewind floor",
       runtimeRootsAboveCheckpoint: false,
       externalRuntimeReservation:
-        "reserved before persistent-cache initialization and Lean graph allocation",
+        "reserved before lazy-cache publication or Lean graph allocation",
     },
   },
   verification: {

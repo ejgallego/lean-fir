@@ -46,9 +46,9 @@ assert.equal(adapter.initialization.reservedFrontier,
   STANDARD_MATH_RUNTIME_RESERVED_MEMORY_BYTES);
 assert.equal(adapter.initialization.initialFrontier,
   STANDARD_MATH_RUNTIME_RESERVED_MEMORY_BYTES);
-assert.ok(adapter.initialization.checkpoint >
+assert.equal(adapter.initialization.checkpoint,
   adapter.initialization.initialFrontier);
-const persistentCheckpoint = adapter.initialization.checkpoint;
+let persistentCheckpoint = adapter.initialization.checkpoint;
 const temporary = mkdtempSync(join(tmpdir(), "fir-lean-zip-raw-"));
 try {
   for (const [name, input] of cases) {
@@ -65,10 +65,18 @@ try {
       assert.deepEqual(input, before, `${name}/L${level}: borrowed input mutated`);
       assert.deepEqual(new Uint8Array(inflateRawSync(result.bytes)), input,
         `${name}/L${level}: raw DEFLATE roundtrip`);
-      assert.equal(result.memory.frontierAfter, persistentCheckpoint,
-        `${name}/L${level}: scratch rewind`);
       assert.equal(result.memory.frontierBefore, persistentCheckpoint,
         `${name}/L${level}: persistent checkpoint moved`);
+      assert.ok(result.memory.frontierAfter >= persistentCheckpoint,
+        `${name}/L${level}: cache-aware rewind moved backwards`);
+      persistentCheckpoint = result.memory.frontierAfter;
+      const warm = adapter.compressRaw(input, level);
+      assert.deepEqual(warm.bytes, expected,
+        `${name}/L${level}: warm native differential`);
+      assert.equal(warm.memory.frontierBefore, persistentCheckpoint,
+        `${name}/L${level}: warm checkpoint moved`);
+      assert.equal(warm.memory.frontierAfter, persistentCheckpoint,
+        `${name}/L${level}: warm scratch rewind`);
     }
   }
   assert.throws(() => adapter.compressRaw(Uint8Array.of(1), 0), /1\.\.10/);
@@ -80,8 +88,8 @@ try {
     descriptor,
     now: () => clock++,
   });
-  assert.equal(timed.initialization.initializeMs, 1);
-  assert.equal(timed.initialization.idempotenceMs, 1);
+  assert.equal(timed.initialization.initializeMs, 0);
+  assert.equal(timed.initialization.idempotenceMs, 0);
   assert.deepEqual(timed.compressRaw(Uint8Array.of(1, 2, 3), 6).timings, {
     encodeMs: 1,
     executeMs: 1,

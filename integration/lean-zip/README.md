@@ -91,6 +91,13 @@ all later scratch rewinds. `adapter.initialization` reports the initial and
 checkpoint frontiers plus initialization/idempotence timings; per-call timing
 continues to cover only encoding, execution, decoding, and total call time.
 
+The levels 1--10 raw dispatcher instead keeps compiler lazy constants lazy.
+When a cold call publishes an object cache, the resident runtime advances a
+monotonic rewind floor through the newly persistent graph. The adapter accepts
+that one-time checkpoint growth; repeating the same call is required to rewind
+flat to the resulting floor. This avoids forcing panic-only fallback constants
+that are present in the captured closure but unreachable in ordinary execution.
+
 Both public wrappers reuse the same versioned ByteArray encoder, decoder,
 module validator, timing, and scratch-ownership implementation. Level-1 has
 zero imports and is suitable for correctness testing in Node and browsers. It
@@ -100,6 +107,6 @@ remain allocation-heavy, and `BUILD.json` records that limitation explicitly.
 The raw producer retains exactly `Float.ofNat`, `Float.ofScientific`, and
 `Float.log2` at its reviewed frontier and closes them with the pinned standard
 math runtime. Its published module has zero imports. The browser adapter
-reserves `STANDARD_MATH_RUNTIME_RESERVED_MEMORY_BYTES` before persistent-cache
-initialization or Lean allocation, and the package records both frontier and
+reserves `STANDARD_MATH_RUNTIME_RESERVED_MEMORY_BYTES` before lazy-cache
+publication or Lean allocation, and the package records both frontier and
 complete identities plus the runtime source, contract, and Emscripten identity.

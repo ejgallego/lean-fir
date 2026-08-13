@@ -31,7 +31,7 @@ for (const line of readFileSync(join(directory, "SHA256SUMS"), "utf8")
   assert.equal(sha256(readFileSync(join(directory, name))), expected, name);
 }
 
-assert.equal(build.schemaVersion, "fir.lean-zip.raw.build/v1");
+assert.equal(build.schemaVersion, "fir.lean-zip.raw.build/v2");
 assert.equal(build.capabilities.byteArray.layoutVersion,
   LEAN_ZIP_BYTE_ARRAY_LAYOUT_VERSION);
 assert.equal(build.capabilities.adapter.apiVersion,
@@ -53,20 +53,27 @@ assert.equal(
   STANDARD_MATH_RUNTIME_RESERVED_MEMORY_BYTES);
 assert.equal(build.entry.persistentInitializer,
   LEAN_ZIP_RAW_PERSISTENT_INITIALIZER);
-assert.equal(build.capabilities.persistentCaches.idempotent, true);
+assert.equal(build.capabilities.persistentCaches.cacheAwareRewind, true);
+assert.equal(build.capabilities.persistentCaches.warmCallStable, true);
 
 const adapter = await createLeanZipRawAdapter({ bytes: wasm, descriptor });
 assert.equal(adapter.initialization.entry, LEAN_ZIP_RAW_PERSISTENT_INITIALIZER);
 assert.equal(adapter.initialization.initialFrontier,
   STANDARD_MATH_RUNTIME_RESERVED_MEMORY_BYTES);
-assert.ok(adapter.initialization.frontierGrowth > 0);
+assert.equal(adapter.initialization.frontierGrowth, 0);
 const input = Uint8Array.of(0, 1, 127, 128, 254, 255);
+let checkpoint = adapter.initialization.checkpoint;
 for (let level = 1; level <= 10; level += 1) {
   const result = adapter.compressRaw(input, level);
   assert.deepEqual(new Uint8Array(inflateRawSync(result.bytes)), input,
     `level ${level}`);
-  assert.equal(result.memory.frontierAfter, result.memory.frontierBefore);
-  assert.equal(result.memory.frontierBefore, adapter.initialization.checkpoint);
+  assert.equal(result.memory.frontierBefore, checkpoint);
+  assert.ok(result.memory.frontierAfter >= checkpoint);
+  checkpoint = result.memory.frontierAfter;
+  const warm = adapter.compressRaw(input, level);
+  assert.deepEqual(warm.bytes, result.bytes, `warm level ${level}`);
+  assert.equal(warm.memory.frontierBefore, checkpoint);
+  assert.equal(warm.memory.frontierAfter, checkpoint);
 }
 
 console.log("lean-zip raw levels 1–10 package smoke: PASS");

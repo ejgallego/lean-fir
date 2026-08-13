@@ -20,10 +20,6 @@ def rawEntry : Name := ``Zip.Wasm.compressRaw
 def level1PersistentInitializer : Name :=
   Fir.Wasm.Emit.ResidentCache.persistentInitializerName
 
-/-- Package-lifetime initializer shared by the production dispatcher. -/
-def rawPersistentInitializer : Name :=
-  Fir.Wasm.Emit.ResidentCache.persistentInitializerName
-
 /--
 Capture the real stored-block entry through FIR's legacy-source final-LCNF
 pipeline. This lean-zip revision predates Lean's `module` / `public section`
@@ -99,22 +95,22 @@ private def compileRawUnprepared : CoreM (Except Fir.Wasm.Emit.Source.CompileErr
 /-- Lower the complete dispatcher closure before resident linking. -/
 def compileRawBase : CoreM (Except Fir.Wasm.Emit.Source.CompileError
     Fir.Wasm.Emit.Source.ModuleArtifact) := do
-  let result ← compileRawUnprepared
-  return result.bind
-    Fir.Wasm.Emit.ResidentLinker.preparePersistentCacheArenaArtifact
+  compileRawUnprepared
 
-/-- Resident frontier for production levels 1 through 10. Exact Float
-conversion/logarithm externals remain for the separately linked standard math
-runtime; every other runtime dependency is closed here. -/
+/-- Resident frontier for production levels 1 through 10. Compiler lazy caches
+remain lazy; resident cache publication advances the rewind floor only when an
+object cache is first populated. Exact Float conversion/logarithm externals
+remain for the separately linked standard math runtime. -/
 def compileRaw : CoreM (Except Fir.Wasm.Emit.Source.CompileError
     Fir.Wasm.Emit.Source.ModuleArtifact) := do
   let result ← compileRawUnprepared
   return result.bind <|
-    Fir.Wasm.Emit.ResidentLinker.preparePersistentCacheArenaAndLinkArtifact fun module =>
+    fun artifact => Fir.Wasm.Emit.ResidentLinker.linkArtifact
       { Fir.Wasm.Emit.ResidentLinker.closedApplicationAvailablePolicy
-          module #[rawEntry, rawPersistentInitializer] with
+          artifact.module #[rawEntry] with
         allowedExternalImports :=
           some Fir.Wasm.Emit.ExternalRuntime.mathDeclarations
         requireZeroImports := false }
+      artifact
 
 end LeanZipFir.Compile

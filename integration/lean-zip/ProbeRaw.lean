@@ -46,13 +46,10 @@ run_cmd do
           Json.null)
     | .error error =>
         (0, #[], (toString (repr error) : Json))
-  let preparedResult := result.bind
-    Fir.Wasm.Emit.ResidentLinker.preparePersistentCacheArenaArtifact
-  let linkedResult := preparedResult.bind fun artifact =>
+  let linkedResult := result.bind fun artifact =>
     Fir.Wasm.Emit.ResidentLinker.linkArtifact
       { Fir.Wasm.Emit.ResidentLinker.closedApplicationAvailablePolicy
-          artifact.module #[LeanZipFir.Compile.rawEntry,
-            LeanZipFir.Compile.rawPersistentInitializer] with
+          artifact.module #[LeanZipFir.Compile.rawEntry] with
         allowedExternalImports :=
           some Fir.Wasm.Emit.ExternalRuntime.mathDeclarations
         requireZeroImports := false

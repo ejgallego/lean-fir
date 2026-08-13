@@ -93,13 +93,16 @@ function verifyModule(module, entry, label, persistentInitializer) {
 }
 
 class LeanZipByteArrayAdapter {
-  constructor(instance, now, entry, initialization) {
+  constructor(instance, now, entry, initialization,
+      allowPersistentCheckpointGrowth) {
     this.instance = instance;
     this.exports = instance.exports;
     this.memory = this.exports.memory;
     this.now = now;
     this.entry = entry;
     this.initialization = initialization;
+    this.checkpoint = initialization.checkpoint;
+    this.allowPersistentCheckpointGrowth = allowPersistentCheckpointGrowth;
   }
 
   frontier() {
@@ -159,13 +162,14 @@ class LeanZipByteArrayAdapter {
   compress(value, extraArguments = []) {
     const totalStarted = this.now();
     const frontierBefore = this.frontier();
-    requireCondition(frontierBefore === this.initialization.checkpoint,
+    requireCondition(frontierBefore === this.checkpoint,
       "scratch arena moved below or above its persistent checkpoint");
     const input = asBytes(value);
     let encodeMs = 0;
     let executeMs = 0;
     let decodeMs = 0;
     let peakFrontier = frontierBefore;
+    let frontierAfter = frontierBefore;
     let output;
     try {
       const encodeStarted = this.now();
@@ -184,11 +188,17 @@ class LeanZipByteArrayAdapter {
       decodeMs = elapsed(this.now, decodeStarted);
     } finally {
       this.exports.fir_heap_rewind(frontierBefore);
+      frontierAfter = this.frontier();
+      if (this.allowPersistentCheckpointGrowth) {
+        requireCondition(frontierAfter >= frontierBefore,
+          "cache-aware rewind moved the persistent checkpoint backwards");
+        this.checkpoint = frontierAfter;
+      } else {
+        requireCondition(frontierAfter === frontierBefore,
+          "scratch arena did not return to its checkpoint");
+      }
     }
     const totalMs = elapsed(this.now, totalStarted);
-    const frontierAfter = this.frontier();
-    requireCondition(frontierAfter === frontierBefore,
-      "scratch arena did not return to its checkpoint");
     return {
       bytes: output,
       timings: {
@@ -203,6 +213,7 @@ class LeanZipByteArrayAdapter {
         peakFrontier,
         frontierAfter,
         frontierGrowth: peakFrontier - frontierBefore,
+        persistentGrowth: frontierAfter - frontierBefore,
         pages: this.memory.buffer.byteLength / PAGE_BYTES,
       },
     };
@@ -238,6 +249,7 @@ export async function createLeanZipByteArrayAdapter({
   descriptor,
   parameterKinds = ["object"],
   persistentInitializer = null,
+  allowPersistentCheckpointGrowth = false,
   reservedMemoryBytes = null,
   now = () => performance.now(),
 } = {}) {
@@ -250,6 +262,8 @@ export async function createLeanZipByteArrayAdapter({
   requireCondition(persistentInitializer === null ||
     (typeof persistentInitializer === "string" && persistentInitializer.length > 0),
   "persistentInitializer must be null or a nonempty string");
+  requireCondition(typeof allowPersistentCheckpointGrowth === "boolean",
+    "allowPersistentCheckpointGrowth must be a boolean");
   requireCondition(reservedMemoryBytes === null ||
     (Number.isSafeInteger(reservedMemoryBytes) &&
       reservedMemoryBytes >= HEAP_BASE &&
@@ -302,13 +316,15 @@ export async function createLeanZipByteArrayAdapter({
     idempotenceMs,
     pages: instance.exports.memory.buffer.byteLength / PAGE_BYTES,
   });
-  return new LeanZipByteArrayAdapter(instance, now, entry, initialization);
+  return new LeanZipByteArrayAdapter(instance, now, entry, initialization,
+    allowPersistentCheckpointGrowth);
 }
 
 /** Fetch and instantiate any supported self-contained ByteArray entry. */
 export async function fetchLeanZipByteArrayAdapter({
   entry, label, wasmUrl, descriptorUrl, parameterKinds,
-  persistentInitializer, reservedMemoryBytes, now,
+  persistentInitializer, allowPersistentCheckpointGrowth,
+  reservedMemoryBytes, now,
 }) {
   const [wasmResponse, descriptorResponse] = await Promise.all([
     fetch(wasmUrl),
@@ -325,6 +341,7 @@ export async function fetchLeanZipByteArrayAdapter({
     descriptor: await descriptorResponse.json(),
     parameterKinds,
     persistentInitializer,
+    allowPersistentCheckpointGrowth,
     reservedMemoryBytes,
     now,
   });

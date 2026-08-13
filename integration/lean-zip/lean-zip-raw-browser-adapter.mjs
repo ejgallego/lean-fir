@@ -9,11 +9,11 @@ const ENTRY = "Zip.Wasm.compressRaw";
 const PARAMETER_KINDS = Object.freeze(["object", "uint8"]);
 
 export const LEAN_ZIP_RAW_PERSISTENT_INITIALIZER =
-  "fir_initialize_persistent_caches";
+  null;
 export const LEAN_ZIP_RAW_ADAPTER_API_VERSION =
-  "fir.lean-zip.raw.browser/v1";
+  "fir.lean-zip.raw.browser/v2";
 export const LEAN_ZIP_RAW_OWNERSHIP_VERSION =
-  "fir.lean-zip.raw.scratch-transfer/v1";
+  "fir.lean-zip.raw.lazy-cache-floor/v2";
 
 export function createLeanZipRawAdapter(options = {}) {
   return createLeanZipByteArrayAdapter({
@@ -22,6 +22,7 @@ export function createLeanZipRawAdapter(options = {}) {
     label: "lean-zip raw dispatcher",
     parameterKinds: PARAMETER_KINDS,
     persistentInitializer: LEAN_ZIP_RAW_PERSISTENT_INITIALIZER,
+    allowPersistentCheckpointGrowth: true,
     reservedMemoryBytes: STANDARD_MATH_RUNTIME_RESERVED_MEMORY_BYTES,
   });
 }
@@ -33,6 +34,7 @@ export function fetchLeanZipRawAdapter(options) {
     label: "lean-zip raw dispatcher",
     parameterKinds: PARAMETER_KINDS,
     persistentInitializer: LEAN_ZIP_RAW_PERSISTENT_INITIALIZER,
+    allowPersistentCheckpointGrowth: true,
     reservedMemoryBytes: STANDARD_MATH_RUNTIME_RESERVED_MEMORY_BYTES,
   });
 }
