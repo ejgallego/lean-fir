@@ -296,8 +296,8 @@ theorem ResidentArrayObjectRel.writeLogicalSizeRaw
   exact readBefore
 
 /-- Unique in-place push first initializes the spare slot and only then makes
-it live. The composed local theorem therefore never admits an uninitialized
-semantic child. -/
+ it live. The composed local theorem therefore never exposes an uninitialized
+ semantic child. -/
 theorem ResidentArrayObjectRel.pushElementInPlaceRaw
     {state : MemoryState} {witness : RefinementWitness} {address : Word32}
     {elements : Array Value} {capacity : Nat} {header : Header}

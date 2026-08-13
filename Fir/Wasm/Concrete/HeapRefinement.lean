@@ -668,8 +668,8 @@ theorem ResidentArrayObjectRel.readElementBorrowed_outOfBounds
   rw [related.logicalSize]
 
 /-- Cell-level resident Array relation. This keeps the semantic identity,
-capacity, reference count, persistence flag, and liveness together without
-admitting ordinary opaque objects. -/
+ capacity, reference count, persistence flag, and liveness together while
+ excluding ordinary opaque objects. -/
 inductive ResidentArrayCellRel (state : MemoryState)
     (witness : RefinementWitness) (address : Word32) : HeapCell → Prop where
   | array {elements : Array Value} {capacity : Nat} {header : Header} {cell : HeapCell}
