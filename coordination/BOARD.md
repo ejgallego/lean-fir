@@ -15,6 +15,38 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W7-LAZY-CACHE-LEAN-ZIP-PACKAGES`.
+- Integration owner: `root`, consuming the wasm-gen slice on
+  `wasm/generation`. The branch was based directly on accepted `main` at
+  `0ebc8b42`, with raw functional prefix `85022516`, Level-1 functional head
+  `2cb6dfee`, and clean ready mailbox `9cb30157`.
+- Runtime protocol: object-valued compiler constants remain at their ordinary
+  lazy use sites. A cold cache publication advances a private persistent heap
+  floor, and `fir_heap_rewind` clamps scratch rewinds to that floor. The former
+  eager closure walk remains available only through APIs explicitly named
+  unsafe for diagnostic use; production raw and Level-1 packages use ordinary
+  lazy linking.
+- Packages: raw DEFLATE levels 1 through 10 and the migrated Level-1 entry are
+  zero-import modules with module-owned memory, one application entry, four
+  arena controls, and memory. Raw retains 574 source functions and 5,265
+  classified helpers in 1,753,527 bytes; Level-1 retains 324 source functions
+  and 1,552 helpers in 508,708 bytes. Removing eager initialization reduced
+  Level-1 by 3,076 base bytes and 2,259 complete bytes.
+- Acceptance: Lean Beam reports zero diagnostics for the edited runtime/linker
+  modules. Node and Chrome package smokes prove monotonic cold publication and
+  exactly flat immediate warm rewinds. Native/Wasm raw equality plus independent
+  inflate passes five inputs at all ten levels; Level-1 equality passes five
+  inputs. `git diff --check`, complete `make check`, all 3,144 Talos jobs, and
+  the deterministic artifact gate pass. The root gate covers 125 harness
+  tests, 676 source cases, 9 direct-machine cases, a 676-case native/LCNF/V8
+  triangle, 685 unique cases, and 2,037/2,037 equal comparisons.
+- Result: `main` accepts the clean W7 stack through mailbox head `9cb30157`.
+  W6 proves the stable cache-floor behavior independently. W7 next applies the
+  already-characterized constant-time resident Array indexing optimization,
+  then republishes packages whose exact bytes change.
+
+## Latest completed integration lease
+
 - Milestone: `W6-RESIDUAL-STRUCTURED-VALIDATION`.
 - Integration owner: `wasm-proof`, continuing the user-authorized integration
   lease. The accepted stack is based directly on `main` at `a6f4510e`, with
