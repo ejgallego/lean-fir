@@ -339,6 +339,24 @@ function fixedWidthScalarValue(scalarKind, value) {
     ));
 
   const boxedUInt8Schema = { boxed: { scalar: { bits: { width: 8 } } } };
+  const boxedBoolSchema = { boxed: { scalar: "bool" } };
+  assert.deepStrictEqual(
+    semanticDatum(
+      boxedBoolSchema,
+      { kind: "tagged", payload: 1n },
+      host,
+      "tagged boxed Bool",
+      validationExternals,
+    ),
+    { bool: { value: true } },
+  );
+  assert.throws(() => semanticDatum(
+    boxedBoolSchema,
+    { kind: "tagged", payload: 2n },
+    host,
+    "out-of-range boxed Bool",
+    validationExternals,
+  ));
   assert.deepStrictEqual(
     semanticDatum(
       boxedUInt8Schema,

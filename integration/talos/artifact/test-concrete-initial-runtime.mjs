@@ -59,6 +59,49 @@ assert.equal(header.bytes, 80);
 assert.equal(header.rc, 3);
 assert.deepStrictEqual(host.objectJson(address, header), runtime.heap[0].object);
 
+function boxedRuntime(scalarKind, value) {
+  return {
+    nextLocation: 1,
+    heap: [{
+      location: 0,
+      rc: 1,
+      persistent: false,
+      live: true,
+      object: { kind: "boxed", scalarKind, value },
+    }],
+  };
+}
+
+for (const [scalarKind, value, expectedBits] of [
+  ["uint8", { kind: "scalar", scalar: { kind: "uint8", value: "255" } }, 255n],
+  ["float", {
+    kind: "scalar",
+    scalar: { kind: "float", value: FLOAT64_NAN_PAYLOAD.toString() },
+  }, FLOAT64_NAN_PAYLOAD],
+]) {
+  const boxedHost = new ConcreteHost([], boxedRuntime(scalarKind, value));
+  const boxedAddress = boxedHost.locationAddresses.get(0);
+  const boxedHeader = boxedHost.readHeader(boxedAddress);
+  assert.equal(boxedHeader.kind, 3);
+  assert.equal(boxedHeader.rc, 1);
+  assert.deepStrictEqual(
+    boxedHost.decode(
+      scalarKind,
+      boxedHost.unbox({ scalar: scalarKind }, [boxedAddress]),
+    ),
+    { kind: "scalar", scalarKind, value: expectedBits },
+  );
+}
+
+assert.throws(() => new ConcreteHost([], boxedRuntime(
+  "uint8",
+  { kind: "scalar", scalar: { kind: "uint16", value: "255" } },
+)), /payload kind mismatch/);
+assert.throws(() => new ConcreteHost([], boxedRuntime(
+  "float32",
+  { kind: "scalar", scalar: { kind: "float32", value: "4294967296" } },
+)), /out of float32 range/);
+
 // A constructor slot has no runtime tag of its own. Track the physical kind
 // supplied by the latest mutation so an object-only slot can subsequently hold
 // a tagged value and still be decoded faithfully.
@@ -153,4 +196,4 @@ assert.throws(() => new ConcreteHost([], initialRuntime([
   { width: 2, offset: 0, value: { kind: "float", value: "01" } },
 ])), /must use a canonical unsigned decimal string/);
 
-console.log("PASS concrete packed initial-runtime constructors");
+console.log("PASS concrete packed constructors and boxed initial runtime");

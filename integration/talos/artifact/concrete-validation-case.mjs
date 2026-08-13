@@ -20,6 +20,7 @@ import {
 
 const SUPPORTED_INITIAL_OBJECTS = new Set([
   "ctor",
+  "boxed",
   "integer",
   "natural",
   "string",
@@ -142,6 +143,11 @@ function semanticObject(host, location) {
       return { kind: "integer", value: BigInt(object.value) };
     case "string":
       return { kind: "string", value: object.value };
+    case "boxed": {
+      const value = decodedValueJson(object.value);
+      const scalarKind = value.kind === "usize" ? "usize" : value.scalarKind;
+      return { kind: "boxed", scalarKind, value };
+    }
     default:
       throw new Error(`unsupported concrete validation object kind ${object.kind}`);
   }

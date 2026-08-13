@@ -3105,6 +3105,7 @@ private def constructorFieldKind : ValidationSchema → Except String Constructo
   | _ => return .object
 
 private def boxedScalarType : ValidationSchema → Except String Expr
+  | .bool => return LCNF.ImpureType.uint8
   | .usize => return LCNF.ImpureType.usize
   | .bits 8 => return LCNF.ImpureType.uint8
   | .bits 16 => return LCNF.ImpureType.uint16
@@ -3115,6 +3116,8 @@ private def boxedScalarType : ValidationSchema → Except String Expr
   | schema => throw s!"schema {repr schema} is not a boxable scalar"
 
 private def boxedScalarValue : ValidationSchema → ValidationDatum → Except String Value
+  | .bool, .bool value =>
+      return .scalar (.uint8 (if value then 1 else 0))
   | .usize, .usize value => return .usize value
   | .bits 8, .bits 8 value => return .scalar (.uint8 value.toUInt8)
   | .bits 16, .bits 16 value => return .scalar (.uint16 value.toUInt16)

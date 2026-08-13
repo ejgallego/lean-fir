@@ -432,6 +432,41 @@ export class ConcreteHost {
           bytes,
         };
       }
+      case "boxed": {
+        const kind = object.scalarKind;
+        assert.ok(SCALAR_TYPE_NAMES.has(kind),
+          `unsupported concrete initial boxed scalar kind: ${kind}`);
+        assert.ok(object.value && typeof object.value === "object",
+          "initial boxed scalar payload must be a value");
+        let payload;
+        if (kind === "usize") {
+          assert.equal(object.value.kind, "usize",
+            "initial boxed USize must contain a USize value");
+          payload = BigInt(object.value.value);
+          assert.ok(payload >= 0n && payload < (1n << 64n),
+            "initial boxed USize payload is out of range");
+        } else {
+          assert.equal(object.value.kind, "scalar",
+            "initial boxed scalar must contain a scalar value");
+          assert.equal(object.value.scalar?.kind, kind,
+            "initial boxed scalar payload kind mismatch");
+          payload = scalarBits(
+            kind,
+            object.value.scalar.value,
+            `initial boxed ${kind} scalar`,
+          );
+        }
+        return {
+          kind: KIND.boxed,
+          payloadBytes: SLOT_BYTES,
+          auxiliaries: {
+            aux0: this.boxedScalarCode(kind),
+            aux1: ["uint64", "usize", "float"].includes(kind) ? 8 : 4,
+          },
+          descriptor: { kind: "boxed", scalarKind: kind },
+          payload,
+        };
+      }
       default:
         throw new Error(`unsupported concrete initial-runtime heap object: ${object.kind}`);
     }
@@ -548,6 +583,8 @@ export class ConcreteHost {
       } else if (cell.object.kind === "string") {
         new Uint8Array(this.buffer, address + HEADER_BYTES, layout.bytes.length)
           .set(layout.bytes);
+      } else if (cell.object.kind === "boxed") {
+        this.writeU64(address + HEADER_BYTES, layout.payload);
       }
       const header = this.readHeader(address);
       this.writeHeader(address, {

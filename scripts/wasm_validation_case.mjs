@@ -27,6 +27,7 @@ function jsonInteger(value, context) {
 }
 
 function boxedScalarKind(schema, context) {
+  if (schema === "bool") return "uint8";
   if (schema === "usize") return "usize";
   if (schema === "float32") return "float32";
   if (schema === "float64") return "float";

@@ -144,6 +144,31 @@ def largeNat : Nat :=
 def idNatList (xs : List Nat) : List Nat :=
   xs
 
+def idUInt8List (xs : List UInt8) : List UInt8 :=
+  xs
+
+def firstUInt8List : List UInt8 → UInt8
+  | value :: _ => value
+  | [] => 0
+
+def firstBoolList : List Bool → Bool
+  | value :: _ => value
+  | [] => false
+
+def firstFloatList : List Float → Float
+  | value :: _ => value
+  | [] => Float.ofBits 0
+
+def optionBoolValue : Option Bool → Bool
+  | some value => value
+  | none => false
+
+def someUInt64 (value : UInt64) : Option UInt64 :=
+  some value
+
+def okFloat (value : Float) : Except String Float :=
+  .ok value
+
 def classifyNatList (xs : List Nat) : UInt64 :=
   match xs with
   | [] => 0
@@ -2554,6 +2579,18 @@ def Case.descriptor (validationCase : Case) : CaseDescriptor := {
 private def natListDatum (xs : List Nat) : ValidationDatum :=
   .seq (xs.toArray.map .nat)
 
+private def uint8ListDatum (xs : List UInt8) : ValidationDatum :=
+  .seq (xs.toArray.map fun value => .bits 8 (UInt64.ofNat value.toNat))
+
+private def boolListDatum (xs : List Bool) : ValidationDatum :=
+  .seq (xs.toArray.map .bool)
+
+private def floatListDatum (xs : List Float) : ValidationDatum :=
+  .seq (xs.toArray.map fun value => .bits 64 value.toBits)
+
+private def genericContainerFloat : Float :=
+  Float.ofBits 0x7ff8123456789abc
+
 private def byteArrayDatum (value : ByteArray) : ValidationDatum :=
   .bytes (value.data.map (UInt8.toNat ·))
 
@@ -3982,6 +4019,85 @@ private def preConversionCases : Array Case := #[
     requiredLcnfForms := #["inc", "return"]
     requiredExecutedLcnfForms := #["inc", "return"]
     provenance := firProvenance "Recursive value round-trip containing a heap natural" },
+  { id := "generic-uint8-list-roundtrip"
+    entry := ``Source.idUInt8List
+    args := #[uint8ListDatum [0, 127, 255]]
+    argSchemas := #[.seq (.boxed (.bits 8))]
+    resultSchema := .seq (.boxed (.bits 8))
+    native := fun _ => uint8ListDatum (Source.idUInt8List [0, 127, 255])
+    tags := #["quick", "constructor", "list", "generic", "boxed", "uint8", "roundtrip"]
+    requiredLcnfForms := #["inc", "return"]
+    requiredExecutedLcnfForms := #["inc", "return"]
+    provenance := firProvenance
+      "Round-trip UInt8 through List's generic object-valued head field" },
+  { id := "generic-uint8-list-head"
+    entry := ``Source.firstUInt8List
+    args := #[uint8ListDatum [255, 1]]
+    argSchemas := #[.seq (.boxed (.bits 8))]
+    resultSchema := .bits 8
+    native := fun _ => .bits 8 (UInt64.ofNat (Source.firstUInt8List [255, 1]).toNat)
+    tags := #["quick", "constructor", "list", "generic", "boxed", "uint8", "projection"]
+    requiredLcnfForms := #["cases", "oproj", "unbox", "return"]
+    requiredExecutedLcnfForms := #["cases", "oproj", "unbox", "return"]
+    provenance := firProvenance
+      "Project and unbox a tagged UInt8 from List's generic head field" },
+  { id := "generic-bool-list-head"
+    entry := ``Source.firstBoolList
+    args := #[boolListDatum [true, false]]
+    argSchemas := #[.seq (.boxed .bool)]
+    resultSchema := .bool
+    native := fun _ => .bool (Source.firstBoolList [true, false])
+    tags := #["quick", "constructor", "list", "generic", "boxed", "bool", "projection"]
+    requiredLcnfForms := #["cases", "oproj", "unbox", "return"]
+    requiredExecutedLcnfForms := #["cases", "oproj", "unbox", "return"]
+    provenance := firProvenance
+      "Project and unbox a Boolean through the generic UInt8 object path" },
+  { id := "generic-float-list-head"
+    entry := ``Source.firstFloatList
+    args := #[floatListDatum [genericContainerFloat]]
+    argSchemas := #[.seq (.boxed .float64)]
+    resultSchema := .float64
+    native := fun _ => float64Datum (Source.firstFloatList [genericContainerFloat])
+    tags := #["quick", "constructor", "list", "generic", "boxed", "float", "projection",
+      "bit-exact"]
+    requiredLcnfForms := #["cases", "oproj", "unbox", "return"]
+    requiredExecutedLcnfForms := #["cases", "oproj", "unbox", "return"]
+    provenance := firProvenance
+      "Project a heap-only bit-exact Float box from List's generic head field" },
+  { id := "generic-option-bool-read"
+    entry := ``Source.optionBoolValue
+    args := #[.ctor "Option.some" 1 #[.bool true]]
+    argSchemas := #[.ctor "Option.some" 1 #[.boxed .bool]]
+    resultSchema := .bool
+    native := fun _ => .bool (Source.optionBoolValue (some true))
+    tags := #["quick", "constructor", "option", "generic", "boxed", "bool", "projection"]
+    requiredLcnfForms := #["cases", "oproj", "unbox", "return"]
+    requiredExecutedLcnfForms := #["cases", "oproj", "unbox", "return"]
+    provenance := firProvenance
+      "Read a Boolean from Option's generic object-valued payload field" },
+  { id := "generic-option-uint64-build"
+    entry := ``Source.someUInt64
+    args := #[.bits 64 0xffffffffffffffff]
+    argSchemas := #[.bits 64]
+    resultSchema := .ctor "Option.some" 1 #[.boxed (.bits 64)]
+    native := fun _ => .ctor "Option.some" 1 #[.bits 64 0xffffffffffffffff]
+    tags := #["quick", "constructor", "option", "generic", "boxed", "uint64", "heap"]
+    requiredLcnfForms := #["box", "ctor", "return"]
+    requiredExecutedLcnfForms := #["box", "ctor", "return"]
+    provenance := firProvenance
+      "Construct Option.some with a heap-boxed maximal UInt64 payload" },
+  { id := "generic-except-float-build"
+    entry := ``Source.okFloat
+    args := #[float64Datum genericContainerFloat]
+    argSchemas := #[.float64]
+    resultSchema := .ctor "Except.ok" 1 #[.boxed .float64]
+    native := fun _ => .ctor "Except.ok" 1 #[float64Datum genericContainerFloat]
+    tags := #["quick", "constructor", "except", "generic", "boxed", "float", "heap",
+      "bit-exact"]
+    requiredLcnfForms := #["box", "ctor", "return"]
+    requiredExecutedLcnfForms := #["box", "ctor", "return"]
+    provenance := firProvenance
+      "Construct Except.ok with a heap-only bit-exact Float payload" },
   { id := "nat-list-nonempty"
     entry := ``Source.classifyNatList
     args := #[natListDatum [0, Source.largeNat, 42]]
