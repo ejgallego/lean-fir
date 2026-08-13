@@ -573,6 +573,7 @@ theorem heapRel_markPersistentLocationFuelBoth
                 | ctor tag fields usizes scalars => exact fields
                 | closure fixed => exact fixed
                 | boxed value => exact .cons value .nil
+                | array elements => exact elements
                 | string value | natural value | integer value
                 | byteArray value | «opaque» value => exact .nil
               have ownedValues := ownedValuesOf objects
@@ -1136,6 +1137,8 @@ theorem heapObjectRel_mono
   | natural value => exact .natural value
   | integer value => exact .integer value
   | byteArray value => exact .byteArray value
+  | array elements =>
+      exact .array (arrayRel_mono (valueRel_mono extension) elements)
   | «opaque» typeName => exact .opaque typeName
 
 theorem heapCellRel_mono
@@ -1153,6 +1156,7 @@ theorem heapObjectRel_ownedValues
   | ctor tag objects usizes scalars => exact objects
   | closure fixed => exact fixed
   | boxed value => exact .cons value .nil
+  | array elements => exact elements
   | string value | natural value | integer value | byteArray value
   | «opaque» value => exact .nil
 
@@ -3400,6 +3404,11 @@ theorem ShadowRuntimeRel.getConstructorBoth_related
                 leftLiveEq, rightLiveEq, leftObjectEq, rightObjectEq,
                 Bind.bind, Except.bind]
               exact .error (.same _)
+          | array elements =>
+              simp [getConstructor, getLiveCell, leftFound, rightFound,
+                leftLiveEq, rightLiveEq, leftObjectEq, rightObjectEq,
+                Bind.bind, Except.bind]
+              exact .error (.same _)
           | byteArray value =>
               simp [getConstructor, getLiveCell, leftFound, rightFound,
                 leftLiveEq, rightLiveEq, leftObjectEq, rightObjectEq,
@@ -3775,6 +3784,10 @@ theorem ShadowRuntimeRel.getObjectFieldBoth_of_related
               simp [getObjectField, getConstructor, getLiveCell,
                 leftFound, leftLiveEq, leftObjectEq,
                 Bind.bind, Except.bind] at sourceRead
+          | array elements =>
+              simp [getObjectField, getConstructor, getLiveCell,
+                leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
           | byteArray value =>
               simp [getObjectField, getConstructor, getLiveCell,
                 leftFound, leftLiveEq, leftObjectEq,
@@ -3979,6 +3992,10 @@ theorem ShadowRuntimeRel.getUSizeSlotBoth_of_related
               simp [getUSizeSlot, getConstructor, getLiveCell,
                 leftFound, leftLiveEq, leftObjectEq,
                 Bind.bind, Except.bind] at sourceRead
+          | array elements =>
+              simp [getUSizeSlot, getConstructor, getLiveCell,
+                leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
           | byteArray value =>
               simp [getUSizeSlot, getConstructor, getLiveCell,
                 leftFound, leftLiveEq, leftObjectEq,
@@ -4162,6 +4179,10 @@ theorem ShadowRuntimeRel.getScalarFieldBoth_of_related
                 leftFound, leftLiveEq, leftObjectEq,
                 Bind.bind, Except.bind] at sourceRead
           | integer value =>
+              simp [getScalarField, getConstructor, getLiveCell,
+                leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+          | array elements =>
               simp [getScalarField, getConstructor, getLiveCell,
                 leftFound, leftLiveEq, leftObjectEq,
                 Bind.bind, Except.bind] at sourceRead
@@ -4377,6 +4398,9 @@ theorem ShadowRuntimeRel.unboxBoth_of_related
               simp [unbox, getLiveCell, leftFound, leftLiveEq, leftObjectEq,
                 Bind.bind, Except.bind] at sourceRead
           | integer value =>
+              simp [unbox, getLiveCell, leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+          | array elements =>
               simp [unbox, getLiveCell, leftFound, leftLiveEq, leftObjectEq,
                 Bind.bind, Except.bind] at sourceRead
           | byteArray value =>
@@ -5143,6 +5167,11 @@ theorem ShadowRuntimeRel.setObjectFieldBoth_related
                 getLiveCell, leftFound, rightFound, leftLiveEq, rightLiveEq,
                 leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
               exact .error (.same _)
+          | array elements =>
+              simp [setObjectField, modifyConstructor, getConstructor,
+                getLiveCell, leftFound, rightFound, leftLiveEq, rightLiveEq,
+                leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
+              exact .error (.same _)
           | byteArray value =>
               simp [setObjectField, modifyConstructor, getConstructor,
                 getLiveCell, leftFound, rightFound, leftLiveEq, rightLiveEq,
@@ -5542,6 +5571,12 @@ theorem ShadowRuntimeRel.setUSizeSlotBoth_related
                     rightLiveEq, leftObjectEq, rightObjectEq, Bind.bind,
                     Except.bind]
                   exact .error (.same _)
+              | array elements =>
+                  simp [setUSizeSlot, modifyConstructor, getConstructor,
+                    getLiveCell, leftFound, rightFound, leftLiveEq,
+                    rightLiveEq, leftObjectEq, rightObjectEq, Bind.bind,
+                    Except.bind]
+                  exact .error (.same _)
               | byteArray value =>
                   simp [setUSizeSlot, modifyConstructor, getConstructor,
                     getLiveCell, leftFound, rightFound, leftLiveEq,
@@ -5857,6 +5892,12 @@ theorem ShadowRuntimeRel.setScalarFieldBoth_related
                     rightLiveEq, leftObjectEq, rightObjectEq, Bind.bind,
                     Except.bind]
                   exact .error (.same _)
+              | array elements =>
+                  simp [setScalarField, modifyConstructor, getConstructor,
+                    getLiveCell, leftFound, rightFound, leftLiveEq,
+                    rightLiveEq, leftObjectEq, rightObjectEq, Bind.bind,
+                    Except.bind]
+                  exact .error (.same _)
               | byteArray value =>
                   simp [setScalarField, modifyConstructor, getConstructor,
                     getLiveCell, leftFound, rightFound, leftLiveEq,
@@ -6094,6 +6135,11 @@ theorem ShadowRuntimeRel.setTagBoth_related
                 leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
               exact .error (.same _)
           | integer value =>
+              simp [setTag, modifyConstructor, getConstructor, getLiveCell,
+                leftFound, rightFound, leftLiveEq, rightLiveEq,
+                leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
+              exact .error (.same _)
+          | array elements =>
               simp [setTag, modifyConstructor, getConstructor, getLiveCell,
                 leftFound, rightFound, leftLiveEq, rightLiveEq,
                 leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
@@ -6455,6 +6501,11 @@ theorem ShadowRuntimeRel.takeClosureApplicationBoth_related
             Bind.bind, Except.bind, MonadExceptOf.throw,
             instMonadExceptOfExcept] using expectedClosureRelated
       | integer value =>
+          simpa [takeClosureApplication, getLiveCell, leftFound, rightFound,
+            leftLive, rightLive, leftObjectEq, rightObjectEq,
+            Bind.bind, Except.bind, MonadExceptOf.throw,
+            instMonadExceptOfExcept] using expectedClosureRelated
+      | array elements =>
           simpa [takeClosureApplication, getLiveCell, leftFound, rightFound,
             leftLive, rightLive, leftObjectEq, rightObjectEq,
             Bind.bind, Except.bind, MonadExceptOf.throw,
@@ -8607,6 +8658,9 @@ theorem ShadowRuntimeRel.resetBoth_of_related
               | integer value =>
                   simp [reset, leftGet, leftSharedEq, leftObjectEq,
                     Bind.bind, Except.bind] at sourceEffect
+              | array elements =>
+                  simp [reset, leftGet, leftSharedEq, leftObjectEq,
+                    Bind.bind, Except.bind] at sourceEffect
               | byteArray value =>
                   simp [reset, leftGet, leftSharedEq, leftObjectEq,
                     Bind.bind, Except.bind] at sourceEffect
@@ -8989,6 +9043,11 @@ theorem ShadowRuntimeRel.resetBoth_related
                     Bind.bind, Except.bind]
                   exact .error (.same _)
               | integer value =>
+                  simp [reset, leftGet, rightGet, leftSharedEq,
+                    rightSharedEq, leftObjectEq, rightObjectEq,
+                    Bind.bind, Except.bind]
+                  exact .error (.same _)
+              | array elements =>
                   simp [reset, leftGet, rightGet, leftSharedEq,
                     rightSharedEq, leftObjectEq, rightObjectEq,
                     Bind.bind, Except.bind]
@@ -10139,6 +10198,8 @@ theorem ShadowRuntimeRel.reuseBoth_of_related
               simp [leftObjectEq] at source
           | integer value =>
               simp [leftObjectEq] at source
+          | array elements =>
+              simp [leftObjectEq] at source
           | byteArray value =>
               simp [leftObjectEq] at source
           | «opaque» value =>
@@ -10325,6 +10386,14 @@ theorem ShadowRuntimeRel.reuseBoth_related
                     subst sourceFault
                     exact .error (.same _)
                 | integer value =>
+                    simp [reuse, arity, rightArity, getLiveCell,
+                      leftFound, rightFound, leftLiveEq, rightLiveEq,
+                      leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
+                      at sourceEffectEq ⊢
+                    have faultEq := Except.error.inj sourceEffectEq
+                    subst sourceFault
+                    exact .error (.same _)
+                | array elements =>
                     simp [reuse, arity, rightArity, getLiveCell,
                       leftFound, rightFound, leftLiveEq, rightLiveEq,
                       leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
