@@ -12260,7 +12260,7 @@ theorem ConcreteStructuredCodeFocus.advance_constructorTag
     (functionSpec :
       ConcreteSupportedFunction program context functionCode sourceModule
         sourceFunction targetModule hosts)
-    {externals : ExternalImpl}
+    {externals : ExternalImpl} {labels : List Lean.FVarId}
     {facts : ReuseCapacityFacts} {remainingBytes : Nat}
     {sourceRuntime nextRuntime entryRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -12276,7 +12276,7 @@ theorem ConcreteStructuredCodeFocus.advance_constructorTag
       SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
         continuation)
     (related :
-      ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
         sourceRuntime sourceEnv code targetStore targetLocals targetCode witness
         source target)
     (invariant :
@@ -12291,7 +12291,7 @@ theorem ConcreteStructuredCodeFocus.advance_constructorTag
         FinitePath
             (StructuredWasmStep targetModule.wasmModule hosts.env)
             2 target targetAfter ∧
-          ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+          ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
               nextRuntime sourceEnv continuation nextStore targetLocals
               targetRest witness sourceAfter targetAfter ∧
             ReuseCapacityEntryRelativeFrame
@@ -12340,7 +12340,7 @@ theorem ConcreteStructuredCodeFocus.advance_constructorTag
             ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
               related.stateRelated.2.2⟩
           have effectStep :
-              EffectStepSimulates context sourceModule sourceFunction []
+              EffectStepSimulates context sourceModule sourceFunction labels
                 targetModule.wasmModule hosts.env sourceRuntime nextRuntime
                 sourceEnv (.setTag objectId tag continuation) continuation
                 ([.localGet objectIndex, .call callIndex] ++ targetCore)
@@ -12429,7 +12429,7 @@ theorem ConcreteStructuredCodeFocus.advance_constructorTag
                 resultCount operation
           have nextFocus :
               ConcreteStructuredCodeFocus context sourceModule sourceFunction
-                [] nextRuntime sourceEnv continuation
+                labels nextRuntime sourceEnv continuation
                 (replaceHeap targetStore heap) targetLocals targetRest witness
                 sourceAfter targetAfter := {
             sourceProgramEq := by
@@ -12465,7 +12465,7 @@ theorem ConcreteStructuredCodeFocus.advance_objectFieldFVar
     (functionSpec :
       ConcreteSupportedFunction program context functionCode sourceModule
         sourceFunction targetModule hosts)
-    {externals : ExternalImpl}
+    {externals : ExternalImpl} {labels : List Lean.FVarId}
     {facts : ReuseCapacityFacts} {remainingBytes : Nat}
     {sourceRuntime nextRuntime entryRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -12481,7 +12481,7 @@ theorem ConcreteStructuredCodeFocus.advance_objectFieldFVar
       SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
         continuation)
     (related :
-      ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
         sourceRuntime sourceEnv code targetStore targetLocals targetCode witness
         source target)
     (invariant :
@@ -12496,7 +12496,7 @@ theorem ConcreteStructuredCodeFocus.advance_objectFieldFVar
         FinitePath
             (StructuredWasmStep targetModule.wasmModule hosts.env)
             3 target targetAfter ∧
-          ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+          ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
               nextRuntime sourceEnv continuation nextStore targetLocals
               targetRest witness sourceAfter targetAfter ∧
             ReuseCapacityEntryRelativeFrame
@@ -12577,7 +12577,7 @@ theorem ConcreteStructuredCodeFocus.advance_objectFieldFVar
                 ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
                   related.stateRelated.2.2⟩
               have effectStep :
-                  EffectStepSimulates context sourceModule sourceFunction []
+                  EffectStepSimulates context sourceModule sourceFunction labels
                     targetModule.wasmModule hosts.env sourceRuntime nextRuntime
                     sourceEnv
                     (.oset objectId index (.fvar fieldId) continuation)
@@ -12688,7 +12688,7 @@ theorem ConcreteStructuredCodeFocus.advance_objectFieldFVar
                     inBounds contracted parameterCount resultCount operation
               have nextFocus :
                   ConcreteStructuredCodeFocus context sourceModule
-                    sourceFunction [] nextRuntime sourceEnv continuation
+                    sourceFunction labels nextRuntime sourceEnv continuation
                     (replaceHeap targetStore heap) targetLocals targetRest witness
                     sourceAfter targetAfter := {
                 sourceProgramEq := by
@@ -12728,7 +12728,7 @@ theorem ConcreteStructuredCodeFocus.advance_objectFieldErased
     (functionSpec :
       ConcreteSupportedFunction program context functionCode sourceModule
         sourceFunction targetModule hosts)
-    {externals : ExternalImpl}
+    {externals : ExternalImpl} {labels : List Lean.FVarId}
     {facts : ReuseCapacityFacts} {remainingBytes : Nat}
     {sourceRuntime nextRuntime entryRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -12744,7 +12744,7 @@ theorem ConcreteStructuredCodeFocus.advance_objectFieldErased
       SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
         continuation)
     (related :
-      ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
         sourceRuntime sourceEnv code targetStore targetLocals targetCode witness
         source target)
     (invariant :
@@ -12759,7 +12759,7 @@ theorem ConcreteStructuredCodeFocus.advance_objectFieldErased
         FinitePath
             (StructuredWasmStep targetModule.wasmModule hosts.env)
             3 target targetAfter ∧
-          ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+          ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
               nextRuntime sourceEnv continuation nextStore targetLocals
               targetRest witness sourceAfter targetAfter ∧
             ReuseCapacityEntryRelativeFrame
@@ -12831,7 +12831,7 @@ theorem ConcreteStructuredCodeFocus.advance_objectFieldErased
             ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
               related.stateRelated.2.2⟩
           have effectStep :
-              EffectStepSimulates context sourceModule sourceFunction []
+              EffectStepSimulates context sourceModule sourceFunction labels
                 targetModule.wasmModule hosts.env sourceRuntime nextRuntime
                 sourceEnv (.oset objectId index .erased continuation)
                 continuation
@@ -12932,7 +12932,7 @@ theorem ConcreteStructuredCodeFocus.advance_objectFieldErased
                 contracted parameterCount resultCount operationZero
           have nextFocus :
               ConcreteStructuredCodeFocus context sourceModule sourceFunction
-                [] nextRuntime sourceEnv continuation
+                labels nextRuntime sourceEnv continuation
                 (replaceHeap targetStore heap) targetLocals targetRest witness
                 sourceAfter targetAfter := {
             sourceProgramEq := by
@@ -12967,7 +12967,7 @@ theorem ConcreteStructuredCodeFocus.advance_usizeField
     (functionSpec :
       ConcreteSupportedFunction program context functionCode sourceModule
         sourceFunction targetModule hosts)
-    {externals : ExternalImpl}
+    {externals : ExternalImpl} {labels : List Lean.FVarId}
     {facts : ReuseCapacityFacts} {remainingBytes : Nat}
     {sourceRuntime nextRuntime entryRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -12983,7 +12983,7 @@ theorem ConcreteStructuredCodeFocus.advance_usizeField
       SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
         continuation)
     (related :
-      ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
         sourceRuntime sourceEnv code targetStore targetLocals targetCode witness
         source target)
     (invariant :
@@ -12998,7 +12998,7 @@ theorem ConcreteStructuredCodeFocus.advance_usizeField
         FinitePath
             (StructuredWasmStep targetModule.wasmModule hosts.env)
             3 target targetAfter ∧
-          ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+          ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
               nextRuntime sourceEnv continuation nextStore targetLocals
               targetRest witness sourceAfter targetAfter ∧
             ReuseCapacityEntryRelativeFrame
@@ -13064,7 +13064,7 @@ theorem ConcreteStructuredCodeFocus.advance_usizeField
                     ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
                       related.stateRelated.2.2⟩
                   have effectStep :
-                      EffectStepSimulates context sourceModule sourceFunction []
+                      EffectStepSimulates context sourceModule sourceFunction labels
                         targetModule.wasmModule hosts.env sourceRuntime
                         nextRuntime sourceEnv
                         (.uset objectId index fieldId continuation) continuation
@@ -13165,7 +13165,7 @@ theorem ConcreteStructuredCodeFocus.advance_usizeField
                         inBounds contracted parameterCount resultCount operation
                   have nextFocus :
                       ConcreteStructuredCodeFocus context sourceModule
-                        sourceFunction [] nextRuntime sourceEnv continuation
+                        sourceFunction labels nextRuntime sourceEnv continuation
                         (replaceHeap targetStore heap) targetLocals targetRest
                         witness sourceAfter targetAfter := {
                     sourceProgramEq := by
@@ -13205,7 +13205,7 @@ private theorem ConcreteStructuredCodeFocus.advance_scalarFieldOperation
     (functionSpec :
       ConcreteSupportedFunction program context functionCode sourceModule
         sourceFunction targetModule hosts)
-    {externals : ExternalImpl}
+    {externals : ExternalImpl} {labels : List Lean.FVarId}
     {facts : ReuseCapacityFacts} {remainingBytes : Nat}
     {sourceRuntime nextRuntime entryRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -13233,7 +13233,7 @@ private theorem ConcreteStructuredCodeFocus.advance_scalarFieldOperation
         (.sset objectId slotIndex byteOffset fieldId type continuation)
         continuation)
     (related :
-      ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
         sourceRuntime sourceEnv
         (.sset objectId slotIndex byteOffset fieldId type continuation)
         targetStore targetLocals
@@ -13241,10 +13241,10 @@ private theorem ConcreteStructuredCodeFocus.advance_scalarFieldOperation
           targetRest)
         witness source target)
     (continuationAdapted :
-      CodeAdaptedWithSuffix context sourceModule sourceFunction [] continuation
+      CodeAdaptedWithSuffix context sourceModule sourceFunction labels continuation
         targetRest)
     (coreAdapted :
-      CodeAdapted context sourceModule sourceFunction []
+      CodeAdapted context sourceModule sourceFunction labels
         (.sset objectId slotIndex byteOffset fieldId type continuation)
         ([.localGet objectIndex, .localGet fieldIndex, .call callIndex] ++
           targetCore))
@@ -13280,7 +13280,7 @@ private theorem ConcreteStructuredCodeFocus.advance_scalarFieldOperation
         FinitePath
             (StructuredWasmStep targetModule.wasmModule hosts.env)
             3 target targetAfter ∧
-          ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+          ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
               nextRuntime sourceEnv continuation nextStore targetLocals
               targetRest witness sourceAfter targetAfter ∧
             ReuseCapacityEntryRelativeFrame
@@ -13297,7 +13297,7 @@ private theorem ConcreteStructuredCodeFocus.advance_scalarFieldOperation
     ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
       related.stateRelated.2.2⟩
   have effectStep :
-      EffectStepSimulates context sourceModule sourceFunction []
+      EffectStepSimulates context sourceModule sourceFunction labels
         targetModule.wasmModule hosts.env sourceRuntime nextRuntime sourceEnv
         (.sset objectId slotIndex byteOffset fieldId type continuation)
         continuation
@@ -13387,7 +13387,7 @@ private theorem ConcreteStructuredCodeFocus.advance_scalarFieldOperation
         targetObjectLookup targetFieldLookup imported functionSpec.hostsSatisfy
         inBounds contracted parameterCount resultCount operation
   have nextFocus :
-      ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
         nextRuntime sourceEnv continuation (replaceHeap targetStore heap)
         targetLocals targetRest witness sourceAfter targetAfter := {
     sourceProgramEq := by simp [sourceAfter, related.sourceProgramEq]
@@ -13418,7 +13418,7 @@ theorem ConcreteStructuredCodeFocus.advance_scalarField
     (functionSpec :
       ConcreteSupportedFunction program context functionCode sourceModule
         sourceFunction targetModule hosts)
-    {externals : ExternalImpl}
+    {externals : ExternalImpl} {labels : List Lean.FVarId}
     {facts : ReuseCapacityFacts} {remainingBytes : Nat}
     {sourceRuntime nextRuntime entryRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -13434,7 +13434,7 @@ theorem ConcreteStructuredCodeFocus.advance_scalarField
       SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
         continuation)
     (related :
-      ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
         sourceRuntime sourceEnv code targetStore targetLocals targetCode witness
         source target)
     (invariant :
@@ -13449,7 +13449,7 @@ theorem ConcreteStructuredCodeFocus.advance_scalarField
         FinitePath
             (StructuredWasmStep targetModule.wasmModule hosts.env)
             3 target targetAfter ∧
-          ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+          ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
               nextRuntime sourceEnv continuation nextStore targetLocals
               targetRest witness sourceAfter targetAfter ∧
             ReuseCapacityEntryRelativeFrame
@@ -13475,7 +13475,7 @@ theorem ConcreteStructuredCodeFocus.advance_scalarField
       obtain ⟨targetCore, _targetSuffix, continuationCoreAdapted,
           _targetRestEq⟩ := continuationAdaptedSaved
       have coreAdapted :
-          CodeAdapted context sourceModule sourceFunction []
+          CodeAdapted context sourceModule sourceFunction labels
             (.sset objectId slotIndex byteOffset fieldId type continuation)
             ([.localGet objectIndex, .localGet fieldIndex, .call callIndex] ++
               targetCore) :=
@@ -17984,6 +17984,51 @@ inductive ConcreteStructuredCodeStepAdmission
         sourceEnv code continuation nextRuntime) :
       ConcreteStructuredCodeStepAdmission context externals expectedResult facts
         sourceRuntime sourceEnv 0 code
+  | constructorTag
+      {facts : ReuseCapacityFacts}
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {code continuation : Lean.Compiler.LCNF.Code .impure}
+      (supported : ConstructorTagEffectSupported context sourceRuntime
+        sourceEnv code continuation nextRuntime) :
+      ConcreteStructuredCodeStepAdmission context externals expectedResult facts
+        sourceRuntime sourceEnv 0 code
+  | objectFieldFVar
+      {facts : ReuseCapacityFacts}
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {code continuation : Lean.Compiler.LCNF.Code .impure}
+      (supported : ObjectFieldFVarEffectSupported context sourceRuntime
+        sourceEnv code continuation nextRuntime) :
+      ConcreteStructuredCodeStepAdmission context externals expectedResult facts
+        sourceRuntime sourceEnv 0 code
+  | objectFieldErased
+      {facts : ReuseCapacityFacts}
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {code continuation : Lean.Compiler.LCNF.Code .impure}
+      (supported : ObjectFieldErasedEffectSupported context sourceRuntime
+        sourceEnv code continuation nextRuntime) :
+      ConcreteStructuredCodeStepAdmission context externals expectedResult facts
+        sourceRuntime sourceEnv 0 code
+  | usizeField
+      {facts : ReuseCapacityFacts}
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {code continuation : Lean.Compiler.LCNF.Code .impure}
+      (supported : USizeFieldEffectSupported context sourceRuntime sourceEnv
+        code continuation nextRuntime) :
+      ConcreteStructuredCodeStepAdmission context externals expectedResult facts
+        sourceRuntime sourceEnv 0 code
+  | scalarField
+      {facts : ReuseCapacityFacts}
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {code continuation : Lean.Compiler.LCNF.Code .impure}
+      (supported : ScalarFieldEffectSupported context sourceRuntime sourceEnv
+        code continuation nextRuntime) :
+      ConcreteStructuredCodeStepAdmission context externals expectedResult facts
+        sourceRuntime sourceEnv 0 code
 
 /-- Ordinary increment admission already contains the successful semantic
 lookup and update for the current state.  Those facts construct the canonical
@@ -18042,6 +18087,99 @@ theorem OrdinaryDeleteEffectSupported.sourceEffectResult
       intro externals
       simp [executeStep, coreStep, objectLookup, updated]
 
+/-- Constructor-tag admission determines the canonical successful source
+effect step without retaining an execution certificate. -/
+theorem ConstructorTagEffectSupported.sourceEffectResult
+    {context : Fir.Wasm.Context}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {code continuation : Lean.Compiler.LCNF.Code .impure}
+    (supported : ConstructorTagEffectSupported context sourceRuntime sourceEnv
+      code continuation nextRuntime) :
+    SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
+      continuation := by
+  cases supported with
+  | setTag sourceRuntime nextRuntime sourceEnv objectId tag continuation
+      location cell semantic objectCompiled objectLookup updated found live
+      objectEq tagFits =>
+      intro externals
+      simp [executeStep, coreStep, objectLookup, updated]
+
+/-- FVar object-field admission determines the canonical successful source
+effect step; the physical operand remains a refinement consequence. -/
+theorem ObjectFieldFVarEffectSupported.sourceEffectResult
+    {context : Fir.Wasm.Context}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {code continuation : Lean.Compiler.LCNF.Code .impure}
+    (supported : ObjectFieldFVarEffectSupported context sourceRuntime sourceEnv
+      code continuation nextRuntime) :
+    SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
+      continuation := by
+  cases supported with
+  | oset sourceRuntime nextRuntime sourceEnv objectId fieldId index continuation
+      location cell semantic field fieldKind objectCompiled fieldCompiled
+      fieldObjectKind objectLookup fieldLookup updated found live objectEq
+      indexValid fieldKindAligned =>
+      intro externals
+      change evalArg sourceEnv (.fvar fieldId) = .ok field at fieldLookup
+      simp [executeStep, coreStep, objectLookup, fieldLookup, updated]
+
+/-- Erased object-field admission determines the canonical successful source
+effect step, including evaluation of the erased argument. -/
+theorem ObjectFieldErasedEffectSupported.sourceEffectResult
+    {context : Fir.Wasm.Context}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {code continuation : Lean.Compiler.LCNF.Code .impure}
+    (supported : ObjectFieldErasedEffectSupported context sourceRuntime
+      sourceEnv code continuation nextRuntime) :
+    SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
+      continuation := by
+  cases supported with
+  | oset sourceRuntime nextRuntime sourceEnv objectId index continuation
+      location cell semantic objectCompiled objectLookup updated found live
+      objectEq indexValid fieldKindAligned =>
+      intro externals
+      simp [executeStep, coreStep, evalArg, objectLookup, updated]
+
+/-- `USize` field admission determines the canonical successful source effect
+step; slot bounds are consumed only by the concrete refinement theorem. -/
+theorem USizeFieldEffectSupported.sourceEffectResult
+    {context : Fir.Wasm.Context}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {code continuation : Lean.Compiler.LCNF.Code .impure}
+    (supported : USizeFieldEffectSupported context sourceRuntime sourceEnv code
+      continuation nextRuntime) :
+    SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
+      continuation := by
+  cases supported with
+  | uset sourceRuntime nextRuntime sourceEnv objectId fieldId index continuation
+      location cell semantic field objectCompiled fieldCompiled objectLookup
+      fieldLookup updated found live objectEq slotStart slotEnd =>
+      intro externals
+      simp [executeStep, coreStep, objectLookup, fieldLookup, updated]
+
+/-- Packed-scalar field admission determines the canonical successful source
+effect step; descriptor/layout safety is used only to justify target memory. -/
+theorem ScalarFieldEffectSupported.sourceEffectResult
+    {context : Fir.Wasm.Context}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {code continuation : Lean.Compiler.LCNF.Code .impure}
+    (supported : ScalarFieldEffectSupported context sourceRuntime sourceEnv code
+      continuation nextRuntime) :
+    SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
+      continuation := by
+  cases supported with
+  | sset sourceRuntime nextRuntime sourceEnv objectId fieldId slotIndex
+      byteOffset type continuation location cell semantic field fieldKind
+      objectCompiled fieldCompiled objectLookup fieldLookup updated found live
+      objectEq layoutSafe =>
+      intro externals
+      simp [executeStep, coreStep, objectLookup, fieldLookup, updated]
+
 theorem ConcreteStructuredCodeStepAdmission.return_cases
     {context : Fir.Wasm.Context} {externals : ExternalImpl}
     {expectedResult : AbiKind}
@@ -18062,6 +18200,11 @@ theorem ConcreteStructuredCodeStepAdmission.return_cases
   | ordinaryIncrement supported => cases supported
   | ordinaryDecrement supported => cases supported
   | ordinaryDelete supported => cases supported
+  | constructorTag supported => cases supported
+  | objectFieldFVar supported => cases supported
+  | objectFieldErased supported => cases supported
+  | usizeField supported => cases supported
+  | scalarField supported => cases supported
 
 /-- Exhaustive inversion of an admitted `let` node.
 
@@ -18108,6 +18251,11 @@ theorem ConcreteStructuredCodeStepAdmission.let_cases
   | ordinaryIncrement supported => cases supported
   | ordinaryDecrement supported => cases supported
   | ordinaryDelete supported => cases supported
+  | constructorTag supported => cases supported
+  | objectFieldFVar supported => cases supported
+  | objectFieldErased supported => cases supported
+  | usizeField supported => cases supported
+  | scalarField supported => cases supported
 
 /-- Compatibility between an active generated function's result ABI and the
 optional ABI expected by its suspended caller. -/
@@ -22331,6 +22479,260 @@ theorem ConcreteStructuredCodePointwiseRel.advance_ordinaryDelete_of_step
   exact ⟨targetAfter, nextStore, targetRest, targetPath, sourceFramesEq,
     targetFramesEq, ⟨nextFocus, nextResources⟩⟩
 
+/-- Shared relation-level transport for a successful concrete mutation.
+
+The operation-specific theorem still derives both finite paths from source
+admission, generated code, and concrete refinement. This lemma only performs
+the common replacement of the computed source successor and reconstructs the
+resource-indexed continuation relation; it adds no certificate to admission. -/
+private theorem ConcreteStructuredCodePointwiseRel.advance_mutation_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode code continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime nextRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes targetCount : Nat}
+    {sourceEnv : Env}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredCodePointwiseRel program context functionCode
+      sourceModule sourceFunction targetModule hosts spec externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts 0 remainingBytes sourceRuntime sourceEnv code targetStore
+      targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (advanced :
+      ∃ computedAfter targetAfter nextStore targetRest,
+        FinitePath
+            (fun before after => executeStep externals before = .next after)
+            1 source computedAfter ∧
+          FinitePath
+              (StructuredWasmStep targetModule.wasmModule hosts.env)
+              targetCount target targetAfter ∧
+            ConcreteStructuredCodeFocus context sourceModule sourceFunction
+                labels nextRuntime sourceEnv continuation nextStore
+                targetLocals targetRest witness computedAfter targetAfter ∧
+              ReuseCapacityEntryRelativeFrame
+                (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+                  externals)
+                entryRuntime entryStore entryWitness facts remainingBytes
+                nextRuntime sourceEnv nextStore targetLocals witness ∧
+              computedAfter.joins = source.joins ∧
+                computedAfter.frames = source.frames ∧
+                  targetAfter.frames = target.frames) :
+    ∃ targetAfter nextStore targetRest,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetCount target targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames ∧
+        ConcreteStructuredCodeCoreRel program context sourceModule
+          sourceFunction externals labels entryRuntime entryStore entryWitness
+          functionResult callerExpectedResult facts remainingBytes nextRuntime
+          sourceEnv continuation nextStore targetLocals targetRest witness
+          sourceAfter targetAfter := by
+  obtain ⟨computedAfter, targetAfter, nextStore, targetRest, sourcePath,
+      targetPath, nextFocus, nextInvariant, _joinsEq, sourceFramesEq,
+      targetFramesEq⟩ := advanced
+  have computedStep :
+      executeStep externals source = .next computedAfter := by
+    cases sourcePath with
+    | cons head tail =>
+        cases tail
+        exact head
+  have sourceAfterEq : sourceAfter = computedAfter := by
+    rw [sourceStep] at computedStep
+    exact ExecResult.next.inj computedStep
+  subst computedAfter
+  have nextScope :
+      ConcreteStructuredResourceScope context sourceModule sourceFunction
+        externals entryRuntime entryStore entryWitness facts remainingBytes
+        nextRuntime sourceEnv nextStore targetLocals witness :=
+    ⟨nextInvariant, related.resources.current.2⟩
+  have nextResourcesBefore :
+      ConcreteStructuredResourceStack program context sourceModule
+        sourceFunction externals entryRuntime nextRuntime entryStore nextStore
+        entryWitness witness facts remainingBytes sourceEnv targetLocals
+        functionResult callerExpectedResult source.frames target.frames :=
+    ⟨nextScope, related.resources.suspended⟩
+  have nextResources :
+      ConcreteStructuredResourceStack program context sourceModule
+        sourceFunction externals entryRuntime nextRuntime entryStore nextStore
+        entryWitness witness facts remainingBytes sourceEnv targetLocals
+        functionResult callerExpectedResult sourceAfter.frames
+        targetAfter.frames := by
+    rw [sourceFramesEq, targetFramesEq]
+    exact nextResourcesBefore
+  exact ⟨targetAfter, nextStore, targetRest, targetPath, sourceFramesEq,
+    targetFramesEq, ⟨nextFocus, nextResources⟩⟩
+
+section MutationPointwise
+
+variable
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode code continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime nextRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+
+/-- Constructor-tag mutation preserves the pointwise compiler relation across
+the exact generated local-get/import-call prefix. -/
+theorem ConcreteStructuredCodePointwiseRel.advance_constructorTag_of_step
+    (related : ConcreteStructuredCodePointwiseRel program context functionCode
+      sourceModule sourceFunction targetModule hosts spec externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts 0 remainingBytes sourceRuntime sourceEnv code targetStore
+      targetLocals targetCode witness source target)
+    (supported : ConstructorTagEffectSupported context sourceRuntime sourceEnv
+      code continuation nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore targetRest,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames ∧
+        ConcreteStructuredCodeCoreRel program context sourceModule
+          sourceFunction externals labels entryRuntime entryStore entryWitness
+          functionResult callerExpectedResult facts remainingBytes nextRuntime
+          sourceEnv continuation nextStore targetLocals targetRest witness
+          sourceAfter targetAfter := by
+  apply related.advance_mutation_of_step sourceStep
+  exact related.focus.advance_constructorTag spec supported
+    supported.sourceEffectResult related.resources.current.1
+
+/-- FVar object-field mutation preserves the pointwise compiler relation
+across the exact generated binary-host prefix. -/
+theorem ConcreteStructuredCodePointwiseRel.advance_objectFieldFVar_of_step
+    (related : ConcreteStructuredCodePointwiseRel program context functionCode
+      sourceModule sourceFunction targetModule hosts spec externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts 0 remainingBytes sourceRuntime sourceEnv code targetStore
+      targetLocals targetCode witness source target)
+    (supported : ObjectFieldFVarEffectSupported context sourceRuntime sourceEnv
+      code continuation nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore targetRest,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames ∧
+        ConcreteStructuredCodeCoreRel program context sourceModule
+          sourceFunction externals labels entryRuntime entryStore entryWitness
+          functionResult callerExpectedResult facts remainingBytes nextRuntime
+          sourceEnv continuation nextStore targetLocals targetRest witness
+          sourceAfter targetAfter := by
+  apply related.advance_mutation_of_step sourceStep
+  exact related.focus.advance_objectFieldFVar spec supported
+    supported.sourceEffectResult related.resources.current.1
+
+/-- Erased object-field mutation preserves the pointwise compiler relation
+across the exact generated object-local/zero/import-call prefix. -/
+theorem ConcreteStructuredCodePointwiseRel.advance_objectFieldErased_of_step
+    (related : ConcreteStructuredCodePointwiseRel program context functionCode
+      sourceModule sourceFunction targetModule hosts spec externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts 0 remainingBytes sourceRuntime sourceEnv code targetStore
+      targetLocals targetCode witness source target)
+    (supported : ObjectFieldErasedEffectSupported context sourceRuntime
+      sourceEnv code continuation nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore targetRest,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames ∧
+        ConcreteStructuredCodeCoreRel program context sourceModule
+          sourceFunction externals labels entryRuntime entryStore entryWitness
+          functionResult callerExpectedResult facts remainingBytes nextRuntime
+          sourceEnv continuation nextStore targetLocals targetRest witness
+          sourceAfter targetAfter := by
+  apply related.advance_mutation_of_step sourceStep
+  exact related.focus.advance_objectFieldErased spec supported
+    supported.sourceEffectResult related.resources.current.1
+
+/-- `USize` field mutation preserves the pointwise compiler relation across
+the exact generated binary-host prefix. -/
+theorem ConcreteStructuredCodePointwiseRel.advance_usizeField_of_step
+    (related : ConcreteStructuredCodePointwiseRel program context functionCode
+      sourceModule sourceFunction targetModule hosts spec externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts 0 remainingBytes sourceRuntime sourceEnv code targetStore
+      targetLocals targetCode witness source target)
+    (supported : USizeFieldEffectSupported context sourceRuntime sourceEnv code
+      continuation nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore targetRest,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames ∧
+        ConcreteStructuredCodeCoreRel program context sourceModule
+          sourceFunction externals labels entryRuntime entryStore entryWitness
+          functionResult callerExpectedResult facts remainingBytes nextRuntime
+          sourceEnv continuation nextStore targetLocals targetRest witness
+          sourceAfter targetAfter := by
+  apply related.advance_mutation_of_step sourceStep
+  exact related.focus.advance_usizeField spec supported
+    supported.sourceEffectResult related.resources.current.1
+
+/-- Packed-scalar field mutation preserves the pointwise compiler relation
+across the exact generated binary-host prefix. -/
+theorem ConcreteStructuredCodePointwiseRel.advance_scalarField_of_step
+    (related : ConcreteStructuredCodePointwiseRel program context functionCode
+      sourceModule sourceFunction targetModule hosts spec externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts 0 remainingBytes sourceRuntime sourceEnv code targetStore
+      targetLocals targetCode witness source target)
+    (supported : ScalarFieldEffectSupported context sourceRuntime sourceEnv code
+      continuation nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore targetRest,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames ∧
+        ConcreteStructuredCodeCoreRel program context sourceModule
+          sourceFunction externals labels entryRuntime entryStore entryWitness
+          functionResult callerExpectedResult facts remainingBytes nextRuntime
+          sourceEnv continuation nextStore targetLocals targetRest witness
+          sourceAfter targetAfter := by
+  apply related.advance_mutation_of_step sourceStep
+  exact related.focus.advance_scalarField spec supported
+    supported.sourceEffectResult related.resources.current.1
+
+end MutationPointwise
+
 /-- Stage one admitted pure external into the resource-indexed call-ready
 relation.  The source result and allocation cost come from current-node
 admission, while the production compiler and adapter determine the exact
@@ -22551,6 +22953,41 @@ theorem ConcreteStructuredCodePointwiseRel.advance
           _sourceFramesEq, _targetFramesEq, nextCore⟩ :=
         related.advance_ordinaryDelete_of_step supported sourceStep
       refine ⟨2, targetAfter, targetPath,
+        .code related.contextCaches nextCore, ?_⟩
+      omega
+  | constructorTag supported =>
+      obtain ⟨targetAfter, nextStore, targetRest, targetPath,
+          _sourceFramesEq, _targetFramesEq, nextCore⟩ :=
+        related.advance_constructorTag_of_step supported sourceStep
+      refine ⟨2, targetAfter, targetPath,
+        .code related.contextCaches nextCore, ?_⟩
+      omega
+  | objectFieldFVar supported =>
+      obtain ⟨targetAfter, nextStore, targetRest, targetPath,
+          _sourceFramesEq, _targetFramesEq, nextCore⟩ :=
+        related.advance_objectFieldFVar_of_step supported sourceStep
+      refine ⟨3, targetAfter, targetPath,
+        .code related.contextCaches nextCore, ?_⟩
+      omega
+  | objectFieldErased supported =>
+      obtain ⟨targetAfter, nextStore, targetRest, targetPath,
+          _sourceFramesEq, _targetFramesEq, nextCore⟩ :=
+        related.advance_objectFieldErased_of_step supported sourceStep
+      refine ⟨3, targetAfter, targetPath,
+        .code related.contextCaches nextCore, ?_⟩
+      omega
+  | usizeField supported =>
+      obtain ⟨targetAfter, nextStore, targetRest, targetPath,
+          _sourceFramesEq, _targetFramesEq, nextCore⟩ :=
+        related.advance_usizeField_of_step supported sourceStep
+      refine ⟨3, targetAfter, targetPath,
+        .code related.contextCaches nextCore, ?_⟩
+      omega
+  | scalarField supported =>
+      obtain ⟨targetAfter, nextStore, targetRest, targetPath,
+          _sourceFramesEq, _targetFramesEq, nextCore⟩ :=
+        related.advance_scalarField_of_step supported sourceStep
+      refine ⟨3, targetAfter, targetPath,
         .code related.contextCaches nextCore, ?_⟩
       omega
 
@@ -22778,6 +23215,76 @@ theorem ConcreteStructuredCodePointwiseRel.advance_supportedGlobal
           callerExpectedResult sourceAfter targetAfter :=
         .code related.contextCaches nextCore supportedAfter agreesAfter
       exact ⟨2, targetAfter, targetPath,
+        nextActive.toGlobal, by omega⟩
+  | constructorTag tagSupported =>
+      obtain ⟨targetAfter, nextStore, targetRest, targetPath, sourceFramesEq,
+          targetFramesEq, nextCore⟩ :=
+        related.advance_constructorTag_of_step tagSupported sourceStep
+      obtain ⟨supportedAfter, agreesAfter⟩ :=
+        agrees.reindex sourceFramesEq targetFramesEq
+          nextCore.resources.suspended
+      let nextActive : ConcreteStructuredSupportedOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec
+          externals labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult sourceAfter targetAfter :=
+        .code related.contextCaches nextCore supportedAfter agreesAfter
+      exact ⟨2, targetAfter, targetPath,
+        nextActive.toGlobal, by omega⟩
+  | objectFieldFVar fieldSupported =>
+      obtain ⟨targetAfter, nextStore, targetRest, targetPath, sourceFramesEq,
+          targetFramesEq, nextCore⟩ :=
+        related.advance_objectFieldFVar_of_step fieldSupported sourceStep
+      obtain ⟨supportedAfter, agreesAfter⟩ :=
+        agrees.reindex sourceFramesEq targetFramesEq
+          nextCore.resources.suspended
+      let nextActive : ConcreteStructuredSupportedOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec
+          externals labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult sourceAfter targetAfter :=
+        .code related.contextCaches nextCore supportedAfter agreesAfter
+      exact ⟨3, targetAfter, targetPath,
+        nextActive.toGlobal, by omega⟩
+  | objectFieldErased fieldSupported =>
+      obtain ⟨targetAfter, nextStore, targetRest, targetPath, sourceFramesEq,
+          targetFramesEq, nextCore⟩ :=
+        related.advance_objectFieldErased_of_step fieldSupported sourceStep
+      obtain ⟨supportedAfter, agreesAfter⟩ :=
+        agrees.reindex sourceFramesEq targetFramesEq
+          nextCore.resources.suspended
+      let nextActive : ConcreteStructuredSupportedOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec
+          externals labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult sourceAfter targetAfter :=
+        .code related.contextCaches nextCore supportedAfter agreesAfter
+      exact ⟨3, targetAfter, targetPath,
+        nextActive.toGlobal, by omega⟩
+  | usizeField fieldSupported =>
+      obtain ⟨targetAfter, nextStore, targetRest, targetPath, sourceFramesEq,
+          targetFramesEq, nextCore⟩ :=
+        related.advance_usizeField_of_step fieldSupported sourceStep
+      obtain ⟨supportedAfter, agreesAfter⟩ :=
+        agrees.reindex sourceFramesEq targetFramesEq
+          nextCore.resources.suspended
+      let nextActive : ConcreteStructuredSupportedOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec
+          externals labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult sourceAfter targetAfter :=
+        .code related.contextCaches nextCore supportedAfter agreesAfter
+      exact ⟨3, targetAfter, targetPath,
+        nextActive.toGlobal, by omega⟩
+  | scalarField fieldSupported =>
+      obtain ⟨targetAfter, nextStore, targetRest, targetPath, sourceFramesEq,
+          targetFramesEq, nextCore⟩ :=
+        related.advance_scalarField_of_step fieldSupported sourceStep
+      obtain ⟨supportedAfter, agreesAfter⟩ :=
+        agrees.reindex sourceFramesEq targetFramesEq
+          nextCore.resources.suspended
+      let nextActive : ConcreteStructuredSupportedOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec
+          externals labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult sourceAfter targetAfter :=
+        .code related.contextCaches nextCore supportedAfter agreesAfter
+      exact ⟨3, targetAfter, targetPath,
         nextActive.toGlobal, by omega⟩
 
 /-- Strong, locally runnable control states for the compiler simulation.

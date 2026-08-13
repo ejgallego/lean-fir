@@ -1533,9 +1533,16 @@ acceptance tests pass.
      suspended supported stack aligned. Recursive decrement release and both
      erased-zero/ordinary-object deletion branches are discharged by existing
      concrete-runtime refinements, and the successor continuation remains
-     admission-free. Tag and field mutation, broader cases, and lazy/cache
-     control remain explicit pointwise widenings despite already having
-     terminating hereditary laws.
+     admission-free. Constructor-tag and field mutation are now in the same
+     pointwise closure. Tag writes take the exact two-step
+     `local.get; call` prefix; FVar/erased object fields, `USize` fields, and
+     all four packed-integer scalar fields take their exact three-step binary
+     prefixes. Each operation derives its canonical source step from
+     source/compiler admission, preserves the same witness and entry-relative
+     resource scope through the existing concrete refinement, and returns an
+     admission-free continuation under arbitrary join labels. Broader cases
+     and lazy/cache control remain explicit pointwise widenings despite
+     already having terminating hereditary laws.
      Pure integer-, natural-, and scalar-result externals are now the first
      non-erased family in this same closure. Current-node admission fixes only
      the semantic response and its exact allocation cost. The staging rule
