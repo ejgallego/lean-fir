@@ -265,6 +265,20 @@ def emitResidentCache (path : System.FilePath) : IO Unit := do
   IO.println
     s!"resident-cache: wrote {bytes.size} bytes to {path} and {manifestPath}"
 
+def emitResidentMaterializedCache (path : System.FilePath) : IO Unit := do
+  let module ← IO.ofExcept <|
+    Fir.Wasm.Emit.ResidentCache.materializedExampleModule
+  let bytes ← IO.ofExcept <| (Fir.Wasm.Emit.encode module).mapError fun error =>
+    s!"resident materialized-cache encoding failed: {repr error}"
+  if let some parent := path.parent then
+    IO.FS.createDirAll parent
+  IO.FS.writeBinFile path bytes
+  let manifestPath : System.FilePath := path.toString ++ ".json"
+  IO.FS.writeFile manifestPath <|
+    Fir.Wasm.Emit.ResidentCache.materializedManifest.compress
+  IO.println
+    s!"resident-materialized-cache: wrote {bytes.size} bytes to {path} and {manifestPath}"
+
 def emitResidentNumeric (path : System.FilePath) : IO Unit := do
   let module ← IO.ofExcept <|
     Fir.Wasm.Emit.ResidentNumeric.residentExampleModule
@@ -424,6 +438,7 @@ def usage : String :=
     "       fir-wasm-artifact resident-increments <output.wasm>\n" ++
     "       fir-wasm-artifact resident-releases <output.wasm>\n" ++
     "       fir-wasm-artifact resident-cache <output.wasm>\n" ++
+    "       fir-wasm-artifact resident-materialized-cache <output.wasm>\n" ++
     "       fir-wasm-artifact resident-numeric <output.wasm>\n" ++
     "       fir-wasm-artifact resident-big-numeric <output.wasm>\n" ++
     "       fir-wasm-artifact resident-nat-arithmetic <output.wasm>\n" ++
@@ -491,6 +506,9 @@ def main (args : List String) : IO UInt32 := do
         return 0
     | ["resident-cache", output] =>
         emitResidentCache output
+        return 0
+    | ["resident-materialized-cache", output] =>
+        emitResidentMaterializedCache output
         return 0
     | ["resident-numeric", output] =>
         emitResidentNumeric output

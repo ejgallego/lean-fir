@@ -27,11 +27,121 @@ inductive LinkError where
   | malformedAllocator
   | malformedLazyCache (name : Name)
   | invalidInitializerSignature (name : Name)
+  | unsupportedStaticInitializer (name : Name)
+  | staticImageOverflow (name : Name)
   | retainedCacheGlobal (index : Nat)
   | invalidOutput (error : SymbolicError)
   deriving Inhabited, Repr
 
 private def u32 (value : Nat) : UInt32 := UInt32.ofNat value
+
+private def wordLE (value : UInt32) : Array UInt8 :=
+  #[value.toUInt8,
+    (value >>> (8 : UInt32)).toUInt8,
+    (value >>> (16 : UInt32)).toUInt8,
+    (value >>> (24 : UInt32)).toUInt8]
+
+private def staticFieldAccepted : AbiKind × UInt32 → Bool
+  | (.erased, value) => value == 0
+  | (.tagged, value) | (.tobject, value) => value.toNat % 2 == 1
+  | _ => false
+
+private partial def staticConstructorBody?
+    (instructions : List Instruction)
+    (fields : Array (AbiKind × UInt32) := #[]) :
+    Option (Lean.Compiler.LCNF.CtorInfo × Array (AbiKind × UInt32) × AbiKind) :=
+  match instructions with
+  | .i32Const kind value :: rest =>
+      staticConstructorBody? rest (fields.push (kind, value))
+  | .call (.runtime (.allocCtor info kinds result)) :: [.ret] =>
+      if fields.map (·.1) == kinds then some (info, fields, result) else none
+  | _ => none
+
+private def staticConstructorBytes
+    (info : Lean.Compiler.LCNF.CtorInfo)
+    (fields : Array (AbiKind × UInt32)) : Array UInt8 :=
+  let layout := ConstructorLayout.ofInfo info
+  wordLE ObjectKind.constructor.code ++
+    wordLE (liveFlag + persistentFlag) ++
+    wordLE 0 ++
+    wordLE (u32 layout.allocationBytes) ++
+    wordLE (u32 info.cidx) ++
+    wordLE (u32 info.size) ++
+    wordLE (u32 info.usize) ++
+    wordLE (u32 info.ssize) ++
+    fields.foldl (init := #[]) fun bytes (_, value) =>
+      bytes ++ wordLE value ++ #[0, 0, 0, 0]
+
+private def nextStaticAddress (module : Module) : Nat :=
+  let dataEnd := module.dataSegments.foldl (init := 0) fun end_ segment =>
+    max end_ (segment.offset.toNat + segment.bytes.size)
+  align8 (max heapBase dataEnd)
+
+/--
+Materialize one explicitly selected compiler lazy initializer when its entire
+body is a single immutable constructor whose fields are immediate constants.
+The transform is intentionally narrow and fail-closed: it does not execute
+Lean code, chase calls, accept heap pointers, or infer purity.
+
+The original lazy cache protocol remains in place. Its flag is still zero at
+instantiation and first ordinary access publishes the preverified image
+address. The initializer itself becomes a constant-address function, so that
+first access performs no allocation.
+
+This is an experimental proof of the Wasm image/allocator mechanism. Before
+production use, replace its local syntactic classifier with Lean's upstream
+`SimpleGroundExpr` result from final LCNF and retain only the W6-layout
+serialization performed by the FIR backend.
+-/
+def materializeClosedConstructor (module : Module) (initializer : Name)
+    (validate : Bool := true) : Except LinkError Module := do
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => pure ()
+    | .error error => throw (.invalidInput error)
+  unless module.initializers.contains initializer do
+    throw (.unsupportedStaticInitializer initializer)
+  let some function := module.functions.find? (·.name == initializer) |
+    throw (.unsupportedStaticInitializer initializer)
+  unless function.params.isEmpty && function.results.size == 1 &&
+      function.locals.isEmpty do
+    throw (.unsupportedStaticInitializer initializer)
+  let some (info, fields, resultKind) := staticConstructorBody? function.body |
+    throw (.unsupportedStaticInitializer initializer)
+  unless info.usize == 0 && info.ssize == 0 && info.size == fields.size &&
+      fields.all staticFieldAccepted && function.results == #[resultKind] &&
+      resultKind.isObjectLike do
+    throw (.unsupportedStaticInitializer initializer)
+  let memory ← match module.memory with
+    | none => pure ResidentRuntime.residentMemory
+    | some memory =>
+        unless memory == ResidentRuntime.residentMemory do
+          throw .incompatibleMemory
+        pure memory
+  let address := nextStaticAddress module
+  let bytes := staticConstructorBytes info fields
+  unless address + bytes.size < UInt32.size &&
+      address + bytes.size ≤ memory.pagesMin.toNat * 65536 do
+    throw (.staticImageOverflow initializer)
+  let addressWord := u32 address
+  let functions := module.functions.map fun candidate =>
+    if candidate.name == initializer then
+      { candidate with body := [.i32Const resultKind addressWord, .ret] }
+    else candidate
+  let runtimeOperations := Fir.Wasm.collectRuntimeOps functions
+  let externalImports := module.imports.filter (·.operation?.isNone)
+  let result : Module := {
+    module with
+    imports := runtimeOperations.mapIdx Fir.Wasm.runtimeImport ++ externalImports
+    functions
+    runtimeOperations
+    memory := some memory
+    dataSegments := module.dataSegments.push { offset := addressWord, bytes } }
+  if validate then
+    match Fir.Wasm.validateModule result with
+    | .ok () => return result
+    | .error error => throw (.invalidOutput error)
+  else return result
 
 def isCacheSet : RuntimeOp → Bool
   | .cacheSet .. => true
@@ -348,6 +458,12 @@ def internalizeCacheSets (module : Module) (validate : Bool := true) :
       some (module.cacheGlobalKinds.size + module.globals.size)
     else
       none
+  let persistentFloorInitial ← match persistentFloorIndex with
+    | none => pure none
+    | some _ =>
+        let some frontier := ResidentAllocator.initialFrontier? module |
+          throw (.staticImageOverflow `persistentFloor)
+        pure (some frontier)
   let rewrites := operations.toList.zipIdx.map fun (operation, ordinal) =>
     (operation, cacheSetName ordinal)
   let reservedNames :=
@@ -376,10 +492,10 @@ def internalizeCacheSets (module : Module) (validate : Bool := true) :
     functions
     exports
     runtimeOperations
-    globals := match persistentFloorIndex with
-      | some _ => module.globals.push {
+    globals := match persistentFloorInitial with
+      | some frontier => module.globals.push {
           kind := .uint32
-          init := .i32 (u32 heapBase) }
+          init := .i32 frontier }
       | none => module.globals }
   let result ← match persistentFloorIndex with
     | some index => installCacheAwareRewind result index
@@ -649,6 +765,32 @@ def residentExampleModule : Except String Module := do
   internalizeCacheSets constructed
     |>.mapError fun error => s!"cache: {repr error}"
 
+def persistentCacheFlagName : Name := `resident_lazy_object_initialized
+
+private def persistentCacheFlag : Function := {
+  name := persistentCacheFlagName
+  params := #[]
+  results := #[.uint32]
+  locals := #[]
+  body := [.globalGet 0 .uint32, .ret] }
+
+private def materializedInputModule : Module := {
+  exampleModule with
+  functions := exampleModule.functions.push persistentCacheFlag
+  exports := exampleModule.exports.push persistentCacheFlagName }
+
+/-- Focused zero-import proof-of-design for lazy publication of a static image. -/
+def materializedExampleModule : Except String Module := do
+  let imaged ← materializeClosedConstructor materializedInputModule
+    persistentObjectInitializerName
+    |>.mapError fun error => s!"static image: {repr error}"
+  let allocated ← ResidentAllocator.install imaged
+    |>.mapError fun error => s!"allocator: {repr error}"
+  let constructed ← ResidentConstructor.internalizeConstructors allocated
+    |>.mapError fun error => s!"constructors: {repr error}"
+  internalizeCacheSets constructed
+    |>.mapError fun error => s!"cache: {repr error}"
+
 private def lazyInitializerName : Name := `residentLazyInitializer
 private def lazyCallerName : Name := `residentLazyCaller
 private def lazyValueLocal : FVarId := ⟨`lazyValue⟩
@@ -761,6 +903,17 @@ def manifest : Json :=
     ("cacheAwareRewind", true),
     ("status", "generation-ready; W6 recursive cache-persistence publication proved")]
 
+def materializedManifest : Json :=
+  Json.mkObj [
+    ("entry", persistentExampleCallerName.toString),
+    ("initializedEntry", persistentCacheFlagName.toString),
+    ("initializer", persistentObjectInitializerName.toString),
+    ("imageAddress", heapBase),
+    ("imageBytes", 40),
+    ("initialFrontier", (heapBase + 40 : Nat)),
+    ("lazyPublication", true),
+    ("status", "generation-ready focused static-image fixture")]
+
 #guard match residentExampleModule with
   | .ok module =>
       module.imports.isEmpty &&
@@ -778,5 +931,23 @@ def manifest : Json :=
       (Fir.Wasm.validateModule module |>.isOk) &&
       (Fir.Wasm.Emit.encode module |>.isOk)
   | .error _ => false
+
+#guard match materializedExampleModule with
+  | .ok module =>
+      module.imports.isEmpty && module.runtimeOperations.isEmpty &&
+      module.dataSegments.size == 1 &&
+      module.dataSegments[0]?.map (·.offset) == some (u32 heapBase) &&
+      module.dataSegments[0]?.map (·.bytes.size) == some 40 &&
+      module.exports.contains persistentCacheFlagName &&
+      (module.functions.find? (·.name == persistentObjectInitializerName)
+        |>.map (·.body)) ==
+        some [.i32Const .object (u32 heapBase), .ret] &&
+      (Fir.Wasm.validateModule module).isOk &&
+      (Fir.Wasm.Emit.encode module).isOk
+  | .error _ => false
+
+#guard match materializeClosedConstructor lazyModule lazyInitializerName with
+  | .error (.unsupportedStaticInitializer name) => name == lazyInitializerName
+  | _ => false
 
 end Fir.Wasm.Emit.ResidentCache

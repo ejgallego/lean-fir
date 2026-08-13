@@ -281,8 +281,20 @@ inductive LinkError where
   | invalidInput (error : SymbolicError)
   | reservedDeclaration (name : Name)
   | incompatibleMemory
+  | dataImageOverflow
   | invalidOutput (error : SymbolicError)
   deriving Inhabited, Repr
+
+/--
+First byte available to the resident allocator. Active data below `heapBase`
+does not consume heap space; an image extending into the heap advances the
+frontier past its aligned end.
+-/
+def initialFrontier? (module : Module) : Option UInt32 :=
+  let dataEnd := module.dataSegments.foldl (init := 0) fun end_ segment =>
+    max end_ (segment.offset.toNat + segment.bytes.size)
+  let frontier := align8 (max heapBase dataEnd)
+  if frontier < UInt32.size then some (u32 frontier) else none
 
 /--
 Install the low-level resident heap frontier, allocation primitive, and typed
@@ -307,6 +319,8 @@ def install (module : Module) (validate : Bool := true) : Except LinkError Modul
         module.functions.any (·.name == name) ||
         module.exports.contains name then
       throw (.reservedDeclaration name)
+  let some initialFrontier := initialFrontier? module |
+    throw .dataImageOverflow
   let frontierIndex := module.cacheGlobalKinds.size + module.globals.size
   let result : Module := {
     module with
@@ -314,7 +328,7 @@ def install (module : Module) (validate : Bool := true) : Except LinkError Modul
     exports := module.exports ++ helperNames
     memory := some memory
     globals := module.globals.push
-      { kind := .uint32, init := .i32 (u32 heapBase) } }
+      { kind := .uint32, init := .i32 initialFrontier } }
   if validate then
     match Fir.Wasm.validateModule result with
     | .ok () => return result

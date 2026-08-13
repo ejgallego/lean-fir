@@ -668,6 +668,30 @@ now have 24 function imports, with final LCNF and both closure tables unchanged.
 The text audit is now
 `351 → 350 → 349 → 341 → 254 → 177 → 177 → 154 → 152 → 65 → 54 → 50 → 44 → 24`.
 
+The parked, experimental static-image checkpoint proves the Wasm backend
+mechanism without changing any production package. A fail-closed prototype
+accepts an explicitly selected lazy initializer only when its complete body is
+one immutable constructor with immediate or erased fields. It serializes the
+exact W6 header and slots into an active Wasm data segment, rewrites that
+initializer to return the image address, and advances the resident allocator
+past the image. The cache flag remains zero at instantiation: first ordinary
+access publishes the preverified address through the original lazy protocol,
+without allocation, and warm access plus scratch rewind remain flat.
+
+Do not extend the prototype's local syntactic classifier. Lean 4.32 already
+classifies statically initializable final-LCNF declarations as
+`SimpleGroundExpr`; resumed work should consume `getSimpleGroundExpr` and map
+that target-independent graph into W6 Wasm layout and relocations. The FIR-only
+surface retained from this experiment is active-data placement, allocator-floor
+coordination, and checked W6 image serialization.
+
+```text
+lake exe fir-wasm-artifact resident-materialized-cache \
+  _build/resident-materialized-cache.wasm
+node run-resident-materialized-cache.mjs \
+  _build/resident-materialized-cache.wasm
+```
+
 The next checkpoint internalizes the ten Nat/Int declarations reachable from
 `prettyM`: `Nat.add`, `Nat.sub`, the three Nat decisions, `Int.ofNat`,
 `Int.natAbs`, `Int.add`, `Int.sub`, and `Int.decLt`. The resident helpers cover

@@ -61,6 +61,10 @@ node run-resident-releases.mjs _build/resident-releases.wasm
 lake exe fir-wasm-artifact resident-cache \
   _build/resident-cache.wasm
 node run-resident-cache.mjs _build/resident-cache.wasm
+lake exe fir-wasm-artifact resident-materialized-cache \
+  _build/resident-materialized-cache.wasm
+node run-resident-materialized-cache.mjs \
+  _build/resident-materialized-cache.wasm
 lake exe fir-wasm-artifact resident-numeric \
   _build/resident-numeric.wasm
 node run-resident-numeric.mjs _build/resident-numeric.wasm
@@ -551,6 +555,14 @@ lake exe fir-wasm-artifact resident-cache \
 cmp "$first/resident/cache.wasm" "$second/resident/cache.wasm"
 cmp "$first/resident/cache.wasm.json" \
   "$second/resident/cache.wasm.json"
+lake exe fir-wasm-artifact resident-materialized-cache \
+  "$first/resident/materialized-cache.wasm"
+lake exe fir-wasm-artifact resident-materialized-cache \
+  "$second/resident/materialized-cache.wasm"
+cmp "$first/resident/materialized-cache.wasm" \
+  "$second/resident/materialized-cache.wasm"
+cmp "$first/resident/materialized-cache.wasm.json" \
+  "$second/resident/materialized-cache.wasm.json"
 lake exe fir-wasm-artifact resident-numeric \
   "$first/resident/numeric.wasm"
 lake exe fir-wasm-artifact resident-numeric \
