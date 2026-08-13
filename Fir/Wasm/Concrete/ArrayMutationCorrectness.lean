@@ -110,6 +110,191 @@ theorem ResidentArrayObjectRel.writeElementRaw_targetFrame
       related.liveElements other semanticValue oldValueAt
     exact ⟨oldWord, by rw [readOther other same]; exact oldRead, oldRelated⟩
 
+/-- Writing a currently-spare capacity slot preserves the complete live Array
+relation while producing a target-allocation frame. -/
+theorem ResidentArrayObjectRel.writeCapacityElementRaw_targetFrame
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {elements : Array Value} {capacity : Nat} {header : Header}
+    (related :
+      ResidentArrayObjectRel state witness address elements capacity header)
+    (valid : state.FrontierInvariant)
+    (index : Nat) (word : Word32)
+    (afterLive : elements.size ≤ index) (beforeCapacity : index < capacity) :
+    ∃ result,
+      writeResidentArrayCapacityElementRaw state address index word = .ok result ∧
+      state.TargetMutationFrame result address header.allocationBytes.toNat ∧
+      result.FrontierInvariant ∧
+      ResidentArrayObjectRel result witness address elements capacity header ∧
+      result.memory.readWord32
+          (address.value + headerBytes + target.semanticSlotBytes * index) =
+        .ok word := by
+  let offset := address.value + headerBytes + target.semanticSlotBytes * index
+  have writeInBounds : offset + 3 < state.memory.size := by
+    have allocationInMemory :
+        address.value + residentArrayAllocationBytes capacity ≤ state.memory.size :=
+      Nat.le_trans related.extent valid.cursorInBounds
+    have aligned := align8_ge
+      (headerBytes + target.semanticSlotBytes * capacity)
+    simp [offset, residentArrayAllocationBytes, target] at allocationInMemory aligned ⊢
+    omega
+  obtain ⟨memory, written, _, _, _, _, _, _⟩ :=
+    LinearMemory.writeUInt32_spec state.memory offset (UInt32.ofNat word.value)
+      writeInBounds
+  have wordWritten : state.memory.writeWord32 offset word = .ok memory := written
+  let result : MemoryState := { state with memory }
+  have operation :
+      writeResidentArrayCapacityElementRaw state address index word = .ok result := by
+    unfold writeResidentArrayCapacityElementRaw
+    rw [related.readHeader]
+    simp only [Bind.bind, Except.bind]
+    rw [if_pos (by simpa [related.physicalCapacity] using beforeCapacity)]
+    change (do
+      let nextMemory ← liftMemory (state.memory.writeWord32 offset word)
+      return ({ state with memory := nextMemory } : MemoryState)) = .ok result
+    rw [wordWritten]
+    rfl
+  have afterHeader : address.value + headerBytes ≤ offset := by simp [offset]
+  have insideTarget :
+      offset + 4 ≤ address.value + header.allocationBytes.toNat := by
+    rw [related.allocationBytes]
+    have aligned := align8_ge
+      (headerBytes + target.semanticSlotBytes * capacity)
+    simp [offset, residentArrayAllocationBytes, target] at aligned ⊢
+    omega
+  have targetFrame :
+      state.TargetMutationFrame result address header.allocationBytes.toNat :=
+    MemoryState.TargetMutationFrame.ofWriteUInt32 rfl writeInBounds written
+      afterHeader insideTarget
+  have finalValid : result.FrontierInvariant :=
+    valid.writeUInt32 (Nat.le_trans insideTarget (by
+      rw [related.allocationBytes]
+      exact related.extent)) written
+  have targetRead : memory.readWord32 offset = .ok word :=
+    LinearMemory.readWord32_of_writeWord32_eq_ok state.memory memory offset word
+      writeInBounds wordWritten
+  have liveRelated :
+      ResidentArrayObjectRel result witness address elements capacity header := by
+    refine {
+      headerRead := by rw [targetFrame.targetLiveHeader]; exact related.headerRead
+      headerKind := related.headerKind
+      marker := related.marker
+      logicalSize := related.logicalSize
+      physicalCapacity := related.physicalCapacity
+      reserved := related.reserved
+      sizeCapacity := related.sizeCapacity
+      allocationBytes := related.allocationBytes
+      headerOwned := by rw [targetFrame.cursor]; exact related.headerOwned
+      extent := by rw [targetFrame.cursor]; exact related.extent
+      liveElements := ?_ }
+    intro other value valueAt
+    obtain ⟨oldWord, oldRead, oldRelated⟩ :=
+      related.liveElements other value valueAt
+    have otherLt : other < elements.size :=
+      (Array.getElem?_eq_some_iff.mp valueAt).1
+    have different : other ≠ index := by omega
+    have readFrame : memory.readWord32
+          (address.value + headerBytes + target.semanticSlotBytes * other) =
+        state.memory.readWord32
+          (address.value + headerBytes + target.semanticSlotBytes * other) := by
+      unfold LinearMemory.readWord32
+      rw [LinearMemory.readUInt32_of_writeUInt32_eq_ok_other state.memory memory
+        offset (address.value + headerBytes + target.semanticSlotBytes * other)
+        (UInt32.ofNat word.value) writeInBounds written (by
+          simp [offset, target]
+          omega)]
+    exact ⟨oldWord, by rw [readFrame]; exact oldRead, oldRelated⟩
+  exact ⟨result, operation, targetFrame, finalValid, liveRelated,
+    by simpa [offset] using targetRead⟩
+
+/-- Changing only `aux1` establishes the exact relation for a caller-supplied
+live prefix whose slots are already related in memory. This theorem is valid
+for growth after ownership transfer and for shrink after removed children
+have been released. -/
+theorem ResidentArrayObjectRel.writeLogicalSizeRaw
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {elements nextElements : Array Value} {capacity : Nat} {header : Header}
+    (related :
+      ResidentArrayObjectRel state witness address elements capacity header)
+    (valid : state.FrontierInvariant) (nextSize : Nat)
+    (nextCount : nextElements.size = nextSize)
+    (nextCapacity : nextSize ≤ capacity)
+    (nextFits : nextSize < UInt32.size)
+    (each : ∀ (index : Nat) (value : Value),
+      nextElements[index]? = some value →
+      ∃ word,
+        state.memory.readWord32
+            (address.value + headerBytes + target.semanticSlotBytes * index) =
+          .ok word ∧
+        ValueRel witness .tobject (.word32 word) value) :
+    ∃ result updatedHeader memory,
+      writeResidentArrayLogicalSizeRaw state address nextSize = .ok result ∧
+      updatedHeader = { header with aux1 := UInt32.ofNat nextSize } ∧
+      result = { state with memory } ∧
+      updatedHeader.write state.memory address = .ok memory ∧
+      result.FrontierInvariant ∧
+      ResidentArrayObjectRel result witness address nextElements capacity
+        updatedHeader := by
+  obtain ⟨heap, _, live, minimum, aligned, extentInMemory⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts state address header
+      related.headerRead
+  have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
+    Nat.le_trans related.headerOwned valid.cursorInBounds
+  let updatedHeader : Header := { header with aux1 := UInt32.ofNat nextSize }
+  obtain ⟨memory, headerWrite, _⟩ :=
+    Header.write_spec state.memory address updatedHeader headerInBounds
+  let result : MemoryState := { state with memory }
+  have operation :
+      writeResidentArrayLogicalSizeRaw state address nextSize = .ok result := by
+    unfold writeResidentArrayLogicalSizeRaw
+    rw [related.readHeader]
+    simp only [Bind.bind, Except.bind]
+    rw [if_pos (by simpa [related.physicalCapacity] using nextCapacity)]
+    rw [uint32Field_eq_ok "Array logical size" nextSize nextFits]
+    change writeLiveHeader state address updatedHeader = .ok result
+    unfold writeLiveHeader
+    rw [headerWrite]
+    rfl
+  have memorySize : memory.size = state.memory.size :=
+    Header.write_preserves_size state.memory memory address updatedHeader
+      headerInBounds headerWrite
+  have decodedHeader : Header.read memory address = .ok updatedHeader :=
+    Header.read_of_write_eq_ok state.memory memory address updatedHeader
+      headerInBounds headerWrite
+  have headerReadAfter : result.readLiveHeader address = .ok updatedHeader := by
+    unfold MemoryState.readLiveHeader
+    simp [result, heap, decodedHeader]
+    simp only [Bind.bind, Except.bind]
+    simp [updatedHeader, live, minimum, aligned, memorySize, extentInMemory,
+      nextCount, nextCapacity]
+    rfl
+  have finalValid : result.FrontierInvariant :=
+    valid.writeHeader related.headerOwned headerWrite
+  refine ⟨result, updatedHeader, memory, operation, rfl, rfl, headerWrite,
+    finalValid, ?_⟩
+  refine {
+    headerRead := headerReadAfter
+    headerKind := by simpa [updatedHeader] using related.headerKind
+    marker := by simpa [updatedHeader] using related.marker
+    logicalSize := by
+      change (UInt32.ofNat nextSize).toNat = nextElements.size
+      rw [UInt32.toNat_ofNat_of_lt' nextFits, nextCount]
+    physicalCapacity := by simpa [updatedHeader] using related.physicalCapacity
+    reserved := by simpa [updatedHeader] using related.reserved
+    sizeCapacity := by omega
+    allocationBytes := by simpa [updatedHeader] using related.allocationBytes
+    headerOwned := related.headerOwned
+    extent := related.extent
+    liveElements := ?_ }
+  intro index value valueAt
+  obtain ⟨word, readBefore, valueRelated⟩ := each index value valueAt
+  refine ⟨word, ?_, valueRelated⟩
+  change memory.readWord32 _ = .ok word
+  rw [Header.readWord32_of_write_eq_ok_payload state.memory memory address
+    updatedHeader
+    (address.value + headerBytes + target.semanticSlotBytes * index)
+    headerInBounds headerWrite (by omega)]
+  exact readBefore
+
 /-- Whole-heap form of ownership-neutral Array replacement. The semantic side
 uses the common `setCell` primitive explicitly, keeping retain/release duties
 outside this raw store theorem. -/

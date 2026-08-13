@@ -761,6 +761,29 @@ def writeResidentArrayElementRaw (state : MemoryState) (object : Word32)
     (object.value + headerBytes + target.semanticSlotBytes * index) element
   return { state with memory }
 
+/-- Write one physical Array slot below capacity, including a currently-spare
+slot. This does not change logical size; callers must establish ownership
+before making a spare slot live. -/
+def writeResidentArrayCapacityElementRaw (state : MemoryState) (object : Word32)
+    (index : Nat) (element : Word32) : Except ConcreteError MemoryState := do
+  let header ← readResidentArrayHeader state object
+  unless index < header.aux2.toNat do
+    throw (.source (.objectFieldOutOfBounds index header.aux2.toNat))
+  let memory ← liftMemory <| state.memory.writeWord32
+    (object.value + headerBytes + target.semanticSlotBytes * index) element
+  return { state with memory }
+
+/-- Change only the live-prefix length of a resident Array. Growing transfers
+ownership of already-initialized capacity slots into the Array; shrinking
+requires callers to release removed children first. -/
+def writeResidentArrayLogicalSizeRaw (state : MemoryState) (object : Word32)
+    (size : Nat) : Except ConcreteError MemoryState := do
+  let header ← readResidentArrayHeader state object
+  unless size ≤ header.aux2.toNat do
+    throw (.source (.malformed "Array logical size exceeds capacity"))
+  let logicalSize ← uint32Field "Array logical size" size
+  writeLiveHeader state object { header with aux1 := logicalSize }
+
 /-- Swap two live resident-Array elements without retain/release traffic. The
 operation is ownership-neutral because it preserves the element multiset. -/
 def swapResidentArrayElementsRaw (state : MemoryState) (object : Word32)
