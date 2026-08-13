@@ -161,9 +161,11 @@ assert.throws(() => new ConcreteHost([], {
 }), /capacity must cover its live elements/);
 
 const setArray = concreteValidationExternalRegistry["Array.set!"];
+const sizeArray = concreteValidationExternalRegistry["Array.size"];
 const pushArray = concreteValidationExternalRegistry["Array.push"];
 const popArray = concreteValidationExternalRegistry["Array.pop"];
 const replicateArray = concreteValidationExternalRegistry["Array.replicate"];
+const swapArray = concreteValidationExternalRegistry["Array.swap"];
 const getArray = concreteValidationExternalRegistry["Array.get!Internal"];
 const inhabitedUInt8 = concreteValidationExternalRegistry["instInhabitedUInt8"];
 const erased = { kind: "erased" };
@@ -177,6 +179,9 @@ const uniqueRetained = heapNatural(uniqueArrayHost, (1n << 64n) + 1n);
 const uniqueReplacement = heapNatural(uniqueArrayHost, (1n << 64n) + 2n);
 const uniqueArray =
   uniqueArrayHost.allocateArray([uniqueOld, uniqueRetained], 4);
+assert.deepStrictEqual(sizeArray({
+  args: [erased, uniqueArray], host: uniqueArrayHost, world: 0,
+}).value, taggedIndex(2));
 const uniqueResult = setArray({
   args: [erased, uniqueArray, taggedIndex(0), uniqueReplacement],
   host: uniqueArrayHost,
@@ -315,6 +320,55 @@ assert.equal(
   emptyReplicateArrayHost.readHeader(
     emptyReplicateArrayHost.addressOf(unusedArrayValue.location), false).kind,
   255,
+);
+
+const swapArrayHost = new ConcreteHost([]);
+const swapFirstValue = heapNatural(swapArrayHost, (1n << 64n) + 13n);
+const swapSecondValue = heapNatural(swapArrayHost, (1n << 64n) + 14n);
+const swapSourceArray = swapArrayHost.allocateArray(
+  [swapFirstValue, swapSecondValue], 4);
+assert.deepStrictEqual(swapArray({
+  args: [erased, swapSourceArray, taggedIndex(0), taggedIndex(1), erased, erased],
+  host: swapArrayHost,
+  world: 0,
+}).value, swapSourceArray);
+assert.deepStrictEqual(
+  swapArrayHost.arrayInfo(swapSourceArray).elements,
+  [swapSecondValue, swapFirstValue],
+);
+assert.equal(
+  swapArrayHost.readHeader(swapArrayHost.addressOf(swapFirstValue.location)).rc,
+  1,
+);
+assert.equal(
+  swapArrayHost.readHeader(swapArrayHost.addressOf(swapSecondValue.location)).rc,
+  1,
+);
+
+swapArrayHost.retainValue(swapSourceArray);
+const swappedCopyArray = swapArray({
+  args: [erased, swapSourceArray, taggedIndex(0), taggedIndex(1), erased, erased],
+  host: swapArrayHost,
+  world: 0,
+}).value;
+assert.notDeepStrictEqual(swappedCopyArray, swapSourceArray);
+assert.deepStrictEqual(
+  swapArrayHost.arrayInfo(swapSourceArray).elements,
+  [swapSecondValue, swapFirstValue],
+);
+assert.deepStrictEqual(
+  swapArrayHost.arrayInfo(swappedCopyArray).elements,
+  [swapFirstValue, swapSecondValue],
+);
+assert.equal(swapArrayHost.arrayInfo(swapSourceArray).header.rc, 1);
+assert.equal(swapArrayHost.arrayInfo(swappedCopyArray).capacity, 4);
+assert.equal(
+  swapArrayHost.readHeader(swapArrayHost.addressOf(swapFirstValue.location)).rc,
+  2,
+);
+assert.equal(
+  swapArrayHost.readHeader(swapArrayHost.addressOf(swapSecondValue.location)).rc,
+  2,
 );
 
 // A constructor slot has no runtime tag of its own. Track the physical kind

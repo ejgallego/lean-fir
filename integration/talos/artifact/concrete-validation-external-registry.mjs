@@ -428,6 +428,13 @@ function setArray({ args, host, world }) {
   return { value: host.allocateArray(elements, array.capacity), world };
 }
 
+function sizeArray({ args, host, world }) {
+  assert.equal(args.length, 2, "Array.size external arity mismatch");
+  assert.deepStrictEqual(args[0], { kind: "erased" },
+    "Array.size type argument must be erased");
+  return { value: naturalResult(host, BigInt(host.arrayInfo(args[1]).size)), world };
+}
+
 function inhabitedUInt8({ args, world }) {
   assert.equal(args.length, 0, "instInhabitedUInt8 external arity mismatch");
   return { value: { kind: "scalar", scalarKind: "uint8", value: 0n }, world };
@@ -515,6 +522,34 @@ function replicateArray({ args, host, world }) {
   };
 }
 
+function swapArray({ args, host, world }) {
+  assert.equal(args.length, 6, "Array.swap external arity mismatch");
+  assert.deepStrictEqual(args[0], { kind: "erased" },
+    "Array.swap type argument must be erased");
+  assert.deepStrictEqual(args[4], { kind: "erased" },
+    "Array.swap first bounds proof must be erased");
+  assert.deepStrictEqual(args[5], { kind: "erased" },
+    "Array.swap second bounds proof must be erased");
+  const source = args[1];
+  const array = host.arrayInfo(source);
+  const index = naturalValue(host, args[2], "Array.swap first index");
+  const index2 = naturalValue(host, args[3], "Array.swap second index");
+  assert.ok(index < BigInt(array.size) && index2 < BigInt(array.size),
+    "Array.swap indices must be in bounds");
+  const first = Number(index);
+  const second = Number(index2);
+  const swapped = [...array.elements];
+  [swapped[first], swapped[second]] = [swapped[second], swapped[first]];
+  if (!array.header.persistent && array.header.rc === 1) {
+    host.writeArrayElement(source, first, swapped[first]);
+    host.writeArrayElement(source, second, swapped[second]);
+    return { value: source, world };
+  }
+  swapped.forEach(element => host.retainValue(element));
+  if (!array.header.persistent) host.releaseValue(source);
+  return { value: host.allocateArray(swapped, array.capacity), world };
+}
+
 /**
  * Validation-only externals layered over the ordinary concrete artifact
  * registry. Generic Array operations use the same opaque/ARRY layout as the
@@ -543,9 +578,11 @@ export const concreteValidationExternalRegistry = Object.freeze({
   "instInhabitedUInt8": inhabitedUInt8,
   "Array.get!Internal": getArrayBang,
   "Array.set!": setArray,
+  "Array.size": sizeArray,
   "Array.push": pushArray,
   "Array.pop": popArray,
   "Array.replicate": replicateArray,
+  "Array.swap": swapArray,
   "Int.neg": ({ args, host, world }) => {
     assert.equal(args.length, 1, "Int.neg external arity mismatch");
     const value = integerValue(host, args[0], "Int.neg operand");

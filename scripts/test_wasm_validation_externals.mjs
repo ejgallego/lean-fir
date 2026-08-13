@@ -1629,9 +1629,11 @@ for (const [handler, leftValue, rightValue, expected] of [
 
 {
   const setArray = validationExternalRegistry["Array.set!"];
+  const sizeArray = validationExternalRegistry["Array.size"];
   const pushArray = validationExternalRegistry["Array.push"];
   const popArray = validationExternalRegistry["Array.pop"];
   const replicateArray = validationExternalRegistry["Array.replicate"];
+  const swapArray = validationExternalRegistry["Array.swap"];
   const getArray = validationExternalRegistry["Array.get!Internal"];
   const inhabitedUInt8 = validationExternalRegistry["instInhabitedUInt8"];
   const erased = { kind: "erased" };
@@ -1646,6 +1648,8 @@ for (const [handler, leftValue, rightValue, expected] of [
     elements: [old, retained],
     capacity: 4,
   });
+  assert.deepStrictEqual(invoke(sizeArray, uniqueHost, [erased, unique]),
+    taggedIndex(2));
   assert.deepStrictEqual(
     invoke(setArray, uniqueHost, [erased, unique, taggedIndex(0), replacement]),
     unique,
@@ -1779,6 +1783,35 @@ for (const [handler, leftValue, rightValue, expected] of [
     { kind: "array", elements: [], capacity: 0 },
   );
   assert.throws(() => emptyReplicateHost.liveCell(unused.location));
+
+  const swapHost = new SemanticHost();
+  const swapFirst = swapHost.alloc({ kind: "natural", value: 0x10000000en });
+  const swapSecond = swapHost.alloc({ kind: "natural", value: 0x10000000fn });
+  const swapSource = swapHost.alloc({
+    kind: "array", elements: [swapFirst, swapSecond], capacity: 4,
+  });
+  assert.deepStrictEqual(invoke(swapArray, swapHost, [
+    erased, swapSource, taggedIndex(0), taggedIndex(1), erased, erased,
+  ]), swapSource);
+  assert.deepStrictEqual(swapHost.liveCell(swapSource.location).object, {
+    kind: "array", elements: [swapSecond, swapFirst], capacity: 4,
+  });
+  assert.equal(swapHost.liveCell(swapFirst.location).rc, 1);
+  assert.equal(swapHost.liveCell(swapSecond.location).rc, 1);
+
+  swapHost.incLocation(swapSource.location, 1);
+  const swapCopy = invoke(swapArray, swapHost, [
+    erased, swapSource, taggedIndex(0), taggedIndex(1), erased, erased,
+  ]);
+  assert.notDeepStrictEqual(swapCopy, swapSource);
+  assert.deepStrictEqual(swapHost.liveCell(swapSource.location).object.elements,
+    [swapSecond, swapFirst]);
+  assert.deepStrictEqual(swapHost.liveCell(swapCopy.location).object, {
+    kind: "array", elements: [swapFirst, swapSecond], capacity: 4,
+  });
+  assert.equal(swapHost.liveCell(swapSource.location).rc, 1);
+  assert.equal(swapHost.liveCell(swapFirst.location).rc, 2);
+  assert.equal(swapHost.liveCell(swapSecond.location).rc, 2);
 }
 
 console.log("PASS shared Wasm String and arithmetic external contracts");

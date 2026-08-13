@@ -689,6 +689,17 @@ function pushArray({ args, host, world }) {
   };
 }
 
+function sizeArray({ args, host, world }) {
+  assert.equal(args.length, 2, "Array.size external arity mismatch");
+  assert.deepStrictEqual(args[0], { kind: "erased" },
+    "Array.size type argument must be erased");
+  const source = args[1];
+  assert.equal(source.kind, "heap", "Array.size operand must be a heap Array");
+  const object = host.liveCell(source.location).object;
+  assert.equal(object.kind, "array", "Array.size heap object must be an Array");
+  return { value: host.natural(BigInt(object.elements.length)), world };
+}
+
 function popArray({ args, host, world }) {
   assert.equal(args.length, 2, "Array.pop external arity mismatch");
   assert.deepStrictEqual(args[0], { kind: "erased" },
@@ -740,6 +751,40 @@ function replicateArray({ args, host, world }) {
       elements: Array(size).fill(value),
       capacity: size,
     }),
+    world,
+  };
+}
+
+function swapArray({ args, host, world }) {
+  assert.equal(args.length, 6, "Array.swap external arity mismatch");
+  assert.deepStrictEqual(args[0], { kind: "erased" },
+    "Array.swap type argument must be erased");
+  assert.deepStrictEqual(args[4], { kind: "erased" },
+    "Array.swap first bounds proof must be erased");
+  assert.deepStrictEqual(args[5], { kind: "erased" },
+    "Array.swap second bounds proof must be erased");
+  const source = args[1];
+  assert.equal(source.kind, "heap", "Array.swap operand must be a heap Array");
+  const cell = host.liveCell(source.location);
+  assert.equal(cell.object.kind, "array", "Array.swap heap object must be an Array");
+  const { elements, capacity } = cell.object;
+  const index = naturalValue(host, args[2], "Array.swap first index");
+  const index2 = naturalValue(host, args[3], "Array.swap second index");
+  assert.ok(index < BigInt(elements.length) && index2 < BigInt(elements.length),
+    "Array.swap indices must be in bounds");
+  const swapped = [...elements];
+  [swapped[Number(index)], swapped[Number(index2)]] =
+    [swapped[Number(index2)], swapped[Number(index)]];
+  if (!cell.persistent && cell.rc === 1) {
+    cell.object = { kind: "array", elements: swapped, capacity };
+    return { value: source, world };
+  }
+  for (const element of swapped) {
+    if (element.kind === "heap") host.incLocation(element.location, 1);
+  }
+  if (!cell.persistent) host.decLocation(source.location);
+  return {
+    value: host.alloc({ kind: "array", elements: swapped, capacity }),
     world,
   };
 }
@@ -940,9 +985,11 @@ export const validationExternalRegistry = {
   "instInhabitedUInt8": inhabitedUInt8,
   "Array.get!Internal": getArrayBang,
   "Array.set!": setArray,
+  "Array.size": sizeArray,
   "Array.push": pushArray,
   "Array.pop": popArray,
   "Array.replicate": replicateArray,
+  "Array.swap": swapArray,
   "Fir.Validation.Corpus.NativeEffects.recordImpl": ({ args, host, world }) => {
     assert.equal(args.length, 1, "validation.record external arity mismatch");
     const value = naturalValue(host, args[0], "validation.record operand");

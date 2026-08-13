@@ -202,6 +202,21 @@ def floatArrayPopShared (xs : Array Float) : Array Float × Array Float :=
 def floatArrayReplicate (count : Nat) (value : Float) : Array Float :=
   Array.replicate count value
 
+@[noinline]
+def floatArraySwapUnique (xs : Array Float) : Array Float :=
+  if h : 1 < xs.size then
+    xs.swap 0 1 (Nat.zero_lt_of_lt h) h
+  else
+    xs
+
+@[noinline]
+def floatArraySwapShared (xs : Array Float) : Array Float × Array Float :=
+  let updated := if h : 1 < xs.size then
+      xs.swap 0 1 (Nat.zero_lt_of_lt h) h
+    else
+      xs
+  (xs, updated)
+
 def firstUInt8List : List UInt8 → UInt8
   | value :: _ => value
   | [] => 0
@@ -4345,6 +4360,48 @@ private def preConversionCases : Array Case := #[
     requiredExecutedExternalTrace := some #[``Array.replicate]
     provenance := firProvenance
       "Consume an unused heap Float box when replicating an empty Array" },
+  { id := "generic-float-array-swap-unique"
+    entry := ``Source.floatArraySwapUnique
+    args := #[floatArrayDatum #[genericContainerFloat, genericArrayReplacementFloat]]
+    argSchemas := #[.array (.boxed .float64)]
+    resultSchema := .array (.boxed .float64)
+    native := fun _ => floatArrayDatum
+      (Source.floatArraySwapUnique
+        #[genericContainerFloat, genericArrayReplacementFloat])
+    tags := #["stress", "array", "generic", "boxed", "float", "heap",
+      "swap", "ownership", "unique", "bit-exact"]
+    requiredLcnfForms := #["cases", "fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["cases", "fap", "extern", "return"]
+    requiredExternals := #[``Array.size, ``Nat.decLt, ``Array.swap]
+    requiredExecutedExternals := #[``Array.size, ``Nat.decLt, ``Array.swap]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Array.size, ``Nat.decLt, ``Array.swap]
+    requiredExecutedExternalTrace :=
+      some #[``Array.size, ``Nat.decLt, ``Array.swap]
+    provenance := firProvenance
+      "Swap two heap Float slots in an exclusive Array without changing ownership" },
+  { id := "generic-float-array-swap-shared"
+    entry := ``Source.floatArraySwapShared
+    args := #[floatArrayDatum #[genericContainerFloat, genericArrayReplacementFloat]]
+    argSchemas := #[.array (.boxed .float64)]
+    resultSchema := .ctor "Prod.mk" 0
+      #[.array (.boxed .float64), .array (.boxed .float64)]
+    native := fun _ => floatArrayPairDatum
+      (Source.floatArraySwapShared
+        #[genericContainerFloat, genericArrayReplacementFloat])
+    tags := #["stress", "array", "generic", "boxed", "float", "heap",
+      "swap", "ownership", "shared", "copy-on-write", "bit-exact"]
+    requiredLcnfForms := #["cases", "inc", "fap", "extern", "ctor", "return"]
+    requiredExecutedLcnfForms :=
+      #["cases", "inc", "fap", "extern", "ctor", "return"]
+    requiredExternals := #[``Array.size, ``Nat.decLt, ``Array.swap]
+    requiredExecutedExternals := #[``Array.size, ``Nat.decLt, ``Array.swap]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Array.size, ``Nat.decLt, ``Array.swap]
+    requiredExecutedExternalTrace :=
+      some #[``Array.size, ``Nat.decLt, ``Array.swap]
+    provenance := firProvenance
+      "Copy and swap a shared Float Array while retaining both heap elements" },
   { id := "generic-uint8-list-head"
     entry := ``Source.firstUInt8List
     args := #[uint8ListDatum [255, 1]]

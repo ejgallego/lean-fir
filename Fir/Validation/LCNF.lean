@@ -1321,6 +1321,20 @@ private def arraySetExternal (request : ExternalRequest) (runtime : RuntimeState
     nextLocation := runtime.nextLocation
     world := runtime.world }
 
+private def arraySizeExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [typeArg, array] := request.args.toList
+    | throw (.arityMismatch 2 request.args.size)
+  unless typeArg == .erased do
+    throw (.externalFailure request.name "Array.size type argument must be erased")
+  let (_, _, elements, _) ← externalArrayCell request runtime array
+  let (runtime, value) := literal runtime (.nat elements.size)
+  return {
+    value
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
 private def arrayPushExternal (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
   let [typeArg, array, value] := request.args.toList
@@ -1407,6 +1421,37 @@ private def arrayReplicateExternal
         retainOwnedValue runtime value
   let (runtime, reference) := alloc runtime
     (.array (Array.replicate count value) count)
+  return {
+    value := .object reference
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def arraySwapExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [typeArg, array, indexValue, index2Value, proof, proof2] :=
+      request.args.toList
+    | throw (.arityMismatch 6 request.args.size)
+  unless typeArg == .erased && proof == .erased && proof2 == .erased do
+    throw (.externalFailure request.name
+      "Array.swap type and bounds-proof arguments must be erased")
+  let (location, cell, elements, capacity) ← externalArrayCell request runtime array
+  let index ← externalNat request runtime indexValue
+  let index2 ← externalNat request runtime index2Value
+  unless index < elements.size && index2 < elements.size do
+    throw (.externalFailure request.name "Array.swap index is out of bounds")
+  let elements := elements.swapIfInBounds index index2
+  if !cell.persistent && cell.rc == 1 then
+    let runtime ← setCell runtime location { cell with object := .array elements capacity }
+    return {
+      value := array
+      heap := runtime.heap
+      nextLocation := runtime.nextLocation
+      world := runtime.world }
+  let runtime ← elements.foldlM (init := runtime) fun runtime element =>
+    retainOwnedValue runtime element
+  let runtime ← if cell.persistent then pure runtime else decLocation runtime location
+  let (runtime, reference) := alloc runtime (.array elements capacity)
   return {
     value := .object reference
     heap := runtime.heap
@@ -3181,12 +3226,16 @@ private def validationExternals : ExternalImpl where
       byteArraySetExternal request runtime
     else if request.name == ``Array.set! then
       arraySetExternal request runtime
+    else if request.name == ``Array.size then
+      arraySizeExternal request runtime
     else if request.name == ``Array.push then
       arrayPushExternal request runtime
     else if request.name == ``Array.pop then
       arrayPopExternal request runtime
     else if request.name == ``Array.replicate then
       arrayReplicateExternal request runtime
+    else if request.name == ``Array.swap then
+      arraySwapExternal request runtime
     else if request.name == ``instInhabitedUInt8 then
       inhabitedUInt8External request runtime
     else if request.name == ``Array.get!Internal then
