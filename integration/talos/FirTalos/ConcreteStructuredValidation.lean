@@ -50,6 +50,267 @@ def ConcreteStructuredValidationState
           ConcreteStructuredValidationFocus program joins locals
             (some functionResult) facts sharing code
 
+/-- Static validation retained for every suspended source caller.  Direct and
+saturated calls have the same source bind frame, so validation intentionally
+does not distinguish them; the existing supported-frame stack and its
+resource agreement retain that protocol distinction. -/
+inductive ConcreteStructuredSuspendedValidation
+    (program : Fir.LeanIR.ImpureProgram) :
+    Fir.Wasm.AbiKind → Option Fir.Wasm.AbiKind → List Frame → Prop where
+  | nil {functionResult : Fir.Wasm.AbiKind} :
+      ConcreteStructuredSuspendedValidation program functionResult none []
+  | bind
+      {calleeResult callerResult kind : Fir.Wasm.AbiKind}
+      {tailResult : Option Fir.Wasm.AbiKind}
+      {result : Lean.FVarId}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      {callerEnv : Env}
+      {callerJoins : JoinEnv}
+      {sourceFrames : List Frame}
+      (continuationValidation :
+        ConcreteStructuredValidationState program callerResult continuation)
+      (tail : ConcreteStructuredSuspendedValidation program callerResult
+        tailResult sourceFrames) :
+      ConcreteStructuredSuspendedValidation program calleeResult (some kind)
+        (.bind result continuation callerEnv callerJoins :: sourceFrames)
+  | lazy
+      {calleeResult callerResult kind : Fir.Wasm.AbiKind}
+      {tailResult : Option Fir.Wasm.AbiKind}
+      {declaration : Lean.Name}
+      {result : Lean.FVarId}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      {callerEnv : Env}
+      {callerJoins : JoinEnv}
+      {sourceFrames : List Frame}
+      (continuationValidation :
+        ConcreteStructuredValidationState program callerResult continuation)
+      (tail : ConcreteStructuredSuspendedValidation program callerResult
+        tailResult sourceFrames) :
+      ConcreteStructuredSuspendedValidation program calleeResult (some kind)
+        (.cache declaration ::
+          .bind result continuation callerEnv callerJoins :: sourceFrames)
+
+/-- The established supported caller stack strengthened by source-validation
+provenance for exactly the same source frames.  Target-frame shape and the
+direct/saturated/lazy distinction remain owned by the production-supported
+stack; this companion adds no target execution or future source step. -/
+structure ConcreteStructuredValidatedFrameStack
+    (program : Fir.LeanIR.ImpureProgram)
+    (sourceModule : Fir.Wasm.Module)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (functionResult : Fir.Wasm.AbiKind)
+    (expectedResult : Option Fir.Wasm.AbiKind)
+    (sourceFrames : List Frame)
+    (targetFrames : List StructuredWasmFrame) : Prop where
+  supported : ConcreteStructuredSupportedFrameStack program sourceModule
+    targetModule hosts functionResult expectedResult sourceFrames targetFrames
+  validation : ConcreteStructuredSuspendedValidation program functionResult
+    expectedResult sourceFrames
+
+/-- The compiler-produced root has no suspended caller validation. -/
+theorem ConcreteStructuredValidatedFrameStack.nil
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {functionResult : Fir.Wasm.AbiKind} :
+    ConcreteStructuredValidatedFrameStack program sourceModule targetModule
+      hosts functionResult none [] [] :=
+  ⟨.nil, .nil⟩
+
+/-- Structured case labels are target-only control frames and leave the
+suspended source-validation stack unchanged. -/
+theorem ConcreteStructuredValidatedFrameStack.case
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {functionResult : Fir.Wasm.AbiKind}
+    {expectedResult : Option Fir.Wasm.AbiKind}
+    {sourceFrames : List Frame}
+    {targetFrames : List StructuredWasmFrame}
+    {belowStack : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {testCount : Nat}
+    (tail : ConcreteStructuredValidatedFrameStack program sourceModule
+      targetModule hosts functionResult expectedResult sourceFrames
+      targetFrames) :
+    ConcreteStructuredValidatedFrameStack program sourceModule targetModule
+      hosts functionResult expectedResult sourceFrames
+      (structuredWasmCaseLabels belowStack targetRest testCount ++
+        targetFrames) :=
+  ⟨.case tail.supported, tail.validation⟩
+
+/-- A production direct-call frame stores precisely the already-validated
+caller continuation. -/
+theorem ConcreteStructuredValidatedFrameStack.direct
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {callerContext : Fir.Wasm.Context}
+    {callerCode : Lean.Compiler.LCNF.Code .impure}
+    {callerFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {callerEnv : Env}
+    {result : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {callerLocals : Wasm.Locals}
+    {callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {calleeResult callerResult kind : Fir.Wasm.AbiKind}
+    {resultIndex : Nat}
+    {tailResult : Option Fir.Wasm.AbiKind}
+    (spec : ConcreteSupportedFunction program callerContext callerCode
+      sourceModule callerFunction targetModule hosts)
+    (callerResultAt : spec.sourceResultKind = callerResult)
+    (contextCaches : callerContext.cachedDeclarations =
+      Fir.Wasm.cachedDeclarationNames program)
+    (continuationAdapted : CodeAdaptedWithSuffix callerContext sourceModule
+      callerFunction labels continuation targetRest)
+    (resultFound : findFVar? (functionBindings callerFunction) result =
+      some resultIndex)
+    (kindAt : (functionBindings callerFunction)[resultIndex]?.map Prod.snd =
+      some kind)
+    (calleeCompatible : calleeResult.refines kind = true)
+    (continuationValidation :
+      ConcreteStructuredValidationState program callerResult continuation)
+    (tail : ConcreteStructuredValidatedFrameStack program sourceModule
+      targetModule hosts callerResult tailResult sourceFrames targetFrames) :
+    ConcreteStructuredValidatedFrameStack program sourceModule targetModule
+      hosts calleeResult (some kind)
+      (.bind result continuation callerEnv callerJoins :: sourceFrames)
+      (.call 1 callerRemainder callerLocals
+          (.localSet resultIndex :: targetRest) :: targetFrames) :=
+  ⟨.direct spec callerResultAt contextCaches continuationAdapted resultFound
+      kindAt calleeCompatible tail.supported,
+    .bind continuationValidation tail.validation⟩
+
+/-- Saturated calls share the same source continuation-validation frame while
+retaining their distinct generated matcher/label layout. -/
+theorem ConcreteStructuredValidatedFrameStack.saturated
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {callerContext : Fir.Wasm.Context}
+    {callerCode : Lean.Compiler.LCNF.Code .impure}
+    {callerFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {callerEnv : Env}
+    {result : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {callerLocals : Wasm.Locals}
+    {physicalArgs callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {calleeResult callerResult kind : Fir.Wasm.AbiKind}
+    {resultIndex matcherCount : Nat}
+    {tailResult : Option Fir.Wasm.AbiKind}
+    (spec : ConcreteSupportedFunction program callerContext callerCode
+      sourceModule callerFunction targetModule hosts)
+    (callerResultAt : spec.sourceResultKind = callerResult)
+    (contextCaches : callerContext.cachedDeclarations =
+      Fir.Wasm.cachedDeclarationNames program)
+    (continuationAdapted : CodeAdaptedWithSuffix callerContext sourceModule
+      callerFunction labels continuation targetRest)
+    (resultFound : findFVar? (functionBindings callerFunction) result =
+      some resultIndex)
+    (kindAt : (functionBindings callerFunction)[resultIndex]?.map Prod.snd =
+      some kind)
+    (calleeCompatible : calleeResult.refines kind = true)
+    (continuationValidation :
+      ConcreteStructuredValidationState program callerResult continuation)
+    (tail : ConcreteStructuredValidatedFrameStack program sourceModule
+      targetModule hosts callerResult tailResult sourceFrames targetFrames) :
+    ConcreteStructuredValidatedFrameStack program sourceModule targetModule
+      hosts calleeResult (some kind)
+      (.bind result continuation callerEnv callerJoins :: sourceFrames)
+      (.call 1 callerRemainder
+          { callerLocals with
+            values := physicalArgs.reverse ++ callerRemainder }
+          [.localSet resultIndex] ::
+        (List.replicate matcherCount (.label 0 callerRemainder []) ++
+          .label 0 callerRemainder
+              ([.localGet resultIndex, .localSet resultIndex] ++ targetRest) ::
+            targetFrames)) :=
+  ⟨.saturated spec callerResultAt contextCaches continuationAdapted resultFound
+      kindAt calleeCompatible tail.supported,
+    .bind continuationValidation tail.validation⟩
+
+/-- A lazy miss suspends both the cache marker and the validated caller
+continuation; cache publication later removes the marker before the bind. -/
+theorem ConcreteStructuredValidatedFrameStack.lazy
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {callerContext : Fir.Wasm.Context}
+    {callerCode : Lean.Compiler.LCNF.Code .impure}
+    {callerFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {callerEnv : Env}
+    {declaration : Lean.Name}
+    {result : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {callerLocals : Wasm.Locals}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {calleeResult callerResult kind : Fir.Wasm.AbiKind}
+    {cacheIndex cacheSetId resultIndex : Nat}
+    {tailResult : Option Fir.Wasm.AbiKind}
+    (spec : ConcreteSupportedFunction program callerContext callerCode
+      sourceModule callerFunction targetModule hosts)
+    (callerResultAt : spec.sourceResultKind = callerResult)
+    (contextCaches : callerContext.cachedDeclarations =
+      Fir.Wasm.cachedDeclarationNames program)
+    (continuationAdapted : CodeAdaptedWithSuffix callerContext sourceModule
+      callerFunction labels continuation targetRest)
+    (resultFound : findFVar? (functionBindings callerFunction) result =
+      some resultIndex)
+    (kindAt : (functionBindings callerFunction)[resultIndex]?.map Prod.snd =
+      some kind)
+    (initializerFound : sourceModule.initializers[cacheIndex]? =
+      some declaration)
+    (signature :
+      (sourceModule.callSignature? (.declaration declaration)).bind
+          (·.results[0]?) = some kind)
+    (cacheSetCall :
+      callIndex? sourceModule (.runtime (.cacheSet declaration kind)) =
+        some cacheSetId)
+    (notObject : kind ≠ .object)
+    (notTObject : kind ≠ .tobject)
+    (calleeCompatible : calleeResult.refines kind = true)
+    (continuationValidation :
+      ConcreteStructuredValidationState program callerResult continuation)
+    (tail : ConcreteStructuredValidatedFrameStack program sourceModule
+      targetModule hosts callerResult tailResult sourceFrames targetFrames) :
+    ConcreteStructuredValidatedFrameStack program sourceModule targetModule
+      hosts calleeResult (some kind)
+      (.cache declaration ::
+        .bind result continuation callerEnv callerJoins :: sourceFrames)
+      (.call 1 callerLocals.values callerLocals [
+            .call cacheSetId,
+            .globalSet (2 * cacheIndex + 1),
+            .const 1,
+            .globalSet (2 * cacheIndex)] ::
+        .label 0 callerLocals.values
+            ([.globalGet (2 * cacheIndex + 1),
+              .localSet resultIndex] ++ targetRest) ::
+          targetFrames) :=
+  ⟨.lazy spec callerResultAt contextCaches continuationAdapted resultFound
+      kindAt initializerFound signature cacheSetCall notObject notTObject
+      calleeCompatible tail.supported,
+    .lazy continuationValidation tail.validation⟩
+
 /-- Admission-free compiler/resource core strengthened by the exact residual
 validation state of its current source node.  This companion relation is the
 incremental bridge to universal compiler admission: it adds no source step,
