@@ -1,4 +1,5 @@
 import Fir.Wasm.Emit.ResidentAllocator
+import Fir.Wasm.Emit.ResidentConstructor
 
 namespace Fir.Wasm.Emit.ResidentCache
 
@@ -24,6 +25,7 @@ inductive LinkError where
   | descriptorOverflow (count : Nat)
   | incompatibleMemory
   | malformedLazyCache (name : Name)
+  | invalidInitializerSignature (name : Name)
   | retainedCacheGlobal (index : Nat)
   | invalidOutput (error : SymbolicError)
   deriving Inhabited, Repr
@@ -38,6 +40,9 @@ def cacheSetName (ordinal : Nat) : Name :=
   Name.mkSimple s!"fir_cache_set_{ordinal}"
 
 private def markPersistentName : Name := `fir_mark_persistent
+
+/-- Public, package-neutral entry that eagerly populates compiler lazy caches. -/
+def persistentInitializerName : Name := `fir_initialize_persistent_caches
 
 /--
 The compiler-produced `prettyM` cache graph has at most five constructor
@@ -335,6 +340,71 @@ def internalizeCacheSets (module : Module) (validate : Bool := true) :
     | .error error => throw (.invalidOutput error)
   else return result
 
+private def persistentCacheMiss
+    (ordinal : Nat) (initializer : Name) (kind : AbiKind) : List Instruction := [
+  .call (.declaration initializer),
+  .call (.runtime (.cacheSet initializer kind)),
+  .globalSet (2 * ordinal + 1) kind,
+  .i32Const .uint32 1,
+  .globalSet (2 * ordinal) .uint32]
+
+private def persistentCacheInitializerFunction (module : Module) :
+    Except LinkError Function := do
+  let mut body : List Instruction := []
+  for ordinal in [:module.initializers.size] do
+    let initializer := module.initializers[ordinal]!
+    let some signature := module.callSignature? (.declaration initializer) |
+      throw (.invalidInitializerSignature initializer)
+    let some kind := signature.results[0]? |
+      throw (.invalidInitializerSignature initializer)
+    unless signature.params.isEmpty && signature.results.size == 1 do
+      throw (.invalidInitializerSignature initializer)
+    body := body ++ [
+      .globalGet (2 * ordinal) .uint32,
+      .ifElse [] (persistentCacheMiss ordinal initializer kind)]
+  return {
+    name := persistentInitializerName
+    params := #[]
+    results := #[]
+    locals := #[]
+    body := body ++ [.ret] }
+
+/--
+Preserve the compiler's exact lazy-cache globals and add one explicit,
+idempotent initializer for an instance-lifetime arena. Each cache miss follows
+the ordinary lowering protocol: call the original nullary declaration,
+publish recursive persistence through `cacheSet`, store the typed value, then
+set the initialized flag. Run this before allocator and cache-set
+internalization; consumers call the exported entry before allocating scratch
+inputs and retain its resulting frontier as their rewind checkpoint.
+
+The existing `eliminateLazyInitializers` path remains available for packages
+that deliberately reconstruct closed values in each scratch call.
+-/
+def installPersistentInitializer (module : Module) (validate : Bool := true) :
+    Except LinkError Module := do
+  if validate then
+    match Fir.Wasm.validateModule module with
+    | .ok () => pure ()
+    | .error error => throw (.invalidInput error)
+  if reserved module persistentInitializerName then
+    throw (.reservedDeclaration persistentInitializerName)
+  let initializer ← persistentCacheInitializerFunction module
+  let functions := module.functions.push initializer
+  let runtimeOperations := Fir.Wasm.collectRuntimeOps functions
+  let externalImports := module.imports.filter (·.operation?.isNone)
+  let result : Module := {
+    module with
+    functions
+    exports := Fir.Wasm.addUnique module.exports persistentInitializerName
+    runtimeOperations
+    imports := runtimeOperations.mapIdx Fir.Wasm.runtimeImport ++ externalImports }
+  if validate then
+    match Fir.Wasm.validateModule result with
+    | .ok () => return result
+    | .error error => throw (.invalidOutput error)
+  else return result
+
 /-!
 Rewindable consumers cannot retain a lazy singleton allocated above their
 scratch checkpoint. Before resident linking, the compiler's exact cache
@@ -449,6 +519,50 @@ def exampleDescriptors : Array (Array AbiKind) :=
 def exampleOperation : RuntimeOp :=
   .cacheSet `residentCacheExample .object
 
+def persistentExampleCallerName : Name := `resident_lazy_object
+
+private def persistentObjectInitializerName : Name :=
+  `residentLazyObjectInitializer
+
+private def persistentObjectInfo : Lean.Compiler.LCNF.CtorInfo := {
+  name := `ResidentCache.persistentObject
+  cidx := 0
+  size := 1
+  «usize» := 0
+  ssize := 0 }
+
+private def persistentObjectAllocation : RuntimeOp :=
+  .allocCtor persistentObjectInfo #[.tobject] .object
+
+private def persistentObjectCacheSet : RuntimeOp :=
+  .cacheSet persistentObjectInitializerName .object
+
+private def persistentObjectInitializer : Function := {
+  name := persistentObjectInitializerName
+  params := #[]
+  results := #[.object]
+  locals := #[]
+  body := [
+    .i32Const .tobject 1,
+    .call (.runtime persistentObjectAllocation),
+    .ret] }
+
+private def persistentObjectCaller : Function := {
+  name := persistentExampleCallerName
+  params := #[]
+  results := #[.object]
+  locals := #[]
+  body := [
+    .globalGet 0 .uint32,
+    .ifElse [] [
+      .call (.declaration persistentObjectInitializerName),
+      .call (.runtime persistentObjectCacheSet),
+      .globalSet 1 .object,
+      .i32Const .uint32 1,
+      .globalSet 0 .uint32],
+    .globalGet 1 .object,
+    .ret] }
+
 def exampleCaller : Function := {
   name := `resident_cache_set
   params := #[(objectParam, .object)]
@@ -460,17 +574,24 @@ def exampleCaller : Function := {
     .ret] }
 
 def exampleModule : Module := {
-  imports := #[Fir.Wasm.runtimeImport 0 exampleOperation]
-  functions := #[exampleCaller]
-  exports := #[exampleCaller.name]
-  initializers := #[]
-  runtimeOperations := #[exampleOperation]
+  imports := #[exampleOperation, persistentObjectAllocation,
+    persistentObjectCacheSet].mapIdx Fir.Wasm.runtimeImport
+  functions := #[exampleCaller, persistentObjectInitializer,
+    persistentObjectCaller]
+  exports := #[exampleCaller.name, persistentObjectCaller.name]
+  initializers := #[persistentObjectInitializerName]
+  runtimeOperations := #[exampleOperation, persistentObjectAllocation,
+    persistentObjectCacheSet]
   closureDescriptors := exampleDescriptors }
 
 def residentExampleModule : Except String Module := do
-  let allocated ← ResidentAllocator.install exampleModule
+  let prepared ← installPersistentInitializer exampleModule
+    |>.mapError fun error => s!"initializer: {repr error}"
+  let allocated ← ResidentAllocator.install prepared
     |>.mapError fun error => s!"allocator: {repr error}"
-  internalizeCacheSets allocated
+  let constructed ← ResidentConstructor.internalizeConstructors allocated
+    |>.mapError fun error => s!"constructor: {repr error}"
+  internalizeCacheSets constructed
     |>.mapError fun error => s!"cache: {repr error}"
 
 private def lazyInitializerName : Name := `residentLazyInitializer
@@ -518,6 +639,28 @@ private def eliminatedLazyCallerBody : List Instruction := [
   .globalGet 0 .uint32,
   .ret]
 
+private def persistentInitializerBody : List Instruction := [
+  .globalGet 0 .uint32,
+  .ifElse [] [
+    .call (.declaration lazyInitializerName),
+    .call (.runtime (.cacheSet lazyInitializerName .uint32)),
+    .globalSet 1 .uint32,
+    .i32Const .uint32 1,
+    .globalSet 0 .uint32],
+  .ret]
+
+#guard match installPersistentInitializer lazyModule with
+  | .ok module =>
+      module.initializers == lazyModule.initializers &&
+      module.cacheGlobalKinds == lazyModule.cacheGlobalKinds &&
+      module.globals == lazyModule.globals &&
+      module.runtimeOperations == lazyModule.runtimeOperations &&
+      module.exports.contains persistentInitializerName &&
+      (module.functions.find? (·.name == persistentInitializerName) |>.map (·.body)) ==
+        some persistentInitializerBody &&
+      (Fir.Wasm.validateModule module).isOk
+  | .error _ => false
+
 #guard match eliminateLazyInitializers lazyModule with
   | .ok module =>
       module.initializers.isEmpty &&
@@ -554,9 +697,11 @@ private def malformedLazyCaller : Function := {
 def manifest : Json :=
   Json.mkObj [
     ("entry", exampleCaller.name.toString),
+    ("persistentInitializer", persistentInitializerName.toString),
+    ("persistentEntry", persistentExampleCallerName.toString),
     ("value", "object"),
     ("constructorFieldLimit", constructorFieldLimit),
-    ("status", "generation-only; W6 cache-persistence contract proof pending")]
+    ("status", "generation-ready; W6 recursive cache-persistence publication proved")]
 
 #guard match residentExampleModule with
   | .ok module =>
@@ -564,6 +709,9 @@ def manifest : Json :=
       module.runtimeOperations.isEmpty &&
       module.exports.contains exampleCaller.name &&
       module.exports.contains (cacheSetName 0) &&
+      module.exports.contains (cacheSetName 1) &&
+      module.exports.contains persistentInitializerName &&
+      module.exports.contains persistentExampleCallerName &&
       module.memory == some ResidentRuntime.residentMemory &&
       (Fir.Wasm.validateModule module |>.isOk) &&
       (Fir.Wasm.Emit.encode module |>.isOk)

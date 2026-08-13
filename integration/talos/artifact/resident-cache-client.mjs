@@ -74,10 +74,48 @@ export async function checkResidentCache(bytes) {
   const { exports } = await WebAssembly.instantiate(module, {});
   expect(exports.memory instanceof WebAssembly.Memory,
     "resident cache memory export is missing");
-  for (const entry of ["resident_cache_set", "fir_cache_set_0"]) {
+  for (const entry of [
+    "resident_cache_set",
+    "fir_cache_set_0",
+    "fir_cache_set_1",
+    "fir_initialize_persistent_caches",
+    "resident_lazy_object",
+    "fir_heap_frontier",
+    "fir_heap_alloc",
+    "fir_heap_rewind",
+  ]) {
     equal(typeof exports[entry], "function",
       `resident cache export ${entry} is missing`);
   }
+
+  const { exports: persistent } = await WebAssembly.instantiate(module, {});
+  const initialFrontier = persistent.fir_heap_frontier() >>> 0;
+  persistent.fir_initialize_persistent_caches();
+  const checkpoint = persistent.fir_heap_frontier() >>> 0;
+  expect(checkpoint > initialFrontier,
+    "persistent initializer did not allocate its cached object graph");
+  const cachedRoot = persistent.resident_lazy_object() >>> 0;
+  expect(cachedRoot >= initialFrontier && cachedRoot < checkpoint,
+    "cached root is not below the persistent checkpoint");
+  expectPersistent(persistent.memory, cachedRoot,
+    "persistent initializer root");
+  persistent.fir_initialize_persistent_caches();
+  equal(persistent.fir_heap_frontier() >>> 0, checkpoint,
+    "persistent initializer was not idempotent");
+
+  const scratch = persistent.fir_heap_alloc(40) >>> 0;
+  equal(scratch, checkpoint,
+    "scratch allocation did not start at the persistent checkpoint");
+  expect((persistent.fir_heap_frontier() >>> 0) > checkpoint,
+    "scratch allocation did not advance the frontier");
+  persistent.fir_heap_rewind(checkpoint);
+  equal(persistent.fir_heap_frontier() >>> 0, checkpoint,
+    "scratch rewind did not restore the persistent checkpoint");
+  equal(persistent.resident_lazy_object() >>> 0, cachedRoot,
+    "scratch rewind invalidated the persistent cached root");
+  persistent.fir_initialize_persistent_caches();
+  equal(persistent.fir_heap_frontier() >>> 0, checkpoint,
+    "post-rewind initialization changed the persistent checkpoint");
 
   const parent = 1024;
   const childOne = 1072;
