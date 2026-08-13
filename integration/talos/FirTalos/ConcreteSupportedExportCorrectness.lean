@@ -137,6 +137,13 @@ structure ConcreteSupportedFunction
   sourceResultKind : AbiKind
   sourceResultAt :
     sourceFunction.results[0]? = some sourceResultKind
+  sourceDeclaration : LCNF.Decl .impure
+  sourceDeclarationFound :
+    program.findDecl? sourceDeclaration.name = some sourceDeclaration
+  sourceDeclarationBody : sourceDeclaration.value = .code code
+  sourceResultSelected :
+    Fir.Wasm.effectiveDeclarationResultKind? sourceDeclaration =
+      some sourceResultKind
   localsAligned : LocalLayoutAligned context sourceFunction
   adapted : adapt sourceModule = .ok target
   hostsResolved : resolveHosts sourceModule = .ok hosts
@@ -161,6 +168,75 @@ structure ConcreteSupportedFunction
   bodyAdapted :
     CodeAdapted context sourceModule sourceFunction [] code targetBody
   singleResult : targetFunction.results.length = 1
+
+/-- Recover the exact declaration-body validation performed by
+`WasmSupported` for this compiler-selected function.
+
+The local-kind row is existential because it is the validator's incremental
+parameter row, not the lowerer's complete numeric-local row.  This theorem
+contains no execution evidence and is the static starting point for deriving
+current-node admission along the structured simulation relation. -/
+theorem ConcreteSupportedFunction.validatedBody
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {code : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context code sourceModule
+      sourceFunction target hosts) :
+    ∃ parameterLocals,
+      Fir.Wasm.addSupportedDeclarationParams? program spec.sourceDeclaration =
+          some parameterLocals ∧
+        Fir.Wasm.supportedCode program parameterLocals
+            (some spec.sourceResultKind) code = true := by
+  have declarationMember : spec.sourceDeclaration ∈ program.decls := by
+    obtain ⟨_, index, inBounds, selected, _⟩ :=
+      Array.find?_eq_some_iff_getElem.mp spec.sourceDeclarationFound
+    rw [← selected]
+    exact Array.getElem_mem inBounds
+  have declarationsSupported :
+      program.decls.all (Fir.Wasm.supportedDecl program) = true := by
+    have supported := spec.programSupported
+    unfold Fir.Wasm.WasmSupported Fir.Wasm.supportedProgram at supported
+    simp only [Bool.and_eq_true] at supported
+    exact supported.1.1
+  have declarationSupported :
+      Fir.Wasm.supportedDecl program spec.sourceDeclaration = true :=
+    (Array.all_eq_true'.mp declarationsSupported) _ declarationMember
+  unfold Fir.Wasm.supportedDecl at declarationSupported
+  simp only [Bool.and_eq_true] at declarationSupported
+  cases parametersFound :
+      Fir.Wasm.addSupportedDeclarationParams? program spec.sourceDeclaration with
+  | none =>
+      simp [parametersFound, spec.sourceDeclarationBody] at declarationSupported
+  | some parameterLocals =>
+      refine ⟨parameterLocals, rfl, ?_⟩
+      simpa [parametersFound, spec.sourceDeclarationBody,
+        spec.sourceResultSelected] using
+        declarationSupported.2
+
+/-- Reindex declaration validation by the active result equality retained by
+the structured global simulation relation. -/
+theorem ConcreteSupportedFunction.validatedBodyAt
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {code : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context code sourceModule
+      sourceFunction target hosts)
+    {functionResult : AbiKind}
+    (activeResult : spec.sourceResultKind = functionResult) :
+    ∃ parameterLocals,
+      Fir.Wasm.addSupportedDeclarationParams? program spec.sourceDeclaration =
+          some parameterLocals ∧
+        Fir.Wasm.supportedCode program parameterLocals
+            (some functionResult) code = true := by
+  simpa [activeResult] using spec.validatedBody
 
 /-- A supported generated function together with the one extra static fact
 needed by a named whole-export correctness theorem. Internal recursive

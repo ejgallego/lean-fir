@@ -1608,6 +1608,15 @@ acceptance tests pass.
      relation repair; `FIR-BUG-wasm-none-finite-trace-address-space-safety`
      records the remaining resource boundary. Later runtime families widen
      admission independently.
+     The admission proof now also has a compiler-owned validation root:
+     `ConcreteSupportedFunction` retains the exact source declaration, body,
+     and effective result selected by production lowering, while
+     `validatedBodyAt` reconstructs the actual `WasmSupported` body judgment
+     at the active result kind. The admission law receives that already
+     retained active-result equality. The next invariant slice advances the
+     validator's local/join/case/sharing state with the structured code focus;
+     `FIR-BUG-wasm-none-structured-validation-provenance` tracks this remaining
+     proof-relation widening.
      Heap-valued cache misses and target-only loop unwinding remain later
      widenings.
    - **W6.7f — public certificate-free finite-trace theorem.** From a

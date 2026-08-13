@@ -57,9 +57,10 @@ def ConcreteGeneratedTraceSimulation
 /-- Compiler-derived admission for one currently executing ordinary-code node.
 
 The law is local to the successful source step presented to the simulation.
-It recovers only the source/compiler admission and its exact allocation cost;
-it contains no target execution, successor admission, recursive evaluator,
-termination evidence, or address-space claim. -/
+It receives the exact active result equality already retained by the global
+compiler relation, then recovers only the source/compiler admission and its
+exact allocation cost. It contains no target execution, successor admission,
+recursive evaluator, termination evidence, or address-space claim. -/
 structure ConcreteStructuredCompilerCurrentStepAdmission
     (program : Fir.LeanIR.ImpureProgram)
     (sourceModule : Fir.Wasm.Module)
@@ -86,7 +87,8 @@ structure ConcreteStructuredCompilerCurrentStepAdmission
       {targetCode : Wasm.Program}
       {source sourceAfter : Fir.LeanIR.Impure.MachineState}
       {target : StructuredWasmState Host},
-      ConcreteStructuredCodeCoreRel program context sourceModule
+      spec.sourceResultKind = functionResult →
+        ConcreteStructuredCodeCoreRel program context sourceModule
           sourceFunction externals labels entryRuntime entryStore entryWitness
           functionResult callerExpectedResult facts remainingBytes sourceRuntime
           sourceEnv sourceCode targetStore targetLocals targetCode witness source
@@ -165,6 +167,7 @@ theorem ConcreteStructuredCompilerCurrentStepCoverage.code
     {functionCode : Lean.Compiler.LCNF.Code .impure}
     (spec : ConcreteSupportedFunction program context functionCode
       sourceModule sourceFunction targetModule hosts)
+    (activeResult : spec.sourceResultKind = functionResult)
     (core : ConcreteStructuredCodeCoreRel program context sourceModule
       sourceFunction externals labels entryRuntime entryStore entryWitness
       functionResult callerExpectedResult facts remainingBytes sourceRuntime
@@ -177,7 +180,7 @@ theorem ConcreteStructuredCompilerCurrentStepCoverage.code
           functionResult facts sourceRuntime sourceEnv requiredBytes sourceCode ∧
         requiredBytes ≤ remainingBytes := by
   obtain ⟨requiredBytes, admitted⟩ :=
-    coverage.admission.code spec core sourceStep
+    coverage.admission.code spec activeResult core sourceStep
   exact ⟨requiredBytes, admitted,
     coverage.addressSpaceSafety.code spec core sourceStep admitted⟩
 
@@ -233,7 +236,7 @@ theorem ConcreteStructuredCompilerCurrentStepAdmission.toCurrentStepClassifier
     cases active with
     | code contextCaches core supported agrees =>
         obtain ⟨requiredBytes, admitted⟩ :=
-          admission.code spec core sourceStep
+          admission.code spec activeResult core sourceStep
         have budget :=
           addressSpaceSafety.code spec core sourceStep admitted
         apply ConcreteStructuredRunnableOutcome.toRunnableGlobal

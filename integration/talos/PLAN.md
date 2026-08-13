@@ -6196,6 +6196,14 @@ resource-safe whole-simulation or explicitly budgeted finite-prefix theorem.
 resource boundary; `FIR-BUG-wasm-none-structured-active-result-index` is fixed.
 Heap-valued cache misses remain the facts-aware transport redesign after the
 current non-heap lazy protocol.
+Compiler admission now starts from the exact declaration accepted by the real
+validator: supported-function packages retain declaration lookup/body identity
+and the effective result selected by lowering, and `validatedBodyAt` recovers
+the corresponding `supportedCode` root at the active result ABI. The current
+structured relation must next retain the validator's evolving local, join,
+case, and sharing state so current-node admission follows without a recursive
+caller certificate; `FIR-BUG-wasm-none-structured-validation-provenance`
+records that remaining invariant.
 
 ## Parallel agent packages
 

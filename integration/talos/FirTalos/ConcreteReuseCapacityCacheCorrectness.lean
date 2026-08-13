@@ -11436,9 +11436,11 @@ structure ConcreteGeneratedInternalDeclaration
   sourceParameters :
     sourceFunction.params = parameterLocals.reverse.toArray
   sourceResultSelected :
-    match Fir.Wasm.effectiveDeclarationResultKind? declaration with
-    | some kind => sourceResultKind = kind
-    | none => True
+    Fir.Wasm.effectiveDeclarationResultKind? declaration =
+      some sourceResultKind
+  declarationFound :
+    program.findDecl? declaration.name = some declaration
+  declarationBody : declaration.value = .code sourceCode
   callIndexEq :
     callIndex? sourceModule (.declaration declaration.name) =
       some targetFunctionIndex
@@ -11472,6 +11474,10 @@ def ConcreteGeneratedInternalDeclaration.toSupportedFunction
   sourceFunctionFound := row.sourceFunctionFound
   sourceResultKind := row.sourceResultKind
   sourceResultAt := row.sourceResultAt
+  sourceDeclaration := declaration
+  sourceDeclarationFound := row.declarationFound
+  sourceDeclarationBody := row.declarationBody
+  sourceResultSelected := row.sourceResultSelected
   localsAligned := row.localsAligned
   adapted := spec.adapted
   hostsResolved := spec.hostsResolved
@@ -13343,6 +13349,29 @@ theorem ConcreteGeneratedDeclaration.exists_ofAdaptedFunction
     localsAligned
     singleResult }⟩
 
+/-- A value ABI classification makes the production result selector total. -/
+private theorem effectiveDeclarationResultKind?_exists_of_abiKind
+    {declaration : LCNF.Decl .impure} {declared : AbiKind}
+    (classified :
+      Fir.Wasm.abiKind? declaration.type = .ok (some declared)) :
+    ∃ kind, Fir.Wasm.effectiveDeclarationResultKind? declaration = some kind := by
+  unfold Fir.Wasm.effectiveDeclarationResultKind?
+  rw [classified]
+  simp only [Bind.bind, Option.bind_some]
+  split
+  · exact ⟨declared, rfl⟩
+  · cases bodyEq : declaration.value with
+    | extern metadata => exact ⟨declared, rfl⟩
+    | code code =>
+        simp only
+        split
+        · split
+          · split
+            · exact ⟨_, rfl⟩
+            · exact ⟨declared, rfl⟩
+          · exact ⟨declared, rfl⟩
+        · exact ⟨declared, rfl⟩
+
 /-- The result kind retained by an adapted generated row is exactly the kind
 selected by production lowering whenever that selection succeeds. -/
 theorem ConcreteGeneratedDeclaration.resultSelected
@@ -13367,6 +13396,55 @@ theorem ConcreteGeneratedDeclaration.resultSelected
       exact Option.some.inj <|
         generated.sourceResultAt.symm.trans
           (row.resultAt_of_effectiveResult selected)
+
+/-- A generated single-result row cannot take the declaration selector's
+`none` branch, so the selected kind is exactly the retained function result. -/
+theorem ConcreteGeneratedDeclaration.resultSelectedExact
+    {program : Fir.LeanIR.ImpureProgram}
+    {cachedDeclarations : Array Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {context : Fir.Wasm.Context}
+    {target : AdaptedModule}
+    (generated : ConcreteGeneratedDeclaration context sourceCode sourceModule
+      sourceFunction target)
+    (row : LoweredInternalDeclaration program cachedDeclarations declaration
+      sourceCode sourceFunction) :
+    Fir.Wasm.effectiveDeclarationResultKind? declaration =
+      some generated.sourceResultKind := by
+  cases selected : Fir.Wasm.effectiveDeclarationResultKind? declaration with
+  | some kind =>
+      have kindEq := generated.resultSelected row
+      rw [selected] at kindEq
+      simpa [kindEq] using selected
+  | none =>
+      have selectedResults := row.resultsSelected
+      rw [selected] at selectedResults
+      have functionResults : sourceFunction.results = row.abiResults := by
+        simpa using congrArg Fir.Wasm.Function.results row.sourceFunctionEq
+      have resultAt :
+          row.abiResults[0]? = some generated.sourceResultKind := by
+        simpa [functionResults] using generated.sourceResultAt
+      cases classified : Fir.Wasm.abiKind? declaration.type with
+      | error error =>
+          unfold Fir.Wasm.resultKinds at selectedResults
+          rw [classified] at selectedResults
+          contradiction
+      | ok kind? =>
+          cases kind? with
+          | some declared =>
+              obtain ⟨kind, available⟩ :=
+                effectiveDeclarationResultKind?_exists_of_abiKind classified
+              rw [selected] at available
+              contradiction
+          | none =>
+              have empty : row.abiResults = #[] := by
+                unfold Fir.Wasm.resultKinds at selectedResults
+                rw [classified] at selectedResults
+                exact (Except.ok.inj selectedResults).symm
+              simp [empty] at resultAt
 
 /--
 Whole-pipeline internal-declaration selector.
@@ -13477,7 +13555,9 @@ theorem ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipeline
     parameterIdsUnique
     parametersAdded := row.paramsAdded
     sourceParameters
-    sourceResultSelected := generated.resultSelected row
+    sourceResultSelected := generated.resultSelectedExact row
+    declarationFound := by simpa [declarationNameEq] using declarationFound
+    declarationBody := row.bodyEq
     callIndexEq := by simpa [declarationNameEq] using callIndexEq }⟩⟩
 
 /--
@@ -13574,7 +13654,9 @@ theorem
     parameterIdsUnique
     parametersAdded
     sourceParameters
-    sourceResultSelected := generated.resultSelected row
+    sourceResultSelected := generated.resultSelectedExact row
+    declarationFound := by simpa [declarationNameEq] using declarationFound
+    declarationBody := by simpa only [callerProgram] using row.bodyEq
     callIndexEq := by simpa [declarationNameEq] using callIndexEq }⟩
 
 /-- The common lowered-row selector specialized to a source ABI

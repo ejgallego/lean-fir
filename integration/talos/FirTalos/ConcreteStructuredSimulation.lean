@@ -20735,6 +20735,10 @@ def ConcreteGeneratedInternalDeclaration.toSupportedFunctionOfFunction
   sourceFunctionFound := row.sourceFunctionFound
   sourceResultKind := row.sourceResultKind
   sourceResultAt := row.sourceResultAt
+  sourceDeclaration := declaration
+  sourceDeclarationFound := row.declarationFound
+  sourceDeclarationBody := row.declarationBody
+  sourceResultSelected := row.sourceResultSelected
   localsAligned := row.localsAligned
   adapted := spec.adapted
   hostsResolved := spec.hostsResolved
@@ -22818,7 +22822,7 @@ theorem ConcreteStructuredDirectCallReadyCoreRel.advance_supportedGlobal_of_step
   have calleeResultAt :
       calleeSpec.sourceResultKind = site.calleeResultKind := by
     change rowAtProgram.sourceResultKind = site.calleeResultKind
-    simpa [site.calleeResult] using rowAtProgram.sourceResultSelected
+    simpa [site.calleeResult] using rowAtProgram.sourceResultSelected.symm
   exact ⟨targetAfter, targetPath, calleeContext, site.calleeCode,
     calleeFunction, calleeSpec, [], sourceRuntime, targetStore, witness,
     site.calleeResultKind, some site.resultKind, calleeResultAt, nextActive⟩
@@ -23021,7 +23025,8 @@ theorem ConcreteStructuredSaturatedCallReadyCoreRel.advance_supportedGlobal_of_s
   have calleeResultAt :
       calleeSpec.sourceResultKind = resolution.targetResultKind := by
     change rowAtProgram.sourceResultKind = resolution.targetResultKind
-    simpa [resolution.targetResult] using rowAtProgram.sourceResultSelected
+    simpa [resolution.targetResult] using
+      rowAtProgram.sourceResultSelected.symm
   refine ⟨3 * (matcherCount + 1) + argumentCount + 1, targetAfter,
     targetPath, ?_, calleeContext, resolution.calleeCode, calleeFunction,
     calleeSpec, [], callRuntime, nextStore, witness,
@@ -23158,7 +23163,7 @@ theorem ConcreteStructuredLazyCallReadyCoreRel.advance_supportedGlobal_of_step
         .code row.contextCaches nextCore supportedAfter agreesAfter
       have calleeResultAt : calleeSpec.sourceResultKind = resultKind := by
         change row.sourceResultKind = resultKind
-        simpa [call.effectiveResult] using row.sourceResultSelected
+        simpa [call.effectiveResult] using row.sourceResultSelected.symm
       exact ⟨3, targetAfter, targetPath, by omega,
         ⟨calleeContext, calleeCode, calleeFunction, calleeSpec, [],
           sourceRuntime, targetStore, witness, resultKind, some resultKind,
