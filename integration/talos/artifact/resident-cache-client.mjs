@@ -88,6 +88,30 @@ export async function checkResidentCache(bytes) {
       `resident cache export ${entry} is missing`);
   }
 
+  const { exports: lazy } = await WebAssembly.instantiate(module, {});
+  const lazyInitialFrontier = lazy.fir_heap_frontier() >>> 0;
+  const coldScratch = lazy.fir_heap_alloc(40) >>> 0;
+  equal(coldScratch, lazyInitialFrontier,
+    "cold scratch did not start at the initial frontier");
+  const lazyRoot = lazy.resident_lazy_object() >>> 0;
+  const lazyFloor = lazy.fir_heap_frontier() >>> 0;
+  expect(lazyFloor > coldScratch + 40,
+    "cold lazy cache did not advance the persistent floor");
+  expectPersistent(lazy.memory, lazyRoot, "lazy cache root");
+  lazy.fir_heap_rewind(lazyInitialFrontier);
+  equal(lazy.fir_heap_frontier() >>> 0, lazyFloor,
+    "cache-aware rewind crossed the cold persistent floor");
+  equal(lazy.resident_lazy_object() >>> 0, lazyRoot,
+    "warm lazy cache changed its persistent root");
+  equal(lazy.fir_heap_frontier() >>> 0, lazyFloor,
+    "warm lazy cache grew the persistent floor");
+  const warmScratch = lazy.fir_heap_alloc(40) >>> 0;
+  equal(warmScratch, lazyFloor,
+    "warm scratch did not start at the persistent floor");
+  lazy.fir_heap_rewind(lazyFloor);
+  equal(lazy.fir_heap_frontier() >>> 0, lazyFloor,
+    "warm scratch rewind did not stay flat");
+
   const { exports: persistent } = await WebAssembly.instantiate(module, {});
   const initialFrontier = persistent.fir_heap_frontier() >>> 0;
   persistent.fir_initialize_persistent_caches();

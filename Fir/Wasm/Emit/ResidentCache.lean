@@ -24,6 +24,7 @@ inductive LinkError where
   | unsupportedOperation
   | descriptorOverflow (count : Nat)
   | incompatibleMemory
+  | malformedAllocator
   | malformedLazyCache (name : Name)
   | invalidInitializerSignature (name : Name)
   | retainedCacheGlobal (index : Nat)
@@ -243,7 +244,9 @@ private def markPersistentFunction
             .i32Const .uint32 (u32 (target.heapAlignment - 1)),
             .i32And] ++ aligned)] }
 
-private def cacheSetFunction (ordinal : Nat) (operation : RuntimeOp) :
+private def cacheSetFunction
+    (ordinal : Nat) (operation : RuntimeOp)
+    (persistentFloorIndex : Option Nat := none) :
     Except LinkError Function := do
   unless operation.abiWellFormed do
     throw .unsupportedOperation
@@ -253,12 +256,15 @@ private def cacheSetFunction (ordinal : Nat) (operation : RuntimeOp) :
       [.localGet objectParam, .call (.declaration markPersistentName)]
     else
       []
+  let retainFloor := persistentFloorIndex.map (fun index => [
+    .call (.declaration ResidentAllocator.frontierName),
+    .globalSet index .uint32]) |>.getD []
   return {
     name := cacheSetName ordinal
     params := #[(objectParam, value)]
     results := #[value]
     locals := #[]
-    body := persist ++ [.localGet objectParam, .ret] }
+    body := persist ++ retainFloor ++ [.localGet objectParam, .ret] }
 
 private partial def rewriteInstruction
     (rewrites : List (RuntimeOp × Name)) : Instruction → Instruction
@@ -282,6 +288,34 @@ private def reserved (module : Module) (name : Name) : Bool :=
   module.imports.any (·.declaration? == some name) ||
     module.functions.any (·.name == name) ||
     module.exports.contains name
+
+private def retainedObjectCache
+    (module : Module) (operation : RuntimeOp) : Bool :=
+  match operation with
+  | .cacheSet initializer kind =>
+      kind.isObjectLike && module.initializers.contains initializer
+  | _ => false
+
+private def allocatorFrontierIndex? (module : Module) : Option Nat := do
+  let function ← module.functions.find? (·.name == ResidentAllocator.frontierName)
+  match function.body with
+  | [.globalGet index .uint32, .ret] => some index
+  | _ => none
+
+private def installCacheAwareRewind
+    (module : Module) (persistentFloorIndex : Nat) : Except LinkError Module := do
+  let some frontierIndex := allocatorFrontierIndex? module |
+    throw .malformedAllocator
+  unless module.functions.any (·.name == ResidentAllocator.rewindName) do
+    throw .malformedAllocator
+  return {
+    module with
+    functions := module.functions.map fun function =>
+      if function.name == ResidentAllocator.rewindName then
+        ResidentAllocator.cacheAwareRewindFunction
+          frontierIndex persistentFloorIndex
+      else
+        function }
 
 /--
 Internalize lazy-cache publication. The generated miss path already stores the
@@ -307,6 +341,12 @@ def internalizeCacheSets (module : Module) (validate : Bool := true) :
   if needsPersistence &&
       !module.functions.any (·.name == ResidentAllocator.frontierName) then
     throw .missingAllocator
+  let needsPersistentFloor := operations.any (retainedObjectCache module)
+  let persistentFloorIndex :=
+    if needsPersistentFloor then
+      some (module.cacheGlobalKinds.size + module.globals.size)
+    else
+      none
   let rewrites := operations.toList.zipIdx.map fun (operation, ordinal) =>
     (operation, cacheSetName ordinal)
   let reservedNames :=
@@ -314,7 +354,8 @@ def internalizeCacheSets (module : Module) (validate : Bool := true) :
   if let some name := reservedNames.find? (reserved module) then
     throw (.reservedDeclaration name)
   let wrappers ← operations.toList.zipIdx.mapM fun (operation, ordinal) =>
-    cacheSetFunction ordinal operation
+    cacheSetFunction ordinal operation <|
+      if retainedObjectCache module operation then persistentFloorIndex else none
   let persistence : Array Function ←
     if needsPersistence then
       pure #[← markPersistentFunction module.closureDescriptors]
@@ -333,7 +374,15 @@ def internalizeCacheSets (module : Module) (validate : Bool := true) :
     imports
     functions
     exports
-    runtimeOperations }
+    runtimeOperations
+    globals := match persistentFloorIndex with
+      | some _ => module.globals.push {
+          kind := .uint32
+          init := .i32 (u32 heapBase) }
+      | none => module.globals }
+  let result ← match persistentFloorIndex with
+    | some index => installCacheAwareRewind result index
+    | none => pure result
   if validate then
     match Fir.Wasm.validateModule result with
     | .ok () => return result
@@ -701,6 +750,7 @@ def manifest : Json :=
     ("persistentEntry", persistentExampleCallerName.toString),
     ("value", "object"),
     ("constructorFieldLimit", constructorFieldLimit),
+    ("cacheAwareRewind", true),
     ("status", "generation-ready; W6 recursive cache-persistence publication proved")]
 
 #guard match residentExampleModule with
@@ -712,6 +762,10 @@ def manifest : Json :=
       module.exports.contains (cacheSetName 1) &&
       module.exports.contains persistentInitializerName &&
       module.exports.contains persistentExampleCallerName &&
+      module.globals.size == 2 &&
+      (module.functions.find? (·.name == ResidentAllocator.rewindName)
+        |>.map (·.body)) ==
+        some (ResidentAllocator.cacheAwareRewindFunction 2 3).body &&
       module.memory == some ResidentRuntime.residentMemory &&
       (Fir.Wasm.validateModule module |>.isOk) &&
       (Fir.Wasm.Emit.encode module |>.isOk)

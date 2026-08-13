@@ -30,6 +30,7 @@ private def address : FVarId := ⟨`address⟩
 private def value32 : FVarId := ⟨`value32⟩
 private def value64 : FVarId := ⟨`value64⟩
 private def current : FVarId := ⟨`current⟩
+private def persistentFloor : FVarId := ⟨`persistentFloor⟩
 private def allocationEnd : FVarId := ⟨`allocationEnd⟩
 private def requiredPages : FVarId := ⟨`requiredPages⟩
 private def currentPages : FVarId := ⟨`currentPages⟩
@@ -107,6 +108,46 @@ def rewindFunction (frontierIndex : Nat) : Function := {
   body :=
     [.globalGet frontierIndex .uint32,
       .localSet current] ++
+    trapWhenTrue [
+      .localGet current,
+      .localGet address,
+      .i32LtU] ++
+    trapWhenTrue [
+      .localGet address,
+      .i32Const .uint32 (u32 heapBase),
+      .i32LtU] ++
+    requireAligned address ++
+    [.localGet address,
+      .globalSet frontierIndex .uint32,
+      .ret] }
+
+/--
+Restore a previously observed frontier without crossing the allocation floor
+of a lazily populated persistent cache. A cold cache miss may therefore retain
+the scratch prefix preceding its cached graph; later warm calls rewind flat to
+the advanced floor.
+-/
+def cacheAwareRewindFunction
+    (frontierIndex persistentFloorIndex : Nat) : Function := {
+  name := rewindName
+  params := #[(address, .uint32)]
+  results := #[]
+  locals := #[(current, .uint32), (persistentFloor, .uint32)]
+  body :=
+    [.globalGet frontierIndex .uint32,
+      .localSet current,
+      .globalGet persistentFloorIndex .uint32,
+      .localSet persistentFloor] ++
+    trapWhenTrue [
+      .localGet current,
+      .localGet persistentFloor,
+      .i32LtU] ++
+    [.localGet address,
+      .localGet persistentFloor,
+      .i32LtU,
+      .ifElse
+        [.localGet persistentFloor, .localSet address]
+        []] ++
     trapWhenTrue [
       .localGet current,
       .localGet address,

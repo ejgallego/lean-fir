@@ -311,8 +311,12 @@ private def applyRewriteCohorts (plans : Array RewritePlan)
       (module.functions.extract cohort.start cohort.stop).map
         (rewriteFunctionBatch plan) }
 
-private def isTailStep : Step → Bool
-  | .directSelfTailCallsRequired | .directSelfTailCallsAvailable => true
+/-- Steps that inspect or replace existing function bodies cannot run against
+the skeleton/probe planning view. Flush accumulated rewrites first. -/
+private def requiresMaterializedBodies : Step → Bool
+  | .cacheSets
+  | .directSelfTailCallsRequired
+  | .directSelfTailCallsAvailable => true
   | _ => false
 
 private def rewriteProbeName : Name := `_fir_resident_link_rewrite_probe
@@ -396,7 +400,7 @@ private def applyStepsPlanned (steps : List Step) (plans : Array RewritePlan)
   match steps with
   | [] => return applyRewriteCohorts plans cohorts module
   | step :: steps =>
-      if isTailStep step then
+      if requiresMaterializedBodies step then
         let module := applyRewriteCohorts plans cohorts module
         let module ← applyStep false step module
         applyStepsPlanned steps #[] (rewriteCohortsFor module.functions.size) module

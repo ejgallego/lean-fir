@@ -95,4 +95,23 @@ none
 
 ## Resolution and regression
 
-Pending.
+Candidate repair: the production raw package no longer calls the eager
+initializer. It keeps the compiler's lazy-cache miss sequence and globals
+unchanged. Resident cache publication now recognizes object-valued compiler
+cache roots, recursively marks the new graph persistent, advances a dedicated
+allocation floor to the current frontier, and replaces `fir_heap_rewind` with
+a checked variant that clamps requests to that floor. The fast resident linker
+flushes accumulated rewrites before this body-sensitive cache-publication
+step.
+
+The focused real-Wasm cache fixture covers a cold miss after scratch
+allocation, survival of the exact cached root, a rewind request below the new
+floor, and a flat warm call. The complete `Zip.Wasm.compressRaw` package then
+passes 5 input families at all 10 levels against the native oracle and
+independent raw inflate, with deterministic repeated frontier and complete
+bytes, zero imports, and warm-call flat rewinds.
+
+The older explicit eager-initializer API remains available to the accepted
+Level-1 package and still has eager semantics. Before this card is marked
+fixed, migrate that remaining consumer to the lazy cache-floor protocol and
+remove or make the eager API explicitly unsafe for general captured closures.
