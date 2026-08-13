@@ -15,6 +15,34 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-POINTWISE-EXPLICIT-DELETE`.
+- Integration owner: `wasm-proof`, continuing the user-authorized integration
+  lease. The slice is based directly on accepted `main` at `3d7803a0`, with
+  functional head `c9608bf7` and clean ready mailbox `e2a892e0`; no shared
+  semantic or executable runtime contract changes.
+- Pointwise proof: source/compiler-only delete admission constructs the
+  canonical source effect step and the production compiler/runtime proofs
+  derive its exact two-instruction `local.get; call` structured-Wasm path. The
+  admission-free continuation preserves the active entry-relative resource
+  scope and aligned suspended caller stack, so the module-stable supported
+  global relation is restored.
+- Erased boundary: the same theorem covers ordinary live-object deletion and
+  the accepted erased-value/physical-zero no-op. It consumes the existing
+  concrete delete refinement without weakening ordinary object decoding and
+  stores neither source nor target execution evidence in admission.
+- Acceptance: Lean Beam update/sync/save reports zero errors and save-ready
+  source hash `835837af6ea37b24`; the 3,120-job focused simulation/importer cone,
+  `git diff --check`, `make talos-setup` at `0e05edbc`, all 3,143 Talos jobs,
+  and complete `make check` pass. The root gate covers 661 source cases, 9
+  direct-machine cases, 661 native/LCNF/V8 cases, 670 unique cases,
+  1,992/1,992 equal comparisons, 7,176 machine steps, and zero findings. No
+  bug card was required.
+- Result: `main` fast-forwards through the clean W6 mailbox. Constructor-tag
+  mutation is the next pointwise family, followed by field mutation, broader
+  cases/lazy-cache control, production coverage, and the canonical export root.
+
+## Latest completed integration lease
+
 - Milestone: `W6-POINTWISE-ORDINARY-OWNERSHIP`.
 - Integration owner: `wasm-proof`, taking the user-authorized integration
   lease after completing the W6 slice. The complete W6 stack was rebased
@@ -3451,7 +3479,7 @@ validation work continues; their historical handoff text remains unchanged.
 |---|---|---|---|---|---|
 | Integration | integration owner | `upgrade/lean-4.33` | released | `LEAN-4.33-UPGRADE` landed at `476f001b`; the temporary lane may be retired after publication. | Moves the shared toolchain, compiler-source contracts, and versioned compact-Format package surface to Lean 4.33 without changing the semantic Wasm ABI, concrete layout, or resident-helper signatures. |
 | Lean pass proof | pass-proof owner | `proof/simpcase` | released | Ready mailbox `5cae5958`, functional head `5c607e0e`, on accepted base `a25713a6` packages deleted reset/reuse as generic local ledger operations and derives ordinary/source-owned readiness from live-prefix premises. The retained-prefix fixture no longer uses a finite special-state classifier. | Changes no shared contract. The 34-job examples cone and full root gate pass; next generalize the target live-prefix derivation beyond the singleton adapter. |
-| W6 runtime proof | W6 owner | `wasm/talos-runtime` | active | Pointwise ordinary ownership is accepted through ready mailbox `044eedde`, functional head `cf7ad7c5`, on base `7b07ebdc`. The stable certificate-free relation now packages finite source traces, derives its classifier from source-local current-step coverage, and preserves ordinary nonpersistent increment/decrement—including recursive release—across exact two-step target prefixes. Next add delete, tag/field mutation, and close production coverage plus the canonical export root. | No shared contract changed. Lean Beam, the 3,120-job focused cone, full root gate with 670 unique cases and 1,992 comparisons, and all 3,143 Talos jobs pass. |
+| W6 runtime proof | W6 owner | `wasm/talos-runtime` | active | Explicit deletion is accepted through ready mailbox `e2a892e0`, functional head `c9608bf7`, on base `3d7803a0`. The stable certificate-free relation now preserves the complete ordinary increment/decrement/delete ownership family; delete covers both ordinary live objects and erased physical zero without weakening decoding. Next add constructor-tag and field mutation, then broader cases/lazy-cache control and close production coverage plus the canonical export root. | No shared contract changed. Lean Beam, the 3,120-job focused cone, full root gate with 670 unique cases and 1,992 comparisons, and all 3,143 Talos jobs pass. |
 | W7 generation | generation owner | `wasm/generation` | released | Ready mailbox `22540610`, package source head `8c7dfdd7`, on base `260ce30a`, publishes the real zero-import Verso complete-HTML package and repairs post-mutation field-kind tracking in the W7 concrete observer. | Six generic Array/scalar/String resident signatures are generation-ready without changing the semantic ABI or concrete layout; W6 owns their later refinement bridge. |
 | Compiler-native Wasm | integration owner | `wasm/lcnf-c` | parked | Landed checkpoint `a4855402` adds a separately packaged C/Emscripten `Std.Format.prettyM` facade on top of the optimized final-LCNF-to-C route from `2760e3e0`. The browser adapter shares the compact `Format` request and exact `{text, events}` trace contract with W7's FIR-native facade while retaining a private bulk wire, verified Emscripten loader, full pinned Lean runtime, and independent package. The differential suite compares Unicode, grouping, nesting, tags, arbitrary-precision values, initial columns, malformed requests, repeated calls, and a one-MiB UTF-8 transfer through both engines | No shared semantic contract changed and the packages remain physically independent. The lane consumes `Std.Format.prettyM`, final impure LCNF, and Lean's C ABI without changing the symbolic Wasm, W6 concrete-runtime, or W7 resident-runtime surfaces. Resume with controlled sampled profiling of the facade wire and generated C before accepting a runtime optimization |
 | Validation | validation owner | `validation/float-corpus` | active | Clean coordination head `cfa17d81` retains the long 1,008-case native/LCNF calibration. Current-main validation covers 633 native/LCNF cases, 601 V8 cases, 642 unique cases, 1,844 comparisons, 5,750 interpreter transitions, 51 semantic-tag floors, and 142 conjunctive domains. | Test-fixtures may now rebase and admit the 32 scalar-closure cases. The long validation branch rebases separately; alias, termination, IO, and stream-capture contracts remain isolated. |
