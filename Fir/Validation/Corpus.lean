@@ -217,6 +217,22 @@ def floatArraySwapShared (xs : Array Float) : Array Float × Array Float :=
       xs
   (xs, updated)
 
+@[noinline]
+def floatListToArray (xs : List Float) : Array Float :=
+  Array.mk xs
+
+@[noinline]
+def floatListToArrayShared (xs : List Float) : List Float × Array Float :=
+  (xs, Array.mk xs)
+
+@[noinline]
+def floatArrayToList (xs : Array Float) : List Float :=
+  xs.toList
+
+@[noinline]
+def floatArrayToListShared (xs : Array Float) : Array Float × List Float :=
+  (xs, xs.toList)
+
 def firstUInt8List : List UInt8 → UInt8
   | value :: _ => value
   | [] => 0
@@ -2675,6 +2691,14 @@ private def floatArrayPairDatum
     (value : Array Float × Array Float) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[floatArrayDatum value.1, floatArrayDatum value.2]
 
+private def floatListArrayPairDatum
+    (value : List Float × Array Float) : ValidationDatum :=
+  .ctor "Prod.mk" 0 #[floatListDatum value.1, floatArrayDatum value.2]
+
+private def floatArrayListPairDatum
+    (value : Array Float × List Float) : ValidationDatum :=
+  .ctor "Prod.mk" 0 #[floatArrayDatum value.1, floatListDatum value.2]
+
 private def genericContainerFloat : Float :=
   Float.ofBits 0x7ff8123456789abc
 
@@ -4402,6 +4426,80 @@ private def preConversionCases : Array Case := #[
       some #[``Array.size, ``Nat.decLt, ``Array.swap]
     provenance := firProvenance
       "Copy and swap a shared Float Array while retaining both heap elements" },
+  { id := "generic-float-list-to-array"
+    entry := ``Source.floatListToArray
+    args := #[floatListDatum [genericContainerFloat, genericArrayReplacementFloat]]
+    argSchemas := #[.seq (.boxed .float64)]
+    resultSchema := .array (.boxed .float64)
+    native := fun _ => floatArrayDatum
+      (Source.floatListToArray
+        [genericContainerFloat, genericArrayReplacementFloat])
+    tags := #["stress", "array", "list", "generic", "boxed", "float", "heap",
+      "conversion", "ownership", "bit-exact"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExternals := #[``Array.mk]
+    requiredExecutedExternals := #[``Array.mk]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``Array.mk]
+    requiredExecutedExternalTrace := some #[``Array.mk]
+    provenance := firProvenance
+      "Consume a List spine while transferring its heap Float elements into an Array" },
+  { id := "generic-float-list-to-array-shared"
+    entry := ``Source.floatListToArrayShared
+    args := #[floatListDatum [genericContainerFloat, genericArrayReplacementFloat]]
+    argSchemas := #[.seq (.boxed .float64)]
+    resultSchema := .ctor "Prod.mk" 0
+      #[.seq (.boxed .float64), .array (.boxed .float64)]
+    native := fun _ => floatListArrayPairDatum
+      (Source.floatListToArrayShared
+        [genericContainerFloat, genericArrayReplacementFloat])
+    tags := #["stress", "array", "list", "generic", "boxed", "float", "heap",
+      "conversion", "ownership", "shared", "bit-exact"]
+    requiredLcnfForms := #["inc", "fap", "extern", "ctor", "return"]
+    requiredExecutedLcnfForms := #["inc", "fap", "extern", "ctor", "return"]
+    requiredExternals := #[``Array.mk]
+    requiredExecutedExternals := #[``Array.mk]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``Array.mk]
+    requiredExecutedExternalTrace := some #[``Array.mk]
+    provenance := firProvenance
+      "Preserve a shared List while copying its heap Float elements into an Array" },
+  { id := "generic-float-array-to-list"
+    entry := ``Source.floatArrayToList
+    args := #[floatArrayDatum #[genericContainerFloat, genericArrayReplacementFloat]]
+    argSchemas := #[.array (.boxed .float64)]
+    resultSchema := .seq (.boxed .float64)
+    native := fun _ => floatListDatum
+      (Source.floatArrayToList
+        #[genericContainerFloat, genericArrayReplacementFloat])
+    tags := #["stress", "array", "list", "generic", "boxed", "float", "heap",
+      "conversion", "ownership", "bit-exact"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExternals := #[``Array.toList]
+    requiredExecutedExternals := #[``Array.toList]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``Array.toList]
+    requiredExecutedExternalTrace := some #[``Array.toList]
+    provenance := firProvenance
+      "Consume an Array while transferring its heap Float elements into a List spine" },
+  { id := "generic-float-array-to-list-shared"
+    entry := ``Source.floatArrayToListShared
+    args := #[floatArrayDatum #[genericContainerFloat, genericArrayReplacementFloat]]
+    argSchemas := #[.array (.boxed .float64)]
+    resultSchema := .ctor "Prod.mk" 0
+      #[.array (.boxed .float64), .seq (.boxed .float64)]
+    native := fun _ => floatArrayListPairDatum
+      (Source.floatArrayToListShared
+        #[genericContainerFloat, genericArrayReplacementFloat])
+    tags := #["stress", "array", "list", "generic", "boxed", "float", "heap",
+      "conversion", "ownership", "shared", "bit-exact"]
+    requiredLcnfForms := #["inc", "fap", "extern", "ctor", "return"]
+    requiredExecutedLcnfForms := #["inc", "fap", "extern", "ctor", "return"]
+    requiredExternals := #[``Array.toList]
+    requiredExecutedExternals := #[``Array.toList]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``Array.toList]
+    requiredExecutedExternalTrace := some #[``Array.toList]
+    provenance := firProvenance
+      "Preserve a shared Array while copying its heap Float elements into a List" },
   { id := "generic-uint8-list-head"
     entry := ``Source.firstUInt8List
     args := #[uint8ListDatum [255, 1]]

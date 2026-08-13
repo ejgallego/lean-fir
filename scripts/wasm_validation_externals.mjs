@@ -789,6 +789,69 @@ function swapArray({ args, host, world }) {
   };
 }
 
+export function listValues(host, value, context) {
+  const elements = [];
+  let cursor = value;
+  for (;;) {
+    if (cursor.kind === "tagged") {
+      assert.equal(cursor.payload, 0n, `${context} terminator must be List.nil`);
+      return elements;
+    }
+    assert.equal(cursor.kind, "heap", `${context} must be a List`);
+    const object = host.liveCell(cursor.location).object;
+    assert.equal(object.kind, "ctor", `${context} node must be List.cons`);
+    assert.equal(object.tag, 1n, `${context} constructor tag must be List.cons`);
+    assert.equal(object.objectFields.length, 2,
+      `${context} List.cons must have two object fields`);
+    assert.equal(object.usizeFields.length, 0,
+      `${context} List.cons must not have USize fields`);
+    assert.equal(object.scalarFields.length, 0,
+      `${context} List.cons must not have scalar fields`);
+    elements.push(object.objectFields[0]);
+    cursor = object.objectFields[1];
+  }
+}
+
+function mkArray({ args, host, world }) {
+  assert.equal(args.length, 2, "Array.mk external arity mismatch");
+  assert.deepStrictEqual(args[0], { kind: "erased" },
+    "Array.mk type argument must be erased");
+  const list = args[1];
+  const elements = listValues(host, list, "Array.mk operand");
+  for (const element of elements) {
+    if (element.kind === "heap") host.incLocation(element.location, 1);
+  }
+  host.decValueOnce(list, true);
+  return {
+    value: host.alloc({ kind: "array", elements, capacity: elements.length }),
+    world,
+  };
+}
+
+function toListArray({ args, host, world }) {
+  assert.equal(args.length, 2, "Array.toList external arity mismatch");
+  assert.deepStrictEqual(args[0], { kind: "erased" },
+    "Array.toList type argument must be erased");
+  const source = args[1];
+  assert.equal(source.kind, "heap", "Array.toList operand must be a heap Array");
+  const object = host.liveCell(source.location).object;
+  assert.equal(object.kind, "array", "Array.toList heap object must be an Array");
+  let list = { kind: "tagged", payload: 0n };
+  for (let index = object.elements.length - 1; index >= 0; index -= 1) {
+    const element = object.elements[index];
+    if (element.kind === "heap") host.incLocation(element.location, 1);
+    list = host.alloc({
+      kind: "ctor",
+      tag: 1n,
+      objectFields: [element, list],
+      usizeFields: [],
+      scalarFields: [],
+    });
+  }
+  host.decValueOnce(source, true);
+  return { value: list, world };
+}
+
 function inhabitedUInt8({ args, world }) {
   assert.equal(args.length, 0, "instInhabitedUInt8 external arity mismatch");
   return { value: { kind: "scalar", scalarKind: "uint8", value: 0n }, world };
@@ -990,6 +1053,8 @@ export const validationExternalRegistry = {
   "Array.pop": popArray,
   "Array.replicate": replicateArray,
   "Array.swap": swapArray,
+  "Array.mk": mkArray,
+  "Array.toList": toListArray,
   "Fir.Validation.Corpus.NativeEffects.recordImpl": ({ args, host, world }) => {
     assert.equal(args.length, 1, "validation.record external arity mismatch");
     const value = naturalValue(host, args[0], "validation.record operand");

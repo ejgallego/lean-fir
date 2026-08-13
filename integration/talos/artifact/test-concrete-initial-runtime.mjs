@@ -166,6 +166,8 @@ const pushArray = concreteValidationExternalRegistry["Array.push"];
 const popArray = concreteValidationExternalRegistry["Array.pop"];
 const replicateArray = concreteValidationExternalRegistry["Array.replicate"];
 const swapArray = concreteValidationExternalRegistry["Array.swap"];
+const mkArray = concreteValidationExternalRegistry["Array.mk"];
+const toListArray = concreteValidationExternalRegistry["Array.toList"];
 const getArray = concreteValidationExternalRegistry["Array.get!Internal"];
 const inhabitedUInt8 = concreteValidationExternalRegistry["instInhabitedUInt8"];
 const erased = { kind: "erased" };
@@ -370,6 +372,78 @@ assert.equal(
   swapArrayHost.readHeader(swapArrayHost.addressOf(swapSecondValue.location)).rc,
   2,
 );
+
+const conversionArrayHost = new ConcreteHost([]);
+const conversionFirstValue = heapNatural(conversionArrayHost, (1n << 64n) + 15n);
+const conversionSecondValue = heapNatural(conversionArrayHost, (1n << 64n) + 16n);
+const conversionListTail = conversionArrayHost.allocateListCons(
+  conversionSecondValue, { kind: "tagged", payload: 0n });
+const conversionList = conversionArrayHost.allocateListCons(
+  conversionFirstValue, conversionListTail);
+const convertedConcreteArray = mkArray({
+  args: [erased, conversionList], host: conversionArrayHost, world: 0,
+}).value;
+assert.deepStrictEqual(
+  conversionArrayHost.arrayInfo(convertedConcreteArray).elements,
+  [conversionFirstValue, conversionSecondValue],
+);
+assert.equal(conversionArrayHost.arrayInfo(convertedConcreteArray).capacity, 2);
+for (const location of [conversionList.location, conversionListTail.location]) {
+  assert.equal(conversionArrayHost.readHeader(
+    conversionArrayHost.addressOf(location), false).kind, 255);
+}
+assert.equal(conversionArrayHost.readHeader(
+  conversionArrayHost.addressOf(conversionFirstValue.location)).rc, 1);
+assert.equal(conversionArrayHost.readHeader(
+  conversionArrayHost.addressOf(conversionSecondValue.location)).rc, 1);
+
+const sharedConversionArrayHost = new ConcreteHost([]);
+const sharedConversionFirst = heapNatural(
+  sharedConversionArrayHost, (1n << 64n) + 17n);
+const sharedConversionSecond = heapNatural(
+  sharedConversionArrayHost, (1n << 64n) + 18n);
+const sharedConversionList = sharedConversionArrayHost.allocateList(
+  [sharedConversionFirst, sharedConversionSecond]);
+sharedConversionArrayHost.retainValue(sharedConversionList);
+const sharedConvertedArray = mkArray({
+  args: [erased, sharedConversionList],
+  host: sharedConversionArrayHost,
+  world: 0,
+}).value;
+assert.equal(sharedConversionArrayHost.readHeader(
+  sharedConversionArrayHost.addressOf(sharedConversionList.location)).rc, 1);
+assert.equal(sharedConversionArrayHost.readHeader(
+  sharedConversionArrayHost.addressOf(sharedConversionFirst.location)).rc, 2);
+assert.equal(sharedConversionArrayHost.readHeader(
+  sharedConversionArrayHost.addressOf(sharedConversionSecond.location)).rc, 2);
+sharedConversionArrayHost.retainValue(sharedConvertedArray);
+const sharedConvertedList = toListArray({
+  args: [erased, sharedConvertedArray],
+  host: sharedConversionArrayHost,
+  world: 0,
+}).value;
+assert.equal(sharedConversionArrayHost.arrayInfo(sharedConvertedArray).header.rc, 1);
+assert.deepStrictEqual(
+  sharedConversionArrayHost.listElements(sharedConvertedList),
+  [sharedConversionFirst, sharedConversionSecond],
+);
+assert.equal(sharedConversionArrayHost.readHeader(
+  sharedConversionArrayHost.addressOf(sharedConversionFirst.location)).rc, 3);
+assert.equal(sharedConversionArrayHost.readHeader(
+  sharedConversionArrayHost.addressOf(sharedConversionSecond.location)).rc, 3);
+const convertedConcreteList = toListArray({
+  args: [erased, convertedConcreteArray], host: conversionArrayHost, world: 0,
+}).value;
+assert.deepStrictEqual(
+  conversionArrayHost.listElements(convertedConcreteList),
+  [conversionFirstValue, conversionSecondValue],
+);
+assert.equal(conversionArrayHost.readHeader(
+  conversionArrayHost.addressOf(convertedConcreteArray.location), false).kind, 255);
+assert.equal(conversionArrayHost.readHeader(
+  conversionArrayHost.addressOf(conversionFirstValue.location)).rc, 1);
+assert.equal(conversionArrayHost.readHeader(
+  conversionArrayHost.addressOf(conversionSecondValue.location)).rc, 1);
 
 // A constructor slot has no runtime tag of its own. Track the physical kind
 // supplied by the latest mutation so an object-only slot can subsequently hold

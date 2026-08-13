@@ -341,6 +341,24 @@ private def externalArrayCell (request : ExternalRequest) (runtime : RuntimeStat
     throw (.externalFailure request.name "Array size exceeds capacity")
   return (location, cell, elements, capacity)
 
+private partial def externalListValues
+    (request : ExternalRequest) (runtime : RuntimeState) (value : Value) :
+    Except RuntimeFault (Array Value) := do
+  match value with
+  | .object (.tagged tag) =>
+      if tag == 0 then return #[]
+      throw (.externalFailure request.name "expected List.nil")
+  | .object (.heap location) =>
+      let cell ← getLiveCell runtime location
+      let .ctor object := cell.object
+        | throw (.externalFailure request.name "expected List.cons")
+      unless object.tag == 1 && object.objectFields.size == 2 &&
+          object.usizeFields.isEmpty && object.scalarFields.isEmpty do
+        throw (.externalFailure request.name "expected canonical List.cons")
+      let tail ← externalListValues request runtime object.objectFields[1]!
+      return #[object.objectFields[0]!] ++ tail
+  | _ => throw (.externalFailure request.name "expected a List")
+
 private structure FixedWidthValueCodec (α : Type) where
   name : String
   decode? : Value → Option α
@@ -1454,6 +1472,54 @@ private def arraySwapExternal (request : ExternalRequest) (runtime : RuntimeStat
   let (runtime, reference) := alloc runtime (.array elements capacity)
   return {
     value := .object reference
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def arrayMkExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [typeArg, list] := request.args.toList
+    | throw (.arityMismatch 2 request.args.size)
+  unless typeArg == .erased do
+    throw (.externalFailure request.name "Array.mk type argument must be erased")
+  let elements ← externalListValues request runtime list
+  let runtime ← elements.foldlM (init := runtime) fun runtime element =>
+    retainOwnedValue runtime element
+  let runtime ← decValueOnce runtime list true
+  let (runtime, reference) := alloc runtime (.array elements elements.size)
+  return {
+    value := .object reference
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def allocateListCons
+    (runtime : RuntimeState) (head tail : Value) : RuntimeState × Value :=
+  let object : ConstructorObject := {
+    tag := 1
+    objectFields := #[head, tail]
+    usizeFields := #[]
+    scalarFields := [] }
+  let (runtime, reference) := alloc runtime (.ctor object)
+  (runtime, .object reference)
+
+private def arrayToListExternal
+    (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [typeArg, array] := request.args.toList
+    | throw (.arityMismatch 2 request.args.size)
+  unless typeArg == .erased do
+    throw (.externalFailure request.name
+      "Array.toList type argument must be erased")
+  let (_, _, elements, _) ← externalArrayCell request runtime array
+  let (runtime, list) ← elements.foldrM
+    (init := (runtime, .object (.tagged 0)))
+    fun element (runtime, tail) => do
+      let runtime ← retainOwnedValue runtime element
+      return allocateListCons runtime element tail
+  let runtime ← decValueOnce runtime array true
+  return {
+    value := list
     heap := runtime.heap
     nextLocation := runtime.nextLocation
     world := runtime.world }
@@ -3236,6 +3302,10 @@ private def validationExternals : ExternalImpl where
       arrayReplicateExternal request runtime
     else if request.name == ``Array.swap then
       arraySwapExternal request runtime
+    else if request.name == ``Array.mk then
+      arrayMkExternal request runtime
+    else if request.name == ``Array.toList then
+      arrayToListExternal request runtime
     else if request.name == ``instInhabitedUInt8 then
       inhabitedUInt8External request runtime
     else if request.name == ``Array.get!Internal then

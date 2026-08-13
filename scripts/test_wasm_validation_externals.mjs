@@ -1634,6 +1634,8 @@ for (const [handler, leftValue, rightValue, expected] of [
   const popArray = validationExternalRegistry["Array.pop"];
   const replicateArray = validationExternalRegistry["Array.replicate"];
   const swapArray = validationExternalRegistry["Array.swap"];
+  const mkArray = validationExternalRegistry["Array.mk"];
+  const toListArray = validationExternalRegistry["Array.toList"];
   const getArray = validationExternalRegistry["Array.get!Internal"];
   const inhabitedUInt8 = validationExternalRegistry["instInhabitedUInt8"];
   const erased = { kind: "erased" };
@@ -1812,6 +1814,78 @@ for (const [handler, leftValue, rightValue, expected] of [
   assert.equal(swapHost.liveCell(swapSource.location).rc, 1);
   assert.equal(swapHost.liveCell(swapFirst.location).rc, 2);
   assert.equal(swapHost.liveCell(swapSecond.location).rc, 2);
+
+  const conversionHost = new SemanticHost();
+  const conversionFirst = conversionHost.alloc({
+    kind: "natural", value: 0x100000010n,
+  });
+  const conversionSecond = conversionHost.alloc({
+    kind: "natural", value: 0x100000011n,
+  });
+  const conversionNil = { kind: "tagged", payload: 0n };
+  const conversionTail = conversionHost.alloc({
+    kind: "ctor", tag: 1n,
+    objectFields: [conversionSecond, conversionNil],
+    usizeFields: [], scalarFields: [],
+  });
+  const conversionList = conversionHost.alloc({
+    kind: "ctor", tag: 1n,
+    objectFields: [conversionFirst, conversionTail],
+    usizeFields: [], scalarFields: [],
+  });
+  const convertedArray = invoke(
+    mkArray, conversionHost, [erased, conversionList]);
+  assert.deepStrictEqual(conversionHost.liveCell(convertedArray.location).object, {
+    kind: "array", elements: [conversionFirst, conversionSecond], capacity: 2,
+  });
+  assert.throws(() => conversionHost.liveCell(conversionList.location));
+  assert.throws(() => conversionHost.liveCell(conversionTail.location));
+  assert.equal(conversionHost.liveCell(conversionFirst.location).rc, 1);
+  assert.equal(conversionHost.liveCell(conversionSecond.location).rc, 1);
+  const convertedList = invoke(
+    toListArray, conversionHost, [erased, convertedArray]);
+  assert.deepStrictEqual(
+    validationExternals.listValues(
+      conversionHost, convertedList, "Array.toList result"),
+    [conversionFirst, conversionSecond],
+  );
+  assert.throws(() => conversionHost.liveCell(convertedArray.location));
+  assert.equal(conversionHost.liveCell(conversionFirst.location).rc, 1);
+  assert.equal(conversionHost.liveCell(conversionSecond.location).rc, 1);
+
+  const sharedConversionHost = new SemanticHost();
+  const sharedConversionFirst = sharedConversionHost.alloc({
+    kind: "natural", value: 0x100000012n,
+  });
+  const sharedConversionSecond = sharedConversionHost.alloc({
+    kind: "natural", value: 0x100000013n,
+  });
+  const sharedConversionTail = sharedConversionHost.alloc({
+    kind: "ctor", tag: 1n,
+    objectFields: [sharedConversionSecond, conversionNil],
+    usizeFields: [], scalarFields: [],
+  });
+  const sharedConversionList = sharedConversionHost.alloc({
+    kind: "ctor", tag: 1n,
+    objectFields: [sharedConversionFirst, sharedConversionTail],
+    usizeFields: [], scalarFields: [],
+  });
+  sharedConversionHost.incLocation(sharedConversionList.location, 1);
+  const sharedConvertedArray = invoke(
+    mkArray, sharedConversionHost, [erased, sharedConversionList]);
+  assert.equal(sharedConversionHost.liveCell(sharedConversionList.location).rc, 1);
+  assert.equal(sharedConversionHost.liveCell(sharedConversionFirst.location).rc, 2);
+  assert.equal(sharedConversionHost.liveCell(sharedConversionSecond.location).rc, 2);
+  sharedConversionHost.incLocation(sharedConvertedArray.location, 1);
+  const sharedConvertedList = invoke(
+    toListArray, sharedConversionHost, [erased, sharedConvertedArray]);
+  assert.equal(sharedConversionHost.liveCell(sharedConvertedArray.location).rc, 1);
+  assert.deepStrictEqual(validationExternals.listValues(
+    sharedConversionHost, sharedConvertedList, "shared Array.toList result"),
+    [sharedConversionFirst, sharedConversionSecond],
+  );
+  assert.equal(sharedConversionHost.liveCell(sharedConversionFirst.location).rc, 3);
+  assert.equal(sharedConversionHost.liveCell(sharedConversionSecond.location).rc, 3);
 }
 
 console.log("PASS shared Wasm String and arithmetic external contracts");

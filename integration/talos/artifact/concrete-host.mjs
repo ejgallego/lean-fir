@@ -808,6 +808,55 @@ export class ConcreteHost {
     return this.decode("object", signed32(address));
   }
 
+  listElements(value) {
+    const elements = [];
+    let cursor = value;
+    for (;;) {
+      if (cursor.kind === "tagged") {
+        assert.equal(cursor.payload, 0n, "List terminator must be List.nil");
+        return elements;
+      }
+      assert.equal(cursor.kind, "heap", "List value must be tagged nil or a heap cons");
+      const address = this.addressOf(cursor.location);
+      const header = this.readHeader(address);
+      assert.equal(header.kind, KIND.constructor, "List node must be a constructor");
+      assert.equal(header.aux0, 1, "List constructor tag must be List.cons");
+      assert.equal(header.aux1, 2, "List.cons must have two object fields");
+      assert.equal(header.aux2, 0, "List.cons must not have USize fields");
+      assert.equal(header.aux3, 0, "List.cons must not have scalar fields");
+      elements.push(this.decode("tobject", signed32(
+        this.readWordSlot(address + HEADER_BYTES))));
+      cursor = this.decode("tobject", signed32(
+        this.readWordSlot(address + HEADER_BYTES + SLOT_BYTES)));
+    }
+  }
+
+  allocateListCons(head, tail) {
+    const address = this.allocate(KIND.constructor, SLOT_BYTES * 2, {
+      aux0: 1,
+      aux1: 2,
+      aux2: 0,
+      aux3: 0,
+    });
+    this.descriptors.set(address, {
+      kind: "constructor",
+      fieldKinds: ["tobject", "tobject"],
+    });
+    this.writeWordSlot(address + HEADER_BYTES, this.encode("tobject", head));
+    this.writeWordSlot(
+      address + HEADER_BYTES + SLOT_BYTES, this.encode("tobject", tail));
+    return this.decode("tobject", signed32(address));
+  }
+
+  allocateList(elements) {
+    assert.ok(Array.isArray(elements), "List elements must be an array");
+    let tail = { kind: "tagged", payload: 0n };
+    for (let index = elements.length - 1; index >= 0; index -= 1) {
+      tail = this.allocateListCons(elements[index], tail);
+    }
+    return tail;
+  }
+
   retainValue(value) {
     this.inc({ amount: 1, check: true }, [this.encode("tobject", value)]);
   }

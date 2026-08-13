@@ -550,6 +550,29 @@ function swapArray({ args, host, world }) {
   return { value: host.allocateArray(swapped, array.capacity), world };
 }
 
+function mkArray({ args, host, world }) {
+  assert.equal(args.length, 2, "Array.mk external arity mismatch");
+  assert.deepStrictEqual(args[0], { kind: "erased" },
+    "Array.mk type argument must be erased");
+  const list = args[1];
+  const elements = host.listElements(list);
+  elements.forEach(element => host.retainValue(element));
+  host.releaseValue(list);
+  return { value: host.allocateArray(elements, elements.length), world };
+}
+
+function toListArray({ args, host, world }) {
+  assert.equal(args.length, 2, "Array.toList external arity mismatch");
+  assert.deepStrictEqual(args[0], { kind: "erased" },
+    "Array.toList type argument must be erased");
+  const source = args[1];
+  const elements = host.arrayInfo(source).elements;
+  elements.forEach(element => host.retainValue(element));
+  const list = host.allocateList(elements);
+  host.releaseValue(source);
+  return { value: list, world };
+}
+
 /**
  * Validation-only externals layered over the ordinary concrete artifact
  * registry. Generic Array operations use the same opaque/ARRY layout as the
@@ -583,6 +606,8 @@ export const concreteValidationExternalRegistry = Object.freeze({
   "Array.pop": popArray,
   "Array.replicate": replicateArray,
   "Array.swap": swapArray,
+  "Array.mk": mkArray,
+  "Array.toList": toListArray,
   "Int.neg": ({ args, host, world }) => {
     assert.equal(args.length, 1, "Int.neg external arity mismatch");
     const value = integerValue(host, args[0], "Int.neg operand");
