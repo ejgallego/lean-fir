@@ -71,6 +71,21 @@ These rules apply to every agent and worktree in this repository.
   `coordination/BOARD.md`, validates candidate stacks, and alone fast-forwards
   `main`. No coordination daemon or generated state is required.
 
+## Local agent mailbox
+
+- New operational coordination uses the ignored canonical mailbox at
+  `.agents/mailbox/` in the primary FIR checkout. Linked worktrees do not
+  create separate mailboxes.
+- Follow `docs/MAILBOX_PROTOCOL.md`. A cross-project thread lives in the
+  mailbox of the project that owns the requested code change.
+- Read `make mailbox-list` and `git worktree list` before claiming a lane. A
+  valid acknowledgement records the owner, project-relative worktree, branch,
+  base commit, write scope, and publication boundary.
+- The local event log complements rather than replaces the tracked
+  `coordination/lanes/` handoff and `coordination/BOARD.md` snapshot. Mailbox
+  completion does not authorize integration, pushing, publication, worktree
+  removal, or branch deletion.
+
 ## Shared semantic contracts
 
 The following are shared contracts: impure values and runtime state,

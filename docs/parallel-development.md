@@ -40,6 +40,12 @@ against `AGENTS.md`. This deliberately remains a small human-auditable
 protocol. Add harness automation only for a repeated, mechanically detectable
 failure that the branch/worktree split does not already prevent.
 
+Agents read and write new operational messages only through the primary
+checkout's ignored `.agents/mailbox/`, using `docs/MAILBOX_PROTOCOL.md` and
+`make mailbox-check`. This avoids per-worktree message forks. The tracked
+`coordination/lanes/*.md` records remain the portable, committed handoff state;
+the local mailbox does not replace them.
+
 ## Integration loop
 
 An agent finishes a small vertical slice, commits it, then rebases its clean

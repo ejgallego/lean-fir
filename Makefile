@@ -8,7 +8,7 @@ LAKE_ARTIFACT_CACHE ?= true
 LAKE_RESTORE_ARTIFACTS ?= true
 export LAKE_CACHE_DIR LAKE_ARTIFACT_CACHE LAKE_RESTORE_ARTIFACTS
 
-.PHONY: build examples inspect validate validate-direct-lcnf validate-v8 validate-native-oracle-attestations validate-coverage-index bug-cards trusted-assumptions no-placeholders check beam talos-setup talos-check clean
+.PHONY: build examples inspect validate validate-direct-lcnf validate-v8 validate-native-oracle-attestations validate-coverage-index bug-cards trusted-assumptions no-placeholders mailbox-check mailbox-list mailbox-test check beam talos-setup talos-check clean
 
 build:
 	lake build
@@ -70,7 +70,16 @@ bug-cards:
 trusted-assumptions:
 	python3 scripts/validate_trusted_assumptions.py
 
-check: build examples validate-coverage-index bug-cards trusted-assumptions no-placeholders
+mailbox-check:
+	node scripts/mailbox.mjs check
+
+mailbox-list:
+	node scripts/mailbox.mjs list
+
+mailbox-test:
+	node --test scripts/mailbox.test.mjs
+
+check: build examples validate-coverage-index bug-cards trusted-assumptions no-placeholders mailbox-test
 
 beam:
 	lean-beam sync Fir/LeanIR.lean

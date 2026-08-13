@@ -44,6 +44,11 @@ placeholder and bug-card scans. Use `make examples`, `make validate`,
 the consolidated Lean entrypoints and fixtures through Lean Beam. `make inspect`
 remains a pass-checkpoint diagnostic; it is not the semantic oracle.
 
+Parallel agents exchange local operational requests through the canonical
+ignored mailbox. Use `make mailbox-check`, `make mailbox-list`, and
+`make mailbox-test`; see `docs/MAILBOX_PROTOCOL.md`. Tracked lane status and
+integration decisions remain under `coordination/`.
+
 The optional Talos bridge is deliberately outside the default dependency
 graph. After cloning its pinned revision with `make talos-setup`, validate the
 adapter and executable scalar example with `make talos-check`.
@@ -113,6 +118,8 @@ re-exported.
   correctness roadmap.
 - `docs/parallel-development.md`: worktree ownership, synchronization, and
   integration workflow for concurrent agents.
+- `docs/MAILBOX_PROTOCOL.md`: immutable local operational messages shared by
+  FIR worktrees and cross-project clients.
 - `bugs/`: textual semantic-discrepancy cards, their required format, and
   links to permanent regression tests.
 
