@@ -362,6 +362,211 @@ theorem ResidentArrayObjectRel.pushElementInPlaceRaw
     capacityFrame, middleValid, middleRelated, updatedEq, resultEq, headerWrite,
     finalValid, finalRelated⟩
 
+/-- Lowering logical size by one establishes the exact semantic `Array.pop`
+prefix. Releasing the removed child is intentionally a later step: once this
+header write succeeds, the Array no longer owns that child. -/
+theorem ResidentArrayObjectRel.writeLogicalSizeRaw_pop
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {elements : Array Value} {capacity : Nat} {header : Header}
+    (related :
+      ResidentArrayObjectRel state witness address elements capacity header)
+    (valid : state.FrontierInvariant) (nonempty : 0 < elements.size) :
+    ∃ result updatedHeader memory,
+      writeResidentArrayLogicalSizeRaw state address (elements.size - 1) =
+        .ok result ∧
+      updatedHeader = {
+        header with aux1 := UInt32.ofNat (elements.size - 1) } ∧
+      result = { state with memory } ∧
+      updatedHeader.write state.memory address = .ok memory ∧
+      result.FrontierInvariant ∧
+      ResidentArrayObjectRel result witness address elements.pop capacity
+        updatedHeader := by
+  have poppedSize : elements.pop.size = elements.size - 1 := by simp
+  have nextFits : elements.size - 1 < UInt32.size := by
+    have sizeFits : elements.size < UInt32.size := by
+      rw [← related.logicalSize]
+      exact UInt32.toNat_lt_size header.aux1
+    omega
+  have each : ∀ (index : Nat) (value : Value),
+      elements.pop[index]? = some value →
+      ∃ word,
+        state.memory.readWord32
+            (address.value + headerBytes + target.semanticSlotBytes * index) =
+          .ok word ∧
+        ValueRel witness .tobject (.word32 word) value := by
+    intro index value valueAt
+    rw [Array.getElem?_pop] at valueAt
+    split at valueAt
+    · exact related.liveElements index value valueAt
+    · contradiction
+  exact related.writeLogicalSizeRaw valid (elements.size - 1) poppedSize
+    (by have := related.sizeCapacity; omega) nextFits each
+
+/-- Popping an empty resident Array is the exact concrete identity. No header,
+payload, ownership, or frontier component changes. -/
+theorem ResidentArrayObjectRel.popElementInPlace_empty
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {elements : Array Value} {capacity : Nat} {header : Header}
+    (related :
+      ResidentArrayObjectRel state witness address elements capacity header)
+    (empty : elements.size = 0) :
+    popResidentArrayElementInPlace state address = .ok state := by
+  unfold popResidentArrayElementInPlace
+  rw [related.readSize, empty]
+  rfl
+
+/-- Public checked release for one Array-owned `tobject` word. This is the
+representation-polymorphic ownership boundary shared by pop and future
+container-consuming helpers. -/
+theorem LiveHeapRel.releaseTObject_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime nextRuntime : RuntimeState}
+    {word : Word32} {value : Value}
+    (related : LiveHeapRel state witness runtime)
+    (valueRelated : ValueRel witness .tobject (.word32 word) value)
+    (semanticOperation :
+      Fir.LeanIR.Impure.decValueOnce runtime value true = .ok nextRuntime) :
+    ∃ result,
+      decrementReferenceOnce state word true witness.closureDescriptors =
+        .ok result ∧
+      LiveHeapRel result witness nextRuntime ∧
+      MappedHeaderCapacityTransport state result witness := by
+  cases valueRelated with
+  | tobject objectRelated =>
+      cases objectRelated with
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped mapped =>
+              exact related.decrementReferenceOnce_refines_with_capacity mapped
+                true (by simpa [Fir.LeanIR.Impure.decValueOnce] using
+                  semanticOperation)
+      | tagged taggedRelated =>
+          have runtimeEq : nextRuntime = runtime := by
+            simpa [Fir.LeanIR.Impure.decValueOnce] using
+              (Except.ok.inj semanticOperation).symm
+          subst nextRuntime
+          refine ⟨state, ?_, related, .refl state witness⟩
+          simpa using related.decrementReferenceOnce_tagged taggedRelated true
+            (descriptors := witness.closureDescriptors)
+
+/-- Complete successful nonempty exclusive-pop path. The semantic operation
+is written as the same two observable ownership steps as the concrete helper:
+first replace the Array by its popped prefix, then release the removed value.
+This partial-correctness boundary intentionally assumes the semantic release
+succeeds; the fault-refinement lane handles failing releases. -/
+theorem LiveHeapRel.popResidentArrayElementInPlace_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime nextRuntime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    {elements : Array Value} {capacity : Nat} {removed : Value}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .array elements capacity)
+    (descriptorFound : witness.descriptors.lookup? address =
+      some (.array capacity))
+    (nonempty : 0 < elements.size)
+    (removedAt : elements[elements.size - 1]? = some removed)
+    (semanticOperation :
+      (do
+        let next ← setCell runtime location
+          { cell with object := .array elements.pop capacity }
+        Fir.LeanIR.Impure.decValueOnce next removed true) = .ok nextRuntime) :
+    ∃ result,
+      popResidentArrayElementInPlace state address witness.closureDescriptors =
+        .ok result ∧
+      LiveHeapRel result witness nextRuntime ∧
+      MappedHeaderCapacityTransport state result witness ∧
+      result.heapCursor = state.heapCursor := by
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  let replacement : HeapCell := {
+    cell with object := .array elements.pop capacity }
+  cases targetRelated with
+  | constructor descriptor storedObjectEq objectRelated headerRead headerKind
+      refCount persistent cellLive => rw [objectEq] at storedObjectEq; contradiction
+  | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq; contradiction
+  | natural descriptor storedObjectEq headerRead headerKind marker extent limbsFit
+      decoded refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq; contradiction
+  | integer descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq; contradiction
+  | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq; contradiction
+  | array descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [descriptor] at descriptorFound
+      have descriptorEq := Option.some.inj descriptorFound
+      cases descriptorEq
+      rw [objectEq] at storedObjectEq
+      have objectParts := HeapObject.array.inj storedObjectEq
+      cases objectParts.1
+      cases objectParts.2
+      obtain ⟨removedWord, removedRead, removedRelated⟩ :=
+        objectRelated.readElementBorrowed removedAt
+      obtain ⟨middle, updatedHeader, memory, shrinkOperation, updatedEq,
+          resultEq, headerWrite, middleValid, middleObjectRel⟩ :=
+        objectRelated.writeLogicalSizeRaw_pop related.frontier nonempty
+      obtain ⟨_, targetRawRead, _, _, _, _⟩ :=
+        MemoryState.PrefixExtension.readLiveHeader_facts state address _
+          objectRelated.headerRead
+      have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
+        Nat.le_trans objectRelated.headerOwned related.frontier.cursorInBounds
+      have middleCellRel : CellRel middle witness address replacement := by
+        apply CellRel.live
+        apply LiveCellRel.array descriptor (by rfl)
+          (by simpa [replacement] using middleObjectRel)
+        · rw [updatedEq]
+          simpa [replacement] using refCount
+        · rw [updatedEq]
+          simpa [replacement] using persistent
+        · simpa [replacement] using cellLive
+      obtain ⟨middleRuntime, semanticSet, middleHeapRel⟩ :=
+        related.setCell_of_headerWrite mapped found descriptor targetRawRead
+          resultEq headerInBounds headerWrite (by rw [updatedEq]) middleValid
+            middleCellRel
+      have semanticComposed :
+          (do
+            let next ← setCell runtime location replacement
+            Fir.LeanIR.Impure.decValueOnce next removed true) =
+              .ok nextRuntime := by
+        simpa [replacement] using semanticOperation
+      have semanticRelease :
+          Fir.LeanIR.Impure.decValueOnce middleRuntime removed true =
+            .ok nextRuntime := by
+        rw [semanticSet] at semanticComposed
+        exact semanticComposed
+      obtain ⟨result, concreteRelease, finalHeapRel, releaseCapacity⟩ :=
+        middleHeapRel.releaseTObject_refines removedRelated semanticRelease
+      have concreteOperation :
+          popResidentArrayElementInPlace state address witness.closureDescriptors =
+            .ok result := by
+        unfold popResidentArrayElementInPlace
+        rw [objectRelated.readSize]
+        simp only [Bind.bind, Except.bind]
+        rw [if_neg (by omega)]
+        rw [removedRead]
+        simp only
+        rw [shrinkOperation]
+        exact concreteRelease
+      have shrinkCapacity :=
+        related.mappedHeaderCapacity_of_headerWrite descriptor targetRawRead
+          resultEq headerInBounds headerWrite (by rw [updatedEq])
+      have finalCursor : result.heapCursor = state.heapCursor := by
+        calc
+          result.heapCursor = middle.heapCursor :=
+            decrementReferenceOnce_preserves_heapCursor concreteRelease
+          _ = state.heapCursor := by rw [resultEq]
+      exact ⟨result, concreteOperation, finalHeapRel,
+        shrinkCapacity.trans releaseCapacity, finalCursor⟩
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, storedObjectEq⟩ := closureRelated.objectEq
+      rw [objectEq] at storedObjectEq
+      contradiction
+
 /-- Replacing a found semantic cell by itself is the identity. This local
 lemma lets a concrete spare-slot initialization cross the whole-heap frame
 without inventing an observable semantic step. -/

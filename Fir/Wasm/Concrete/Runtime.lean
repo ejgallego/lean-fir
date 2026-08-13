@@ -962,6 +962,18 @@ def decrementReferenceOnce (state : MemoryState) (object : Word32)
   decrementReferenceOnceFuel (state.heapCursor / headerBytes + 1) state object check
     descriptors
 
+/-- Unique in-place pop: remove the last slot from the owned prefix before
+releasing its value. The empty Array is an exact no-op. -/
+def popResidentArrayElementInPlace (state : MemoryState) (object : Word32)
+    (descriptors : ClosureDescriptorTable := #[]) :
+    Except ConcreteError MemoryState := do
+  let size ← readResidentArraySize state object
+  if size = 0 then
+    return state
+  let removed ← readResidentArrayElementBorrowed state object (size - 1)
+  let state ← writeResidentArrayLogicalSizeRaw state object (size - 1)
+  decrementReferenceOnce state removed true descriptors
+
 /-- FIR's multi-decrement repeats the one-step transition exactly; amount zero
 therefore leaves even a non-object operand untouched. -/
 def decrementReference (state : MemoryState) (object : Word32)
