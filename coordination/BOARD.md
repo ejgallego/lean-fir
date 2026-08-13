@@ -15,6 +15,38 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-RESIDUAL-STRUCTURED-VALIDATION`.
+- Integration owner: `wasm-proof`, continuing the user-authorized integration
+  lease. The accepted stack is based directly on `main` at `a6f4510e`, with
+  isolated shared contract `72856600`, functional proof head `42fb2d5d`, and
+  ready mailbox `c07eaf4b`.
+- Proof-visible production validator: `supportedCodeWithJoins` is now a total
+  syntax traversal with defining equations. Its explicit alternative-list
+  traversal is proved extensionally equal to the former `Array.all` check, so
+  the production acceptance Boolean is preserved. W7 and validation consumers
+  rebase on the landed contract but require no implementation adaptation.
+- Residual invariant API: `ConcreteStructuredValidationFocus` retains the exact
+  current join/local/result/case/sharing judgment, reconstructs the real root
+  from `ConcreteSupportedFunction.validatedBodyAt`, and exposes checked
+  inversions or continuation laws for `let`, join/jump, cases and selected
+  alternatives, ownership, deletion, tag mutation, and all field mutations.
+  It stores static compiler validation, not future execution evidence.
+- Acceptance: Lean Beam update/sync/save reports zero proof errors for the
+  validator and residual proof module; downstream refresh is green. The direct
+  3,121-job target build, `git diff --check`, complete `make check`,
+  `make talos-setup`, and serial 3,144-job Talos gate pass. The root gate covers
+  125 harness tests, 685 unique cases, 2,037/2,037 equal comparisons, all
+  coverage/oracle checks, 169 active bug cards, and the trusted-assumption
+  audit.
+- Result: `main` accepts the clean W6 stack through mailbox head `c07eaf4b`.
+  `FIR-BUG-wasm-none-structured-validation-provenance` now remains only at the
+  relation-attachment boundary. Exact return inversion confirmed the separate
+  `FIR-BUG-wasm-none-return-admission-refinement-direction`: production proves
+  `leanCompatible`, while current admission overrequires directional
+  `refines`.
+
+## Latest completed integration lease
+
 - Milestone: `W6-STRUCTURED-VALIDATION-PROVENANCE`.
 - Integration owner: `wasm-proof`, continuing the user-authorized integration
   lease. The proof slice is based on accepted `main` at `7fd2d2d9`, with
@@ -3850,7 +3882,7 @@ validation work continues; their historical handoff text remains unchanged.
 |---|---|---|---|---|---|
 | Integration | integration owner | `upgrade/lean-4.33` | released | `LEAN-4.33-UPGRADE` landed at `476f001b`; the temporary lane may be retired after publication. | Moves the shared toolchain, compiler-source contracts, and versioned compact-Format package surface to Lean 4.33 without changing the semantic Wasm ABI, concrete layout, or resident-helper signatures. |
 | Lean pass proof | pass-proof owner | `proof/simpcase` | released | Ready mailbox `5cae5958`, functional head `5c607e0e`, on accepted base `a25713a6` packages deleted reset/reuse as generic local ledger operations and derives ordinary/source-owned readiness from live-prefix premises. The retained-prefix fixture no longer uses a finite special-state classifier. | Changes no shared contract. The 34-job examples cone and full root gate pass; next generalize the target live-prefix derivation beyond the singleton adapter. |
-| W6 runtime proof | W6 owner | `wasm/talos-runtime` | active | Arbitrary normalized object-constructor and scalar-`UInt8` cases are accepted through ready mailbox `85d8945e`, functional head `5bcc92bd`, on base `8d97e6bd`. The certificate-free pointwise relation derives the dynamic selected arm and exact `5 × tests`/`4 × tests` target prefixes, tracks every target-only case label through nested calls, and proves the zero-test default path decreases the compiler rank. Next add lazy-cache hit/non-heap miss control, then remaining production coverage and the canonical export root. | No shared contract changed. Lean Beam, the 3,120-job focused cone, full root gate with 123 harness tests, 670 unique cases and 1,992 comparisons, and all 3,143 Talos jobs pass. |
+| W6 runtime proof | W6 owner | `wasm/talos-runtime` | released | Ready mailbox `c07eaf4b`, functional head `42fb2d5d`, on base `a6f4510e` makes production validation proof-visible and supplies the root plus residual join/local/case/sharing transition API. Next attach that state to active/suspended relations and repair return admission's compatibility direction. | Shared validator contract `72856600` replaces an opaque partial traversal with an extensionally equivalent total traversal; consumers rebase without code adaptation. Lean Beam, the 3,121-job focused cone, full root gate with 125 harness tests, 685 unique cases and 2,037 comparisons, and all 3,144 Talos jobs pass. |
 | W7 generation | generation owner | `wasm/generation` | released | Ready mailbox `22540610`, package source head `8c7dfdd7`, on base `260ce30a`, publishes the real zero-import Verso complete-HTML package and repairs post-mutation field-kind tracking in the W7 concrete observer. | Six generic Array/scalar/String resident signatures are generation-ready without changing the semantic ABI or concrete layout; W6 owns their later refinement bridge. |
 | Compiler-native Wasm | integration owner | `wasm/lcnf-c` | parked | Landed checkpoint `a4855402` adds a separately packaged C/Emscripten `Std.Format.prettyM` facade on top of the optimized final-LCNF-to-C route from `2760e3e0`. The browser adapter shares the compact `Format` request and exact `{text, events}` trace contract with W7's FIR-native facade while retaining a private bulk wire, verified Emscripten loader, full pinned Lean runtime, and independent package. The differential suite compares Unicode, grouping, nesting, tags, arbitrary-precision values, initial columns, malformed requests, repeated calls, and a one-MiB UTF-8 transfer through both engines | No shared semantic contract changed and the packages remain physically independent. The lane consumes `Std.Format.prettyM`, final impure LCNF, and Lean's C ABI without changing the symbolic Wasm, W6 concrete-runtime, or W7 resident-runtime surfaces. Resume with controlled sampled profiling of the facade wire and generated C before accepting a runtime optimization |
 | Validation | validation owner | `validation/float-corpus` | active | Clean coordination head `cfa17d81` retains the long 1,008-case native/LCNF calibration. Current-main validation covers 633 native/LCNF cases, 601 V8 cases, 642 unique cases, 1,844 comparisons, 5,750 interpreter transitions, 51 semantic-tag floors, and 142 conjunctive domains. | Test-fixtures may now rebase and admit the 32 scalar-closure cases. The long validation branch rebases separately; alias, termination, IO, and stream-capture contracts remain isolated. |
@@ -3870,6 +3902,7 @@ validation work continues; their historical handoff text remains unchanged.
 
 | ID | Producer | Consumers | Status | Standalone commit | Effect |
 |---|---|---|---|---|---|
+| `WASM-STRUCTURED-VALIDATION-TOTALITY` | W6/integration | W6, W7, validation | released | isolated contract `72856600`; proof consumer `42fb2d5d`; mailbox `c07eaf4b` | Replaces opaque partial `supportedCodeWithJoins` recursion with a terminating traversal and an explicit alternative-list helper. The helper is proved extensionally equal to the former `Array.all` check, preserving production acceptance while exposing equations needed by the compiler-correctness proof. W7 and validation rebase; no generated code, semantic ABI, concrete runtime, or artifact adaptation is required. |
 | `LEAN-4.33-UPGRADE` | integration | pass proof, W6, W7, validation, artifact clients | released | landed stack through `476f001b`; Verso source `eb8d2b8f`; Talos pin `0e05edbc` | Moves every live FIR toolchain and versioned package contract to Lean 4.33.0 while preserving the semantic Wasm ABI, concrete layout, and resident-helper signatures. All surviving lanes rebase before continuing; historical 4.32 records remain provenance. |
 | `LANE-W6-W7-SPLIT` | integration | W6, W7, harness | released | `9cb483f` | Gives W6 and W7 independent branches and worktrees |
 | `RESET-ERASED-RELEASE` | integration | pass proof, W6, validation | released | `373b0a9` | Reset treats erased ownership slots as no-ops; proof adaptation `8c2fff6`, W6 adaptation `afd7ab0`, and validation observation `3b82b0b` are landed |
