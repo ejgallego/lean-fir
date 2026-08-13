@@ -295,6 +295,214 @@ theorem ResidentArrayObjectRel.writeLogicalSizeRaw
     headerInBounds headerWrite (by omega)]
   exact readBefore
 
+/-- Unique in-place push first initializes the spare slot and only then makes
+it live. The composed local theorem therefore never admits an uninitialized
+semantic child. -/
+theorem ResidentArrayObjectRel.pushElementInPlaceRaw
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {elements : Array Value} {capacity : Nat} {header : Header}
+    (related :
+      ResidentArrayObjectRel state witness address elements capacity header)
+    (valid : state.FrontierInvariant) (value : Value) (word : Word32)
+    (spare : elements.size < capacity)
+    (valueRelated : ValueRel witness .tobject (.word32 word) value) :
+    ∃ middle result updatedHeader memory,
+      pushResidentArrayElementInPlaceRaw state address word = .ok result ∧
+      writeResidentArrayCapacityElementRaw state address elements.size word =
+        .ok middle ∧
+      state.TargetMutationFrame middle address header.allocationBytes.toNat ∧
+      middle.FrontierInvariant ∧
+      ResidentArrayObjectRel middle witness address elements capacity header ∧
+      updatedHeader = {
+        header with aux1 := UInt32.ofNat (elements.size + 1) } ∧
+      result = { middle with memory } ∧
+      updatedHeader.write middle.memory address = .ok memory ∧
+      result.FrontierInvariant ∧
+      ResidentArrayObjectRel result witness address (elements.push value)
+        capacity updatedHeader := by
+  obtain ⟨middle, capacityWrite, capacityFrame, middleValid, middleRelated,
+      newRead⟩ :=
+    related.writeCapacityElementRaw_targetFrame valid elements.size word
+      (Nat.le_refl _) spare
+  have nextFits : elements.size + 1 < UInt32.size := by
+    have capacityFits : capacity < UInt32.size := by
+      rw [← related.physicalCapacity]
+      exact UInt32.toNat_lt_size header.aux2
+    omega
+  have pushedSize : (elements.push value).size = elements.size + 1 := by simp
+  have pushedEach : ∀ (index : Nat) (semanticValue : Value),
+      (elements.push value)[index]? = some semanticValue →
+      ∃ concreteWord,
+        middle.memory.readWord32
+            (address.value + headerBytes + target.semanticSlotBytes * index) =
+          .ok concreteWord ∧
+        ValueRel witness .tobject (.word32 concreteWord) semanticValue := by
+    intro index semanticValue valueAt
+    rw [Array.getElem?_push] at valueAt
+    by_cases isNew : index = elements.size
+    · rw [if_pos isNew] at valueAt
+      have valueEq : semanticValue = value := (Option.some.inj valueAt).symm
+      subst semanticValue
+      subst index
+      exact ⟨word, newRead, valueRelated⟩
+    · rw [if_neg isNew] at valueAt
+      exact middleRelated.liveElements index semanticValue valueAt
+  obtain ⟨result, updatedHeader, finalMemory, sizeWrite, updatedEq, resultEq,
+      headerWrite, finalValid, finalRelated⟩ :=
+    middleRelated.writeLogicalSizeRaw middleValid (elements.size + 1) pushedSize
+      (by omega) nextFits pushedEach
+  have operation :
+      pushResidentArrayElementInPlaceRaw state address word = .ok result := by
+    unfold pushResidentArrayElementInPlaceRaw
+    rw [related.readSize]
+    simp only [Bind.bind, Except.bind]
+    rw [capacityWrite]
+    exact sizeWrite
+  exact ⟨middle, result, updatedHeader, finalMemory, operation, capacityWrite,
+    capacityFrame, middleValid, middleRelated, updatedEq, resultEq, headerWrite,
+    finalValid, finalRelated⟩
+
+/-- Replacing a found semantic cell by itself is the identity. This local
+lemma lets a concrete spare-slot initialization cross the whole-heap frame
+without inventing an observable semantic step. -/
+private theorem replaceCell_same_of_find
+    {heap : Heap} {location : Location} {cell : HeapCell}
+    (found : findCell? heap location = some cell) :
+    replaceCell heap location cell = some heap := by
+  induction heap with
+  | nil => simp [findCell?] at found
+  | cons entry rest ih =>
+      obtain ⟨candidate, current⟩ := entry
+      by_cases here : candidate = location
+      · subst candidate
+        simp [findCell?] at found
+        subst current
+        simp [replaceCell]
+      · have tailFound : findCell? rest location = some cell := by
+          simpa [findCell?, here] using found
+        simp [replaceCell, here, ih tailFound]
+
+private theorem setCell_same_of_find
+    {runtime : RuntimeState} {location : Location} {cell : HeapCell}
+    (found : findCell? runtime.heap location = some cell) :
+    setCell runtime location cell = .ok runtime := by
+  unfold setCell
+  rw [replaceCell_same_of_find found]
+
+/-- Whole-heap refinement for a unique in-place Array push. The concrete
+helper initializes the old spare slot without a semantic change, then the
+logical-size header write performs exactly one semantic `Array.push`.
+
+`valueRelated` is the ownership-transfer boundary: retain/copy policy is a
+caller obligation, while this theorem proves the raw mutation itself. -/
+theorem LiveHeapRel.pushResidentArrayElementInPlaceRaw_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    {elements : Array Value} {capacity : Nat}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .array elements capacity)
+    (descriptorFound : witness.descriptors.lookup? address =
+      some (.array capacity))
+    (value : Value) (word : Word32) (spare : elements.size < capacity)
+    (valueRelated : ValueRel witness .tobject (.word32 word) value) :
+    ∃ result nextRuntime,
+      pushResidentArrayElementInPlaceRaw state address word = .ok result ∧
+      setCell runtime location
+          { cell with object := .array (elements.push value) capacity } =
+        .ok nextRuntime ∧
+      LiveHeapRel result witness nextRuntime ∧
+      MappedHeaderCapacityTransport state result witness ∧
+      result.heapCursor = state.heapCursor := by
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  let replacement : HeapCell := {
+    cell with object := .array (elements.push value) capacity }
+  cases targetRelated with
+  | constructor descriptor storedObjectEq objectRelated headerRead headerKind
+      refCount persistent cellLive => rw [objectEq] at storedObjectEq; contradiction
+  | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq; contradiction
+  | natural descriptor storedObjectEq headerRead headerKind marker extent limbsFit
+      decoded refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq; contradiction
+  | integer descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq; contradiction
+  | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq; contradiction
+  | array descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [descriptor] at descriptorFound
+      have descriptorEq := Option.some.inj descriptorFound
+      cases descriptorEq
+      rw [objectEq] at storedObjectEq
+      have objectParts := HeapObject.array.inj storedObjectEq
+      cases objectParts.1
+      cases objectParts.2
+      obtain ⟨middle, result, updatedHeader, memory, operation, capacityWrite,
+          capacityFrame, middleValid, middleObjectRel, updatedEq, resultEq,
+          headerWrite, finalValid, finalObjectRel⟩ :=
+        objectRelated.pushElementInPlaceRaw related.frontier value word spare
+          valueRelated
+      obtain ⟨_, targetRawRead, _, _, _, _⟩ :=
+        MemoryState.PrefixExtension.readLiveHeader_facts state address _
+          objectRelated.headerRead
+      have middleCellRel : CellRel middle witness address cell := by
+        apply CellRel.live
+        apply LiveCellRel.array descriptor objectEq middleObjectRel
+        · simpa using refCount
+        · simpa using persistent
+        · simpa using cellLive
+      obtain ⟨sameRuntime, semanticSame, middleHeapRel⟩ :=
+        related.setCell_of_targetMutation mapped found descriptor targetRawRead
+          capacityFrame middleValid middleCellRel
+      have semanticIdentity : setCell runtime location cell = .ok runtime :=
+        setCell_same_of_find found
+      rw [semanticIdentity] at semanticSame
+      have sameRuntimeEq : sameRuntime = runtime :=
+        (Except.ok.inj semanticSame).symm
+      subst sameRuntime
+      obtain ⟨_, middleRawRead, _, _, _, _⟩ :=
+        MemoryState.PrefixExtension.readLiveHeader_facts middle address _
+          middleObjectRel.headerRead
+      have headerInBounds :
+          address.value + headerBytes ≤ middle.memory.size :=
+        Nat.le_trans middleObjectRel.headerOwned middleValid.cursorInBounds
+      have finalCellRel : CellRel result witness address replacement := by
+        apply CellRel.live
+        apply LiveCellRel.array descriptor (by rfl)
+          (by simpa [replacement] using finalObjectRel)
+        · rw [updatedEq]
+          simpa [replacement] using refCount
+        · rw [updatedEq]
+          simpa [replacement] using persistent
+        · simpa [replacement] using cellLive
+      obtain ⟨nextRuntime, semanticSet, finalHeapRel⟩ :=
+        middleHeapRel.setCell_of_headerWrite mapped found descriptor middleRawRead
+          resultEq headerInBounds headerWrite (by rw [updatedEq]) finalValid
+            finalCellRel
+      have firstCapacity :=
+        related.mappedHeaderCapacity_of_targetMutation descriptor targetRawRead
+          capacityFrame
+      have secondCapacity :=
+        middleHeapRel.mappedHeaderCapacity_of_headerWrite descriptor middleRawRead
+          resultEq headerInBounds headerWrite (by rw [updatedEq])
+      have finalCursor : result.heapCursor = state.heapCursor := by
+        rw [resultEq]
+        exact capacityFrame.cursor
+      exact ⟨result, nextRuntime, operation, by
+          simpa [replacement] using semanticSet,
+        finalHeapRel, firstCapacity.trans secondCapacity, finalCursor⟩
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, storedObjectEq⟩ := closureRelated.objectEq
+      rw [objectEq] at storedObjectEq
+      contradiction
+
 /-- Whole-heap form of ownership-neutral Array replacement. The semantic side
 uses the common `setCell` primitive explicitly, keeping retain/release duties
 outside this raw store theorem. -/

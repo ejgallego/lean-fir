@@ -784,6 +784,14 @@ def writeResidentArrayLogicalSizeRaw (state : MemoryState) (object : Word32)
   let logicalSize ← uint32Field "Array logical size" size
   writeLiveHeader state object { header with aux1 := logicalSize }
 
+/-- Unique in-place push: initialize the old first spare slot, then advance
+logical size so the initialized value becomes owned. -/
+def pushResidentArrayElementInPlaceRaw (state : MemoryState) (object : Word32)
+    (element : Word32) : Except ConcreteError MemoryState := do
+  let size ← readResidentArraySize state object
+  let state ← writeResidentArrayCapacityElementRaw state object size element
+  writeResidentArrayLogicalSizeRaw state object (size + 1)
+
 /-- Swap two live resident-Array elements without retain/release traffic. The
 operation is ownership-neutral because it preserves the element multiset. -/
 def swapResidentArrayElementsRaw (state : MemoryState) (object : Word32)
