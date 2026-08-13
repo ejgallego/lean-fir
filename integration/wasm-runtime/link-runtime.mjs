@@ -20,10 +20,21 @@ const output = resolve(outputArg);
 const temporary = mkdtempSync(join(tmpdir(), "fir-external-runtime-link-"));
 const expectedExports = WebAssembly.Module.exports(new WebAssembly.Module(
   readFileSync(frontier)));
-const allowedExports = new Set(expectedExports.map(({ name }) => name));
+const expectedExportKinds = new Map(expectedExports.map(({ name, kind }) =>
+  [name, kind]));
+assert.equal(expectedExportKinds.size, expectedExports.length,
+  "frontier export names must be unique");
+const isExpectedExport = ({ name, kind }) =>
+  expectedExportKinds.get(name) === kind;
+const binaryenFeatures = [
+  "--enable-nontrapping-float-to-int",
+  "--enable-multivalue",
+];
 
-function run(tool, args) {
-  execFileSync(join(binaryen, tool), args, { stdio: "inherit" });
+function run(tool, args, { discardStdout = false } = {}) {
+  execFileSync(join(binaryen, tool), args, {
+    stdio: discardStdout ? ["ignore", "ignore", "inherit"] : "inherit",
+  });
 }
 
 function replaceExactlyOnce(source, pattern, replacement, label) {
@@ -38,8 +49,7 @@ try {
   const normalizedMathWat = join(temporary, "math-unbounded.wat");
   const normalizedMath = join(temporary, "math-unbounded.wasm");
   const merged = join(temporary, "merged.wasm");
-  const mergedWat = join(temporary, "merged.wat");
-  const privateWat = join(temporary, "private.wat");
+  const reachabilityGraph = join(temporary, "exports.json");
   const privateWasm = join(temporary, "private.wasm");
 
   run("wasm-dis", [math, "-o", mathWat]);
@@ -49,29 +59,30 @@ try {
     '(import "env" "memory" (memory $1 1))',
     "Emscripten memory import normalization");
   writeFileSync(normalizedMathWat, wat);
-  run("wasm-as", ["--enable-nontrapping-float-to-int", normalizedMathWat,
+  run("wasm-as", [...binaryenFeatures, normalizedMathWat,
     "-o", normalizedMath]);
 
-  run("wasm-merge", ["--enable-nontrapping-float-to-int",
+  run("wasm-merge", [...binaryenFeatures,
     frontier, "env", normalizedMath, "lean.extern", "-o", merged]);
   const mergedModule = new WebAssembly.Module(readFileSync(merged));
   assert.deepEqual(WebAssembly.Module.imports(mergedModule), [],
     "merged application module must be import-free");
-
-  run("wasm-dis", [merged, "-o", mergedWat]);
-  wat = readFileSync(mergedWat, "utf8");
-  let removed = 0;
-  wat = wat.replace(/^ \(export "([^"]+)" .*\)\n/gm,
-    (line, name) => {
-      if (allowedExports.has(name)) return line;
-      removed += 1;
-      return "";
-    });
-  assert(removed > 0, "expected private linker exports to remove");
-  writeFileSync(privateWat, wat);
-  run("wasm-as", ["--enable-nontrapping-float-to-int", privateWat,
-    "-o", privateWasm]);
-  run("wasm-opt", ["--enable-nontrapping-float-to-int", "-O3",
+  const mergedExports = WebAssembly.Module.exports(mergedModule);
+  assert(mergedExports.some((export_) => !isExpectedExport(export_)),
+    "expected private linker exports to remove");
+  writeFileSync(reachabilityGraph, JSON.stringify(mergedExports.map(
+    (export_, index) => ({
+      name: `link$export$${index}`,
+      export: export_.name,
+      ...(isExpectedExport(export_) ? { root: true } : {}),
+    }))));
+  run("wasm-metadce", [...binaryenFeatures, merged,
+    "--quiet", `--graph-file=${reachabilityGraph}`, "-o", privateWasm],
+  { discardStdout: true });
+  assert.deepEqual(WebAssembly.Module.exports(new WebAssembly.Module(
+    readFileSync(privateWasm))), expectedExports,
+  "meta-DCE must preserve exactly the frontier exports");
+  run("wasm-opt", [...binaryenFeatures, "-O3",
     "--closed-world", "--remove-unused-module-elements", "--vacuum",
     "--strip-debug", "--strip-dwarf", privateWasm, "-o", output]);
 
@@ -84,9 +95,9 @@ try {
     const debugDirectory = resolve(process.env.FIR_WASM_RUNTIME_LINK_DEBUG_DIR);
     mkdirSync(debugDirectory, { recursive: true });
     copyFileSync(merged, join(debugDirectory, "merged.wasm"));
-    copyFileSync(mergedWat, join(debugDirectory, "merged.wat"));
     copyFileSync(privateWasm, join(debugDirectory, "private.wasm"));
-    copyFileSync(privateWat, join(debugDirectory, "private.wat"));
+    copyFileSync(reachabilityGraph,
+      join(debugDirectory, "exports.json"));
   }
 } finally {
   rmSync(temporary, { recursive: true, force: true });

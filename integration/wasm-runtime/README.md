@@ -20,5 +20,8 @@ advance a fresh FIR heap frontier to it before allocating Lean values.
 
 The linker discovers the intended public surface from the frontier module. It
 normalizes Emscripten's imported-memory maximum, links by exact external name
-and Wasm signature, removes runtime-only exports, rejects residual imports, and
-requires the complete module to preserve the frontier export inventory exactly.
+and Wasm signature, and preserves the frontier's multivalue feature. A binary
+`wasm-metadce` graph roots the exact frontier `(name, kind)` export inventory;
+this removes runtime-only exports without a size-amplifying WAT roundtrip. The
+linker rejects residual imports and requires both the private and optimized
+complete modules to preserve the frontier export inventory exactly.
