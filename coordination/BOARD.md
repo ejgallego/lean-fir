@@ -15,6 +15,38 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-FINITE-TRACE-RESOURCE-BOUNDARY`.
+- Integration owner: `wasm-proof`, continuing the user-authorized integration
+  lease. The proof slice is based on accepted `main` at `8bcafc05`, with
+  functional head `379d8202`; no shared semantic or executable runtime
+  contract changed.
+- Compiler law: `ConcreteStructuredCompilerCurrentStepAdmission` recovers the
+  current ordinary node's source/compiler admission and exact allocation cost
+  without a target path, future execution, termination premise, or memory
+  claim.
+- Resource law: `ConcreteStructuredCurrentStepAddressSpaceSafety` separately
+  requires that the admitted cost fit the retained wasm32 budget. Their
+  composition reconstructs the runnable classifier and finite-trace package;
+  the legacy coverage package is only a compatibility pair.
+- Export boundary:
+  `ConcreteSupportedExport.finiteTraceCorrect_of_currentStepAdmission` is the
+  preferred theorem and exposes compiler admission and finite-memory safety as
+  visibly independent hypotheses. `FIR-BUG-wasm-none-finite-trace-address-space-safety`
+  is fixed: an unconditional compiler proof can no longer inherit the
+  impossible weakened-budget obligation.
+- Acceptance: Lean Beam update/sync/save reports zero proof errors; the direct
+  3,120-job target build, `git diff --check`, complete `make check`,
+  `make talos-setup`, and all 3,143 Talos jobs pass. The root gate covers 125
+  harness tests, 676 source cases, 9 direct-machine cases, a 676-case
+  native/LCNF/V8 triangle, 685 unique cases, 2,037/2,037 equal comparisons,
+  7,341 machine steps, 167 active bug cards, and zero findings.
+- Result: `main` may fast-forward through the clean W6 mailbox. W6 next proves
+  compiler admission for the currently implemented fragment, with join/jump
+  control and other operation widenings explicit, then chooses a resource-safe
+  execution invariant or an explicitly budgeted finite-prefix theorem.
+
+## Latest completed integration lease
+
 - Milestone: `W7-GENERIC-CONTAINER-BOXING`.
 - Integration owner: `root`, consuming the wasm-gen-2 slice on
   `wasm/generic-container-boxing`. The implementation rebased without conflict
@@ -44,8 +76,6 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   constructor fields. Generic `Array α` remains a separate future contract:
   the validation schema and semantic runtime do not yet contain a generic
   Array heap representation, so it was not papered over by this slice.
-
-## Latest completed integration lease
 
 - Milestone: `W6-STRUCTURED-ACTIVE-RESULT-INDEX`.
 - Integration owner: `wasm-proof`, continuing the user-authorized integration
