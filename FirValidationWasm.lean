@@ -134,7 +134,7 @@ def elabFirValidationWasm : CommandElab := fun _ => do
     let result ← liftCoreM <|
       Fir.Wasm.Emit.Source.compileValidationInvocation validationCase.id validationCase.entry
         validationCase.argSchemas validationCase.args validationCase.resultSchema
-        validationCase.dependencies
+        validationCase.dependencies validationCase.argumentAliases
     let artifact ←
       match result with
       | .ok artifact => pure artifact

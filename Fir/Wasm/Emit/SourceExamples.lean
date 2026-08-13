@@ -14,6 +14,9 @@ def idFloat32Fixture (value : Float32) : Float32 := value
 
 def idFloatFixture (value : Float) : Float := value
 
+def preserveAliasedBytes (first second : ByteArray) : ByteArray × ByteArray :=
+  (first, second)
+
 #guard Fir.Wasm.Emit.CompilerPrivate.specializationCallerCandidates
     `List.foldl._at_.Array.appendList.spec_0._redArg == #[`Array.appendList]
 
@@ -350,5 +353,23 @@ run_cmd do
         throwError "unexpected result-schema rejection: {message}"
   | .error error => throwError "unexpected validation invocation failure: {repr error}"
   | .ok _ => throwError "validation invocation accepted the wrong result schema"
+
+run_cmd do
+  let result ← liftCoreM <|
+    compileValidationInvocation "aliased-byte-array-invocation"
+      ``preserveAliasedBytes #[.bytes, .bytes]
+      #[.bytes #[0, 127, 255], .bytes #[0, 127, 255]]
+      (.ctor "Prod.mk" 0 #[.bytes, .bytes]) #[]
+      #[{ source := 0, target := 1 }]
+  let artifact ← match result with
+    | .ok artifact => pure artifact
+    | .error error => throwError "aliased validation invocation failed: {repr error}"
+  let manifest := artifact.manifest.compress
+  unless manifest.contains
+      "\"arguments\":[{\"kind\":\"heap\",\"location\":0},{\"kind\":\"heap\",\"location\":0}]" do
+    throwError "aliased invocation did not reuse one manifest location: {manifest}"
+  unless manifest.contains
+      "\"live\":true,\"location\":0,\"object\":{\"kind\":\"byteArray\",\"value\":[0,127,255]},\"persistent\":false,\"rc\":2" do
+    throwError "aliased invocation did not retain exact root multiplicity: {manifest}"
 
 end Fir.Wasm.Emit.SourceExamples

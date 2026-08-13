@@ -142,7 +142,7 @@ def elabFirWasmEmitCase : CommandElab
       writeCompiledArtifact stx caseId output s!"validation case {caseIdValue}" <|
         compileValidationInvocation validationCase.id validationCase.entry
           validationCase.argSchemas validationCase.args validationCase.resultSchema
-          validationCase.dependencies
+          validationCase.dependencies validationCase.argumentAliases
   | _ => throwUnsupportedSyntax
 
 end Fir.Wasm.Emit.Source

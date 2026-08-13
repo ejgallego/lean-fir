@@ -854,7 +854,9 @@ def ModuleArtifact.withValidationInvocation (artifact : ModuleArtifact)
     (artifactName : String) (sourceEntry entry : Name)
     (argSchemas : Array Fir.Validation.ValidationSchema)
     (data : Array Fir.Validation.ValidationDatum)
-    (resultSchema : Fir.Validation.ValidationSchema) : Except CompileError Artifact := do
+    (resultSchema : Fir.Validation.ValidationSchema)
+    (argumentAliases : Array Fir.Validation.ArgumentAlias := #[]) :
+    Except CompileError Artifact := do
   let function ← Manifest.entryFunction artifact.module entry |>.mapError .manifest
   let resultKind ← Manifest.entryResultKind entry function |>.mapError .manifest
   unless validationSchemaAcceptsAbiKind resultSchema resultKind do
@@ -863,7 +865,8 @@ def ModuleArtifact.withValidationInvocation (artifact : ModuleArtifact)
   unless paramKinds.size == argSchemas.size do
     throw (.manifest
       s!"entry {entry} expects {paramKinds.size} argument schemas, got {argSchemas.size}")
-  let (runtime, args) ← Fir.Validation.Lcnf.encodeArgs argSchemas data |>.mapError .manifest
+  let (runtime, args) ← Fir.Validation.Lcnf.encodeArgs argSchemas data argumentAliases
+    |>.mapError .manifest
   let args ← (paramKinds.toList.zip (argSchemas.toList.zip args.toList)).mapM
     fun (kind, schema, value) =>
       validationArgumentForAbi schema kind value |>.mapError .manifest
@@ -895,10 +898,13 @@ def compileValidationInvocation (artifactName : String) (entry : Name)
     (argSchemas : Array Fir.Validation.ValidationSchema)
     (data : Array Fir.Validation.ValidationDatum)
     (resultSchema : Fir.Validation.ValidationSchema)
-    (dependencies : Array Name := #[]) : CoreM (Except CompileError Artifact) := do
+    (dependencies : Array Name := #[])
+    (argumentAliases : Array Fir.Validation.ArgumentAlias := #[]) :
+    CoreM (Except CompileError Artifact) := do
   let result ← compileModule entry dependencies
   return result.bind fun artifact =>
     artifact.withValidationInvocation artifactName entry entry argSchemas data resultSchema
+      argumentAliases
 
 /-- Compile a zero-argument Lean declaration and record its closed invocation. -/
 def compileClosed (entry : Name) (dependencies : Array Name := #[]) :
