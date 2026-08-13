@@ -4941,6 +4941,7 @@ structure DirectInternalCallSite
   calleeEnv : Env
   resultKind : AbiKind
   parameterKinds : Array AbiKind
+  declaredCalleeResultKind : AbiKind
   calleeResultKind : AbiKind
   args : Array (LCNF.Arg .impure)
   argumentCode : List Fir.Wasm.Instruction
@@ -4955,8 +4956,12 @@ structure DirectInternalCallSite
       some parameterKinds
   argumentsRefine :
     Fir.Wasm.kindsRefine argumentKinds parameterKinds = true
+  declaredCalleeResult :
+    Fir.Wasm.directAbiKind? sourceDeclaration.type =
+      some declaredCalleeResultKind
   calleeResult :
-    Fir.Wasm.directAbiKind? sourceDeclaration.type = some calleeResultKind
+    Fir.Wasm.effectiveDeclarationResultKind? sourceDeclaration =
+      some calleeResultKind
   calleeResultRefines : calleeResultKind.refines resultKind = true
   nonCached :
     (args.isEmpty && sourceDeclaration.params.isEmpty) = false
@@ -9468,6 +9473,23 @@ inductive LazyCacheCallSupported (context : Fir.Wasm.Context) :
       LazyCacheCallSupported context decl declaration sourceDeclaration
         resultKind
 
+/-- Recover the production-selected initializer result ABI from cache-call
+admission without exposing the rest of the constructor payload. -/
+theorem LazyCacheCallSupported.effectiveResult
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure}
+    {declaration : Name}
+    {sourceDeclaration : LCNF.Decl .impure}
+    {resultKind : AbiKind}
+    (call : LazyCacheCallSupported context decl declaration sourceDeclaration
+      resultKind) :
+    Fir.Wasm.effectiveDeclarationResultKind? sourceDeclaration =
+      some resultKind := by
+  cases call with
+  | intro _valueEq _kindEq _targetEq targetResultEq _resultRefines _paramsEq
+      _resultCompiled =>
+      exact targetResultEq
+
 /--
 The internal-declaration specialization of lazy-cache admission.
 
@@ -11375,6 +11397,9 @@ structure ConcreteGeneratedDeclaration
   sourceFunctionIndex : Nat
   sourceFunctionFound :
     sourceModule.functions[sourceFunctionIndex]? = some sourceFunction
+  sourceResultKind : AbiKind
+  sourceResultAt :
+    sourceFunction.results[0]? = some sourceResultKind
   targetFunctionIndex_eq :
     targetFunctionIndex = sourceModule.imports.size + sourceFunctionIndex
   functionAdapted :
@@ -11410,6 +11435,10 @@ structure ConcreteGeneratedInternalDeclaration
     Fir.Wasm.addDeclarationParams program declaration = .ok parameterLocals
   sourceParameters :
     sourceFunction.params = parameterLocals.reverse.toArray
+  sourceResultSelected :
+    match Fir.Wasm.effectiveDeclarationResultKind? declaration with
+    | some kind => sourceResultKind = kind
+    | none => True
   callIndexEq :
     callIndex? sourceModule (.declaration declaration.name) =
       some targetFunctionIndex
@@ -11441,6 +11470,8 @@ def ConcreteGeneratedInternalDeclaration.toSupportedFunction
   lowered := spec.lowered
   sourceFunctionIndex := row.sourceFunctionIndex
   sourceFunctionFound := row.sourceFunctionFound
+  sourceResultKind := row.sourceResultKind
+  sourceResultAt := row.sourceResultAt
   localsAligned := row.localsAligned
   adapted := spec.adapted
   hostsResolved := spec.hostsResolved
@@ -13185,6 +13216,29 @@ theorem LoweredInternalDeclaration.singleResult_of_effectiveResult
   rw [resultsSelected]
   rfl
 
+/-- The effective declaration result is the exact first symbolic result lane,
+not merely evidence that the result row is nonempty. -/
+theorem LoweredInternalDeclaration.resultAt_of_effectiveResult
+    {program : Fir.LeanIR.ImpureProgram}
+    {cachedDeclarations : Array Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    (row :
+      LoweredInternalDeclaration program cachedDeclarations declaration
+        sourceCode sourceFunction)
+    {resultKind : AbiKind}
+    (selected :
+      Fir.Wasm.effectiveDeclarationResultKind? declaration = some resultKind) :
+    sourceFunction.results[0]? = some resultKind := by
+  have functionResults : sourceFunction.results = row.abiResults := by
+    simpa using congrArg Fir.Wasm.Function.results row.sourceFunctionEq
+  rw [functionResults]
+  have resultsSelected := row.resultsSelected
+  rw [selected] at resultsSelected
+  rw [resultsSelected]
+  rfl
+
 /-- A successful function adaptation turns the source body equation into the
 two-stage `CodeAdapted` boundary used by the structural correctness proof. -/
 private theorem codeAdapted_of_function
@@ -13265,11 +13319,18 @@ theorem ConcreteGeneratedDeclaration.exists_ofAdaptedFunction
   have singleResult : targetFunction.results.length = 1 := by
     rw [signature.2.2]
     simpa using sourceSingleResult
+  have zeroInBounds : 0 < sourceFunction.results.size := by omega
+  let sourceResultKind : AbiKind := sourceFunction.results[0]
+  have sourceResultAt :
+      sourceFunction.results[0]? = some sourceResultKind := by
+    rw [Array.getElem?_eq_getElem zeroInBounds]
   obtain ⟨targetBody, bodyAdapted, targetBodyEq⟩ :=
     codeAdapted_of_function compiled functionAdapted
   exact ⟨{
     sourceFunctionIndex
     sourceFunctionFound
+    sourceResultKind
+    sourceResultAt
     targetFunctionIndex := sourceModule.imports.size + sourceFunctionIndex
     targetFunction
     targetFunctionIndex_eq := rfl
@@ -13281,6 +13342,31 @@ theorem ConcreteGeneratedDeclaration.exists_ofAdaptedFunction
     bodyAdapted
     localsAligned
     singleResult }⟩
+
+/-- The result kind retained by an adapted generated row is exactly the kind
+selected by production lowering whenever that selection succeeds. -/
+theorem ConcreteGeneratedDeclaration.resultSelected
+    {program : Fir.LeanIR.ImpureProgram}
+    {cachedDeclarations : Array Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {context : Fir.Wasm.Context}
+    {target : AdaptedModule}
+    (generated : ConcreteGeneratedDeclaration context sourceCode sourceModule
+      sourceFunction target)
+    (row : LoweredInternalDeclaration program cachedDeclarations declaration
+      sourceCode sourceFunction) :
+    match Fir.Wasm.effectiveDeclarationResultKind? declaration with
+    | some kind => generated.sourceResultKind = kind
+    | none => True := by
+  cases selected : Fir.Wasm.effectiveDeclarationResultKind? declaration with
+  | none => trivial
+  | some kind =>
+      exact Option.some.inj <|
+        generated.sourceResultAt.symm.trans
+          (row.resultAt_of_effectiveResult selected)
 
 /--
 Whole-pipeline internal-declaration selector.
@@ -13391,6 +13477,7 @@ theorem ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipeline
     parameterIdsUnique
     parametersAdded := row.paramsAdded
     sourceParameters
+    sourceResultSelected := generated.resultSelected row
     callIndexEq := by simpa [declarationNameEq] using callIndexEq }⟩⟩
 
 /--
@@ -13487,6 +13574,7 @@ theorem
     parameterIdsUnique
     parametersAdded
     sourceParameters
+    sourceResultSelected := generated.resultSelected row
     callIndexEq := by simpa [declarationNameEq] using callIndexEq }⟩
 
 /-- The common lowered-row selector specialized to a source ABI
@@ -14588,8 +14676,9 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_generated
         site.declarationFound
       have resultClassified :
           Fir.Wasm.abiKind? site.sourceDeclaration.type =
-            .ok (some site.calleeResultKind) :=
-        abiKind?_eq_ok_some_of_directAbiKind?_eq_some site.calleeResult
+            .ok (some site.declaredCalleeResultKind) :=
+        abiKind?_eq_ok_some_of_directAbiKind?_eq_some
+          site.declaredCalleeResult
       obtain ⟨generatedRow⟩ :=
         ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipelineAtLowered
           rfl row.contextCaches namesUnique lowered adaptedModule declarationFound
@@ -15374,8 +15463,9 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
         site.declarationFound
       have resultClassified :
           Fir.Wasm.abiKind? site.sourceDeclaration.type =
-            .ok (some site.calleeResultKind) :=
-        abiKind?_eq_ok_some_of_directAbiKind?_eq_some site.calleeResult
+            .ok (some site.declaredCalleeResultKind) :=
+        abiKind?_eq_ok_some_of_directAbiKind?_eq_some
+          site.declaredCalleeResult
       obtain ⟨generatedRow⟩ :=
         ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipelineAtLowered
           rfl contextCaches spec.programNamesUnique spec.lowered spec.adapted
@@ -16752,8 +16842,8 @@ theorem
     site.declarationFound
   have resultClassified :
       Fir.Wasm.abiKind? site.sourceDeclaration.type =
-        .ok (some site.calleeResultKind) :=
-    abiKind?_eq_ok_some_of_directAbiKind?_eq_some site.calleeResult
+        .ok (some site.declaredCalleeResultKind) :=
+    abiKind?_eq_ok_some_of_directAbiKind?_eq_some site.declaredCalleeResult
   obtain ⟨generatedRow⟩ :=
     ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipelineAtLowered
       rfl contextCaches namesUnique lowered adapted declarationFound

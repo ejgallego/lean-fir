@@ -5833,7 +5833,7 @@ correctness becomes a corollary; a backward simulation is deliberately later.
 | W6.7c emitted structured target | complete | frame laws plus the explicit label/loop/call stack expose progress through calls, branches, loops, returns, and halting |
 | W6.7d structured terminal adequacy | complete | every reachable canonical-entry-to-halted path collapses to the exact instruction-boundary/Talos run; stack shape and arities are proved, not assumed at the public boundary |
 | W6.7e compiler relation and rank | in progress; the branch-complete strong one-step dispatcher now closes direct values, the staged pure-external request/import/bind protocol, generated named/saturated call staging and entry, direct/saturated return-pop, erased default-only cases, arbitrary normalized object-constructor and scalar-`UInt8` case tables, persistent `inc`/`dec`, ordinary nonpersistent increment/decrement/delete, constructor-tag mutation, and FVar/erased object, `USize`, and packed-integer scalar field mutation in one module-stable relation; every tested constructor retains one explicit target-only case-label stack layer which is unwound before caller return-pop; zero-test default selection is proved to be a compiler-erased default-only node and therefore decreases the structural rank; the older terminating hereditary theorem additionally covers lazy/cache operations, which remain the next explicit pointwise widening | each currently runnable LCNF `executeStep` produces a finite structured path restoring the aligned supported global relation; zero-step matches decrease a compiler-derived structural rank; newly reached code receives only a fresh local admission, never a future execution certificate |
-| W6.7f public finite-trace theorem | in progress; the export-facing root state is now constructed by `ConcreteSupportedExport.supportedGlobalRootAt`, and combined current-step coverage packages the ranked simulation over the stable admission-free strong relation | first retain the active symbolic function's exact result ABI in the strong relation; then separate compiler-derived current-node admission from finite wasm32 address-space safety and state the public theorem either for resource-safe executions or for an explicitly budgeted finite source prefix |
+| W6.7f public finite-trace theorem | in progress; the export-facing root state is constructed by `ConcreteSupportedExport.supportedGlobalRoot`, and the supported/runnable global relations now index every active generated function by its exact compiler-selected result ABI across call entry and return/pop | separate compiler-derived current-node admission from finite wasm32 address-space safety, then state the public theorem either for resource-safe executions or for an explicitly budgeted finite source prefix |
 | W6.7g corollaries | pending | finite whole-export correctness follows from W6.7d/f; infinite source progress and trace preservation follow from W6.7e/f; backward weak simulation remains explicitly deferred |
 
 W6.7e initially follows the same admitted production fragment as
@@ -6176,17 +6176,20 @@ allocation cost fits the retained wasm32 address-space budget. Its
 structural inversion, and the corresponding simulation wrappers expose no
 target path or future execution evidence. The root relation is now constructed
 at the actual source/structured-Wasm entries by
-`ConcreteSupportedExport.supportedGlobalRootAt`. Proof audit found that the
+`ConcreteSupportedExport.supportedGlobalRoot`. The supported function package
+now retains `sourceFunction.results[0]?`, and the strong and runnable global
+relations require that exact lane to equal the active result ABI. Generated
+direct, saturated, and lazy calls derive the callee equality from production
+lowering; suspended supported frames retain the caller equality for return.
+Proof audit found that the
 combined coverage package cannot itself be a theorem of lowering: a valid
 budget can be weakened to zero, while supported allocating source steps have
 positive cost, and an indefinitely allocating source cannot be simulated
-forever by a fixed wasm32 address space. The next slices therefore (1) retain
-the active symbolic function's singleton result ABI in the strong relation,
-(2) prove compiler admission independently, and (3) select an honest
+forever by a fixed wasm32 address space. The next slices therefore (1) prove
+compiler admission independently and (2) select an honest
 resource-safe whole-simulation or explicitly budgeted finite-prefix theorem.
-`FIR-BUG-wasm-none-finite-trace-address-space-safety` and
-`FIR-BUG-wasm-none-structured-active-result-index` record these two proof
-contract gaps.
+`FIR-BUG-wasm-none-finite-trace-address-space-safety` records the remaining
+resource boundary; `FIR-BUG-wasm-none-structured-active-result-index` is fixed.
 Heap-valued cache misses remain the facts-aware transport redesign after the
 current non-heap lazy protocol.
 

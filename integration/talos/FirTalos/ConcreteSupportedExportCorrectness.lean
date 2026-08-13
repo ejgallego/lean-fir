@@ -134,6 +134,9 @@ structure ConcreteSupportedFunction
   sourceFunctionIndex : Nat
   sourceFunctionFound :
     sourceModule.functions[sourceFunctionIndex]? = some sourceFunction
+  sourceResultKind : AbiKind
+  sourceResultAt :
+    sourceFunction.results[0]? = some sourceResultKind
   localsAligned : LocalLayoutAligned context sourceFunction
   adapted : adapt sourceModule = .ok target
   hostsResolved : resolveHosts sourceModule = .ok hosts

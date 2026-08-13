@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-structured-active-result-index
-status: confirmed
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: b28b05afb9029e61230e975108ea487ecd613cf0
@@ -9,7 +9,7 @@ pass: none
 discovered-by: proof
 first-seen: 2026-08-13
 reproduction: integration/talos/FirTalos/ConcreteStructuredSimulation.lean
-regression: none
+regression: integration/talos/FirTalos/ConcreteResumableWasm.lean
 ---
 
 # Summary
@@ -19,7 +19,7 @@ retaining that it is the active symbolic function's actual singleton result.
 
 ## Minimal reproduction
 
-`ConcreteSupportedExport.supportedGlobalRootAt` can construct the current
+Before the repair, `ConcreteSupportedExport.supportedGlobalRootAt` could construct the current
 strong relation at any supplied `functionResult`. At a source `.return`, the
 admission rule instead requires the returned local's ABI kind to refine that
 index, so arbitrary instances cannot satisfy universal current-step coverage.
@@ -33,7 +33,7 @@ lake build FirTalos.ConcreteResumableWasm
 
 Inspect `ConcreteStructuredSupportedGlobalOutcome`,
 `ConcreteStructuredCodeStepAdmission.ret`, and
-`ConcreteSupportedExport.supportedGlobalRootAt`.
+`ConcreteSupportedExport.supportedGlobalRoot`.
 
 ## Expected semantics
 
@@ -78,5 +78,16 @@ none
 
 ## Resolution and regression
 
-Unresolved. The root constructor is named `supportedGlobalRootAt` to expose
-the temporary caller-selected index until the global relation is strengthened.
+Resolved in W6.7f. `ConcreteSupportedFunction` now retains the exact first
+symbolic result lane, and both supported and runnable global outcomes require
+that lane to equal the active `functionResult`. Generated declaration rows
+derive the lane from the executable `lowerDecl` result selection.
+
+Named calls distinguish the public declared result ABI from the effective
+compiler-selected result ABI, so intentional object-family refinement remains
+sound. Direct, saturated, and lazy call entry switch to the generated callee's
+exact lane; supported caller frames save its equality and return/pop restores
+it. The canonical export constructor is consequently
+`ConcreteSupportedExport.supportedGlobalRoot` and accepts no result-kind
+argument. Beam checkpoints and the `FirTalos.ConcreteResumableWasm` dependency
+cone compile with the strengthened index.

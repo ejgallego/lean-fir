@@ -146,39 +146,47 @@ theorem ConcreteStructuredCompilerCurrentStepCoverage.toCurrentStepClassifier
     intro source sourceAfter target related sourceStep
     rcases related with
       ⟨context, functionCode, sourceFunction, spec, labels, entryRuntime,
-        entryStore, entryWitness, functionResult, callerExpectedResult, active⟩
+        entryStore, entryWitness, functionResult, callerExpectedResult,
+        activeResult, active⟩
     cases active with
     | code contextCaches core supported agrees =>
         obtain ⟨requiredBytes, admitted, budget⟩ :=
           coverage.code spec core sourceStep
         apply ConcreteStructuredRunnableOutcome.toRunnableGlobal
           (functionCode := functionCode) (spec := spec)
+          (activeResult := activeResult)
         exact .code (core.withAdmission contextCaches admitted budget) supported
           agrees
     | directReady ready contextCaches supported agrees =>
         apply ConcreteStructuredRunnableOutcome.toRunnableGlobal
           (functionCode := functionCode) (spec := spec)
+          (activeResult := activeResult)
         exact .directReady ready contextCaches supported agrees
     | saturatedReady row sharedCapacity ready contextCaches supported agrees =>
         apply ConcreteStructuredRunnableOutcome.toRunnableGlobal
           (functionCode := functionCode) (spec := spec)
+          (activeResult := activeResult)
         exact .saturatedReady row sharedCapacity ready contextCaches supported
           agrees
     | lazyReady path ready contextCaches supported agrees =>
         apply ConcreteStructuredRunnableOutcome.toRunnableGlobal
           (functionCode := functionCode) (spec := spec)
+          (activeResult := activeResult)
         exact .lazyReady path ready contextCaches supported agrees
     | externalReady ready contextCaches supported agrees =>
         apply ConcreteStructuredRunnableOutcome.toRunnableGlobal
           (functionCode := functionCode) (spec := spec)
+          (activeResult := activeResult)
         exact .externalReady ready contextCaches supported agrees
     | externalBind bindCore contextCaches supported agrees =>
         apply ConcreteStructuredRunnableOutcome.toRunnableGlobal
           (functionCode := functionCode) (spec := spec)
+          (activeResult := activeResult)
         exact .externalBind bindCore contextCaches supported agrees
     | returned yielded compatible resources contextCaches supported agrees =>
         apply ConcreteStructuredRunnableOutcome.toRunnableGlobal
           (functionCode := functionCode) (spec := spec) (labels := labels)
+          (activeResult := activeResult)
         exact .returned yielded compatible resources contextCaches supported agrees
 
 /-- A source-local current-step classifier closes the admission-free strong
@@ -267,7 +275,7 @@ entries.
 
 Unlike `ConcreteStructuredCompilerCurrentStepCoverage.toFiniteTraceCorrect`,
 this export-facing bridge does not ask its caller to construct the simulation's
-initial relation. `ConcreteSupportedExport.supportedGlobalRootAt` derives it
+initial relation. `ConcreteSupportedExport.supportedGlobalRoot` derives it
 from production lowering/adaptation and the concrete cache/ABI frame. The
 remaining `coverage` premise contains no target path or future execution
 evidence, but it does include the explicit wasm32 address-space safety law
@@ -288,7 +296,6 @@ theorem ConcreteSupportedExport.finiteTraceCorrect_of_currentStepCoverage
       sourceModule targetModule hosts externals)
     (contextCaches :
       context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
-    (functionResult : Fir.Wasm.AbiKind)
     {facts : Fir.Wasm.ReuseCapacityFacts}
     {remainingBytes : Nat}
     {sourceRuntime : Fir.LeanIR.Impure.RuntimeState}
@@ -306,7 +313,6 @@ theorem ConcreteSupportedExport.finiteTraceCorrect_of_currentStepCoverage
       (concreteStructuredFunctionEntry spec.targetFunction initial
         parameters) :=
   coverage.toFiniteTraceCorrect
-    (spec.supportedGlobalRootAt contextCaches
-      (functionResult := functionResult) invariant)
+    (spec.supportedGlobalRoot contextCaches invariant)
 
 end FirTalos.Concrete

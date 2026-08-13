@@ -1593,16 +1593,18 @@ acceptance tests pass.
      `toGeneratedTraceSimulation` and
      `toFiniteTraceCorrect` wrappers no longer expose that intermediate
      classifier to callers. The actual compiler-produced root state is now
-     constructed by `ConcreteSupportedExport.supportedGlobalRootAt`, but two
-     independent invariants remain to make the bridge non-vacuous. The strong
-     relation must retain that `functionResult` is the active symbolic
-     function's singleton result kind. Compiler admission must then be split
-     from finite-address-space safety: lowering cannot prove that a positive
+     constructed by `ConcreteSupportedExport.supportedGlobalRoot`. The strong
+     relation now retains that `functionResult` is the active symbolic
+     function's exact singleton result kind. Generated call entry derives the
+     callee kind from production lowering, supported frames retain the caller
+     equality, and return/pop restores it. Compiler admission must next be
+     split from finite-address-space safety: lowering cannot prove that a positive
      allocation fits an arbitrarily weakened budget, nor that a fixed wasm32
      heap matches every prefix of an indefinitely allocating source.
-     `FIR-BUG-wasm-none-structured-active-result-index` and
-     `FIR-BUG-wasm-none-finite-trace-address-space-safety` record the exact
-     gaps. Later runtime families widen admission independently.
+     `FIR-BUG-wasm-none-structured-active-result-index` records the completed
+     relation repair; `FIR-BUG-wasm-none-finite-trace-address-space-safety`
+     records the remaining resource boundary. Later runtime families widen
+     admission independently.
      Heap-valued cache misses and target-only loop unwinding remain later
      widenings.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
