@@ -1525,16 +1525,17 @@ acceptance tests pass.
      successful source step reconstructs the default branch selection; all
      three laws preserve the hereditary resource and supported stacks through
      exact frame equality while taking a reflexive target path.
-     Ordinary nonpersistent increment and decrement are now heap-mutating
-     ownership nodes in the same pointwise closure. Their source/compiler-only
-     admissions construct the canonical semantic step; each preservation
-     theorem derives the exact two-instruction target path and transports the
-     active entry-relative resource scope while leaving the suspended supported
-     stack aligned. Recursive decrement release is discharged by the existing
-     concrete-runtime refinement, and the successor continuation remains
-     admission-free. Delete, tag and field mutation, broader cases, and
-     lazy/cache control remain explicit pointwise widenings despite already
-     having terminating hereditary laws.
+     Ordinary nonpersistent increment, decrement, and explicit deletion are
+     now heap-mutating ownership nodes in the same pointwise closure. Their
+     source/compiler-only admissions construct the canonical semantic step;
+     each preservation theorem derives the exact two-instruction target path
+     and transports the active entry-relative resource scope while leaving the
+     suspended supported stack aligned. Recursive decrement release and both
+     erased-zero/ordinary-object deletion branches are discharged by existing
+     concrete-runtime refinements, and the successor continuation remains
+     admission-free. Tag and field mutation, broader cases, and lazy/cache
+     control remain explicit pointwise widenings despite already having
+     terminating hereditary laws.
      Pure integer-, natural-, and scalar-result externals are now the first
      non-erased family in this same closure. Current-node admission fixes only
      the semantic response and its exact allocation cost. The staging rule

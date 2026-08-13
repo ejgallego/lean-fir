@@ -12057,6 +12057,7 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryDelete
       ConcreteSupportedFunction program context functionCode sourceModule
         sourceFunction targetModule hosts)
     {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
     {facts : ReuseCapacityFacts} {remainingBytes : Nat}
     {sourceRuntime nextRuntime entryRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -12072,7 +12073,7 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryDelete
       SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
         continuation)
     (related :
-      ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
         sourceRuntime sourceEnv code targetStore targetLocals targetCode witness
         source target)
     (invariant :
@@ -12087,7 +12088,7 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryDelete
         FinitePath
             (StructuredWasmStep targetModule.wasmModule hosts.env)
             2 target targetAfter ∧
-          ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+          ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
               nextRuntime sourceEnv continuation nextStore targetLocals
               targetRest witness sourceAfter targetAfter ∧
             ReuseCapacityEntryRelativeFrame
@@ -12134,7 +12135,7 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryDelete
             ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
               related.stateRelated.2.2⟩
           have effectStep :
-              EffectStepSimulates context sourceModule sourceFunction []
+              EffectStepSimulates context sourceModule sourceFunction labels
                 targetModule.wasmModule hosts.env sourceRuntime nextRuntime
                 sourceEnv (.del objectId continuation) continuation
                 ([.localGet objectIndex, .call callIndex] ++ targetCore)
@@ -12223,7 +12224,7 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryDelete
                 resultCount operation
           have nextFocus :
               ConcreteStructuredCodeFocus context sourceModule sourceFunction
-                [] nextRuntime sourceEnv continuation
+                labels nextRuntime sourceEnv continuation
                 (replaceHeap targetStore heap) targetLocals targetRest witness
                 sourceAfter targetAfter := {
             sourceProgramEq := by
@@ -17974,6 +17975,15 @@ inductive ConcreteStructuredCodeStepAdmission
         sourceEnv code continuation nextRuntime) :
       ConcreteStructuredCodeStepAdmission context externals expectedResult facts
         sourceRuntime sourceEnv 0 code
+  | ordinaryDelete
+      {facts : ReuseCapacityFacts}
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {code continuation : Lean.Compiler.LCNF.Code .impure}
+      (supported : OrdinaryDeleteEffectSupported context sourceRuntime
+        sourceEnv code continuation nextRuntime) :
+      ConcreteStructuredCodeStepAdmission context externals expectedResult facts
+        sourceRuntime sourceEnv 0 code
 
 /-- Ordinary increment admission already contains the successful semantic
 lookup and update for the current state.  Those facts construct the canonical
@@ -18014,6 +18024,24 @@ theorem OrdinaryDecrementEffectSupported.sourceEffectResult
       intro externals
       simp [executeStep, coreStep, objectLookup, updated]
 
+/-- Explicit-delete admission determines the canonical successful source
+effect step, including the erased reset token. The target zero no-op and
+ordinary heap update remain consequences of concrete refinement. -/
+theorem OrdinaryDeleteEffectSupported.sourceEffectResult
+    {context : Fir.Wasm.Context}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {code continuation : Lean.Compiler.LCNF.Code .impure}
+    (supported : OrdinaryDeleteEffectSupported context sourceRuntime sourceEnv
+      code continuation nextRuntime) :
+    SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
+      continuation := by
+  cases supported with
+  | del sourceRuntime nextRuntime sourceEnv objectId continuation objectKind
+      sourceObject objectCompiled objectLookup updated =>
+      intro externals
+      simp [executeStep, coreStep, objectLookup, updated]
+
 theorem ConcreteStructuredCodeStepAdmission.return_cases
     {context : Fir.Wasm.Context} {externals : ExternalImpl}
     {expectedResult : AbiKind}
@@ -18033,6 +18061,7 @@ theorem ConcreteStructuredCodeStepAdmission.return_cases
       exact ⟨_, resultCompiled, resultRefines, rfl⟩
   | ordinaryIncrement supported => cases supported
   | ordinaryDecrement supported => cases supported
+  | ordinaryDelete supported => cases supported
 
 /-- Exhaustive inversion of an admitted `let` node.
 
@@ -18078,6 +18107,7 @@ theorem ConcreteStructuredCodeStepAdmission.let_cases
       exact .inr (.inr (.inr ⟨site, resolution, rfl, sharedCapacity⟩))
   | ordinaryIncrement supported => cases supported
   | ordinaryDecrement supported => cases supported
+  | ordinaryDelete supported => cases supported
 
 /-- Compatibility between an active generated function's result ABI and the
 optional ABI expected by its suspended caller. -/
@@ -22215,6 +22245,92 @@ theorem ConcreteStructuredCodePointwiseRel.advance_ordinaryDecrement_of_step
   exact ⟨targetAfter, nextStore, targetRest, targetPath, sourceFramesEq,
     targetFramesEq, ⟨nextFocus, nextResources⟩⟩
 
+/-- A successful explicit deletion preserves the full admission-free compiler
+relation across its exact two-step generated host prefix.
+
+The same theorem covers an ordinary heap deletion and deletion of the erased
+reset token. Admission records only the successful source lookup/update;
+physical zero-as-no-op, concrete heap transport, and target execution are
+derived from the shared delete refinement. -/
+theorem ConcreteStructuredCodePointwiseRel.advance_ordinaryDelete_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode code continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime nextRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredCodePointwiseRel program context functionCode
+      sourceModule sourceFunction targetModule hosts spec externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts 0 remainingBytes sourceRuntime sourceEnv code targetStore
+      targetLocals targetCode witness source target)
+    (supported : OrdinaryDeleteEffectSupported context sourceRuntime sourceEnv
+      code continuation nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore targetRest,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames ∧
+        ConcreteStructuredCodeCoreRel program context sourceModule
+          sourceFunction externals labels entryRuntime entryStore entryWitness
+          functionResult callerExpectedResult facts remainingBytes nextRuntime
+          sourceEnv continuation nextStore targetLocals targetRest witness
+          sourceAfter targetAfter := by
+  obtain ⟨computedAfter, targetAfter, nextStore, targetRest, sourcePath,
+      targetPath, nextFocus, nextInvariant, _joinsEq, sourceFramesEq,
+      targetFramesEq⟩ :=
+    related.focus.advance_ordinaryDelete spec supported
+      supported.sourceEffectResult related.resources.current.1
+  have computedStep :
+      executeStep externals source = .next computedAfter := by
+    cases sourcePath with
+    | cons head tail =>
+        cases tail
+        exact head
+  have sourceAfterEq : sourceAfter = computedAfter := by
+    rw [sourceStep] at computedStep
+    exact ExecResult.next.inj computedStep
+  subst computedAfter
+  have nextScope :
+      ConcreteStructuredResourceScope context sourceModule sourceFunction
+        externals entryRuntime entryStore entryWitness facts remainingBytes
+        nextRuntime sourceEnv nextStore targetLocals witness :=
+    ⟨nextInvariant, related.resources.current.2⟩
+  have nextResourcesBefore :
+      ConcreteStructuredResourceStack program context sourceModule
+        sourceFunction externals entryRuntime nextRuntime entryStore nextStore
+        entryWitness witness facts remainingBytes sourceEnv targetLocals
+        functionResult callerExpectedResult source.frames target.frames :=
+    ⟨nextScope, related.resources.suspended⟩
+  have nextResources :
+      ConcreteStructuredResourceStack program context sourceModule
+        sourceFunction externals entryRuntime nextRuntime entryStore nextStore
+        entryWitness witness facts remainingBytes sourceEnv targetLocals
+        functionResult callerExpectedResult sourceAfter.frames
+        targetAfter.frames := by
+    rw [sourceFramesEq, targetFramesEq]
+    exact nextResourcesBefore
+  exact ⟨targetAfter, nextStore, targetRest, targetPath, sourceFramesEq,
+    targetFramesEq, ⟨nextFocus, nextResources⟩⟩
+
 /-- Stage one admitted pure external into the resource-indexed call-ready
 relation.  The source result and allocation cost come from current-node
 admission, while the production compiler and adapter determine the exact
@@ -22430,6 +22546,13 @@ theorem ConcreteStructuredCodePointwiseRel.advance
       refine ⟨2, targetAfter, targetPath,
         .code related.contextCaches nextCore, ?_⟩
       omega
+  | ordinaryDelete supported =>
+      obtain ⟨targetAfter, nextStore, targetRest, targetPath,
+          _sourceFramesEq, _targetFramesEq, nextCore⟩ :=
+        related.advance_ordinaryDelete_of_step supported sourceStep
+      refine ⟨2, targetAfter, targetPath,
+        .code related.contextCaches nextCore, ?_⟩
+      omega
 
 /-- Strong form of the pointwise ordinary-code step law.
 
@@ -22632,6 +22755,20 @@ theorem ConcreteStructuredCodePointwiseRel.advance_supportedGlobal
       obtain ⟨targetAfter, nextStore, targetRest, targetPath, sourceFramesEq,
           targetFramesEq, nextCore⟩ :=
         related.advance_ordinaryDecrement_of_step decrementSupported sourceStep
+      obtain ⟨supportedAfter, agreesAfter⟩ :=
+        agrees.reindex sourceFramesEq targetFramesEq
+          nextCore.resources.suspended
+      let nextActive : ConcreteStructuredSupportedOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec
+          externals labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult sourceAfter targetAfter :=
+        .code related.contextCaches nextCore supportedAfter agreesAfter
+      exact ⟨2, targetAfter, targetPath,
+        nextActive.toGlobal, by omega⟩
+  | ordinaryDelete deleteSupported =>
+      obtain ⟨targetAfter, nextStore, targetRest, targetPath, sourceFramesEq,
+          targetFramesEq, nextCore⟩ :=
+        related.advance_ordinaryDelete_of_step deleteSupported sourceStep
       obtain ⟨supportedAfter, agreesAfter⟩ :=
         agrees.reindex sourceFramesEq targetFramesEq
           nextCore.resources.suspended

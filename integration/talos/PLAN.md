@@ -5832,7 +5832,7 @@ correctness becomes a corollary; a backward simulation is deliberately later.
 | W6.7b instruction-boundary Talos adequacy | complete | finite residual-instruction paths agree with Talos `exec` above one common fuel bound and recover exact `Wasm.run` exits |
 | W6.7c emitted structured target | complete | frame laws plus the explicit label/loop/call stack expose progress through calls, branches, loops, returns, and halting |
 | W6.7d structured terminal adequacy | complete | every reachable canonical-entry-to-halted path collapses to the exact instruction-boundary/Talos run; stack shape and arities are proved, not assumed at the public boundary |
-| W6.7e compiler relation and rank | in progress; the branch-complete strong one-step dispatcher now closes direct values, the staged pure-external request/import/bind protocol, generated named/saturated call staging and entry, direct/saturated return-pop, erased default-only cases, persistent `inc`/`dec`, and ordinary nonpersistent `inc`/`dec` in one module-stable relation; the older terminating hereditary theorem additionally covers lazy/cache operations, broader cases, delete, tag/field mutation, and arbitrary finite generated call nesting, but those families remain explicit pointwise widenings rather than being silently attributed to the stable relation | each currently runnable LCNF `executeStep` produces a finite structured path restoring the aligned supported global relation; zero-step matches decrease a compiler-derived structural rank; newly reached code receives only a fresh local admission, never a future execution certificate |
+| W6.7e compiler relation and rank | in progress; the branch-complete strong one-step dispatcher now closes direct values, the staged pure-external request/import/bind protocol, generated named/saturated call staging and entry, direct/saturated return-pop, erased default-only cases, persistent `inc`/`dec`, and ordinary nonpersistent increment/decrement/delete in one module-stable relation; the older terminating hereditary theorem additionally covers lazy/cache operations, broader cases, tag/field mutation, and arbitrary finite generated call nesting, but those families remain explicit pointwise widenings rather than being silently attributed to the stable relation | each currently runnable LCNF `executeStep` produces a finite structured path restoring the aligned supported global relation; zero-step matches decrease a compiler-derived structural rank; newly reached code receives only a fresh local admission, never a future execution certificate |
 | W6.7f public finite-trace theorem | in progress; `ConcreteStructuredCompilerCurrentStepCoverage.toCurrentStepClassifier` now derives the global classifier by structural inversion, while its `toGeneratedTraceSimulation` and `toFiniteTraceCorrect` wrappers construct the ranked simulation over the stable admission-free strong relation | prove the ordinary-code current-node coverage law and canonical root relation from `ConcreteSupportedExport`, so the public caller supplies no classifier, target path, simulation/certificate, resolver package, or termination premise |
 | W6.7g corollaries | pending | finite whole-export correctness follows from W6.7d/f; infinite source progress and trace preservation follow from W6.7e/f; backward weak simulation remains explicitly deferred |
 
@@ -6120,17 +6120,18 @@ both return-pop protocols, returning
 compiler-erased default-only cases and persistent `inc`/`dec` are now ordinary
 code branches of this same dispatcher; their reflexive target paths are
 guarded by strict compiler-control-rank descent.
-Ordinary nonpersistent `inc` and `dec` are now heap-mutating ownership branches
-of the same pointwise relation. Their current-node admissions retain only the
-source lookup/update and compiler local kind. Each preservation theorem
-derives the exact `local.get; call` structured path, transports the
-entry-relative heap/cache/closure resource scope, preserves the aligned
-suspended caller stack, and returns admission-free continuation code. The
-decrement theorem includes recursive owned-graph release through the existing
-concrete-runtime refinement rather than storing that execution in admission.
-Delete, tag/field mutation, broader cases, and lazy/cache control remain
-separate pointwise widenings even though their terminating hereditary laws
-already exist.
+Ordinary nonpersistent increment, decrement, and explicit deletion are now
+heap-mutating ownership branches of the same pointwise relation. Their
+current-node admissions retain only the source lookup/update and compiler
+local kind. Each preservation theorem derives the exact `local.get; call`
+structured path, transports the entry-relative heap/cache/closure resource
+scope, preserves the aligned suspended caller stack, and returns
+admission-free continuation code. Decrement includes recursive owned-graph
+release, while deletion includes the erased-value/physical-zero no-op and
+ordinary live-object branches, all through existing concrete-runtime
+refinements rather than executions stored in admission. Tag/field mutation,
+broader cases, and lazy/cache control remain separate pointwise widenings even
+though their terminating hereditary laws already exist.
 Pure external calls now use that same runnable relation without collapsing
 their three source steps. Current-node admission selects the response and
 exact allocation cost, staging derives the production argument prefix and
