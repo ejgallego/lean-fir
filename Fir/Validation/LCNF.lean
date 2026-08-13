@@ -3079,55 +3079,105 @@ def compileEntry (entry : Name) (dependencies : Array Name := #[]) : CoreM Artif
 private def mismatch (expected : ValidationSchema) (actual : ValidationDatum) : Except String α :=
   .error s!"datum does not match schema: expected {repr expected}, got {repr actual}"
 
-private partial def encodeDatum (runtime : RuntimeState) (schema : ValidationSchema)
-    (datum : ValidationDatum) : Except String (RuntimeState × Value) := do
+private abbrev EncodedArgumentPaths := Array (ArgumentPath × Value)
+
+private def childArgumentPath (path : ArgumentPath) (index : Nat) : ArgumentPath :=
+  { path with children := path.children.push index }
+
+private def EncodedArgumentPaths.findValue?
+    (paths : EncodedArgumentPaths) (path : ArgumentPath) : Option Value :=
+  (paths.find? fun entry => entry.1 == path).map (fun entry => entry.2)
+
+private partial def encodeDatum (nestedAliases : Array NestedArgumentAlias)
+    (path : ArgumentPath) (materialized : EncodedArgumentPaths)
+    (runtime : RuntimeState) (schema : ValidationSchema) (datum : ValidationDatum) :
+    Except String (RuntimeState × Value × EncodedArgumentPaths) := do
   if !schema.accepts datum then mismatch schema datum
-  match schema, datum with
-  | .unit, .unit => return (runtime, .object (.tagged 0))
-  | .bool, .bool value =>
-      return (runtime, .scalar (.uint8 (if value then 1 else 0)))
-  | .nat, .nat value => return literal runtime (.nat value)
-  | .int, .int value => return encodeIntValue runtime value
-  | .usize, .usize value => return (runtime, .usize value)
-  | .bits 8, .bits _ value => return (runtime, .scalar (.uint8 value.toUInt8))
-  | .bits 16, .bits _ value => return (runtime, .scalar (.uint16 value.toUInt16))
-  | .bits 32, .bits _ value => return (runtime, .scalar (.uint32 value.toUInt32))
-  | .bits 64, .bits _ value => return (runtime, .scalar (.uint64 value))
-  | .float32, .bits 32 value =>
-      return (runtime, .scalar (.float32Bits value.toUInt32))
-  | .float64, .bits 64 value =>
-      return (runtime, .scalar (.float64Bits value))
-  | .string, .string value =>
-      let (runtime, reference) := alloc runtime (.string value)
-      return (runtime, .object reference)
-  | .bytes, .bytes values =>
-      let bytes := values.map (UInt8.ofNat ·)
-      let (runtime, reference) := alloc runtime (.byteArray bytes)
-      return (runtime, .object reference)
-  | .seq element, .seq values =>
-      values.foldrM (init := (runtime, .object (.tagged 0))) fun datum (runtime, tail) => do
-        let (runtime, head) ← encodeDatum runtime element datum
-        allocCtor runtime { name := ``List.cons, cidx := 1, size := 2, usize := 0, ssize := 0 }
-          #[head, tail] |>.mapError (fun fault => toString (repr fault))
-  | .ctor name tag schemas, .ctor _ _ fields =>
-      let (runtime, values) ← schemas.zip fields |>.foldlM (init := (runtime, #[]))
-        fun (runtime, values) (schema, field) => do
-          let (runtime, value) ← encodeDatum runtime schema field
-          return (runtime, values.push value)
-      allocCtor runtime {
-        name := Name.mkSimple name, cidx := tag, size := values.size, usize := 0, ssize := 0 }
-        values |>.mapError (fun fault => toString (repr fault))
-  | _, _ => mismatch schema datum
+  match nestedAliases.find? fun alias => alias.target == path with
+  | some alias => do
+      let some value := materialized.findValue? alias.source |
+        throw s!"nested argument alias source {repr alias.source} was not materialized"
+      let .object (.heap _) := value |
+        throw s!"nested argument alias {repr alias.source}->{repr alias.target} does not name a heap object"
+      let runtime ← incValue runtime value 1 true
+        |>.mapError (fun fault => toString (repr fault))
+      return (runtime, value, materialized.push (path, value))
+  | none => do
+      let record (runtime : RuntimeState) (value : Value)
+          (materialized : EncodedArgumentPaths) :=
+        (runtime, value, materialized.push (path, value))
+      match schema, datum with
+      | .unit, .unit => return record runtime (.object (.tagged 0)) materialized
+      | .bool, .bool value =>
+          return record runtime (.scalar (.uint8 (if value then 1 else 0))) materialized
+      | .nat, .nat value =>
+          let (runtime, value) := literal runtime (.nat value)
+          return record runtime value materialized
+      | .int, .int value =>
+          let (runtime, value) := encodeIntValue runtime value
+          return record runtime value materialized
+      | .usize, .usize value => return record runtime (.usize value) materialized
+      | .bits 8, .bits _ value =>
+          return record runtime (.scalar (.uint8 value.toUInt8)) materialized
+      | .bits 16, .bits _ value =>
+          return record runtime (.scalar (.uint16 value.toUInt16)) materialized
+      | .bits 32, .bits _ value =>
+          return record runtime (.scalar (.uint32 value.toUInt32)) materialized
+      | .bits 64, .bits _ value =>
+          return record runtime (.scalar (.uint64 value)) materialized
+      | .float32, .bits 32 value =>
+          return record runtime (.scalar (.float32Bits value.toUInt32)) materialized
+      | .float64, .bits 64 value =>
+          return record runtime (.scalar (.float64Bits value)) materialized
+      | .string, .string value =>
+          let (runtime, reference) := alloc runtime (.string value)
+          return record runtime (.object reference) materialized
+      | .bytes, .bytes values =>
+          let bytes := values.map (UInt8.ofNat ·)
+          let (runtime, reference) := alloc runtime (.byteArray bytes)
+          return record runtime (.object reference) materialized
+      | .seq element, .seq values => do
+          let (_, runtime, heads, materialized) ← values.foldlM
+            (init := (0, runtime, #[], materialized))
+            fun (index, runtime, heads, materialized) datum => do
+              let (runtime, head, materialized) ←
+                encodeDatum nestedAliases (childArgumentPath path index) materialized
+                  runtime element datum
+              return (index + 1, runtime, heads.push head, materialized)
+          let (runtime, value) ← heads.foldrM
+            (init := (runtime, .object (.tagged 0)))
+            fun head (runtime, tail) =>
+              allocCtor runtime {
+                name := ``List.cons, cidx := 1, size := 2, usize := 0, ssize := 0 }
+                #[head, tail] |>.mapError (fun fault => toString (repr fault))
+          return record runtime value materialized
+      | .ctor name tag schemas, .ctor _ _ fields => do
+          let (_, runtime, values, materialized) ← schemas.zip fields |>.foldlM
+            (init := (0, runtime, #[], materialized))
+            fun (index, runtime, values, materialized) (schema, field) => do
+              let (runtime, value, materialized) ←
+                encodeDatum nestedAliases (childArgumentPath path index) materialized
+                  runtime schema field
+              return (index + 1, runtime, values.push value, materialized)
+          let (runtime, value) ← allocCtor runtime {
+            name := Name.mkSimple name, cidx := tag, size := values.size,
+            usize := 0, ssize := 0 } values
+            |>.mapError (fun fault => toString (repr fault))
+          return record runtime value materialized
+      | _, _ => mismatch schema datum
 
 private def encodeArgsFrom
-    (argumentAliases : Array ArgumentAlias) :
+    (argumentAliases : Array ArgumentAlias)
+    (nestedAliases : Array NestedArgumentAlias) :
     List (ValidationSchema × ValidationDatum) → Nat → RuntimeState → Array Value →
+      EncodedArgumentPaths →
       Except String (RuntimeState × Array Value)
-  | [], _, runtime, values => return (runtime, values)
-  | (schema, datum) :: remaining, index, runtime, values => do
-      let encoded : Except String (RuntimeState × Value) :=
+  | [], _, runtime, values, _ => return (runtime, values)
+  | (schema, datum) :: remaining, index, runtime, values, materialized => do
+      let path : ArgumentPath := { argument := index, children := #[] }
+      let encoded : Except String (RuntimeState × Value × EncodedArgumentPaths) :=
         match argumentAliases.find? fun alias => alias.target == index with
-        | none => encodeDatum runtime schema datum
+        | none => encodeDatum nestedAliases path materialized runtime schema datum
         | some alias => do
             let some value := values[alias.source]? |
               throw s!"argument alias source {alias.source} was not materialized"
@@ -3135,15 +3185,17 @@ private def encodeArgsFrom
               throw s!"argument alias {alias.source}->{alias.target} does not name a heap object"
             let runtime ← incValue runtime value 1 true
               |>.mapError (fun fault => toString (repr fault))
-            return (runtime, value)
-      let (runtime, value) ← encoded
-      encodeArgsFrom argumentAliases remaining (index + 1) runtime (values.push value)
+            return (runtime, value, materialized.push (path, value))
+      let (runtime, value, materialized) ← encoded
+      encodeArgsFrom argumentAliases nestedAliases remaining (index + 1) runtime
+        (values.push value) materialized
 
 def encodeArgs (schemas : Array ValidationSchema) (data : Array ValidationDatum)
-    (argumentAliases : Array ArgumentAlias := #[]) :
+    (argumentAliases : Array ArgumentAlias := #[])
+    (nestedAliases : Array NestedArgumentAlias := #[]) :
     Except String (RuntimeState × Array Value) := do
-  checkArgumentAliases schemas data argumentAliases
-  encodeArgsFrom argumentAliases (schemas.zip data).toList 0 {} #[]
+  checkNestedArgumentAliases schemas data argumentAliases nestedAliases
+  encodeArgsFrom argumentAliases nestedAliases (schemas.zip data).toList 0 {} #[] #[]
 
 private def encodedArgumentAliasGuard : Bool :=
   match encodeArgs #[.bytes, .bytes]
@@ -3213,6 +3265,73 @@ private def rejectsNonCanonicalArgumentAliasGuard : Bool :=
 #guard encodedIndependentArgumentAliasRootsGuard
 #guard rejectsNonHeapArgumentAliasGuard
 #guard rejectsNonCanonicalArgumentAliasGuard
+
+private def encodedNestedConstructorAliasGuard : Bool :=
+  let schema := ValidationSchema.ctor "NestedAliasInput" 0 #[.bytes, .bytes]
+  let datum := ValidationDatum.ctor "NestedAliasInput" 0
+    #[.bytes #[3, 1, 4], .bytes #[3, 1, 4]]
+  let aliases : Array NestedArgumentAlias := #[{
+    source := { argument := 0, children := #[0] }
+    target := { argument := 0, children := #[1] } }]
+  match encodeArgs #[schema] #[datum] #[] aliases with
+  | .error _ => false
+  | .ok (runtime, values) =>
+      match values[0]? with
+      | some (Value.object (.heap root)) =>
+          match findCell? runtime.heap root with
+          | some { object := .ctor object, .. } =>
+              match object.objectFields[0]?, object.objectFields[1]? with
+              | some (Value.object (.heap first)), some (Value.object (.heap second)) =>
+                  first == second &&
+                    match findCell? runtime.heap first with
+                    | some cell => cell.live && cell.rc == 2 &&
+                        cell.object == .byteArray #[3, 1, 4]
+                    | none => false
+              | _, _ => false
+          | _ => false
+      | _ => false
+
+private def encodedNestedSequenceAliasGuard : Bool :=
+  let aliases : Array NestedArgumentAlias := #[{
+    source := { argument := 0, children := #[0] }
+    target := { argument := 0, children := #[1] } }]
+  match encodeArgs #[.seq .bytes]
+      #[.seq #[.bytes #[2, 7], .bytes #[2, 7]]] #[] aliases with
+  | .error _ => false
+  | .ok (runtime, values) =>
+      match values[0]? with
+      | some (Value.object (.heap root)) =>
+          match findCell? runtime.heap root with
+          | some { object := .ctor firstCons, .. } =>
+              match firstCons.objectFields[0]?, firstCons.objectFields[1]? with
+              | some (Value.object (.heap first)), some (Value.object (.heap tail)) =>
+                  match findCell? runtime.heap tail with
+                  | some { object := .ctor secondCons, .. } =>
+                      match secondCons.objectFields[0]? with
+                      | some (Value.object (.heap second)) =>
+                          first == second &&
+                            match findCell? runtime.heap first with
+                            | some cell => cell.live && cell.rc == 2 &&
+                                cell.object == .byteArray #[2, 7]
+                            | none => false
+                      | _ => false
+                  | _ => false
+              | _, _ => false
+          | _ => false
+      | _ => false
+
+private def rejectsNonHeapNestedArgumentAliasGuard : Bool :=
+  let aliases : Array NestedArgumentAlias := #[{
+    source := { argument := 0, children := #[0] }
+    target := { argument := 0, children := #[1] } }]
+  match encodeArgs #[.ctor "Pair" 0 #[.nat, .nat]]
+      #[.ctor "Pair" 0 #[.nat 1, .nat 1]] #[] aliases with
+  | .error _ => true
+  | .ok _ => false
+
+#guard encodedNestedConstructorAliasGuard
+#guard encodedNestedSequenceAliasGuard
+#guard rejectsNonHeapNestedArgumentAliasGuard
 
 private def encodedBoolArgumentsUseScalarAbiGuard : Bool :=
   match encodeArgs #[.bool, .bool] #[.bool false, .bool true] with
@@ -3426,7 +3545,8 @@ def execute (case : Corpus.Case) (artifact : Artifact) : BackendResult :=
     { key := "missing-externals",
       value := String.intercalate ","
         ((artifact.missingExternals case.requiredExternals).toList.map toString) }]
-  match encodeArgs case.argSchemas case.args case.argumentAliases with
+  match encodeArgs case.argSchemas case.args case.argumentAliases
+      case.nestedArgumentAliases with
   | .error message =>
       { caseId := case.id, backend := "lcnf", outcome := .failure message,
         diagnostics := staticDiagnostics }

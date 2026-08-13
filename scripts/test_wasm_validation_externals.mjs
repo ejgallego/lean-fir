@@ -9,6 +9,7 @@ import { semanticDatum } from "./wasm_validation_case.mjs";
 import * as validationExternals from "./wasm_validation_externals.mjs";
 import {
   validateMaterializedArgumentAliases,
+  validateMaterializedNestedArgumentAliases,
 } from "./wasm_validation_case.mjs";
 import {
   integerValue,
@@ -1443,6 +1444,83 @@ for (const [handler, leftValue, rightValue, expected] of [
       wrongCountHost,
     ),
     /wrong initial reference count/,
+  );
+
+  const nestedHost = new SemanticHost();
+  const nestedShared = nestedHost.alloc({ kind: "byteArray", value: [2, 7] });
+  nestedHost.incLocation(nestedShared.location, 1);
+  const nestedRoot = nestedHost.alloc({
+    kind: "ctor",
+    tag: 0n,
+    objectFields: [nestedShared, nestedShared],
+    usizeFields: [],
+    scalarFields: [],
+  });
+  validateMaterializedNestedArgumentAliases(
+    "nested-constructor-alias",
+    [{
+      source: { argument: 0, children: [0] },
+      target: { argument: 0, children: [1] },
+    }],
+    [{ ctor: { name: "Pair", tag: 0, fields: ["bytes", "bytes"] } }],
+    [nestedRoot],
+    nestedHost,
+  );
+
+  const nestedListHost = new SemanticHost();
+  const nestedListShared =
+    nestedListHost.alloc({ kind: "byteArray", value: [3, 1, 4] });
+  nestedListHost.incLocation(nestedListShared.location, 1);
+  const nil = { kind: "tagged", payload: 0n };
+  const secondCons = nestedListHost.alloc({
+    kind: "ctor",
+    tag: 1n,
+    objectFields: [nestedListShared, nil],
+    usizeFields: [],
+    scalarFields: [],
+  });
+  const firstCons = nestedListHost.alloc({
+    kind: "ctor",
+    tag: 1n,
+    objectFields: [nestedListShared, secondCons],
+    usizeFields: [],
+    scalarFields: [],
+  });
+  validateMaterializedNestedArgumentAliases(
+    "nested-sequence-alias",
+    [{
+      source: { argument: 0, children: [0] },
+      target: { argument: 0, children: [1] },
+    }],
+    [{ seq: { element: "bytes" } }],
+    [firstCons],
+    nestedListHost,
+  );
+
+  const distinctNestedHost = new SemanticHost();
+  const distinctNestedFirst =
+    distinctNestedHost.alloc({ kind: "byteArray", value: [8] });
+  const distinctNestedSecond =
+    distinctNestedHost.alloc({ kind: "byteArray", value: [8] });
+  const distinctNestedRoot = distinctNestedHost.alloc({
+    kind: "ctor",
+    tag: 0n,
+    objectFields: [distinctNestedFirst, distinctNestedSecond],
+    usizeFields: [],
+    scalarFields: [],
+  });
+  assert.throws(
+    () => validateMaterializedNestedArgumentAliases(
+      "distinct-nested-children",
+      [{
+        source: { argument: 0, children: [0] },
+        target: { argument: 0, children: [1] },
+      }],
+      [{ ctor: { name: "Pair", tag: 0, fields: ["bytes", "bytes"] } }],
+      [distinctNestedRoot],
+      distinctNestedHost,
+    ),
+    /did not preserve nested argument alias/,
   );
 }
 

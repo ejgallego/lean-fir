@@ -342,6 +342,98 @@ export function validateMaterializedArgumentAliases(
   }
 }
 
+function materializedArgumentPath(caseId, path, schemas, semanticArguments, host) {
+  assert.ok(path && typeof path === "object" &&
+    Number.isSafeInteger(path.argument) && path.argument >= 0 &&
+    Array.isArray(path.children) && path.children.length > 0 &&
+    path.children.every(child => Number.isSafeInteger(child) && child >= 0),
+  `${caseId} malformed nested argument path`);
+  let schema = schemas[path.argument];
+  let value = semanticArguments[path.argument];
+  assert.notEqual(schema, undefined,
+    `${caseId} nested argument path root ${path.argument} is out of bounds`);
+  for (const child of path.children) {
+    if (schema?.seq !== undefined) {
+      let cursor = value;
+      for (let index = 0; index <= child; ++index) {
+        assert.equal(cursor?.kind, "heap",
+          `${caseId} nested sequence child ${child} is out of bounds`);
+        const object = host.liveCell(cursor.location).object;
+        assert.equal(object.kind, "ctor",
+          `${caseId} nested sequence path did not reach a list cell`);
+        assert.equal(object.tag, 1n,
+          `${caseId} nested sequence path did not reach a cons cell`);
+        assert.equal(object.objectFields.length, 2,
+          `${caseId} nested sequence cons arity mismatch`);
+        if (index === child) {
+          value = object.objectFields[0];
+        } else {
+          cursor = object.objectFields[1];
+        }
+      }
+      schema = schema.seq.element;
+      continue;
+    }
+    if (schema?.ctor !== undefined) {
+      assert.ok(child < schema.ctor.fields.length,
+        `${caseId} nested constructor child ${child} is out of bounds`);
+      assert.equal(value?.kind, "heap",
+        `${caseId} nested constructor path did not reach a heap object`);
+      const object = host.liveCell(value.location).object;
+      assert.equal(object.kind, "ctor",
+        `${caseId} nested constructor path did not reach a constructor`);
+      const layout = constructorSchemaLayout(
+        schema.ctor.fields, `${caseId} nested constructor path`);
+      const storage = layout.fields[child];
+      assert.equal(storage.kind, "object",
+        `${caseId} nested alias path selected a non-object constructor field`);
+      value = object.objectFields[storage.index];
+      schema = schema.ctor.fields[child];
+      continue;
+    }
+    assert.fail(`${caseId} nested child ${child} descends through a non-container`);
+  }
+  return value;
+}
+
+/** Check recursive graph identity and owning-edge multiplicity before execution. */
+export function validateMaterializedNestedArgumentAliases(
+  caseId,
+  nestedArgumentAliases,
+  schemas,
+  semanticArguments,
+  host,
+) {
+  const aliasMultiplicities = new Map();
+  for (const alias of nestedArgumentAliases) {
+    assert.ok(alias && typeof alias === "object",
+      `${caseId} malformed nested argument alias`);
+    const source = materializedArgumentPath(
+      caseId, alias.source, schemas, semanticArguments, host);
+    const target = materializedArgumentPath(
+      caseId, alias.target, schemas, semanticArguments, host);
+    assert.equal(source?.kind, "heap",
+      `${caseId} nested argument alias source is not a heap object`);
+    assert.equal(target?.kind, "heap",
+      `${caseId} nested argument alias target is not a heap object`);
+    assert.equal(target.location, source.location,
+      `${caseId} compiler manifest did not preserve nested argument alias`);
+    const sourceKey = JSON.stringify(alias.source);
+    const current = aliasMultiplicities.get(sourceKey);
+    if (current === undefined) {
+      aliasMultiplicities.set(sourceKey, { value: source, count: 2 });
+    } else {
+      ++current.count;
+    }
+  }
+  for (const [sourceKey, { value, count }] of aliasMultiplicities) {
+    const cell = host.heap.find(candidate => candidate.location === value.location);
+    assert.ok(cell, `${caseId} nested argument alias root ${sourceKey} is not live`);
+    assert.equal(cell.rc, count,
+      `${caseId} nested argument alias root ${sourceKey} has the wrong reference count`);
+  }
+}
+
 /** Execute one compiler-produced semantic Wasm validation case in any JS host. */
 export async function executeSemanticWasmCase({
   caseId,
@@ -356,6 +448,8 @@ export async function executeSemanticWasmCase({
     `${caseId} argument schema/fixture arity mismatch`);
   assert.ok(Array.isArray(descriptor.argumentAliases),
     `${caseId} argument aliases must be an array`);
+  assert.ok(Array.isArray(descriptor.nestedArgumentAliases),
+    `${caseId} nested argument aliases must be an array`);
   assert.ok(Array.isArray(descriptor.effectProjections),
     `${caseId} effect projections must be an array`);
 
@@ -423,6 +517,13 @@ export async function executeSemanticWasmCase({
   validateMaterializedArgumentAliases(
     caseId,
     descriptor.argumentAliases,
+    semanticArguments,
+    host,
+  );
+  validateMaterializedNestedArgumentAliases(
+    caseId,
+    descriptor.nestedArgumentAliases,
+    descriptor.argSchemas,
     semanticArguments,
     host,
   );
