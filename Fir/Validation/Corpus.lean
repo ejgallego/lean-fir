@@ -169,6 +169,16 @@ def uint8ArraySetShared (xs : Array UInt8) : Array UInt8 × Array UInt8 :=
   let updated := xs.set! 2 255
   (xs, updated)
 
+@[noinline]
+def floatArraySetUnique (xs : Array Float) (replacement : Float) : Array Float :=
+  xs.set! 0 replacement
+
+@[noinline]
+def floatArraySetShared
+    (xs : Array Float) (replacement : Float) : Array Float × Array Float :=
+  let updated := xs.set! 0 replacement
+  (xs, updated)
+
 def firstUInt8List : List UInt8 → UInt8
   | value :: _ => value
   | [] => 0
@@ -2623,8 +2633,15 @@ private def uint8ArrayPairDatum
     (value : Array UInt8 × Array UInt8) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[uint8ArrayDatum value.1, uint8ArrayDatum value.2]
 
+private def floatArrayPairDatum
+    (value : Array Float × Array Float) : ValidationDatum :=
+  .ctor "Prod.mk" 0 #[floatArrayDatum value.1, floatArrayDatum value.2]
+
 private def genericContainerFloat : Float :=
   Float.ofBits 0x7ff8123456789abc
+
+private def genericArrayReplacementFloat : Float :=
+  Float.ofBits 0x8000000000000000
 
 private def byteArrayDatum (value : ByteArray) : ValidationDatum :=
   .bytes (value.data.map (UInt8.toNat ·))
@@ -4156,6 +4173,45 @@ private def preConversionCases : Array Case := #[
     requiredExecutedExternalTrace := some #[``Array.set!]
     provenance := firProvenance
       "Copy a shared generic Array while preserving its original alias through Array.set!" },
+  { id := "generic-float-array-set-unique"
+    entry := ``Source.floatArraySetUnique
+    args := #[floatArrayDatum #[genericContainerFloat],
+      .bits 64 genericArrayReplacementFloat.toBits]
+    argSchemas := #[.array (.boxed .float64), .float64]
+    resultSchema := .array (.boxed .float64)
+    native := fun _ => floatArrayDatum
+      (Source.floatArraySetUnique #[genericContainerFloat] genericArrayReplacementFloat)
+    tags := #["stress", "array", "generic", "boxed", "float", "heap", "mutation",
+      "ownership", "unique", "bit-exact"]
+    requiredLcnfForms := #["lit", "box", "fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["lit", "box", "fap", "extern", "return"]
+    requiredExternals := #[``Array.set!]
+    requiredExecutedExternals := #[``Array.set!]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``Array.set!]
+    requiredExecutedExternalTrace := some #[``Array.set!]
+    provenance := firProvenance
+      "Transfer a heap Float box into a uniquely owned Array without changing its bits" },
+  { id := "generic-float-array-set-shared"
+    entry := ``Source.floatArraySetShared
+    args := #[floatArrayDatum #[genericContainerFloat],
+      .bits 64 genericArrayReplacementFloat.toBits]
+    argSchemas := #[.array (.boxed .float64), .float64]
+    resultSchema := .ctor "Prod.mk" 0
+      #[.array (.boxed .float64), .array (.boxed .float64)]
+    native := fun _ => floatArrayPairDatum
+      (Source.floatArraySetShared #[genericContainerFloat]
+        genericArrayReplacementFloat)
+    tags := #["stress", "array", "generic", "boxed", "float", "heap", "mutation",
+      "ownership", "shared", "copy-on-write", "bit-exact"]
+    requiredLcnfForms := #["lit", "box", "inc", "fap", "extern", "ctor", "return"]
+    requiredExecutedLcnfForms :=
+      #["lit", "box", "inc", "fap", "extern", "ctor", "return"]
+    requiredExternals := #[``Array.set!]
+    requiredExecutedExternals := #[``Array.set!]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``Array.set!]
+    requiredExecutedExternalTrace := some #[``Array.set!]
+    provenance := firProvenance
+      "Copy a shared Float Array with exact heap-box retention and replacement bits" },
   { id := "generic-uint8-list-head"
     entry := ``Source.firstUInt8List
     args := #[uint8ListDatum [255, 1]]
