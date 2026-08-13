@@ -749,6 +749,18 @@ def readResidentArrayElementBorrowed (state : MemoryState) (object : Word32)
   liftMemory <| state.memory.readWord32
     (object.value + headerBytes + target.semanticSlotBytes * index)
 
+/-- Replace one live resident-Array slot without performing ownership
+transitions. Generated helpers surround this primitive with the retain/release
+protocol appropriate to unique or copy-on-write mutation. -/
+def writeResidentArrayElementRaw (state : MemoryState) (object : Word32)
+    (index : Nat) (element : Word32) : Except ConcreteError MemoryState := do
+  let header ← readResidentArrayHeader state object
+  unless index < header.aux1.toNat do
+    throw (.source (.objectFieldOutOfBounds index header.aux1.toNat))
+  let memory ← liftMemory <| state.memory.writeWord32
+    (object.value + headerBytes + target.semanticSlotBytes * index) element
+  return { state with memory }
+
 /-- Allocate the canonical resident generic Array and initialize exactly its
 live `tobject` prefix. `capacity` determines the retained extent; spare slots
 remain allocator-zeroed and are not semantic ownership. -/

@@ -15,6 +15,7 @@ import Fir.Wasm.Concrete.FreshAllocationCorrectness
 import Fir.Wasm.Concrete.HeapRefinement
 import Fir.Wasm.Concrete.ArrayAllocationCorrectness
 import Fir.Wasm.Concrete.ArrayHeapCorrectness
+import Fir.Wasm.Concrete.ArrayMutationCorrectness
 import Fir.Wasm.Concrete.NaturalAllocationCorrectness
 import Fir.Wasm.Concrete.IntegerAllocationCorrectness
 import Fir.Wasm.Concrete.PromotedTagCorrectness
