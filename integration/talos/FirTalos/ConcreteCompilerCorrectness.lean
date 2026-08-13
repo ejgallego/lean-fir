@@ -6724,6 +6724,10 @@ theorem ConcreteRuntimeRel.unboxFacts_of_sourceCompatible
                           persistent cellLive =>
                           rw [compatibleObjectEq] at objectEq
                           contradiction
+                      | array descriptor objectEq objectRelated refCount
+                          persistent cellLive =>
+                          rw [compatibleObjectEq] at objectEq
+                          contradiction
                       | closure closureRelated =>
                           obtain ⟨function, arity, captures, objectEq⟩ :=
                             closureRelated.objectEq
