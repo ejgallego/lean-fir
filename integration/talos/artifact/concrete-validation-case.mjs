@@ -57,6 +57,8 @@ export const CONCRETE_VALIDATION_BLOCKED_CASES = Object.freeze([
   "effect-captured-byte-array-retained-use",
   "effect-record-aliased-byte-array-arguments",
   "effect-record-byte-array-twice",
+  "effect-record-nested-aliased-byte-array-layout",
+  "effect-record-nested-aliased-byte-array-list",
   "effect-record-triply-aliased-byte-array-arguments",
   "effect-record-two-aliased-byte-array-groups",
   "empty-byte-array-roundtrip",

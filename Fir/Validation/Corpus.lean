@@ -2297,6 +2297,22 @@ def effectCapturedByteArrayRetainedUse
 def recordAliasedByteArrays (first second : ByteArray) : ByteArray × ByteArray :=
   (recordByteArray first 42, second)
 
+structure NestedAliasedByteArrays where
+  first : ByteArray
+  second : ByteArray
+
+@[noinline]
+def recordNestedAliasedByteArrayLayout (value : NestedAliasedByteArrays) :
+    ByteArray × ByteArray :=
+  (recordByteArray value.first 42, value.second)
+
+@[noinline]
+def recordNestedAliasedByteArrayList (values : List ByteArray) :
+    ByteArray × ByteArray :=
+  match values with
+  | first :: second :: _ => (recordByteArray first 42, second)
+  | _ => (⟨#[]⟩, ⟨#[]⟩)
+
 @[noinline]
 def recordTriplyAliasedByteArrays (first second third : ByteArray) :
     ByteArray × ByteArray × ByteArray :=
@@ -2817,6 +2833,9 @@ private def byteArrayObjectSwapArgSchemas : Array ValidationSchema :=
 
 private def byteArrayPairSchema : ValidationSchema :=
   .ctor "Prod.mk" 0 #[.bytes, .bytes]
+
+private def aliasedByteArrayLayoutSchema : ValidationSchema :=
+  .ctor "NestedAliasedByteArrays.mk" 0 #[.bytes, .bytes]
 
 private def byteArrayTripleSchema : ValidationSchema :=
   .ctor "Prod.mk" 0 #[.bytes, byteArrayPairSchema]
@@ -9229,6 +9248,96 @@ private def postConversionCases : Array Case := #[
       resultSchema := some .bytes }]
     provenance := firProvenance
       "Materialize one runner-supplied ByteArray as two owned arguments and preserve its original alias" },
+  { id := "effect-record-nested-aliased-byte-array-layout"
+    entry := ``Source.recordNestedAliasedByteArrayLayout
+    args := #[.ctor "NestedAliasedByteArrays.mk" 0 #[
+      .bytes #[0, 127, 128, 255],
+      .bytes #[0, 127, 128, 255]]]
+    argSchemas := #[aliasedByteArrayLayoutSchema]
+    nestedArgumentAliases := #[{
+      source := { argument := 0, children := #[0] }
+      target := { argument := 0, children := #[1] } }]
+    resultSchema := byteArrayPairSchema
+    native := fun _ =>
+      let shared : ByteArray := ⟨#[0, 127, 128, 255]⟩
+      let input : Source.NestedAliasedByteArrays := {
+        first := shared
+        second := shared }
+      byteArrayPairDatum (Source.recordNestedAliasedByteArrayLayout input)
+    nativeBefore := NativeEffects.reset
+    nativeEffects := fun _ => NativeEffects.take
+    tags :=
+      #["stress", "effect", "external", "bytes", "heap", "constructor",
+        "mutation", "ownership", "shared", "copy-on-write", "alias",
+        "nested-argument-alias"]
+    requiredLcnfForms :=
+      #["oproj", "join", "isShared", "cases", "jump", "lit", "fap",
+        "extern", "oset", "return"]
+    requiredExecutedLcnfForms :=
+      #["oproj", "join", "isShared", "cases", "jump", "lit", "fap",
+        "extern", "oset", "return"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "oproj", minimum := 2, maximum := some 2 },
+        { form := "join", minimum := 2, maximum := some 2 },
+        { form := "isShared", minimum := 1, maximum := some 1 },
+        { form := "cases", minimum := 2, maximum := some 2 },
+        { form := "jump", minimum := 2, maximum := some 2 },
+        { form := "lit", minimum := 1, maximum := some 1 },
+        { form := "fap", minimum := 1, maximum := some 1 },
+        { form := "extern", minimum := 1, maximum := some 1 },
+        { form := "oset", minimum := 1, maximum := some 1 },
+        { form := "return", minimum := 1, maximum := some 1 }]
+    requiredExecutedLcnfFormTrace := some
+      #["oproj", "oproj", "join", "isShared", "cases", "jump", "lit",
+        "fap", "extern", "join", "cases", "oset", "jump", "return"]
+    requiredAdministrativeStepKinds := #["admin:yield-bind", "admin:yield-done"]
+    requiredExternals := #[``NativeEffects.recordByteArrayImpl]
+    requiredExecutedExternals := #[``NativeEffects.recordByteArrayImpl]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``NativeEffects.recordByteArrayImpl]
+    requiredExecutedExternalTrace := some #[``NativeEffects.recordByteArrayImpl]
+    effectProjections := #[{
+      external := ``NativeEffects.recordByteArrayImpl
+      operation := "validation.recordByteArray"
+      argSchemas := #[.bytes, .bits 8]
+      resultSchema := some .bytes }]
+    provenance := firProvenance
+      "Preserve one nested ByteArray across two owning constructor fields before copy-on-write" },
+  { id := "effect-record-nested-aliased-byte-array-list"
+    entry := ``Source.recordNestedAliasedByteArrayList
+    args := #[.seq #[
+      .bytes #[0, 127, 128, 255],
+      .bytes #[0, 127, 128, 255]]]
+    argSchemas := #[.seq .bytes]
+    nestedArgumentAliases := #[{
+      source := { argument := 0, children := #[0] }
+      target := { argument := 0, children := #[1] } }]
+    resultSchema := byteArrayPairSchema
+    native := fun _ =>
+      let shared : ByteArray := ⟨#[0, 127, 128, 255]⟩
+      byteArrayPairDatum
+        (Source.recordNestedAliasedByteArrayList [shared, shared])
+    nativeBefore := NativeEffects.reset
+    nativeEffects := fun _ => NativeEffects.take
+    tags :=
+      #["stress", "effect", "external", "bytes", "heap", "list",
+        "mutation", "ownership", "shared", "copy-on-write", "alias",
+        "nested-argument-alias"]
+    requiredLcnfForms := #["cases", "oproj", "lit", "fap", "extern", "return"]
+    requiredExecutedLcnfForms :=
+      #["cases", "oproj", "lit", "fap", "extern", "return"]
+    requiredExternals := #[``NativeEffects.recordByteArrayImpl]
+    requiredExecutedExternals := #[``NativeEffects.recordByteArrayImpl]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``NativeEffects.recordByteArrayImpl]
+    requiredExecutedExternalTrace := some #[``NativeEffects.recordByteArrayImpl]
+    effectProjections := #[{
+      external := ``NativeEffects.recordByteArrayImpl
+      operation := "validation.recordByteArray"
+      argSchemas := #[.bytes, .bits 8]
+      resultSchema := some .bytes }]
+    provenance := firProvenance
+      "Preserve one ByteArray across two owning List elements before copy-on-write" },
   { id := "effect-record-triply-aliased-byte-array-arguments"
     entry := ``Source.recordTriplyAliasedByteArrays
     args :=

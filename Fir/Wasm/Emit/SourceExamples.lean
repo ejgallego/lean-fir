@@ -372,4 +372,30 @@ run_cmd do
       "\"live\":true,\"location\":0,\"object\":{\"kind\":\"byteArray\",\"value\":[0,127,255]},\"persistent\":false,\"rc\":2" do
     throwError "aliased invocation did not retain exact root multiplicity: {manifest}"
 
+run_cmd do
+  let inputSchema := Fir.Validation.ValidationSchema.ctor
+    "NestedAliasedByteArrays.mk" 0 #[.bytes, .bytes]
+  let input := Fir.Validation.ValidationDatum.ctor
+    "NestedAliasedByteArrays.mk" 0
+    #[.bytes #[0, 127, 255], .bytes #[0, 127, 255]]
+  let nestedAliases : Array Fir.Validation.NestedArgumentAlias := #[{
+    source := { argument := 0, children := #[0] }
+    target := { argument := 0, children := #[1] } }]
+  let result ← liftCoreM <|
+    compileValidationInvocation "nested-aliased-byte-array-invocation"
+      ``Fir.Validation.Corpus.Source.recordNestedAliasedByteArrayLayout
+      #[inputSchema] #[input] (.ctor "Prod.mk" 0 #[.bytes, .bytes])
+      #[] #[] nestedAliases
+  let artifact ← match result with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "nested-aliased validation invocation failed: {repr error}"
+  let manifest := artifact.manifest.compress
+  unless manifest.contains
+      "\"objectFields\":[{\"kind\":\"object\",\"reference\":{\"kind\":\"heap\",\"location\":0}},{\"kind\":\"object\",\"reference\":{\"kind\":\"heap\",\"location\":0}}" do
+    throwError "nested-aliased invocation did not reuse one child location: {manifest}"
+  unless manifest.contains
+      "\"live\":true,\"location\":0,\"object\":{\"kind\":\"byteArray\",\"value\":[0,127,255]},\"persistent\":false,\"rc\":2" do
+    throwError "nested-aliased invocation did not retain exact child multiplicity: {manifest}"
+
 end Fir.Wasm.Emit.SourceExamples

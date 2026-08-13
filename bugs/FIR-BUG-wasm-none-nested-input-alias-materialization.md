@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-nested-input-alias-materialization
-status: candidate
+status: fixed
 classification: validation-harness
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: d8b18978322de05a8f3dba51ef03cf5461676c17
@@ -9,7 +9,7 @@ pass: none
 discovered-by: invariant-check
 first-seen: 2026-08-13
 reproduction: Fir/Validation/Corpus.lean
-regression: none
+regression: Fir/Validation/Corpus.lean
 ---
 
 # Summary
@@ -73,4 +73,14 @@ none
 
 ## Resolution and regression
 
-pending
+The path-based `NestedArgumentAlias` contract records aliases below constructor
+fields and sequence elements. The LCNF encoder materializes children in logical
+preorder, reuses the independently encoded heap source, and increments it once
+per additional owning edge. The Wasm runner independently checks identical
+locations and exact initial multiplicity before invocation.
+
+The `effect-record-nested-aliased-byte-array-layout` and
+`effect-record-nested-aliased-byte-array-list` fixtures exercise copy-on-write
+through native Lean, the LCNF interpreter, and V8. Resident Array's existing
+`Array.replicate` tests separately pin repeated-child reference counts and
+unique/shared updates for the runtime Array representation.
