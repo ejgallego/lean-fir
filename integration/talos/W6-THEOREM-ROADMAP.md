@@ -1540,9 +1540,14 @@ acceptance tests pass.
      prefixes. Each operation derives its canonical source step from
      source/compiler admission, preserves the same witness and entry-relative
      resource scope through the existing concrete refinement, and returns an
-     admission-free continuation under arbitrary join labels. Broader cases
-     and lazy/cache control remain explicit pointwise widenings despite
-     already having terminating hereditary laws.
+     admission-free continuation under arbitrary join labels. Singleton
+     object-constructor dispatch now belongs to the same pointwise closure.
+     Its exact five-step generated prefix enters the selected arm under one
+     target-only case-label layer; the resource, structural, and supported
+     stacks agree on that layer, and return-pop unwinds it before consuming a
+     source caller frame. Arbitrary object/scalar tables and lazy/cache control
+     remain explicit pointwise widenings despite already having terminating
+     hereditary laws.
      Pure integer-, natural-, and scalar-result externals are now the first
      non-erased family in this same closure. Current-node admission fixes only
      the semantic response and its exact allocation cost. The staging rule

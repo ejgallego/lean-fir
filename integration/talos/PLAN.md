@@ -5832,7 +5832,7 @@ correctness becomes a corollary; a backward simulation is deliberately later.
 | W6.7b instruction-boundary Talos adequacy | complete | finite residual-instruction paths agree with Talos `exec` above one common fuel bound and recover exact `Wasm.run` exits |
 | W6.7c emitted structured target | complete | frame laws plus the explicit label/loop/call stack expose progress through calls, branches, loops, returns, and halting |
 | W6.7d structured terminal adequacy | complete | every reachable canonical-entry-to-halted path collapses to the exact instruction-boundary/Talos run; stack shape and arities are proved, not assumed at the public boundary |
-| W6.7e compiler relation and rank | in progress; the branch-complete strong one-step dispatcher now closes direct values, the staged pure-external request/import/bind protocol, generated named/saturated call staging and entry, direct/saturated return-pop, erased default-only cases, persistent `inc`/`dec`, ordinary nonpersistent increment/decrement/delete, constructor-tag mutation, and FVar/erased object, `USize`, and packed-integer scalar field mutation in one module-stable relation; the older terminating hereditary theorem additionally covers lazy/cache operations, broader cases, and arbitrary finite generated call nesting, but those families remain explicit pointwise widenings rather than being silently attributed to the stable relation | each currently runnable LCNF `executeStep` produces a finite structured path restoring the aligned supported global relation; zero-step matches decrease a compiler-derived structural rank; newly reached code receives only a fresh local admission, never a future execution certificate |
+| W6.7e compiler relation and rank | in progress; the branch-complete strong one-step dispatcher now closes direct values, the staged pure-external request/import/bind protocol, generated named/saturated call staging and entry, direct/saturated return-pop, erased default-only cases, singleton object-constructor selection, persistent `inc`/`dec`, ordinary nonpersistent increment/decrement/delete, constructor-tag mutation, and FVar/erased object, `USize`, and packed-integer scalar field mutation in one module-stable relation; selected constructor arms retain an explicit target-only case-label stack layer which is unwound before caller return-pop; the older terminating hereditary theorem additionally covers lazy/cache operations and arbitrary broader object/scalar case tables, but those families remain explicit pointwise widenings rather than being silently attributed to the stable relation | each currently runnable LCNF `executeStep` produces a finite structured path restoring the aligned supported global relation; zero-step matches decrease a compiler-derived structural rank; newly reached code receives only a fresh local admission, never a future execution certificate |
 | W6.7f public finite-trace theorem | in progress; `ConcreteStructuredCompilerCurrentStepCoverage.toCurrentStepClassifier` now derives the global classifier by structural inversion, while its `toGeneratedTraceSimulation` and `toFiniteTraceCorrect` wrappers construct the ranked simulation over the stable admission-free strong relation | prove the ordinary-code current-node coverage law and canonical root relation from `ConcreteSupportedExport`, so the public caller supplies no classifier, target path, simulation/certificate, resolver package, or termination premise |
 | W6.7g corollaries | pending | finite whole-export correctness follows from W6.7d/f; infinite source progress and trace preservation follow from W6.7e/f; backward weak simulation remains explicitly deferred |
 
@@ -6135,9 +6135,14 @@ the exact two-step unary prefix; FVar and erased object fields, `USize`, and
 all four packed-integer scalar kinds derive exact three-step prefixes. Their
 source/compiler admissions retain no execution certificate, their concrete
 refinements preserve the witness and entry-relative resource scope, and their
-continuations remain admission-free under arbitrary join labels. Broader
-cases and lazy/cache control remain separate pointwise widenings even though
-their terminating hereditary laws already exist.
+continuations remain admission-free under arbitrary join labels. Singleton
+object-constructor dispatch is pointwise too: it derives the exact five-step
+`getTag`/comparison prefix, enters the selected arm beneath one target-only
+case label, and records that layer in both the resource and supported stacks.
+Return-pop first unwinds every such case layer, so nested calls inside the arm
+remain compositional. Arbitrary object/scalar case tables and lazy/cache
+control remain separate pointwise widenings even though their terminating
+hereditary laws already exist.
 Pure external calls now use that same runnable relation without collapsing
 their three source steps. Current-node admission selects the response and
 exact allocation cost, staging derives the production argument prefix and

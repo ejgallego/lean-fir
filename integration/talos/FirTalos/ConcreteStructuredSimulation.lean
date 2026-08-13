@@ -4887,6 +4887,121 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainFinitePath
           structuredWasmCaseLabels_empty_then_outer] using
             headPath.trans tailPath
 
+/-- Exact five-step structured prefix for the singleton object-constructor
+case admitted by the pointwise simulation.  This is the non-WP presentation
+of the existing runtime refinement boundary: production adaptation supplies
+the test, and the source selection fixes it to the hit arm. -/
+theorem ConcreteSupportedFunction.singleObjectConstructorCaseFinitePath
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context sourceCode sourceModule
+      sourceFunction target hosts)
+    {labels : List Lean.FVarId}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {selected : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {frames : List StructuredWasmFrame}
+    (supported : SingleObjectConstructorCaseSupported context sourceRuntime
+      sourceEnv cases selected)
+    (sourceResult : SourceCaseResult sourceRuntime sourceEnv cases selected)
+    (stateRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      targetStore targetLocals witness)
+    (adapted : CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+      (.cases cases) targetCode) :
+    ∃ selectedTarget targetSuffix,
+      CodeAdapted context sourceModule sourceFunction labels selected
+          selectedTarget ∧
+        FinitePath (StructuredWasmStep target.wasmModule hosts.env) 5
+          ⟨targetStore, .running targetLocals targetCode, frames⟩
+          ⟨targetStore,
+            .running { targetLocals with values := targetLocals.values }
+              selectedTarget,
+            structuredWasmCaseLabels (targetLocals.values.drop 0)
+                targetSuffix 1 ++ frames⟩ := by
+  rcases supported with
+    ⟨info, altsEq, modeEq, expectedTagFits, discrCompiled, actualTagFits⟩
+  rcases sourceResult with
+    ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩
+  have sourceLookup : lookup sourceEnv cases.discr = some sourceObject := by
+    cases lookupEq : lookup sourceEnv cases.discr with
+    | none => simp [lookupValue, lookupEq] at lookupFound
+    | some value =>
+        have valueEq : value = sourceObject := by
+          simpa [lookupValue, lookupEq] using lookupFound
+        subst value
+        rfl
+  have tagEq : actualTag = info.cidx := by
+    rw [altsEq] at chosen
+    simp [chooseAlt, findCtorAlt, findDefaultAlt] at chosen
+    omega
+  have actualFits : actualTag < UInt32.size :=
+    actualTagFits lookupFound tagged
+  obtain ⟨selectedTarget, discrIndex, getTagIndex, targetSuffix,
+      selectedAdapted, discrFound, getTagFound, targetCodeEq⟩ :=
+    CodeAdaptedWithSuffix.singleObjectConstructorCases_eq altsEq modeEq
+      expectedTagFits adapted
+  obtain ⟨alignedIndex, alignedFound, discrKind⟩ :=
+    spec.localsAligned discrCompiled
+  rw [discrFound] at alignedFound
+  have alignedEq : alignedIndex = discrIndex :=
+    Option.some.inj alignedFound.symm
+  subst alignedIndex
+  obtain ⟨discrPhysical, targetLookup, physicalRelated⟩ :=
+    stateRelated.resolve sourceLookup discrFound discrKind
+  obtain ⟨word, physicalEq, objectRelated⟩ :
+      ∃ word : Word32,
+        discrPhysical = .i32 (UInt32.ofNat word.value) ∧
+          ValueRel witness .tobject (.word32 word) sourceObject := by
+    cases physicalRelated with
+    | word32 valueRelated => exact ⟨_, rfl, valueRelated⟩
+    | word64 valueRelated => cases valueRelated
+    | float32Bits valueRelated => cases valueRelated
+    | float64Bits valueRelated => cases valueRelated
+  subst discrPhysical
+  obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+    spec.runtimeCallsAligned getTagFound
+  have getTagContracted :
+      hosts.spec.contracts[getTagIndex]? = some getTagContract := by
+    change hosts.spec.contracts[getTagIndex]? =
+      some (fun initial args result => result = getTagStep initial args)
+    simpa only [resolvedContract?, hostFn?, Option.map_some, getTagFn] using
+      contracted
+  have parameterCount : imp.params.length = 1 := by
+    change imp.params.length = 1 at params
+    exact params
+  have resultCount : imp.results.length = 1 := by
+    change imp.results.length = 1 at results
+    exact results
+  have tagOperation :
+      getTagStep targetStore [.i32 (UInt32.ofNat word.value)] =
+        .Return [.i32 (UInt32.ofNat info.cidx)] targetStore := by
+    have operation :=
+      getTagStep_of_refines stateRelated.1 objectRelated tagged actualFits
+    rw [stateRelated.clearFailure, tagEq] at operation
+    exact operation
+  refine ⟨selectedTarget, targetSuffix, selectedAdapted, ?_⟩
+  rw [targetCodeEq]
+  simpa [structuredWasmCaseLabels] using
+    structuredWasmObjectCaseHitPrefixFinitePath
+      (module := target.wasmModule) (hostEnv := hosts.env)
+      (spec := hosts.spec) (store := targetStore) (locals := targetLocals)
+      (rest := targetSuffix) (frames := frames)
+      (thenTarget := selectedTarget) (elseTarget := [.unreachable])
+      (discrIndex := discrIndex) (getTagIndex := getTagIndex) (imp := imp)
+      (word := word) (actualTag := info.cidx) (expectedTag := info.cidx) rfl
+      targetLookup imported spec.hostsSatisfy inBounds getTagContracted
+      parameterCount resultCount tagOperation
+
 /-- Exact structured path through an arbitrary normalized scalar `UInt8` case
 chain. Each compiler-generated direct comparison costs four steps and retains
 one empty-result label; no concrete host operation is involved. -/
@@ -9253,8 +9368,9 @@ yield consumes only the head constructor.  No callee evaluation or termination
 evidence occurs in the relation.
 
 Target-only matcher labels belong to the saturated constructor rather than
-being identified with source frames.  Ordinary case labels will receive their
-own constructor when the pointwise case-control protocol is connected. -/
+being identified with source frames.  The `case` constructor similarly records
+the labels retained by a selected constructor-case arm: these frames have no
+source counterpart and are removed when that arm returns. -/
 inductive ConcreteStructuredFrameRel
     (program : Fir.LeanIR.ImpureProgram)
     (sourceRuntime : RuntimeState)
@@ -9264,6 +9380,20 @@ inductive ConcreteStructuredFrameRel
   | nil :
       ConcreteStructuredFrameRel program sourceRuntime targetStore witness none
         [] []
+  | case
+      {expectedResult : Option AbiKind}
+      {sourceFrames : List Frame}
+      {targetFrames : List StructuredWasmFrame}
+      {belowStack : List Wasm.Value}
+      {targetRest : Wasm.Program}
+      {testCount : Nat}
+      (tail :
+        ConcreteStructuredFrameRel program sourceRuntime targetStore witness
+          expectedResult sourceFrames targetFrames) :
+      ConcreteStructuredFrameRel program sourceRuntime targetStore witness
+        expectedResult sourceFrames
+        (structuredWasmCaseLabels belowStack targetRest testCount ++
+          targetFrames)
   | direct
       {context : Fir.Wasm.Context}
       {sourceModule : Fir.Wasm.Module}
@@ -9376,6 +9506,7 @@ theorem ConcreteStructuredFrameRel.transport
       currentWitness expectedResult sourceFrames targetFrames := by
   induction related with
   | nil => exact .nil
+  | case _tail ih => exact .case ih
   | direct programEq continuationAdapted callerStateRelated
       callerFrameAligned resultFound kindAt _tail ih =>
       exact .direct programEq continuationAdapted
@@ -9417,7 +9548,7 @@ inductive ConcreteStructuredControlFrameRel :
           sourceEnv sourceValue targetStore targetLocals witness kind physical
           source target)
       (frames : ConcreteStructuredFrameRel source.program sourceRuntime
-        targetStore witness none source.frames target.frames) :
+        targetStore witness expectedResult source.frames target.frames) :
       ConcreteStructuredControlFrameRel (.yielded related)
   | externalCallReady
       {source : MachineState} {target : StructuredWasmState Host}
@@ -9928,6 +10059,24 @@ inductive ConcreteStructuredSuspendedResourceStack
       {functionResult : AbiKind} :
       ConcreteStructuredSuspendedResourceStack externals program entryRuntime
         entryStore entryWitness functionResult none [] []
+  | case
+      {entryRuntime : RuntimeState}
+      {entryStore : Wasm.Store Host}
+      {entryWitness : RefinementWitness}
+      {functionResult : AbiKind}
+      {expectedResult : Option AbiKind}
+      {sourceFrames : List Frame}
+      {targetFrames : List StructuredWasmFrame}
+      {belowStack : List Wasm.Value}
+      {targetRest : Wasm.Program}
+      {testCount : Nat}
+      (tail : ConcreteStructuredSuspendedResourceStack externals program
+        entryRuntime entryStore entryWitness functionResult expectedResult
+        sourceFrames targetFrames) :
+      ConcreteStructuredSuspendedResourceStack externals program entryRuntime
+        entryStore entryWitness functionResult expectedResult sourceFrames
+        (structuredWasmCaseLabels belowStack targetRest testCount ++
+          targetFrames)
   | direct
       {activeEntryRuntime callerEntryRuntime : RuntimeState}
       {activeEntryStore callerEntryStore : Wasm.Store Host}
@@ -10093,6 +10242,7 @@ theorem ConcreteStructuredSuspendedResourceStack.frameRel
       currentFacts currentBytes sourceRuntime currentEnv targetStore
       currentLocals witness with
   | nil => exact .nil
+  | case _tail ih => exact .case (ih currentScope)
   | direct callerScope programEq continuationAdapted resultFound kindAt
       _calleeCompatible _tail ih =>
       have tailAtEntry := ih callerScope
@@ -10475,6 +10625,14 @@ theorem ConcreteStructuredFrameRel.control_of_yield
             (witness := witness))
       exact ⟨ConcreteStructuredControlRel.yielded yielded,
         .yielded yielded rootFrames⟩
+  | case tail =>
+      have caseFrames :
+          ConcreteStructuredFrameRel source.program sourceRuntime targetStore
+            witness expectedResult source.frames target.frames := by
+        simpa [sourceFramesEq, targetFramesEq] using
+          (ConcreteStructuredFrameRel.case tail)
+      exact ⟨ConcreteStructuredControlRel.yielded yielded,
+        .yielded yielded caseFrames⟩
   | @direct context sourceModule sourceFunction labels callerEnv result
       continuation callerJoins sourceFrames callerLocals callerRemainder
       targetRest targetFrames kind resultIndex tailResult programEq
@@ -17934,6 +18092,16 @@ inductive ConcreteStructuredCodeStepAdmission
         DefaultOnlyCaseSupported sourceRuntime sourceEnv cases selected) :
       ConcreteStructuredCodeStepAdmission context externals expectedResult facts
         sourceRuntime sourceEnv 0 (.cases cases)
+  | singleObjectCase
+      {facts : ReuseCapacityFacts}
+      {sourceRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {cases : Lean.Compiler.LCNF.Cases .impure}
+      {selected : Lean.Compiler.LCNF.Code .impure}
+      (supported : SingleObjectConstructorCaseSupported context sourceRuntime
+        sourceEnv cases selected) :
+      ConcreteStructuredCodeStepAdmission context externals expectedResult facts
+        sourceRuntime sourceEnv 0 (.cases cases)
   | incPersistent
       {facts : ReuseCapacityFacts}
       {sourceRuntime : RuntimeState}
@@ -18282,10 +18450,11 @@ theorem ConcreteStructuredSuspendedResourceStack.resultCompatible
       entryRuntime entryStore entryWitness functionResult callerExpectedResult
       sourceFrames targetFrames) :
     ConcreteStructuredResultCompatible functionResult callerExpectedResult := by
-  cases stack with
+  induction stack with
   | nil => trivial
-  | direct _ _ _ _ _ compatible _ => exact compatible
-  | saturated _ _ _ _ _ compatible _ => exact compatible
+  | case _tail ih => exact ih
+  | direct _ _ _ _ _ compatible _tail _ih => exact compatible
+  | saturated _ _ _ _ _ compatible _tail _ih => exact compatible
 
 /-- Compiler focus plus hereditary resources, independent of which source
 operation family is currently admitted.  This is the invariant preserved by
@@ -20242,6 +20411,21 @@ inductive ConcreteStructuredSupportedFrameStack
       {functionResult : AbiKind} :
       ConcreteStructuredSupportedFrameStack program sourceModule targetModule
         hosts functionResult none [] []
+  | case
+      {functionResult : AbiKind}
+      {expectedResult : Option AbiKind}
+      {sourceFrames : List Frame}
+      {targetFrames : List StructuredWasmFrame}
+      {belowStack : List Wasm.Value}
+      {targetRest : Wasm.Program}
+      {testCount : Nat}
+      (tail : ConcreteStructuredSupportedFrameStack program sourceModule
+        targetModule hosts functionResult expectedResult sourceFrames
+        targetFrames) :
+      ConcreteStructuredSupportedFrameStack program sourceModule targetModule
+        hosts functionResult expectedResult sourceFrames
+        (structuredWasmCaseLabels belowStack targetRest testCount ++
+          targetFrames)
   | direct
       {callerContext : Fir.Wasm.Context}
       {callerCode : Lean.Compiler.LCNF.Code .impure}
@@ -20365,6 +20549,29 @@ inductive ConcreteStructuredSupportedFrameStack.Agrees
           (externals := externals) (program := program)
           (entryRuntime := entryRuntime) (entryStore := entryStore)
           (entryWitness := entryWitness) (functionResult := functionResult))
+  | case
+      {entryRuntime : RuntimeState}
+      {entryStore : Wasm.Store Host}
+      {entryWitness : RefinementWitness}
+      {functionResult : AbiKind}
+      {expectedResult : Option AbiKind}
+      {sourceFrames : List Frame}
+      {targetFrames : List StructuredWasmFrame}
+      {belowStack : List Wasm.Value}
+      {targetRest : Wasm.Program}
+      {testCount : Nat}
+      (supportedTail : ConcreteStructuredSupportedFrameStack program
+        sourceModule targetModule hosts functionResult expectedResult
+        sourceFrames targetFrames)
+      (resourceTail : ConcreteStructuredSuspendedResourceStack externals program
+        entryRuntime entryStore entryWitness functionResult expectedResult
+        sourceFrames targetFrames)
+      (tailAgrees : supportedTail.Agrees resourceTail) :
+      ConcreteStructuredSupportedFrameStack.Agrees
+        (.case (belowStack := belowStack) (targetRest := targetRest)
+          (testCount := testCount) supportedTail)
+        (.case (belowStack := belowStack) (targetRest := targetRest)
+          (testCount := testCount) resourceTail)
   | direct
       {activeEntryRuntime callerEntryRuntime : RuntimeState}
       {activeEntryStore callerEntryStore : Wasm.Store Host}
@@ -21354,7 +21561,52 @@ theorem ConcreteStructuredYieldFocus.advance_pop_supportedGlobal_of_step
   generalize targetFramesEq : target.frames = targetFrames at resources supported agrees
   rcases resources with ⟨currentScope, resourceStack⟩
   change supported.Agrees resourceStack at agrees
-  cases agrees with
+  induction agrees generalizing target with
+  | @case _ _ _ _ _ sourceFrames targetFrames belowStack targetRest testCount
+      supportedTail resourceTail tailAgrees ih =>
+      subst sourceFrames
+      let targetPopped : StructuredWasmState Host := {
+        store := targetStore
+        control := .returning (physical :: targetLocals.values)
+        frames := targetFrames }
+      have unwindTarget :
+          FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+            testCount target targetPopped := by
+        rcases target with ⟨actualStore, actualControl, actualFrames⟩
+        have storeEq := yielded.targetStoreEq
+        change actualStore = targetStore at storeEq
+        subst actualStore
+        have controlEq := yielded.targetControlEq
+        change actualControl = .returning (physical :: targetLocals.values)
+          at controlEq
+        subst actualControl
+        change actualFrames = _ at targetFramesEq
+        subst actualFrames
+        simpa [targetPopped] using
+          (structuredWasmReturnCaseLabelsFinitePath
+            (module := targetModule.wasmModule) (hostEnv := hosts.env)
+            (store := targetStore)
+            (values := physical :: targetLocals.values)
+            (belowStack := belowStack) (rest := targetRest)
+            (frames := targetFrames) testCount)
+      have yieldedPopped :
+          ConcreteStructuredYieldFocus currentContext currentFunction
+            sourceRuntime sourceEnv sourceValue targetStore targetLocals witness
+            actualKind physical source targetPopped := {
+        sourceProgramEq := yielded.sourceProgramEq
+        sourceControlEq := yielded.sourceControlEq
+        sourceEnvEq := yielded.sourceEnvEq
+        sourceRuntimeEq := yielded.sourceRuntimeEq
+        targetStoreEq := by simp [targetPopped]
+        targetControlEq := by simp [targetPopped]
+        stateRelated := yielded.stateRelated
+        frameAligned := yielded.frameAligned
+        valueRelated := yielded.valueRelated }
+      obtain ⟨tailCount, targetAfter, tailPath, tailPositive, nextGlobal⟩ :=
+        ih yieldedPopped compatible (by rfl) (by simp [targetPopped])
+          currentScope
+      exact ⟨testCount + tailCount, targetAfter,
+        unwindTarget.trans tailPath, by omega, nextGlobal⟩
   | nil =>
       rcases source with
         ⟨sourceProgram, sourceControl, stateEnv, stateJoins, sourceFrames,
@@ -21483,11 +21735,11 @@ theorem ConcreteStructuredYieldFocus.advance_pop_supportedGlobal_of_step
       have callerScopeAtSaved :
           ConcreteStructuredResourceScope callerContext sourceModule
             callerFunction externals callerEntryRuntime callerEntryStore
-            callerEntryWitness facts callerBytes entryRuntime callerEnv
-            entryStore
+            callerEntryWitness facts callerBytes activeEntryRuntime callerEnv
+            activeEntryStore
             { savedCallerLocals with
               values := physicalArgs.reverse ++ callerRemainder }
-            entryWitness := by
+            activeEntryWitness := by
         simpa [savedCallerLocals] using callerScope
       have resourceTailAtCaller :
           ConcreteStructuredSuspendedResourceStack externals
@@ -21644,6 +21896,80 @@ theorem ConcreteStructuredCodeFocus.defaultOnlyCaseResult_of_step
             rw [supported]
             simp [chooseAlt, findCtorAlt, findDefaultAlt]
           exact ⟨discrValue, tag, found, tagged, chosen⟩
+
+/-- A successful interpreter step at a singleton object-constructor case
+recovers both its source selection fact and the exact selected-arm machine
+state.  The compiler admission fixes the only possible arm; no execution
+certificate is retained after this current step. -/
+theorem ConcreteStructuredCodeFocus.singleObjectCaseResult_of_step
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {selected : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.cases cases) targetStore targetLocals
+      targetCode witness source target)
+    (supported : SingleObjectConstructorCaseSupported context sourceRuntime
+      sourceEnv cases selected)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    SourceCaseResult sourceRuntime sourceEnv cases selected ∧
+      sourceAfter = { source with control := .code selected } := by
+  rcases supported with
+    ⟨info, altsEq, _modeEq, _expectedTagFits, _discrCompiled,
+      _actualTagFits⟩
+  rcases source with
+    ⟨sourceProgram, sourceControl, actualEnv, sourceJoins, sourceFrames,
+      actualRuntime⟩
+  have programEq := related.sourceProgramEq
+  change sourceProgram = context.program at programEq
+  subst sourceProgram
+  have controlEq := related.sourceControlEq
+  change sourceControl = .code (.cases cases) at controlEq
+  subst sourceControl
+  have envEq := related.sourceEnvEq
+  change actualEnv = sourceEnv at envEq
+  subst actualEnv
+  have runtimeEq := related.sourceRuntimeEq
+  change actualRuntime = sourceRuntime at runtimeEq
+  subst actualRuntime
+  cases found : lookupValue sourceEnv cases.discr with
+  | error fault =>
+      simp [executeStep, coreStep, found, fail] at sourceStep
+  | ok discrValue =>
+      cases tagged : getTag sourceRuntime discrValue with
+      | error fault =>
+          simp [executeStep, coreStep, found, tagged, fail] at sourceStep
+      | ok tag =>
+          cases chosen : chooseAlt tag cases.alts.toList with
+          | none =>
+              simp [executeStep, coreStep, found, tagged, chosen, fail] at sourceStep
+          | some selectedArm =>
+              have selectedEq : selectedArm = selected := by
+                rw [altsEq] at chosen
+                simp [chooseAlt, findCtorAlt, findDefaultAlt] at chosen
+                simp_all
+              subst selectedArm
+              have afterEq :
+                  ({ program := context.program
+                     control := .code selected
+                     env := sourceEnv
+                     joins := sourceJoins
+                     frames := sourceFrames
+                     runtime := sourceRuntime } : MachineState) = sourceAfter := by
+                simpa [executeStep, coreStep, found, tagged, chosen] using
+                  sourceStep
+              exact ⟨⟨discrValue, tag, found, tagged, chosen⟩, afterEq.symm⟩
 
 /-- A successful interpreter step at an admitted direct-value node exposes the
 existing source semantic boundary.  The focus identifies the actual machine
@@ -22092,6 +22418,124 @@ theorem ConcreteStructuredCodePointwiseRel.advance_defaultOnlyCase_of_step
     rw [framesEq]
     exact related.resources
   exact ⟨targetPath, framesEq, ⟨nextFocus, nextResources⟩, rank⟩
+
+/-- A singleton object-constructor case executes its generated five-step tag
+test and enters the selected arm under one target-only case label.  The active
+resource scope is unchanged (modulo the compiler's stack-value reset), while
+the suspended stack records exactly the label that must be unwound when the
+arm returns. -/
+theorem ConcreteStructuredCodePointwiseRel.advance_singleObjectCase_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {selected : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredCodePointwiseRel program context functionCode
+      sourceModule sourceFunction targetModule hosts spec externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts 0 remainingBytes sourceRuntime sourceEnv (.cases cases) targetStore
+      targetLocals targetCode witness source target)
+    (supported : SingleObjectConstructorCaseSupported context sourceRuntime
+      sourceEnv cases selected)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter selectedTarget, ∃ targetSuffix : Wasm.Program,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 5 target
+          targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames =
+          structuredWasmCaseLabels (targetLocals.values.drop 0) targetSuffix 1 ++
+            target.frames ∧
+        ConcreteStructuredCodeCoreRel program context sourceModule
+          sourceFunction externals labels entryRuntime entryStore entryWitness
+          functionResult callerExpectedResult facts remainingBytes sourceRuntime
+          sourceEnv selected targetStore
+          { targetLocals with values := targetLocals.values } selectedTarget
+          witness sourceAfter targetAfter := by
+  obtain ⟨sourceResult, sourceAfterEq⟩ :=
+    related.focus.singleObjectCaseResult_of_step supported sourceStep
+  obtain ⟨selectedTarget, targetSuffix, selectedAdapted, rawTargetPrefix⟩ :=
+    spec.singleObjectConstructorCaseFinitePath supported sourceResult
+      related.focus.stateRelated related.focus.adapted
+      (frames := target.frames)
+  let targetAfter : StructuredWasmState Host := {
+    store := targetStore
+    control := .running
+      { targetLocals with values := targetLocals.values } selectedTarget
+    frames := structuredWasmCaseLabels (targetLocals.values.drop 0)
+      targetSuffix 1 ++ target.frames }
+  have targetPrefix :
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 5 target
+        targetAfter := by
+    rcases target with ⟨actualStore, actualControl, actualFrames⟩
+    have storeEq := related.focus.targetStoreEq
+    change actualStore = targetStore at storeEq
+    subst actualStore
+    have controlEq := related.focus.targetControlEq
+    change actualControl = .running targetLocals targetCode at controlEq
+    subst actualControl
+    simpa [targetAfter] using rawTargetPrefix
+  have nextFocus :
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+        sourceRuntime sourceEnv selected targetStore
+        { targetLocals with values := targetLocals.values } selectedTarget
+        witness sourceAfter targetAfter := {
+    sourceProgramEq := by
+      rw [sourceAfterEq]
+      simp [related.focus.sourceProgramEq]
+    sourceControlEq := by simp [sourceAfterEq]
+    sourceEnvEq := by
+      rw [sourceAfterEq]
+      simpa using related.focus.sourceEnvEq
+    sourceRuntimeEq := by
+      rw [sourceAfterEq]
+      simpa using related.focus.sourceRuntimeEq
+    targetStoreEq := by simp [targetAfter]
+    targetControlEq := by simp [targetAfter]
+    adapted := CodeAdapted.withEmptySuffix selectedAdapted
+    stateRelated := related.focus.stateRelated.withValues targetLocals.values
+    frameAligned := related.focus.frameAligned.withValues targetLocals.values }
+  have nextScope :
+      ConcreteStructuredResourceScope context sourceModule sourceFunction
+        externals entryRuntime entryStore entryWitness facts remainingBytes
+        sourceRuntime sourceEnv targetStore
+        { targetLocals with values := targetLocals.values } witness :=
+    related.resources.current.withValues targetLocals.values
+  have nextResources :
+      ConcreteStructuredResourceStack program context sourceModule
+        sourceFunction externals entryRuntime sourceRuntime entryStore
+        targetStore entryWitness witness facts remainingBytes sourceEnv
+        { targetLocals with values := targetLocals.values } functionResult
+        callerExpectedResult sourceAfter.frames targetAfter.frames := by
+    refine ⟨nextScope, ?_⟩
+    rw [sourceAfterEq]
+    simpa [targetAfter] using
+      (ConcreteStructuredSuspendedResourceStack.case
+        (belowStack := targetLocals.values.drop 0)
+        (targetRest := targetSuffix) (testCount := 1)
+        related.resources.suspended)
+  exact ⟨targetAfter, selectedTarget, targetSuffix, targetPrefix,
+    by simp [sourceAfterEq], by simp [targetAfter],
+    ⟨nextFocus, nextResources⟩⟩
 
 /-- Persistent increments are erased by lowering and preserve the complete
 resource core while consuming one ranked source step. -/
@@ -22924,6 +23368,12 @@ theorem ConcreteStructuredCodePointwiseRel.advance
         related.advance_defaultOnlyCase_of_step supported sourceStep
       exact ⟨0, target, targetPath,
         .code related.contextCaches nextCore, fun _ => rank⟩
+  | singleObjectCase caseSupported =>
+      obtain ⟨targetAfter, selectedTarget, targetSuffix, targetPath,
+          _sourceFramesEq, _targetFramesEq, nextCore⟩ :=
+        related.advance_singleObjectCase_of_step caseSupported sourceStep
+      exact ⟨5, targetAfter, targetPath,
+        .code related.contextCaches nextCore, by omega⟩
   | incPersistent =>
       obtain ⟨targetPath, _sourceFramesEq, nextCore, rank⟩ :=
         related.advance_incPersistent_of_step sourceStep
@@ -23150,6 +23600,31 @@ theorem ConcreteStructuredCodePointwiseRel.advance_supportedGlobal
         .code related.contextCaches nextCore supportedAfter agreesAfter
       exact ⟨0, target, targetPath,
         nextActive.toGlobal, fun _ => rank⟩
+  | singleObjectCase caseSupported =>
+      obtain ⟨targetAfter, selectedTarget, targetSuffix, targetPath,
+          sourceFramesEq, targetFramesEq, nextCore⟩ :=
+        related.advance_singleObjectCase_of_step caseSupported sourceStep
+      let stackedSupported :=
+        ConcreteStructuredSupportedFrameStack.case
+          (belowStack := targetLocals.values.drop 0)
+          (targetRest := targetSuffix) (testCount := 1) supported
+      let stackedResources :=
+        ConcreteStructuredSuspendedResourceStack.case
+          (belowStack := targetLocals.values.drop 0)
+          (targetRest := targetSuffix) (testCount := 1)
+          related.resources.suspended
+      have stackedAgrees : stackedSupported.Agrees stackedResources := by
+        exact ConcreteStructuredSupportedFrameStack.Agrees.case supported
+          related.resources.suspended agrees
+      obtain ⟨supportedAfter, agreesAfter⟩ :=
+        stackedAgrees.reindex sourceFramesEq targetFramesEq
+          nextCore.resources.suspended
+      let nextActive : ConcreteStructuredSupportedOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec
+          externals labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult sourceAfter targetAfter :=
+        .code related.contextCaches nextCore supportedAfter agreesAfter
+      exact ⟨5, targetAfter, targetPath, nextActive.toGlobal, by omega⟩
   | incPersistent =>
       obtain ⟨targetPath, sourceFramesEq, nextCore, rank⟩ :=
         related.advance_incPersistent_of_step sourceStep
