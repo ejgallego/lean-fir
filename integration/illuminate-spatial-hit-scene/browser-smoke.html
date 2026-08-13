@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en" data-result="running">
+  <head>
+    <meta charset="utf-8">
+    <title>FIR Illuminate SpatialHitScene smoke</title>
+  </head>
+  <body>
+    <pre id="result">RUNNING</pre>
+    <script type="module">
+      import { fetchIlluminateSpatialHitSceneAdapter } from
+        "./illuminate-spatial-hit-scene-browser-adapter.mjs";
+
+      const output = document.querySelector("#result");
+      const bitsView = new DataView(new ArrayBuffer(8));
+      const fromBits = (bits) => {
+        bitsView.setBigUint64(0, BigInt(bits), true);
+        return bitsView.getFloat64(0, true);
+      };
+      const sameResult = (actual, expected) =>
+        actual.kind === expected.kind &&
+        (actual.kind !== "tag" ||
+          (actual.value === expected.value && actual.label === expected.label));
+
+      try {
+        const [adapter, suite] = await Promise.all([
+          fetchIlluminateSpatialHitSceneAdapter(
+            "./illuminate-spatial-hit-scene.wasm",
+            { buildUrl: "./BUILD.json" }),
+          fetch("./hit-scene-benchmark-suite.json").then((response) => {
+            if (!response.ok) throw new Error("failed to fetch fixture suite");
+            return response.json();
+          }),
+        ]);
+        let queryCount = 0;
+        for (const fixture of suite.fixtures) {
+          const created = adapter.createHitScene(fixture.encodedScene);
+          for (const query of fixture.queries) {
+            const actual = adapter.hitTest(created.scene,
+              fromBits(query.xBits), fromBits(query.yBits));
+            if (!sameResult(actual, query.expected)) {
+              throw new Error(`mismatch ${fixture.name}/${query.name}`);
+            }
+            queryCount += 1;
+          }
+          adapter.disposeHitScene(created.scene);
+        }
+        if (queryCount !== 1009) throw new Error(`query count ${queryCount}`);
+
+        const fixture = suite.fixtures[1];
+        const retained = adapter.createHitScene(fixture.encodedScene);
+        const checkpoint = retained.memory.persistentCheckpoint;
+        for (let index = 0; index < 10000; ++index) {
+          const query = fixture.queries[index % fixture.queries.length];
+          adapter.hitTest(retained.scene,
+            fromBits(query.xBits), fromBits(query.yBits));
+        }
+        const query = fixture.queries[0];
+        const diagnostic = adapter.hitTestDiagnostic(retained.scene,
+          fromBits(query.xBits), fromBits(query.yBits));
+        if (diagnostic.memory.frontierBefore !== checkpoint ||
+            diagnostic.memory.postRewindFrontier !== checkpoint) {
+          throw new Error("retained query frontier drifted");
+        }
+        adapter.disposeHitScene(retained.scene);
+        output.textContent =
+          "PASS browser spatial HitScene: 1009 oracle + 10000 flat-frontier queries";
+        document.documentElement.dataset.result = "pass";
+      } catch (error) {
+        output.textContent = `FAIL ${error.stack ?? error}`;
+        document.documentElement.dataset.result = "fail";
+      }
+    </script>
+  </body>
+</html>
+

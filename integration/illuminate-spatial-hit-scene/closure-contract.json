@@ -1,0 +1,10 @@
+{
+  "capturedDeclarations": 194,
+  "reviewedExternalsBeforeLink": 41,
+  "baseWasmBytes": 61489,
+  "frontierFunctions": 780,
+  "frontierFunctionSha256": "728b9097b33a0b0878c9cbf7041ed4137167aef82f06479cd5f421f71805bb8b",
+  "frontierImports": 15,
+  "frontierImportSha256": "a175429135ad3092842e7b7ba45615e3f6ecc97ecab864f67f0fd1b9ba3ac06b",
+  "completeWasmBytes": 95995
+}
