@@ -165,6 +165,29 @@ def floatArrayGet (xs : Array Float) (index : Nat) : Float :=
   xs[index]!
 
 @[noinline]
+def floatArrayWithCapacity (capacity : Nat) (value : Float) : Array Float :=
+  (Array.emptyWithCapacity capacity).push value
+
+@[noinline]
+def floatArrayUSize (xs : Array Float) : USize :=
+  xs.usize
+
+@[noinline]
+def floatArrayUGet (xs : Array Float) (index : USize) : Float :=
+  if h : index.toNat < xs.size then
+    xs.uget index h
+  else
+    Float.ofBits 0
+
+@[noinline]
+def floatArrayUSetUnique
+    (xs : Array Float) (index : USize) (replacement : Float) : Array Float :=
+  if h : index.toNat < xs.size then
+    xs.uset index replacement h
+  else
+    xs
+
+@[noinline]
 def uint8ArraySetUnique (xs : Array UInt8) : Array UInt8 :=
   xs.set! 0 255
 
@@ -4225,6 +4248,86 @@ private def preConversionCases : Array Case := #[
       some #[``instInhabitedFloat, ``Array.get!InternalBorrowed]
     provenance := firProvenance
       "Read a heap Float box through Array.get!Internal and retain it past Array release" },
+  { id := "generic-float-array-capacity-push"
+    entry := ``Source.floatArrayWithCapacity
+    args := #[.nat 4, .bits 64 genericContainerFloat.toBits]
+    argSchemas := #[.nat, .float64]
+    resultSchema := .array (.boxed .float64)
+    native := fun _ => floatArrayDatum
+      (Source.floatArrayWithCapacity 4 genericContainerFloat)
+    tags := #["stress", "array", "generic", "boxed", "float", "heap",
+      "capacity", "push", "ownership", "bit-exact"]
+    requiredLcnfForms := #["fap", "extern", "box", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "box", "return"]
+    requiredExternals := #[``Array.emptyWithCapacity, ``Array.push]
+    requiredExecutedExternals := #[``Array.emptyWithCapacity, ``Array.push]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Array.emptyWithCapacity, ``Array.push]
+    requiredExecutedExternalTrace := some #[``Array.emptyWithCapacity, ``Array.push]
+    provenance := firProvenance
+      "Allocate spare generic Array capacity and consume it with one heap Float push" },
+  { id := "generic-float-array-usize"
+    entry := ``Source.floatArrayUSize
+    args := #[floatArrayDatum #[genericContainerFloat, genericArrayReplacementFloat]]
+    argSchemas := #[.array (.boxed .float64)]
+    resultSchema := .usize
+    native := fun _ => .usize
+      (Source.floatArrayUSize
+        #[genericContainerFloat, genericArrayReplacementFloat]).toUInt64
+    tags := #["stress", "array", "generic", "float", "usize", "size"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExternals := #[``Array.usize]
+    requiredExecutedExternals := #[``Array.usize]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``Array.usize]
+    requiredExecutedExternalTrace := some #[``Array.usize]
+    provenance := firProvenance
+      "Read generic Array size directly through the unboxed USize runtime lane" },
+  { id := "generic-float-array-uget-heap"
+    entry := ``Source.floatArrayUGet
+    args := #[floatArrayDatum #[genericContainerFloat], .usize 0]
+    argSchemas := #[.array (.boxed .float64), .usize]
+    resultSchema := .float64
+    native := fun _ => float64Datum
+      (Source.floatArrayUGet #[genericContainerFloat] 0)
+    tags := #["stress", "array", "generic", "boxed", "float", "heap",
+      "usize", "projection", "ownership", "bit-exact"]
+    requiredLcnfForms := #["cases", "fap", "extern", "unbox", "return"]
+    requiredExecutedLcnfForms :=
+      #["cases", "fap", "extern", "unbox", "return"]
+    requiredExternals :=
+      #[``USize.toNat, ``Array.size, ``Nat.decLt, ``Array.ugetBorrowed]
+    requiredExecutedExternals :=
+      #[``USize.toNat, ``Array.size, ``Nat.decLt, ``Array.ugetBorrowed]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts
+      #[``USize.toNat, ``Array.size, ``Nat.decLt, ``Array.ugetBorrowed]
+    requiredExecutedExternalTrace :=
+      some #[``USize.toNat, ``Array.size, ``Nat.decLt, ``Array.ugetBorrowed]
+    provenance := firProvenance
+      "Read a heap Float box through the proof-carrying USize Array access path" },
+  { id := "generic-float-array-uset-unique"
+    entry := ``Source.floatArrayUSetUnique
+    args := #[floatArrayDatum #[genericContainerFloat], .usize 0,
+      .bits 64 genericArrayReplacementFloat.toBits]
+    argSchemas := #[.array (.boxed .float64), .usize, .float64]
+    resultSchema := .array (.boxed .float64)
+    native := fun _ => floatArrayDatum
+      (Source.floatArrayUSetUnique #[genericContainerFloat] 0
+        genericArrayReplacementFloat)
+    tags := #["stress", "array", "generic", "boxed", "float", "heap",
+      "usize", "mutation", "ownership", "unique", "bit-exact"]
+    requiredLcnfForms := #["cases", "fap", "extern", "box", "return"]
+    requiredExecutedLcnfForms := #["cases", "fap", "extern", "box", "return"]
+    requiredExternals :=
+      #[``USize.toNat, ``Array.size, ``Nat.decLt, ``Array.uset]
+    requiredExecutedExternals :=
+      #[``USize.toNat, ``Array.size, ``Nat.decLt, ``Array.uset]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts
+      #[``USize.toNat, ``Array.size, ``Nat.decLt, ``Array.uset]
+    requiredExecutedExternalTrace :=
+      some #[``USize.toNat, ``Array.size, ``Nat.decLt, ``Array.uset]
+    provenance := firProvenance
+      "Replace a heap Float through proof-carrying USize Array mutation" },
   { id := "generic-uint8-array-set-unique"
     entry := ``Source.uint8ArraySetUnique
     args := #[uint8ArrayDatum #[0, 127, 128, 42]]

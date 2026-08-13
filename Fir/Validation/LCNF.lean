@@ -1303,15 +1303,14 @@ private def byteArraySetExternal (request : ExternalRequest) (runtime : RuntimeS
     nextLocation := runtime.nextLocation
     world := runtime.world }
 
-private def arraySetExternal (request : ExternalRequest) (runtime : RuntimeState) :
+private def replaceArrayAtExternal
+    (request : ExternalRequest) (runtime : RuntimeState) (array : Value)
+    (index : Nat) (replacement : Value) (requireInBounds : Bool) :
     Except RuntimeFault ExternalResponse := do
-  let [typeArg, array, index, replacement] := request.args.toList
-    | throw (.arityMismatch 4 request.args.size)
-  unless typeArg == .erased do
-    throw (.externalFailure request.name "Array.set! type argument must be erased")
   let (location, cell, elements, capacity) ← externalArrayCell request runtime array
-  let index ← externalNat request runtime index
   if index >= elements.size then
+    if requireInBounds then
+      throw (.externalFailure request.name "Array index is out of bounds")
     let runtime ← decValueOnce runtime replacement true
     return {
       value := array
@@ -1339,6 +1338,44 @@ private def arraySetExternal (request : ExternalRequest) (runtime : RuntimeState
     nextLocation := runtime.nextLocation
     world := runtime.world }
 
+private def arraySetExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [typeArg, array, index, replacement] := request.args.toList
+    | throw (.arityMismatch 4 request.args.size)
+  unless typeArg == .erased do
+    throw (.externalFailure request.name "Array.set! type argument must be erased")
+  let index ← externalNat request runtime index
+  replaceArrayAtExternal request runtime array index replacement false
+
+private def arrayUSetExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [typeArg, array, index, replacement, proof] := request.args.toList
+    | throw (.arityMismatch 5 request.args.size)
+  unless typeArg == .erased && proof == .erased do
+    throw (.externalFailure request.name
+      "Array.uset type and bounds-proof arguments must be erased")
+  let index ← externalFixedWidthValue usizeCodec request index
+  replaceArrayAtExternal request runtime array index.toNat replacement true
+
+private def arrayEmptyWithCapacityExternal
+    (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [typeArg, capacityValue] := request.args.toList
+    | throw (.arityMismatch 2 request.args.size)
+  unless typeArg == .erased do
+    throw (.externalFailure request.name
+      "Array.emptyWithCapacity type argument must be erased")
+  let capacity ← externalNat request runtime capacityValue
+  if capacity > UInt32.size - 1 then
+    throw (.externalFailure request.name
+      "Array.emptyWithCapacity exceeds the Wasm32 capacity range")
+  let (runtime, reference) := alloc runtime (.array #[] capacity)
+  return {
+    value := .object reference
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
 private def arraySizeExternal (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
   let [typeArg, array] := request.args.toList
@@ -1349,6 +1386,19 @@ private def arraySizeExternal (request : ExternalRequest) (runtime : RuntimeStat
   let (runtime, value) := literal runtime (.nat elements.size)
   return {
     value
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def arrayUSizeExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [typeArg, array] := request.args.toList
+    | throw (.arityMismatch 2 request.args.size)
+  unless typeArg == .erased do
+    throw (.externalFailure request.name "Array.usize type argument must be erased")
+  let (_, _, elements, _) ← externalArrayCell request runtime array
+  return {
+    value := .usize (UInt64.ofNat elements.size)
     heap := runtime.heap
     nextLocation := runtime.nextLocation
     world := runtime.world }
@@ -1576,6 +1626,26 @@ private def arrayGetBangBorrowedExternal
   let index ← externalNat request runtime index
   return {
     value := elements[index]?.getD fallback
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def arrayUGetExternal (owned : Bool)
+    (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [typeArg, array, indexValue, proof] := request.args.toList
+    | throw (.arityMismatch 4 request.args.size)
+  unless typeArg == .erased && proof == .erased do
+    throw (.externalFailure request.name
+      "Array.uget type and bounds-proof arguments must be erased")
+  let (_, _, elements, _) ← externalArrayCell request runtime array
+  let index ← externalFixedWidthValue usizeCodec request indexValue
+  unless index.toNat < elements.size do
+    throw (.externalFailure request.name "Array.uget index is out of bounds")
+  let value := elements[index.toNat]!
+  let runtime ← if owned then incValue runtime value 1 true else pure runtime
+  return {
+    value
     heap := runtime.heap
     nextLocation := runtime.nextLocation
     world := runtime.world }
@@ -3319,8 +3389,14 @@ private def validationExternals : ExternalImpl where
       byteArraySetExternal request runtime
     else if request.name == ``Array.set! then
       arraySetExternal request runtime
+    else if request.name == ``Array.uset then
+      arrayUSetExternal request runtime
+    else if request.name == ``Array.emptyWithCapacity then
+      arrayEmptyWithCapacityExternal request runtime
     else if request.name == ``Array.size then
       arraySizeExternal request runtime
+    else if request.name == ``Array.usize then
+      arrayUSizeExternal request runtime
     else if request.name == ``Array.push then
       arrayPushExternal request runtime
     else if request.name == ``Array.pop then
@@ -3341,6 +3417,10 @@ private def validationExternals : ExternalImpl where
       arrayGetBangExternal request runtime
     else if request.name == ``Array.get!InternalBorrowed then
       arrayGetBangBorrowedExternal request runtime
+    else if request.name == ``Array.uget then
+      arrayUGetExternal true request runtime
+    else if request.name == ``Array.ugetBorrowed then
+      arrayUGetExternal false request runtime
     else if request.name == ``Int.ofNat then
       intOfNatExternal request runtime
     else if request.name == ``Int.neg then

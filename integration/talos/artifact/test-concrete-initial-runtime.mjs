@@ -161,7 +161,11 @@ assert.throws(() => new ConcreteHost([], {
 }), /capacity must cover its live elements/);
 
 const setArray = concreteValidationExternalRegistry["Array.set!"];
+const usetArray = concreteValidationExternalRegistry["Array.uset"];
+const emptyArrayWithCapacity =
+  concreteValidationExternalRegistry["Array.emptyWithCapacity"];
 const sizeArray = concreteValidationExternalRegistry["Array.size"];
+const usizeArray = concreteValidationExternalRegistry["Array.usize"];
 const pushArray = concreteValidationExternalRegistry["Array.push"];
 const popArray = concreteValidationExternalRegistry["Array.pop"];
 const replicateArray = concreteValidationExternalRegistry["Array.replicate"];
@@ -171,11 +175,30 @@ const toListArray = concreteValidationExternalRegistry["Array.toList"];
 const getArray = concreteValidationExternalRegistry["Array.get!Internal"];
 const getArrayBorrowed =
   concreteValidationExternalRegistry["Array.get!InternalBorrowed"];
+const ugetArray = concreteValidationExternalRegistry["Array.uget"];
+const ugetArrayBorrowed =
+  concreteValidationExternalRegistry["Array.ugetBorrowed"];
 const inhabitedUInt8 = concreteValidationExternalRegistry["instInhabitedUInt8"];
 const erased = { kind: "erased" };
 const taggedIndex = value => ({ kind: "tagged", payload: BigInt(value) });
 const heapNatural = (target, value) =>
   target.decode("object", target.allocateNatural(value));
+
+const capacityArrayHost = new ConcreteHost([]);
+const emptyCapacityArray = emptyArrayWithCapacity({
+  args: [erased, taggedIndex(4)], host: capacityArrayHost, world: 0,
+}).value;
+assert.equal(capacityArrayHost.arrayInfo(emptyCapacityArray).size, 0);
+assert.equal(capacityArrayHost.arrayInfo(emptyCapacityArray).capacity, 4);
+const capacityArrayChild = heapNatural(capacityArrayHost, (1n << 64n) + 100n);
+assert.deepStrictEqual(pushArray({
+  args: [erased, emptyCapacityArray, capacityArrayChild],
+  host: capacityArrayHost,
+  world: 0,
+}).value, emptyCapacityArray);
+assert.deepStrictEqual(
+  capacityArrayHost.arrayInfo(emptyCapacityArray).elements, [capacityArrayChild]);
+assert.equal(capacityArrayHost.arrayInfo(emptyCapacityArray).capacity, 4);
 
 const uniqueArrayHost = new ConcreteHost([]);
 const uniqueOld = heapNatural(uniqueArrayHost, 1n << 64n);
@@ -186,6 +209,9 @@ const uniqueArray =
 assert.deepStrictEqual(sizeArray({
   args: [erased, uniqueArray], host: uniqueArrayHost, world: 0,
 }).value, taggedIndex(2));
+assert.deepStrictEqual(usizeArray({
+  args: [erased, uniqueArray], host: uniqueArrayHost, world: 0,
+}).value, { kind: "usize", value: 2n });
 const uniqueResult = setArray({
   args: [erased, uniqueArray, taggedIndex(0), uniqueReplacement],
   host: uniqueArrayHost,
@@ -222,6 +248,32 @@ assert.equal(
     uniqueArrayHost.addressOf(uniqueReplacement.location)).rc,
   1,
 );
+assert.deepStrictEqual(ugetArrayBorrowed({
+  args: [erased, uniqueArray, { kind: "usize", value: 0n }, erased],
+  host: uniqueArrayHost,
+  world: 0,
+}).value, uniqueReplacement);
+assert.equal(uniqueArrayHost.readHeader(
+  uniqueArrayHost.addressOf(uniqueReplacement.location)).rc, 1);
+assert.deepStrictEqual(ugetArray({
+  args: [erased, uniqueArray, { kind: "usize", value: 0n }, erased],
+  host: uniqueArrayHost,
+  world: 0,
+}).value, uniqueReplacement);
+assert.equal(uniqueArrayHost.readHeader(
+  uniqueArrayHost.addressOf(uniqueReplacement.location)).rc, 2);
+uniqueArrayHost.releaseValue(uniqueReplacement);
+const usizeReplacement = heapNatural(uniqueArrayHost, (1n << 64n) + 101n);
+assert.deepStrictEqual(usetArray({
+  args: [erased, uniqueArray, { kind: "usize", value: 1n },
+    usizeReplacement, erased],
+  host: uniqueArrayHost,
+  world: 0,
+}).value, uniqueArray);
+assert.deepStrictEqual(uniqueArrayHost.arrayInfo(uniqueArray).elements,
+  [uniqueReplacement, usizeReplacement]);
+assert.equal(uniqueArrayHost.readHeader(
+  uniqueArrayHost.addressOf(uniqueRetained.location), false).kind, 255);
 
 const sharedArrayHost = new ConcreteHost([]);
 const sharedOld = heapNatural(sharedArrayHost, (1n << 64n) + 3n);

@@ -1629,7 +1629,11 @@ for (const [handler, leftValue, rightValue, expected] of [
 
 {
   const setArray = validationExternalRegistry["Array.set!"];
+  const usetArray = validationExternalRegistry["Array.uset"];
+  const emptyArrayWithCapacity =
+    validationExternalRegistry["Array.emptyWithCapacity"];
   const sizeArray = validationExternalRegistry["Array.size"];
+  const usizeArray = validationExternalRegistry["Array.usize"];
   const pushArray = validationExternalRegistry["Array.push"];
   const popArray = validationExternalRegistry["Array.pop"];
   const replicateArray = validationExternalRegistry["Array.replicate"];
@@ -1639,9 +1643,25 @@ for (const [handler, leftValue, rightValue, expected] of [
   const getArray = validationExternalRegistry["Array.get!Internal"];
   const getArrayBorrowed =
     validationExternalRegistry["Array.get!InternalBorrowed"];
+  const ugetArray = validationExternalRegistry["Array.uget"];
+  const ugetArrayBorrowed = validationExternalRegistry["Array.ugetBorrowed"];
   const inhabitedUInt8 = validationExternalRegistry["instInhabitedUInt8"];
   const erased = { kind: "erased" };
   const taggedIndex = value => ({ kind: "tagged", payload: BigInt(value) });
+
+  const capacityHost = new SemanticHost();
+  const emptyCapacityArray = invoke(
+    emptyArrayWithCapacity, capacityHost, [erased, taggedIndex(4)]);
+  assert.deepStrictEqual(capacityHost.liveCell(emptyCapacityArray.location).object,
+    { kind: "array", elements: [], capacity: 4 });
+  const capacityChild = capacityHost.alloc({
+    kind: "natural", value: 0x100000100n,
+  });
+  assert.deepStrictEqual(invoke(
+    pushArray, capacityHost, [erased, emptyCapacityArray, capacityChild]),
+    emptyCapacityArray);
+  assert.deepStrictEqual(capacityHost.liveCell(emptyCapacityArray.location).object,
+    { kind: "array", elements: [capacityChild], capacity: 4 });
 
   const uniqueHost = new SemanticHost();
   const old = uniqueHost.alloc({ kind: "natural", value: 0x100000000n });
@@ -1654,6 +1674,8 @@ for (const [handler, leftValue, rightValue, expected] of [
   });
   assert.deepStrictEqual(invoke(sizeArray, uniqueHost, [erased, unique]),
     taggedIndex(2));
+  assert.deepStrictEqual(invoke(usizeArray, uniqueHost, [erased, unique]),
+    { kind: "usize", value: 2n });
   assert.deepStrictEqual(
     invoke(setArray, uniqueHost, [erased, unique, taggedIndex(0), replacement]),
     unique,
@@ -1664,7 +1686,25 @@ for (const [handler, leftValue, rightValue, expected] of [
     { kind: "array", elements: [replacement, retained], capacity: 4 },
   );
   assert.equal(uniqueHost.liveCell(replacement.location).rc, 1);
-  assert.equal(uniqueHost.liveCell(retained.location).rc, 1);
+  assert.deepStrictEqual(invoke(
+    ugetArrayBorrowed, uniqueHost,
+    [erased, unique, { kind: "usize", value: 0n }, erased]), replacement);
+  assert.equal(uniqueHost.liveCell(replacement.location).rc, 1);
+  assert.deepStrictEqual(invoke(
+    ugetArray, uniqueHost,
+    [erased, unique, { kind: "usize", value: 0n }, erased]), replacement);
+  assert.equal(uniqueHost.liveCell(replacement.location).rc, 2);
+  uniqueHost.decValueOnce(replacement, true);
+
+  const usizeReplacement =
+    uniqueHost.alloc({ kind: "natural", value: 0x100000008n });
+  assert.deepStrictEqual(invoke(usetArray, uniqueHost,
+    [erased, unique, { kind: "usize", value: 1n }, usizeReplacement, erased]),
+  unique);
+  assert.deepStrictEqual(uniqueHost.liveCell(unique.location).object, {
+    kind: "array", elements: [replacement, usizeReplacement], capacity: 4,
+  });
+  assert.throws(() => uniqueHost.liveCell(retained.location));
   assert.deepStrictEqual(
     invoke(inhabitedUInt8, uniqueHost, []),
     { kind: "scalar", scalarKind: "uint8", value: 0n },

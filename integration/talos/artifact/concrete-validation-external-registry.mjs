@@ -428,11 +428,49 @@ function setArray({ args, host, world }) {
   return { value: host.allocateArray(elements, array.capacity), world };
 }
 
+function usetArray({ args, host, world }) {
+  assert.equal(args.length, 5, "Array.uset external arity mismatch");
+  assert.deepStrictEqual(args[0], { kind: "erased" },
+    "Array.uset type argument must be erased");
+  assert.deepStrictEqual(args[4], { kind: "erased" },
+    "Array.uset bounds proof must be erased");
+  const index = usizeValue(args[2], "Array.uset index");
+  assert.ok(index < BigInt(host.arrayInfo(args[1]).size),
+    "Array.uset index must be in bounds");
+  return setArray({
+    args: [args[0], args[1], { kind: "tagged", payload: index }, args[3]],
+    host,
+    world,
+  });
+}
+
+function emptyArrayWithCapacity({ args, host, world }) {
+  assert.equal(args.length, 2,
+    "Array.emptyWithCapacity external arity mismatch");
+  assert.deepStrictEqual(args[0], { kind: "erased" },
+    "Array.emptyWithCapacity type argument must be erased");
+  const capacity = naturalValue(
+    host, args[1], "Array.emptyWithCapacity capacity");
+  assert.ok(capacity <= 0xffff_ffffn,
+    "Array.emptyWithCapacity exceeds the Wasm32 capacity range");
+  return { value: host.allocateArray([], Number(capacity)), world };
+}
+
 function sizeArray({ args, host, world }) {
   assert.equal(args.length, 2, "Array.size external arity mismatch");
   assert.deepStrictEqual(args[0], { kind: "erased" },
     "Array.size type argument must be erased");
   return { value: naturalResult(host, BigInt(host.arrayInfo(args[1]).size)), world };
+}
+
+function usizeArray({ args, host, world }) {
+  assert.equal(args.length, 2, "Array.usize external arity mismatch");
+  assert.deepStrictEqual(args[0], { kind: "erased" },
+    "Array.usize type argument must be erased");
+  return {
+    value: { kind: "usize", value: BigInt(host.arrayInfo(args[1]).size) },
+    world,
+  };
 }
 
 function inhabitedUInt8({ args, world }) {
@@ -468,6 +506,23 @@ function getArrayBangBorrowed({ args, host, world }) {
       ? array.elements[Number(index)]
       : fallback,
     world,
+  };
+}
+
+function ugetArray(owned) {
+  return ({ args, host, world }) => {
+    const context = owned ? "Array.uget" : "Array.ugetBorrowed";
+    assert.equal(args.length, 4, `${context} external arity mismatch`);
+    assert.deepStrictEqual(args[0], { kind: "erased" },
+      `${context} type argument must be erased`);
+    assert.deepStrictEqual(args[3], { kind: "erased" },
+      `${context} bounds proof must be erased`);
+    const array = host.arrayInfo(args[1]);
+    const index = usizeValue(args[2], `${context} index`);
+    assert.ok(index < BigInt(array.size), `${context} index must be in bounds`);
+    const value = array.elements[Number(index)];
+    if (owned) host.retainValue(value);
+    return { value, world };
   };
 }
 
@@ -625,8 +680,13 @@ export const concreteValidationExternalRegistry = Object.freeze({
   },
   "Array.get!Internal": getArrayBang,
   "Array.get!InternalBorrowed": getArrayBangBorrowed,
+  "Array.uget": ugetArray(true),
+  "Array.ugetBorrowed": ugetArray(false),
   "Array.set!": setArray,
+  "Array.uset": usetArray,
+  "Array.emptyWithCapacity": emptyArrayWithCapacity,
   "Array.size": sizeArray,
+  "Array.usize": usizeArray,
   "Array.push": pushArray,
   "Array.pop": popArray,
   "Array.replicate": replicateArray,

@@ -609,20 +609,16 @@ function setByteArray({ args, host, world }) {
   return { value: host.alloc({ kind: "byteArray", value: bytes }), world };
 }
 
-function setArray({ args, host, world }) {
-  assert.equal(args.length, 4, "Array.set! external arity mismatch");
-  assert.deepStrictEqual(args[0], { kind: "erased" },
-    "Array.set! type argument must be erased");
-  const source = args[1];
-  assert.equal(source.kind, "heap", "Array.set! operand must be a heap Array");
+function replaceArrayAt({ source, index, replacement, host, world, context,
+  requireInBounds }) {
+  assert.equal(source.kind, "heap", `${context} operand must be a heap Array`);
   const cell = host.liveCell(source.location);
-  assert.equal(cell.object.kind, "array", "Array.set! heap object must be an Array");
+  assert.equal(cell.object.kind, "array", `${context} heap object must be an Array`);
   assert.ok(Number.isSafeInteger(cell.object.capacity) &&
     cell.object.capacity >= cell.object.elements.length,
-    "Array.set! source has invalid capacity");
-  const index = naturalValue(host, args[2], "Array.set! index");
-  const replacement = args[3];
+    `${context} source has invalid capacity`);
   if (index >= BigInt(cell.object.elements.length)) {
+    assert.equal(requireInBounds, false, `${context} index must be in bounds`);
     host.decValueOnce(replacement, true);
     return { value: source, world };
   }
@@ -641,6 +637,53 @@ function setArray({ args, host, world }) {
   if (!cell.persistent) host.decLocation(source.location);
   return {
     value: host.alloc({ kind: "array", elements, capacity: cell.object.capacity }),
+    world,
+  };
+}
+
+function setArray({ args, host, world }) {
+  assert.equal(args.length, 4, "Array.set! external arity mismatch");
+  assert.deepStrictEqual(args[0], { kind: "erased" },
+    "Array.set! type argument must be erased");
+  return replaceArrayAt({
+    source: args[1],
+    index: naturalValue(host, args[2], "Array.set! index"),
+    replacement: args[3],
+    host,
+    world,
+    context: "Array.set!",
+    requireInBounds: false,
+  });
+}
+
+function usetArray({ args, host, world }) {
+  assert.equal(args.length, 5, "Array.uset external arity mismatch");
+  assert.deepStrictEqual(args[0], { kind: "erased" },
+    "Array.uset type argument must be erased");
+  assert.deepStrictEqual(args[4], { kind: "erased" },
+    "Array.uset bounds proof must be erased");
+  return replaceArrayAt({
+    source: args[1],
+    index: semanticUSize(args[2], "Array.uset index"),
+    replacement: args[3],
+    host,
+    world,
+    context: "Array.uset",
+    requireInBounds: true,
+  });
+}
+
+function emptyArrayWithCapacity({ args, host, world }) {
+  assert.equal(args.length, 2,
+    "Array.emptyWithCapacity external arity mismatch");
+  assert.deepStrictEqual(args[0], { kind: "erased" },
+    "Array.emptyWithCapacity type argument must be erased");
+  const capacity = naturalValue(
+    host, args[1], "Array.emptyWithCapacity capacity");
+  assert.ok(capacity <= 0xffff_ffffn,
+    "Array.emptyWithCapacity exceeds the Wasm32 capacity range");
+  return {
+    value: host.alloc({ kind: "array", elements: [], capacity: Number(capacity) }),
     world,
   };
 }
@@ -698,6 +741,17 @@ function sizeArray({ args, host, world }) {
   const object = host.liveCell(source.location).object;
   assert.equal(object.kind, "array", "Array.size heap object must be an Array");
   return { value: host.natural(BigInt(object.elements.length)), world };
+}
+
+function usizeArray({ args, host, world }) {
+  assert.equal(args.length, 2, "Array.usize external arity mismatch");
+  assert.deepStrictEqual(args[0], { kind: "erased" },
+    "Array.usize type argument must be erased");
+  const source = args[1];
+  assert.equal(source.kind, "heap", "Array.usize operand must be a heap Array");
+  const object = host.liveCell(source.location).object;
+  assert.equal(object.kind, "array", "Array.usize heap object must be an Array");
+  return { value: { kind: "usize", value: BigInt(object.elements.length) }, world };
 }
 
 function popArray({ args, host, world }) {
@@ -901,6 +955,27 @@ function getArrayBangBorrowed({ args, host, world }) {
   };
 }
 
+function ugetArray(owned) {
+  return ({ args, host, world }) => {
+    const context = owned ? "Array.uget" : "Array.ugetBorrowed";
+    assert.equal(args.length, 4, `${context} external arity mismatch`);
+    assert.deepStrictEqual(args[0], { kind: "erased" },
+      `${context} type argument must be erased`);
+    assert.deepStrictEqual(args[3], { kind: "erased" },
+      `${context} bounds proof must be erased`);
+    const source = args[1];
+    assert.equal(source.kind, "heap", `${context} operand must be a heap Array`);
+    const object = host.liveCell(source.location).object;
+    assert.equal(object.kind, "array", `${context} heap object must be an Array`);
+    const index = semanticUSize(args[2], `${context} index`);
+    assert.ok(index < BigInt(object.elements.length),
+      `${context} index must be in bounds`);
+    const value = object.elements[Number(index)];
+    if (owned && value.kind === "heap") host.incLocation(value.location, 1);
+    return { value, world };
+  };
+}
+
 export const validationExternalRegistry = {
   "Nat.add": naturalBinary("Nat.add", (left, right) => left + right),
   "Nat.sub": naturalBinary(
@@ -1077,8 +1152,13 @@ export const validationExternalRegistry = {
   },
   "Array.get!Internal": getArrayBang,
   "Array.get!InternalBorrowed": getArrayBangBorrowed,
+  "Array.uget": ugetArray(true),
+  "Array.ugetBorrowed": ugetArray(false),
   "Array.set!": setArray,
+  "Array.uset": usetArray,
+  "Array.emptyWithCapacity": emptyArrayWithCapacity,
   "Array.size": sizeArray,
+  "Array.usize": usizeArray,
   "Array.push": pushArray,
   "Array.pop": popArray,
   "Array.replicate": replicateArray,
