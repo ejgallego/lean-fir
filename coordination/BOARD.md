@@ -15,6 +15,41 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W7-CONSTANT-TIME-RESIDENT-ARRAY-INDEXING`.
+- Integration owner: `root`, consuming the wasm-gen slice on
+  `wasm/generation`. It is based directly on accepted `main` at `7ee984fb`,
+  with functional head `1d79658d` and clean ready mailbox `9284f4ce`.
+- Generic runtime repair: resident Array reads, sets, and swaps now compute
+  `array + headerBytes + index * 8` in constant time instead of advancing an
+  eight-byte cursor `index` times. A Lean guard freezes the accepted W6
+  object-lane width. Ownership, bounds/default behavior, unique reuse, shared
+  copy-on-write, recursive release, helper signatures, and public ABI are
+  unchanged.
+- Performance evidence: on the characterized 1 KiB structured level-6 raw
+  workload, cold execution fell from 917.5 ms to 195.6 ms; warm samples fell
+  from 30.0/28.6/27.6 ms to 11.7/8.9/7.3 ms. Persistent and scratch frontier
+  growth are byte-identical. The raw complete module shrank by 217 bytes,
+  Level-1 by 177 bytes, and the stored control by 16 bytes without changing
+  declaration, source-function, or helper inventories.
+- Packages: the refreshed stored, Level-1, and raw levels 1 through 10 modules
+  are zero-import and module-owned. Raw is 1,753,310 bytes with SHA-256
+  `0686e69684c187b1b14415f0f3b88fe4ce28514c97f8aac003fbd7359f15b838`;
+  Level-1 is 508,531 bytes with SHA-256
+  `cec08523e4abf4b9555db565952903b5b693c3a1af7ef698117a2ebefc4230de`.
+- Acceptance: Lean Beam reports zero diagnostics and a saved source hash of
+  `45ae8eb173783ec9`. The standalone resident Array artifact, deterministic
+  package emission, native/Wasm and independent-inflate checks, cache/scratch
+  ownership checks, `git diff --check`, complete `make check`, all 3,144 Talos
+  jobs, and the full deterministic artifact gate pass. The root gate covers
+  125 harness tests, 676 source cases, 9 direct-machine cases, 685 unique cases,
+  and 2,037/2,037 equal comparisons.
+- Result: `main` accepts the clean W7 slice through mailbox head `9284f4ce`.
+  No W6 or LCNF-proof adaptation is required. The larger generic Array semantic
+  contract remains parked for its proof consumers; wasm-gen-2 independently
+  characterizes the remaining per-call-site closure allocator code-size debt.
+
+## Latest completed integration lease
+
 - Milestone: `W7-LAZY-CACHE-LEAN-ZIP-PACKAGES`.
 - Integration owner: `root`, consuming the wasm-gen slice on
   `wasm/generation`. The branch was based directly on accepted `main` at
