@@ -1535,6 +1535,17 @@ private def inhabitedUInt8External
     nextLocation := runtime.nextLocation
     world := runtime.world }
 
+private def inhabitedFloatExternal
+    (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  unless request.args.isEmpty do
+    throw (.arityMismatch 0 request.args.size)
+  return {
+    value := .scalar (.float64Bits 0)
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
 private def arrayGetBangExternal
     (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
@@ -1549,6 +1560,22 @@ private def arrayGetBangExternal
   let runtime ← incValue runtime value 1 true
   return {
     value
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def arrayGetBangBorrowedExternal
+    (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [typeArg, fallback, array, index] := request.args.toList
+    | throw (.arityMismatch 4 request.args.size)
+  unless typeArg == .erased do
+    throw (.externalFailure request.name
+      "Array.get!InternalBorrowed type argument must be erased")
+  let (_, _, elements, _) ← externalArrayCell request runtime array
+  let index ← externalNat request runtime index
+  return {
+    value := elements[index]?.getD fallback
     heap := runtime.heap
     nextLocation := runtime.nextLocation
     world := runtime.world }
@@ -3308,8 +3335,12 @@ private def validationExternals : ExternalImpl where
       arrayToListExternal request runtime
     else if request.name == ``instInhabitedUInt8 then
       inhabitedUInt8External request runtime
+    else if request.name == ``instInhabitedFloat then
+      inhabitedFloatExternal request runtime
     else if request.name == ``Array.get!Internal then
       arrayGetBangExternal request runtime
+    else if request.name == ``Array.get!InternalBorrowed then
+      arrayGetBangBorrowedExternal request runtime
     else if request.name == ``Int.ofNat then
       intOfNatExternal request runtime
     else if request.name == ``Int.neg then

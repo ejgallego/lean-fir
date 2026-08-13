@@ -454,6 +454,23 @@ function getArrayBang({ args, host, world }) {
   return { value, world };
 }
 
+function getArrayBangBorrowed({ args, host, world }) {
+  assert.equal(args.length, 4,
+    "Array.get!InternalBorrowed external arity mismatch");
+  assert.deepStrictEqual(args[0], { kind: "erased" },
+    "Array.get!InternalBorrowed type argument must be erased");
+  const fallback = args[1];
+  const array = host.arrayInfo(args[2]);
+  const index = naturalValue(host, args[3],
+    "Array.get!InternalBorrowed index");
+  return {
+    value: index < BigInt(array.size)
+      ? array.elements[Number(index)]
+      : fallback,
+    world,
+  };
+}
+
 function pushArray({ args, host, world }) {
   assert.equal(args.length, 3, "Array.push external arity mismatch");
   assert.deepStrictEqual(args[0], { kind: "erased" },
@@ -599,7 +616,15 @@ export const concreteValidationExternalRegistry = Object.freeze({
       (left, right) => stringCompare(left, right) === 0n ? 1n : 0n),
   "String.compare": stringBinaryUInt8("String.compare", stringCompare),
   "instInhabitedUInt8": inhabitedUInt8,
+  "instInhabitedFloat": ({ args, world }) => {
+    assert.equal(args.length, 0, "instInhabitedFloat external arity mismatch");
+    return {
+      value: { kind: "scalar", scalarKind: "float", value: 0n },
+      world,
+    };
+  },
   "Array.get!Internal": getArrayBang,
+  "Array.get!InternalBorrowed": getArrayBangBorrowed,
   "Array.set!": setArray,
   "Array.size": sizeArray,
   "Array.push": pushArray,

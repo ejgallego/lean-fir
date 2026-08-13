@@ -169,6 +169,8 @@ const swapArray = concreteValidationExternalRegistry["Array.swap"];
 const mkArray = concreteValidationExternalRegistry["Array.mk"];
 const toListArray = concreteValidationExternalRegistry["Array.toList"];
 const getArray = concreteValidationExternalRegistry["Array.get!Internal"];
+const getArrayBorrowed =
+  concreteValidationExternalRegistry["Array.get!InternalBorrowed"];
 const inhabitedUInt8 = concreteValidationExternalRegistry["instInhabitedUInt8"];
 const erased = { kind: "erased" };
 const taggedIndex = value => ({ kind: "tagged", payload: BigInt(value) });
@@ -210,6 +212,16 @@ assert.equal(
   2,
 );
 uniqueArrayHost.releaseValue(uniqueReplacement);
+assert.deepStrictEqual(getArrayBorrowed({
+  args: [erased, taggedIndex(0), uniqueArray, taggedIndex(0)],
+  host: uniqueArrayHost,
+  world: 0,
+}).value, uniqueReplacement);
+assert.equal(
+  uniqueArrayHost.readHeader(
+    uniqueArrayHost.addressOf(uniqueReplacement.location)).rc,
+  1,
+);
 
 const sharedArrayHost = new ConcreteHost([]);
 const sharedOld = heapNatural(sharedArrayHost, (1n << 64n) + 3n);

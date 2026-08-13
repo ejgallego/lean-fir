@@ -1637,6 +1637,8 @@ for (const [handler, leftValue, rightValue, expected] of [
   const mkArray = validationExternalRegistry["Array.mk"];
   const toListArray = validationExternalRegistry["Array.toList"];
   const getArray = validationExternalRegistry["Array.get!Internal"];
+  const getArrayBorrowed =
+    validationExternalRegistry["Array.get!InternalBorrowed"];
   const inhabitedUInt8 = validationExternalRegistry["instInhabitedUInt8"];
   const erased = { kind: "erased" };
   const taggedIndex = value => ({ kind: "tagged", payload: BigInt(value) });
@@ -1674,6 +1676,12 @@ for (const [handler, leftValue, rightValue, expected] of [
   );
   assert.equal(uniqueHost.liveCell(replacement.location).rc, 2);
   uniqueHost.decValueOnce(replacement, true);
+  assert.deepStrictEqual(
+    invoke(getArrayBorrowed, uniqueHost,
+      [erased, taggedIndex(0), unique, taggedIndex(0)]),
+    replacement,
+  );
+  assert.equal(uniqueHost.liveCell(replacement.location).rc, 1);
   const fallback = uniqueHost.alloc({ kind: "natural", value: 0x100000007n });
   assert.deepStrictEqual(
     invoke(getArray, uniqueHost,

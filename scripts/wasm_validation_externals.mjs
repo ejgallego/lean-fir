@@ -879,6 +879,28 @@ function getArrayBang({ args, host, world }) {
   return { value, world };
 }
 
+function getArrayBangBorrowed({ args, host, world }) {
+  assert.equal(args.length, 4,
+    "Array.get!InternalBorrowed external arity mismatch");
+  assert.deepStrictEqual(args[0], { kind: "erased" },
+    "Array.get!InternalBorrowed type argument must be erased");
+  const fallback = args[1];
+  const source = args[2];
+  assert.equal(source.kind, "heap",
+    "Array.get!InternalBorrowed operand must be a heap Array");
+  const object = host.liveCell(source.location).object;
+  assert.equal(object.kind, "array",
+    "Array.get!InternalBorrowed heap object must be an Array");
+  const index = naturalValue(host, args[3],
+    "Array.get!InternalBorrowed index");
+  return {
+    value: index < BigInt(object.elements.length)
+      ? object.elements[Number(index)]
+      : fallback,
+    world,
+  };
+}
+
 export const validationExternalRegistry = {
   "Nat.add": naturalBinary("Nat.add", (left, right) => left + right),
   "Nat.sub": naturalBinary(
@@ -1046,7 +1068,15 @@ export const validationExternalRegistry = {
   },
   "ByteArray.set!": setByteArray,
   "instInhabitedUInt8": inhabitedUInt8,
+  "instInhabitedFloat": ({ args, world }) => {
+    assert.equal(args.length, 0, "instInhabitedFloat external arity mismatch");
+    return {
+      value: { kind: "scalar", scalarKind: "float", value: 0n },
+      world,
+    };
+  },
   "Array.get!Internal": getArrayBang,
+  "Array.get!InternalBorrowed": getArrayBangBorrowed,
   "Array.set!": setArray,
   "Array.size": sizeArray,
   "Array.push": pushArray,

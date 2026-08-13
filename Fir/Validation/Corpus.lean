@@ -161,6 +161,10 @@ def uint8ArrayGet (xs : Array UInt8) (index : Nat) : UInt8 :=
   xs[index]!
 
 @[noinline]
+def floatArrayGet (xs : Array Float) (index : Nat) : Float :=
+  xs[index]!
+
+@[noinline]
 def uint8ArraySetUnique (xs : Array UInt8) : Array UInt8 :=
   xs.set! 0 255
 
@@ -4199,6 +4203,28 @@ private def preConversionCases : Array Case := #[
       some #[``instInhabitedUInt8, ``Array.get!Internal]
     provenance := firProvenance
       "Read and unbox a UInt8 through Array generic object-valued storage" },
+  { id := "generic-float-array-get-heap"
+    entry := ``Source.floatArrayGet
+    args := #[floatArrayDatum #[genericContainerFloat], .nat 0]
+    argSchemas := #[.array (.boxed .float64), .nat]
+    resultSchema := .float64
+    native := fun _ => float64Datum
+      (Source.floatArrayGet #[genericContainerFloat] 0)
+    tags := #["stress", "array", "generic", "boxed", "float", "heap",
+      "projection", "ownership", "bit-exact"]
+    requiredLcnfForms := #["fap", "box", "unbox", "return", "extern"]
+    requiredExecutedLcnfForms :=
+      #["fap", "extern", "box", "unbox", "return"]
+    requiredExternals := #[``instInhabitedFloat, ``Array.get!InternalBorrowed]
+    requiredExecutedExternals :=
+      #[``instInhabitedFloat, ``Array.get!InternalBorrowed]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts
+        #[``instInhabitedFloat, ``Array.get!InternalBorrowed]
+    requiredExecutedExternalTrace :=
+      some #[``instInhabitedFloat, ``Array.get!InternalBorrowed]
+    provenance := firProvenance
+      "Read a heap Float box through Array.get!Internal and retain it past Array release" },
   { id := "generic-uint8-array-set-unique"
     entry := ``Source.uint8ArraySetUnique
     args := #[uint8ArrayDatum #[0, 127, 128, 42]]
