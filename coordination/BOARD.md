@@ -15,6 +15,34 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W7-RESIDENT-CONTAINER-OWNERSHIP-AUDIT`.
+- Integration owner: `root`, consuming the wasm-gen-2 handoff on
+  `wasm/array-ownership-audit`. The patch-equivalent ready head was rebased
+  directly on accepted `main` at `bad7b4ba` as functional head `fba1ad8c`;
+  no shared signature, layout, symbolic-Wasm, or proof contract changed.
+- Runtime repair: resident `Array.swap` now follows upstream Lean's
+  ensure-exclusive/copy-on-write path even when both valid indices are equal.
+  Both owned and borrowed `Array.get!` variants retain the out-of-bounds
+  `Inhabited` fallback before returning it, while in-bounds borrowed lookup
+  remains non-retaining.
+- Audit boundary: Array, packed ByteArray, String, and List-to-container paths
+  are ratcheted across unique, shared, persistent, empty/no-op, self-alias,
+  growth, read, mutation, and bounds behavior. ByteArray preserves the
+  upstream distinction between `srcOff > size` and the exclusive empty copy at
+  `srcOff == size`.
+- Acceptance: Lean Beam reported zero diagnostics for the resident Array
+  module. Focused resident Array/ByteArray/String Node and V8 artifacts,
+  `git diff --check`, complete `make check`, all 3,143 Talos jobs, and the full
+  deterministic artifact gate passed. The gate covered 670 unique cases,
+  1,992/1,992 equal comparisons, 44 concrete artifacts, and 15 source probes.
+  Bug cards `FIR-BUG-wasm-none-array-swap-equal-index-ownership` and
+  `FIR-BUG-wasm-none-array-get-bang-default-ownership` are fixed.
+- Result: `main` fast-forwards through the clean audit head and the lease is
+  released. W7 rebases and republishes Spatial HitScene on this runtime before
+  starting the generic persistent lazy-cache initialization slice.
+
+## Latest completed integration lease
+
 - Milestone: `W6-POINTWISE-CONSTRUCTOR-FIELD-MUTATION`.
 - Integration owner: `wasm-proof`, continuing the user-authorized integration
   lease. The slice is based directly on accepted `main` at `d73fb90a`, with
