@@ -1321,6 +1321,75 @@ private def arraySetExternal (request : ExternalRequest) (runtime : RuntimeState
     nextLocation := runtime.nextLocation
     world := runtime.world }
 
+private def arrayPushExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [typeArg, array, value] := request.args.toList
+    | throw (.arityMismatch 3 request.args.size)
+  unless typeArg == .erased do
+    throw (.externalFailure request.name "Array.push type argument must be erased")
+  let (location, cell, elements, capacity) ← externalArrayCell request runtime array
+  if !cell.persistent && cell.rc == 1 then
+    if elements.size < capacity then
+      let runtime ← setCell runtime location
+        { cell with object := .array (elements.push value) capacity }
+      return {
+        value := array
+        heap := runtime.heap
+        nextLocation := runtime.nextLocation
+        world := runtime.world }
+    let capacity := 2 * (capacity + 1)
+    let runtime ← setCell runtime location { cell with rc := 0, live := false }
+    let (runtime, reference) := alloc runtime (.array (elements.push value) capacity)
+    return {
+      value := .object reference
+      heap := runtime.heap
+      nextLocation := runtime.nextLocation
+      world := runtime.world }
+  let runtime ← elements.foldlM (init := runtime) fun runtime element =>
+    retainOwnedValue runtime element
+  let runtime ← if cell.persistent then pure runtime else decLocation runtime location
+  let minimum := 2 * elements.size + 1
+  let capacity := if capacity < minimum then 2 * (capacity + 1) else capacity
+  let (runtime, reference) := alloc runtime (.array (elements.push value) capacity)
+  return {
+    value := .object reference
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def arrayPopExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [typeArg, array] := request.args.toList
+    | throw (.arityMismatch 2 request.args.size)
+  unless typeArg == .erased do
+    throw (.externalFailure request.name "Array.pop type argument must be erased")
+  let (location, cell, elements, capacity) ← externalArrayCell request runtime array
+  if !cell.persistent && cell.rc == 1 then
+    let some removed := elements.back?
+      | return {
+          value := array
+          heap := runtime.heap
+          nextLocation := runtime.nextLocation
+          world := runtime.world }
+    let runtime ← setCell runtime location
+      { cell with object := .array elements.pop capacity }
+    let runtime ← decValueOnce runtime removed true
+    return {
+      value := array
+      heap := runtime.heap
+      nextLocation := runtime.nextLocation
+      world := runtime.world }
+  let elements := elements.pop
+  let runtime ← elements.foldlM (init := runtime) fun runtime element =>
+    retainOwnedValue runtime element
+  let runtime ← if cell.persistent then pure runtime else decLocation runtime location
+  let (runtime, reference) := alloc runtime (.array elements capacity)
+  return {
+    value := .object reference
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
 private def inhabitedUInt8External
     (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
@@ -3089,6 +3158,10 @@ private def validationExternals : ExternalImpl where
       byteArraySetExternal request runtime
     else if request.name == ``Array.set! then
       arraySetExternal request runtime
+    else if request.name == ``Array.push then
+      arrayPushExternal request runtime
+    else if request.name == ``Array.pop then
+      arrayPopExternal request runtime
     else if request.name == ``instInhabitedUInt8 then
       inhabitedUInt8External request runtime
     else if request.name == ``Array.get!Internal then

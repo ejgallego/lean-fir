@@ -179,6 +179,25 @@ def floatArraySetShared
   let updated := xs.set! 0 replacement
   (xs, updated)
 
+@[noinline]
+def floatArrayPushUnique (xs : Array Float) (value : Float) : Array Float :=
+  xs.push value
+
+@[noinline]
+def floatArrayPushShared
+    (xs : Array Float) (value : Float) : Array Float × Array Float :=
+  let updated := xs.push value
+  (xs, updated)
+
+@[noinline]
+def floatArrayPopUnique (xs : Array Float) : Array Float :=
+  xs.pop
+
+@[noinline]
+def floatArrayPopShared (xs : Array Float) : Array Float × Array Float :=
+  let updated := xs.pop
+  (xs, updated)
+
 def firstUInt8List : List UInt8 → UInt8
   | value :: _ => value
   | [] => 0
@@ -4212,6 +4231,82 @@ private def preConversionCases : Array Case := #[
     requiredExecutedExternalTrace := some #[``Array.set!]
     provenance := firProvenance
       "Copy a shared Float Array with exact heap-box retention and replacement bits" },
+  { id := "generic-float-array-push-unique"
+    entry := ``Source.floatArrayPushUnique
+    args := #[floatArrayDatum #[genericContainerFloat],
+      .bits 64 genericArrayReplacementFloat.toBits]
+    argSchemas := #[.array (.boxed .float64), .float64]
+    resultSchema := .array (.boxed .float64)
+    native := fun _ => floatArrayDatum
+      (Source.floatArrayPushUnique #[genericContainerFloat]
+        genericArrayReplacementFloat)
+    tags := #["stress", "array", "generic", "boxed", "float", "heap", "push",
+      "ownership", "unique", "bit-exact"]
+    requiredLcnfForms := #["box", "fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["box", "fap", "extern", "return"]
+    requiredExternals := #[``Array.push]
+    requiredExecutedExternals := #[``Array.push]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``Array.push]
+    requiredExecutedExternalTrace := some #[``Array.push]
+    provenance := firProvenance
+      "Grow an exclusive full Float Array while transferring both heap boxes" },
+  { id := "generic-float-array-push-shared"
+    entry := ``Source.floatArrayPushShared
+    args := #[floatArrayDatum #[genericContainerFloat],
+      .bits 64 genericArrayReplacementFloat.toBits]
+    argSchemas := #[.array (.boxed .float64), .float64]
+    resultSchema := .ctor "Prod.mk" 0
+      #[.array (.boxed .float64), .array (.boxed .float64)]
+    native := fun _ => floatArrayPairDatum
+      (Source.floatArrayPushShared #[genericContainerFloat]
+        genericArrayReplacementFloat)
+    tags := #["stress", "array", "generic", "boxed", "float", "heap", "push",
+      "ownership", "shared", "copy-on-write", "bit-exact"]
+    requiredLcnfForms := #["box", "inc", "fap", "extern", "ctor", "return"]
+    requiredExecutedLcnfForms :=
+      #["box", "inc", "fap", "extern", "ctor", "return"]
+    requiredExternals := #[``Array.push]
+    requiredExecutedExternals := #[``Array.push]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``Array.push]
+    requiredExecutedExternalTrace := some #[``Array.push]
+    provenance := firProvenance
+      "Copy a shared Float Array while retaining its heap element and appending another" },
+  { id := "generic-float-array-pop-unique"
+    entry := ``Source.floatArrayPopUnique
+    args := #[floatArrayDatum #[genericContainerFloat, genericArrayReplacementFloat]]
+    argSchemas := #[.array (.boxed .float64)]
+    resultSchema := .array (.boxed .float64)
+    native := fun _ => floatArrayDatum
+      (Source.floatArrayPopUnique #[genericContainerFloat, genericArrayReplacementFloat])
+    tags := #["stress", "array", "generic", "boxed", "float", "heap", "pop",
+      "ownership", "unique", "bit-exact"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExternals := #[``Array.pop]
+    requiredExecutedExternals := #[``Array.pop]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``Array.pop]
+    requiredExecutedExternalTrace := some #[``Array.pop]
+    provenance := firProvenance
+      "Shrink an exclusive Float Array and recursively release its removed heap box" },
+  { id := "generic-float-array-pop-shared"
+    entry := ``Source.floatArrayPopShared
+    args := #[floatArrayDatum #[genericContainerFloat, genericArrayReplacementFloat]]
+    argSchemas := #[.array (.boxed .float64)]
+    resultSchema := .ctor "Prod.mk" 0
+      #[.array (.boxed .float64), .array (.boxed .float64)]
+    native := fun _ => floatArrayPairDatum
+      (Source.floatArrayPopShared
+        #[genericContainerFloat, genericArrayReplacementFloat])
+    tags := #["stress", "array", "generic", "boxed", "float", "heap", "pop",
+      "ownership", "shared", "copy-on-write", "bit-exact"]
+    requiredLcnfForms := #["inc", "fap", "extern", "ctor", "return"]
+    requiredExecutedLcnfForms := #["inc", "fap", "extern", "ctor", "return"]
+    requiredExternals := #[``Array.pop]
+    requiredExecutedExternals := #[``Array.pop]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``Array.pop]
+    requiredExecutedExternalTrace := some #[``Array.pop]
+    provenance := firProvenance
+      "Copy a shared Float Array prefix while the original retains its removed heap box" },
   { id := "generic-uint8-list-head"
     entry := ``Source.firstUInt8List
     args := #[uint8ListDatum [255, 1]]

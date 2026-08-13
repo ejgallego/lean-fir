@@ -769,6 +769,24 @@ export class ConcreteHost {
     );
   }
 
+  appendArrayElement(value, element) {
+    const array = this.arrayInfo(value);
+    assert.ok(array.size < array.capacity, "Array has no spare capacity");
+    this.writeWordSlot(
+      array.address + HEADER_BYTES + SLOT_BYTES * array.size,
+      this.encode("tobject", element),
+    );
+    this.writeHeader(array.address, { ...array.header, aux1: array.size + 1 });
+  }
+
+  popArrayElement(value) {
+    const array = this.arrayInfo(value);
+    if (array.size === 0) return undefined;
+    const removed = array.elements[array.size - 1];
+    this.writeHeader(array.address, { ...array.header, aux1: array.size - 1 });
+    return removed;
+  }
+
   allocateArray(elements, capacity) {
     assert.ok(Array.isArray(elements), "Array elements must be an array");
     assert.ok(Number.isSafeInteger(capacity) && capacity >= elements.length &&
@@ -796,6 +814,10 @@ export class ConcreteHost {
 
   releaseValue(value) {
     this.releaseWord(this.encode("tobject", value), true);
+  }
+
+  retireTransferredValue(value) {
+    this.deleteObject([this.encode("object", value)]);
   }
 
   writeWordSlot(address, word) {

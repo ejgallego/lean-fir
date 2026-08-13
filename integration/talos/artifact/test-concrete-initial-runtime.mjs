@@ -161,6 +161,8 @@ assert.throws(() => new ConcreteHost([], {
 }), /capacity must cover its live elements/);
 
 const setArray = concreteValidationExternalRegistry["Array.set!"];
+const pushArray = concreteValidationExternalRegistry["Array.push"];
+const popArray = concreteValidationExternalRegistry["Array.pop"];
 const getArray = concreteValidationExternalRegistry["Array.get!Internal"];
 const inhabitedUInt8 = concreteValidationExternalRegistry["instInhabitedUInt8"];
 const erased = { kind: "erased" };
@@ -225,6 +227,49 @@ assert.equal(
 );
 assert.equal(sharedArrayHost.arrayInfo(sharedArray).header.rc, 1);
 assert.equal(sharedArrayHost.arrayInfo(sharedResult).capacity, 5);
+
+const roomyArrayHost = new ConcreteHost([]);
+const roomyChild = heapNatural(roomyArrayHost, (1n << 64n) + 7n);
+const roomyValue = heapNatural(roomyArrayHost, (1n << 64n) + 8n);
+const roomyArray = roomyArrayHost.allocateArray([roomyChild], 3);
+assert.deepStrictEqual(pushArray({
+  args: [erased, roomyArray, roomyValue],
+  host: roomyArrayHost,
+  world: 0,
+}).value, roomyArray);
+assert.deepStrictEqual(
+  roomyArrayHost.arrayInfo(roomyArray).elements, [roomyChild, roomyValue]);
+assert.equal(roomyArrayHost.arrayInfo(roomyArray).capacity, 3);
+assert.deepStrictEqual(popArray({
+  args: [erased, roomyArray],
+  host: roomyArrayHost,
+  world: 0,
+}).value, roomyArray);
+assert.deepStrictEqual(roomyArrayHost.arrayInfo(roomyArray).elements, [roomyChild]);
+assert.equal(
+  roomyArrayHost.readHeader(roomyArrayHost.addressOf(roomyValue.location), false).kind,
+  255,
+);
+
+const fullArrayHost = new ConcreteHost([]);
+const fullChild = heapNatural(fullArrayHost, (1n << 64n) + 9n);
+const fullValue = heapNatural(fullArrayHost, (1n << 64n) + 10n);
+const fullArray = fullArrayHost.allocateArray([fullChild], 1);
+const grownArray = pushArray({
+  args: [erased, fullArray, fullValue],
+  host: fullArrayHost,
+  world: 0,
+}).value;
+assert.notDeepStrictEqual(grownArray, fullArray);
+assert.equal(
+  fullArrayHost.readHeader(fullArrayHost.addressOf(fullArray.location), false).kind,
+  255,
+);
+assert.deepStrictEqual(
+  fullArrayHost.arrayInfo(grownArray).elements, [fullChild, fullValue]);
+assert.equal(fullArrayHost.arrayInfo(grownArray).capacity, 4);
+assert.equal(fullArrayHost.readHeader(fullArrayHost.addressOf(fullChild.location)).rc, 1);
+assert.equal(fullArrayHost.readHeader(fullArrayHost.addressOf(fullValue.location)).rc, 1);
 
 // A constructor slot has no runtime tag of its own. Track the physical kind
 // supplied by the latest mutation so an object-only slot can subsequently hold

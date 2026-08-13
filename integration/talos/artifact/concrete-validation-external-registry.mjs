@@ -447,6 +447,52 @@ function getArrayBang({ args, host, world }) {
   return { value, world };
 }
 
+function pushArray({ args, host, world }) {
+  assert.equal(args.length, 3, "Array.push external arity mismatch");
+  assert.deepStrictEqual(args[0], { kind: "erased" },
+    "Array.push type argument must be erased");
+  const source = args[1];
+  const array = host.arrayInfo(source);
+  const value = args[2];
+  if (!array.header.persistent && array.header.rc === 1) {
+    if (array.size < array.capacity) {
+      host.appendArrayElement(source, value);
+      return { value: source, world };
+    }
+    const result = host.allocateArray(
+      [...array.elements, value], 2 * (array.capacity + 1));
+    host.retireTransferredValue(source);
+    return { value: result, world };
+  }
+  array.elements.forEach(element => host.retainValue(element));
+  if (!array.header.persistent) host.releaseValue(source);
+  const minimum = 2 * array.size + 1;
+  const capacity = array.capacity < minimum
+    ? 2 * (array.capacity + 1)
+    : array.capacity;
+  return {
+    value: host.allocateArray([...array.elements, value], capacity),
+    world,
+  };
+}
+
+function popArray({ args, host, world }) {
+  assert.equal(args.length, 2, "Array.pop external arity mismatch");
+  assert.deepStrictEqual(args[0], { kind: "erased" },
+    "Array.pop type argument must be erased");
+  const source = args[1];
+  const array = host.arrayInfo(source);
+  if (!array.header.persistent && array.header.rc === 1) {
+    const removed = host.popArrayElement(source);
+    if (removed !== undefined) host.releaseValue(removed);
+    return { value: source, world };
+  }
+  const remaining = array.elements.slice(0, -1);
+  remaining.forEach(element => host.retainValue(element));
+  if (!array.header.persistent) host.releaseValue(source);
+  return { value: host.allocateArray(remaining, array.capacity), world };
+}
+
 /**
  * Validation-only externals layered over the ordinary concrete artifact
  * registry. Generic Array operations use the same opaque/ARRY layout as the
@@ -475,6 +521,8 @@ export const concreteValidationExternalRegistry = Object.freeze({
   "instInhabitedUInt8": inhabitedUInt8,
   "Array.get!Internal": getArrayBang,
   "Array.set!": setArray,
+  "Array.push": pushArray,
+  "Array.pop": popArray,
   "Int.neg": ({ args, host, world }) => {
     assert.equal(args.length, 1, "Int.neg external arity mismatch");
     const value = integerValue(host, args[0], "Int.neg operand");

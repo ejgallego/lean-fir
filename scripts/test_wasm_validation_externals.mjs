@@ -1629,6 +1629,8 @@ for (const [handler, leftValue, rightValue, expected] of [
 
 {
   const setArray = validationExternalRegistry["Array.set!"];
+  const pushArray = validationExternalRegistry["Array.push"];
+  const popArray = validationExternalRegistry["Array.pop"];
   const getArray = validationExternalRegistry["Array.get!Internal"];
   const inhabitedUInt8 = validationExternalRegistry["instInhabitedUInt8"];
   const erased = { kind: "erased" };
@@ -1707,6 +1709,50 @@ for (const [handler, leftValue, rightValue, expected] of [
     shared,
   );
   assert.throws(() => sharedHost.liveCell(outOfBoundsReplacement.location));
+
+  const roomyHost = new SemanticHost();
+  const roomyChild = roomyHost.alloc({ kind: "natural", value: 0x100000008n });
+  const roomyValue = roomyHost.alloc({ kind: "natural", value: 0x100000009n });
+  const roomy = roomyHost.alloc({
+    kind: "array",
+    elements: [roomyChild],
+    capacity: 3,
+  });
+  assert.deepStrictEqual(
+    invoke(pushArray, roomyHost, [erased, roomy, roomyValue]),
+    roomy,
+  );
+  assert.deepStrictEqual(roomyHost.liveCell(roomy.location).object, {
+    kind: "array",
+    elements: [roomyChild, roomyValue],
+    capacity: 3,
+  });
+  assert.deepStrictEqual(invoke(popArray, roomyHost, [erased, roomy]), roomy);
+  assert.deepStrictEqual(roomyHost.liveCell(roomy.location).object, {
+    kind: "array",
+    elements: [roomyChild],
+    capacity: 3,
+  });
+  assert.throws(() => roomyHost.liveCell(roomyValue.location));
+
+  const fullHost = new SemanticHost();
+  const fullChild = fullHost.alloc({ kind: "natural", value: 0x10000000an });
+  const fullValue = fullHost.alloc({ kind: "natural", value: 0x10000000bn });
+  const full = fullHost.alloc({
+    kind: "array",
+    elements: [fullChild],
+    capacity: 1,
+  });
+  const grown = invoke(pushArray, fullHost, [erased, full, fullValue]);
+  assert.notDeepStrictEqual(grown, full);
+  assert.throws(() => fullHost.liveCell(full.location));
+  assert.deepStrictEqual(fullHost.liveCell(grown.location).object, {
+    kind: "array",
+    elements: [fullChild, fullValue],
+    capacity: 4,
+  });
+  assert.equal(fullHost.liveCell(fullChild.location).rc, 1);
+  assert.equal(fullHost.liveCell(fullValue.location).rc, 1);
 }
 
 console.log("PASS shared Wasm String and arithmetic external contracts");
