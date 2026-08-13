@@ -15,6 +15,51 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W7-LEVEL1-EXTERN-BOUNDARY-PUBLICATION`.
+- Integration owner: `root`, reconciling the clean `wasm/capture-upstream`
+  capture handoff with the completed `wasm/generation` Level-1 publication on
+  branch `integration/level1-capture`. The stack is based on accepted main
+  `3cfddfc0`; clean functional head `ba380dd9` includes the exact regenerated
+  closure ratchet.
+- Capture/runtime slice: Lean's ordinary final-LCNF pipeline still generates
+  each required `_boxed` adapter locally, after which FIR restores the original
+  environment `@[extern]` declaration to its resident-runtime boundary. The
+  linked closure also includes the accepted source-provider fixed-width
+  rewrite, arbitrary-precision `Nat.mod`, persistent big-numeric admission,
+  mixed constructor provenance, and revision-safe exhaustive artifact gates.
+- Production evidence: the real Lean 4.33 `Zip.Wasm.compressLevel1` capture
+  contains 432 declarations and 108 reviewed externals. It retains 324 source
+  functions, links 1,552 resident helpers, and emits 1,876 functions with zero
+  unsupported declarations, function imports, memory imports, or residual
+  runtime operations. Native/Wasm output agrees on all five production cases,
+  and both Node and Chrome exercise the packed ByteArray adapter with scratch
+  rewind.
+- Artifact: immutable Level-1 package
+  `integration/lean-zip/_build/lean-zip-level1-packages/ba380dd90385-30737b4e2ebf-1179fc8ac6fc54fe83d0`;
+  canonical pointer `integration/lean-zip/_build/lean-zip-level1-current`.
+  Complete Wasm is 501,668 bytes with SHA-256
+  `592f1abcf1a4044e721135967476550043e283d57bf4ff30454e6fcaf30bc079`;
+  base Wasm is 212,709 bytes with SHA-256
+  `d4ff5ce46affba6e6319109b4fc4b525f8a2078b5f7c990501dbcfb66ab484d8`.
+- Contracts and discrepancies: no shared semantic, concrete-layout,
+  symbolic-Wasm, or W6 proof contract changed. Eight W7 bug cards covering
+  capture, fixed-width selection, Nat modulo, persistent numerics, constructor
+  provenance, and stale artifact checkpoints are fixed. Generic Nat-heavy
+  allocation remains a performance follow-up: a 4 KiB repeated input can grow
+  the scratch frontier by about 2.98 GB before the successful rewind.
+- Acceptance: Lean dependency cones and the exact Level-1 closure probe pass;
+  `git diff --check` and `make check` pass with 670 unique cases and
+  1,992/1,992 equal comparisons; worktree-local Talos setup and all 3,149 jobs
+  pass; the complete deterministic Talos artifact gate passes; and the
+  lean-zip gate passes native oracles, deterministic double publication,
+  checksums, Node, Chrome, zero-import assertions, and scratch reclamation.
+- Result: `main` fast-forwards through the reconciled green stack and this
+  acceptance record; the integration lease is released. W7 may next profile
+  the remaining Level-1 allocation amplification or resume the independent
+  Array/spatial-HitScene generation backlog.
+
+## Latest completed integration lease
+
 - Milestone: `FIR-SCOPED-LAKE-ARTIFACT-CACHE`.
 - Integration owner: `test-fixtures`, consuming the compile-performance
   handoff `af3ed1e0` and hardening it on branch
