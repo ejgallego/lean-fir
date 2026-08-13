@@ -95,6 +95,9 @@ inductive HeapObjectRel (rho : AddressRenaming) : HeapObject → HeapObject → 
   | integer (value : Int) : HeapObjectRel rho (.integer value) (.integer value)
   | byteArray (value : Array UInt8) :
       HeapObjectRel rho (.byteArray value) (.byteArray value)
+  | array {left right : Array Value} {capacity : Nat}
+      (elements : ArrayRel (ValueRel rho) left right) :
+      HeapObjectRel rho (.array left capacity) (.array right capacity)
   | opaque (typeName : Name) : HeapObjectRel rho (.opaque typeName) (.opaque typeName)
 
 def HeapCellRel (rho : AddressRenaming) (left right : HeapCell) : Prop :=

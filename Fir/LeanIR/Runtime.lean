@@ -55,6 +55,10 @@ inductive HeapObject where
   | natural (value : Nat)
   | integer (value : Int)
   | byteArray (value : Array UInt8)
+  /-- A generic Lean `Array` runtime object. `capacity` is the number of
+  allocated element slots and must be at least `elements.size`. Only the live
+  prefix owns references. -/
+  | array (elements : Array Value) (capacity : Nat)
   | opaque (typeName : Name)
   deriving Inhabited, BEq
 
@@ -241,6 +245,7 @@ def HeapObject.ownedValues : HeapObject → Array Value
   | .ctor object => object.objectFields
   | .closure _ _ fixed => fixed
   | .boxed _ value => #[value]
+  | .array elements _ => elements
   | .string _ | .natural _ | .integer _ | .byteArray _ | .opaque _ => #[]
 
 /-- Mark one live heap object and its reachable object graph persistent.

@@ -104,6 +104,12 @@ inductive ValidationSchema where
   | float64
   | string
   | bytes
+  /-- A source `Array α`, distinct from `seq`, which denotes `List α`.
+
+  The datum remains a backend-neutral sequence. Runtime consumers preserve
+  Array identity, ownership, size, and capacity while comparing only the live
+  element prefix at the protocol boundary. -/
+  | array (element : ValidationSchema)
   | seq (element : ValidationSchema)
   /--
   A scalar transported through Lean's generic object representation.
@@ -135,6 +141,7 @@ partial def ValidationSchema.accepts : ValidationSchema → ValidationDatum → 
   | .float64, .bits 64 _ => true
   | .string, .string _ => true
   | .bytes, .bytes values => values.all (· < 256)
+  | .array element, .seq values => values.all (element.accepts ·)
   | .seq element, .seq values => values.all (element.accepts ·)
   | .boxed scalar, datum => scalar.isBoxableScalar && scalar.accepts datum
   | .ctor expectedName expectedTag expectedFields,
@@ -239,9 +246,9 @@ private partial def resolveArgumentPathChildren
   | [] => return (schema, datum)
   | index :: remaining =>
       match schema, datum with
-      | .seq element, .seq values => do
+      | .array element, .seq values | .seq element, .seq values => do
           let some value := values[index]? |
-            throw s!"sequence child {index} is out of bounds for {values.size} elements"
+            throw s!"container child {index} is out of bounds for {values.size} elements"
           resolveArgumentPathChildren element value remaining
       | .ctor _ _ schemas, .ctor _ _ fields => do
           let some childSchema := schemas[index]? |
@@ -455,10 +462,17 @@ private def protocolRoundTripRequest : CaseRequest := {
 #guard (ValidationSchema.boxed (.bits 8)).accepts (.bits 8 0xff)
 #guard !(ValidationSchema.boxed (.bits 8)).accepts (.bits 16 0xff)
 #guard !(ValidationSchema.boxed .nat).accepts (.nat 1)
+#guard (ValidationSchema.array (.boxed .bool)).accepts (.seq #[.bool true, .bool false])
+#guard !(ValidationSchema.array (.boxed .bool)).accepts (.seq #[.bool true, .nat 0])
 
 #guard match (fromJson? (toJson (ValidationSchema.boxed (.bits 8))) :
     Except String ValidationSchema) with
   | .ok schema => schema == .boxed (.bits 8)
+  | .error _ => false
+
+#guard match (fromJson? (toJson (ValidationSchema.array (.boxed .float64))) :
+    Except String ValidationSchema) with
+  | .ok schema => schema == .array (.boxed .float64)
   | .error _ => false
 
 #guard toJson (.nat 18446744073709551617 : ValidationDatum) ==
