@@ -1,8 +1,20 @@
 import Fir.Wasm.Concrete.ArrayHeapCorrectness
+import Fir.Wasm.Concrete.OwnershipFrameCorrectness
 
 namespace Fir.Wasm.Concrete
 
 open Fir.LeanIR.Impure
+
+/-- Retain every word in an Array's copied live prefix. This is the concrete
+ownership step emitted before a non-exclusive copy publishes its fresh Array.
+It intentionally reuses the closure-capture retain primitive because that
+primitive is exactly the erased-or-object `tobject` retain boundary needed by
+generic container elements. -/
+def retainResidentArrayElements (state : MemoryState) (source : Word32)
+    (header : Header) :
+    Except ConcreteError MemoryState :=
+  readOwnedReferences state source header >>= fun words =>
+    words.foldlM (init := state) retainClosureCapture
 
 /-- Allocate a fresh resident Array from words read out of an existing Array's
 live prefix. The premise deliberately identifies every copied word with its
@@ -95,5 +107,38 @@ theorem LiveHeapRel.allocateResidentArray_copyFrame
   exact ⟨witnessExtension, closurePersistent, heapRelated, memoryExtension,
     capacityTransport, sourceAfter, sourceFresh, valueRelated,
     semanticAllocation⟩
+
+/-- The complete shared-copy prefix: read-related source words are retained in
+order, and the resulting concrete/semantic heaps remain related. The exact
+fresh allocation is deliberately the next theorem boundary so W7's emitted
+order—retain, store, then consume the source reference—can be composed without
+smuggling allocation effects into the retain fold. -/
+theorem LiveHeapRel.retainResidentArrayElements_refines
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime finalRuntime : RuntimeState}
+    {sourceAddress : Word32} {elements : Array Value}
+    {sourceCapacity : Nat} {sourceHeader : Header}
+    (related : LiveHeapRel state witness runtime)
+    (sourceRelated : ResidentArrayObjectRel state witness sourceAddress
+      elements sourceCapacity sourceHeader)
+    (capacity : ClosureRetainCapacity runtime elements.toList)
+    (semanticOperation :
+      elements.toList.foldlM (init := runtime) retainOwnedValue =
+        .ok finalRuntime) :
+    ∃ finalState,
+      retainResidentArrayElements state sourceAddress sourceHeader =
+        .ok finalState ∧
+      LiveHeapRel finalState witness finalRuntime ∧
+      MappedHeaderCapacityTransport state finalState witness ∧
+      finalState.heapCursor = state.heapCursor := by
+  obtain ⟨words, wordsRead, wordsRelated⟩ := sourceRelated.readOwnedReferences
+  obtain ⟨finalState, concreteOperation, finalRelated, capacityTransport,
+      cursor⟩ :=
+    wordsRelated.foldlM_retainClosureCaptures_refines related capacity
+      semanticOperation
+  refine ⟨finalState, ?_, finalRelated, capacityTransport, cursor⟩
+  unfold retainResidentArrayElements
+  rw [wordsRead]
+  exact concreteOperation
 
 end Fir.Wasm.Concrete
