@@ -15,6 +15,38 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-STRUCTURED-ACTIVE-RESULT-INDEX`.
+- Integration owner: `wasm-proof`, continuing the user-authorized integration
+  lease. The proof slice rebased without conflict onto accepted `main` at
+  `a348f8ac`, with functional head `0946ec49`; no shared semantic or executable
+  runtime contract changed.
+- Exact result index: every `ConcreteSupportedFunction` now retains the first
+  symbolic result lane. Supported and runnable global outcomes require that
+  lane to equal the active `functionResult`, so the ranked simulation no
+  longer ranges over caller-selected malformed ABI indices.
+- Calls and returns: production generated rows identify their exact effective
+  result lane. Direct calls separately retain the public declared lane used to
+  select the source declaration, while direct, saturated, and lazy call entry
+  switch to the effective generated lane. Supported caller frames save the
+  caller equality and return/pop restores it.
+- Export boundary: `ConcreteSupportedExport.supportedGlobalRoot` selects the
+  supported function's lane and accepts no result-kind argument.
+  `FIR-BUG-wasm-none-structured-active-result-index` is fixed.
+- Acceptance: Lean Beam update/sync/save reports zero errors for all four
+  modified proof modules; the targeted resumable-Wasm cone, `git diff --check`,
+  complete `make check`, `make talos-setup`, and all 3,143 Talos jobs pass
+  before and after rebase. The post-rebase root gate covers 125 harness tests,
+  669 source cases, 9 direct-machine cases, a 669-case native/LCNF/V8 triangle,
+  678 unique cases, 2,016/2,016 equal comparisons, 7,303 machine steps, 167
+  active bug cards, and zero findings.
+- Result: `main` may fast-forward through the clean W6 mailbox. W6 next splits
+  compiler-derived current-node admission from finite wasm32 address-space
+  safety, then closes a resource-safe whole simulation or explicitly budgeted
+  finite-prefix theorem. Heap-valued lazy miss publication and target-only loop
+  unwinding remain independent widenings.
+
+## Latest completed integration lease
+
 - Milestone: `W7-VALIDATION-BOXED-SCALAR-LAYOUT`.
 - Integration owner: `root`, consuming the wasm-gen-2 slice on
   `wasm/nested-boxed-scalar-layout`. The implementation rebased without
