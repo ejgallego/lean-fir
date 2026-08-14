@@ -240,6 +240,13 @@ zero host resident-allocation calls, and zero diagnostic-clock reads; result
 scratch is still cleared and rewound. A final `dispatchTickTimed` audit checks
 that the post-production frontier remains exactly flat.
 
+The exact linked-module ratchets include the accepted proof-indexed resident
+Array implementation. Source declaration, retained-function, and helper
+inventories are unchanged from the prior package; only the generic Array helper
+bodies changed. The v3 and selection complete modules are respectively 32,334
+and 35,370 bytes, with their full SHA-256 identities pinned by the package
+generators in addition to `SHA256SUMS`.
+
 The selection package exports the two generic source entries, the bit-exact
 tick façade, and the four allocator operations:
 

@@ -60,7 +60,9 @@ const expectedClosure = Object.freeze({
   residentHelperSha256:
     "aee31058e18e2b2ac5c7e4d5e8775afb0073b48f6a84d01a19e10d5a657c7dda",
   baseWasmBytes: 19097,
-  completeWasmBytes: 32205,
+  completeWasmBytes: 32334,
+  completeWasmSha256:
+    "8fc7e56bd597163153e35e24a0288a22f8f3bde6f40906ea332661d91845fed5",
 });
 const outputNames = [
   "BUILD.json",
@@ -249,6 +251,8 @@ assert.equal(baseWasm.byteLength, expectedClosure.baseWasmBytes,
   "Illuminate base Wasm size changed");
 assert.equal(wasm.byteLength, expectedClosure.completeWasmBytes,
   "Illuminate complete-runtime Wasm size changed");
+assert.equal(wasmHash, expectedClosure.completeWasmSha256,
+  "Illuminate complete-runtime Wasm bytes changed");
 
 const build = {
   schemaVersion: "fir.illuminate-player.build/v1",
