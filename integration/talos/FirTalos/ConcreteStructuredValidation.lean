@@ -515,6 +515,54 @@ structure ConcreteStructuredValidatedSaturatedCallReadyOutcome
     targetFrames
   agrees : frames.supported.Agrees core.resources.suspended
 
+/-- A closed yielded result.  No active code remains to validate; all static
+validation needed for a nonterminal successor lives in the suspended caller
+stack that will be restored by the pop transition. -/
+structure ConcreteStructuredValidatedReturnedOutcome
+    (program : Fir.LeanIR.ImpureProgram)
+    (context : Fir.Wasm.Context)
+    (functionCode : Lean.Compiler.LCNF.Code .impure)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts)
+    (externals : ExternalImpl)
+    (labels : List Lean.FVarId)
+    (entryRuntime : RuntimeState)
+    (entryStore : Wasm.Store Host)
+    (entryWitness : RefinementWitness)
+    (functionResult : AbiKind)
+    (callerExpectedResult : Option AbiKind)
+    (facts : ReuseCapacityFacts)
+    (remainingBytes : Nat)
+    (sourceRuntime : RuntimeState)
+    (sourceEnv : Env)
+    (sourceValue : Value)
+    (targetStore : Wasm.Store Host)
+    (targetLocals : Wasm.Locals)
+    (witness : RefinementWitness)
+    (kind : AbiKind)
+    (physical : Wasm.Value)
+    (source : MachineState)
+    (target : StructuredWasmState Host) : Prop where
+  activeResult : spec.sourceResultKind = functionResult
+  contextCaches :
+    context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program
+  yielded : ConcreteStructuredYieldFocus context sourceFunction sourceRuntime
+    sourceEnv sourceValue targetStore targetLocals witness kind physical source
+    target
+  compatible : ConcreteStructuredResultCompatible kind callerExpectedResult
+  resources : ConcreteStructuredResourceStack program context sourceModule
+    sourceFunction externals entryRuntime sourceRuntime entryStore targetStore
+    entryWitness witness facts remainingBytes sourceEnv targetLocals
+    functionResult callerExpectedResult source.frames target.frames
+  frames : ConcreteStructuredValidatedFrameStack program sourceModule
+    targetModule hosts functionResult callerExpectedResult source.frames
+    target.frames
+  agrees : frames.supported.Agrees resources.suspended
+
 /-- Module-wide closed relation for active generated code.  The constructor
 hides the current generated function, entry anchor, resource budget, residual
 validator state, and compiler focus while retaining the proof that the active
@@ -637,6 +685,35 @@ inductive ConcreteStructuredValidatedCodeGlobalOutcome
         callerExpectedResult facts remainingBytes continuation callerJoins
         sourceFrames targetStore callerLocals targetValue targetRest targetFrames
         witness resultIndex source target) :
+      ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
+        targetModule hosts externals source target
+  | returned
+      {context : Fir.Wasm.Context}
+      {functionCode : Lean.Compiler.LCNF.Code .impure}
+      {sourceFunction : Fir.Wasm.Function}
+      {spec : ConcreteSupportedFunction program context functionCode
+        sourceModule sourceFunction targetModule hosts}
+      {labels : List Lean.FVarId}
+      {entryRuntime sourceRuntime : RuntimeState}
+      {entryStore targetStore : Wasm.Store Host}
+      {entryWitness witness : RefinementWitness}
+      {functionResult : AbiKind}
+      {callerExpectedResult : Option AbiKind}
+      {facts : ReuseCapacityFacts}
+      {remainingBytes : Nat}
+      {sourceEnv : Env}
+      {sourceValue : Value}
+      {targetLocals : Wasm.Locals}
+      {kind : AbiKind}
+      {physical : Wasm.Value}
+      {source : MachineState}
+      {target : StructuredWasmState Host}
+      (related : ConcreteStructuredValidatedReturnedOutcome program context
+        functionCode sourceModule sourceFunction targetModule hosts spec
+        externals labels entryRuntime entryStore entryWitness functionResult
+        callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+        sourceValue targetStore targetLocals witness kind physical source
+        target) :
       ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
         targetModule hosts externals source target
 
@@ -783,6 +860,45 @@ theorem
   .saturatedReady row related.sharedCapacity related.core
     related.contextCaches related.frames.supported related.agrees
 
+/-- Forget validation from a yielded state while retaining its exact result,
+resource stack, and production caller protocol. -/
+theorem ConcreteStructuredValidatedReturnedOutcome.toSupportedOutcome
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {sourceValue : Value}
+    {targetLocals : Wasm.Locals}
+    {kind : AbiKind}
+    {physical : Wasm.Value}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedReturnedOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec
+      externals labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      sourceValue targetStore targetLocals witness kind physical source target) :
+    ConcreteStructuredSupportedOutcome program context functionCode sourceModule
+      sourceFunction targetModule hosts spec externals labels entryRuntime
+      entryStore entryWitness functionResult callerExpectedResult source target :=
+  .returned related.yielded related.compatible related.resources
+    related.contextCaches related.frames.supported related.agrees
+
 /-- Attach current-node admission to the closed admission-free relation.  The
 admission remains a one-step classifier: it contains neither the source step
 nor a target path, and the closed validation evidence is not duplicated in
@@ -850,6 +966,8 @@ theorem ConcreteStructuredValidatedCodeGlobalOutcome.toSupportedGlobal
       exact ready.toSupportedOutcome.toGlobal ready.activeResult
   | saturatedReady ready =>
       exact ready.toSupportedOutcome.toGlobal ready.activeResult
+  | returned returned =>
+      exact returned.toSupportedOutcome.toGlobal returned.activeResult
 
 /-- Reassemble the closed active-code branch after a local core theorem has
 advanced both controls and supplied the exact frame equalities.  Static caller
@@ -1867,6 +1985,78 @@ theorem
     ConcreteStructuredValidatedCodeGlobalOutcome.code calleeResultAt
       nextOutcome⟩
   omega
+
+/-- A validated return enters the closed yielded branch.  Current-node
+admission supplies only the compiled result kind; the concrete theorem derives
+the semantic/physical result and both machine paths, while suspended caller
+validation is transported across the unchanged-frame equalities. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_return_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {result : Lean.FVarId}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.return result) targetStore targetLocals targetCode witness source target)
+    (admitted : ConcreteStructuredCodeStepAdmission context sourceModule
+      externals functionResult facts sourceRuntime sourceEnv 0
+      (.return result))
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
+          targetModule hosts externals sourceAfter targetAfter := by
+  have pointwise := related.toPointwise admitted (by omega)
+  obtain ⟨targetAfter, sourceValue, actualKind, physical, targetPath, yielded,
+      compatible, resources, sourceFramesEq, targetFramesEq⟩ :=
+    pointwise.advance_return spec sourceStep
+  obtain ⟨supportedAfter, agreesAfter⟩ := related.agrees.reindex
+    sourceFramesEq targetFramesEq resources.suspended
+  have validationAfter :
+      ConcreteStructuredSuspendedValidation program functionResult
+        callerExpectedResult sourceAfter.frames := by
+    rw [sourceFramesEq]
+    exact related.frames.validation
+  have framesAfter :
+      ConcreteStructuredValidatedFrameStack program sourceModule targetModule
+        hosts functionResult callerExpectedResult sourceAfter.frames
+        targetAfter.frames :=
+    ⟨supportedAfter, validationAfter⟩
+  have returned :
+      ConcreteStructuredValidatedReturnedOutcome program context functionCode
+        sourceModule sourceFunction targetModule hosts spec externals labels
+        entryRuntime entryStore entryWitness functionResult
+        callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+        sourceValue targetStore targetLocals witness actualKind physical
+        sourceAfter targetAfter :=
+    ⟨activeResult, related.contextCaches, yielded, compatible, resources,
+      framesAfter, agreesAfter⟩
+  exact ⟨targetAfter, targetPath,
+    ConcreteStructuredValidatedCodeGlobalOutcome.returned returned⟩
 
 /-- Persistent ownership increments are erased by lowering and preserve the
 complete residual validator state. -/
