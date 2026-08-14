@@ -354,6 +354,30 @@ def stringAppendSelfShared (value : String) : String × String :=
   let result := String.Internal.append value value
   (value, result)
 
+/-!
+A nullary declaration returns a heap owner with two heap children. Lean marks
+the complete reachable graph persistent when it publishes the declaration
+cache. Reusing the declaration after an ownership-sensitive String operation
+therefore distinguishes recursive cache persistence from a shallow cached
+root.
+-/
+structure CachedHeapOwner where
+  text : String
+  payload : Nat
+
+@[noinline]
+def cachedHeapOwner : CachedHeapOwner :=
+  { text := "cached\nα🙂", payload := 18446744073709551616 }
+
+@[noinline]
+def cachedHeapOwnerChildReuse
+    (mutate : Bool) : CachedHeapOwner × String × CachedHeapOwner :=
+  let first := cachedHeapOwner
+  let child := first.text
+  let result := if mutate then String.Internal.append child "!" else child
+  let second := cachedHeapOwner
+  (first, result, second)
+
 @[noinline]
 def stringPushnNonBmp (source : String) (count : Nat) : String :=
   String.Internal.pushn source '😀' count
@@ -2876,6 +2900,16 @@ private def growReleaseSharedResultDatum
 private def stringPairDatum (value : String × String) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[.string value.1, .string value.2]
 
+private def cachedHeapOwnerDatum
+    (value : Source.CachedHeapOwner) : ValidationDatum :=
+  .ctor "CachedHeapOwner.mk" 0 #[.string value.text, .nat value.payload]
+
+private def cachedHeapOwnerChildReuseDatum
+    (value : Source.CachedHeapOwner × String × Source.CachedHeapOwner) :
+    ValidationDatum :=
+  .ctor "Prod.mk" 0 #[cachedHeapOwnerDatum value.1,
+    .ctor "Prod.mk" 0 #[.string value.2.1, cachedHeapOwnerDatum value.2.2]]
+
 private def natPairDatum (value : Nat × Nat) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[.nat value.1, .nat value.2]
 
@@ -3110,6 +3144,13 @@ private def repeatedCaptureBoxSchema : ValidationSchema :=
 private def repeatedCaptureBoxTripleSchema : ValidationSchema :=
   .ctor "Prod.mk" 0 #[repeatedCaptureBoxSchema,
     .ctor "Prod.mk" 0 #[repeatedCaptureBoxSchema, .nat]]
+
+private def cachedHeapOwnerSchema : ValidationSchema :=
+  .ctor "CachedHeapOwner.mk" 0 #[.string, .nat]
+
+private def cachedHeapOwnerChildReuseSchema : ValidationSchema :=
+  .ctor "Prod.mk" 0 #[cachedHeapOwnerSchema,
+    .ctor "Prod.mk" 0 #[.string, cachedHeapOwnerSchema]]
 
 private def tailByteOwnerSchema : ValidationSchema :=
   .ctor "TailByteOwner.mk" 0 #[.bytes, .string]
@@ -3908,6 +3949,19 @@ private def pairedExternalCallFormTrace : Array String :=
 
 private def sharedStringAppendFormTrace : Array String :=
   #["inc", "fap", "extern", "ctor", "return"]
+
+private def cachedHeapOwnerChildReuseSkippedFormTrace : Array String :=
+  #["fap", "fap", "fap", "lit", "return", "fap", "lit", "return", "inc", "inc",
+    "ctor", "return", "inc", "return", "join", "cases", "oproj", "inc", "jump",
+    "inc", "ctor", "ctor", "return"]
+
+private def cachedHeapOwnerChildReuseTakenFormTrace : Array String :=
+  #["fap", "fap", "fap", "lit", "return", "fap", "lit", "return", "inc", "inc",
+    "ctor", "return", "inc", "return", "join", "cases", "oproj", "fap", "lit",
+    "return", "inc", "fap", "extern", "jump", "inc", "ctor", "ctor", "return"]
+
+private def cachedHeapOwnerAdministrativeKinds : Array String :=
+  #["admin:invoke-name", "admin:yield-bind", "admin:yield-cache", "admin:yield-done"]
 
 private def stringPushnFormTrace : Array String :=
   #["lit", "fap", "extern", "return"]
@@ -5299,6 +5353,80 @@ private def preConversionCases : Array Case := #[
     requiredExecutedExternalTrace := some #[``String.Internal.append]
     provenance := firProvenance
       "Use one retained String as both consumed left and borrowed right append operands" },
+  { id := "cached-heap-owner-child-reuse-skipped"
+    entry := ``Source.cachedHeapOwnerChildReuse
+    dependencies := #[``Source.cachedHeapOwner]
+    args := #[.bool false]
+    argSchemas := #[.bool]
+    resultSchema := cachedHeapOwnerChildReuseSchema
+    native := fun _ => cachedHeapOwnerChildReuseDatum
+      (Source.cachedHeapOwnerChildReuse false)
+    tags := #["stress", "ownership", "persistent", "cache", "nullary-cache",
+      "recursive-persistence", "constructor", "object", "heap", "string",
+      "large-nat", "repeated-call", "cache-miss", "cache-hit", "initialization",
+      "alias", "path-exclusion"]
+    requiredLcnfForms :=
+      #["cases", "ctor", "extern", "fap", "inc", "join", "jump", "lit", "oproj",
+        "return"]
+    requiredExecutedLcnfForms :=
+      #["cases", "ctor", "fap", "inc", "join", "jump", "lit", "oproj", "return"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "cases", minimum := 1, maximum := some 1 },
+        { form := "ctor", minimum := 3, maximum := some 3 },
+        { form := "extern", minimum := 0, maximum := some 0 },
+        { form := "fap", minimum := 4, maximum := some 4 },
+        { form := "inc", minimum := 5, maximum := some 5 },
+        { form := "join", minimum := 1, maximum := some 1 },
+        { form := "jump", minimum := 1, maximum := some 1 },
+        { form := "lit", minimum := 2, maximum := some 2 },
+        { form := "oproj", minimum := 1, maximum := some 1 },
+        { form := "return", minimum := 5, maximum := some 5 }]
+    requiredExecutedLcnfFormTrace := some cachedHeapOwnerChildReuseSkippedFormTrace
+    requiredAdministrativeStepKinds := cachedHeapOwnerAdministrativeKinds
+    requiredExternals := #[``String.Internal.append]
+    requiredExecutedExternalCounts :=
+      #[{ external := ``String.Internal.append, minimum := 0, maximum := some 0 }]
+    requiredExecutedExternalTrace := some #[]
+    provenance := firProvenance
+      "Reuse a recursively persistent cached owner while skipping child mutation" },
+  { id := "cached-heap-owner-child-reuse-taken"
+    entry := ``Source.cachedHeapOwnerChildReuse
+    dependencies := #[``Source.cachedHeapOwner]
+    args := #[.bool true]
+    argSchemas := #[.bool]
+    resultSchema := cachedHeapOwnerChildReuseSchema
+    native := fun _ => cachedHeapOwnerChildReuseDatum
+      (Source.cachedHeapOwnerChildReuse true)
+    tags := #["stress", "ownership", "persistent", "cache", "nullary-cache",
+      "recursive-persistence", "constructor", "object", "heap", "string",
+      "large-nat", "repeated-call", "cache-miss", "cache-hit", "initialization",
+      "copy-on-write", "mutation", "external"]
+    requiredLcnfForms :=
+      #["cases", "ctor", "extern", "fap", "inc", "join", "jump", "lit", "oproj",
+        "return"]
+    requiredExecutedLcnfForms :=
+      #["cases", "ctor", "extern", "fap", "inc", "join", "jump", "lit", "oproj",
+        "return"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "cases", minimum := 1, maximum := some 1 },
+        { form := "ctor", minimum := 3, maximum := some 3 },
+        { form := "extern", minimum := 1, maximum := some 1 },
+        { form := "fap", minimum := 6, maximum := some 6 },
+        { form := "inc", minimum := 5, maximum := some 5 },
+        { form := "join", minimum := 1, maximum := some 1 },
+        { form := "jump", minimum := 1, maximum := some 1 },
+        { form := "lit", minimum := 3, maximum := some 3 },
+        { form := "oproj", minimum := 1, maximum := some 1 },
+        { form := "return", minimum := 6, maximum := some 6 }]
+    requiredExecutedLcnfFormTrace := some cachedHeapOwnerChildReuseTakenFormTrace
+    requiredAdministrativeStepKinds := cachedHeapOwnerAdministrativeKinds
+    requiredExternals := #[``String.Internal.append]
+    requiredExecutedExternals := #[``String.Internal.append]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.append]
+    requiredExecutedExternalTrace := some #[``String.Internal.append]
+    provenance := firProvenance
+      "Append through a cached owner's persistent child, then reuse the cached graph" },
   { id := "string-pushn-zero"
     entry := ``Source.stringPushnNonBmp
     args := #[.string "Aé", .nat 0]

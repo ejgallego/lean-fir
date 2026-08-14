@@ -496,6 +496,21 @@
       },
       {
         "tier": "source-lcnf",
+        "tag": "cache",
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "cache-hit",
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "cache-miss",
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
         "tag": "call-boundary",
         "minimumCases": 2
       },
@@ -616,6 +631,11 @@
       },
       {
         "tier": "source-lcnf",
+        "tag": "initialization",
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
         "tag": "literal",
         "minimumCases": 26
       },
@@ -643,6 +663,11 @@
         "tier": "source-lcnf",
         "tag": "negative-one",
         "minimumCases": 10
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "nullary-cache",
+        "minimumCases": 2
       },
       {
         "tier": "source-lcnf",
@@ -676,6 +701,11 @@
       },
       {
         "tier": "source-lcnf",
+        "tag": "persistent",
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
         "tag": "polymorphism",
         "minimumCases": 3
       },
@@ -698,6 +728,11 @@
         "tier": "source-lcnf",
         "tag": "read",
         "minimumCases": 3
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "recursive-persistence",
+        "minimumCases": 2
       },
       {
         "tier": "source-lcnf",
@@ -728,6 +763,11 @@
         "tier": "source-lcnf",
         "tag": "repeated-application",
         "minimumCases": 3
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "repeated-call",
+        "minimumCases": 2
       },
       {
         "tier": "source-lcnf",
@@ -906,6 +946,21 @@
       },
       {
         "tier": "wasm-v8",
+        "tag": "cache",
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "cache-hit",
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "cache-miss",
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
         "tag": "call-boundary",
         "minimumCases": 2
       },
@@ -996,6 +1051,11 @@
       },
       {
         "tier": "wasm-v8",
+        "tag": "initialization",
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
         "tag": "literal",
         "minimumCases": 26
       },
@@ -1023,6 +1083,11 @@
         "tier": "wasm-v8",
         "tag": "negative-one",
         "minimumCases": 10
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "nullary-cache",
+        "minimumCases": 2
       },
       {
         "tier": "wasm-v8",
@@ -1056,6 +1121,11 @@
       },
       {
         "tier": "wasm-v8",
+        "tag": "persistent",
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
         "tag": "polymorphism",
         "minimumCases": 3
       },
@@ -1072,6 +1142,11 @@
       {
         "tier": "wasm-v8",
         "tag": "proof-erasure",
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "recursive-persistence",
         "minimumCases": 2
       },
       {
@@ -1093,6 +1168,11 @@
         "tier": "wasm-v8",
         "tag": "release-fidelity",
         "minimumCases": 4
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "repeated-call",
+        "minimumCases": 2
       },
       {
         "tier": "wasm-v8",
@@ -1308,6 +1388,45 @@
         "name": "bytes-out-of-bounds",
         "allTags": ["bytes", "out-of-bounds"],
         "minimumCases": 3
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "cache-child-copy-on-write",
+        "allTags": [
+          "cache",
+          "copy-on-write",
+          "mutation",
+          "persistent",
+          "recursive-persistence",
+          "string"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "cache-child-path-exclusion",
+        "allTags": [
+          "cache",
+          "path-exclusion",
+          "persistent",
+          "recursive-persistence",
+          "string"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "cache-recursive-persistence",
+        "allTags": [
+          "cache",
+          "cache-hit",
+          "cache-miss",
+          "nullary-cache",
+          "persistent",
+          "recursive-persistence",
+          "repeated-call"
+        ],
+        "minimumCases": 2
       },
       {
         "tier": "source-lcnf",
@@ -2216,6 +2335,45 @@
         "name": "bytes-out-of-bounds",
         "allTags": ["bytes", "out-of-bounds"],
         "minimumCases": 3
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "cache-child-copy-on-write",
+        "allTags": [
+          "cache",
+          "copy-on-write",
+          "mutation",
+          "persistent",
+          "recursive-persistence",
+          "string"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "cache-child-path-exclusion",
+        "allTags": [
+          "cache",
+          "path-exclusion",
+          "persistent",
+          "recursive-persistence",
+          "string"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "cache-recursive-persistence",
+        "allTags": [
+          "cache",
+          "cache-hit",
+          "cache-miss",
+          "nullary-cache",
+          "persistent",
+          "recursive-persistence",
+          "repeated-call"
+        ],
+        "minimumCases": 2
       },
       {
         "tier": "wasm-v8",
