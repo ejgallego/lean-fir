@@ -5466,6 +5466,466 @@ theorem ConcreteStructuredAlignedValidationState.admit_setTag_of_step
   obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees⟩ := validated
   exact focus.admit_setTag_of_step agrees related sourceStep
 
+/-- Source-level descriptor typing for one object field.
+
+This is the exact invariant absent from representation-only LCNF validation:
+the object currently named by `objectId` has `kind` at `index` in every
+concrete descriptor related to that source value. It mentions neither emitted
+code nor a target execution and is therefore a typing premise, not a
+translation certificate. -/
+def ConcreteObjectFieldKindAligned
+    (sourceEnv : Env) (objectId : Lean.FVarId) (index : Nat)
+    (kind : AbiKind) : Prop :=
+  ∀ {sourceObject : Value} {witness : RefinementWitness}
+      {objectWord : Word32} {info : Lean.Compiler.LCNF.CtorInfo}
+      {fieldKinds : Array AbiKind},
+    lookupValue sourceEnv objectId = .ok sourceObject →
+      ValueRel witness .tobject (.word32 objectWord) sourceObject →
+        witness.descriptors.lookup? objectWord =
+            some (.constructor info fieldKinds) →
+          fieldKinds[index]? = some kind
+
+/-- The FVar mutation specialization connects descriptor typing to the exact
+payload kind selected by production lowering. -/
+def ConcreteObjectFieldFVarTyped
+    (context : Fir.Wasm.Context) (sourceEnv : Env)
+    (objectId fieldId : Lean.FVarId) (index : Nat) : Prop :=
+  ∀ {fieldKind : AbiKind},
+    Fir.Wasm.getLocal context fieldId =
+        .ok (.localGet fieldId, fieldKind) →
+      ConcreteObjectFieldKindAligned sourceEnv objectId index fieldKind
+
+/-- Validation of an FVar object-field write fixes the object lane, payload
+lane, and the payload's object-field classification. -/
+theorem ConcreteStructuredValidationFocus.oset_fvar_eq
+    {program : Fir.LeanIR.ImpureProgram}
+    {joins : Fir.Wasm.JoinPoints}
+    {locals : Fir.Wasm.LocalKinds}
+    {expectedResult : Option Fir.Wasm.AbiKind}
+    {facts : Fir.Wasm.SupportedCaseFacts}
+    {sharing : Fir.Wasm.SupportedSharingFacts}
+    {objectId fieldId : Lean.FVarId} {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredValidationFocus program joins locals
+      expectedResult facts sharing
+      (.oset objectId index (.fvar fieldId) continuation)) :
+    ∃ fieldKind,
+      Fir.Wasm.findLocalKind? locals objectId = some .object ∧
+        Fir.Wasm.findLocalKind? locals fieldId = some fieldKind ∧
+        fieldKind.isObjectField = true := by
+  have supported := validated.supported
+  simp [Fir.Wasm.supportedCodeWithJoins, Fir.Wasm.supportedArgKind?] at supported
+  split at supported <;> simp_all
+
+/-- Residual-local agreement turns the FVar object-field guards into the exact
+production compiler equations. -/
+theorem ConcreteStructuredValidationFocus.oset_fvar_compiler
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {joins : Fir.Wasm.JoinPoints}
+    {locals : Fir.Wasm.LocalKinds}
+    {expectedResult : Option Fir.Wasm.AbiKind}
+    {facts : Fir.Wasm.SupportedCaseFacts}
+    {sharing : Fir.Wasm.SupportedSharingFacts}
+    {objectId fieldId : Lean.FVarId} {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredValidationFocus program joins locals
+      expectedResult facts sharing
+      (.oset objectId index (.fvar fieldId) continuation))
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals) :
+    ∃ fieldKind,
+      Fir.Wasm.getLocal context objectId =
+          .ok (.localGet objectId, .object) ∧
+        Fir.Wasm.getLocal context fieldId =
+          .ok (.localGet fieldId, fieldKind) ∧
+        fieldKind.isObjectField = true := by
+  obtain ⟨fieldKind, objectFound, fieldFound, fieldObjectKind⟩ :=
+    validated.oset_fvar_eq
+  exact ⟨fieldKind, agrees objectFound, agrees fieldFound, fieldObjectKind⟩
+
+/-- Validation of an erased object-field write fixes the object lane; the
+payload lane is definitionally the canonical erased lane. -/
+theorem ConcreteStructuredValidationFocus.oset_erased_eq
+    {program : Fir.LeanIR.ImpureProgram}
+    {joins : Fir.Wasm.JoinPoints}
+    {locals : Fir.Wasm.LocalKinds}
+    {expectedResult : Option Fir.Wasm.AbiKind}
+    {facts : Fir.Wasm.SupportedCaseFacts}
+    {sharing : Fir.Wasm.SupportedSharingFacts}
+    {objectId : Lean.FVarId} {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredValidationFocus program joins locals
+      expectedResult facts sharing
+      (.oset objectId index .erased continuation)) :
+    Fir.Wasm.findLocalKind? locals objectId = some .object := by
+  have supported := validated.supported
+  simp only [Fir.Wasm.supportedCodeWithJoins] at supported
+  cases objectFound : Fir.Wasm.findLocalKind? locals objectId with
+  | none => simp [objectFound] at supported
+  | some objectKind =>
+      cases objectKind <;>
+        simp [objectFound, Fir.Wasm.supportedArgKind?] at supported ⊢
+
+/-- Residual-local agreement turns the erased object-field guard into the
+exact production object-local equation. -/
+theorem ConcreteStructuredValidationFocus.oset_erased_compiler
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {joins : Fir.Wasm.JoinPoints}
+    {locals : Fir.Wasm.LocalKinds}
+    {expectedResult : Option Fir.Wasm.AbiKind}
+    {facts : Fir.Wasm.SupportedCaseFacts}
+    {sharing : Fir.Wasm.SupportedSharingFacts}
+    {objectId : Lean.FVarId} {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredValidationFocus program joins locals
+      expectedResult facts sharing
+      (.oset objectId index .erased continuation))
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals) :
+    Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, .object) :=
+  agrees validated.oset_erased_eq
+
+/-- A successful semantic object-field update determines its heap constructor
+and exact object-slot bound. -/
+private theorem setObjectField_shape_for_admission
+    {runtime nextRuntime : RuntimeState} {object field : Value} {index : Nat}
+    (updated : setObjectField runtime object index field = .ok nextRuntime) :
+    ∃ location cell semantic,
+      object = .object (.heap location) ∧
+        findCell? runtime.heap location = some cell ∧
+        cell.live = true ∧
+        cell.object = .ctor semantic ∧
+        index < semantic.objectFields.size := by
+  unfold setObjectField modifyConstructor at updated
+  simp only [Bind.bind, Except.bind] at updated
+  generalize constructorEq :
+    getConstructor runtime object = constructorResult at updated
+  cases constructorResult with
+  | error fault => simp at updated
+  | ok triple =>
+      obtain ⟨location, cell, semantic⟩ := triple
+      simp only at updated
+      by_cases bounded : index < semantic.objectFields.size
+      · rw [dif_pos bounded] at updated
+        have shape := getConstructor_shape_for_admission constructorEq
+        exact ⟨location, cell, semantic, shape.1, shape.2.1, shape.2.2.1,
+          shape.2.2.2, bounded⟩
+      · rw [dif_neg bounded] at updated
+        simp at updated
+
+/-- A successful FVar object-field source step exposes all dynamic mutation
+facts without inspecting the target. -/
+theorem ConcreteStructuredCodeFocus.oset_fvar_source_of_step
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId fieldId : Lean.FVarId}
+    {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv
+      (.oset objectId index (.fvar fieldId) continuation) targetStore
+      targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ location cell semantic field nextRuntime,
+      lookupValue sourceEnv objectId = .ok (.object (.heap location)) ∧
+        lookupValue sourceEnv fieldId = .ok field ∧
+        setObjectField sourceRuntime (.object (.heap location)) index field =
+          .ok nextRuntime ∧
+        findCell? sourceRuntime.heap location = some cell ∧
+        cell.live = true ∧
+        cell.object = .ctor semantic ∧
+        index < semantic.objectFields.size := by
+  rcases source with
+    ⟨sourceProgram, sourceControl, sourceStateEnv, sourceJoins, sourceFrames,
+      sourceStateRuntime⟩
+  have sourceControlEq := related.sourceControlEq
+  change sourceControl =
+    .code (.oset objectId index (.fvar fieldId) continuation) at sourceControlEq
+  subst sourceControl
+  have sourceEnvEq := related.sourceEnvEq
+  change sourceStateEnv = sourceEnv at sourceEnvEq
+  subst sourceStateEnv
+  have sourceRuntimeEq := related.sourceRuntimeEq
+  change sourceStateRuntime = sourceRuntime at sourceRuntimeEq
+  subst sourceStateRuntime
+  cases objectResult : lookupValue sourceEnv objectId with
+  | error fault =>
+      simp [executeStep, coreStep, objectResult, fail] at sourceStep
+  | ok sourceObject =>
+      cases fieldResult : lookupValue sourceEnv fieldId with
+      | error fault =>
+          have evalField : evalArg sourceEnv (.fvar fieldId) = .error fault := by
+            change lookupValue sourceEnv fieldId = .error fault
+            exact fieldResult
+          simp [executeStep, coreStep, objectResult, evalField, fail] at sourceStep
+      | ok sourceField =>
+          have evalField : evalArg sourceEnv (.fvar fieldId) = .ok sourceField := by
+            change lookupValue sourceEnv fieldId = .ok sourceField
+            exact fieldResult
+          cases updateResult :
+              setObjectField sourceRuntime sourceObject index sourceField with
+          | error fault =>
+              simp [executeStep, coreStep, objectResult, evalField, updateResult,
+                fail] at sourceStep
+          | ok nextRuntime =>
+              have updated := updateResult
+              obtain ⟨location, cell, semantic, objectEq, found, live,
+                  semanticEq, bounded⟩ :=
+                setObjectField_shape_for_admission updated
+              rw [objectEq] at updated
+              exact ⟨location, cell, semantic, sourceField, nextRuntime,
+                congrArg Except.ok objectEq, rfl,
+                updated, found, live,
+                semanticEq, bounded⟩
+
+/-- A successful erased object-field source step exposes the same dynamic
+facts with its canonical erased payload. -/
+theorem ConcreteStructuredCodeFocus.oset_erased_source_of_step
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.oset objectId index .erased continuation)
+      targetStore targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ location cell semantic nextRuntime,
+      lookupValue sourceEnv objectId = .ok (.object (.heap location)) ∧
+        setObjectField sourceRuntime (.object (.heap location)) index .erased =
+          .ok nextRuntime ∧
+        findCell? sourceRuntime.heap location = some cell ∧
+        cell.live = true ∧
+        cell.object = .ctor semantic ∧
+        index < semantic.objectFields.size := by
+  rcases source with
+    ⟨sourceProgram, sourceControl, sourceStateEnv, sourceJoins, sourceFrames,
+      sourceStateRuntime⟩
+  have sourceControlEq := related.sourceControlEq
+  change sourceControl = .code (.oset objectId index .erased continuation)
+    at sourceControlEq
+  subst sourceControl
+  have sourceEnvEq := related.sourceEnvEq
+  change sourceStateEnv = sourceEnv at sourceEnvEq
+  subst sourceStateEnv
+  have sourceRuntimeEq := related.sourceRuntimeEq
+  change sourceStateRuntime = sourceRuntime at sourceRuntimeEq
+  subst sourceStateRuntime
+  cases objectResult : lookupValue sourceEnv objectId with
+  | error fault =>
+      simp [executeStep, coreStep, evalArg, objectResult, fail] at sourceStep
+  | ok sourceObject =>
+      cases updateResult :
+          setObjectField sourceRuntime sourceObject index .erased with
+      | error fault =>
+          simp [executeStep, coreStep, evalArg, objectResult, updateResult,
+            fail] at sourceStep
+      | ok nextRuntime =>
+          have updated := updateResult
+          obtain ⟨location, cell, semantic, objectEq, found, live, semanticEq,
+              bounded⟩ := setObjectField_shape_for_admission updated
+          rw [objectEq] at updated
+          exact ⟨location, cell, semantic, nextRuntime,
+            congrArg Except.ok objectEq, updated, found, live, semanticEq,
+            bounded⟩
+
+/-- FVar object-field mutation is a complete current-step admission case once
+the explicit source descriptor-typing invariant is supplied. -/
+theorem ConcreteStructuredValidationFocus.admit_oset_fvar_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {joins : Fir.Wasm.JoinPoints}
+    {locals : Fir.Wasm.LocalKinds}
+    {expectedResult : AbiKind}
+    {validatorFacts : Fir.Wasm.SupportedCaseFacts}
+    {sharing : Fir.Wasm.SupportedSharingFacts}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId fieldId : Lean.FVarId}
+    {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (validated : ConcreteStructuredValidationFocus program joins locals
+      (some expectedResult) validatorFacts sharing
+      (.oset objectId index (.fvar fieldId) continuation))
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals)
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv
+      (.oset objectId index (.fvar fieldId) continuation) targetStore
+      targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (fieldTyped : ConcreteObjectFieldFVarTyped context sourceEnv objectId
+      fieldId index) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv 0
+      (.oset objectId index (.fvar fieldId) continuation) := by
+  obtain ⟨fieldKind, objectCompiled, fieldCompiled, fieldObjectKind⟩ :=
+    validated.oset_fvar_compiler agrees
+  obtain ⟨location, cell, semantic, field, nextRuntime, objectLookup,
+      fieldLookup, updated, found, live, objectEq, indexValid⟩ :=
+    related.oset_fvar_source_of_step sourceStep
+  exact .objectFieldFVar
+    (.oset sourceRuntime nextRuntime sourceEnv objectId fieldId index
+      continuation location cell semantic field fieldKind objectCompiled
+      fieldCompiled fieldObjectKind objectLookup fieldLookup updated found live
+      objectEq indexValid (fun objectRelated descriptorFound =>
+        fieldTyped fieldCompiled objectLookup objectRelated descriptorFound))
+
+/-- Erased object-field mutation uses the same source typing boundary at the
+canonical erased descriptor kind. -/
+theorem ConcreteStructuredValidationFocus.admit_oset_erased_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {joins : Fir.Wasm.JoinPoints}
+    {locals : Fir.Wasm.LocalKinds}
+    {expectedResult : AbiKind}
+    {validatorFacts : Fir.Wasm.SupportedCaseFacts}
+    {sharing : Fir.Wasm.SupportedSharingFacts}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (validated : ConcreteStructuredValidationFocus program joins locals
+      (some expectedResult) validatorFacts sharing
+      (.oset objectId index .erased continuation))
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals)
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.oset objectId index .erased continuation)
+      targetStore targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (fieldTyped : ConcreteObjectFieldKindAligned sourceEnv objectId index
+      .erased) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv 0
+      (.oset objectId index .erased continuation) := by
+  have objectCompiled := validated.oset_erased_compiler agrees
+  obtain ⟨location, cell, semantic, nextRuntime, objectLookup, updated, found,
+      live, objectEq, indexValid⟩ :=
+    related.oset_erased_source_of_step sourceStep
+  exact .objectFieldErased
+    (.oset sourceRuntime nextRuntime sourceEnv objectId index continuation
+      location cell semantic objectCompiled objectLookup updated found live
+      objectEq indexValid (fun objectRelated descriptorFound =>
+        fieldTyped objectLookup objectRelated descriptorFound))
+
+/-- The aligned residual package closes FVar object-field admission under the
+same source descriptor-typing invariant. -/
+theorem ConcreteStructuredAlignedValidationState.admit_oset_fvar_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {expectedResult : AbiKind}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId fieldId : Lean.FVarId}
+    {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (validated : ConcreteStructuredAlignedValidationState program context
+      expectedResult (.oset objectId index (.fvar fieldId) continuation))
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv
+      (.oset objectId index (.fvar fieldId) continuation) targetStore
+      targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (fieldTyped : ConcreteObjectFieldFVarTyped context sourceEnv objectId
+      fieldId index) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv 0
+      (.oset objectId index (.fvar fieldId) continuation) := by
+  obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees⟩ := validated
+  exact focus.admit_oset_fvar_of_step agrees related sourceStep fieldTyped
+
+/-- The aligned residual package closes erased object-field admission under
+the canonical erased descriptor-typing invariant. -/
+theorem ConcreteStructuredAlignedValidationState.admit_oset_erased_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {expectedResult : AbiKind}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (validated : ConcreteStructuredAlignedValidationState program context
+      expectedResult (.oset objectId index .erased continuation))
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.oset objectId index .erased continuation)
+      targetStore targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (fieldTyped : ConcreteObjectFieldKindAligned sourceEnv objectId index
+      .erased) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv 0
+      (.oset objectId index .erased continuation) := by
+  obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees⟩ := validated
+  exact focus.admit_oset_erased_of_step agrees related sourceStep fieldTyped
+
 /-- Validation of a `USize` field write fixes both compiler-local lanes. -/
 theorem ConcreteStructuredValidationFocus.uset_eq
     {program : Fir.LeanIR.ImpureProgram}
