@@ -80,7 +80,8 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   and indexes all 2,171 final functions: 354 Lean source, 1,811 resident
   helpers, and six explicit optimizer-or-linked-runtime functions. The exact
   immutable package is
-  `integration/lean-zip/_build/lean-zip-raw-packages/669b965f6a98-30737b4e2ebf-a8a6d957b9a6df70599d`.
+  `integration/lean-zip/_build/lean-zip-raw-packages/752d2187b0cc-30737b4e2ebf-e1f5126677666dcf26b2`,
+  generated at the functional head and selected by the canonical local pointer.
 - Contracts: only the client-specific diagnostic package schema advances from
   `fir.lean-zip.raw.build/v2` to v3. Adapter API, input/output layout,
   ownership/reclamation, source semantics, semantic ABI, zero-import six-export
@@ -97,8 +98,9 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `products.json` publication error did not reproduce in the immediate focused
   retry or subsequent complete gate and produced no semantic finding.
 - Bug cards: none.
-- Result: `main` fast-forwards through `31035d5e`. The lean-zip consumer may
-  pin the remotely reachable main descendant; fresh-output catalog publication
+- Result: `main` fast-forwards through `31035d5e`; acceptance commit
+  `ca6fe5d0` is remotely reachable under the active main-publication lease. The
+  immutable package itself remains local-only. Fresh-output catalog publication
   and later performance work remain independent slices.
 
 ## Latest completed integration lease
