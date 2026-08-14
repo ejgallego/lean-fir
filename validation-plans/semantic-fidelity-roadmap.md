@@ -646,6 +646,46 @@ compiler/capture issue remains unresolved.
 State: S9 landed on `main` through clean ready handoff `5937df70`; functional
 head `84ef07e9` changes no shared contract.
 
+### S11/A-E1: repeated-child Array copy-on-write
+
+State: `ready` through functional head `13a8998f`; changes no shared semantic
+contract and remains independent of the S10 panic-observation bridge.
+
+This slice intersects generic Array ownership with a repeated heap-child DAG.
+One runner-materialized input owner contains an outside `ByteArray` alias and
+an `Array ByteArray`; nested-alias metadata makes both Array slots reuse that
+same outside object. The source retains the original Array while replacing its
+first slot through `Array.set!`, then mutates the outside child through
+`ByteArray.set!`. It returns the original Array, the updated Array, and the
+mutated child. Native Lean therefore observes two unchanged original children,
+the replacement plus one unchanged surviving child, and the independent
+`[42, 127, 128, 255]` copy. A missed retain during Array copy or an over-release
+during field replacement can no longer hide behind equal scalar values.
+
+The exact 24-transition final-LCNF path projects both input fields, executes one
+`isShared` branch and one `inc`, dispatches `Array.set!` followed by
+`ByteArray.set!`, writes the two returned owner fields through `oset`, and
+returns. The fixture pins all 20 executed forms, their exact counts and order,
+both external calls, and the invoke/bind/done administrative kinds. Native
+Lean, final LCNF, and real V8 agree on all three comparisons; both focused Wasm
+products and all 1,404 full-corpus products are opened under strace.
+
+The narrowing process found three infrastructure discrepancies before reaching
+the admitted ownership path. `FIR-BUG-impure-none-array-mkempty-validation-external`
+records that source Array literals compile through an unmodeled `Array.mkEmpty`
+in both validation candidates. `FIR-BUG-impure-none-array-getinternal-validation-external`
+records the analogous exact-name gap for the borrowed proof-backed
+`Array.getInternalBorrowed` operation. Neither shared runtime was weakened or
+changed in this lane. `FIR-BUG-validation-none-array-nested-alias-manifest` is
+fixed locally: the Python protocol mirror now descends through both `array` and
+`seq` schemas while retaining the common `seq` datum representation, with a
+unit regression in the 125-test harness suite.
+
+The checkpoint advances to 702 source cases, 711 aggregate unique cases, 1,413
+tier cases, 2,115 equal comparisons, 7,602 aggregate interpreter steps, 162 tag
+floors, and 253 conjunctive domains, with zero findings. The complete
+`make check` and 3,148-job Talos dependency-cone build pass.
+
 ### E3: constants, caches, and initialization
 
 Add native-oracle cases for zero-argument constants, initialization order,
