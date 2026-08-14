@@ -19,34 +19,65 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 - Integration owner: `wasm-gen`, temporarily acting as the integration owner
   on `main` by explicit user assignment. The lease covers landing coordination
   only; feature ownership remains with each lane.
-- Accepted baseline: `main` at `0cfc5505`, which contains the complete
-  `W7-LEAN-ZIP-CACHE-ISOLATED-CLOSURE-RATCHET` stack and its acceptance
-  record. The stale local mailbox thread is closed against this commit before
-  another feature landing.
+- Accepted baseline: `main` contains the complete
+  `W6-OBJECT-FIELD-TYPING-ADMISSION` stack through lane head `fe01cd1a` plus
+  its acceptance record. This proof documents but does not repair the missing
+  production descriptor-slot typing invariant.
 - Landing order:
-  1. W6 rebases its clean object-field typing-admission proof on `0cfc5505`,
-     reruns its required gates, and returns a clean tracked handoff.
-  2. Tooling isolates the final-function-index protocol as a clean prefix,
+  1. Tooling isolates the final-function-index protocol as a clean prefix,
      rebases it after the preceding acceptance, and leaves CPU profiling,
      selected-function views, and compiled-Array probes as independent later
      slices.
-  3. W7-2 separates the Verso post-G2 semantic closure review from the generic
+  2. W7-2 separates the Verso post-G2 semantic closure review from the generic
      immutable-package publisher refactor. Semantic/generator fixes land
      before the publisher consumer unless the lane documents a hard dependency.
-  4. W7-1 resumes the caller-owned Illuminate selection export from accepted
+  3. W7-1 resumes the caller-owned Illuminate selection export from accepted
      main. Its lean-zip function-sidecar consumer waits until the tooling
      protocol is accepted.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
   invalidating long deterministic package and external-engine gates.
-- Not ready: the tooling worktree has an untracked test fixture; the W7-2
-  worktree has an uncommitted bug-card edit; and the Array panic-observation
-  fixture request remains unacknowledged. None is integrated from dirty or
-  unclaimed state.
+- Not ready: the tooling worktree has an untracked test fixture and the W7-2
+  worktree has an uncommitted bug-card edit. The Array panic-observation
+  fixture request is now claimed and remains independent until it returns a
+  clean handoff. None is integrated from dirty state.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
+
+## Latest completed integration lease
+
+- Milestone: `W6-OBJECT-FIELD-TYPING-ADMISSION`.
+- Integration owner: `wasm-gen`, temporarily consuming the clean
+  `wasm/talos-runtime` handoff based directly on `main` at `05ada0bd`. The
+  functional proof head is `4bf39b80`; the accepted lane-mailbox head is
+  `fe01cd1a`.
+- Static admission: inversion of residual production validation supplies the
+  ordinary object lane, the selected FVar payload lane or canonical erased
+  lane, and the existing `isObjectField` classification.
+- Dynamic admission: one successful source `.oset` step supplies the live
+  constructor cell, semantic update, and exact slot bound. The new
+  `ConcreteObjectFieldKindAligned` source-typing boundary supplies only the
+  missing equality between the selected payload ABI kind and descriptor slot.
+  Both FVar and erased current-step cases then use the existing concrete
+  mutation admission without inspecting target execution or storing a
+  translation certificate.
+- Compiler discrepancy: production raw-LCNF validation does not yet establish
+  descriptor-slot kind alignment. Bug card
+  `FIR-BUG-wasm-none-object-field-kind-admission` is confirmed; this proof
+  slice deliberately does not claim to fix the accepted compiler domain.
+- Contracts: none. Source semantics, production validation, concrete
+  layout/runtime, symbolic Wasm, semantic ABI, resident-helper signatures,
+  emitted code, and W7 generation surfaces are unchanged.
+- Acceptance: the focused proof cone passes 3,124 jobs. On the final base,
+  `git diff --check`, complete `make check` (125 tests, 710 unique cases,
+  2,112/2,112 comparisons, zero findings, 182 active bug cards, and 25 mailbox
+  tests), and all 3,148 W6 Talos jobs pass.
+- Result: `main` fast-forwards through `fe01cd1a` plus this acceptance record.
+  Any production-validator or source-typing repair is a future isolated shared
+  contract; packed scalar mutation remains dependent on
+  `ScalarFieldMutationSafe` layout evidence.
 
 ## Latest completed integration lease
 
