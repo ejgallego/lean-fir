@@ -54,7 +54,7 @@ def specializationCalleeCandidates (name : Name) : Array Name := Id.run do
       candidates := candidates.push candidate
   return candidates.reverse
 
-private partial def sourceDeclarationAncestor? (sourceNames : Array Name) (name : Name) :
+private partial def sourceDeclarationAncestor? (sourceNames : Std.HashSet Name) (name : Name) :
     Option Name :=
   if sourceNames.contains name then
     some name
@@ -63,13 +63,12 @@ private partial def sourceDeclarationAncestor? (sourceNames : Array Name) (name 
   else
     sourceDeclarationAncestor? sourceNames name.getPrefix
 
-private def generatedNameOwnedBy (env : Environment) (sourceRoots : Array Name)
-    (name : Name) : Bool := Id.run do
+private def generatedNameOwnedBy (env : Environment)
+    (sourceRoots sourceNames : Std.HashSet Name) (name : Name) : Bool := Id.run do
   let callers := specializationCallerCandidates name
   if !callers.isEmpty then
     return callers.any sourceRoots.contains
-  let some moduleIndex := env.getModuleIdxFor? name | return false
-  let sourceNames := env.header.moduleData[moduleIndex]!.constNames
+  if (env.getModuleIdxFor? name).isNone then return false
   return (sourceDeclarationAncestor? sourceNames name).any sourceRoots.contains
 
 /--
@@ -108,7 +107,13 @@ that compilation.
 -/
 def forgetGeneratedCompilerModuleMappings (env : Environment)
     (moduleIndices : Array ModuleIdx) (sourceRoots : Array Name) : Environment :=
-  let isOwned := generatedNameOwnedBy env sourceRoots
+  let sourceRootSet := sourceRoots.foldl
+    (init := Std.HashSet.emptyWithCapacity sourceRoots.size) (·.insert ·)
+  let sourceNames := moduleIndices.foldl
+    (init := Std.HashSet.emptyWithCapacity (moduleIndices.size * 128))
+    fun names moduleIndex =>
+      env.header.moduleData[moduleIndex]!.constNames.foldl (·.insert ·) names
+  let isOwned := generatedNameOwnedBy env sourceRootSet sourceNames
   let mappings := sourceRoots.foldl (init := env.base.private.const2ModIdx)
     fun mappings name => mappings.erase name
   let mappings := moduleIndices.foldl (init := mappings)
