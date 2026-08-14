@@ -21,19 +21,21 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   only; feature ownership remains with each lane.
 - Accepted baseline: `main` contains the complete
   `W7-ILLUMINATE-SELECTION-CATALOG-EXPORT` stack through tracked lane head
-  `5081015a`. The functional generation head is `4b84f35b`; the package itself
-  remains local-only until its consumer authorizes publication.
+  `5081015a` and the independently isolated
+  `TOOLING-FINAL-FUNCTION-INDEX-PROTOCOL` through `7d0d9b3b`. The Illuminate
+  functional generation head is `4b84f35b`; the package itself remains
+  local-only until its consumer authorizes publication.
 - Landing order:
   1. W7-2 separates the Verso post-G2 semantic closure review from the generic
      immutable-package publisher refactor. Semantic/generator fixes land
      before the publisher consumer unless the lane documents a hard dependency.
-  2. Tooling returns explicitly authorized, clean heads for the optimized
-     final-function index protocol. CPU profiling, selected-function views,
-     the compiled-Array probe, and the queued mailbox-protocol adaptation stay
-     separately reviewable; the current combined tooling history is not an
-     integration handoff.
-  3. W7-1's lean-zip function-sidecar consumer waits until the tooling protocol
-     is accepted; the independent Illuminate selection export is complete.
+  2. The optimized final-function index protocol is accepted through clean
+     isolated head `7d0d9b3b`. CPU profiling, selected-function views, the
+     compiled-Array probe, and the queued mailbox-protocol adaptation stay
+     separately reviewable; the combined tooling history remains outside the
+     integration queue.
+  3. W7-1 may now rebase and resume the lean-zip function-sidecar consumer; the
+     independent Illuminate selection export is also complete.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -41,14 +43,42 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 - Not ready: W7-2 is clean and rebased on `608ba389`, but its current history
   still places the semantic specialization repair above the generic publisher
   refactor; the lane owns the requested split or documented dependency. The
-  tooling worktree is clean and rebased, but its tracked mailbox says
-  `handoff: none` and its current history combines five independently reviewed
-  surfaces, including a large shared mailbox-protocol change. The Array
-  panic-observation fixture audit is accepted and parked behind the existing
-  shared-observation bug card; it has no feature landing.
+  Array panic-observation fixture audit is accepted and parked behind the
+  existing shared-observation bug card; it has no feature landing. Later
+  tooling surfaces remain on their combined development branch until each has
+  an independently authorized head.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
+
+## Latest completed integration lease
+
+- Milestone: `TOOLING-FINAL-FUNCTION-INDEX-PROTOCOL`.
+- Integration owner: `tooling`, explicitly authorized to consume its own clean
+  isolated handoff for this slice. The branch
+  `tooling/function-index-protocol` was based directly on `main` at `88d12da7`;
+  its functional and handoff head is `7d0d9b3b`.
+- Scope: release-hashed final-function capture, sidecar validation and
+  inspection, plus Binaryen's import-aware final namespace (`fimport$N` for
+  imports and import-excluding ordinals for definitions). Final call-graph
+  edges resolve through that namespace while public selection remains in
+  absolute Wasm index space. CPU profiling, selected-function views, the
+  compiled-Array probe, mailbox adaptation, benchmark policy, W7 packages,
+  compiler code, and runtime code are not part of this landing.
+- Contracts: none. The slice adds artifact-local tooling and changes no FIR
+  semantics, concrete runtime, resident-helper signature, symbolic Wasm, ABI,
+  ownership rule, package contract, or coordination protocol.
+- Acceptance: the imported/minified Binaryen suite passes 3/3 and proves that
+  evidence-enabled and ordinary stripped output are byte-identical; sidecars
+  bind the final artifact hash, exact import classification, body sizes, call
+  edges, and exports. The existing 2,346,345-byte lean-zip production artifact
+  with 27 imports and 6,938 definitions verifies successfully.
+  `git diff --check` and complete `make check` pass with 125 harness tests,
+  710 unique cases, 2,112/2,112 equal comparisons, zero findings, 182 active
+  bug cards, and 25 mailbox tests.
+- Result: `main` fast-forwards through `7d0d9b3b`. W7 may now consume the
+  accepted sidecar protocol; the combined tooling branch remains unchanged and
+  its later surfaces remain independently queued.
 
 ## Latest completed integration lease
 
