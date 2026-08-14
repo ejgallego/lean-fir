@@ -30,9 +30,10 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   through `912bf68a`, and the Flat source identity is repinned to the published
   Verso 4.33 contract at `8199b6d7`. The resident linker's persistent planning
   view is accepted at `17d576fb`, followed by indexed resident dead-code
-  reachability at `7b9d523a`. The Illuminate functional generation head is
-  `4b84f35b`; the package itself remains local-only until its consumer
-  authorizes publication.
+  reachability at `7b9d523a`. The lean-zip final-function sidecar package is
+  accepted through tracked handoff `31035d5e` (functional head `752d2187`).
+  The Illuminate functional generation head is `4b84f35b`; the package itself
+  remains local-only until its consumer authorizes publication.
 - Landing order:
   1. W7-2's Verso source-module replay repair and generic immutable-package
      publisher are accepted in that order through `912bf68a`.
@@ -41,9 +42,9 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
      compiled-Array probe, and the queued mailbox-protocol adaptation stay
      separately reviewable; the combined tooling history remains outside the
      integration queue.
-  3. W7-1 may now resume the lean-zip function-sidecar consumer. W7-2 may
-     hand the validated exact-head Flat package to the Verso owner; the
-     Illuminate selection export is also complete.
+  3. W7-1's lean-zip function-sidecar consumer is accepted through
+     `31035d5e`. W7-2 may hand the validated exact-head Flat package to the
+     Verso owner; the Illuminate selection export is also complete.
   4. The isolated persistent resident-linker planning view is accepted at
      `17d576fb`, and indexed resident dead-code reachability is accepted at
      `7b9d523a`; later profiling/tooling surfaces remain separate slices.
@@ -60,6 +61,45 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
+
+## Latest completed integration lease
+
+- Milestone: `W7-LEAN-ZIP-FINAL-FUNCTION-EVIDENCE`.
+- Integration owner: `wasm-gen`, consuming the clean `wasm/generation`
+  handoff on accepted `main` at `652b482a`. The rebased functional head is
+  `752d2187`; the tracked handoff is accepted through `31035d5e`.
+- Package: `package-raw.mjs` produces and verifies
+  `lean-zip-raw.wasm.functions.json` through the accepted evidence-preserving
+  linker, requires evidence-enabled and ordinary release bytes to match, and
+  binds the sidecar in BUILD v3, SHA256SUMS, the immutable package fingerprint,
+  and package smoke. The adapter and Wasm runtime do not load the sidecar.
+- Artifact identity: the complete zero-import module remains 902,411 bytes at
+  SHA-256 `d3992d5b5e5a4bd11edb93f48e0b95fbc2148a1c0b7c87b395d208e4a61e44cc`.
+  The 943,785-byte sidecar has SHA-256
+  `0948c7497690ffaf61a6bc7f4a441846099e8c7d03c3a8d6cd00e98a694536ab`
+  and indexes all 2,171 final functions: 354 Lean source, 1,811 resident
+  helpers, and six explicit optimizer-or-linked-runtime functions. The exact
+  immutable package is
+  `integration/lean-zip/_build/lean-zip-raw-packages/669b965f6a98-30737b4e2ebf-a8a6d957b9a6df70599d`.
+- Contracts: only the client-specific diagnostic package schema advances from
+  `fir.lean-zip.raw.build/v2` to v3. Adapter API, input/output layout,
+  ownership/reclamation, source semantics, semantic ABI, zero-import six-export
+  module, runtime/layout, resident-helper signatures, W6 proofs, and executable
+  Wasm identity are unchanged.
+- Acceptance: two complete internal generations and repeated clean publication
+  are byte-identical; function-sidecar verification, five inputs at every level
+  1--10, native/Wasm byte equality, independent inflate, zero imports,
+  persistent-cache ownership/rewind, and package smoke pass. Complete combined
+  `make check` passes with 702 source cases, nine direct machines, 702 V8
+  triangles, 711 unique cases, 2,115/2,115 equal comparisons, 7,602 steps,
+  186 active bug cards, zero findings, and 25/25 mailbox tests. All 3,148 Talos
+  jobs and the complete W7 artifact gate pass. One transient worktree-local
+  `products.json` publication error did not reproduce in the immediate focused
+  retry or subsequent complete gate and produced no semantic finding.
+- Bug cards: none.
+- Result: `main` fast-forwards through `31035d5e`. The lean-zip consumer may
+  pin the remotely reachable main descendant; fresh-output catalog publication
+  and later performance work remain independent slices.
 
 ## Latest completed integration lease
 
