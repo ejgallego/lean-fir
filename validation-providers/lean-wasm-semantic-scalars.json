@@ -7,8 +7,8 @@
     "runtimeFlavor": "fir-semantic-runtime-v1",
     "abi": "fir-semantic-abi-v1"
   },
-  "buildCommand": ["lake", "lean", "FirValidationWasm.lean"],
-  "buildReplayCommand": ["lake", "env", "lean", "FirValidationWasm.lean"],
+  "buildCommand": ["lake", "--no-cache", "lean", "FirValidationWasm.lean"],
+  "buildReplayCommand": ["lake", "--no-cache", "env", "lean", "FirValidationWasm.lean"],
   "buildAttempts": 2,
   "buildFileAccessRecorder": {
     "kind": "file-access-recorder",

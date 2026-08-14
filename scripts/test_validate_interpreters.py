@@ -4690,11 +4690,11 @@ class HarnessTests(unittest.TestCase):
         )
         self.assertEqual(
             provider.driver.build_command,
-            ["lake", "lean", "FirValidationWasm.lean"],
+            ["lake", "--no-cache", "lean", "FirValidationWasm.lean"],
         )
         self.assertEqual(
             provider.driver.build_replay_command,
-            ["lake", "env", "lean", "FirValidationWasm.lean"],
+            ["lake", "--no-cache", "env", "lean", "FirValidationWasm.lean"],
         )
         self.assertEqual(provider.driver.build_attempts, 2)
         self.assertEqual(
