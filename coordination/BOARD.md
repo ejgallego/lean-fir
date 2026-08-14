@@ -15,6 +15,36 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-VALIDATED-LAZY-CACHE-PUBLICATION`.
+- Integration owner: `root`, consuming the clean `wasm/talos-runtime`
+  handoff based directly on `main` at `2e4cb265`. The functional proof head
+  is `f9beb034`; the accepted mailbox head is `bdcc778a`.
+- Validated administrative state: the branch-exact global relation now
+  includes the existing concrete external-bind boundary, strengthened with
+  validation of the pending caller continuation and exact agreement between
+  its validated, production-supported, and hereditary resource tails.
+- Publication coverage: a validated yielded lazy caller may carry arbitrary
+  target-only case-label prefixes. After those labels unwind, one source
+  cache-publication step matches the established seven-step Wasm protocol:
+  the concrete host cache is updated, its value and initialized flag are
+  published to the paired globals, and the source `.cache` marker is removed.
+  The successor retains the same bind validation, caller ABI spine, resource
+  budget, ownership, closure tables, and lazy-cache refinement.
+- Contracts: none. This is a W6 proof-only extension over the unchanged
+  source semantics, production lazy-cache/external-bind relation, concrete
+  runtime and resource contracts, symbolic Wasm, and W7 generation surface.
+- Acceptance: Lean Beam update/sync/save reports zero diagnostics; direct
+  compilation of `FirTalos.ConcreteStructuredValidation` and `FirTalos`
+  passes all 3,148 jobs. `git diff --check`, complete `make check` (125 tests,
+  710 unique cases, 2,112/2,112 equal comparisons), and all 3,148 Talos jobs
+  pass. No bug card was required.
+- Result: `main` fast-forwards through `bdcc778a`. W6 next closes validated
+  external-bind resumption into ordinary compiler code, then proves
+  validator-derived current-step admission before assembling the universal
+  one-step and finite-trace theorems.
+
+## Latest completed integration lease
+
 - Milestone: `W6-VALIDATED-YIELDED-BIND-RESUMPTION`.
 - Integration owner: `root`, consuming the clean `wasm/talos-runtime`
   handoff rebased directly on `main` at `7e5f31f3`. The functional proof head
