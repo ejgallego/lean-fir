@@ -31,7 +31,8 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   Verso 4.33 contract at `8199b6d7`. The resident linker's persistent planning
   view is accepted at `17d576fb`, followed by indexed resident dead-code
   reachability at `7b9d523a`. The lean-zip final-function sidecar package is
-  accepted through tracked handoff `31035d5e` (functional head `752d2187`).
+  accepted through tracked handoff `31035d5e` (functional head `752d2187`),
+  followed by indexed final-LCNF capture ownership at `3dc7b0ee`.
   The Illuminate functional generation head is `4b84f35b`; the package itself
   remains local-only until its consumer authorizes publication.
 - Landing order:
@@ -47,7 +48,8 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
      Verso owner; the Illuminate selection export is also complete.
   4. The isolated persistent resident-linker planning view is accepted at
      `17d576fb`, and indexed resident dead-code reachability is accepted at
-     `7b9d523a`; later profiling/tooling surfaces remain separate slices.
+     `7b9d523a`. Indexed final-LCNF capture ownership is accepted at
+     `3dc7b0ee`; later profiling/tooling surfaces remain separate slices.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -61,6 +63,32 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
+
+## Latest completed integration lease
+
+- Milestone: `W7-FINAL-LCNF-CAPTURE-INDEXING`.
+- Integration owner: `wasm-gen`, accepting isolated commit `3dc7b0ee` after
+  the lean-zip function-evidence package and its board correction at
+  `ccd8304d`. The active W7 worktree had no overlapping `CompilerPrivate.lean`
+  or `Source.lean` change at integration time.
+- Change: generated-compiler cache reset now builds hash indexes for source
+  roots and selected-module declarations, replacing nested membership scans
+  while preserving the captured declaration and external inventories.
+- Evidence: the measured Level-1 capture decreases from 18.504s in a 21.463s
+  capture timeline to 2.977s in the final production sample; cache reset
+  decreases from 18.504s to 1.574s. The complete production sample takes
+  8.169s, including 2.344s lower/base encode, 2.317s link, and 0.531s final
+  encode. The 331,580-byte linked Wasm remains byte-identical at SHA-256
+  `d440dfc326cb62785cc909a5c58b04344046e179602b53114e70682358fd3d59`.
+- Contracts: none. Source capture results, lowering, semantic ABI,
+  runtime/layout, ownership, resident-helper signatures, W6 proofs, and linked
+  artifact bytes are unchanged.
+- Acceptance: Lean Beam, `git diff --check`, complete `make check`,
+  `make talos-setup`, all 3,148 Talos jobs, and the complete
+  artifact/browser/differential gate pass.
+- Result: `main` advances through `3dc7b0ee` and is remotely reachable. W7-1
+  rebases its next independent generation slice on this accepted baseline
+  before handoff.
 
 ## Latest completed integration lease
 
