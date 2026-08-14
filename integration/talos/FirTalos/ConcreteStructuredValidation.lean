@@ -49,6 +49,98 @@ def ConcreteStructuredValidationLocalsAgree
       Fir.Wasm.getLocal context fvarId =
         .ok (.localGet fvarId, kind)
 
+/-- Removing bindings for one different name does not change lookup of the
+queried local.  This is the small row lemma behind hereditary validator/
+compiler agreement: validator insertion replaces a name, while the production
+compiler context already contains its unique final slot. -/
+private theorem findLocalKind?_filter_different
+    (locals : Fir.Wasm.LocalKinds) (removed query : Lean.FVarId)
+    (different : removed.name ≠ query.name) :
+    Fir.Wasm.findLocalKind?
+        (locals.filter fun entry => entry.fst.name != removed.name) query =
+      Fir.Wasm.findLocalKind? locals query := by
+  induction locals with
+  | nil => rfl
+  | cons entry rest ih =>
+      obtain ⟨candidate, candidateKind⟩ := entry
+      by_cases candidateRemoved : candidate.name = removed.name
+      · have candidateQuery : candidate.name ≠ query.name := by
+          simpa [candidateRemoved] using different
+        have removedTest : (candidate.name != removed.name) = false := by
+          simp [candidateRemoved]
+        have queryTest : (candidate.name == query.name) = false :=
+          beq_eq_false_iff_ne.mpr candidateQuery
+        simp only [List.filter_cons, removedTest, Bool.false_eq_true,
+          ↓reduceIte, Fir.Wasm.findLocalKind?, queryTest]
+        exact ih
+      · have removedTest : (candidate.name != removed.name) = true :=
+          bne_iff_ne.mpr candidateRemoved
+        simp only [List.filter_cons, removedTest, ↓reduceIte,
+          Fir.Wasm.findLocalKind?]
+        by_cases candidateQuery : candidate.name = query.name
+        · have queryTest : (candidate.name == query.name) = true :=
+            beq_iff_eq.mpr candidateQuery
+          simp [queryTest]
+        · have queryTest : (candidate.name == query.name) = false :=
+            beq_eq_false_iff_ne.mpr candidateQuery
+          simp [queryTest, ih]
+
+/-- Validator insertion has the expected name-directed lookup behavior. -/
+theorem findLocalKind?_insertLocal
+    (locals : Fir.Wasm.LocalKinds) (inserted query : Lean.FVarId)
+    (kind : Fir.Wasm.AbiKind) :
+    Fir.Wasm.findLocalKind? (Fir.Wasm.insertLocal locals inserted kind) query =
+      if inserted.name = query.name then some kind
+      else Fir.Wasm.findLocalKind? locals query := by
+  unfold Fir.Wasm.insertLocal
+  by_cases same : inserted.name = query.name
+  · simp [Fir.Wasm.findLocalKind?, same]
+  · simp [Fir.Wasm.findLocalKind?, same,
+      findLocalKind?_filter_different locals inserted query same]
+
+/-- Once the production compiler row contains the binding selected by a
+validated insertion, local agreement is preserved for the continuation. -/
+theorem ConcreteStructuredValidationLocalsAgree.insert
+    {context : Fir.Wasm.Context}
+    {locals : Fir.Wasm.LocalKinds}
+    {fvarId : Lean.FVarId}
+    {kind : Fir.Wasm.AbiKind}
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals)
+    (compiled : Fir.Wasm.getLocal context fvarId =
+      .ok (.localGet fvarId, kind)) :
+    ConcreteStructuredValidationLocalsAgree context
+      (Fir.Wasm.insertLocal locals fvarId kind) := by
+  intro query queryKind found
+  rw [findLocalKind?_insertLocal] at found
+  by_cases same : fvarId.name = query.name
+  · rw [if_pos same] at found
+    have queryKindEq : queryKind = kind := Option.some.inj found.symm
+    subst queryKind
+    have queryEq : query = fvarId := by
+      cases query
+      cases fvarId
+      simp_all
+    subst query
+    exact compiled
+  · rw [if_neg same] at found
+    exact agrees found
+
+/-- Residual validation packaged together with its production-local agreement.
+This remains purely static: it contains neither a source step nor target
+execution evidence. -/
+def ConcreteStructuredAlignedValidationState
+    (program : Fir.LeanIR.ImpureProgram)
+    (context : Fir.Wasm.Context)
+    (functionResult : Fir.Wasm.AbiKind)
+    (code : Lean.Compiler.LCNF.Code .impure) : Prop :=
+  ∃ joins : Fir.Wasm.JoinPoints,
+    ∃ locals : Fir.Wasm.LocalKinds,
+      ∃ facts : Fir.Wasm.SupportedCaseFacts,
+        ∃ sharing : Fir.Wasm.SupportedSharingFacts,
+          ConcreteStructuredValidationFocus program joins locals
+              (some functionResult) facts sharing code ∧
+            ConcreteStructuredValidationLocalsAgree context locals
+
 /-- Existential package for the complete residual validator state at an
 active generated-function node.  The indices retain only the stable program,
 function result, and current code; joins, local kinds, case facts, and sharing
@@ -64,6 +156,19 @@ def ConcreteStructuredValidationState
         ∃ sharing : Fir.Wasm.SupportedSharingFacts,
           ConcreteStructuredValidationFocus program joins locals
             (some functionResult) facts sharing code
+
+/-- Aligned validation forgets only the compiler-row agreement when viewed as
+the pre-existing residual validation state. -/
+theorem ConcreteStructuredAlignedValidationState.toValidationState
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionResult : Fir.Wasm.AbiKind}
+    {code : Lean.Compiler.LCNF.Code .impure}
+    (aligned : ConcreteStructuredAlignedValidationState program context
+      functionResult code) :
+    ConcreteStructuredValidationState program functionResult code := by
+  obtain ⟨joins, locals, facts, sharing, validated, _agrees⟩ := aligned
+  exact ⟨joins, locals, facts, sharing, validated⟩
 
 /-- Static validation retained for every suspended source caller.  Direct and
 saturated calls have the same source bind frame, so validation intentionally
