@@ -108,3 +108,14 @@ relation and derive each current-node admission constructor from it plus the
 successful source step. Return admission has a separate compatibility
 overstrengthening recorded by
 `FIR-BUG-wasm-none-return-admission-refinement-direction`.
+
+The residual focus and suspended validation are now attached throughout the
+closed structured relation, including direct and saturated calls, returns,
+lazy-cache publication, external bind resumption, cases, ownership, and field
+mutation. The first admission inversion identifies the remaining static
+bridge precisely: the path-sensitive validator local row must agree, on every
+successful lookup, with the production compiler context. Under that agreement,
+ordinary decrement admission follows from the validator and successful source
+step alone. Ordinary increment has the same compiler derivation but exposes an
+independent finite-header headroom condition recorded by
+`FIR-BUG-wasm-none-finite-trace-refcount-overflow`.

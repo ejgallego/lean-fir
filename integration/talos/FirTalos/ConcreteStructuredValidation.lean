@@ -34,6 +34,21 @@ structure ConcreteStructuredValidationFocus
     Fir.Wasm.supportedCodeWithJoins program joins locals expectedResult facts
       sharing code = true
 
+/-- Agreement between the validator's residual local-kind row and the exact
+production compiler context at the current code node.
+
+The validator row is path-sensitive and contains only bindings introduced on
+the current source path, whereas the lowering context may also contain locals
+collected from other syntax.  Admission only needs agreement for a successful
+validator lookup; requiring equality of the two rows would therefore be both
+unnecessary and false. -/
+def ConcreteStructuredValidationLocalsAgree
+    (context : Fir.Wasm.Context) (locals : Fir.Wasm.LocalKinds) : Prop :=
+  ∀ {fvarId : Lean.FVarId} {kind : Fir.Wasm.AbiKind},
+    Fir.Wasm.findLocalKind? locals fvarId = some kind →
+      Fir.Wasm.getLocal context fvarId =
+        .ok (.localGet fvarId, kind)
+
 /-- Existential package for the complete residual validator state at an
 active generated-function node.  The indices retain only the stable program,
 function result, and current code; joins, local kinds, case facts, and sharing
@@ -3557,6 +3572,332 @@ theorem ConcreteStructuredValidationFocus.decPersistent
   have supported := validated.supported
   simp only [Fir.Wasm.supportedCodeWithJoins] at supported
   exact ⟨by simpa using supported⟩
+
+/-- Validation of an ordinary decrement exposes the exact object-family kind
+selected in the residual validator row.  This is the static half of current-
+step admission; the successful source step supplies the lookup and update. -/
+theorem ConcreteStructuredValidationFocus.decOrdinary_eq
+    {program : Fir.LeanIR.ImpureProgram}
+    {joins : Fir.Wasm.JoinPoints}
+    {locals : Fir.Wasm.LocalKinds}
+    {expectedResult : Option Fir.Wasm.AbiKind}
+    {facts : Fir.Wasm.SupportedCaseFacts}
+    {sharing : Fir.Wasm.SupportedSharingFacts}
+    {objectId : Lean.FVarId}
+    {amount : Nat}
+    {check : Bool}
+    {objectFields? : Option Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredValidationFocus program joins locals
+      expectedResult facts sharing
+      (.dec objectId amount check false objectFields? continuation)) :
+    ∃ objectKind,
+      Fir.Wasm.findLocalKind? locals objectId = some objectKind ∧
+        objectKind.isObjectLike = true := by
+  have supported := validated.supported
+  simp [Fir.Wasm.supportedCodeWithJoins, Bool.and_eq_true] at supported
+  cases found : Fir.Wasm.findLocalKind? locals objectId with
+  | none => simp [found] at supported
+  | some objectKind =>
+      exact ⟨objectKind, rfl, by simpa [found] using supported.1⟩
+
+/-- Residual-local agreement turns the validator's ordinary-decrement guard
+into the exact production `getLocal` equation and directional object-family
+refinement consumed by the concrete runtime theorem. -/
+theorem ConcreteStructuredValidationFocus.decOrdinary_compiler
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {joins : Fir.Wasm.JoinPoints}
+    {locals : Fir.Wasm.LocalKinds}
+    {expectedResult : Option Fir.Wasm.AbiKind}
+    {facts : Fir.Wasm.SupportedCaseFacts}
+    {sharing : Fir.Wasm.SupportedSharingFacts}
+    {objectId : Lean.FVarId}
+    {amount : Nat}
+    {check : Bool}
+    {objectFields? : Option Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredValidationFocus program joins locals
+      expectedResult facts sharing
+      (.dec objectId amount check false objectFields? continuation))
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals) :
+    ∃ objectKind,
+      Fir.Wasm.getLocal context objectId =
+          .ok (.localGet objectId, objectKind) ∧
+        objectKind.refines .tobject = true := by
+  obtain ⟨objectKind, found, objectLike⟩ := validated.decOrdinary_eq
+  refine ⟨objectKind, agrees found, ?_⟩
+  cases objectKind <;> simp_all [Fir.Wasm.AbiKind.isObjectLike,
+    Fir.Wasm.AbiKind.refines]
+
+/-- A successful source decrement step exposes exactly the semantic lookup
+and update stored by ordinary-decrement admission.  This inversion uses only
+the current compiler focus to identify the source runtime/environment; it
+does not inspect the target transition. -/
+theorem ConcreteStructuredCodeFocus.decOrdinary_source_of_step
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {amount : Nat}
+    {check : Bool}
+    {objectFields? : Option Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv
+      (.dec objectId amount check false objectFields? continuation)
+      targetStore targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ sourceObject nextRuntime,
+      lookupValue sourceEnv objectId = .ok sourceObject ∧
+        decValue sourceRuntime sourceObject amount check = .ok nextRuntime := by
+  rcases source with
+    ⟨sourceProgram, sourceControl, sourceStateEnv, sourceJoins, sourceFrames,
+      sourceStateRuntime⟩
+  have sourceControlEq := related.sourceControlEq
+  change sourceControl = .code
+    (.dec objectId amount check false objectFields? continuation)
+    at sourceControlEq
+  subst sourceControl
+  have sourceEnvEq := related.sourceEnvEq
+  change sourceStateEnv = sourceEnv at sourceEnvEq
+  subst sourceStateEnv
+  have sourceRuntimeEq := related.sourceRuntimeEq
+  change sourceStateRuntime = sourceRuntime at sourceRuntimeEq
+  subst sourceStateRuntime
+  cases objectResult : lookupValue sourceEnv objectId with
+  | error fault =>
+      simp [executeStep, coreStep, objectResult, fail] at sourceStep
+  | ok sourceObject =>
+      cases updateResult : decValue sourceRuntime sourceObject amount check with
+      | error fault =>
+          simp [executeStep, coreStep, objectResult, updateResult, fail]
+            at sourceStep
+      | ok nextRuntime =>
+          exact ⟨sourceObject, nextRuntime, rfl, updateResult⟩
+
+/-- First validator-derived dynamic admission slice: an ordinary decrement is
+classified from the actual residual validator, its production-local agreement,
+and the successful source step.  No target path, continuation admission,
+termination evidence, or allocation budget is stored in the result. -/
+theorem ConcreteStructuredValidationFocus.admit_decOrdinary_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {joins : Fir.Wasm.JoinPoints}
+    {locals : Fir.Wasm.LocalKinds}
+    {expectedResult : AbiKind}
+    {validatorFacts : Fir.Wasm.SupportedCaseFacts}
+    {sharing : Fir.Wasm.SupportedSharingFacts}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {amount : Nat}
+    {check : Bool}
+    {objectFields? : Option Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (validated : ConcreteStructuredValidationFocus program joins locals
+      (some expectedResult) validatorFacts sharing
+      (.dec objectId amount check false objectFields? continuation))
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals)
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv
+      (.dec objectId amount check false objectFields? continuation)
+      targetStore targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv 0
+      (.dec objectId amount check false objectFields? continuation) := by
+  obtain ⟨objectKind, objectCompiled, objectRefines⟩ :=
+    validated.decOrdinary_compiler agrees
+  obtain ⟨sourceObject, nextRuntime, objectLookup, updated⟩ :=
+    related.decOrdinary_source_of_step sourceStep
+  exact .ordinaryDecrement
+    (.dec sourceRuntime nextRuntime sourceEnv objectId amount check
+      objectFields? continuation objectKind sourceObject objectCompiled
+      objectRefines objectLookup updated)
+
+/-- Ordinary-increment validation exposes the same object-family local guard
+as decrement. -/
+theorem ConcreteStructuredValidationFocus.incOrdinary_eq
+    {program : Fir.LeanIR.ImpureProgram}
+    {joins : Fir.Wasm.JoinPoints}
+    {locals : Fir.Wasm.LocalKinds}
+    {expectedResult : Option Fir.Wasm.AbiKind}
+    {facts : Fir.Wasm.SupportedCaseFacts}
+    {sharing : Fir.Wasm.SupportedSharingFacts}
+    {objectId : Lean.FVarId}
+    {amount : Nat}
+    {check : Bool}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredValidationFocus program joins locals
+      expectedResult facts sharing
+      (.inc objectId amount check false continuation)) :
+    ∃ objectKind,
+      Fir.Wasm.findLocalKind? locals objectId = some objectKind ∧
+        objectKind.isObjectLike = true := by
+  have supported := validated.supported
+  simp [Fir.Wasm.supportedCodeWithJoins, Bool.and_eq_true] at supported
+  cases found : Fir.Wasm.findLocalKind? locals objectId with
+  | none => simp [found] at supported
+  | some objectKind =>
+      exact ⟨objectKind, rfl, by simpa [found] using supported.1⟩
+
+/-- Residual-local agreement turns the increment validator guard into the
+compiler equation used by the concrete operation theorem. -/
+theorem ConcreteStructuredValidationFocus.incOrdinary_compiler
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {joins : Fir.Wasm.JoinPoints}
+    {locals : Fir.Wasm.LocalKinds}
+    {expectedResult : Option Fir.Wasm.AbiKind}
+    {facts : Fir.Wasm.SupportedCaseFacts}
+    {sharing : Fir.Wasm.SupportedSharingFacts}
+    {objectId : Lean.FVarId}
+    {amount : Nat}
+    {check : Bool}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredValidationFocus program joins locals
+      expectedResult facts sharing
+      (.inc objectId amount check false continuation))
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals) :
+    ∃ objectKind,
+      Fir.Wasm.getLocal context objectId =
+          .ok (.localGet objectId, objectKind) ∧
+        objectKind.refines .tobject = true := by
+  obtain ⟨objectKind, found, objectLike⟩ := validated.incOrdinary_eq
+  refine ⟨objectKind, agrees found, ?_⟩
+  cases objectKind <;> simp_all [Fir.Wasm.AbiKind.isObjectLike,
+    Fir.Wasm.AbiKind.refines]
+
+/-- Successful ordinary increment exposes the source lookup and update used
+by admission, independently of the target execution. -/
+theorem ConcreteStructuredCodeFocus.incOrdinary_source_of_step
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {amount : Nat}
+    {check : Bool}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv
+      (.inc objectId amount check false continuation)
+      targetStore targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ sourceObject nextRuntime,
+      lookupValue sourceEnv objectId = .ok sourceObject ∧
+        incValue sourceRuntime sourceObject amount check = .ok nextRuntime := by
+  rcases source with
+    ⟨sourceProgram, sourceControl, sourceStateEnv, sourceJoins, sourceFrames,
+      sourceStateRuntime⟩
+  have sourceControlEq := related.sourceControlEq
+  change sourceControl = .code
+    (.inc objectId amount check false continuation) at sourceControlEq
+  subst sourceControl
+  have sourceEnvEq := related.sourceEnvEq
+  change sourceStateEnv = sourceEnv at sourceEnvEq
+  subst sourceStateEnv
+  have sourceRuntimeEq := related.sourceRuntimeEq
+  change sourceStateRuntime = sourceRuntime at sourceRuntimeEq
+  subst sourceStateRuntime
+  cases objectResult : lookupValue sourceEnv objectId with
+  | error fault =>
+      simp [executeStep, coreStep, objectResult, fail] at sourceStep
+  | ok sourceObject =>
+      cases updateResult : incValue sourceRuntime sourceObject amount check with
+      | error fault =>
+          simp [executeStep, coreStep, objectResult, updateResult, fail]
+            at sourceStep
+      | ok nextRuntime =>
+          exact ⟨sourceObject, nextRuntime, rfl, updateResult⟩
+
+/-- Validator-derived ordinary-increment admission under the exact finite
+header-count safety premise.  Unlike the decrement case, successful source
+execution does not imply that an unbounded semantic reference count still
+fits wasm32, so this premise must be discharged by the runtime-safety side of
+the final simulation theorem. -/
+theorem ConcreteStructuredValidationFocus.admit_incOrdinary_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {joins : Fir.Wasm.JoinPoints}
+    {locals : Fir.Wasm.LocalKinds}
+    {expectedResult : AbiKind}
+    {validatorFacts : Fir.Wasm.SupportedCaseFacts}
+    {sharing : Fir.Wasm.SupportedSharingFacts}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {amount : Nat}
+    {check : Bool}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (validated : ConcreteStructuredValidationFocus program joins locals
+      (some expectedResult) validatorFacts sharing
+      (.inc objectId amount check false continuation))
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals)
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv
+      (.inc objectId amount check false continuation)
+      targetStore targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (fits : ∀ (sourceObject : Value) (location : Location) (cell : HeapCell),
+      lookupValue sourceEnv objectId = .ok sourceObject →
+        sourceObject = .object (.heap location) →
+          findCell? sourceRuntime.heap location = some cell →
+            cell.rc + amount < UInt32.size) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv 0
+      (.inc objectId amount check false continuation) := by
+  obtain ⟨objectKind, objectCompiled, objectRefines⟩ :=
+    validated.incOrdinary_compiler agrees
+  obtain ⟨sourceObject, nextRuntime, objectLookup, updated⟩ :=
+    related.incOrdinary_source_of_step sourceStep
+  exact .ordinaryIncrement
+    (.inc sourceRuntime nextRuntime sourceEnv objectId amount check continuation
+      objectKind sourceObject objectCompiled objectRefines objectLookup updated
+      (fun location cell sourceObjectEq found =>
+        fits sourceObject location cell objectLookup sourceObjectEq found))
 
 /-- Both persistent and ordinary increments retain the validator state at
 their continuation; the ordinary branch additionally discharges its local
