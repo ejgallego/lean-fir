@@ -1058,6 +1058,70 @@ theorem ConcreteStructuredValidatedCodeCoreRel.letSuccessor
     related.validation.letContinuation
   exact related.withSuccessor nextCore nextValidation
 
+/-- A direct-value `let` is a fully closed transition.  Executable validation
+supplies the exact residual local-kind and guarded-sharing update, current
+admission comes from the source/compiler direct-value predicate, and the
+existing concrete theorem reconstructs the dynamic runtime, heap facts,
+remaining allocation budget, locals, witness, and positive target path. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_directLet_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.let decl continuation) targetStore targetLocals targetCode witness source
+      target)
+    (supported : ReuseBudgetedDirectSupported context facts decl)
+    (budget : directLetAllocationCost decl ≤ remainingBytes)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextRuntime sourceValue nextStore resumedLocals nextWitness
+        nextFacts nextTargetCode targetCount,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetCount target targetAfter ∧
+        0 < targetCount ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult nextFacts
+          (remainingBytes - directLetAllocationCost decl) nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation nextStore
+          resumedLocals nextTargetCode nextWitness sourceAfter targetAfter := by
+  have pointwise := related.toPointwise
+    (ConcreteStructuredCodeStepAdmission.directLet supported) budget
+  obtain ⟨targetAfter, nextRuntime, sourceValue, nextStore, resumedLocals,
+      nextWitness, nextFacts, nextTargetCode, targetCount, targetPath,
+      targetPositive, sourceFramesEq, targetFramesEq, nextCore⟩ :=
+    pointwise.advance_directLet_of_step spec supported rfl sourceStep
+  have validatedCore := related.core.letSuccessor nextCore
+  exact ⟨targetAfter, nextRuntime, sourceValue, nextStore, resumedLocals,
+    nextWitness, nextFacts, nextTargetCode, targetCount, targetPath,
+    targetPositive,
+    related.withSuccessor validatedCore sourceFramesEq targetFramesEq⟩
+
 /-- Persistent ownership increments are erased by lowering and preserve the
 complete residual validator state. -/
 theorem ConcreteStructuredValidationFocus.incPersistent
