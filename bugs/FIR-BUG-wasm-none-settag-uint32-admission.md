@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-settag-uint32-admission
-status: confirmed
+status: fixed
 classification: compiler
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: 7fd2d2d97feb82ca7d905ec8db13e30c49aeab33
@@ -83,6 +83,15 @@ none
 
 ## Resolution and regression
 
-Unresolved. W6 can preserve validation through a set-tag continuation, but
-cannot derive sound set-tag admission until the production guard lands through
-the shared-contract queue.
+The isolated shared contract `982ed402` requires
+`decide (tag < UInt32.size)` in the production `.setTag` validator. The
+boundary value `UInt32.size` is now rejected by both `supportedProgram` and
+`lowerSupported`, while existing compiler-generated tags remain accepted.
+
+`ConcreteStructuredValidationFocus.setTag_eq` extracts the exact width and
+ordinary-object-local facts from that validator. A successful source-step
+inversion exposes the heap location, live constructor cell, and semantic
+update; `admit_setTag_of_step` combines only those facts into the existing
+`ConstructorTagEffectSupported` judgment. The aligned theorem therefore
+derives constructor-tag current-step admission without weakening the concrete
+header relation or inspecting target execution.

@@ -5219,6 +5219,253 @@ theorem ConcreteStructuredAlignedValidationState.ssetContinuation
   obtain ⟨joins, locals, facts, sharing, focus, agrees⟩ := validated
   exact ⟨joins, locals, facts, sharing, focus.ssetContinuation, agrees⟩
 
+/-- Validation of constructor-tag mutation exposes both parts of its static
+admission boundary: the source `Nat` fits the wasm32 header and the mutated
+local is compiled in the ordinary-object lane. -/
+theorem ConcreteStructuredValidationFocus.setTag_eq
+    {program : Fir.LeanIR.ImpureProgram}
+    {joins : Fir.Wasm.JoinPoints}
+    {locals : Fir.Wasm.LocalKinds}
+    {expectedResult : Option Fir.Wasm.AbiKind}
+    {facts : Fir.Wasm.SupportedCaseFacts}
+    {sharing : Fir.Wasm.SupportedSharingFacts}
+    {objectId : Lean.FVarId} {tag : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredValidationFocus program joins locals
+      expectedResult facts sharing (.setTag objectId tag continuation)) :
+    tag < UInt32.size ∧
+      Fir.Wasm.findLocalKind? locals objectId = some .object := by
+  have supported := validated.supported
+  simp [Fir.Wasm.supportedCodeWithJoins, Bool.and_eq_true] at supported
+  exact supported.1
+
+/-- Residual-local agreement turns the validator's constructor-tag guard into
+the exact production compiler equation while retaining the width fact. -/
+theorem ConcreteStructuredValidationFocus.setTag_compiler
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {joins : Fir.Wasm.JoinPoints}
+    {locals : Fir.Wasm.LocalKinds}
+    {expectedResult : Option Fir.Wasm.AbiKind}
+    {facts : Fir.Wasm.SupportedCaseFacts}
+    {sharing : Fir.Wasm.SupportedSharingFacts}
+    {objectId : Lean.FVarId} {tag : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredValidationFocus program joins locals
+      expectedResult facts sharing (.setTag objectId tag continuation))
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals) :
+    tag < UInt32.size ∧
+      Fir.Wasm.getLocal context objectId =
+        .ok (.localGet objectId, .object) := by
+  obtain ⟨tagFits, objectFound⟩ := validated.setTag_eq
+  exact ⟨tagFits, agrees objectFound⟩
+
+/-- Local inversion for the semantic helper used by mutation admission. -/
+private theorem getLiveCell_shape_for_admission
+    {runtime : RuntimeState} {location : Location} {cell : HeapCell}
+    (effect : getLiveCell runtime location = .ok cell) :
+    findCell? runtime.heap location = some cell ∧ cell.live = true := by
+  unfold getLiveCell at effect
+  cases found : findCell? runtime.heap location with
+  | none => simp [found] at effect
+  | some actualCell =>
+      cases live : actualCell.live with
+      | false => simp [found, live] at effect
+      | true =>
+          have cellEq : actualCell = cell := by
+            simpa [found, live] using effect
+          subst cell
+          exact ⟨rfl, live⟩
+
+/-- Successful constructor decoding fixes the heap reference, live cell, and
+constructor payload used by the mutation. -/
+private theorem getConstructor_shape_for_admission
+    {runtime : RuntimeState} {value : Value} {location : Location}
+    {cell : HeapCell} {semantic : ConstructorObject}
+    (effect : getConstructor runtime value = .ok (location, cell, semantic)) :
+    value = .object (.heap location) ∧
+      findCell? runtime.heap location = some cell ∧
+      cell.live = true ∧ cell.object = .ctor semantic := by
+  unfold getConstructor at effect
+  cases value with
+  | object reference =>
+      cases reference with
+      | tagged payload => simp at effect
+      | heap actualLocation =>
+          simp only [Bind.bind, Except.bind] at effect
+          cases liveResult : getLiveCell runtime actualLocation with
+          | error fault => simp [liveResult] at effect
+          | ok actualCell =>
+              simp only [liveResult] at effect
+              cases objectEq : actualCell.object with
+              | ctor actualSemantic =>
+                  simp only [objectEq, Pure.pure, Except.pure] at effect
+                  have tripleEq := Except.ok.inj effect
+                  rcases tripleEq with ⟨rfl, rfl, rfl⟩
+                  have liveShape :=
+                    getLiveCell_shape_for_admission liveResult
+                  exact ⟨rfl, liveShape.1, liveShape.2, objectEq⟩
+              | closure function arity fixed => simp [objectEq] at effect
+              | boxed type value => simp [objectEq] at effect
+              | string value => simp [objectEq] at effect
+              | natural value => simp [objectEq] at effect
+              | integer value => simp [objectEq] at effect
+              | byteArray value => simp [objectEq] at effect
+              | array elements capacity => simp [objectEq] at effect
+              | «opaque» typeName => simp [objectEq] at effect
+  | usize value => simp at effect
+  | scalar value => simp at effect
+  | erased => simp at effect
+  | reuseToken location? => simp at effect
+
+/-- A successful source constructor-tag step exposes the live constructor that
+the semantic update mutates. This is the dynamic half of admission and
+inspects no target execution. -/
+theorem ConcreteStructuredCodeFocus.setTag_source_of_step
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {tag : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.setTag objectId tag continuation)
+      targetStore targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ location cell semantic nextRuntime,
+      lookupValue sourceEnv objectId = .ok (.object (.heap location)) ∧
+        setTag sourceRuntime (.object (.heap location)) tag =
+          .ok nextRuntime ∧
+        findCell? sourceRuntime.heap location = some cell ∧
+        cell.live = true ∧
+        cell.object = .ctor semantic := by
+  rcases source with
+    ⟨sourceProgram, sourceControl, sourceStateEnv, sourceJoins, sourceFrames,
+      sourceStateRuntime⟩
+  have sourceControlEq := related.sourceControlEq
+  change sourceControl = .code (.setTag objectId tag continuation)
+    at sourceControlEq
+  subst sourceControl
+  have sourceEnvEq := related.sourceEnvEq
+  change sourceStateEnv = sourceEnv at sourceEnvEq
+  subst sourceStateEnv
+  have sourceRuntimeEq := related.sourceRuntimeEq
+  change sourceStateRuntime = sourceRuntime at sourceRuntimeEq
+  subst sourceStateRuntime
+  cases objectResult : lookupValue sourceEnv objectId with
+  | error fault =>
+      simp [executeStep, coreStep, objectResult, fail] at sourceStep
+  | ok sourceObject =>
+      cases updateResult : setTag sourceRuntime sourceObject tag with
+      | error fault =>
+          simp [executeStep, coreStep, objectResult, updateResult, fail]
+            at sourceStep
+      | ok nextRuntime =>
+          have updated := updateResult
+          unfold setTag modifyConstructor at updateResult
+          generalize constructorEq :
+            getConstructor sourceRuntime sourceObject = constructorResult
+              at updateResult
+          cases constructorResult with
+          | error fault =>
+              simp [Bind.bind, Except.bind] at updateResult
+          | ok triple =>
+              obtain ⟨location, cell, semantic⟩ := triple
+              have shape := getConstructor_shape_for_admission constructorEq
+              rw [shape.1] at objectResult updated
+              exact ⟨location, cell, semantic, nextRuntime,
+                congrArg Except.ok shape.1, updated, shape.2.1, shape.2.2.1,
+                shape.2.2.2⟩
+
+/-- Constructor-tag admission is derived entirely from the current validator,
+compiler-local agreement, and one successful source step. -/
+theorem ConcreteStructuredValidationFocus.admit_setTag_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {joins : Fir.Wasm.JoinPoints}
+    {locals : Fir.Wasm.LocalKinds}
+    {expectedResult : AbiKind}
+    {validatorFacts : Fir.Wasm.SupportedCaseFacts}
+    {sharing : Fir.Wasm.SupportedSharingFacts}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {tag : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (validated : ConcreteStructuredValidationFocus program joins locals
+      (some expectedResult) validatorFacts sharing
+      (.setTag objectId tag continuation))
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals)
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.setTag objectId tag continuation)
+      targetStore targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv 0
+      (.setTag objectId tag continuation) := by
+  obtain ⟨tagFits, objectCompiled⟩ := validated.setTag_compiler agrees
+  obtain ⟨location, cell, semantic, nextRuntime, objectLookup, updated, found,
+      live, objectEq⟩ := related.setTag_source_of_step sourceStep
+  exact .constructorTag
+    (.setTag sourceRuntime nextRuntime sourceEnv objectId tag continuation
+      location cell semantic objectCompiled objectLookup updated found live
+      objectEq tagFits)
+
+/-- The aligned residual package discharges constructor-tag admission from the
+successful current source step alone. -/
+theorem ConcreteStructuredAlignedValidationState.admit_setTag_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {expectedResult : AbiKind}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {tag : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (validated : ConcreteStructuredAlignedValidationState program context
+      expectedResult (.setTag objectId tag continuation))
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.setTag objectId tag continuation)
+      targetStore targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv 0
+      (.setTag objectId tag continuation) := by
+  obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees⟩ := validated
+  exact focus.admit_setTag_of_step agrees related sourceStep
+
 /-- Constructor-tag writes preserve the residual validator state. -/
 theorem ConcreteStructuredValidationFocus.setTagContinuation
     {program : Fir.LeanIR.ImpureProgram}
