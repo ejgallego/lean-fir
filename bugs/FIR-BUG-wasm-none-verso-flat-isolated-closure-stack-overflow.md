@@ -1,7 +1,7 @@
 ---
 id: FIR-BUG-wasm-none-verso-flat-isolated-closure-stack-overflow
-status: candidate
-classification: wasm-adapter
+status: fixed
+classification: compiler
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: d8b18978322de05a8f3dba51ef03cf5461676c17
 phase: wasm
@@ -9,7 +9,7 @@ pass: none
 discovered-by: differential-test
 first-seen: 2026-08-14
 reproduction: integration/verso-flat/check-flat.mjs
-regression: none
+regression: integration/verso-flat/check-flat.mjs
 ---
 
 # Summary
@@ -76,16 +76,18 @@ package contract. Other closure-heavy `prettyM` clients may share the gap.
 
 ## Classification and triage
 
-This is provisionally a W7 code-generation control-flow defect. The repeating
-cycle spans several Wasm functions rather than the single direct recursive
-worker repaired by the existing self-tail-call rewrite. Minimize and classify
-whether the isolated closure exposes mutual tail recursion, tail calls through
-generated closure applications, or a newly non-tail call path. It changes no
-W6 layout or resident-helper signature.
+This was a capture-boundary defect, not a missing Wasm tail-call opcode. The
+single fresh compiler unit exposed a genuinely non-tail cycle through the
+generic rendered-monad bind and its generated continuation. Emitting
+standardized `return_call` for the surrounding tail positions did not remove
+that cycle. Replaying the source module's postponed final LCNF instead retains
+Lean's native module specialization and SCC identities; the existing direct
+self-tail-call lowering can then turn the specialized worker into a loop.
+It changes no W6 layout or resident-helper signature.
 
 ## Workaround
 
-none
+none; the source-capture path is repaired.
 
 ## Upstream tracking
 
@@ -93,4 +95,11 @@ none
 
 ## Resolution and regression
 
-unresolved
+`compileEntryModuleWiseInternalizedFrom` replays the exact postponed source
+module without requiring its native IR artifact. `internalizeFinalDependencies`
+then compiles only unresolved prebuilt Lean dependencies in a fresh final-LCNF
+unit and prunes the merged closure. The resulting ordinary-Wasm package passes
+the native differential corpus, the 2,047-node balanced document, the grouped
+256-break document, and the repeated-call arena check in
+`integration/verso-flat/check-flat.mjs` without requiring the Wasm tail-call
+feature.

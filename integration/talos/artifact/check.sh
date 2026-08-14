@@ -17,6 +17,7 @@ second="$(mktemp -d)"
 trap 'rm -rf "$first" "$second"' EXIT
 
 cd "$here"
+node --test "$root/integration/package-tools/postponed-source-view.test.mjs"
 lake build
 lake exe fir-wasm-artifact resident-global _build/resident-global.wasm
 node run-resident-global.mjs _build/resident-global.wasm

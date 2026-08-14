@@ -13,7 +13,8 @@ unstyled newline `2`.
 ## Source view
 
 The build reads `VersoSlides/Pretty.lean` from a clean checkout without using
-that checkout's `.lake`:
+that checkout's `.lake`. It replays the module's postponed final LCNF, then
+recompiles only unresolved prebuilt Lean dependencies in a fresh compiler unit:
 
 ```sh
 ln -s /absolute/path/to/clean/verso .verso

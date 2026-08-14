@@ -1,22 +1,25 @@
 import Fir.Wasm.Emit.ResidentLinker
-import VersoSlides.Pretty
 
 namespace VersoFirHtml.Compile
 
 open Lean
 
 /-- The real complete-HTML entry published by Verso. -/
-def entry : Name := ``VersoSlides.Pretty.formatHtmlForRuntime
+def sourceModule : Name := `VersoSlides.Pretty
+
+def entry : Name := `VersoSlides.Pretty.formatHtmlForRuntime
 
 /--
-Capture the real entry immediately before Lean's final LCNF-to-IR handoff.
-
-This is the same single-unit capture used by the accepted Flat package. It
-lets Lean specialize the imported `Std.Format.prettyM` closure for the HTML
-monad and leaves only genuine runtime primitives at the resident boundary.
+Replay the real source module immediately before Lean's final LCNF-to-IR
+handoff. This preserves the same specialization/SCC boundary as Lean's native
+module build and leaves only genuine runtime primitives at the resident
+boundary.
 -/
-def captureSource : CoreM Fir.Validation.Lcnf.Artifact :=
-  Fir.Wasm.Emit.Source.compileEntryFinalCapturedInternalized entry #[]
+def captureSource : CoreM Fir.Validation.Lcnf.Artifact := do
+  let artifact ← Fir.Wasm.Emit.Source.compileEntryModuleWiseInternalizedFrom
+    sourceModule entry entry
+    Fir.Wasm.Emit.ResidentLinker.closedApplicationRetainedExternalNames
+  Fir.Wasm.Emit.Source.internalizeFinalDependencies artifact
     Fir.Wasm.Emit.ResidentLinker.closedApplicationRetainedExternalNames
 
 /-- Lower the unmodified source closure before resident-runtime linking. -/

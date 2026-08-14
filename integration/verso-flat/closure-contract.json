@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
-  "capturedDeclarations": 90,
+  "capturedDeclarations": 75,
   "reviewedExternalsBeforeLink": 24,
-  "retainedSourceFunctions": 64,
-  "residentHelpers": 504,
-  "completeFunctions": 568,
-  "baseWasmBytes": 56327,
-  "completeWasmBytes": 154635,
+  "retainedSourceFunctions": 51,
+  "residentHelpers": 345,
+  "completeFunctions": 396,
+  "baseWasmBytes": 55663,
+  "completeWasmBytes": 121192,
   "lazyCacheInitializers": 0,
   "residentGlobals": 3,
-  "retainedSourceFunctionSha256": "b61b6e29482645444173a21686120ad1c49ff88737cc53c74e20070fe13badff",
-  "residentHelperSha256": "a8169963be4274f331171cc6d4ced42f540dd2f815e8a88b13c227426b636d2c"
+  "retainedSourceFunctionSha256": "fb318220627a708a5e8cfc6b151bfd638a9e86fd09ba45bb70573853817d5552",
+  "residentHelperSha256": "e0c0478201c0d95a7fd63b1748adca0719cdd842baff807529fa7efa0dc72a67"
 }

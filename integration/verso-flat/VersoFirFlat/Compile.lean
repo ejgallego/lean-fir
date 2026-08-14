@@ -1,15 +1,19 @@
 import Fir.Wasm.Emit.ResidentLinker
-import VersoSlides.Pretty
 
 namespace VersoFirFlat.Compile
 
 open Lean
 
-def entry : Name := ``VersoSlides.Pretty.formatRenderedForRuntime
+def sourceModule : Name := `VersoSlides.Pretty
 
-/-- Capture the real Verso entry immediately before Lean's final LCNF-to-IR handoff. -/
-def captureSource : CoreM Fir.Validation.Lcnf.Artifact :=
-  Fir.Wasm.Emit.Source.compileEntryFinalCapturedInternalized entry #[]
+def entry : Name := `VersoSlides.Pretty.formatRenderedForRuntime
+
+/-- Replay the real Verso module at Lean's final LCNF-to-IR handoff. -/
+def captureSource : CoreM Fir.Validation.Lcnf.Artifact := do
+  let artifact ← Fir.Wasm.Emit.Source.compileEntryModuleWiseInternalizedFrom
+    sourceModule entry entry
+    Fir.Wasm.Emit.ResidentLinker.closedApplicationRetainedExternalNames
+  Fir.Wasm.Emit.Source.internalizeFinalDependencies artifact
     Fir.Wasm.Emit.ResidentLinker.closedApplicationRetainedExternalNames
 
 /-- Lower the unmodified source closure before resident runtime linking. -/

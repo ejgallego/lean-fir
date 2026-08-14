@@ -15,6 +15,8 @@ import {
 } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildPostponedSourceView } from
+  "../package-tools/postponed-source-view.mjs";
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const firRoot = realpathSync(join(directory, "../.."));
@@ -39,6 +41,7 @@ function run(command, args, options = {}) {
   return execFileSync(command, args, {
     cwd: options.cwd ?? directory,
     encoding: options.encoding ?? "utf8",
+    env: { ...process.env, ...options.env },
     stdio: options.capture === false ? "inherit" : ["ignore", "pipe", "inherit"],
     maxBuffer: options.maxBuffer ?? 64 * 1024 * 1024,
   });
@@ -108,8 +111,21 @@ mkdirSync(buildDirectory, { recursive: true });
 run("lake", ["--keep-toolchain", "--reconfigure",
   `-KversoRoot=${versoRoot}`, "build", "VersoFirFlat.Compile"],
 { capture: false });
-run("lake", ["--keep-toolchain", `-KversoRoot=${versoRoot}`, "env", "lean",
-  "Emit.lean"], { capture: false });
+const lean = capture("lake", ["--keep-toolchain", "env", "which", "lean"]);
+const leanPath = capture("lake", ["--keep-toolchain", "env", "printenv",
+  "LEAN_PATH"]);
+const sourceView = buildPostponedSourceView({
+  lean,
+  leanPath,
+  moduleName: "VersoSlides.Pretty",
+  outputRoot: join(buildDirectory, "source-view", "lib", "lean"),
+  packageName: "VersoFirFlatSourceView",
+  sourceFile: join(versoRoot, "VersoSlides/Pretty.lean"),
+});
+run(lean, ["Emit.lean"], {
+  capture: false,
+  env: { LEAN_PATH: sourceView.leanPath },
+});
 run("node", ["build-adapter.mjs", adapterPath], { capture: false });
 
 const wasm = readFileSync(residentStem);
@@ -215,7 +231,8 @@ const build = {
     baseSha256: sha256(baseWasm),
   },
   closure: {
-    capture: "compileEntryFinalCapturedInternalized",
+    capture: "compileEntryModuleWiseInternalizedFrom+internalizeFinalDependencies",
+    sourceView: "postponed-final-lcnf-module/v1",
     arenaPreparation: "prepareArenaArtifact",
     residentPolicy: "closedApplicationPolicy",
     capturedDeclarations: inventory.capturedDeclarations,

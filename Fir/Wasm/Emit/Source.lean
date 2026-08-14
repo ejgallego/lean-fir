@@ -616,16 +616,26 @@ than the IR subsequently emitted by Lean.
 Every source module intended for internalization must have been built with
 `compiler.postponeCompile=true`, which records replay groups in its private
 olean data. Prebuilt Lean/runtime modules without such groups remain explicit
-external declarations.
+external declarations. The explicit module and source-root parameters let a
+package façade remain independent of the source module's native IR artifacts.
 -/
+def compileEntryModuleWiseInternalizedFrom
+    (moduleName sourceRoot entry : Name)
+    (retainedExternalNames : Array String := #[]) :
+    CoreM Fir.Validation.Lcnf.Artifact := do
+  let environment ← getEnv
+  compileEntryDeferredModulesInternalizedAux entry retainedExternalNames environment
+    #[(moduleName, sourceRoot, true)] #[] #[]
+
+/-- Derive an imported entry's source module, then replay its postponed final LCNF. -/
 def compileEntryModuleWiseInternalized (entry : Name)
     (retainedExternalNames : Array String := #[]) :
     CoreM Fir.Validation.Lcnf.Artifact := do
   let environment ← getEnv
   let some (moduleName, sourceRoot) ← sourceModuleFor? environment entry |
     throwError "entry `{entry}` has no source module"
-  compileEntryDeferredModulesInternalizedAux entry retainedExternalNames environment
-    #[(moduleName, sourceRoot, true)] #[] #[]
+  compileEntryModuleWiseInternalizedFrom moduleName sourceRoot entry
+    retainedExternalNames
 
 /--
 Compile an entry and its recursively discovered source dependencies as one
@@ -696,6 +706,30 @@ def compileEntriesFinalCapturedInternalized (entries : Array Name)
       throwError "final-LCNF multi-entry root `{root}` remained external"
   match pruneUnreachableDeclarations artifact (entries.extract 1 entries.size) with
   | .ok artifact => return artifact
+  | .error message => throwError message
+
+/--
+Close the source dependencies left by an exact module-wise replay through one
+fresh final-LCNF compiler unit. The replayed module's declarations keep their
+native specialization/SCC identities; only unresolved declarations from
+prebuilt modules without postponed groups are recompiled. Explicit runtime
+frontier names remain external.
+-/
+def internalizeFinalDependencies (artifact : Fir.Validation.Lcnf.Artifact)
+    (retainedExternalNames : Array String := #[]) :
+    CoreM Fir.Validation.Lcnf.Artifact := do
+  let localNames := artifact.program.decls.filterMap fun declaration =>
+    if artifact.externalNames.contains declaration.name then none
+    else some declaration.name
+  let roots ← discoveredFinalSourceRoots artifact retainedExternalNames localNames
+  let dependencyNames := roots.foldl (init := #[]) fun names root =>
+    (#[root.name] ++ root.companions).foldl addUniqueName names
+  let some dependencyEntry := dependencyNames[0]? | return artifact
+  let dependencies ← compileEntryFinalCapturedInternalized dependencyEntry
+    (dependencyNames.extract 1 dependencyNames.size) retainedExternalNames
+  let merged ← mergeSeparatelyCompiledArtifacts artifact.entry #[artifact, dependencies]
+  match pruneUnreachableDeclarations merged with
+  | .ok merged => return merged
   | .error message => throwError message
 
 /--

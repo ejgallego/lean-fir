@@ -20,10 +20,10 @@ The exact clean Verso revision and source digest are pinned in
 ln -s /absolute/path/to/clean/verso .verso
 ```
 
-FIR asks Lean for one captured final-LCNF unit rooted at the public entry. This
-is deliberately slower than replaying module-wise fragments, but it preserves
-the specializations produced by the source compilation and reduces the
-external frontier to generic runtime operations. `closure-contract.json`
+FIR builds a private postponed source view, replays the module's exact final
+LCNF, and compiles only unresolved prebuilt Lean dependencies in one fresh
+compiler unit. This preserves the source module's specialization and SCC
+boundaries without requiring its native IR artifact. `closure-contract.json`
 ratchets the complete declaration, helper, size, and inventory digests.
 
 ## Complete gate and publication
