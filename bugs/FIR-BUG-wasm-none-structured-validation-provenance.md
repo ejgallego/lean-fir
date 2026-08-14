@@ -140,3 +140,10 @@ The remaining `let` obligation is therefore syntax-local: derive that compiled
 binding from the operation-specific adaptation theorem. Join, case, call-entry,
 and suspended-frame transport remain to be connected before the universal
 current-step admission theorem can replace per-constructor hypotheses.
+
+Explicit deletion is now classified from the aligned validator state and the
+actual successful source step alone, and alignment is preserved across delete,
+tag, object-field, `USize`-field, and packed-scalar-field continuations. While
+closing the direct-`let` result premise, the proof exposed that raw supported
+lowering does not retain body-binder name uniqueness; that independent domain
+defect is recorded as `FIR-BUG-wasm-none-local-binder-name-uniqueness`.

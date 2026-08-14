@@ -5057,6 +5057,21 @@ theorem ConcreteStructuredValidationState.osetContinuation
   obtain ⟨joins, locals, facts, sharing, focus⟩ := validated
   exact ⟨joins, locals, facts, sharing, focus.osetContinuation⟩
 
+/-- Object-field writes preserve compiler/validator local agreement. -/
+theorem ConcreteStructuredAlignedValidationState.osetContinuation
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionResult : Fir.Wasm.AbiKind}
+    {objectId : Lean.FVarId} {fieldIndex : Nat}
+    {field : Lean.Compiler.LCNF.Arg .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredAlignedValidationState program context
+      functionResult (.oset objectId fieldIndex field continuation)) :
+    ConcreteStructuredAlignedValidationState program context functionResult
+      continuation := by
+  obtain ⟨joins, locals, facts, sharing, focus, agrees⟩ := validated
+  exact ⟨joins, locals, facts, sharing, focus.osetContinuation, agrees⟩
+
 /-- `USize` field writes preserve the residual validator state. -/
 theorem ConcreteStructuredValidationFocus.usetContinuation
     {program : Fir.LeanIR.ImpureProgram}
@@ -5086,6 +5101,20 @@ theorem ConcreteStructuredValidationState.usetContinuation
     ConcreteStructuredValidationState program functionResult continuation := by
   obtain ⟨joins, locals, facts, sharing, focus⟩ := validated
   exact ⟨joins, locals, facts, sharing, focus.usetContinuation⟩
+
+/-- `USize` field writes preserve compiler/validator local agreement. -/
+theorem ConcreteStructuredAlignedValidationState.usetContinuation
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionResult : Fir.Wasm.AbiKind}
+    {objectId : Lean.FVarId} {fieldIndex : Nat} {fieldId : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredAlignedValidationState program context
+      functionResult (.uset objectId fieldIndex fieldId continuation)) :
+    ConcreteStructuredAlignedValidationState program context functionResult
+      continuation := by
+  obtain ⟨joins, locals, facts, sharing, focus, agrees⟩ := validated
+  exact ⟨joins, locals, facts, sharing, focus.usetContinuation, agrees⟩
 
 /-- Packed scalar field writes preserve the residual validator state. -/
 theorem ConcreteStructuredValidationFocus.ssetContinuation
@@ -5126,6 +5155,22 @@ theorem ConcreteStructuredValidationState.ssetContinuation
   obtain ⟨joins, locals, facts, sharing, focus⟩ := validated
   exact ⟨joins, locals, facts, sharing, focus.ssetContinuation⟩
 
+/-- Packed-scalar field writes preserve compiler/validator local agreement. -/
+theorem ConcreteStructuredAlignedValidationState.ssetContinuation
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionResult : Fir.Wasm.AbiKind}
+    {objectId : Lean.FVarId} {byteOffset fieldIndex : Nat}
+    {fieldId : Lean.FVarId} {type : Lean.Expr}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredAlignedValidationState program context
+      functionResult
+      (.sset objectId byteOffset fieldIndex fieldId type continuation)) :
+    ConcreteStructuredAlignedValidationState program context functionResult
+      continuation := by
+  obtain ⟨joins, locals, facts, sharing, focus, agrees⟩ := validated
+  exact ⟨joins, locals, facts, sharing, focus.ssetContinuation, agrees⟩
+
 /-- Constructor-tag writes preserve the residual validator state. -/
 theorem ConcreteStructuredValidationFocus.setTagContinuation
     {program : Fir.LeanIR.ImpureProgram}
@@ -5155,6 +5200,183 @@ theorem ConcreteStructuredValidationState.setTagContinuation
   obtain ⟨joins, locals, facts, sharing, focus⟩ := validated
   exact ⟨joins, locals, facts, sharing, focus.setTagContinuation⟩
 
+/-- Constructor-tag writes preserve compiler/validator local agreement. -/
+theorem ConcreteStructuredAlignedValidationState.setTagContinuation
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionResult : Fir.Wasm.AbiKind}
+    {objectId : Lean.FVarId} {tag : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredAlignedValidationState program context
+      functionResult (.setTag objectId tag continuation)) :
+    ConcreteStructuredAlignedValidationState program context functionResult
+      continuation := by
+  obtain ⟨joins, locals, facts, sharing, focus, agrees⟩ := validated
+  exact ⟨joins, locals, facts, sharing, focus.setTagContinuation, agrees⟩
+
+/-- Validation of explicit deletion selects the exact ordinary-object local
+lane used by production lowering. -/
+theorem ConcreteStructuredValidationFocus.del_eq
+    {program : Fir.LeanIR.ImpureProgram}
+    {joins : Fir.Wasm.JoinPoints}
+    {locals : Fir.Wasm.LocalKinds}
+    {expectedResult : Option Fir.Wasm.AbiKind}
+    {facts : Fir.Wasm.SupportedCaseFacts}
+    {sharing : Fir.Wasm.SupportedSharingFacts}
+    {objectId : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredValidationFocus program joins locals
+      expectedResult facts sharing (.del objectId continuation)) :
+    Fir.Wasm.findLocalKind? locals objectId = some .object := by
+  have supported := validated.supported
+  simp only [Fir.Wasm.supportedCodeWithJoins, Bool.and_eq_true] at supported
+  simpa using supported.1
+
+/-- Residual-local agreement turns the validator's delete guard into the
+production compiler equation required by delete admission. -/
+theorem ConcreteStructuredValidationFocus.del_compiler
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {joins : Fir.Wasm.JoinPoints}
+    {locals : Fir.Wasm.LocalKinds}
+    {expectedResult : Option Fir.Wasm.AbiKind}
+    {facts : Fir.Wasm.SupportedCaseFacts}
+    {sharing : Fir.Wasm.SupportedSharingFacts}
+    {objectId : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredValidationFocus program joins locals
+      expectedResult facts sharing (.del objectId continuation))
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals) :
+    Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, .object) :=
+  agrees validated.del_eq
+
+/-- A successful source delete step exposes exactly the semantic lookup and
+update stored by ordinary-delete admission. Target execution is not inspected.
+-/
+theorem ConcreteStructuredCodeFocus.del_source_of_step
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.del objectId continuation) targetStore
+      targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ sourceObject nextRuntime,
+      lookupValue sourceEnv objectId = .ok sourceObject ∧
+        deleteValue sourceRuntime sourceObject = .ok nextRuntime := by
+  rcases source with
+    ⟨sourceProgram, sourceControl, sourceStateEnv, sourceJoins, sourceFrames,
+      sourceStateRuntime⟩
+  have sourceControlEq := related.sourceControlEq
+  change sourceControl = .code (.del objectId continuation) at sourceControlEq
+  subst sourceControl
+  have sourceEnvEq := related.sourceEnvEq
+  change sourceStateEnv = sourceEnv at sourceEnvEq
+  subst sourceStateEnv
+  have sourceRuntimeEq := related.sourceRuntimeEq
+  change sourceStateRuntime = sourceRuntime at sourceRuntimeEq
+  subst sourceStateRuntime
+  cases objectResult : lookupValue sourceEnv objectId with
+  | error fault =>
+      simp [executeStep, coreStep, objectResult, fail] at sourceStep
+  | ok sourceObject =>
+      cases updateResult : deleteValue sourceRuntime sourceObject with
+      | error fault =>
+          simp [executeStep, coreStep, objectResult, updateResult, fail]
+            at sourceStep
+      | ok nextRuntime =>
+          exact ⟨sourceObject, nextRuntime, rfl, updateResult⟩
+
+/-- Validator-derived delete admission from the aligned current state and the
+actual successful source step. No target path or continuation admission is
+retained. -/
+theorem ConcreteStructuredValidationFocus.admit_del_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {joins : Fir.Wasm.JoinPoints}
+    {locals : Fir.Wasm.LocalKinds}
+    {expectedResult : AbiKind}
+    {validatorFacts : Fir.Wasm.SupportedCaseFacts}
+    {sharing : Fir.Wasm.SupportedSharingFacts}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (validated : ConcreteStructuredValidationFocus program joins locals
+      (some expectedResult) validatorFacts sharing
+      (.del objectId continuation))
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals)
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.del objectId continuation) targetStore
+      targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv 0
+      (.del objectId continuation) := by
+  have objectCompiled := validated.del_compiler agrees
+  obtain ⟨sourceObject, nextRuntime, objectLookup, updated⟩ :=
+    related.del_source_of_step sourceStep
+  exact .ordinaryDelete
+    (.del sourceRuntime nextRuntime sourceEnv objectId continuation .object
+      sourceObject objectCompiled objectLookup updated)
+
+/-- The aligned residual package discharges explicit-delete admission from
+the successful current source step alone. -/
+theorem ConcreteStructuredAlignedValidationState.admit_del_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {expectedResult : AbiKind}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (validated : ConcreteStructuredAlignedValidationState program context
+      expectedResult (.del objectId continuation))
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.del objectId continuation) targetStore
+      targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv 0
+      (.del objectId continuation) := by
+  obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees⟩ := validated
+  exact focus.admit_del_of_step agrees related sourceStep
+
 /-- Explicit deletion preserves the residual validator state. -/
 theorem ConcreteStructuredValidationFocus.delContinuation
     {program : Fir.LeanIR.ImpureProgram}
@@ -5183,6 +5405,20 @@ theorem ConcreteStructuredValidationState.delContinuation
     ConcreteStructuredValidationState program functionResult continuation := by
   obtain ⟨joins, locals, facts, sharing, focus⟩ := validated
   exact ⟨joins, locals, facts, sharing, focus.delContinuation⟩
+
+/-- Explicit deletion preserves the complete aligned residual state. -/
+theorem ConcreteStructuredAlignedValidationState.delContinuation
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionResult : Fir.Wasm.AbiKind}
+    {objectId : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredAlignedValidationState program context
+      functionResult (.del objectId continuation)) :
+    ConcreteStructuredAlignedValidationState program context functionResult
+      continuation := by
+  obtain ⟨joins, locals, facts, sharing, focus, agrees⟩ := validated
+  exact ⟨joins, locals, facts, sharing, focus.delContinuation, agrees⟩
 
 /-- Explicit delete, including erased physical zero, preserves the closed
 relation across the exact two-instruction generated host prefix. -/
