@@ -206,6 +206,27 @@ def floatArraySetShared
   let updated := xs.set! 0 replacement
   (xs, updated)
 
+/-!
+Retain a repeated-child Array across a copy-on-write replacement, then project
+and mutate its surviving child. The child occurs twice in `original` and once
+in `updated`, so both an under-retain while copying the Array and an
+over-release while replacing its first slot become observable at the result
+boundary.
+-/
+structure RepeatedByteArrayChildArrayInput where
+  outside : ByteArray
+  values : Array ByteArray
+
+@[noinline]
+def repeatedByteArrayChildArraySetShared
+    (input : RepeatedByteArrayChildArrayInput) (replacement : ByteArray) :
+    Array ByteArray × Array ByteArray × ByteArray :=
+  let original := input.values
+  let source := input.outside
+  let updated := original.set! 0 replacement
+  let changed := source.set! 0 42
+  (original, updated, changed)
+
 @[noinline]
 def floatArrayPushUnique (xs : Array Float) (value : Float) : Array Float :=
   xs.push value
@@ -2735,6 +2756,15 @@ private def genericArrayReplacementFloat : Float :=
 private def byteArrayDatum (value : ByteArray) : ValidationDatum :=
   .bytes (value.data.map (UInt8.toNat ·))
 
+private def byteArrayArrayDatum (values : Array ByteArray) : ValidationDatum :=
+  .seq (values.map byteArrayDatum)
+
+private def byteArrayArrayArrayByteArrayDatum
+    (value : Array ByteArray × Array ByteArray × ByteArray) : ValidationDatum :=
+  .ctor "Prod.mk" 0 #[byteArrayArrayDatum value.1,
+    .ctor "Prod.mk" 0 #[byteArrayArrayDatum value.2.1,
+      byteArrayDatum value.2.2]]
+
 private def byteArrayPairDatum (value : ByteArray × ByteArray) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[byteArrayDatum value.1, byteArrayDatum value.2]
 
@@ -4403,6 +4433,60 @@ private def preConversionCases : Array Case := #[
     requiredExecutedExternalTrace := some #[``Array.set!]
     provenance := firProvenance
       "Copy a shared Float Array with exact heap-box retention and replacement bits" },
+  { id := "repeated-byte-array-child-array-set-shared"
+    entry := ``Source.repeatedByteArrayChildArraySetShared
+    args := #[.ctor "RepeatedByteArrayChildArrayInput.mk" 0 #[
+        .bytes #[0, 127, 128, 255],
+        .seq #[.bytes #[0, 127, 128, 255], .bytes #[0, 127, 128, 255]]],
+      .bytes #[255, 1, 2, 3]]
+    argSchemas := #[.ctor "RepeatedByteArrayChildArrayInput.mk" 0
+      #[.bytes, .array .bytes], .bytes]
+    nestedArgumentAliases := #[
+      { source := { argument := 0, children := #[0] }
+        target := { argument := 0, children := #[1, 0] } },
+      { source := { argument := 0, children := #[0] }
+        target := { argument := 0, children := #[1, 1] } }]
+    resultSchema := .ctor "Prod.mk" 0 #[.array .bytes,
+      .ctor "Prod.mk" 0 #[.array .bytes, .bytes]]
+    native := fun _ => byteArrayArrayArrayByteArrayDatum
+      (let shared : ByteArray := ⟨#[0, 127, 128, 255]⟩
+       Source.repeatedByteArrayChildArraySetShared
+         { outside := shared, values := #[shared, shared] }
+         ⟨#[255, 1, 2, 3]⟩)
+    tags := #["stress", "array", "generic", "bytearray", "bytes", "heap",
+      "mutation", "ownership", "shared", "copy-on-write", "repeated-alias",
+      "repeated-child-alias", "outside-alias", "nested-argument-alias",
+      "release-fidelity"]
+    requiredLcnfForms := #["oproj", "join", "lit", "inc", "fap", "ctor",
+      "return", "cases", "oset", "jump", "isShared", "dec", "extern"]
+    requiredExecutedLcnfForms := #["oproj", "join", "isShared", "cases",
+      "jump", "lit", "inc", "fap", "extern", "oset", "ctor", "return"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "oproj", minimum := 2, maximum := some 2 },
+        { form := "join", minimum := 2, maximum := some 2 },
+        { form := "isShared", minimum := 1, maximum := some 1 },
+        { form := "cases", minimum := 2, maximum := some 2 },
+        { form := "jump", minimum := 2, maximum := some 2 },
+        { form := "lit", minimum := 2, maximum := some 2 },
+        { form := "inc", minimum := 1, maximum := some 1 },
+        { form := "fap", minimum := 2, maximum := some 2 },
+        { form := "extern", minimum := 2, maximum := some 2 },
+        { form := "oset", minimum := 2, maximum := some 2 },
+        { form := "ctor", minimum := 1, maximum := some 1 },
+        { form := "return", minimum := 1, maximum := some 1 }]
+    requiredExecutedLcnfFormTrace := some
+      #["oproj", "oproj", "join", "isShared", "cases", "jump", "lit",
+        "inc", "fap", "extern", "lit", "fap", "extern", "join", "cases",
+        "oset", "oset", "jump", "ctor", "return"]
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:yield-bind", "admin:yield-done"]
+    requiredExternals := #[``Array.set!, ``ByteArray.set!]
+    requiredExecutedExternals := #[``Array.set!, ``ByteArray.set!]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Array.set!, ``ByteArray.set!]
+    requiredExecutedExternalTrace := some #[``Array.set!, ``ByteArray.set!]
+    provenance := firProvenance
+      "Retain a repeated ByteArray child through shared Array replacement before mutating its outside alias" },
   { id := "generic-float-array-push-unique"
     entry := ``Source.floatArrayPushUnique
     args := #[floatArrayDatum #[genericContainerFloat],
