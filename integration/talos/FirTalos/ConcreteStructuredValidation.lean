@@ -6161,6 +6161,295 @@ theorem ConcreteStructuredAlignedValidationState.admit_uset_of_step
   obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees⟩ := validated
   exact focus.admit_uset_of_step agrees related sourceStep
 
+/-- Source/runtime layout typing for one packed-scalar field mutation.
+
+The predicate connects the semantic constructor currently named by
+`objectId` to every concrete descriptor refining that value. It states exactly
+the packed coordinate, extent, and non-overlap facts required by the existing
+concrete scalar-mutation theorem. It mentions neither emitted code nor a
+target execution and is therefore a source typing premise rather than a
+translation certificate. -/
+def ConcreteScalarFieldLayoutAligned
+    (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (objectId : Lean.FVarId) (slotIndex byteOffset : Nat)
+    (fieldKind : AbiKind) : Prop :=
+  ∀ {location : Location} {cell : HeapCell} {semantic : ConstructorObject}
+      {witness : RefinementWitness} {objectWord : Word32}
+      {info : Lean.Compiler.LCNF.CtorInfo} {fieldKinds : Array AbiKind},
+    lookupValue sourceEnv objectId = .ok (.object (.heap location)) →
+      findCell? sourceRuntime.heap location = some cell →
+        cell.live = true →
+          cell.object = .ctor semantic →
+            ValueRel witness .tobject (.word32 objectWord)
+                (.object (.heap location)) →
+              witness.descriptors.lookup? objectWord =
+                  some (.constructor info fieldKinds) →
+                ScalarFieldMutationSafe semantic slotIndex byteOffset
+                  fieldKind info
+
+/-- The scalar-field specialization connects source/runtime layout typing to
+the exact payload kind selected by production lowering. -/
+def ConcreteScalarFieldMutationTyped
+    (context : Fir.Wasm.Context) (sourceRuntime : RuntimeState)
+    (sourceEnv : Env) (objectId fieldId : Lean.FVarId)
+    (slotIndex byteOffset : Nat) : Prop :=
+  ∀ {fieldKind : AbiKind},
+    Fir.Wasm.getLocal context fieldId =
+        .ok (.localGet fieldId, fieldKind) →
+      ConcreteScalarFieldLayoutAligned sourceRuntime sourceEnv objectId
+        slotIndex byteOffset fieldKind
+
+/-- Validation of a packed-scalar write fixes the object lane, payload lane,
+source annotation, and the scalar ABI family accepted by production lowering.
+The production validator deliberately supplies no layout-coordinate fact. -/
+theorem ConcreteStructuredValidationFocus.sset_eq
+    {program : Fir.LeanIR.ImpureProgram}
+    {joins : Fir.Wasm.JoinPoints}
+    {locals : Fir.Wasm.LocalKinds}
+    {expectedResult : Option Fir.Wasm.AbiKind}
+    {facts : Fir.Wasm.SupportedCaseFacts}
+    {sharing : Fir.Wasm.SupportedSharingFacts}
+    {objectId fieldId : Lean.FVarId} {slotIndex byteOffset : Nat}
+    {type : Lean.Expr}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredValidationFocus program joins locals
+      expectedResult facts sharing
+      (.sset objectId slotIndex byteOffset fieldId type continuation)) :
+    ∃ fieldKind,
+      Fir.Wasm.findLocalKind? locals objectId = some .object ∧
+        Fir.Wasm.findLocalKind? locals fieldId = some fieldKind ∧
+        Fir.Wasm.abiValueKind? type = some fieldKind ∧
+        Fir.Wasm.supportedScalarProjectionKind fieldKind = true := by
+  have supported := validated.supported
+  simp [Fir.Wasm.supportedCodeWithJoins] at supported
+  split at supported <;> simp_all
+  simpa [supported.1.1] using supported.1.2
+
+/-- Residual-local agreement turns the scalar validator guards into the exact
+production compiler equations. -/
+theorem ConcreteStructuredValidationFocus.sset_compiler
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {joins : Fir.Wasm.JoinPoints}
+    {locals : Fir.Wasm.LocalKinds}
+    {expectedResult : Option Fir.Wasm.AbiKind}
+    {facts : Fir.Wasm.SupportedCaseFacts}
+    {sharing : Fir.Wasm.SupportedSharingFacts}
+    {objectId fieldId : Lean.FVarId} {slotIndex byteOffset : Nat}
+    {type : Lean.Expr}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredValidationFocus program joins locals
+      expectedResult facts sharing
+      (.sset objectId slotIndex byteOffset fieldId type continuation))
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals) :
+    ∃ fieldKind,
+      Fir.Wasm.getLocal context objectId =
+          .ok (.localGet objectId, .object) ∧
+        Fir.Wasm.getLocal context fieldId =
+          .ok (.localGet fieldId, fieldKind) ∧
+        Fir.Wasm.abiValueKind? type = some fieldKind ∧
+        Fir.Wasm.supportedScalarProjectionKind fieldKind = true := by
+  obtain ⟨fieldKind, objectFound, fieldFound, annotationFound,
+      scalarSupported⟩ := validated.sset_eq
+  exact ⟨fieldKind, agrees objectFound, agrees fieldFound, annotationFound,
+    scalarSupported⟩
+
+/-- A successful semantic scalar write determines its heap constructor and
+scalar payload. Source execution itself imposes no packed-layout bounds. -/
+private theorem setScalarField_shape_for_admission
+    {runtime nextRuntime : RuntimeState} {object fieldValue : Value}
+    {slotIndex byteOffset : Nat}
+    (updated : setScalarField runtime object slotIndex byteOffset fieldValue =
+      .ok nextRuntime) :
+    ∃ location cell semantic field,
+      object = .object (.heap location) ∧
+        fieldValue = .scalar field ∧
+        findCell? runtime.heap location = some cell ∧
+        cell.live = true ∧
+        cell.object = .ctor semantic := by
+  cases fieldValue with
+  | object reference => simp [setScalarField] at updated
+  | usize field => simp [setScalarField] at updated
+  | scalar field =>
+      unfold setScalarField modifyConstructor at updated
+      simp only [Bind.bind, Except.bind] at updated
+      generalize constructorEq :
+        getConstructor runtime object = constructorResult at updated
+      cases constructorResult with
+      | error fault => simp at updated
+      | ok triple =>
+          obtain ⟨location, cell, semantic⟩ := triple
+          simp only at updated
+          have shape := getConstructor_shape_for_admission constructorEq
+          exact ⟨location, cell, semantic, field, shape.1, rfl,
+            shape.2.1, shape.2.2.1, shape.2.2.2⟩
+  | erased => simp [setScalarField] at updated
+  | reuseToken location? => simp [setScalarField] at updated
+
+/-- A successful source scalar-field step exposes every dynamic mutation fact
+without inspecting the target. -/
+theorem ConcreteStructuredCodeFocus.sset_source_of_step
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId fieldId : Lean.FVarId}
+    {slotIndex byteOffset : Nat}
+    {type : Lean.Expr}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv
+      (.sset objectId slotIndex byteOffset fieldId type continuation)
+      targetStore targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ location cell semantic field nextRuntime,
+      lookupValue sourceEnv objectId = .ok (.object (.heap location)) ∧
+        lookupValue sourceEnv fieldId = .ok (.scalar field) ∧
+        setScalarField sourceRuntime (.object (.heap location)) slotIndex
+            byteOffset (.scalar field) = .ok nextRuntime ∧
+        findCell? sourceRuntime.heap location = some cell ∧
+        cell.live = true ∧
+        cell.object = .ctor semantic := by
+  rcases source with
+    ⟨sourceProgram, sourceControl, sourceStateEnv, sourceJoins, sourceFrames,
+      sourceStateRuntime⟩
+  have sourceControlEq := related.sourceControlEq
+  change sourceControl = .code
+    (.sset objectId slotIndex byteOffset fieldId type continuation)
+    at sourceControlEq
+  subst sourceControl
+  have sourceEnvEq := related.sourceEnvEq
+  change sourceStateEnv = sourceEnv at sourceEnvEq
+  subst sourceStateEnv
+  have sourceRuntimeEq := related.sourceRuntimeEq
+  change sourceStateRuntime = sourceRuntime at sourceRuntimeEq
+  subst sourceStateRuntime
+  cases objectResult : lookupValue sourceEnv objectId with
+  | error fault =>
+      simp [executeStep, coreStep, objectResult, fail] at sourceStep
+  | ok sourceObject =>
+      cases fieldResult : lookupValue sourceEnv fieldId with
+      | error fault =>
+          simp [executeStep, coreStep, objectResult, fieldResult, fail]
+            at sourceStep
+      | ok sourceField =>
+          cases updateResult : setScalarField sourceRuntime sourceObject
+              slotIndex byteOffset sourceField with
+          | error fault =>
+              simp [executeStep, coreStep, objectResult, fieldResult,
+                updateResult, fail] at sourceStep
+          | ok nextRuntime =>
+              have updated := updateResult
+              obtain ⟨location, cell, semantic, field, objectEq, fieldEq,
+                  found, live, semanticEq⟩ :=
+                setScalarField_shape_for_admission updated
+              rw [objectEq, fieldEq] at updated
+              exact ⟨location, cell, semantic, field, nextRuntime,
+                congrArg Except.ok objectEq, congrArg Except.ok fieldEq,
+                updated, found, live, semanticEq⟩
+
+/-- Packed-integer scalar mutation is a complete current-step admission case
+once the explicit source/runtime layout-typing invariant is supplied. -/
+theorem ConcreteStructuredValidationFocus.admit_sset_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {joins : Fir.Wasm.JoinPoints}
+    {locals : Fir.Wasm.LocalKinds}
+    {expectedResult : AbiKind}
+    {validatorFacts : Fir.Wasm.SupportedCaseFacts}
+    {sharing : Fir.Wasm.SupportedSharingFacts}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId fieldId : Lean.FVarId}
+    {slotIndex byteOffset : Nat}
+    {type : Lean.Expr}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (validated : ConcreteStructuredValidationFocus program joins locals
+      (some expectedResult) validatorFacts sharing
+      (.sset objectId slotIndex byteOffset fieldId type continuation))
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals)
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv
+      (.sset objectId slotIndex byteOffset fieldId type continuation)
+      targetStore targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (fieldTyped : ConcreteScalarFieldMutationTyped context sourceRuntime
+      sourceEnv objectId fieldId slotIndex byteOffset) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv 0
+      (.sset objectId slotIndex byteOffset fieldId type continuation) := by
+  obtain ⟨fieldKind, objectCompiled, fieldCompiled, annotationFound,
+      scalarSupported⟩ := validated.sset_compiler agrees
+  obtain ⟨location, cell, semantic, field, nextRuntime, objectLookup,
+      fieldLookup, updated, found, live, objectEq⟩ :=
+    related.sset_source_of_step sourceStep
+  exact .scalarField
+    (.sset sourceRuntime nextRuntime sourceEnv objectId fieldId slotIndex
+      byteOffset type continuation location cell semantic field fieldKind
+      objectCompiled fieldCompiled objectLookup fieldLookup updated found live
+      objectEq (fun objectRelated descriptorFound =>
+        fieldTyped fieldCompiled objectLookup found live objectEq objectRelated
+          descriptorFound))
+
+/-- The aligned residual package closes packed-integer scalar admission under
+the same explicit source/runtime layout invariant. -/
+theorem ConcreteStructuredAlignedValidationState.admit_sset_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {expectedResult : AbiKind}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId fieldId : Lean.FVarId}
+    {slotIndex byteOffset : Nat}
+    {type : Lean.Expr}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (validated : ConcreteStructuredAlignedValidationState program context
+      expectedResult
+      (.sset objectId slotIndex byteOffset fieldId type continuation))
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv
+      (.sset objectId slotIndex byteOffset fieldId type continuation)
+      targetStore targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (fieldTyped : ConcreteScalarFieldMutationTyped context sourceRuntime
+      sourceEnv objectId fieldId slotIndex byteOffset) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv 0
+      (.sset objectId slotIndex byteOffset fieldId type continuation) := by
+  obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees⟩ := validated
+  exact focus.admit_sset_of_step agrees related sourceStep fieldTyped
+
 /-- Constructor-tag writes preserve the residual validator state. -/
 theorem ConcreteStructuredValidationFocus.setTagContinuation
     {program : Fir.LeanIR.ImpureProgram}
