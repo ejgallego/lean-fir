@@ -21,16 +21,18 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   only; feature ownership remains with each lane.
 - Accepted baseline: `main` contains the complete
   `W6-OBJECT-FIELD-TYPING-ADMISSION` stack through lane head `fe01cd1a` plus
-  its acceptance record. This proof documents but does not repair the missing
-  production descriptor-slot typing invariant.
+  its acceptance record at `608ba389`, pushed to `origin/main`. This proof
+  documents but does not repair the missing production descriptor-slot typing
+  invariant.
 - Landing order:
-  1. Tooling isolates the final-function-index protocol as a clean prefix,
-     rebases it after the preceding acceptance, and leaves CPU profiling,
-     selected-function views, and compiled-Array probes as independent later
-     slices.
-  2. W7-2 separates the Verso post-G2 semantic closure review from the generic
+  1. W7-2 separates the Verso post-G2 semantic closure review from the generic
      immutable-package publisher refactor. Semantic/generator fixes land
      before the publisher consumer unless the lane documents a hard dependency.
+  2. Tooling returns explicitly authorized, clean heads for the optimized
+     final-function index protocol. CPU profiling, selected-function views,
+     the compiled-Array probe, and the queued mailbox-protocol adaptation stay
+     separately reviewable; the current combined tooling history is not an
+     integration handoff.
   3. W7-1 resumes the caller-owned Illuminate selection export from accepted
      main. Its lean-zip function-sidecar consumer waits until the tooling
      protocol is accepted.
@@ -38,10 +40,14 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
   invalidating long deterministic package and external-engine gates.
-- Not ready: the tooling worktree has an untracked test fixture and the W7-2
-  worktree has an uncommitted bug-card edit. The Array panic-observation
-  fixture request is now claimed and remains independent until it returns a
-  clean handoff. None is integrated from dirty state.
+- Not ready: W7-2 is clean and rebased on `608ba389`, but its current history
+  still places the semantic specialization repair above the generic publisher
+  refactor; the lane owns the requested split or documented dependency. The
+  tooling worktree is clean and rebased, but its tracked mailbox says
+  `handoff: none` and its current history combines five independently reviewed
+  surfaces, including a large shared mailbox-protocol change. The Array
+  panic-observation fixture audit is accepted and parked behind the existing
+  shared-observation bug card; it has no feature landing.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
