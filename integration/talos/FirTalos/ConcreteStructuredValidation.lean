@@ -20,6 +20,7 @@ open Fir.Wasm
 open Fir.Wasm.Concrete
 open Fir.LeanIR.Impure
 open FirTalos.Correctness
+open Lean.Compiler
 
 /-- The exact residual state of source validation at one current LCNF node. -/
 structure ConcreteStructuredValidationFocus
@@ -33,6 +34,295 @@ structure ConcreteStructuredValidationFocus
   supported :
     Fir.Wasm.supportedCodeWithJoins program joins locals expectedResult facts
       sharing code = true
+
+/-- One proof-transparent declaration-parameter step of the executable
+validator. -/
+private def supportedDeclarationParamStep
+    (program : Fir.LeanIR.ImpureProgram) (declaration : LCNF.Decl .impure)
+    (locals : Fir.Wasm.LocalKinds) (param : LCNF.Param .impure) :
+    Option Fir.Wasm.LocalKinds := do
+  if !Fir.Wasm.abiTypeKnown param.type then none
+  match Fir.Wasm.abiValueKind? param.type with
+  | none => some locals
+  | some _ => do
+      let kind ← Fir.Wasm.declarationParamKind? program declaration param
+      some (Fir.Wasm.insertLocal locals param.fvarId kind)
+
+/-- One proof-transparent declaration-parameter step of production lowering. -/
+private def loweredDeclarationParamStep
+    (program : Fir.LeanIR.ImpureProgram) (declaration : LCNF.Decl .impure)
+    (locals : Fir.Wasm.LocalKinds) (param : LCNF.Param .impure) :
+    Except Fir.Wasm.CompileError Fir.Wasm.LocalKinds := do
+  match ← Fir.Wasm.checkedAbiKind? param.type with
+  | none => return locals
+  | some kind =>
+      let kind :=
+        if kind == .tobject &&
+            Fir.Wasm.erasedOnlyParameter program declaration param then
+          .erased
+        else
+          kind
+      return Fir.Wasm.insertLocal locals param.fvarId kind
+
+/-- A successful validator parameter step is exactly the corresponding
+production-lowering step. -/
+private theorem supportedDeclarationParamStep_lowered
+    {program : Fir.LeanIR.ImpureProgram}
+    {declaration : LCNF.Decl .impure}
+    {locals next : Fir.Wasm.LocalKinds}
+    {param : LCNF.Param .impure}
+    (validated : supportedDeclarationParamStep program declaration locals
+      param = some next) :
+    loweredDeclarationParamStep program declaration locals param = .ok next := by
+  unfold supportedDeclarationParamStep at validated
+  unfold loweredDeclarationParamStep
+  unfold Fir.Wasm.abiTypeKnown Fir.Wasm.abiValueKind?
+    Fir.Wasm.declarationParamKind? at validated
+  unfold Fir.Wasm.checkedAbiKind?
+  cases classified : Fir.Wasm.abiKind? param.type with
+  | error error => simp [classified] at validated
+  | ok kindOption =>
+      cases kindOption with
+      | none =>
+          have nextEq : next = locals := by
+            simpa [classified] using validated.symm
+          subst next
+          rfl
+      | some kind =>
+          by_cases erased :
+              (kind == .tobject &&
+                Fir.Wasm.erasedOnlyParameter program declaration param) = true
+          · have nextEq :
+                next = Fir.Wasm.insertLocal locals param.fvarId .erased := by
+              simpa [classified, erased] using validated.symm
+            subst next
+            simp [erased, pure, Except.pure, Bind.bind,
+              Except.bind]
+          · have nextEq :
+                next = Fir.Wasm.insertLocal locals param.fvarId kind := by
+              simpa [classified, erased] using validated.symm
+            subst next
+            simp [erased, pure, Except.pure, Bind.bind,
+              Except.bind]
+
+/-- Successful root validation and production lowering compute the same
+front-inserted parameter row. -/
+private theorem supportedDeclarationParamFold_lowered
+    {program : Fir.LeanIR.ImpureProgram}
+    {declaration : LCNF.Decl .impure}
+    {params : List (LCNF.Param .impure)}
+    {initial result : Fir.Wasm.LocalKinds}
+    (validated :
+      params.foldlM
+          (supportedDeclarationParamStep program declaration) initial =
+        some result) :
+    params.foldlM
+        (loweredDeclarationParamStep program declaration) initial =
+      .ok result := by
+  induction params generalizing initial with
+  | nil =>
+      have resultEq : initial = result := by simpa using validated
+      subst result
+      rfl
+  | cons head tail ih =>
+      rw [List.foldlM_cons] at validated ⊢
+      cases headValidated :
+          supportedDeclarationParamStep program declaration initial head with
+      | none => simp [headValidated] at validated
+      | some next =>
+          rw [headValidated] at validated
+          rw [supportedDeclarationParamStep_lowered headValidated]
+          exact ih validated
+
+/-- The validator and lowerer use the same complete declaration-parameter
+row whenever validation succeeds. -/
+theorem addSupportedDeclarationParams?_lowered
+    {program : Fir.LeanIR.ImpureProgram}
+    {declaration : LCNF.Decl .impure}
+    {result : Fir.Wasm.LocalKinds}
+    (validated :
+      Fir.Wasm.addSupportedDeclarationParams? program declaration =
+        some result) :
+    Fir.Wasm.addDeclarationParams program declaration = .ok result := by
+  unfold Fir.Wasm.addSupportedDeclarationParams? at validated
+  unfold Fir.Wasm.addDeclarationParams
+  change declaration.params.foldlM
+      (supportedDeclarationParamStep program declaration) [] =
+        some result at validated
+  change declaration.params.foldlM
+      (loweredDeclarationParamStep program declaration) [] = .ok result
+  rw [← Array.foldlM_toList] at validated ⊢
+  exact supportedDeclarationParamFold_lowered validated
+
+/-- Front insertion preserves uniqueness of local names. -/
+private theorem insertLocal_namesNodup
+    {locals : Fir.Wasm.LocalKinds}
+    {fvarId : Lean.FVarId} {kind : Fir.Wasm.AbiKind}
+    (unique : (locals.map (·.fst.name)).Nodup) :
+    ((Fir.Wasm.insertLocal locals fvarId kind).map (·.fst.name)).Nodup := by
+  unfold Fir.Wasm.insertLocal
+  simp only [List.map_cons, List.nodup_cons]
+  constructor
+  · intro present
+    obtain ⟨entry, entryMem, nameEq⟩ := List.mem_map.mp present
+    have kept := (List.mem_filter.mp entryMem).2
+    exact (bne_iff_ne.mp kept) nameEq
+  · exact unique.sublist
+      ((List.filter_sublist (l := locals)
+        (p := fun entry => entry.fst.name != fvarId.name)).map _)
+
+/-- A successful validator parameter fold started from a unique row retains
+unique local names. -/
+private theorem supportedDeclarationParamFold_namesNodup
+    {program : Fir.LeanIR.ImpureProgram}
+    {declaration : LCNF.Decl .impure}
+    {params : List (LCNF.Param .impure)}
+    {initial result : Fir.Wasm.LocalKinds}
+    (initialUnique : (initial.map (·.fst.name)).Nodup)
+    (validated :
+      params.foldlM
+          (supportedDeclarationParamStep program declaration) initial =
+        some result) :
+    (result.map (·.fst.name)).Nodup := by
+  induction params generalizing initial with
+  | nil =>
+      have resultEq : initial = result := by simpa using validated
+      subst result
+      exact initialUnique
+  | cons head tail ih =>
+      rw [List.foldlM_cons] at validated
+      cases headValidated :
+          supportedDeclarationParamStep program declaration initial head with
+      | none => simp [headValidated] at validated
+      | some next =>
+          rw [headValidated] at validated
+          have nextUnique : (next.map (·.fst.name)).Nodup := by
+            unfold supportedDeclarationParamStep at headValidated
+            unfold Fir.Wasm.abiTypeKnown Fir.Wasm.abiValueKind? at headValidated
+            cases classified : Fir.Wasm.abiKind? head.type with
+            | error error => simp [classified] at headValidated
+            | ok kindOption =>
+                cases kindOption with
+                | none =>
+                    have nextEq : next = initial := by
+                      simpa [classified] using headValidated.symm
+                    simpa [nextEq] using initialUnique
+                | some kind =>
+                    unfold Fir.Wasm.declarationParamKind? at headValidated
+                    by_cases erased :
+                        (kind == .tobject &&
+                          Fir.Wasm.erasedOnlyParameter program declaration
+                            head) = true
+                    · have nextEq :
+                          next = Fir.Wasm.insertLocal initial head.fvarId
+                            .erased := by
+                        simpa [classified, erased] using headValidated.symm
+                      simpa [nextEq] using
+                        insertLocal_namesNodup
+                          (fvarId := head.fvarId) (kind := .erased)
+                          initialUnique
+                    · have nextEq :
+                          next = Fir.Wasm.insertLocal initial head.fvarId kind := by
+                        simpa [classified, erased] using headValidated.symm
+                      simpa [nextEq] using
+                        insertLocal_namesNodup
+                          (fvarId := head.fvarId) (kind := kind) initialUnique
+          exact ih nextUnique validated
+
+/-- Successful declaration-parameter validation produces a name-unique row. -/
+theorem addSupportedDeclarationParams?_namesNodup
+    {program : Fir.LeanIR.ImpureProgram}
+    {declaration : LCNF.Decl .impure}
+    {result : Fir.Wasm.LocalKinds}
+    (validated :
+      Fir.Wasm.addSupportedDeclarationParams? program declaration =
+        some result) :
+    (result.map (·.fst.name)).Nodup := by
+  unfold Fir.Wasm.addSupportedDeclarationParams? at validated
+  change declaration.params.foldlM
+      (supportedDeclarationParamStep program declaration) [] =
+        some result at validated
+  rw [← Array.foldlM_toList] at validated
+  exact supportedDeclarationParamFold_namesNodup (by simp) validated
+
+/-- A successful name-directed lookup identifies an entry in the row. -/
+private theorem findLocalKind?_eq_some_mem
+    {locals : Fir.Wasm.LocalKinds}
+    {query : Lean.FVarId} {kind : Fir.Wasm.AbiKind}
+    (found : Fir.Wasm.findLocalKind? locals query = some kind) :
+    ∃ bound, (bound, kind) ∈ locals ∧ bound.name = query.name := by
+  induction locals with
+  | nil => simp [Fir.Wasm.findLocalKind?] at found
+  | cons entry rest ih =>
+      obtain ⟨candidate, candidateKind⟩ := entry
+      by_cases same : candidate.name == query.name
+      · rw [Fir.Wasm.findLocalKind?, if_pos same] at found
+        have kindEq : candidateKind = kind := Option.some.inj found
+        subst candidateKind
+        exact ⟨candidate, by simp, LawfulBEq.eq_of_beq same⟩
+      · rw [Fir.Wasm.findLocalKind?, if_neg same] at found
+        obtain ⟨bound, member, names⟩ := ih found
+        exact ⟨bound, by simp [member], names⟩
+
+/-- In a name-unique row, membership determines name-directed lookup. -/
+private theorem findLocalKind?_eq_some_of_mem
+    {locals : Fir.Wasm.LocalKinds}
+    {query bound : Lean.FVarId} {kind : Fir.Wasm.AbiKind}
+    (unique : (locals.map (·.fst.name)).Nodup)
+    (member : (bound, kind) ∈ locals)
+    (names : bound.name = query.name) :
+    Fir.Wasm.findLocalKind? locals query = some kind := by
+  induction locals with
+  | nil => simp at member
+  | cons entry rest ih =>
+      obtain ⟨candidate, candidateKind⟩ := entry
+      simp only [List.map_cons, List.nodup_cons] at unique
+      rcases unique with ⟨candidateFresh, restUnique⟩
+      rcases List.mem_cons.mp member with selected | member
+      · cases selected
+        simp [Fir.Wasm.findLocalKind?, names]
+      · have different : candidate.name ≠ query.name := by
+          intro same
+          apply candidateFresh
+          exact List.mem_map.mpr ⟨(bound, kind), member,
+            by simp [names, same]⟩
+        simp [Fir.Wasm.findLocalKind?, different,
+          ih restUnique member]
+
+/-- Reversing a duplicate-free local row does not change a successful
+name-directed lookup. -/
+theorem findLocalKind?_reverse_eq_some
+    {locals : Fir.Wasm.LocalKinds}
+    {query : Lean.FVarId} {kind : Fir.Wasm.AbiKind}
+    (unique : (locals.map (·.fst.name)).Nodup)
+    (found : Fir.Wasm.findLocalKind? locals query = some kind) :
+    Fir.Wasm.findLocalKind? locals.reverse query = some kind := by
+  obtain ⟨bound, member, names⟩ := findLocalKind?_eq_some_mem found
+  apply findLocalKind?_eq_some_of_mem
+  · rw [List.map_reverse]
+    apply unique.reverse.imp
+    intro left right different same
+    exact different same.symm
+  · simpa using member
+  · exact names
+
+/-- A successful lookup in the left row remains successful after appending
+any later locals. -/
+theorem findLocalKind?_append_eq_some
+    {left right : Fir.Wasm.LocalKinds}
+    {query : Lean.FVarId} {kind : Fir.Wasm.AbiKind}
+    (found : Fir.Wasm.findLocalKind? left query = some kind) :
+    Fir.Wasm.findLocalKind? (left ++ right) query = some kind := by
+  induction left with
+  | nil => simp [Fir.Wasm.findLocalKind?] at found
+  | cons entry rest ih =>
+      obtain ⟨candidate, candidateKind⟩ := entry
+      by_cases same : candidate.name == query.name
+      · simpa [Fir.Wasm.findLocalKind?, same] using found
+      · have restFound :
+            Fir.Wasm.findLocalKind? rest query = some kind := by
+          simpa [Fir.Wasm.findLocalKind?, same] using found
+        simp [Fir.Wasm.findLocalKind?, same, ih restFound]
 
 /-- Agreement between the validator's residual local-kind row and the exact
 production compiler context at the current code node.
@@ -1805,6 +2095,62 @@ theorem ConcreteSupportedFunction.rootValidation
   obtain ⟨rootLocals, parameters, supported⟩ :=
     spec.validatedBodyAt activeResult
   exact ⟨rootLocals, parameters, ⟨supported⟩⟩
+
+/-- Production lowering and root validation agree on every parameter lookup.
+
+The validator front-inserts parameters while the symbolic function stores
+them in source order, so the proof uses name uniqueness to reverse the
+validator row.  Body locals may follow the parameters in the compiler context;
+they cannot shadow an already successful parameter lookup. -/
+theorem ConcreteSupportedFunction.rootAlignedValidationState
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction target hosts)
+    {functionResult : Fir.Wasm.AbiKind}
+    (activeResult : spec.sourceResultKind = functionResult) :
+    ConcreteStructuredAlignedValidationState program context functionResult
+      functionCode := by
+  obtain ⟨rootLocals, parametersValidated, validated⟩ :=
+    spec.rootValidation activeResult
+  obtain ⟨row⟩ := spec.loweredInternalDeclaration
+  have parametersLowered :
+      Fir.Wasm.addDeclarationParams program spec.sourceDeclaration =
+        .ok rootLocals :=
+    addSupportedDeclarationParams?_lowered parametersValidated
+  have parameterLocalsEq : row.paramLocals = rootLocals :=
+    Except.ok.inj (row.paramsAdded.symm.trans parametersLowered)
+  have sourceParameters :=
+    congrArg Fir.Wasm.Function.params row.sourceFunctionEq
+  have sourceParameterListEq :
+      sourceFunction.params.toList = rootLocals.reverse := by
+    simpa [parameterLocalsEq] using congrArg Array.toList sourceParameters
+  have rootNamesUnique :=
+    addSupportedDeclarationParams?_namesNodup parametersValidated
+  have agrees :
+      ConcreteStructuredValidationLocalsAgree context rootLocals := by
+    intro fvarId kind found
+    have reversed :
+        Fir.Wasm.findLocalKind? rootLocals.reverse fvarId = some kind :=
+      findLocalKind?_reverse_eq_some rootNamesUnique found
+    have parameterFound :
+        Fir.Wasm.findLocalKind? sourceFunction.params.toList fvarId =
+          some kind := by
+      rw [sourceParameterListEq]
+      exact reversed
+    have bindingFound :
+        Fir.Wasm.findLocalKind?
+            (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+            fvarId = some kind :=
+      findLocalKind?_append_eq_some parameterFound
+    simp [Fir.Wasm.getLocal, spec.localKindsExact,
+      FirTalos.Correctness.functionBindings, bindingFound]
+  exact ⟨[], rootLocals, [], [], validated, agrees⟩
 
 /-- The production-supported function constructs the packaged validation
 state at its generated entry. -/

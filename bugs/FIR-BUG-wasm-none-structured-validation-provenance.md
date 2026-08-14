@@ -119,3 +119,15 @@ ordinary decrement admission follows from the validator and successful source
 step alone. Ordinary increment has the same compiler derivation but exposes an
 independent finite-header headroom condition recorded by
 `FIR-BUG-wasm-none-finite-trace-refcount-overflow`.
+
+The production-root bridge is now closed. `ConcreteSupportedFunction` retains
+the generated function/declaration name identity, from which the successful
+lowering table and compiler-derived name uniqueness recover the exact
+`LoweredInternalDeclaration`. The validator and lowerer are proved to compute
+the same parameter row; name-directed lookup is invariant under reversal of
+that duplicate-free row and remains valid when body locals are appended.
+Consequently `ConcreteSupportedFunction.rootAlignedValidationState` constructs
+root validation together with production-local agreement without a
+caller-supplied certificate. The remaining provenance work is hereditary:
+preserve aligned validation through residual code/frame transitions and use it
+in the universal current-step admission theorem.

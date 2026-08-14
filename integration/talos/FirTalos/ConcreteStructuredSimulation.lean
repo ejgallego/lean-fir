@@ -20739,6 +20739,7 @@ def ConcreteGeneratedInternalDeclaration.toSupportedFunctionOfFunction
   sourceDeclaration := declaration
   sourceDeclarationFound := row.declarationFound
   sourceDeclarationBody := row.declarationBody
+  sourceFunctionName := row.sourceFunctionName
   sourceResultSelected := row.sourceResultSelected
   localsAligned := row.localsAligned
   adapted := spec.adapted

@@ -11459,6 +11459,7 @@ structure ConcreteGeneratedInternalDeclaration
   declarationFound :
     program.findDecl? declaration.name = some declaration
   declarationBody : declaration.value = .code sourceCode
+  sourceFunctionName : sourceFunction.name = declaration.name
   callIndexEq :
     callIndex? sourceModule (.declaration declaration.name) =
       some targetFunctionIndex
@@ -11496,6 +11497,7 @@ def ConcreteGeneratedInternalDeclaration.toSupportedFunction
   sourceDeclaration := declaration
   sourceDeclarationFound := row.declarationFound
   sourceDeclarationBody := row.declarationBody
+  sourceFunctionName := row.sourceFunctionName
   sourceResultSelected := row.sourceResultSelected
   localsAligned := row.localsAligned
   adapted := spec.adapted
@@ -11546,7 +11548,7 @@ theorem supportedFunctionSaturatedClosureCandidateAdapterResolvers_ofPipeline
 
 /-- The validator's count-based parameter check gives the proof-facing
 `Nodup` fact for the source parameter names. -/
-private theorem declarationParameterNamesNodup
+theorem declarationParameterNamesNodup
     {declaration : LCNF.Decl .impure}
     (unique : Fir.Wasm.declarationParameterIdsUnique declaration = true) :
     (declaration.params.toList.map (·.fvarId.name)).Nodup := by
@@ -13183,6 +13185,50 @@ theorem LoweredInternalDeclaration.exists_of_lower
   exact ⟨sourceFunctionIndex, sourceFunction, sourceFunctionFound,
     LoweredInternalDeclaration.exists_of_lowerDecl bodyEq selected⟩
 
+/-- A supported function's named declaration and selected symbolic function
+recover one exact production `lowerDecl` row.  The proof uses only the real
+lowering table and its compiler-derived name uniqueness; it does not retain a
+translation certificate or inspect target execution. -/
+theorem ConcreteSupportedFunction.loweredInternalDeclaration
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context sourceCode sourceModule
+      sourceFunction target hosts) :
+    Nonempty (LoweredInternalDeclaration program
+      (Fir.Wasm.cachedDeclarationNames program) spec.sourceDeclaration
+      sourceCode sourceFunction) := by
+  have ordinaryLowering : Fir.Wasm.lower program = .ok sourceModule :=
+    LazyCacheGeneratedEnvironment.lower_of_lowerSupported spec.lowered
+  obtain ⟨selectedIndex, selectedFunction, selectedFound, ⟨row⟩⟩ :=
+    LoweredInternalDeclaration.exists_of_lower ordinaryLowering
+      spec.sourceDeclarationFound spec.sourceDeclarationBody
+  have namesNodup :=
+    LoweredInternalDeclaration.functionNamesNodup spec.programNamesUnique
+      ordinaryLowering
+  have selectedIndexFound :
+      sourceModule.functions.findIdx?
+          (·.name == spec.sourceDeclaration.name) = some selectedIndex :=
+    functionFindIdx?_eq_some_of_namesNodup namesNodup selectedFound
+      row.sourceFunctionName
+  have specifiedIndexFound :
+      sourceModule.functions.findIdx?
+          (·.name == spec.sourceDeclaration.name) =
+        some spec.sourceFunctionIndex :=
+    functionFindIdx?_eq_some_of_namesNodup namesNodup
+      spec.sourceFunctionFound spec.sourceFunctionName
+  have indexEq : selectedIndex = spec.sourceFunctionIndex :=
+    Option.some.inj (selectedIndexFound.symm.trans specifiedIndexFound)
+  subst selectedIndex
+  have functionEq : selectedFunction = sourceFunction :=
+    Option.some.inj (selectedFound.symm.trans spec.sourceFunctionFound)
+  subst selectedFunction
+  exact ⟨row⟩
+
 /-- A value-classified source result produces the singleton function result
 row required by the concrete declaration body theorem. -/
 theorem LoweredInternalDeclaration.singleResult_of_abiKind
@@ -13578,6 +13624,7 @@ theorem ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipeline
     sourceResultSelected := generated.resultSelectedExact row
     declarationFound := by simpa [declarationNameEq] using declarationFound
     declarationBody := row.bodyEq
+    sourceFunctionName := row.sourceFunctionName
     callIndexEq := by simpa [declarationNameEq] using callIndexEq }⟩⟩
 
 /--
@@ -13678,6 +13725,7 @@ theorem
     sourceResultSelected := generated.resultSelectedExact row
     declarationFound := by simpa [declarationNameEq] using declarationFound
     declarationBody := by simpa only [callerProgram] using row.bodyEq
+    sourceFunctionName := row.sourceFunctionName
     callIndexEq := by simpa [declarationNameEq] using callIndexEq }⟩
 
 /-- The common lowered-row selector specialized to a source ABI

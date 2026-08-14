@@ -147,6 +147,10 @@ structure ConcreteSupportedFunction
   sourceDeclarationFound :
     program.findDecl? sourceDeclaration.name = some sourceDeclaration
   sourceDeclarationBody : sourceDeclaration.value = .code code
+  /-- The selected symbolic function is the production lowering of the named
+  source declaration.  This static identity closes the declaration/function
+  provenance gap without retaining dynamic execution evidence. -/
+  sourceFunctionName : sourceFunction.name = sourceDeclaration.name
   sourceResultSelected :
     Fir.Wasm.effectiveDeclarationResultKind? sourceDeclaration =
       some sourceResultKind
