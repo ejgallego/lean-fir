@@ -15,6 +15,46 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W7-PRODUCTION-SELECTION-DISPATCH`.
+- Integration owner: `root`, consuming the clean `wasm/generation` handoff
+  rebased directly on `main` at `2b9d160e`. The functional generation head is
+  `b4f24fbf`; the accepted mailbox head is `3702b5c3`.
+- Adapter split: Illuminate selection-player adapter API v5 / hot-event v2
+  makes `dispatchTick` the clock-free production path and exposes
+  `dispatchTickTimed` for explicit timing and memory diagnostics. Both invoke
+  the same bit-exact scalar Wasm entry, preserve checkpoint and poisoning
+  behavior, and return equal copied selections. Production ticks perform no
+  clock reads and return no timing or memory object.
+- Source-compiler repair: regeneration exposed reuse of an imported
+  `Option Nat` specialization owned by Lean's delaborator, which pulled an
+  unrelated metaprogramming closure into the synthetic unit. FIR now preserves
+  imported declaration mappings but clears imported specialization and
+  closed-term caches for each isolated final-LCNF compiler unit, allowing
+  Lean's ordinary pipeline to regenerate helpers under the selected caller.
+  Noncomputable declarations are also rejected before source-root promotion.
+  Bug card: `FIR-BUG-wasm-none-final-capture-imported-specialization-reuse`.
+- Artifact: the clean handoff package contains 111 captured declarations, 81
+  retained source functions, and 209 resident helpers. Complete Wasm is 35,240
+  bytes with SHA-256
+  `4f538ee895c3c730c1cd237d52d0d0f93101af758d732b3c1d0c161c50c97e83`,
+  module-owned memory, zero imports, and seven function exports. The v3
+  compatibility package remains zero-import and passes the same source gate.
+- Acceptance: Lean Beam guided the Lean iterations; the final batch source
+  cone passes. `git diff --check`, complete `make check`, all 3,148 Talos jobs,
+  and the complete deterministic W7 artifact gate pass. The clean-head
+  Illuminate gate passes exact closure assertions, repeat publication,
+  checksums, package smokes, 10,000-event flat-frontier tests, and all 107
+  legacy/v3/selection generic/scalar-tick traces. Eight order-balanced rounds
+  per workload produce identical action digests and a consistent production
+  median advantage; absolute sub-millisecond samples remain scheduler-noisy.
+- Result: `main` fast-forwards through `3702b5c3`. W7 next republishes the
+  immutable selection package from accepted `main`, notifies the Illuminate
+  client of adapter API v5 / hot-event v2, then starts only G3's already-
+  duplicated checksum-verifier and atomic-installer surface. Static
+  simple-ground research remains parked.
+
+## Latest completed integration lease
+
 - Milestone: `W6-VALIDATED-LAZY-CACHE-PUBLICATION`.
 - Integration owner: `root`, consuming the clean `wasm/talos-runtime`
   handoff based directly on `main` at `2e4cb265`. The functional proof head
