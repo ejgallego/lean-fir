@@ -20,10 +20,9 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   on `main` by explicit user assignment. The lease covers landing coordination
   only; feature ownership remains with each lane.
 - Accepted baseline: `main` contains the complete
-  `W6-OBJECT-FIELD-TYPING-ADMISSION` stack through lane head `fe01cd1a` plus
-  its acceptance record at `608ba389`, pushed to `origin/main`. This proof
-  documents but does not repair the missing production descriptor-slot typing
-  invariant.
+  `W7-ILLUMINATE-SELECTION-CATALOG-EXPORT` stack through tracked lane head
+  `5081015a`. The functional generation head is `4b84f35b`; the package itself
+  remains local-only until its consumer authorizes publication.
 - Landing order:
   1. W7-2 separates the Verso post-G2 semantic closure review from the generic
      immutable-package publisher refactor. Semantic/generator fixes land
@@ -33,9 +32,8 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
      the compiled-Array probe, and the queued mailbox-protocol adaptation stay
      separately reviewable; the current combined tooling history is not an
      integration handoff.
-  3. W7-1 resumes the caller-owned Illuminate selection export from accepted
-     main. Its lean-zip function-sidecar consumer waits until the tooling
-     protocol is accepted.
+  3. W7-1's lean-zip function-sidecar consumer waits until the tooling protocol
+     is accepted; the independent Illuminate selection export is complete.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -51,6 +49,41 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
+
+## Latest completed integration lease
+
+- Milestone: `W7-ILLUMINATE-SELECTION-CATALOG-EXPORT`.
+- Integration owner: `wasm-gen`, temporarily consuming its own clean
+  `wasm/generation` handoff based directly on `main` at `300f8ab8`. The
+  functional generation head is `4b84f35b`; the accepted lane-mailbox head is
+  `5081015a`.
+- Publication boundary: the executable generic command accepts one fresh
+  caller-owned output and exact clean `producer` and `illuminate` checkouts.
+  It rejects dependency packages, unknown or duplicate roles, dirty or wrong
+  revisions, and existing or symbolic output; it verifies the exact six-file
+  checksum inventory and runs package-local smoke before and after its atomic
+  directory move.
+- Artifact: the immutable selection package at
+  `integration/illuminate-player/_build/illuminate-selection-player-packages/4b84f35bc327-6f16cdc3d432-d8aff69ccdf23c05db5d`
+  contains a 35,370-byte complete module with SHA-256
+  `22f295c5f249d1bd6e04e80bee10406f8e7d31a5bc7dcbec29131a7bb78896cd`,
+  module-owned memory, zero function and memory imports, and the intended seven
+  public functions plus memory. The exact caller-owned acceptance copy is
+  `/tmp/fir-selection-export-4b84f35b`.
+- Contracts: none. Adapter API v5 / hot-event v2, source inventories, ownership,
+  scratch rewind, input layout, source semantics, concrete runtime, symbolic
+  Wasm, and W6 theorem surfaces are unchanged. The v3 and selection complete
+  modules merely ratchet the already-accepted proof-indexed resident Array
+  helper bodies and now pin their full SHA-256 identities.
+- Acceptance: focused exporter tests pass 6/6. Exact generic export passes
+  deterministic two-pass v3 and selection publication, all six events, 10,000
+  flat-frontier ticks, 107 legacy/v3/selection traces, checksums, and package
+  smokes. `git diff --check`, complete `make check` (125 tests, 710 unique
+  cases, 2,112/2,112 comparisons, zero findings, 182 active bug cards, and 25
+  mailbox tests), all 3,148 Talos jobs, and the complete W7 artifact gate pass.
+- Result: `main` fast-forwards through `5081015a`. Consumer notification names
+  the exact accepted command and local-only package; W7-2 and tooling remain
+  independent queued handoffs.
 
 ## Latest completed integration lease
 
