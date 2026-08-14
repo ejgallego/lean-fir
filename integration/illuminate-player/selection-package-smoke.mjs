@@ -16,7 +16,7 @@ const manifest = JSON.parse(await readFile(
 const build = JSON.parse(await readFile("BUILD.json", "utf8"));
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
-assert.equal(build.schemaVersion, "fir.illuminate-selection-player.build/v1");
+assert.equal(build.schemaVersion, "fir.illuminate-selection-player.build/v2");
 assert.equal(build.wasm.sha256, sha256(bytes));
 assert.equal(build.capabilities.browserAdapter.apiVersion,
   ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION);
@@ -135,26 +135,36 @@ for (const event of events) {
 
 const genericTickPlayer = adapter.createPlayer(animation);
 const scalarTickPlayer = adapter.createPlayer(animation);
-assert.equal(genericTickPlayer.ok && scalarTickPlayer.ok, true);
+const diagnosticTickPlayer = adapter.createPlayer(animation);
+assert.equal(genericTickPlayer.ok && scalarTickPlayer.ok &&
+  diagnosticTickPlayer.ok, true);
 for (const timestamp of [adjacentFloat(50, -1), 50,
   adjacentFloat(50, 1), 300.125]) {
   const generic = adapter.dispatch(genericTickPlayer.player,
     { kind: "tick", timestamp });
   const scalar = adapter.dispatchTick(scalarTickPlayer.player, timestamp);
-  assert.equal(generic.ok && scalar.ok, true, generic.error ?? scalar.error);
+  const diagnostic = adapter.dispatchTickTimed(
+    diagnosticTickPlayer.player, timestamp);
+  assert.equal(generic.ok && scalar.ok && diagnostic.ok, true,
+    generic.error ?? scalar.error ?? diagnostic.error);
   assert.deepEqual(scalar.action, generic.action);
+  assert.deepEqual(diagnostic.action, generic.action);
   assert.equal(scalar.scheduleNextFrame, generic.scheduleNextFrame);
+  assert.equal(diagnostic.scheduleNextFrame, generic.scheduleNextFrame);
   assert.ok(generic.memory.scratchBytes > 0);
   assert.ok(generic.memory.scratchAllocationCalls > 0);
-  assert.equal(scalar.memory.scratchBytes, 0);
-  assert.equal(scalar.memory.scratchAllocationCalls, 0);
-  assert.equal(scalar.memory.frontierAfterEncode,
-    scalar.memory.persistentCheckpoint);
-  assert.equal(scalar.memory.postRewindFrontier,
-    scalar.memory.persistentCheckpoint);
+  assert.equal(Object.hasOwn(scalar, "timings"), false);
+  assert.equal(Object.hasOwn(scalar, "memory"), false);
+  assert.equal(diagnostic.memory.scratchBytes, 0);
+  assert.equal(diagnostic.memory.scratchAllocationCalls, 0);
+  assert.equal(diagnostic.memory.frontierAfterEncode,
+    diagnostic.memory.persistentCheckpoint);
+  assert.equal(diagnostic.memory.postRewindFrontier,
+    diagnostic.memory.persistentCheckpoint);
 }
 adapter.disposePlayer(genericTickPlayer.player);
 adapter.disposePlayer(scalarTickPlayer.player);
+adapter.disposePlayer(diagnosticTickPlayer.player);
 adapter.disposePlayer(created.player);
 adapter.disposePlayer(created.player);
 assert.throws(() => adapter.dispatch(created.player, { kind: "advance" }),
@@ -203,18 +213,22 @@ assert.equal(adapter.dispatch(steady.player, { kind: "advance" }).ok, true);
 const malformedTick = adapter.dispatchTick(steady.player, Number.POSITIVE_INFINITY);
 assert.equal(malformedTick.ok, false);
 assert.match(malformedTick.error, /timestamp must be finite/);
-assert.equal(malformedTick.memory.postRewindFrontier,
-  steady.memory.persistentCheckpoint);
+assert.equal(Object.hasOwn(malformedTick, "timings"), false);
+assert.equal(Object.hasOwn(malformedTick, "memory"), false);
 const checkpoint = steady.memory.persistentCheckpoint;
-let peak = checkpoint;
 for (let index = 0; index < 10_000; ++index) {
   const tick = adapter.dispatchTick(steady.player, index / 7);
   assert.equal(tick.ok, true, tick.error);
-  assert.equal(tick.memory.scratchBytes, 0);
-  assert.equal(tick.memory.scratchAllocationCalls, 0);
-  assert.equal(tick.memory.postRewindFrontier, checkpoint);
-  peak = Math.max(peak, tick.memory.peakFrontier);
+  assert.equal(Object.hasOwn(tick, "timings"), false);
+  assert.equal(Object.hasOwn(tick, "memory"), false);
 }
+const auditedTick = adapter.dispatchTickTimed(steady.player, 10_000 / 7);
+assert.equal(auditedTick.ok, true, auditedTick.error);
+assert.equal(auditedTick.memory.frontierBefore, checkpoint);
+assert.equal(auditedTick.memory.scratchBytes, 0);
+assert.equal(auditedTick.memory.scratchAllocationCalls, 0);
+assert.equal(auditedTick.memory.postRewindFrontier, checkpoint);
+const peak = auditedTick.memory.peakFrontier;
 adapter.disposePlayer(steady.player);
 
 let clock = 0;
@@ -237,7 +251,14 @@ assert.deepEqual(measured.timings, {
   totalMs: 15,
   overheadMs: 8,
 });
-const timedTick = timed.dispatchTick(measured.player, 0.125);
+const clockBeforeProductionTick = clock;
+const productionTick = timed.dispatchTick(measured.player, 0.125);
+assert.equal(productionTick.ok, true, productionTick.error);
+assert.equal(clock, clockBeforeProductionTick,
+  "production dispatchTick must not read the diagnostic clock");
+assert.equal(Object.hasOwn(productionTick, "timings"), false);
+assert.equal(Object.hasOwn(productionTick, "memory"), false);
+const timedTick = timed.dispatchTickTimed(measured.player, 0.125);
 assert.equal(timedTick.ok, true, timedTick.error);
 for (const phase of ["encodeMs", "executeMs", "decodeMs", "rewindMs"]) {
   assert.equal(timedTick.timings[phase], 1);

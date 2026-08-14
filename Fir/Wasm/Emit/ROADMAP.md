@@ -66,7 +66,10 @@ Recorded lean-zip effect:
 - resident frontier falls from 3,265,131 to 2,639,643 bytes; and
 - complete Wasm falls from 1,753,310 to 1,622,609 bytes, with zero imports.
 
-### G1a. Align resident Array hot calls with Lean's trusted runtime path
+### G1a. Align resident Array hot calls with Lean's trusted runtime path (accepted)
+
+The trusted-call split was accepted on `main` at `7e5f31f3` with functional
+head `da721bc3`.
 
 Lean's native Array primitives trust the typed runtime representation and keep
 dynamic work to index handling plus exclusivity for mutation. FIR's first
@@ -109,6 +112,29 @@ the existing persistent checkpoint, poisoning, bit-exact timestamp, and flat
 Use an interleaved fixed-event benchmark with digest equality, warmups, median,
 and p95. This slice is useful beyond Illuminate: production adapters should
 not pay for clocks, timing objects, or memory diagnostics unless requested.
+
+The generation-ready implementation exposes clock-free `dispatchTick` at
+adapter API v5 / hot-event capability v2 and retains `dispatchTickTimed` as the
+explicit diagnostic path. Package and source smokes prove that production
+ticks perform no clock reads, return no timing or memory object, use the same
+bit-exact scalar Wasm entry, and leave the checkpoint flat across 10,000 calls.
+All 107 legacy/v3/selection generic/scalar-tick traces agree.
+
+Eight AB/BA rounds with 240 measured events per mode and workload recorded
+identical action digests. Median whole-callback time changed from 0.00463 to
+0.00373 ms for “Pause-driven slide show” (MAD 0.00018 to 0.00014 ms) and from
+0.00430 to 0.00359 ms for “Morphing arrows and final loop” (MAD 0.00015 to
+0.00017 ms). The first p95 improved from 0.00597 to 0.00448 ms; the second was
+noisy and changed from 0.00547 to 0.00582 ms. These are adapter-overhead
+measurements, not a claim that the compiled Lean transition became faster.
+
+Regeneration also exposed and fixed a generic compiler-unit isolation bug:
+final-LCNF capture reused an imported `Option Nat` specialization owned by
+Lean's delaborator. Synthetic FIR units now clear imported specialization and
+closed-term caches while retaining direct imported declaration mappings, so
+Lean generates helpers in the selected source unit. The selection artifact is
+35,240 bytes with 111 captured declarations, 209 resident helpers, zero
+imports, and seven function exports.
 
 ### G3. Extract only the proven common package surface
 

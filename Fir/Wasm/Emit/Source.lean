@@ -51,6 +51,15 @@ structure SourceCompilationRoot where
 private def addUniqueName (names : Array Name) (name : Name) : Array Name :=
   if names.contains name then names else names.push name
 
+/-- Match Lean's code-generator computability boundary before promoting an
+environment declaration into the recursively growing source unit. The public
+`LCNF.shouldGenerateCode` predicate deliberately answers a broader source-shape
+question and does not reject declarations marked noncomputable. -/
+def sourceDeclarationIsCompilable (env : Environment) (name : Name) : CoreM Bool := do
+  if isNoncomputable env name || isNoncomputable env (mkUnsafeRecName name) then
+    return false
+  LCNF.shouldGenerateCode name
+
 /--
 Resolve a generated specialization to the source caller that owns its body.
 Lean embeds the caller after `._at_.`; accept that provenance when the caller
@@ -66,12 +75,13 @@ private def specializationSourceCaller? (env : Environment) (name : Name) :
       Fir.Wasm.Emit.CompilerPrivate.specializationCallerCandidates name do
     let some source ← sourceDeclarationAncestor? env candidate | continue
     if source == candidate then
+      unless ← sourceDeclarationIsCompilable env candidate do continue
       let mut companions : Array Name := #[]
       for callee in
           Fir.Wasm.Emit.CompilerPrivate.specializationCalleeCandidates name do
         unless env.constants.contains callee do continue
         if isExtern env callee then continue
-        unless ← LCNF.shouldGenerateCode callee do continue
+        unless ← sourceDeclarationIsCompilable env callee do continue
         companions := addUniqueName companions callee
       return some { name := candidate, companions }
   return none
@@ -101,7 +111,7 @@ private def sourceCompilationRoot? (env : Environment) (name : Name) :
   | some (.ctorInfo _) | some (.inductInfo _) => return none
   | _ => pure ()
   if isExtern env ancestor then return none
-  unless ← LCNF.shouldGenerateCode ancestor do return none
+  unless ← sourceDeclarationIsCompilable env ancestor do return none
   return some { name := ancestor }
 
 private def addSourceCompilationRoot (roots : Array SourceCompilationRoot)

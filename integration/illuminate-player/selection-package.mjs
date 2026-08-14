@@ -56,15 +56,15 @@ const illuminateSourceFiles = [
 const expectedClosure = Object.freeze({
   finalLcnfDeclarations: 111,
   finalLcnfDeclarationSha256:
-    "a563644df812361a24e6c2935cf578ad8ed7761977b956a30eab1f39e950fbe4",
+    "b8b52ba5b8076ecd1fde28f03a4cc1db9493e416a617c370fbab25d268676aea",
   retainedSourceFunctions: 81,
   retainedSourceFunctionSha256:
-    "5097a2c841288d8862caf2cfbeff1332fe5bfc92b297d124ceb282a6cd498a94",
-  residentHelpers: 207,
+    "50d630414e49e19e1eeb3eca3fbf0de98ffb46ac6b05a92ec5fdf3a22bf0242b",
+  residentHelpers: 209,
   residentHelperSha256:
-    "fb51d0c3ed5efab80637dacfd431e9b71c860368bfe08428cffc4f701182b73f",
-  baseWasmBytes: 21046,
-  completeWasmBytes: 31787,
+    "8b1b413a738346539f6940fa24b32fa83c0e80b711812b7f114d359192fc8233",
+  baseWasmBytes: 21053,
+  completeWasmBytes: 35240,
 });
 const outputNames = [
   "BUILD.json",
@@ -262,7 +262,7 @@ assert.equal(wasm.byteLength, expectedClosure.completeWasmBytes,
   "selection complete-runtime Wasm size changed");
 
 const build = {
-  schemaVersion: "fir.illuminate-selection-player.build/v1",
+  schemaVersion: "fir.illuminate-selection-player.build/v2",
   sources: { fir, illuminate },
   toolchain: {
     leanToolchain,
@@ -351,15 +351,16 @@ const build = {
     },
     browserAdapter: {
       apiVersion: ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION,
-      methods: ["createPlayer", "dispatch", "dispatchTick", "disposePlayer",
-        "replayTrace"],
+      methods: ["createPlayer", "dispatch", "dispatchTick",
+        "dispatchTickTimed", "disposePlayer", "replayTrace"],
       phases: ["project", "selectionEncode", "eventEncode", "execute",
         "decode", "rewind"],
       timing: {
         creation: ["instantiateMs", "projectMs", "selectionEncodeMs",
           "stateSlotMs", "executeMs", "decodeMs", "rewindMs", "totalMs"],
         dispatch: ["encodeMs", "executeMs", "decodeMs", "rewindMs", "totalMs"],
-        dispatchTick:
+        dispatchTick: "none; production result omits timing and memory diagnostics",
+        dispatchTickTimed:
           ["encodeMs", "executeMs", "decodeMs", "rewindMs", "totalMs"],
         intervals: "non-overlapping; totalMs is independently measured",
       },
@@ -368,7 +369,12 @@ const build = {
     },
     hotEvent: {
       version: ILLUMINATE_SELECTION_PLAYER_HOT_EVENT_VERSION,
-      method: "dispatchTick(player, timestamp)",
+      productionMethod: "dispatchTick(player, timestamp)",
+      diagnosticMethod: "dispatchTickTimed(player, timestamp)",
+      productionResult:
+        "ok/action/scheduleNextFrame only; no clock reads or diagnostic objects",
+      diagnosticResult:
+        "same semantic result plus non-overlapping timings and memory diagnostics",
       semanticOracle: "dispatch(player, { kind: 'tick', timestamp })",
       sourceEntry: "IlluminateFirNative.transitionSelectionTickLive",
       wasmExport:
@@ -376,6 +382,8 @@ const build = {
       transport: "IEEE-754 binary64 bits over a Wasm i64 parameter",
       eventConstruction: "PlayerEvent.tick is constructed inside Wasm",
       hostScratch: "zero bytes and zero resident allocation calls",
+      rewind:
+        "both methods clear scratch and verify exact persistent-checkpoint restoration",
     },
     inputLayout: {
       version: ILLUMINATE_SELECTION_PLAYER_INPUT_LAYOUT_VERSION,

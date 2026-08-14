@@ -97,6 +97,14 @@ not in a textual suffix list.
 Candidate mappings come from the selected modules' `extraConstNames` reverse
 index and the two compiler caches. This preserves the indexed mainline path;
 it does not scan every imported constant mapping.
+
+The synthetic FIR unit cannot reuse an imported specialization or closed-term
+cache entry: unlike Lean's native linker, it has no object code containing the
+generated declaration named by that entry. A specialization key may also name
+a helper owned by an unrelated imported caller. Preserve unrelated declaration
+mappings for direct dependencies, but start both caches empty so Lean generates
+helpers in the selected source unit and repopulates the caches normally during
+that compilation.
 -/
 def forgetGeneratedCompilerModuleMappings (env : Environment)
     (moduleIndices : Array ModuleIdx) (sourceRoots : Array Name) : Environment :=
@@ -110,27 +118,18 @@ def forgetGeneratedCompilerModuleMappings (env : Environment)
         (fun mappings name =>
           if isOwned name then mappings.erase name else mappings)
         mappings
-  let (mappings, specializationCache) := SMap.fold
-    (fun (mappings, cache) key name =>
-      if isOwned name then (mappings.erase name, cache)
-      else (mappings, cache.insert key name))
-    (mappings, {}) (LCNF.Specialize.specCacheExt.getState env)
+  let mappings := SMap.fold
+    (fun mappings _ name =>
+      if isOwned name then mappings.erase name else mappings)
+    mappings (LCNF.Specialize.specCacheExt.getState env)
   let oldClosedCache := Lean.closedTermCacheExt.getState env
-  let (mappings, closedMap) := oldClosedCache.map.foldl
-    (init := (mappings, {})) fun (mappings, cache) key name =>
-      if isOwned name then (mappings.erase name, cache)
-      else (mappings, cache.insert key name)
-  let closedNames := closedMap.foldl (init := {}) fun names _ name =>
-    names.insert name
-  let closedExprs := oldClosedCache.revExprs.filter fun key =>
-    match oldClosedCache.map.find? key with
-    | some name => !isOwned name
-    | none => false
+  let mappings := oldClosedCache.map.foldl (init := mappings)
+    fun mappings _ name =>
+      if isOwned name then mappings.erase name else mappings
   let env := { env with base.private.const2ModIdx := mappings }
   let env := SimplePersistentEnvExtension.setState
-    LCNF.Specialize.specCacheExt env specializationCache
-  Lean.closedTermCacheExt.setState (asyncMode := .sync) env {
-    map := closedMap, constNames := closedNames, revExprs := closedExprs }
+    LCNF.Specialize.specCacheExt env {}
+  Lean.closedTermCacheExt.setState (asyncMode := .sync) env {}
 
 /-- Match `leanir`'s target-module import phase without exposing Lean's private
 `ImportState.moduleNameMap` field to the ordinary FIR source module. -/

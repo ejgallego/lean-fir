@@ -52,15 +52,15 @@ const illuminateSourceFiles = [
 const expectedClosure = Object.freeze({
   finalLcnfDeclarations: 99,
   finalLcnfDeclarationSha256:
-    "618c180e3a4cec2c8b98c6c1e6f190f532817fa070c33deaffc3b5a99ababf41",
+    "4f45433e267588ceb356dc3f124b7d4561598c603f0ca9173e2bf2cd043a1aae",
   retainedSourceFunctions: 72,
   retainedSourceFunctionSha256:
-    "41fc2031343fa3006f735ce64f21e1ca4b900b7fdcc081370ad753adefe4cd8d",
-  residentHelpers: 188,
+    "5cd74013314d0fc12f162935bd830f360687c9b3d241057d39ee65e2ad1f2d75",
+  residentHelpers: 190,
   residentHelperSha256:
-    "4e7a766a751f6ce43bae3b4f4e07b95c88f0708c45de2111f058a6aad8b6d6c6",
+    "aee31058e18e2b2ac5c7e4d5e8775afb0073b48f6a84d01a19e10d5a657c7dda",
   baseWasmBytes: 19097,
-  completeWasmBytes: 29018,
+  completeWasmBytes: 32205,
 });
 const outputNames = [
   "BUILD.json",

@@ -12,6 +12,7 @@ private def functionSignatureJson (function : Fir.Wasm.Function) : Json :=
     ("params", Fir.Wasm.Emit.Manifest.abiKindsJson (function.params.map (·.2))),
     ("results", Fir.Wasm.Emit.Manifest.abiKindsJson function.results)]
 
+set_option maxHeartbeats 0 in
 run_cmd do
   let baseResult ← liftCoreM IlluminateFirNative.SelectionCompile.compileBaseModule
   let base ← match baseResult with

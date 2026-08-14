@@ -17,6 +17,9 @@ def idFloatFixture (value : Float) : Float := value
 def preserveAliasedBytes (first second : ByteArray) : ByteArray × ByteArray :=
   (first, second)
 
+def optionNatChangedFixture (prior next : Option Nat) : Bool :=
+  prior != next
+
 #guard Fir.Wasm.Emit.CompilerPrivate.specializationCallerCandidates
     `List.foldl._at_.Array.appendList.spec_0._redArg == #[`Array.appendList]
 
@@ -36,6 +39,14 @@ run_cmd do
   unless source.program.findDecl?
       ``Fir.Wasm.Emit.SourceClosedFixture.packedTable |>.isSome do
     throwError "closed-term source fixture disappeared from final-LCNF capture"
+
+run_cmd do
+  let source ← liftCoreM <|
+    compileEntryFinalCapturedInternalized ``optionNatChangedFixture
+  let leaked := source.externalNames.filter fun name =>
+    name.toString.contains "Lean.PrettyPrinter"
+  unless leaked.isEmpty do
+    throwError "Option Nat specialization reused an imported pretty-printer helper: {leaked}"
 
 #guard validationSchemaAcceptsAbiKind .float32 .float32
 #guard validationSchemaAcceptsAbiKind .float64 .float
@@ -202,6 +213,17 @@ run_cmd do
       text.contains "\"params\":[\"uint64\"]" &&
       text.contains "\"result\":\"uint64\"" do
     throwError "Float module descriptor lost its exact-bit facade: {text}"
+
+run_cmd do
+  let env ← getEnv
+  let classical ← liftCoreM <|
+    sourceDeclarationIsCompilable env ``Classical.ofNonempty
+  if classical then
+    throwError "final source discovery admitted Classical.ofNonempty"
+  let fixture ← liftCoreM <|
+    sourceDeclarationIsCompilable env ``idFloatFixture
+  unless fixture do
+    throwError "final source discovery rejected a computable source fixture"
 
 run_cmd do
   let entries := #[``idFloat32Fixture, ``idFloatFixture]

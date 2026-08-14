@@ -1,13 +1,13 @@
 /** Browser/Node adapter for the FIR-native Illuminate selection player. */
 
 export const ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION =
-  "fir.illuminate-player.browser/v4";
+  "fir.illuminate-player.browser/v5";
 export const ILLUMINATE_SELECTION_PLAYER_INPUT_LAYOUT_VERSION =
   "lean-4.33-Illuminate.Animation.SelectionAnimation/v4";
 export const ILLUMINATE_SELECTION_PLAYER_OWNERSHIP_VERSION =
   "fir.illuminate-player.persistent-checkpoint/v2";
 export const ILLUMINATE_SELECTION_PLAYER_HOT_EVENT_VERSION =
-  "fir.illuminate-player.hot-event/v1";
+  "fir.illuminate-player.hot-event/v2";
 
 const PAGE_BYTES = 65536;
 const HEAP_BASE = 1024;
@@ -894,8 +894,7 @@ function readFrontier(state) {
   return value;
 }
 
-function rewind(state, checkpoint, now) {
-  const started = now();
+function rewindScratch(state, checkpoint) {
   const frontierBeforeRewind = readFrontier(state);
   requireCondition(frontierBeforeRewind >= checkpoint,
     `frontier ${frontierBeforeRewind} is below checkpoint ${checkpoint}`);
@@ -906,10 +905,18 @@ function rewind(state, checkpoint, now) {
   requireCondition(postRewindFrontier === checkpoint,
     `frontier rewind stopped at ${postRewindFrontier}, expected ${checkpoint}`);
   return {
-    rewindMs: elapsed(now, started),
     frontierBeforeRewind,
     clearedBytes,
     postRewindFrontier,
+  };
+}
+
+function rewind(state, checkpoint, now) {
+  const started = now();
+  const result = rewindScratch(state, checkpoint);
+  return {
+    rewindMs: elapsed(now, started),
+    ...result,
   };
 }
 
@@ -929,7 +936,7 @@ function invalidatePlayer(state, status) {
   state.stateSlot = undefined;
 }
 
-function dispatchCore(owner, player, operation, encode, execute) {
+function activePlayerState(owner, player, operation) {
   const adapter = ADAPTER_STATE.get(owner);
   const state = PLAYER_STATE.get(player);
   requireCondition(adapter !== undefined && player?.[PLAYER] === owner &&
@@ -937,6 +944,11 @@ function dispatchCore(owner, player, operation, encode, execute) {
     `${operation} requires this adapter's player handle`);
   requireCondition(state.status === "active",
     `player is ${state.status ?? "invalid"}`);
+  return { adapter, state };
+}
+
+function dispatchCore(owner, player, operation, encode, execute) {
+  const { adapter, state } = activePlayerState(owner, player, operation);
   const totalStarted = adapter.now();
   const timings = { encodeMs: 0, executeMs: 0, decodeMs: 0, rewindMs: 0 };
   const memory = {
@@ -1012,6 +1024,45 @@ function dispatchCore(owner, player, operation, encode, execute) {
     return { ok: false, error: failure, ...final };
   }
   return { ok: true, ...decoded, ...final };
+}
+
+function dispatchTickProduction(owner, player, timestamp) {
+  const operation = "transitionSelectionTickLive";
+  const { state } = activePlayerState(owner, player, operation);
+  let phase = "encode";
+  let decoded;
+  let failure;
+  try {
+    const frontierBefore = readFrontier(state);
+    requireCondition(frontierBefore === state.checkpoint,
+      `${operation} began at ${frontierBefore}, expected ${state.checkpoint}`);
+    const timestampBits = float64Bits(timestamp, "timestamp");
+
+    phase = "execute";
+    const physicalResult = u32(state.transitionTickLiveBits(
+      i32(state.selectionAddress), i32(state.stateSlot.stateAddress),
+      timestampBits));
+
+    phase = "decode";
+    decoded = decodeLiveSelectionTransition(new DataView(state.memory.buffer),
+      physicalResult, state.stateSlot, `${operation} result`);
+    phase = "done";
+  } catch (error) {
+    failure = errorMessage(error);
+    if (phase === "execute" || phase === "decode") state.status = "poisoned";
+  } finally {
+    try {
+      rewindScratch(state, state.checkpoint);
+    } catch (error) {
+      failure = errorMessage(error);
+      state.status = "poisoned";
+    }
+  }
+  if (failure !== undefined) {
+    if (state.status === "poisoned") invalidatePlayer(state, "poisoned");
+    return { ok: false, error: failure };
+  }
+  return { ok: true, ...decoded };
 }
 
 export class IlluminateSelectionPlayerAdapter {
@@ -1182,6 +1233,10 @@ export class IlluminateSelectionPlayerAdapter {
   }
 
   dispatchTick(player, timestamp) {
+    return dispatchTickProduction(this, player, timestamp);
+  }
+
+  dispatchTickTimed(player, timestamp) {
     return dispatchCore(this, player, "transitionSelectionTickLive",
       () => ({
         argument: float64Bits(timestamp, "timestamp"),

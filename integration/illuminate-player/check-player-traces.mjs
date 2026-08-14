@@ -496,5 +496,5 @@ for (const testCase of cases) {
     `${testCase.name} scalar tick versus generic event`);
 }
 
-console.log(`${cases.length} legacy/FIR-v3/FIR-selection-v4 generic/scalar-tick ` +
+console.log(`${cases.length} legacy/FIR-v3/FIR-selection-v4/v5-adapter generic/scalar-tick ` +
   "player traces matched");

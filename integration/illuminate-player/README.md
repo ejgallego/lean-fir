@@ -196,10 +196,14 @@ SHA256SUMS
 smoke.mjs
 ```
 
-The adapter API exposes `createPlayer`, generic `dispatch`, constructor-specific
-`dispatchTick`, `disposePlayer`, and `replayTrace`, at capability
-`fir.illuminate-player.browser/v4`. `dispatchTick(player, timestamp)` uses the
-`fir.illuminate-player.hot-event/v1` capability: JavaScript transports the
+The adapter API exposes `createPlayer`, generic diagnostic `dispatch`,
+constructor-specific `dispatchTick` and `dispatchTickTimed`, `disposePlayer`,
+and `replayTrace`, at capability `fir.illuminate-player.browser/v5`.
+`dispatchTick(player, timestamp)` is the production path: it performs no clock
+reads and returns no timing or memory-diagnostic objects. `dispatchTickTimed`
+executes the same Wasm entry and adds the non-overlapping phase and memory
+diagnostics used by tests and benchmarks. Both use the
+`fir.illuminate-player.hot-event/v2` capability: JavaScript transports the
 binary64 bits over an `i64` parameter and Wasm constructs `PlayerEvent.tick`
 before calling the same real Illuminate transition. Generic `dispatch` remains
 the semantic oracle and handles all six constructors. Returned actions contain
@@ -207,14 +211,17 @@ frame, step, segment, local frame, segment-change, and playback only. Consumers
 materialize patches from their original `pmap` and `params[localFrame]`; the
 adapter neither reads nor transfers those values.
 
-The v4 package preserves the v3 persistent-checkpoint ownership protocol:
+The v4 representation package with its v5 adapter preserves the v3
+persistent-checkpoint ownership protocol:
 one shared compiled module, one instance per opaque player, a retained compact
 selection graph and fixed state slot below the checkpoint, and cleared/re-wound
 event and result scratch after every call. Its source and package smokes enforce
 the 16 KiB/400-allocation creation bounds, the declared runtime reservation,
 and a flat frontier across
-10,000 scalar ticks. The hot path has zero host-encoded event bytes and zero
-host resident-allocation calls; result scratch is still cleared and rewound.
+10,000 production scalar ticks. The hot path has zero host-encoded event bytes,
+zero host resident-allocation calls, and zero diagnostic-clock reads; result
+scratch is still cleared and rewound. A final `dispatchTickTimed` audit checks
+that the post-production frontier remains exactly flat.
 
 The selection package exports the two generic source entries, the bit-exact
 tick façade, and the four allocator operations:
@@ -242,9 +249,11 @@ The phase benchmark compares v4 after host-side patch-row materialization with
 v3 over all 16 examples, excludes a warmup, alternates v3/v4 order for at
 least seven rounds, records raw samples and median/p95/MAD summaries, and writes
 `_build/illuminate-selection-benchmark.json`.
-The hot-event benchmark compares generic tagged-event encoding with
-`dispatchTick` in balanced order on the same package and writes
-`_build/illuminate-selection-hot-event-benchmark.json`.
+The hot-event benchmark compares diagnostic `dispatchTickTimed` with
+production `dispatchTick` in balanced order on the same package. Both call the
+same bit-exact scalar Wasm entry and must produce the same action digest. The
+report records raw samples, median/p95/MAD summaries, and the exact dashboard
+HTML digest in `_build/illuminate-selection-hot-event-benchmark.json`.
 
 ## Benchmarking
 
