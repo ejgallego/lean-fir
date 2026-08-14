@@ -32,17 +32,20 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   view is accepted at `17d576fb`, followed by indexed resident dead-code
   reachability at `7b9d523a`. The lean-zip final-function sidecar package is
   accepted through tracked handoff `31035d5e` (functional head `752d2187`),
-  followed by indexed final-LCNF capture ownership at `3dc7b0ee`.
+  followed by indexed final-LCNF capture ownership at `3dc7b0ee`. The bounded
+  optimized-function tooling and its root fail-closed gate are accepted through
+  `fa3105f7`.
   The Illuminate functional generation head is `4b84f35b`; the package itself
   remains local-only until its consumer authorizes publication.
 - Landing order:
   1. W7-2's Verso source-module replay repair and generic immutable-package
      publisher are accepted in that order through `912bf68a`.
   2. The optimized final-function index protocol is accepted through clean
-     isolated head `7d0d9b3b`. CPU profiling, selected-function views, the
-     compiled-Array probe, and the queued mailbox-protocol adaptation stay
-     separately reviewable; the combined tooling history remains outside the
-     integration queue.
+     isolated head `7d0d9b3b`, and bounded selected-function views plus the
+     fail-closed root tooling gates are accepted through `fa3105f7`. CPU
+     profiling, the compiled-Array probe, and the queued mailbox-protocol
+     adaptation stay separately reviewable; the combined tooling history
+     remains outside the integration queue.
   3. W7-1's lean-zip function-sidecar consumer is accepted through
      `31035d5e`. W7-2 may hand the validated exact-head Flat package to the
      Verso owner; the Illuminate selection export is also complete.
@@ -63,6 +66,37 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
+
+## Latest completed integration lease
+
+- Milestone: `TOOLING-BOUNDED-FUNCTION-VIEW`.
+- Integration owner: `wasm-gen`, applying tooling commits `b4787fa7` and
+  `7be4b61e` in order as `402be2d1` and `633a2eec` on accepted `main` at
+  `3957b08c`, then adding isolated root-build wiring at `fa3105f7`. The tooling
+  owner's branch was not rewritten.
+- Change: dependency-free parser/selector tests now run in ordinary root
+  `check`; an explicit `tooling-check` target forwards `FIR_BINARYEN_DIR` and
+  fails closed on missing tools, revision drift, skipped tests, or test
+  failures. The new bounded `view` command extracts one final optimized
+  function, resolves its imported and defined call targets through the release
+  sidecar, classifies instruction/call families, and caps its WAT excerpt
+  without rewriting or materializing the whole release module.
+- Evidence: the dependency-free tier passes 7/7 tests. The missing-tool case
+  rejects as required; pinned Binaryen `version 128
+  (version_127-18-g2eb472cd6)` passes all 4/4 integration tests with zero
+  skips. The reviewed lean-zip release view contains 22,297 instructions and
+  926 resolved direct calls with no unattributed targets and unchanged release
+  SHA-256. Complete root `make check` passes 125 harness tests, 702 source
+  cases, nine direct machines, the 702-case V8 triangle, 711 unique cases,
+  2,115/2,115 equal comparisons, 7,602 steps, 186 active bug cards, zero
+  findings, and 25/25 mailbox tests.
+- Contracts: none. This changes diagnostic tooling and build gates only; it
+  does not change source semantics, generation, lowering, semantic ABI,
+  runtime/layout, ownership, resident-helper signatures, packages, executable
+  artifacts, or W6 proofs.
+- Result: local `main` advances through `fa3105f7`. The integration branch and
+  acceptance record remain local-only; no push, PR, package publication,
+  branch deletion, or worktree removal is authorized by this lease.
 
 ## Latest completed integration lease
 
