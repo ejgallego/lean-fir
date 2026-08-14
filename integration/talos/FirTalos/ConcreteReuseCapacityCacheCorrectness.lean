@@ -11157,6 +11157,22 @@ theorem LoweredInternalDeclaration.localsAligned
   rw [bindingsEq]
   exact findFVar?_kind_of_findLocalKind? localFound
 
+/-- Production lowering uses exactly the emitted function's parameter/local
+binding row as its symbolic compiler context. -/
+theorem LoweredInternalDeclaration.localKindsExact
+    {program : Fir.LeanIR.ImpureProgram}
+    {cachedDeclarations : Array Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    (row :
+      LoweredInternalDeclaration program cachedDeclarations declaration
+        sourceCode sourceFunction) :
+    row.context.localKinds = functionBindings sourceFunction := by
+  change row.localKinds = functionBindings sourceFunction
+  simpa [functionBindings, LoweredInternalDeclaration.localKinds] using
+    (congrArg functionBindings row.sourceFunctionEq).symm
+
 /-- Successful production `lowerDecl` exposes its exact declaration-local
 context, symbolic body, ABI result row, and emitted source function. -/
 theorem LoweredInternalDeclaration.exists_of_lowerDecl
@@ -11428,6 +11444,8 @@ structure ConcreteGeneratedInternalDeclaration
   contextProgram : context.program = program
   contextCaches :
     context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program
+  localKindsExact :
+    context.localKinds = functionBindings sourceFunction
   parameterLocals : Fir.Wasm.LocalKinds
   parameterIdsUnique :
     Fir.Wasm.declarationParameterIdsUnique declaration = true
@@ -11469,6 +11487,7 @@ def ConcreteGeneratedInternalDeclaration.toSupportedFunction
   programSupported := spec.programSupported
   programNamesUnique := spec.programNamesUnique
   contextProgram := row.contextProgram
+  localKindsExact := row.localKindsExact
   lowered := spec.lowered
   sourceFunctionIndex := row.sourceFunctionIndex
   sourceFunctionFound := row.sourceFunctionFound
@@ -13551,6 +13570,7 @@ theorem ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipeline
     toConcreteGeneratedDeclaration := generated
     contextProgram := rfl
     contextCaches := rfl
+    localKindsExact := row.localKindsExact
     parameterLocals := row.paramLocals
     parameterIdsUnique
     parametersAdded := row.paramsAdded
@@ -13650,6 +13670,7 @@ theorem
       change caller.cachedDeclarations =
         Fir.Wasm.cachedDeclarationNames program
       exact callerCaches
+    localKindsExact := row.localKindsExact
     parameterLocals := row.paramLocals
     parameterIdsUnique
     parametersAdded

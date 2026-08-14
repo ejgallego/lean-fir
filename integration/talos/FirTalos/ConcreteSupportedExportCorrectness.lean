@@ -130,6 +130,12 @@ structure ConcreteSupportedFunction
   programSupported : Fir.Wasm.WasmSupported program
   programNamesUnique : program.NamesUnique
   contextProgram : context.program = program
+  /-- The proof handle retains the exact declaration-local binding row used by
+  production lowering.  `LocalLayoutAligned` below connects successful reads
+  to numeric slots; this stronger static equality is what lets residual source
+  validation recover those reads without consulting target execution. -/
+  localKindsExact :
+    context.localKinds = functionBindings sourceFunction
   lowered : Fir.Wasm.lowerSupported program = .ok sourceModule
   sourceFunctionIndex : Nat
   sourceFunctionFound :

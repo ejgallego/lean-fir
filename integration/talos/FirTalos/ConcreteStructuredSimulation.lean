@@ -20730,6 +20730,7 @@ def ConcreteGeneratedInternalDeclaration.toSupportedFunctionOfFunction
   programSupported := spec.programSupported
   programNamesUnique := spec.programNamesUnique
   contextProgram := row.contextProgram
+  localKindsExact := row.localKindsExact
   lowered := spec.lowered
   sourceFunctionIndex := row.sourceFunctionIndex
   sourceFunctionFound := row.sourceFunctionFound
