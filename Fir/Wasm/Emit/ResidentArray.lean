@@ -129,9 +129,27 @@ private inductive InputValidation where
   | checked
   /--
   Consume the resident Array invariant already carried by typed compiled
-  execution. Bounds and ownership behavior remain in the operation itself.
+  execution. Index behavior is classified independently below.
   -/
   | trusted
+
+private inductive ProofIndexValidation where
+  /-- Reconstruct and check an erased proof premise for a raw/public call. -/
+  | checked
+  /-- Consume the erased proof premise carried by well-typed compiled code. -/
+  | trusted
+
+private structure CallValidation where
+  input : InputValidation
+  proofIndex : ProofIndexValidation
+
+private def checkedCalls : CallValidation := {
+  input := .checked
+  proofIndex := .checked }
+
+private def trustedCalls : CallValidation := {
+  input := .trusted
+  proofIndex := .trusted }
 
 private def requireArray (array : FVarId) : List Instruction :=
   trapUnless ([
@@ -220,6 +238,43 @@ private def decodeNaturalIndex (param destination : FVarId) : List Instruction :
 
 private def decodeIndex : List Instruction :=
   decodeNaturalIndex indexParam indexLocal
+
+/-- Lean's proof-indexed Array primitives use `lean_unbox` directly. A valid
+Array index is necessarily a canonical immediate Nat because the resident
+wasm32 allocation bound is below the maximum immediate payload. -/
+private def decodeTrustedNaturalIndex (param destination : FVarId) :
+    List Instruction := [
+  .localGet param,
+  .i32Const .uint32 1,
+  .i32ShrU,
+  .localSet destination]
+
+private def decodeProofNaturalIndex (validation : ProofIndexValidation)
+    (param destination : FVarId) : List Instruction :=
+  match validation with
+  | .checked =>
+      decodeNaturalIndex param destination ++ trapUnless [
+        .localGet destination,
+        .localGet sizeLocal,
+        .i32LtU]
+  | .trusted => decodeTrustedNaturalIndex param destination
+
+private def decodeProofUSizeIndex (validation : ProofIndexValidation)
+    (param destination : FVarId) : List Instruction :=
+  match validation with
+  | .checked => [
+      .localGet param,
+      .localGet sizeLocal,
+      .i64ExtendI32U .usize,
+      .i64LtU,
+      .ifElse [] [.unreachable],
+      .localGet param,
+      .i32WrapI64 .uint32,
+      .localSet destination]
+  | .trusted => [
+      .localGet param,
+      .i32WrapI64 .uint32,
+      .localSet destination]
 
 private def storeHeaderWord (offset : Nat) (value : List Instruction) :
     List Instruction :=
@@ -623,7 +678,7 @@ private partial def containsLoop : Instruction → Bool
 private def elementAddress : List Instruction :=
   elementAddressFor arrayParam indexLocal sourceCursorLocal
 
-private def getBody (validation : InputValidation) (useDefault owned : Bool) :
+private def getBangBody (validation : InputValidation) (owned : Bool) :
     List Instruction :=
   validateArrayInput validation arrayParam ++ loadSize arrayParam ++ decodeIndex ++ [
     .localGet indexLocal,
@@ -640,12 +695,29 @@ private def getBody (validation : InputValidation) (useDefault owned : Bool) :
         else []) ++ [
         .localGet elementLocal,
         .ret])
-      (if useDefault then [
-        .localGet defaultParam,
+      [.localGet defaultParam,
         .call (.declaration ResidentReferenceCount.incrementOnceName),
         .localGet defaultParam,
-        .ret]
-       else [.unreachable])]
+        .ret]]
+
+private def proofGetBody (inputValidation : InputValidation)
+    (proofIndexValidation : ProofIndexValidation) (owned : Bool) :
+    List Instruction :=
+  validateArrayInput inputValidation arrayParam ++
+    (match proofIndexValidation with
+    | .checked => loadSize arrayParam
+    | .trusted => []) ++
+    decodeProofNaturalIndex proofIndexValidation indexParam indexLocal ++
+    elementAddress ++ [
+      .localGet sourceCursorLocal,
+      .i32Load .tobject 0,
+      .localSet elementLocal] ++
+    (if owned then [
+      .localGet elementLocal,
+      .call (.declaration ResidentReferenceCount.incrementOnceName)]
+    else []) ++ [
+      .localGet elementLocal,
+      .ret]
 
 private def getBangFunction (validation : InputValidation)
     (declaration : Name) (owned : Bool) : Function := {
@@ -656,7 +728,7 @@ private def getBangFunction (validation : InputValidation)
   locals := #[(sizeLocal, .uint32), (indexLocal, .uint32),
     (countLocal, .uint32), (sourceCursorLocal, .uint32),
     (elementLocal, .tobject)]
-  body := getBody validation true owned }
+  body := getBangBody validation owned }
 
 def getBangBorrowedFunction : Function :=
   getBangFunction .checked `Array.get!InternalBorrowed false
@@ -664,7 +736,8 @@ def getBangBorrowedFunction : Function :=
 def getBangOwnedFunction : Function :=
   getBangFunction .checked `Array.get!Internal true
 
-private def getBorrowedFunctionFor (validation : InputValidation) : Function := {
+private def getBorrowedFunctionFor (inputValidation : InputValidation)
+    (proofIndexValidation : ProofIndexValidation) : Function := {
   name := externalName `Array.getInternalBorrowed
   params := #[(erasedParam, .erased), (arrayParam, .object),
     (indexParam, .tobject), (proofParam, .erased)]
@@ -672,11 +745,13 @@ private def getBorrowedFunctionFor (validation : InputValidation) : Function := 
   locals := #[(sizeLocal, .uint32), (indexLocal, .uint32),
     (countLocal, .uint32), (sourceCursorLocal, .uint32),
     (elementLocal, .tobject)]
-  body := getBody validation false false }
+  body := proofGetBody inputValidation proofIndexValidation false }
 
-def getBorrowedFunction : Function := getBorrowedFunctionFor .checked
+def getBorrowedFunction : Function :=
+  getBorrowedFunctionFor .checked .checked
 
-private def getFunctionFor (validation : InputValidation) : Function := {
+private def getFunctionFor (inputValidation : InputValidation)
+    (proofIndexValidation : ProofIndexValidation) : Function := {
   name := externalName `Array.getInternal
   params := #[(erasedParam, .erased), (arrayParam, .object),
     (indexParam, .tobject), (proofParam, .erased)]
@@ -684,33 +759,33 @@ private def getFunctionFor (validation : InputValidation) : Function := {
   locals := #[(sizeLocal, .uint32), (indexLocal, .uint32),
     (countLocal, .uint32), (sourceCursorLocal, .uint32),
     (elementLocal, .tobject)]
-  body := getBody validation false true }
+  body := proofGetBody inputValidation proofIndexValidation true }
 
-def getFunction : Function := getFunctionFor .checked
+def getFunction : Function := getFunctionFor .checked .checked
 
-private def ugetBorrowedFunctionFor (validation : InputValidation) : Function := {
+private def ugetBorrowedFunctionFor (inputValidation : InputValidation)
+    (proofIndexValidation : ProofIndexValidation) : Function := {
   name := externalName `Array.ugetBorrowed
   params := #[(erasedParam, .erased), (arrayParam, .object),
     (indexParam, .usize), (proofParam, .erased)]
   results := #[.tobject]
   locals := #[(sizeLocal, .uint32), (indexLocal, .uint32),
     (countLocal, .uint32), (sourceCursorLocal, .uint32)]
-  body := validateArrayInput validation arrayParam ++ loadSize arrayParam ++ [
-    .localGet indexParam,
-    .localGet sizeLocal,
-    .i64ExtendI32U .usize,
-    .i64LtU,
-    .ifElse [] [.unreachable],
-    .localGet indexParam,
-    .i32WrapI64 .uint32,
-    .localSet indexLocal] ++ elementAddress ++ [
+  body := validateArrayInput inputValidation arrayParam ++
+    (match proofIndexValidation with
+    | .checked => loadSize arrayParam
+    | .trusted => []) ++
+    decodeProofUSizeIndex proofIndexValidation indexParam indexLocal ++
+    elementAddress ++ [
     .localGet sourceCursorLocal,
     .i32Load .tobject 0,
     .ret] }
 
-def ugetBorrowedFunction : Function := ugetBorrowedFunctionFor .checked
+def ugetBorrowedFunction : Function :=
+  ugetBorrowedFunctionFor .checked .checked
 
-private def ugetFunctionFor (validation : InputValidation) : Function := {
+private def ugetFunctionFor (inputValidation : InputValidation)
+    (proofIndexValidation : ProofIndexValidation) : Function := {
   name := externalName `Array.uget
   params := #[(erasedParam, .erased), (arrayParam, .object),
     (indexParam, .usize), (proofParam, .erased)]
@@ -718,15 +793,12 @@ private def ugetFunctionFor (validation : InputValidation) : Function := {
   locals := #[(sizeLocal, .uint32), (indexLocal, .uint32),
     (countLocal, .uint32), (sourceCursorLocal, .uint32),
     (elementLocal, .tobject)]
-  body := validateArrayInput validation arrayParam ++ loadSize arrayParam ++ [
-    .localGet indexParam,
-    .localGet sizeLocal,
-    .i64ExtendI32U .usize,
-    .i64LtU,
-    .ifElse [] [.unreachable],
-    .localGet indexParam,
-    .i32WrapI64 .uint32,
-    .localSet indexLocal] ++ elementAddress ++ [
+  body := validateArrayInput inputValidation arrayParam ++
+    (match proofIndexValidation with
+    | .checked => loadSize arrayParam
+    | .trusted => []) ++
+    decodeProofUSizeIndex proofIndexValidation indexParam indexLocal ++
+    elementAddress ++ [
     .localGet sourceCursorLocal,
     .i32Load .tobject 0,
     .localSet elementLocal,
@@ -735,7 +807,7 @@ private def ugetFunctionFor (validation : InputValidation) : Function := {
     .localGet elementLocal,
     .ret] }
 
-def ugetFunction : Function := ugetFunctionFor .checked
+def ugetFunction : Function := ugetFunctionFor .checked .checked
 
 private def validatorDelta (checked trusted : Function) : Bool :=
   let validation := requireArray arrayParam
@@ -750,12 +822,6 @@ private def validatorDelta (checked trusted : Function) : Bool :=
 #guard validatorDelta
   (getBangFunction .checked `Array.get!Internal true)
   (getBangFunction .trusted `Array.get!Internal true)
-#guard validatorDelta (getBorrowedFunctionFor .checked)
-  (getBorrowedFunctionFor .trusted)
-#guard validatorDelta (getFunctionFor .checked) (getFunctionFor .trusted)
-#guard validatorDelta (ugetBorrowedFunctionFor .checked)
-  (ugetBorrowedFunctionFor .trusted)
-#guard validatorDelta (ugetFunctionFor .checked) (ugetFunctionFor .trusted)
 #guard validatorDelta (toListFunctionFor .checked) (toListFunctionFor .trusted)
 
 private def emptyWrapper (declaration : Name) : Function := {
@@ -1105,38 +1171,33 @@ private def setLocals : Array (FVarId × AbiKind) := #[(addressLocal, .uint32),
   (savedScratchLocal, .uint32), (objectResultLocal, .object),
   (elementLocal, .tobject)]
 
-private def usetFunctionFor (validation : InputValidation) : Function := {
+private def usetFunctionFor (inputValidation : InputValidation)
+    (proofIndexValidation : ProofIndexValidation) : Function := {
   name := externalName `Array.uset
   params := #[(erasedParam, .erased), (arrayParam, .object),
     (indexParam, .usize), (valueParam, .tobject), (proofParam, .erased)]
   results := #[.object]
   locals := setLocals
-  body := validateArrayInput validation arrayParam ++ captureInputAddress ++
-    loadSize arrayParam ++ [
-    .localGet indexParam,
-    .localGet sizeLocal,
-    .i64ExtendI32U .usize,
-    .i64LtU,
-    .ifElse [] [.unreachable],
-    .localGet indexParam,
-    .i32WrapI64 .uint32,
-    .localSet indexLocal] ++ replaceAtDecodedIndexBody }
+  body := validateArrayInput inputValidation arrayParam ++ captureInputAddress ++
+    loadSize arrayParam ++
+    decodeProofUSizeIndex proofIndexValidation indexParam indexLocal ++
+    replaceAtDecodedIndexBody }
 
-def usetFunction : Function := usetFunctionFor .checked
+def usetFunction : Function := usetFunctionFor .checked .checked
 
-private def setFunctionFor (validation : InputValidation) : Function := {
+private def setFunctionFor (inputValidation : InputValidation)
+    (proofIndexValidation : ProofIndexValidation) : Function := {
   name := externalName `Array.set
   params := #[(erasedParam, .erased), (arrayParam, .object),
     (indexParam, .tobject), (valueParam, .tobject), (proofParam, .erased)]
   results := #[.object]
   locals := setLocals
-  body := validateArrayInput validation arrayParam ++ captureInputAddress ++
-    loadSize arrayParam ++ decodeIndex ++ trapUnless [
-      .localGet indexLocal,
-      .localGet sizeLocal,
-      .i32LtU] ++ replaceAtDecodedIndexBody }
+  body := validateArrayInput inputValidation arrayParam ++ captureInputAddress ++
+    loadSize arrayParam ++
+    decodeProofNaturalIndex proofIndexValidation indexParam indexLocal ++
+    replaceAtDecodedIndexBody }
 
-def setFunction : Function := setFunctionFor .checked
+def setFunction : Function := setFunctionFor .checked .checked
 
 private def decodeSetBangIndex : List Instruction := [
   .localGet indexParam,
@@ -1208,7 +1269,8 @@ private def callSwapDecodedElements (array : FVarId) : List Instruction := [
   .localGet index2Local,
   .call (.declaration swapElementsName)]
 
-private def swapFunctionFor (validation : InputValidation) : Function := {
+private def swapFunctionFor (inputValidation : InputValidation)
+    (proofIndexValidation : ProofIndexValidation) : Function := {
   name := externalName `Array.swap
   params := #[(erasedParam, .erased), (arrayParam, .object),
     (indexParam, .tobject), (index2Param, .tobject),
@@ -1222,15 +1284,10 @@ private def swapFunctionFor (validation : InputValidation) : Function := {
     (targetCursorLocal, .uint32), (allocationBytesLocal, .uint32),
     (savedScratchLocal, .uint32), (objectResultLocal, .object),
     (elementLocal, .tobject), (element2Local, .tobject)]
-  body := validateArrayInput validation arrayParam ++ captureInputAddress ++
-    loadSize arrayParam ++ decodeNaturalIndex indexParam indexLocal ++ trapUnless [
-      .localGet indexLocal,
-      .localGet sizeLocal,
-      .i32LtU] ++
-    decodeNaturalIndex index2Param index2Local ++ trapUnless [
-      .localGet index2Local,
-      .localGet sizeLocal,
-      .i32LtU] ++
+  body := validateArrayInput inputValidation arrayParam ++ captureInputAddress ++
+    loadSize arrayParam ++
+    decodeProofNaturalIndex proofIndexValidation indexParam indexLocal ++
+    decodeProofNaturalIndex proofIndexValidation index2Param index2Local ++
     loadCapacity arrayParam ++ selectExclusive ++ [
     .localGet exclusiveLocal,
     .ifElse (callSwapDecodedElements inputAddressLocal ++ [
@@ -1243,15 +1300,63 @@ private def swapFunctionFor (validation : InputValidation) : Function := {
     copyElementsBody true ++ consumeSharedArray ++
     callSwapDecodedElements addressLocal ++ retypeAddress }
 
-def swapFunction : Function := swapFunctionFor .checked
+def swapFunction : Function := swapFunctionFor .checked .checked
 
 #guard validatorDelta (pushFunctionFor .checked) (pushFunctionFor .trusted)
 #guard validatorDelta (popFunctionFor .checked) (popFunctionFor .trusted)
-#guard validatorDelta (usetFunctionFor .checked) (usetFunctionFor .trusted)
-#guard validatorDelta (setFunctionFor .checked) (setFunctionFor .trusted)
 #guard validatorDelta (setBangFunctionFor .checked)
   (setBangFunctionFor .trusted)
-#guard validatorDelta (swapFunctionFor .checked) (swapFunctionFor .trusted)
+
+private def callsProofIndexDecoder : Instruction → Bool
+  | .call (.declaration declaration) =>
+      declaration == ResidentNumeric.validateNaturalName ||
+        declaration == ResidentNumeric.naturalLowName ||
+        declaration == ResidentNumeric.naturalHighName
+  | _ => false
+
+private def containsSequence (needle haystack : List Instruction) : Bool :=
+  match haystack with
+  | [] => needle.isEmpty
+  | _ :: tail =>
+      haystack.take needle.length == needle || containsSequence needle tail
+termination_by haystack.length
+
+private def naturalBoundsCheck (index : FVarId) : List Instruction := [
+  .localGet index,
+  .localGet sizeLocal,
+  .i32LtU,
+  .ifElse [] [.unreachable]]
+
+private def usizeBoundsCheck : List Instruction := [
+  .localGet indexParam,
+  .localGet sizeLocal,
+  .i64ExtendI32U .usize,
+  .i64LtU,
+  .ifElse [] [.unreachable]]
+
+private def trustedProofIndexedFunctions : Array Function := #[
+  getBorrowedFunctionFor .trusted .trusted,
+  getFunctionFor .trusted .trusted,
+  ugetBorrowedFunctionFor .trusted .trusted,
+  ugetFunctionFor .trusted .trusted,
+  usetFunctionFor .trusted .trusted,
+  setFunctionFor .trusted .trusted,
+  swapFunctionFor .trusted .trusted]
+
+#guard trustedProofIndexedFunctions.all fun function =>
+  !function.body.any callsProofIndexDecoder &&
+    !containsSequence (naturalBoundsCheck indexLocal) function.body &&
+    !containsSequence (naturalBoundsCheck index2Local) function.body &&
+    !containsSequence usizeBoundsCheck function.body
+
+#guard (getBorrowedFunctionFor .trusted .trusted).body.take 4 ==
+  decodeTrustedNaturalIndex indexParam indexLocal
+#guard (getFunctionFor .trusted .trusted).body.take 4 ==
+  decodeTrustedNaturalIndex indexParam indexLocal
+#guard (ugetBorrowedFunctionFor .trusted .trusted).body.take 3 ==
+  decodeProofUSizeIndex .trusted indexParam indexLocal
+#guard (ugetFunctionFor .trusted .trusted).body.take 3 ==
+  decodeProofUSizeIndex .trusted indexParam indexLocal
 
 private def fillElementsBody : List Instruction := [
   .localGet addressLocal,
@@ -1313,32 +1418,32 @@ def replicateFunction : Function := {
       .call (.declaration ResidentRelease.decrementOnceName)] []] ++
     retypeAddress }
 
-private def functionsFor (validation : InputValidation) : Array Function := #[
+private def functionsFor (validation : CallValidation) : Array Function := #[
   allocateEmptyFunction,
   allocateListConsFunction,
   swapDecodedElementsFunction,
-  sizeFunctionFor validation,
-  usizeFunctionFor validation,
-  getBangFunction validation `Array.get!InternalBorrowed false,
+  sizeFunctionFor validation.input,
+  usizeFunctionFor validation.input,
+  getBangFunction validation.input `Array.get!InternalBorrowed false,
   emptyWithCapacityFunction,
   mkEmptyFunction,
-  getBorrowedFunctionFor validation,
-  getFunctionFor validation,
-  ugetBorrowedFunctionFor validation,
-  ugetFunctionFor validation,
-  pushFunctionFor validation,
-  popFunctionFor validation,
-  getBangFunction validation `Array.get!Internal true,
-  usetFunctionFor validation,
-  setFunctionFor validation,
-  setBangFunctionFor validation,
-  swapFunctionFor validation,
+  getBorrowedFunctionFor validation.input validation.proofIndex,
+  getFunctionFor validation.input validation.proofIndex,
+  ugetBorrowedFunctionFor validation.input validation.proofIndex,
+  ugetFunctionFor validation.input validation.proofIndex,
+  pushFunctionFor validation.input,
+  popFunctionFor validation.input,
+  getBangFunction validation.input `Array.get!Internal true,
+  usetFunctionFor validation.input validation.proofIndex,
+  setFunctionFor validation.input validation.proofIndex,
+  setBangFunctionFor validation.input,
+  swapFunctionFor validation.input validation.proofIndex,
   replicateFunction,
   mkFunction,
-  toListFunctionFor validation]
+  toListFunctionFor validation.input]
 
 /-- Checked helper bodies used by the standalone/public resident Array surface. -/
-def functions : Array Function := functionsFor .checked
+def functions : Array Function := functionsFor checkedCalls
 
 private partial def rewriteInstruction (declarations : Array Name) : Instruction → Instruction
   | .call (.declaration declaration) =>
@@ -1412,7 +1517,7 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
   else none
 
 private def internalizeSelected (module : Module) (declarations : Array Name)
-    (inputValidation : InputValidation) (validate : Bool) :
+    (callValidation : CallValidation) (validate : Bool) :
     Except LinkError Module := do
   if validate then
     match Fir.Wasm.validateModule module with
@@ -1458,7 +1563,7 @@ private def internalizeSelected (module : Module) (declarations : Array Name)
       throw (.incompatibleExternal declaration)
   let linkedFunctions := module.functions.map fun function =>
     { function with body := function.body.map (rewriteInstruction declarations) }
-  let selectedFunctions := (functionsFor inputValidation).filter fun function =>
+  let selectedFunctions := (functionsFor callValidation).filter fun function =>
     selectedHelperNames.contains function.name
   let linkedFunctions := linkedFunctions ++ selectedFunctions
   let imports := module.imports.filter fun import_ =>
@@ -1479,7 +1584,7 @@ private def internalizeSelected (module : Module) (declarations : Array Name)
 
 /-- Internalize the complete historical array frontier, rejecting omissions. -/
 def internalize (module : Module) (validate : Bool := true) : Except LinkError Module :=
-  internalizeSelected module externalDeclarations .checked validate
+  internalizeSelected module externalDeclarations checkedCalls validate
 
 /--
 Internalize the strict Array frontier for calls originating in typed final
@@ -1489,7 +1594,7 @@ copy-on-write behavior. Raw/public callers use `internalize` instead.
 -/
 def internalizeTrusted (module : Module) (validate : Bool := true) :
     Except LinkError Module :=
-  internalizeSelected module externalDeclarations .trusted validate
+  internalizeSelected module externalDeclarations trustedCalls validate
 
 /--
 Internalize exactly the array operations imported by a source closure.  This
@@ -1499,7 +1604,7 @@ while preserving the same fail-closed signature checks as `internalize`.
 def internalizeAvailable (module : Module) (validate : Bool := true) : Except LinkError Module :=
   let declarations := availableExternalDeclarations.filter fun declaration =>
     module.imports.any (·.declaration? == some declaration)
-  internalizeSelected module declarations .checked validate
+  internalizeSelected module declarations checkedCalls validate
 
 /--
 Internalize exactly the Array operations imported by a typed closed
@@ -1510,7 +1615,7 @@ def internalizeAvailableTrusted (module : Module) (validate : Bool := true) :
     Except LinkError Module :=
   let declarations := availableExternalDeclarations.filter fun declaration =>
     module.imports.any (·.declaration? == some declaration)
-  internalizeSelected module declarations .trusted validate
+  internalizeSelected module declarations trustedCalls validate
 
 private def exampleDeclarations : Array Name :=
   #[`Array.emptyWithCapacity, `Array.push, `Array.ugetBorrowed, `Array.uget,
@@ -1575,9 +1680,8 @@ private def exampleExternalImport (declaration : Name) : Import := {
   signature := (expectedSignature? declaration).get!
   externalTypes? := some (exampleExternalTypes declaration) }
 
-/-- Closed generation-only probe for the array helpers added by the compact
-Illuminate validation closure. -/
-def residentExampleModule : Except String Module := do
+/-- Common closed generation-only probe input for the resident Array surface. -/
+private def residentExampleInput : Except String Module := do
   let numeric ← ResidentNumeric.residentExampleModule
   let numeric : Module := {
     numeric with
@@ -1593,8 +1697,19 @@ def residentExampleModule : Except String Module := do
   let module : Module := {
     releases with
     imports := releases.imports ++ exampleDeclarations.map exampleExternalImport }
-  internalizeSelected module exampleDeclarations .checked true
+  pure module
+
+/-- Closed checked/public probe for the resident Array surface. -/
+def residentExampleModule : Except String Module := do
+  let module ← residentExampleInput
+  internalizeSelected module exampleDeclarations checkedCalls true
     |>.mapError fun error => s!"array: {repr error}"
+
+/-- Closed typed-application probe for the upstream-trusted Array surface. -/
+def residentTrustedExampleModule : Except String Module := do
+  let module ← residentExampleInput
+  internalizeSelected module exampleDeclarations trustedCalls true
+    |>.mapError fun error => s!"trusted array: {repr error}"
 
 def manifest : Json :=
   Json.mkObj [
@@ -1607,6 +1722,17 @@ def manifest : Json :=
     ("status", "generation-ready; W6 array contract proofs pending")]
 
 #guard match residentExampleModule with
+  | .ok module =>
+      module.imports.isEmpty &&
+      module.runtimeOperations.isEmpty &&
+      exampleDeclarations.all fun declaration =>
+        module.exports.contains (externalName declaration) &&
+      module.memory == some ResidentRuntime.residentMemory &&
+      (Fir.Wasm.validateModule module |>.isOk) &&
+      (Fir.Wasm.Emit.encode module |>.isOk)
+  | .error _ => false
+
+#guard match residentTrustedExampleModule with
   | .ok module =>
       module.imports.isEmpty &&
       module.runtimeOperations.isEmpty &&

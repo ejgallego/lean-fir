@@ -71,8 +71,10 @@ Recorded lean-zip effect:
 The trusted-call split was accepted on `main` at `7e5f31f3` with functional
 head `da721bc3`.
 
-Lean's native Array primitives trust the typed runtime representation and keep
-dynamic work to index handling plus exclusivity for mutation. FIR's first
+Lean's native Array primitives trust the typed runtime representation. Its
+dynamically checked APIs retain index handling, while proof-indexed APIs trust
+their erased bounds proofs and proceed directly to access or copy-on-write
+mutation. FIR's first
 resident Array implementation instead combined an O(index) address walk with a
 complete raw-header validator on every operation. Commit `1d79658d` was FIR's
 first O(1) address implementation; there was no earlier retained fast O(1)
@@ -80,11 +82,12 @@ version. The later ownership repair `6592e2cb` expanded the common validator to
 cover live/persistent flags, reference counts, reserved lanes, and capacity,
 but did not introduce the validator itself.
 
-Keep checked standalone/public helper bodies for raw-memory diagnostics. Closed
-typed applications should consume the resident Array invariant and use trusted
-helper bodies whose suffix is exactly the checked operation after its common
-validator prefix. Bounds, reference counting, uniqueness, copy-on-write,
-allocation, and recursive release remain unchanged. Validate the split with a
+The accepted first slice kept checked standalone/public helper bodies for
+raw-memory diagnostics. Closed typed applications consumed the resident Array
+invariant and omitted the common validator prefix, but deliberately retained
+the existing bounds branches pending the upstream audit. Reference counting,
+uniqueness, copy-on-write, allocation, and recursive release remained
+unchanged. The slice was validated with a
 malformed-boundary trap, exact symbolic suffix guards, the real lean-zip
 native/inflate matrix, and order-balanced scaling evidence rather than a single
 absolute-time threshold. W6 separately audits that its accepted Array
@@ -100,6 +103,39 @@ resident frontier shrank from 2,639,643 to 2,637,367 bytes, while the complete
 linked module grew from 1,622,609 to 1,628,872 bytes; therefore this slice is
 not a binary-size win and should not be described as closing lean-zip's larger
 native-performance gap.
+
+### G1b. Consume proof-indexed Array bounds like upstream Lean
+
+The version-pinned upstream rule is local and explicit. Representation trust
+and index policy are separate dimensions:
+
+- foreign/public helper calls validate transferred Array and index values;
+- dynamically checked Lean APIs preserve their exact bounds and panic/default
+  behavior; and
+- `getInternal`, `uget`, `set`, `uset`, and `swap` consume their erased proofs,
+  directly unbox or narrow the index, and do not branch on bounds.
+
+The trusted implementation must preserve owned versus borrowed reads,
+uniqueness, copy-on-write, child retention/release, allocation, and capacity
+behavior exactly. Generated-shape guards reject proof-index decoder calls and
+the former bounds sequences in trusted bodies. A closed trusted resident module
+must validate and encode with zero imports, while the checked standalone module
+continues trapping malformed foreign inputs. Real-source differential and
+lean-zip package checks provide execution evidence; W6 separately discharges
+the representation, canonical immediate-Nat, and erased-bounds premises.
+
+The first same-main lean-zip probe held final-LCNF capture and all linker
+inventories constant at 662 declarations, 128 reviewed externals, 534 retained
+source functions, 2,598 resident helpers, 3,132 complete functions, and zero
+runtime operations. Five native/Wasm cases at all ten compression levels,
+zero-import linking, cache/checkpoint ownership, output hashes, and flat
+frontiers passed. The frontier Wasm decreased by 201 bytes (1,570,838 to
+1,570,637); the externally linked complete file changed from 899,613 to
+902,411 bytes, so this is not presently a complete-binary size win.
+Order-balanced random-input execution was noisy and inconclusive: four paired
+64-KiB medians had a median delta of about -8.94 ms, while four 256-KiB pairs
+had a median delta of about +32.98 ms. Treat the upstream-faithful instruction
+shape as the result; do not claim a workload speedup from these samples.
 
 ### G2. Separate production and diagnostic adapter costs
 
