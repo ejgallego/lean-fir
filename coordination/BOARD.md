@@ -15,6 +15,33 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-VALIDATED-USIZE-FIELD-ADMISSION`.
+- Integration owner: `root`, consuming the clean `wasm/talos-runtime`
+  handoff based directly on `main` at `5ad696a9`. The functional proof head is
+  `c56aa2ff`; the accepted lane-mailbox head is `6f4da03b`.
+- Static admission: inversion of the real residual validator supplies the
+  exact object-local and USize-local compiler guards for a current `.uset`
+  node.
+- Dynamic admission: one successful source update exposes the semantic heap
+  reference, live constructor cell, USize field payload, and the exact
+  absolute object-plus-USize slot bounds. These source facts assemble the
+  existing `USizeFieldEffectSupported` premise without inspecting target
+  execution or storing a translation certificate.
+- Contracts: none. Source semantics, production validation, concrete
+  layout/runtime, symbolic Wasm, semantic ABI, resident helper signatures,
+  emitted code, and W7 artifacts are unchanged.
+- Acceptance: Lean Beam update/sync/save reports zero diagnostics. The focused
+  `FirTalos.ConcreteStructuredValidation` cone passes 3,124 jobs;
+  `git diff --check`, complete `make check` (125 tests, 710 unique cases,
+  2,112/2,112 comparisons, 25 mailbox tests), and all 3,148 W6 Talos jobs
+  pass. No bug card was required.
+- Result: `main` fast-forwards through `6f4da03b` plus this acceptance record.
+  W6 next derives object-field descriptor alignment from retained source
+  invariants, while packed scalar mutation remains explicitly dependent on
+  `ScalarFieldMutationSafe` layout evidence.
+
+## Latest completed integration lease
+
 - Milestone: `W6-VALIDATED-CONSTRUCTOR-TAG-ADMISSION`.
 - Integration owner: `root`, consuming the clean `wasm/talos-runtime`
   handoff based directly on `main` at `49b56a0d`. The functional proof head is
