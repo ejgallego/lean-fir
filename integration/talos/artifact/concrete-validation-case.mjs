@@ -81,6 +81,9 @@ export const CONCRETE_VALIDATION_BLOCKED_CASES = Object.freeze([
   "multi-object-update-first-preserves-last",
   "multi-object-update-last-preserves-middle",
   "multi-object-update-middle-preserves-first",
+  // The transferred initial graph contains a ByteArray shared by the outside
+  // field and both Array slots; the concrete product does not admit ByteArray.
+  "repeated-byte-array-child-array-set-shared",
   "repeated-captured-byte-array-consumed",
   "repeated-captured-byte-array-ignored",
   "repeated-captured-byte-array-read",
