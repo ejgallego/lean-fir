@@ -28,11 +28,19 @@ git -C /path/to/zipCommon worktree add --detach /tmp/fir-zip-common-4425 \
 lake --keep-toolchain --reconfigure \
   -KleanZipRoot=/tmp/fir-lean-zip-30737 \
   -KzipCommonRoot=/tmp/fir-zip-common-4425 \
-  build LeanZipFir.Compile
+  build LeanZipFir.Compile leanZipFirLevel1Artifact
 lake --keep-toolchain env lean Probe.lean
 lake --keep-toolchain env lean ProbeLevel1.lean
 lake --keep-toolchain env lean ProbeRaw.lean
 ```
+
+The Level-1 package generator stores its expensive final-LCNF source capture
+in `LeanZipFir.CapturedLevel1.olean`, then runs lowering and resident linking
+as native code. From this directory, the hot command is
+`.lake/build/bin/leanZipFirLevel1Artifact`; it prints one linear millisecond
+timeline covering module load, cached capture lookup, lowering/base encoding,
+resident linking/final encoding, and output writes. Lake's content-addressed
+artifact cache can restore the capture checkpoint across FIR worktrees.
 
 The produced artifact is not a host-backed ByteArray facade. `ByteArray.size`,
 `ByteArray.mk`, `ByteArray.emptyWithCapacity`, and `ByteArray.copySlice` run in

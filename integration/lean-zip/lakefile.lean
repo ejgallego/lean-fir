@@ -61,3 +61,8 @@ lean_lib «LeanZipFir»
 /-- Binary-safe native oracle compiled from the same real source entry. -/
 lean_exe «leanZipFirOracle» where
   root := `Oracle
+
+/-- Native hot path over the Level-1 final-LCNF checkpoint. -/
+lean_exe «leanZipFirLevel1Artifact» where
+  root := `Level1ArtifactMain
+  needs := #[`+LeanZipFir.CapturedLevel1:olean]

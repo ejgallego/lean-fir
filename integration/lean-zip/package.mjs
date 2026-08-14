@@ -34,6 +34,7 @@ const leanZipRoot = realpathSync(process.env.LEAN_ZIP_ROOT ??
 const zipCommonRoot = realpathSync(process.env.ZIP_COMMON_ROOT ??
   "/tmp/fir-zip-common-4425");
 const buildDirectory = join(directory, "_build");
+const lakeBuildDirectory = join(directory, ".lake", "build");
 const wasmStem = join(buildDirectory, "lean-zip-stored.wasm");
 const baseStem = join(buildDirectory, "lean-zip-stored-base.wasm");
 const inventoryPath = join(buildDirectory, "lean-zip-stored.inventory.json");
@@ -41,6 +42,9 @@ const level1WasmStem = join(buildDirectory, "lean-zip-level1.wasm");
 const level1BaseStem = join(buildDirectory, "lean-zip-level1-base.wasm");
 const level1InventoryPath = join(buildDirectory,
   "lean-zip-level1.inventory.json");
+const executableSuffix = process.platform === "win32" ? ".exe" : "";
+const level1GeneratorPath = join(lakeBuildDirectory, "bin",
+  `leanZipFirLevel1Artifact${executableSuffix}`);
 const expectedClosure = JSON.parse(readFileSync(
   join(directory, "closure-contract.json"), "utf8"));
 const expectedLevel1Closure = JSON.parse(readFileSync(
@@ -133,19 +137,19 @@ const lakeArguments = [
   `-KzipCommonRoot=${zipCommonRoot}`,
 ];
 run("lake", [...lakeArguments, "build", "LeanZipFir.Compile",
-  "leanZipFirOracle"], { capture: false });
+  "leanZipFirOracle", "leanZipFirLevel1Artifact"], { capture: false });
 run("lake", ["--keep-toolchain", "env", "lean", "Probe.lean"],
   { capture: false });
-run("lake", ["--keep-toolchain", "env", "lean", "ProbeLevel1.lean"],
+run("lake", ["--keep-toolchain", "env", "lean", "EmitStored.lean"],
   { capture: false });
-run("lake", ["--keep-toolchain", "env", "lean", "Emit.lean"],
-  { capture: false });
+run(level1GeneratorPath, [], { capture: false });
 const firstWasm = readFileSync(wasmStem);
 const firstDescriptor = readFileSync(`${wasmStem}.json`);
 const firstLevel1Wasm = readFileSync(level1WasmStem);
 const firstLevel1Descriptor = readFileSync(`${level1WasmStem}.json`);
-run("lake", ["--keep-toolchain", "env", "lean", "Emit.lean"],
+run("lake", ["--keep-toolchain", "env", "lean", "EmitStored.lean"],
   { capture: false });
+run(level1GeneratorPath, [], { capture: false });
 assert.deepEqual(readFileSync(wasmStem), firstWasm,
   "repeated stored generation was not deterministic");
 assert.deepEqual(readFileSync(`${wasmStem}.json`), firstDescriptor,
@@ -476,6 +480,8 @@ const level1Build = {
   },
   performance: {
     status: "correctness artifact with lazy compiler-cache publication",
+    generator:
+      "native lowering/linking over a persistent final-LCNF capture checkpoint",
     caveat:
       "cold executeMs may include first-use compiler-cache publication; no cross-runtime performance claim",
   },
