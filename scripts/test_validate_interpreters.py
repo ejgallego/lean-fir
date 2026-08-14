@@ -1302,6 +1302,17 @@ class HarnessTests(unittest.TestCase):
             prepared[0]["nestedArgumentAliases"], item["nestedArgumentAliases"]
         )
 
+        array_item = json.loads(json.dumps(item))
+        array_item["args"] = [{"seq": {"value": [byte_value, byte_value]}}]
+        array_item["argSchemas"] = [{"array": {"element": "bytes"}}]
+        prepared_array = harness.manifest_from_output(
+            json.dumps(array_item), ["native", "--manifest"]
+        )
+        self.assertEqual(
+            prepared_array[0]["nestedArgumentAliases"],
+            array_item["nestedArgumentAliases"],
+        )
+
         empty_path = dict(item)
         empty_path["nestedArgumentAliases"] = [{
             "source": {"argument": 0, "children": []},

@@ -1759,8 +1759,9 @@ def _resolve_argument_path(
     schema = arg_schemas[argument]
     datum = args[argument]
     for child in key[1:]:
-        if isinstance(schema, dict) and set(schema) == {"seq"}:
-            sequence_schema = schema["seq"]
+        if isinstance(schema, dict) and set(schema) in ({"array"}, {"seq"}):
+            container = next(iter(schema))
+            sequence_schema = schema[container]
             sequence_datum = datum.get("seq") if isinstance(datum, dict) else None
             if (
                 not isinstance(sequence_schema, dict)
@@ -1770,7 +1771,7 @@ def _resolve_argument_path(
                 or not isinstance(sequence_datum["value"], list)
                 or child >= len(sequence_datum["value"])
             ):
-                raise ValidationError(f"{context}: invalid sequence child {child}")
+                raise ValidationError(f"{context}: invalid {container} child {child}")
             schema = sequence_schema["element"]
             datum = sequence_datum["value"][child]
             continue
