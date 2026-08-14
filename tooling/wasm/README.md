@@ -72,13 +72,25 @@ node tooling/wasm/function-index.mjs optimize \
   --output app.release.wasm.functions.json
 ```
 
-The focused Binaryen test also checks that temporary identities do not change
-the stripped release bytes:
+Dependency-free parser, selector, and final-namespace tests run in the ordinary
+fast tooling tier:
 
-```text
-FIR_BINARYEN_DIR=/path/to/binaryen/bin \
-  node --test tooling/wasm/function-index.test.mjs
+```sh
+make -C tooling unit-check
 ```
+
+The pinned Binaryen gate additionally checks that temporary identities do not
+change release bytes, imported/minified modules resolve through the final
+namespace, and sidecars reject artifacts changed after capture:
+
+```sh
+make -C tooling check \
+  FIR_BINARYEN_DIR=/path/to/emscripten-5.0.3/upstream/bin
+```
+
+This gate is fail-closed: missing tools, a Binaryen revision other than
+`version 128 (version_127-18-g2eb472cd6)`, skipped integration tests, or any
+test failure rejects the tooling slice. It never downloads dependencies.
 
 The representative multi-module check used the Illuminate selection-player
 artifact from FIR `8c5fc9f13fd871f1453f0a6e2fc476c125adc3e5`. The restamped capture reproduced

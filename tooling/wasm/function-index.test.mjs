@@ -19,6 +19,8 @@ import {
 } from "./function-index-lib.mjs";
 
 const binaryen = process.env.FIR_BINARYEN_DIR;
+assert.equal(typeof binaryen, "string",
+  "FIR_BINARYEN_DIR must name the pinned Binaryen bin directory");
 const fixture = resolve(import.meta.dirname, "test/fixture.wat");
 const importedFixture = resolve(import.meta.dirname,
   "test/imported-fixture.wat");
@@ -33,7 +35,6 @@ function run(tool, args, options = {}) {
 }
 
 test("captures final optimized indices without changing release bytes",
-  { skip: binaryen === undefined ? "set FIR_BINARYEN_DIR to Binaryen's bin directory" : false },
   () => {
     const directory = mkdtempSync(join(tmpdir(), "fir-function-index-"));
     try {
@@ -103,7 +104,6 @@ test("captures final optimized indices without changing release bytes",
   });
 
 test("resolves imported functions across final maps and call graphs",
-  { skip: binaryen === undefined ? "set FIR_BINARYEN_DIR to Binaryen's bin directory" : false },
   () => {
     const directory = mkdtempSync(join(tmpdir(), "fir-function-imports-"));
     try {
@@ -195,7 +195,6 @@ test("resolves imported functions across final maps and call graphs",
   });
 
 test("rejects a sidecar after the artifact changes",
-  { skip: binaryen === undefined ? "set FIR_BINARYEN_DIR to Binaryen's bin directory" : false },
   () => {
     const directory = mkdtempSync(join(tmpdir(), "fir-function-index-hash-"));
     try {
