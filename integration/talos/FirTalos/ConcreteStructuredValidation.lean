@@ -394,14 +394,74 @@ structure ConcreteStructuredValidatedCodeOutcome
     target.frames
   agrees : frames.supported.Agrees core.core.resources.suspended
 
+/-- A closed staged named call.  The dynamic ready core retains the caller's
+resource state, while this companion retains both the already-validated caller
+stack and the residual validation of the continuation that the forthcoming
+call frame will suspend. -/
+structure ConcreteStructuredValidatedDirectCallReadyOutcome
+    (program : Fir.LeanIR.ImpureProgram)
+    (callerContext calleeContext : Fir.Wasm.Context)
+    (callerCode : Lean.Compiler.LCNF.Code .impure)
+    (sourceModule : Fir.Wasm.Module)
+    (callerFunction calleeFunction : Fir.Wasm.Function)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (spec : ConcreteSupportedFunction program callerContext callerCode
+      sourceModule callerFunction targetModule hosts)
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {callerEnv : Env}
+    (site : DirectInternalCallSite callerContext decl callerEnv)
+    (row : ConcreteGeneratedInternalDeclaration callerContext.program
+      site.sourceDeclaration calleeContext site.calleeCode sourceModule
+      calleeFunction targetModule)
+    (externals : ExternalImpl)
+    (labels : List Lean.FVarId)
+    (entryRuntime : RuntimeState)
+    (entryStore : Wasm.Store Host)
+    (entryWitness : RefinementWitness)
+    (functionResult : AbiKind)
+    (callerExpectedResult : Option AbiKind)
+    (facts : ReuseCapacityFacts)
+    (remainingBytes : Nat)
+    (sourceRuntime : RuntimeState)
+    (continuation : Lean.Compiler.LCNF.Code .impure)
+    (callerJoins : JoinEnv)
+    (sourceFrames : List Frame)
+    (targetStore : Wasm.Store Host)
+    (callerLocals : Wasm.Locals)
+    (callerRemainder : List Wasm.Value)
+    (targetRest : Wasm.Program)
+    (targetFrames : List StructuredWasmFrame)
+    (witness : RefinementWitness)
+    (physicalArgs : List Wasm.Value)
+    (resultIndex : Nat)
+    (source : MachineState)
+    (target : StructuredWasmState Host) : Prop where
+  activeResult : spec.sourceResultKind = functionResult
+  contextCaches :
+    callerContext.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program
+  core : ConcreteStructuredDirectCallReadyCoreRel program callerContext
+    calleeContext sourceModule callerFunction calleeFunction targetModule site
+    row externals labels entryRuntime entryStore entryWitness functionResult
+    callerExpectedResult facts remainingBytes sourceRuntime continuation
+    callerJoins sourceFrames targetStore callerLocals callerRemainder targetRest
+    targetFrames witness physicalArgs resultIndex source target
+  continuationValidation :
+    ConcreteStructuredValidationState program functionResult continuation
+  frames : ConcreteStructuredValidatedFrameStack program sourceModule
+    targetModule hosts functionResult callerExpectedResult sourceFrames
+    targetFrames
+  agrees : frames.supported.Agrees core.resources.suspended
+
 /-- Module-wide closed relation for active generated code.  The constructor
 hides the current generated function, entry anchor, resource budget, residual
 validator state, and compiler focus while retaining the proof that the active
 function's selected result ABI is the one validated at its root.
 
-Ready-call and yielded branches will join this sum as their validation
-transport lemmas are completed; the present relation is already stable across
-all active-code successors whose conclusion remains active code. -/
+The direct-ready constructor is the first administrative branch in this sum:
+it carries the caller continuation validation between staging and entry.
+Saturated, lazy, external, and yielded branches will join it as their matching
+transport lemmas are completed. -/
 inductive ConcreteStructuredValidatedCodeGlobalOutcome
     (program : Fir.LeanIR.ImpureProgram)
     (sourceModule : Fir.Wasm.Module)
@@ -435,6 +495,46 @@ inductive ConcreteStructuredValidatedCodeGlobalOutcome
         externals labels entryRuntime entryStore entryWitness functionResult
         callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
         sourceCode targetStore targetLocals targetCode witness source target) :
+      ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
+        targetModule hosts externals source target
+  | directReady
+      {callerContext calleeContext : Fir.Wasm.Context}
+      {callerCode : Lean.Compiler.LCNF.Code .impure}
+      {callerFunction calleeFunction : Fir.Wasm.Function}
+      {spec : ConcreteSupportedFunction program callerContext callerCode
+        sourceModule callerFunction targetModule hosts}
+      {decl : Lean.Compiler.LCNF.LetDecl .impure}
+      {callerEnv : Env}
+      {site : DirectInternalCallSite callerContext decl callerEnv}
+      {row : ConcreteGeneratedInternalDeclaration callerContext.program
+        site.sourceDeclaration calleeContext site.calleeCode sourceModule
+        calleeFunction targetModule}
+      {labels : List Lean.FVarId}
+      {entryRuntime sourceRuntime : RuntimeState}
+      {entryStore targetStore : Wasm.Store Host}
+      {entryWitness witness : RefinementWitness}
+      {functionResult : AbiKind}
+      {callerExpectedResult : Option AbiKind}
+      {facts : ReuseCapacityFacts}
+      {remainingBytes : Nat}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      {callerJoins : JoinEnv}
+      {sourceFrames : List Frame}
+      {callerLocals : Wasm.Locals}
+      {callerRemainder : List Wasm.Value}
+      {targetRest : Wasm.Program}
+      {targetFrames : List StructuredWasmFrame}
+      {physicalArgs : List Wasm.Value}
+      {resultIndex : Nat}
+      {source : MachineState}
+      {target : StructuredWasmState Host}
+      (related : ConcreteStructuredValidatedDirectCallReadyOutcome program
+        callerContext calleeContext callerCode sourceModule callerFunction
+        calleeFunction targetModule hosts spec site row externals labels
+        entryRuntime entryStore entryWitness functionResult
+        callerExpectedResult facts remainingBytes sourceRuntime continuation
+        callerJoins sourceFrames targetStore callerLocals callerRemainder
+        targetRest targetFrames witness physicalArgs resultIndex source target) :
       ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
         targetModule hosts externals source target
 
@@ -475,6 +575,58 @@ theorem ConcreteStructuredValidatedCodeOutcome.toSupportedOutcome
       sourceFunction targetModule hosts spec externals labels entryRuntime
       entryStore entryWitness functionResult callerExpectedResult source target :=
   .code related.contextCaches related.core.core related.frames.supported
+    related.agrees
+
+/-- Forget validation from a staged named call without changing either
+machine or its production-supported administrative branch. -/
+theorem ConcreteStructuredValidatedDirectCallReadyOutcome.toSupportedOutcome
+    {program : Fir.LeanIR.ImpureProgram}
+    {callerContext calleeContext : Fir.Wasm.Context}
+    {callerCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program callerContext callerCode
+      sourceModule callerFunction targetModule hosts}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {callerEnv : Env}
+    {site : DirectInternalCallSite callerContext decl callerEnv}
+    {row : ConcreteGeneratedInternalDeclaration callerContext.program
+      site.sourceDeclaration calleeContext site.calleeCode sourceModule
+      calleeFunction targetModule}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {callerLocals : Wasm.Locals}
+    {callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {physicalArgs : List Wasm.Value}
+    {resultIndex : Nat}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedDirectCallReadyOutcome program
+      callerContext calleeContext callerCode sourceModule callerFunction
+      calleeFunction targetModule hosts spec site row externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts remainingBytes sourceRuntime continuation callerJoins sourceFrames
+      targetStore callerLocals callerRemainder targetRest targetFrames witness
+      physicalArgs resultIndex source target) :
+    ConcreteStructuredSupportedOutcome program callerContext callerCode
+      sourceModule callerFunction targetModule hosts spec externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      source target :=
+  .directReady related.core related.contextCaches related.frames.supported
     related.agrees
 
 /-- Attach current-node admission to the closed admission-free relation.  The
@@ -540,6 +692,8 @@ theorem ConcreteStructuredValidatedCodeGlobalOutcome.toSupportedGlobal
   cases related with
   | code activeResult code =>
       exact code.toSupportedOutcome.toGlobal activeResult
+  | directReady ready =>
+      exact ready.toSupportedOutcome.toGlobal ready.activeResult
 
 /-- Reassemble the closed active-code branch after a local core theorem has
 advanced both controls and supplied the exact frame equalities.  Static caller
@@ -1121,6 +1275,218 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_directLet_of_step
     nextWitness, nextFacts, nextTargetCode, targetCount, targetPath,
     targetPositive,
     related.withSuccessor validatedCore sourceFramesEq targetFramesEq⟩
+
+/-- Stage a compiler-generated named call inside the closed relation.  The
+production pipeline selects the exact callee row, the concrete theorem runs
+the argument prefix, and validation contributes only the caller continuation
+that must survive the administrative ready state. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_directCall_stage_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {callerContext : Fir.Wasm.Context}
+    {callerCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program callerContext callerCode
+      sourceModule callerFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {callerEnv : Env}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program callerContext
+      callerCode sourceModule callerFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime callerEnv
+      (.let decl continuation) targetStore targetLocals targetCode witness source
+      target)
+    (site : DirectInternalCallSite callerContext decl callerEnv)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ calleeContext calleeFunction,
+      ∃ row : ConcreteGeneratedInternalDeclaration callerContext.program
+        site.sourceDeclaration calleeContext site.calleeCode sourceModule
+        calleeFunction targetModule,
+      ∃ (physicalArgs : List Wasm.Value) (resultIndex : Nat)
+          (targetArguments targetRest : Wasm.Program)
+          (targetAfter : StructuredWasmState Host),
+        FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+            targetArguments.length target targetAfter ∧
+          ConcreteStructuredValidatedDirectCallReadyOutcome program
+            callerContext calleeContext callerCode sourceModule callerFunction
+            calleeFunction targetModule hosts spec site row externals labels
+            entryRuntime entryStore entryWitness functionResult
+            callerExpectedResult facts remainingBytes sourceRuntime continuation
+            source.joins source.frames targetStore targetLocals
+            targetLocals.values targetRest target.frames witness physicalArgs
+            resultIndex sourceAfter targetAfter ∧
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source := by
+  have pointwise := related.toPointwise
+    (ConcreteStructuredCodeStepAdmission.directCall site) (by omega)
+  obtain ⟨calleeContext, calleeFunction, _contexts, ⟨generatedRow⟩⟩ :=
+    pointwise.directCallRow site
+  have row :
+      ConcreteGeneratedInternalDeclaration callerContext.program
+        site.sourceDeclaration calleeContext site.calleeCode sourceModule
+        calleeFunction targetModule := by
+    rw [spec.contextProgram]
+    exact generatedRow
+  obtain ⟨physicalArgs, resultIndex, targetArguments, targetRest,
+      computedAfter, targetAfter, computedStep, targetPath, ready, rank⟩ :=
+    related.core.core.advance_directCall_stage_ranked site row spec
+  have sourceAfterEq : sourceAfter = computedAfter := by
+    rw [sourceStep] at computedStep
+    exact ExecResult.next.inj computedStep
+  subst computedAfter
+  obtain ⟨_kind, _locals, _kindFound, continuationValidation⟩ :=
+    related.core.validation.letContinuation
+  exact ⟨calleeContext, calleeFunction, row, physicalArgs, resultIndex,
+    targetArguments, targetRest, targetAfter, targetPath,
+    ⟨activeResult, related.contextCaches, ready, continuationValidation,
+      related.frames, related.agrees⟩,
+    rank⟩
+
+/-- Enter a staged named call and close the relation at the selected callee.
+The accepted callee declaration reconstructs root validation; the ready state
+pushes the previously validated caller continuation in lockstep with the
+production call frame and hereditary resource stack. -/
+theorem
+    ConcreteStructuredValidatedDirectCallReadyOutcome.advance_enter_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {callerContext calleeContext : Fir.Wasm.Context}
+    {callerCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program callerContext callerCode
+      sourceModule callerFunction targetModule hosts}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {callerEnv : Env}
+    {site : DirectInternalCallSite callerContext decl callerEnv}
+    {row : ConcreteGeneratedInternalDeclaration callerContext.program
+      site.sourceDeclaration calleeContext site.calleeCode sourceModule
+      calleeFunction targetModule}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {callerLocals : Wasm.Locals}
+    {callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {physicalArgs : List Wasm.Value}
+    {resultIndex : Nat}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedDirectCallReadyOutcome program
+      callerContext calleeContext callerCode sourceModule callerFunction
+      calleeFunction targetModule hosts spec site row externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts remainingBytes sourceRuntime continuation callerJoins sourceFrames
+      targetStore callerLocals callerRemainder targetRest targetFrames witness
+      physicalArgs resultIndex source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 1 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
+          targetModule hosts externals sourceAfter targetAfter := by
+  obtain ⟨targetAfter, targetPath, nextCore, callerScope, entry⟩ :=
+    related.core.advance_enter_of_step (hostEnv := hosts.env)
+      spec.contextProgram sourceStep
+  have rowAtProgram :
+      ConcreteGeneratedInternalDeclaration program site.sourceDeclaration
+        calleeContext site.calleeCode sourceModule calleeFunction
+        targetModule := by
+    simpa only [spec.contextProgram] using row
+  let calleeSpec :
+      ConcreteSupportedFunction program calleeContext site.calleeCode
+        sourceModule calleeFunction targetModule hosts :=
+    rowAtProgram.toSupportedFunctionOfFunction spec
+  have calleeResultAt :
+      calleeSpec.sourceResultKind = site.calleeResultKind := by
+    change rowAtProgram.sourceResultKind = site.calleeResultKind
+    simpa [site.calleeResult] using rowAtProgram.sourceResultSelected.symm
+  have validatedCore :
+      ConcreteStructuredValidatedCodeCoreRel program calleeContext sourceModule
+        calleeFunction externals [] sourceRuntime targetStore witness
+        site.calleeResultKind (some site.resultKind) [] remainingBytes
+        sourceRuntime site.calleeEnv site.calleeCode targetStore
+        (row.targetFunction.toLocals physicalArgs) row.targetFunction.body
+        witness sourceAfter targetAfter :=
+    nextCore.withRootValidation calleeSpec calleeResultAt
+  let storedCallerLocals : Wasm.Locals :=
+    { callerLocals with
+      values := physicalArgs.reverse ++ callerRemainder }
+  let pushedFrames :=
+    ConcreteStructuredValidatedFrameStack.direct
+      (callerEnv := callerEnv) (callerJoins := callerJoins)
+      (callerLocals := storedCallerLocals)
+      (callerRemainder := callerRemainder) spec related.activeResult
+      related.contextCaches entry.continuationAdapted entry.resultFound
+      entry.resultKindAt site.calleeResultRefines
+      related.continuationValidation related.frames
+  let pushedResources :=
+    ConcreteStructuredSuspendedResourceStack.direct
+      (callerEnv := callerEnv) (callerJoins := callerJoins)
+      (callerLocals := storedCallerLocals)
+      (callerRemainder := callerRemainder) callerScope
+      spec.contextProgram.symm entry.continuationAdapted entry.resultFound
+      entry.resultKindAt site.calleeResultRefines
+      related.core.resources.suspended
+  have pushedAgrees : pushedFrames.supported.Agrees pushedResources := by
+    exact ConcreteStructuredSupportedFrameStack.Agrees.direct
+      spec related.activeResult related.contextCaches callerScope
+      spec.contextProgram.symm entry.continuationAdapted entry.resultFound
+      entry.resultKindAt site.calleeResultRefines related.frames.supported
+      related.core.resources.suspended related.agrees
+  obtain ⟨supportedAfter, agreesAfter⟩ := pushedAgrees.reindex
+    entry.sourceFramesEq entry.targetFramesEq
+    validatedCore.core.resources.suspended
+  have validationAfter :
+      ConcreteStructuredSuspendedValidation program site.calleeResultKind
+        (some site.resultKind) sourceAfter.frames := by
+    rw [entry.sourceFramesEq]
+    exact pushedFrames.validation
+  have nextFrames :
+      ConcreteStructuredValidatedFrameStack program sourceModule targetModule
+        hosts site.calleeResultKind (some site.resultKind) sourceAfter.frames
+        targetAfter.frames :=
+    ⟨supportedAfter, validationAfter⟩
+  have nextOutcome :
+      ConcreteStructuredValidatedCodeOutcome program calleeContext
+        site.calleeCode sourceModule calleeFunction targetModule hosts
+        calleeSpec externals [] sourceRuntime targetStore witness
+        site.calleeResultKind (some site.resultKind) [] remainingBytes
+        sourceRuntime site.calleeEnv site.calleeCode targetStore
+        (row.targetFunction.toLocals physicalArgs) row.targetFunction.body
+        witness sourceAfter targetAfter :=
+    ⟨rowAtProgram.contextCaches, validatedCore, nextFrames, agreesAfter⟩
+  exact ⟨targetAfter, targetPath,
+    ConcreteStructuredValidatedCodeGlobalOutcome.code calleeResultAt
+      nextOutcome⟩
 
 /-- Persistent ownership increments are erased by lowering and preserve the
 complete residual validator state. -/
