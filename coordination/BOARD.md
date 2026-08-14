@@ -34,7 +34,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   accepted through tracked handoff `31035d5e` (functional head `752d2187`),
   followed by indexed final-LCNF capture ownership at `3dc7b0ee`. The bounded
   optimized-function tooling and its root fail-closed gate are accepted through
-  `fa3105f7`.
+  `fa3105f7`, followed by the resident Array hot-path history at `372826cf`.
   The Illuminate functional generation head is `4b84f35b`; the package itself
   remains local-only until its consumer authorizes publication.
 - Landing order:
@@ -45,7 +45,8 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
      fail-closed root tooling gates are accepted through `fa3105f7`. CPU
      profiling, the compiled-Array probe, and the queued mailbox-protocol
      adaptation stay separately reviewable; the combined tooling history
-     remains outside the integration queue.
+     remains outside the integration queue. The independently reviewed Array
+     hot-path history is accepted at `372826cf`.
   3. W7-1's lean-zip function-sidecar consumer is accepted through
      `31035d5e`. W7-2 may hand the validated exact-head Flat package to the
      Verso owner; the Illuminate selection export is also complete.
@@ -66,6 +67,24 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
+
+## Latest completed integration lease
+
+- Milestone: `TOOLING-ARRAY-RUNTIME-HISTORY`.
+- Integration owner: `wasm-gen`, rebasing the tooling owner's documentation
+  commit `a227cd8d` as `372826cf` directly on the accepted bounded-function
+  tooling baseline.
+- Change: `docs/tooling/ARRAY_RUNTIME_HISTORY.md` separates element-addressing,
+  Array-object validation, and proof-index validation costs, records the
+  checked/public versus trusted compiled boundary, and explains why current
+  lean-zip profiles point next to resident numeric work rather than Array.
+- Contracts: none. This is source-backed architecture history only and changes
+  no executable, proof, generator, runtime, package, or build surface.
+- Acceptance: `git diff --check` and complete `make check` pass with 702 source
+  cases, nine direct machines, the 702-case V8 triangle, 711 unique cases,
+  2,115/2,115 equal comparisons, zero findings, and 25/25 mailbox tests.
+- Result: local `main` advances through `372826cf`; the compiled Array
+  microprobe remains a separate slice behind the accepted function-view API.
 
 ## Latest completed integration lease
 
