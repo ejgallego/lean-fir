@@ -25,34 +25,72 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `TOOLING-FINAL-FUNCTION-INDEX-PROTOCOL` through `7d0d9b3b`, followed by the
   `S11-REPEATED-ARRAY-CHILD-FIDELITY` fixture stack through `5d673ad3` and its
   W7 concrete-product classification through `bccfc240`. The optional generic
-  runtime-link function-evidence API is accepted at `52a98a6f`. The Illuminate
-  functional generation head is `4b84f35b`; the package itself remains
-  local-only until its consumer authorizes publication.
+  runtime-link function-evidence API is accepted at `52a98a6f`. W7-2's
+  source-module replay repair and shared immutable publisher are accepted
+  through `912bf68a`. The Illuminate functional generation head is `4b84f35b`;
+  the package itself remains local-only until its consumer authorizes
+  publication.
 - Landing order:
-  1. W7-2 separates the Verso post-G2 semantic closure review from the generic
-     immutable-package publisher refactor. Semantic/generator fixes land
-     before the publisher consumer unless the lane documents a hard dependency.
+  1. W7-2's Verso source-module replay repair and generic immutable-package
+     publisher are accepted in that order through `912bf68a`.
   2. The optimized final-function index protocol is accepted through clean
      isolated head `7d0d9b3b`. CPU profiling, selected-function views, the
      compiled-Array probe, and the queued mailbox-protocol adaptation stay
      separately reviewable; the combined tooling history remains outside the
      integration queue.
-  3. W7-1 may now resume the lean-zip function-sidecar consumer; the
-     independent Illuminate selection export is also complete.
+  3. W7-1 may now resume the lean-zip function-sidecar consumer. W7-2 may
+     regenerate exact-head Flat/HTML packages and run the updated external
+     Verso validators independently; the Illuminate selection export is also
+     complete.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
   invalidating long deterministic package and external-engine gates.
-- Not ready: W7-2 is clean and rebased on `608ba389`, but its current history
-  still places the semantic specialization repair above the generic publisher
-  refactor; the lane owns the requested split or documented dependency. The
-  Array panic-observation fixture audit is accepted and parked behind the
-  existing shared-observation bug card; it has no feature landing. Later
-  tooling surfaces remain on their combined development branch until each has
-  an independently authorized head.
+- Not ready: the external Verso Flat/HTML source validator update and exact-head
+  package regeneration remain client-owned follow-ups; no compatibility alias
+  was added in FIR. The Array panic-observation fixture audit is accepted and
+  parked behind the existing shared-observation bug card; it has no feature
+  landing. Later tooling surfaces remain on their combined development branch
+  until each has an independently authorized head.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
+
+## Latest completed integration lease
+
+- Milestone: `W7-VERSO-MODULE-REPLAY-AND-IMMUTABLE-PUBLISHER`.
+- Integration owner: `wasm-gen`, consuming the clean
+  `wasm/package-verifier` handoff on accepted `main` at `f2dc8d0b`. The bug-card
+  head is `122d85ac`, the semantic/generator head is `1e9faedf`, and the
+  functional publisher head is `912bf68a`.
+- Semantic repair: postponed source replay now preserves the source module's
+  Lean specialization and SCC boundary before compiling unresolved prebuilt
+  dependencies in a fresh unit. Ordinary Wasm plus FIR's direct-self loop
+  lowering passes the Flat balanced 2,047-node and grouped 256-break stack
+  shapes; the rejected generic `return_call` experiment is absent.
+- Publication: Flat and HTML share a thin immutable-package utility with exact
+  ordered checksum inventories, identity-collision rejection, atomic directory
+  publication, and atomic current pointers. The semantic prefix is independent
+  of this publisher.
+- Contracts: none. Source semantics, the semantic Wasm ABI, concrete
+  runtime/layout, ownership, resident-helper signatures, and W6 proofs are
+  unchanged. The external Verso 4.33 validator remains source-owner work;
+  previously validated packages remain client-test evidence until regenerated
+  at this exact FIR head.
+- Acceptance: `git diff --check`, Lean Beam refresh for the generator and both
+  compile facades, five package-tool tests, Node syntax checks, and the focused
+  source dependency cone pass. Complete `make check` passes with 702 source
+  cases, nine direct machines, 702 V8 triangles, 711 unique cases,
+  2,115/2,115 equal comparisons, 7,602 steps, 186 active bug cards, zero
+  findings, and 25/25 mailbox tests. All 3,148 Talos jobs and the complete W7
+  artifact gate pass on the exact rebased head, including deterministic
+  prettyM publication, 640/702 admitted concrete products, and 44/44 concrete
+  readiness artifacts.
+- Bug card: `FIR-BUG-wasm-none-verso-flat-isolated-closure-stack-overflow` is
+  fixed by the source-module replay boundary.
+- Result: `main` fast-forwards through `912bf68a`. W7-1's lean-zip function
+  sidecar and W7-2's exact-head Flat/HTML regeneration are now independent next
+  slices.
 
 ## Latest completed integration lease
 
