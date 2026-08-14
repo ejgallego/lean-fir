@@ -22,19 +22,23 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 - Accepted baseline: `main` contains the complete
   `W7-ILLUMINATE-SELECTION-CATALOG-EXPORT` stack through tracked lane head
   `5081015a` and the independently isolated
-  `TOOLING-FINAL-FUNCTION-INDEX-PROTOCOL` through `7d0d9b3b`. The Illuminate
-  functional generation head is `4b84f35b`; the package itself remains
-  local-only until its consumer authorizes publication.
+  `TOOLING-FINAL-FUNCTION-INDEX-PROTOCOL` through `7d0d9b3b`, followed by the
+  `S11-REPEATED-ARRAY-CHILD-FIDELITY` fixture stack through `5d673ad3`. The
+  Illuminate functional generation head is `4b84f35b`; the package itself
+  remains local-only until its consumer authorizes publication.
 - Landing order:
-  1. W7-2 separates the Verso post-G2 semantic closure review from the generic
+  1. W7-1 classifies S11's initial `ByteArray` graph at the concrete-product
+     boundary and runs the complete W7 artifact gate without changing semantic
+     admission.
+  2. W7-2 separates the Verso post-G2 semantic closure review from the generic
      immutable-package publisher refactor. Semantic/generator fixes land
      before the publisher consumer unless the lane documents a hard dependency.
-  2. The optimized final-function index protocol is accepted through clean
+  3. The optimized final-function index protocol is accepted through clean
      isolated head `7d0d9b3b`. CPU profiling, selected-function views, the
      compiled-Array probe, and the queued mailbox-protocol adaptation stay
      separately reviewable; the combined tooling history remains outside the
      integration queue.
-  3. W7-1 may now rebase and resume the lean-zip function-sidecar consumer; the
+  4. W7-1 may now rebase and resume the lean-zip function-sidecar consumer; the
      independent Illuminate selection export is also complete.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
@@ -50,6 +54,35 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
+
+## Latest completed integration lease
+
+- Milestone: `S11-REPEATED-ARRAY-CHILD-FIDELITY`.
+- Integration owner: `wasm-gen`, consuming the clean `test-fixtures` handoff
+  based directly on accepted `main` at `dbe40b79`. The functional fixture head
+  is `13a8998f`; the tracked ready handoff is `5d673ad3`.
+- Fixture: one runner-materialized input shares a `ByteArray` between an
+  outside field and both slots of a generic Array. Source retains the original
+  Array across `Array.set!`, mutates the outside child through `ByteArray.set!`,
+  and returns the original Array, updated Array, and copied mutation. The exact
+  24-transition LCNF/external path and nested-alias graph are pinned.
+- Harness repair: the Python protocol mirror now descends through the `array`
+  branch already present in protocol v3, retaining the shared `seq` datum
+  representation. No wire shape, alias rule, source semantics, interpreter,
+  runtime, generation, artifact, or proof contract changed.
+- Acceptance: Lean Beam reports zero diagnostics. The focused native/LCNF/V8
+  triangle passes 3/3 with the exact path and both products opened under
+  strace. `git diff --check`, complete `make check` (125 harness tests, 702
+  source cases, nine direct machines, 702 V8 triangles, 2,115/2,115 equal
+  comparisons, 7,602 steps, 185 bug cards, and zero findings), and all 3,148
+  Talos jobs pass.
+- Bug cards: `FIR-BUG-validation-none-array-nested-alias-manifest` is fixed;
+  `FIR-BUG-impure-none-array-mkempty-validation-external` and
+  `FIR-BUG-impure-none-array-getinternal-validation-external` remain exact
+  shared validation-host follow-ups. The separately parked S10 panic audit is
+  not in this landing.
+- Result: `main` fast-forwards through `5d673ad3`. W7 next adds only the narrow
+  concrete-product blocker classification for the initial `ByteArray` graph.
 
 ## Latest completed integration lease
 
@@ -72,7 +105,9 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   evidence-enabled and ordinary stripped output are byte-identical; sidecars
   bind the final artifact hash, exact import classification, body sizes, call
   edges, and exports. The existing 2,346,345-byte lean-zip production artifact
-  with 27 imports and 6,938 definitions verifies successfully.
+  with 27 function imports, 5,306 definitions, and 5,333 total final functions
+  verifies successfully. The earlier 6,938/6,965 figures describe the complete
+  pre-Binaryen linker inventory, not this optimized release namespace.
   `git diff --check` and complete `make check` pass with 125 harness tests,
   710 unique cases, 2,112/2,112 equal comparisons, zero findings, 182 active
   bug cards, and 25 mailbox tests.
