@@ -38,12 +38,15 @@ substantial, exact-source Lean closures:
 | Verso Flat and HTML | real structured render results and authenticated external source closures |
 | lean-zip | packed ByteArrays, unique updates, arbitrary Nat/Int work, generic Arrays, deep closure use, and compute-heavy DEFLATE levels 1--10 |
 
-The accepted lean-zip raw package is the new scaling reference: 702 captured
-declarations, zero unsupported declarations, a reviewed three-declaration
-math frontier before complete linking, zero imports in the complete module,
-module-owned memory, exact native output, and all ten compression levels.
-This is the point at which W7 moves from runtime closure discovery to generic
-compiler quality.
+The accepted lean-zip raw package established the scaling reference. After the
+accepted compiler-unit cache-isolation repair, its reviewed closure contains
+662 captured declarations, 534 retained source functions, and 2,598 resident
+helpers, with zero unsupported declarations, a reviewed three-declaration math
+frontier before complete linking, zero imports in the complete module,
+module-owned memory, exact native output, and all ten compression levels. The
+package contract pins ordered-inventory hashes as well as counts and byte
+lengths. This is the point at which W7 moves from runtime closure discovery to
+generic compiler quality.
 
 ## Ordered queue
 

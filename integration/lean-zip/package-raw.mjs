@@ -187,6 +187,12 @@ const baseWasm = readFileSync(baseStem);
 const descriptorBytes = readFileSync(`${wasmStem}.json`);
 const descriptor = JSON.parse(descriptorBytes);
 const inventory = JSON.parse(readFileSync(inventoryPath, "utf8"));
+const inventoryHashes = Object.freeze({
+  externalsSha256: sha256(JSON.stringify(inventory.externals)),
+  sourceFunctionsSha256: sha256(JSON.stringify(inventory.sourceFunctions)),
+  residentHelpersSha256: sha256(JSON.stringify(inventory.residentHelpers)),
+  completeFunctionsSha256: sha256(JSON.stringify(inventory.functions)),
+});
 const module = new WebAssembly.Module(wasm);
 const imports = WebAssembly.Module.imports(module);
 const exports = WebAssembly.Module.exports(module);
@@ -208,6 +214,7 @@ for (const [field, expected] of Object.entries(expectedClosure)) {
     retainedSourceFunctions: inventory.sourceFunctions.length,
     residentHelpers: inventory.residentHelpers.length,
     completeFunctions: inventory.functions.length,
+    ...inventoryHashes,
     baseWasmBytes: baseWasm.byteLength,
     frontierWasmBytes: frontierWasm.byteLength,
     completeWasmBytes: wasm.byteLength,
@@ -285,6 +292,7 @@ const build = {
       "compiler lazy caches retained with cache-aware rewind floor",
     capturedDeclarations: inventory.capturedDeclarations,
     reviewedExternalsBeforeLink: inventory.reviewedExternalsBeforeLink,
+    inventoryHashes,
     retainedSourceFunctions: inventory.sourceFunctions,
     residentHelpers: inventory.residentHelpers,
     residualRuntimeOperations: inventory.runtimeOperations,

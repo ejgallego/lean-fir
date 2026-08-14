@@ -106,6 +106,14 @@ reserves `STANDARD_MATH_RUNTIME_RESERVED_MEMORY_BYTES` before lazy-cache
 publication or Lean allocation, and the package records both frontier and
 complete identities plus the runtime source, contract, and Emscripten identity.
 
+The exact post-isolation raw closure is ratcheted in
+`raw-closure-contract.json`: 662 captured declarations, 128 reviewed
+externals, 534 retained source functions, 2,598 resident helpers, and 3,132
+complete functions. In addition to counts and Wasm byte lengths, the contract
+pins SHA-256 digests of the ordered external, source-function, resident-helper,
+and complete-function inventories. This prevents a same-count closure change
+from passing the package gate without review.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not

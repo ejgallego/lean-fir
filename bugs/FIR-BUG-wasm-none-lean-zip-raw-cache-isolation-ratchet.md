@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-lean-zip-raw-cache-isolation-ratchet
-status: confirmed
+status: fixed
 classification: validation-harness
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: d8b18978322de05a8f3dba51ef03cf5461676c17
@@ -88,4 +88,25 @@ none
 
 ## Resolution and regression
 
-unresolved
+Resolved by reviewing and ratcheting the complete post-isolation inventory
+rather than weakening the declaration-count assertion. The accepted closure
+has 662 declarations, 128 reviewed externals, 534 retained source functions,
+2,598 resident helpers, and 3,132 complete functions. Base, frontier, and
+complete Wasm are respectively 1,050,780, 1,570,637, and 902,411 bytes.
+
+The 94 old-only and 54 new-only source names were audited as regenerated
+specializations, lambda/closed helpers, and boxed-wrapper changes caused by
+the corrected compiler-unit cache policy. Resident Array, ByteArray,
+Nat/Int, String, and fixed-width/Float family counts are unchanged. Closure
+allocator, matcher, projection, and cache helper counts follow the smaller
+source closure; setter/release changes reflect the regenerated ownership
+shapes. The external count stays 128, the exact frontier remains
+`Float.ofNat`, `Float.ofScientific`, and `Float.log2`, and runtime operations
+remain zero.
+
+`raw-closure-contract.json` now also pins SHA-256 digests of the ordered
+external, retained-source, resident-helper, and complete-function inventories.
+This turns a future same-count name change into a deterministic package-gate
+failure. Repeated complete generation, the five-case-by-ten-level native/Wasm
+matrix, zero-import adapter, and persistent-cache/scratch reclamation checks
+all pass before immutable publication.
