@@ -1,20 +1,16 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
   copyFileSync,
-  existsSync,
-  lstatSync,
   mkdirSync,
   readFileSync,
   realpathSync,
-  renameSync,
-  rmSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { publishImmutablePackage, sha256 } from
+  "../package-tools/immutable-package.mjs";
 import { buildPostponedSourceView } from
   "../package-tools/postponed-source-view.mjs";
 
@@ -51,10 +47,6 @@ function capture(command, args, cwd = directory) {
   return run(command, args, { cwd }).trim();
 }
 
-function sha256(value) {
-  return createHash("sha256").update(value).digest("hex");
-}
-
 function gitState(root) {
   return {
     commit: capture("git", ["rev-parse", "HEAD"], root),
@@ -81,16 +73,6 @@ function assertExpectedVersoSource() {
 
 function assertExpected(value, expected, label) {
   assert.equal(value, expected, `${label} changed`);
-}
-
-function replaceCurrentLink(destination) {
-  const current = join(buildDirectory, "verso-html-current");
-  const temporary = join(buildDirectory, `.verso-html-current-${process.pid}`);
-  rmSync(temporary, { force: true });
-  symlinkSync(relative(buildDirectory, destination), temporary);
-  renameSync(temporary, current);
-  assert.equal(lstatSync(current).isSymbolicLink(), true);
-  assert.equal(realpathSync(current), realpathSync(destination));
 }
 
 const verso = assertExpectedVersoSource();
@@ -299,31 +281,19 @@ const packageFingerprint = sha256(Buffer.concat([
 const packageId = `${fir.commit.slice(0, 12)}-${verso.commit.slice(0, 12)}-` +
   packageFingerprint.slice(0, 20);
 const packages = join(buildDirectory, "verso-html-packages");
-const destination = join(packages, packageId);
-const staging = join(packages, `.staging-${packageId}-${process.pid}`);
-mkdirSync(packages, { recursive: true });
-rmSync(staging, { recursive: true, force: true });
-mkdirSync(staging);
-copyFileSync(residentStem, join(staging, "prettyM.wasm"));
-copyFileSync(`${residentStem}.json`, join(staging, "prettyM.wasm.json"));
-writeFileSync(join(staging, "prettyM-browser-adapter.mjs"), adapterBytes);
-writeFileSync(join(staging, "smoke.mjs"), smokeBytes);
-writeFileSync(join(staging, "BUILD.json"), buildBytes);
-const sums = outputNames.map((name) =>
-  `${sha256(readFileSync(join(staging, name)))}  ${name}`).join("\n") + "\n";
-writeFileSync(join(staging, "SHA256SUMS"), sums);
-
-if (existsSync(destination)) {
-  for (const name of [...outputNames, "SHA256SUMS"]) {
-    assert.deepEqual(readFileSync(join(staging, name)),
-      readFileSync(join(destination, name)),
-      `immutable package ${packageId} differs at ${name}`);
-  }
-  rmSync(staging, { recursive: true });
-} else {
-  renameSync(staging, destination);
-}
-replaceCurrentLink(destination);
+const { directory: destination } = publishImmutablePackage({
+  packagesDirectory: packages,
+  packageId,
+  outputNames,
+  currentLink: join(buildDirectory, "verso-html-current"),
+  populate(staging) {
+    copyFileSync(residentStem, join(staging, "prettyM.wasm"));
+    copyFileSync(`${residentStem}.json`, join(staging, "prettyM.wasm.json"));
+    writeFileSync(join(staging, "prettyM-browser-adapter.mjs"), adapterBytes);
+    writeFileSync(join(staging, "smoke.mjs"), smokeBytes);
+    writeFileSync(join(staging, "BUILD.json"), buildBytes);
+  },
+});
 console.log(JSON.stringify({
   ok: true,
   packageId,
