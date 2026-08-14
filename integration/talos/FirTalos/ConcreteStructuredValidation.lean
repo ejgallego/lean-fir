@@ -2254,4 +2254,346 @@ theorem ConcreteStructuredValidationFocus.defaultAlt
   simp only [Fir.Wasm.supportedAltWithJoins] at selectedSupported
   exact ⟨selectedSupported⟩
 
+/-- A successful constructor lookup identifies the exact constructor
+alternative in the source table. -/
+private theorem exists_ctorAlt_mem_of_findCtorAlt
+    {tag : Nat}
+    {alts : List (Lean.Compiler.LCNF.Alt .impure)}
+    {selected : Lean.Compiler.LCNF.Code .impure}
+    (found : findCtorAlt tag alts = some selected) :
+    ∃ info, Lean.Compiler.LCNF.Alt.ctorAlt info selected ∈ alts := by
+  induction alts with
+  | nil => simp [findCtorAlt] at found
+  | cons alt rest ih =>
+      cases alt with
+      | alt ctorName params code impossible => nomatch impossible
+      | ctorAlt info code _ =>
+          simp only [findCtorAlt] at found
+          split at found
+          · have codeEq : code = selected := Option.some.inj found
+            subst selected
+            exact ⟨info, List.mem_cons_self⟩
+          · obtain ⟨selectedInfo, member⟩ := ih found
+            exact ⟨selectedInfo, List.mem_cons_of_mem _ member⟩
+      | default code =>
+          simp only [findCtorAlt] at found
+          obtain ⟨selectedInfo, member⟩ := ih found
+          exact ⟨selectedInfo, List.mem_cons_of_mem _ member⟩
+
+/-- A successful default lookup identifies the exact default alternative in
+the source table. -/
+private theorem default_mem_of_findDefaultAlt
+    {alts : List (Lean.Compiler.LCNF.Alt .impure)}
+    {selected : Lean.Compiler.LCNF.Code .impure}
+    (found : findDefaultAlt alts = some selected) :
+    Lean.Compiler.LCNF.Alt.default selected ∈ alts := by
+  induction alts with
+  | nil => simp [findDefaultAlt] at found
+  | cons alt rest ih =>
+      cases alt with
+      | alt ctorName params code impossible => nomatch impossible
+      | ctorAlt info code _ =>
+          simp only [findDefaultAlt] at found
+          exact List.mem_cons_of_mem _ (ih found)
+      | default code =>
+          simp only [findDefaultAlt, Option.some.injEq] at found
+          subst selected
+          exact List.mem_cons_self
+
+/-- Every successful source case selection is either the exact constructor
+arm or the exact default arm present in the source table. -/
+private theorem selected_alt_mem_of_chooseAlt
+    {tag : Nat}
+    {alts : List (Lean.Compiler.LCNF.Alt .impure)}
+    {selected : Lean.Compiler.LCNF.Code .impure}
+    (chosen : chooseAlt tag alts = some selected) :
+    (∃ info, Lean.Compiler.LCNF.Alt.ctorAlt info selected ∈ alts) ∨
+      Lean.Compiler.LCNF.Alt.default selected ∈ alts := by
+  unfold chooseAlt at chosen
+  cases found : findCtorAlt tag alts with
+  | some code =>
+      have codeEq : code = selected := by simpa [found] using chosen
+      subst selected
+      exact .inl (exists_ctorAlt_mem_of_findCtorAlt found)
+  | none =>
+      have defaultFound : findDefaultAlt alts = some selected := by
+        simpa [found] using chosen
+      exact .inr (default_mem_of_findDefaultAlt defaultFound)
+
+/-- Executable validation follows the exact branch chosen by the source
+interpreter. Constructor selection inserts the discriminator fact used by
+guarded joins; default selection erases any stale fact. -/
+theorem ConcreteStructuredValidationState.selectedCase
+    {program : Fir.LeanIR.ImpureProgram}
+    {functionResult : Fir.Wasm.AbiKind}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {selected : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredValidationState program functionResult
+      (.cases cases))
+    (sourceResult : SourceCaseResult sourceRuntime sourceEnv cases selected) :
+    ConcreteStructuredValidationState program functionResult selected := by
+  obtain ⟨joins, locals, facts, sharing, focus⟩ := validated
+  obtain ⟨_discrValue, tag, _found, _tagged, chosen⟩ := sourceResult
+  rcases selected_alt_mem_of_chooseAlt chosen with constructor | default
+  · obtain ⟨info, member⟩ := constructor
+    obtain ⟨_mode, _fits, selectedFocus⟩ := focus.constructorAlt
+      (by simpa using member)
+    exact ⟨joins, locals,
+      Fir.Wasm.insertSupportedCaseFact facts cases.discr info.cidx,
+      sharing, selectedFocus⟩
+  · exact ⟨joins, locals,
+      Fir.Wasm.eraseSupportedCaseFact facts cases.discr,
+      sharing, focus.defaultAlt (by simpa using default)⟩
+
+/-- Reassemble a closed active-code state when structured case testing has
+pushed target-only label frames.  Source caller validation is unchanged;
+production stack/resource agreement grows by the matching case protocol. -/
+private theorem ConcreteStructuredValidatedCodeOutcome.withCaseSuccessor
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {selected : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals nextLocals : Wasm.Locals}
+    {targetCode selectedTarget targetSuffix : Wasm.Program}
+    {belowStack : List Wasm.Value}
+    {testCount : Nat}
+    {source sourceAfter : MachineState}
+    {target targetAfter : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.cases cases) targetStore targetLocals targetCode witness source target)
+    (nextCore : ConcreteStructuredCodeCoreRel program context sourceModule
+      sourceFunction externals labels entryRuntime entryStore entryWitness
+      functionResult callerExpectedResult facts remainingBytes sourceRuntime
+      sourceEnv selected targetStore nextLocals selectedTarget witness
+      sourceAfter targetAfter)
+    (nextValidation : ConcreteStructuredValidationState program functionResult
+      selected)
+    (sourceFramesEq : sourceAfter.frames = source.frames)
+    (targetFramesEq : targetAfter.frames =
+      structuredWasmCaseLabels belowStack targetSuffix testCount ++
+        target.frames) :
+    ConcreteStructuredValidatedCodeOutcome program context functionCode
+      sourceModule sourceFunction targetModule hosts spec externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts remainingBytes sourceRuntime sourceEnv selected targetStore nextLocals
+      selectedTarget witness sourceAfter targetAfter := by
+  let pushedSupported := ConcreteStructuredSupportedFrameStack.case
+    (belowStack := belowStack) (targetRest := targetSuffix)
+    (testCount := testCount) related.frames.supported
+  let pushedResources := ConcreteStructuredSuspendedResourceStack.case
+    (belowStack := belowStack) (targetRest := targetSuffix)
+    (testCount := testCount) related.core.core.resources.suspended
+  have pushedAgrees : pushedSupported.Agrees pushedResources :=
+    .case related.frames.supported related.core.core.resources.suspended
+      related.agrees
+  obtain ⟨nextSupported, nextAgrees⟩ := pushedAgrees.reindex
+    sourceFramesEq targetFramesEq nextCore.resources.suspended
+  have nextFrameValidation :
+      ConcreteStructuredSuspendedValidation program functionResult
+        callerExpectedResult sourceAfter.frames := by
+    rw [sourceFramesEq]
+    exact related.frames.validation
+  exact ⟨related.contextCaches, ⟨nextCore, nextValidation⟩,
+    ⟨nextSupported, nextFrameValidation⟩, nextAgrees⟩
+
+/-- A compiler-erased default-only case is a closed zero-target-step
+transition and strictly decreases the structured source rank. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_defaultOnlyCase_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {selected : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.cases cases) targetStore targetLocals targetCode witness source target)
+    (supported : DefaultOnlyCaseSupported sourceRuntime sourceEnv cases selected)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 0 target
+        target ∧
+      ConcreteStructuredValidatedCodeOutcome program context functionCode
+        sourceModule sourceFunction targetModule hosts spec externals labels
+        entryRuntime entryStore entryWitness functionResult callerExpectedResult
+        facts remainingBytes sourceRuntime sourceEnv selected targetStore
+        targetLocals targetCode witness sourceAfter target ∧
+      compilerStructuredControlRank sourceAfter <
+        compilerStructuredControlRank source := by
+  have sourceResult := related.core.core.focus.defaultOnlyCaseResult_of_step
+    supported sourceStep
+  have pointwise := related.toPointwise
+    (ConcreteStructuredCodeStepAdmission.defaultOnlyCase supported) (by omega)
+  obtain ⟨targetPath, sourceFramesEq, nextCore, rank⟩ :=
+    pointwise.advance_defaultOnlyCase_of_step supported sourceStep
+  have validatedCore : ConcreteStructuredValidatedCodeCoreRel program context
+      sourceModule sourceFunction externals labels entryRuntime entryStore
+      entryWitness functionResult callerExpectedResult facts remainingBytes
+      sourceRuntime sourceEnv selected targetStore targetLocals targetCode
+      witness sourceAfter target :=
+    ⟨nextCore, related.core.validation.selectedCase sourceResult⟩
+  exact ⟨targetPath,
+    related.withSuccessor validatedCore sourceFramesEq rfl, rank⟩
+
+section ClosedTestedCases
+
+variable
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {admittedSelected : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+
+/-- Normalized object cases preserve closed validation and push one matching
+target-only case label per executed constructor test. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_objectCases_of_step
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.cases cases) targetStore targetLocals targetCode witness source target)
+    (supported : ObjectConstructorCasesSupported context sourceRuntime
+      sourceEnv cases admittedSelected)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ testCount targetAfter selected selectedTarget,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          (5 * testCount) target targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+          selected targetStore
+          { targetLocals with values := targetLocals.values } selectedTarget
+          witness sourceAfter targetAfter ∧
+        (5 * testCount = 0 →
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source) := by
+  obtain ⟨chosen, sourceResult, sourceAfterEq⟩ :=
+    related.core.core.focus.caseResult_of_step sourceStep
+  have pointwise := related.toPointwise
+    (ConcreteStructuredCodeStepAdmission.objectCases supported) (by omega)
+  obtain ⟨testCount, targetAfter, selected, selectedTarget, targetSuffix,
+      targetPath, sourceFramesEq, targetFramesEq, nextCore, zeroRank⟩ :=
+    pointwise.advance_objectCases_of_step supported sourceStep
+  have selectedEq : selected = chosen := by
+    have controlEq := nextCore.focus.sourceControlEq
+    rw [sourceAfterEq] at controlEq
+    have chosenEq : chosen = selected := by
+      simpa using Control.code.inj controlEq
+    exact chosenEq.symm
+  subst selected
+  exact ⟨testCount, targetAfter, chosen, selectedTarget, targetPath,
+    related.withCaseSuccessor nextCore
+      (related.core.validation.selectedCase sourceResult)
+      sourceFramesEq targetFramesEq,
+    zeroRank⟩
+
+/-- Normalized scalar `UInt8` cases have the same closed branch semantics;
+their resident comparisons cost four target steps per test. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_scalarUInt8Cases_of_step
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.cases cases) targetStore targetLocals targetCode witness source target)
+    (supported : ScalarUInt8CasesSupported context sourceRuntime sourceEnv cases
+      admittedSelected)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ testCount targetAfter selected selectedTarget,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          (4 * testCount) target targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+          selected targetStore
+          { targetLocals with values := targetLocals.values } selectedTarget
+          witness sourceAfter targetAfter ∧
+        (4 * testCount = 0 →
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source) := by
+  obtain ⟨chosen, sourceResult, sourceAfterEq⟩ :=
+    related.core.core.focus.caseResult_of_step sourceStep
+  have pointwise := related.toPointwise
+    (ConcreteStructuredCodeStepAdmission.scalarUInt8Cases supported) (by omega)
+  obtain ⟨testCount, targetAfter, selected, selectedTarget, targetSuffix,
+      targetPath, sourceFramesEq, targetFramesEq, nextCore, zeroRank⟩ :=
+    pointwise.advance_scalarUInt8Cases_of_step supported sourceStep
+  have selectedEq : selected = chosen := by
+    have controlEq := nextCore.focus.sourceControlEq
+    rw [sourceAfterEq] at controlEq
+    have chosenEq : chosen = selected := by
+      simpa using Control.code.inj controlEq
+    exact chosenEq.symm
+  subst selected
+  exact ⟨testCount, targetAfter, chosen, selectedTarget, targetPath,
+    related.withCaseSuccessor nextCore
+      (related.core.validation.selectedCase sourceResult)
+      sourceFramesEq targetFramesEq,
+    zeroRank⟩
+
+end ClosedTestedCases
+
 end FirTalos.Concrete
