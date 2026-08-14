@@ -22,6 +22,8 @@ const directory = dirname(fileURLToPath(import.meta.url));
 const wasm = readFileSync(join(directory, "lean-zip-raw.wasm"));
 const descriptor = JSON.parse(readFileSync(
   join(directory, "lean-zip-raw.wasm.json"), "utf8"));
+const functionSidecar = JSON.parse(readFileSync(
+  join(directory, "lean-zip-raw.wasm.functions.json"), "utf8"));
 const build = JSON.parse(readFileSync(join(directory, "BUILD.json"), "utf8"));
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
@@ -31,7 +33,7 @@ for (const line of readFileSync(join(directory, "SHA256SUMS"), "utf8")
   assert.equal(sha256(readFileSync(join(directory, name))), expected, name);
 }
 
-assert.equal(build.schemaVersion, "fir.lean-zip.raw.build/v2");
+assert.equal(build.schemaVersion, "fir.lean-zip.raw.build/v3");
 assert.equal(build.capabilities.byteArray.layoutVersion,
   LEAN_ZIP_BYTE_ARRAY_LAYOUT_VERSION);
 assert.equal(build.capabilities.adapter.apiVersion,
@@ -41,6 +43,58 @@ assert.equal(build.capabilities.ownership.version,
 assert.deepEqual(build.entry.levels, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 assert.equal(build.wasm.functionImportCount, 0);
 assert.equal(build.wasm.memoryImportCount, 0);
+const module = new WebAssembly.Module(wasm);
+assert.deepEqual(WebAssembly.Module.imports(module), []);
+assert.deepEqual(WebAssembly.Module.exports(module), build.wasm.exports);
+assert.equal(functionSidecar.schemaVersion, "fir.wasm.function-index/v1");
+assert.deepEqual(functionSidecar.artifact, {
+  file: "lean-zip-raw.wasm",
+  byteLength: wasm.byteLength,
+  sha256: sha256(wasm),
+  functionImportCount: 0,
+  definedFunctionCount: 2171,
+  functionCount: 2171,
+});
+assert.deepEqual(functionSidecar.functions.map(({ index }) => index),
+  Array.from({ length: 2171 }, (_, index) => index));
+assert(functionSidecar.functions.every(({ imported }) => imported === false));
+const functionExports = functionSidecar.functions.flatMap((function_) =>
+  function_.exportedAs.map((name) => ({ name, index: function_.index })));
+const functionOrigins = Object.fromEntries([
+  "lean-source",
+  "optimizer-or-linked-runtime",
+  "resident-helper",
+].map((origin) => [origin, functionSidecar.functions.filter(
+  (function_) => function_.origin === origin).length]));
+assert.deepEqual(functionExports, [
+  { name: "fir_heap_alloc", index: 17 },
+  { name: "fir_heap_frontier", index: 44 },
+  { name: "Zip.Wasm.compressRaw", index: 2168 },
+  { name: "fir_heap_rewind", index: 2169 },
+  { name: "fir_heap_set_frontier", index: 2170 },
+]);
+assert.deepEqual(build.wasm.functionEvidence, {
+  file: "lean-zip-raw.wasm.functions.json",
+  schemaVersion: "fir.wasm.function-index/v1",
+  byteLength: readFileSync(
+    join(directory, "lean-zip-raw.wasm.functions.json")).byteLength,
+  sha256: sha256(readFileSync(
+    join(directory, "lean-zip-raw.wasm.functions.json"))),
+  functionImportCount: 0,
+  definedFunctionCount: 2171,
+  functionCount: 2171,
+  functionsSha256: sha256(JSON.stringify(functionSidecar.functions)),
+  origins: functionOrigins,
+  exports: functionExports,
+  runtimeUse: false,
+  releaseBytesIdentical: true,
+  protocol: "prepare/restamp/optimize across runtime linking and DCE",
+});
+assert.deepEqual(functionOrigins, {
+  "lean-source": 354,
+  "optimizer-or-linked-runtime": 6,
+  "resident-helper": 1811,
+});
 assert.deepEqual(build.wasm.frontier.imports, [
   { module: "lean.extern", name: "Float.ofNat", kind: "function" },
   { module: "lean.extern", name: "Float.ofScientific", kind: "function" },

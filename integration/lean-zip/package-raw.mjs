@@ -42,6 +42,7 @@ const externalRuntimeDirectory = join(firRoot, "integration/wasm-runtime");
 const externalMathSource = join(externalRuntimeDirectory, "math-runtime.c");
 const externalRuntimeLinker = join(externalRuntimeDirectory,
   "link-runtime.mjs");
+const functionIndexTool = join(firRoot, "tooling/wasm/function-index.mjs");
 const externalRuntimeContract = join(externalRuntimeDirectory,
   "contract.mjs");
 const packagedRuntimeContractName = "standard-math-runtime-contract.mjs";
@@ -51,6 +52,7 @@ const previewDirectory = process.env.FIR_RAW_PACKAGE_PREVIEW_DIR === undefined
 const emcc = join(firRoot,
   ".deps/lcnf-c-wasm/emsdk/upstream/emscripten/emcc");
 const inventoryPath = join(buildDirectory, "lean-zip-raw.inventory.json");
+const functionSidecarStem = `${wasmStem}.functions.json`;
 const expectedClosure = JSON.parse(readFileSync(
   join(directory, "raw-closure-contract.json"), "utf8"));
 const byteArrayAdapterPath = join(directory,
@@ -63,6 +65,7 @@ const outputNames = [
   "lean-zip-raw-browser-adapter.mjs",
   packagedRuntimeContractName,
   "lean-zip-raw.wasm",
+  "lean-zip-raw.wasm.functions.json",
   "lean-zip-raw.wasm.json",
   "smoke.mjs",
 ];
@@ -128,7 +131,9 @@ function generateCompleteRaw() {
   assert.deepEqual(frontierImports, expectedFrontierImports,
     "raw frontier math import inventory changed");
   run(process.execPath, [externalRuntimeLinker, frontierStem,
-    externalMathStem, wasmStem], { capture: false });
+    externalMathStem, wasmStem,
+    "--function-inventory", inventoryPath,
+    "--function-sidecar", functionSidecarStem], { capture: false });
   const frontierDescriptor = JSON.parse(readFileSync(
     `${frontierStem}.json`, "utf8"));
   const descriptor = {
@@ -170,6 +175,7 @@ const firstWasm = readFileSync(wasmStem);
 const firstFrontierWasm = readFileSync(frontierStem);
 const firstDescriptor = readFileSync(`${wasmStem}.json`);
 const firstExternalMath = readFileSync(externalMathStem);
+const firstFunctionSidecar = readFileSync(functionSidecarStem);
 generateCompleteRaw();
 assert.deepEqual(readFileSync(wasmStem), firstWasm,
   "repeated complete raw generation was not deterministic");
@@ -179,6 +185,8 @@ assert.deepEqual(readFileSync(`${wasmStem}.json`), firstDescriptor,
   "repeated raw descriptor generation was not deterministic");
 assert.deepEqual(readFileSync(externalMathStem), firstExternalMath,
   "repeated standard math runtime generation was not deterministic");
+assert.deepEqual(readFileSync(functionSidecarStem), firstFunctionSidecar,
+  "repeated final function-sidecar generation was not deterministic");
 run(process.execPath, [join(directory, "raw-smoke.mjs")], { capture: false });
 
 const wasm = readFileSync(wasmStem);
@@ -187,6 +195,10 @@ const baseWasm = readFileSync(baseStem);
 const descriptorBytes = readFileSync(`${wasmStem}.json`);
 const descriptor = JSON.parse(descriptorBytes);
 const inventory = JSON.parse(readFileSync(inventoryPath, "utf8"));
+const functionSidecarBytes = readFileSync(functionSidecarStem);
+const functionSidecar = JSON.parse(functionSidecarBytes);
+run(process.execPath, [functionIndexTool, "verify", "--wasm", wasmStem,
+  "--sidecar", functionSidecarStem], { capture: false });
 const inventoryHashes = Object.freeze({
   externalsSha256: sha256(JSON.stringify(inventory.externals)),
   sourceFunctionsSha256: sha256(JSON.stringify(inventory.sourceFunctions)),
@@ -197,6 +209,39 @@ const module = new WebAssembly.Module(wasm);
 const imports = WebAssembly.Module.imports(module);
 const exports = WebAssembly.Module.exports(module);
 assert.deepEqual(imports, []);
+const functionOrigins = Object.fromEntries([
+  "lean-source",
+  "optimizer-or-linked-runtime",
+  "resident-helper",
+].map((origin) => [origin, functionSidecar.functions.filter(
+  (function_) => function_.origin === origin).length]));
+const functionExports = functionSidecar.functions.flatMap((function_) =>
+  function_.exportedAs.map((name) => ({ name, index: function_.index })));
+const functionIndexSha256 = sha256(JSON.stringify(functionSidecar.functions));
+assert.equal(functionSidecar.schemaVersion, "fir.wasm.function-index/v1");
+assert.deepEqual(functionSidecar.artifact, {
+  file: "lean-zip-raw.wasm",
+  byteLength: wasm.byteLength,
+  sha256: sha256(wasm),
+  functionImportCount: 0,
+  definedFunctionCount: 2171,
+  functionCount: 2171,
+});
+assert.deepEqual(functionSidecar.functions.map(({ index }) => index),
+  Array.from({ length: 2171 }, (_, index) => index));
+assert(functionSidecar.functions.every(({ imported }) => imported === false));
+assert.deepEqual(functionOrigins, {
+  "lean-source": 354,
+  "optimizer-or-linked-runtime": 6,
+  "resident-helper": 1811,
+});
+assert.deepEqual(functionExports, [
+  { name: "fir_heap_alloc", index: 17 },
+  { name: "fir_heap_frontier", index: 44 },
+  { name: "Zip.Wasm.compressRaw", index: 2168 },
+  { name: "fir_heap_rewind", index: 2169 },
+  { name: "fir_heap_set_frontier", index: 2170 },
+]);
 assert.deepEqual(inventory.frontierImports,
   frontierImports.map(({ name }) => name));
 assert.deepEqual(exports, [
@@ -215,6 +260,16 @@ for (const [field, expected] of Object.entries(expectedClosure)) {
     residentHelpers: inventory.residentHelpers.length,
     completeFunctions: inventory.functions.length,
     ...inventoryHashes,
+    releaseFunctionImports: functionSidecar.artifact.functionImportCount,
+    releaseDefinedFunctions: functionSidecar.artifact.definedFunctionCount,
+    releaseFunctions: functionSidecar.artifact.functionCount,
+    releaseLeanSourceFunctions: functionOrigins["lean-source"],
+    releaseResidentHelpers: functionOrigins["resident-helper"],
+    releaseOptimizerOrLinkedRuntimeFunctions:
+      functionOrigins["optimizer-or-linked-runtime"],
+    releaseFunctionIndexSha256: functionIndexSha256,
+    releaseFunctionSidecarBytes: functionSidecarBytes.byteLength,
+    releaseFunctionSidecarSha256: sha256(functionSidecarBytes),
     baseWasmBytes: baseWasm.byteLength,
     frontierWasmBytes: frontierWasm.byteLength,
     completeWasmBytes: wasm.byteLength,
@@ -232,7 +287,7 @@ const smokeBytes = readFileSync(smokePath);
 const leanToolchain = readFileSync(join(firRoot, "lean-toolchain"), "utf8").trim();
 const levels = Array.from({ length: 10 }, (_, index) => index + 1);
 const build = {
-  schemaVersion: "fir.lean-zip.raw.build/v2",
+  schemaVersion: "fir.lean-zip.raw.build/v3",
   sources: {
     fir,
     leanZip: {
@@ -283,6 +338,21 @@ const build = {
     memoryImportCount: 0,
     memoryOwner: "module",
     exports,
+    functionEvidence: {
+      file: "lean-zip-raw.wasm.functions.json",
+      schemaVersion: functionSidecar.schemaVersion,
+      byteLength: functionSidecarBytes.byteLength,
+      sha256: sha256(functionSidecarBytes),
+      functionImportCount: functionSidecar.artifact.functionImportCount,
+      definedFunctionCount: functionSidecar.artifact.definedFunctionCount,
+      functionCount: functionSidecar.artifact.functionCount,
+      functionsSha256: functionIndexSha256,
+      origins: functionOrigins,
+      exports: functionExports,
+      runtimeUse: false,
+      releaseBytesIdentical: true,
+      protocol: "prepare/restamp/optimize across runtime linking and DCE",
+    },
   },
   closure: {
     capture: "compileEntriesFinalCapturedInternalized",
@@ -361,7 +431,8 @@ const build = {
 
 const buildBytes = Buffer.from(`${JSON.stringify(build, null, 2)}\n`);
 const fingerprint = sha256(Buffer.concat([
-  wasm, frontierWasm, descriptorBytes, byteArrayAdapterBytes, adapterBytes,
+  wasm, frontierWasm, descriptorBytes, functionSidecarBytes,
+  byteArrayAdapterBytes, adapterBytes,
   readFileSync(externalRuntimeContract), buildBytes, smokeBytes,
 ]));
 const packageId = `${fir.commit.slice(0, 12)}-${leanZip.commit.slice(0, 12)}-` +
@@ -375,6 +446,8 @@ mkdirSync(packages, { recursive: true });
 rmSync(staging, { recursive: true, force: true });
 mkdirSync(staging);
 copyFileSync(wasmStem, join(staging, "lean-zip-raw.wasm"));
+copyFileSync(functionSidecarStem,
+  join(staging, "lean-zip-raw.wasm.functions.json"));
 copyFileSync(`${wasmStem}.json`, join(staging, "lean-zip-raw.wasm.json"));
 copyFileSync(byteArrayAdapterPath,
   join(staging, "lean-zip-byte-array-browser-adapter.mjs"));
@@ -411,6 +484,9 @@ console.log(JSON.stringify({
     : null,
   wasmBytes: wasm.byteLength,
   wasmSha256: sha256(wasm),
+  functionSidecarBytes: functionSidecarBytes.byteLength,
+  functionSidecarSha256: sha256(functionSidecarBytes),
+  finalFunctions: functionSidecar.artifact.functionCount,
   functionImports: 0,
   memoryImports: 0,
   sourceFunctions: inventory.sourceFunctions.length,

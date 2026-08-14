@@ -61,6 +61,15 @@ produced by `node package-raw.mjs` under `_build/lean-zip-raw-packages/`.
 Their atomic canonical pointers end in `-current`. Every package is checksummed
 and can run `node smoke.mjs` without the FIR or lean-zip source trees.
 
+The raw package also carries `lean-zip-raw.wasm.functions.json`, a versioned
+index for every function in the final optimized module. The producer tracks
+function identities through runtime linking, dead-code elimination, and the
+final Binaryen optimizer, then requires the evidence-enabled release bytes to
+equal the ordinary release bytes exactly. `BUILD.json` and `SHA256SUMS` bind
+the sidecar to the Wasm hash, function/import counts, origin counts, and exact
+export indices. It is diagnostic package metadata only: neither the adapter nor
+the Wasm module loads it during execution.
+
 Do not advance the raw canonical pointer while validating a dirty or stale-base
 branch. `FIR_RAW_PACKAGE_PREVIEW_DIR=/tmp/PATH` selects an explicit preview
 destination and suppresses canonical publication; dirty previews additionally
@@ -113,6 +122,12 @@ complete functions. In addition to counts and Wasm byte lengths, the contract
 pins SHA-256 digests of the ordered external, source-function, resident-helper,
 and complete-function inventories. This prevents a same-count closure change
 from passing the package gate without review.
+
+The same contract ratchets the final optimized artifact at 2,171 functions and
+zero function imports, with 354 surviving Lean-source functions, 1,811
+resident helpers, and six optimizer-or-linked-runtime functions. The function
+index digest and sidecar digest make an index-preserving but identity-changing
+release a reviewed package change rather than an unnoticed one.
 
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
