@@ -27,9 +27,10 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   W7 concrete-product classification through `bccfc240`. The optional generic
   runtime-link function-evidence API is accepted at `52a98a6f`. W7-2's
   source-module replay repair and shared immutable publisher are accepted
-  through `912bf68a`. The Illuminate functional generation head is `4b84f35b`;
-  the package itself remains local-only until its consumer authorizes
-  publication.
+  through `912bf68a`, and the Flat source identity is repinned to the published
+  Verso 4.33 contract at `8199b6d7`. The Illuminate functional generation head
+  is `4b84f35b`; the package itself remains local-only until its consumer
+  authorizes publication.
 - Landing order:
   1. W7-2's Verso source-module replay repair and generic immutable-package
      publisher are accepted in that order through `912bf68a`.
@@ -39,22 +40,51 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
      separately reviewable; the combined tooling history remains outside the
      integration queue.
   3. W7-1 may now resume the lean-zip function-sidecar consumer. W7-2 may
-     regenerate exact-head Flat/HTML packages and run the updated external
-     Verso validators independently; the Illuminate selection export is also
-     complete.
+     hand the validated exact-head Flat package to the Verso owner; the
+     Illuminate selection export is also complete.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
   invalidating long deterministic package and external-engine gates.
-- Not ready: the external Verso Flat/HTML source validator update and exact-head
-  package regeneration remain client-owned follow-ups; no compatibility alias
-  was added in FIR. The Array panic-observation fixture audit is accepted and
-  parked behind the existing shared-observation bug card; it has no feature
-  landing. Later tooling surfaces remain on their combined development branch
-  until each has an independently authorized head.
+- Not ready: Verso consumption of the local-only exact-head Flat package and
+  its mailbox closure remain client-owned; no compatibility alias was added in
+  FIR. The Array panic-observation fixture audit is accepted and parked behind
+  the existing shared-observation bug card; it has no feature landing. Later
+  tooling surfaces remain on their combined development branch until each has
+  an independently authorized head.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
+
+## Latest completed integration lease
+
+- Milestone: `W7-VERSO-FLAT-4.33-SOURCE-PIN`.
+- Integration owner: `wasm-gen`, consuming the clean one-commit W7-2 slice
+  `8199b6d7` on accepted `main` at `f204a8b8`.
+- Source identity: Flat now pins published Verso revision
+  `eb8d2b8fcf145810996ad388d701e9337cfe1ceb`, reachable from
+  `ejgallego/upgrade/fir-html-lean-4.33`, and exact `VersoSlides/Pretty.lean`
+  SHA-256 `bf4271d690b523d5709d19331568c27f2dcb42b0d9ee253dbc30205a5a336c8e`.
+  The input layout remains `lean-4.33-Std.Format.compact/v1`.
+- Artifact: immutable package
+  `integration/verso-flat/_build/verso-flat-packages/8199b6d7415b-eb8d2b8fcf14-1ceeef2286e5150490bc`
+  contains the unchanged 121,192-byte Wasm module at SHA-256
+  `06a7af99e5cd46ab394c7cf1686d470fbfe100416a1b8b315024067160d58cb2`.
+  It retains 51 source functions, 345 resident helpers, zero imports, and the
+  intended five function exports plus module-owned memory.
+- Contracts: no compiler, semantic ABI, runtime, ownership, resident-helper,
+  or W6 proof contract changed. Only the exact externally published source pin
+  and digest changed; no compatibility alias or validator weakening was added.
+- Acceptance: the complete Flat gate publishes twice with deterministic
+  identity, verifies checksums and smoke, passes the corrected Verso source
+  validator, nine native/Wasm cases, 1 MiB UTF-8, the 2,047-node balanced and
+  256-break grouped stack shapes, 32 repeated calls, timing, and malformed
+  input checks. `git diff --check`, complete `make check` (711 unique cases,
+  2,115/2,115 equal comparisons, zero findings, 186 active bug cards, and
+  25/25 mailbox tests), all 3,148 Talos jobs, and the complete W7 artifact gate
+  also pass on exact head.
+- Result: `main` fast-forwards through `8199b6d7`; the immutable package remains
+  local-only for Verso acceptance.
 
 ## Latest completed integration lease
 
