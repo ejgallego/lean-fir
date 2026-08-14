@@ -15,6 +15,43 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-VALIDATED-STRUCTURED-CONTROL`.
+- Integration owner: `root`, consuming the clean `wasm/talos-runtime`
+  handoff based directly on `main` at `85481c67`. The functional proof head is
+  `d11bab61`; the accepted mailbox head is `20692b18`.
+- Closed validation relation: active generated code retains the executable
+  source validator's residual join/local/case/sharing state, while every
+  suspended caller retains validation of its exact continuation. The relation
+  strengthens the production compiler/resource relation without storing a
+  future source step, target path, termination witness, or translation
+  certificate.
+- Local control coverage: direct lets, persistent and ordinary ownership,
+  deletion, constructor tags, object/erased/USize/scalar field mutation, and
+  default/object/UInt8 case selection preserve the closed relation. Case
+  selection follows the exact constructor or default arm chosen by the source
+  interpreter and tracks the corresponding guarded-join fact update.
+- Recursive calls and results: direct named calls and saturated closure calls
+  retain validated caller continuations across staging, reconstruct root
+  validation from the selected generated callee declaration on entry, and
+  preserve validation beneath the exact call/matcher-label stack. Validated
+  returns now reach a closed yielded state carrying the suspended validation
+  stack required for resumption.
+- Contracts: none. This is a W6 proof-only strengthening over the accepted
+  validator, generated-row, concrete runtime/resource, symbolic Wasm, and W7
+  closure allocator surfaces.
+- Acceptance: Lean Beam update/sync/save reports zero errors; direct batch
+  compilation of `FirTalos.ConcreteStructuredValidation` and its `FirTalos`
+  importer passes all 3,148 jobs. `git diff --check`, complete `make check`
+  (125 tests, 710 unique cases, 2,112/2,112 equal comparisons), and all 3,148
+  Talos jobs pass. No new bug card was required.
+- Result: `main` fast-forwards through the clean W6 mailbox. W6 next proves
+  validated pop/resumption for yielded direct and saturated callers, then
+  covers lazy/external administrative branches and closes validator-derived
+  current-step admission before assembling the universal one-step and
+  finite-trace theorems.
+
+## Latest completed integration lease
+
 - Milestone: `W7-CONSOLIDATED-RESIDENT-CLOSURE-ALLOCATORS`.
 - Integration owner: `root`, consuming the clean W7-2 stack on
   `wasm/closure-allocation-consolidation`. The stack is based directly on
