@@ -102,6 +102,19 @@ def ConcreteStructuredBindCallerAtHead (frames : List Frame) : Prop :=
       (tail : List Frame),
     frames = .bind result continuation callerEnv callerJoins :: tail
 
+/-- A yielded lazy result must publish its cache slot before resuming the
+caller bind.  This source-only classifier selects exactly the stack shape
+whose cache marker is consumed by the seven-step publication protocol. -/
+def ConcreteStructuredLazyCallerAtHead (frames : List Frame) : Prop :=
+  ∃ (declaration : Lean.Name)
+      (result : Lean.FVarId)
+      (continuation : Lean.Compiler.LCNF.Code .impure)
+      (callerEnv : Env)
+      (callerJoins : JoinEnv)
+      (tail : List Frame),
+    frames = .cache declaration ::
+      .bind result continuation callerEnv callerJoins :: tail
+
 /-- The established supported caller stack strengthened by source-validation
 provenance for exactly the same source frames.  Target-frame shape and the
 direct/saturated/lazy distinction remain owned by the production-supported
@@ -871,6 +884,65 @@ structure ConcreteStructuredValidatedSaturatedCallReadyOutcome
   validationAgrees :
     ConcreteStructuredValidationAgrees agrees frames.validation
 
+/-- A closed post-call/pre-bind state.  The dynamic core retains the value
+that will be installed by `local.set`; the proof companion retains validation
+of that continuation and of the unchanged caller tail.  Lazy cache
+publication enters this state after removing only its cache marker. -/
+structure ConcreteStructuredValidatedExternalBindOutcome
+    (program : Fir.LeanIR.ImpureProgram)
+    (context : Fir.Wasm.Context)
+    (functionCode : Lean.Compiler.LCNF.Code .impure)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts)
+    (externals : ExternalImpl)
+    (labels : List Lean.FVarId)
+    (entryRuntime : RuntimeState)
+    (entryStore : Wasm.Store Host)
+    (entryWitness : RefinementWitness)
+    (functionResult : AbiKind)
+    (callerExpectedResult : Option AbiKind)
+    (facts : ReuseCapacityFacts)
+    (remainingBytes : Nat)
+    (sourceRuntime : RuntimeState)
+    (callerEnv : Env)
+    (sourceValue : Value)
+    (result : Lean.FVarId)
+    (continuation : Lean.Compiler.LCNF.Code .impure)
+    (callerJoins : JoinEnv)
+    (sourceFrames : List Frame)
+    (targetStore : Wasm.Store Host)
+    (callerLocals : Wasm.Locals)
+    (callerRemainder : List Wasm.Value)
+    (targetRest : Wasm.Program)
+    (targetFrames : List StructuredWasmFrame)
+    (witness : RefinementWitness)
+    (kind : AbiKind)
+    (physical : Wasm.Value)
+    (resultIndex : Nat)
+    (source : MachineState)
+    (target : StructuredWasmState Host) : Prop where
+  activeResult : spec.sourceResultKind = functionResult
+  contextCaches :
+    context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program
+  core : ConcreteStructuredExternalBindCoreRel program context sourceModule
+    sourceFunction externals labels entryRuntime entryStore entryWitness
+    functionResult callerExpectedResult facts remainingBytes sourceRuntime
+    callerEnv sourceValue result continuation callerJoins sourceFrames
+    targetStore callerLocals callerRemainder targetRest targetFrames witness
+    kind physical resultIndex source target
+  continuationValidation :
+    ConcreteStructuredValidationState program functionResult continuation
+  frames : ConcreteStructuredValidatedFrameStack program sourceModule
+    targetModule hosts functionResult callerExpectedResult sourceFrames
+    targetFrames
+  agrees : frames.supported.Agrees core.resources.suspended
+  validationAgrees :
+    ConcreteStructuredValidationAgrees agrees frames.validation
+
 /-- A closed yielded result.  No active code remains to validate; all static
 validation needed for a nonterminal successor lives in the suspended caller
 stack that will be restored by the pop transition. -/
@@ -1043,6 +1115,44 @@ inductive ConcreteStructuredValidatedCodeGlobalOutcome
         callerExpectedResult facts remainingBytes continuation callerJoins
         sourceFrames targetStore callerLocals targetValue targetRest targetFrames
         witness resultIndex source target) :
+      ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
+        targetModule hosts externals source target
+  | externalBind
+      {context : Fir.Wasm.Context}
+      {functionCode : Lean.Compiler.LCNF.Code .impure}
+      {sourceFunction : Fir.Wasm.Function}
+      {spec : ConcreteSupportedFunction program context functionCode
+        sourceModule sourceFunction targetModule hosts}
+      {labels : List Lean.FVarId}
+      {entryRuntime sourceRuntime : RuntimeState}
+      {entryStore targetStore : Wasm.Store Host}
+      {entryWitness witness : RefinementWitness}
+      {functionResult : AbiKind}
+      {callerExpectedResult : Option AbiKind}
+      {facts : ReuseCapacityFacts}
+      {remainingBytes : Nat}
+      {callerEnv : Env}
+      {sourceValue : Value}
+      {result : Lean.FVarId}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      {callerJoins : JoinEnv}
+      {sourceFrames : List Frame}
+      {callerLocals : Wasm.Locals}
+      {callerRemainder : List Wasm.Value}
+      {targetRest : Wasm.Program}
+      {targetFrames : List StructuredWasmFrame}
+      {kind : AbiKind}
+      {physical : Wasm.Value}
+      {resultIndex : Nat}
+      {source : MachineState}
+      {target : StructuredWasmState Host}
+      (related : ConcreteStructuredValidatedExternalBindOutcome program context
+        functionCode sourceModule sourceFunction targetModule hosts spec
+        externals labels entryRuntime entryStore entryWitness functionResult
+        callerExpectedResult facts remainingBytes sourceRuntime callerEnv
+        sourceValue result continuation callerJoins sourceFrames targetStore
+        callerLocals callerRemainder targetRest targetFrames witness kind
+        physical resultIndex source target) :
       ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
         targetModule hosts externals source target
   | returned
@@ -1218,6 +1328,55 @@ theorem
   .saturatedReady row related.sharedCapacity related.core
     related.contextCaches related.frames.supported related.agrees
 
+/-- Forget validation from a post-call/pre-bind state without changing the
+dynamic external-bind protocol. -/
+theorem ConcreteStructuredValidatedExternalBindOutcome.toSupportedOutcome
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {callerEnv : Env}
+    {sourceValue : Value}
+    {result : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {callerLocals : Wasm.Locals}
+    {callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {kind : AbiKind}
+    {physical : Wasm.Value}
+    {resultIndex : Nat}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedExternalBindOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec
+      externals labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime callerEnv
+      sourceValue result continuation callerJoins sourceFrames targetStore
+      callerLocals callerRemainder targetRest targetFrames witness kind physical
+      resultIndex source target) :
+    ConcreteStructuredSupportedOutcome program context functionCode sourceModule
+      sourceFunction targetModule hosts spec externals labels entryRuntime
+      entryStore entryWitness functionResult callerExpectedResult source target :=
+  .externalBind related.core related.contextCaches related.frames.supported
+    related.agrees
+
 /-- Forget validation from a yielded state while retaining its exact result,
 resource stack, and production caller protocol. -/
 theorem ConcreteStructuredValidatedReturnedOutcome.toSupportedOutcome
@@ -1324,6 +1483,8 @@ theorem ConcreteStructuredValidatedCodeGlobalOutcome.toSupportedGlobal
       exact ready.toSupportedOutcome.toGlobal ready.activeResult
   | saturatedReady ready =>
       exact ready.toSupportedOutcome.toGlobal ready.activeResult
+  | externalBind bind =>
+      exact bind.toSupportedOutcome.toGlobal bind.activeResult
   | returned returned =>
       exact returned.toSupportedOutcome.toGlobal returned.activeResult
 
@@ -2802,6 +2963,460 @@ theorem ConcreteStructuredValidatedReturnedOutcome.advance_bindCaller_of_step
         ⟨headResult, headContinuation, headEnv, headJoins, tail, bindEq⟩
       rw [sourceFramesEq] at bindEq
       cases bindEq
+
+/-- Publish a yielded lazy value into its concrete cache and resume at the
+validated external-bind boundary.  Target-only case labels may precede the
+lazy call frame; publication itself is the established seven-step Wasm path.
+The cache marker disappears, while validation of the caller continuation and
+its hereditary tail is retained exactly. -/
+theorem ConcreteStructuredValidatedReturnedOutcome.advance_lazyCache_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult actualKind : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {sourceValue : Value}
+    {targetLocals : Wasm.Locals}
+    {physical : Wasm.Value}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedReturnedOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      sourceValue targetStore targetLocals witness actualKind physical source
+      target)
+    (lazyCaller : ConcreteStructuredLazyCallerAtHead source.frames)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetCount targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetCount target targetAfter ∧
+        0 < targetCount ∧
+        ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
+          targetModule hosts externals sourceAfter targetAfter := by
+  rcases related with ⟨activeResult, _contextCaches, yielded, compatible,
+    resources, frames, agrees, validationAgrees⟩
+  generalize sourceFramesEq : source.frames = sourceFrames at resources frames agrees validationAgrees
+  generalize targetFramesEq : target.frames = targetFrames at resources frames agrees validationAgrees
+  rcases resources with ⟨currentScope, resourceStack⟩
+  rcases frames with ⟨supported, validation⟩
+  change supported.Agrees resourceStack at agrees
+  change ConcreteStructuredValidationAgrees agrees validation at validationAgrees
+  rcases validationAgrees with ⟨spine, aligned⟩
+  induction aligned generalizing target with
+  | @case spine _ _ _ _ _ sourceFrames targetFrames belowStack targetRest
+      testCount supportedTail resourceTail tailAgrees validation tailAligned
+      ih =>
+      subst sourceFrames
+      let targetPopped : StructuredWasmState Host := {
+        store := targetStore
+        control := .returning (physical :: targetLocals.values)
+        frames := targetFrames }
+      have unwindTarget :
+          FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+            testCount target targetPopped := by
+        rcases target with ⟨actualStore, actualControl, actualFrames⟩
+        have storeEq := yielded.targetStoreEq
+        change actualStore = targetStore at storeEq
+        subst actualStore
+        have controlEq := yielded.targetControlEq
+        change actualControl = .returning (physical :: targetLocals.values)
+          at controlEq
+        subst actualControl
+        change actualFrames = _ at targetFramesEq
+        subst actualFrames
+        simpa [targetPopped] using
+          (structuredWasmReturnCaseLabelsFinitePath
+            (module := targetModule.wasmModule) (hostEnv := hosts.env)
+            (store := targetStore)
+            (values := physical :: targetLocals.values)
+            (belowStack := belowStack) (rest := targetRest)
+            (frames := targetFrames) testCount)
+      have yieldedPopped :
+          ConcreteStructuredYieldFocus context sourceFunction sourceRuntime
+            sourceEnv sourceValue targetStore targetLocals witness actualKind
+            physical source targetPopped := {
+        sourceProgramEq := yielded.sourceProgramEq
+        sourceControlEq := yielded.sourceControlEq
+        sourceEnvEq := yielded.sourceEnvEq
+        sourceRuntimeEq := yielded.sourceRuntimeEq
+        targetStoreEq := by simp [targetPopped]
+        targetControlEq := by simp [targetPopped]
+        stateRelated := yielded.stateRelated
+        frameAligned := yielded.frameAligned
+        valueRelated := yielded.valueRelated }
+      obtain ⟨tailCount, targetAfter, tailPath, tailPositive, nextGlobal⟩ :=
+        ih activeResult yieldedPopped compatible (by rfl)
+          (by simp [targetPopped]) currentScope
+      exact ⟨testCount + tailCount, targetAfter,
+        unwindTarget.trans tailPath, by omega, nextGlobal⟩
+  | nil =>
+      rcases lazyCaller with
+        ⟨declaration, result, continuation, callerEnv, callerJoins, tail,
+          lazyEq⟩
+      rw [sourceFramesEq] at lazyEq
+      cases lazyEq
+  | @direct spine activeEntryRuntime callerEntryRuntime activeEntryStore
+      callerEntryStore activeEntryWitness callerEntryWitness callerContext
+      callerCode callerFunction callerLabels callerFacts callerBytes callerEnv
+      callerLocals result continuation callerJoins sourceFrames
+      callerRemainder targetRest targetFrames calleeResult callerResult kind
+      resultIndex tailResult supportedTail resourceTail tailAgrees
+      tailValidation callerSpec callerResultAt contextCaches callerScope
+      programEq continuationAdapted resultFound kindAt calleeCompatible
+      continuationValidation tailAligned _ih =>
+      rcases lazyCaller with
+        ⟨declaration, headResult, headContinuation, headEnv, headJoins, tail,
+          lazyEq⟩
+      rw [sourceFramesEq] at lazyEq
+      cases lazyEq
+  | @saturated spine activeEntryRuntime callerEntryRuntime activeEntryStore
+      callerEntryStore activeEntryWitness callerEntryWitness callerContext
+      callerCode callerFunction callerLabels callerFacts callerBytes callerEnv
+      callerLocals result continuation callerJoins sourceFrames physicalArgs
+      callerRemainder targetRest targetFrames calleeResult callerResult kind
+      resultIndex matcherCount tailResult supportedTail resourceTail tailAgrees
+      tailValidation callerSpec callerResultAt contextCaches callerScope
+      programEq continuationAdapted resultFound kindAt calleeCompatible
+      continuationValidation tailAligned _ih =>
+      rcases lazyCaller with
+        ⟨declaration, headResult, headContinuation, headEnv, headJoins, tail,
+          lazyEq⟩
+      rw [sourceFramesEq] at lazyEq
+      cases lazyEq
+  | @lazy spine activeEntryRuntime callerEntryRuntime activeEntryStore
+      callerEntryStore activeEntryWitness callerEntryWitness callerContext
+      callerCode callerFunction callerLabels callerFacts callerBytes callerEnv
+      callerLocals declaration result continuation callerJoins sourceFrames
+      targetRest targetFrames calleeResult callerResult kind cacheIndex
+      cacheSetId resultIndex tailResult supportedTail resourceTail tailAgrees
+      tailValidation callerSpec callerResultAt contextCaches callerScope
+      programEq continuationAdapted resultFound kindAt initializerFound
+      signature cacheSetCall notObject notTObject calleeCompatible
+      continuationValidation tailAligned _ih =>
+      have valueRelated :
+          PhysicalValueRel witness kind physical sourceValue :=
+        yielded.valueRelated.ofRefines compatible
+      obtain ⟨cacheSlot, cacheFound, cacheKindEq⟩ :=
+        currentScope.1.1.2.1.hostSlot initializerFound signature
+      have cacheDescriptorsEq :
+          targetStore.host.closureDescriptors = witness.closureDescriptors :=
+        currentScope.1.1.1.2
+      obtain ⟨runtimeAfter, operation, runtimeAfterRelated,
+          _valueStillRelated, _mappedCapacity⟩ :=
+        cacheSetStep_of_refines currentScope.stateRelated.1 valueRelated
+          cacheFound cacheKindEq cacheDescriptorsEq
+      let afterCache := replaceRuntime targetStore runtimeAfter
+      have operationEq :
+          cacheSetStep declaration kind targetStore [physical] =
+            .Return [physical] afterCache := by
+        simpa [afterCache] using operation
+      obtain ⟨oldFlag, oldValue, flagBefore, valueBefore⟩ :=
+        currentScope.1.1.2.1.slotLanesPresent initializerFound signature
+      have valueAfterCache :
+          afterCache.globals.globals[2 * cacheIndex + 1]? = some oldValue := by
+        rw [cacheSetStep_preserves_wasmGlobals operationEq]
+        exact valueBefore
+      have flagAfterCache :
+          afterCache.globals.globals[2 * cacheIndex]? = some oldFlag := by
+        rw [cacheSetStep_preserves_wasmGlobals operationEq]
+        exact flagBefore
+      let valueStore :=
+        writeWasmGlobal afterCache (2 * cacheIndex + 1) physical
+      have valueStoreEq :
+          valueStore =
+            writeWasmGlobal afterCache (2 * cacheIndex + 1) physical := rfl
+      have flagAfterValue :
+          valueStore.globals.globals[2 * cacheIndex]? = some oldFlag := by
+        rw [valueStoreEq, writeWasmGlobal_get_ne (by omega)]
+        exact flagAfterCache
+      let nextStore :=
+        writeWasmGlobal valueStore (2 * cacheIndex) (.i32 1)
+      let nextRuntime := sourceRuntime.setGlobal declaration sourceValue
+      let sourcePublished : MachineState := {
+        source with
+          runtime := nextRuntime
+          frames :=
+            .bind result continuation callerEnv callerJoins :: sourceFrames }
+      have computedStep :
+          executeStep externals source = .next sourcePublished := by
+        rcases source with
+          ⟨sourceProgram, sourceControl, stateEnv, stateJoins, stateFrames,
+            stateRuntime⟩
+        have controlEq := yielded.sourceControlEq
+        change sourceControl = .yielded sourceValue at controlEq
+        subst sourceControl
+        have runtimeEq := yielded.sourceRuntimeEq
+        change stateRuntime = sourceRuntime at runtimeEq
+        subst stateRuntime
+        change stateFrames = _ at sourceFramesEq
+        subst stateFrames
+        simp [sourcePublished, nextRuntime, executeStep, coreStep]
+      have sourceAfterEq : sourceAfter = sourcePublished := by
+        rw [sourceStep] at computedStep
+        exact ExecResult.next.inj computedStep
+      obtain ⟨imp, importFound, importInBounds, contractFound,
+          parameterCount, resultCount⟩ :=
+        callerSpec.cacheSetCall cacheSetCall
+      let targetAfter : StructuredWasmState Host := {
+        store := nextStore
+        control := .running
+          { callerLocals with
+            values := physical :: callerLocals.values }
+          (.localSet resultIndex :: targetRest)
+        frames := targetFrames }
+      have targetPath :
+          FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 7
+            target targetAfter := by
+        rcases target with ⟨stateStore, stateControl, stateFrames⟩
+        have storeEq := yielded.targetStoreEq
+        change stateStore = targetStore at storeEq
+        subst stateStore
+        have controlEq := yielded.targetControlEq
+        change stateControl = .returning (physical :: targetLocals.values)
+          at controlEq
+        subst stateControl
+        change stateFrames = _ at targetFramesEq
+        subst stateFrames
+        simpa [targetAfter, nextStore] using
+          structuredWasmLazyMissPublicationFinitePath
+            (module := targetModule.wasmModule) (hostEnv := hosts.env)
+            (spec := hosts.spec) (cacheSetId := cacheSetId) (imp := imp)
+            (declaration := declaration) (kind := kind)
+            (afterCall := targetStore) (afterCache := afterCache)
+            (valueStore := valueStore) (callerLocals := callerLocals)
+            (calleeLocals := targetLocals) (physical := physical)
+            (oldValue := oldValue) (oldFlag := oldFlag)
+            (flagIndex := 2 * cacheIndex)
+            (valueIndex := 2 * cacheIndex + 1)
+            (resultIndex := resultIndex) (rest := targetRest)
+            (frames := targetFrames) callerLocals.values importFound
+            callerSpec.hostsSatisfy importInBounds contractFound
+            parameterCount resultCount operationEq valueAfterCache valueStoreEq
+            flagAfterValue (by omega)
+      have callerStateAtCurrent :
+          StateRelated callerFunction sourceRuntime callerEnv targetStore
+            callerLocals witness :=
+        currentScope.transports.savedStateRelated callerScope.stateRelated
+          currentScope.stateRelated
+      have nextStateRelated :
+          StateRelated callerFunction nextRuntime callerEnv nextStore
+            callerLocals witness := by
+        refine ⟨?_, ?_, callerStateAtCurrent.2.2⟩
+        · simpa [nextRuntime, nextStore, valueStore, afterCache,
+            writeWasmGlobal] using runtimeAfterRelated
+        · simp [nextStore, valueStore, afterCache, writeWasmGlobal,
+            replaceRuntime, clearFailure]
+      have nonHeap : IsNonHeapReference sourceValue :=
+        valueRelated.isNonHeapReference_of_kind notObject notTObject
+      have publicationOrdinary :
+          OrdinaryPersistenceTransport sourceRuntime nextRuntime := by
+        apply (OrdinaryPersistenceTransport.refl sourceRuntime).congrAfter
+        rw [show nextRuntime = sourceRuntime.setGlobal declaration sourceValue
+          by rfl]
+        exact
+          (RuntimeState.setGlobal_heap_eq_of_nonHeapReference sourceRuntime
+            declaration sourceValue nonHeap).symm
+      have publicationCapacity :
+          HeaderCapacityTransport targetStore.host.runtime.heap
+            nextStore.host.runtime.heap witness := by
+        simpa [nextStore, writeWasmGlobal, valueStoreEq] using
+          cacheSetStep_preserves_mappedHeaderCapacity_of_related
+            currentScope.stateRelated.1 valueRelated cacheFound cacheKindEq
+            cacheDescriptorsEq operationEq
+      have nextReuseRelated :
+          ReuseCapacityStateRelated callerFacts callerFunction nextRuntime
+            callerEnv nextStore callerLocals witness := by
+        have callerAtCurrent :
+            ReuseCapacityStateRelated callerFacts callerFunction sourceRuntime
+              callerEnv targetStore callerLocals witness :=
+          callerScope.1.1.1.1.1.1.transport callerStateAtCurrent
+            currentScope.transports.witness currentScope.transports.capacity
+        exact callerAtCurrent.transport nextStateRelated
+          (WitnessTransport.refl witness) publicationCapacity
+      have nextOrdinary :
+          ReuseTokenOrdinaryRel callerFacts nextRuntime callerEnv :=
+        (callerScope.1.1.1.1.1.2.1.transport
+          currentScope.transports.ordinary).transport publicationOrdinary
+      have nextAligned :
+          ConcreteLocalFrameAligned callerFunction nextRuntime callerEnv
+            nextStore callerLocals witness := by
+        simpa [ConcreteLocalFrameAligned] using callerScope.frameAligned
+      have nextBudget :
+          nextStore.host.runtime.heap.AddressSpaceBudget remainingBytes := by
+        simpa [nextStore] using
+          cachePublication_preserves_addressSpaceBudget operationEq valueStoreEq
+            currentScope.1.1.1.1.1.2.2.2
+      have publicationExternals :
+          nextStore.host.externals = targetStore.host.externals := by
+        simp [nextStore, valueStore, afterCache, writeWasmGlobal,
+          replaceRuntime, clearFailure]
+      have publicationDescriptors :
+          nextStore.host.closureDescriptors =
+            targetStore.host.closureDescriptors := by
+        simp [nextStore, valueStore, afterCache, writeWasmGlobal,
+          replaceRuntime, clearFailure]
+      have publicationDispatch :
+          nextStore.host.closureDispatch = targetStore.host.closureDispatch := by
+        simp [nextStore, valueStore, afterCache, writeWasmGlobal,
+          replaceRuntime, clearFailure]
+      have nextInteger :
+          nextStore.host.externals.IntegerResultRefines externals := by
+        rw [publicationExternals, currentScope.transports.externals]
+        exact callerScope.1.1.1.1.2.1
+      have nextNatural :
+          FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+            nextStore.host.externals externals := by
+        rw [publicationExternals, currentScope.transports.externals]
+        exact callerScope.1.1.1.1.2.2.1
+      have nextScalar :
+          FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+            nextStore.host.externals externals := by
+        rw [publicationExternals, currentScope.transports.externals]
+        exact callerScope.1.1.1.1.2.2.2
+      have nextDescriptors :
+          nextStore.host.closureDescriptors = witness.closureDescriptors :=
+        publicationDescriptors.trans cacheDescriptorsEq
+      have nextCache :
+          LazyCacheGlobalsRel witness sourceModule nextRuntime nextStore := by
+        have afterHost := currentScope.1.1.2.1.afterCacheSet operationEq
+        simpa [nextRuntime, nextStore] using
+          afterHost.publish initializerFound signature rfl valueRelated
+            valueStoreEq
+      have nextClosureTables : ClosureTablesAgree nextStore witness := {
+        dispatch :=
+          currentScope.1.1.2.2.dispatch.trans publicationDispatch.symm
+        descriptors :=
+          publicationDescriptors.trans currentScope.1.1.2.2.descriptors }
+      have nextBase :
+          ConcreteReuseCapacityFrame callerFunction callerFacts remainingBytes
+            nextRuntime callerEnv nextStore callerLocals witness :=
+        ⟨nextReuseRelated, nextOrdinary, nextAligned, nextBudget⟩
+      have nextPure :
+          ConcreteReuseCapacityPureExternalFrame callerFunction externals
+            callerFacts remainingBytes nextRuntime callerEnv nextStore
+            callerLocals witness :=
+        ⟨nextBase, nextInteger, nextNatural, nextScalar⟩
+      have nextOwnership :
+          ConcreteReuseCapacityPureExternalOwnershipFrame callerFunction
+            externals callerFacts remainingBytes nextRuntime callerEnv nextStore
+            callerLocals witness :=
+        ⟨nextPure, nextDescriptors⟩
+      have nextFrame :
+          ConcreteReuseCapacityCacheFrame sourceModule callerFunction externals
+            callerFacts remainingBytes nextRuntime callerEnv nextStore
+            callerLocals witness :=
+        ⟨nextOwnership, nextCache, nextClosureTables⟩
+      have publicationTables :
+          ClosureTablesTransport targetStore nextStore witness witness := {
+        hostDispatchPreserved := publicationDispatch
+        witnessDispatchPreserved := rfl
+        hostDescriptorsPreserved := publicationDescriptors
+        witnessDescriptorsPreserved := rfl }
+      have activeToNext :
+          ReuseCapacityCodeEntryTransports activeEntryRuntime nextRuntime
+            activeEntryStore nextStore activeEntryWitness witness :=
+        currentScope.transports.step (WitnessTransport.refl witness)
+          (ClosureAllocationsPersistent.refl witness) publicationCapacity
+          publicationOrdinary publicationExternals publicationTables
+      have nextEntry :
+          ReuseCapacityCodeEntryTransports callerEntryRuntime nextRuntime
+            callerEntryStore nextStore callerEntryWitness witness :=
+        callerScope.transports.step activeToNext.witness
+          activeToNext.closureAllocationsPersistent activeToNext.capacity
+          activeToNext.ordinary activeToNext.externals
+          activeToNext.toClosureTablesTransport
+      have nextAbi :
+          ClosureAllocationsAbiAligned callerContext.program witness := by
+        rw [← programEq, ← spec.contextProgram]
+        exact currentScope.2
+      have nextScope :
+          ConcreteStructuredResourceScope callerContext sourceModule
+            callerFunction externals callerEntryRuntime callerEntryStore
+            callerEntryWitness callerFacts remainingBytes nextRuntime callerEnv
+            nextStore callerLocals witness :=
+        ⟨⟨nextFrame, nextEntry⟩, nextAbi⟩
+      have bindFocus :
+          ConcreteStructuredExternalBindFocus callerContext sourceModule
+            callerFunction callerLabels nextRuntime callerEnv sourceValue result
+            continuation callerJoins sourceFrames nextStore callerLocals
+            callerLocals.values targetRest targetFrames witness kind physical
+            resultIndex sourceAfter targetAfter := {
+        sourceProgramEq := by
+          rw [sourceAfterEq]
+          exact yielded.sourceProgramEq.trans
+            (spec.contextProgram.trans programEq)
+        sourceControlEq := by
+          rw [sourceAfterEq]
+          simpa [sourcePublished] using yielded.sourceControlEq
+        sourceRuntimeEq := by simp [sourceAfterEq, sourcePublished]
+        sourceFramesEq := by simp [sourceAfterEq, sourcePublished]
+        targetStoreEq := by simp [targetAfter]
+        targetControlEq := by simp [targetAfter]
+        targetFramesEq := by simp [targetAfter]
+        continuationAdapted
+        stateRelated := nextStateRelated
+        frameAligned := nextAligned
+        resultFound
+        kindAt
+        valueRelated }
+      have nextResources :
+          ConcreteStructuredResourceStack program callerContext sourceModule
+            callerFunction externals callerEntryRuntime nextRuntime
+            callerEntryStore nextStore callerEntryWitness witness callerFacts
+            remainingBytes callerEnv callerLocals callerResult tailResult
+            sourceFrames targetFrames :=
+        ⟨nextScope, resourceTail⟩
+      have nextAgrees : supportedTail.Agrees nextResources.suspended := by
+        simpa using tailAgrees
+      let bindCore :
+          ConcreteStructuredExternalBindCoreRel program callerContext
+            sourceModule callerFunction externals callerLabels callerEntryRuntime
+            callerEntryStore callerEntryWitness callerResult tailResult
+            callerFacts remainingBytes nextRuntime callerEnv sourceValue result
+            continuation callerJoins sourceFrames nextStore callerLocals
+            callerLocals.values targetRest targetFrames witness kind physical
+            resultIndex sourceAfter targetAfter :=
+        ⟨bindFocus, nextResources⟩
+      let validatedFrames :
+          ConcreteStructuredValidatedFrameStack program sourceModule
+            targetModule hosts callerResult tailResult sourceFrames
+            targetFrames :=
+        ⟨supportedTail, tailValidation⟩
+      have nextValidationAgrees :
+          ConcreteStructuredValidationAgrees nextAgrees
+            validatedFrames.validation := by
+        simpa [validatedFrames] using
+          (show ConcreteStructuredValidationAgrees tailAgrees tailValidation
+            from ⟨spine, tailAligned⟩)
+      let bindValidated :
+          ConcreteStructuredValidatedExternalBindOutcome program callerContext
+            callerCode sourceModule callerFunction targetModule hosts callerSpec
+            externals callerLabels callerEntryRuntime callerEntryStore
+            callerEntryWitness callerResult tailResult callerFacts
+            remainingBytes nextRuntime callerEnv sourceValue result continuation
+            callerJoins sourceFrames nextStore callerLocals callerLocals.values
+            targetRest targetFrames witness kind physical resultIndex sourceAfter
+            targetAfter :=
+        ⟨callerResultAt, contextCaches, bindCore, continuationValidation,
+          validatedFrames, nextAgrees, nextValidationAgrees⟩
+      exact ⟨7, targetAfter, targetPath, by omega,
+        ConcreteStructuredValidatedCodeGlobalOutcome.externalBind
+          bindValidated⟩
 
 /-- Persistent ownership increments are erased by lowering and preserve the
 complete residual validator state. -/
