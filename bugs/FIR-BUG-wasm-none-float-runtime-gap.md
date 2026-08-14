@@ -1,8 +1,8 @@
 ---
 id: FIR-BUG-wasm-none-float-runtime-gap
-status: confirmed
+status: fixed
 classification: fir-semantics
-lean-toolchain: leanprover/lean4:v4.32.0
+lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
 phase: wasm
 pass: none
@@ -14,15 +14,21 @@ regression: Fir/Wasm/Examples.lean
 
 # Summary
 
-Final impure LCNF includes `Float32` and `Float`, but FIR's abstract impure runtime value model has no corresponding scalar values.
+Final impure LCNF includes `Float32` and `Float`; FIR formerly had no
+corresponding abstract scalar values and the W6 concrete relation therefore
+could not state float execution correctness.
 
 ## Minimal reproduction
 
-Lean 4.32's `LCNF.ImpureType` classifies `Float32` and `Float` as impure scalars, while `Fir.LeanIR.Impure.ScalarValue` only contains `UInt8`, `UInt16`, `UInt32`, and `UInt64`.
+Historically, `LCNF.ImpureType` classified `Float32` and `Float` as impure
+scalars while `Fir.LeanIR.Impure.ScalarValue` contained only the four unsigned
+integer widths.
 
 ## Exact commands
 
-Run `lake build Fir.Wasm.Examples`. The ABI guards demonstrate the required `f32` and `f64` projections; inspection of `Fir/LeanIR/Runtime.lean` shows that no source values can currently inhabit those kinds.
+The historical reproduction was `lake build Fir.Wasm.Examples`, followed by
+inspection of `Fir/LeanIR/Runtime.lean`. The current regressions are built by
+`make talos-check` and exercise raw-bit float projection and mutation.
 
 ## Expected semantics
 
@@ -30,19 +36,29 @@ The shared abstract runtime should represent both floating-point scalar classes 
 
 ## Actual behavior
 
-The Wasm ABI and Talos adapter can preserve and project the types, but the FIR interpreter cannot construct, return, or compare corresponding abstract scalar values.
+`ScalarValue.float32Bits` and `ScalarValue.float64Bits` now carry the exact
+IEEE-754 payloads. `ValueRel`, `PhysicalValueRel`, concrete packed-field
+read/write refinement, compiler-step simulation, structured simulation, and
+dead-object fault leaves all preserve those payloads in `.f32`/`.f64` lanes.
 
 ## Proof or differential evidence
 
-The exhaustive ABI-kind table has twelve non-void classes, whereas `ScalarValue` covers only four integer classes and `Value` adds `USize` plus object-like values.
+The concrete regressions round-trip Float32 negative zero (`0x80000000`) and a
+noncanonical Float NaN payload (`0x7ff8000000000042`) without host floating
+conversion. The projection and mutation dependency cones compile under the
+six-kind packed-scalar admission.
 
 ## Semantic impact
 
-Float signatures can be lowered and validated structurally, but float-bearing executions must remain outside differential and correctness claims until the shared runtime is extended.
+Float packed-field projection and mutation are now inside the W6 correctness
+claim. Float boxing/unboxing remains a distinct operation-coverage follow-up;
+it is no longer blocked by the abstract semantic value model.
 
 ## Classification and triage
 
-This is a known gap in FIR's shared semantic model. The change belongs to the integration-owned runtime rather than a private Wasm-only value type.
+The shared semantic change landed through integration ownership. W6 consumes
+that representation directly and does not introduce a private Wasm-only float
+value type.
 
 ## Workaround
 
@@ -54,4 +70,7 @@ none
 
 ## Resolution and regression
 
-unresolved
+Fixed by the shared raw-bit scalar constructors and the W6 exact-lane
+refinement slice. Regression coverage lives in
+`integration/talos/FirTalos/ConcreteRuntimeExamples.lean`; the full proof gate
+is `make talos-check`.

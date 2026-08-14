@@ -1298,6 +1298,12 @@ inductive ValueRel (witness : RefinementWitness) :
       ValueRel witness .uint32 (.word32 word) (.scalar (.uint32 value))
   | uint64 :
       ValueRel witness .uint64 (.word64 value) (.scalar (.uint64 value))
+  | float32Bits :
+      ValueRel witness .float32 (.float32Bits bits)
+        (.scalar (.float32Bits bits))
+  | float64Bits :
+      ValueRel witness .float (.float64Bits bits)
+        (.scalar (.float64Bits bits))
   | usize :
       ValueRel witness .usize (.word64 value) (.usize value)
 
@@ -1376,6 +1382,8 @@ theorem ValueRel.witnessExtension
   | uint16 encoded => exact .uint16 encoded
   | uint32 encoded => exact .uint32 encoded
   | uint64 => exact .uint64
+  | float32Bits => exact .float32Bits
+  | float64Bits => exact .float64Bits
   | usize => exact .usize
 
 /-- Descriptor rebinding preserves every mapped heap reference because the
@@ -1445,6 +1453,8 @@ theorem ValueRel.rebindConstructor
   | uint16 encoded => exact .uint16 encoded
   | uint32 encoded => exact .uint32 encoded
   | uint64 => exact .uint64
+  | float32Bits => exact .float32Bits
+  | float64Bits => exact .float64Bits
   | usize => exact .usize
 
 theorem ValueRel.physical_type {witness : RefinementWitness} {kind : AbiKind}

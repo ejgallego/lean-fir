@@ -13127,8 +13127,12 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryDelete
             by simp [targetAfter]⟩
       | word64 valueRelated =>
           cases valueRelated <;> simp [deleteValue] at updated
-      | float32Bits valueRelated => cases valueRelated
-      | float64Bits valueRelated => cases valueRelated
+      | float32Bits valueRelated =>
+          cases valueRelated
+          simp [deleteValue] at updated
+      | float64Bits valueRelated =>
+          cases valueRelated
+          simp [deleteValue] at updated
 
 /-- One successful constructor-tag mutation advances the source by one effect
 step and the structured target by the exact generated unary-host prefix. The
@@ -13592,8 +13596,12 @@ theorem ConcreteStructuredCodeFocus.advance_objectFieldFVar
           | word64 fieldRelated =>
               cases fieldRelated <;>
                 simp [AbiKind.isObjectField] at fieldObjectKind
-          | float32Bits fieldRelated => cases fieldRelated
-          | float64Bits fieldRelated => cases fieldRelated
+          | float32Bits fieldRelated =>
+              cases fieldRelated <;>
+                simp [AbiKind.isObjectField] at fieldObjectKind
+          | float64Bits fieldRelated =>
+              cases fieldRelated <;>
+                simp [AbiKind.isObjectField] at fieldObjectKind
       | word64 objectRelated => cases objectRelated
       | float32Bits objectRelated => cases objectRelated
       | float64Bits objectRelated => cases objectRelated
@@ -14287,11 +14295,12 @@ private theorem ConcreteStructuredCodeFocus.advance_scalarFieldOperation
     .single sourcePath, targetPath, nextFocus, nextInvariant,
     by simp [sourceAfter], by simp [sourceAfter], by simp [targetAfter]⟩
 
-/-- One successful packed-integer scalar mutation advances the source by one
+/-- One successful packed scalar mutation advances the source by one
 effect step and the structured target by the exact generated binary-host
 prefix. Production inversion and state refinement select the i32 lane for
 `UInt8`/`UInt16`/`UInt32` and the i64 lane for `UInt64`; each checked writer
-then enters the common same-witness continuation rule. -/
+or the exact raw-bit f32/f64 lane for floats; each checked writer then enters
+the common same-witness continuation rule. -/
 theorem ConcreteStructuredCodeFocus.advance_scalarField
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
@@ -14404,9 +14413,9 @@ theorem ConcreteStructuredCodeFocus.advance_scalarField
               related.stateRelated.1 tobjectRelated decoded
           obtain ⟨historySafe, slotIndexEq, fieldFits⟩ :=
             layoutSafe tobjectRelated descriptorFound
-          have fieldSupported : PackedIntegerAbiKind fieldKind := by
+          have fieldSupported : PackedScalarAbiKind fieldKind := by
             cases fieldKind <;>
-              simp [PackedIntegerAbiKind] at fieldFits ⊢
+              simp [PackedScalarAbiKind] at fieldFits ⊢
           cases fieldKind with
           | uint8 =>
               obtain ⟨imp, imported, inBounds, contracted, parameterCount,
@@ -14510,14 +14519,62 @@ theorem ConcreteStructuredCodeFocus.advance_scalarField
               | word32 fieldRelated => cases fieldRelated
               | float32Bits fieldRelated => cases fieldRelated
               | float64Bits fieldRelated => cases fieldRelated
-          | object => simp [PackedIntegerAbiKind] at fieldSupported
-          | tagged => simp [PackedIntegerAbiKind] at fieldSupported
-          | tobject => simp [PackedIntegerAbiKind] at fieldSupported
-          | erased => simp [PackedIntegerAbiKind] at fieldSupported
-          | reuseToken => simp [PackedIntegerAbiKind] at fieldSupported
-          | usize => simp [PackedIntegerAbiKind] at fieldSupported
-          | float32 => simp [PackedIntegerAbiKind] at fieldSupported
-          | float => simp [PackedIntegerAbiKind] at fieldSupported
+          | float32 =>
+              obtain ⟨imp, imported, inBounds, contracted, parameterCount,
+                  resultCount⟩ :=
+                functionSpec.scalarSetCall callFound (by trivial)
+              cases physicalFieldRelated with
+              | float32Bits fieldRelated =>
+                  cases fieldRelated with
+                  | float32Bits =>
+                      obtain ⟨heap, operation, runtimeRelated, capacity,
+                          cursor⟩ :=
+                        scalarSetStep_float32_of_refines_with_capacity
+                          related.stateRelated.1 objectRelated .float32Bits
+                          found live objectEq descriptorFound
+                          (by simpa using historySafe) slotIndexEq
+                          (by simpa using fieldFits) updated
+                      exact
+                        ConcreteStructuredCodeFocus.advance_scalarFieldOperation
+                          functionSpec objectLookup fieldLookup updated sourceStep
+                          related continuationAdapted coreAdapted invariant
+                          targetObjectLookup targetFieldLookup imported inBounds
+                          contracted parameterCount resultCount operation
+                          runtimeRelated capacity cursor
+              | word32 fieldRelated => cases fieldRelated
+              | word64 fieldRelated => cases fieldRelated
+              | float64Bits fieldRelated => cases fieldRelated
+          | float =>
+              obtain ⟨imp, imported, inBounds, contracted, parameterCount,
+                  resultCount⟩ :=
+                functionSpec.scalarSetCall callFound (by trivial)
+              cases physicalFieldRelated with
+              | float64Bits fieldRelated =>
+                  cases fieldRelated with
+                  | float64Bits =>
+                      obtain ⟨heap, operation, runtimeRelated, capacity,
+                          cursor⟩ :=
+                        scalarSetStep_float64_of_refines_with_capacity
+                          related.stateRelated.1 objectRelated .float64Bits
+                          found live objectEq descriptorFound
+                          (by simpa using historySafe) slotIndexEq
+                          (by simpa using fieldFits) updated
+                      exact
+                        ConcreteStructuredCodeFocus.advance_scalarFieldOperation
+                          functionSpec objectLookup fieldLookup updated sourceStep
+                          related continuationAdapted coreAdapted invariant
+                          targetObjectLookup targetFieldLookup imported inBounds
+                          contracted parameterCount resultCount operation
+                          runtimeRelated capacity cursor
+              | word32 fieldRelated => cases fieldRelated
+              | word64 fieldRelated => cases fieldRelated
+              | float32Bits fieldRelated => cases fieldRelated
+          | object => simp [PackedScalarAbiKind] at fieldSupported
+          | tagged => simp [PackedScalarAbiKind] at fieldSupported
+          | tobject => simp [PackedScalarAbiKind] at fieldSupported
+          | erased => simp [PackedScalarAbiKind] at fieldSupported
+          | reuseToken => simp [PackedScalarAbiKind] at fieldSupported
+          | usize => simp [PackedScalarAbiKind] at fieldSupported
       | word64 objectRelated => cases objectRelated
       | float32Bits objectRelated => cases objectRelated
       | float64Bits objectRelated => cases objectRelated
@@ -14527,7 +14584,7 @@ external results, statically named calls, generated lazy caches, erased
 default-case wrappers, arbitrary normalized object and scalar `UInt8`
 dispatchers, ownership effects through deletion, constructor-tag mutation,
 both FVar and erased object-field mutation, `USize` field mutation, and every
-supported packed-integer scalar field mutation.
+supported packed scalar field mutation.
 
 External results traverse the interpreter's exact three-step request protocol
 and the compiler-derived imported-call prefix. Named and exactly saturated

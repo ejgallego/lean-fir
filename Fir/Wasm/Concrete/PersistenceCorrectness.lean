@@ -1244,7 +1244,8 @@ private theorem ValueRel.markPersistentNoOp_of_notObjectField
   cases related with
   | object | tagged | tobject | erased =>
       simp [AbiKind.isObjectField] at rejected
-  | reuseNone | reuseSome | uint8 | uint16 | uint32 | uint64 | usize => rfl
+  | reuseNone | reuseSome | uint8 | uint16 | uint32 | uint64 |
+      float32Bits | float64Bits | usize => rfl
 
 /-- Filtering statically non-owning closure captures preserves the pure
 semantic persistence fold. -/
@@ -1714,6 +1715,14 @@ theorem CachePersistenceRefines.of_nonHeapReference
         by simpa [RuntimeState.markPersistent] using heapRelated,
         MappedHeaderCapacityTransport.refl _ _⟩
   | uint64 =>
+      exact ⟨concrete, by simp [persistGlobalValue]; rfl,
+        by simpa [RuntimeState.markPersistent] using heapRelated,
+        MappedHeaderCapacityTransport.refl _ _⟩
+  | float32Bits =>
+      exact ⟨concrete, by simp [persistGlobalValue]; rfl,
+        by simpa [RuntimeState.markPersistent] using heapRelated,
+        MappedHeaderCapacityTransport.refl _ _⟩
+  | float64Bits =>
       exact ⟨concrete, by simp [persistGlobalValue]; rfl,
         by simpa [RuntimeState.markPersistent] using heapRelated,
         MappedHeaderCapacityTransport.refl _ _⟩

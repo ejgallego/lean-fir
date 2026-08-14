@@ -6216,6 +6216,23 @@ overstrong proof contract—`leanCompatible` in production versus directional
 `refines` in admission—tracked as
 `FIR-BUG-wasm-none-return-admission-refinement-direction`.
 
+W6.6 float packed-field admission closes the semantic-to-concrete gap for
+`Float32` and `Float` projection and mutation. `ValueRel` now relates the
+shared raw-bit semantic constructors directly to `.float32Bits` and
+`.float64Bits` lanes. The concrete heap keeps the existing four- and
+eight-byte little-endian layout; small relabeling lemmas reuse the verified
+UInt32/UInt64 writers while changing only the semantic scalar constructor.
+Whole-heap refinement, projection/mutation Talos hosts, resolver contracts,
+compiler-step simulation, the structured finite-path theorem, and exact
+dead-object fault leaves all cover the resulting six-kind packed-scalar
+family. The admission remains source/compiler-facing: it requires the same
+packed-region coordinate, extent, and retained-field separation judgment and
+contains no target path or translation certificate. Executable regressions
+round-trip Float32 negative zero and a noncanonical Float NaN payload without
+host floating conversion. No shared semantic contract, physical layout,
+symbolic Wasm instruction, or W7 resident-helper signature changed in this
+slice; Float32/Float box and unbox operations remain separate follow-up work.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

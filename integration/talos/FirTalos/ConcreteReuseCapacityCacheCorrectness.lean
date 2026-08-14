@@ -587,8 +587,10 @@ theorem PhysicalValueRel.isNonHeapReference_of_kind
       cases related <;> simp_all [IsNonHeapReference]
   | word64 related =>
       cases related <;> simp_all [IsNonHeapReference]
-  | float32Bits related => cases related
-  | float64Bits related => cases related
+  | float32Bits related =>
+      cases related <;> simp_all [IsNonHeapReference]
+  | float64Bits related =>
+      cases related <;> simp_all [IsNonHeapReference]
 
 /-- Publishing a non-heap semantic value changes only the global table. -/
 theorem RuntimeState.setGlobal_heap_eq_of_nonHeapReference

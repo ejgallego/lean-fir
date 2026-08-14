@@ -330,6 +330,46 @@ theorem LiveHeapRel.readScalarUInt64Field_refines
   rw [← fieldWidth, ← fieldOffset]
   exact ⟨observed.2.2, BoxedScalar.valueRel witness (.uint64 value)⟩
 
+/-- Checked packed `Float32` projection preserves the exact binary32 bits. -/
+theorem LiveHeapRel.readScalarFloat32Field_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {width offset : Nat}
+    {bits : UInt32}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (projected : getScalarField runtime (.object (.heap location)) width offset =
+      .ok (.scalar (.float32Bits bits))) :
+    readScalarUInt32Field state address width offset = .ok bits ∧
+      ValueRel witness .float32 (.float32Bits bits)
+        (.scalar (.float32Bits bits)) := by
+  obtain ⟨info, fieldKinds, semantic, field, objectRelated, member, fieldWidth,
+      fieldOffset, fieldValue⟩ := related.scalarField_of_projected mapped projected
+  have observed := objectRelated.semanticScalarFields field member
+  rw [fieldValue] at observed
+  simp only at observed
+  rw [← fieldWidth, ← fieldOffset]
+  exact ⟨observed.2.2, .float32Bits⟩
+
+/-- Checked packed `Float` projection preserves the exact binary64 bits. -/
+theorem LiveHeapRel.readScalarFloat64Field_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {width offset : Nat}
+    {bits : UInt64}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (projected : getScalarField runtime (.object (.heap location)) width offset =
+      .ok (.scalar (.float64Bits bits))) :
+    readScalarUInt64Field state address width offset = .ok bits ∧
+      ValueRel witness .float (.float64Bits bits)
+        (.scalar (.float64Bits bits)) := by
+  obtain ⟨info, fieldKinds, semantic, field, objectRelated, member, fieldWidth,
+      fieldOffset, fieldValue⟩ := related.scalarField_of_projected mapped projected
+  have observed := objectRelated.semanticScalarFields field member
+  rw [fieldValue] at observed
+  simp only at observed
+  rw [← fieldWidth, ← fieldOffset]
+  exact ⟨observed.2.2, .float64Bits⟩
+
 /-- Reading a concrete constructor tag returns the exact semantic constructor
 tag recorded by the decoded-object relation. -/
 theorem ConstructorObjectRel.readTag_refines

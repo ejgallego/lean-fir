@@ -1844,4 +1844,168 @@ theorem ConstructorObjectRel.writeScalarUInt16Field
     rw [usizeFieldFrame]
     exact related.usizeFields index semanticValue valueAt
 
+/-- The concrete representation of a packed `Float32` field is the same
+little-endian word as `UInt32`; this adapter changes only the semantic view of
+the freshly written head field. -/
+theorem ConstructorObjectRel.uint32Head_to_float32Head
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {semantic : ConstructorObject} {retained : List ScalarField}
+    (slotIndex byteOffset : Nat) (bits : UInt32)
+    (related : ConstructorObjectRel state witness address info fieldKinds
+      { semantic with
+        scalarFields := {
+          width := slotIndex
+          offset := byteOffset
+          value := .uint32 bits } :: retained }) :
+    ConstructorObjectRel state witness address info fieldKinds
+      { semantic with
+        scalarFields := {
+          width := slotIndex
+          offset := byteOffset
+          value := .float32Bits bits } :: retained } := by
+  refine {
+    header := ?_
+    headerOwned := related.headerOwned
+    extent := related.extent
+    semanticObjectFields := ?_
+    semanticUSizeFields := ?_
+    semanticScalarFields := ?_
+    fieldKindsSize := related.fieldKindsSize
+    fieldKindsValid := related.fieldKindsValid
+    objectFields := ?_
+    usizeFields := ?_ }
+  · simpa using related.header
+  · simpa using related.semanticObjectFields
+  · simpa using related.semanticUSizeFields
+  · intro field member
+    simp only [List.mem_cons] at member
+    rcases member with rfl | member
+    · simpa using related.semanticScalarFields
+        { width := slotIndex, offset := byteOffset, value := .uint32 bits }
+        (by simp)
+    · simpa using related.semanticScalarFields field (by simp [member])
+  · intro index kind value kindAt valueAt
+    exact related.objectFields index kind value kindAt (by simpa using valueAt)
+  · intro index value valueAt
+    exact related.usizeFields index value (by simpa using valueAt)
+
+/-- The concrete representation of a packed `Float` field is the same
+little-endian doubleword as `UInt64`; this adapter changes only the semantic
+view of the freshly written head field. -/
+theorem ConstructorObjectRel.uint64Head_to_float64Head
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {semantic : ConstructorObject} {retained : List ScalarField}
+    (slotIndex byteOffset : Nat) (bits : UInt64)
+    (related : ConstructorObjectRel state witness address info fieldKinds
+      { semantic with
+        scalarFields := {
+          width := slotIndex
+          offset := byteOffset
+          value := .uint64 bits } :: retained }) :
+    ConstructorObjectRel state witness address info fieldKinds
+      { semantic with
+        scalarFields := {
+          width := slotIndex
+          offset := byteOffset
+          value := .float64Bits bits } :: retained } := by
+  refine {
+    header := ?_
+    headerOwned := related.headerOwned
+    extent := related.extent
+    semanticObjectFields := ?_
+    semanticUSizeFields := ?_
+    semanticScalarFields := ?_
+    fieldKindsSize := related.fieldKindsSize
+    fieldKindsValid := related.fieldKindsValid
+    objectFields := ?_
+    usizeFields := ?_ }
+  · simpa using related.header
+  · simpa using related.semanticObjectFields
+  · simpa using related.semanticUSizeFields
+  · intro field member
+    simp only [List.mem_cons] at member
+    rcases member with rfl | member
+    · simpa using related.semanticScalarFields
+        { width := slotIndex, offset := byteOffset, value := .uint64 bits }
+        (by simp)
+    · simpa using related.semanticScalarFields field (by simp [member])
+  · intro index kind value kindAt valueAt
+    exact related.objectFields index kind value kindAt (by simpa using valueAt)
+  · intro index value valueAt
+    exact related.usizeFields index value (by simpa using valueAt)
+
+/-- A checked packed `Float32` write preserves the exact IEEE-754 bit pattern
+and every previously implemented constructor observation. -/
+theorem ConstructorObjectRel.writeScalarFloat32Field
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {semantic : ConstructorObject}
+    (related : ConstructorObjectRel state witness address info fieldKinds semantic)
+    (slotIndex byteOffset : Nat) (bits : UInt32)
+    (retainedDisjoint : ∀ field ∈ semantic.scalarFields,
+      field.width ≠ slotIndex ∨ field.offset ≠ byteOffset →
+      field.offset + scalarValueByteSize field.value ≤ byteOffset ∨
+        byteOffset + 4 ≤ field.offset)
+    (slotIndexEq : slotIndex = info.size + info.usize)
+    (fieldFits : byteOffset + 4 ≤ info.ssize) :
+    ∃ result,
+      Fir.Wasm.Concrete.writeScalarUInt32Field state address slotIndex byteOffset bits =
+        .ok result ∧
+      readScalarUInt32Field result address slotIndex byteOffset = .ok bits ∧
+      readTag result address = readTag state address ∧
+      (∀ index, readObjectField result address index =
+        readObjectField state address index) ∧
+      (∀ index, readUSizeField result address index =
+        readUSizeField state address index) ∧
+      ConstructorObjectRel result witness address info fieldKinds
+        { semantic with
+          scalarFields := {
+            width := slotIndex
+            offset := byteOffset
+            value := .float32Bits bits } :: semantic.scalarFields.filter fun old =>
+              old.width != slotIndex || old.offset != byteOffset } := by
+  obtain ⟨result, operation, readBack, tagFrame, objectFrame, usizeFrame,
+      relation⟩ := related.writeScalarUInt32Field slotIndex byteOffset bits
+        retainedDisjoint slotIndexEq fieldFits
+  exact ⟨result, operation, readBack, tagFrame, objectFrame, usizeFrame,
+    relation.uint32Head_to_float32Head slotIndex byteOffset bits⟩
+
+/-- A checked packed `Float` write preserves the exact IEEE-754 bit pattern
+and every previously implemented constructor observation. -/
+theorem ConstructorObjectRel.writeScalarFloat64Field
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {semantic : ConstructorObject}
+    (related : ConstructorObjectRel state witness address info fieldKinds semantic)
+    (slotIndex byteOffset : Nat) (bits : UInt64)
+    (retainedDisjoint : ∀ field ∈ semantic.scalarFields,
+      field.width ≠ slotIndex ∨ field.offset ≠ byteOffset →
+      field.offset + scalarValueByteSize field.value ≤ byteOffset ∨
+        byteOffset + 8 ≤ field.offset)
+    (slotIndexEq : slotIndex = info.size + info.usize)
+    (fieldFits : byteOffset + 8 ≤ info.ssize) :
+    ∃ result,
+      Fir.Wasm.Concrete.writeScalarUInt64Field state address slotIndex byteOffset bits =
+        .ok result ∧
+      readScalarUInt64Field result address slotIndex byteOffset = .ok bits ∧
+      readTag result address = readTag state address ∧
+      (∀ index, readObjectField result address index =
+        readObjectField state address index) ∧
+      (∀ index, readUSizeField result address index =
+        readUSizeField state address index) ∧
+      ConstructorObjectRel result witness address info fieldKinds
+        { semantic with
+          scalarFields := {
+            width := slotIndex
+            offset := byteOffset
+            value := .float64Bits bits } :: semantic.scalarFields.filter fun old =>
+              old.width != slotIndex || old.offset != byteOffset } := by
+  obtain ⟨result, operation, readBack, tagFrame, objectFrame, usizeFrame,
+      relation⟩ := related.writeScalarUInt64Field slotIndex byteOffset bits
+        retainedDisjoint slotIndexEq fieldFits
+  exact ⟨result, operation, readBack, tagFrame, objectFrame, usizeFrame,
+    relation.uint64Head_to_float64Head slotIndex byteOffset bits⟩
+
 end Fir.Wasm.Concrete

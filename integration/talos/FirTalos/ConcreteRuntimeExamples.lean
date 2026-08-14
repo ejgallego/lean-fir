@@ -502,9 +502,9 @@ theorem initialUnicodeString_liveHeapRel
       (LiveHeapRel.initial #[] #[]) allocated
   exact ⟨nextWitness, extendsWitness, heapRel, valueRel⟩
 
--- Remaining unsupported runtime families are rejected by resolution rather
--- than reaching a concrete host that only traps after instantiation.
-#guard (hostFn? (.scalarProj 1 0 .float32)).isNone
+-- Packed float projection resolves to the same executable concrete scalar
+-- host family as the integer widths.
+#guard (hostFn? (.scalarProj 1 0 .float32)).isSome
 
 private def echoConcreteExternal : Fir.Wasm.Concrete.ConcreteExternalImpl where
   call request before :=
@@ -769,7 +769,7 @@ private def scalarProjectionFixture :
       | _ => false
   | .error _ => false
 
--- Each supported packed-integer mutation preserves its exact physical lane
+-- Each supported packed scalar mutation preserves its exact physical lane
 -- and is immediately observable through the matching checked reader.
 #guard match scalarProjectionFixture with
   | .ok (store, object) =>
@@ -816,16 +816,34 @@ private def scalarProjectionFixture :
       | _ => false
   | .error _ => false
 
--- Float scalar kinds remain an explicit structured fragment gate.
-#guard match scalarProjStep 0 0 .float32 emptyHostStore [.i32 1] with
-  | .Trap store _ =>
-      store.host.failure? == some (.unsupportedScalarKind .float32)
-  | _ => false
+-- Float32 negative zero survives setter, memory, and projection bit-exactly.
+#guard match scalarProjectionFixture with
+  | .ok (store, object) =>
+      match scalarSetStep 0 0 .float32 store
+          [.i32 (UInt32.ofNat object.value), .f32 0x80000000] with
+      | .Return [] next =>
+          match scalarProjStep 0 0 .float32 next
+              [.i32 (UInt32.ofNat object.value)] with
+          | .Return [.f32 bits] final =>
+              bits == 0x80000000 && final.host.failure?.isNone
+          | _ => false
+      | _ => false
+  | .error _ => false
 
-#guard match scalarSetStep 0 0 .float32 emptyHostStore [.i32 1, .f32 0] with
-  | .Trap store _ =>
-      store.host.failure? == some (.unsupportedScalarKind .float32)
-  | _ => false
+-- A noncanonical Float NaN payload also crosses the concrete boundary
+-- unchanged; the runtime never rounds it through a host `Float` value.
+#guard match scalarProjectionFixture with
+  | .ok (store, object) =>
+      match scalarSetStep 0 0 .float store
+          [.i32 (UInt32.ofNat object.value), .f64 0x7ff8000000000042] with
+      | .Return [] next =>
+          match scalarProjStep 0 0 .float next
+              [.i32 (UInt32.ofNat object.value)] with
+          | .Return [.f64 bits] final =>
+              bits == 0x7ff8000000000042 && final.host.failure?.isNone
+          | _ => false
+      | _ => false
+  | .error _ => false
 
 -- Small naturals stay immediate and do not move the concrete heap frontier.
 #guard match naturalLiteralStep 42 emptyHostStore [] with

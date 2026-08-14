@@ -4,9 +4,9 @@ namespace FirTalos.Concrete
 
 open Fir.Wasm
 
-/-- Operations omitted from the concrete resolver are honest fragment gates:
-floating-point scalar storage and legacy closure callbacks still need
-concrete executable counterparts. -/
+/-- Heap boxing remains limited to the concrete boxed-scalar layout below;
+ordinary float lanes, captures, caches, projections, and packed fields are
+represented bit-exactly without passing through this enum. -/
 private def boxedScalarKind? :
     AbiKind → Option Fir.Wasm.Concrete.BoxedScalarKind
   | .uint8 => some Fir.Wasm.Concrete.BoxedScalarKind.uint8
@@ -16,12 +16,11 @@ private def boxedScalarKind? :
   | .usize => some Fir.Wasm.Concrete.BoxedScalarKind.usize
   | _ => none
 
-private def integerScalarKind : AbiKind → Bool
-  | .uint8 | .uint16 | .uint32 | .uint64 => true
+private def packedScalarKind : AbiKind → Bool
+  | .uint8 | .uint16 | .uint32 | .uint64 | .float32 | .float => true
   | _ => false
 
 private def representedKind : AbiKind → Bool
-  | .float32 | .float => false
   | _ => true
 
 /-- Resolve one supported semantic runtime identity to the executable W6 host
@@ -37,7 +36,7 @@ def hostFn? : RuntimeOp → Option (Wasm.HostFn Host)
   | .objectProj index _ => some (objectProjFn index)
   | .usizeProj index => some (usizeProjFn index)
   | .scalarProj width offset kind =>
-      if integerScalarKind kind then some (scalarProjFn width offset kind) else none
+      if packedScalarKind kind then some (scalarProjFn width offset kind) else none
   | .cacheSet declaration kind =>
       if representedKind kind then some (cacheSetFn declaration kind) else none
   | .partialApply function arity fixed fields result =>
@@ -61,7 +60,7 @@ def hostFn? : RuntimeOp → Option (Wasm.HostFn Host)
   | .objectSet index field => some (objectSetFn index field)
   | .usizeSet index => some (usizeSetFn index)
   | .scalarSet width offset kind =>
-      if integerScalarKind kind then some (scalarSetFn width offset kind) else none
+      if packedScalarKind kind then some (scalarSetFn width offset kind) else none
   | .setTag tag => some (setTagFn tag)
   | .inc amount check => some (incrementFn amount check)
   | .dec amount check objectFields? =>
@@ -99,6 +98,28 @@ theorem hostFn?_scalarSet_of_packedInteger
     hostFn? (.scalarSet slotIndex byteOffset kind) =
       some (scalarSetFn slotIndex byteOffset kind) := by
   rcases supported with rfl | rfl | rfl | rfl <;> rfl
+
+/-- Every integer or floating packed scalar kind resolves to the same
+bit-preserving, width-indexed projection host. -/
+theorem hostFn?_scalarProj_of_packedScalar
+    {slotIndex byteOffset : Nat} {kind : AbiKind}
+    (supported :
+      kind = .uint8 ∨ kind = .uint16 ∨ kind = .uint32 ∨
+      kind = .uint64 ∨ kind = .float32 ∨ kind = .float) :
+    hostFn? (.scalarProj slotIndex byteOffset kind) =
+      some (scalarProjFn slotIndex byteOffset kind) := by
+  rcases supported with rfl | rfl | rfl | rfl | rfl | rfl <;> rfl
+
+/-- Every integer or floating packed scalar kind resolves to the executable
+setter that stores its exact physical bits in the checked packed region. -/
+theorem hostFn?_scalarSet_of_packedScalar
+    {slotIndex byteOffset : Nat} {kind : AbiKind}
+    (supported :
+      kind = .uint8 ∨ kind = .uint16 ∨ kind = .uint32 ∨
+      kind = .uint64 ∨ kind = .float32 ∨ kind = .float) :
+    hostFn? (.scalarSet slotIndex byteOffset kind) =
+      some (scalarSetFn slotIndex byteOffset kind) := by
+  rcases supported with rfl | rfl | rfl | rfl | rfl | rfl <;> rfl
 
 inductive ResolverError where
   | invalidModule (error : SymbolicError)

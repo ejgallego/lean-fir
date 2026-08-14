@@ -167,8 +167,10 @@ theorem PhysicalValueRel.toTObject
       | uint32 encoded => simp [AbiKind.refines] at refines
   | word64 valueRelated =>
       cases valueRelated <;> simp [AbiKind.refines] at refines
-  | float32Bits valueRelated => cases valueRelated
-  | float64Bits valueRelated => cases valueRelated
+  | float32Bits valueRelated =>
+      cases valueRelated <;> simp [AbiKind.refines] at refines
+  | float64Bits valueRelated =>
+      cases valueRelated <;> simp [AbiKind.refines] at refines
 
 /--
 Transport a physical/semantic value relation along the compiler's complete
@@ -1189,6 +1191,14 @@ def scalarProjStep (width offset : Nat) (kind : AbiKind)
           match readScalarUInt64Field store.host.runtime.heap object width offset with
           | .ok value => .Return [.i64 value] store
           | .error failure => trap store (.runtime failure.toTrap)
+      | .float32 =>
+          match readScalarUInt32Field store.host.runtime.heap object width offset with
+          | .ok bits => .Return [.f32 bits] store
+          | .error failure => trap store (.runtime failure.toTrap)
+      | .float =>
+          match readScalarUInt64Field store.host.runtime.heap object width offset with
+          | .ok bits => .Return [.f64 bits] store
+          | .error failure => trap store (.runtime failure.toTrap)
       | other => trap store (.unsupportedScalarKind other)
   | [_] => trap store (.laneMismatch 0 .i32)
   | args => trap store (.arityMismatch 1 args.length)
@@ -1632,9 +1642,21 @@ def scalarSetStep (slotIndex byteOffset : Nat) (kind : AbiKind)
               byteOffset field with
           | .ok heap => .Return [] (replaceHeap store heap)
           | .error failure => trap store (.runtime failure.toTrap)
+      | .float32, .f32 bits =>
+          match writeScalarUInt32Field store.host.runtime.heap object slotIndex
+              byteOffset bits with
+          | .ok heap => .Return [] (replaceHeap store heap)
+          | .error failure => trap store (.runtime failure.toTrap)
+      | .float, .f64 bits =>
+          match writeScalarUInt64Field store.host.runtime.heap object slotIndex
+              byteOffset bits with
+          | .ok heap => .Return [] (replaceHeap store heap)
+          | .error failure => trap store (.runtime failure.toTrap)
       | .uint8, _ | .uint16, _ | .uint32, _ =>
           trap store (.laneMismatch 1 .i32)
       | .uint64, _ => trap store (.laneMismatch 1 .i64)
+      | .float32, _ => trap store (.laneMismatch 1 .f32)
+      | .float, _ => trap store (.laneMismatch 1 .f64)
       | other, _ => trap store (.unsupportedScalarKind other)
   | [_, _] => trap store (.laneMismatch 0 .i32)
   | args => trap store (.arityMismatch 2 args.length)
@@ -1776,6 +1798,8 @@ theorem physicalOfLane_related
   | uint16 encoded => exact .word32 (.uint16 encoded)
   | uint32 encoded => exact .word32 (.uint32 encoded)
   | uint64 => exact .word64 .uint64
+  | float32Bits => exact .float32Bits .float32Bits
+  | float64Bits => exact .float64Bits .float64Bits
   | usize => exact .word64 .usize
 
 theorem valueRel_physical_type_beq
@@ -2904,14 +2928,15 @@ theorem usizeProjStep_deadObject_of_refines
           simp [usizeProjStep, clearFailure, Word32.ofUInt32_ofNat_value,
             concrete, ConcreteError.toTrap]
 
-/-- Every supported packed-integer projection rejects a stale mapped object at
+/-- Every supported packed-scalar projection rejects a stale mapped object at
 the common live-header gate, before scalar-coordinate validation. -/
 theorem scalarProjStep_deadObject_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
     {runtime : RuntimeState} {objectWord : Word32} {location : Location}
     {cell : HeapCell} (width offset : Nat) (kind : AbiKind)
     (supported : kind = .uint8 ∨ kind = .uint16 ∨
-      kind = .uint32 ∨ kind = .uint64)
+      kind = .uint32 ∨ kind = .uint64 ∨
+      kind = .float32 ∨ kind = .float)
     (runtimeRelated :
       ConcreteRuntimeRel initial.host.runtime witness runtime)
     (objectRelated :
@@ -2935,7 +2960,7 @@ theorem scalarProjStep_deadObject_of_refines
             runtimeRelated.heap.readScalarFields_deadObject heapRelated found dead
               width offset
           refine ⟨?_, semantic, .sourceAddress (.deadObject heapRelated)⟩
-          rcases supported with rfl | rfl | rfl | rfl <;>
+          rcases supported with rfl | rfl | rfl | rfl | rfl | rfl <;>
             simp [scalarProjStep, clearFailure, Word32.ofUInt32_ofNat_value,
               read8, read16, read32, read64, ConcreteError.toTrap]
 
@@ -3061,7 +3086,7 @@ theorem scalarProjStep_expectedConstructor_of_refines
     rw [headerFailed]
     rfl
   refine ⟨?_, ?_, .source .expectedConstructor⟩
-  · rcases supported with rfl | rfl | rfl | rfl <;>
+  · rcases supported with rfl | rfl | rfl | rfl | rfl | rfl <;>
       simp [scalarProjStep, clearFailure, Word32.ofUInt32_ofNat_value,
         read8, read16, read32, read64, ConcreteError.toTrap]
   · unfold getScalarField
@@ -3079,6 +3104,10 @@ inductive ScalarValueKind : ScalarValue → AbiKind → Prop where
   | uint16 (value : UInt16) : ScalarValueKind (.uint16 value) .uint16
   | uint32 (value : UInt32) : ScalarValueKind (.uint32 value) .uint32
   | uint64 (value : UInt64) : ScalarValueKind (.uint64 value) .uint64
+  | float32Bits (bits : UInt32) :
+      ScalarValueKind (.float32Bits bits) .float32
+  | float64Bits (bits : UInt64) :
+      ScalarValueKind (.float64Bits bits) .float
 
 theorem scalarProjUInt8Step_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
@@ -3202,11 +3231,69 @@ theorem scalarProjUInt64Step_of_refines
             simp [getScalarField, getConstructor, Bind.bind, Except.bind]
               at projected
 
+theorem scalarProjFloat32Step_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {sourceObject : Value}
+    {width offset : Nat} {bits : UInt32}
+    (runtimeRelated : ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (projected : getScalarField runtime sourceObject width offset =
+      .ok (.scalar (.float32Bits bits))) :
+    scalarProjStep width offset .float32 initial
+        [.i32 (UInt32.ofNat objectWord.value)] =
+      .Return [.f32 bits] (clearFailure initial) ∧
+      PhysicalValueRel witness .float32 (.f32 bits)
+        (.scalar (.float32Bits bits)) := by
+  cases objectRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped mapped =>
+              obtain ⟨read, valueRelated⟩ :=
+                runtimeRelated.heap.readScalarFloat32Field_refines mapped projected
+              exact ⟨by simp [scalarProjStep, clearFailure, read],
+                .float32Bits valueRelated⟩
+      | tagged taggedRelated =>
+          cases taggedRelated <;>
+            simp [getScalarField, getConstructor, Bind.bind, Except.bind]
+              at projected
+
+theorem scalarProjFloat64Step_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {sourceObject : Value}
+    {width offset : Nat} {bits : UInt64}
+    (runtimeRelated : ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (projected : getScalarField runtime sourceObject width offset =
+      .ok (.scalar (.float64Bits bits))) :
+    scalarProjStep width offset .float initial
+        [.i32 (UInt32.ofNat objectWord.value)] =
+      .Return [.f64 bits] (clearFailure initial) ∧
+      PhysicalValueRel witness .float (.f64 bits)
+        (.scalar (.float64Bits bits)) := by
+  cases objectRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped mapped =>
+              obtain ⟨read, valueRelated⟩ :=
+                runtimeRelated.heap.readScalarFloat64Field_refines mapped projected
+              exact ⟨by simp [scalarProjStep, clearFailure, read],
+                .float64Bits valueRelated⟩
+      | tagged taggedRelated =>
+          cases taggedRelated <;>
+            simp [getScalarField, getConstructor, Bind.bind, Except.bind]
+              at projected
+
 /--
-Every successfully projected, ABI-aligned integer scalar has one matching
+Every successfully projected, ABI-aligned packed scalar has one matching
 concrete host step and related physical result.
 
-This unifies the four integer lanes used by the compiler. It is deliberately
+This unifies the four integer and two floating lanes used by the compiler. It is deliberately
 a success theorem: it does not claim that a valid but semantically
 uninitialized coordinate faults in the zero-filled concrete heap.
 -/
@@ -3238,6 +3325,12 @@ theorem scalarProjStep_of_refines
   | uint64 value =>
       exact ⟨.i64 value,
         scalarProjUInt64Step_of_refines runtimeRelated objectRelated projected⟩
+  | float32Bits bits =>
+      exact ⟨.f32 bits,
+        scalarProjFloat32Step_of_refines runtimeRelated objectRelated projected⟩
+  | float64Bits bits =>
+      exact ⟨.f64 bits,
+        scalarProjFloat64Step_of_refines runtimeRelated objectRelated projected⟩
 
 theorem naturalLiteralStep_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
@@ -3598,8 +3691,12 @@ theorem decodePhysicalLane_of_related
   | word64 valueRelated =>
       refine ⟨_, ?_, valueRelated⟩
       cases valueRelated <;> rfl
-  | float32Bits valueRelated => cases valueRelated
-  | float64Bits valueRelated => cases valueRelated
+  | float32Bits valueRelated =>
+      cases valueRelated
+      exact ⟨_, rfl, .float32Bits⟩
+  | float64Bits valueRelated =>
+      cases valueRelated
+      exact ⟨_, rfl, .float64Bits⟩
 
 /--
 Every related physical value constructively drives the complete concrete
@@ -6406,8 +6503,34 @@ theorem scalarSetStep_expectedConstructor_of_refines
           refine ⟨?_, semanticFailure, .source .expectedConstructor⟩
           simp [scalarSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
             writeFailed, ConcreteError.toTrap]
-  | float32Bits fieldRelated => cases fieldRelated
-  | float64Bits fieldRelated => cases fieldRelated
+  | float32Bits fieldRelated =>
+      cases fieldRelated with
+      | float32Bits =>
+          rename_i bits
+          have writeFailed :
+              writeScalarUInt32Field initial.host.runtime.heap objectWord
+                  slotIndex byteOffset bits =
+                .error (.source .expectedConstructor) := by
+            unfold writeScalarUInt32Field
+            rw [headerFailed]
+            rfl
+          refine ⟨?_, semanticFailure, .source .expectedConstructor⟩
+          simp [scalarSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+            writeFailed, ConcreteError.toTrap]
+  | float64Bits fieldRelated =>
+      cases fieldRelated with
+      | float64Bits =>
+          rename_i bits
+          have writeFailed :
+              writeScalarUInt64Field initial.host.runtime.heap objectWord
+                  slotIndex byteOffset bits =
+                .error (.source .expectedConstructor) := by
+            unfold writeScalarUInt64Field
+            rw [headerFailed]
+            rfl
+          refine ⟨?_, semanticFailure, .source .expectedConstructor⟩
+          simp [scalarSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+            writeFailed, ConcreteError.toTrap]
 
 /-- Every successful semantic constructor modification is heap-only. This is
 shared by tag, object, USize, and packed-scalar mutation composition. -/
@@ -6926,6 +7049,82 @@ theorem scalarSetStep_uint32_deadObject_of_refines
           simp [scalarSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
             encoded, concrete, ConcreteError.toTrap]
 
+/-- The Float32 scalar host preserves stale-reference precedence and its exact
+source-address fault before inspecting the packed coordinate. -/
+theorem scalarSetStep_float32_deadObject_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {bits : UInt32}
+    {location : Location} {cell : HeapCell} {slotIndex byteOffset : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (fieldRelated : ValueRel witness .float32 (.float32Bits bits)
+      (.scalar (.float32Bits bits)))
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) :
+    scalarSetStep slotIndex byteOffset .float32 initial
+        [.i32 (UInt32.ofNat objectWord.value), .f32 bits] =
+      trap (clearFailure initial)
+        (.runtime (.source (.address (.deadObject objectWord)))) ∧
+    setScalarField runtime (.object (.heap location)) slotIndex byteOffset
+        (.scalar (.float32Bits bits)) = .error (.deadObject location) ∧
+    ConcreteErrorSourceRel witness
+      (.sourceAddress (.deadObject objectWord)) (.deadObject location) := by
+  cases fieldRelated
+  cases objectRelated with
+  | object heapRelated =>
+      obtain ⟨concrete, _⟩ :=
+        runtimeRelated.heap.writeScalarUInt32Field_deadObject heapRelated found
+          dead slotIndex byteOffset bits
+      have semantic :
+          setScalarField runtime (.object (.heap location)) slotIndex byteOffset
+              (.scalar (.float32Bits bits)) = .error (.deadObject location) := by
+        simp [setScalarField, modifyConstructor, getConstructor, getLiveCell,
+          found, dead]
+        rfl
+      refine ⟨?_, semantic, .sourceAddress (.deadObject heapRelated)⟩
+      simp [scalarSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+        concrete, ConcreteError.toTrap]
+
+/-- The Float scalar host has the same stale-reference boundary in its exact
+64-bit lane. -/
+theorem scalarSetStep_float64_deadObject_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {bits : UInt64}
+    {location : Location} {cell : HeapCell} {slotIndex byteOffset : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (fieldRelated : ValueRel witness .float (.float64Bits bits)
+      (.scalar (.float64Bits bits)))
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) :
+    scalarSetStep slotIndex byteOffset .float initial
+        [.i32 (UInt32.ofNat objectWord.value), .f64 bits] =
+      trap (clearFailure initial)
+        (.runtime (.source (.address (.deadObject objectWord)))) ∧
+    setScalarField runtime (.object (.heap location)) slotIndex byteOffset
+        (.scalar (.float64Bits bits)) = .error (.deadObject location) ∧
+    ConcreteErrorSourceRel witness
+      (.sourceAddress (.deadObject objectWord)) (.deadObject location) := by
+  cases fieldRelated
+  cases objectRelated with
+  | object heapRelated =>
+      obtain ⟨concrete, _⟩ :=
+        runtimeRelated.heap.writeScalarUInt64Field_deadObject heapRelated found
+          dead slotIndex byteOffset bits
+      have semantic :
+          setScalarField runtime (.object (.heap location)) slotIndex byteOffset
+              (.scalar (.float64Bits bits)) = .error (.deadObject location) := by
+        simp [setScalarField, modifyConstructor, getConstructor, getLiveCell,
+          found, dead]
+        rfl
+      refine ⟨?_, semantic, .sourceAddress (.deadObject heapRelated)⟩
+      simp [scalarSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+        concrete, ConcreteError.toTrap]
+
 /-- The UInt16 scalar host has the same stale-reference boundary. -/
 theorem scalarSetStep_uint16_deadObject_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
@@ -7176,6 +7375,194 @@ theorem scalarSetStep_uint32_of_refines
         nextRuntime := by
   obtain ⟨heap, concrete, finalRelated, _, _⟩ :=
     scalarSetStep_uint32_of_refines_with_capacity runtimeRelated objectRelated
+      fieldRelated found live objectEq descriptorFound retainedDisjoint
+      slotIndexEq fieldFits updated
+  exact ⟨heap, concrete, finalRelated⟩
+
+/-- A successful `Float32` host mutation writes and relates the exact raw
+32-bit payload; no host-language floating-point conversion is involved. -/
+theorem scalarSetStep_float32_of_refines_with_capacity
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location}
+    {cell : HeapCell} {semantic : ConstructorObject}
+    {objectWord : Word32} {bits : UInt32}
+    {slotIndex byteOffset : Nat} {info : Lean.Compiler.LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (fieldRelated : ValueRel witness .float32 (.float32Bits bits)
+      (.scalar (.float32Bits bits)))
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (descriptorFound : witness.descriptors.lookup? objectWord =
+      some (.constructor info fieldKinds))
+    (retainedDisjoint : ∀ old ∈ semantic.scalarFields,
+      old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
+      old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
+        byteOffset + 4 ≤ old.offset)
+    (slotIndexEq : slotIndex = info.size + info.usize)
+    (fieldFits : byteOffset + 4 ≤ info.ssize)
+    (updated : setScalarField runtime (.object (.heap location)) slotIndex
+      byteOffset (.scalar (.float32Bits bits)) = .ok nextRuntime) :
+    ∃ heap,
+      scalarSetStep slotIndex byteOffset .float32 initial
+          [.i32 (UInt32.ofNat objectWord.value), .f32 bits] =
+        .Return [] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
+        nextRuntime ∧
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness ∧
+      heap.heapCursor = initial.host.runtime.heap.heapCursor := by
+  cases fieldRelated
+  cases objectRelated with
+  | object heapRelated =>
+      cases heapRelated with
+      | mapped mapped =>
+          obtain ⟨heap, semanticAfter, concreteOperation,
+              semanticOperation, finalHeapRelated, capacity, cursor⟩ :=
+            runtimeRelated.heap.writeScalarFloat32Field_refines_with_capacity
+              mapped found live objectEq descriptorFound slotIndex byteOffset
+              bits retainedDisjoint slotIndexEq fieldFits
+          rw [updated] at semanticOperation
+          have afterEq := Except.ok.inj semanticOperation
+          subst semanticAfter
+          refine ⟨heap, ?_, ?_, capacity, cursor⟩
+          · simp [scalarSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+              concreteOperation, replaceHeap]
+          · apply ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
+              finalHeapRelated
+            apply modifyConstructor_heapOnly
+            simpa [setScalarField] using updated
+
+theorem scalarSetStep_float32_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location}
+    {cell : HeapCell} {semantic : ConstructorObject}
+    {objectWord : Word32} {bits : UInt32}
+    {slotIndex byteOffset : Nat} {info : Lean.Compiler.LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind}
+    (runtimeRelated : ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (fieldRelated : ValueRel witness .float32 (.float32Bits bits)
+      (.scalar (.float32Bits bits)))
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (descriptorFound : witness.descriptors.lookup? objectWord =
+      some (.constructor info fieldKinds))
+    (retainedDisjoint : ∀ old ∈ semantic.scalarFields,
+      old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
+      old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
+        byteOffset + 4 ≤ old.offset)
+    (slotIndexEq : slotIndex = info.size + info.usize)
+    (fieldFits : byteOffset + 4 ≤ info.ssize)
+    (updated : setScalarField runtime (.object (.heap location)) slotIndex
+      byteOffset (.scalar (.float32Bits bits)) = .ok nextRuntime) :
+    ∃ heap,
+      scalarSetStep slotIndex byteOffset .float32 initial
+          [.i32 (UInt32.ofNat objectWord.value), .f32 bits] =
+        .Return [] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
+        nextRuntime := by
+  obtain ⟨heap, concrete, finalRelated, _, _⟩ :=
+    scalarSetStep_float32_of_refines_with_capacity runtimeRelated objectRelated
+      fieldRelated found live objectEq descriptorFound retainedDisjoint
+      slotIndexEq fieldFits updated
+  exact ⟨heap, concrete, finalRelated⟩
+
+/-- A successful `Float` host mutation writes and relates the exact raw 64-bit
+payload. -/
+theorem scalarSetStep_float64_of_refines_with_capacity
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location}
+    {cell : HeapCell} {semantic : ConstructorObject}
+    {objectWord : Word32} {bits : UInt64}
+    {slotIndex byteOffset : Nat} {info : Lean.Compiler.LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (fieldRelated : ValueRel witness .float (.float64Bits bits)
+      (.scalar (.float64Bits bits)))
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (descriptorFound : witness.descriptors.lookup? objectWord =
+      some (.constructor info fieldKinds))
+    (retainedDisjoint : ∀ old ∈ semantic.scalarFields,
+      old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
+      old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
+        byteOffset + 8 ≤ old.offset)
+    (slotIndexEq : slotIndex = info.size + info.usize)
+    (fieldFits : byteOffset + 8 ≤ info.ssize)
+    (updated : setScalarField runtime (.object (.heap location)) slotIndex
+      byteOffset (.scalar (.float64Bits bits)) = .ok nextRuntime) :
+    ∃ heap,
+      scalarSetStep slotIndex byteOffset .float initial
+          [.i32 (UInt32.ofNat objectWord.value), .f64 bits] =
+        .Return [] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
+        nextRuntime ∧
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness ∧
+      heap.heapCursor = initial.host.runtime.heap.heapCursor := by
+  cases fieldRelated
+  cases objectRelated with
+  | object heapRelated =>
+      cases heapRelated with
+      | mapped mapped =>
+          obtain ⟨heap, semanticAfter, concreteOperation,
+              semanticOperation, finalHeapRelated, capacity, cursor⟩ :=
+            runtimeRelated.heap.writeScalarFloat64Field_refines_with_capacity
+              mapped found live objectEq descriptorFound slotIndex byteOffset
+              bits retainedDisjoint slotIndexEq fieldFits
+          rw [updated] at semanticOperation
+          have afterEq := Except.ok.inj semanticOperation
+          subst semanticAfter
+          refine ⟨heap, ?_, ?_, capacity, cursor⟩
+          · simp [scalarSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+              concreteOperation, replaceHeap]
+          · apply ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
+              finalHeapRelated
+            apply modifyConstructor_heapOnly
+            simpa [setScalarField] using updated
+
+theorem scalarSetStep_float64_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location}
+    {cell : HeapCell} {semantic : ConstructorObject}
+    {objectWord : Word32} {bits : UInt64}
+    {slotIndex byteOffset : Nat} {info : Lean.Compiler.LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind}
+    (runtimeRelated : ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (fieldRelated : ValueRel witness .float (.float64Bits bits)
+      (.scalar (.float64Bits bits)))
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (descriptorFound : witness.descriptors.lookup? objectWord =
+      some (.constructor info fieldKinds))
+    (retainedDisjoint : ∀ old ∈ semantic.scalarFields,
+      old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
+      old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
+        byteOffset + 8 ≤ old.offset)
+    (slotIndexEq : slotIndex = info.size + info.usize)
+    (fieldFits : byteOffset + 8 ≤ info.ssize)
+    (updated : setScalarField runtime (.object (.heap location)) slotIndex
+      byteOffset (.scalar (.float64Bits bits)) = .ok nextRuntime) :
+    ∃ heap,
+      scalarSetStep slotIndex byteOffset .float initial
+          [.i32 (UInt32.ofNat objectWord.value), .f64 bits] =
+        .Return [] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
+        nextRuntime := by
+  obtain ⟨heap, concrete, finalRelated, _, _⟩ :=
+    scalarSetStep_float64_of_refines_with_capacity runtimeRelated objectRelated
       fieldRelated found live objectEq descriptorFound retainedDisjoint
       slotIndexEq fieldFits updated
   exact ⟨heap, concrete, finalRelated⟩
@@ -8912,8 +9299,12 @@ theorem effectStepSimulates_delete_with_capacity
       · exact operation
   | word64 valueRelated =>
       cases valueRelated <;> simp [deleteValue] at updated
-  | float32Bits valueRelated => cases valueRelated
-  | float64Bits valueRelated => cases valueRelated
+  | float32Bits valueRelated =>
+      cases valueRelated
+      simp [deleteValue] at updated
+  | float64Bits valueRelated =>
+      cases valueRelated
+      simp [deleteValue] at updated
 
 theorem effectStepSimulates_delete
     {context : Fir.Wasm.Context}
@@ -9203,8 +9594,10 @@ theorem effectStepSimulates_objectSet_with_capacity
       · exact operation
   | word64 fieldRelated =>
       cases fieldRelated <;> simp [AbiKind.isObjectField] at fieldObjectKind
-  | float32Bits fieldRelated => cases fieldRelated
-  | float64Bits fieldRelated => cases fieldRelated
+  | float32Bits fieldRelated =>
+      cases fieldRelated <;> simp [AbiKind.isObjectField] at fieldObjectKind
+  | float64Bits fieldRelated =>
+      cases fieldRelated <;> simp [AbiKind.isObjectField] at fieldObjectKind
 
 theorem effectStepSimulates_objectSet
     {context : Fir.Wasm.Context}
@@ -9666,6 +10059,14 @@ theorem effectStepSimulates_scalarSet_with_capacity
           old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
           old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
             byteOffset + 8 ≤ old.offset
+      | .float32 => ∀ old ∈ semantic.scalarFields,
+          old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
+          old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
+            byteOffset + 4 ≤ old.offset
+      | .float => ∀ old ∈ semantic.scalarFields,
+          old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
+          old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
+            byteOffset + 8 ≤ old.offset
       | _ => semantic.scalarFields.filter (fun old =>
           old.width != slotIndex || old.offset != byteOffset) = [])
     (slotIndexEq : slotIndex = info.size + info.usize)
@@ -9674,6 +10075,8 @@ theorem effectStepSimulates_scalarSet_with_capacity
       | .uint16 => byteOffset + 2 ≤ info.ssize
       | .uint32 => byteOffset + 4 ≤ info.ssize
       | .uint64 => byteOffset + 8 ≤ info.ssize
+      | .float32 => byteOffset + 4 ≤ info.ssize
+      | .float => byteOffset + 8 ≤ info.ssize
       | _ => False) :
     ∃ heap,
       EffectStepSimulates context sourceModule sourceFunction labels module
@@ -9799,8 +10202,60 @@ theorem effectStepSimulates_scalarSet_with_capacity
           · exact hParams
           · exact hResults
           · exact operation
-  | float32Bits fieldRelated => cases fieldRelated
-  | float64Bits fieldRelated => cases fieldRelated
+  | float32Bits fieldRelated =>
+      cases fieldRelated with
+      | float32Bits =>
+          obtain ⟨heap, operation, runtimeRelated, capacity, cursor⟩ :=
+            scalarSetStep_float32_of_refines_with_capacity initialRelated.1
+              objectRelated .float32Bits found live objectEq descriptorFound
+              (by simpa using historySafe) slotIndexEq
+              (by simpa using fieldFits) updated
+          refine ⟨heap, ?_, capacity, cursor⟩
+          apply effectStepSimulates_binaryHost
+            (step := scalarSetStep slotIndex byteOffset .float32)
+          · intro externals
+            simp [executeStep, coreStep, objectLookup, fieldLookup, updated]
+          · exact codeAdapted_sset objectCompiled fieldCompiled objectFound
+              fieldFound callFound continuationAdapted
+          · exact initialRelated
+          · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
+              initialRelated.2.2⟩
+          · exact hObject
+          · exact hField
+          · exact hImp
+          · exact hSat
+          · exact hi
+          · exact hContract
+          · exact hParams
+          · exact hResults
+          · exact operation
+  | float64Bits fieldRelated =>
+      cases fieldRelated with
+      | float64Bits =>
+          obtain ⟨heap, operation, runtimeRelated, capacity, cursor⟩ :=
+            scalarSetStep_float64_of_refines_with_capacity initialRelated.1
+              objectRelated .float64Bits found live objectEq descriptorFound
+              (by simpa using historySafe) slotIndexEq
+              (by simpa using fieldFits) updated
+          refine ⟨heap, ?_, capacity, cursor⟩
+          apply effectStepSimulates_binaryHost
+            (step := scalarSetStep slotIndex byteOffset .float)
+          · intro externals
+            simp [executeStep, coreStep, objectLookup, fieldLookup, updated]
+          · exact codeAdapted_sset objectCompiled fieldCompiled objectFound
+              fieldFound callFound continuationAdapted
+          · exact initialRelated
+          · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
+              initialRelated.2.2⟩
+          · exact hObject
+          · exact hField
+          · exact hImp
+          · exact hSat
+          · exact hi
+          · exact hContract
+          · exact hParams
+          · exact hResults
+          · exact operation
 
 theorem effectStepSimulates_scalarSet
     {context : Fir.Wasm.Context}
@@ -9871,6 +10326,14 @@ theorem effectStepSimulates_scalarSet
           old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
           old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
             byteOffset + 8 ≤ old.offset
+      | .float32 => ∀ old ∈ semantic.scalarFields,
+          old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
+          old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
+            byteOffset + 4 ≤ old.offset
+      | .float => ∀ old ∈ semantic.scalarFields,
+          old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
+          old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
+            byteOffset + 8 ≤ old.offset
       | _ => semantic.scalarFields.filter (fun old =>
           old.width != slotIndex || old.offset != byteOffset) = [])
     (slotIndexEq : slotIndex = info.size + info.usize)
@@ -9879,6 +10342,8 @@ theorem effectStepSimulates_scalarSet
       | .uint16 => byteOffset + 2 ≤ info.ssize
       | .uint32 => byteOffset + 4 ≤ info.ssize
       | .uint64 => byteOffset + 8 ≤ info.ssize
+      | .float32 => byteOffset + 4 ≤ info.ssize
+      | .float => byteOffset + 8 ≤ info.ssize
       | _ => False) :
     ∃ heap,
       EffectStepSimulates context sourceModule sourceFunction labels module

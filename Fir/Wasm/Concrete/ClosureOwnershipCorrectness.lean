@@ -33,7 +33,8 @@ theorem ValueRel.ownershipOfObjectField
       exact ⟨_, rfl, .intro .tobject admissible (.tobject reference)⟩
   | erased =>
       exact ⟨_, rfl, .intro .erased admissible .erased⟩
-  | reuseNone | reuseSome | uint8 | uint16 | uint32 | uint64 | usize =>
+  | reuseNone | reuseSome | uint8 | uint16 | uint32 | uint64 |
+      float32Bits | float64Bits | usize =>
       simp [AbiKind.isObjectField] at admissible
 
 /-- A capture rejected by the concrete ownership filter cannot be a semantic
@@ -50,7 +51,8 @@ private theorem ValueRel.releaseNoOp_of_notObjectField
   cases related with
   | object | tagged | tobject | erased =>
       simp [AbiKind.isObjectField] at rejected
-  | reuseNone | reuseSome | uint8 | uint16 | uint32 | uint64 | usize => rfl
+  | reuseNone | reuseSome | uint8 | uint16 | uint32 | uint64 |
+      float32Bits | float64Bits | usize => rfl
 
 /-- Filtering statically non-owning closure captures preserves FIR's release
 fold because every omitted typed value takes the semantic no-op branch. -/
@@ -147,7 +149,8 @@ theorem ValueRel.retainNoOp_of_notObjectField
   cases related with
   | object | tagged | tobject | erased =>
       simp [AbiKind.isObjectField] at rejected
-  | reuseNone | reuseSome | uint8 | uint16 | uint32 | uint64 | usize => rfl
+  | reuseNone | reuseSome | uint8 | uint16 | uint32 | uint64 |
+      float32Bits | float64Bits | usize => rfl
 
 /-- Filtering statically non-owning closure captures preserves the semantic
 application-retain fold because every omitted value is a typed no-op. -/

@@ -1343,8 +1343,10 @@ theorem PhysicalValueRel.objectFieldWord
       exact ⟨_, rfl, valueRelated⟩
   | word64 valueRelated =>
       cases valueRelated <;> simp [AbiKind.isObjectField] at objectField
-  | float32Bits valueRelated => cases valueRelated
-  | float64Bits valueRelated => cases valueRelated
+  | float32Bits valueRelated =>
+      cases valueRelated <;> simp [AbiKind.isObjectField] at objectField
+  | float64Bits valueRelated =>
+      cases valueRelated <;> simp [AbiKind.isObjectField] at objectField
 
 /--
 The compiled/evaluated argument relation constructively decodes every
@@ -5307,14 +5309,14 @@ inductive USizeFieldEffectSupported
       USizeFieldEffectSupported context sourceRuntime sourceEnv
         (.uset objectId index fieldId continuation) continuation nextRuntime
 
-/-- The four packed-integer ABI kinds implemented by the concrete scalar
-setter. Float and non-scalar kinds remain outside this fragment. -/
-def PackedIntegerAbiKind : AbiKind → Prop
-  | .uint8 | .uint16 | .uint32 | .uint64 => True
+/-- The six packed scalar ABI kinds implemented by the concrete scalar
+setter. Floating lanes retain their exact raw bit patterns. -/
+def PackedScalarAbiKind : AbiKind → Prop
+  | .uint8 | .uint16 | .uint32 | .uint64 | .float32 | .float => True
   | _ => False
 
 /--
-The source typing/layout condition needed by one packed-integer field write.
+The source typing/layout condition needed by one packed scalar field write.
 
 The width-indexed separation premise preserves every retained scalar field;
 the descriptor coordinates identify the packed region and prove the selected
@@ -5340,6 +5342,14 @@ def ScalarFieldMutationSafe
         old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
         old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
           byteOffset + 8 ≤ old.offset
+    | .float32 => ∀ old ∈ semantic.scalarFields,
+        old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
+        old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
+          byteOffset + 4 ≤ old.offset
+    | .float => ∀ old ∈ semantic.scalarFields,
+        old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
+        old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
+          byteOffset + 8 ≤ old.offset
     | _ => semantic.scalarFields.filter (fun old =>
         old.width != slotIndex || old.offset != byteOffset) = []) ∧
   slotIndex = info.size + info.usize ∧
@@ -5348,10 +5358,12 @@ def ScalarFieldMutationSafe
     | .uint16 => byteOffset + 2 ≤ info.ssize
     | .uint32 => byteOffset + 4 ≤ info.ssize
     | .uint64 => byteOffset + 8 ≤ info.ssize
+    | .float32 => byteOffset + 4 ≤ info.ssize
+    | .float => byteOffset + 8 ≤ info.ssize
     | _ => False
 
 /--
-Source/compiler-facing admission for successful packed-integer field mutation.
+Source/compiler-facing admission for successful packed scalar field mutation.
 
 The universally quantified layout premise is the source typing judgment
 connecting any refined constructor descriptor to the supported packed
@@ -8760,7 +8772,7 @@ theorem ConcreteSupportedFunction.scalarSetCall
       callIndex? sourceModule
           (.runtime (.scalarSet slotIndex byteOffset fieldKind)) =
         some id)
-    (supportedKind : PackedIntegerAbiKind fieldKind) :
+    (supportedKind : PackedScalarAbiKind fieldKind) :
     ∃ imp,
       target.wasmModule.imports[id]? = some imp ∧
         id < target.wasmModule.imports.length ∧
@@ -8778,10 +8790,11 @@ theorem ConcreteSupportedFunction.scalarSetCall
             scalarSetStep slotIndex byteOffset fieldKind initial args)
     have supported :
         fieldKind = .uint8 ∨ fieldKind = .uint16 ∨
-          fieldKind = .uint32 ∨ fieldKind = .uint64 := by
-      cases fieldKind <;> simp [PackedIntegerAbiKind] at supportedKind ⊢
+          fieldKind = .uint32 ∨ fieldKind = .uint64 ∨
+          fieldKind = .float32 ∨ fieldKind = .float := by
+      cases fieldKind <;> simp [PackedScalarAbiKind] at supportedKind ⊢
     have resolved :=
-      hostFn?_scalarSet_of_packedInteger
+      hostFn?_scalarSet_of_packedScalar
         (slotIndex := slotIndex) (byteOffset := byteOffset) supported
     simpa only [resolvedContract?, resolved, Option.map_some, scalarSetFn]
       using contracted
@@ -9664,11 +9677,11 @@ theorem
               stateRelated.1 tobjectRelated decoded
           obtain ⟨historySafe, slotIndexEq, fieldFits⟩ :=
             layoutSafe tobjectRelated descriptorFound
-          have fieldSupported : PackedIntegerAbiKind fieldKind := by
+          have fieldSupported : PackedScalarAbiKind fieldKind := by
             cases fieldKind <;>
-              simp [PackedIntegerAbiKind] at fieldFits ⊢
+              simp [PackedScalarAbiKind] at fieldFits ⊢
           cases fieldKind <;>
-            simp [PackedIntegerAbiKind] at fieldSupported
+            simp [PackedScalarAbiKind] at fieldSupported
           all_goals
             obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
               supportedExport.scalarSetCall callFound (by trivial)
@@ -20262,11 +20275,11 @@ theorem
               stateRelated.1 tobjectRelated decoded
           obtain ⟨historySafe, slotIndexEq, fieldFits⟩ :=
             layoutSafe tobjectRelated descriptorFound
-          have fieldSupported : PackedIntegerAbiKind fieldKind := by
+          have fieldSupported : PackedScalarAbiKind fieldKind := by
             cases fieldKind <;>
-              simp [PackedIntegerAbiKind] at fieldFits ⊢
+              simp [PackedScalarAbiKind] at fieldFits ⊢
           cases fieldKind <;>
-            simp [PackedIntegerAbiKind] at fieldSupported
+            simp [PackedScalarAbiKind] at fieldSupported
           all_goals
             obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
               supportedExport.scalarSetCall callFound (by trivial)

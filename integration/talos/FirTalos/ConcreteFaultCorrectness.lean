@@ -1511,7 +1511,8 @@ theorem concreteFaultLeaf_scalarProjection_deadObject
     (dead : cell.live = false)
     (supported :
       resultKind = .uint8 ∨ resultKind = .uint16 ∨
-        resultKind = .uint32 ∨ resultKind = .uint64)
+        resultKind = .uint32 ∨ resultKind = .uint64 ∨
+          resultKind = .float32 ∨ resultKind = .float)
     (hImp : module.imports[id]? = some imp)
     (hSat : hostEnv.Satisfies module hostSpec)
     (hi : id < module.imports.length)
@@ -3699,8 +3700,50 @@ theorem concreteFaultLeaf_scalarSet_deadObject
             (failure := .sourceAddress (.deadObject objectWord))
             sourceFault adapted initialRelated hObject hField hImp hSat hi
             hContract hParams operation failureRelated
-  | float32Bits fieldRelated => cases fieldRelated
-  | float64Bits fieldRelated => cases fieldRelated
+  | float32Bits fieldRelated =>
+      cases fieldRelated with
+      | float32Bits =>
+          rename_i bits
+          obtain ⟨operation, semanticFailure, failureRelated⟩ :=
+            scalarSetStep_float32_deadObject_of_refines
+              (bits := bits) (slotIndex := slotIndex) (byteOffset := byteOffset)
+              initialRelated.1 objectRelated .float32Bits found dead
+          have sourceFault :
+              ExecEvaluates sourceExternals
+                (sourceCodeState context sourceRuntime sourceEnv
+                  (.sset objectId slotIndex byteOffset fieldId type
+                    continuation))
+                (FaultObservation sourceRuntime (.deadObject location)) := by
+            apply sourceCodeFault_execEvaluates
+            simp [executeStep, coreStep, sourceCodeState, objectLookup,
+              fieldLookup, semanticFailure, fail, observe, FaultObservation]
+          exact concreteFaultLeaf_binaryHostEffect
+            (step := scalarSetStep slotIndex byteOffset .float32)
+            (failure := .sourceAddress (.deadObject objectWord))
+            sourceFault adapted initialRelated hObject hField hImp hSat hi
+            hContract hParams operation failureRelated
+  | float64Bits fieldRelated =>
+      cases fieldRelated with
+      | float64Bits =>
+          rename_i bits
+          obtain ⟨operation, semanticFailure, failureRelated⟩ :=
+            scalarSetStep_float64_deadObject_of_refines
+              (bits := bits) (slotIndex := slotIndex) (byteOffset := byteOffset)
+              initialRelated.1 objectRelated .float64Bits found dead
+          have sourceFault :
+              ExecEvaluates sourceExternals
+                (sourceCodeState context sourceRuntime sourceEnv
+                  (.sset objectId slotIndex byteOffset fieldId type
+                    continuation))
+                (FaultObservation sourceRuntime (.deadObject location)) := by
+            apply sourceCodeFault_execEvaluates
+            simp [executeStep, coreStep, sourceCodeState, objectLookup,
+              fieldLookup, semanticFailure, fail, observe, FaultObservation]
+          exact concreteFaultLeaf_binaryHostEffect
+            (step := scalarSetStep slotIndex byteOffset .float)
+            (failure := .sourceAddress (.deadObject objectWord))
+            sourceFault adapted initialRelated hObject hField hImp hSat hi
+            hContract hParams operation failureRelated
 
 /-- Stale constructor-tag mutation faults before updating the header or
 entering its continuation. -/

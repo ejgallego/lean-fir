@@ -1082,6 +1082,284 @@ theorem LiveHeapRel.writeScalarUInt32Field_refines
       slotIndexEq fieldFits
   exact ⟨result, nextRuntime, concrete, semanticOperation, finalRelated⟩
 
+/-- Whole-heap refinement for a successful packed `Float32` mutation. The
+source and concrete executions agree on the exact IEEE-754 bit pattern. -/
+theorem LiveHeapRel.writeScalarFloat32Field_refines_with_capacity
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    {semantic : ConstructorObject} {info : LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (descriptorFound : witness.descriptors.lookup? address =
+      some (.constructor info fieldKinds))
+    (slotIndex byteOffset : Nat) (bits : UInt32)
+    (retainedDisjoint : ∀ field ∈ semantic.scalarFields,
+      field.width ≠ slotIndex ∨ field.offset ≠ byteOffset →
+      field.offset + scalarValueByteSize field.value ≤ byteOffset ∨
+        byteOffset + 4 ≤ field.offset)
+    (slotIndexEq : slotIndex = info.size + info.usize)
+    (fieldFits : byteOffset + 4 ≤ info.ssize) :
+    ∃ result nextRuntime,
+      Fir.Wasm.Concrete.writeScalarUInt32Field state address slotIndex byteOffset
+        bits = .ok result ∧
+      Fir.LeanIR.Impure.setScalarField runtime (.object (.heap location))
+        slotIndex byteOffset (.scalar (.float32Bits bits)) = .ok nextRuntime ∧
+      LiveHeapRel result witness nextRuntime ∧
+      MappedHeaderCapacityTransport state result witness ∧
+      result.heapCursor = state.heapCursor := by
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  let updatedSemantic : ConstructorObject := {
+    semantic with
+      scalarFields := {
+        width := slotIndex
+        offset := byteOffset
+        value := .float32Bits bits } :: semantic.scalarFields.filter fun old =>
+          old.width != slotIndex || old.offset != byteOffset }
+  let replacement : HeapCell := { cell with object := .ctor updatedSemantic }
+  cases targetRelated with
+  | constructor descriptor storedObjectEq objectRelated headerRead headerKind
+      refCount persistent cellLive =>
+      rw [descriptor] at descriptorFound
+      have descriptorEq := Option.some.inj descriptorFound
+      cases descriptorEq
+      rw [objectEq] at storedObjectEq
+      have semanticEq := HeapObject.ctor.inj storedObjectEq
+      subst semantic
+      obtain ⟨result, targetHeader, operation, targetRawRead, targetFrame,
+          finalValid⟩ :=
+        objectRelated.writeScalarUInt32Field_targetFrame related.frontier
+          slotIndex byteOffset bits slotIndexEq fieldFits
+      obtain ⟨localResult, localOperation, _, _, _, _, objectAfter⟩ :=
+        objectRelated.writeScalarFloat32Field slotIndex byteOffset bits
+          retainedDisjoint slotIndexEq fieldFits
+      rw [operation] at localOperation
+      have resultMatch := Except.ok.inj localOperation
+      subst localResult
+      have targetAfter : CellRel result witness address replacement := by
+        apply CellRel.live
+        apply LiveCellRel.constructor descriptor (by rfl)
+          (by simpa [updatedSemantic] using objectAfter)
+          (by rw [targetFrame.targetLiveHeader]; exact headerRead) headerKind
+        · simpa [replacement] using refCount
+        · simpa [replacement] using persistent
+        · simpa [replacement] using cellLive
+      obtain ⟨nextRuntime, semanticSet, heapRelated⟩ :=
+        related.setCell_of_targetMutation mapped found descriptor targetRawRead
+          targetFrame finalValid targetAfter
+      have sourceOperation :
+          Fir.LeanIR.Impure.setScalarField runtime (.object (.heap location))
+            slotIndex byteOffset (.scalar (.float32Bits bits)) =
+              .ok nextRuntime := by
+        simp [Fir.LeanIR.Impure.setScalarField, modifyConstructor, getConstructor,
+          getLiveCell, Bind.bind, Except.bind, found, live, objectEq]
+        simp only [pure, Except.pure]
+        change setCell runtime location replacement = .ok nextRuntime
+        exact semanticSet
+      have capacity :=
+        related.mappedHeaderCapacity_of_targetMutation descriptor targetRawRead
+          targetFrame
+      exact ⟨result, nextRuntime, operation, sourceOperation, heapRelated,
+        capacity, targetFrame.cursor⟩
+  | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | natural descriptor storedObjectEq headerRead headerKind marker extent
+      limbsFit decoded refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | integer descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | array descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, storedObjectEq⟩ := closureRelated.objectEq
+      rw [objectEq] at storedObjectEq
+      contradiction
+
+theorem LiveHeapRel.writeScalarFloat32Field_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    {semantic : ConstructorObject} {info : LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (descriptorFound : witness.descriptors.lookup? address =
+      some (.constructor info fieldKinds))
+    (slotIndex byteOffset : Nat) (bits : UInt32)
+    (retainedDisjoint : ∀ field ∈ semantic.scalarFields,
+      field.width ≠ slotIndex ∨ field.offset ≠ byteOffset →
+      field.offset + scalarValueByteSize field.value ≤ byteOffset ∨
+        byteOffset + 4 ≤ field.offset)
+    (slotIndexEq : slotIndex = info.size + info.usize)
+    (fieldFits : byteOffset + 4 ≤ info.ssize) :
+    ∃ result nextRuntime,
+      Fir.Wasm.Concrete.writeScalarUInt32Field state address slotIndex byteOffset
+        bits = .ok result ∧
+      Fir.LeanIR.Impure.setScalarField runtime (.object (.heap location))
+        slotIndex byteOffset (.scalar (.float32Bits bits)) = .ok nextRuntime ∧
+      LiveHeapRel result witness nextRuntime := by
+  obtain ⟨result, nextRuntime, concrete, semanticOperation, finalRelated, _, _⟩ :=
+    related.writeScalarFloat32Field_refines_with_capacity mapped found live
+      objectEq descriptorFound slotIndex byteOffset bits retainedDisjoint
+      slotIndexEq fieldFits
+  exact ⟨result, nextRuntime, concrete, semanticOperation, finalRelated⟩
+
+/-- Whole-heap refinement for a successful packed `Float` mutation. The
+source and concrete executions agree on the exact IEEE-754 bit pattern. -/
+theorem LiveHeapRel.writeScalarFloat64Field_refines_with_capacity
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    {semantic : ConstructorObject} {info : LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (descriptorFound : witness.descriptors.lookup? address =
+      some (.constructor info fieldKinds))
+    (slotIndex byteOffset : Nat) (bits : UInt64)
+    (retainedDisjoint : ∀ field ∈ semantic.scalarFields,
+      field.width ≠ slotIndex ∨ field.offset ≠ byteOffset →
+      field.offset + scalarValueByteSize field.value ≤ byteOffset ∨
+        byteOffset + 8 ≤ field.offset)
+    (slotIndexEq : slotIndex = info.size + info.usize)
+    (fieldFits : byteOffset + 8 ≤ info.ssize) :
+    ∃ result nextRuntime,
+      Fir.Wasm.Concrete.writeScalarUInt64Field state address slotIndex byteOffset
+        bits = .ok result ∧
+      Fir.LeanIR.Impure.setScalarField runtime (.object (.heap location))
+        slotIndex byteOffset (.scalar (.float64Bits bits)) = .ok nextRuntime ∧
+      LiveHeapRel result witness nextRuntime ∧
+      MappedHeaderCapacityTransport state result witness ∧
+      result.heapCursor = state.heapCursor := by
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  let updatedSemantic : ConstructorObject := {
+    semantic with
+      scalarFields := {
+        width := slotIndex
+        offset := byteOffset
+        value := .float64Bits bits } :: semantic.scalarFields.filter fun old =>
+          old.width != slotIndex || old.offset != byteOffset }
+  let replacement : HeapCell := { cell with object := .ctor updatedSemantic }
+  cases targetRelated with
+  | constructor descriptor storedObjectEq objectRelated headerRead headerKind
+      refCount persistent cellLive =>
+      rw [descriptor] at descriptorFound
+      have descriptorEq := Option.some.inj descriptorFound
+      cases descriptorEq
+      rw [objectEq] at storedObjectEq
+      have semanticEq := HeapObject.ctor.inj storedObjectEq
+      subst semantic
+      obtain ⟨result, targetHeader, operation, targetRawRead, targetFrame,
+          finalValid⟩ :=
+        objectRelated.writeScalarUInt64Field_targetFrame related.frontier
+          slotIndex byteOffset bits slotIndexEq fieldFits
+      obtain ⟨localResult, localOperation, _, _, _, _, objectAfter⟩ :=
+        objectRelated.writeScalarFloat64Field slotIndex byteOffset bits
+          retainedDisjoint slotIndexEq fieldFits
+      rw [operation] at localOperation
+      have resultMatch := Except.ok.inj localOperation
+      subst localResult
+      have targetAfter : CellRel result witness address replacement := by
+        apply CellRel.live
+        apply LiveCellRel.constructor descriptor (by rfl)
+          (by simpa [updatedSemantic] using objectAfter)
+          (by rw [targetFrame.targetLiveHeader]; exact headerRead) headerKind
+        · simpa [replacement] using refCount
+        · simpa [replacement] using persistent
+        · simpa [replacement] using cellLive
+      obtain ⟨nextRuntime, semanticSet, heapRelated⟩ :=
+        related.setCell_of_targetMutation mapped found descriptor targetRawRead
+          targetFrame finalValid targetAfter
+      have sourceOperation :
+          Fir.LeanIR.Impure.setScalarField runtime (.object (.heap location))
+            slotIndex byteOffset (.scalar (.float64Bits bits)) =
+              .ok nextRuntime := by
+        simp [Fir.LeanIR.Impure.setScalarField, modifyConstructor, getConstructor,
+          getLiveCell, Bind.bind, Except.bind, found, live, objectEq]
+        simp only [pure, Except.pure]
+        change setCell runtime location replacement = .ok nextRuntime
+        exact semanticSet
+      have capacity :=
+        related.mappedHeaderCapacity_of_targetMutation descriptor targetRawRead
+          targetFrame
+      exact ⟨result, nextRuntime, operation, sourceOperation, heapRelated,
+        capacity, targetFrame.cursor⟩
+  | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | natural descriptor storedObjectEq headerRead headerKind marker extent
+      limbsFit decoded refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | integer descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | array descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, storedObjectEq⟩ := closureRelated.objectEq
+      rw [objectEq] at storedObjectEq
+      contradiction
+
+theorem LiveHeapRel.writeScalarFloat64Field_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    {semantic : ConstructorObject} {info : LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (descriptorFound : witness.descriptors.lookup? address =
+      some (.constructor info fieldKinds))
+    (slotIndex byteOffset : Nat) (bits : UInt64)
+    (retainedDisjoint : ∀ field ∈ semantic.scalarFields,
+      field.width ≠ slotIndex ∨ field.offset ≠ byteOffset →
+      field.offset + scalarValueByteSize field.value ≤ byteOffset ∨
+        byteOffset + 8 ≤ field.offset)
+    (slotIndexEq : slotIndex = info.size + info.usize)
+    (fieldFits : byteOffset + 8 ≤ info.ssize) :
+    ∃ result nextRuntime,
+      Fir.Wasm.Concrete.writeScalarUInt64Field state address slotIndex byteOffset
+        bits = .ok result ∧
+      Fir.LeanIR.Impure.setScalarField runtime (.object (.heap location))
+        slotIndex byteOffset (.scalar (.float64Bits bits)) = .ok nextRuntime ∧
+      LiveHeapRel result witness nextRuntime := by
+  obtain ⟨result, nextRuntime, concrete, semanticOperation, finalRelated, _, _⟩ :=
+    related.writeScalarFloat64Field_refines_with_capacity mapped found live
+      objectEq descriptorFound slotIndex byteOffset bits retainedDisjoint
+      slotIndexEq fieldFits
+  exact ⟨result, nextRuntime, concrete, semanticOperation, finalRelated⟩
+
 /-- Whole-heap refinement for a successful packed `UInt16` mutation. -/
 theorem LiveHeapRel.writeScalarUInt16Field_refines_with_capacity
     {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
