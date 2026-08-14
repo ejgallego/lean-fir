@@ -15,74 +15,75 @@ inductive PruneError where
   | invalidOutput (error : SymbolicError)
   deriving Inhabited, Repr
 
-private def addUnique (names : Array Name) (name : Name) : Array Name :=
-  if names.contains name then names else names.push name
-
-private partial def instructionCalls (names : Array Name) :
-    Instruction → Array Name
-  | .call (.declaration name) => addUnique names name
-  | .block _ body | .loop _ body => body.foldl instructionCalls names
+private partial def instructionCalls (pending : List Name) :
+    Instruction → List Name
+  | .call (.declaration name) => name :: pending
+  | .block _ body | .loop _ body => body.foldl instructionCalls pending
   | .ifElse thenBody elseBody =>
-      elseBody.foldl instructionCalls (thenBody.foldl instructionCalls names)
-  | _ => names
+      elseBody.foldl instructionCalls (thenBody.foldl instructionCalls pending)
+  | _ => pending
 
-private def functionCalls (function : Function) : Array Name :=
-  function.body.foldl instructionCalls #[]
+private def functionCalls (function : Function) (pending : List Name) : List Name :=
+  function.body.foldl instructionCalls pending
 
-private partial def reachableNames (module : Module) (pending : List Name)
-    (seen : Array Name := #[]) : Except PruneError (Array Name) := do
+private partial def reachableNames (functions : Std.HashMap Name Function)
+    (imports : Std.HashSet Name) (pending : List Name)
+    (seen : Std.HashSet Name) : Except PruneError (Std.HashSet Name) := do
   match pending with
   | [] => return seen
   | name :: pending =>
       if seen.contains name then
-        reachableNames module pending seen
-      else if let some function := module.functions.find? (·.name == name) then
-        reachableNames module ((functionCalls function).toList ++ pending)
-          (seen.push name)
-      else if module.imports.any (·.declaration? == some name) then
-        reachableNames module pending (seen.push name)
+        reachableNames functions imports pending seen
+      else if let some function := functions.get? name then
+        reachableNames functions imports (functionCalls function pending)
+          (seen.insert name)
+      else if imports.contains name then
+        reachableNames functions imports pending (seen.insert name)
       else
         throw (.missingDeclaration name)
 
-private def remapGlobalIndex (oldInitializers newInitializers : Array Name)
+private def remapGlobalIndex (oldInitializers : Array Name)
+    (newInitializerIndices : Std.HashMap Name Nat)
     (oldCacheSize newCacheSize index : Nat) : Except PruneError Nat := do
   if index < oldCacheSize then
     let ordinal := index / 2
     let lane := index % 2
     let some name := oldInitializers[ordinal]? |
       throw (.invalidCacheIndex index)
-    let some newOrdinal := newInitializers.findIdx? (· == name) |
+    let some newOrdinal := newInitializerIndices.get? name |
       throw (.removedCacheReference name)
     return 2 * newOrdinal + lane
   return newCacheSize + (index - oldCacheSize)
 
-private partial def remapInstruction (oldInitializers newInitializers : Array Name)
+private partial def remapInstruction (oldInitializers : Array Name)
+    (newInitializerIndices : Std.HashMap Name Nat)
     (oldCacheSize newCacheSize : Nat) : Instruction → Except PruneError Instruction
   | .globalGet index kind => do
-      return .globalGet (← remapGlobalIndex oldInitializers newInitializers
+      return .globalGet (← remapGlobalIndex oldInitializers newInitializerIndices
         oldCacheSize newCacheSize index) kind
   | .globalSet index kind => do
-      return .globalSet (← remapGlobalIndex oldInitializers newInitializers
+      return .globalSet (← remapGlobalIndex oldInitializers newInitializerIndices
         oldCacheSize newCacheSize index) kind
   | .block label body =>
       return .block label (← body.mapM <| remapInstruction oldInitializers
-        newInitializers oldCacheSize newCacheSize)
+        newInitializerIndices oldCacheSize newCacheSize)
   | .loop label body =>
       return .loop label (← body.mapM <| remapInstruction oldInitializers
-        newInitializers oldCacheSize newCacheSize)
+        newInitializerIndices oldCacheSize newCacheSize)
   | .ifElse thenBody elseBody =>
       return .ifElse
-        (← thenBody.mapM <| remapInstruction oldInitializers newInitializers
+        (← thenBody.mapM <| remapInstruction oldInitializers newInitializerIndices
           oldCacheSize newCacheSize)
-        (← elseBody.mapM <| remapInstruction oldInitializers newInitializers
+        (← elseBody.mapM <| remapInstruction oldInitializers newInitializerIndices
           oldCacheSize newCacheSize)
   | instruction => return instruction
 
-private def remapFunction (oldInitializers newInitializers : Array Name)
+private def remapFunction (oldInitializers : Array Name)
+    (newInitializerIndices : Std.HashMap Name Nat)
     (oldCacheSize newCacheSize : Nat) (function : Function) :
     Except PruneError Function := do
   let body ← function.body.mapM <|
-    remapInstruction oldInitializers newInitializers oldCacheSize newCacheSize
+    remapInstruction oldInitializers newInitializerIndices oldCacheSize newCacheSize
   return { function with body }
 
 /--
@@ -95,17 +96,33 @@ def prune (module : Module) (validate : Bool := true) : Except PruneError Module
     match Fir.Wasm.validateModule module with
     | .ok () => pure ()
     | .error error => throw (.invalidInput error)
+  let functionsByName := module.functions.foldl
+    (init := Std.HashMap.emptyWithCapacity module.functions.size)
+    fun functions function => functions.insert function.name function
+  let importedDeclarations := module.imports.foldl
+    (init := Std.HashSet.emptyWithCapacity module.imports.size)
+    fun declarations import_ =>
+      match import_.declaration? with
+      | some name => declarations.insert name
+      | none => declarations
   for root in module.exports do
-    unless module.functions.any (·.name == root) do
+    unless functionsByName.contains root do
       throw (.missingRoot root)
-  let reachable ← reachableNames module module.exports.toList
-  let functions := module.functions.filter (reachable.contains ·.name)
+  let reachable ← reachableNames functionsByName importedDeclarations
+    module.exports.toList
+    (Std.HashSet.emptyWithCapacity
+      (module.functions.size + importedDeclarations.size))
+  let functions := module.functions.filter fun function =>
+    reachable.contains function.name
   let initializers := module.initializers.filter reachable.contains
+  let newInitializerIndices := initializers.zipIdx.foldl
+    (init := Std.HashMap.emptyWithCapacity initializers.size)
+    fun indices (name, index) => indices.insert name index
   let oldCacheSize := module.cacheGlobalKinds.size
   let shape : Module := { module with functions, initializers }
   let newCacheSize := shape.cacheGlobalKinds.size
   let functions ← functions.mapM <|
-    remapFunction module.initializers initializers oldCacheSize newCacheSize
+    remapFunction module.initializers newInitializerIndices oldCacheSize newCacheSize
   let runtimeOperations := Fir.Wasm.collectRuntimeOps functions
   let externalImports := module.imports.filter fun import_ =>
     match import_.declaration? with
