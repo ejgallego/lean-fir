@@ -15,6 +15,38 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W7-CONSOLIDATED-RESIDENT-CLOSURE-ALLOCATORS`.
+- Integration owner: `root`, consuming the clean W7-2 stack on
+  `wasm/closure-allocation-consolidation`. The stack is based directly on
+  `main` at `3fee77f6` and lands through tested head `10dca27f`.
+- Runtime generation: the 3,131 lean-zip `partialApply` operations now share
+  569 resident allocator helpers by typed capture/result shape. Each call site
+  supplies stable target ID and arity; descriptor, fixed count, closure layout,
+  and ownership remain unchanged. Lean-zip complete functions fall from 5,839
+  to 3,277 and helpers from 5,265 to 2,703. Complete zero-import Wasm falls
+  from 1,753,310 to 1,622,609 bytes; styled prettyM falls from 143,042 to
+  119,843 bytes with byte-identical behavior and neutral runtime measurements.
+- Generic linker cleanup: the rewrite planner now records any `CallTarget` to
+  an instruction sequence, composes expanding rewrites in policy order, and
+  retains runtime operations introduced directly by replacement sequences.
+  A guard proves planned allocator/partial-application linking emits exactly
+  the same bytes as the materialized diagnostic path. The obsolete public
+  single-operation helper builder and retired float-capture error variant are
+  removed; live closure documentation and diagnostics match current support.
+- Acceptance: Lean Beam sync/save reports zero diagnostics. The focused
+  resident closure fixture, deterministic raw lean-zip levels 1 through 10
+  package, native/Wasm differential, independent inflate, and scratch/cache
+  reclamation gates pass. `git diff --check`, complete `make check` (125
+  harness tests, 701 native/LCNF/V8 source cases, 9 direct-machine cases,
+  2,112/2,112 aggregate comparisons), all 3,148 Talos jobs, and the complete
+  deterministic W7 artifact gate pass. No new bug card was required.
+- Result: `main` fast-forwards through `10dca27f`. The primary W7 Array
+  hot-path audit may rebase on this accepted head. W6's semantic partialApply
+  and concrete closure-layout proofs are unchanged; future direct emitted
+  helper proofs consume the new private shape-shared helper ABI.
+
+## Latest completed integration lease
+
 - Milestone: `W6-SHARED-RESIDENT-ARRAY-COPY-REFINEMENT`.
 - Integration owner: `root`, consuming the clean `wasm/talos-runtime`
   handoff based on accepted generic-Array main `515bf401`. The functional
