@@ -1840,6 +1840,175 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_ordinaryDelete_of_step
   exact related.advanceCode related.core.validation.delContinuation
     (pointwise.advance_ordinaryDelete_of_step supported sourceStep)
 
+section ClosedMutation
+
+variable
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime nextRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+
+/-- Constructor-tag mutation preserves the closed active-and-suspended
+validation relation across its exact generated two-step prefix. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_constructorTag_of_step
+    {objectId : Lean.FVarId} {tag : Nat}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.setTag objectId tag continuation) targetStore targetLocals targetCode
+      witness source target)
+    (supported : ConstructorTagEffectSupported context sourceRuntime sourceEnv
+      (.setTag objectId tag continuation) continuation nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter := by
+  have pointwise := related.toPointwise
+    (ConcreteStructuredCodeStepAdmission.constructorTag supported) (by omega)
+  exact related.advanceCode related.core.validation.setTagContinuation
+    (pointwise.advance_constructorTag_of_step supported sourceStep)
+
+/-- Object-reference field mutation preserves closed validation across its
+exact generated three-step prefix. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_objectFieldFVar_of_step
+    {objectId fieldId : Lean.FVarId} {index : Nat}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.oset objectId index (.fvar fieldId) continuation) targetStore
+      targetLocals targetCode witness source target)
+    (supported : ObjectFieldFVarEffectSupported context sourceRuntime sourceEnv
+      (.oset objectId index (.fvar fieldId) continuation) continuation
+      nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter := by
+  have pointwise := related.toPointwise
+    (ConcreteStructuredCodeStepAdmission.objectFieldFVar supported) (by omega)
+  exact related.advanceCode related.core.validation.osetContinuation
+    (pointwise.advance_objectFieldFVar_of_step supported sourceStep)
+
+/-- Erased object-field mutation preserves closed validation while the target
+writes the canonical erased physical zero. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_objectFieldErased_of_step
+    {objectId : Lean.FVarId} {index : Nat}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.oset objectId index .erased continuation) targetStore targetLocals
+      targetCode witness source target)
+    (supported : ObjectFieldErasedEffectSupported context sourceRuntime
+      sourceEnv (.oset objectId index .erased continuation) continuation
+      nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter := by
+  have pointwise := related.toPointwise
+    (ConcreteStructuredCodeStepAdmission.objectFieldErased supported) (by omega)
+  exact related.advanceCode related.core.validation.osetContinuation
+    (pointwise.advance_objectFieldErased_of_step supported sourceStep)
+
+/-- `USize` slot mutation preserves the closed relation across its exact
+generated three-step prefix. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_usizeField_of_step
+    {objectId fieldId : Lean.FVarId} {index : Nat}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.uset objectId index fieldId continuation) targetStore targetLocals
+      targetCode witness source target)
+    (supported : USizeFieldEffectSupported context sourceRuntime sourceEnv
+      (.uset objectId index fieldId continuation) continuation nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter := by
+  have pointwise := related.toPointwise
+    (ConcreteStructuredCodeStepAdmission.usizeField supported) (by omega)
+  exact related.advanceCode related.core.validation.usetContinuation
+    (pointwise.advance_usizeField_of_step supported sourceStep)
+
+/-- Packed-integer scalar mutation preserves the closed relation across its
+descriptor/layout-checked three-step prefix. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_scalarField_of_step
+    {objectId fieldId : Lean.FVarId} {slotIndex byteOffset : Nat}
+    {type : Lean.Expr}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.sset objectId slotIndex byteOffset fieldId type continuation) targetStore
+      targetLocals targetCode witness source target)
+    (supported : ScalarFieldEffectSupported context sourceRuntime sourceEnv
+      (.sset objectId slotIndex byteOffset fieldId type continuation)
+      continuation nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter := by
+  have pointwise := related.toPointwise
+    (ConcreteStructuredCodeStepAdmission.scalarField supported) (by omega)
+  exact related.advanceCode related.core.validation.ssetContinuation
+    (pointwise.advance_scalarField_of_step supported sourceStep)
+
+end ClosedMutation
+
 /-- Return validation identifies the residual local kind and the exact
 compiler-level compatibility check against the active result ABI. -/
 theorem ConcreteStructuredValidationFocus.return_eq
