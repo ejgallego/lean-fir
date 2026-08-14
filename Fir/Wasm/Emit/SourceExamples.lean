@@ -219,7 +219,7 @@ run_cmd do
   let classical ← liftCoreM <|
     sourceDeclarationIsCompilable env ``Classical.ofNonempty
   if classical then
-    throwError "final source discovery admitted Classical.ofNonempty"
+    throwError "final source discovery accepted noncomputable Classical.ofNonempty"
   let fixture ← liftCoreM <|
     sourceDeclarationIsCompilable env ``idFloatFixture
   unless fixture do
