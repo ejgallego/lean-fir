@@ -105,3 +105,11 @@ math runtime. Its published module has zero imports. The browser adapter
 reserves `STANDARD_MATH_RUNTIME_RESERVED_MEMORY_BYTES` before lazy-cache
 publication or Lean allocation, and the package records both frontier and
 complete identities plus the runtime source, contract, and Emscripten identity.
+
+For performance characterization, `array-scaling-bench.mjs` runs one
+diagnostics-free, warmed level-6 workload and emits raw execute samples, input
+and output hashes, and the post-rewind frontier. It is a measurement seed, not
+an absolute-time test: compare identified baseline and candidate packages with
+an order-balanced harness and retain the raw process rows. The `random` family
+exercises the Array-heavy matcher path at caller-selected sizes; `structured`
+retains the deterministic mixed-text control.

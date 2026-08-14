@@ -154,6 +154,19 @@ export async function checkResidentArrays(bytes) {
     "resident List.cons allocator export");
   equal(typeof release, "function", "array release export");
 
+  const malformed = exports.fir_heap_alloc(32);
+  const malformedView = new DataView(exports.memory.buffer);
+  malformedView.setUint32(malformed, KIND_CONSTRUCTOR, true);
+  malformedView.setUint32(malformed + 4, LIVE, true);
+  malformedView.setUint32(malformed + 8, 1, true);
+  malformedView.setUint32(malformed + 12, 32, true);
+  malformedView.setUint32(malformed + 16, 0x41525259, true);
+  malformedView.setUint32(malformed + 20, 0, true);
+  malformedView.setUint32(malformed + 24, 0, true);
+  malformedView.setUint32(malformed + 28, 0, true);
+  expectTrap(() => ugetBorrowed(0, malformed, 0n, 0),
+    "checked Array.ugetBorrowed malformed kind");
+
   let inputList = 1;
   const inputListAddresses = [];
   for (const value of [3, 2, 1]) {

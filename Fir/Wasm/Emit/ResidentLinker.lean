@@ -65,6 +65,8 @@ inductive Step where
   | floatAvailable
   | arraysStrict
   | arraysAvailable
+  | arraysTrustedStrict
+  | arraysTrustedAvailable
   | byteArraysAvailable
   | natModStrict
   | natModAvailable
@@ -108,8 +110,12 @@ private def validatePolicy (policy : Policy) : Except Source.CompileError Unit :
     throw (.manifest "resident linker policy selects both strict and available Numeric linking")
   if incompatiblePair policy.steps .floatStrict .floatAvailable then
     throw (.manifest "resident linker policy selects both strict and available Float linking")
-  if incompatiblePair policy.steps .arraysStrict .arraysAvailable then
-    throw (.manifest "resident linker policy selects both strict and available Array linking")
+  let arraySteps := policy.steps.filter fun step =>
+    step == .arraysStrict || step == .arraysAvailable ||
+      step == .arraysTrustedStrict || step == .arraysTrustedAvailable
+  if arraySteps.size > 1 then
+    throw (.manifest
+      s!"resident linker policy selects multiple Array linking modes: {repr arraySteps}")
   if incompatiblePair policy.steps .natModStrict .natModAvailable then
     throw (.manifest "resident linker policy selects both strict and available Nat.mod linking")
   if let some exports := policy.publicExports then
@@ -202,6 +208,12 @@ private def applyStep (validate : Bool) (step : Step) (module : Module) :
   | .arraysAvailable =>
       transform "available Array operations"
         (ResidentArray.internalizeAvailable · validate) module
+  | .arraysTrustedStrict =>
+      transform "trusted Array operations"
+        (ResidentArray.internalizeTrusted · validate) module
+  | .arraysTrustedAvailable =>
+      transform "available trusted Array operations"
+        (ResidentArray.internalizeAvailableTrusted · validate) module
   | .byteArraysAvailable =>
       transform "available ByteArray operations"
         (ResidentByteArray.internalizeAvailable · validate) module
@@ -642,14 +654,14 @@ def closedApplicationExternalDeclarations : Array Name :=
 def closedApplicationRetainedExternalNames : Array String :=
   closedApplicationExternalDeclarations.map Name.toString
 
-/-- Available external-helper families in their checked dependency order. -/
+/-- Available external-helper families in their dependency order. -/
 def closedApplicationFamilySteps : Array Step := #[
   .numericAvailable,
   .bigNumeric,
   .natArithmeticAvailable,
   .fixedWidthAvailable,
   .floatAvailable,
-  .arraysAvailable,
+  .arraysTrustedAvailable,
   .byteArraysAvailable,
   .natModAvailable,
   .natShiftAvailable,
@@ -693,6 +705,16 @@ def closedApplicationFrontierPolicy (sourceExports : Array Name) : Policy := {
 #guard !hasDuplicates prettyFormatPolicy.steps
 
 #guard !hasDuplicates (closedApplicationPolicy #[`entry]).steps
+
+#guard closedApplicationFamilySteps.contains .arraysTrustedAvailable
+
+#guard !closedApplicationFamilySteps.contains .arraysAvailable
+
+#guard match validatePolicy {
+  steps := #[.arraysAvailable, .arraysTrustedAvailable]
+} with
+  | .error _ => true
+  | .ok _ => false
 
 private def emptyPolicyProbeModule : Module := {
   imports := #[]

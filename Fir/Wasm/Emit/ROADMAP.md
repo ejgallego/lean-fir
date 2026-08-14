@@ -47,10 +47,10 @@ compiler quality.
 
 ## Ordered queue
 
-### G1. Land consolidated closure allocation
+### G1. Consolidated closure allocation (accepted)
 
-Integrate the ready generic stack on
-`wasm/closure-allocation-consolidation` through `052866ca`:
+The generic stack was accepted on `main` at `85481c67` with functional head
+`10dca27f`:
 
 - group `partialApply` allocation helpers by physical capture/result shape;
 - pass target identity and arity as data to the shared typed helper;
@@ -66,11 +66,37 @@ Recorded lean-zip effect:
 - resident frontier falls from 3,265,131 to 2,639,643 bytes; and
 - complete Wasm falls from 1,753,310 to 1,622,609 bytes, with zero imports.
 
-After integration, regenerate the immutable stored, Level-1, and raw
-lean-zip packages on accepted `main`, update exact inventory/size ratchets,
-and rerun levels 1--10 through native, independent inflate, Node, and browser
-checks. Package identities must be derived only after the compiler slice
-lands.
+### G1a. Align resident Array hot calls with Lean's trusted runtime path
+
+Lean's native Array primitives trust the typed runtime representation and keep
+dynamic work to index handling plus exclusivity for mutation. FIR's first
+resident Array implementation instead combined an O(index) address walk with a
+complete raw-header validator on every operation. Commit `1d79658d` was FIR's
+first O(1) address implementation; there was no earlier retained fast O(1)
+version. The later ownership repair `6592e2cb` expanded the common validator to
+cover live/persistent flags, reference counts, reserved lanes, and capacity,
+but did not introduce the validator itself.
+
+Keep checked standalone/public helper bodies for raw-memory diagnostics. Closed
+typed applications should consume the resident Array invariant and use trusted
+helper bodies whose suffix is exactly the checked operation after its common
+validator prefix. Bounds, reference counting, uniqueness, copy-on-write,
+allocation, and recursive release remain unchanged. Validate the split with a
+malformed-boundary trap, exact symbolic suffix guards, the real lean-zip
+native/inflate matrix, and order-balanced scaling evidence rather than a single
+absolute-time threshold. W6 separately audits that its accepted Array
+refinement supplies the trusted representation premise.
+
+The first order-balanced lean-zip measurements show the intended modest
+effect rather than a new algorithmic speedup. Four-KiB inputs were neutral;
+for deterministic random inputs the paired median raw-entry reduction was
+5.47 ms at 64 KiB (210.33 to 206.06 ms, about 2.6%) and 15.39 ms at 256 KiB
+(825.62 to 812.06 ms, about 1.9%), with all eight AB/BA pairs improving at
+both sizes. Output hashes and post-rewind frontiers were identical. The
+resident frontier shrank from 2,639,643 to 2,637,367 bytes, while the complete
+linked module grew from 1,622,609 to 1,628,872 bytes; therefore this slice is
+not a binary-size win and should not be described as closing lean-zip's larger
+native-performance gap.
 
 ### G2. Separate production and diagnostic adapter costs
 
