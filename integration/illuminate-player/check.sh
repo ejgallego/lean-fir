@@ -19,6 +19,7 @@ if test -n "$(git -C "$illuminate_root" status --porcelain)"; then
   exit 1
 fi
 
+node --test export-selection-package.test.mjs
 lake --keep-toolchain --reconfigure -KilluminateRoot="$illuminate_root" \
   build IlluminateFirNative.Examples IlluminateFirNative.SelectionExamples
 ILLUMINATE_ROOT="$illuminate_root" node package.mjs

@@ -196,6 +196,23 @@ SHA256SUMS
 smoke.mjs
 ```
 
+For a caller-owned copy, use the executable catalog boundary from an exact
+clean FIR checkout:
+
+```text
+integration/illuminate-player/export-selection-package.mjs \
+  --output OUTPUT \
+  --checkout producer=EXACT_CLEAN_FIR_CHECKOUT \
+  --checkout illuminate=EXACT_CLEAN_ILLUMINATE_CHECKOUT
+```
+
+The command accepts no dependency packages and rejects unknown checkout roles,
+dirty or mismatched checkouts, and existing or symbolic output paths. It runs
+the existing selection integration gate, then verifies and smokes the accepted
+immutable package before and after atomically moving its six regular files into
+the fresh caller-owned output. For direct local use, the compatibility form
+`ILLUMINATE_ROOT=... export-selection-package.mjs OUTPUT` remains available.
+
 The adapter API exposes `createPlayer`, generic diagnostic `dispatch`,
 constructor-specific `dispatchTick` and `dispatchTickTimed`, `disposePlayer`,
 and `replayTrace`, at capability `fir.illuminate-player.browser/v5`.
