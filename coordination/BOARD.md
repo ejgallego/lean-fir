@@ -29,7 +29,8 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   source-module replay repair and shared immutable publisher are accepted
   through `912bf68a`, and the Flat source identity is repinned to the published
   Verso 4.33 contract at `8199b6d7`. The resident linker's persistent planning
-  view is accepted at `17d576fb`. The Illuminate functional generation head is
+  view is accepted at `17d576fb`, followed by indexed resident dead-code
+  reachability at `7b9d523a`. The Illuminate functional generation head is
   `4b84f35b`; the package itself remains local-only until its consumer
   authorizes publication.
 - Landing order:
@@ -44,7 +45,8 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
      hand the validated exact-head Flat package to the Verso owner; the
      Illuminate selection export is also complete.
   4. The isolated persistent resident-linker planning view is accepted at
-     `17d576fb`; later profiling/tooling surfaces remain separate slices.
+     `17d576fb`, and indexed resident dead-code reachability is accepted at
+     `7b9d523a`; later profiling/tooling surfaces remain separate slices.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -58,6 +60,29 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
+
+## Latest completed integration lease
+
+- Milestone: `W7-RESIDENT-DEAD-CODE-INDEXING`.
+- Integration owner: `wasm-gen`, accepting isolated commit `7b9d523a` on
+  accepted `main` at `bd38983f` after confirming no overlap with the active
+  lean-zip package files.
+- Change: resident dead-code pruning now uses indexed function, import, and
+  reachable sets plus indexed initializer remapping, replacing repeated linear
+  membership and lookup scans.
+- Evidence: the clean Level-1 pruning sample decreases from 642ms to 165ms;
+  the full production sample completes in 22.883s with a 3.239s linker. The
+  linked module remains byte-identical at 331,580 bytes and SHA-256
+  `d440dfc326cb62785cc909a5c58b04344046e179602b53114e70682358fd3d59`.
+- Contracts: none. Source semantics, semantic ABI, linked artifact identity,
+  runtime/layout, ownership, resident-helper signatures, and W6 proof surfaces
+  are unchanged.
+- Acceptance: Lean Beam, `git diff --check`, complete `make check`,
+  `make talos-setup`, all 3,148 Talos jobs, and the complete
+  artifact/browser/differential gate pass.
+- Result: `main` advances through `7b9d523a`; W7-1 rebases its independent
+  lean-zip function-sidecar package before integration. The next capture
+  profiling request remains unacknowledged and therefore outside this lease.
 
 ## Latest completed integration lease
 
