@@ -131,3 +131,12 @@ root validation together with production-local agreement without a
 caller-supplied certificate. The remaining provenance work is hereditary:
 preserve aligned validation through residual code/frame transitions and use it
 in the universal current-step admission theorem.
+
+The first hereditary slice packages ordinary increment and decrement admission
+over the aligned residual invariant and carries that invariant through their
+continuations unchanged. A direct `let` continuation now extends agreement with
+the exact result binding chosen by both the validator and production compiler.
+The remaining `let` obligation is therefore syntax-local: derive that compiled
+binding from the operation-specific adaptation theorem. Join, case, call-entry,
+and suspended-frame transport remain to be connected before the universal
+current-step admission theorem can replace per-constructor hypotheses.

@@ -2435,6 +2435,43 @@ theorem ConcreteStructuredValidationState.letContinuation
           Fir.Wasm.eraseSupportedSharingFact sharing decl.fvarId),
       next⟩⟩
 
+/-- An aligned validated `let` preserves validator/compiler local agreement
+when the production compiler row contains the result binding selected by the
+validator.  The premise is syntax-local and can be discharged by the existing
+operation admission relation; it contains no dynamic execution evidence. -/
+theorem ConcreteStructuredAlignedValidationState.letContinuation
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionResult : Fir.Wasm.AbiKind}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredAlignedValidationState program context
+      functionResult (.let decl continuation))
+    (compiled : ∀ {locals kind},
+      Fir.Wasm.supportedLetDeclKind? program locals decl = some kind →
+        Fir.Wasm.getLocal context decl.fvarId =
+          .ok (.localGet decl.fvarId, kind)) :
+    ∃ kind,
+      ∃ locals,
+        Fir.Wasm.supportedLetDeclKind? program locals decl = some kind ∧
+          Fir.Wasm.getLocal context decl.fvarId =
+            .ok (.localGet decl.fvarId, kind) ∧
+          ConcreteStructuredAlignedValidationState program context
+            functionResult continuation := by
+  obtain ⟨joins, locals, facts, sharing, focus, agrees⟩ := validated
+  obtain ⟨kind, kindFound, next⟩ := focus.let_eq
+  have resultCompiled := compiled kindFound
+  exact ⟨kind, locals, kindFound, resultCompiled,
+    joins,
+    Fir.Wasm.insertLocal locals decl.fvarId kind,
+    facts,
+    (match decl.value with
+    | .isShared objectId =>
+        Fir.Wasm.insertSupportedSharingFact sharing decl.fvarId objectId
+    | _ => Fir.Wasm.eraseSupportedSharingFact sharing decl.fvarId),
+    next,
+    agrees.insert resultCompiled⟩
+
 /-- Any compiler/resource successor of a validated direct `let` continuation
 inherits the exact residual validator state, even when the concrete operation
 changes heap facts, remaining address-space budget, or refinement witness. -/
@@ -4188,6 +4225,45 @@ theorem ConcreteStructuredValidationFocus.admit_decOrdinary_of_step
       objectFields? continuation objectKind sourceObject objectCompiled
       objectRefines objectLookup updated)
 
+/-- The aligned residual package discharges ordinary-decrement admission
+directly.  This is the proof-facing form consumed by the structured relation:
+the caller supplies only the successful current source step. -/
+theorem ConcreteStructuredAlignedValidationState.admit_decOrdinary_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {expectedResult : AbiKind}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {amount : Nat}
+    {check : Bool}
+    {objectFields? : Option Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (validated : ConcreteStructuredAlignedValidationState program context
+      expectedResult
+      (.dec objectId amount check false objectFields? continuation))
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv
+      (.dec objectId amount check false objectFields? continuation)
+      targetStore targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv 0
+      (.dec objectId amount check false objectFields? continuation) := by
+  obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees⟩ := validated
+  exact focus.admit_decOrdinary_of_step agrees related sourceStep
+
 /-- Ordinary-increment validation exposes the same object-family local guard
 as decrement. -/
 theorem ConcreteStructuredValidationFocus.incOrdinary_eq
@@ -4350,6 +4426,47 @@ theorem ConcreteStructuredValidationFocus.admit_incOrdinary_of_step
       (fun location cell sourceObjectEq found =>
         fits sourceObject location cell objectLookup sourceObjectEq found))
 
+/-- The aligned residual package discharges ordinary-increment admission once
+the independent finite-header headroom condition is supplied. -/
+theorem ConcreteStructuredAlignedValidationState.admit_incOrdinary_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {expectedResult : AbiKind}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {amount : Nat}
+    {check : Bool}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (validated : ConcreteStructuredAlignedValidationState program context
+      expectedResult (.inc objectId amount check false continuation))
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv
+      (.inc objectId amount check false continuation)
+      targetStore targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (fits : ∀ (sourceObject : Value) (location : Location) (cell : HeapCell),
+      lookupValue sourceEnv objectId = .ok sourceObject →
+        sourceObject = .object (.heap location) →
+          findCell? sourceRuntime.heap location = some cell →
+            cell.rc + amount < UInt32.size) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv 0
+      (.inc objectId amount check false continuation) := by
+  obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees⟩ := validated
+  exact focus.admit_incOrdinary_of_step agrees related sourceStep fits
+
 /-- Both persistent and ordinary increments retain the validator state at
 their continuation; the ordinary branch additionally discharges its local
 kind guard inside the executable judgment. -/
@@ -4389,6 +4506,21 @@ theorem ConcreteStructuredValidationState.incContinuation
   obtain ⟨joins, locals, facts, sharing, focus⟩ := validated
   exact ⟨joins, locals, facts, sharing, focus.incContinuation⟩
 
+/-- Ownership increment also preserves the compiler/validator local-row
+agreement carried by the aligned residual package. -/
+theorem ConcreteStructuredAlignedValidationState.incContinuation
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionResult : Fir.Wasm.AbiKind}
+    {objectId : Lean.FVarId} {amount : Nat} {check persistent : Bool}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredAlignedValidationState program context
+      functionResult (.inc objectId amount check persistent continuation)) :
+    ConcreteStructuredAlignedValidationState program context functionResult
+      continuation := by
+  obtain ⟨joins, locals, facts, sharing, focus, agrees⟩ := validated
+  exact ⟨joins, locals, facts, sharing, focus.incContinuation, agrees⟩
+
 /-- Both decrement modes retain the same validator state at their
 continuation. -/
 theorem ConcreteStructuredValidationFocus.decContinuation
@@ -4427,6 +4559,23 @@ theorem ConcreteStructuredValidationState.decContinuation
     ConcreteStructuredValidationState program functionResult continuation := by
   obtain ⟨joins, locals, facts, sharing, focus⟩ := validated
   exact ⟨joins, locals, facts, sharing, focus.decContinuation⟩
+
+/-- Ownership decrement also preserves the compiler/validator local-row
+agreement carried by the aligned residual package. -/
+theorem ConcreteStructuredAlignedValidationState.decContinuation
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionResult : Fir.Wasm.AbiKind}
+    {objectId : Lean.FVarId} {amount : Nat} {check persistent : Bool}
+    {objectFields? : Option Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredAlignedValidationState program context
+      functionResult
+      (.dec objectId amount check persistent objectFields? continuation)) :
+    ConcreteStructuredAlignedValidationState program context functionResult
+      continuation := by
+  obtain ⟨joins, locals, facts, sharing, focus, agrees⟩ := validated
+  exact ⟨joins, locals, facts, sharing, focus.decContinuation, agrees⟩
 
 /-- Uniform successor transport for ownership increments. -/
 theorem ConcreteStructuredValidatedCodeCoreRel.incSuccessor
