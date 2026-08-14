@@ -53,6 +53,25 @@ function integerValue(host, physical) {
   return host.readInteger(word, header);
 }
 
+function checkNaturalAddition(host, natAdd, {
+  left,
+  right,
+  leftClass,
+  rightClass,
+  resultClass,
+}) {
+  const leftInput = naturalInput(host, left);
+  const rightInput = naturalInput(host, right);
+  assert.equal(host.classify(leftInput), leftClass,
+    `unexpected concrete class for Nat.add left operand ${left}`);
+  assert.equal(host.classify(rightInput), rightClass,
+    `unexpected concrete class for Nat.add right operand ${right}`);
+  const result = natAdd(leftInput, rightInput);
+  assert.equal(host.classify(result), resultClass,
+    `unexpected concrete class for Nat.add result ${left} + ${right}`);
+  assert.equal(naturalValue(host, result), left + right);
+}
+
 function checkStackSafeWalkers(host, {
   intOfNat,
   natAdd,
@@ -110,6 +129,50 @@ export async function checkResidentBigNumeric({ bytes, manifest }) {
   const n384 = 1n << 384n;
   const a = n256 + (1n << 129n) + 0x123456789abcdefn;
   const b = (1n << 192n) + (1n << 64n) + 0xfedcba987654321n;
+
+  const maxImmediate = 2147483647n;
+  checkNaturalAddition(host, natAdd, {
+    left: maxImmediate - 2n,
+    right: 1n,
+    leftClass: "immediate",
+    rightClass: "immediate",
+    resultClass: "immediate",
+  });
+  checkNaturalAddition(host, natAdd, {
+    left: maxImmediate - 1n,
+    right: 1n,
+    leftClass: "immediate",
+    rightClass: "immediate",
+    resultClass: "immediate",
+  });
+  checkNaturalAddition(host, natAdd, {
+    left: maxImmediate,
+    right: 1n,
+    leftClass: "immediate",
+    rightClass: "immediate",
+    resultClass: "heap",
+  });
+  checkNaturalAddition(host, natAdd, {
+    left: maxImmediate,
+    right: maxImmediate,
+    leftClass: "immediate",
+    rightClass: "immediate",
+    resultClass: "heap",
+  });
+  checkNaturalAddition(host, natAdd, {
+    left: maxImmediate + 1n,
+    right: 1n,
+    leftClass: "heap",
+    rightClass: "immediate",
+    resultClass: "heap",
+  });
+  checkNaturalAddition(host, natAdd, {
+    left: maxImmediate + 1n,
+    right: maxImmediate + 2n,
+    leftClass: "heap",
+    rightClass: "heap",
+    resultClass: "heap",
+  });
 
   assert.equal(naturalValue(host,
     natAdd(naturalInput(host, a), naturalInput(host, b))), a + b);

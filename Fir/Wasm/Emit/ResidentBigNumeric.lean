@@ -1312,28 +1312,58 @@ private def validateNaturalsAndCounts : List Instruction := [
   loadCount leftParam leftFlavorParam leftCountLocal ++
   loadCount rightParam rightFlavorParam rightCountLocal
 
+/-- Both operands use the wasm32 immediate representation.  This is a
+representation check, not a semantic relaxation: every odd object word is a
+canonical nonnegative Nat payload in the concrete ABI. -/
+private def bothNaturalsImmediate : List Instruction := [
+  .localGet leftParam,
+  .i32Const .uint32 1,
+  .i32And,
+  .localGet rightParam,
+  .i32Const .uint32 1,
+  .i32And,
+  .i32And]
+
+/-- Decode two immediate Nat payloads and reuse the existing bounded natural
+sum constructor.  That constructor returns an immediate when the sum fits and
+the canonical promoted representation when it crosses the wasm32 immediate
+boundary. -/
+private def callImmediateNaturalSum : List Instruction := [
+  .localGet leftParam,
+  .i32Const .uint32 1,
+  .i32ShrU,
+  .i32Const .uint32 0,
+  .localGet rightParam,
+  .i32Const .uint32 1,
+  .i32ShrU,
+  .i32Const .uint32 0,
+  .call (.declaration ResidentNumeric.naturalSumName)]
+
 def natAddFunction : Function := {
   name := externalName `Nat.add
   params := #[(leftParam, .tobject), (rightParam, .tobject)]
   results := #[.tobject]
   locals := naturalArithmeticLocals
-  body := [
-    .i32Const .uint32 0,
-    .localSet leftFlavorParam,
-    .i32Const .uint32 0,
-    .localSet rightFlavorParam] ++
-    validateNaturalsAndCounts ++ maxCounts ++ callSumCarry ++ [
-    .localGet resultCountLocal,
-    .i32Const .uint32 1,
-    .i32Eq,
+  body := bothNaturalsImmediate ++ [
     .ifElse
-      (callOneLimbNaturalSum ++
+      (callImmediateNaturalSum ++
         retypeRawResult .tobject objectResultLocal)
-      (allocateNatural resultCountLocal ++ [
-        .localSet rawLocal] ++
-        writeSum rawLocal ++ [
-        .localGet rawLocal] ++
-        retypeRawResult .tobject objectResultLocal)] }
+      ([.i32Const .uint32 0,
+        .localSet leftFlavorParam,
+        .i32Const .uint32 0,
+        .localSet rightFlavorParam] ++
+        validateNaturalsAndCounts ++ maxCounts ++ callSumCarry ++ [
+        .localGet resultCountLocal,
+        .i32Const .uint32 1,
+        .i32Eq,
+        .ifElse
+          (callOneLimbNaturalSum ++
+            retypeRawResult .tobject objectResultLocal)
+          (allocateNatural resultCountLocal ++ [
+            .localSet rawLocal] ++
+            writeSum rawLocal ++ [
+            .localGet rawLocal] ++
+            retypeRawResult .tobject objectResultLocal)])] }
 
 private def scanDifference (left leftFlavor right rightFlavor total : FVarId) :
     List Instruction := [
