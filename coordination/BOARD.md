@@ -24,7 +24,8 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `5081015a` and the independently isolated
   `TOOLING-FINAL-FUNCTION-INDEX-PROTOCOL` through `7d0d9b3b`, followed by the
   `S11-REPEATED-ARRAY-CHILD-FIDELITY` fixture stack through `5d673ad3` and its
-  W7 concrete-product classification through `bccfc240`. The Illuminate
+  W7 concrete-product classification through `bccfc240`. The optional generic
+  runtime-link function-evidence API is accepted at `52a98a6f`. The Illuminate
   functional generation head is `4b84f35b`; the package itself remains
   local-only until its consumer authorizes publication.
 - Landing order:
@@ -52,6 +53,39 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
+
+## Latest completed integration lease
+
+- Milestone: `WASM-RUNTIME-LINK-FUNCTION-EVIDENCE`.
+- Integration owner: `wasm-gen`, publishing isolated shared-linker commit
+  `52a98a6f` on accepted base `258f83d4` before its lean-zip package consumer.
+- Interface: `integration/wasm-runtime/link-runtime.mjs` retains its unchanged
+  three-argument default and optionally accepts paired `--function-inventory`
+  and `--function-sidecar` arguments. The evidence path uses tooling's accepted
+  prepare/restamp/optimize API across merge, meta-DCE, and the final optimizer;
+  it rejects a missing half or unknown option and publishes the sidecar only
+  after verification.
+- Release invariant: the linker always produces the ordinary stripped module,
+  independently produces the evidence-enabled stripped module, and requires
+  exact byte equality before returning. Temporary identity names therefore
+  cannot alter the application artifact.
+- Real probe: the 1,570,637-byte lean-zip frontier plus standard math runtime
+  reproduces the accepted 902,411-byte zero-import release at SHA-256
+  `d3992d5b5e5a4bd11edb93f48e0b95fbc2148a1c0b7c87b395d208e4a61e44cc`.
+  The validated sidecar indexes all 2,171 final functions: 354 surviving Lean
+  source functions, 1,811 resident helpers, and six explicitly unattributed
+  optimizer/linked-runtime functions.
+- Contracts: this adds an optional shared linker API but changes no default
+  output, semantic Wasm ABI, source semantics, concrete runtime/layout,
+  ownership rule, resident-helper signature, package schema, or W6 theorem.
+  W7 rebases before consuming it.
+- Acceptance: `git diff --check` and Node syntax validation pass; the real
+  zero-import link, final sidecar validation, and byte-identity check pass.
+  Complete `make check` passes with 702 source cases across native/LCNF/V8,
+  711 unique cases, 2,115 equal comparisons, zero findings, and 25/25 mailbox
+  tests.
+- Result: `main` advances through `52a98a6f`; W7 may checksum the sidecar as
+  non-runtime immutable package evidence.
 
 ## Latest completed integration lease
 
