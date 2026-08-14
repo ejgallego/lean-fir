@@ -7,26 +7,30 @@ reorder functions.
 
 The capture protocol is deliberately split around the existing linker:
 
-1. `prepare` replaces debug function names in a temporary input with Binaryen's
-   default numeric index names and writes their Lean identities to a capture
-   manifest. Matching Binaryen's unnamed-module convention avoids changing
-   optimizer ordering.
+1. `prepare` replaces debug function names in a temporary input with unique
+   absolute-index tokens and writes their Lean identities to a capture
+   manifest. These names exist only in identity-carrying build intermediates.
 2. After every merging, DCE, or ordering stage, `restamp` captures the stage's
    old-to-new function map in the manifest and replaces temporary names with
-   the new default numeric indices. The next stage therefore sees exactly the
-   names it would assign to an unnamed input.
+   the new absolute-index tokens.
 3. The final `wasm-opt` invocation is made through `optimize`, which adds
    `--print-function-map`; the normal stripped output remains the release
    artifact.
 4. `wasm-opt --print-call-graph` reads that final artifact without optimization.
    Binaryen may re-encode the discarded output copy, so the tool verifies its
-   numeric function map and never substitutes that copy for the release bytes.
+   final stripped function map and never substitutes that copy for the release
+   bytes. In that map imports are named `fimport$N`, while definitions are
+   named by a zero-based ordinal that excludes imports.
 5. `finalize` combines the captured map and graph with binary body sizes and
    exports, then binds the result to the release SHA-256.
 
 Functions introduced by the linker or optimizer, or functions whose temporary
 identity does not survive, remain explicitly classified as
 `optimizer-or-linked-runtime`. The sidecar never guesses a Lean name.
+
+When import/export minification is enabled, Binaryen writes rename diagnostics
+beside `--print-function-map`. The parser deliberately consumes only numeric
+`index:name` rows.
 
 Multi-module link steps must preserve the temporary name section (for Binaryen,
 pass `--debuginfo` to `wasm-merge` and `wasm-metadce`). The final `optimize`
@@ -87,4 +91,4 @@ functions. This check exercises `wasm-merge`, `wasm-metadce`, and the release
 
 This is artifact-local evidence. Browser campaign selection and comparative
 presentation remain in VIR; application corpora and semantic oracles remain in
-their client repositories, as defined in `docs/tooling/BENCHMARKING.md`.
+their client repositories.

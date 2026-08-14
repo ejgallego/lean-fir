@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 
 import {
+  binaryenOptimizerName,
   injectFunctionIdentities,
   inspectFunction,
   makeCapture,
@@ -162,14 +163,14 @@ if (command === "prepare") {
       "-o",
       graphCopy,
     ], { encoding: "utf8" });
-    const graphFunctionMap = parseFunctionMap(callGraph.split(/\r?\n/)
-      .filter((line) => /^\d+:/.test(line)).join("\n"));
+    const graphFunctionMap = parseFunctionMap(callGraph);
     const shape = moduleShape(readFileSync(wasmPath));
     assert.equal(graphFunctionMap.length, shape.functionCount,
       "call-graph read did not preserve the final function count");
     assert.deepEqual(graphFunctionMap.map(({ index, optimizerName }) =>
       [index, optimizerName]), Array.from({ length: shape.functionCount },
-      (_, index) => [index, String(index)]),
+      (_, index) => [index, binaryenOptimizerName(index,
+        shape.functionImportCount)]),
     "stripped release function order changed during call-graph read");
     assert.equal(moduleShape(readFileSync(graphCopy)).functionCount,
       shape.functionCount,

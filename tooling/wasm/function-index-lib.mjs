@@ -149,6 +149,23 @@ export function moduleShape(bytes) {
   };
 }
 
+/** Binaryen's default name for a function in a stripped module. */
+export function binaryenOptimizerName(index, functionImportCount) {
+  assert(Number.isSafeInteger(index) && index >= 0,
+    `invalid absolute Wasm function index ${index}`);
+  assert(Number.isSafeInteger(functionImportCount) && functionImportCount >= 0,
+    `invalid function import count ${functionImportCount}`);
+  return index < functionImportCount ? `fimport$${index}` :
+    String(index - functionImportCount);
+}
+
+/** Convert an absolute Wasm function index to Binaryen's defined ordinal. */
+export function definedFunctionOrdinal(index, functionImportCount) {
+  assert(Number.isSafeInteger(index) && index >= functionImportCount,
+    `function ${index} is imported and has no local body`);
+  return index - functionImportCount;
+}
+
 function isNameSection(bytes, section) {
   return section.id === 0 &&
     readName(bytes, section.payloadStart).value === "name";
@@ -310,13 +327,20 @@ export function parseFunctionMap(source) {
       continue;
     }
     const match = /^(\d+):(.*)$/.exec(line);
-    assert(match !== null, `unrecognized Binaryen function-map line: ${line}`);
+    // Binaryen's import/export minifier emits rename diagnostics on the same
+    // stream as --print-function-map. Only numeric map rows belong here.
+    if (match === null) {
+      continue;
+    }
+    assert.notEqual(match[2], "", `empty Binaryen function name at ${match[1]}`);
     entries.push({ index: Number(match[1]), optimizerName: match[2] });
   }
   entries.sort((left, right) => left.index - right.index);
   assert.deepEqual(entries.map(({ index }) => index),
     Array.from({ length: entries.length }, (_, index) => index),
     "Binaryen function map must contain every final index exactly once");
+  assert.equal(new Set(entries.map(({ optimizerName }) => optimizerName)).size,
+    entries.length, "Binaryen function names must be unique");
   return entries;
 }
 
@@ -324,9 +348,14 @@ function dotName(source) {
   return JSON.parse(`"${source}"`);
 }
 
-export function parseCallGraph(source, functionCount) {
+export function parseCallGraph(source, functionMap) {
+  const functionCount = functionMap.length;
   const calls = Array.from({ length: functionCount }, () => []);
   const unresolved = Array.from({ length: functionCount }, () => []);
+  const indices = new Map(functionMap.map(({ index, optimizerName }) =>
+    [optimizerName, index]));
+  assert.equal(indices.size, functionCount,
+    "call-graph function names must be unique");
   const edge = /^\s*"((?:[^"\\]|\\.)*)"\s*->\s*"((?:[^"\\]|\\.)*)"/;
   for (const line of source.split(/\r?\n/)) {
     const match = edge.exec(line);
@@ -335,14 +364,13 @@ export function parseCallGraph(source, functionCount) {
     }
     const callerName = dotName(match[1]);
     const calleeName = dotName(match[2]);
-    if (!/^\d+$/.test(callerName)) {
+    const caller = indices.get(callerName);
+    if (caller === undefined) {
       continue;
     }
-    const caller = Number(callerName);
-    assert(caller < functionCount,
-      `call graph caller ${caller} is outside the final function map`);
-    if (/^\d+$/.test(calleeName) && Number(calleeName) < functionCount) {
-      calls[caller].push(Number(calleeName));
+    const callee = indices.get(calleeName);
+    if (callee !== undefined) {
+      calls[caller].push(callee);
     } else {
       unresolved[caller].push(calleeName);
     }
@@ -358,10 +386,18 @@ export function makeSidecar(bytes, capture, functionMapSource,
   assert.equal(capture.schemaVersion, captureSchema,
     `unsupported capture schema ${capture.schemaVersion}`);
   const shape = moduleShape(bytes);
-  const functionMap = parseFunctionMap(functionMapSource);
-  assert.equal(functionMap.length, shape.functionCount,
+  const identityFunctionMap = parseFunctionMap(functionMapSource);
+  assert.equal(identityFunctionMap.length, shape.functionCount,
     "Binaryen function map and final Wasm function count disagree");
-  const graph = parseCallGraph(callGraphSource, shape.functionCount);
+  const graphFunctionMap = parseFunctionMap(callGraphSource);
+  const finalFunctionMap = graphFunctionMap.length === 0 ?
+    Array.from({ length: shape.functionCount }, (_, index) => ({
+      index,
+      optimizerName: binaryenOptimizerName(index, shape.functionImportCount),
+    })) : graphFunctionMap;
+  assert.equal(finalFunctionMap.length, shape.functionCount,
+    "call-graph function map and final Wasm function count disagree");
+  const graph = parseCallGraph(callGraphSource, finalFunctionMap);
   const identities = new Map(capture.identities.map((entry) =>
     [entry.token, entry]));
   const exportsByIndex = new Map();
@@ -370,8 +406,10 @@ export function makeSidecar(bytes, capture, functionMapSource,
     names.push(name);
     exportsByIndex.set(index, names);
   }
-  const functions = functionMap.map(({ index, optimizerName }) => {
-    const identity = identities.get(optimizerName);
+  const functions = identityFunctionMap.map(({ index,
+    optimizerName: identityName }) => {
+    const identity = identities.get(identityName);
+    const optimizerName = finalFunctionMap[index].optimizerName;
     const imported = index < shape.functionImportCount;
     const bodyBytes = imported ? null :
       shape.functionBodyBytes[index - shape.functionImportCount];
@@ -431,7 +469,26 @@ export function validateSidecar(bytes, sidecar) {
   const expectedExports = new Map(shape.functionExports.map(({ index,
     name }) => [name, index]));
   const actualExports = new Map();
+  const optimizerNames = new Set();
   for (const function_ of sidecar.functions) {
+    assert.equal(typeof function_.optimizerName, "string",
+      `function ${function_.index} has no optimizer name`);
+    assert(!optimizerNames.has(function_.optimizerName),
+      `duplicate optimizer name ${function_.optimizerName}`);
+    optimizerNames.add(function_.optimizerName);
+    const imported = function_.index < shape.functionImportCount;
+    assert.equal(function_.imported, imported,
+      `function ${function_.index} import classification changed`);
+    assert.equal(function_.bodyBytes, imported ? null :
+      shape.functionBodyBytes[definedFunctionOrdinal(function_.index,
+        shape.functionImportCount)],
+    `function ${function_.index} body size does not match Wasm bytes`);
+    if (imported) {
+      assert.deepEqual(function_.directCallees, [],
+        `imported function ${function_.index} cannot have callees`);
+      assert.deepEqual(function_.unresolvedCallTargets, [],
+        `imported function ${function_.index} cannot have unresolved callees`);
+    }
     for (const name of function_.exportedAs) {
       assert(!actualExports.has(name), `duplicate sidecar export ${name}`);
       actualExports.set(name, function_.index);
