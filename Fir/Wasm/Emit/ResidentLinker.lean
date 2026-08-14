@@ -272,67 +272,9 @@ private def rewriteFunctionBatch (plan : RewritePlan) (function : Function) : Fu
   if plan.callRewrites.isEmpty then function
   else { function with body := rewriteInstructionsBatch plan function.body }
 
-private structure RewriteCohort where
-  start : Nat
-  stop : Nat
-  firstPlan : Nat := 0
-
-/-- Compose call-to-instruction rewrites in policy order: `later (earlier call)`. -/
-private def composeRewritePlans (earlier later : RewritePlan) : RewritePlan :=
-  let callRewrites := earlier.callRewrites.fold
-    (fun rewrites target body =>
-      rewrites.insert target (rewriteInstructionsBatch later body))
-    (Std.HashMap.emptyWithCapacity
-      (earlier.callRewrites.size + later.callRewrites.size))
-  let callRewrites := later.callRewrites.fold
-    (fun rewrites target body =>
-      if earlier.callRewrites.contains target then rewrites
-      else rewrites.insert target body)
-    callRewrites
-  { callRewrites }
-
-private def rewriteCompositionProbePlan : RewritePlan := {
-  callRewrites := ({} : Std.HashMap CallTarget (List Instruction))
-    |>.insert (.runtime .getTag) [
-      .call (.declaration `_fir_probe_intermediate),
-      .call (.runtime .isShared)] }
-
-private def rewriteCompositionProbeSuffix : RewritePlan := {
-  callRewrites := ({} : Std.HashMap CallTarget (List Instruction))
-    |>.insert (.declaration `_fir_probe_intermediate)
-      [.call (.declaration `_fir_probe_final)]
-    |>.insert (.runtime .isShared) [
-      .i32Const .uint32 7,
-      .call (.declaration `_fir_probe_shared)] }
-
-#guard rewriteInstructionsBatch
-    (composeRewritePlans rewriteCompositionProbePlan rewriteCompositionProbeSuffix)
-    [.call (.runtime .getTag)] == [
-      .call (.declaration `_fir_probe_final),
-      .i32Const .uint32 7,
-      .call (.declaration `_fir_probe_shared)]
-
-private def rewriteCohortsFor (size : Nat) : Array RewriteCohort :=
-  if size == 0 then #[] else #[{ start := 0, stop := size }]
-
-private def rewritePlanSuffixes (plans : Array RewritePlan) : Array RewritePlan :=
-  (plans.foldr
-    (fun plan suffixes => suffixes.push
-      (composeRewritePlans plan suffixes.back!))
-    #[{}]).reverse
-
-private def applyRewriteCohorts (plans : Array RewritePlan)
-    (cohorts : Array RewriteCohort)
-    (module : Module) : Module :=
-  let suffixes := rewritePlanSuffixes plans
-  { module with
-    functions := cohorts.flatMap fun cohort =>
-      let plan := suffixes[cohort.firstPlan]!
-      (module.functions.extract cohort.start cohort.stop).map
-        (rewriteFunctionBatch plan) }
-
 /-- Steps that inspect or replace existing function bodies cannot run against
-the skeleton/probe planning view. Flush accumulated rewrites first. -/
+the skeleton/probe planning view. Materialize the persistent planning phase
+before applying one of these steps. -/
 private def requiresMaterializedBodies : Step → Bool
   | .cacheSets
   | .directSelfTailCallsRequired
@@ -345,15 +287,21 @@ private def rewriteProbeLabel (index : Nat) : FVarId :=
   ⟨Name.mkSimple s!"_fir_resident_link_rewrite_probe_{index}"⟩
 
 /--
-Run one helper-family installer against function headers and a synthetic call
-probe. Each call occupies one uniquely labelled block, so the installer may
-replace it with any instruction sequence without losing the probe boundary.
-The installer still performs all dependency, signature, collision and
-helper-generation work, while the probe records its exact substitutions. Real
-function bodies are rewritten once when the accumulated plan is flushed.
+Run a contiguous group of helper-family installers against one persistent
+planning view. Source bodies are replaced by headers and one synthetic call
+probe; generated helper bodies remain materialized so later families rewrite
+them directly. Each probe call occupies one uniquely labelled block, allowing
+the whole group to replace it with any composed instruction sequence without
+losing the boundary.
+
+The group therefore constructs and verifies headers and rewrite metadata once,
+then rewrites the source cohort once. The previous per-family plans rebuilt and
+rescanned the same probe and headers and composed a suffix plan for every helper
+cohort, making planning grow with both policy length and module size.
 -/
-private def planStep (step : Step) (module : Module) :
-    Except Source.CompileError (RewritePlan × Module) := do
+private def applyPersistentPlan (steps : Array Step) (module : Module) :
+    Except Source.CompileError Module := do
+  if steps.isEmpty then return module
   if module.functions.any (·.name == rewriteProbeName) then
     throw (.manifest s!"reserved linker rewrite-probe declaration {rewriteProbeName}")
   let externalDeclarations := module.imports.filterMap (·.declaration?)
@@ -370,67 +318,56 @@ private def planStep (step : Step) (module : Module) :
       .block (rewriteProbeLabel index) [.call target] }
   let skeletons := module.functions.map fun function => { function with body := [] }
   let prefixSize := skeletons.size + 1
-  let planned ← applyStep false step { module with functions := skeletons.push probe }
+  let planned ← applySteps false steps.toList {
+    module with functions := skeletons.push probe }
   unless prefixSize ≤ planned.functions.size do
-    throw (.manifest s!"resident {repr step} removed function declarations")
+    throw (.manifest s!"resident plan {repr steps} removed function declarations")
   for index in [:skeletons.size] do
     let before := skeletons[index]!
     let after := planned.functions[index]!
     unless before.name == after.name && before.params == after.params &&
         before.results == after.results && before.locals == after.locals &&
         after.body.isEmpty do
-      throw (.manifest s!"resident {repr step} changed a function declaration shape")
+      throw (.manifest
+        s!"resident plan {repr steps} changed a function declaration shape")
   let rewrittenProbe := planned.functions[skeletons.size]!
   unless rewrittenProbe.name == rewriteProbeName &&
       rewrittenProbe.body.length == targets.size do
-    throw (.manifest s!"resident {repr step} changed the linker rewrite probe shape")
+    throw (.manifest s!"resident plan {repr steps} changed the linker rewrite probe shape")
   let mut callRewrites : Std.HashMap CallTarget (List Instruction) := {}
-  let mut removedOperations := #[]
   for ((target, instruction), index) in
       (targets.zip rewrittenProbe.body.toArray).zipIdx do
     let .block label body := instruction |
-      throw (.manifest s!"resident {repr step} removed a rewrite probe boundary")
+      throw (.manifest s!"resident plan {repr steps} removed a rewrite probe boundary")
     unless label == rewriteProbeLabel index do
-      throw (.manifest s!"resident {repr step} changed a rewrite probe label")
+      throw (.manifest s!"resident plan {repr steps} changed a rewrite probe label")
     unless body == [.call target] do
       callRewrites := callRewrites.insert target body
-      if let .runtime operation := target then
-        removedOperations := removedOperations.push operation
+  let plan : RewritePlan := { callRewrites }
   let newFunctions := planned.functions.extract prefixSize planned.functions.size
-  /- The rewritten probe is metadata-only, but scanning it is essential: an
-  expanding call rewrite may introduce a runtime operation directly in its
-  replacement sequence rather than through a generated helper. -/
-  let runtimeOperations := Fir.Wasm.updateRuntimeOps module.runtimeOperations
-    removedOperations (#[rewrittenProbe] ++ newFunctions)
+  let functions := module.functions.map (rewriteFunctionBatch plan) ++ newFunctions
+  /- The persistent planning view orders the probe before generated helpers.
+  Recollect once after replacing the probe with the real source cohort so the
+  public runtime-operation order remains exactly the module's function order. -/
+  let runtimeOperations := Fir.Wasm.collectRuntimeOps functions
   let externalImports := planned.imports.filter (·.operation?.isNone)
-  let result : Module := {
+  return {
     planned with
-    functions := module.functions ++ newFunctions
+    functions
     imports := runtimeOperations.mapIdx Fir.Wasm.runtimeImport ++ externalImports
     runtimeOperations }
-  return ({ callRewrites }, result)
 
-private def applyStepsPlanned (steps : List Step) (plans : Array RewritePlan)
-    (cohorts : Array RewriteCohort)
+private def applyStepsPlanned (steps : List Step) (pending : Array Step)
     (module : Module) : Except Source.CompileError Module := do
   match steps with
-  | [] => return applyRewriteCohorts plans cohorts module
+  | [] => applyPersistentPlan pending module
   | step :: steps =>
       if requiresMaterializedBodies step then
-        let module := applyRewriteCohorts plans cohorts module
+        let module ← applyPersistentPlan pending module
         let module ← applyStep false step module
-        applyStepsPlanned steps #[] (rewriteCohortsFor module.functions.size) module
+        applyStepsPlanned steps #[] module
       else
-        let oldSize := module.functions.size
-        let (stepPlan, module) ← planStep step module
-        let plans := plans.push stepPlan
-        let mut cohorts := cohorts
-        if oldSize < module.functions.size then
-          cohorts := cohorts.push {
-            start := oldSize
-            stop := module.functions.size
-            firstPlan := plans.size }
-        applyStepsPlanned steps plans cohorts module
+        applyStepsPlanned steps (pending.push step) module
 
 private def checkPostconditions (policy : Policy) (module : Module) :
     Except Source.CompileError Unit := do
@@ -471,7 +408,7 @@ def linkModule (policy : Policy) (module : Module) :
       applySteps true policy.steps.toList module
     else do
       applyStepsPlanned policy.steps.toList
-        #[] (rewriteCohortsFor module.functions.size) module
+        #[] module
   let module ← match policy.publicExports with
     | none => pure module
     | some exports =>
