@@ -6,16 +6,16 @@ owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
 state: ready
-base: 515bf401 on main
-functional-head: 0b3f466c
-contract-base: 71471a5d; accepted generic `HeapObject.array elements capacity` ownership contract, with only the live prefix owned and spare capacity nonsemantic
+base: 85481c67 on main
+functional-head: d11bab61
+contract-base: 85481c67; consumes the accepted consolidated resident closure allocator surface and changes no shared runtime or generation contract
 clean-at-update: true
-slice: W6 closes shared/persistent resident Array push/pop copy-on-write refinement. A fresh copy/allocation frame extends the witness without changing the source Array. Ordered prefix retain refinement follows semantic retainOwnedValue exactly. The complete shared-push theorem retains the old live prefix, allocates it, transfers the new element without retaining it, publishes the pushed Array, then consumes one source reference. The complete shared-pop theorem retains and publishes exactly elements.pop—including the empty case—then consumes one source reference, so the removed last element receives no retain. Both complete theorems preserve full heap refinement, old allocation extents, closure allocations, fresh-reference refinement, source/fresh address distinction, and exact post-allocation cursor stability.
-files: Fir/Wasm/Concrete/; Fir/Wasm/Concrete.lean; integration/talos/FirTalos/; coordination/lanes/wasm-proof.md
-contracts: none; consumes the accepted generic Array semantics/layout contract at 71471a5d and changes no shared semantic, resident-helper signature, symbolic-Wasm, compiler, or W7 generation surface
-checks: Lean Beam update/sync/save PASS with zero errors for Fir/Wasm/Concrete/ArrayCopyCorrectness.lean; direct lake build Fir.Wasm.Concrete.ArrayCopyCorrectness Fir.Wasm.Concrete PASS (61 jobs); direct Talos lake build Fir.Wasm.Concrete.ArrayCopyCorrectness PASS; git diff --check PASS; make check PASS (125 tests); make talos-setup PASS; make talos-check PASS (3148 jobs)
+slice: W6 closes residual executable validation across active structured execution, constructor/default case selection, direct named-call staging and entry, saturated closure-call staging and entry, and the transition to yielded results. The module-wide relation now retains exact validation for the active node and every suspended caller, derives fresh root validation at selected generated callees, preserves caller validation beneath direct and matcher-label call stacks, and carries that stack to the return-pop boundary without storing future execution or termination certificates.
+files: integration/talos/FirTalos/ConcreteStructuredValidation.lean; coordination/lanes/wasm-proof.md
+contracts: none; proof-only strengthening of the existing concrete structured relation, source validator, generated-row selection, runtime resource stack, and symbolic Wasm step contracts
+checks: Lean Beam update/sync/save PASS with zero errors for FirTalos/ConcreteStructuredValidation.lean; direct lake build FirTalos.ConcreteStructuredValidation FirTalos PASS (3148 jobs); git diff --check PASS; make check PASS (125 tests, 710 unique cases, 2112/2112 comparisons); make talos-check PASS (3148 jobs)
 bug-cards: none
 blockers: none
-handoff: Ready to fast-forward main from 515bf401 through functional head 0b3f466c and this clean mailbox commit. Commits 54f8acd1, 95a476be, 0f232b6f, and 0b3f466c are the coherent proof stack; earlier branch-only mailbox commits are coordination records only.
-next: After acceptance and rebase, connect these complete resident copy-path contracts to the compiler-facing finite-trace current-step admission when emitted resident Array calls enter that structured proof surface. Independently add active-data-segment initialization refinement only when a nonempty segment enters W6's proof model.
+handoff: Ready to fast-forward main from 85481c67 through functional head d11bab61 and this clean mailbox commit. The coherent proof stack runs from f910f481 through d11bab61; it changes only the W6-owned structured validation proof module before this mailbox record.
+next: Prove validated yielded pop/resumption for direct and saturated caller frames, then lazy cache and external administrative branches. Separately close validator-to-current-step admission, including the already-recorded return compatibility-direction discrepancy, before assembling the universal one-step and finite-trace theorems.
 ```
