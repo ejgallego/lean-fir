@@ -15,6 +15,50 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W7-PROOF-INDEXED-RESIDENT-ARRAY-BOUNDS`.
+- Integration owner: `root`, consuming the clean `wasm/generation` handoff
+  rebased directly on `main` at `04413f79`. The functional generation head is
+  `e9629e37`; the accepted mailbox head is `f93c49db`.
+- Local Array principle: version-pinned, well-typed closed applications use
+  Lean's trusted proof-indexed hot path. `getInternal`, `uget`, `get`, `set`,
+  `uset`, and `swap` consume the resident representation invariant and their
+  erased bounds proofs without revalidating headers or branching dynamically.
+  Trusted Nat indices use the exact `lean_unbox` shift shape; trusted USize
+  indices narrow directly. Public/raw helpers remain checked, and dynamic
+  `get!`/`set!` retain their bounds and default-result behavior.
+- Global semantic rule: FIR follows the exact upstream API/runtime behavior
+  for the selected Lean toolchain at well-typed internal call sites. Foreign
+  raw-memory boundaries may validate representation once, but internal
+  generation does not add defensive checks or traps absent from upstream.
+  General lower-level FIR bounds-fault semantics are unchanged. Ownership,
+  uniqueness, copy-on-write, allocation, element release, and recursive
+  release remain observable and unchanged.
+- Regression surface: compile-time guards reject former bounds instruction
+  sequences in trusted helpers and freeze direct Nat/USize decode shapes. A
+  zero-import typed closed Array module exercises the trusted path. The real
+  lean-zip closure retains 662 declarations, 128 reviewed externals, 2,598
+  resident helpers, zero unsupported declarations, and zero runtime
+  operations; five cases at ten compression levels match native Lean with
+  flat cache/checkpoint frontiers.
+- Acceptance: Lean Beam reports zero diagnostics and the focused Array cone
+  passes. After the final rebase, `git diff --check`, complete `make check`
+  (125 tests, 710 unique cases, 2,112/2,112 comparisons), all 3,148 Talos
+  jobs, and the complete deterministic W7 artifact gate pass, including 701
+  native/LCNF/V8 cases and the concrete readiness checks. A/B timings were
+  noisy and the complete linked artifact grew, so no performance or size win
+  is claimed.
+- Follow-ups: `FIR-BUG-wasm-none-array-panic-observation` records the missing
+  recoverable panic observation for dynamic out-of-bounds calls;
+  `FIR-BUG-wasm-none-lean-zip-raw-cache-isolation-ratchet` records the stale
+  exact closure ratchet and blocks only package publication. W6 refinement
+  audits remain independent in `W7-W6-20260814-001` and
+  `W7-W6-20260814-002`; generation acceptance does not claim those theorems.
+- Result: `main` fast-forwards through `f93c49db`. W7 next reviews the
+  post-G2 lean-zip closure inventory and publishes the zero-import package,
+  while the dynamic panic-observation design stays a separate semantic slice.
+
+## Latest completed integration lease
+
 - Milestone: `W7-PRODUCTION-SELECTION-DISPATCH`.
 - Integration owner: `root`, consuming the clean `wasm/generation` handoff
   rebased directly on `main` at `2b9d160e`. The functional generation head is
