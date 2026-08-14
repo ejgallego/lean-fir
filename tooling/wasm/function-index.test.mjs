@@ -17,6 +17,12 @@ import {
   restampCapture,
   validateSidecar,
 } from "./function-index-lib.mjs";
+import {
+  boundedDisassembly,
+  extractedFunctionWat,
+  instructionSummary,
+  makeFunctionView,
+} from "./function-view-lib.mjs";
 
 const binaryen = process.env.FIR_BINARYEN_DIR;
 assert.equal(typeof binaryen, "string",
@@ -112,6 +118,8 @@ test("resolves imported functions across final maps and call graphs",
       const baseline = join(directory, "baseline.wasm");
       const release = join(directory, "release.wasm");
       const graphCopy = join(directory, "graph-copy.wasm");
+      const extracted = join(directory, "entry.wat");
+      const sidecarPath = join(directory, "release.wasm.functions.json");
       const capturePath = join(directory, "capture.json");
       const optimizerArgsPath = join(directory, "optimizer-args.json");
       const commandRelease = join(directory, "command-release.wasm");
@@ -166,6 +174,7 @@ test("resolves imported functions across final maps and call graphs",
 
       const sidecar = makeSidecar(releaseBytes, capture,
         identityMapSource, callGraph, { artifactFile: "release.wasm" });
+      writeFileSync(sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`);
       assert.deepEqual(sidecar.functions.map(({ index, name, optimizerName,
         imported, directCallees }) => ({ index, name, optimizerName,
         imported, directCallees })), [
@@ -189,6 +198,95 @@ test("resolves imported functions across final maps and call graphs",
       validateSidecar(readFileSync(commandRelease), commandSidecar);
       assert.deepEqual(commandSidecar.functions, sidecar.functions,
         "optimize command must use the same imported-function namespace");
+
+      // Selection uses the absolute Wasm index. The extracted WAT body and
+      // its direct targets use Binaryen's final optimizer-name namespace.
+      run("wasm-opt", [...features, "--quiet", release,
+        "--extract-function-index=2", "--emit-text", "-o", extracted]);
+      const view = makeFunctionView(sidecar, "Fixture.entry",
+        readFileSync(extracted, "utf8"), 40);
+      assert.equal(view.function.index, 2);
+      assert.equal(view.function.optimizerName, "0");
+      assert.deepEqual(view.calls.targets, [
+        { index: 0, name: "host.sink", origin: "function-import",
+          family: null, callSites: 1 },
+        { index: 1, name: "host.identity", origin: "function-import",
+          family: null, callSites: 1 },
+      ]);
+      assert.throws(() => makeFunctionView(sidecar, "host.sink", "", 40),
+        /imported and has no local body/);
+
+      const releaseBeforeView = readFileSync(release);
+      const commandView = JSON.parse(execFileSync(process.execPath, [
+        functionTool, "view", "--binaryen-dir", binaryen,
+        "--wasm", release, "--sidecar", sidecarPath,
+        "--function", "Fixture.entry", "--max-lines", "40", "--json",
+      ], { encoding: "utf8" }));
+      assert.equal(commandView.function.index, 2,
+        "view command must select by the absolute Wasm index");
+      assert.deepEqual(commandView.calls.targets, view.calls.targets);
+      assert.deepEqual(readFileSync(release), releaseBeforeView,
+        "view command must not rewrite the release artifact");
+      assert.throws(() => execFileSync(process.execPath, [
+        functionTool, "view", "--binaryen-dir", binaryen,
+        "--wasm", release, "--sidecar", sidecarPath,
+        "--function", "host.sink", "--json",
+      ], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
+      (error) => error.stderr.includes("is imported and has no local body"));
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+test("extracts a bounded function-local instruction view",
+  () => {
+    const directory = mkdtempSync(join(tmpdir(), "fir-function-view-"));
+    try {
+      const wasm = join(directory, "fixture.wasm");
+      const wat = join(directory, "function.wat");
+      run("wasm-as", [...features, fixture, "-o", wasm]);
+      const bytes = readFileSync(wasm);
+      const capture = makeCapture(bytes, {
+        functions: ["Fixture.leaf", "Fixture.entry", "Fixture.dead"],
+        sourceFunctions: ["Fixture.leaf", "Fixture.entry", "Fixture.dead"],
+      });
+      const map = capture.identities.map(({ index, token }) =>
+        `${index}:${token}`).join("\n");
+      const sidecar = makeSidecar(bytes, capture, map,
+        "digraph call {\n  \"1\" -> \"0\";\n}\n");
+      run("wasm-opt", [...features, "--quiet", wasm,
+        "--extract-function-index=1", "--emit-text", "-o", wat]);
+      const source = readFileSync(wat, "utf8");
+      const view = makeFunctionView(sidecar, "Fixture.entry", source, 12);
+      assert.equal(view.artifact.sha256, sidecar.artifact.sha256);
+      assert.deepEqual(view.function.directCallees, [{
+        index: 0,
+        name: "Fixture.leaf",
+        origin: "lean-source",
+        family: null,
+      }]);
+      assert.equal(Object.fromEntries(view.instructions.opcodes.map(({ name,
+        count }) => [name, count])).call, 1);
+      assert.equal(view.calls.directCount, 1);
+      assert.deepEqual(view.calls.byFamily, [{
+        name: "lean-source",
+        count: 1,
+      }]);
+      assert.deepEqual(view.calls.targets, [{
+        index: 0,
+        name: "Fixture.leaf",
+        origin: "lean-source",
+        family: null,
+        callSites: 1,
+      }]);
+      assert(view.instructions.classes.some(({ name, count }) =>
+        name === "local-global" && count > 0));
+      assert.equal(view.disassembly.lines.length,
+        Math.min(view.disassembly.lineCount, 12));
+      assert.equal(instructionSummary(extractedFunctionWat(source, "1"))
+        .instructionCount,
+        view.instructions.instructionCount);
+      assert.equal(boundedDisassembly(source, 1000).omittedLines, 0);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

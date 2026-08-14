@@ -59,7 +59,25 @@ node tooling/wasm/function-index.mjs verify \
 node tooling/wasm/function-index.mjs inspect \
   --wasm app.release.wasm --sidecar app.release.wasm.functions.json \
   --function 17
+
+node tooling/wasm/function-index.mjs view \
+  --binaryen-dir /path/to/binaryen/bin \
+  --wasm app.release.wasm --sidecar app.release.wasm.functions.json \
+  --function 17 --max-lines 160
 ```
+
+`view` asks Binaryen's `--extract-function-index` pass to emit only the selected
+function. The selector and extraction pass use the absolute Wasm function
+index. The extracted body's WAT name is its final definition ordinal, and its
+direct targets use the final optimizer-name namespace, including `fimport$N`.
+The tool resolves those names through the sidecar rather than treating numeric
+WAT names as absolute indices. Imported functions can be inspected but are
+rejected by `view` because they have no local body. The release module is never
+rewritten. The result includes a compact opcode and instruction-class
+histogram, per-target direct-call counts grouped into Lean, allocation,
+boxing, reference-counting, container, numeric, projection, and linked-runtime
+families, plus a bounded head/tail WAT excerpt. This avoids materializing
+whole-module WAT for large optimized packages.
 
 `optimize` can replace a linker's final `wasm-opt` invocation without owning
 the linker's flags. The JSON file is an array containing those exact arguments:

@@ -17,6 +17,7 @@ import {
   restampCapture,
   validateSidecar,
 } from "./function-index-lib.mjs";
+import { makeFunctionView } from "./function-view-lib.mjs";
 
 function usage() {
   return `usage:
@@ -25,7 +26,8 @@ function usage() {
   function-index.mjs optimize --binaryen-dir DIR --input FILE --wasm FILE --capture FILE --wasm-opt-args FILE --output FILE
   function-index.mjs finalize --wasm FILE --capture FILE --function-map FILE --call-graph FILE --output FILE
   function-index.mjs verify --wasm FILE --sidecar FILE
-  function-index.mjs inspect --wasm FILE --sidecar FILE --function INDEX_OR_NAME [--json]`;
+  function-index.mjs inspect --wasm FILE --sidecar FILE --function INDEX_OR_NAME [--json]
+  function-index.mjs view --binaryen-dir DIR --wasm FILE --sidecar FILE --function INDEX_OR_NAME [--max-lines N] [--json]`;
 }
 
 function arguments_(items) {
@@ -62,7 +64,8 @@ function writeJson(path, value) {
 function run(binaryenDirectory, tool, args, options = {}) {
   return execFileSync(join(binaryenDirectory, tool), args, {
     encoding: options.encoding,
-    stdio: options.encoding === undefined ? "inherit" : undefined,
+    stdio: options.encoding === undefined ? "inherit" :
+      ["ignore", "pipe", "pipe"],
   });
 }
 
@@ -98,6 +101,30 @@ function textInspection(sidecar, function_) {
   if (function_.unresolvedCallTargets.length !== 0) {
     lines.push(`  unresolved call targets: ${function_.unresolvedCallTargets.join(", ")}`);
   }
+  return `${lines.join("\n")}\n`;
+}
+
+function textFunctionView(view) {
+  const lines = [
+    `${view.function.index}: ${view.function.name ?? view.function.optimizerName}`,
+    `  artifact: ${view.artifact.sha256}`,
+    `  body bytes: ${view.function.bodyBytes}`,
+    `  instructions: ${view.instructions.instructionCount}`,
+    "  classes: " + view.instructions.classes.map(({ name, count }) =>
+      `${name}=${count}`).join(", "),
+    "  opcodes: " + view.instructions.opcodes.map(({ name, count }) =>
+      `${name}=${count}`).join(", "),
+    `  direct call sites: ${view.calls.directCount}`,
+    "  call families: " + view.calls.byFamily.map(({ name, count }) =>
+      `${name}=${count}`).join(", "),
+    "  direct call targets:",
+    ...view.calls.targets.map(({ index, name, family, origin, callSites }) =>
+      `    ${index}: ${name ?? "unattributed"} x${callSites} ` +
+      `[${family ?? origin}]`),
+    `  disassembly: ${view.disassembly.lineCount} line(s), ` +
+      `${view.disassembly.omittedLines} omitted`,
+    ...view.disassembly.lines,
+  ];
   return `${lines.join("\n")}\n`;
 }
 
@@ -213,6 +240,40 @@ if (command === "prepare") {
   process.stdout.write(args.get("--json") === true ?
     `${JSON.stringify(function_, null, 2)}\n` :
     textInspection(sidecar, function_));
+} else if (command === "view") {
+  const binaryenDirectory = required(args, "--binaryen-dir");
+  const wasmPath = required(args, "--wasm");
+  const wasm = readFileSync(wasmPath);
+  const sidecar = readJson(required(args, "--sidecar"));
+  validateSidecar(wasm, sidecar);
+  const selector = args.get("--function");
+  assert.equal(typeof selector, "string", `missing --function\n${usage()}`);
+  const function_ = inspectFunction(sidecar, selector);
+  assert.equal(function_.imported, false,
+    `function ${function_.index} is imported and has no local body`);
+  const maxLines = Number(args.get("--max-lines") ?? 160);
+  assert(Number.isSafeInteger(maxLines) && maxLines >= 8,
+    "--max-lines must be an integer of at least eight");
+  const temporary = mkdtempSync(join(tmpdir(), "fir-function-view-"));
+  let wat;
+  try {
+    const watPath = join(temporary, "function.wat");
+    run(binaryenDirectory, "wasm-opt", [
+      "--all-features",
+      "--quiet",
+      wasmPath,
+      `--extract-function-index=${function_.index}`,
+      "--emit-text",
+      "-o",
+      watPath,
+    ], { encoding: "utf8" });
+    wat = readFileSync(watPath, "utf8");
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+  const view = makeFunctionView(sidecar, selector, wat, maxLines);
+  process.stdout.write(args.get("--json") === true ?
+    `${JSON.stringify(view, null, 2)}\n` : textFunctionView(view));
 } else {
   throw new Error(`unknown command ${command}\n${usage()}`);
 }
