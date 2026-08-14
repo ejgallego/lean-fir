@@ -15,6 +15,32 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-VALIDATED-CONSTRUCTOR-TAG-ADMISSION`.
+- Integration owner: `root`, consuming the clean `wasm/talos-runtime`
+  handoff based directly on `main` at `49b56a0d`. The functional proof head is
+  `e8def3a8`; the accepted lane-mailbox head is `7f7e51fa`.
+- Static admission: inversion of the real residual validator now supplies
+  both `tag < UInt32.size` and the exact ordinary-object compiler local for a
+  current `.setTag` node.
+- Dynamic admission: one successful source step exposes the heap reference,
+  live constructor cell, constructor payload, and semantic tag update. These
+  source facts assemble the existing `ConstructorTagEffectSupported` premise
+  without inspecting target execution or storing a translation certificate.
+- Contracts: this proof consumes `WASM-SETTAG-UINT32-ADMISSION` at isolated
+  commit `982ed402`; it adds no contract change. Source semantics, production
+  validation, concrete layout/runtime, symbolic Wasm, semantic ABI, resident
+  helper signatures, emitted code, and W7 artifacts are unchanged.
+- Acceptance: Lean Beam update/sync/save reports zero diagnostics. The focused
+  `FirTalos.ConcreteStructuredValidation` cone passes 3,124 jobs;
+  `git diff --check`, complete `make check` (125 tests, 710 unique cases,
+  2,112/2,112 comparisons), and all 3,148 W6 Talos jobs pass. Bug card
+  `FIR-BUG-wasm-none-settag-uint32-admission` is fixed.
+- Result: `main` fast-forwards through `7f7e51fa` plus this acceptance record.
+  W6 next derives field-mutation admission and isolates only any genuinely
+  missing source typing/layout premise.
+
+## Latest completed integration lease
+
 - Milestone: `WASM-SETTAG-UINT32-ADMISSION`.
 - Integration owner: `root`, publishing the isolated shared-validator commit
   `982ed402` on base `7a52a8e0` before its W6 proof consumer.
@@ -4334,7 +4360,7 @@ validation work continues; their historical handoff text remains unchanged.
 
 | ID | Producer | Consumers | Status | Standalone commit | Effect |
 |---|---|---|---|---|---|
-| `WASM-SETTAG-UINT32-ADMISSION` | integration/W6 proof | W6, W7, validation | released | isolated contract `982ed402`; bug card `FIR-BUG-wasm-none-settag-uint32-admission` | Requires every production-accepted source `.setTag` value to satisfy `tag < UInt32.size`, matching the unbounded source `Nat` to the concrete wasm32 header instead of silently wrapping. The first excluded value has a fail-closed `supportedProgram`/`lowerSupported` regression. W6 derives its tag-width premise from validation; W7 and validation rebase without generated-code, ABI, runtime, layout, helper-signature, or artifact adaptation. |
+| `WASM-SETTAG-UINT32-ADMISSION` | integration/W6 proof | W6, W7, validation | released | isolated contract `982ed402`; proof consumer `e8def3a8`; mailbox `7f7e51fa`; bug card `FIR-BUG-wasm-none-settag-uint32-admission` fixed | Requires every production-accepted source `.setTag` value to satisfy `tag < UInt32.size`, matching the unbounded source `Nat` to the concrete wasm32 header instead of silently wrapping. The first excluded value has a fail-closed `supportedProgram`/`lowerSupported` regression. W6 now derives the exact compiler local, range, live-constructor shape, and semantic update from validation plus one successful source step. W7 and validation rebase without generated-code, ABI, runtime, layout, helper-signature, or artifact adaptation. |
 | `WASM-STRUCTURED-VALIDATION-TOTALITY` | W6/integration | W6, W7, validation | released | isolated contract `72856600`; proof consumer `42fb2d5d`; mailbox `c07eaf4b` | Replaces opaque partial `supportedCodeWithJoins` recursion with a terminating traversal and an explicit alternative-list helper. The helper is proved extensionally equal to the former `Array.all` check, preserving production acceptance while exposing equations needed by the compiler-correctness proof. W7 and validation rebase; no generated code, semantic ABI, concrete runtime, or artifact adaptation is required. |
 | `LEAN-4.33-UPGRADE` | integration | pass proof, W6, W7, validation, artifact clients | released | landed stack through `476f001b`; Verso source `eb8d2b8f`; Talos pin `0e05edbc` | Moves every live FIR toolchain and versioned package contract to Lean 4.33.0 while preserving the semantic Wasm ABI, concrete layout, and resident-helper signatures. All surviving lanes rebase before continuing; historical 4.32 records remain provenance. |
 | `LANE-W6-W7-SPLIT` | integration | W6, W7, harness | released | `9cb483f` | Gives W6 and W7 independent branches and worktrees |
