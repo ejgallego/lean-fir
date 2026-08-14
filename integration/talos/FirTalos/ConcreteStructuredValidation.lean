@@ -5466,6 +5466,241 @@ theorem ConcreteStructuredAlignedValidationState.admit_setTag_of_step
   obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees⟩ := validated
   exact focus.admit_setTag_of_step agrees related sourceStep
 
+/-- Validation of a `USize` field write fixes both compiler-local lanes. -/
+theorem ConcreteStructuredValidationFocus.uset_eq
+    {program : Fir.LeanIR.ImpureProgram}
+    {joins : Fir.Wasm.JoinPoints}
+    {locals : Fir.Wasm.LocalKinds}
+    {expectedResult : Option Fir.Wasm.AbiKind}
+    {facts : Fir.Wasm.SupportedCaseFacts}
+    {sharing : Fir.Wasm.SupportedSharingFacts}
+    {objectId fieldId : Lean.FVarId} {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredValidationFocus program joins locals
+      expectedResult facts sharing
+      (.uset objectId index fieldId continuation)) :
+    Fir.Wasm.findLocalKind? locals objectId = some .object ∧
+      Fir.Wasm.findLocalKind? locals fieldId = some .usize := by
+  have supported := validated.supported
+  simp [Fir.Wasm.supportedCodeWithJoins, Bool.and_eq_true] at supported
+  exact supported.1
+
+/-- Residual-local agreement turns the two `USize` validator guards into the
+exact production compiler equations. -/
+theorem ConcreteStructuredValidationFocus.uset_compiler
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {joins : Fir.Wasm.JoinPoints}
+    {locals : Fir.Wasm.LocalKinds}
+    {expectedResult : Option Fir.Wasm.AbiKind}
+    {facts : Fir.Wasm.SupportedCaseFacts}
+    {sharing : Fir.Wasm.SupportedSharingFacts}
+    {objectId fieldId : Lean.FVarId} {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredValidationFocus program joins locals
+      expectedResult facts sharing
+      (.uset objectId index fieldId continuation))
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals) :
+    Fir.Wasm.getLocal context objectId =
+        .ok (.localGet objectId, .object) ∧
+      Fir.Wasm.getLocal context fieldId =
+        .ok (.localGet fieldId, .usize) := by
+  obtain ⟨objectFound, fieldFound⟩ := validated.uset_eq
+  exact ⟨agrees objectFound, agrees fieldFound⟩
+
+/-- A successful semantic `USize` write determines its heap constructor,
+payload lane, and exact absolute-slot bounds. -/
+private theorem setUSizeSlot_shape_for_admission
+    {runtime nextRuntime : RuntimeState} {object fieldValue : Value}
+    {slot : Nat}
+    (updated : setUSizeSlot runtime object slot fieldValue = .ok nextRuntime) :
+    ∃ location cell semantic field,
+      object = .object (.heap location) ∧
+        fieldValue = .usize field ∧
+        findCell? runtime.heap location = some cell ∧
+        cell.live = true ∧
+        cell.object = .ctor semantic ∧
+        semantic.objectFields.size ≤ slot ∧
+        slot < semantic.objectFields.size + semantic.usizeFields.size := by
+  cases fieldValue with
+  | object reference => simp [setUSizeSlot] at updated
+  | usize field =>
+      unfold setUSizeSlot modifyConstructor at updated
+      simp only [Bind.bind, Except.bind] at updated
+      generalize constructorEq :
+        getConstructor runtime object = constructorResult at updated
+      cases constructorResult with
+      | error fault => simp at updated
+      | ok triple =>
+          obtain ⟨location, cell, semantic⟩ := triple
+          simp only at updated
+          by_cases slotStart : semantic.objectFields.size ≤ slot
+          · rw [if_pos slotStart] at updated
+            let localIndex := slot - semantic.objectFields.size
+            by_cases bounded : localIndex < semantic.usizeFields.size
+            · rw [dif_pos bounded] at updated
+              have shape :=
+                getConstructor_shape_for_admission constructorEq
+              exact ⟨location, cell, semantic, field, shape.1, rfl,
+                shape.2.1, shape.2.2.1, shape.2.2.2, slotStart, by omega⟩
+            · rw [dif_neg bounded] at updated
+              simp at updated
+          · rw [if_neg slotStart] at updated
+            simp at updated
+  | scalar value => simp [setUSizeSlot] at updated
+  | erased => simp [setUSizeSlot] at updated
+  | reuseToken location? => simp [setUSizeSlot] at updated
+
+/-- A successful source `USize` field step exposes all dynamic facts required
+by the existing concrete mutation theorem, without inspecting the target. -/
+theorem ConcreteStructuredCodeFocus.uset_source_of_step
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId fieldId : Lean.FVarId}
+    {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.uset objectId index fieldId continuation)
+      targetStore targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ location cell semantic field nextRuntime,
+      lookupValue sourceEnv objectId = .ok (.object (.heap location)) ∧
+        lookupValue sourceEnv fieldId = .ok (.usize field) ∧
+        setUSizeSlot sourceRuntime (.object (.heap location)) index
+            (.usize field) = .ok nextRuntime ∧
+        findCell? sourceRuntime.heap location = some cell ∧
+        cell.live = true ∧
+        cell.object = .ctor semantic ∧
+        semantic.objectFields.size ≤ index ∧
+        index < semantic.objectFields.size + semantic.usizeFields.size := by
+  rcases source with
+    ⟨sourceProgram, sourceControl, sourceStateEnv, sourceJoins, sourceFrames,
+      sourceStateRuntime⟩
+  have sourceControlEq := related.sourceControlEq
+  change sourceControl = .code (.uset objectId index fieldId continuation)
+    at sourceControlEq
+  subst sourceControl
+  have sourceEnvEq := related.sourceEnvEq
+  change sourceStateEnv = sourceEnv at sourceEnvEq
+  subst sourceStateEnv
+  have sourceRuntimeEq := related.sourceRuntimeEq
+  change sourceStateRuntime = sourceRuntime at sourceRuntimeEq
+  subst sourceStateRuntime
+  cases objectResult : lookupValue sourceEnv objectId with
+  | error fault =>
+      simp [executeStep, coreStep, objectResult, fail] at sourceStep
+  | ok sourceObject =>
+      cases fieldResult : lookupValue sourceEnv fieldId with
+      | error fault =>
+          simp [executeStep, coreStep, objectResult, fieldResult, fail]
+            at sourceStep
+      | ok sourceField =>
+          cases updateResult :
+              setUSizeSlot sourceRuntime sourceObject index sourceField with
+          | error fault =>
+              simp [executeStep, coreStep, objectResult, fieldResult,
+                updateResult, fail] at sourceStep
+          | ok nextRuntime =>
+              have updated := updateResult
+              obtain ⟨location, cell, semantic, field, objectEq, fieldEq,
+                  found, live, semanticEq, slotStart, slotEnd⟩ :=
+                setUSizeSlot_shape_for_admission updated
+              rw [objectEq, fieldEq] at updated
+              exact ⟨location, cell, semantic, field, nextRuntime,
+                congrArg Except.ok objectEq, congrArg Except.ok fieldEq,
+                updated, found, live, semanticEq, slotStart, slotEnd⟩
+
+/-- `USize` field mutation is a complete validator-derived current-step
+admission case. -/
+theorem ConcreteStructuredValidationFocus.admit_uset_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {joins : Fir.Wasm.JoinPoints}
+    {locals : Fir.Wasm.LocalKinds}
+    {expectedResult : AbiKind}
+    {validatorFacts : Fir.Wasm.SupportedCaseFacts}
+    {sharing : Fir.Wasm.SupportedSharingFacts}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId fieldId : Lean.FVarId}
+    {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (validated : ConcreteStructuredValidationFocus program joins locals
+      (some expectedResult) validatorFacts sharing
+      (.uset objectId index fieldId continuation))
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals)
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.uset objectId index fieldId continuation)
+      targetStore targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv 0
+      (.uset objectId index fieldId continuation) := by
+  obtain ⟨objectCompiled, fieldCompiled⟩ := validated.uset_compiler agrees
+  obtain ⟨location, cell, semantic, field, nextRuntime, objectLookup,
+      fieldLookup, updated, found, live, objectEq, slotStart, slotEnd⟩ :=
+    related.uset_source_of_step sourceStep
+  exact .usizeField
+    (.uset sourceRuntime nextRuntime sourceEnv objectId fieldId index
+      continuation location cell semantic field objectCompiled fieldCompiled
+      objectLookup fieldLookup updated found live objectEq slotStart slotEnd)
+
+/-- The aligned residual package discharges `USize` field admission from one
+successful source step. -/
+theorem ConcreteStructuredAlignedValidationState.admit_uset_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {expectedResult : AbiKind}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId fieldId : Lean.FVarId}
+    {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (validated : ConcreteStructuredAlignedValidationState program context
+      expectedResult (.uset objectId index fieldId continuation))
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.uset objectId index fieldId continuation)
+      targetStore targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv 0
+      (.uset objectId index fieldId continuation) := by
+  obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees⟩ := validated
+  exact focus.admit_uset_of_step agrees related sourceStep
+
 /-- Constructor-tag writes preserve the residual validator state. -/
 theorem ConcreteStructuredValidationFocus.setTagContinuation
     {program : Fir.LeanIR.ImpureProgram}
