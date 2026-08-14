@@ -15,6 +15,41 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W7-TRUSTED-RESIDENT-ARRAY-HOT-CALLS`.
+- Integration owner: `root`, consuming the clean `wasm/generation` handoff
+  rebased directly on `main` at `0172e5ea`. The functional runtime head is
+  `da721bc3`; the accepted mailbox head is `15a43513`.
+- Runtime split: standalone and raw/public Array helpers retain the complete
+  address/header validator and malformed-address traps. Typed closed
+  applications select explicitly trusted helpers that consume the accepted
+  resident Array representation invariant. Lean guards prove that each
+  trusted body is exactly its checked counterpart after removing the common
+  validator prefix; bounds, reference counting, uniqueness, copy-on-write,
+  allocation, and recursive release remain byte-identical.
+- Linker boundary: checked strict/available policies remain available, while
+  the closed-application family alone selects trusted available Array calls.
+  The policy rejects mixed checked/trusted Array modes. No semantic operation,
+  concrete layout, symbolic-Wasm instruction, ownership rule, helper
+  signature, or application ABI changed.
+- Evidence: malformed raw Array input still traps. The exact zero-import
+  lean-zip levels 1--10 package, native output, independent inflate,
+  persistent/scratch ownership, repeat generation, and order-balanced scaling
+  probes pass with identical digests and flat frontiers. Four-KiB inputs were
+  neutral; paired raw-entry medians improved about 2.6% at 64 KiB and 1.9% at
+  256 KiB. Resident frontier shrank by 2,276 bytes, while complete linked Wasm
+  grew by 6,263 bytes, so this is not recorded as a binary-size win.
+- Acceptance: Lean Beam sync/save reports zero diagnostics; the focused linker
+  cone, `git diff --check`, complete `make check` (125 tests, 710 unique cases,
+  2,112/2,112 equal comparisons), all 3,148 Talos jobs, and the complete
+  deterministic W7 artifact gate pass. No bug card was required.
+- Result: `main` fast-forwards through `15a43513`. The independent W6
+  theorem-side audit of the trusted representation premise remains in mailbox
+  thread `W7-W6-20260814-001`; generation acceptance neither claims nor
+  changes that refinement theorem. W7 next republishes lean-zip from accepted
+  `main`, then resumes the production/diagnostic adapter split.
+
+## Latest completed integration lease
+
 - Milestone: `W6-VALIDATED-STRUCTURED-CONTROL`.
 - Integration owner: `root`, consuming the clean `wasm/talos-runtime`
   handoff based directly on `main` at `85481c67`. The functional proof head is
