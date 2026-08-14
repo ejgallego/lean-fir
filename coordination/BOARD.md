@@ -15,6 +15,37 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W7-LEAN-ZIP-CACHE-ISOLATED-CLOSURE-RATCHET`.
+- Integration owner: `root`, consuming the clean `wasm/generation` handoff
+  rebased directly on `main` at `bebc9b53`. The functional generation head is
+  `a2a1373f`; the accepted lane-mailbox head is `123c34e4`.
+- Closure contract: the reviewed post-cache-isolation lean-zip closure contains
+  662 captured declarations, 128 reviewed externals, 534 retained source
+  functions, 2,598 resident helpers, and 3,132 complete functions. The package
+  gate now pins SHA-256 identities for all four ordered inventories as well as
+  their counts and Wasm sizes.
+- Artifact: the immutable raw-compression package at
+  `integration/lean-zip/_build/lean-zip-raw-packages/b3eefa8e3de3-30737b4e2ebf-9ff10a697177758c87ec`
+  contains a 902,411-byte complete module with SHA-256
+  `d3992d5b5e5a4bd11edb93f48e0b95fbc2148a1c0b7c87b395d208e4a61e44cc`,
+  zero function imports, zero memory imports, module-owned memory, and all ten
+  compression levels.
+- Contracts: none. This hardens only the lean-zip integration's closure and
+  immutable-package ratchet. Source semantics, production validation,
+  concrete layout/runtime, symbolic Wasm, semantic ABI, resident-helper
+  signatures, and W6 theorem surfaces are unchanged.
+- Acceptance: `git diff --check`, complete `make check` (125 tests, 710 unique
+  cases, 2,112/2,112 comparisons), all 3,148 Talos jobs, and the complete W7
+  artifact gate pass on the final base. Exact-head package generation again
+  passes repeated generation, five native/Wasm cases at ten levels,
+  zero-import linking, cache/scratch rewind, checksums, and smoke. Bug card
+  `FIR-BUG-wasm-none-lean-zip-raw-cache-isolation-ratchet` is fixed.
+- Result: `main` fast-forwards through `123c34e4` plus this acceptance record.
+  The stable W7 integration lease is released. W6 may now rebase its committed
+  object-field typing-admission slice before the next proof handoff.
+
+## Latest completed integration lease
+
 - Milestone: `W6-VALIDATED-USIZE-FIELD-ADMISSION`.
 - Integration owner: `root`, consuming the clean `wasm/talos-runtime`
   handoff based directly on `main` at `5ad696a9`. The functional proof head is
