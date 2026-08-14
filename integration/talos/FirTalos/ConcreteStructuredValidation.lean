@@ -4061,6 +4061,54 @@ theorem ConcreteStructuredValidationFocus.decPersistent
   simp only [Fir.Wasm.supportedCodeWithJoins] at supported
   exact ⟨by simpa using supported⟩
 
+/-- Persistent increments are a complete current-step admission case.  The
+source operation remains visible, but production lowering erases it and the
+admission judgment therefore needs no heap, target, or allocation premise. -/
+theorem ConcreteStructuredAlignedValidationState.admit_incPersistent
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {externals : ExternalImpl}
+    {expectedResult : Fir.Wasm.AbiKind}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {amount : Nat}
+    {check : Bool}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (_validated : ConcreteStructuredAlignedValidationState program context
+      expectedResult (.inc objectId amount check true continuation)) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv 0
+      (.inc objectId amount check true continuation) := by
+  exact .incPersistent
+
+/-- Persistent decrements are likewise admitted directly from the current
+validated node.  Recursive release is absent by construction because the
+persistent flag makes this source-visible operation compiler-erased. -/
+theorem ConcreteStructuredAlignedValidationState.admit_decPersistent
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {externals : ExternalImpl}
+    {expectedResult : Fir.Wasm.AbiKind}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {amount : Nat}
+    {check : Bool}
+    {objectFields? : Option Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (_validated : ConcreteStructuredAlignedValidationState program context
+      expectedResult
+      (.dec objectId amount check true objectFields? continuation)) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv 0
+      (.dec objectId amount check true objectFields? continuation) := by
+  exact .decPersistent
+
 /-- Validation of an ordinary decrement exposes the exact object-family kind
 selected in the residual validator row.  This is the static half of current-
 step admission; the successful source step supplies the lookup and update. -/

@@ -147,3 +147,12 @@ tag, object-field, `USize`-field, and packed-scalar-field continuations. While
 closing the direct-`let` result premise, the proof exposed that raw supported
 lowering does not retain body-binder name uniqueness; that independent domain
 defect is recorded as `FIR-BUG-wasm-none-local-binder-name-uniqueness`.
+
+Persistent increment and decrement are now complete validator-derived
+admission cases: their source-visible nodes are erased by production lowering
+and require no target or heap premise. The mutation audit also confirmed that
+set-tag validation lacks the `UInt32` range premise required by the concrete
+header theorem; `FIR-BUG-wasm-none-settag-uint32-admission` records that
+independent compiler-domain gap. Return admission remains deliberately
+directional until upstream typing/value-shape information can justify the
+reverse object-family orientations accepted by physical compatibility.

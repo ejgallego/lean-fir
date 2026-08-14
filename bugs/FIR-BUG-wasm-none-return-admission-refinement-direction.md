@@ -46,10 +46,14 @@ Inspect `ConcreteStructuredValidationFocus.return_eq` and
 
 ## Expected semantics
 
-Current-step admission should accept exactly the compiler-validated return
-boundary. Object-family ABI kinds share one Lean/Wasm calling representation;
-the proof contract may retain their precise semantic kinds without imposing a
-direction that the compiler does not require.
+Current-step admission should accept exactly the compiler-produced, well-typed
+return boundary. Object-family ABI kinds share one Lean/Wasm calling
+representation, but physical compatibility alone is not a semantic coercion:
+specializing `.tobject` to `.object` additionally requires that the returned
+semantic value is a heap reference, and specializing it to `.tagged` requires
+that the value is tagged. The proof boundary must therefore retain either the
+directional refinement already sufficient for `ValueRel.ofRefines`, or the
+upstream typing/value-shape invariant that justifies the reverse orientation.
 
 ## Actual behavior
 
@@ -69,15 +73,19 @@ in `Fir/Wasm/ABI.lean`.
 ## Semantic impact
 
 The universal compiler-admission theorem would exclude a source function that
-the production validator and lowering accept. This is a proof-contract
-overstrengthening, not evidence that the generated physical return lane is
-wrong.
+the production validator and lowering accept. This is a missing compiler-domain
+invariant rather than evidence that the generated physical return lane is
+wrong. Simply replacing directional refinement by `leanCompatible` in the
+proof would be unsound for arbitrary raw LCNF: a `.tobject` relation may contain
+a tagged reference that cannot be rebound to an `.object` caller local.
 
 ## Classification and triage
 
-Repair the admission and return-preservation contracts to use the production
-compatibility relation, then retain directional refinement only at runtime
-boundaries that genuinely need it. Re-run the full return/pop dependency cone.
+Retain the production `leanCompatible` equation, but do not use it directly as
+a `ValueRel` transport. Add the smallest phase typing/value-shape invariant at
+the supported-function boundary and derive either directional refinement or
+the appropriate semantic narrowing at return/pop. Re-run the full return/pop
+dependency cone.
 
 ## Workaround
 
@@ -89,6 +97,9 @@ none
 
 ## Resolution and regression
 
-Unresolved. `ConcreteStructuredValidationFocus.return_eq` is the proof-side
-regression that preserves the exact production compatibility judgment. The
-next slice will adapt `.ret` admission and its return/pop dependency cone.
+Unresolved. `ConcreteStructuredValidationFocus.return_eq` preserves the exact
+production compatibility judgment. The attempted direct contract replacement
+was rejected because `ConcreteStructuredYieldFocus.advance_pop_*` must call
+`PhysicalValueRel.ofRefines` when rebinding the caller local. Resolution now
+depends on making the upstream typing/value-shape fact proof-visible rather
+than weakening that semantic transport.
