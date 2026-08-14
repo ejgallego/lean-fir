@@ -35,6 +35,9 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   followed by indexed final-LCNF capture ownership at `3dc7b0ee`. The bounded
   optimized-function tooling and its root fail-closed gate are accepted through
   `fa3105f7`, followed by the resident Array hot-path history at `372826cf`.
+  W6 scalar-field layout admission and bit-exact Float32/Float field refinement
+  are accepted through tracked proof handoff `3f038b71` (functional heads
+  `e2249d03` and `cb04d7ee`).
   The Illuminate functional generation head is `4b84f35b`; the package itself
   remains local-only until its consumer authorizes publication.
 - Landing order:
@@ -54,6 +57,9 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
      `17d576fb`, and indexed resident dead-code reachability is accepted at
      `7b9d523a`. Indexed final-LCNF capture ownership is accepted at
      `3dc7b0ee`; later profiling/tooling surfaces remain separate slices.
+  5. W6 scalar-field layout admission lands before the additive bit-exact
+     Float32/Float field refinement, through tracked proof head `3f038b71`.
+     Neither slice changes W7's generator contract.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -67,6 +73,33 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
+
+## Latest completed integration lease
+
+- Milestone: `W6-SCALAR-FIELD-FLOAT-ADMISSION`.
+- Integration owner: `wasm-gen`, rebasing the W6 stack directly on accepted
+  `main` at `58a97c72` and accepting scalar-layout functional commit
+  `e2249d03` followed by bit-exact Float32/Float functional commit `cb04d7ee`;
+  tracked proof handoff is `3f038b71`.
+- Change: structured validation now names the source-typing boundary needed for
+  packed scalar field access. Concrete projection, mutation, heap, ownership,
+  persistence, cache, resolver/compiler, simulation, and fault proofs now cover
+  Float32 and Float using exact raw bits. Direct examples preserve Float32
+  negative zero and a noncanonical Float NaN without host conversion.
+- Contracts: none. This proves the already-landed raw-bit scalar, ABI, and
+  packed-layout contracts and changes no source semantics, production
+  validator, physical layout, symbolic instruction, resident-helper signature,
+  emitted code, or W7 generation surface.
+- Acceptance: Lean Beam passes the scalar-validation and downstream
+  compiler/cache/simulation/fault cone with zero errors; the focused batch cone
+  passes 3,124 jobs. `git diff --check`, complete `make check` (702 source
+  cases, nine direct machines, the 702-case V8 triangle, 2,115/2,115 equal
+  comparisons, zero findings), and all 3,148 Talos jobs pass.
+- Bug cards: `FIR-BUG-wasm-none-float-runtime-gap` is fixed;
+  `FIR-BUG-wasm-none-scalar-field-layout-admission` records the remaining
+  production source-typing invariant rather than weakening admission.
+- Result: local `main` advances through `3f038b71`. W7 may add generated
+  raw-bit Float32/Float field fixtures without an ABI or runtime adaptation.
 
 ## Latest completed integration lease
 
