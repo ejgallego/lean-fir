@@ -15,6 +15,38 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-VALIDATED-YIELDED-BIND-RESUMPTION`.
+- Integration owner: `root`, consuming the clean `wasm/talos-runtime`
+  handoff rebased directly on `main` at `7e5f31f3`. The functional proof head
+  is `8262bd21`; the accepted mailbox head is `6cfb6d8e`.
+- Relation repair: the previous static/resource agreement and suspended
+  validation proofs hid caller result ABIs independently. Their constructors
+  built matching stacks, but proof irrelevance did not expose the equality
+  needed when a yielded callee restored its caller. The strengthened W6
+  relation carries a branch-exact caller-ABI spine as a non-proof index and
+  preserves that alignment through every existing active, ready, entry,
+  case-label, and returned transition.
+- Resumption coverage: a yielded direct call now takes the exact two target
+  steps and re-enters its validated caller continuation. Saturated calls do
+  the same after the exact matcher-count-plus-five target path. Arbitrary
+  target-only case-label prefixes unwind first without changing the source
+  caller or its validation. Lazy cache-marker publication remains a separate
+  administrative branch rather than being weakened into this theorem.
+- Contracts: none. This is a proof-only strengthening over unchanged source
+  validation, concrete runtime/resource, compiler, symbolic Wasm, and W7
+  generation contracts.
+- Acceptance: Lean Beam update/sync/save reports zero diagnostics; direct
+  compilation of `FirTalos.ConcreteStructuredValidation` and `FirTalos`
+  passes all 3,148 jobs. After rebasing, `git diff --check`, the same direct
+  build, complete `make check` (125 tests, 710 unique cases, 2,112/2,112 equal
+  comparisons), and all 3,148 Talos jobs pass. No bug card was required.
+- Result: `main` fast-forwards through `6cfb6d8e`. W6 next proves validated
+  lazy-cache publication and external-bind resumption, then closes
+  validator-derived current-step admission before assembling the universal
+  one-step and finite-trace theorems.
+
+## Latest completed integration lease
+
 - Milestone: `W7-TRUSTED-RESIDENT-ARRAY-HOT-CALLS`.
 - Integration owner: `root`, consuming the clean `wasm/generation` handoff
   rebased directly on `main` at `0172e5ea`. The functional runtime head is
