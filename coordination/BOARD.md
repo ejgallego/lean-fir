@@ -13,6 +13,41 @@ specific behavior to prevent.
 
 Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
+## Active integration lease
+
+- Milestone: `MULTI-LANE-CONSOLIDATION-20260814`.
+- Integration owner: `wasm-gen`, temporarily acting as the integration owner
+  on `main` by explicit user assignment. The lease covers landing coordination
+  only; feature ownership remains with each lane.
+- Accepted baseline: `main` at `0cfc5505`, which contains the complete
+  `W7-LEAN-ZIP-CACHE-ISOLATED-CLOSURE-RATCHET` stack and its acceptance
+  record. The stale local mailbox thread is closed against this commit before
+  another feature landing.
+- Landing order:
+  1. W6 rebases its clean object-field typing-admission proof on `0cfc5505`,
+     reruns its required gates, and returns a clean tracked handoff.
+  2. Tooling isolates the final-function-index protocol as a clean prefix,
+     rebases it after the preceding acceptance, and leaves CPU profiling,
+     selected-function views, and compiled-Array probes as independent later
+     slices.
+  3. W7-2 separates the Verso post-G2 semantic closure review from the generic
+     immutable-package publisher refactor. Semantic/generator fixes land
+     before the publisher consumer unless the lane documents a hard dependency.
+  4. W7-1 resumes the caller-owned Illuminate selection export from accepted
+     main. Its lean-zip function-sidecar consumer waits until the tooling
+     protocol is accepted.
+- Serialization rule: while the integration owner is validating one rebased
+  candidate, other lanes may continue on their branches but do not
+  fast-forward `main`. This prevents proof-only commits from repeatedly
+  invalidating long deterministic package and external-engine gates.
+- Not ready: the tooling worktree has an untracked test fixture; the W7-2
+  worktree has an uncommitted bug-card edit; and the Array panic-observation
+  fixture request remains unacknowledged. None is integrated from dirty or
+  unclaimed state.
+- Publication boundary: local integration and the already-authorized `main`
+  push only. No feature push, PR, external package publication, worktree
+  removal, or branch deletion is implied by this lease.
+
 ## Latest completed integration lease
 
 - Milestone: `W7-LEAN-ZIP-CACHE-ISOLATED-CLOSURE-RATCHET`.
