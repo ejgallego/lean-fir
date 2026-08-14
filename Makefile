@@ -8,7 +8,9 @@ LAKE_ARTIFACT_CACHE ?= true
 LAKE_RESTORE_ARTIFACTS ?= true
 export LAKE_CACHE_DIR LAKE_ARTIFACT_CACHE LAKE_RESTORE_ARTIFACTS
 
-.PHONY: build examples inspect validate validate-direct-lcnf validate-v8 validate-native-oracle-attestations validate-coverage-index bug-cards trusted-assumptions no-placeholders mailbox-check mailbox-list mailbox-test check beam talos-setup talos-check clean
+FIR_BINARYEN_DIR ?= $(CURDIR)/.deps/lcnf-c-wasm/emsdk/upstream/bin
+
+.PHONY: build examples inspect validate validate-direct-lcnf validate-v8 validate-native-oracle-attestations validate-coverage-index bug-cards trusted-assumptions no-placeholders mailbox-check mailbox-list mailbox-test tooling-unit-check tooling-check check beam talos-setup talos-check clean
 
 build:
 	lake build
@@ -79,7 +81,13 @@ mailbox-list:
 mailbox-test:
 	node --test scripts/mailbox.test.mjs
 
-check: build examples validate-coverage-index bug-cards trusted-assumptions no-placeholders mailbox-test
+tooling-unit-check:
+	$(MAKE) -C tooling unit-check
+
+tooling-check:
+	$(MAKE) -C tooling check FIR_BINARYEN_DIR="$(FIR_BINARYEN_DIR)"
+
+check: tooling-unit-check build examples validate-coverage-index bug-cards trusted-assumptions no-placeholders mailbox-test
 
 beam:
 	lean-beam sync Fir/LeanIR.lean
