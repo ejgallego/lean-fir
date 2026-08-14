@@ -832,6 +832,16 @@ def oversizedAllocatedTagProgram : Fir.LeanIR.ImpureProgram :=
           (.let (letDecl r tobjectType (.lit (.nat 0))) (.return r)),
         .default (.return x)]))] }
 
+/-- A source `Nat` tag that does not fit the wasm32 constructor header must be
+rejected before lowering; otherwise the concrete setter would wrap it to zero.
+-/
+def oversizedSetTagProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] tobjectType (.code <|
+      .let (letDecl x tobjectType (.lit (.nat 7))) <|
+      .let (letDecl p objType (.ctor { pairInfo with size := 1 } #[.fvar x])) <|
+      .setTag p UInt32.size <|
+      .return p)] }
+
 #guard !supportedProgram literalProgram
 #guard !supportedProgram erasedProgram
 #guard !supportedProgram ctorProjectionProgram
@@ -861,6 +871,10 @@ def oversizedAllocatedTagProgram : Fir.LeanIR.ImpureProgram :=
 #guard !supportedProgram oversizedTagCaseProgram
 #guard !supportedProgram oversizedScalarTagCaseProgram
 #guard !supportedProgram oversizedAllocatedTagProgram
+#guard !supportedProgram oversizedSetTagProgram
+#guard match lowerSupported oversizedSetTagProgram with
+  | .error (.validation (.unsupportedCode `main)) => true
+  | _ => false
 #guard !supportedProgram directCallProgram
 #guard !supportedProgram closureCallProgram
 #guard !supportedProgram mutationProgram

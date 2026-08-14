@@ -402,8 +402,9 @@ def supportedCodeWithJoins (program : Fir.LeanIR.ImpureProgram)
           fieldKind == annotationKind && supportedScalarProjectionKind fieldKind &&
             supportedCodeWithJoins program joins locals expectedResult facts sharing continuation
       | _, _, _ => false
-  | .setTag objectId _ continuation =>
-      findLocalKind? locals objectId == some .object &&
+  | .setTag objectId tag continuation =>
+      decide (tag < UInt32.size) &&
+        findLocalKind? locals objectId == some .object &&
         supportedCodeWithJoins program joins locals expectedResult facts sharing continuation
   | .inc objectId _ _ persistent continuation =>
       if persistent then
