@@ -28,8 +28,9 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   runtime-link function-evidence API is accepted at `52a98a6f`. W7-2's
   source-module replay repair and shared immutable publisher are accepted
   through `912bf68a`, and the Flat source identity is repinned to the published
-  Verso 4.33 contract at `8199b6d7`. The Illuminate functional generation head
-  is `4b84f35b`; the package itself remains local-only until its consumer
+  Verso 4.33 contract at `8199b6d7`. The resident linker's persistent planning
+  view is accepted at `17d576fb`. The Illuminate functional generation head is
+  `4b84f35b`; the package itself remains local-only until its consumer
   authorizes publication.
 - Landing order:
   1. W7-2's Verso source-module replay repair and generic immutable-package
@@ -42,6 +43,8 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   3. W7-1 may now resume the lean-zip function-sidecar consumer. W7-2 may
      hand the validated exact-head Flat package to the Verso owner; the
      Illuminate selection export is also complete.
+  4. The isolated persistent resident-linker planning view is accepted at
+     `17d576fb`; later profiling/tooling surfaces remain separate slices.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -55,6 +58,30 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
+
+## Latest completed integration lease
+
+- Milestone: `W7-RESIDENT-LINKER-PERSISTENT-PLAN`.
+- Integration owner: `wasm-gen`, accepting isolated commit `17d576fb` on
+  `main` at `07bb4961` after confirming no overlap with the active lean-zip
+  package files or W7-2's Flat source pin.
+- Change: contiguous non-materializing helper-family steps now share one
+  persistent skeleton/probe planning view. Generated helpers remain
+  materialized for later families, source bodies are rewritten once, and
+  runtime operations are recollected once in final function order. This
+  removes repeated header/probe reconstruction and suffix-plan composition.
+- Evidence: alternating Level-1 measurements report linker time decreasing
+  from 6.426s and 7.513s controls to 4.799s candidates. Control and candidate
+  linked Wasm are byte-identical at 331,580 bytes and SHA-256
+  `d440dfc326cb62785cc909a5c58b04344046e179602b53114e70682358fd3d59`.
+- Contracts: none. Source semantics, semantic ABI, public linker output,
+  runtime/layout, ownership, resident-helper signatures, and W6 proof surfaces
+  are unchanged.
+- Acceptance: Lean Beam, `git diff --check`, complete `make check`,
+  `make talos-setup`, all 3,148 Talos jobs, and the complete
+  artifact/browser/differential gate pass.
+- Result: `main` advances through `17d576fb`; W7-1 rebases its independent
+  lean-zip function-sidecar package before integration.
 
 ## Latest completed integration lease
 
