@@ -54,7 +54,10 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   is accepted through tracked handoff `da09b857` (functional head `ffbd7139`),
   including the isolated per-source-unit capture contract at `d1786ba4`.
   The Illuminate functional generation head is `4b84f35b`; the package itself
-  remains local-only until its consumer authorizes publication.
+  remains local-only until its consumer authorizes publication. W7's genuine
+  platform-libm frontier is closed through tracked handoff `8695a69c`
+  (functional head `0c5dda71`) with a six-only provider and deterministic,
+  zero-import linked acceptance module.
 - Landing order:
   1. W7-2's Verso source-module replay repair and generic immutable-package
      publisher are accepted in that order through `912bf68a`.
@@ -91,7 +94,10 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
      by the source-compiled Float closure, deterministic artifact gate, and
      strict numeric-checkpoint selection through tracked handoff `da09b857`.
      W6 refinement of the additive resident Nat/Int operations remains
-     independent; concrete layouts and helper ABI kinds are unchanged.
+     independent; concrete layouts and helper ABI kinds are unchanged. The
+     separately compiled six-function libm provider follows through tracked
+     handoff `8695a69c`; it preserves the existing external names and binary64
+     signatures, so no W6 adaptation is required for integration.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -107,6 +113,40 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   removal, or branch deletion is implied by this lease.
 
 ## Latest completed integration lease
+
+- Milestone: `W7-STANDARD-LIBM-FRONTIER`.
+- Integration owner: `wasm-gen`, accepting its own clean tracked handoff
+  `8695a69c` on `main`; the functional head is `0c5dda71`.
+- Change: FIR now closes Lean's six genuine opaque Float externals through the
+  same platform-libm boundary used upstream. A six-function-only Emscripten
+  provider supplies `Float.sin`, `Float.cos`, `Float.acos`, `Float.atan2`,
+  `Float.cbrt`, and `Float.log2`; the existing exact-name/signature linker
+  internalizes it and retains only the caller's public exports. Core-Wasm
+  Float helpers and source-compiled `Float.ofNat`/`Float.ofScientific` remain
+  outside this provider.
+- Contracts: no shared semantic contract changes. The additive
+  `fir.standard-libm/v2` package capability records the existing six binary64
+  signatures, the 65536-byte Emscripten low-memory reservation, and the
+  platform-libm special-value/bounded-error policy. Legacy
+  `fir.standard-math/v1` remains available for packages awaiting regeneration.
+- Acceptance: Lean Beam reports zero diagnostics. The focused 93-job Lake
+  cone, `git diff --check`, complete `make check` (704 source cases, nine direct
+  machines, 2,121/2,121 comparisons), all 3,148 Talos jobs, and the complete
+  deterministic resident/prettyM artifact gate pass. The libm gate checks
+  exact signed-zero/infinity/domain behavior, NaN classification, binary64 bit
+  transport, and a bounded finite-result comparison against an independent
+  JavaScript libm. No bug card was needed.
+- Artifact: the 486-byte frontier has exactly six `lean.extern` function
+  imports. The 11,516-byte provider links to an 11,454-byte, module-memory,
+  zero-import module at SHA-256
+  `f5e516e1f237c3dd641317338e445844fc20c8cbefcc26f21deb501cb29cdd4f`.
+  It exports six bit-lane probes plus memory and is byte-identical across
+  repeated builds.
+- Result: local `main` advances through `8695a69c`. No external package was
+  published. Consumer packages may now regenerate, inspect their remaining
+  import subset, select v2, and retire the heap-aware v1 compatibility runtime.
+
+## Previous completed integration lease
 
 - Milestone: `W7-SOURCE-FLOAT-CONSTRUCTION`.
 - Integration owner: `wasm-gen`, accepting its own clean tracked handoff
