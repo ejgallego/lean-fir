@@ -26,7 +26,7 @@ export const payloadFiles = Object.freeze([
   "BUILD.json",
   "lean-zip-byte-array-browser-adapter.mjs",
   "lean-zip-raw-browser-adapter.mjs",
-  "standard-math-runtime-contract.mjs",
+  "standard-libm-runtime-contract.mjs",
   "lean-zip-raw.wasm",
   "lean-zip-raw.wasm.functions.json",
   "lean-zip-raw.wasm.json",

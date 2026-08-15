@@ -34,7 +34,7 @@ run_cmd do
   | .error error => throwError "failed to write resident raw frontier: {repr error}"
   | .ok () =>
       let expectedMathImports : Array Name :=
-        #[`Float.ofNat, `Float.ofScientific, `Float.log2]
+        #[`Float.log2]
       let frontierImports := linked.module.imports.filterMap (·.declaration?)
       unless frontierImports == expectedMathImports do
         throwError "raw frontier imports changed: expected {expectedMathImports}, got {frontierImports}"

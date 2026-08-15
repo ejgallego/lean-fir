@@ -2,8 +2,8 @@ import {
   createLeanZipByteArrayAdapter,
   fetchLeanZipByteArrayAdapter,
 } from "./lean-zip-byte-array-browser-adapter.mjs";
-import { STANDARD_MATH_RUNTIME_RESERVED_MEMORY_BYTES } from
-  "./standard-math-runtime-contract.mjs";
+import { STANDARD_LIBM_RUNTIME_RESERVED_MEMORY_BYTES } from
+  "./standard-libm-runtime-contract.mjs";
 
 const ENTRY = "Zip.Wasm.compressRaw";
 const PARAMETER_KINDS = Object.freeze(["object", "uint8"]);
@@ -23,7 +23,7 @@ export function createLeanZipRawAdapter(options = {}) {
     parameterKinds: PARAMETER_KINDS,
     persistentInitializer: LEAN_ZIP_RAW_PERSISTENT_INITIALIZER,
     allowPersistentCheckpointGrowth: true,
-    reservedMemoryBytes: STANDARD_MATH_RUNTIME_RESERVED_MEMORY_BYTES,
+    reservedMemoryBytes: STANDARD_LIBM_RUNTIME_RESERVED_MEMORY_BYTES,
   });
 }
 
@@ -35,6 +35,6 @@ export function fetchLeanZipRawAdapter(options) {
     parameterKinds: PARAMETER_KINDS,
     persistentInitializer: LEAN_ZIP_RAW_PERSISTENT_INITIALIZER,
     allowPersistentCheckpointGrowth: true,
-    reservedMemoryBytes: STANDARD_MATH_RUNTIME_RESERVED_MEMORY_BYTES,
+    reservedMemoryBytes: STANDARD_LIBM_RUNTIME_RESERVED_MEMORY_BYTES,
   });
 }

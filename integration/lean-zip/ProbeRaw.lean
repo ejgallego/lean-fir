@@ -90,7 +90,7 @@ run_cmd do
   match linkedResult with
   | .ok _ =>
       let expectedMathImports : Array Name :=
-        #[`Float.ofNat, `Float.ofScientific, `Float.log2]
+        #[`Float.log2]
       unless remainingImports == expectedMathImports do
         throwError "raw frontier imports changed: expected {expectedMathImports}, got {remainingImports}"
       unless remainingRuntimeOperations.isEmpty do

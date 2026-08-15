@@ -14,9 +14,9 @@ import {
 import { LEAN_ZIP_BYTE_ARRAY_LAYOUT_VERSION } from
   "./lean-zip-byte-array-browser-adapter.mjs";
 import {
-  STANDARD_MATH_RUNTIME_RESERVED_MEMORY_BYTES,
-  STANDARD_MATH_RUNTIME_VERSION,
-} from "./standard-math-runtime-contract.mjs";
+  STANDARD_LIBM_RUNTIME_RESERVED_MEMORY_BYTES,
+  STANDARD_LIBM_RUNTIME_VERSION,
+} from "./standard-libm-runtime-contract.mjs";
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const wasm = readFileSync(join(directory, "lean-zip-raw.wasm"));
@@ -52,11 +52,11 @@ assert.deepEqual(functionSidecar.artifact, {
   byteLength: wasm.byteLength,
   sha256: sha256(wasm),
   functionImportCount: 0,
-  definedFunctionCount: 2172,
-  functionCount: 2172,
+  definedFunctionCount: 2305,
+  functionCount: 2305,
 });
 assert.deepEqual(functionSidecar.functions.map(({ index }) => index),
-  Array.from({ length: 2172 }, (_, index) => index));
+  Array.from({ length: 2305 }, (_, index) => index));
 assert(functionSidecar.functions.every(({ imported }) => imported === false));
 const functionExports = functionSidecar.functions.flatMap((function_) =>
   function_.exportedAs.map((name) => ({ name, index: function_.index })));
@@ -68,10 +68,10 @@ const functionOrigins = Object.fromEntries([
   (function_) => function_.origin === origin).length]));
 assert.deepEqual(functionExports, [
   { name: "fir_heap_alloc", index: 17 },
-  { name: "fir_heap_frontier", index: 44 },
-  { name: "Zip.Wasm.compressRaw", index: 2169 },
-  { name: "fir_heap_rewind", index: 2170 },
-  { name: "fir_heap_set_frontier", index: 2171 },
+  { name: "fir_heap_frontier", index: 37 },
+  { name: "Zip.Wasm.compressRaw", index: 2302 },
+  { name: "fir_heap_rewind", index: 2303 },
+  { name: "fir_heap_set_frontier", index: 2304 },
 ]);
 assert.deepEqual(build.wasm.functionEvidence, {
   file: "lean-zip-raw.wasm.functions.json",
@@ -81,8 +81,8 @@ assert.deepEqual(build.wasm.functionEvidence, {
   sha256: sha256(readFileSync(
     join(directory, "lean-zip-raw.wasm.functions.json"))),
   functionImportCount: 0,
-  definedFunctionCount: 2172,
-  functionCount: 2172,
+  definedFunctionCount: 2305,
+  functionCount: 2305,
   functionsSha256: sha256(JSON.stringify(functionSidecar.functions)),
   origins: functionOrigins,
   exports: functionExports,
@@ -91,20 +91,21 @@ assert.deepEqual(build.wasm.functionEvidence, {
   protocol: "prepare/restamp/optimize across runtime linking and DCE",
 });
 assert.deepEqual(functionOrigins, {
-  "lean-source": 354,
-  "optimizer-or-linked-runtime": 6,
-  "resident-helper": 1812,
+  "lean-source": 390,
+  "optimizer-or-linked-runtime": 0,
+  "resident-helper": 1915,
 });
 assert.deepEqual(build.wasm.frontier.imports, [
-  { module: "lean.extern", name: "Float.ofNat", kind: "function" },
-  { module: "lean.extern", name: "Float.ofScientific", kind: "function" },
   { module: "lean.extern", name: "Float.log2", kind: "function" },
 ]);
 assert.equal(build.capabilities.completeRuntime.externalRuntime.version,
-  STANDARD_MATH_RUNTIME_VERSION);
+  STANDARD_LIBM_RUNTIME_VERSION);
 assert.equal(
   build.capabilities.completeRuntime.externalRuntime.reservedMemoryBytes,
-  STANDARD_MATH_RUNTIME_RESERVED_MEMORY_BYTES);
+  STANDARD_LIBM_RUNTIME_RESERVED_MEMORY_BYTES);
+assert.equal(
+  build.capabilities.completeRuntime.externalRuntime.numericContract,
+  "platform-libm-special-values-and-bounded-error");
 assert.equal(build.entry.persistentInitializer,
   LEAN_ZIP_RAW_PERSISTENT_INITIALIZER);
 assert.equal(build.capabilities.persistentCaches.cacheAwareRewind, true);
@@ -113,7 +114,7 @@ assert.equal(build.capabilities.persistentCaches.warmCallStable, true);
 const adapter = await createLeanZipRawAdapter({ bytes: wasm, descriptor });
 assert.equal(adapter.initialization.entry, LEAN_ZIP_RAW_PERSISTENT_INITIALIZER);
 assert.equal(adapter.initialization.initialFrontier,
-  STANDARD_MATH_RUNTIME_RESERVED_MEMORY_BYTES);
+  STANDARD_LIBM_RUNTIME_RESERVED_MEMORY_BYTES);
 assert.equal(adapter.initialization.frontierGrowth, 0);
 const input = Uint8Array.of(0, 1, 127, 128, 254, 255);
 let checkpoint = adapter.initialization.checkpoint;

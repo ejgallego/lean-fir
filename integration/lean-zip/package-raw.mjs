@@ -23,7 +23,7 @@ import {
   LEAN_ZIP_RAW_OWNERSHIP_VERSION,
   LEAN_ZIP_RAW_PERSISTENT_INITIALIZER,
 } from "./lean-zip-raw-browser-adapter.mjs";
-import { standardMathRuntimeCapability } from
+import { standardLibmRuntimeCapability } from
   "../wasm-runtime/contract.mjs";
 
 const directory = dirname(fileURLToPath(import.meta.url));
@@ -36,16 +36,16 @@ const buildDirectory = join(directory, "_build");
 const wasmStem = join(buildDirectory, "lean-zip-raw.wasm");
 const frontierStem = join(buildDirectory, "lean-zip-raw-frontier.wasm");
 const baseStem = join(buildDirectory, "lean-zip-raw-base.wasm");
-const externalMathStem = join(buildDirectory,
-  "lean-zip-raw-external-math.wasm");
+const externalLibmStem = join(buildDirectory,
+  "lean-zip-raw-external-libm.wasm");
 const externalRuntimeDirectory = join(firRoot, "integration/wasm-runtime");
-const externalMathSource = join(externalRuntimeDirectory, "math-runtime.c");
+const externalLibmSource = join(externalRuntimeDirectory, "libm-runtime.c");
 const externalRuntimeLinker = join(externalRuntimeDirectory,
   "link-runtime.mjs");
 const functionIndexTool = join(firRoot, "tooling/wasm/function-index.mjs");
 const externalRuntimeContract = join(externalRuntimeDirectory,
   "contract.mjs");
-const packagedRuntimeContractName = "standard-math-runtime-contract.mjs";
+const packagedRuntimeContractName = "standard-libm-runtime-contract.mjs";
 const previewDirectory = process.env.FIR_RAW_PACKAGE_PREVIEW_DIR === undefined
   ? null
   : resolve(process.env.FIR_RAW_PACKAGE_PREVIEW_DIR);
@@ -114,26 +114,24 @@ function publishCurrent(destination) {
 }
 
 const expectedFrontierImports = Object.freeze([
-  { module: "lean.extern", name: "Float.ofNat", kind: "function" },
-  { module: "lean.extern", name: "Float.ofScientific", kind: "function" },
   { module: "lean.extern", name: "Float.log2", kind: "function" },
 ]);
 
 function generateCompleteRaw() {
   run("lake", ["--keep-toolchain", "env", "lean", "EmitRaw.lean"],
     { capture: false });
-  run(emcc, [externalMathSource, "-O3", "-flto", "--no-entry",
+  run(emcc, [externalLibmSource, "-O3", "-flto", "--no-entry",
     "-sSTANDALONE_WASM=1", "-sIMPORTED_MEMORY=1",
     "-sALLOW_MEMORY_GROWTH=1", "-sINITIAL_MEMORY=65536",
     "-sSTACK_SIZE=16384", "-Wl,--gc-sections", "-Wl,--strip-all",
-    "-o", externalMathStem], { capture: false });
+    "-o", externalLibmStem], { capture: false });
   const frontier = readFileSync(frontierStem);
   const frontierImports = WebAssembly.Module.imports(
     new WebAssembly.Module(frontier));
   assert.deepEqual(frontierImports, expectedFrontierImports,
     "raw frontier math import inventory changed");
   run(process.execPath, [externalRuntimeLinker, frontierStem,
-    externalMathStem, wasmStem,
+    externalLibmStem, wasmStem,
     "--function-inventory", inventoryPath,
     "--function-sidecar", functionSidecarStem], { capture: false });
   const frontierDescriptor = JSON.parse(readFileSync(
@@ -142,7 +140,7 @@ function generateCompleteRaw() {
     ...frontierDescriptor,
     imports: [],
     completeRuntime: true,
-    externalRuntime: standardMathRuntimeCapability(
+    externalRuntime: standardLibmRuntimeCapability(
       frontierImports.map(({ name }) => name)),
   };
   writeFileSync(`${wasmStem}.json`, `${JSON.stringify(descriptor)}\n`);
@@ -177,7 +175,7 @@ const { frontierImports } = generateCompleteRaw();
 const firstWasm = readFileSync(wasmStem);
 const firstFrontierWasm = readFileSync(frontierStem);
 const firstDescriptor = readFileSync(`${wasmStem}.json`);
-const firstExternalMath = readFileSync(externalMathStem);
+const firstExternalLibm = readFileSync(externalLibmStem);
 const firstFunctionSidecar = readFileSync(functionSidecarStem);
 generateCompleteRaw();
 assert.deepEqual(readFileSync(wasmStem), firstWasm,
@@ -186,8 +184,8 @@ assert.deepEqual(readFileSync(frontierStem), firstFrontierWasm,
   "repeated raw frontier generation was not deterministic");
 assert.deepEqual(readFileSync(`${wasmStem}.json`), firstDescriptor,
   "repeated raw descriptor generation was not deterministic");
-assert.deepEqual(readFileSync(externalMathStem), firstExternalMath,
-  "repeated standard math runtime generation was not deterministic");
+assert.deepEqual(readFileSync(externalLibmStem), firstExternalLibm,
+  "repeated standard libm runtime generation was not deterministic");
 assert.deepEqual(readFileSync(functionSidecarStem), firstFunctionSidecar,
   "repeated final function-sidecar generation was not deterministic");
 run(process.execPath, [join(directory, "raw-smoke.mjs")], { capture: false });
@@ -227,23 +225,23 @@ assert.deepEqual(functionSidecar.artifact, {
   byteLength: wasm.byteLength,
   sha256: sha256(wasm),
   functionImportCount: 0,
-  definedFunctionCount: 2172,
-  functionCount: 2172,
+  definedFunctionCount: 2305,
+  functionCount: 2305,
 });
 assert.deepEqual(functionSidecar.functions.map(({ index }) => index),
-  Array.from({ length: 2172 }, (_, index) => index));
+  Array.from({ length: 2305 }, (_, index) => index));
 assert(functionSidecar.functions.every(({ imported }) => imported === false));
 assert.deepEqual(functionOrigins, {
-  "lean-source": 354,
-  "optimizer-or-linked-runtime": 6,
-  "resident-helper": 1812,
+  "lean-source": 390,
+  "optimizer-or-linked-runtime": 0,
+  "resident-helper": 1915,
 });
 assert.deepEqual(functionExports, [
   { name: "fir_heap_alloc", index: 17 },
-  { name: "fir_heap_frontier", index: 44 },
-  { name: "Zip.Wasm.compressRaw", index: 2169 },
-  { name: "fir_heap_rewind", index: 2170 },
-  { name: "fir_heap_set_frontier", index: 2171 },
+  { name: "fir_heap_frontier", index: 37 },
+  { name: "Zip.Wasm.compressRaw", index: 2302 },
+  { name: "fir_heap_rewind", index: 2303 },
+  { name: "fir_heap_set_frontier", index: 2304 },
 ]);
 assert.deepEqual(inventory.frontierImports,
   frontierImports.map(({ name }) => name));
@@ -313,7 +311,7 @@ const build = {
     leanVersion: capture("lake", ["--keep-toolchain", "env", "lean",
       "--version"], directory),
     emscriptenVersion: capture(emcc, ["--version"], directory).split("\n")[0],
-    externalRuntimeSourceSha256: sha256(readFileSync(externalMathSource)),
+    externalRuntimeSourceSha256: sha256(readFileSync(externalLibmSource)),
     externalRuntimeContractSha256:
       sha256(readFileSync(externalRuntimeContract)),
   },
@@ -375,7 +373,7 @@ const build = {
       version: "fir.lean-zip.raw.complete-runtime/v1",
       selfContained: true,
       unresolvedRuntimeOperations: [],
-      externalRuntime: standardMathRuntimeCapability(
+      externalRuntime: standardLibmRuntimeCapability(
         frontierImports.map(({ name }) => name)),
     },
     byteArray: {

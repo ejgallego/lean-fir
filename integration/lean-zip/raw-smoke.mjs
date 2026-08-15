@@ -10,8 +10,8 @@ import {
   LEAN_ZIP_RAW_PERSISTENT_INITIALIZER,
   createLeanZipRawAdapter,
 } from "./lean-zip-raw-browser-adapter.mjs";
-import { STANDARD_MATH_RUNTIME_RESERVED_MEMORY_BYTES } from
-  "./standard-math-runtime-contract.mjs";
+import { STANDARD_LIBM_RUNTIME_RESERVED_MEMORY_BYTES } from
+  "./standard-libm-runtime-contract.mjs";
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const wasm = readFileSync(join(directory, "_build/lean-zip-raw.wasm"));
@@ -43,9 +43,9 @@ const levels = Array.from({ length: 10 }, (_, index) => index + 1);
 const adapter = await createLeanZipRawAdapter({ bytes: wasm, descriptor });
 assert.equal(adapter.initialization.entry, LEAN_ZIP_RAW_PERSISTENT_INITIALIZER);
 assert.equal(adapter.initialization.reservedFrontier,
-  STANDARD_MATH_RUNTIME_RESERVED_MEMORY_BYTES);
+  STANDARD_LIBM_RUNTIME_RESERVED_MEMORY_BYTES);
 assert.equal(adapter.initialization.initialFrontier,
-  STANDARD_MATH_RUNTIME_RESERVED_MEMORY_BYTES);
+  STANDARD_LIBM_RUNTIME_RESERVED_MEMORY_BYTES);
 assert.equal(adapter.initialization.checkpoint,
   adapter.initialization.initialFrontier);
 let persistentCheckpoint = adapter.initialization.checkpoint;

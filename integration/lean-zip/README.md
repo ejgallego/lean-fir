@@ -133,24 +133,25 @@ zero imports and is suitable for correctness testing in Node and browsers.
 Generic resident operations and closure execution remain optimization targets;
 `BUILD.json` makes no cross-runtime performance claim.
 
-The raw producer retains exactly `Float.ofNat`, `Float.ofScientific`, and
-`Float.log2` at its reviewed frontier and closes them with the pinned standard
-math runtime. Its published module has zero imports. The browser adapter
-reserves `STANDARD_MATH_RUNTIME_RESERVED_MEMORY_BYTES` before lazy-cache
+The raw producer compiles Lean's `Float.ofNat` and `Float.ofScientific`
+definitions from final LCNF, retains exactly `Float.log2` at its reviewed
+frontier, and closes it with the pinned standard libm runtime. Its published
+module has zero imports. The browser adapter
+reserves `STANDARD_LIBM_RUNTIME_RESERVED_MEMORY_BYTES` before lazy-cache
 publication or Lean allocation, and the package records both frontier and
 complete identities plus the runtime source, contract, and Emscripten identity.
 
-The exact post-isolation raw closure is ratcheted in
-`raw-closure-contract.json`: 662 captured declarations, 128 reviewed
-externals, 534 retained source functions, 2,598 resident helpers, and 3,132
+The exact source-Float raw closure is ratcheted in
+`raw-closure-contract.json`: 769 captured declarations, 139 reviewed
+externals, 630 retained source functions, 2,782 resident helpers, and 3,412
 complete functions. In addition to counts and Wasm byte lengths, the contract
 pins SHA-256 digests of the ordered external, source-function, resident-helper,
 and complete-function inventories. This prevents a same-count closure change
 from passing the package gate without review.
 
-The same contract ratchets the final optimized artifact at 2,172 functions and
-zero function imports, with 354 surviving Lean-source functions, 1,812
-resident helpers, and six optimizer-or-linked-runtime functions. The function
+The same contract ratchets the final optimized artifact at 2,305 functions and
+zero function imports, with 390 surviving Lean-source functions, 1,915
+resident helpers, and no optimizer-or-linked-runtime functions. The function
 index digest and sidecar digest make an index-preserving but identity-changing
 release a reviewed package change rather than an unnoticed one.
 
