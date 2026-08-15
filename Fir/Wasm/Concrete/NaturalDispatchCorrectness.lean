@@ -22,6 +22,94 @@ structure ImmediateNaturalPairRel (leftWord rightWord : Word32)
   leftWordEq : leftWord = Word32.encodeImmediate leftPayload.toNat leftFits
   rightWordEq : rightWord = Word32.encodeImmediate rightPayload.toNat rightFits
 
+/-- The low-bit operation emitted by resident helpers recognizes every
+canonical immediate word. Keeping this UInt32 fact beside the representation
+theorem avoids reproving bitvector arithmetic in each generated helper. -/
+theorem Word32.encodeImmediate_and_one
+    (payload : Nat) (fits : payload ≤ maxImmediatePayload) :
+    UInt32.ofNat (Word32.encodeImmediate payload fits).value &&& 1 = 1 := by
+  simp [Word32.encodeImmediate]
+  bv_decide
+
+/-- Logical shift-right by one is the exact resident decode of a canonical
+immediate payload. -/
+theorem Word32.encodeImmediate_shr_one
+    (payload : Nat) (fits : payload ≤ maxImmediatePayload) :
+    UInt32.ofNat (Word32.encodeImmediate payload fits).value >>> 1 =
+      UInt32.ofNat payload := by
+  simp [Word32.encodeImmediate]
+  apply UInt32.toNat_inj.mp
+  have payloadLt : payload < 4294967296 := by
+    unfold maxImmediatePayload at fits
+    omega
+  have encodedLt : payload * 2 + 1 < 4294967296 := by
+    unfold maxImmediatePayload at fits
+    omega
+  simp [Nat.mod_eq_of_lt payloadLt, Nat.mod_eq_of_lt encodedLt,
+    Nat.shiftRight_eq_div_pow]
+  omega
+
+theorem ImmediateNaturalPairRel.wasmPairTest_eq_one
+    {leftWord rightWord : Word32} {leftReference rightReference : ObjectRef}
+    {leftPayload rightPayload : UInt64}
+    (pair : ImmediateNaturalPairRel leftWord rightWord leftReference
+      rightReference leftPayload rightPayload) :
+    (UInt32.ofNat leftWord.value &&& 1) &&&
+        (UInt32.ofNat rightWord.value &&& 1) = 1 := by
+  have leftBit : UInt32.ofNat leftWord.value &&& 1 = 1 := by
+    rw [congrArg Word32.value pair.leftWordEq]
+    exact Word32.encodeImmediate_and_one leftPayload.toNat pair.leftFits
+  have rightBit : UInt32.ofNat rightWord.value &&& 1 = 1 := by
+    rw [congrArg Word32.value pair.rightWordEq]
+    exact Word32.encodeImmediate_and_one rightPayload.toNat pair.rightFits
+  rw [leftBit, rightBit]
+  decide
+
+theorem ImmediateNaturalPairRel.wasmLeftPayload
+    {leftWord rightWord : Word32} {leftReference rightReference : ObjectRef}
+    {leftPayload rightPayload : UInt64}
+    (pair : ImmediateNaturalPairRel leftWord rightWord leftReference
+      rightReference leftPayload rightPayload) :
+    UInt32.ofNat leftWord.value >>> 1 = UInt32.ofNat leftPayload.toNat := by
+  rw [pair.leftWordEq]
+  exact Word32.encodeImmediate_shr_one leftPayload.toNat pair.leftFits
+
+theorem ImmediateNaturalPairRel.wasmRightPayload
+    {leftWord rightWord : Word32} {leftReference rightReference : ObjectRef}
+    {leftPayload rightPayload : UInt64}
+    (pair : ImmediateNaturalPairRel leftWord rightWord leftReference
+      rightReference leftPayload rightPayload) :
+    UInt32.ofNat rightWord.value >>> 1 = UInt32.ofNat rightPayload.toNat := by
+  rw [pair.rightWordEq]
+  exact Word32.encodeImmediate_shr_one rightPayload.toNat pair.rightFits
+
+/-- The unsigned Wasm remainder on decoded immediate payloads agrees with the
+mathematical Nat remainder used by the concrete runtime contract. -/
+theorem ImmediateNaturalPairRel.wasmRemainder
+    {leftWord rightWord : Word32} {leftReference rightReference : ObjectRef}
+    {leftPayload rightPayload : UInt64}
+    (pair : ImmediateNaturalPairRel leftWord rightWord leftReference
+      rightReference leftPayload rightPayload) :
+    UInt32.ofNat leftPayload.toNat % UInt32.ofNat rightPayload.toNat =
+      UInt32.ofNat (leftPayload.toNat % rightPayload.toNat) := by
+  apply UInt32.toNat_inj.mp
+  have leftLt : leftPayload.toNat < 4294967296 := by
+    have leftFits := pair.leftFits
+    unfold maxImmediatePayload at leftFits
+    omega
+  have rightLt : rightPayload.toNat < 4294967296 := by
+    have rightFits := pair.rightFits
+    unfold maxImmediatePayload at rightFits
+    omega
+  have remainderLt : leftPayload.toNat % rightPayload.toNat < 4294967296 := by
+    by_cases zero : rightPayload.toNat = 0
+    · simp [zero, leftLt]
+    · exact Nat.lt_trans
+        (Nat.mod_lt leftPayload.toNat (Nat.pos_of_ne_zero zero)) rightLt
+  simp
+  rw [Nat.mod_eq_of_lt leftLt, Nat.mod_eq_of_lt rightLt,
+    Nat.mod_eq_of_lt remainderLt]
+
 /-- A heap-classified word has a zero low bit. -/
 theorem Word32.lowBit_zero_of_classify_heap (word : Word32)
     (heap : word.classify = .heap) :

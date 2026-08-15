@@ -25,6 +25,8 @@ import FirTalos.Correctness.FunctionCtorProjectionExample
 import FirTalos.Correctness.FunctionCaseExample
 import FirTalos.Correctness.FunctionDefaultCaseExample
 import FirTalos.ConcreteRuntime
+import FirTalos.ConcreteResidentMemory
+import FirTalos.ConcreteResidentPrimitives
 import FirTalos.ConcreteReuseCapacityCorrectness
 import FirTalos.ConcreteCacheCorrectness
 import FirTalos.ConcreteDeclarationCorrectness

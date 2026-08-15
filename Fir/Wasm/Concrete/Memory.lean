@@ -68,7 +68,10 @@ def writeUInt16 (memory : LinearMemory) (address : Nat) (value : UInt16) :
   let memory ← memory.writeByte address (byte16 value 0)
   memory.writeByte (address + 1) (byte16 value 8)
 
-private def byte32 (value : UInt32) (shift : Nat) : UInt8 :=
+/-- The little-endian byte selected from one concrete 32-bit lane.  Resident
+Wasm refinement proofs use this common decomposition to align Talos stores
+with the checked W6 memory operation. -/
+def byte32 (value : UInt32) (shift : Nat) : UInt8 :=
   (value >>> UInt32.ofNat shift).toUInt8
 
 def readUInt32 (memory : LinearMemory) (address : Nat) : Except MemoryError UInt32 := do
