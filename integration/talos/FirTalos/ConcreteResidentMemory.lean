@@ -28,6 +28,58 @@ structure ResidentMemoryRel (heap : MemoryState) (memory : Wasm.Mem) : Prop wher
 
 namespace ResidentMemoryRel
 
+/-- Writing back the word just read from one address restores the Talos
+memory extensionally.  Resident ABI casts use this to justify their temporary
+scratch-slot overwrite without exposing the byte proof at every call site. -/
+theorem write32_read32_self (memory : Wasm.Mem) (address : UInt32) :
+    memory.write32 address (memory.read32 address) = memory := by
+  cases memory
+  simp [Wasm.Mem.write32, Wasm.Mem.read32]
+  funext other
+  split <;> rename_i selected
+  · subst other
+    bv_decide
+  split <;> rename_i selected
+  · subst other
+    bv_decide
+  split <;> rename_i selected
+  · subst other
+    bv_decide
+  split <;> rename_i selected
+  · subst other
+    bv_decide
+  rfl
+
+/-- A 32-bit Talos store is immediately observable by a matching load. -/
+theorem read32_write32_self
+    (memory : Wasm.Mem) (address value : UInt32) :
+    (memory.write32 address value).read32 address = value := by
+  cases memory
+  simp [Wasm.Mem.write32, Wasm.Mem.read32]
+  bv_decide
+
+/-- Restoring the word observed before a temporary 32-bit overwrite recovers
+the original memory, including every byte outside the scratch lane. -/
+theorem write32_restore (memory : Wasm.Mem) (address value : UInt32) :
+    (memory.write32 address value).write32 address
+        (memory.read32 address) = memory := by
+  cases memory
+  simp [Wasm.Mem.write32, Wasm.Mem.read32]
+  funext other
+  split <;> rename_i selected
+  · subst other
+    bv_decide
+  split <;> rename_i selected
+  · subst other
+    bv_decide
+  split <;> rename_i selected
+  · subst other
+    bv_decide
+  split <;> rename_i selected
+  · subst other
+    bv_decide
+  rfl
+
 theorem initial :
     ResidentMemoryRel MemoryState.initial (Wasm.Mem.empty 1) := by
   constructor

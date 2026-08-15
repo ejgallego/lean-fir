@@ -1,5 +1,7 @@
 import Fir.Wasm.Concrete.NaturalDispatchCorrectness
+import Fir.Wasm.Emit.ResidentBigNumeric
 import FirTalos.ConcreteResidentMemory
+import FirTalos.Correctness.Adapter
 import Interpreter.Wasm.Wp.Tactic
 
 namespace FirTalos.Concrete
@@ -39,6 +41,53 @@ def immediateNaturalPairDispatch (leftIndex rightIndex : Nat)
 def immediateNaturalRemainder (leftIndex rightIndex : Nat) : Wasm.Program :=
   immediateNaturalPayload leftIndex ++ immediateNaturalPayload rightIndex ++
     [.remU]
+
+/-- The adapter maps the emitter's shared immediate-payload decoder to the
+same Talos program used by the execution lemmas below. -/
+theorem instructions_immediateNaturalPayload
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {value : Lean.FVarId} {index : Nat}
+    (found : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) value =
+        some index) :
+    FirTalos.instructions sourceModule sourceFunction labels
+      (Fir.Wasm.Emit.ResidentBigNumeric.immediateNaturalPayload value) =
+        .ok (immediateNaturalPayload index) := by
+  simp [Fir.Wasm.Emit.ResidentBigNumeric.immediateNaturalPayload,
+    immediateNaturalPayload, FirTalos.instructions, FirTalos.instruction,
+    found, Bind.bind, Except.bind, pure, Except.pure]
+
+/-- Successful adaptation of the two operation-specific branches lifts to
+successful adaptation of the emitter's common pair dispatcher. -/
+theorem instructions_withImmediateNaturalPair
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {left right : Lean.FVarId}
+    {leftIndex rightIndex : Nat}
+    {sourceImmediate sourceFallback : List Fir.Wasm.Instruction}
+    {targetImmediate targetFallback : Wasm.Program}
+    (leftFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) left =
+        some leftIndex)
+    (rightFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) right =
+        some rightIndex)
+    (immediateAdapted :
+      FirTalos.instructions sourceModule sourceFunction labels sourceImmediate =
+        .ok targetImmediate)
+    (fallbackAdapted :
+      FirTalos.instructions sourceModule sourceFunction labels sourceFallback =
+        .ok targetFallback) :
+    FirTalos.instructions sourceModule sourceFunction labels
+      (Fir.Wasm.Emit.ResidentBigNumeric.withImmediateNaturalPair left right
+        sourceImmediate sourceFallback) =
+      .ok (immediateNaturalPairDispatch leftIndex rightIndex
+        targetImmediate targetFallback) := by
+  simp [Fir.Wasm.Emit.ResidentBigNumeric.withImmediateNaturalPair,
+    Fir.Wasm.Emit.ResidentBigNumeric.bothImmediateNaturals,
+    immediateNaturalPairDispatch, immediateNaturalPairTest,
+    FirTalos.instructions, FirTalos.instruction, leftFound, rightFound,
+    immediateAdapted, fallbackAdapted, Bind.bind, Except.bind, pure,
+    Except.pure]
 
 /-- The shared scalar dispatcher leaves the canonical true word on the stack
 for a related pair of immediate naturals. -/

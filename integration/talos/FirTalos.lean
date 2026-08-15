@@ -26,6 +26,7 @@ import FirTalos.Correctness.FunctionCaseExample
 import FirTalos.Correctness.FunctionDefaultCaseExample
 import FirTalos.ConcreteRuntime
 import FirTalos.ConcreteResidentMemory
+import FirTalos.ConcreteResidentNat
 import FirTalos.ConcreteResidentPrimitives
 import FirTalos.ConcreteReuseCapacityCorrectness
 import FirTalos.ConcreteCacheCorrectness

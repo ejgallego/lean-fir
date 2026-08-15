@@ -83,6 +83,28 @@ theorem ImmediateNaturalPairRel.wasmRightPayload
   rw [pair.rightWordEq]
   exact Word32.encodeImmediate_shr_one rightPayload.toNat pair.rightFits
 
+/-- A semantically nonzero immediate right operand remains nonzero after the
+resident wasm32 payload conversion. -/
+theorem ImmediateNaturalPairRel.wasmRightPayload_ne_zero
+    {leftWord rightWord : Word32} {leftReference rightReference : ObjectRef}
+    {leftPayload rightPayload : UInt64}
+    (pair : ImmediateNaturalPairRel leftWord rightWord leftReference
+      rightReference leftPayload rightPayload)
+    (rightNonzero : rightPayload.toNat ≠ 0) :
+    UInt32.ofNat rightPayload.toNat ≠ 0 := by
+  intro zero
+  have rightLt : rightPayload.toNat < UInt32.size := by
+    have rightFits := pair.rightFits
+    unfold maxImmediatePayload at rightFits
+    simp [UInt32.size]
+    omega
+  have := congrArg UInt32.toNat zero
+  simp at this
+  have rightLt' : rightPayload.toNat < 4294967296 := by
+    simpa [UInt32.size] using rightLt
+  rw [Nat.mod_eq_of_lt rightLt'] at this
+  exact rightNonzero this
+
 /-- The unsigned Wasm remainder on decoded immediate payloads agrees with the
 mathematical Nat remainder used by the concrete runtime contract. -/
 theorem ImmediateNaturalPairRel.wasmRemainder
