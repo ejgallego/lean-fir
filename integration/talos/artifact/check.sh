@@ -37,6 +37,30 @@ lake exe fir-wasm-artifact resident-fixed-width \
 node run-resident-fixed-width.mjs _build/resident-fixed-width.wasm
 lake exe fir-wasm-artifact resident-float _build/resident-float.wasm
 node run-resident-float.mjs _build/resident-float.wasm
+lake exe fir-wasm-artifact resident-libm-frontier \
+  _build/resident-libm-frontier.wasm
+emcc="$root/.deps/lcnf-c-wasm/emsdk/upstream/emscripten/emcc"
+libm_linker="$root/integration/wasm-runtime/link-runtime.mjs"
+libm_source="$root/integration/wasm-runtime/libm-runtime.c"
+"$emcc" "$libm_source" -O3 -flto --no-entry -sSTANDALONE_WASM=1 \
+  -sIMPORTED_MEMORY=1 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=65536 \
+  -sSTACK_SIZE=16384 -Wl,--gc-sections -Wl,--strip-all \
+  -o _build/resident-libm-runtime.wasm
+node "$libm_linker" _build/resident-libm-frontier.wasm \
+  _build/resident-libm-runtime.wasm _build/resident-libm-complete.wasm
+"$emcc" "$libm_source" -O3 -flto --no-entry -sSTANDALONE_WASM=1 \
+  -sIMPORTED_MEMORY=1 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=65536 \
+  -sSTACK_SIZE=16384 -Wl,--gc-sections -Wl,--strip-all \
+  -o _build/resident-libm-runtime-repeat.wasm
+node "$libm_linker" _build/resident-libm-frontier.wasm \
+  _build/resident-libm-runtime-repeat.wasm \
+  _build/resident-libm-complete-repeat.wasm
+cmp _build/resident-libm-runtime.wasm \
+  _build/resident-libm-runtime-repeat.wasm
+cmp _build/resident-libm-complete.wasm \
+  _build/resident-libm-complete-repeat.wasm
+node run-resident-libm.mjs _build/resident-libm-frontier.wasm \
+  _build/resident-libm-complete.wasm
 lake exe fir-wasm-float-source _build/source-float-conversions.wasm
 node run-source-float.mjs _build/source-float-conversions.wasm
 for suffix in wasm wasm.json wasm.lcnf wasm.inventory.json wasm.oracle.json; do

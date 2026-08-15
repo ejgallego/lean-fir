@@ -6,7 +6,14 @@ opaque declarations, resident helpers consume the subset they implement, and
 `link-runtime.mjs` merges the remaining checked `lean.extern` imports with the
 separately compiled runtime while preserving exactly the frontier exports.
 
-`math-runtime.c` implements the Lean 4.33 libm boundary and reads FIR's
+`libm-runtime.c` is the current generic implementation of Lean's six genuine
+platform-libm externals. It accepts and returns only binary64 lanes. Ordinary
+finite results follow the linked Wasm libc implementation and may differ from
+another platform's libc by a few ULPs; special-value behavior and ABI bit
+transport are checked explicitly. This is the same portability boundary Lean
+upstream chooses for these opaque declarations.
+
+`math-runtime.c` implements the older Lean 4.33 math boundary and reads FIR's
 module-owned Lean object representation directly. Its version-1 compatibility
 surface still contains the historical `Float.ofNat` and `Float.ofScientific`
 providers for older frontier packages; those providers accept Naturals with at
