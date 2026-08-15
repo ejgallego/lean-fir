@@ -16,9 +16,9 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 ## Active integration lease
 
 - Milestone: `MULTI-LANE-CONSOLIDATION-20260814`.
-- Integration owner: `wasm-gen`, temporarily acting as the integration owner
-  on `main` by explicit user assignment. The lease covers landing coordination
-  only; feature ownership remains with each lane.
+- Integration owner: `wasm-proof`, taking over the integration lease from the
+  sleeping `wasm-gen` owner by explicit user assignment. The lease covers
+  landing coordination only; feature ownership remains with each lane.
 - Accepted baseline: `main` contains the complete
   `W7-ILLUMINATE-SELECTION-CATALOG-EXPORT` stack through tracked lane head
   `5081015a` and the independently isolated
@@ -57,7 +57,12 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   remains local-only until its consumer authorizes publication. W7's genuine
   platform-libm frontier is closed through tracked handoff `8695a69c`
   (functional head `0c5dda71`) with a six-only provider and deterministic,
-  zero-import linked acceptance module.
+  zero-import linked acceptance module. W6's certificate-free resident Nat and
+  proof-indexed Array-admission stack is accepted through tracked handoff
+  `e1bd9722` (functional head `2231901a`): the actual adapted immediate
+  `Nat.add` call chain now refines to the concrete host contract, while
+  promoted naturals and the compiler-to-admission bridge remain explicit
+  follow-ups.
 - Landing order:
   1. W7-2's Verso source-module replay repair and generic immutable-package
      publisher are accepted in that order through `912bf68a`.
@@ -98,11 +103,18 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
      separately compiled six-function libm provider follows through tracked
      handoff `8695a69c`; it preserves the existing external names and binary64
      signatures, so no W6 adaptation is required for integration.
+  8. W6's proof-only Array admission and resident Nat stack follows through
+     tracked handoff `e1bd9722`. It consumes the landed W7 helper bodies and
+     proves the actual adapted bounded `Nat.add` path without changing the
+     shared ABI, concrete layout, helper signatures, or W7-owned sources.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
   invalidating long deterministic package and external-engine gates.
-- Not ready: Verso consumption of the local-only exact-head Flat package and
+- Not ready: W6 promoted/heap-backed `Nat.add`, the operation-specific
+  `StateRelated` successor for full resident replacement, and the
+  integration-owned compiler-to-Array-admission bridge remain open. Verso
+  consumption of the local-only exact-head Flat package and
   its mailbox closure remain client-owned; no compatibility alias was added in
   FIR. The Array panic-observation fixture audit is accepted and parked behind
   the existing shared-observation bug card; it has no feature landing. Later
@@ -113,6 +125,33 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   removal, or branch deletion is implied by this lease.
 
 ## Latest completed integration lease
+
+- Milestone: `W6-RESIDENT-NAT-ARRAY-ADMISSION`.
+- Integration owner: `wasm-proof`, taking over the active consolidation lease
+  from `wasm-gen` by explicit user assignment and accepting its own clean W6
+  tracked handoff `e1bd9722`; the functional head is `2231901a` and its base is
+  the previous `main` at `f5cfd054`.
+- Change: the concrete-runtime proof layer now factors the immediate-Nat scalar
+  fragments, adapted-body/terminal-suffix bridge, scratch-memory retyping, and
+  defined-function call composition. The actual generated `Nat.add` function
+  composes the shared dispatcher, `naturalSum`, and `makeNatural` bodies and
+  returns the exact canonical tagged result for bounded sums. Proof-indexed
+  Nat/USize Array admission derives live layout bounds and reconstructs the
+  selected semantic element.
+- Contracts: none. No helper signature, semantic ABI, concrete layout,
+  ownership rule, source semantics, compiler relation, or W7-owned source
+  changed.
+- Acceptance: fresh Lean Beam update/sync/save reported zero diagnostics; the
+  focused 3,162-job Talos cone, `git diff --check`, complete `make check`,
+  `make talos-setup`, and complete 3,162-job `make talos-check` all passed on
+  the direct `f5cfd054` descendant. No new bug card was needed.
+- Result: local `main` advances through `e1bd9722`. The integration backlog is
+  clear: the W7 mailbox contains a live consumer request rather than a ready
+  landing, and the other tracked lane branches contain no unlanded descendant
+  of `main`. Promoted Nat arithmetic, full resident replacement, and compiler
+  admission remain future proof work rather than pending integration.
+
+## Previous completed integration lease
 
 - Milestone: `W7-STANDARD-LIBM-FRONTIER`.
 - Integration owner: `wasm-gen`, accepting its own clean tracked handoff
