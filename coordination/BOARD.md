@@ -41,7 +41,10 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   through functional fixture `a6543da1` and rebased tracked status `7b02b7d5`;
   the deterministic semantic-Wasm publication repair and closed regression are
   accepted through `d15e32d4`. The native cached Level-1 lean-zip generator is
-  accepted at `4aa78f93`.
+  accepted at `4aa78f93`. W7's exact-source catalog, canonical immediate-Nat
+  addition, reusable immediate-Nat dispatcher, and allocation-free immediate
+  `Nat.mod` are accepted through tracked handoff `04003bd6` (functional heads
+  `75b11c0c`, `fe586cec`, `6320a410`, and `8cb9cd82`).
   The Illuminate functional generation head is `4b84f35b`; the package itself
   remains local-only until its consumer authorizes publication.
 - Landing order:
@@ -66,8 +69,10 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
      Neither slice changes W7's generator contract.
   6. The cached recursive-owner fixtures land before the validation-provider
      cache repair and its cold complete artifact gate. The native Level-1
-     driver then lands independently at `4aa78f93`; W7-1's resident Nat-add
-     candidate remains a subsequent separately reviewed slice.
+     driver then lands independently at `4aa78f93`. W7-1's immediate-Nat and
+     catalog stack is accepted afterward through `04003bd6`; its executable
+     helpers are generation-ready while W6 refinements remain separately
+     queued in `W7-W6-20260814-007` and `W7-W6-20260814-008`.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -81,6 +86,42 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
+
+## Latest completed integration lease
+
+- Milestone: `W7-IMMEDIATE-NAT-DISPATCH`.
+- Integration owner: `wasm-gen`, accepting its own clean tracked handoff
+  `04003bd6` on `main` at `dc550aa8`; functional heads are `75b11c0c` for
+  immediate addition, `fe586cec` for the exact-source catalog producer,
+  `6320a410` for package ratchets, and `8cb9cd82` for shared dispatch plus
+  immediate remainder.
+- Change: binary Nat helpers now share one canonical two-immediate tag test and
+  payload decoder. `Nat.add` retains its prior immediate and arbitrary-
+  precision bodies through that dispatcher. `Nat.mod` preserves `n % 0 = n`
+  and otherwise uses unsigned remainder for two immediate operands, returning
+  a canonical immediate without allocation; mixed and heap-backed operands
+  retain the former checked arbitrary-precision path.
+- Contracts: none. The semantic ABI, concrete Nat representation, ownership,
+  resident-helper signatures, source semantics, and malformed-input boundary
+  are unchanged. W6 refinement remains independently queued; integration
+  records these helpers as generation-ready, not yet contract-proved.
+- Acceptance: Lean Beam saves both edited modules with zero diagnostics. The
+  focused zero-import artifact covers immediate zero/boundary/result-class/no-
+  allocation cases, malformed heap traps, and arbitrary-precision values.
+  Exact-source stored, Level-1, and raw package gates pass deterministic double
+  generation, 5 inputs across 10 levels, independent inflate, function
+  evidence, cache/scratch reclamation, and smoke. Complete `make check` passes
+  704 source cases, nine direct machines, the 704-case V8 triangle, and
+  2,121/2,121 comparisons; all 3,148 Talos jobs and the complete artifact gate
+  pass.
+- Artifacts: stored remains 12,794 bytes. Level-1 is 331,815 bytes at
+  `0336448af3860aa8d7bdff9e29ad934e23cfcc44902cd8306bf5c209e3841aa2`.
+  Raw is 902,526 bytes at
+  `68d0f17dfd8641a458687d68972308a1af7766c04cea7834904f87b6f4064c70`,
+  with zero imports and unchanged source/helper/function counts.
+- Bug cards: none.
+- Result: local `main` advances through `04003bd6`. W7 next audits the missing
+  symbolic Wasm instruction surface before selecting another scalar slice.
 
 ## Latest completed integration lease
 
@@ -4971,7 +5012,7 @@ validation work continues; their historical handoff text remains unchanged.
 | Integration | integration owner | `upgrade/lean-4.33` | released | `LEAN-4.33-UPGRADE` landed at `476f001b`; the temporary lane may be retired after publication. | Moves the shared toolchain, compiler-source contracts, and versioned compact-Format package surface to Lean 4.33 without changing the semantic Wasm ABI, concrete layout, or resident-helper signatures. |
 | Lean pass proof | pass-proof owner | `proof/simpcase` | released | Ready mailbox `5cae5958`, functional head `5c607e0e`, on accepted base `a25713a6` packages deleted reset/reuse as generic local ledger operations and derives ordinary/source-owned readiness from live-prefix premises. The retained-prefix fixture no longer uses a finite special-state classifier. | Changes no shared contract. The 34-job examples cone and full root gate pass; next generalize the target live-prefix derivation beyond the singleton adapter. |
 | W6 runtime proof | W6 owner | `wasm/talos-runtime` | released | Ready mailbox `c07eaf4b`, functional head `42fb2d5d`, on base `a6f4510e` makes production validation proof-visible and supplies the root plus residual join/local/case/sharing transition API. Next attach that state to active/suspended relations and repair return admission's compatibility direction. | Shared validator contract `72856600` replaces an opaque partial traversal with an extensionally equivalent total traversal; consumers rebase without code adaptation. Lean Beam, the 3,121-job focused cone, full root gate with 125 harness tests, 685 unique cases and 2,037 comparisons, and all 3,144 Talos jobs pass. |
-| W7 generation | generation owner | `wasm/generation` | released | Ready mailbox `22540610`, package source head `8c7dfdd7`, on base `260ce30a`, publishes the real zero-import Verso complete-HTML package and repairs post-mutation field-kind tracking in the W7 concrete observer. | Six generic Array/scalar/String resident signatures are generation-ready without changing the semantic ABI or concrete layout; W6 owns their later refinement bridge. |
+| W7 generation | generation owner | `wasm/generation` | released | Tracked handoff `04003bd6`, functional head `8cb9cd82`, on base `dc550aa8` lands the exact-source lean-zip catalog, immediate `Nat.add`, reusable binary immediate-Nat dispatch, and allocation-free immediate `Nat.mod`. | No shared contract changes. Generation is ready; W6 refinements remain queued in `W7-W6-20260814-007` and `W7-W6-20260814-008`. |
 | Compiler-native Wasm | integration owner | `wasm/lcnf-c` | parked | Landed checkpoint `a4855402` adds a separately packaged C/Emscripten `Std.Format.prettyM` facade on top of the optimized final-LCNF-to-C route from `2760e3e0`. The browser adapter shares the compact `Format` request and exact `{text, events}` trace contract with W7's FIR-native facade while retaining a private bulk wire, verified Emscripten loader, full pinned Lean runtime, and independent package. The differential suite compares Unicode, grouping, nesting, tags, arbitrary-precision values, initial columns, malformed requests, repeated calls, and a one-MiB UTF-8 transfer through both engines | No shared semantic contract changed and the packages remain physically independent. The lane consumes `Std.Format.prettyM`, final impure LCNF, and Lean's C ABI without changing the symbolic Wasm, W6 concrete-runtime, or W7 resident-runtime surfaces. Resume with controlled sampled profiling of the facade wire and generated C before accepting a runtime optimization |
 | Validation | validation owner | `validation/float-corpus` | active | Clean coordination head `cfa17d81` retains the long 1,008-case native/LCNF calibration. Current-main validation covers 633 native/LCNF cases, 601 V8 cases, 642 unique cases, 1,844 comparisons, 5,750 interpreter transitions, 51 semantic-tag floors, and 142 conjunctive domains. | Test-fixtures may now rebase and admit the 32 scalar-closure cases. The long validation branch rebases separately; alias, termination, IO, and stream-capture contracts remain isolated. |
 
@@ -4985,6 +5026,7 @@ validation work continues; their historical handoff text remains unchanged.
 | Bit-exact float source probes and styled zero-import `prettyM` package | W7 ready head `fdaa8bd1`; package source `56d18362` | landed closure proof/runtime stack `229640de` | linked/accepted | W6 float and closure refinements landed | styled Wasm `e7ccd1ac678900e0f6583a0d2251b0ef4d43de0b388d18033bbc86344eed4af7` |
 | Generic object-family calls and resident Array/weak-Inhabited results | `a13fa2ad` | shared call-ABI contract `bd7a5e55` | generation-ready | W6 owner for the later concrete refinement bridge | styled PrettyFormat `c928d30adb3d39f7409e7091b4e1f13289aac35c02b34d761062c8a8f3e74b60`; Illuminate v3 `a4de0ec22d50c5070dbfa90969dc95c41be6f747955f60c8f9620baeafefbfa5`; v4 `1c3064d4ee5b9ea0f96055b03e50e8477d29ce6f2313c23c9dcfc83d314eecd8` |
 | Generic Array/scalar/String HTML frontier: `Array.pop`, `UInt32.decEq`, `String.append`, `String.push`, `String.Pos.next`, `String.decodeChar` | `57ae699e` | `260ce30a`; existing concrete layouts and semantic ABI | generation-ready | W6 owner for later concrete refinement | Verso complete HTML `ce63b4fd71abddda8aa5795a57ab7849666f8029b501a015ee3e3c714a3eec1c` |
+| Canonical immediate binary Nat dispatch for `Nat.add` and `Nat.mod` | `75b11c0c`, `8cb9cd82`; tracked handoff `04003bd6` | `dc550aa8`; unchanged Nat layout, ownership, and helper signatures | generation-ready | W6 owner via `W7-W6-20260814-007` and `W7-W6-20260814-008` | raw lean-zip `68d0f17dfd8641a458687d68972308a1af7766c04cea7834904f87b6f4064c70` |
 
 ## Contract queue
 
@@ -5002,7 +5044,7 @@ validation work continues; their historical handoff text remains unchanged.
 | `FLOAT-SCALAR-RUNTIME` | integration/validation | pass proof, W6, W7, validation | released | landed stack through `8a8d1387` | Adds bit-exact `float32Bits`/`float64Bits`, heap-only boxes, stable box-kind/layout signatures, exact ABI adapters, and concrete/proof refinements without the unrelated closure-ownership stack. The integrated stack passes `make check` and all 3,123 Talos jobs. W7 consumes it in candidate `2b4d9d23`. |
 | `WASM-FLOAT-REINTERPRET` | integration | W6, W7, Talos adapter | released | landed stack through `8a8d1387` | Symbolic, binary, Talos-adapter, runtime, and proof support for `i32.reinterpret_f32`, `i64.reinterpret_f64`, `f32.reinterpret_i32`, and `f64.reinterpret_i64` is landed. W7's integer-lane facade preserves signaling-NaN payloads across JavaScript without numeric coercion. |
 | `ILLUMINATE-FLOAT-MACHINE` | integration | W7, W6 | released | `e39d0bbb` | Adds only the typed symbolic and binary Wasm operations needed to implement Lean 4.32 Float subtraction/division/multiplication/comparison, round-away-from-zero, saturating `toUInt64`, and Nat-to-Float conversion. W7 consumes the vocabulary in resident helpers; the later W6 bridge proves those helpers against the concrete runtime contracts. |
-| `ILLUMINATE-NAT-MOD-MACHINE` | integration | W7, W6 | candidate | current `integration/closure-ownership` functional head | Adds unsigned i32 remainder for W7's checked immediate/one-limb `Nat.mod` helper, avoiding input-dependent linear subtraction on large timestamp jumps. |
+| `ILLUMINATE-NAT-MOD-MACHINE` | integration | W7, W6 | released | symbolic unsigned i32 remainder plus W7 consumer `8cb9cd82` | Supplies unsigned i32 remainder to the generic two-immediate `Nat.mod` branch while retaining the arbitrary-precision checked fallback. W6 refinement remains separately queued. |
 | `BIT-EXACT-FLOAT-MANIFEST-TRANSPORT` | integration | W7, validation, artifact clients | released | contract `8ad80ad3`; canonical validation consumer `57f13122` | Defines the version-1 `wasm-reinterpret-i32-i64` capability, exact entry selection, integer-lane argument/result codecs, and semantic observation bridge. Floating manifests without the capability and capabilities with unknown fields, versions, encodings, entries, arities, kinds, or ranges fail closed. The standalone suite covers signed zero, infinities, quiet/signaling NaNs, maximal payloads, mixed signatures, and every malformed constructor path without JavaScript numeric coercion; the root validation runner now consumes the facade and passes the complete 613-case native/LCNF plus 581-case V8 gate. |
 | `CLOSURE-APPLICATION-OWNERSHIP` | integration/validation | pass proof, W6, W7, validation | released | landed proof/runtime stack `229640de`; corrected contract `89fda41a`; proof `1640c7d4`; W6 `b28feab9`; ownership `528fdd1a`; W7 adapter `fd6a51e3` and ready head `fdaa8bd1` | Matches Lean's `lean_apply_*` boundary: an exclusive closure transfers fixed arguments and is freed non-recursively; a shared closure drops one reference and retains each fixed heap argument. Pass, concrete-runtime, and executable-adapter layers are green and linked/accepted. |
 | `EXTERNAL-WAITING-RUNTIME` | integration/validation | pass proof, W6, validation | released | landed stack `229640de`; standalone repair `89fda41a`; proof `1640c7d4`; W6 `b28feab9`; historical validation provenance `2f301de5` | `Step.external`, `executeStep`, soundness, and the Talos frame refinement use the post-core-step `waiting.runtime`, so external responses cannot resurrect a consumed closure or discard shared closure decrements and retained captures. `FIR-BUG-impure-none-closure-application-external-runtime` is fixed with executable and proof regressions. |
