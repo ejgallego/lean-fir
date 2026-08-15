@@ -47,7 +47,9 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `75b11c0c`, `fe586cec`, `6320a410`, and `8cb9cd82`).
   The complete scalar Wasm vocabulary is accepted at `43ab6619`, and W7's
   direct fixed-width/USize consumer is accepted through tracked handoff
-  `e52ad4b3` (functional head `bda81d3a`).
+  `e52ad4b3` (functional head `bda81d3a`). W7's direct Float/conversion
+  consumer is accepted through tracked handoff `c3e0ba1a` (functional head
+  `dc3d70af`); the remaining compiled math frontier is recorded explicitly.
   The Illuminate functional generation head is `4b84f35b`; the package itself
   remains local-only until its consumer authorizes publication.
 - Landing order:
@@ -79,6 +81,9 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
      scalar Wasm vocabulary is accepted afterward at `43ab6619`;
      W7's direct fixed-width/USize resident-helper consumer is accepted through
      `e52ad4b3`, while W6 refinements remain separately tracked.
+     W7's direct Float/conversion consumer follows at `c3e0ba1a`; it changes
+     no helper signature or proof contract, so W6 refinement remains a
+     separate queue item.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -94,6 +99,35 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   removal, or branch deletion is implied by this lease.
 
 ## Latest completed integration lease
+
+- Milestone: `W7-DIRECT-FLOAT-SCALARS`.
+- Integration owner: `wasm-gen`, accepting its own clean tracked handoff
+  `c3e0ba1a` on `main` at `ba6b1c31`; the functional head is `dc3d70af`.
+- Change: resident linking now consumes every standard Float/conversion
+  external with an exact core-Wasm meaning: `UInt64.toFloat`, Float
+  add/subtract/multiply/divide, negate, equality and ordering, absolute value,
+  square root, and floor. Available linking emits only helpers selected by the
+  source closure. `Float.round` retains the Lean-specific floor/ceiling
+  implementation because Lean rounds halves away from zero while Wasm
+  `f64.nearest` uses ties-to-even.
+- Contracts: none. This consumes symbolic-Wasm contract `43ab6619` without
+  changing source semantics, ABI kinds, concrete layouts, ownership,
+  resident-helper signatures, or W6 proof obligations. The existing opaque
+  math frontier is now partitioned canonically between exact scalar helpers
+  and compiled-math helpers.
+- Acceptance: Lean Beam sync/save is clean for both W7 modules and the nested
+  artifact driver. `git diff --check`, complete `make check` (704 source cases,
+  nine direct machines, the 704-case V8 triangle, and 2,121/2,121
+  comparisons), all 3,148 Talos jobs, and the complete resident/prettyM
+  artifact gate pass. The focused zero-import, module-memory Float artifact is
+  5,673 bytes and checks all 15 helpers, including signed zero, NaN bits,
+  saturation, half boundaries, scratch restoration, and immediate/heap Nat.
+- Result: `Float.ofNat`, `Float.ofScientific`, `Float.sin`, `Float.cos`,
+  `Float.acos`, `Float.atan2`, `Float.cbrt`, and `Float.log2` are the exact
+  remaining compiled-math frontier. No external package was published and no
+  bug card was needed.
+
+## Previous completed integration lease
 
 - Milestone: `W7-DIRECT-FIXED-WIDTH-SCALARS`.
 - Integration owner: `wasm-gen`, accepting its own clean tracked handoff
