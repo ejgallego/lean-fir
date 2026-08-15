@@ -606,4 +606,257 @@ private def isManifestError : Except String Lean.Json → Bool
 #guard isManifestError <| Fir.Wasm.Emit.Manifest.argumentJsonWithRuntime {} .float
   (.scalar (.float32Bits 0x80000000))
 
+/-! ## Complete scalar Wasm instruction surface
+
+This fixture deliberately mentions every typed scalar constructor.  It keeps
+symbolic validation and binary encoding exhaustive as the resident runtime
+moves away from synthesized machine arithmetic.  The Talos side imports the
+same module and checks adaptation independently.
+-/
+
+private def surfaceLeft : Lean.FVarId := ⟨`surfaceLeft⟩
+private def surfaceRight : Lean.FVarId := ⟨`surfaceRight⟩
+
+private def unarySurfaceFunction (name : Lean.Name) (param result : AbiKind)
+    (instruction : Instruction) : Function := {
+  name
+  params := #[(surfaceLeft, param)]
+  results := #[result]
+  locals := #[]
+  body := [.localGet surfaceLeft, instruction, .ret] }
+
+private def binarySurfaceFunction (name : Lean.Name) (param result : AbiKind)
+    (instruction : Instruction) : Function := {
+  name
+  params := #[(surfaceLeft, param), (surfaceRight, param)]
+  results := #[result]
+  locals := #[]
+  body := [.localGet surfaceLeft, .localGet surfaceRight, instruction, .ret] }
+
+private def constantSurfaceFunction (name : Lean.Name) (result : AbiKind)
+    (instruction : Instruction) : Function := {
+  name
+  params := #[]
+  results := #[result]
+  locals := #[]
+  body := [instruction, .ret] }
+
+private def loadSurfaceFunction (name : Lean.Name) (result : AbiKind)
+    (instruction : Instruction) : Function := {
+  name
+  params := #[(surfaceLeft, .uint32)]
+  results := #[result]
+  locals := #[]
+  body := [.localGet surfaceLeft, instruction, .ret] }
+
+private def storeSurfaceFunction (name : Lean.Name) (value : AbiKind)
+    (instruction : Instruction) : Function := {
+  name
+  params := #[(surfaceLeft, .uint32), (surfaceRight, value)]
+  results := #[]
+  locals := #[]
+  body := [.localGet surfaceLeft, .localGet surfaceRight, instruction, .ret] }
+
+def i32UnarySurfaceFunctions : Array Function := #[
+  unarySurfaceFunction `surfaceI32Eqz .uint32 .uint32 .i32Eqz,
+  unarySurfaceFunction `surfaceI32Clz .uint32 .uint32 .i32Clz,
+  unarySurfaceFunction `surfaceI32Ctz .uint32 .uint32 .i32Ctz,
+  unarySurfaceFunction `surfaceI32Popcnt .uint32 .uint32 .i32Popcnt]
+
+def i32BinarySurfaceFunctions : Array Function := #[
+  binarySurfaceFunction `surfaceI32Eq .uint32 .uint32 .i32Eq,
+  binarySurfaceFunction `surfaceI32Ne .uint32 .uint32 .i32Ne,
+  binarySurfaceFunction `surfaceI32LtS .uint32 .uint32 .i32LtS,
+  binarySurfaceFunction `surfaceI32LtU .uint32 .uint32 .i32LtU,
+  binarySurfaceFunction `surfaceI32GtS .uint32 .uint32 .i32GtS,
+  binarySurfaceFunction `surfaceI32GtU .uint32 .uint32 .i32GtU,
+  binarySurfaceFunction `surfaceI32LeS .uint32 .uint32 .i32LeS,
+  binarySurfaceFunction `surfaceI32LeU .uint32 .uint32 .i32LeU,
+  binarySurfaceFunction `surfaceI32GeS .uint32 .uint32 .i32GeS,
+  binarySurfaceFunction `surfaceI32GeU .uint32 .uint32 .i32GeU,
+  binarySurfaceFunction `surfaceI32Add .uint32 .uint32 .i32Add,
+  binarySurfaceFunction `surfaceI32Sub .uint32 .uint32 .i32Sub,
+  binarySurfaceFunction `surfaceI32Mul .uint32 .uint32 .i32Mul,
+  binarySurfaceFunction `surfaceI32DivS .uint32 .uint32 .i32DivS,
+  binarySurfaceFunction `surfaceI32DivU .uint32 .uint32 .i32DivU,
+  binarySurfaceFunction `surfaceI32RemS .uint32 .uint32 .i32RemS,
+  binarySurfaceFunction `surfaceI32RemU .uint32 .uint32 .i32RemU,
+  binarySurfaceFunction `surfaceI32And .uint32 .uint32 .i32And,
+  binarySurfaceFunction `surfaceI32Or .uint32 .uint32 .i32Or,
+  binarySurfaceFunction `surfaceI32Xor .uint32 .uint32 .i32Xor,
+  binarySurfaceFunction `surfaceI32Shl .uint32 .uint32 .i32Shl,
+  binarySurfaceFunction `surfaceI32ShrS .uint32 .uint32 .i32ShrS,
+  binarySurfaceFunction `surfaceI32ShrU .uint32 .uint32 .i32ShrU,
+  binarySurfaceFunction `surfaceI32Rotl .uint32 .uint32 .i32Rotl,
+  binarySurfaceFunction `surfaceI32Rotr .uint32 .uint32 .i32Rotr]
+
+def i64UnarySurfaceFunctions : Array Function := #[
+  unarySurfaceFunction `surfaceI64Eqz .uint64 .uint32 .i64Eqz,
+  unarySurfaceFunction `surfaceI64Clz .uint64 .uint64 .i64Clz,
+  unarySurfaceFunction `surfaceI64Ctz .uint64 .uint64 .i64Ctz,
+  unarySurfaceFunction `surfaceI64Popcnt .uint64 .uint64 .i64Popcnt]
+
+def i64BinarySurfaceFunctions : Array Function := #[
+  binarySurfaceFunction `surfaceI64Eq .uint64 .uint32 .i64Eq,
+  binarySurfaceFunction `surfaceI64Ne .uint64 .uint32 .i64Ne,
+  binarySurfaceFunction `surfaceI64LtS .uint64 .uint32 .i64LtS,
+  binarySurfaceFunction `surfaceI64LtU .uint64 .uint32 .i64LtU,
+  binarySurfaceFunction `surfaceI64GtS .uint64 .uint32 .i64GtS,
+  binarySurfaceFunction `surfaceI64GtU .uint64 .uint32 .i64GtU,
+  binarySurfaceFunction `surfaceI64LeS .uint64 .uint32 .i64LeS,
+  binarySurfaceFunction `surfaceI64LeU .uint64 .uint32 .i64LeU,
+  binarySurfaceFunction `surfaceI64GeS .uint64 .uint32 .i64GeS,
+  binarySurfaceFunction `surfaceI64GeU .uint64 .uint32 .i64GeU,
+  binarySurfaceFunction `surfaceI64Add .uint64 .uint64 .i64Add,
+  binarySurfaceFunction `surfaceI64Sub .uint64 .uint64 .i64Sub,
+  binarySurfaceFunction `surfaceI64Mul .uint64 .uint64 .i64Mul,
+  binarySurfaceFunction `surfaceI64DivS .uint64 .uint64 .i64DivS,
+  binarySurfaceFunction `surfaceI64DivU .uint64 .uint64 .i64DivU,
+  binarySurfaceFunction `surfaceI64RemS .uint64 .uint64 .i64RemS,
+  binarySurfaceFunction `surfaceI64RemU .uint64 .uint64 .i64RemU,
+  binarySurfaceFunction `surfaceI64And .uint64 .uint64 .i64And,
+  binarySurfaceFunction `surfaceI64Or .uint64 .uint64 .i64Or,
+  binarySurfaceFunction `surfaceI64Xor .uint64 .uint64 .i64Xor,
+  binarySurfaceFunction `surfaceI64Shl .uint64 .uint64 .i64Shl,
+  binarySurfaceFunction `surfaceI64ShrS .uint64 .uint64 .i64ShrS,
+  binarySurfaceFunction `surfaceI64ShrU .uint64 .uint64 .i64ShrU,
+  binarySurfaceFunction `surfaceI64Rotl .uint64 .uint64 .i64Rotl,
+  binarySurfaceFunction `surfaceI64Rotr .uint64 .uint64 .i64Rotr]
+
+def f32UnarySurfaceFunctions : Array Function := #[
+  unarySurfaceFunction `surfaceF32Abs .float32 .float32 .f32Abs,
+  unarySurfaceFunction `surfaceF32Neg .float32 .float32 .f32Neg,
+  unarySurfaceFunction `surfaceF32Ceil .float32 .float32 .f32Ceil,
+  unarySurfaceFunction `surfaceF32Floor .float32 .float32 .f32Floor,
+  unarySurfaceFunction `surfaceF32Trunc .float32 .float32 .f32Trunc,
+  unarySurfaceFunction `surfaceF32Nearest .float32 .float32 .f32Nearest,
+  unarySurfaceFunction `surfaceF32Sqrt .float32 .float32 .f32Sqrt]
+
+def f32BinarySurfaceFunctions : Array Function := #[
+  binarySurfaceFunction `surfaceF32Eq .float32 .uint32 .f32Eq,
+  binarySurfaceFunction `surfaceF32Ne .float32 .uint32 .f32Ne,
+  binarySurfaceFunction `surfaceF32Lt .float32 .uint32 .f32Lt,
+  binarySurfaceFunction `surfaceF32Gt .float32 .uint32 .f32Gt,
+  binarySurfaceFunction `surfaceF32Le .float32 .uint32 .f32Le,
+  binarySurfaceFunction `surfaceF32Ge .float32 .uint32 .f32Ge,
+  binarySurfaceFunction `surfaceF32Add .float32 .float32 .f32Add,
+  binarySurfaceFunction `surfaceF32Sub .float32 .float32 .f32Sub,
+  binarySurfaceFunction `surfaceF32Mul .float32 .float32 .f32Mul,
+  binarySurfaceFunction `surfaceF32Div .float32 .float32 .f32Div,
+  binarySurfaceFunction `surfaceF32Min .float32 .float32 .f32Min,
+  binarySurfaceFunction `surfaceF32Max .float32 .float32 .f32Max,
+  binarySurfaceFunction `surfaceF32Copysign .float32 .float32 .f32Copysign]
+
+def f64UnarySurfaceFunctions : Array Function := #[
+  unarySurfaceFunction `surfaceF64Abs .float .float .f64Abs,
+  unarySurfaceFunction `surfaceF64Neg .float .float .f64Neg,
+  unarySurfaceFunction `surfaceF64Ceil .float .float .f64Ceil,
+  unarySurfaceFunction `surfaceF64Floor .float .float .f64Floor,
+  unarySurfaceFunction `surfaceF64Trunc .float .float .f64Trunc,
+  unarySurfaceFunction `surfaceF64Nearest .float .float .f64Nearest,
+  unarySurfaceFunction `surfaceF64Sqrt .float .float .f64Sqrt]
+
+def f64BinarySurfaceFunctions : Array Function := #[
+  binarySurfaceFunction `surfaceF64Eq .float .uint32 .f64Eq,
+  binarySurfaceFunction `surfaceF64Ne .float .uint32 .f64Ne,
+  binarySurfaceFunction `surfaceF64Lt .float .uint32 .f64Lt,
+  binarySurfaceFunction `surfaceF64Gt .float .uint32 .f64Gt,
+  binarySurfaceFunction `surfaceF64Le .float .uint32 .f64Le,
+  binarySurfaceFunction `surfaceF64Ge .float .uint32 .f64Ge,
+  binarySurfaceFunction `surfaceF64Add .float .float .f64Add,
+  binarySurfaceFunction `surfaceF64Sub .float .float .f64Sub,
+  binarySurfaceFunction `surfaceF64Mul .float .float .f64Mul,
+  binarySurfaceFunction `surfaceF64Div .float .float .f64Div,
+  binarySurfaceFunction `surfaceF64Min .float .float .f64Min,
+  binarySurfaceFunction `surfaceF64Max .float .float .f64Max,
+  binarySurfaceFunction `surfaceF64Copysign .float .float .f64Copysign]
+
+def conversionSurfaceFunctions : Array Function := #[
+  unarySurfaceFunction `surfaceI32WrapI64 .uint64 .uint32 (.i32WrapI64 .uint32),
+  unarySurfaceFunction `surfaceI64ExtendI32S .uint32 .uint64 (.i64ExtendI32S .uint64),
+  unarySurfaceFunction `surfaceI64ExtendI32U .uint32 .uint64 (.i64ExtendI32U .uint64),
+  unarySurfaceFunction `surfaceI32Extend8S .uint32 .uint32 (.i32Extend8S .uint32),
+  unarySurfaceFunction `surfaceI32Extend16S .uint32 .uint32 (.i32Extend16S .uint32),
+  unarySurfaceFunction `surfaceI64Extend8S .uint64 .uint64 (.i64Extend8S .uint64),
+  unarySurfaceFunction `surfaceI64Extend16S .uint64 .uint64 (.i64Extend16S .uint64),
+  unarySurfaceFunction `surfaceI64Extend32S .uint64 .uint64 (.i64Extend32S .uint64),
+  unarySurfaceFunction `surfaceF32ConvertI32S .uint32 .float32 .f32ConvertI32S,
+  unarySurfaceFunction `surfaceF32ConvertI32U .uint32 .float32 .f32ConvertI32U,
+  unarySurfaceFunction `surfaceF32ConvertI64S .uint64 .float32 .f32ConvertI64S,
+  unarySurfaceFunction `surfaceF32ConvertI64U .uint64 .float32 .f32ConvertI64U,
+  unarySurfaceFunction `surfaceF64ConvertI32S .uint32 .float .f64ConvertI32S,
+  unarySurfaceFunction `surfaceF64ConvertI32U .uint32 .float .f64ConvertI32U,
+  unarySurfaceFunction `surfaceF64ConvertI64S .uint64 .float .f64ConvertI64S,
+  unarySurfaceFunction `surfaceF64ConvertI64U .uint64 .float .f64ConvertI64U,
+  unarySurfaceFunction `surfaceI32TruncF32S .float32 .uint32 (.i32TruncF32S .uint32),
+  unarySurfaceFunction `surfaceI32TruncF32U .float32 .uint32 (.i32TruncF32U .uint32),
+  unarySurfaceFunction `surfaceI32TruncF64S .float .uint32 (.i32TruncF64S .uint32),
+  unarySurfaceFunction `surfaceI32TruncF64U .float .uint32 (.i32TruncF64U .uint32),
+  unarySurfaceFunction `surfaceI64TruncF32S .float32 .uint64 (.i64TruncF32S .uint64),
+  unarySurfaceFunction `surfaceI64TruncF32U .float32 .uint64 (.i64TruncF32U .uint64),
+  unarySurfaceFunction `surfaceI64TruncF64S .float .uint64 (.i64TruncF64S .uint64),
+  unarySurfaceFunction `surfaceI64TruncF64U .float .uint64 (.i64TruncF64U .uint64),
+  unarySurfaceFunction `surfaceI32TruncSatF32S .float32 .uint32 (.i32TruncSatF32S .uint32),
+  unarySurfaceFunction `surfaceI32TruncSatF32U .float32 .uint32 (.i32TruncSatF32U .uint32),
+  unarySurfaceFunction `surfaceI32TruncSatF64S .float .uint32 (.i32TruncSatF64S .uint32),
+  unarySurfaceFunction `surfaceI32TruncSatF64U .float .uint32 (.i32TruncSatF64U .uint32),
+  unarySurfaceFunction `surfaceI64TruncSatF32S .float32 .uint64 (.i64TruncSatF32S .uint64),
+  unarySurfaceFunction `surfaceI64TruncSatF32U .float32 .uint64 (.i64TruncSatF32U .uint64),
+  unarySurfaceFunction `surfaceI64TruncSatF64S .float .uint64 (.i64TruncSatF64S .uint64),
+  unarySurfaceFunction `surfaceI64TruncSatF64U .float .uint64 (.i64TruncSatF64U .uint64),
+  unarySurfaceFunction `surfaceF32DemoteF64 .float .float32 .f32DemoteF64,
+  unarySurfaceFunction `surfaceF64PromoteF32 .float32 .float .f64PromoteF32,
+  unarySurfaceFunction `surfaceI32ReinterpretF32 .float32 .uint32 (.i32ReinterpretF32 .uint32),
+  unarySurfaceFunction `surfaceI64ReinterpretF64 .float .uint64 (.i64ReinterpretF64 .uint64),
+  unarySurfaceFunction `surfaceF32ReinterpretI32 .uint32 .float32 (.f32ReinterpretI32 .float32),
+  unarySurfaceFunction `surfaceF64ReinterpretI64 .uint64 .float (.f64ReinterpretI64 .float)]
+
+def memorySurfaceFunctions : Array Function := #[
+  loadSurfaceFunction `surfaceI32Load .uint32 (.i32Load .uint32 0),
+  loadSurfaceFunction `surfaceI32Load8S .uint32 (.i32Load8S .uint32 0),
+  loadSurfaceFunction `surfaceI32Load8U .uint32 (.i32Load8U .uint32 0),
+  loadSurfaceFunction `surfaceI32Load16S .uint32 (.i32Load16S .uint32 0),
+  loadSurfaceFunction `surfaceI32Load16U .uint32 (.i32Load16U .uint32 0),
+  loadSurfaceFunction `surfaceI64Load .uint64 (.i64Load .uint64 0),
+  loadSurfaceFunction `surfaceI64Load8S .uint64 (.i64Load8S .uint64 0),
+  loadSurfaceFunction `surfaceI64Load8U .uint64 (.i64Load8U .uint64 0),
+  loadSurfaceFunction `surfaceI64Load16S .uint64 (.i64Load16S .uint64 0),
+  loadSurfaceFunction `surfaceI64Load16U .uint64 (.i64Load16U .uint64 0),
+  loadSurfaceFunction `surfaceI64Load32S .uint64 (.i64Load32S .uint64 0),
+  loadSurfaceFunction `surfaceI64Load32U .uint64 (.i64Load32U .uint64 0),
+  loadSurfaceFunction `surfaceF32Load .float32 (.f32Load 0),
+  loadSurfaceFunction `surfaceF64Load .float (.f64Load 0),
+  storeSurfaceFunction `surfaceI32Store .uint32 (.i32Store .uint32 0),
+  storeSurfaceFunction `surfaceI32Store8 .uint32 (.i32Store8 .uint32 0),
+  storeSurfaceFunction `surfaceI32Store16 .uint32 (.i32Store16 .uint32 0),
+  storeSurfaceFunction `surfaceI64Store .uint64 (.i64Store .uint64 0),
+  storeSurfaceFunction `surfaceI64Store8 .uint64 (.i64Store8 .uint64 0),
+  storeSurfaceFunction `surfaceI64Store16 .uint64 (.i64Store16 .uint64 0),
+  storeSurfaceFunction `surfaceI64Store32 .uint64 (.i64Store32 .uint64 0),
+  storeSurfaceFunction `surfaceF32Store .float32 (.f32Store 0),
+  storeSurfaceFunction `surfaceF64Store .float (.f64Store 0),
+  unarySurfaceFunction `surfaceMemoryGrow .uint32 .uint32 .memoryGrow,
+  constantSurfaceFunction `surfaceMemorySize .uint32 .memorySize]
+
+def scalarSurfaceFunctions : Array Function :=
+  #[constantSurfaceFunction `surfaceF32Const .float32 (.f32Const 0x3f800000),
+    constantSurfaceFunction `surfaceF64Const .float (.f64Const 0x3ff0000000000000)] ++
+  i32UnarySurfaceFunctions ++ i32BinarySurfaceFunctions ++
+  i64UnarySurfaceFunctions ++ i64BinarySurfaceFunctions ++
+  f32UnarySurfaceFunctions ++ f32BinarySurfaceFunctions ++
+  f64UnarySurfaceFunctions ++ f64BinarySurfaceFunctions ++
+  conversionSurfaceFunctions ++ memorySurfaceFunctions
+
+def scalarSurfaceModule : Module := {
+  imports := #[]
+  functions := scalarSurfaceFunctions
+  exports := scalarSurfaceFunctions.map (·.name)
+  initializers := #[]
+  runtimeOperations := #[]
+  memory := some { pagesMin := 1, exportName := some "memory" } }
+
+#guard scalarSurfaceFunctions.size == 163
+#guard validateModule scalarSurfaceModule |>.isOk
+#guard encode scalarSurfaceModule |>.isOk
+
 end Fir.Wasm.Emit.Examples

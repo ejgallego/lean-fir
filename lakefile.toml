@@ -21,3 +21,7 @@ root = "FirValidationDirectLCNF"
 name = "fir-prettyM-artifact"
 root = "FirPrettyMArtifactMain"
 supportInterpreter = true
+
+[[lean_exe]]
+name = "fir-wasm-scalar-surface"
+root = "FirWasmScalarSurfaceMain"

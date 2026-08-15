@@ -13,6 +13,8 @@ inductive CallTarget where
 inductive Instruction where
   | i32Const (kind : AbiKind) (value : UInt32)
   | i64Const (kind : AbiKind) (value : UInt64)
+  /-- A bit-exact IEEE-754 binary32 constant. -/
+  | f32Const (bits : UInt32)
   /-- A bit-exact IEEE-754 binary64 constant. -/
   | f64Const (bits : UInt64)
   | localGet (fvarId : FVarId)
@@ -22,53 +24,182 @@ inductive Instruction where
   | globalGet (index : Nat) (kind : AbiKind)
   | globalSet (index : Nat) (kind : AbiKind)
   | call (target : CallTarget)
+  /-- Complete core wasm32 integer comparison surface. -/
+  | i32Eqz
   | i32Eq
-  /-- Physical wasm32 bit operations used inside Wasm-resident runtime helpers. -/
-  | i32And
-  | i32ShrU
-  /-- Physical wasm32 arithmetic/comparison used by resident allocation helpers. -/
+  | i32Ne
+  | i32LtS
+  | i32LtU
+  | i32GtS
+  | i32GtU
+  | i32LeS
+  | i32LeU
+  | i32GeS
+  | i32GeU
+  /-- Complete core wasm32 integer arithmetic and bit-operation surface. -/
+  | i32Clz
+  | i32Ctz
+  | i32Popcnt
   | i32Add
   | i32Sub
+  | i32Mul
+  | i32DivS
+  | i32DivU
+  | i32RemS
   | i32RemU
-  | i32LtU
-  /-- Physical wasm64 integer operations used by numeric conversion helpers. -/
+  | i32And
+  | i32Or
+  | i32Xor
+  | i32Shl
+  | i32ShrU
+  | i32ShrS
+  | i32Rotl
+  | i32Rotr
+  /-- Complete core wasm64 integer comparison surface. -/
+  | i64Eqz
+  | i64Eq
+  | i64Ne
+  | i64LtS
+  | i64LtU
+  | i64GtS
+  | i64GtU
+  | i64LeS
+  | i64LeU
+  | i64GeS
+  | i64GeU
+  /-- Complete core wasm64 integer arithmetic and bit-operation surface. -/
+  | i64Clz
+  | i64Ctz
+  | i64Popcnt
+  | i64Add
+  | i64Sub
+  | i64Mul
+  | i64DivS
+  | i64DivU
+  | i64RemS
+  | i64RemU
+  | i64And
   | i64Or
+  | i64Xor
   | i64Shl
   | i64ShrU
-  | i64LtU
-  /-- IEEE-754 binary64 comparisons and arithmetic used by resident externals. -/
+  | i64ShrS
+  | i64Rotl
+  | i64Rotr
+  /-- Complete IEEE-754 binary32 scalar surface. -/
+  | f32Eq
+  | f32Ne
+  | f32Lt
+  | f32Gt
+  | f32Le
+  | f32Ge
+  | f32Abs
+  | f32Neg
+  | f32Ceil
+  | f32Floor
+  | f32Trunc
+  | f32Nearest
+  | f32Sqrt
+  | f32Add
+  | f32Sub
+  | f32Mul
+  | f32Div
+  | f32Min
+  | f32Max
+  | f32Copysign
+  /-- Complete IEEE-754 binary64 scalar surface. -/
   | f64Eq
+  | f64Ne
   | f64Lt
+  | f64Gt
   | f64Le
+  | f64Ge
+  | f64Abs
+  | f64Neg
+  | f64Ceil
+  | f64Floor
+  | f64Trunc
+  | f64Nearest
+  | f64Sqrt
   | f64Add
   | f64Sub
   | f64Mul
   | f64Div
-  | f64Ceil
-  | f64Floor
+  | f64Min
+  | f64Max
+  | f64Copysign
   /-- Load from the module-owned memory at `address + offset`. -/
   | i32Load (result : AbiKind) (offset : UInt32)
+  | i32Load8S (result : AbiKind) (offset : UInt32)
   /-- Zero-extend one byte from module-owned memory at `address + offset`. -/
   | i32Load8U (result : AbiKind) (offset : UInt32)
+  | i32Load16S (result : AbiKind) (offset : UInt32)
   /-- Zero-extend two bytes from module-owned memory at `address + offset`. -/
   | i32Load16U (result : AbiKind) (offset : UInt32)
   | i64Load (result : AbiKind) (offset : UInt32)
+  | i64Load8S (result : AbiKind) (offset : UInt32)
+  | i64Load8U (result : AbiKind) (offset : UInt32)
+  | i64Load16S (result : AbiKind) (offset : UInt32)
+  | i64Load16U (result : AbiKind) (offset : UInt32)
+  | i64Load32S (result : AbiKind) (offset : UInt32)
+  | i64Load32U (result : AbiKind) (offset : UInt32)
+  | f32Load (offset : UInt32)
+  | f64Load (offset : UInt32)
   /-- Store a typed physical lane into module-owned memory. -/
   | i32Store8 (value : AbiKind) (offset : UInt32)
   | i32Store16 (value : AbiKind) (offset : UInt32)
   | i32Store (value : AbiKind) (offset : UInt32)
+  | i64Store8 (value : AbiKind) (offset : UInt32)
+  | i64Store16 (value : AbiKind) (offset : UInt32)
+  | i64Store32 (value : AbiKind) (offset : UInt32)
   | i64Store (value : AbiKind) (offset : UInt32)
+  | f32Store (offset : UInt32)
+  | f64Store (offset : UInt32)
   /-- Query or grow the module-owned wasm32 memory in 64-KiB pages. -/
   | memorySize
   | memoryGrow
   /-- Retag the low 32 bits of an i64 physical lane. -/
   | i32WrapI64 (result : AbiKind)
+  /-- Sign-extend an i32 physical lane to i64. -/
+  | i64ExtendI32S (result : AbiKind)
   /-- Zero-extend an i32 physical lane to i64. -/
   | i64ExtendI32U (result : AbiKind)
-  /-- Convert an unsigned i64 lane to IEEE-754 binary64. -/
+  /-- Sign-extend narrow integer lanes in place. -/
+  | i32Extend8S (result : AbiKind)
+  | i32Extend16S (result : AbiKind)
+  | i64Extend8S (result : AbiKind)
+  | i64Extend16S (result : AbiKind)
+  | i64Extend32S (result : AbiKind)
+  /-- Convert integer lanes to IEEE-754 binary32 or binary64. -/
+  | f32ConvertI32S
+  | f32ConvertI32U
+  | f32ConvertI64S
+  | f32ConvertI64U
+  | f64ConvertI32S
+  | f64ConvertI32U
+  | f64ConvertI64S
   | f64ConvertI64U
-  /-- Lean-compatible saturating conversion from binary64 to unsigned i64. -/
+  /-- Trapping float-to-integer conversions. -/
+  | i32TruncF32S (result : AbiKind)
+  | i32TruncF32U (result : AbiKind)
+  | i32TruncF64S (result : AbiKind)
+  | i32TruncF64U (result : AbiKind)
+  | i64TruncF32S (result : AbiKind)
+  | i64TruncF32U (result : AbiKind)
+  | i64TruncF64S (result : AbiKind)
+  | i64TruncF64U (result : AbiKind)
+  /-- Non-trapping saturating float-to-integer conversions. -/
+  | i32TruncSatF32S (result : AbiKind)
+  | i32TruncSatF32U (result : AbiKind)
+  | i32TruncSatF64S (result : AbiKind)
+  | i32TruncSatF64U (result : AbiKind)
+  | i64TruncSatF32S (result : AbiKind)
+  | i64TruncSatF32U (result : AbiKind)
+  | i64TruncSatF64S (result : AbiKind)
   | i64TruncSatF64U (result : AbiKind)
+  /-- Convert between IEEE-754 widths. -/
+  | f32DemoteF64
+  | f64PromoteF32
   /-- Preserve the exact 32-bit payload while retagging an `f32` lane as `i32`. -/
   | i32ReinterpretF32 (result : AbiKind)
   /-- Preserve the exact 64-bit payload while retagging an `f64` lane as `i64`. -/

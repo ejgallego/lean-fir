@@ -322,6 +322,66 @@ structure Flow where
   fallthrough : Option OperandStack
   branches : List FVarId := []
 
+private def representativeKind : ValueType → AbiKind
+  | .i32 => .uint32
+  | .i64 => .uint64
+  | .f32 => .float32
+  | .f64 => .float
+
+private def checkUnaryPhysical (context : CheckContext)
+    (stack? : Option OperandStack) (input : ValueType) (result : AbiKind) :
+    Except SymbolicError Flow := do
+  let expected := representativeKind input
+  let stack? ← stack?.mapM fun stack => do
+    if stack.isEmpty then
+      throw (.stackUnderflow context.function.name [expected])
+    let remaining := stack.take (stack.length - 1)
+    let some operand := stack.getLast? |
+      throw (.stackUnderflow context.function.name [expected])
+    unless operand.valueType == input do
+      throw (.stackMismatch context.function.name [expected] [operand])
+    return remaining ++ [result]
+  return { fallthrough := stack? }
+
+private def checkBinaryPhysical (context : CheckContext)
+    (stack? : Option OperandStack) (input : ValueType) (result : AbiKind) :
+    Except SymbolicError Flow := do
+  let expected := representativeKind input
+  let stack? ← stack?.mapM fun stack => do
+    if stack.length < 2 then
+      throw (.stackUnderflow context.function.name [expected, expected])
+    let remaining := stack.take (stack.length - 2)
+    let operands := stack.drop (stack.length - 2)
+    unless operands.all (·.valueType == input) do
+      throw (.stackMismatch context.function.name [expected, expected] operands)
+    return remaining ++ [result]
+  return { fallthrough := stack? }
+
+private def checkLoadPhysical (context : CheckContext)
+    (stack? : Option OperandStack) (result : AbiKind) :
+    Except SymbolicError Flow := do
+  unless context.module.memory.isSome do
+    throw (.memoryInstructionWithoutMemory context.function.name)
+  let stack? ← stack?.mapM fun stack => do
+    if stack.isEmpty then
+      throw (.stackUnderflow context.function.name [.uint32])
+    let remaining := stack.take (stack.length - 1)
+    let some address := stack.getLast? |
+      throw (.stackUnderflow context.function.name [.uint32])
+    unless address.valueType == .i32 do
+      throw (.stackMismatch context.function.name [.uint32] [address])
+    return remaining ++ [result]
+  return { fallthrough := stack? }
+
+private def checkStorePhysical (context : CheckContext)
+    (stack? : Option OperandStack) (value : AbiKind) :
+    Except SymbolicError Flow := do
+  unless context.module.memory.isSome do
+    throw (.memoryInstructionWithoutMemory context.function.name)
+  let stack? ← stack?.mapM fun stack =>
+    popKinds context.function.name stack [.uint32, value]
+  return { fallthrough := stack? }
+
 def mergeFallthrough (function : Name) (left right : Option OperandStack) :
     Except SymbolicError (Option OperandStack) := do
   match left, right with
@@ -357,6 +417,8 @@ partial def checkInstruction (context : CheckContext) (stack? : Option OperandSt
       unless kind.valueType == .i64 do
         throw (.invalidConstant context.function.name kind .i64)
       return { fallthrough := stack?.map (· ++ [kind]) }
+  | .f32Const _ =>
+      return { fallthrough := stack?.map (· ++ [.float32]) }
   | .f64Const _ =>
       return { fallthrough := stack?.map (· ++ [.float]) }
   | .localGet fvarId => do
@@ -409,69 +471,57 @@ partial def checkInstruction (context : CheckContext) (stack? : Option OperandSt
           throw (.stackMismatch context.function.name [right, right] operands)
         return remaining ++ [.uint32]
       return { fallthrough := stack? }
-  | .i32And | .i32ShrU | .i32Add | .i32Sub | .i32RemU | .i32LtU => do
-      let stack? ← stack?.mapM fun stack => do
-        if stack.length < 2 then
-          throw (.stackUnderflow context.function.name [.uint32, .uint32])
-        let remaining := stack.take (stack.length - 2)
-        let operands := stack.drop (stack.length - 2)
-        unless operands.all (·.valueType == .i32) do
-          throw (.stackMismatch context.function.name [.uint32, .uint32] operands)
-        return remaining ++ [.uint32]
-      return { fallthrough := stack? }
-  | .i64Or | .i64Shl | .i64ShrU => do
-      let stack? ← stack?.mapM fun stack => do
-        if stack.length < 2 then
-          throw (.stackUnderflow context.function.name [.uint64, .uint64])
-        let remaining := stack.take (stack.length - 2)
-        let operands := stack.drop (stack.length - 2)
-        unless operands.all (·.valueType == .i64) do
-          throw (.stackMismatch context.function.name [.uint64, .uint64] operands)
-        return remaining ++ [.uint64]
-      return { fallthrough := stack? }
-  | .i64LtU => do
-      let stack? ← stack?.mapM fun stack => do
-        if stack.length < 2 then
-          throw (.stackUnderflow context.function.name [.uint64, .uint64])
-        let remaining := stack.take (stack.length - 2)
-        let operands := stack.drop (stack.length - 2)
-        unless operands.all (·.valueType == .i64) do
-          throw (.stackMismatch context.function.name [.uint64, .uint64] operands)
-        return remaining ++ [.uint32]
-      return { fallthrough := stack? }
-  | .f64Eq | .f64Lt | .f64Le => do
-      let stack? ← stack?.mapM fun stack => do
-        let stack ← popKinds context.function.name stack [.float, .float]
-        return stack ++ [.uint32]
-      return { fallthrough := stack? }
-  | .f64Add | .f64Sub | .f64Mul | .f64Div => do
-      let stack? ← stack?.mapM fun stack => do
-        let stack ← popKinds context.function.name stack [.float, .float]
-        return stack ++ [.float]
-      return { fallthrough := stack? }
-  | .f64Ceil | .f64Floor => do
-      let stack? ← stack?.mapM fun stack => do
-        let stack ← popKinds context.function.name stack [.float]
-        return stack ++ [.float]
-      return { fallthrough := stack? }
+  | .i32Eqz | .i32Clz | .i32Ctz | .i32Popcnt =>
+      checkUnaryPhysical context stack? .i32 .uint32
+  | .i32Ne | .i32LtS | .i32LtU | .i32GtS | .i32GtU
+  | .i32LeS | .i32LeU | .i32GeS | .i32GeU =>
+      checkBinaryPhysical context stack? .i32 .uint32
+  | .i32Add | .i32Sub | .i32Mul | .i32DivS | .i32DivU
+  | .i32RemS | .i32RemU | .i32And | .i32Or | .i32Xor
+  | .i32Shl | .i32ShrS | .i32ShrU | .i32Rotl | .i32Rotr =>
+      checkBinaryPhysical context stack? .i32 .uint32
+  | .i64Eqz =>
+      checkUnaryPhysical context stack? .i64 .uint32
+  | .i64Clz | .i64Ctz | .i64Popcnt =>
+      checkUnaryPhysical context stack? .i64 .uint64
+  | .i64Eq | .i64Ne | .i64LtS | .i64LtU | .i64GtS | .i64GtU
+  | .i64LeS | .i64LeU | .i64GeS | .i64GeU =>
+      checkBinaryPhysical context stack? .i64 .uint32
+  | .i64Add | .i64Sub | .i64Mul | .i64DivS | .i64DivU
+  | .i64RemS | .i64RemU | .i64And | .i64Or | .i64Xor
+  | .i64Shl | .i64ShrS | .i64ShrU | .i64Rotl | .i64Rotr =>
+      checkBinaryPhysical context stack? .i64 .uint64
+  | .f32Eq | .f32Ne | .f32Lt | .f32Gt | .f32Le | .f32Ge =>
+      checkBinaryPhysical context stack? .f32 .uint32
+  | .f32Abs | .f32Neg | .f32Ceil | .f32Floor | .f32Trunc
+  | .f32Nearest | .f32Sqrt =>
+      checkUnaryPhysical context stack? .f32 .float32
+  | .f32Add | .f32Sub | .f32Mul | .f32Div | .f32Min | .f32Max
+  | .f32Copysign =>
+      checkBinaryPhysical context stack? .f32 .float32
+  | .f64Eq | .f64Ne | .f64Lt | .f64Gt | .f64Le | .f64Ge =>
+      checkBinaryPhysical context stack? .f64 .uint32
+  | .f64Abs | .f64Neg | .f64Ceil | .f64Floor | .f64Trunc
+  | .f64Nearest | .f64Sqrt =>
+      checkUnaryPhysical context stack? .f64 .float
+  | .f64Add | .f64Sub | .f64Mul | .f64Div | .f64Min | .f64Max
+  | .f64Copysign =>
+      checkBinaryPhysical context stack? .f64 .float
   | .i32Store8 value _
   | .i32Store16 value _
   | .i32Store value _ => do
-      unless context.module.memory.isSome do
-        throw (.memoryInstructionWithoutMemory context.function.name)
       unless value.valueType == .i32 do
         throw (.invalidConstant context.function.name value .i32)
-      let stack? ← stack?.mapM fun stack =>
-        popKinds context.function.name stack [.uint32, value]
-      return { fallthrough := stack? }
+      checkStorePhysical context stack? value
+  | .i64Store8 value _
+  | .i64Store16 value _
+  | .i64Store32 value _
   | .i64Store value _ => do
-      unless context.module.memory.isSome do
-        throw (.memoryInstructionWithoutMemory context.function.name)
       unless value.valueType == .i64 do
         throw (.invalidConstant context.function.name value .i64)
-      let stack? ← stack?.mapM fun stack =>
-        popKinds context.function.name stack [.uint32, value]
-      return { fallthrough := stack? }
+      checkStorePhysical context stack? value
+  | .f32Store _ => checkStorePhysical context stack? .float32
+  | .f64Store _ => checkStorePhysical context stack? .float
   | .memorySize => do
       unless context.module.memory.isSome do
         throw (.memoryInstructionWithoutMemory context.function.name)
@@ -484,89 +534,78 @@ partial def checkInstruction (context : CheckContext) (stack? : Option OperandSt
         return stack ++ [.uint32]
       return { fallthrough := stack? }
   | .i32Load result _ => do
-      unless context.module.memory.isSome do
-        throw (.memoryInstructionWithoutMemory context.function.name)
       unless result.valueType == .i32 do
         throw (.invalidConstant context.function.name result .i32)
-      let stack? ← stack?.mapM fun stack => do
-        if stack.isEmpty then
-          throw (.stackUnderflow context.function.name [.uint32])
-        let remaining := stack.take (stack.length - 1)
-        let some address := stack.getLast? |
-          throw (.stackUnderflow context.function.name [.uint32])
-        unless address.valueType == .i32 do
-          throw (.stackMismatch context.function.name [.uint32] [address])
-        return remaining ++ [result]
-      return { fallthrough := stack? }
+      checkLoadPhysical context stack? result
+  | .i32Load8S result _
   | .i32Load8U result _
+  | .i32Load16S result _
   | .i32Load16U result _ => do
-      unless context.module.memory.isSome do
-        throw (.memoryInstructionWithoutMemory context.function.name)
       unless result.valueType == .i32 do
         throw (.invalidConstant context.function.name result .i32)
-      let stack? ← stack?.mapM fun stack => do
-        if stack.isEmpty then
-          throw (.stackUnderflow context.function.name [.uint32])
-        let remaining := stack.take (stack.length - 1)
-        let some address := stack.getLast? |
-          throw (.stackUnderflow context.function.name [.uint32])
-        unless address.valueType == .i32 do
-          throw (.stackMismatch context.function.name [.uint32] [address])
-        return remaining ++ [result]
-      return { fallthrough := stack? }
-  | .i64Load result _ => do
-      unless context.module.memory.isSome do
-        throw (.memoryInstructionWithoutMemory context.function.name)
+      checkLoadPhysical context stack? result
+  | .i64Load result _
+  | .i64Load8S result _
+  | .i64Load8U result _
+  | .i64Load16S result _
+  | .i64Load16U result _
+  | .i64Load32S result _
+  | .i64Load32U result _ => do
       unless result.valueType == .i64 do
         throw (.invalidConstant context.function.name result .i64)
-      let stack? ← stack?.mapM fun stack => do
-        if stack.isEmpty then
-          throw (.stackUnderflow context.function.name [.uint32])
-        let remaining := stack.take (stack.length - 1)
-        let some address := stack.getLast? |
-          throw (.stackUnderflow context.function.name [.uint32])
-        unless address.valueType == .i32 do
-          throw (.stackMismatch context.function.name [.uint32] [address])
-        return remaining ++ [result]
-      return { fallthrough := stack? }
+      checkLoadPhysical context stack? result
+  | .f32Load _ => checkLoadPhysical context stack? .float32
+  | .f64Load _ => checkLoadPhysical context stack? .float
   | .i32WrapI64 result => do
       unless result.valueType == .i32 do
         throw (.invalidConstant context.function.name result .i32)
-      let stack? ← stack?.mapM fun stack => do
-        if stack.isEmpty then
-          throw (.stackUnderflow context.function.name [.uint64])
-        let remaining := stack.take (stack.length - 1)
-        let some operand := stack.getLast? |
-          throw (.stackUnderflow context.function.name [.uint64])
-        unless operand.valueType == .i64 do
-          throw (.stackMismatch context.function.name [.uint64] [operand])
-        return remaining ++ [result]
-      return { fallthrough := stack? }
+      checkUnaryPhysical context stack? .i64 result
+  | .i64ExtendI32S result
   | .i64ExtendI32U result => do
       unless result.valueType == .i64 do
         throw (.invalidConstant context.function.name result .i64)
-      let stack? ← stack?.mapM fun stack => do
-        if stack.isEmpty then
-          throw (.stackUnderflow context.function.name [.uint32])
-        let remaining := stack.take (stack.length - 1)
-        let some operand := stack.getLast? |
-          throw (.stackUnderflow context.function.name [.uint32])
-        unless operand.valueType == .i32 do
-          throw (.stackMismatch context.function.name [.uint32] [operand])
-        return remaining ++ [result]
-      return { fallthrough := stack? }
-  | .f64ConvertI64U => do
-      let stack? ← stack?.mapM fun stack => do
-        let stack ← popKinds context.function.name stack [.uint64]
-        return stack ++ [.float]
-      return { fallthrough := stack? }
-  | .i64TruncSatF64U result => do
+      checkUnaryPhysical context stack? .i32 result
+  | .i32Extend8S result
+  | .i32Extend16S result => do
+      unless result.valueType == .i32 do
+        throw (.invalidConstant context.function.name result .i32)
+      checkUnaryPhysical context stack? .i32 result
+  | .i64Extend8S result
+  | .i64Extend16S result
+  | .i64Extend32S result => do
       unless result.valueType == .i64 do
         throw (.invalidConstant context.function.name result .i64)
-      let stack? ← stack?.mapM fun stack => do
-        let stack ← popKinds context.function.name stack [.float]
-        return stack ++ [result]
-      return { fallthrough := stack? }
+      checkUnaryPhysical context stack? .i64 result
+  | .f32ConvertI32S | .f32ConvertI32U =>
+      checkUnaryPhysical context stack? .i32 .float32
+  | .f32ConvertI64S | .f32ConvertI64U =>
+      checkUnaryPhysical context stack? .i64 .float32
+  | .f64ConvertI32S | .f64ConvertI32U =>
+      checkUnaryPhysical context stack? .i32 .float
+  | .f64ConvertI64S | .f64ConvertI64U =>
+      checkUnaryPhysical context stack? .i64 .float
+  | .i32TruncF32S result | .i32TruncF32U result
+  | .i32TruncSatF32S result | .i32TruncSatF32U result => do
+      unless result.valueType == .i32 do
+        throw (.invalidConstant context.function.name result .i32)
+      checkUnaryPhysical context stack? .f32 result
+  | .i32TruncF64S result | .i32TruncF64U result
+  | .i32TruncSatF64S result | .i32TruncSatF64U result => do
+      unless result.valueType == .i32 do
+        throw (.invalidConstant context.function.name result .i32)
+      checkUnaryPhysical context stack? .f64 result
+  | .i64TruncF32S result | .i64TruncF32U result
+  | .i64TruncSatF32S result | .i64TruncSatF32U result => do
+      unless result.valueType == .i64 do
+        throw (.invalidConstant context.function.name result .i64)
+      checkUnaryPhysical context stack? .f32 result
+  | .i64TruncF64S result | .i64TruncF64U result
+  | .i64TruncSatF64S result | .i64TruncSatF64U result => do
+      unless result.valueType == .i64 do
+        throw (.invalidConstant context.function.name result .i64)
+      checkUnaryPhysical context stack? .f64 result
+  | .f32DemoteF64 => checkUnaryPhysical context stack? .f64 .float32
+  | .f64PromoteF32 => checkUnaryPhysical context stack? .f32 .float
   | .i32ReinterpretF32 result => do
       unless result.valueType == .i32 do
         throw (.invalidConstant context.function.name result .i32)

@@ -217,6 +217,16 @@ def residentMemoryGrowBody? : List Wasm.Instruction → Bool
           residentMemoryGrowBody? function.body
   | .error _ => false
 
+#guard match adapt Fir.Wasm.Emit.Examples.scalarSurfaceModule with
+  | .ok adapted =>
+      adapted.wasmModule.imports.isEmpty &&
+      adapted.wasmModule.funcs.length ==
+        Fir.Wasm.Emit.Examples.scalarSurfaceFunctions.size &&
+      match adapted.wasmModule.validate with
+      | .ok _ => true
+      | .error _ => false
+  | .error _ => false
+
 #guard match adapt Fir.Wasm.Emit.ResidentRuntime.getTagModule with
   | .ok adapted =>
       adapted.wasmModule.imports.isEmpty &&
