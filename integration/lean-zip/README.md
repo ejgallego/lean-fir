@@ -8,7 +8,7 @@ Zip.Wasm.compressLevel1 : ByteArray → ByteArray
 Zip.Wasm.compressRaw : ByteArray → UInt8 → ByteArray
 ```
 
-from lean-zip commit `30737b4e2ebfd0fc889f0b2e265aae0635d668a1`.
+from lean-zip commit `273d0d6cd9cab77c7f3489b0b0b1f6e543315d21`.
 The stored entry is the minimal boundary control. Level-1 is the first
 production matcher/emitter slice. FIR reads clean source checkouts and writes
 every build product locally; it never consumes lean-zip's `.lake` products.
@@ -20,13 +20,13 @@ is reserved for sources containing `module` / `public section` boundaries.
 Create clean source views, then run the closure probe:
 
 ```sh
-git -C /path/to/lean-zip worktree add --detach /tmp/fir-lean-zip-30737 \
-  30737b4e2ebfd0fc889f0b2e265aae0635d668a1
+git -C /path/to/lean-zip worktree add --detach /tmp/fir-lean-zip-273d \
+  273d0d6cd9cab77c7f3489b0b0b1f6e543315d21
 git -C /path/to/zipCommon worktree add --detach /tmp/fir-zip-common-4425 \
   4425bab1f9522307d77e8d485bc536149ba31c36
 
 lake --keep-toolchain --reconfigure \
-  -KleanZipRoot=/tmp/fir-lean-zip-30737 \
+  -KleanZipRoot=/tmp/fir-lean-zip-273d \
   -KzipCommonRoot=/tmp/fir-zip-common-4425 \
   build LeanZipFir.Compile leanZipFirLevel1Artifact
 lake --keep-toolchain env lean Probe.lean
@@ -57,7 +57,7 @@ values and therefore cannot be mutated by compiled Lean.
 Run the complete deterministic, native-oracle, Node, and optional browser gate:
 
 ```sh
-LEAN_ZIP_ROOT=/tmp/fir-lean-zip-30737 \
+LEAN_ZIP_ROOT=/tmp/fir-lean-zip-273d \
 ZIP_COMMON_ROOT=/tmp/fir-zip-common-4425 \
 FIR_BROWSER=google-chrome \
 ./check.sh
@@ -68,6 +68,23 @@ Immutable packages are under `_build/lean-zip-stored-packages/` and
 produced by `node package-raw.mjs` under `_build/lean-zip-raw-packages/`.
 Their atomic canonical pointers end in `-current`. Every package is checksummed
 and can run `node smoke.mjs` without the FIR or lean-zip source trees.
+
+Catalog consumers should use the fail-closed fresh-output entry rather than
+the direct-use aliases above:
+
+```sh
+integration/lean-zip/export-raw-package.mjs \
+  --output /caller/controlled/fir-native \
+  --checkout producer=/exact/clean/fir \
+  --checkout client=/exact/clean/lean-zip \
+  --checkout zip-common=/exact/clean/zipCommon
+```
+
+The exporter accepts exactly those three source roles and no dependency
+packages. It verifies clean worktree roots and the revisions in
+`raw-source-contract.json`, stages atomically beside the requested output,
+checks the exact regular-file inventory and all hashes, and runs the
+package-local smoke before returning. The output must not already exist.
 
 The raw package also carries `lean-zip-raw.wasm.functions.json`, a versioned
 index for every function in the final optimized module. The producer tracks

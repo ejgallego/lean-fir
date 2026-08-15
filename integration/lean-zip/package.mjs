@@ -30,7 +30,7 @@ import {
 const directory = dirname(fileURLToPath(import.meta.url));
 const firRoot = realpathSync(join(directory, "../.."));
 const leanZipRoot = realpathSync(process.env.LEAN_ZIP_ROOT ??
-  "/tmp/fir-lean-zip-30737");
+  "/tmp/fir-lean-zip-273d");
 const zipCommonRoot = realpathSync(process.env.ZIP_COMMON_ROOT ??
   "/tmp/fir-zip-common-4425");
 const buildDirectory = join(directory, "_build");
@@ -118,11 +118,12 @@ function publishCurrent(destination, currentName) {
 const leanZip = gitState(leanZipRoot);
 const zipCommon = gitState(zipCommonRoot);
 const fir = gitState(firRoot);
-assert.equal(leanZip.commit,
-  "30737b4e2ebfd0fc889f0b2e265aae0635d668a1",
+const expectedSources = JSON.parse(readFileSync(
+  join(directory, "raw-source-contract.json"), "utf8"));
+assert.equal(expectedSources.schemaVersion, "fir.lean-zip.raw-source/v1");
+assert.equal(leanZip.commit, expectedSources.clientRevision,
   "unexpected lean-zip source revision");
-assert.equal(zipCommon.commit,
-  "4425bab1f9522307d77e8d485bc536149ba31c36",
+assert.equal(zipCommon.commit, expectedSources.zipCommonRevision,
   "unexpected zipCommon source revision");
 assert.equal(leanZip.dirty, false, "lean-zip source view must be clean");
 assert.equal(zipCommon.dirty, false, "zipCommon source view must be clean");
