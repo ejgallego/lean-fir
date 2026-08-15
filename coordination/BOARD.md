@@ -16,9 +16,10 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 ## Active integration lease
 
 - Milestone: `MULTI-LANE-CONSOLIDATION-20260814`.
-- Integration owner: `wasm-proof`, taking over the integration lease from the
-  sleeping `wasm-gen` owner by explicit user assignment. The lease covers
-  landing coordination only; feature ownership remains with each lane.
+- Integration owner: `wasm-gen`, resuming the integration lease for the
+  lean-zip regeneration by explicit user assignment after W6 completed its
+  serialized proof landing. The lease covers landing coordination only;
+  feature ownership remains with each lane.
 - Accepted baseline: `main` contains the complete
   `W7-ILLUMINATE-SELECTION-CATALOG-EXPORT` stack through tracked lane head
   `5081015a` and the independently isolated
@@ -62,7 +63,10 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `e1bd9722` (functional head `2231901a`): the actual adapted immediate
   `Nat.add` call chain now refines to the concrete host contract, while
   promoted naturals and the compiler-to-admission bridge remain explicit
-  follow-ups.
+  follow-ups. The canonical lean-zip raw consumer is regenerated on the v2
+  libm surface through tracked handoff `78e5da9a` (functional head
+  `7903b7f1`), with source-compiled Float construction, an exact one-function
+  `Float.log2` symbolic frontier, and a zero-import final package.
 - Landing order:
   1. W7-2's Verso source-module replay repair and generic immutable-package
      publisher are accepted in that order through `912bf68a`.
@@ -107,6 +111,9 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
      tracked handoff `e1bd9722`. It consumes the landed W7 helper bodies and
      proves the actual adapted bounded `Nat.add` path without changing the
      shared ABI, concrete layout, helper signatures, or W7-owned sources.
+  9. The lean-zip raw consumer then regenerates through tracked handoff
+     `78e5da9a` after rebasing over the accepted W6 proof stack. The proof-only
+     delta leaves its executable identities byte-identical.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -125,6 +132,40 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   removal, or branch deletion is implied by this lease.
 
 ## Latest completed integration lease
+
+- Milestone: `W7-LEAN-ZIP-STANDARD-LIBM-V2`.
+- Integration owner: `wasm-gen`, accepting its own clean tracked handoff
+  `78e5da9a`; the functional head is `7903b7f1` on the accepted W6 proof
+  baseline `a1a1f375`.
+- Change: the canonical `Zip.Wasm.compressRaw` consumer now compiles Lean's
+  real `Float.ofNat` and `Float.ofScientific` definitions from final LCNF and
+  retains exactly `Float.log2` at its reviewed symbolic frontier. It links
+  that frontier through `fir.standard-libm/v2`; the adapter and immutable
+  package carry the corresponding reservation and numeric-policy capability.
+- Contracts: no shared semantic contract changed. The raw input layout,
+  public entry, module-memory ABI, allocator/frontier/rewind exports,
+  persistent-cache plus scratch-checkpoint ownership, and package schema are
+  unchanged. This is a consumer regeneration of already accepted W7 surfaces.
+- Acceptance: the 157-job lean-zip/FIR cone and repeated generation pass. Five
+  native/Wasm inputs at compression levels 1 through 10, independent inflate,
+  the zero-import ByteArray adapter, persistent-cache/scratch reclamation,
+  function evidence, checksums, and package smoke all pass. `make check`
+  reports 2,121/2,121 equal comparisons with zero findings; all 3,148 Talos
+  jobs and the complete deterministic W7 artifact gate pass. No bug card was
+  needed.
+- Artifact: clean producer `b9f6adb4` publishes immutable local package
+  `integration/lean-zip/_build/lean-zip-raw-packages/b9f6adb4e6e0-273d0d6cd9ca-37190072c618e2a0e56f`,
+  selected by `integration/lean-zip/_build/lean-zip-raw-current`. Its
+  936,001-byte Wasm is SHA-256
+  `b0eaf85bb2ae2691329a966e8c01a80b661799919291b32358368e147a2cff3d`;
+  it owns memory and has zero function and memory imports. The final 2,305
+  functions comprise 390 Lean-source and 1,915 resident-helper functions.
+- Result: local `main` advances through `78e5da9a`. The package remains a local
+  immutable handoff; no feature branch or package was published externally.
+  The unrelated legacy stored-package byte-size ratchet remains a separate
+  metadata review.
+
+## Previous completed integration lease
 
 - Milestone: `W6-RESIDENT-NAT-ARRAY-ADMISSION`.
 - Integration owner: `wasm-proof`, taking over the active consolidation lease
