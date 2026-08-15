@@ -20,6 +20,7 @@ import Fir.Wasm.Concrete.ArrayCopyCorrectness
 import Fir.Wasm.Concrete.NaturalAllocationCorrectness
 import Fir.Wasm.Concrete.IntegerAllocationCorrectness
 import Fir.Wasm.Concrete.PromotedTagCorrectness
+import Fir.Wasm.Concrete.NaturalDispatchCorrectness
 import Fir.Wasm.Concrete.ConstructorAllocationCorrectness
 import Fir.Wasm.Concrete.ConstructorHeapCorrectness
 import Fir.Wasm.Concrete.ProjectionCorrectness
