@@ -202,6 +202,23 @@ and 2.71x for `UInt64.mul`; `UInt64.ctzFast` improves 1.10x because the common
 call and ABI-retagging cost dominates that small operation. All focused,
 native/LCNF/V8, Talos, and deterministic package checks preserve exact results.
 
+### G1f. Direct core-Wasm Float and conversion helpers
+
+The same scalar surface now closes the standard externals that have exact core
+Wasm meanings: `UInt64.toFloat`, Float add/subtract/multiply/divide, negate,
+equality and ordering, absolute value, square root, and floor. Existing
+`Float.toUInt64` remains the saturating unsigned conversion, and the available
+linker emits only helpers actually referenced by the source closure.
+
+`Float.round` deliberately remains a floor/ceiling synthesis. Lean rounds
+halves away from zero and preserves signed zero, whereas Wasm `nearest` uses
+ties-to-even. Decimal construction (`Float.ofNat`, `Float.ofScientific`) and
+the six transcendental operations remain in the checked standard math runtime;
+they are not approximated with scalar instructions. A zero-import 5,673-byte
+executable fixture covers all 15 resident helpers, exact NaN sign/payload
+behavior for negate/absolute value, signed zero, saturation, infinities, half
+boundaries, scratch restoration, and immediate/heap `UInt64.toNat` results.
+
 ### G2. Separate production and diagnostic adapter costs
 
 Finish the pending Illuminate selection-player request with an actually

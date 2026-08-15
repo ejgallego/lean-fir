@@ -8,6 +8,7 @@ import Fir.Wasm.Emit.ResidentClosureAllocation
 import Fir.Wasm.Emit.ResidentConstructor
 import Fir.Wasm.Emit.ResidentFallback
 import Fir.Wasm.Emit.ResidentFixedWidth
+import Fir.Wasm.Emit.ResidentFloat
 import Fir.Wasm.Emit.ResidentLiteral
 import Fir.Wasm.Emit.ResidentMutation
 import Fir.Wasm.Emit.ResidentBigNumeric
@@ -136,6 +137,20 @@ def emitResidentFixedWidth (path : System.FilePath) : IO Unit := do
     Fir.Wasm.Emit.ResidentFixedWidth.manifest.compress
   IO.println
     s!"resident-fixed-width: wrote {bytes.size} bytes to {path} and {manifestPath}"
+
+def emitResidentFloat (path : System.FilePath) : IO Unit := do
+  let module ← IO.ofExcept <|
+    Fir.Wasm.Emit.ResidentFloat.residentExampleModule
+  let bytes ← IO.ofExcept <| (Fir.Wasm.Emit.encode module).mapError fun error =>
+    s!"resident Float encoding failed: {repr error}"
+  if let some parent := path.parent then
+    IO.FS.createDirAll parent
+  IO.FS.writeBinFile path bytes
+  let manifestPath : System.FilePath := path.toString ++ ".json"
+  IO.FS.writeFile manifestPath
+    Fir.Wasm.Emit.ResidentFloat.manifest.compress
+  IO.println
+    s!"resident-float: wrote {bytes.size} bytes to {path} and {manifestPath}"
 
 def emitResidentConstructors (path : System.FilePath) : IO Unit := do
   let module ← IO.ofExcept <|
@@ -415,6 +430,7 @@ def usage : String :=
     "       fir-wasm-artifact resident-arrays <output.wasm>\n" ++
     "       fir-wasm-artifact resident-byte-arrays <output.wasm>\n" ++
     "       fir-wasm-artifact resident-fixed-width <output.wasm>\n" ++
+    "       fir-wasm-artifact resident-float <output.wasm>\n" ++
     "       fir-wasm-artifact resident-constructors <output.wasm>\n" ++
     "       fir-wasm-artifact resident-closure-allocation <output.wasm>\n" ++
     "       fir-wasm-artifact resident-scalar-box <output.wasm>\n" ++
@@ -464,6 +480,9 @@ def main (args : List String) : IO UInt32 := do
         return 0
     | ["resident-fixed-width", output] =>
         emitResidentFixedWidth output
+        return 0
+    | ["resident-float", output] =>
+        emitResidentFloat output
         return 0
     | ["resident-constructors", output] =>
         emitResidentConstructors output

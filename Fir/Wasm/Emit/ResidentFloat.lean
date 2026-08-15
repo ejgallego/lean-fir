@@ -1,3 +1,4 @@
+import Fir.Wasm.Emit.ExternalRuntime
 import Fir.Wasm.Emit.ResidentNumeric
 
 namespace Fir.Wasm.Emit.ResidentFloat
@@ -9,11 +10,11 @@ open Lean
 /-!
 # Wasm-resident Float frontier
 
-This generation helper internalizes the exact Lean 4.33 floating operations
-supported by the resident runtime. It deliberately assigns Lean extern
-semantics here, after the shared symbolic Wasm instruction layer has landed
-independently. Other standard Float declarations remain at the checked
-external-runtime frontier.
+This generation helper internalizes the standard floating operations whose
+Lean semantics map exactly to the core Wasm scalar surface. It deliberately
+assigns Lean extern semantics here, after the shared symbolic Wasm instruction
+layer has landed independently. Decimal construction and transcendental
+operations remain at the checked external-runtime frontier.
 -/
 
 inductive LinkError where
@@ -55,12 +56,7 @@ def unboxName : Name := `fir_float_unbox
 def scalarProjectionName (width byteOffset : Nat) : Name :=
   Name.mkSimple s!"fir_sproj_f64_{width}_{byteOffset}"
 
-def externalDeclarations : Array Name := #[
-  `Float.sub,
-  `Float.div,
-  `Float.mul,
-  `Float.decLt,
-  `Float.decLe,
+def externalDeclarations : Array Name := ExternalRuntime.coreScalarDeclarations ++ #[
   `Float.round,
   `Float.toUInt64,
   `UInt64.toNat]
@@ -277,33 +273,43 @@ private def binaryFloatFunction (declaration : Name) (instruction : Instruction)
   locals := #[]
   body := [.localGet leftParam, .localGet rightParam, instruction, .ret] }
 
+private def unaryFloatFunction (declaration : Name) (instruction : Instruction) : Function := {
+  name := externalName declaration
+  params := #[(valueParam, .float)]
+  results := #[.float]
+  locals := #[]
+  body := [.localGet valueParam, instruction, .ret] }
+
+private def decisionFloatFunction (declaration : Name) (instruction : Instruction) : Function := {
+  name := externalName declaration
+  params := #[(leftParam, .float), (rightParam, .float)]
+  results := #[.uint8]
+  locals := #[(raw32Local, .uint32), (savedScratchLocal, .uint32),
+    (uint8ResultLocal, .uint8)]
+  body := [
+    .localGet leftParam,
+    .localGet rightParam,
+    instruction,
+    .localSet raw32Local] ++ retypeUInt8 }
+
+def uint64ToFloatFunction : Function := {
+  name := externalName `UInt64.toFloat
+  params := #[(valueParam, .uint64)]
+  results := #[.float]
+  locals := #[]
+  body := [.localGet valueParam, .f64ConvertI64U, .ret] }
+
+def addFunction : Function := binaryFloatFunction `Float.add .f64Add
 def subFunction : Function := binaryFloatFunction `Float.sub .f64Sub
 def divFunction : Function := binaryFloatFunction `Float.div .f64Div
 def mulFunction : Function := binaryFloatFunction `Float.mul .f64Mul
-
-def decLtFunction : Function := {
-  name := externalName `Float.decLt
-  params := #[(leftParam, .float), (rightParam, .float)]
-  results := #[.uint8]
-  locals := #[(raw32Local, .uint32), (savedScratchLocal, .uint32),
-    (uint8ResultLocal, .uint8)]
-  body := [
-    .localGet leftParam,
-    .localGet rightParam,
-    .f64Lt,
-    .localSet raw32Local] ++ retypeUInt8 }
-
-def decLeFunction : Function := {
-  name := externalName `Float.decLe
-  params := #[(leftParam, .float), (rightParam, .float)]
-  results := #[.uint8]
-  locals := #[(raw32Local, .uint32), (savedScratchLocal, .uint32),
-    (uint8ResultLocal, .uint8)]
-  body := [
-    .localGet leftParam,
-    .localGet rightParam,
-    .f64Le,
-    .localSet raw32Local] ++ retypeUInt8 }
+def negFunction : Function := unaryFloatFunction `Float.neg .f64Neg
+def beqFunction : Function := decisionFloatFunction `Float.beq .f64Eq
+def decLtFunction : Function := decisionFloatFunction `Float.decLt .f64Lt
+def decLeFunction : Function := decisionFloatFunction `Float.decLe .f64Le
+def absFunction : Function := unaryFloatFunction `Float.abs .f64Abs
+def sqrtFunction : Function := unaryFloatFunction `Float.sqrt .f64Sqrt
+def floorFunction : Function := unaryFloatFunction `Float.floor .f64Floor
 
 def roundFunction : Function := {
   name := externalName `Float.round
@@ -362,33 +368,49 @@ def uint64ToNatFunction : Function := {
     .localSet raw32Local] ++ retypeNatural }
 
 def externalFunctions : Array Function := #[
+  uint64ToFloatFunction,
+  addFunction,
   subFunction,
   divFunction,
   mulFunction,
+  negFunction,
+  beqFunction,
   decLtFunction,
   decLeFunction,
+  absFunction,
+  sqrtFunction,
+  floorFunction,
   roundFunction,
   toUInt64Function,
   uint64ToNatFunction]
 
-private partial def rewriteExternalInstruction : Instruction → Instruction
+private partial def rewriteExternalInstruction (declarations : Array Name) :
+    Instruction → Instruction
   | .call (.declaration declaration) =>
-      if externalDeclarations.contains declaration then
+      if declarations.contains declaration then
         .call (.declaration (externalName declaration))
       else
         .call (.declaration declaration)
-  | .block label body => .block label (body.map rewriteExternalInstruction)
-  | .loop label body => .loop label (body.map rewriteExternalInstruction)
+  | .block label body =>
+      .block label (body.map (rewriteExternalInstruction declarations))
+  | .loop label body =>
+      .loop label (body.map (rewriteExternalInstruction declarations))
   | .ifElse thenBody elseBody =>
-      .ifElse (thenBody.map rewriteExternalInstruction)
-        (elseBody.map rewriteExternalInstruction)
+      .ifElse (thenBody.map (rewriteExternalInstruction declarations))
+        (elseBody.map (rewriteExternalInstruction declarations))
   | instruction => instruction
 
 private def expectedExternalSignature? (declaration : Name) : Option Signature :=
-  if declaration == `Float.sub || declaration == `Float.div ||
-      declaration == `Float.mul then
+  if declaration == `UInt64.toFloat then
+    some { params := #[.uint64], results := #[.float] }
+  else if declaration == `Float.add || declaration == `Float.sub ||
+      declaration == `Float.div || declaration == `Float.mul then
     some { params := #[.float, .float], results := #[.float] }
-  else if declaration == `Float.decLt || declaration == `Float.decLe then
+  else if declaration == `Float.neg || declaration == `Float.abs ||
+      declaration == `Float.sqrt || declaration == `Float.floor then
+    some { params := #[.float], results := #[.float] }
+  else if declaration == `Float.beq || declaration == `Float.decLt ||
+      declaration == `Float.decLe then
     some { params := #[.float, .float], results := #[.uint8] }
   else if declaration == `Float.round then
     some { params := #[.float], results := #[.float] }
@@ -426,7 +448,8 @@ def internalize (module : Module) (validate : Bool := true) : Except LinkError M
         module.functions.any (·.name == name) || module.exports.contains name then
       throw (.reservedDeclaration name)
   let functions := module.functions.map fun function =>
-    { function with body := function.body.map rewriteExternalInstruction }
+    { function with
+      body := function.body.map (rewriteExternalInstruction externalDeclarations) }
   let functions := functions ++ externalFunctions
   let imports := module.imports.filter fun import_ =>
     match import_.declaration? with
@@ -452,16 +475,19 @@ def internalizeAvailable (module : Module) (validate : Bool := true) :
     match Fir.Wasm.validateModule module with
     | .ok () => pure ()
     | .error error => throw (.invalidInput error)
-  unless module.functions.any (·.name == ResidentAllocator.allocateName) do
-    throw .missingAllocator
-  unless module.memory == some ResidentRuntime.residentMemory do
-    throw .incompatibleMemory
-  for name in #[ResidentNumeric.makeNaturalName, ResidentNumeric.naturalLowName,
-      ResidentNumeric.naturalHighName] do
-    unless module.functions.any (·.name == name) do
-      throw (.missingNumericHelper name)
   let present := externalDeclarations.filter fun declaration =>
     module.imports.any (·.declaration? == some declaration)
+  let runtimePresent := module.runtimeOperations.any fun operation =>
+    (runtimeName? operation).isSome
+  if present.isEmpty && !runtimePresent then return module
+  unless module.memory == some ResidentRuntime.residentMemory do
+    throw .incompatibleMemory
+  if module.runtimeOperations.contains (.box .float .object) then
+    unless module.functions.any (·.name == ResidentAllocator.allocateName) do
+      throw .missingAllocator
+  if present.contains `UInt64.toNat then
+    unless module.functions.any (·.name == ResidentNumeric.makeNaturalName) do
+      throw (.missingNumericHelper ResidentNumeric.makeNaturalName)
   for declaration in present do
     let imports := module.imports.filter (·.declaration? == some declaration)
     unless imports.size == 1 do
@@ -471,13 +497,15 @@ def internalizeAvailable (module : Module) (validate : Bool := true) :
     unless imports[0]!.signature == signature do
       throw (.incompatibleExternal declaration)
   let module ← internalizeRuntime module
-  for name in externalHelperNames do
+  let selectedHelperNames := present.map externalName
+  for name in selectedHelperNames do
     if module.imports.any (·.declaration? == some name) ||
         module.functions.any (·.name == name) || module.exports.contains name then
       throw (.reservedDeclaration name)
   let functions := module.functions.map fun function =>
-    { function with body := function.body.map rewriteExternalInstruction }
-  let functions := functions ++ externalFunctions
+    { function with body := function.body.map (rewriteExternalInstruction present) }
+  let functions := functions ++ externalFunctions.filter fun function =>
+    selectedHelperNames.contains function.name
   let imports := module.imports.filter fun import_ =>
     match import_.declaration? with
     | some declaration => !present.contains declaration
@@ -486,12 +514,131 @@ def internalizeAvailable (module : Module) (validate : Bool := true) :
     module with
     functions
     imports
-    exports := externalHelperNames.foldl Fir.Wasm.addUnique module.exports
+    exports := selectedHelperNames.foldl Fir.Wasm.addUnique module.exports
     runtimeOperations := Fir.Wasm.collectRuntimeOps functions }
   if validate then
     match Fir.Wasm.validateModule result with
     | .ok () => return result
     | .error error => throw (.invalidOutput error)
   else return result
+
+private def impureType : AbiKind → Expr
+  | .uint8 => Compiler.LCNF.ImpureType.uint8
+  | .uint16 => Compiler.LCNF.ImpureType.uint16
+  | .uint32 => Compiler.LCNF.ImpureType.uint32
+  | .uint64 => Compiler.LCNF.ImpureType.uint64
+  | .usize => Compiler.LCNF.ImpureType.usize
+  | .float32 => Compiler.LCNF.ImpureType.float32
+  | .float => Compiler.LCNF.ImpureType.float
+  | .tagged => Compiler.LCNF.ImpureType.tagged
+  | .tobject => Compiler.LCNF.ImpureType.tobject
+  | .object => Compiler.LCNF.ImpureType.object
+  | .erased => Compiler.LCNF.ImpureType.erased
+  | .reuseToken => Compiler.LCNF.ImpureType.tobject
+
+private def externalTypes (signature : Signature) : ExternalTypes := {
+  params := signature.params.map impureType
+  result := impureType signature.results[0]! }
+
+private def externalImport (declaration : Name) : Import :=
+  let signature := (expectedExternalSignature? declaration).get!
+  {
+    key := .external declaration
+    moduleName := "lean.extern"
+    itemName := declaration.toString
+    signature
+    externalTypes? := some (externalTypes signature) }
+
+private def bitUnaryProbeName (declaration : Name) : Name :=
+  Name.mkSimple s!"resident_{declaration.toString.replace "." "_"}_bits"
+
+private def bitUnaryProbe (declaration : Name) : Function := {
+  name := bitUnaryProbeName declaration
+  params := #[(valueParam, .uint64)]
+  results := #[.uint64]
+  locals := #[]
+  body := [
+    .localGet valueParam,
+    .f64ReinterpretI64 .float,
+    .call (.declaration declaration),
+    .i64ReinterpretF64 .uint64,
+    .ret] }
+
+private def bitUnaryProbes : Array Function := #[
+  bitUnaryProbe `Float.neg,
+  bitUnaryProbe `Float.abs,
+  bitUnaryProbe `Float.floor,
+  bitUnaryProbe `Float.round]
+
+/-- Complete executable Float helper inventory used by the artifact gate. -/
+def residentExampleModule : Except String Module := do
+  let numeric ← ResidentNumeric.residentExampleModule
+  let module : Module := {
+    numeric with
+    imports := numeric.imports ++ externalDeclarations.map externalImport
+    functions := numeric.functions ++ bitUnaryProbes
+    exports := numeric.exports ++ bitUnaryProbes.map (·.name) }
+  internalize module |>.mapError fun error => s!"float: {repr error}"
+
+/-- Available linking must add only the helper requested by the source closure. -/
+def selectedExampleModule : Except String Module := do
+  let module : Module := {
+    ResidentAllocator.allocatorModule with
+    imports := #[externalImport `Float.add] }
+  internalizeAvailable module |>.mapError fun error => s!"selected float: {repr error}"
+
+def manifest : Json :=
+  Json.mkObj [
+    ("entries", Json.arr <| externalDeclarations.map fun declaration =>
+      Json.mkObj [
+        ("sourceEntry", declaration.toString),
+        ("entry", externalName declaration |>.toString)]),
+    ("imports", Json.arr #[]),
+    ("scalarStrategy", "direct-core-wasm"),
+    ("roundStrategy", "half-away-from-zero-floor-ceil"),
+    ("externalMathFrontier", Json.arr <|
+      ExternalRuntime.compiledDeclarations.map fun declaration =>
+        toJson declaration.toString),
+    ("status", "generation-ready; W6 Float helper contract proofs pending")]
+
+private partial def instructionContains (target : Instruction) : Instruction → Bool
+  | instruction@(.block _ body) | instruction@(.loop _ body) =>
+      instruction == target || body.any (instructionContains target)
+  | instruction@(.ifElse thenBody elseBody) =>
+      instruction == target || thenBody.any (instructionContains target) ||
+        elseBody.any (instructionContains target)
+  | instruction => instruction == target
+
+#guard uint64ToFloatFunction.body.any (instructionContains .f64ConvertI64U)
+#guard ExternalRuntime.coreScalarDeclarations.all externalDeclarations.contains
+#guard addFunction.body.any (instructionContains .f64Add)
+#guard negFunction.body.any (instructionContains .f64Neg)
+#guard beqFunction.body.any (instructionContains .f64Eq)
+#guard absFunction.body.any (instructionContains .f64Abs)
+#guard sqrtFunction.body.any (instructionContains .f64Sqrt)
+#guard floorFunction.body.any (instructionContains .f64Floor)
+#guard toUInt64Function.body.any (instructionContains (.i64TruncSatF64U .uint64))
+#guard roundFunction.body.any (instructionContains .f64Floor)
+#guard roundFunction.body.any (instructionContains .f64Ceil)
+#guard !roundFunction.body.any (instructionContains .f64Nearest)
+
+#guard match selectedExampleModule with
+  | .ok module =>
+      module.imports.isEmpty && module.runtimeOperations.isEmpty &&
+      module.exports.contains (externalName `Float.add) &&
+      !module.exports.contains (externalName `Float.sub) &&
+      module.functions.any (·.name == externalName `Float.add) &&
+      !module.functions.any (·.name == externalName `Float.sub) &&
+      (Fir.Wasm.validateModule module).isOk && (Fir.Wasm.Emit.encode module).isOk
+  | .error _ => false
+
+#guard match residentExampleModule with
+  | .ok module =>
+      module.imports.isEmpty && module.runtimeOperations.isEmpty &&
+      externalDeclarations.all fun declaration =>
+        module.exports.contains (externalName declaration) &&
+      module.memory == some ResidentRuntime.residentMemory &&
+      (Fir.Wasm.validateModule module).isOk && (Fir.Wasm.Emit.encode module).isOk
+  | .error _ => false
 
 end Fir.Wasm.Emit.ResidentFloat

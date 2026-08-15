@@ -35,6 +35,8 @@ node run-resident-byte-array.mjs _build/resident-byte-arrays.wasm
 lake exe fir-wasm-artifact resident-fixed-width \
   _build/resident-fixed-width.wasm
 node run-resident-fixed-width.mjs _build/resident-fixed-width.wasm
+lake exe fir-wasm-artifact resident-float _build/resident-float.wasm
+node run-resident-float.mjs _build/resident-float.wasm
 lake exe fir-wasm-artifact resident-constructors \
   _build/resident-constructors.wasm
 node run-resident-constructors.mjs _build/resident-constructors.wasm
