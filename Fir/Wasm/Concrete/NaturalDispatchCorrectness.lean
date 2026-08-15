@@ -225,4 +225,121 @@ theorem LiveHeapRel.immediateNaturalAdd_refines
   exact ⟨nextWitness, pair, extension, closurePersistent, heapRelated,
     valueRelated, capacity⟩
 
+/-- The remainder of two immediate natural payloads always fits the wasm32
+immediate range. This includes Lean's `n % 0 = n` case. -/
+theorem ImmediateNaturalPairRel.mod_fits
+    {leftWord rightWord : Word32} {leftReference rightReference : ObjectRef}
+    {left right : UInt64}
+    (pair : ImmediateNaturalPairRel leftWord rightWord leftReference
+      rightReference left right) :
+    left.toNat % right.toNat ≤ maxImmediatePayload := by
+  by_cases rightZero : right.toNat = 0
+  · simpa [rightZero] using pair.leftFits
+  · exact Nat.le_trans
+      (Nat.le_of_lt (Nat.mod_lt _ (Nat.pos_of_ne_zero rightZero)))
+      pair.rightFits
+
+/-- Exact concrete-runtime model of W7's two-immediate `Nat.mod` branch.
+The zero-divisor arm returns the already canonical left word directly. The
+nonzero arm calls the existing canonical natural constructor. -/
+def immediateNaturalMod (state : MemoryState) (leftWord : Word32)
+    (left right : UInt64) : Except ConcreteError (MemoryState × Word32) :=
+  if right.toNat = 0 then
+    .ok (state, leftWord)
+  else
+    allocateNatural state (left.toNat % right.toNat)
+
+/-- W7's immediate `Nat.mod` branch implements Lean remainder exactly. Both
+the zero-divisor direct return and the nonzero machine-remainder path preserve
+the concrete heap and proof witness, return the canonical immediate word, and
+have no heap-ownership effects. -/
+theorem LiveHeapRel.immediateNaturalMod_refines
+    {state result : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {leftWord rightWord resultWord : Word32}
+    {left right : UInt64}
+    (related : LiveHeapRel state witness runtime)
+    (leftRelated : ValueRel witness .tobject (.word32 leftWord)
+      (.object (.tagged left)))
+    (rightRelated : ValueRel witness .tobject (.word32 rightWord)
+      (.object (.tagged right)))
+    (both : BothImmediateNaturalWords leftWord rightWord)
+    (executed : immediateNaturalMod state leftWord left right =
+      .ok (result, resultWord)) :
+    ∃ resultFits : left.toNat % right.toNat ≤ maxImmediatePayload,
+      ImmediateNaturalPairRel leftWord rightWord (.tagged left) (.tagged right)
+          left right ∧
+      result = state ∧
+      resultWord = Word32.encodeImmediate
+        (left.toNat % right.toNat) resultFits ∧
+      witness.Extends witness ∧
+      ClosureAllocationsPersistent witness witness ∧
+      LiveHeapRel result witness runtime ∧
+      ValueRel witness .tobject (.word32 resultWord)
+        (.object (.tagged (UInt64.ofNat (left.toNat % right.toNat)))) ∧
+      MappedHeaderCapacityTransport state result witness := by
+  obtain ⟨leftPayload, rightPayload, pair⟩ :=
+    (ValueRel.bothImmediateNaturalWords_iff related.witnessWellFormed
+      leftRelated rightRelated).mp both
+  have leftPayloadEq : leftPayload = left := by
+    simpa using (ObjectRef.tagged.inj pair.leftReferenceEq).symm
+  have rightPayloadEq : rightPayload = right := by
+    simpa using (ObjectRef.tagged.inj pair.rightReferenceEq).symm
+  subst leftPayload
+  subst rightPayload
+  have remainderFits := pair.mod_fits
+  by_cases rightZero : right.toNat = 0
+  · unfold immediateNaturalMod at executed
+    rw [if_pos rightZero] at executed
+    have pairEq : (state, leftWord) = (result, resultWord) :=
+      Except.ok.inj executed
+    have stateEq : state = result := congrArg Prod.fst pairEq
+    have wordEq : leftWord = resultWord := congrArg Prod.snd pairEq
+    subst result
+    subst resultWord
+    refine ⟨remainderFits, pair, rfl, ?_,
+      RefinementWitness.Extends.refl witness,
+      ClosureAllocationsPersistent.refl witness, related, ?_,
+      MappedHeaderCapacityTransport.refl state witness⟩
+    · simpa [rightZero] using pair.leftWordEq
+    · simpa [rightZero] using leftRelated
+  · have remainderLt : left.toNat % right.toNat < right.toNat :=
+      Nat.mod_lt _ (Nat.pos_of_ne_zero rightZero)
+    have remainderTagged : left.toNat % right.toNat ≤ maxTaggedPayload := by
+      unfold maxImmediatePayload maxTaggedPayload at *
+      omega
+    have remainderLtUInt64 : left.toNat % right.toNat < UInt64.size := by
+      have immediateLtUInt64 : maxImmediatePayload < UInt64.size := by decide
+      exact Nat.lt_of_le_of_lt remainderFits immediateLtUInt64
+    have remainderToNat :
+        (UInt64.ofNat (left.toNat % right.toNat)).toNat =
+          left.toNat % right.toNat :=
+      UInt64.toNat_ofNat_of_lt' remainderLtUInt64
+    have payloadFits :
+        (UInt64.ofNat (left.toNat % right.toNat)).toNat ≤
+          maxImmediatePayload := by
+      simpa [remainderToNat] using remainderFits
+    unfold immediateNaturalMod at executed
+    rw [if_neg rightZero] at executed
+    unfold allocateNatural at executed
+    rw [if_pos remainderTagged] at executed
+    rw [encodeTagged_immediate state _ payloadFits] at executed
+    have pairEq :
+        (state, Word32.encodeImmediate
+          (UInt64.ofNat (left.toNat % right.toNat)).toNat payloadFits) =
+            (result, resultWord) :=
+      Except.ok.inj executed
+    have stateEq : state = result := congrArg Prod.fst pairEq
+    have wordEq : Word32.encodeImmediate
+        (UInt64.ofNat (left.toNat % right.toNat)).toNat payloadFits =
+          resultWord := congrArg Prod.snd pairEq
+    subst result
+    subst resultWord
+    refine ⟨remainderFits, pair, rfl, ?_,
+      RefinementWitness.Extends.refl witness,
+      ClosureAllocationsPersistent.refl witness, related,
+      encodeTagged_immediate_refines witness
+        (UInt64.ofNat (left.toNat % right.toNat)) payloadFits,
+      MappedHeaderCapacityTransport.refl state witness⟩
+    simp [remainderToNat]
+
 end Fir.Wasm.Concrete
