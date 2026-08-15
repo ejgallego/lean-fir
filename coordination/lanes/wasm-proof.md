@@ -5,17 +5,17 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: active
-base: 8484c0be on main
-functional-head: cb04d7ee (landed on main through f37af09e)
-contract-base: 8484c0be; consume the landed resident Array and immediate-Nat helper implementations without changing their signatures or shared ABI
+state: ready
+base: f3b24d80 on main
+functional-head: 71384ff8
+contract-base: f3b24d80; consume the landed resident Array, immediate-Nat, and complete scalar Wasm surfaces without changing their signatures or shared ABI
 clean-at-update: true
-slice: Checkpoint after the W6/W7 bridge intake. W7-W6-20260814-001 is complete with no action: ResidentArrayObjectRel already discharges trusted header elision. W7-W6-20260814-004 is complete with a precise blocking admission gap: the unchecked typed path needs the erased bounds witness and canonical Nat-index representation at the source/compiler boundary. W7-W6-20260814-007/008 are claimed as one dependency-ordered immediate-Nat dispatch/add/remainder refinement milestone.
-files: coordination/lanes/wasm-proof.md only; both Array audits were read-only and their conclusions are in the canonical local mailbox
-contracts: none planned. The accepted W7 Array and Nat helper implementations retain the existing semantic ABI, concrete layout, ownership model, and helper signatures.
-checks: git diff --check pass; make check pass (125 unit tests, 704 source cases across native/LCNF/V8 with 2,112/2,112 comparisons equal, 713-case aggregate coverage, zero findings, 188 active bug cards, 25 mailbox tests); make talos-setup pass at Talos 0e05edbc; make talos-check pass (3,148 jobs); canonical mailbox validation pass (39 threads, 148 messages)
-bug-cards: none yet
-blockers: Proof acceptance of W7's typed unchecked Array paths needs a source/compiler admission theorem carrying erased bounds and canonical Nat/USize decode facts; the lower checked runtime theorems and fault semantics remain intact. This does not block the independent immediate-Nat milestone.
-handoff: none; local-only checkpoint on current main 8484c0be
-next: After user checkpoint, prove the shared immediate-Nat representation dispatcher once, reuse it for the Nat.add immediate branch and Nat.mod including divisor zero, preserve the arbitrary-precision fallback contract, and run the focused Lean Beam/dependency-cone gates.
+slice: W7-W6-20260814-007 complete. Proved that the shared odd-word dispatcher selects exactly two canonical immediate Nat representations, that shift-right decodes their exact payloads, and that the complementary branch heap-classifies at least one operand. Proved the Nat.add fast branch through the existing canonical natural allocator, including witness extension and the promoted persistent result when the sum exceeds the immediate range; the semantic heap and arbitrary-precision fallback contract are unchanged.
+files: Fir/Wasm/Concrete/NaturalDispatchCorrectness.lean; Fir/Wasm/Concrete.lean; coordination/lanes/wasm-proof.md
+contracts: none. No helper signature, ABI, concrete layout, ownership rule, semantic relation, or W7-owned source changed.
+checks: Lean Beam update/sync/save pass for Fir/Wasm/Concrete/NaturalDispatchCorrectness.lean and Fir/Wasm/Concrete.lean; lake build Fir.Wasm.Concrete.NaturalDispatchCorrectness Fir.Wasm.Concrete pass (62 jobs); git diff --check main...HEAD pass; make check pass after rebase (163 scalar Wasm exports, 125 unit tests, 704 source cases across native/LCNF/V8 with 2,112/2,112 comparisons equal, 713-case aggregate coverage, zero findings, 188 active bug cards, 25 mailbox tests); make talos-setup pass at Talos 0e05edbc; make talos-check pass after rebase (3,149 jobs)
+bug-cards: none
+blockers: none for this slice. The separate unchecked typed Array admission gap remains recorded in W7-W6-20260814-004 and does not affect the Nat dispatcher/add theorem.
+handoff: Integration may land functional-head 71384ff8 and its containing ready mailbox commit from wasm/talos-runtime on base f3b24d80.
+next: Complete W7-W6-20260814-008 by reusing the dispatcher for Nat.mod, including the immediate divisor-zero behavior and the unchanged arbitrary-precision fallback.
 ```
