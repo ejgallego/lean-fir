@@ -140,6 +140,35 @@ Order-balanced random-input execution was noisy and inconclusive: four paired
 had a median delta of about +32.98 ms. Treat the upstream-faithful instruction
 shape as the result; do not claim a workload speedup from these samples.
 
+### G1c. Fast-path canonical immediate natural addition
+
+Lean's tagged immediate `Nat` representation makes the common two-immediate
+case locally decidable without scanning arbitrary-precision magnitudes. The
+accepted generation candidate checks both physical tags at the start of
+`Nat.add`, decodes their 31-bit payloads, supplies zero high limbs to the
+existing natural-sum constructor, and returns through the same object retyping
+path. Mixed and heap-backed operands retain the previous validation,
+multi-limb, allocation, and ownership implementation byte-for-byte. This is a
+generic representation path, not a lean-zip specialization or a relaxation of
+the public malformed-input boundary.
+
+Focused Wasm cases cover sums below, at, and above the immediate boundary, two
+maximal immediates, mixed immediate/heap operands, and two heap operands. The
+complete lean-zip matrix preserves exact native/Wasm bytes, zero imports, and
+flat scratch reclamation. Two checked 256-KiB seeded-random profiles improve
+from 1799.46 to 516.80 ms/call and from 1709.47 to 504.61 ms/call (3.48x and
+3.39x); the structured control improves from 173.64 to 96.84 ms/call (1.79x).
+`fir_big_ext_Nat_add` self time improves about 6.5x in both random runs, while
+the magnitude and validation helpers also fall substantially. The work is
+removed rather than shifted.
+
+The source and pre-optimization linker inventories remain unchanged. The raw
+release grows by 51 bytes and retains one additional resident helper because
+`fir_numeric_natural_sum`, formerly inlined from its sole surviving use, now
+has two. W6 separately adapts the existing arbitrary-precision addition proof
+to the immediate branch; the signature and concrete runtime contract are
+unchanged.
+
 ### G2. Separate production and diagnostic adapter costs
 
 Finish the pending Illuminate selection-player request with an actually

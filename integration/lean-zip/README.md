@@ -129,9 +129,9 @@ cold first-use cache work is included honestly in the entry's execute timing.
 
 Both public wrappers reuse the same versioned ByteArray encoder, decoder,
 module validator, timing, and scratch-ownership implementation. Level-1 has
-zero imports and is suitable for correctness testing in Node and browsers. It
-is not yet a performance artifact: generic resident Nat and closure execution
-remain allocation-heavy, and `BUILD.json` records that limitation explicitly.
+zero imports and is suitable for correctness testing in Node and browsers.
+Generic resident operations and closure execution remain optimization targets;
+`BUILD.json` makes no cross-runtime performance claim.
 
 The raw producer retains exactly `Float.ofNat`, `Float.ofScientific`, and
 `Float.log2` at its reviewed frontier and closes them with the pinned standard
@@ -148,11 +148,21 @@ pins SHA-256 digests of the ordered external, source-function, resident-helper,
 and complete-function inventories. This prevents a same-count closure change
 from passing the package gate without review.
 
-The same contract ratchets the final optimized artifact at 2,171 functions and
-zero function imports, with 354 surviving Lean-source functions, 1,811
+The same contract ratchets the final optimized artifact at 2,172 functions and
+zero function imports, with 354 surviving Lean-source functions, 1,812
 resident helpers, and six optimizer-or-linked-runtime functions. The function
 index digest and sidecar digest make an index-preserving but identity-changing
 release a reviewed package change rather than an unnoticed one.
+
+The additional final helper is `fir_numeric_natural_sum`: the generic
+immediate-`Nat.add` branch gives it a second surviving use, so Binaryen no
+longer inlines away its former sole use. No source declaration or
+pre-optimization helper was added. On the checked 256-KiB level-6 corpus, the
+branch preserves exact compressed bytes while reducing seeded-random raw-entry
+time by 3.48x and 3.39x in two profiles and structured-input time by 1.79x.
+`fir_big_ext_Nat_add` self time falls by about 6.5x on both random profiles;
+the validation and magnitude helpers fall as well rather than absorbing the
+removed work.
 
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
