@@ -28,6 +28,7 @@ import FirTalos.ConcreteRuntime
 import FirTalos.ConcreteResidentMemory
 import FirTalos.ConcreteResidentNat
 import FirTalos.ConcreteResidentPrimitives
+import FirTalos.ConcreteResidentReplacement
 import FirTalos.ConcreteReuseCapacityCorrectness
 import FirTalos.ConcreteCacheCorrectness
 import FirTalos.ConcreteDeclarationCorrectness

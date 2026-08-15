@@ -13,9 +13,10 @@ Talos function. It is the store-specific counterpart of the postcondition in
 `Wasm.FuncSpec.of_wp_body` and retains the caller operand remainder prescribed
 by the Wasm calling convention.
 -/
-def FunctionBodyPost (function : Wasm.Function) (args : List Wasm.Value)
-    (Post : Wasm.Store RuntimeHost → List Wasm.Value → Prop) :
-    Wasm.Assertion RuntimeHost :=
+def FunctionBodyPost {host : Type} (function : Wasm.Function)
+    (args : List Wasm.Value)
+    (Post : Wasm.Store host → List Wasm.Value → Prop) :
+    Wasm.Assertion host :=
   fun continuation =>
     match continuation with
     | .Fallthrough targetStore targetLocals =>
@@ -85,10 +86,10 @@ does not quantify over every initial store, so it can consume FIR's concrete
 runtime/handle relation directly.
 -/
 theorem terminatesWith_of_wp_body_at
-    {env : Wasm.HostEnv RuntimeHost} {module : Wasm.Module}
+    {host : Type} {env : Wasm.HostEnv host} {module : Wasm.Module}
     {functionIndex : Nat} {function : Wasm.Function}
-    {initial : Wasm.Store RuntimeHost} {args : List Wasm.Value}
-    {Post : Wasm.Store RuntimeHost → List Wasm.Value → Prop}
+    {initial : Wasm.Store host} {args : List Wasm.Value}
+    {Post : Wasm.Store host → List Wasm.Value → Prop}
     (notImport : module.imports[functionIndex]? = none)
     (found :
       module.funcs[functionIndex - module.imports.length]? = some function)

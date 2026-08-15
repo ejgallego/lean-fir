@@ -2,6 +2,7 @@ import Fir.Wasm.Concrete.NaturalDispatchCorrectness
 import Fir.Wasm.Emit.ResidentBigNumeric
 import FirTalos.ConcreteResidentMemory
 import FirTalos.Correctness.Adapter
+import FirTalos.Correctness.Composition
 import Interpreter.Wasm.Wp.Tactic
 
 namespace FirTalos.Concrete
@@ -41,6 +42,33 @@ def immediateNaturalPairDispatch (leftIndex rightIndex : Nat)
 def immediateNaturalRemainder (leftIndex rightIndex : Nat) : Wasm.Program :=
   immediateNaturalPayload leftIndex ++ immediateNaturalPayload rightIndex ++
     [.remU]
+
+/-- A terminating defined helper call with one result composes with the
+compiler's checked destination write and arbitrary continuation.  This is the
+resident analogue of the import-specific `wp_external_ready_let` core, with
+no host contract or helper-specific semantics baked into it. -/
+theorem wp_definedCallResultSet
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {functionIndex resultIndex : Nat}
+    {initial nextStore : Wasm.Store host}
+    {locals updated : Wasm.Locals} {arguments tail : List Wasm.Value}
+    {physicalResult : Wasm.Value} {rest : Wasm.Program}
+    {Q : Wasm.Assertion host}
+    (callRun :
+      Wasm.TerminatesWith env module functionIndex initial (arguments ++ tail)
+        (fun final values =>
+          final = nextStore ∧ values = physicalResult :: tail))
+    (targetSet :
+      locals.set? resultIndex physicalResult = some updated)
+    (continued :
+      Wasm.wp module rest Q nextStore { updated with values := tail } env) :
+    Wasm.wp module (.call functionIndex :: .localSet resultIndex :: rest) Q
+      initial { locals with values := arguments ++ tail } env := by
+  apply Wasm.wp_call_tw callRun
+  intro final values completed
+  rcases completed with ⟨rfl, rfl⟩
+  exact FirTalos.Correctness.wp_localSet_of_set
+    (locals := locals) (updated := updated) targetSet continued
 
 /-- The adapter maps the emitter's shared immediate-payload decoder to the
 same Talos program used by the execution lemmas below. -/

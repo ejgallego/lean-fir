@@ -8,9 +8,9 @@ and preserves the operand tail. The premise is phrased using Talos's checked
 `set?` operation, so out-of-range local indices cannot be hidden by the proof.
 -/
 theorem wp_localSet_of_set
-    {module : Wasm.Module} {env : Wasm.HostEnv RuntimeHost}
-    {rest : Wasm.Program} {Q : Wasm.Assertion RuntimeHost}
-    {store : Wasm.Store RuntimeHost} {locals updated : Wasm.Locals}
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {rest : Wasm.Program} {Q : Wasm.Assertion host}
+    {store : Wasm.Store host} {locals updated : Wasm.Locals}
     {index : Nat} {value : Wasm.Value} {tail : List Wasm.Value}
     (hSet : locals.set? index value = some updated)
     (continued :

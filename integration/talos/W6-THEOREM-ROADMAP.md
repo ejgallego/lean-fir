@@ -1657,6 +1657,49 @@ acceptance tests pass.
    public finite-prefix resource-safety boundary. Operation coverage remains
    an explicit admission widening rather
    than a target certificate supplied by the public caller.
+
+### Resident helpers and proof-indexed typed-Array admission
+
+Resident-runtime internalization now has a proof boundary parallel to the
+external-host boundary, rather than a second compiler-correctness architecture.
+`ResidentPrimitives.wp_definedCallResultSet` factors the common defined-call,
+checked-result-write, and continuation rule.  The host-polymorphic function
+termination bridge turns a body WP into `Wasm.TerminatesWith`, and
+`ResidentReplacement.externalLetStepSimulates_of_definedCall` replaces an
+external call by such a terminating resident helper while reusing the ordinary
+source step and concrete `StateRelated` successor.  None of these lemmas stores
+a target path, future execution, or translation certificate.
+
+For `Nat.mod`, W6 now proves that the public generated helper adapts to the
+shared immediate-pair dispatcher.  Both zero-divisor and nonzero immediate
+paths terminate at the actual defined-function call boundary.  The nonzero
+path composes payload decoding, unsigned remainder, the immediate
+`makeNatural` contract, scratch-memory restoration, and checked scratch-local
+writes; the arbitrary-precision fallback stays opaque and unreachable.  The
+remaining helper work is to connect the installed `makeNatural` body to that
+immediate contract without an assumed target shape and to prove the analogous
+`Nat.add`/`naturalSum` defined-function chain, including promoted sums.
+
+Unchecked typed Array helpers use a separate proof-indexed admission boundary.
+A live `ResidentArrayObjectRel` already supplies a checked header, exact
+logical size, capacity, and live related elements.  Its wasm32 allocation
+extent proves that the logical size fits the canonical immediate-Nat range.
+`ProofIndexedResidentArrayNatAdmission` then retains the erased source bound
+and the compiler's canonical Nat operand shape; its decode is exact and its
+bound reconstructs the selected semantic element.  The USize form retains the
+erased bound, proves wasm32 narrowing exact, and reconstructs the same element.
+This is deliberately local: general checked Array operations and their bounds
+fault semantics are unchanged.  Closing compiler admission still requires the
+integration-owned validator/lowering relation to transport these erased typed
+proofs to the generated unchecked helper call.
+
+The main theorem boundary remains unchanged.  Compiler current-step admission
+is a theorem about accepted source/compiler output; finite wasm32 address-space
+safety is an independent execution/resource premise.  Resident-helper
+execution discharges a target step selected by compiler admission, but cannot
+and should not manufacture either compiler provenance or global memory
+headroom.
+
 8. Let W7 generation proceed independently against the current concrete
    runtime surface, then prove T5 per internalized runtime function.
 9. Close with T6 and the pure `prettyM` acceptance theorem.

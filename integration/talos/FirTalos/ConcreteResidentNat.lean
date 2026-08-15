@@ -104,9 +104,9 @@ def makeNaturalTargetFunction
 path. This is the call boundary consumed by arithmetic helpers; unlike a
 global `FuncSpec`, it can state that the current store is exactly unchanged. -/
 theorem terminatesWith_makeNaturalImmediate
-    {module : Wasm.Module}
-    {env : Wasm.HostEnv Fir.Wasm.RuntimeHost} {functionIndex : Nat}
-    {store : Wasm.Store Fir.Wasm.RuntimeHost}
+    {host : Type} {module : Wasm.Module}
+    {env : Wasm.HostEnv host} {functionIndex : Nat}
+    {store : Wasm.Store host}
     {payload : Nat} {tail : List Wasm.Value}
     {lowOverflow highNonzero big : Wasm.Program}
     (fits : payload ≤ maxImmediatePayload)
@@ -151,6 +151,48 @@ def retypeRawObjectResultProgram (raw saved result : Nat) : Wasm.Program := [
   .store32 0,
   .localGet result,
   .ret]
+
+/-- Symbolic-emitter form of the common scratch-slot object retyping ABI.
+The names are parameters so proofs can recover the exact private locals of a
+public generated function through its public `locals` array. -/
+def retypeRawObjectResultSource (raw saved result : Lean.FVarId) :
+    List Fir.Wasm.Instruction := [
+  .localSet raw,
+  .i32Const .uint32 0,
+  .i32Load .uint32 0,
+  .localSet saved,
+  .i32Const .uint32 0,
+  .localGet raw,
+  .i32Store .uint32 0,
+  .i32Const .uint32 0,
+  .i32Load .tobject 0,
+  .localSet result,
+  .i32Const .uint32 0,
+  .localGet saved,
+  .i32Store .uint32 0,
+  .localGet result,
+  .ret]
+
+/-- The adapter preserves the shared scratch-slot object retyping sequence. -/
+theorem instructions_retypeRawObjectResultSource
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {raw saved result : Lean.FVarId}
+    {rawIndex savedIndex resultIndex : Nat}
+    (rawFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) raw =
+        some rawIndex)
+    (savedFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) saved =
+        some savedIndex)
+    (resultFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) result =
+        some resultIndex) :
+    FirTalos.instructions sourceModule sourceFunction labels
+      (retypeRawObjectResultSource raw saved result) =
+        .ok (retypeRawObjectResultProgram rawIndex savedIndex resultIndex) := by
+  simp [retypeRawObjectResultSource, retypeRawObjectResultProgram,
+    FirTalos.instructions, FirTalos.instruction, rawFound, savedFound,
+    resultFound, Bind.bind, Except.bind, pure, Except.pure]
 
 /-- The scratch-slot ABI cast returns the raw word through the object lane and
 restores both linear memory and the caller operand tail.  Its hypotheses are
@@ -230,13 +272,179 @@ def immediateModProgram (makeNaturalIndex : Nat) : Wasm.Program :=
         .call makeNaturalIndex] ++
         retypeRawObjectResultProgram 2 3 4)]
 
+/-- Symbolic source branch corresponding to `immediateModProgram`.  This
+public W6-side spelling avoids depending on private generator identifiers: the
+actual identifiers are recovered positionally from `modFunction`. -/
+def immediateModSource (left right raw saved result : Lean.FVarId) :
+    List Fir.Wasm.Instruction :=
+  Fir.Wasm.Emit.ResidentBigNumeric.immediateNaturalPayload right ++ [
+    .i32Const .uint32 0,
+    .i32Eq,
+    .ifElse
+      [.localGet left, .ret]
+      (Fir.Wasm.Emit.ResidentBigNumeric.immediateNaturalPayload left ++
+        Fir.Wasm.Emit.ResidentBigNumeric.immediateNaturalPayload right ++ [
+          .i32RemU,
+          .i32Const .uint32 0,
+          .call (.declaration
+            Fir.Wasm.Emit.ResidentNumeric.makeNaturalName)] ++
+        retypeRawObjectResultSource raw saved result)]
+
+/-- The public resident `Nat.mod` function contains exactly the W6-spelled
+immediate branch and some checked fallback.  Private generator names do not
+cross this theorem boundary. -/
+theorem modFunction_immediate_shape :
+    ∃ fallback,
+      Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.body =
+        Fir.Wasm.Emit.ResidentBigNumeric.withImmediateNaturalPair
+          Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.params[0]!.1
+          Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.params[1]!.1
+          (immediateModSource
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.params[0]!.1
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.params[1]!.1
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.locals[0]!.1
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.locals[1]!.1
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.locals[2]!.1)
+          fallback := by
+  refine ⟨_, rfl⟩
+
+/-- The adapter maps the symbolic immediate remainder branch to the exact
+Talos program executed below. -/
+theorem instructions_immediateModSource
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {left right raw saved result : Lean.FVarId}
+    {leftIndex rightIndex rawIndex savedIndex resultIndex makeNaturalIndex : Nat}
+    (leftFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) left =
+        some leftIndex)
+    (rightFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) right =
+        some rightIndex)
+    (rawFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) raw =
+        some rawIndex)
+    (savedFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) saved =
+        some savedIndex)
+    (resultFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) result =
+        some resultIndex)
+    (makeNaturalFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentNumeric.makeNaturalName) =
+        some makeNaturalIndex) :
+    FirTalos.instructions sourceModule sourceFunction labels
+      (immediateModSource left right raw saved result) =
+        .ok (ResidentPrimitives.immediateNaturalPayload rightIndex ++ [
+          .const 0,
+          .eq,
+          .iff 0 0
+            [.localGet leftIndex, .ret]
+            (ResidentPrimitives.immediateNaturalPayload leftIndex ++
+              ResidentPrimitives.immediateNaturalPayload rightIndex ++ [
+                .remU,
+                .const 0,
+                .call makeNaturalIndex] ++
+              retypeRawObjectResultProgram rawIndex savedIndex resultIndex)]) := by
+  simp [immediateModSource,
+    Fir.Wasm.Emit.ResidentBigNumeric.immediateNaturalPayload,
+    ResidentPrimitives.immediateNaturalPayload,
+    retypeRawObjectResultSource, retypeRawObjectResultProgram,
+    FirTalos.instructions, FirTalos.instruction, leftFound, rightFound,
+    rawFound, savedFound, resultFound, makeNaturalFound,
+    Bind.bind, Except.bind, pure, Except.pure]
+
+/-- Once the checked fallback adapts, the adapter preserves the complete
+public `Nat.mod` body and exposes the exact common dispatcher plus immediate
+program consumed by the execution theorems. -/
+theorem instructions_modFunctionBody_of_shape
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFallback : List Fir.Wasm.Instruction}
+    {targetFallback : Wasm.Program} {makeNaturalIndex : Nat}
+    (shape :
+      Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.body =
+        Fir.Wasm.Emit.ResidentBigNumeric.withImmediateNaturalPair
+          Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.params[0]!.1
+          Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.params[1]!.1
+          (immediateModSource
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.params[0]!.1
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.params[1]!.1
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.locals[0]!.1
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.locals[1]!.1
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.locals[2]!.1)
+          sourceFallback)
+    (makeNaturalFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentNumeric.makeNaturalName) =
+        some makeNaturalIndex)
+    (fallbackAdapted :
+      FirTalos.instructions sourceModule
+        Fir.Wasm.Emit.ResidentNatArithmetic.modFunction [] sourceFallback =
+          .ok targetFallback) :
+    FirTalos.instructions sourceModule
+      Fir.Wasm.Emit.ResidentNatArithmetic.modFunction []
+      Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.body =
+        .ok (ResidentPrimitives.immediateNaturalPairDispatch 0 1
+          (immediateModProgram makeNaturalIndex) targetFallback) := by
+  rw [shape]
+  apply ResidentPrimitives.instructions_withImmediateNaturalPair
+      (leftIndex := 0) (rightIndex := 1)
+  · decide
+  · decide
+  · apply instructions_immediateModSource
+    · decide
+    · decide
+    · decide
+    · decide
+    · decide
+    · exact makeNaturalFound
+  · exact fallbackAdapted
+
+/-- Successful adaptation installs exactly the proved dispatcher in the Talos
+function body, followed only by the adapter's standard terminal marker. -/
+theorem adaptedModFunction_body_of_shape
+    {sourceModule : Fir.Wasm.Module} {targetFunction : Wasm.Function}
+    {sourceFallback : List Fir.Wasm.Instruction}
+    {targetFallback : Wasm.Program} {makeNaturalIndex : Nat}
+    (adapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentNatArithmetic.modFunction = .ok targetFunction)
+    (shape :
+      Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.body =
+        Fir.Wasm.Emit.ResidentBigNumeric.withImmediateNaturalPair
+          Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.params[0]!.1
+          Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.params[1]!.1
+          (immediateModSource
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.params[0]!.1
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.params[1]!.1
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.locals[0]!.1
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.locals[1]!.1
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.locals[2]!.1)
+          sourceFallback)
+    (makeNaturalFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentNumeric.makeNaturalName) =
+        some makeNaturalIndex)
+    (fallbackAdapted :
+      FirTalos.instructions sourceModule
+        Fir.Wasm.Emit.ResidentNatArithmetic.modFunction [] sourceFallback =
+          .ok targetFallback) :
+    targetFunction.body =
+      ResidentPrimitives.immediateNaturalPairDispatch 0 1
+          (immediateModProgram makeNaturalIndex) targetFallback ++
+        FirTalos.functionTerminal sourceModule
+          Fir.Wasm.Emit.ResidentNatArithmetic.modFunction := by
+  rcases FirTalos.Correctness.function_preserves_body adapted with
+    ⟨targetBody, bodyAdapted, targetBodyEq⟩
+  have exactBody := instructions_modFunctionBody_of_shape shape
+    makeNaturalFound fallbackAdapted
+  rw [exactBody] at bodyAdapted
+  injection bodyAdapted with targetBodyExact
+  simpa [targetBodyExact] using targetBodyEq
+
 /-- The zero-divisor arm of the actual resident remainder skeleton returns
 the original canonical left word and does not call the constructor. -/
 theorem wp_immediateModProgram_zero
-    {module : Wasm.Module}
-    {env : Wasm.HostEnv Fir.Wasm.RuntimeHost}
-    {Q : Wasm.Assertion Fir.Wasm.RuntimeHost}
-    {store : Wasm.Store Fir.Wasm.RuntimeHost} {locals : Wasm.Locals}
+    {host : Type} {module : Wasm.Module}
+    {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host}
+    {store : Wasm.Store host} {locals : Wasm.Locals}
     {makeNaturalIndex : Nat} {leftWord rightWord : Word32}
     {leftReference rightReference : Fir.LeanIR.Impure.ObjectRef}
     {leftPayload rightPayload : UInt64} {tail : List Wasm.Value}
@@ -277,10 +485,10 @@ def immediateRemainderWord
 remainder, the allocation-free constructor theorem, and the generic scratch
 cast. It returns the canonical word with the exact initial store. -/
 theorem wp_immediateModProgram_nonzero
-    {module : Wasm.Module}
-    {env : Wasm.HostEnv Fir.Wasm.RuntimeHost}
-    {Q : Wasm.Assertion Fir.Wasm.RuntimeHost}
-    {store : Wasm.Store Fir.Wasm.RuntimeHost} {locals : Wasm.Locals}
+    {host : Type} {module : Wasm.Module}
+    {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host}
+    {store : Wasm.Store host} {locals : Wasm.Locals}
     {afterRaw afterSaved afterResult : Wasm.Locals}
     {makeNaturalIndex : Nat} {leftWord rightWord : Word32}
     {leftReference rightReference : Fir.LeanIR.Impure.ObjectRef}
@@ -331,6 +539,294 @@ theorem wp_immediateModProgram_nonzero
   apply wp_retypeRawObjectResultProgram pagesPositive (by decide) (by decide)
     rawSet savedSet resultSet
   simpa using returned
+
+/-- The complete common dispatcher selects the zero-divisor immediate branch;
+the checked fallback and the post-dispatch suffix are unreachable because the
+branch returns. -/
+theorem wp_immediateModDispatch_zero
+    {host : Type} {module : Wasm.Module}
+    {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host}
+    {store : Wasm.Store host} {locals : Wasm.Locals}
+    {makeNaturalIndex : Nat} {leftWord rightWord : Word32}
+    {leftReference rightReference : Fir.LeanIR.Impure.ObjectRef}
+    {leftPayload rightPayload : UInt64} {tail : List Wasm.Value}
+    {fallback rest : Wasm.Program}
+    (pair : ImmediateNaturalPairRel leftWord rightWord leftReference
+      rightReference leftPayload rightPayload)
+    (rightZero : rightPayload.toNat = 0)
+    (leftLocal : locals.get 0 = some (.i32 (UInt32.ofNat leftWord.value)))
+    (rightLocal : locals.get 1 = some (.i32 (UInt32.ofNat rightWord.value)))
+    (returned :
+      Q (.Return store (.i32 (UInt32.ofNat leftWord.value) :: tail))) :
+    Wasm.wp module
+      (ResidentPrimitives.immediateNaturalPairDispatch 0 1
+          (immediateModProgram makeNaturalIndex) fallback ++ rest)
+      Q store { locals with values := tail } env := by
+  apply ResidentPrimitives.wp_immediateNaturalPairDispatch pair leftLocal
+    rightLocal
+  apply wp_immediateModProgram_zero pair rightZero leftLocal rightLocal
+  simpa using returned
+
+/-- The complete common dispatcher selects the nonzero immediate remainder
+branch and inherits its exact-store result; neither fallback nor suffix can
+run after the explicit return. -/
+theorem wp_immediateModDispatch_nonzero
+    {host : Type} {module : Wasm.Module}
+    {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host}
+    {store : Wasm.Store host} {locals : Wasm.Locals}
+    {afterRaw afterSaved afterResult : Wasm.Locals}
+    {makeNaturalIndex : Nat} {leftWord rightWord : Word32}
+    {leftReference rightReference : Fir.LeanIR.Impure.ObjectRef}
+    {leftPayload rightPayload : UInt64} {tail : List Wasm.Value}
+    {fallback rest : Wasm.Program}
+    (pair : ImmediateNaturalPairRel leftWord rightWord leftReference
+      rightReference leftPayload rightPayload)
+    (rightNonzero : rightPayload.toNat ≠ 0)
+    (pagesPositive : 0 < store.mem.pages)
+    (leftLocal : locals.get 0 = some (.i32 (UInt32.ofNat leftWord.value)))
+    (rightLocal : locals.get 1 = some (.i32 (UInt32.ofNat rightWord.value)))
+    (makeNaturalRun :
+      Wasm.TerminatesWith env module makeNaturalIndex store
+        ([.i32 0,
+          .i32 (UInt32.ofNat
+            (leftPayload.toNat % rightPayload.toNat))] ++ tail)
+        (fun final values =>
+          final = store ∧
+            values = .i32 (immediateRemainderWord pair) :: tail))
+    (rawSet :
+      ({ locals with values := .i32 (immediateRemainderWord pair) :: tail }).set?
+          2 (.i32 (immediateRemainderWord pair)) = some afterRaw)
+    (savedSet :
+      ({ afterRaw with values := .i32 (store.mem.read32 0) :: tail }).set?
+          3 (.i32 (store.mem.read32 0)) = some afterSaved)
+    (resultSet :
+      ({ afterSaved with values := .i32 (immediateRemainderWord pair) :: tail }).set?
+          4 (.i32 (immediateRemainderWord pair)) = some afterResult)
+    (returned :
+      Q (.Return store (.i32 (immediateRemainderWord pair) :: tail))) :
+    Wasm.wp module
+      (ResidentPrimitives.immediateNaturalPairDispatch 0 1
+          (immediateModProgram makeNaturalIndex) fallback ++ rest)
+      Q store { locals with values := tail } env := by
+  apply ResidentPrimitives.wp_immediateNaturalPairDispatch pair leftLocal
+    rightLocal
+  apply wp_immediateModProgram_nonzero pair rightNonzero pagesPositive
+    leftLocal rightLocal makeNaturalRun rawSet savedSet resultSet
+  simpa using returned
+
+/-- The zero-divisor immediate path of the actual adapted resident `Nat.mod`
+function is a fuel-free defined call.  This packages the shared dispatcher
+proof at the precise Wasm call boundary consumed by resident replacement. -/
+theorem terminatesWith_modFunctionImmediate_zero
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {targetFunction : Wasm.Function} {functionIndex makeNaturalIndex : Nat}
+    {sourceFallback : List Fir.Wasm.Instruction}
+    {targetFallback : Wasm.Program} {store : Wasm.Store host}
+    {leftWord rightWord : Word32}
+    {leftReference rightReference : Fir.LeanIR.Impure.ObjectRef}
+    {leftPayload rightPayload : UInt64} {tail : List Wasm.Value}
+    (adapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentNatArithmetic.modFunction = .ok targetFunction)
+    (notImport : module.imports[functionIndex]? = none)
+    (found : module.funcs[functionIndex - module.imports.length]? =
+      some targetFunction)
+    (shape :
+      Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.body =
+        Fir.Wasm.Emit.ResidentBigNumeric.withImmediateNaturalPair
+          Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.params[0]!.1
+          Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.params[1]!.1
+          (immediateModSource
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.params[0]!.1
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.params[1]!.1
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.locals[0]!.1
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.locals[1]!.1
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.locals[2]!.1)
+          sourceFallback)
+    (makeNaturalFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentNumeric.makeNaturalName) =
+        some makeNaturalIndex)
+    (fallbackAdapted :
+      FirTalos.instructions sourceModule
+        Fir.Wasm.Emit.ResidentNatArithmetic.modFunction [] sourceFallback =
+          .ok targetFallback)
+    (pair : ImmediateNaturalPairRel leftWord rightWord leftReference
+      rightReference leftPayload rightPayload)
+    (rightZero : rightPayload.toNat = 0) :
+    Wasm.TerminatesWith env module functionIndex store
+      ([.i32 (UInt32.ofNat rightWord.value),
+        .i32 (UInt32.ofNat leftWord.value)] ++ tail)
+      (fun final values =>
+        final = store ∧
+          values = .i32 (UInt32.ofNat leftWord.value) :: tail) := by
+  have signature :=
+    FirTalos.Correctness.function_preserves_signature adapted
+  rcases signature with ⟨paramsEq, localsEq, resultsEq⟩
+  have body := adaptedModFunction_body_of_shape adapted shape
+    makeNaturalFound fallbackAdapted
+  apply FirTalos.Correctness.terminatesWith_of_wp_body_at notImport found
+  rw [body]
+  let entry := targetFunction.toLocals
+    (([Wasm.Value.i32 (UInt32.ofNat rightWord.value),
+      Wasm.Value.i32 (UInt32.ofNat leftWord.value)] ++ tail).take
+        targetFunction.numParams).reverse
+  have leftLocal : entry.get 0 =
+      some (.i32 (UInt32.ofNat leftWord.value)) := by
+    simp [entry, Wasm.Function.toLocals, Wasm.Function.numParams, paramsEq,
+      Fir.Wasm.Emit.ResidentNatArithmetic.modFunction]
+  have rightLocal : entry.get 1 =
+      some (.i32 (UInt32.ofNat rightWord.value)) := by
+    simp [entry, Wasm.Function.toLocals, Wasm.Function.numParams, paramsEq,
+      Fir.Wasm.Emit.ResidentNatArithmetic.modFunction]
+  have returned :
+      FirTalos.Correctness.FunctionBodyPost targetFunction
+          ([.i32 (UInt32.ofNat rightWord.value),
+            .i32 (UInt32.ofNat leftWord.value)] ++ tail)
+          (fun final values =>
+            final = store ∧
+              values = .i32 (UInt32.ofNat leftWord.value) :: tail)
+          (.Return store [.i32 (UInt32.ofNat leftWord.value)]) := by
+    simp [FirTalos.Correctness.FunctionBodyPost, Wasm.Function.numParams,
+      paramsEq, resultsEq,
+      Fir.Wasm.Emit.ResidentNatArithmetic.modFunction]
+  simpa [entry, Wasm.Function.toLocals] using
+    (wp_immediateModDispatch_zero
+      (module := module) (env := env) (store := store) (locals := entry)
+      (makeNaturalIndex := makeNaturalIndex) (fallback := targetFallback)
+      (rest := FirTalos.functionTerminal sourceModule
+        Fir.Wasm.Emit.ResidentNatArithmetic.modFunction)
+      (tail := []) pair rightZero leftLocal rightLocal returned)
+
+/-- The nonzero two-immediate path of the actual adapted resident `Nat.mod`
+function is a fuel-free defined call.  The nested constructor call and all
+three scratch-local writes are discharged through their shared primitive
+contracts; the arbitrary-precision fallback remains unreachable and opaque. -/
+theorem terminatesWith_modFunctionImmediate_nonzero
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {targetFunction : Wasm.Function} {functionIndex makeNaturalIndex : Nat}
+    {sourceFallback : List Fir.Wasm.Instruction}
+    {targetFallback lowOverflow highNonzero big : Wasm.Program}
+    {store : Wasm.Store host}
+    {leftWord rightWord : Word32}
+    {leftReference rightReference : Fir.LeanIR.Impure.ObjectRef}
+    {leftPayload rightPayload : UInt64} {tail : List Wasm.Value}
+    (adapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentNatArithmetic.modFunction = .ok targetFunction)
+    (notImport : module.imports[functionIndex]? = none)
+    (found : module.funcs[functionIndex - module.imports.length]? =
+      some targetFunction)
+    (shape :
+      Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.body =
+        Fir.Wasm.Emit.ResidentBigNumeric.withImmediateNaturalPair
+          Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.params[0]!.1
+          Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.params[1]!.1
+          (immediateModSource
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.params[0]!.1
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.params[1]!.1
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.locals[0]!.1
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.locals[1]!.1
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.locals[2]!.1)
+          sourceFallback)
+    (makeNaturalFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentNumeric.makeNaturalName) =
+        some makeNaturalIndex)
+    (fallbackAdapted :
+      FirTalos.instructions sourceModule
+        Fir.Wasm.Emit.ResidentNatArithmetic.modFunction [] sourceFallback =
+          .ok targetFallback)
+    (makeNaturalNotImport : module.imports[makeNaturalIndex]? = none)
+    (makeNaturalTargetFound :
+      module.funcs[makeNaturalIndex - module.imports.length]? =
+        some (makeNaturalTargetFunction lowOverflow highNonzero big))
+    (pair : ImmediateNaturalPairRel leftWord rightWord leftReference
+      rightReference leftPayload rightPayload)
+    (rightNonzero : rightPayload.toNat ≠ 0)
+    (pagesPositive : 0 < store.mem.pages) :
+    Wasm.TerminatesWith env module functionIndex store
+      ([.i32 (UInt32.ofNat rightWord.value),
+        .i32 (UInt32.ofNat leftWord.value)] ++ tail)
+      (fun final values =>
+        final = store ∧
+          values = .i32 (immediateRemainderWord pair) :: tail) := by
+  have signature :=
+    FirTalos.Correctness.function_preserves_signature adapted
+  rcases signature with ⟨paramsEq, localsEq, resultsEq⟩
+  have body := adaptedModFunction_body_of_shape adapted shape
+    makeNaturalFound fallbackAdapted
+  apply FirTalos.Correctness.terminatesWith_of_wp_body_at notImport found
+  rw [body]
+  let entry := targetFunction.toLocals
+    (([Wasm.Value.i32 (UInt32.ofNat rightWord.value),
+      Wasm.Value.i32 (UInt32.ofNat leftWord.value)] ++ tail).take
+        targetFunction.numParams).reverse
+  have leftLocal : entry.get 0 =
+      some (.i32 (UInt32.ofNat leftWord.value)) := by
+    simp [entry, Wasm.Function.toLocals, Wasm.Function.numParams, paramsEq,
+      Fir.Wasm.Emit.ResidentNatArithmetic.modFunction]
+  have rightLocal : entry.get 1 =
+      some (.i32 (UInt32.ofNat rightWord.value)) := by
+    simp [entry, Wasm.Function.toLocals, Wasm.Function.numParams, paramsEq,
+      Fir.Wasm.Emit.ResidentNatArithmetic.modFunction]
+  have makeNaturalRun :
+      Wasm.TerminatesWith env module makeNaturalIndex store
+        [.i32 0,
+          .i32 (UInt32.ofNat
+            (leftPayload.toNat % rightPayload.toNat))]
+        (fun final values =>
+          final = store ∧
+            values = .i32 (immediateRemainderWord pair) :: []) := by
+    simpa [immediateRemainderWord] using
+      (terminatesWith_makeNaturalImmediate
+        (module := module) (env := env) (store := store) (tail := [])
+        pair.mod_fits makeNaturalNotImport makeNaturalTargetFound)
+  have rawValid :
+      ({ entry with values := [.i32 (immediateRemainderWord pair)] }).validIndex
+        2 := by
+    simp [entry, Wasm.Function.toLocals, Wasm.Function.numParams, paramsEq,
+      localsEq, Fir.Wasm.Emit.ResidentNatArithmetic.modFunction]
+  obtain ⟨afterRaw, rawSet⟩ :=
+    FirTalos.Correctness.locals_set?_exists rawValid
+  have rawLengths := FirTalos.Correctness.locals_lengths_of_set? rawSet
+  have savedValid :
+      ({ afterRaw with values := [.i32 (store.mem.read32 0)] }).validIndex 3 := by
+    simp only [Wasm.Locals.validIndex]
+    simp [rawLengths.1, rawLengths.2, entry, Wasm.Function.toLocals,
+      Wasm.Function.numParams, paramsEq, localsEq,
+      Fir.Wasm.Emit.ResidentNatArithmetic.modFunction]
+  obtain ⟨afterSaved, savedSet⟩ :=
+    FirTalos.Correctness.locals_set?_exists savedValid
+  have savedLengths := FirTalos.Correctness.locals_lengths_of_set? savedSet
+  have resultValid :
+      ({ afterSaved with values := [.i32 (immediateRemainderWord pair)]
+        }).validIndex 4 := by
+    simp only [Wasm.Locals.validIndex]
+    simp [savedLengths.1, savedLengths.2, rawLengths.1, rawLengths.2,
+      entry, Wasm.Function.toLocals, Wasm.Function.numParams, paramsEq,
+      localsEq, Fir.Wasm.Emit.ResidentNatArithmetic.modFunction]
+  obtain ⟨afterResult, resultSet⟩ :=
+    FirTalos.Correctness.locals_set?_exists resultValid
+  have returned :
+      FirTalos.Correctness.FunctionBodyPost targetFunction
+          ([.i32 (UInt32.ofNat rightWord.value),
+            .i32 (UInt32.ofNat leftWord.value)] ++ tail)
+          (fun final values =>
+            final = store ∧
+              values = .i32 (immediateRemainderWord pair) :: tail)
+          (.Return store [.i32 (immediateRemainderWord pair)]) := by
+    simp [FirTalos.Correctness.FunctionBodyPost, Wasm.Function.numParams,
+      paramsEq, resultsEq,
+      Fir.Wasm.Emit.ResidentNatArithmetic.modFunction]
+  simpa [entry, Wasm.Function.toLocals] using
+    (wp_immediateModDispatch_nonzero
+      (module := module) (env := env) (store := store) (locals := entry)
+      (makeNaturalIndex := makeNaturalIndex) (fallback := targetFallback)
+      (rest := FirTalos.functionTerminal sourceModule
+        Fir.Wasm.Emit.ResidentNatArithmetic.modFunction)
+      (tail := []) pair rightNonzero pagesPositive leftLocal rightLocal
+      makeNaturalRun rawSet savedSet resultSet returned)
 
 /-- The public resident `Nat.mod` body is structurally the shared pair
 dispatcher. This theorem deliberately exposes only the two branch lists; the
