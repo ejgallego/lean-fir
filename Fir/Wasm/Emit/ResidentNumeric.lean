@@ -101,12 +101,12 @@ def internalHelperNames : Array Name := #[
   integerDifferenceName,
   integerCombineName]
 
-def externalDeclarations : Array Name := #[
+/- The prettyM checkpoint historically requires this exact core inventory.
+Keep that ratchet stable while allowing larger source closures to select the
+additional generic operations below through `internalizeAvailable`. -/
+def requiredExternalDeclarations : Array Name := #[
   `Int.ofNat,
-  `Int.negSucc,
-  `Int.neg,
   `Int.decLt,
-  `Int.decLe,
   `Int.natAbs,
   `Int.sub,
   `Nat.add,
@@ -115,6 +115,14 @@ def externalDeclarations : Array Name := #[
   `Int.add,
   `Nat.decLt,
   `Nat.decLe]
+
+def additionalExternalDeclarations : Array Name := #[
+  `Int.negSucc,
+  `Int.neg,
+  `Int.decLe]
+
+def externalDeclarations : Array Name :=
+  requiredExternalDeclarations ++ additionalExternalDeclarations
 
 def externalName (declaration : Name) : Name :=
   Name.mkSimple s!"fir_ext_{declaration.toString.replace "." "_"}"
@@ -1175,10 +1183,16 @@ def internalize (module : Module) (validate : Bool := true) : Except LinkError M
         module.functions.any (·.name == name) ||
         module.exports.contains name then
       throw (.reservedDeclaration name)
-  for declaration in externalDeclarations do
+  for declaration in requiredExternalDeclarations do
     let imports := module.imports.filter (·.declaration? == some declaration)
     unless imports.size == 1 do
       throw (.missingExternal declaration)
+  let present := externalDeclarations.filter fun declaration =>
+    module.imports.any (·.declaration? == some declaration)
+  for declaration in present do
+    let imports := module.imports.filter (·.declaration? == some declaration)
+    unless imports.size == 1 do
+      throw (.incompatibleExternal declaration)
     let some signature := expectedSignature? declaration |
       throw (.incompatibleExternal declaration)
     unless imports[0]!.signature == signature do
