@@ -185,6 +185,23 @@ result representation, no frontier growth, and the existing arbitrary-
 precision matrix. This changes neither the public signature nor the malformed-
 heap fallback boundary; W6 owns the corresponding branch refinement.
 
+### G1e. Direct core-Wasm fixed-width helpers
+
+The released complete scalar instruction surface removes the historical need
+to synthesize fixed-width operations from split 32-bit halves and structured
+loops. The resident `UInt8`, `UInt16`, `UInt32`, `UInt64`, and `USize` helpers
+now use direct core Wasm comparison, bitwise, shift, count, multiplication, and
+remainder instructions. `UInt64.mod` and `USize.mod` retain an explicit zero-
+divisor branch because Lean specifies `n % 0 = n`, while `i64.rem_u` traps.
+
+Symbolic guards require the helper family to contain no structured scalar
+loops and pin the native CLZ, CTZ, multiplication, and remainder operations.
+The zero-import fixed-width artifact decreases from 13,433 to 11,608 bytes.
+Seven order-balanced V8 rounds give median speedups of 2.82x for `UInt64.mod`
+and 2.71x for `UInt64.mul`; `UInt64.ctzFast` improves 1.10x because the common
+call and ABI-retagging cost dominates that small operation. All focused,
+native/LCNF/V8, Talos, and deterministic package checks preserve exact results.
+
 ### G2. Separate production and diagnostic adapter costs
 
 Finish the pending Illuminate selection-player request with an actually

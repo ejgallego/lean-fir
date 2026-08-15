@@ -10,10 +10,11 @@ open Lean.Compiler
 /-!
 # Wasm-resident fixed-width integer operations
 
-Lean's raw fixed-width externs are ordinary machine operations.  This module
+Lean's raw fixed-width externs are ordinary machine operations. This module
 internalizes the subset currently exercised by the generic ByteArray/DEFLATE
-frontier.  The declarations and signatures are source-level Lean APIs; no
-lean-zip declaration is named here.
+frontier using the corresponding core Wasm scalar instructions. The
+declarations and signatures are source-level Lean APIs; no lean-zip declaration
+is named here.
 -/
 
 inductive LinkError where
@@ -32,8 +33,6 @@ private def leftParam : FVarId := ⟨`left⟩
 private def rightParam : FVarId := ⟨`right⟩
 private def rawLocal : FVarId := ⟨`raw⟩
 private def raw64Local : FVarId := ⟨`raw64⟩
-private def sumLocal : FVarId := ⟨`sum⟩
-private def intersectionLocal : FVarId := ⟨`intersection⟩
 private def savedScratchLocal : FVarId := ⟨`savedScratch⟩
 private def uint8ResultLocal : FVarId := ⟨`uint8Result⟩
 private def uint16ResultLocal : FVarId := ⟨`uint16Result⟩
@@ -42,29 +41,7 @@ private def uint64ResultLocal : FVarId := ⟨`uint64Result⟩
 private def usizeResultLocal : FVarId := ⟨`usizeResult⟩
 private def objectResultLocal : FVarId := ⟨`objectResult⟩
 private def taggedResultLocal : FVarId := ⟨`taggedResult⟩
-private def lowLocal : FVarId := ⟨`low⟩
-private def highLocal : FVarId := ⟨`high⟩
-private def leftLowLocal : FVarId := ⟨`leftLow⟩
-private def leftHighLocal : FVarId := ⟨`leftHigh⟩
-private def rightLowLocal : FVarId := ⟨`rightLow⟩
-private def rightHighLocal : FVarId := ⟨`rightHigh⟩
-private def carryLocal : FVarId := ⟨`carry⟩
-private def borrowLocal : FVarId := ⟨`borrow⟩
-private def multiplierLocal : FVarId := ⟨`multiplier⟩
-private def multiplicandLocal : FVarId := ⟨`multiplicand⟩
-private def result32Local : FVarId := ⟨`result32⟩
-private def result64Local : FVarId := ⟨`result64⟩
-private def wordLocal : FVarId := ⟨`word⟩
 private def countLocal : FVarId := ⟨`count⟩
-private def indexLocal : FVarId := ⟨`index⟩
-private def remainder64Local : FVarId := ⟨`remainder64⟩
-private def remainderLowLocal : FVarId := ⟨`remainderLow⟩
-private def remainderHighLocal : FVarId := ⟨`remainderHigh⟩
-private def multiplyLoop : FVarId := ⟨`fixedWidthMultiplyLoop⟩
-private def multiply64Loop : FVarId := ⟨`fixedWidthMultiply64Loop⟩
-private def log2Loop : FVarId := ⟨`fixedWidthLog2Loop⟩
-private def ctzLoop : FVarId := ⟨`fixedWidthCtzLoop⟩
-private def modLoop : FVarId := ⟨`fixedWidthModLoop⟩
 
 def externalDeclarations : Array Name := #[
   `UInt8.ofBitVec,
@@ -259,6 +236,13 @@ private def binaryI32Function (declaration : Name) (param : AbiKind)
     .localGet rightParam,
     operation]
 
+private def binaryI64Function (declaration : Name) (param : AbiKind)
+    (operation : Instruction) : Function :=
+  retypedI64Function declaration #[(leftParam, param), (rightParam, param)] param [
+    .localGet leftParam,
+    .localGet rightParam,
+    operation]
+
 def shiftRightFunction : Function :=
   retypedI32Function `UInt16.shiftRight
     #[(leftParam, .uint16), (rightParam, .uint16)] .uint16 [
@@ -280,59 +264,22 @@ def toUInt8Function : Function :=
 def landFunction : Function :=
   binaryI32Function `UInt16.land .uint16 .i32And
 
-/-- `a xor b = a + b - 2 * (a and b)` in the wasm32 bit ring. -/
-def xorFunction : Function := {
-  (retypedI32Function `UInt16.xor
-    #[(leftParam, .uint16), (rightParam, .uint16)] .uint16 [
-    .localGet leftParam,
-    .localGet rightParam,
-    .i32Add,
-    .localSet sumLocal,
-    .localGet leftParam,
-    .localGet rightParam,
-    .i32And,
-    .localSet intersectionLocal,
-    .localGet sumLocal,
-    .localGet intersectionLocal,
-    .localGet intersectionLocal,
-    .i32Add,
-    .i32Sub]) with
-    locals := #[(rawLocal, .uint32), (sumLocal, .uint32),
-      (intersectionLocal, .uint32), (savedScratchLocal, .uint64),
-      (uint16ResultLocal, .uint16)] }
+def xorFunction : Function :=
+  binaryI32Function `UInt16.xor .uint16 .i32Xor
 
 def shiftLeftFunction : Function :=
   retypedI32Function `UInt16.shiftLeft
     #[(leftParam, .uint16), (rightParam, .uint16)] .uint16 [
     .localGet leftParam,
-    .i64ExtendI32U .uint64,
     .localGet rightParam,
     .i32Const .uint32 16,
     .i32RemU,
-    .i64ExtendI32U .uint64,
-    .i64Shl,
-    .i32WrapI64 .uint32,
+    .i32Shl,
     .i32Const .uint32 0xffff,
     .i32And]
 
-/-- `a or b = a + b - (a and b)` in the wasm32 bit ring. -/
-def lorFunction : Function := {
-  (retypedI32Function `UInt16.lor
-    #[(leftParam, .uint16), (rightParam, .uint16)] .uint16 [
-    .localGet leftParam,
-    .localGet rightParam,
-    .i32Add,
-    .localSet sumLocal,
-    .localGet leftParam,
-    .localGet rightParam,
-    .i32And,
-    .localSet intersectionLocal,
-    .localGet sumLocal,
-    .localGet intersectionLocal,
-    .i32Sub]) with
-    locals := #[(rawLocal, .uint32), (sumLocal, .uint32),
-      (intersectionLocal, .uint32), (savedScratchLocal, .uint64),
-      (uint16ResultLocal, .uint16)] }
+def lorFunction : Function :=
+  binaryI32Function `UInt16.lor .uint16 .i32Or
 
 def uint8OfNatFunction : Function :=
   ofNat32Function `UInt8.ofNat .uint8 0xff
@@ -369,11 +316,9 @@ def uint8DecLtFunction : Function :=
 def uint8DecLeFunction : Function :=
   retypedI32Function `UInt8.decLe
     #[(leftParam, .uint8), (rightParam, .uint8)] .uint8 [
-      .localGet rightParam,
       .localGet leftParam,
-      .i32LtU,
-      .i32Const .uint32 0,
-      .i32Eq]
+      .localGet rightParam,
+      .i32LeU]
 
 def uint8ShiftRightFunction : Function :=
   retypedI32Function `UInt8.shiftRight
@@ -387,24 +332,8 @@ def uint8ShiftRightFunction : Function :=
 def uint8LandFunction : Function :=
   binaryI32Function `UInt8.land .uint8 .i32And
 
-/-- `a or b = a + b - (a and b)`; byte inputs keep the result in range. -/
-def uint8LorFunction : Function := {
-  (retypedI32Function `UInt8.lor
-    #[(leftParam, .uint8), (rightParam, .uint8)] .uint8 [
-      .localGet leftParam,
-      .localGet rightParam,
-      .i32Add,
-      .localSet sumLocal,
-      .localGet leftParam,
-      .localGet rightParam,
-      .i32And,
-      .localSet intersectionLocal,
-      .localGet sumLocal,
-      .localGet intersectionLocal,
-      .i32Sub]) with
-    locals := #[(rawLocal, .uint32), (sumLocal, .uint32),
-      (intersectionLocal, .uint32), (savedScratchLocal, .uint64),
-      (uint8ResultLocal, .uint8)] }
+def uint8LorFunction : Function :=
+  binaryI32Function `UInt8.lor .uint8 .i32Or
 
 def uint16ToNatFunction : Function :=
   toNat32Function `UInt16.toNat .uint16 .tagged
@@ -425,33 +354,23 @@ def uint32OfNatLTFunction : Function :=
 def uint32OfBitVecFunction : Function :=
   ofNat32Function `UInt32.ofBitVec .uint32 0xffffffff
 
-/-- Floor log2 with Lean's `0 ↦ 0` convention. The source declaration is
-lean-zip's transparent CLZ-backed override, but this provider is a generic
-UInt32 implementation and does not depend on compressor code. -/
+/-- Floor log2 with Lean's `0 ↦ 0` convention. -/
 def uint32Log2ClzFunction : Function := {
   (retypedI32Function `UInt32.log2Clz #[(valueParam, .uint32)] .uint32 [
-    .localGet valueParam,
-    .localSet wordLocal,
     .i32Const .uint32 0,
     .localSet countLocal,
-    .loop log2Loop [
-      .localGet wordLocal,
-      .i32Const .uint32 2,
-      .i32LtU,
-      .ifElse [] [
-        .localGet wordLocal,
-        .i32Const .uint32 1,
-        .i32ShrU,
-        .localSet wordLocal,
-        .localGet countLocal,
-        .i32Const .uint32 1,
-        .i32Add,
-        .localSet countLocal,
-        .br log2Loop]],
+    .localGet valueParam,
+    .i32Eqz,
+    .ifElse
+      []
+      [.i32Const .uint32 31,
+        .localGet valueParam,
+        .i32Clz,
+        .i32Sub,
+        .localSet countLocal],
     .localGet countLocal]) with
-    locals := #[(rawLocal, .uint32), (wordLocal, .uint32),
-      (countLocal, .uint32), (savedScratchLocal, .uint64),
-      (uint32ResultLocal, .uint32)] }
+    locals := #[(rawLocal, .uint32), (countLocal, .uint32),
+      (savedScratchLocal, .uint64), (uint32ResultLocal, .uint32)] }
 
 def uint32ToNatFunction : Function :=
   toNat32Function `UInt32.toNat .uint32 .tobject
@@ -484,25 +403,8 @@ def uint32SubFunction : Function :=
 def uint32LandFunction : Function :=
   binaryI32Function `UInt32.land .uint32 .i32And
 
-def uint32XorFunction : Function := {
-  (retypedI32Function `UInt32.xor
-    #[(leftParam, .uint32), (rightParam, .uint32)] .uint32 [
-      .localGet leftParam,
-      .localGet rightParam,
-      .i32Add,
-      .localSet sumLocal,
-      .localGet leftParam,
-      .localGet rightParam,
-      .i32And,
-      .localSet intersectionLocal,
-      .localGet sumLocal,
-      .localGet intersectionLocal,
-      .localGet intersectionLocal,
-      .i32Add,
-      .i32Sub]) with
-    locals := #[(rawLocal, .uint32), (sumLocal, .uint32),
-      (intersectionLocal, .uint32), (savedScratchLocal, .uint64),
-      (uint32ResultLocal, .uint32)] }
+def uint32XorFunction : Function :=
+  binaryI32Function `UInt32.xor .uint32 .i32Xor
 
 def uint32ShiftRightFunction : Function :=
   binaryI32Function `UInt32.shiftRight .uint32 .i32ShrU
@@ -513,80 +415,18 @@ def uint32DecLtFunction : Function :=
 def uint32DecLeFunction : Function :=
   retypedI32Function `UInt32.decLe
     #[(leftParam, .uint32), (rightParam, .uint32)] .uint8 [
-      .localGet rightParam,
       .localGet leftParam,
-      .i32LtU,
-      .i32Const .uint32 0,
-      .i32Eq]
+      .localGet rightParam,
+      .i32LeU]
 
 def uint32ShiftLeftFunction : Function :=
-  retypedI32Function `UInt32.shiftLeft
-    #[(leftParam, .uint32), (rightParam, .uint32)] .uint32 [
-    .localGet leftParam,
-    .i64ExtendI32U .uint64,
-    .localGet rightParam,
-    .i32Const .uint32 32,
-    .i32RemU,
-    .i64ExtendI32U .uint64,
-    .i64Shl,
-    .i32WrapI64 .uint32]
+  binaryI32Function `UInt32.shiftLeft .uint32 .i32Shl
 
-def uint32LorFunction : Function := {
-  (retypedI32Function `UInt32.lor
-    #[(leftParam, .uint32), (rightParam, .uint32)] .uint32 [
-    .localGet leftParam,
-    .localGet rightParam,
-    .i32Add,
-    .localSet sumLocal,
-    .localGet leftParam,
-    .localGet rightParam,
-    .i32And,
-    .localSet intersectionLocal,
-    .localGet sumLocal,
-    .localGet intersectionLocal,
-    .i32Sub]) with
-    locals := #[(rawLocal, .uint32), (sumLocal, .uint32),
-      (intersectionLocal, .uint32), (savedScratchLocal, .uint64),
-      (uint32ResultLocal, .uint32)] }
+def uint32LorFunction : Function :=
+  binaryI32Function `UInt32.lor .uint32 .i32Or
 
-/-- Shift-and-add multiplication in the modulo-2^32 ring. -/
-def uint32MulFunction : Function := {
-  (retypedI32Function `UInt32.mul
-    #[(leftParam, .uint32), (rightParam, .uint32)] .uint32 [
-    .localGet leftParam,
-    .localSet multiplicandLocal,
-    .localGet rightParam,
-    .localSet multiplierLocal,
-    .i32Const .uint32 0,
-    .localSet result32Local,
-    .loop multiplyLoop [
-      .localGet multiplierLocal,
-      .i32Const .uint32 0,
-      .i32Eq,
-      .ifElse [] [
-        .localGet multiplierLocal,
-        .i32Const .uint32 1,
-        .i32And,
-        .i32Const .uint32 0,
-        .i32Eq,
-        .ifElse [] [
-          .localGet result32Local,
-          .localGet multiplicandLocal,
-          .i32Add,
-          .localSet result32Local],
-        .localGet multiplicandLocal,
-        .localGet multiplicandLocal,
-        .i32Add,
-        .localSet multiplicandLocal,
-        .localGet multiplierLocal,
-        .i32Const .uint32 1,
-        .i32ShrU,
-        .localSet multiplierLocal,
-        .br multiplyLoop]],
-    .localGet result32Local]) with
-    locals := #[(rawLocal, .uint32), (multiplierLocal, .uint32),
-      (multiplicandLocal, .uint32), (result32Local, .uint32),
-      (savedScratchLocal, .uint64), (uint32ResultLocal, .uint32)] }
+def uint32MulFunction : Function :=
+  binaryI32Function `UInt32.mul .uint32 .i32Mul
 
 def uint64OfNatFunction : Function := {
   name := externalName `UInt64.ofNat
@@ -644,98 +484,16 @@ def uint64DecEqFunction : Function :=
     #[(leftParam, .uint64), (rightParam, .uint64)] .uint8 [
       .localGet leftParam,
       .localGet rightParam,
-      .i64LtU,
-      .i32Const .uint32 0,
-      .i32Eq,
-      .localGet rightParam,
-      .localGet leftParam,
-      .i64LtU,
-      .i32Const .uint32 0,
-      .i32Eq,
-      .i32And]
+      .i64Eq]
 
-private def splitUInt64 (source low high : FVarId) : List Instruction := [
-  .localGet source,
-  .i32WrapI64 .uint32,
-  .localSet low,
-  .localGet source,
-  .i64Const .uint64 32,
-  .i64ShrU,
-  .i32WrapI64 .uint32,
-  .localSet high]
+def uint64AddFunction : Function :=
+  binaryI64Function `UInt64.add .uint64 .i64Add
 
-private def combineUInt64 (low high : FVarId) : List Instruction := [
-  .localGet high,
-  .i64ExtendI32U .uint64,
-  .i64Const .uint64 32,
-  .i64Shl,
-  .localGet low,
-  .i64ExtendI32U .uint64,
-  .i64Or]
+def uint64SubFunction : Function :=
+  binaryI64Function `UInt64.sub .uint64 .i64Sub
 
-private def uint64BinaryLocals : Array (FVarId × AbiKind) := #[
-  (leftLowLocal, .uint32), (leftHighLocal, .uint32),
-  (rightLowLocal, .uint32), (rightHighLocal, .uint32),
-  (lowLocal, .uint32), (highLocal, .uint32),
-  (raw64Local, .uint64), (savedScratchLocal, .uint64),
-  (uint64ResultLocal, .uint64)]
-
-def uint64AddFunction : Function := {
-  (retypedI64Function `UInt64.add
-    #[(leftParam, .uint64), (rightParam, .uint64)] .uint64 <|
-    splitUInt64 leftParam leftLowLocal leftHighLocal ++
-    splitUInt64 rightParam rightLowLocal rightHighLocal ++ [
-      .localGet leftLowLocal,
-      .localGet rightLowLocal,
-      .i32Add,
-      .localSet lowLocal,
-      .localGet lowLocal,
-      .localGet leftLowLocal,
-      .i32LtU,
-      .localSet carryLocal,
-      .localGet leftHighLocal,
-      .localGet rightHighLocal,
-      .i32Add,
-      .localGet carryLocal,
-      .i32Add,
-      .localSet highLocal] ++ combineUInt64 lowLocal highLocal) with
-    locals := uint64BinaryLocals.insertIdx 6 (carryLocal, .uint32) }
-
-def uint64SubFunction : Function := {
-  (retypedI64Function `UInt64.sub
-    #[(leftParam, .uint64), (rightParam, .uint64)] .uint64 <|
-    splitUInt64 leftParam leftLowLocal leftHighLocal ++
-    splitUInt64 rightParam rightLowLocal rightHighLocal ++ [
-      .localGet leftLowLocal,
-      .localGet rightLowLocal,
-      .i32Sub,
-      .localSet lowLocal,
-      .localGet leftLowLocal,
-      .localGet rightLowLocal,
-      .i32LtU,
-      .localSet borrowLocal,
-      .localGet leftHighLocal,
-      .localGet rightHighLocal,
-      .i32Sub,
-      .localGet borrowLocal,
-      .i32Sub,
-      .localSet highLocal] ++ combineUInt64 lowLocal highLocal) with
-    locals := uint64BinaryLocals.insertIdx 6 (borrowLocal, .uint32) }
-
-def uint64LandFunction : Function := {
-  (retypedI64Function `UInt64.land
-    #[(leftParam, .uint64), (rightParam, .uint64)] .uint64 <|
-    splitUInt64 leftParam leftLowLocal leftHighLocal ++
-    splitUInt64 rightParam rightLowLocal rightHighLocal ++ [
-      .localGet leftLowLocal,
-      .localGet rightLowLocal,
-      .i32And,
-      .localSet lowLocal,
-      .localGet leftHighLocal,
-      .localGet rightHighLocal,
-      .i32And,
-      .localSet highLocal] ++ combineUInt64 lowLocal highLocal) with
-    locals := uint64BinaryLocals }
+def uint64LandFunction : Function :=
+  binaryI64Function `UInt64.land .uint64 .i64And
 
 def uint64LorFunction : Function :=
   retypedI64Function `UInt64.lor
@@ -744,52 +502,14 @@ def uint64LorFunction : Function :=
     .localGet rightParam,
     .i64Or]
 
-def uint64XorFunction : Function := {
-  (retypedI64Function `UInt64.xor
-    #[(leftParam, .uint64), (rightParam, .uint64)] .uint64 <|
-    splitUInt64 leftParam leftLowLocal leftHighLocal ++
-    splitUInt64 rightParam rightLowLocal rightHighLocal ++ [
-      .localGet leftLowLocal,
-      .localGet rightLowLocal,
-      .i32Add,
-      .localGet leftLowLocal,
-      .localGet rightLowLocal,
-      .i32And,
-      .localGet leftLowLocal,
-      .localGet rightLowLocal,
-      .i32And,
-      .i32Add,
-      .i32Sub,
-      .localSet lowLocal,
-      .localGet leftHighLocal,
-      .localGet rightHighLocal,
-      .i32Add,
-      .localGet leftHighLocal,
-      .localGet rightHighLocal,
-      .i32And,
-      .localGet leftHighLocal,
-      .localGet rightHighLocal,
-      .i32And,
-      .i32Add,
-      .i32Sub,
-      .localSet highLocal] ++ combineUInt64 lowLocal highLocal) with
-    locals := uint64BinaryLocals }
+def uint64XorFunction : Function :=
+  binaryI64Function `UInt64.xor .uint64 .i64Xor
 
-/-- Bitwise complement without requiring an additional symbolic opcode. -/
-def uint64ComplementFunction : Function := {
-  (retypedI64Function `UInt64.complement #[(valueParam, .uint64)] .uint64 <|
-    splitUInt64 valueParam lowLocal highLocal ++ [
-      .i32Const .uint32 0xffffffff,
-      .localGet lowLocal,
-      .i32Sub,
-      .localSet lowLocal,
-      .i32Const .uint32 0xffffffff,
-      .localGet highLocal,
-      .i32Sub,
-      .localSet highLocal] ++ combineUInt64 lowLocal highLocal) with
-    locals := #[(lowLocal, .uint32), (highLocal, .uint32),
-      (raw64Local, .uint64), (savedScratchLocal, .uint64),
-      (uint64ResultLocal, .uint64)] }
+def uint64ComplementFunction : Function :=
+  retypedI64Function `UInt64.complement #[(valueParam, .uint64)] .uint64 [
+    .localGet valueParam,
+    .i64Const .uint64 0xffffffffffffffff,
+    .i64Xor]
 
 def uint64DecLtFunction : Function :=
   retypedI32Function `UInt64.decLt
@@ -798,182 +518,28 @@ def uint64DecLtFunction : Function :=
       .localGet rightParam,
       .i64LtU]
 
-/-- Shift-and-add multiplication in the modulo-2^64 ring. -/
-def uint64MulFunction : Function := {
-  (retypedI64Function `UInt64.mul
-    #[(leftParam, .uint64), (rightParam, .uint64)] .uint64 <| [
-      .localGet leftParam,
-      .localSet multiplicandLocal,
-      .localGet rightParam,
-      .localSet multiplierLocal,
-      .i64Const .uint64 0,
-      .localSet result64Local,
-      .loop multiply64Loop [
-        .localGet multiplierLocal,
-        .i64Const .uint64 1,
-        .i64LtU,
-        .ifElse [] <|
-          [.localGet multiplierLocal,
-            .i32WrapI64 .uint32,
-            .i32Const .uint32 1,
-            .i32And,
-            .i32Const .uint32 0,
-            .i32Eq,
-            .ifElse [] <|
-              splitUInt64 result64Local leftLowLocal leftHighLocal ++
-              splitUInt64 multiplicandLocal rightLowLocal rightHighLocal ++ [
-                .localGet leftLowLocal,
-                .localGet rightLowLocal,
-                .i32Add,
-                .localSet lowLocal,
-                .localGet lowLocal,
-                .localGet leftLowLocal,
-                .i32LtU,
-                .localSet carryLocal,
-                .localGet leftHighLocal,
-                .localGet rightHighLocal,
-                .i32Add,
-                .localGet carryLocal,
-                .i32Add,
-                .localSet highLocal] ++
-              combineUInt64 lowLocal highLocal ++ [.localSet result64Local],
-            .localGet multiplicandLocal,
-            .i64Const .uint64 1,
-            .i64Shl,
-            .localSet multiplicandLocal,
-            .localGet multiplierLocal,
-            .i64Const .uint64 1,
-            .i64ShrU,
-            .localSet multiplierLocal,
-            .br multiply64Loop]],
-      .localGet result64Local]) with
-    locals := #[(multiplicandLocal, .uint64), (multiplierLocal, .uint64),
-      (result64Local, .uint64), (leftLowLocal, .uint32),
-      (leftHighLocal, .uint32), (rightLowLocal, .uint32),
-      (rightHighLocal, .uint32), (lowLocal, .uint32),
-      (highLocal, .uint32), (carryLocal, .uint32),
-      (raw64Local, .uint64), (savedScratchLocal, .uint64),
-      (uint64ResultLocal, .uint64)] }
+def uint64MulFunction : Function :=
+  binaryI64Function `UInt64.mul .uint64 .i64Mul
 
-def uint64CtzFastFunction : Function := {
-  (retypedI64Function `UInt64.ctzFast #[(valueParam, .uint64)] .uint64 <|
-    splitUInt64 valueParam lowLocal highLocal ++ [
-      .i32Const .uint32 64,
-      .localSet countLocal,
-      .localGet lowLocal,
-      .i32Const .uint32 0,
-      .i32Eq,
-      .localGet highLocal,
-      .i32Const .uint32 0,
-      .i32Eq,
-      .i32And,
-      .ifElse
-        []
-        [.localGet lowLocal,
-          .i32Const .uint32 0,
-          .i32Eq,
-          .ifElse
-            [.localGet highLocal,
-              .localSet wordLocal,
-              .i32Const .uint32 32,
-              .localSet countLocal]
-            [.localGet lowLocal,
-              .localSet wordLocal,
-              .i32Const .uint32 0,
-              .localSet countLocal],
-          .loop ctzLoop [
-            .localGet wordLocal,
-            .i32Const .uint32 1,
-            .i32And,
-            .i32Const .uint32 0,
-            .i32Eq,
-            .ifElse
-              [.localGet wordLocal,
-                .i32Const .uint32 1,
-                .i32ShrU,
-                .localSet wordLocal,
-                .localGet countLocal,
-                .i32Const .uint32 1,
-                .i32Add,
-                .localSet countLocal,
-                .br ctzLoop]
-              []],
-          ],
-      .localGet countLocal,
-      .i64ExtendI32U .uint64]) with
-    locals := #[(lowLocal, .uint32), (highLocal, .uint32),
-      (wordLocal, .uint32), (countLocal, .uint32),
-      (raw64Local, .uint64), (savedScratchLocal, .uint64),
-      (uint64ResultLocal, .uint64)] }
+def uint64CtzFastFunction : Function :=
+  retypedI64Function `UInt64.ctzFast #[(valueParam, .uint64)] .uint64 [
+    .localGet valueParam,
+    .i64Ctz]
 
-/-- Restoring unsigned remainder; Lean specifies `a % 0 = a`. -/
-def uint64ModFunction : Function := {
-  (retypedI64Function `UInt64.mod
+/-- Lean specifies `a % 0 = a`, while core Wasm remainder traps at zero. -/
+def uint64ModFunction : Function :=
+  retypedI64Function `UInt64.mod
     #[(leftParam, .uint64), (rightParam, .uint64)] .uint64 [
     .localGet rightParam,
-    .i64Const .uint64 1,
-    .i64LtU,
+    .i64Eqz,
     .ifElse
       [.localGet leftParam,
-        .localSet remainder64Local]
-      [.i64Const .uint64 0,
-        .localSet remainder64Local,
-        .i32Const .uint32 64,
-        .localSet indexLocal,
-        .loop modLoop [
-          .localGet indexLocal,
-          .i32Const .uint32 1,
-          .i32Sub,
-          .localSet indexLocal,
-          .localGet remainder64Local,
-          .i64Const .uint64 1,
-          .i64Shl,
-          .localGet leftParam,
-          .localGet indexLocal,
-          .i64ExtendI32U .uint64,
-          .i64ShrU,
-          .i32WrapI64 .uint32,
-          .i32Const .uint32 1,
-          .i32And,
-          .i64ExtendI32U .uint64,
-          .i64Or,
-          .localSet remainder64Local,
-          .localGet remainder64Local,
-          .localGet rightParam,
-          .i64LtU,
-          .i32Const .uint32 0,
-          .i32Eq,
-          .ifElse
-            (splitUInt64 remainder64Local remainderLowLocal remainderHighLocal ++
-              splitUInt64 rightParam rightLowLocal rightHighLocal ++ [
-                .localGet remainderLowLocal,
-                .localGet rightLowLocal,
-                .i32Sub,
-                .localSet lowLocal,
-                .localGet remainderLowLocal,
-                .localGet rightLowLocal,
-                .i32LtU,
-                .localSet borrowLocal,
-                .localGet remainderHighLocal,
-                .localGet rightHighLocal,
-                .i32Sub,
-                .localGet borrowLocal,
-                .i32Sub,
-                .localSet highLocal] ++
-              combineUInt64 lowLocal highLocal ++
-              [.localSet remainder64Local])
-            [],
-          .localGet indexLocal,
-          .i32Const .uint32 0,
-          .i32Eq,
-          .ifElse [] [.br modLoop]]],
-    .localGet remainder64Local]) with
-    locals := #[(indexLocal, .uint32), (remainder64Local, .uint64),
-      (remainderLowLocal, .uint32), (remainderHighLocal, .uint32),
-      (rightLowLocal, .uint32), (rightHighLocal, .uint32),
-      (lowLocal, .uint32), (highLocal, .uint32), (borrowLocal, .uint32),
-      (raw64Local, .uint64), (savedScratchLocal, .uint64),
-      (uint64ResultLocal, .uint64)] }
+        .localSet raw64Local]
+      [.localGet leftParam,
+        .localGet rightParam,
+        .i64RemU,
+        .localSet raw64Local],
+    .localGet raw64Local]
 
 def functions : Array Function := #[
   uint8OfBitVecFunction,
@@ -1316,7 +882,36 @@ def manifest : Json :=
         ("entry", externalName declaration |>.toString)]),
     ("imports", Json.arr #[]),
     ("providers", Json.arr #["external", "source-definition"]),
+    ("scalarStrategy", "direct-core-wasm"),
+    ("structuredScalarLoops", 0),
     ("status", "generation-ready; W6 fixed-width contract proofs pending")]
+
+private partial def instructionContains (target : Instruction) : Instruction → Bool
+  | instruction@(.block _ body) | instruction@(.loop _ body) =>
+      instruction == target || body.any (instructionContains target)
+  | instruction@(.ifElse thenBody elseBody) =>
+      instruction == target || thenBody.any (instructionContains target) ||
+        elseBody.any (instructionContains target)
+  | instruction => instruction == target
+
+private partial def instructionContainsLoop : Instruction → Bool
+  | .loop _ _ => true
+  | .block _ body => body.any instructionContainsLoop
+  | .ifElse thenBody elseBody =>
+      thenBody.any instructionContainsLoop || elseBody.any instructionContainsLoop
+  | _ => false
+
+private def functionContainsLoop (function : Function) : Bool :=
+  function.body.any instructionContainsLoop
+
+#guard !functions.any functionContainsLoop
+#guard !ResidentUSize.functions.any functionContainsLoop
+#guard uint32Log2ClzFunction.body.any (instructionContains .i32Clz)
+#guard uint32MulFunction.body.any (instructionContains .i32Mul)
+#guard uint64MulFunction.body.any (instructionContains .i64Mul)
+#guard uint64CtzFastFunction.body.any (instructionContains .i64Ctz)
+#guard uint64ModFunction.body.any (instructionContains .i64RemU)
+#guard ResidentUSize.modFunction.body.any (instructionContains .i64RemU)
 
 #guard match residentExampleModule with
   | .ok module =>

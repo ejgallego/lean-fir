@@ -10,9 +10,8 @@ open Lean
 
 Final LCNF generated for `Array.forIn'Unsafe` keeps its cursor and bound in
 native `USize` lanes. These helpers implement the generic scalar frontier over
-wasm64 values. Arithmetic is assembled from accepted wasm32/wasm64 operations
-so it retains `USize`'s modulo-2^64 behavior without extending FIR's shared
-symbolic instruction surface.
+wasm64 values using the corresponding core Wasm scalar instructions while
+retaining `USize`'s modulo-2^64 behavior.
 -/
 
 inductive LinkError where
@@ -48,13 +47,8 @@ def helperNames : Array Name := externalDeclarations.map externalName
 
 private def leftParam : FVarId := ⟨`left⟩
 private def rightParam : FVarId := ⟨`right⟩
-private def leftLowLocal : FVarId := ⟨`leftLow⟩
-private def leftHighLocal : FVarId := ⟨`leftHigh⟩
-private def rightLowLocal : FVarId := ⟨`rightLow⟩
-private def rightHighLocal : FVarId := ⟨`rightHigh⟩
 private def lowLocal : FVarId := ⟨`low⟩
 private def highLocal : FVarId := ⟨`high⟩
-private def carryLocal : FVarId := ⟨`carry⟩
 private def raw32Local : FVarId := ⟨`raw32⟩
 private def raw64Local : FVarId := ⟨`raw64⟩
 private def savedScratchLocal : FVarId := ⟨`savedScratch⟩
@@ -63,12 +57,6 @@ private def usizeResultLocal : FVarId := ⟨`usizeResult⟩
 private def objectResultLocal : FVarId := ⟨`objectResult⟩
 private def valueParam : FVarId := ⟨`value⟩
 private def erasedParam : FVarId := ⟨`erased⟩
-private def borrowLocal : FVarId := ⟨`borrow⟩
-private def indexLocal : FVarId := ⟨`index⟩
-private def remainderLocal : FVarId := ⟨`remainder⟩
-private def remainderLowLocal : FVarId := ⟨`remainderLow⟩
-private def remainderHighLocal : FVarId := ⟨`remainderHigh⟩
-private def modLoop : FVarId := ⟨`usizeModLoop⟩
 
 private def retypeUInt8 : List Instruction := [
   .i32Const .uint32 0,
@@ -147,100 +135,31 @@ private def splitUSize (source low high : FVarId) : List Instruction := [
   .i32WrapI64 .uint32,
   .localSet high]
 
-private def combineUSize (low high : FVarId) : List Instruction := [
-  .localGet high,
-  .i64ExtendI32U .uint64,
-  .i64Const .uint64 32,
-  .i64Shl,
-  .localGet low,
-  .i64ExtendI32U .uint64,
-  .i64Or]
+private def binaryFunction (declaration : Name) (operation : Instruction) : Function := {
+  name := externalName declaration
+  params := #[(leftParam, .usize), (rightParam, .usize)]
+  results := #[.usize]
+  locals := #[(raw64Local, .uint64), (savedScratchLocal, .uint64),
+    (usizeResultLocal, .usize)]
+  body := [.localGet leftParam, .localGet rightParam, operation] ++ retypeUSize }
 
-def decLtFunction : Function := {
-  name := externalName `USize.decLt
+private def decisionFunction (declaration : Name) (comparison : Instruction) : Function := {
+  name := externalName declaration
   params := #[(leftParam, .usize), (rightParam, .usize)]
   results := #[.uint8]
   locals := #[(raw32Local, .uint32), (savedScratchLocal, .uint64),
     (uint8ResultLocal, .uint8)]
-  body := [
-    .localGet leftParam,
-    .localGet rightParam,
-    .i64LtU,
+  body := [.localGet leftParam, .localGet rightParam, comparison,
     .localSet raw32Local] ++ retypeUInt8 }
 
-def addFunction : Function := {
-  name := externalName `USize.add
-  params := #[(leftParam, .usize), (rightParam, .usize)]
-  results := #[.usize]
-  locals := #[(leftLowLocal, .uint32), (leftHighLocal, .uint32),
-    (rightLowLocal, .uint32), (rightHighLocal, .uint32),
-    (lowLocal, .uint32), (highLocal, .uint32), (carryLocal, .uint32),
-    (raw64Local, .uint64), (savedScratchLocal, .uint64),
-    (usizeResultLocal, .usize)]
-  body := [
-    .localGet leftParam,
-    .i32WrapI64 .uint32,
-    .localSet leftLowLocal,
-    .localGet leftParam,
-    .i64Const .uint64 32,
-    .i64ShrU,
-    .i32WrapI64 .uint32,
-    .localSet leftHighLocal,
-    .localGet rightParam,
-    .i32WrapI64 .uint32,
-    .localSet rightLowLocal,
-    .localGet rightParam,
-    .i64Const .uint64 32,
-    .i64ShrU,
-    .i32WrapI64 .uint32,
-    .localSet rightHighLocal,
-    .localGet leftLowLocal,
-    .localGet rightLowLocal,
-    .i32Add,
-    .localSet lowLocal,
-    .localGet lowLocal,
-    .localGet leftLowLocal,
-    .i32LtU,
-    .localSet carryLocal,
-    .localGet leftHighLocal,
-    .localGet rightHighLocal,
-    .i32Add,
-    .localGet carryLocal,
-    .i32Add,
-    .localSet highLocal,
-    .localGet highLocal,
-    .i64ExtendI32U .uint64,
-    .i64Const .uint64 32,
-    .i64Shl,
-    .localGet lowLocal,
-    .i64ExtendI32U .uint64,
-    .i64Or] ++ retypeUSize }
+def decLtFunction : Function :=
+  decisionFunction `USize.decLt .i64LtU
 
-def subFunction : Function := {
-  name := externalName `USize.sub
-  params := #[(leftParam, .usize), (rightParam, .usize)]
-  results := #[.usize]
-  locals := #[(leftLowLocal, .uint32), (leftHighLocal, .uint32),
-    (rightLowLocal, .uint32), (rightHighLocal, .uint32),
-    (lowLocal, .uint32), (highLocal, .uint32), (borrowLocal, .uint32),
-    (raw64Local, .uint64), (savedScratchLocal, .uint64),
-    (usizeResultLocal, .usize)]
-  body := splitUSize leftParam leftLowLocal leftHighLocal ++
-    splitUSize rightParam rightLowLocal rightHighLocal ++ [
-      .localGet leftLowLocal,
-      .localGet rightLowLocal,
-      .i32Sub,
-      .localSet lowLocal,
-      .localGet leftLowLocal,
-      .localGet rightLowLocal,
-      .i32LtU,
-      .localSet borrowLocal,
-      .localGet leftHighLocal,
-      .localGet rightHighLocal,
-      .i32Sub,
-      .localGet borrowLocal,
-      .i32Sub,
-      .localSet highLocal] ++ combineUSize lowLocal highLocal ++ retypeUSize }
+def addFunction : Function :=
+  binaryFunction `USize.add .i64Add
+
+def subFunction : Function :=
+  binaryFunction `USize.sub .i64Sub
 
 private def ofNatBody : List Instruction := [
   .localGet valueParam,
@@ -292,186 +211,45 @@ def toNatFunction : Function := {
     .localGet highLocal,
     .call (.declaration ResidentNumeric.makeNaturalName)] ++ retypeObject }
 
-def landFunction : Function := {
-  name := externalName `USize.land
-  params := #[(leftParam, .usize), (rightParam, .usize)]
-  results := #[.usize]
-  locals := #[(leftLowLocal, .uint32), (leftHighLocal, .uint32),
-    (rightLowLocal, .uint32), (rightHighLocal, .uint32),
-    (lowLocal, .uint32), (highLocal, .uint32),
-    (raw64Local, .uint64), (savedScratchLocal, .uint64),
-    (usizeResultLocal, .usize)]
-  body := splitUSize leftParam leftLowLocal leftHighLocal ++
-    splitUSize rightParam rightLowLocal rightHighLocal ++ [
-      .localGet leftLowLocal,
-      .localGet rightLowLocal,
-      .i32And,
-      .localSet lowLocal,
-      .localGet leftHighLocal,
-      .localGet rightHighLocal,
-      .i32And,
-      .localSet highLocal] ++ combineUSize lowLocal highLocal ++ retypeUSize }
+def landFunction : Function :=
+  binaryFunction `USize.land .i64And
 
-def shiftLeftFunction : Function := {
-  name := externalName `USize.shiftLeft
-  params := #[(leftParam, .usize), (rightParam, .usize)]
-  results := #[.usize]
-  locals := #[(raw64Local, .uint64), (savedScratchLocal, .uint64),
-    (usizeResultLocal, .usize)]
-  body := [
-    .localGet leftParam,
-    .localGet rightParam,
-    .i64Shl] ++ retypeUSize }
+def shiftLeftFunction : Function :=
+  binaryFunction `USize.shiftLeft .i64Shl
 
-def shiftRightFunction : Function := {
-  name := externalName `USize.shiftRight
-  params := #[(leftParam, .usize), (rightParam, .usize)]
-  results := #[.usize]
-  locals := #[(raw64Local, .uint64), (savedScratchLocal, .uint64),
-    (usizeResultLocal, .usize)]
-  body := [
-    .localGet leftParam,
-    .localGet rightParam,
-    .i64ShrU] ++ retypeUSize }
+def shiftRightFunction : Function :=
+  binaryFunction `USize.shiftRight .i64ShrU
 
-def decLeFunction : Function := {
-  name := externalName `USize.decLe
-  params := #[(leftParam, .usize), (rightParam, .usize)]
-  results := #[.uint8]
-  locals := #[(raw32Local, .uint32), (savedScratchLocal, .uint64),
-    (uint8ResultLocal, .uint8)]
-  body := [
-    .localGet rightParam,
-    .localGet leftParam,
-    .i64LtU,
-    .i32Const .uint32 0,
-    .i32Eq,
-    .localSet raw32Local] ++ retypeUInt8 }
+def decLeFunction : Function :=
+  decisionFunction `USize.decLe .i64LeU
 
-def decEqFunction : Function := {
-  name := externalName `USize.decEq
-  params := #[(leftParam, .usize), (rightParam, .usize)]
-  results := #[.uint8]
-  locals := #[(raw32Local, .uint32), (savedScratchLocal, .uint64),
-    (uint8ResultLocal, .uint8)]
-  body := [
-    .localGet leftParam,
-    .localGet rightParam,
-    .i64LtU,
-    .i32Const .uint32 0,
-    .i32Eq,
-    .localGet rightParam,
-    .localGet leftParam,
-    .i64LtU,
-    .i32Const .uint32 0,
-    .i32Eq,
-    .i32And,
-    .localSet raw32Local] ++ retypeUInt8 }
+def decEqFunction : Function :=
+  decisionFunction `USize.decEq .i64Eq
 
 def complementFunction : Function := {
   name := externalName `USize.complement
   params := #[(valueParam, .usize)]
   results := #[.usize]
-  locals := #[(lowLocal, .uint32), (highLocal, .uint32),
-    (raw64Local, .uint64), (savedScratchLocal, .uint64),
+  locals := #[(raw64Local, .uint64), (savedScratchLocal, .uint64),
     (usizeResultLocal, .usize)]
-  body := splitUSize valueParam lowLocal highLocal ++ [
-    .i32Const .uint32 0xffffffff,
-    .localGet lowLocal,
-    .i32Sub,
-    .localSet lowLocal,
-    .i32Const .uint32 0xffffffff,
-    .localGet highLocal,
-    .i32Sub,
-    .localSet highLocal] ++ combineUSize lowLocal highLocal ++ retypeUSize }
-
-private def modSubtractBody : List Instruction :=
-  splitUSize remainderLocal remainderLowLocal remainderHighLocal ++
-  splitUSize rightParam rightLowLocal rightHighLocal ++ [
-    .localGet remainderLowLocal,
-    .localGet rightLowLocal,
-    .i32Sub,
-    .localSet lowLocal,
-    .localGet remainderLowLocal,
-    .localGet rightLowLocal,
-    .i32LtU,
-    .localSet borrowLocal,
-    .localGet remainderHighLocal,
-    .localGet rightHighLocal,
-    .i32Sub,
-    .localGet borrowLocal,
-    .i32Sub,
-    .localSet highLocal] ++ combineUSize lowLocal highLocal ++ [
-    .localSet remainderLocal]
+  body := [.localGet valueParam, .i64Const .uint64 0xffffffffffffffff,
+    .i64Xor] ++ retypeUSize }
 
 def modFunction : Function := {
   name := externalName `USize.mod
   params := #[(leftParam, .usize), (rightParam, .usize)]
   results := #[.usize]
-  locals := #[(indexLocal, .uint32), (remainderLocal, .uint64),
-    (remainderLowLocal, .uint32), (remainderHighLocal, .uint32),
-    (rightLowLocal, .uint32), (rightHighLocal, .uint32),
-    (lowLocal, .uint32), (highLocal, .uint32), (borrowLocal, .uint32),
-    (raw64Local, .uint64), (savedScratchLocal, .uint64),
+  locals := #[(raw64Local, .uint64), (savedScratchLocal, .uint64),
     (usizeResultLocal, .usize)]
   body := [
-    .i32Const .uint32 0,
-    .i64Load .uint64 0,
-    .localSet savedScratchLocal,
-    .i32Const .uint32 0,
-    .localGet leftParam,
-    .i64Store .usize 0,
-    .i32Const .uint32 0,
-    .i64Load .uint64 0,
-    .localSet remainderLocal,
     .localGet rightParam,
-    .i64Const .uint64 1,
-    .i64LtU,
+    .i64Eqz,
     .ifElse
-      []
-      [.i64Const .uint64 0,
-        .localSet remainderLocal,
-        .i32Const .uint32 64,
-        .localSet indexLocal,
-        .loop modLoop [
-          .localGet indexLocal,
-          .i32Const .uint32 1,
-          .i32Sub,
-          .localSet indexLocal,
-          .localGet remainderLocal,
-          .i64Const .uint64 1,
-          .i64Shl,
-          .localGet leftParam,
-          .localGet indexLocal,
-          .i64ExtendI32U .uint64,
-          .i64ShrU,
-          .i32WrapI64 .uint32,
-          .i32Const .uint32 1,
-          .i32And,
-          .i64ExtendI32U .uint64,
-          .i64Or,
-          .localSet remainderLocal,
-          .localGet remainderLocal,
-          .localGet rightParam,
-          .i64LtU,
-          .i32Const .uint32 0,
-          .i32Eq,
-          .ifElse modSubtractBody [],
-          .localGet indexLocal,
-          .i32Const .uint32 0,
-          .i32Eq,
-          .ifElse [] [.br modLoop]]],
-    .i32Const .uint32 0,
-    .localGet remainderLocal,
-    .i64Store .uint64 0,
-    .i32Const .uint32 0,
-    .i64Load .usize 0,
-    .localSet usizeResultLocal,
-    .i32Const .uint32 0,
-    .localGet savedScratchLocal,
-    .i64Store .uint64 0,
-    .localGet usizeResultLocal,
-    .ret] }
+      [.localGet leftParam, .i64Const .uint64 0, .i64Or,
+        .localSet raw64Local]
+      [.localGet leftParam, .localGet rightParam, .i64RemU,
+        .localSet raw64Local],
+    .localGet raw64Local] ++ retypeUSize }
 
 def functions : Array Function := #[
   decLtFunction,
