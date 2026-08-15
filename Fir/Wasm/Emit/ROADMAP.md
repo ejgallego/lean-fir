@@ -169,6 +169,22 @@ has two. W6 separately adapts the existing arbitrary-precision addition proof
 to the immediate branch; the signature and concrete runtime contract are
 unchanged.
 
+### G1d. Reusable canonical immediate-Nat dispatch
+
+The representation check and payload decode are now a small shared code-
+generation surface rather than a `Nat.add`-local instruction sequence. Binary
+Nat operations can select two canonical tagged immediates, run a typed local
+kernel, and retain their existing checked arbitrary-precision implementation
+unchanged for every mixed or heap-backed pair.
+
+`Nat.mod` is the first additional consumer. Its immediate branch preserves Lean's
+`n % 0 = n`; for a nonzero immediate divisor, unsigned machine remainder is
+strictly below the 31-bit divisor and is therefore returned canonically without
+allocation. Focused external-engine checks cover zero, boundary payloads,
+result representation, no frontier growth, and the existing arbitrary-
+precision matrix. This changes neither the public signature nor the malformed-
+heap fallback boundary; W6 owns the corresponding branch refinement.
+
 ### G2. Separate production and diagnostic adapter costs
 
 Finish the pending Illuminate selection-player request with an actually

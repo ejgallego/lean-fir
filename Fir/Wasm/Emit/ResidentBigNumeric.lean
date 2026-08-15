@@ -1315,40 +1315,48 @@ private def validateNaturalsAndCounts : List Instruction := [
 /-- Both operands use the wasm32 immediate representation.  This is a
 representation check, not a semantic relaxation: every odd object word is a
 canonical nonnegative Nat payload in the concrete ABI. -/
-private def bothNaturalsImmediate : List Instruction := [
-  .localGet leftParam,
+def bothImmediateNaturals (left right : FVarId) : List Instruction := [
+  .localGet left,
   .i32Const .uint32 1,
   .i32And,
-  .localGet rightParam,
+  .localGet right,
   .i32Const .uint32 1,
   .i32And,
   .i32And]
+
+/-- Decode the 31-bit payload of a Nat already selected by
+`bothImmediateNaturals`. -/
+def immediateNaturalPayload (value : FVarId) : List Instruction := [
+  .localGet value,
+  .i32Const .uint32 1,
+  .i32ShrU]
+
+/-- Reusable binary Nat representation dispatch.  The immediate body may
+assume both operands are canonical tagged immediates; every other
+representation reaches the checked arbitrary-precision fallback. -/
+def withImmediateNaturalPair (left right : FVarId)
+    (immediate fallback : List Instruction) : List Instruction :=
+  bothImmediateNaturals left right ++ [.ifElse immediate fallback]
 
 /-- Decode two immediate Nat payloads and reuse the existing bounded natural
 sum constructor.  That constructor returns an immediate when the sum fits and
 the canonical promoted representation when it crosses the wasm32 immediate
 boundary. -/
-private def callImmediateNaturalSum : List Instruction := [
-  .localGet leftParam,
-  .i32Const .uint32 1,
-  .i32ShrU,
-  .i32Const .uint32 0,
-  .localGet rightParam,
-  .i32Const .uint32 1,
-  .i32ShrU,
-  .i32Const .uint32 0,
-  .call (.declaration ResidentNumeric.naturalSumName)]
+private def callImmediateNaturalSum : List Instruction :=
+  immediateNaturalPayload leftParam ++ [.i32Const .uint32 0] ++
+  immediateNaturalPayload rightParam ++ [
+    .i32Const .uint32 0,
+    .call (.declaration ResidentNumeric.naturalSumName)]
 
 def natAddFunction : Function := {
   name := externalName `Nat.add
   params := #[(leftParam, .tobject), (rightParam, .tobject)]
   results := #[.tobject]
   locals := naturalArithmeticLocals
-  body := bothNaturalsImmediate ++ [
-    .ifElse
-      (callImmediateNaturalSum ++
-        retypeRawResult .tobject objectResultLocal)
-      ([.i32Const .uint32 0,
+  body := withImmediateNaturalPair leftParam rightParam
+    (callImmediateNaturalSum ++
+      retypeRawResult .tobject objectResultLocal)
+    ([.i32Const .uint32 0,
         .localSet leftFlavorParam,
         .i32Const .uint32 0,
         .localSet rightFlavorParam] ++
@@ -1363,7 +1371,7 @@ def natAddFunction : Function := {
             .localSet rawLocal] ++
             writeSum rawLocal ++ [
             .localGet rawLocal] ++
-            retypeRawResult .tobject objectResultLocal)])] }
+            retypeRawResult .tobject objectResultLocal)]) }
 
 private def scanDifference (left leftFlavor right rightFlavor total : FVarId) :
     List Instruction := [

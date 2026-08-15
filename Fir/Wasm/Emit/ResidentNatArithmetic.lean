@@ -734,6 +734,39 @@ private def callGenericMod : List Instruction := [
   .call (.declaration modGenericName),
   .ret]
 
+/-- The canonical two-immediate remainder path.  A zero divisor returns the
+already-canonical left word.  Otherwise the machine remainder is strictly
+smaller than the 31-bit immediate divisor, so `makeNatural` returns an
+immediate without allocation. -/
+private def immediateMod : List Instruction :=
+  ResidentBigNumeric.immediateNaturalPayload rightParam ++ [
+    .i32Const .uint32 0,
+    .i32Eq,
+    .ifElse
+      [.localGet leftParam, .ret]
+      (ResidentBigNumeric.immediateNaturalPayload leftParam ++
+        ResidentBigNumeric.immediateNaturalPayload rightParam ++ [
+          .i32RemU,
+          .i32Const .uint32 0,
+          .call (.declaration ResidentNumeric.makeNaturalName)] ++
+        retypeRawResult)]
+
+/-- The pre-existing checked arbitrary-precision implementation, retained as
+the exact fallback for mixed and heap-backed representations. -/
+private def checkedModFallback : List Instruction := validateInputs ++ [
+  .localGet rightParam,
+  .i32Const .uint32 0,
+  .call (.declaration ResidentBigNumeric.naturalLowName),
+  .i32Const .uint32 0,
+  .i32Eq,
+  .localGet rightParam,
+  .i32Const .uint32 0,
+  .call (.declaration ResidentBigNumeric.naturalHighName),
+  .i32Const .uint32 0,
+  .i32Eq,
+  .i32And,
+  .ifElse (incrementLocal leftParam ++ [.localGet leftParam, .ret]) callGenericMod]
+
 def divFunction : Function := {
   name := externalName `Nat.div
   params := #[(leftParam, .tobject), (rightParam, .tobject)]
@@ -757,20 +790,10 @@ def modFunction : Function := {
   name := externalName `Nat.mod
   params := #[(leftParam, .tobject), (rightParam, .tobject)]
   results := #[.tobject]
-  locals := #[]
-  body := validateInputs ++ [
-    .localGet rightParam,
-    .i32Const .uint32 0,
-    .call (.declaration ResidentBigNumeric.naturalLowName),
-    .i32Const .uint32 0,
-    .i32Eq,
-    .localGet rightParam,
-    .i32Const .uint32 0,
-    .call (.declaration ResidentBigNumeric.naturalHighName),
-    .i32Const .uint32 0,
-    .i32Eq,
-    .i32And,
-    .ifElse (incrementLocal leftParam ++ [.localGet leftParam, .ret]) callGenericMod] }
+  locals := #[(rawLocal, .uint32), (savedScratchLocal, .uint32),
+    (objectResultLocal, .tobject)]
+  body := ResidentBigNumeric.withImmediateNaturalPair leftParam rightParam
+    immediateMod checkedModFallback }
 
 def externalFunctions : Array Function := #[
   mulFunction, powFunction, landFunction, divFunction, modFunction,

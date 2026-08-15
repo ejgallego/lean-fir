@@ -11,6 +11,16 @@ function exported(instance, name) {
   return value;
 }
 
+function expectTrap(action, label) {
+  let trapped = false;
+  try {
+    action();
+  } catch (error) {
+    trapped = error instanceof WebAssembly.RuntimeError;
+  }
+  assert.equal(trapped, true, `${label} did not trap`);
+}
+
 function synchronize(host) {
   host.synchronizeResidentFrontierBeforeImport();
 }
@@ -53,6 +63,7 @@ export async function checkResidentNatArithmetic({ bytes, manifest }) {
   const land = exported(instance, "fir_ext_Nat_land");
   const div = exported(instance, "fir_ext_Nat_div");
   const mod = exported(instance, "fir_ext_Nat_mod");
+  const frontier = exported(instance, "fir_heap_frontier");
   const shiftLeft = exported(instance, "fir_ext_Nat_shiftLeft");
   const log2 = exported(instance, "fir_ext_Nat_log2");
   const apply = (operation, left, right) => naturalValue(host,
@@ -91,6 +102,26 @@ export async function checkResidentNatArithmetic({ bytes, manifest }) {
   assert.equal(apply(mod, 5n, 0n), 5n);
   assert.equal(apply(mod, 0n, 5n), 0n);
   assert.equal(apply(mod, 17n, 5n), 2n);
+  const immediateFrontier = frontier() >>> 0;
+  for (const [left, right] of [
+    [0n, 0n],
+    [0n, 1n],
+    [17n, 5n],
+    [0x7fff_ffffn, 2n],
+    [0x7fff_ffffn, 0x7fff_fffen],
+  ]) {
+    const result = mod(naturalInput(host, left), naturalInput(host, right));
+    assert.equal(host.classify(result), "immediate",
+      `Nat.mod immediate pair returned a non-immediate: ${left} % ${right}`);
+    assert.equal(naturalValue(host, result), right === 0n ? left : left % right,
+      `Nat.mod immediate pair mismatch: ${left} % ${right}`);
+  }
+  assert.equal(frontier() >>> 0, immediateFrontier,
+    "Nat.mod immediate pairs allocated in the resident heap");
+  expectTrap(() => mod(0, naturalInput(host, 1n)),
+    "Nat.mod malformed heap left operand");
+  expectTrap(() => mod(naturalInput(host, 1n), 0),
+    "Nat.mod malformed heap right operand");
   assert.equal(apply(mod, (1n << 63n) + 123n, (1n << 32n) + 7n),
     ((1n << 63n) + 123n) % ((1n << 32n) + 7n));
   assert.equal(apply(mod, dividend, divisor), dividend % divisor);
