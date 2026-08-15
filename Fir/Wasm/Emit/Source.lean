@@ -447,6 +447,64 @@ def compileEntrySeparatelyInternalized (entry : Name)
   let dependencies ← discoveredOrdinarySourceRoots entryArtifact retainedExternalNames #[entry]
   compileEntrySeparatelyInternalizedAux entry retainedExternalNames entryArtifact dependencies
 
+private def sourceRootCovers (available required : SourceCompilationRoot) : Bool :=
+  available.name == required.name &&
+    required.companions.all available.companions.contains
+
+private def enqueueSourceRoot (completed pending : Array SourceCompilationRoot)
+    (root : SourceCompilationRoot) : Array SourceCompilationRoot :=
+  if completed.any (sourceRootCovers · root) then pending
+  else addSourceCompilationRoot pending root
+
+private def compileIndividualSourceRoot (root : SourceCompilationRoot) :
+    CoreM Fir.Validation.Lcnf.Artifact :=
+  if root.companions.isEmpty then
+    withoutModifyingEnv <| Fir.Validation.Lcnf.compileEntry root.name
+  else withoutModifyingEnv do
+    resetFinalImpureCapture
+    LCNF.addPass ``finalImpureCaptureInstaller
+    compileEntryFinalCaptured root.name root.companions
+
+private partial def compileEntryIndividuallyInternalizedAux (entry : Name)
+    (retainedExternalNames : Array String)
+    (completed pending : Array SourceCompilationRoot)
+    (artifacts : Array Fir.Validation.Lcnf.Artifact) :
+    CoreM Fir.Validation.Lcnf.Artifact := do
+  let some root := pending[0]? |
+    return ← mergeSeparatelyCompiledArtifacts entry artifacts
+  let pending := pending.extract 1 pending.size
+  let artifact ← compileIndividualSourceRoot root
+  let excluded := completed.map (·.name) ++ pending.map (·.name)
+  let discoveries ← discoveredFinalSourceRoots artifact retainedExternalNames excluded
+  /- A specialization is attributed to its source caller plus the generic
+  callee needed to regenerate it. If the caller was just compiled without that
+  companion, discard this incomplete unit and immediately rebuild the exact
+  source group; otherwise merging both caller bodies would be ambiguous. -/
+  if let some enhancement := discoveries.find? fun discovery =>
+      discovery.name == root.name && !sourceRootCovers root discovery then
+    let enhanced := { root with
+      companions := enhancement.companions.foldl addUniqueName root.companions }
+    return ← compileEntryIndividuallyInternalizedAux entry retainedExternalNames
+      completed (#[enhanced] ++ pending) artifacts
+  let completed := completed.push root
+  let pending := discoveries.foldl (enqueueSourceRoot completed) pending
+  compileEntryIndividuallyInternalizedAux entry retainedExternalNames
+    completed pending (artifacts.push artifact)
+
+/--
+Compile every recursively discovered imported source root as its own ordinary
+LCNF unit before linking the resulting declaration graphs. This mirrors the
+native cross-module boundary for prebuilt modules whose macro-inlined helpers
+do not have standalone published LCNF signatures; grouping those roots into a
+new synthetic compiler unit would ask Lean to compile such generated helpers
+as independent declarations.
+-/
+def compileEntryIndividuallyInternalized (entry : Name)
+    (retainedExternalNames : Array String := #[]) :
+    CoreM Fir.Validation.Lcnf.Artifact :=
+  compileEntryIndividuallyInternalizedAux entry retainedExternalNames
+    #[] #[{ name := entry }] #[]
+
 private def initializePersistentExtension {α β σ} [Inhabited σ]
     (extension : PersistentEnvExtension α β σ) (env : Environment) : IO Environment := do
   let state := extension.toEnvExtension.getState env

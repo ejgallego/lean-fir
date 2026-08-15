@@ -226,6 +226,24 @@ run_cmd do
     throwError "final source discovery rejected a computable source fixture"
 
 run_cmd do
+  let source ← liftCoreM <|
+    compileEntryIndividuallyInternalized `Float.ofNat
+  for root in #[`Float.ofNat, `Float.ofScientific,
+      `Float.Model.ofScientific] do
+    unless (source.program.findDecl? root).isSome &&
+        !source.externalNames.contains root do
+      throwError "individual source-unit capture did not internalize {root}"
+  let specializationFragment :=
+    "._at_.Float.Model.UnpackedFloat.shiftToExponent.spec_"
+  unless source.program.decls.any fun declaration =>
+      declaration.name.toString.contains specializationFragment &&
+        !source.externalNames.contains declaration.name do
+    throwError "individual source-unit capture lost the shift specialization"
+  if source.externalNames.any fun name =>
+      name.toString.contains specializationFragment then
+    throwError "individual source-unit capture left the shift specialization external"
+
+run_cmd do
   let entries := #[``idFloat32Fixture, ``idFloatFixture]
   let source ← liftCoreM <|
     compileEntriesFinalCapturedInternalized entries
