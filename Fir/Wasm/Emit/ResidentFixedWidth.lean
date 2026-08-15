@@ -1,4 +1,4 @@
-import Fir.Wasm.Emit.ResidentNumeric
+import Fir.Wasm.Emit.ResidentBigNumeric
 import Fir.Wasm.Emit.ResidentUSize
 
 namespace Fir.Wasm.Emit.ResidentFixedWidth
@@ -87,6 +87,7 @@ def externalDeclarations : Array Name := #[
   `UInt32.shiftLeft,
   `UInt32.lor,
   `UInt32.mul,
+  `UInt64.ofBitVec,
   `UInt64.ofNat,
   `UInt64.toUInt8,
   `UInt64.toUInt16,
@@ -182,9 +183,10 @@ private def ofNat32Function (declaration : Name) (result : AbiKind)
     (mask : UInt32) : Function :=
   retypedI32Function declaration #[(valueParam, .tobject)] result [
     .localGet valueParam,
-    .call (.declaration ResidentNumeric.validateNaturalName),
+    .call (.declaration ResidentBigNumeric.validateNaturalName),
     .localGet valueParam,
-    .call (.declaration ResidentNumeric.naturalLowName),
+    .i32Const .uint32 0,
+    .call (.declaration ResidentBigNumeric.naturalLowName),
     .i32Const .uint32 mask,
     .i32And]
 
@@ -195,9 +197,10 @@ private def ofNatLT32Function (declaration : Name) (result : AbiKind)
   retypedI32Function declaration
     #[(valueParam, .tobject), (proofParam, .erased)] result [
       .localGet valueParam,
-      .call (.declaration ResidentNumeric.validateNaturalName),
+      .call (.declaration ResidentBigNumeric.validateNaturalName),
       .localGet valueParam,
-      .call (.declaration ResidentNumeric.naturalLowName),
+      .i32Const .uint32 0,
+      .call (.declaration ResidentBigNumeric.naturalLowName),
       .i32Const .uint32 mask,
       .i32And]
 
@@ -428,24 +431,32 @@ def uint32LorFunction : Function :=
 def uint32MulFunction : Function :=
   binaryI32Function `UInt32.mul .uint32 .i32Mul
 
-def uint64OfNatFunction : Function := {
-  name := externalName `UInt64.ofNat
+private def uint64OfNaturalFunction (declaration : Name) : Function := {
+  name := externalName declaration
   params := #[(valueParam, .tobject)]
   results := #[.uint64]
   locals := #[]
   body := [
     .localGet valueParam,
-    .call (.declaration ResidentNumeric.validateNaturalName),
+    .call (.declaration ResidentBigNumeric.validateNaturalName),
     .localGet valueParam,
-    .call (.declaration ResidentNumeric.naturalHighName),
+    .i32Const .uint32 0,
+    .call (.declaration ResidentBigNumeric.naturalHighName),
     .i64ExtendI32U .uint64,
     .i64Const .uint64 32,
     .i64Shl,
     .localGet valueParam,
-    .call (.declaration ResidentNumeric.naturalLowName),
+    .i32Const .uint32 0,
+    .call (.declaration ResidentBigNumeric.naturalLowName),
     .i64ExtendI32U .uint64,
     .i64Or,
     .ret] }
+
+def uint64OfBitVecFunction : Function :=
+  uint64OfNaturalFunction `UInt64.ofBitVec
+
+def uint64OfNatFunction : Function :=
+  uint64OfNaturalFunction `UInt64.ofNat
 
 private def narrowUInt64Function (declaration : Name) (result : AbiKind)
     (mask : UInt32) : Function :=
@@ -585,6 +596,7 @@ def functions : Array Function := #[
   uint32ShiftLeftFunction,
   uint32LorFunction,
   uint32MulFunction,
+  uint64OfBitVecFunction,
   uint64OfNatFunction,
   uint64ToUInt8Function,
   uint64ToUInt16Function,
@@ -667,7 +679,7 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
     some { params := #[.uint64], results := #[.uint64] }
   else if declaration == `UInt64.decEq || declaration == `UInt64.decLt then
     some { params := #[.uint64, .uint64], results := #[.uint8] }
-  else if declaration == `UInt64.ofNat then
+  else if declaration == `UInt64.ofBitVec || declaration == `UInt64.ofNat then
     some { params := #[.tobject], results := #[.uint64] }
   else if declaration == `UInt64.toUInt8 then
     some { params := #[.uint64], results := #[.uint8] }
@@ -710,15 +722,16 @@ private def internalizeSelected (module : Module) (declarations : Array Name)
   let needsFromNat := declarations.any fun declaration =>
     #[`UInt8.ofBitVec, `UInt8.ofNat, `UInt8.ofNatLT, `UInt16.ofNat,
       `UInt32.ofBitVec, `UInt32.ofNat, `UInt32.ofNatLT,
-      `UInt64.ofNat].contains declaration
+      `UInt64.ofBitVec, `UInt64.ofNat].contains declaration
   let needsToNat := declarations.any fun declaration =>
     #[`UInt8.toBitVec, `UInt8.toNat, `UInt16.toNat, `UInt32.toNat].contains declaration
-  let needsHigh := declarations.contains `UInt64.ofNat
+  let needsHigh := declarations.contains `UInt64.ofBitVec ||
+    declarations.contains `UInt64.ofNat
   let numericHelpers :=
     (if needsFromNat then
-      #[ResidentNumeric.validateNaturalName, ResidentNumeric.naturalLowName]
+      #[ResidentBigNumeric.validateNaturalName, ResidentBigNumeric.naturalLowName]
     else #[]) ++
-    (if needsHigh then #[ResidentNumeric.naturalHighName] else #[]) ++
+    (if needsHigh then #[ResidentBigNumeric.naturalHighName] else #[]) ++
     (if needsToNat then #[ResidentNumeric.makeNaturalName] else #[])
   if !numericHelpers.isEmpty then
     for name in numericHelpers do
@@ -812,7 +825,7 @@ private def usizeExternalImport (declaration : Name) : Import := {
     (ResidentUSize.expectedSignature? declaration).get! }
 
 def residentExampleModule : Except String Module := do
-  let numeric ← ResidentNumeric.residentExampleModule
+  let numeric ← ResidentBigNumeric.residentExampleModule
   let module : Module := {
     numeric with
     imports := numeric.imports ++ externalDeclarations.map externalImport ++
@@ -844,7 +857,7 @@ private def sourceUInt32OfNatCaller : Function := {
 /-- The same checked fixed-width implementation replaces a captured source
 definition as well as an external import. -/
 def sourceDefinitionExampleModule : Except String Module := do
-  let numeric ← ResidentNumeric.residentExampleModule
+  let numeric ← ResidentBigNumeric.residentExampleModule
   let module : Module := {
     numeric with
     functions := numeric.functions ++ #[
@@ -867,7 +880,7 @@ private def taggedUInt8ToNatExternalImport : Import := {
 the ordinary object-family `tobject` boundary. The same stricter resident
 helper is a valid implementation of both providers. -/
 def taggedUInt8ToNatExampleModule : Except String Module := do
-  let numeric ← ResidentNumeric.residentExampleModule
+  let numeric ← ResidentBigNumeric.residentExampleModule
   let module : Module := {
     numeric with imports := numeric.imports.push taggedUInt8ToNatExternalImport }
   internalizeAvailable module

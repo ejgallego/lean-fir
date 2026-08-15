@@ -33,7 +33,7 @@ inductive LinkError where
 private def u32 (value : Nat) : UInt32 := UInt32.ofNat value
 
 def externalDeclarations : Array Name := #[
-  `Nat.mul, `Nat.pow, `Nat.land, `Nat.div, `Nat.mod, `Nat.shiftLeft]
+  `Nat.mul, `Nat.pow, `Nat.land, `Nat.lor, `Nat.div, `Nat.mod, `Nat.shiftLeft]
 
 def externalName (declaration : Name) : Name :=
   ResidentNumeric.externalName declaration
@@ -88,6 +88,7 @@ private def mulPartLoop : FVarId := ⟨`natMulPartLoop⟩
 private def mulBitLoop : FVarId := ⟨`natMulBitLoop⟩
 private def landScanLoop : FVarId := ⟨`natLandScanLoop⟩
 private def landWriteLoop : FVarId := ⟨`natLandWriteLoop⟩
+private def lorWriteLoop : FVarId := ⟨`natLorWriteLoop⟩
 private def powPartLoop : FVarId := ⟨`natPowPartLoop⟩
 private def powBitLoop : FVarId := ⟨`natPowBitLoop⟩
 private def divPartLoop : FVarId := ⟨`natDivPartLoop⟩
@@ -495,6 +496,95 @@ def landFunction : Function := {
     .localSet lastLocal,
     .loop landScanLoop landScanBody] }
 
+/- `naturalLow` and `naturalHigh` deliberately assume a valid limb index for
+heap-backed values.  Unlike `Nat.land`, OR walks the larger operand, so each
+load must be guarded by that operand's actual limb count. -/
+private def lorParts : List Instruction := [
+  .localGet indexLocal,
+  .localGet leftCountLocal,
+  .i32LtU,
+  .ifElse
+    [.localGet leftParam,
+      .localGet indexLocal,
+      .call (.declaration ResidentBigNumeric.naturalLowName),
+      .localSet leftLowLocal]
+    [.i32Const .uint32 0, .localSet leftLowLocal],
+  .localGet indexLocal,
+  .localGet rightCountLocal,
+  .i32LtU,
+  .ifElse
+    [.localGet rightParam,
+      .localGet indexLocal,
+      .call (.declaration ResidentBigNumeric.naturalLowName),
+      .localSet rightLowLocal]
+    [.i32Const .uint32 0, .localSet rightLowLocal],
+  .localGet leftLowLocal,
+  .localGet rightLowLocal,
+  .i32Or,
+  .localSet lowLocal,
+  .localGet indexLocal,
+  .localGet leftCountLocal,
+  .i32LtU,
+  .ifElse
+    [.localGet leftParam,
+      .localGet indexLocal,
+      .call (.declaration ResidentBigNumeric.naturalHighName),
+      .localSet leftHighLocal]
+    [.i32Const .uint32 0, .localSet leftHighLocal],
+  .localGet indexLocal,
+  .localGet rightCountLocal,
+  .i32LtU,
+  .ifElse
+    [.localGet rightParam,
+      .localGet indexLocal,
+      .call (.declaration ResidentBigNumeric.naturalHighName),
+      .localSet rightHighLocal]
+    [.i32Const .uint32 0, .localSet rightHighLocal],
+  .localGet leftHighLocal,
+  .localGet rightHighLocal,
+  .i32Or,
+  .localSet highLocal]
+
+private def lorWriteBody : List Instruction := [
+  .localGet indexLocal,
+  .localGet lastLocal,
+  .i32Eq,
+  .ifElse ([.localGet rawLocal] ++ retypeRawResult) []] ++ lorParts ++
+  limbStore rawLocal indexLocal scaledLocal lowLocal 0 ++
+  limbStore rawLocal indexLocal scaledLocal highLocal 4 ++ [
+  .localGet indexLocal,
+  .i32Const .uint32 1,
+  .i32Add,
+  .localSet indexLocal,
+  .br lorWriteLoop]
+
+def lorFunction : Function := {
+  name := externalName `Nat.lor
+  params := #[(leftParam, .tobject), (rightParam, .tobject)]
+  results := #[.tobject]
+  locals := #[(leftCountLocal, .uint32), (rightCountLocal, .uint32),
+    (indexLocal, .uint32), (lastLocal, .uint32),
+    (leftLowLocal, .uint32), (leftHighLocal, .uint32),
+    (rightLowLocal, .uint32), (rightHighLocal, .uint32),
+    (lowLocal, .uint32), (highLocal, .uint32), (scaledLocal, .uint32),
+    (rawLocal, .uint32), (savedScratchLocal, .uint32),
+    (objectResultLocal, .tobject)]
+  body := validateInputs ++ naturalCount leftParam leftCountLocal ++
+    naturalCount rightParam rightCountLocal ++ [
+    .localGet leftCountLocal,
+    .localGet rightCountLocal,
+    .i32GtU,
+    .ifElse [.localGet leftCountLocal, .localSet lastLocal]
+      [.localGet rightCountLocal, .localSet lastLocal],
+    .localGet lastLocal,
+    .i32Const .uint32 1,
+    .i32Eq,
+    .ifElse ([.i32Const .uint32 0, .localSet indexLocal] ++ lorParts ++
+      makeNaturalResult lowLocal highLocal) [],
+    .i32Const .uint32 0,
+    .localSet indexLocal] ++ allocateNatural ++ [
+    .loop lorWriteLoop lorWriteBody] }
+
 private def computePartCount (value count : FVarId) : List Instruction := [
   .localGet count,
   .localGet count,
@@ -796,7 +886,7 @@ def modFunction : Function := {
     immediateMod checkedModFallback }
 
 def externalFunctions : Array Function := #[
-  mulFunction, powFunction, landFunction, divFunction, modFunction,
+  mulFunction, powFunction, landFunction, lorFunction, divFunction, modFunction,
   shiftLeftFunction]
 
 def internalFunctions : Array Function := #[
@@ -919,7 +1009,7 @@ def residentExampleModule : Except String Module := do
     |>.mapError fun error => s!"releases: {repr error}"
   let module := { module with
     imports := module.imports ++ externalDeclarations.map exampleImport ++
-      #[log2ExampleImport] }
+      #[exampleImport ResidentNatShift.declaration, log2ExampleImport] }
   let module ← internalizeAvailable module
     |>.mapError fun error => s!"Nat arithmetic: {repr error}"
   ResidentNatShift.internalizeAvailable module
@@ -932,7 +1022,8 @@ def manifest : Json := Json.mkObj [
   ("result", "tobject"),
   ("closureDispatch", Json.arr #[]),
   ("closureDescriptors", Json.arr #[]),
-  ("entries", Json.arr <| (externalDeclarations.map fun declaration =>
+  ("entries", Json.arr <| ((externalDeclarations.push ResidentNatShift.declaration).map
+      fun declaration =>
     Json.mkObj [
       ("entry", externalName declaration |>.toString),
       ("params", Json.arr #["tobject", "tobject"]),

@@ -60,6 +60,8 @@ private def leftSignLocal : FVarId := ⟨`leftSignValue⟩
 private def rightSignLocal : FVarId := ⟨`rightSignValue⟩
 private def lowLocal : FVarId := ⟨`lowValue⟩
 private def highLocal : FVarId := ⟨`highValue⟩
+private def naturalLocal : FVarId := ⟨`naturalValue⟩
+private def integerLocal : FVarId := ⟨`integerValue⟩
 private def carryLocal : FVarId := ⟨`carry⟩
 private def borrowLocal : FVarId := ⟨`borrow⟩
 private def compareLocal : FVarId := ⟨`compare⟩
@@ -101,7 +103,10 @@ def internalHelperNames : Array Name := #[
 
 def externalDeclarations : Array Name := #[
   `Int.ofNat,
+  `Int.negSucc,
+  `Int.neg,
   `Int.decLt,
+  `Int.decLe,
   `Int.natAbs,
   `Int.sub,
   `Nat.add,
@@ -946,6 +951,40 @@ def intSubFunction : Function := {
     .call (.declaration integerCombineName)] ++
     retypeRawResult .tobject }
 
+def intNegFunction : Function := {
+  name := externalName `Int.neg
+  params := #[(valueParam, .tobject)]
+  results := #[.tobject]
+  locals := objectResultLocals
+  body := [
+    .i32Const .tobject 1,
+    .localGet valueParam,
+    .i32Const .uint32 1,
+    .call (.declaration integerCombineName)] ++
+    retypeRawResult .tobject }
+
+/-- `Int.negSucc n` is `-(n + 1)`. Keeping this expression in terms of the
+resident Nat and Int helpers lets the arbitrary-precision layer replace the
+same calls without introducing a second constructor algorithm. -/
+def intNegSuccFunction : Function := {
+  name := externalName `Int.negSucc
+  params := #[(valueParam, .tobject)]
+  results := #[.tobject]
+  locals := objectResultLocals ++ #[(naturalLocal, .tobject), (integerLocal, .tobject)]
+  body := [
+    .localGet valueParam,
+    .i32Const .tobject 3,
+    .call (.declaration (externalName `Nat.add)),
+    .localSet naturalLocal,
+    .localGet naturalLocal,
+    .call (.declaration (externalName `Int.ofNat)),
+    .localSet integerLocal,
+    .i32Const .tobject 1,
+    .localGet integerLocal,
+    .i32Const .uint32 1,
+    .call (.declaration integerCombineName)] ++
+    retypeRawResult .tobject }
+
 inductive DecisionKind where
   | eq
   | lt
@@ -1026,9 +1065,44 @@ def intDecLtFunction : Function := {
     .localGet rawLocal] ++
     retypeRawResult .uint8 }
 
+def intDecLeFunction : Function := {
+  name := externalName `Int.decLe
+  params := #[(leftParam, .tobject), (rightParam, .tobject)]
+  results := #[.uint8]
+  locals := decisionResultLocals ++ integerOperandLocals
+  body := loadIntegerOperands ++ [
+    .localGet leftSignLocal,
+    .localGet rightSignLocal,
+    .i32Eq,
+    .ifElse
+      [.localGet leftLowLocal,
+        .localGet leftHighLocal,
+        .localGet rightLowLocal,
+        .localGet rightHighLocal,
+        .call (.declaration compareMagnitudeName),
+        .localSet compareLocal,
+        .localGet leftSignLocal,
+        .ifElse
+          [.localGet compareLocal,
+            .i32Const .uint32 1,
+            .i32Eq,
+            .i32Eqz,
+            .localSet rawLocal]
+          [.localGet compareLocal,
+            .i32Const .uint32 2,
+            .i32LtU,
+            .localSet rawLocal]]
+      [.localGet leftSignLocal,
+        .localSet rawLocal],
+    .localGet rawLocal] ++
+    retypeRawResult .uint8 }
+
 def externalFunctions : Array Function := #[
   intOfNatFunction,
+  intNegSuccFunction,
+  intNegFunction,
   intDecLtFunction,
+  intDecLeFunction,
   intNatAbsFunction,
   intSubFunction,
   natAddFunction,
@@ -1074,9 +1148,11 @@ private def rewriteFunction (function : Function) : Function :=
   { function with body := function.body.map rewriteInstruction }
 
 private def expectedSignature? (declaration : Name) : Option Signature :=
-  if declaration == `Int.ofNat || declaration == `Int.natAbs then
+  if declaration == `Int.ofNat || declaration == `Int.negSucc ||
+      declaration == `Int.neg || declaration == `Int.natAbs then
     some { params := #[.tobject], results := #[.tobject] }
-  else if declaration == `Int.decLt || declaration == `Nat.decEq ||
+  else if declaration == `Int.decLt || declaration == `Int.decLe ||
+      declaration == `Nat.decEq ||
       declaration == `Nat.decLt || declaration == `Nat.decLe then
     some { params := #[.tobject, .tobject], results := #[.uint8] }
   else if declaration == `Int.sub || declaration == `Int.add ||
@@ -1176,11 +1252,13 @@ private def externalTypes? (declaration : Name) : Option ExternalTypes :=
   let nat := LCNF.ImpureType.tobject
   let int := LCNF.ImpureType.tobject
   let bool := LCNF.ImpureType.uint8
-  if declaration == `Int.ofNat then
+  if declaration == `Int.ofNat || declaration == `Int.negSucc then
     some { params := #[nat], result := int }
+  else if declaration == `Int.neg then
+    some { params := #[int], result := int }
   else if declaration == `Int.natAbs then
     some { params := #[int], result := nat }
-  else if declaration == `Int.decLt then
+  else if declaration == `Int.decLt || declaration == `Int.decLe then
     some { params := #[int, int], result := bool }
   else if declaration == `Int.add || declaration == `Int.sub then
     some { params := #[int, int], result := int }

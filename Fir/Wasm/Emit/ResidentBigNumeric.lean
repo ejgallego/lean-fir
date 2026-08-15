@@ -76,6 +76,8 @@ private def rightSignLocal : FVarId := ⟨`rightSign⟩
 private def resultSignLocal : FVarId := ⟨`resultSign⟩
 private def minuendLocal : FVarId := ⟨`minuend⟩
 private def subtrahendLocal : FVarId := ⟨`subtrahend⟩
+private def naturalLocal : FVarId := ⟨`naturalValue⟩
+private def integerLocal : FVarId := ⟨`integerValue⟩
 
 private def compareAtLoop : FVarId := ⟨`compareAtLoop⟩
 private def copyFromLoop : FVarId := ⟨`copyFromLoop⟩
@@ -1608,6 +1610,37 @@ def intSubFunction : Function := {
     .call (.declaration integerCombineName)] ++
     retypeRawResult .tobject objectResultLocal }
 
+def intNegFunction : Function := {
+  name := externalName `Int.neg
+  params := #[(valueParam, .tobject)]
+  results := #[.tobject]
+  locals := objectResultLocals
+  body := [
+    .i32Const .tobject 1,
+    .localGet valueParam,
+    .i32Const .uint32 1,
+    .call (.declaration integerCombineName)] ++
+    retypeRawResult .tobject objectResultLocal }
+
+def intNegSuccFunction : Function := {
+  name := externalName `Int.negSucc
+  params := #[(valueParam, .tobject)]
+  results := #[.tobject]
+  locals := objectResultLocals ++ #[(naturalLocal, .tobject), (integerLocal, .tobject)]
+  body := [
+    .localGet valueParam,
+    .i32Const .tobject 3,
+    .call (.declaration (externalName `Nat.add)),
+    .localSet naturalLocal,
+    .localGet naturalLocal,
+    .call (.declaration (externalName `Int.ofNat)),
+    .localSet integerLocal,
+    .i32Const .tobject 1,
+    .localGet integerLocal,
+    .i32Const .uint32 1,
+    .call (.declaration integerCombineName)] ++
+    retypeRawResult .tobject objectResultLocal }
+
 inductive DecisionKind where
   | eq
   | lt
@@ -1707,9 +1740,57 @@ def intDecLtFunction : Function := {
     .localGet rawLocal] ++
     retypeRawResult .uint8 decisionResultLocal }
 
+def intDecLeFunction : Function := {
+  name := externalName `Int.decLe
+  params := #[(leftParam, .tobject), (rightParam, .tobject)]
+  results := #[.uint8]
+  locals := decisionResultLocals ++ #[
+    (leftSignLocal, .uint32),
+    (rightSignLocal, .uint32),
+    (compareLocal, .uint32)]
+  body := [
+    .localGet leftParam,
+    .call (.declaration validateIntegerName),
+    .localGet rightParam,
+    .call (.declaration validateIntegerName),
+    .localGet leftParam,
+    .call (.declaration integerSignName),
+    .localSet leftSignLocal,
+    .localGet rightParam,
+    .call (.declaration integerSignName),
+    .localSet rightSignLocal,
+    .localGet leftSignLocal,
+    .localGet rightSignLocal,
+    .i32Eq,
+    .ifElse
+      [.localGet leftParam,
+        .i32Const .uint32 1,
+        .localGet rightParam,
+        .i32Const .uint32 1,
+        .call (.declaration compareName),
+        .localSet compareLocal,
+        .localGet leftSignLocal,
+        .ifElse
+          [.localGet compareLocal,
+            .i32Const .uint32 1,
+            .i32Eq,
+            .i32Eqz,
+            .localSet rawLocal]
+          [.localGet compareLocal,
+            .i32Const .uint32 2,
+            .i32LtU,
+            .localSet rawLocal]]
+      [.localGet leftSignLocal,
+        .localSet rawLocal],
+    .localGet rawLocal] ++
+    retypeRawResult .uint8 decisionResultLocal }
+
 def externalFunctions : Array Function := #[
   intOfNatFunction,
+  intNegSuccFunction,
+  intNegFunction,
   intDecLtFunction,
+  intDecLeFunction,
   intNatAbsFunction,
   intSubFunction,
   natAddFunction,

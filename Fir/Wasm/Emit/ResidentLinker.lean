@@ -672,7 +672,9 @@ private def emptyPolicyProbeModule : Module := {
 #guard (closedApplicationPolicy #[`entry]).publicExports ==
   some (#[`entry] ++ allocatorExports)
 
-#guard closedApplicationRetainedExternalNames.contains "Float.ofScientific"
+#guard !closedApplicationRetainedExternalNames.contains "Float.ofScientific"
+
+#guard ExternalRuntime.sourceDeclarations.contains `Float.ofScientific
 
 #guard (closedApplicationFrontierPolicy #[`entry]).allowedExternalImports ==
   some ExternalRuntime.mathDeclarations

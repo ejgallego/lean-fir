@@ -13,8 +13,10 @@ open Lean
 This generation helper internalizes the standard floating operations whose
 Lean semantics map exactly to the core Wasm scalar surface. It deliberately
 assigns Lean extern semantics here, after the shared symbolic Wasm instruction
-layer has landed independently. Decimal construction and transcendental
-operations remain at the checked external-runtime frontier.
+layer has landed independently. The exact scalar dependencies of
+source-compiled decimal construction live here; `ResidentFloatSource` captures
+Lean's own construction algorithm. Transcendental operations remain at the
+checked external-runtime frontier.
 -/
 
 inductive LinkError where
@@ -299,6 +301,15 @@ def uint64ToFloatFunction : Function := {
   locals := #[]
   body := [.localGet valueParam, .f64ConvertI64U, .ret] }
 
+private def bitsToFloatFunction (declaration : Name) : Function := {
+  name := externalName declaration
+  params := #[(valueParam, .uint64)]
+  results := #[.float]
+  locals := #[]
+  body := [.localGet valueParam, .f64ReinterpretI64 .float, .ret] }
+
+def ofModelFunction : Function := bitsToFloatFunction `Float.ofModel
+def ofBitsFunction : Function := bitsToFloatFunction `Float.ofBits
 def addFunction : Function := binaryFloatFunction `Float.add .f64Add
 def subFunction : Function := binaryFloatFunction `Float.sub .f64Sub
 def divFunction : Function := binaryFloatFunction `Float.div .f64Div
@@ -369,6 +380,8 @@ def uint64ToNatFunction : Function := {
 
 def externalFunctions : Array Function := #[
   uint64ToFloatFunction,
+  ofModelFunction,
+  ofBitsFunction,
   addFunction,
   subFunction,
   divFunction,
@@ -401,7 +414,8 @@ private partial def rewriteExternalInstruction (declarations : Array Name) :
   | instruction => instruction
 
 private def expectedExternalSignature? (declaration : Name) : Option Signature :=
-  if declaration == `UInt64.toFloat then
+  if declaration == `UInt64.toFloat || declaration == `Float.ofModel ||
+      declaration == `Float.ofBits then
     some { params := #[.uint64], results := #[.float] }
   else if declaration == `Float.add || declaration == `Float.sub ||
       declaration == `Float.div || declaration == `Float.mul then
@@ -610,6 +624,10 @@ private partial def instructionContains (target : Instruction) : Instruction →
   | instruction => instruction == target
 
 #guard uint64ToFloatFunction.body.any (instructionContains .f64ConvertI64U)
+#guard ofModelFunction.body.any
+  (instructionContains (.f64ReinterpretI64 .float))
+#guard ofBitsFunction.body.any
+  (instructionContains (.f64ReinterpretI64 .float))
 #guard ExternalRuntime.coreScalarDeclarations.all externalDeclarations.contains
 #guard addFunction.body.any (instructionContains .f64Add)
 #guard negFunction.body.any (instructionContains .f64Neg)
