@@ -50,6 +50,9 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `e52ad4b3` (functional head `bda81d3a`). W7's direct Float/conversion
   consumer is accepted through tracked handoff `c3e0ba1a` (functional head
   `dc3d70af`); the remaining compiled math frontier is recorded explicitly.
+  W7's faithful source-compiled `Float.ofNat` and `Float.ofScientific` closure
+  is accepted through tracked handoff `da09b857` (functional head `ffbd7139`),
+  including the isolated per-source-unit capture contract at `d1786ba4`.
   The Illuminate functional generation head is `4b84f35b`; the package itself
   remains local-only until its consumer authorizes publication.
 - Landing order:
@@ -84,6 +87,11 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
      W7's direct Float/conversion consumer follows at `c3e0ba1a`; it changes
      no helper signature or proof contract, so W6 refinement remains a
      separate queue item.
+  7. W7's isolated source-unit capture API lands first at `d1786ba4`, followed
+     by the source-compiled Float closure, deterministic artifact gate, and
+     strict numeric-checkpoint selection through tracked handoff `da09b857`.
+     W6 refinement of the additive resident Nat/Int operations remains
+     independent; concrete layouts and helper ABI kinds are unchanged.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -97,6 +105,38 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
+
+## Latest completed integration lease
+
+- Milestone: `W7-SOURCE-FLOAT-CONSTRUCTION`.
+- Integration owner: `wasm-gen`, accepting its own clean tracked handoff
+  `da09b857` on `main` at `8952b76c`; the functional head is `ffbd7139`.
+- Change: FIR now compiles Lean's real `Float.ofNat` and
+  `Float.ofScientific` definitions from final LCNF and closes their full
+  arbitrary-precision Nat/Int/BitVec model with resident helpers. Generic
+  `Nat.shiftRight`, `Nat.lor`, fixed-width Natural conversion, `Int.negSucc`,
+  `Int.neg`, and `Int.decLe` cover the exact reachable closure. Only the six
+  genuine libm operations remain at the compiled math frontier.
+- Shared contract: isolated commit `d1786ba4` adds
+  `Source.compileEntryIndividuallyInternalized`. Imported roots compile in the
+  same ordinary source-unit shape as upstream; a caller-owned specialization
+  is regenerated with its generic companions through final capture. Existing
+  capture APIs, semantic ABI, concrete layouts, arena ownership, and W6 proof
+  contracts are unchanged.
+- Acceptance: Lean Beam reports zero diagnostics on the final repair. The
+  focused 115-job Lake cone, `git diff --check`, complete `make check` (704
+  source cases, nine direct machines, 2,121/2,121 comparisons), all 3,148
+  Talos jobs, and the complete deterministic resident/prettyM artifact gate
+  pass. No bug card was needed.
+- Artifact: the zero-import, module-memory source Float fixture is 71,419
+  bytes at SHA-256
+  `a7403b5326ad2ced4bb6524e1fd1dd718d987ab32d99183f98fee97939846d9d`.
+  It captures 144 declarations, retains 113 source functions and 333 resident
+  helpers, and checks fast/slow decimal paths, subnormals, overflow, malformed
+  layouts, and arbitrary Naturals bit-exactly against a native Lean oracle.
+- Result: local `main` advances through `da09b857`. The acceptance artifact is
+  not an externally published package; interested consumers should regenerate
+  their closed application to retire the version-1 C conversion frontier.
 
 ## Latest completed integration lease
 
