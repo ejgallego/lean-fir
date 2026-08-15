@@ -20,6 +20,22 @@ function naturalValue(memory, physical) {
   return view.getBigUint64(word + 32, true);
 }
 
+function arbitraryNatural(exports, value) {
+  const natural = BigInt(value);
+  const limbs = [];
+  let remaining = natural;
+  do {
+    limbs.push(BigInt.asUintN(64, remaining));
+    remaining >>= 64n;
+  } while (remaining !== 0n);
+  const address = exports.fir_big_numeric_allocate(5, 2, 0, limbs.length) >>> 0;
+  const view = new DataView(exports.memory.buffer);
+  limbs.forEach((limb, index) => {
+    view.setBigUint64(address + 32 + 8 * index, limb, true);
+  });
+  return address;
+}
+
 /** Exercise the generic unsigned fixed-width extern families. */
 export async function checkResidentFixedWidth(bytes) {
   const module = await WebAssembly.compile(bytes);
@@ -27,6 +43,8 @@ export async function checkResidentFixedWidth(bytes) {
     "resident fixed-width module retained an import");
   const { exports } = await WebAssembly.instantiate(module, {});
   for (const name of [
+    "fir_ext_UInt8_ofBitVec",
+    "fir_ext_UInt8_toBitVec",
     "fir_ext_UInt8_ofNat",
     "fir_ext_UInt8_ofNatLT",
     "fir_ext_UInt8_toNat",
@@ -50,6 +68,7 @@ export async function checkResidentFixedWidth(bytes) {
     "fir_ext_UInt16_shiftLeft",
     "fir_ext_UInt16_lor",
     "fir_ext_UInt32_ofNat",
+    "fir_ext_UInt32_ofBitVec",
     "fir_ext_UInt32_ofNatLT",
     "fir_ext_UInt32_log2Clz",
     "fir_ext_UInt32_toNat",
@@ -67,6 +86,7 @@ export async function checkResidentFixedWidth(bytes) {
     "fir_ext_UInt32_shiftLeft",
     "fir_ext_UInt32_lor",
     "fir_ext_UInt32_mul",
+    "fir_ext_UInt64_ofBitVec",
     "fir_ext_UInt64_ofNat",
     "fir_ext_UInt64_toUInt8",
     "fir_ext_UInt64_toUInt16",
@@ -230,6 +250,25 @@ export async function checkResidentFixedWidth(bytes) {
   const wideNatural = exports.fir_numeric_make_natural(0x89abcdef, 0x01234567);
   const wide = 0x0123456789abcdefn;
   equal(exports.fir_ext_UInt64_ofNat(wideNatural), wide, "UInt64.ofNat");
+  equal(exports.fir_ext_UInt64_ofBitVec(wideNatural), wide,
+    "UInt64.ofBitVec");
+  const arbitrary = (1n << 193n) + (1n << 129n) +
+    0x0123456789abcdefn;
+  const arbitraryInput = arbitraryNatural(exports, arbitrary);
+  equal(exports.fir_ext_UInt8_ofBitVec(arbitraryInput) >>> 0, 0xef,
+    "UInt8.ofBitVec arbitrary-precision modulo");
+  equal(exports.fir_ext_UInt8_ofNat(arbitraryInput) >>> 0, 0xef,
+    "UInt8.ofNat arbitrary-precision modulo");
+  equal(exports.fir_ext_UInt16_ofNat(arbitraryInput) >>> 0, 0xcdef,
+    "UInt16.ofNat arbitrary-precision modulo");
+  equal(exports.fir_ext_UInt32_ofNat(arbitraryInput) >>> 0, 0x89abcdef,
+    "UInt32.ofNat arbitrary-precision modulo");
+  equal(exports.fir_ext_UInt32_ofBitVec(arbitraryInput) >>> 0, 0x89abcdef,
+    "UInt32.ofBitVec arbitrary-precision modulo");
+  equal(exports.fir_ext_UInt64_ofNat(arbitraryInput), wide,
+    "UInt64.ofNat arbitrary-precision modulo");
+  equal(exports.fir_ext_UInt64_ofBitVec(arbitraryInput), wide,
+    "UInt64.ofBitVec arbitrary-precision physical input");
   equal(exports.fir_ext_UInt64_toUInt8(wide) >>> 0, 0xef,
     "UInt64.toUInt8");
   equal(exports.fir_ext_UInt64_toUInt16(wide) >>> 0, 0xcdef,

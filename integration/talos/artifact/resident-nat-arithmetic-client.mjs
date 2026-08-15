@@ -61,10 +61,12 @@ export async function checkResidentNatArithmetic({ bytes, manifest }) {
   const mul = exported(instance, "fir_ext_Nat_mul");
   const pow = exported(instance, "fir_ext_Nat_pow");
   const land = exported(instance, "fir_ext_Nat_land");
+  const lor = exported(instance, "fir_ext_Nat_lor");
   const div = exported(instance, "fir_ext_Nat_div");
   const mod = exported(instance, "fir_ext_Nat_mod");
   const frontier = exported(instance, "fir_heap_frontier");
   const shiftLeft = exported(instance, "fir_ext_Nat_shiftLeft");
+  const shiftRight = exported(instance, "fir_ext_Nat_shiftRight");
   const log2 = exported(instance, "fir_ext_Nat_log2");
   const apply = (operation, left, right) => naturalValue(host,
     operation(naturalInput(host, left), naturalInput(host, right)));
@@ -88,6 +90,15 @@ export async function checkResidentNatArithmetic({ bytes, manifest }) {
   const maskRight = (1n << 384n) | (1n << 192n) | 0x1234_5678n;
   assert.equal(apply(land, maskLeft, maskRight), maskLeft & maskRight);
   assert.equal(apply(land, 1n << 256n, (1n << 256n) - 1n), 0n);
+  for (const [left, right] of [
+    [0n, 0n],
+    [1n, 1n << 384n],
+    [(1n << 385n) - 1n, (1n << 192n) | 0x1234_5678n],
+    [(1n << 129n) + 3n, (1n << 521n) + (1n << 65n)],
+  ]) {
+    assert.equal(apply(lor, left, right), left | right,
+      `Nat.lor(${left}, ${right})`);
+  }
 
   assert.equal(apply(div, 5n, 0n), 0n);
   assert.equal(apply(div, 0n, 5n), 0n);
@@ -138,6 +149,31 @@ export async function checkResidentNatArithmetic({ bytes, manifest }) {
     assert.equal(apply(shiftLeft, value, count), value << count,
       `Nat.shiftLeft(${value}, ${count})`);
   }
+
+  const shiftValue = (1n << 521n) + (1n << 320n) +
+    (1n << 129n) + 0x1234_5678_9abcn;
+  for (const [value, count] of [
+    [0n, 65n],
+    [1n, 0n],
+    [1n, 64n],
+    [(1n << 130n) + 3n, 67n],
+    [shiftValue, 0n],
+    [shiftValue, 1n],
+    [shiftValue, 32n],
+    [shiftValue, 63n],
+    [shiftValue, 64n],
+    [shiftValue, 65n],
+    [shiftValue, 257n],
+    [shiftValue, 600n],
+    [shiftValue, 1n << 64n],
+  ]) {
+    assert.equal(apply(shiftRight, value, count), value >> count,
+      `Nat.shiftRight(${value}, ${count})`);
+  }
+  expectTrap(() => shiftRight(0, naturalInput(host, 1n)),
+    "Nat.shiftRight malformed value");
+  expectTrap(() => shiftRight(naturalInput(host, 1n), 0),
+    "Nat.shiftRight malformed count");
 
   for (const [value, expected] of [
     [0n, 0n],

@@ -10,3 +10,8 @@ path = "../../.."
 [[lean_exe]]
 name = "fir-wasm-artifact"
 root = "FirWasmArtifactMain"
+
+[[lean_exe]]
+name = "fir-wasm-float-source"
+root = "FirWasmFloatSourceMain"
+supportInterpreter = true

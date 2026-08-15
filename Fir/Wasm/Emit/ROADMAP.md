@@ -212,12 +212,22 @@ linker emits only helpers actually referenced by the source closure.
 
 `Float.round` deliberately remains a floor/ceiling synthesis. Lean rounds
 halves away from zero and preserves signed zero, whereas Wasm `nearest` uses
-ties-to-even. Decimal construction (`Float.ofNat`, `Float.ofScientific`) and
-the six transcendental operations remain in the checked standard math runtime;
-they are not approximated with scalar instructions. A zero-import 5,673-byte
-executable fixture covers all 15 resident helpers, exact NaN sign/payload
-behavior for negate/absolute value, signed zero, saturation, infinities, half
-boundaries, scratch restoration, and immediate/heap `UInt64.toNat` results.
+ties-to-even. The six transcendental operations remain in the checked standard
+math runtime; they are not approximated with scalar instructions. A zero-import
+fixture covers all resident scalar helpers, exact NaN sign/payload behavior for
+negate/absolute value, signed zero, saturation, infinities, half boundaries,
+scratch restoration, and immediate/heap `UInt64.toNat` results.
+
+`Float.ofNat` and `Float.ofScientific` now follow a separate, faithful source
+path. FIR compiles Lean's exposed definitions as ordinary LCNF source units,
+regenerating caller-owned specializations with their generic companions, then
+closes the resulting arbitrary-precision Nat/Int/BitVec model with resident
+helpers. The deterministic 71,419-byte acceptance artifact has module-owned
+memory, zero imports, bit-exact integer-lane facades, and native-oracle cases
+covering the fast boundary, slow model path, subnormals, overflow, and Naturals
+beyond 64 bits. This work also removed the one-limb restrictions from
+`Nat.shiftRight` and fixed-width `ofNat` conversions; the C conversion exports
+remain only as a version-1 compatibility surface for packages not yet rebuilt.
 
 ### G2. Separate production and diagnostic adapter costs
 

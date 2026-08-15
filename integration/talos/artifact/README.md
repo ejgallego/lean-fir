@@ -128,6 +128,16 @@ node run-resident-numeric.mjs _build/resident-numeric.wasm
 lake exe fir-wasm-artifact resident-big-numeric \
   _build/resident-big-numeric.wasm
 node run-resident-big-numeric.mjs _build/resident-big-numeric.wasm
+lake exe fir-wasm-artifact resident-nat-arithmetic \
+  _build/resident-nat-arithmetic.wasm
+node run-resident-nat-arithmetic.mjs _build/resident-nat-arithmetic.wasm
+lake exe fir-wasm-artifact resident-fixed-width \
+  _build/resident-fixed-width.wasm
+node run-resident-fixed-width.mjs _build/resident-fixed-width.wasm
+lake exe fir-wasm-artifact resident-float _build/resident-float.wasm
+node run-resident-float.mjs _build/resident-float.wasm
+lake exe fir-wasm-float-source _build/source-float-conversions.wasm
+node run-source-float.mjs _build/source-float-conversions.wasm
 lake exe fir-wasm-artifact resident-string \
   _build/resident-string.wasm
 node run-resident-string.mjs _build/resident-string.wasm
@@ -136,6 +146,15 @@ lake exe fir-wasm-artifact resident-fallbacks \
   _build/resident-fallbacks.wasm
 node run-resident-fallbacks.mjs _build/resident-fallbacks.wasm
 ```
+
+The source Float artifact compiles upstream `Float.ofNat` and
+`Float.ofScientific` rather than installing declaration-named conversion
+shims. Its two ordinary exports are accompanied by integer-lane bit-exact
+facades and the four allocator exports. The module owns its memory and has zero
+imports. The generator also writes the captured declaration/helper inventory
+and a native Lean bit oracle; `check.sh` regenerates all five products twice and
+compares them byte-for-byte before running fast/slow, rounding, subnormal,
+overflow, arbitrary-Nat, and malformed-layout cases in V8.
 
 W7 also emits the first standalone Wasm-resident runtime slice. Its module
 defines and exports one-page memory, has no imports, and exports the raw

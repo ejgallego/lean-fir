@@ -115,7 +115,10 @@ export async function checkResidentBigNumeric({ bytes, manifest }) {
     "arbitrary-precision numeric fixture must be standalone or a linked prettyM checkpoint");
 
   const intOfNat = exported(instance, "fir_big_ext_Int_ofNat");
+  const intNegSucc = exported(instance, "fir_big_ext_Int_negSucc");
+  const intNeg = exported(instance, "fir_big_ext_Int_neg");
   const intDecLt = exported(instance, "fir_big_ext_Int_decLt");
+  const intDecLe = exported(instance, "fir_big_ext_Int_decLe");
   const intNatAbs = exported(instance, "fir_big_ext_Int_natAbs");
   const intSub = exported(instance, "fir_big_ext_Int_sub");
   const intAdd = exported(instance, "fir_big_ext_Int_add");
@@ -129,6 +132,36 @@ export async function checkResidentBigNumeric({ bytes, manifest }) {
   const n384 = 1n << 384n;
   const a = n256 + (1n << 129n) + 0x123456789abcdefn;
   const b = (1n << 192n) + (1n << 64n) + 0xfedcba987654321n;
+
+  for (const value of [0n, 1n, 52n, (1n << 130n) + 7n]) {
+    assert.equal(integerValue(host, intNegSucc(naturalInput(host, value))),
+      -(value + 1n), `Int.negSucc(${value})`);
+  }
+  for (const value of [
+    0n,
+    1n,
+    -1n,
+    52n,
+    -52n,
+    (1n << 130n) + 7n,
+    -((1n << 130n) + 7n),
+  ]) {
+    assert.equal(integerValue(host, intNeg(integerInput(host, value))), -value,
+      `Int.neg(${value})`);
+  }
+  for (const [left, right] of [
+    [0n, 0n],
+    [-1n, 0n],
+    [1n, -1n],
+    [1n, 0n],
+    [-((1n << 130n) + 7n), -(1n << 129n)],
+    [-(1n << 129n), -((1n << 130n) + 7n)],
+    [(1n << 129n), (1n << 130n) + 7n],
+    [(1n << 130n) + 7n, (1n << 130n) + 7n],
+  ]) {
+    assert.equal(intDecLe(integerInput(host, left), integerInput(host, right)),
+      left <= right ? 1 : 0, `Int.decLe(${left}, ${right})`);
+  }
 
   const maxImmediate = 2147483647n;
   checkNaturalAddition(host, natAdd, {

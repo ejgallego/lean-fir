@@ -37,6 +37,18 @@ lake exe fir-wasm-artifact resident-fixed-width \
 node run-resident-fixed-width.mjs _build/resident-fixed-width.wasm
 lake exe fir-wasm-artifact resident-float _build/resident-float.wasm
 node run-resident-float.mjs _build/resident-float.wasm
+lake exe fir-wasm-float-source _build/source-float-conversions.wasm
+node run-source-float.mjs _build/source-float-conversions.wasm
+for suffix in wasm wasm.json wasm.lcnf wasm.inventory.json wasm.oracle.json; do
+  cp "_build/source-float-conversions.$suffix" \
+    "_build/source-float-conversions-first.$suffix"
+done
+lake exe fir-wasm-float-source _build/source-float-conversions.wasm
+node run-source-float.mjs _build/source-float-conversions.wasm
+for suffix in wasm wasm.json wasm.lcnf wasm.inventory.json wasm.oracle.json; do
+  cmp "_build/source-float-conversions-first.$suffix" \
+    "_build/source-float-conversions.$suffix"
+done
 lake exe fir-wasm-artifact resident-constructors \
   _build/resident-constructors.wasm
 node run-resident-constructors.mjs _build/resident-constructors.wasm
