@@ -1670,15 +1670,28 @@ external call by such a terminating resident helper while reusing the ordinary
 source step and concrete `StateRelated` successor.  None of these lemmas stores
 a target path, future execution, or translation certificate.
 
-For `Nat.mod`, W6 now proves that the public generated helper adapts to the
-shared immediate-pair dispatcher.  Both zero-divisor and nonzero immediate
-paths terminate at the actual defined-function call boundary.  The nonzero
-path composes payload decoding, unsigned remainder, the immediate
-`makeNatural` contract, scratch-memory restoration, and checked scratch-local
-writes; the arbitrary-precision fallback stays opaque and unreachable.  The
-remaining helper work is to connect the installed `makeNatural` body to that
-immediate contract without an assumed target shape and to prove the analogous
-`Nat.add`/`naturalSum` defined-function chain, including promoted sums.
+For `Nat.mod`, W6 proves that the public generated helper adapts to the shared
+immediate-pair dispatcher.  Both zero-divisor and nonzero immediate paths
+terminate at the actual defined-function call boundary.  The nonzero path
+composes payload decoding, unsigned remainder, the actual adapted
+`makeNatural` immediate body, scratch-memory restoration, and checked
+scratch-local writes; the arbitrary-precision fallback stays opaque and
+unreachable.
+
+The matching bounded `Nat.add` chain is now closed too.  A generic unsigned
+64-bit sum theorem proves low-word addition, carry propagation, both high-word
+overflow guards, constructor-call composition, exact store threading, and the
+outer return convention independently of whether the result is a Nat or Int.
+The `naturalSum` specialization derives the no-carry facts for a mathematical
+sum that remains in the immediate range and obtains both its own target body
+and the nested `makeNatural` body from successful FIR-to-Talos adaptation.
+The public `Nat.add` theorem then composes the common pair dispatcher, payload
+decoders, actual adapted `naturalSum` call, and shared scratch retyping path.
+It returns the canonical tagged mathematical sum with unchanged store; neither
+the checked arbitrary-precision arm nor the adapter terminal suffix executes.
+The next resident-helper proof slices are promoted/heap-backed sums and the
+operation-specific `StateRelated` successor needed to instantiate the generic
+resident replacement theorem at compiler admission.
 
 Unchecked typed Array helpers use a separate proof-indexed admission boundary.
 A live `ResidentArrayObjectRel` already supplies a checked header, exact
