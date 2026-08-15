@@ -72,7 +72,9 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
      driver then lands independently at `4aa78f93`. W7-1's immediate-Nat and
      catalog stack is accepted afterward through `04003bd6`; its executable
      helpers are generation-ready while W6 refinements remain separately
-     queued in `W7-W6-20260814-007` and `W7-W6-20260814-008`.
+     queued in `W7-W6-20260814-007` and `W7-W6-20260814-008`. The complete core
+     scalar Wasm vocabulary is accepted afterward at `43ab6619`;
+     resident-helper consumers remain separate W7 commits.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -88,6 +90,29 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   removal, or branch deletion is implied by this lease.
 
 ## Latest completed integration lease
+
+- Milestone: `WASM-CORE-SCALAR-SURFACE`.
+- Integration owner: `wasm-gen`, publishing the isolated shared contract from
+  `integration/wasm-core-scalar-surface` at `43ab6619`, after queue commit
+  `8484c0be`.
+- Change: completes FIR's typed core scalar instruction vocabulary, binary
+  encoding, validation, and Talos adaptation for the i32/i64 and f32/f64
+  arithmetic, comparison, bit, conversion, and scalar-memory families. The
+  executable fixture exports and invokes every one of the 163 scalar cases in
+  a real JavaScript engine; it is a semantic gate rather than a byte-only
+  encoder check.
+- Contracts: the symbolic Wasm surface advances atomically. Table/reference
+  calls, GC, exceptions, SIMD, atomics, and bulk memory remain explicitly
+  separate Wasm subsystems. The semantic ABI, concrete runtime layouts,
+  ownership rules, and resident-helper signatures are unchanged.
+- Acceptance: Lean Beam sync/save reports zero diagnostics for every edited
+  Lean module; `git diff --check`, complete `make check`, the 163-case Node
+  scalar gate, all 3,154 Talos jobs, and the complete resident/prettyM artifact
+  gate pass. No W6 proof adaptation or bug card was required.
+- Result: W7 rebases before replacing hand-synthesized scalar loops with the
+  released instructions. W6 may rebase without a proof or runtime change.
+
+## Previous completed integration lease
 
 - Milestone: `W7-IMMEDIATE-NAT-DISPATCH`.
 - Integration owner: `wasm-gen`, accepting its own clean tracked handoff
@@ -5032,7 +5057,7 @@ validation work continues; their historical handoff text remains unchanged.
 
 | ID | Producer | Consumers | Status | Standalone commit | Effect |
 |---|---|---|---|---|---|
-| `WASM-CORE-SCALAR-SURFACE` | integration | W6, W7, validation, binary/Talos adapters | active | isolated contract pending on `integration/wasm-core-scalar-surface` | Completes FIR's typed scalar core vocabulary rather than synthesizing standard machine operations in resident helpers: all wasm32/wasm64 integer arithmetic, comparison, bitwise, shift/rotate/count operations; the f32/f64 arithmetic, unary, comparison, constant, and scalar-memory families; all scalar integer memory widths; and the core numeric conversion, sign-extension, saturating-conversion, and reinterpretation families. The binary encoder, symbolic validator, Talos adapter, and executable opcode fixtures advance atomically. Table/reference calls, GC, exceptions, SIMD, atomics, and bulk-memory remain separately modelled subsystems, not silently claimed by this scalar contract. W6 and W7 rebase after the standalone contract lands; resident-helper loop removal follows in separate consumer commits. |
+| `WASM-CORE-SCALAR-SURFACE` | integration | W6, W7, validation, binary/Talos adapters | released | isolated contract `43ab6619`; queue `8484c0be` | Completes FIR's typed scalar core vocabulary rather than synthesizing standard machine operations in resident helpers: all wasm32/wasm64 integer arithmetic, comparison, bitwise, shift/rotate/count operations; the f32/f64 arithmetic, unary, comparison, constant, and scalar-memory families; all scalar integer memory widths; and the core numeric conversion, sign-extension, saturating-conversion, and reinterpretation families. The binary encoder, symbolic validator, Talos adapter, and executable 163-case opcode fixture advance atomically. Table/reference calls, GC, exceptions, SIMD, atomics, and bulk-memory remain separately modelled subsystems, not silently claimed by this scalar contract. W7 rebases before resident-helper loop removal in separate consumer commits; W6 requires no proof adaptation. |
 | `WASM-SETTAG-UINT32-ADMISSION` | integration/W6 proof | W6, W7, validation | released | isolated contract `982ed402`; proof consumer `e8def3a8`; mailbox `7f7e51fa`; bug card `FIR-BUG-wasm-none-settag-uint32-admission` fixed | Requires every production-accepted source `.setTag` value to satisfy `tag < UInt32.size`, matching the unbounded source `Nat` to the concrete wasm32 header instead of silently wrapping. The first excluded value has a fail-closed `supportedProgram`/`lowerSupported` regression. W6 now derives the exact compiler local, range, live-constructor shape, and semantic update from validation plus one successful source step. W7 and validation rebase without generated-code, ABI, runtime, layout, helper-signature, or artifact adaptation. |
 | `WASM-STRUCTURED-VALIDATION-TOTALITY` | W6/integration | W6, W7, validation | released | isolated contract `72856600`; proof consumer `42fb2d5d`; mailbox `c07eaf4b` | Replaces opaque partial `supportedCodeWithJoins` recursion with a terminating traversal and an explicit alternative-list helper. The helper is proved extensionally equal to the former `Array.all` check, preserving production acceptance while exposing equations needed by the compiler-correctness proof. W7 and validation rebase; no generated code, semantic ABI, concrete runtime, or artifact adaptation is required. |
 | `LEAN-4.33-UPGRADE` | integration | pass proof, W6, W7, validation, artifact clients | released | landed stack through `476f001b`; Verso source `eb8d2b8f`; Talos pin `0e05edbc` | Moves every live FIR toolchain and versioned package contract to Lean 4.33.0 while preserving the semantic Wasm ABI, concrete layout, and resident-helper signatures. All surviving lanes rebase before continuing; historical 4.32 records remain provenance. |
