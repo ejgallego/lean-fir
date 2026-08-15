@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-validation-product-cold-publication
-status: confirmed
+status: fixed
 classification: validation-harness
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: d8b18978322de05a8f3dba51ef03cf5461676c17
@@ -9,7 +9,7 @@ pass: none
 discovered-by: invariant-check
 first-seen: 2026-08-14
 reproduction: integration/talos/artifact/check.sh
-regression: none
+regression: scripts/test_validate_interpreters.py#test_checked_semantic_wasm_provider_declares_frozen_contract
 ---
 
 # Summary
@@ -88,4 +88,17 @@ none
 
 ## Resolution and regression
 
-unresolved
+The semantic-Wasm provider cleared its output between the two deterministic
+build attempts and then invoked a side-effectful Lean command elaborator.
+Lake's artifact cache could replay the compiled module without re-running that
+elaborator, leaving the freshly cleared product tree unpublished. The provider
+now invokes both the ordinary and isolated replay commands with
+`lake --no-cache`; normal FIR compilation continues to use the shared
+content-addressed cache.
+
+The provider-contract regression pins both no-cache commands while retaining
+two build attempts, regular-file checks, and checksum verification. A single
+cold complete `integration/talos/artifact/check.sh` invocation subsequently
+passed both publication attempts, all 704 V8 triangles, the 642/704 concrete
+product executions, and the exact unchanged 62-case initial-ByteArray blocker
+inventory without a warm retry.
