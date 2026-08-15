@@ -45,6 +45,9 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   addition, reusable immediate-Nat dispatcher, and allocation-free immediate
   `Nat.mod` are accepted through tracked handoff `04003bd6` (functional heads
   `75b11c0c`, `fe586cec`, `6320a410`, and `8cb9cd82`).
+  The complete scalar Wasm vocabulary is accepted at `43ab6619`, and W7's
+  direct fixed-width/USize consumer is accepted through tracked handoff
+  `e52ad4b3` (functional head `bda81d3a`).
   The Illuminate functional generation head is `4b84f35b`; the package itself
   remains local-only until its consumer authorizes publication.
 - Landing order:
@@ -74,7 +77,8 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
      helpers are generation-ready while W6 refinements remain separately
      queued in `W7-W6-20260814-007` and `W7-W6-20260814-008`. The complete core
      scalar Wasm vocabulary is accepted afterward at `43ab6619`;
-     resident-helper consumers remain separate W7 commits.
+     W7's direct fixed-width/USize resident-helper consumer is accepted through
+     `e52ad4b3`, while W6 refinements remain separately tracked.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -90,6 +94,32 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   removal, or branch deletion is implied by this lease.
 
 ## Latest completed integration lease
+
+- Milestone: `W7-DIRECT-FIXED-WIDTH-SCALARS`.
+- Integration owner: `wasm-gen`, accepting its own clean tracked handoff
+  `e52ad4b3` on the released scalar-surface baseline `f3b24d80`; the functional
+  head is `bda81d3a`.
+- Change: fixed-width and USize resident helpers now use the released core Wasm
+  comparison, arithmetic, bit, shift, CLZ, CTZ, multiply, and unsigned
+  remainder operations. `UInt64.mod` and `USize.mod` retain an explicit
+  zero-divisor branch so Lean's `n % 0 = n` semantics do not become Wasm's
+  trapping `i64.rem_u` semantics. Structural guards reject reintroduced
+  fixed-width/USize scalar loops.
+- Contracts: none. This consumes symbolic-Wasm contract `43ab6619` without
+  changing source semantics, ABI kinds, concrete layouts, ownership,
+  resident-helper signatures, or W6 proof obligations.
+- Acceptance: Lean Beam sync/save is clean. `git diff --check`, complete
+  `make check` (704 source cases, nine direct machines, the 704-case V8
+  triangle, and 2,121/2,121 comparisons), all 3,148 Talos jobs, and the full
+  resident/prettyM artifact gate pass. The focused zero-import fixed-width
+  module passes every export, edge cases, scratch restoration, and 1,000
+  deterministic `UInt64.mod` differential cases.
+- Result: the fixed-width artifact shrinks from 13,433 to 11,608 bytes
+  (13.6%). Seven order-balanced V8 rounds show median improvements of 2.822x
+  for `UInt64.mod`, 2.713x for `UInt64.mul`, and 1.103x for `UInt64.ctzFast`.
+  No external package was published and no bug card was needed.
+
+## Previous completed integration lease
 
 - Milestone: `WASM-CORE-SCALAR-SURFACE`.
 - Integration owner: `wasm-gen`, publishing the isolated shared contract from
