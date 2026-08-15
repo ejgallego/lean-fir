@@ -37,7 +37,11 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `fa3105f7`, followed by the resident Array hot-path history at `372826cf`.
   W6 scalar-field layout admission and bit-exact Float32/Float field refinement
   are accepted through tracked proof handoff `3f038b71` (functional heads
-  `e2249d03` and `cb04d7ee`).
+  `e2249d03` and `cb04d7ee`). Cached recursive-owner persistence is accepted
+  through functional fixture `a6543da1` and rebased tracked status `7b02b7d5`;
+  the deterministic semantic-Wasm publication repair and closed regression are
+  accepted through `d15e32d4`. The native cached Level-1 lean-zip generator is
+  accepted at `4aa78f93`.
   The Illuminate functional generation head is `4b84f35b`; the package itself
   remains local-only until its consumer authorizes publication.
 - Landing order:
@@ -60,6 +64,10 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   5. W6 scalar-field layout admission lands before the additive bit-exact
      Float32/Float field refinement, through tracked proof head `3f038b71`.
      Neither slice changes W7's generator contract.
+  6. The cached recursive-owner fixtures land before the validation-provider
+     cache repair and its cold complete artifact gate. The native Level-1
+     driver then lands independently at `4aa78f93`; W7-1's resident Nat-add
+     candidate remains a subsequent separately reviewed slice.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -73,6 +81,65 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
+
+## Latest completed integration lease
+
+- Milestone: `W7-NATIVE-CACHED-LEVEL1-GENERATOR`.
+- Integration owner: `wasm-gen`, accepting compiler-performance handoff
+  `4aa78f93` directly on the deterministic-publication baseline `4d336565`.
+- Change: lean-zip now persists the exact existing `captureLevel1` result in a
+  project-local olean environment extension and invokes a native generator
+  executable twice for package determinism. It retains the existing capture,
+  lowering, resident-linking, encoding, adapter, and package contracts rather
+  than creating a second compiler pipeline.
+- Evidence: direct hot native runs take 1.40--1.43 seconds; package-internal
+  generation takes 1.03--1.04 seconds, compared with the prior 21.75-second
+  command path. The integration rerun completes both native generations in
+  728 and 733 ms. The zero-import artifact remains 331,580 bytes at SHA-256
+  `7801d626bff56fed22ac588de0775cce4f0322553d81eeec5bfba249b09d7ebe`,
+  with 404 captured declarations, 108 reviewed externals, 296 retained source
+  functions, 1,068 resident helpers, and 1,364 total functions.
+- Contracts: none. This changes the integration-local compilation driver and
+  closure ratchets only; source semantics, final-LCNF capture contents,
+  semantic ABI, runtime/layout, ownership, resident-helper signatures, W6
+  proofs, imports, and exports are unchanged.
+- Acceptance: Lean Beam and the focused 214-job Lake cone pass. Native/Wasm
+  stored and Level-1 differentials, adapter checks, scratch and persistent
+  reclamation, two-run determinism, and immutable package smoke pass. The lane
+  also reports clean `git diff --check`, complete `make check`, all 3,148 Talos
+  jobs, and the complete W7 artifact gate passing.
+- Bug cards: none.
+- Result: local `main` advances through `4aa78f93`. W7-1 has rebased its
+  independent resident Nat-add and catalog work on this compiler baseline.
+
+## Latest completed integration lease
+
+- Milestone: `S12-CACHED-RECURSIVE-PERSISTENCE-E3`.
+- Integration owner: `wasm-gen`, accepting functional fixture `a6543da1`,
+  tracked semantic handoff `4733a08e`, deterministic-publication repair
+  `4d336565`, rebased final fixture status `7b02b7d5`, and bug-card closure
+  `d15e32d4`.
+- Change: two source cases retain a cached constructor owner and its recursive
+  String/large-Nat child across a cache miss and hit, then distinguish skipped
+  from taken child mutation. Semantic-Wasm provider commands bypass Lake's
+  artifact cache because their command elaborator publishes external product
+  files; ordinary FIR compilation retains the shared artifact cache.
+- Contracts: none. The fixtures strengthen coverage of existing cache,
+  persistence, and copy-on-write semantics. The provider repair changes only
+  deterministic validation-product publication and weakens no file, checksum,
+  semantic, runtime, or concrete-execution check.
+- Acceptance: Lean Beam is clean. Complete `make check` passes 704 source
+  cases, nine direct machines, 704 V8 triangles, and 2,121/2,121 comparisons;
+  all 3,148 Talos jobs pass. One cold complete W7 artifact invocation passes
+  both deterministic publication attempts. The concrete checker executes
+  642/704 products, including both new cases, with the exact unchanged 62-case
+  initial-ByteArray blocker inventory.
+- Bug cards: `FIR-BUG-wasm-none-cached-heap-persistence` remains fixed and its
+  regression is strengthened;
+  `FIR-BUG-wasm-none-validation-product-cold-publication` is fixed and pinned
+  by the provider-contract regression.
+- Result: local `main` advances through `d15e32d4`; E3 may continue with an
+  undominated cached-graph topology as a later independent fixture slice.
 
 ## Latest completed integration lease
 
