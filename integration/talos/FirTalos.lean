@@ -28,6 +28,8 @@ import FirTalos.ConcreteRuntime
 import FirTalos.ConcreteResidentMemory
 import FirTalos.ConcreteResidentNat
 import FirTalos.ConcreteResidentNatDecision
+import FirTalos.ConcreteResidentNatMul
+import FirTalos.ConcreteResidentNatSub
 import FirTalos.ConcreteResidentUSize
 import FirTalos.ConcreteResidentPrimitives
 import FirTalos.ConcreteResidentReplacement
