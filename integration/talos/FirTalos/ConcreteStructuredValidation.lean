@@ -2073,6 +2073,61 @@ theorem ConcreteStructuredValidatedCodeCoreRel.withSuccessor
       nextWitness nextSource nextTarget :=
   ⟨nextCore, nextValidation⟩
 
+/-- Whole-program impure hygiene specializes to the exact declaration found
+by the production name lookup.  This is a static phase fact: it carries no
+compiler execution, target path, or recursive admission evidence. -/
+theorem impureHygienic_declarationOfFind
+    {program : Fir.LeanIR.ImpureProgram}
+    (hygienic : program.ImpureHygienic)
+    {name : Lean.Name} {declaration : Lean.Compiler.LCNF.Decl .impure}
+    (found : program.findDecl? name = some declaration) :
+    Fir.LeanIR.ImpureHygiene.declHygienic declaration = true := by
+  have member : declaration ∈ program.decls := by
+    obtain ⟨_, index, inBounds, selected, _⟩ :=
+      Array.find?_eq_some_iff_getElem.mp found
+    rw [← selected]
+    exact Array.getElem_mem inBounds
+  unfold Fir.LeanIR.Program.ImpureHygienic at hygienic
+  rw [Array.all_eq_true'] at hygienic
+  exact hygienic declaration member
+
+/-- Hygiene of a code declaration exposes the exact declaration-wide binder
+uniqueness check consumed by the local-collector agreement proof. -/
+theorem declHygienic_code_bindersUnique
+    {declaration : Lean.Compiler.LCNF.Decl .impure}
+    {code : Lean.Compiler.LCNF.Code .impure}
+    (body : declaration.value = .code code)
+    (hygienic :
+      Fir.LeanIR.ImpureHygiene.declHygienic declaration = true) :
+    Fir.LeanIR.ImpureHygiene.bindersUnique
+      (Fir.LeanIR.ImpureHygiene.paramIds declaration.params ++
+        Fir.LeanIR.ImpureHygiene.codeBinders code) = true := by
+  unfold Fir.LeanIR.ImpureHygiene.declHygienic at hygienic
+  rw [body] at hygienic
+  simp only [Bool.and_eq_true] at hygienic
+  exact hygienic.1.1
+
+/-- The source declaration selected by one supported-function package inherits
+the existing impure phase hygiene invariant.  The explicit premise will be
+discharged directly from `WasmSupported` once the shared admission contract
+lands. -/
+theorem ConcreteSupportedFunction.sourceBodyBindersUnique_of_hygienic
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction target hosts)
+    (hygienic : program.ImpureHygienic) :
+    Fir.LeanIR.ImpureHygiene.bindersUnique
+      (Fir.LeanIR.ImpureHygiene.paramIds spec.sourceDeclaration.params ++
+        Fir.LeanIR.ImpureHygiene.codeBinders functionCode) = true := by
+  apply declHygienic_code_bindersUnique spec.sourceDeclarationBody
+  exact impureHygienic_declarationOfFind hygienic spec.sourceDeclarationFound
+
 /-- Production validation supplies the root residual state at the active
 generated function's exact result ABI. -/
 theorem ConcreteSupportedFunction.rootValidation
