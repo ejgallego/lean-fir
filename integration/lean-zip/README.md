@@ -214,6 +214,18 @@ the preceding `Nat.mul` package, level-6 medians fall from 190.94/187.20 ms to
 fall by about 75% and magnitude-low samples by about 98%, with identical
 compressed bytes and the same flat 9,237,304-byte frontier.
 
+The immediate arm of `USize.ofNat` and `USize.ofNatLT` now returns the decoded
+payload directly as the symbolic `.usize` result of `i64.extend_i32_u`. It no
+longer stores and reloads the same physical `i64` lane through scratch memory
+solely to change its semantic ABI kind. The boxed-Nat arm is unchanged: it
+still validates and reduces the complete limb sequence modulo `2^64`. On eight
+order-balanced unprofiled process rounds against the preceding `Nat.sub`
+package, the median of steady-state medians changed from 143.16 ms
+(MAD 0.46 ms) to 140.26 ms (MAD 0.72 ms), about 2.0%. In clean CPU profiles,
+`fir_ext_USize_ofNat` self samples changed from 735 to 132/128, about 82%, while
+`fir_dec_once` remained independent. Output bytes and the flat 9,237,304-byte
+post-call frontier were unchanged.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not
