@@ -122,13 +122,16 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   natural-constructor call, while the exact checked promoted/wide path remains.
   Lean-zip improves by another 5.3% with identical compressed bytes and a flat
   frontier. The separate wasm32 USize-width question is recorded without
-  changing FIR's current captured-Lean64 contract; W6 refinement coverage is
-  queued independently in `W7-W6-20260820-011`. W6's tagged `Nat.mul` and
-  `Nat.sub` refinements are accepted through tracked proof handoff `26bbc06d`
-  (functional heads `d224d04c` and `e89a77e9`) and are included by the Talos
-  umbrella at `31b7ae80`. They prove the exact immediate branches, constructor
-  or truncated-subtraction results, scratch restoration, and caller-tail
-  preservation while retaining the checked fallbacks unchanged.
+  changing FIR's current captured-Lean64 contract. W6's matching refinement is
+  accepted through tracked proof handoff `685ada29` (functional head
+  `3c89859a`): the tagged arm returns without calls, allocation, or scratch
+  traffic, while the wide constructor arm proves exact high/low decomposition,
+  result ownership, complete scratch restoration, and caller-tail preservation.
+  W6's tagged `Nat.mul` and `Nat.sub` refinements are accepted through tracked
+  proof handoff `26bbc06d` (functional heads `d224d04c` and `e89a77e9`) and are
+  included by the Talos umbrella at `31b7ae80`. They prove the exact immediate
+  branches, constructor or truncated-subtraction results, scratch restoration,
+  and caller-tail preservation while retaining the checked fallbacks unchanged.
 - Landing order:
   1. W7-2's Verso source-module replay repair and generic immutable-package
      publisher are accepted in that order through `912bf68a`.
@@ -227,10 +230,11 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
       checked arm retains validation, modulo-`2^64` recombination, and the
       restoring scratch cast. No shared signature or layout changes.
   21. W7's direct `USize.toNat` successor follows through tracked generation
-      handoff `e2f9c8af`. The immediate arm mirrors Lean's generic tagged
-      representation path; the checked constructor arm, helper signature,
+      handoff `e2f9c8af`, followed by W6's exact tagged/wide refinement through
+      tracked proof handoff `685ada29`. The immediate arm mirrors Lean's generic
+      tagged representation path; the checked constructor arm, helper signature,
       concrete layout, semantic ABI, and frozen wasm32-lean64 width remain
-      unchanged. Missing W6 refinement coverage is a separate queue item.
+      unchanged.
   22. W6's tagged `Nat.mul` and `Nat.sub` refinement modules follow through
       tracked proof handoff `26bbc06d`; integration-owned umbrella imports land
       at `31b7ae80`. No W7 implementation or shared runtime contract changes.
