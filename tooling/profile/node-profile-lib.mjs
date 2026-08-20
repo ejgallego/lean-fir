@@ -30,7 +30,7 @@ function frameIndex(callFrame) {
   return match === null ? null : Number(match[1]);
 }
 
-function classification(function_) {
+export function profileFunctionFamily(function_) {
   if (function_ === undefined) return "wasm/unattributed";
   if (function_.origin === "lean-source") {
     return function_.compilerShape === "closed-declaration" ?
@@ -66,6 +66,7 @@ function add(map, key, delta) {
 export function summarizeCpuProfile(profile, sidecar, {
   startMicros = 0,
   durationMicros = Number.POSITIVE_INFINITY,
+  strictFunctionIndices = false,
 } = {}) {
   assert(profile !== null && typeof profile === "object",
     "CPU profile must be an object");
@@ -81,10 +82,14 @@ export function summarizeCpuProfile(profile, sidecar, {
   const deltas = sampleDeltas(profile);
   const groups = new Map();
   const functions = new Map();
+  const functionSamples = new Map();
   const frames = new Map();
   let resolvedWasmMicros = 0;
   let unresolvedWasmMicros = 0;
   let hostMicros = 0;
+  let resolvedWasmSamples = 0;
+  let unresolvedWasmSamples = 0;
+  let hostSamples = 0;
   let includedSampleCount = 0;
   let cursorMicros = 0;
   const endMicros = startMicros + durationMicros;
@@ -101,6 +106,7 @@ export function summarizeCpuProfile(profile, sidecar, {
     const index = frameIndex(node.callFrame ?? {});
     if (index === null) {
       hostMicros += delta;
+      hostSamples += 1;
       add(groups, "host-or-runtime/unattributed", delta);
       const label = node.callFrame?.functionName || node.callFrame?.url ||
         "(anonymous)";
@@ -108,10 +114,20 @@ export function summarizeCpuProfile(profile, sidecar, {
       continue;
     }
     const function_ = sidecar.functions[index];
-    if (function_ === undefined) unresolvedWasmMicros += delta;
-    else resolvedWasmMicros += delta;
-    add(groups, classification(function_), delta);
+    if (strictFunctionIndices) {
+      assert(function_ !== undefined,
+        `CPU profile refers to Wasm function ${index} outside the sidecar`);
+    }
+    if (function_ === undefined) {
+      unresolvedWasmMicros += delta;
+      unresolvedWasmSamples += 1;
+    } else {
+      resolvedWasmMicros += delta;
+      resolvedWasmSamples += 1;
+    }
+    add(groups, profileFunctionFamily(function_), delta);
     add(functions, index, delta);
+    add(functionSamples, index, 1);
   }
   const descending = (left, right) => right.selfMicros - left.selfMicros ||
     String(left.name ?? left.index).localeCompare(
@@ -129,14 +145,18 @@ export function summarizeCpuProfile(profile, sidecar, {
     resolvedWasmMicros,
     unresolvedWasmMicros,
     hostMicros,
+    resolvedWasmSamples,
+    unresolvedWasmSamples,
+    hostSamples,
     groups: [...groups].map(([name, selfMicros]) => ({ name, selfMicros }))
       .sort(descending),
     functions: [...functions].map(([index, selfMicros]) => ({
       index,
       name: sidecar.functions[index]?.name ?? null,
       origin: sidecar.functions[index]?.origin ?? "unattributed",
-      family: classification(sidecar.functions[index]),
+      family: profileFunctionFamily(sidecar.functions[index]),
       selfMicros,
+      selfSamples: functionSamples.get(index),
     })).sort(descending),
     hostFrames: [...frames].map(([name, selfMicros]) => ({ name, selfMicros }))
       .sort(descending),

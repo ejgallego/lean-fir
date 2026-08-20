@@ -14,7 +14,8 @@ export function residentHelperFamily(name) {
   if (/String|string|utf8/.test(name)) {
     return "resident/string";
   }
-  if (/(?:^|[._])(?:Nat|Int)(?:[._]|$)|numeric|big_|uint|sint/.test(name)) {
+  if (/(?:^|[._])(?:nat|usize|isize|u?int(?:8|16|32|64)?)(?:[._]|$)|numeric|big_|uint|sint/i
+    .test(name)) {
     return "resident/numeric";
   }
   if (/proj|setter|sproj/.test(name)) {

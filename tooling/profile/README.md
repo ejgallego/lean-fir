@@ -74,3 +74,39 @@ The live test verifies artifact/sidecar/workload immutability, raw evidence
 hashes, resolved Wasm samples, checked phase observations, and absence of
 partial output after an unchecked steady result. The gate never downloads
 tools and never skips when its dependency is missing.
+
+## Cross-run final-function resolver
+
+`profile-aggregate.mjs` re-derives attribution from one or more untouched raw
+profiles and compares only evidence bound to the same exact release Wasm and
+verified final-function sidecar:
+
+```sh
+node tooling/profile/profile-aggregate.mjs \
+  --wasm package/app.wasm \
+  --sidecar package/app.wasm.functions.json \
+  --evidence _profiles/run-1/evidence.json \
+  --evidence _profiles/run-2/evidence.json \
+  --out _profiles/aggregate.json
+```
+
+Legacy or externally collected V8 profiles may be supplied with repeated
+`--profile FILE` arguments. Because a raw `.cpuprofile` does not embed the Wasm
+digest, those runs and the aggregate are explicitly labeled unbound even though
+the selected Wasm and sidecar are verified and all indices resolve. Prefer
+`--evidence` for new captures.
+
+The `fir.sampled-profile-aggregate/v1` report groups duplicate V8 nodes by
+absolute final function index. It retains per-run self samples, sampled
+microseconds, normalized Wasm-self share, and rank; cross-run fields report the
+median, median absolute deviation, range, and rank span. Exact name, origin,
+family, and body bytes come only from the verified sidecar. Host samples remain
+visible at run level, while a Wasm index outside the complete sidecar is
+rejected as malformed.
+
+The command refuses mixed artifacts, sidecars, duplicate input paths, raw
+profile hash mismatches in bound evidence, empty Wasm windows, and output
+reuse. It does not
+rewrite, copy, or delete the caller-owned raw evidence. Sample shares are noisy
+diagnostic attribution and must not be presented as headline elapsed-time
+measurements.

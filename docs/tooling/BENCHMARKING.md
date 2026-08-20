@@ -53,7 +53,10 @@ frontiers, persistent growth, and linear-memory pages when available.
   optimized function and its direct call neighborhood.
 - [`tooling/profile/`](../../tooling/profile/README.md) captures a checked,
   steady-only Node/V8 profile and binds the raw profile and derived attribution
-  to the exact Wasm, sidecar, and workload.
+  to the exact Wasm, sidecar, and workload. Its cross-run resolver folds V8
+  nodes by final function identity and reports per-run shares plus median,
+  dispersion, and rank stability without treating profiler time as a headline
+  benchmark.
 - [`tooling/array-probe/`](../../tooling/array-probe/README.md) compiles ordinary
   Lean through the production FIR pipeline and distinguishes repeated reads,
   allocation, unique updates, and shared copy-on-write. It is a mechanism
@@ -68,13 +71,13 @@ complete pinned-Binaryen and compiled-probe gate with `make tooling-check`.
 
 ## Thin roadmap
 
-1. Add a fail-closed multi-profile resolver beside the existing Node collector:
-   group duplicate V8 nodes by final function, normalize by each run's Wasm
-   self samples, and report cross-run median/dispersion while retaining inputs.
-2. Capture one real `d8 --perf-prof --perf-prof-annotate-wasm` fixture before
+1. Capture one real `d8 --perf-prof --perf-prof-annotate-wasm` fixture before
    freezing the instruction-origin evidence schema.
-3. Let each client register its representative workload and report consumer in
+2. Let each client register its representative workload and report consumer in
    the VIR catalog; FIR supplies artifact identities and profile/probe outputs.
+3. Replace retained legacy raw profiles with collector-produced bound evidence
+   when a client next refreshes that workload; raw profiles remain explicitly
+   unbound meanwhile.
 4. Use fresh client profiles to choose W7 optimization work, then route changed
    runtime contracts to W6 through the existing lane protocol.
 

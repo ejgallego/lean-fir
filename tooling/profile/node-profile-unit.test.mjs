@@ -85,6 +85,8 @@ test("classifies boxing separately and rejects malformed profiles", () => {
     "resident/allocation");
   assert.equal(residentHelperFamily("fir_ext_Array_getInternalBorrowed"),
     "resident/array");
+  assert.equal(residentHelperFamily("fir_ext_USize_ofNat"),
+    "resident/numeric");
   assert.equal(residentHelperFamily("Illuminate._fir_bit_exact"),
     "resident/other");
   const valid = {

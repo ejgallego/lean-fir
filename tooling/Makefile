@@ -21,7 +21,8 @@ unit-check: no-skips
 		node --test \
 			tooling/worktree-temp-unit.test.mjs \
 			tooling/wasm/function-index-unit.test.mjs \
-			tooling/profile/node-profile-unit.test.mjs
+			tooling/profile/node-profile-unit.test.mjs \
+			tooling/profile/profile-aggregate-unit.test.mjs
 
 binaryen-check:
 	@for tool in wasm-as wasm-opt; do \
@@ -58,7 +59,7 @@ array-probe-check: binaryen-check
 		LAKE_CACHE_DIR="$(FIR_LAKE_CACHE_DIR)" \
 		LAKE_ARTIFACT_CACHE=true \
 		LAKE_RESTORE_ARTIFACTS=true \
-		lake build FirArrayProbe && \
+		lake build FirArrayProbe FirArrayProbe.Compile && \
 		LAKE_CACHE_DIR="$(FIR_LAKE_CACHE_DIR)" \
 		LAKE_ARTIFACT_CACHE=true \
 		LAKE_RESTORE_ARTIFACTS=true \
