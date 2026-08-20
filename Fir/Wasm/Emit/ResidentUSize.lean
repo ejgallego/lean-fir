@@ -218,6 +218,26 @@ def toUInt32Function : Function := {
     .localGet valueParam,
     .i32WrapI64 .uint32] ++ retypeUInt32 }
 
+/- Mirror upstream `lean_usize_to_nat`: values that fit the wasm32 tagged-Nat
+payload are boxed directly, while larger values retain the generic natural
+constructor. This threshold is representation-stable even if a future target
+specialization changes the physical `USize` lane from FIR's current Lean64
+contract. -/
+private def immediateUSizeToNat : List Instruction := [
+  .localGet valueParam,
+  .i64Const .uint64 1,
+  .i64Shl,
+  .i64Const .uint64 1,
+  .i64Or,
+  .i32WrapI64 .tagged,
+  .ret]
+
+private def checkedUSizeToNat : List Instruction :=
+  splitUSize valueParam lowLocal highLocal ++ [
+    .localGet lowLocal,
+    .localGet highLocal,
+    .call (.declaration ResidentNumeric.makeNaturalName)] ++ retypeObject
+
 def toNatFunction : Function := {
   name := externalName `USize.toNat
   params := #[(valueParam, .usize)]
@@ -225,10 +245,11 @@ def toNatFunction : Function := {
   locals := #[(lowLocal, .uint32), (highLocal, .uint32),
     (raw32Local, .uint32), (savedScratchLocal, .uint64),
     (objectResultLocal, .tobject)]
-  body := splitUSize valueParam lowLocal highLocal ++ [
-    .localGet lowLocal,
-    .localGet highLocal,
-    .call (.declaration ResidentNumeric.makeNaturalName)] ++ retypeObject }
+  body := [
+    .localGet valueParam,
+    .i64Const .uint64 2147483648,
+    .i64LtU,
+    .ifElse immediateUSizeToNat checkedUSizeToNat] }
 
 def landFunction : Function :=
   binaryFunction `USize.land .i64And
@@ -302,6 +323,8 @@ private partial def instructionUsesMemory : Instruction → Bool
 
 #guard immediateNatToUSize.contains (.i64ExtendI32U .usize)
 #guard !immediateNatToUSize.any instructionUsesMemory
+#guard immediateUSizeToNat.contains (.i32WrapI64 .tagged)
+#guard !immediateUSizeToNat.any instructionUsesMemory
 
 private partial def rewriteInstruction (present : Array Name) : Instruction → Instruction
   | .call (.declaration declaration) =>

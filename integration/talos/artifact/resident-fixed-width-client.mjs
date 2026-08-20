@@ -372,6 +372,20 @@ export async function checkResidentFixedWidth(bytes) {
     0xfedcba9876543210n, "USize.ofNatLT arbitrary-limb modulo reduction");
   equal(exports.fir_ext_USize_toUInt32(0x0123456789abcdefn) >>> 0,
     0x89abcdef, "USize.toUInt32");
+  for (const [value, encoded] of [
+    [0n, 0x00000001],
+    [1n, 0x00000003],
+    [0x3fffffffn, 0x7fffffff],
+    [0x7fffffffn, 0xffffffff],
+  ]) {
+    equal(exports.fir_ext_USize_toNat(value) >>> 0, encoded,
+      `USize.toNat direct tagged ${value}`);
+  }
+  const firstHeapUSizeNatural = exports.fir_ext_USize_toNat(0x80000000n);
+  equal(firstHeapUSizeNatural & 1, 0,
+    "USize.toNat first non-tagged result is heap-backed");
+  equal(naturalValue(exports.memory, firstHeapUSizeNatural), 0x80000000n,
+    "USize.toNat first non-tagged value");
   equal(naturalValue(exports.memory,
     exports.fir_ext_USize_toNat(wide)), wide, "USize.toNat");
   equal(u64(exports.fir_ext_USize_land(
