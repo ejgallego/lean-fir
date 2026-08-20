@@ -23,6 +23,11 @@ These rules apply to every agent and worktree in this repository.
   toolchain-scoped location automatically. Its boundary is mode 700. The
   cache is ignored; never commit it or use it in place of a worktree's
   `.lake` state.
+- Never use the system `/tmp` directory for FIR source views, build inputs,
+  compiler state, package publication, test fixtures, or scratch data. It is
+  periodically cleaned. Use an ignored, worktree-local `.deps` path instead;
+  when a tool requires a temporary directory, set `TMPDIR` to that persistent
+  worktree-local location explicitly.
 
 ## Ownership
 
