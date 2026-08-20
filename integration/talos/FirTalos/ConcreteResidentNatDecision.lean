@@ -57,29 +57,15 @@ def immediateDecisionSource (kind : DecisionKind)
     | .le => [.i32LeU]) ++
     [.localSet raw]
 
-/-- Symbolic spelling of the common scratch-slot cast into the `UInt8` ABI. -/
-def retypeRawUInt8ResultSource
-    (raw saved result : Lean.FVarId) : List Fir.Wasm.Instruction := [
-  .localSet raw,
-  .i32Const .uint32 0,
-  .i32Load .uint32 0,
-  .localSet saved,
-  .i32Const .uint32 0,
+/-- Source suffix after the branch has installed its normalized Boolean word.
+The typed `i32 → i64 → UInt8` roundtrip carries the symbolic ABI witness while
+remaining a physical identity on the already-normalized `0`/`1` value. -/
+def decisionResultSource (raw : Lean.FVarId) :
+    List Fir.Wasm.Instruction := [
   .localGet raw,
-  .i32Store .uint32 0,
-  .i32Const .uint32 0,
-  .i32Load .uint8 0,
-  .localSet result,
-  .i32Const .uint32 0,
-  .localGet saved,
-  .i32Store .uint32 0,
-  .localGet result,
+  .i64ExtendI32U .uint64,
+  .i32WrapI64 .uint8,
   .ret]
-
-/-- Source suffix after the branch has installed its raw Boolean word. -/
-def decisionResultSource (raw saved result : Lean.FVarId) :
-    List Fir.Wasm.Instruction :=
-  [.localGet raw] ++ retypeRawUInt8ResultSource raw saved result
 
 /-- Exact Talos immediate arm, including the branch-local result write. -/
 def immediateDecisionProgram (kind : DecisionKind)
@@ -87,17 +73,20 @@ def immediateDecisionProgram (kind : DecisionKind)
   ResidentPrimitives.immediateNaturalDecision kind left right ++
     [.localSet raw]
 
-/-- Exact Talos suffix returning the decision through the scalar ABI. -/
-def decisionResultProgram (raw saved result : Nat) : Wasm.Program :=
-  [.localGet raw] ++
-    ResidentNat.retypeRawObjectResultProgram raw saved result
+/-- Exact Talos suffix returning the decision through the scalar ABI without
+borrowing linear-memory scratch. -/
+def decisionResultProgram (raw : Nat) : Wasm.Program := [
+  .localGet raw,
+  .extendUI32,
+  .wrapI64,
+  .ret]
 
 /-- Complete target skeleton with an opaque checked arbitrary-precision arm. -/
 def decisionProgram (kind : DecisionKind) (fallback : Wasm.Program) :
     Wasm.Program :=
   ResidentPrimitives.immediateNaturalPairDispatch 0 1
       (immediateDecisionProgram kind 0 1 2) fallback ++
-    decisionResultProgram 2 3 4
+    decisionResultProgram 2
 
 /-- Every public Nat decision helper has the same dispatcher/result skeleton.
 Only its comparison instruction and checked fallback differ. -/
@@ -113,14 +102,13 @@ theorem decisionFunction_shape (kind : DecisionKind) :
             (decisionFunction kind).locals[0]!.1)
           fallback ++
         decisionResultSource
-          (decisionFunction kind).locals[0]!.1
-          (decisionFunction kind).locals[1]!.1
-          (decisionFunction kind).locals[2]!.1 := by
+          (decisionFunction kind).locals[0]!.1 := by
   cases kind <;> refine ⟨_, rfl⟩
 
-/-- The three generated helpers expose the same four private locals. -/
+/-- The three generated helpers expose only their raw-result and checked-path
+comparison locals. -/
 theorem decisionFunction_locals_size (kind : DecisionKind) :
-    (decisionFunction kind).locals.size = 4 := by
+    (decisionFunction kind).locals.size = 2 := by
   cases kind <;> rfl
 
 /-- Adapter preservation for the branch-local direct comparison. -/
@@ -146,51 +134,17 @@ theorem instructions_immediateDecisionSource
       FirTalos.instruction, leftFound, rightFound, rawFound, Bind.bind,
       Except.bind, pure, Except.pure]
 
-/-- Adapter preservation for the `UInt8` scratch-slot result cast. -/
-theorem instructions_retypeRawUInt8ResultSource
-    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {raw saved result : Lean.FVarId}
-    {rawIndex savedIndex resultIndex : Nat}
-    (rawFound : FirTalos.findFVar?
-      (sourceFunction.params.toList ++ sourceFunction.locals.toList) raw =
-        some rawIndex)
-    (savedFound : FirTalos.findFVar?
-      (sourceFunction.params.toList ++ sourceFunction.locals.toList) saved =
-        some savedIndex)
-    (resultFound : FirTalos.findFVar?
-      (sourceFunction.params.toList ++ sourceFunction.locals.toList) result =
-        some resultIndex) :
-    FirTalos.instructions sourceModule sourceFunction labels
-      (retypeRawUInt8ResultSource raw saved result) =
-        .ok (ResidentNat.retypeRawObjectResultProgram
-          rawIndex savedIndex resultIndex) := by
-  simp [retypeRawUInt8ResultSource,
-    ResidentNat.retypeRawObjectResultProgram, FirTalos.instructions,
-    FirTalos.instruction, rawFound, savedFound, resultFound, Bind.bind,
-    Except.bind, pure, Except.pure]
-
 /-- Adapter preservation for the common post-dispatch result suffix. -/
 theorem instructions_decisionResultSource
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {raw saved result : Lean.FVarId}
-    {rawIndex savedIndex resultIndex : Nat}
+    {labels : List Lean.FVarId} {raw : Lean.FVarId} {rawIndex : Nat}
     (rawFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList) raw =
-        some rawIndex)
-    (savedFound : FirTalos.findFVar?
-      (sourceFunction.params.toList ++ sourceFunction.locals.toList) saved =
-        some savedIndex)
-    (resultFound : FirTalos.findFVar?
-      (sourceFunction.params.toList ++ sourceFunction.locals.toList) result =
-        some resultIndex) :
+        some rawIndex) :
     FirTalos.instructions sourceModule sourceFunction labels
-      (decisionResultSource raw saved result) =
-        .ok (decisionResultProgram rawIndex savedIndex resultIndex) := by
-  rw [decisionResultSource, FirTalos.Correctness.instructions_append]
+      (decisionResultSource raw) = .ok (decisionResultProgram rawIndex) := by
   simp [decisionResultProgram, FirTalos.instructions, FirTalos.instruction,
-    rawFound, instructions_retypeRawUInt8ResultSource rawFound savedFound
-      resultFound,
-    Bind.bind, Except.bind, pure, Except.pure]
+    decisionResultSource, rawFound, Bind.bind, Except.bind, pure, Except.pure]
 
 /-- Exact adaptation of any public Nat decision body, preserving the complete
 checked fallback as one opaque target program. -/
@@ -209,9 +163,7 @@ theorem instructions_decisionFunctionBody_of_shape
             (decisionFunction kind).locals[0]!.1)
           sourceFallback ++
         decisionResultSource
-          (decisionFunction kind).locals[0]!.1
-          (decisionFunction kind).locals[1]!.1
-          (decisionFunction kind).locals[2]!.1)
+          (decisionFunction kind).locals[0]!.1)
     (fallbackAdapted : FirTalos.instructions sourceModule
       (decisionFunction kind) [] sourceFallback = .ok targetFallback) :
     FirTalos.instructions sourceModule (decisionFunction kind) []
@@ -247,12 +199,10 @@ theorem instructions_decisionFunctionBody_of_shape
   have suffixAdapted : FirTalos.instructions sourceModule
       (decisionFunction kind) []
       (decisionResultSource
-        (decisionFunction kind).locals[0]!.1
-        (decisionFunction kind).locals[1]!.1
-        (decisionFunction kind).locals[2]!.1) =
-      .ok (decisionResultProgram 2 3 4) := by
+        (decisionFunction kind).locals[0]!.1) =
+      .ok (decisionResultProgram 2) := by
     apply instructions_decisionResultSource
-    all_goals cases kind <;> decide
+    cases kind <;> decide
   rw [suffixAdapted]
   rfl
 
@@ -275,9 +225,7 @@ theorem adaptedDecisionFunction_body_of_shape
             (decisionFunction kind).locals[0]!.1)
           sourceFallback ++
         decisionResultSource
-          (decisionFunction kind).locals[0]!.1
-          (decisionFunction kind).locals[1]!.1
-          (decisionFunction kind).locals[2]!.1)
+          (decisionFunction kind).locals[0]!.1)
     (fallbackAdapted : FirTalos.instructions sourceModule
       (decisionFunction kind) [] sourceFallback = .ok targetFallback) :
     targetFunction.body = decisionProgram kind targetFallback ++
@@ -314,20 +262,20 @@ theorem wp_immediateDecisionProgram
   simp only [Wasm.wp_localSet_cons, rawSet]
   simpa using continued
 
-/-- The shared dispatcher selects the immediate comparison, threads its raw
-local through the scalar scratch cast, restores memory, and returns the exact
-Boolean word.  The checked fallback and adapter suffix are unreachable. -/
+/-- The shared dispatcher selects the immediate comparison and returns its raw
+Boolean word through the typed scratch-free scalar roundtrip.  The store and
+caller operand tail are unchanged; the checked fallback and adapter suffix are
+unreachable. -/
 theorem wp_immediateDecisionDispatch
     {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
     {Q : Wasm.Assertion host} {store : Wasm.Store host}
-    {locals afterBranch afterRaw afterSaved afterResult : Wasm.Locals}
+    {locals afterBranch : Wasm.Locals}
     {kind : DecisionKind} {leftWord rightWord : Word32}
     {leftReference rightReference : Fir.LeanIR.Impure.ObjectRef}
     {leftPayload rightPayload : UInt64} {tail : List Wasm.Value}
     {fallback rest : Wasm.Program}
     (pair : ImmediateNaturalPairRel leftWord rightWord leftReference
       rightReference leftPayload rightPayload)
-    (pagesPositive : 0 < store.mem.pages)
     (leftLocal : locals.get 0 =
       some (.i32 (UInt32.ofNat leftWord.value)))
     (rightLocal : locals.get 1 =
@@ -338,21 +286,6 @@ theorem wp_immediateDecisionDispatch
           kind leftPayload rightPayload) :: tail) }).set? 2
         (.i32 (ResidentPrimitives.immediateNaturalDecisionResult
           kind leftPayload rightPayload)) = some afterBranch)
-    (rawSet :
-      ({ afterBranch with values :=
-        (.i32 (ResidentPrimitives.immediateNaturalDecisionResult
-          kind leftPayload rightPayload) :: tail) }).set? 2
-        (.i32 (ResidentPrimitives.immediateNaturalDecisionResult
-          kind leftPayload rightPayload)) = some afterRaw)
-    (savedSet :
-      ({ afterRaw with values := .i32 (store.mem.read32 0) :: tail }).set? 3
-        (.i32 (store.mem.read32 0)) = some afterSaved)
-    (resultSet :
-      ({ afterSaved with values :=
-        (.i32 (ResidentPrimitives.immediateNaturalDecisionResult
-          kind leftPayload rightPayload) :: tail) }).set? 4
-        (.i32 (ResidentPrimitives.immediateNaturalDecisionResult
-          kind leftPayload rightPayload)) = some afterResult)
     (returned : Q (.Return store
       (.i32 (ResidentPrimitives.immediateNaturalDecisionResult
         kind leftPayload rightPayload) :: tail))) :
@@ -372,19 +305,25 @@ theorem wp_immediateDecisionDispatch
         kind leftPayload rightPayload)) := by
     simpa using rawGet
   unfold decisionResultProgram
-  rw [List.append_assoc]
-  simp only [List.cons_append, List.nil_append, Wasm.wp_localGet_cons, rawGet']
-  have casted := ResidentNat.wp_retypeRawObjectResultProgram
-    (module := module) (env := env) (Q := Q) pagesPositive
-    (by decide) (by decide) rawSet savedSet resultSet returned
-  simpa [ResidentNat.retypeRawObjectResultProgram] using casted
+  simp only [List.cons_append, List.nil_append, Wasm.wp_localGet_cons, rawGet',
+    Wasm.wp_extendUI32_cons, UInt64.ofNat_uInt32ToNat,
+    Wasm.wp_wrapI64_cons]
+  have retyped : UInt32.ofNat
+      ((ResidentPrimitives.immediateNaturalDecisionResult kind leftPayload
+        rightPayload).toUInt64.toNat % 2 ^ 32) =
+      ResidentPrimitives.immediateNaturalDecisionResult kind leftPayload
+        rightPayload := by
+    apply UInt32.toNat_inj.mp
+    simp
+  rw [retyped]
+  simpa only [Wasm.wp_ret_cons] using returned
 
 /-- The immediate path of each actual adapted resident Nat decision helper is
 a fuel-free defined call.  The theorem is uniform in the public helper kind:
-the two encoded operands are compared directly, all scratch writes are
-checked, linear memory is restored, and the exact `UInt8` result is returned
-with the caller tail and store unchanged.  The adapted checked fallback is
-preserved in the body but unreachable under `ImmediateNaturalPairRel`. -/
+the two encoded operands are compared directly and the exact `UInt8` result is
+returned with caller tail, locals outside the result slot, and store unchanged.
+The adapted checked fallback is preserved in the body but unreachable under
+`ImmediateNaturalPairRel`. -/
 theorem terminatesWith_decisionFunctionImmediate_of_adapted
     {host : Type} {sourceModule : Fir.Wasm.Module}
     {module : Wasm.Module} {env : Wasm.HostEnv host}
@@ -410,14 +349,11 @@ theorem terminatesWith_decisionFunctionImmediate_of_adapted
             (decisionFunction kind).locals[0]!.1)
           sourceFallback ++
         decisionResultSource
-          (decisionFunction kind).locals[0]!.1
-          (decisionFunction kind).locals[1]!.1
-          (decisionFunction kind).locals[2]!.1)
+          (decisionFunction kind).locals[0]!.1)
     (fallbackAdapted : FirTalos.instructions sourceModule
       (decisionFunction kind) [] sourceFallback = .ok targetFallback)
     (pair : ImmediateNaturalPairRel leftWord rightWord leftReference
-      rightReference leftPayload rightPayload)
-    (pagesPositive : 0 < store.mem.pages) :
+      rightReference leftPayload rightPayload) :
     Wasm.TerminatesWith env module functionIndex store
       ([.i32 (UInt32.ofNat rightWord.value),
         .i32 (UInt32.ofNat leftWord.value)] ++ tail)
@@ -451,7 +387,7 @@ theorem terminatesWith_decisionFunctionImmediate_of_adapted
         decisionFunction, Fir.Wasm.Emit.ResidentBigNumeric.natDecEqFunction,
         Fir.Wasm.Emit.ResidentBigNumeric.natDecLtFunction,
         Fir.Wasm.Emit.ResidentBigNumeric.natDecLeFunction]
-  have targetLocalsLength : targetFunction.locals.length = 4 := by
+  have targetLocalsLength : targetFunction.locals.length = 2 := by
     rw [localsEq, List.length_map, Array.length_toList,
       decisionFunction_locals_size]
   have branchValid :
@@ -466,41 +402,6 @@ theorem terminatesWith_decisionFunctionImmediate_of_adapted
         Fir.Wasm.Emit.ResidentBigNumeric.natDecLeFunction]
   obtain ⟨afterBranch, branchSet⟩ :=
     FirTalos.Correctness.locals_set?_exists branchValid
-  have branchLengths := FirTalos.Correctness.locals_lengths_of_set? branchSet
-  have rawValid :
-      ({ afterBranch with values :=
-        [.i32 (ResidentPrimitives.immediateNaturalDecisionResult kind
-          leftPayload rightPayload)] }).validIndex 2 := by
-    simp only [Wasm.Locals.validIndex]
-    simp [branchLengths.1, branchLengths.2, entry, Wasm.Function.toLocals,
-      Wasm.Function.numParams, paramsEq, targetLocalsLength]
-  obtain ⟨afterRaw, rawSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists rawValid
-  have rawLengths := FirTalos.Correctness.locals_lengths_of_set? rawSet
-  have savedValid :
-      ({ afterRaw with values := [.i32 (store.mem.read32 0)] }).validIndex 3 := by
-    simp only [Wasm.Locals.validIndex]
-    simp [rawLengths.1, rawLengths.2, branchLengths.1, branchLengths.2,
-      entry, Wasm.Function.toLocals, Wasm.Function.numParams, paramsEq,
-      targetLocalsLength]
-  obtain ⟨afterSaved, savedSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists savedValid
-  have savedLengths := FirTalos.Correctness.locals_lengths_of_set? savedSet
-  have resultValid :
-      ({ afterSaved with values :=
-        [.i32 (ResidentPrimitives.immediateNaturalDecisionResult kind
-          leftPayload rightPayload)] }).validIndex 4 := by
-    simp only [Wasm.Locals.validIndex]
-    cases kind <;>
-      simp [savedLengths.1, savedLengths.2, rawLengths.1, rawLengths.2,
-        branchLengths.1, branchLengths.2, entry, Wasm.Function.toLocals,
-        Wasm.Function.numParams, paramsEq, targetLocalsLength,
-        decisionFunction,
-        Fir.Wasm.Emit.ResidentBigNumeric.natDecEqFunction,
-        Fir.Wasm.Emit.ResidentBigNumeric.natDecLtFunction,
-        Fir.Wasm.Emit.ResidentBigNumeric.natDecLeFunction]
-  obtain ⟨afterResult, resultSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists resultValid
   have returned :
       FirTalos.Correctness.FunctionBodyPost targetFunction
           ([.i32 (UInt32.ofNat rightWord.value),
@@ -524,8 +425,7 @@ theorem terminatesWith_decisionFunctionImmediate_of_adapted
       (module := module) (env := env) (store := store) (locals := entry)
       (fallback := targetFallback)
       (rest := FirTalos.functionTerminal sourceModule (decisionFunction kind))
-      (tail := []) pair pagesPositive leftLocal rightLocal branchSet rawSet
-      savedSet resultSet returned)
+      (tail := []) pair leftLocal rightLocal branchSet returned)
 
 /-- The direct decision result is an exact W6 `UInt8` value relation. -/
 theorem immediateDecisionResult_related
