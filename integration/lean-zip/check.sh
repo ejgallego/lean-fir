@@ -4,8 +4,9 @@ set -euo pipefail
 directory="$(cd "$(dirname "$0")" && pwd)"
 cd "$directory"
 
-: "${LEAN_ZIP_ROOT:=/tmp/fir-lean-zip-273d}"
-: "${ZIP_COMMON_ROOT:=/tmp/fir-zip-common-4425}"
+fir_root="$(cd "$directory/../.." && pwd)"
+: "${LEAN_ZIP_ROOT:=$fir_root/.deps/source-views/lean-zip}"
+: "${ZIP_COMMON_ROOT:=$fir_root/.deps/source-views/zip-common}"
 export LEAN_ZIP_ROOT ZIP_COMMON_ROOT
 
 node --test export-raw-package.test.mjs

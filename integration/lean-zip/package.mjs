@@ -30,9 +30,9 @@ import {
 const directory = dirname(fileURLToPath(import.meta.url));
 const firRoot = realpathSync(join(directory, "../.."));
 const leanZipRoot = realpathSync(process.env.LEAN_ZIP_ROOT ??
-  "/tmp/fir-lean-zip-273d");
+  join(firRoot, ".deps/source-views/lean-zip"));
 const zipCommonRoot = realpathSync(process.env.ZIP_COMMON_ROOT ??
-  "/tmp/fir-zip-common-4425");
+  join(firRoot, ".deps/source-views/zip-common"));
 const buildDirectory = join(directory, "_build");
 const lakeBuildDirectory = join(directory, ".lake", "build");
 const wasmStem = join(buildDirectory, "lean-zip-stored.wasm");

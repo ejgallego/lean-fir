@@ -39,10 +39,13 @@ substantial, exact-source Lean closures:
 | lean-zip | packed ByteArrays, unique updates, arbitrary Nat/Int work, generic Arrays, deep closure use, and compute-heavy DEFLATE levels 1--10 |
 
 The accepted lean-zip raw package established the scaling reference. After the
-accepted compiler-unit cache-isolation repair, its reviewed closure contains
-662 captured declarations, 534 retained source functions, and 2,598 resident
-helpers, with zero unsupported declarations, a reviewed three-declaration math
-frontier before complete linking, zero imports in the complete module,
+accepted compiler-unit cache isolation, source-Float compilation, direct scalar
+helpers, and standard-libm v2 migration, its reviewed closure contains 769
+captured declarations, 630 retained source functions, and 2,782 resident
+helpers, with zero unsupported declarations. `Float.ofNat` and
+`Float.ofScientific` compile from final LCNF; exactly `Float.log2` remains at
+the symbolic frontier and is internalized by the standard libm provider. The
+936,001-byte complete module has 2,305 final functions, zero imports,
 module-owned memory, exact native output, and all ten compression levels. The
 package contract pins ordered-inventory hashes as well as counts and byte
 lengths. This is the point at which W7 moves from runtime closure discovery to
@@ -107,7 +110,7 @@ linked module grew from 1,622,609 to 1,628,872 bytes; therefore this slice is
 not a binary-size win and should not be described as closing lean-zip's larger
 native-performance gap.
 
-### G1b. Consume proof-indexed Array bounds like upstream Lean
+### G1b. Consume proof-indexed Array bounds like upstream Lean (accepted)
 
 The version-pinned upstream rule is local and explicit. Representation trust
 and index policy are separate dimensions:
@@ -140,7 +143,7 @@ Order-balanced random-input execution was noisy and inconclusive: four paired
 had a median delta of about +32.98 ms. Treat the upstream-faithful instruction
 shape as the result; do not claim a workload speedup from these samples.
 
-### G1c. Fast-path canonical immediate natural addition
+### G1c. Fast-path canonical immediate natural addition (accepted)
 
 Lean's tagged immediate `Nat` representation makes the common two-immediate
 case locally decidable without scanning arbitrary-precision magnitudes. The
@@ -169,7 +172,7 @@ has two. W6 separately adapts the existing arbitrary-precision addition proof
 to the immediate branch; the signature and concrete runtime contract are
 unchanged.
 
-### G1d. Reusable canonical immediate-Nat dispatch
+### G1d. Reusable canonical immediate-Nat dispatch (accepted)
 
 The representation check and payload decode are now a small shared code-
 generation surface rather than a `Nat.add`-local instruction sequence. Binary
@@ -185,7 +188,7 @@ result representation, no frontier growth, and the existing arbitrary-
 precision matrix. This changes neither the public signature nor the malformed-
 heap fallback boundary; W6 owns the corresponding branch refinement.
 
-### G1e. Direct core-Wasm fixed-width helpers
+### G1e. Direct core-Wasm fixed-width helpers (accepted)
 
 The released complete scalar instruction surface removes the historical need
 to synthesize fixed-width operations from split 32-bit halves and structured
@@ -202,7 +205,7 @@ and 2.71x for `UInt64.mul`; `UInt64.ctzFast` improves 1.10x because the common
 call and ABI-retagging cost dominates that small operation. All focused,
 native/LCNF/V8, Talos, and deterministic package checks preserve exact results.
 
-### G1f. Direct core-Wasm Float and conversion helpers
+### G1f. Direct core-Wasm Float and conversion helpers (accepted)
 
 The same scalar surface now closes the standard externals that have exact core
 Wasm meanings: `UInt64.toFloat`, Float add/subtract/multiply/divide, negate,
@@ -229,7 +232,7 @@ beyond 64 bits. This work also removed the one-limb restrictions from
 `Nat.shiftRight` and fixed-width `ofNat` conversions; the C conversion exports
 remain only as a version-1 compatibility surface for packages not yet rebuilt.
 
-### G2. Separate production and diagnostic adapter costs
+### G2. Separate production and diagnostic adapter costs (accepted)
 
 Finish the pending Illuminate selection-player request with an actually
 timing-free `dispatchTick` and a separate diagnostic `dispatchTickTimed`.

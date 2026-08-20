@@ -17,17 +17,24 @@ This revision uses Lean's legacy module syntax. FIR therefore captures its real
 declarations through the generic single-unit final-LCNF path; module-wise replay
 is reserved for sources containing `module` / `public section` boundaries.
 
-Create clean source views, then run the closure probe:
+Create persistent clean source views under FIR's ignored, worktree-local
+`.deps/source-views/` directory, then run the closure probe. Do not use `/tmp`:
 
 ```sh
-git -C /path/to/lean-zip worktree add --detach /tmp/fir-lean-zip-273d \
+fir_root="$(git rev-parse --show-toplevel)"
+mkdir -p "$fir_root/.deps/source-views"
+git clone --no-local --no-checkout /path/to/lean-zip \
+  "$fir_root/.deps/source-views/lean-zip"
+git -C "$fir_root/.deps/source-views/lean-zip" checkout --detach \
   273d0d6cd9cab77c7f3489b0b0b1f6e543315d21
-git -C /path/to/zipCommon worktree add --detach /tmp/fir-zip-common-4425 \
+git clone --no-local --no-checkout /path/to/zipCommon \
+  "$fir_root/.deps/source-views/zip-common"
+git -C "$fir_root/.deps/source-views/zip-common" checkout --detach \
   4425bab1f9522307d77e8d485bc536149ba31c36
 
 lake --keep-toolchain --reconfigure \
-  -KleanZipRoot=/tmp/fir-lean-zip-273d \
-  -KzipCommonRoot=/tmp/fir-zip-common-4425 \
+  -KleanZipRoot="$fir_root/.deps/source-views/lean-zip" \
+  -KzipCommonRoot="$fir_root/.deps/source-views/zip-common" \
   build LeanZipFir.Compile leanZipFirLevel1Artifact
 lake --keep-toolchain env lean Probe.lean
 lake --keep-toolchain env lean ProbeLevel1.lean
@@ -57,11 +64,15 @@ values and therefore cannot be mutated by compiled Lean.
 Run the complete deterministic, native-oracle, Node, and optional browser gate:
 
 ```sh
-LEAN_ZIP_ROOT=/tmp/fir-lean-zip-273d \
-ZIP_COMMON_ROOT=/tmp/fir-zip-common-4425 \
+LEAN_ZIP_ROOT="$fir_root/.deps/source-views/lean-zip" \
+ZIP_COMMON_ROOT="$fir_root/.deps/source-views/zip-common" \
 FIR_BROWSER=google-chrome \
 ./check.sh
 ```
+
+`package.mjs`, `package-raw.mjs`, and `check.sh` use those persistent FIR-local
+source views by default. Environment overrides remain available for another
+equally persistent clean checkout.
 
 Immutable packages are under `_build/lean-zip-stored-packages/` and
 `_build/lean-zip-level1-packages/`; the production levels 1–10 package is
