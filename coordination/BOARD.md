@@ -82,7 +82,10 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   through tracked handoff `b36d9d98` (functional head `65f4a57c`): postponed
   entry modules keep their exact final-LCNF groups, ordinary imported roots are
   final-pass captured separately, and the linked closure is reachability
-  pruned. HitScene production now uses this repaired hybrid path.
+  pruned. HitScene production now uses this repaired hybrid path. The Verso
+  HTML clean-check dependency repair is accepted through tracked handoff
+  `3767af90` (functional head `c4051bff`), so its native oracle no longer
+  depends on a pre-existing `VersoSlides.Pretty` build product.
 - Landing order:
   1. W7-2's Verso source-module replay repair and generic immutable-package
      publisher are accepted in that order through `912bf68a`.
@@ -147,6 +150,9 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
       postponed entry-module replay plus individually captured ordinary roots;
       SpatialHitScene's multi-entry synthetic path remains unchanged pending a
       separate consumer review.
+  14. The Verso HTML clean-check repair follows through tracked handoff
+      `3767af90`; the package gate explicitly builds its declared source
+      library before invoking the native oracle.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -166,6 +172,36 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   removal, or branch deletion is implied by this lease.
 
 ## Latest completed integration lease
+
+- Milestone: `W7-VERSO-HTML-CLEAN-CHECK`.
+- Integration owner: `wasm-gen`, accepting its own clean tracked handoff
+  `3767af90`; the functional head is `c4051bff` on `b2c81e94`.
+- Change: the Verso HTML package gate now builds `VersoHtmlSource` together
+  with `VersoFirHtml.Compile`, ensuring the later native oracle can import
+  `VersoSlides.Pretty` without a warm checkout. Current generic runtime code
+  changes only the complete linked byte count from 145,114 to 145,219; every
+  semantic inventory count and ordered hash is unchanged.
+- Contracts: no Lean semantic, semantic Wasm ABI, resident-helper signature,
+  symbolic-module, W6 proof contract, source entry, adapter API, or ownership
+  contract changed. The package remains zero-import with module-owned memory,
+  five function exports plus memory, 74 source functions, 421 resident helpers,
+  and 495 complete functions.
+- Acceptance: a separate clean FIR worktree with persistent local scratch
+  passed the source-library/compiler build, deterministic double publication,
+  complete checksums, package smoke, eight native/Wasm HTML cases, bounded
+  growth, 32 repeated calls, malformed annotation rejection, and the source
+  package validator. `make check` reports 2,121/2,121 equal comparisons; all
+  3,162 Talos jobs and the complete W7 artifact gate pass.
+- Artifact: clean FIR producer `c4051bff` and clean Verso source
+  `eb8d2b8fcf14` produce immutable package
+  `integration/verso-html/_build/verso-html-packages/c4051bff324b-eb8d2b8fcf14-f9c47a3710629f0517e5`.
+  Its 145,219-byte Wasm has SHA-256
+  `78d38136fa6d8f9b236757b2e06820af8903c60622661a66f5219d52ae92a471`.
+- Result: local `main` advances through `3767af90`; no external package is
+  published. The next W7 milestone is the evidence-driven generic numeric
+  investigation requested in `ROOT-FIR-20260820-001`.
+
+## Previous completed integration lease
 
 - Milestone: `W7-NATIVE-SOURCE-BOUNDARY-HITSCENE`.
 - Integration owner: `wasm-gen`, accepting its own clean tracked handoff
