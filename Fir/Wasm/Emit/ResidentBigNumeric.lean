@@ -1100,6 +1100,23 @@ private def decisionResultLocals : Array (FVarId × AbiKind) := #[
   (savedScratchLocal, .uint32),
   (decisionResultLocal, .uint8)]
 
+/-- Retype a physical decision bit without borrowing linear-memory scratch.
+
+The symbolic ABI distinguishes a raw `UInt32` comparison result from the
+`UInt8` result expected by Lean's decision procedures.  The zero extension and
+wrap preserve every bit of the already-normalized `0`/`1` result while moving
+it through instructions whose result kinds make that distinction explicit.
+The final Wasm optimizer can erase this physical no-op pair. -/
+private def retypeDecisionResult : List Instruction := [
+  .i64ExtendI32U .uint64,
+  .i32WrapI64 .uint8,
+  .ret]
+
+#guard retypeDecisionResult == [
+  .i64ExtendI32U .uint64,
+  .i32WrapI64 .uint8,
+  .ret]
+
 private def loadCount (object flavor destination : FVarId) :
     List Instruction := [
   .localGet object,
@@ -1706,10 +1723,10 @@ private def naturalDecisionBody (kind : DecisionKind) : List Instruction :=
     (immediateNaturalDecision kind ++ [.localSet rawLocal])
     (checkedNaturalDecision kind ++ [.localSet rawLocal]) ++ [
     .localGet rawLocal] ++
-  retypeRawResult .uint8 decisionResultLocal
+  retypeDecisionResult
 
 private def naturalDecisionLocals : Array (FVarId × AbiKind) :=
-  decisionResultLocals ++ #[(compareLocal, .uint32)]
+  #[(rawLocal, .uint32), (compareLocal, .uint32)]
 
 def natDecEqFunction : Function := {
   name := externalName `Nat.decEq
