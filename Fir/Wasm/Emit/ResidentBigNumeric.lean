@@ -1117,6 +1117,24 @@ private def retypeDecisionResult : List Instruction := [
   .i32WrapI64 .uint8,
   .ret]
 
+/-- Retype a physical word already known to be a valid Lean object result
+without borrowing linear-memory scratch.
+
+This helper is deliberately narrower than `retypeRawResult`: callers must
+establish that the input word is already a valid tagged immediate or live heap
+object.  Extending to `UInt64` and wrapping back to `tobject` preserves all 32
+bits while making the symbolic ABI-kind transition explicit.  The final Wasm
+optimizer can erase this physical no-op pair. -/
+private def retypeKnownObjectResult : List Instruction := [
+  .i64ExtendI32U .uint64,
+  .i32WrapI64 .tobject,
+  .ret]
+
+#guard retypeKnownObjectResult == [
+  .i64ExtendI32U .uint64,
+  .i32WrapI64 .tobject,
+  .ret]
+
 private def loadCount (object flavor destination : FVarId) :
     List Instruction := [
   .localGet object,
@@ -1374,7 +1392,7 @@ def natAddFunction : Function := {
   locals := naturalArithmeticLocals
   body := withImmediateNaturalPair leftParam rightParam
     (callImmediateNaturalSum ++
-      retypeRawResult .tobject objectResultLocal)
+      retypeKnownObjectResult)
     ([.i32Const .uint32 0,
         .localSet leftFlavorParam,
         .i32Const .uint32 0,

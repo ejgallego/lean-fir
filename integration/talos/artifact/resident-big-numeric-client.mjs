@@ -175,6 +175,7 @@ export async function checkResidentBigNumeric({ bytes, manifest }) {
   }
 
   const maxImmediate = 2147483647n;
+  const immediateAddFrontier = frontier() >>> 0;
   checkNaturalAddition(host, natAdd, {
     left: maxImmediate - 2n,
     right: 1n,
@@ -189,6 +190,8 @@ export async function checkResidentBigNumeric({ bytes, manifest }) {
     rightClass: "immediate",
     resultClass: "immediate",
   });
+  assert.equal(frontier() >>> 0, immediateAddFrontier,
+    "Nat.add immediate results allocated in the resident heap");
   checkNaturalAddition(host, natAdd, {
     left: maxImmediate,
     right: 1n,
@@ -217,6 +220,10 @@ export async function checkResidentBigNumeric({ bytes, manifest }) {
     rightClass: "heap",
     resultClass: "heap",
   });
+  expectTrap(() => natAdd(0, naturalInput(host, 1n)),
+    "Nat.add malformed heap left operand");
+  expectTrap(() => natAdd(naturalInput(host, 1n), 0),
+    "Nat.add malformed heap right operand");
 
   for (const [left, right] of [
     [0n, 0n],
