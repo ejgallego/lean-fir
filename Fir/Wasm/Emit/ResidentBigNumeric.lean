@@ -1646,7 +1646,14 @@ inductive DecisionKind where
   | lt
   | le
 
-private def naturalDecisionBody (kind : DecisionKind) : List Instruction := [
+private def immediateNaturalDecision (kind : DecisionKind) : List Instruction :=
+  [.localGet leftParam, .localGet rightParam] ++
+  match kind with
+  | .eq => [.i32Eq]
+  | .lt => [.i32LtU]
+  | .le => [.i32LeU]
+
+private def checkedNaturalDecision (kind : DecisionKind) : List Instruction := [
   .localGet leftParam,
   .call (.declaration validateNaturalName),
   .localGet rightParam,
@@ -1669,7 +1676,13 @@ private def naturalDecisionBody (kind : DecisionKind) : List Instruction := [
   | .le =>
       [.localGet compareLocal,
         .i32Const .uint32 2,
-        .i32LtU]) ++
+        .i32LtU])
+
+private def naturalDecisionBody (kind : DecisionKind) : List Instruction :=
+  withImmediateNaturalPair leftParam rightParam
+    (immediateNaturalDecision kind ++ [.localSet rawLocal])
+    (checkedNaturalDecision kind ++ [.localSet rawLocal]) ++ [
+    .localGet rawLocal] ++
   retypeRawResult .uint8 decisionResultLocal
 
 private def naturalDecisionLocals : Array (FVarId × AbiKind) :=

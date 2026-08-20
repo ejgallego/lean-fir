@@ -207,6 +207,25 @@ export async function checkResidentBigNumeric({ bytes, manifest }) {
     resultClass: "heap",
   });
 
+  for (const [left, right] of [
+    [0n, 0n],
+    [0n, 1n],
+    [52n, 17n],
+    [maxImmediate - 1n, maxImmediate],
+    [maxImmediate, maxImmediate],
+  ]) {
+    const leftInput = naturalInput(host, left);
+    const rightInput = naturalInput(host, right);
+    assert.equal(host.classify(leftInput), "immediate");
+    assert.equal(host.classify(rightInput), "immediate");
+    assert.equal(natDecEq(leftInput, rightInput), left === right ? 1 : 0,
+      `Nat.decEq immediate pair ${left}, ${right}`);
+    assert.equal(natDecLt(leftInput, rightInput), left < right ? 1 : 0,
+      `Nat.decLt immediate pair ${left}, ${right}`);
+    assert.equal(natDecLe(leftInput, rightInput), left <= right ? 1 : 0,
+      `Nat.decLe immediate pair ${left}, ${right}`);
+  }
+
   assert.equal(naturalValue(host,
     natAdd(naturalInput(host, a), naturalInput(host, b))), a + b);
   assert.equal(naturalValue(host,

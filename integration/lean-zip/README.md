@@ -107,9 +107,10 @@ export indices. It is diagnostic package metadata only: neither the adapter nor
 the Wasm module loads it during execution.
 
 Do not advance the raw canonical pointer while validating a dirty or stale-base
-branch. `FIR_RAW_PACKAGE_PREVIEW_DIR=/tmp/PATH` selects an explicit preview
-destination and suppresses canonical publication; dirty previews additionally
-require the existing `FIR_ALLOW_DIRTY_PACKAGE=1` acknowledgment.
+branch. `FIR_RAW_PACKAGE_PREVIEW_DIR=$fir_root/.deps/previews/PATH` selects an
+explicit persistent preview destination and suppresses canonical publication;
+dirty previews additionally require the existing
+`FIR_ALLOW_DIRTY_PACKAGE=1` acknowledgment.
 
 The browser/Node API is:
 
@@ -175,6 +176,14 @@ time by 3.48x and 3.39x in two profiles and structured-input time by 1.79x.
 `fir_big_ext_Nat_add` self time falls by about 6.5x on both random profiles;
 the validation and magnitude helpers fall as well rather than absorbing the
 removed work.
+
+The arbitrary-precision decision helpers likewise dispatch two canonical
+tagged immediates directly through Wasm unsigned comparisons. Promoted and
+heap-backed operands retain the checked generic magnitude path. On the same
+256-KiB seeded-random level-6 profile contract, this lowers median raw-entry
+time from 391.71/387.83 ms to 270.49/284.03 ms in two captures. Generic compare
+self samples fall by 89.8%, magnitude low/high by 62.8%/76.2%, and natural
+validation by 75.7%, with identical compressed bytes and a flat frontier.
 
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
