@@ -41,13 +41,13 @@ binaryen-check:
 		fi; \
 	done
 
-wasm-check: unit-check binaryen-check
+wasm-check: binaryen-check
 	cd "$(REPO_ROOT)" && \
 		FIR_BINARYEN_DIR="$(FIR_BINARYEN_DIR)" \
 		FIR_TOOLING_TMPDIR="$(FIR_TOOLING_TMPDIR)" \
 		node --test tooling/wasm/function-index.test.mjs
 
-profile-check: unit-check binaryen-check
+profile-check: binaryen-check
 	cd "$(REPO_ROOT)" && \
 		FIR_BINARYEN_DIR="$(FIR_BINARYEN_DIR)" \
 		FIR_TOOLING_TMPDIR="$(FIR_TOOLING_TMPDIR)" \
@@ -72,4 +72,4 @@ array-probe-check: binaryen-check
 			--wasm _build/package/array-probe.wasm \
 			--sidecar _build/package/array-probe.wasm.functions.json
 
-check: wasm-check profile-check array-probe-check
+check: unit-check wasm-check profile-check array-probe-check
