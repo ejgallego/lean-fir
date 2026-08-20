@@ -73,7 +73,12 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   full-action and selection players are provider-free through tracked handoff
   `a45de4c9` (functional head `1b1668f1`): both source-compile upstream Float
   construction, start at the module's 1,024-byte heap base, and retain zero
-  imports without the legacy standard-math provider.
+  imports without the legacy standard-math provider. The HitScene-family
+  consumers follow through tracked handoff `f42285d8` (functional head
+  `3ba58f87`): both use exact module-wise source capture, link only their
+  five-function platform-libm frontier through `fir.standard-libm/v2`, and
+  finish with zero imports. The now-unreferenced `fir.standard-math/v1`
+  provider is retired.
 - Landing order:
   1. W7-2's Verso source-module replay repair and generic immutable-package
      publisher are accepted in that order through `912bf68a`.
@@ -128,8 +133,11 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   11. Illuminate's full-action and selection consumers follow through tracked
       handoff `a45de4c9`. Their already-closed resident modules use generic
       fail-closed Binaryen cleanup directly; no C provider or 64 KiB runtime
-      reservation remains. HitScene-family migration remains a later consumer
-      slice.
+      reservation remains.
+  12. HitScene and SpatialHitScene follow through tracked handoff `f42285d8`.
+      Their exact five-function opaque platform-libm frontiers link through
+      the accepted standard-libm/v2 provider, after which the unused legacy
+      standard-math/v1 provider is deleted.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -143,11 +151,54 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   the existing shared-observation bug card; it has no feature landing. Later
   tooling surfaces remain on their combined development branch until each has
   an independently authorized head.
+  Individual source-root capture of HitScene remains blocked by confirmed
+  generated private/closed-helper ABI drift in
+  `FIR-BUG-wasm-none-individual-hit-scene-generated-helper-admission`;
+  production uses faithful module-wise postponed-group replay without
+  weakening admission.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
 
 ## Latest completed integration lease
+
+- Milestone: `W7-ILLUMINATE-HIT-SCENE-STANDARD-LIBM`.
+- Integration owner: `wasm-gen`, accepting its own clean tracked handoff
+  `f42285d8`; the functional head is `3ba58f87` on `5b2ba581`.
+- Change: HitScene now replays the exact postponed groups for its source entry
+  module and internalizes ordinary imported modules through FIR's generic
+  final-LCNF dependency capture. HitScene and SpatialHitScene link exactly
+  `Float.acos`, `Float.cos`, `Float.cbrt`, `Float.sin`, and `Float.atan2`
+  through `fir.standard-libm/v2`. The broad legacy `math-runtime.c` provider
+  and `fir.standard-math/v1` capability are removed after the active-consumer
+  scan reached zero.
+- Contracts: no Lean semantic, semantic Wasm ABI, resident-helper signature,
+  symbolic-module, or W6 proof contract changed. Public production and
+  diagnostic query APIs, bit-exact coordinate transport, module-owned memory,
+  persistent scene checkpoint, copied results, scratch rewind, and disposal
+  remain unchanged.
+- Acceptance: HitScene passes 301 fixture queries and 10,000 flat-frontier
+  queries; SpatialHitScene passes 1,009 fixture queries and 10,000
+  flat-frontier queries. Both publish byte-identically twice and verify their
+  complete checksum sets. `make check` reports 2,121/2,121 equal comparisons;
+  all 3,162 Talos jobs and the complete W7 artifact gate pass. All scratch
+  storage stayed in the persistent worktree-local `.deps` tree.
+- Artifacts: HitScene's 67,556-byte module has SHA-256
+  `35f037a7eb65d9aa05ffaf79dfe1d9966a899333f08bd14b25c5d210727b25ef`
+  and package SHA-256
+  `57c165649b6d247dadcf03c626a54bc0b93efcb5c6f6685cbfa0cc2f86601722`.
+  SpatialHitScene's 77,725-byte module has SHA-256
+  `9b86dd2b380ff4841af0517b66ec9b34e0cf312863641ecdf073ca8e2021c2b0`
+  and package SHA-256
+  `f80f8fbb4c9789144824e61cf6a4707b46a8d25ffabf527a66813fc105e73120`.
+  Both own memory and have zero function and memory imports.
+- Result: local `main` advances through `f42285d8`. The confirmed individual
+  capture ABI discrepancy is recorded in
+  `FIR-BUG-wasm-none-individual-hit-scene-generated-helper-admission`; the
+  production path has zero unsupported declarations. No external package is
+  published.
+
+## Previous completed integration lease
 
 - Milestone: `W7-ILLUMINATE-PROVIDER-FREE-SOURCE-FLOAT`.
 - Integration owner: `wasm-gen`, accepting its own clean tracked handoff
