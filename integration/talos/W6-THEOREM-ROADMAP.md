@@ -1689,9 +1689,25 @@ The public `Nat.add` theorem then composes the common pair dispatcher, payload
 decoders, actual adapted `naturalSum` call, and shared scratch retyping path.
 It returns the canonical tagged mathematical sum with unchanged store; neither
 the checked arbitrary-precision arm nor the adapter terminal suffix executes.
-The next resident-helper proof slices are promoted/heap-backed sums and the
-operation-specific `StateRelated` successor needed to instantiate the generic
-resident replacement theorem at compiler admission.
+
+The three public resident Nat decisions now share one proof as well.
+`ImmediateNaturalPairRel.wasmWords_eq_iff`, `wasmWords_lt_iff`, and
+`wasmWords_le_iff` show that equality and unsigned order on canonical encoded
+words are exactly equality and order on their Nat payloads.  Successful
+adaptation of `Nat.decEq`, `Nat.decLt`, or `Nat.decLe` preserves the complete
+checked fallback program and exposes the common direct dispatcher.  The
+uniform actual-function theorem executes the selected comparison and the
+existing scratch-memory `UInt8` cast, restores memory, leaves the caller tail
+and store unchanged, and returns precisely the source decision byte.  The
+promoted, heap-backed, mixed-representation, and arbitrary-limb path remains
+the same checked branch; the pre-existing pure-scalar external theorem and its
+compiler admission are unchanged.
+
+The next resident-helper proof slices are promoted/heap-backed sums, followed
+by the operation-specific `StateRelated` successors needed to instantiate the
+generic resident replacement theorem at compiler admission.  The decision
+slice also still needs that final replacement instantiation; its actual helper
+body and immediate representation law no longer block it.
 
 Unchecked typed Array helpers use a separate proof-indexed admission boundary.
 A live `ResidentArrayObjectRel` already supplies a checked header, exact

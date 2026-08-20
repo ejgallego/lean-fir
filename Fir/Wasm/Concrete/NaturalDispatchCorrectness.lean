@@ -283,6 +283,69 @@ theorem ValueRel.heapFallback_of_not_bothImmediateNaturalWords
       · exact .inl
           (leftObjectRelated.classify_eq_heap_of_lowBit_ne_one valid leftOdd)
 
+/-- A canonical immediate word crosses the Talos `i32` boundary without
+wraparound.  Decision helpers compare the encoded words directly, so this is
+the common bridge from their unsigned machine comparisons back to Nat. -/
+@[simp] theorem Word32.encodeImmediate_uint32_toNat
+    (payload : Nat) (fits : payload ≤ maxImmediatePayload) :
+    (UInt32.ofNat (Word32.encodeImmediate payload fits).value).toNat =
+      payload * 2 + 1 := by
+  have encodedLt : payload * 2 + 1 < 4294967296 := by
+    unfold maxImmediatePayload at fits
+    omega
+  simp [Word32.encodeImmediate, Nat.mod_eq_of_lt encodedLt]
+
+/-- Canonical immediate words are equal exactly when their Nat payloads are
+equal. -/
+theorem ImmediateNaturalPairRel.wasmWords_eq_iff
+    {leftWord rightWord : Word32} {leftReference rightReference : ObjectRef}
+    {leftPayload rightPayload : UInt64}
+    (pair : ImmediateNaturalPairRel leftWord rightWord leftReference
+      rightReference leftPayload rightPayload) :
+    UInt32.ofNat leftWord.value = UInt32.ofNat rightWord.value ↔
+      leftPayload.toNat = rightPayload.toNat := by
+  rw [congrArg Word32.value pair.leftWordEq,
+    congrArg Word32.value pair.rightWordEq]
+  constructor
+  · intro equal
+    have values := congrArg UInt32.toNat equal
+    rw [Word32.encodeImmediate_uint32_toNat,
+      Word32.encodeImmediate_uint32_toNat] at values
+    omega
+  · intro equal
+    apply UInt32.toNat_inj.mp
+    rw [Word32.encodeImmediate_uint32_toNat,
+      Word32.encodeImmediate_uint32_toNat]
+    omega
+
+/-- Unsigned order on canonical immediate words is exactly strict Nat order.
+The affine encoding `2 * payload + 1` is monotone and does not wrap. -/
+theorem ImmediateNaturalPairRel.wasmWords_lt_iff
+    {leftWord rightWord : Word32} {leftReference rightReference : ObjectRef}
+    {leftPayload rightPayload : UInt64}
+    (pair : ImmediateNaturalPairRel leftWord rightWord leftReference
+      rightReference leftPayload rightPayload) :
+    UInt32.ofNat leftWord.value < UInt32.ofNat rightWord.value ↔
+      leftPayload.toNat < rightPayload.toNat := by
+  rw [congrArg Word32.value pair.leftWordEq,
+    congrArg Word32.value pair.rightWordEq, UInt32.lt_iff_toNat_lt]
+  simp only [Word32.encodeImmediate_uint32_toNat]
+  omega
+
+/-- Unsigned non-strict order on canonical immediate words is exactly Nat
+non-strict order. -/
+theorem ImmediateNaturalPairRel.wasmWords_le_iff
+    {leftWord rightWord : Word32} {leftReference rightReference : ObjectRef}
+    {leftPayload rightPayload : UInt64}
+    (pair : ImmediateNaturalPairRel leftWord rightWord leftReference
+      rightReference leftPayload rightPayload) :
+    UInt32.ofNat leftWord.value ≤ UInt32.ofNat rightWord.value ↔
+      leftPayload.toNat ≤ rightPayload.toNat := by
+  rw [congrArg Word32.value pair.leftWordEq,
+    congrArg Word32.value pair.rightWordEq, UInt32.le_iff_toNat_le]
+  simp only [Word32.encodeImmediate_uint32_toNat]
+  omega
+
 /-- The immediate `Nat.add` branch reuses the existing canonical natural
 constructor. Its result remains immediate when the sum fits and becomes the
 ordinary promoted persistent natural when it crosses `maxImmediatePayload`;

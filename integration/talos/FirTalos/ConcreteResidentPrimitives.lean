@@ -43,6 +43,26 @@ def immediateNaturalRemainder (leftIndex rightIndex : Nat) : Wasm.Program :=
   immediateNaturalPayload leftIndex ++ immediateNaturalPayload rightIndex ++
     [.remU]
 
+/-- Exact scalar result of W7's direct two-immediate Nat decision branch. -/
+def immediateNaturalDecisionResult
+    (kind : Fir.Wasm.Emit.ResidentBigNumeric.DecisionKind)
+    (left right : UInt64) : UInt32 :=
+  match kind with
+  | .eq => if left.toNat = right.toNat then 1 else 0
+  | .lt => if left.toNat < right.toNat then 1 else 0
+  | .le => if left.toNat ≤ right.toNat then 1 else 0
+
+/-- Talos spelling of the immediate branch shared by `Nat.decEq`, `Nat.decLt`,
+and `Nat.decLe`. -/
+def immediateNaturalDecision
+    (kind : Fir.Wasm.Emit.ResidentBigNumeric.DecisionKind)
+    (leftIndex rightIndex : Nat) : Wasm.Program :=
+  [.localGet leftIndex, .localGet rightIndex] ++
+    match kind with
+    | .eq => [.eq]
+    | .lt => [.ltU]
+    | .le => [.leU]
+
 /-- A terminating defined helper call with one result composes with the
 compiler's checked destination write and arbitrary continuation.  This is the
 resident analogue of the import-specific `wp_external_ready_let` core, with
@@ -244,6 +264,49 @@ theorem wp_immediateNaturalRemainder
   rw [if_neg machineRightNonzero]
   rw [pair.wasmRemainder]
   exact continuation
+
+/-- All three direct decision instructions implement their Nat relation on a
+canonical immediate pair.  The store and caller operand tail are unchanged. -/
+theorem wp_immediateNaturalDecision
+    {module : Wasm.Module} {env : Wasm.HostEnv α}
+    {Q : Wasm.Assertion α} {store : Wasm.Store α} {locals : Wasm.Locals}
+    {kind : Fir.Wasm.Emit.ResidentBigNumeric.DecisionKind}
+    {leftIndex rightIndex : Nat} {leftWord rightWord : Word32}
+    {leftReference rightReference : Fir.LeanIR.Impure.ObjectRef}
+    {leftPayload rightPayload : UInt64} {tail : List Wasm.Value}
+    {rest : Wasm.Program}
+    (pair : ImmediateNaturalPairRel leftWord rightWord leftReference
+      rightReference leftPayload rightPayload)
+    (leftLocal : locals.get leftIndex =
+      some (.i32 (UInt32.ofNat leftWord.value)))
+    (rightLocal : locals.get rightIndex =
+      some (.i32 (UInt32.ofNat rightWord.value)))
+    (continuation : Wasm.wp module rest Q store
+      { locals with values :=
+          (.i32 (immediateNaturalDecisionResult kind leftPayload rightPayload) ::
+            tail) } env) :
+    Wasm.wp module
+      (immediateNaturalDecision kind leftIndex rightIndex ++ rest) Q store
+      { locals with values := tail } env := by
+  have leftLocal' : ({ locals with values := tail } : Wasm.Locals).get
+      leftIndex = some (.i32 (UInt32.ofNat leftWord.value)) := by
+    simpa using leftLocal
+  have rightLocal' : ({ locals with values :=
+      (.i32 (UInt32.ofNat leftWord.value) :: tail) } : Wasm.Locals).get
+      rightIndex = some (.i32 (UInt32.ofNat rightWord.value)) := by
+    simpa using rightLocal
+  cases kind <;>
+    simp only [immediateNaturalDecision, List.cons_append, List.nil_append,
+      Wasm.wp_localGet_cons, leftLocal', rightLocal']
+  · rw [Wasm.wp_eq_cons]
+    simpa [immediateNaturalDecisionResult, pair.wasmWords_eq_iff] using
+      continuation
+  · rw [Wasm.wp_ltU_cons]
+    simpa [immediateNaturalDecisionResult, pair.wasmWords_lt_iff] using
+      continuation
+  · rw [Wasm.wp_leU_cons]
+    simpa [immediateNaturalDecisionResult, pair.wasmWords_le_iff] using
+      continuation
 
 /-- Once the pair test is known true, the generated `if` selects exactly the
 immediate body and restores the caller's operand tail at the control boundary.
