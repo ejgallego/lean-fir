@@ -194,6 +194,16 @@ to 219.84/220.72 ms, a further reduction of about 19%/22%. The helper's
 combined self samples fall by about 61%; compressed bytes remain identical
 and the post-call frontier remains flat at 9,237,304 bytes.
 
+`Nat.mul` uses the same representation dispatcher for two tagged inputs. Their
+31-bit payloads are widened and multiplied with Wasm `i64.mul`; the existing
+natural constructor returns either a tagged result or the canonical promoted
+one-limb representation. Every promoted, mixed, or arbitrary-limb input still
+uses the checked multiplication implementation. Against the preceding
+`USize.ofNat` package, level-6 medians fall from 219.84/220.72 ms to
+190.94/187.20 ms, another reduction of about 13%/15%. `fir_ext_Nat_mul` self
+samples fall by about 94%, with identical compressed bytes and the same flat
+9,237,304-byte frontier.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not

@@ -72,6 +72,7 @@ private def carryLocal : FVarId := ⟨`carry⟩
 private def lastLocal : FVarId := ⟨`lastNonzero⟩
 private def scaledLocal : FVarId := ⟨`scaled⟩
 private def rawLocal : FVarId := ⟨`raw⟩
+private def raw64Local : FVarId := ⟨`raw64⟩
 private def savedScratchLocal : FVarId := ⟨`savedScratch⟩
 private def objectResultLocal : FVarId := ⟨`objectResult⟩
 private def resultLocal : FVarId := ⟨`resultValue⟩
@@ -361,21 +362,25 @@ private def callGenericMul : List Instruction := [
   .call (.declaration mulGenericName),
   .ret]
 
-def mulFunction : Function := {
-  name := externalName `Nat.mul
-  params := #[(leftParam, .tobject), (rightParam, .tobject)]
-  results := #[.tobject]
-  locals := #[(leftCountLocal, .uint32), (rightCountLocal, .uint32),
-    (countLocal, .uint32), (partCountLocal, .uint32),
-    (partIndexLocal, .uint32), (bitIndexLocal, .uint32),
-    (wordLocal, .uint32), (leftLowLocal, .uint32),
-    (leftHighLocal, .uint32), (rightLowLocal, .uint32),
-    (lowLocal, .uint32), (highLocal, .uint32), (carryLocal, .uint32),
-    (resultLocal, .tobject), (temporaryLocal, .tobject),
-    (addendLocal, .tobject), (multiplierLocal, .tobject),
-    (rawLocal, .uint32), (savedScratchLocal, .uint32),
-    (objectResultLocal, .tobject)]
-  body := validateInputs ++ naturalCount leftParam leftCountLocal ++
+private def immediateMulBody : List Instruction :=
+  ResidentBigNumeric.immediateNaturalPayload leftParam ++ [
+    .i64ExtendI32U .uint64] ++
+  ResidentBigNumeric.immediateNaturalPayload rightParam ++ [
+    .i64ExtendI32U .uint64,
+    .i64Mul,
+    .localSet raw64Local,
+    .localGet raw64Local,
+    .i32WrapI64 .uint32,
+    .localSet lowLocal,
+    .localGet raw64Local,
+    .i64Const .uint64 32,
+    .i64ShrU,
+    .i32WrapI64 .uint32,
+    .localSet highLocal] ++
+  makeNaturalResult lowLocal highLocal
+
+private def checkedMulBody : List Instruction :=
+  validateInputs ++ naturalCount leftParam leftCountLocal ++
     naturalCount rightParam rightCountLocal ++ [
     .localGet leftCountLocal,
     .i32Const .uint32 1,
@@ -396,7 +401,25 @@ def mulFunction : Function := {
       .i32Const .uint32 0,
       .i32Eq,
       .i32And,
-      .ifElse smallMulBody callGenericMul]) callGenericMul] }
+      .ifElse smallMulBody callGenericMul]) callGenericMul]
+
+def mulFunction : Function := {
+  name := externalName `Nat.mul
+  params := #[(leftParam, .tobject), (rightParam, .tobject)]
+  results := #[.tobject]
+  locals := #[(leftCountLocal, .uint32), (rightCountLocal, .uint32),
+    (countLocal, .uint32), (partCountLocal, .uint32),
+    (partIndexLocal, .uint32), (bitIndexLocal, .uint32),
+    (wordLocal, .uint32), (leftLowLocal, .uint32),
+    (leftHighLocal, .uint32), (rightLowLocal, .uint32),
+    (lowLocal, .uint32), (highLocal, .uint32), (carryLocal, .uint32),
+    (resultLocal, .tobject), (temporaryLocal, .tobject),
+    (addendLocal, .tobject), (multiplierLocal, .tobject),
+    (rawLocal, .uint32), (raw64Local, .uint64),
+    (savedScratchLocal, .uint32),
+    (objectResultLocal, .tobject)]
+  body := ResidentBigNumeric.withImmediateNaturalPair leftParam rightParam
+    immediateMulBody checkedMulBody }
 
 private def landParts : List Instruction := [
   .localGet leftParam,

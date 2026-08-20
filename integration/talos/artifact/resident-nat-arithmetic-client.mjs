@@ -74,11 +74,43 @@ export async function checkResidentNatArithmetic({ bytes, manifest }) {
     operation(naturalInput(host, value)));
 
   assert.equal(apply(mul, 0n, 0n), 0n);
+  const immediateMulFrontier = frontier() >>> 0;
+  for (const [left, right] of [
+    [0n, 0x7fff_ffffn],
+    [1n, 0x7fff_ffffn],
+    [0x3fff_ffffn, 2n],
+  ]) {
+    const leftInput = naturalInput(host, left);
+    const rightInput = naturalInput(host, right);
+    assert.equal(host.classify(leftInput), "immediate");
+    assert.equal(host.classify(rightInput), "immediate");
+    const result = mul(leftInput, rightInput);
+    assert.equal(host.classify(result), "immediate",
+      `Nat.mul immediate result was promoted: ${left} * ${right}`);
+    assert.equal(naturalValue(host, result), left * right,
+      `Nat.mul immediate mismatch: ${left} * ${right}`);
+  }
+  assert.equal(frontier() >>> 0, immediateMulFrontier,
+    "Nat.mul immediate products allocated in the resident heap");
+  for (const [left, right] of [
+    [0x7fff_ffffn, 2n],
+    [0x7fff_ffffn, 0x7fff_ffffn],
+  ]) {
+    const result = mul(naturalInput(host, left), naturalInput(host, right));
+    assert.notEqual(host.classify(result), "immediate",
+      `Nat.mul promoted result stayed immediate: ${left} * ${right}`);
+    assert.equal(naturalValue(host, result), left * right,
+      `Nat.mul promoted mismatch: ${left} * ${right}`);
+  }
   assert.equal(apply(mul, 0xffff_ffffn, 0xffff_ffffn),
     0xffff_fffe_0000_0001n);
   const mulLeft = (1n << 257n) + (1n << 129n) + 3n;
   const mulRight = (1n << 193n) + (1n << 65n) + 5n;
   assert.equal(apply(mul, mulLeft, mulRight), mulLeft * mulRight);
+  expectTrap(() => mul(0, naturalInput(host, 1n)),
+    "Nat.mul malformed heap left operand");
+  expectTrap(() => mul(naturalInput(host, 1n), 0),
+    "Nat.mul malformed heap right operand");
 
   assert.equal(apply(pow, 0n, 0n), 1n);
   assert.equal(apply(pow, 3n, 0n), 1n);
