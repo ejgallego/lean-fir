@@ -10,8 +10,9 @@ open Fir.Wasm.Concrete
 
 This module verifies the optimized `USize.ofNat` and `USize.ofNatLT`
 helpers.  Their shared dispatcher decodes canonical tagged naturals directly;
-all other representations retain the checked arbitrary-precision path.  Both
-paths meet at the same scratch-memory retyping boundary.
+all other representations retain the checked arbitrary-precision path.  The
+immediate arm returns directly without touching locals or memory; only the
+checked arm crosses the scratch-memory retyping boundary.
 -/
 
 namespace ResidentUSize
@@ -36,13 +37,13 @@ def savedIndex (kind : NatConversionKind) : Nat := rawIndex kind + 1
 def resultIndex (kind : NatConversionKind) : Nat := rawIndex kind + 2
 
 /-- W6 spelling of W7's direct canonical-tag decode. -/
-def immediateSource (value raw : Lean.FVarId) :
+def immediateSource (value : Lean.FVarId) :
     List Fir.Wasm.Instruction := [
   .localGet value,
   .i32Const .uint32 1,
   .i32ShrU,
-  .i64ExtendI32U .uint64,
-  .localSet raw]
+  .i64ExtendI32U .usize,
+  .ret]
 
 /-- The checked path deliberately validates before reading limb zero.  This
 ordering is part of the failure contract for malformed representations. -/
@@ -83,12 +84,12 @@ def retypeSource (raw saved result : Lean.FVarId) :
   .localGet result,
   .ret]
 
-def immediateProgram (value raw : Nat) : Wasm.Program := [
+def immediateProgram (value : Nat) : Wasm.Program := [
   .localGet value,
   .const 1,
   .shrU,
   .extendUI32,
-  .localSet raw]
+  .ret]
 
 def checkedProgram (validate high low value raw : Nat) : Wasm.Program := [
   .localGet value,
@@ -131,13 +132,13 @@ def conversionProgram (kind : NatConversionKind) (fallback : Wasm.Program) :
   .localGet 0,
   .const 1,
   .and,
-  .iff 0 0 (immediateProgram 0 (rawIndex kind)) fallback,
-  .localGet (rawIndex kind)] ++
-    retypeProgram (rawIndex kind) (savedIndex kind) (resultIndex kind)
+  .iff 0 0 (immediateProgram 0)
+    (fallback ++ [.localGet (rawIndex kind)] ++
+      retypeProgram (rawIndex kind) (savedIndex kind) (resultIndex kind))]
 
-/-- The public emitter bodies expose the same dispatcher and scratch cast.
-The checked arm is existential because private helper locals are intentionally
-not part of the proof API. -/
+/-- The public emitter bodies expose the direct-return immediate arm and keep
+the scratch cast inside the checked fallback.  The checked arm is existential
+because private helper locals are intentionally not part of the proof API. -/
 theorem conversionFunction_shape (kind : NatConversionKind) :
     ∃ fallback,
       (conversionFunction kind).body = [
@@ -145,15 +146,13 @@ theorem conversionFunction_shape (kind : NatConversionKind) :
         .i32Const .uint32 1,
         .i32And,
         .ifElse
-          (immediateSource
-            (conversionFunction kind).params[0]!.1
-            (conversionFunction kind).locals[0]!.1)
-          fallback,
-        .localGet (conversionFunction kind).locals[0]!.1] ++
-        retypeSource
-          (conversionFunction kind).locals[0]!.1
-          (conversionFunction kind).locals[1]!.1
-          (conversionFunction kind).locals[2]!.1 := by
+          (immediateSource (conversionFunction kind).params[0]!.1)
+          (fallback ++ [
+            .localGet (conversionFunction kind).locals[0]!.1] ++
+            retypeSource
+              (conversionFunction kind).locals[0]!.1
+              (conversionFunction kind).locals[1]!.1
+              (conversionFunction kind).locals[2]!.1)] := by
   cases kind <;> refine ⟨_, rfl⟩
 
 /-- Exact public shape, including the validation and generic limb accessor
@@ -164,17 +163,15 @@ theorem conversionFunction_shape_exact (kind : NatConversionKind) :
       .i32Const .uint32 1,
       .i32And,
       .ifElse
-        (immediateSource
-          (conversionFunction kind).params[0]!.1
-          (conversionFunction kind).locals[0]!.1)
+        (immediateSource (conversionFunction kind).params[0]!.1)
         (checkedSource
-          (conversionFunction kind).params[0]!.1
-          (conversionFunction kind).locals[0]!.1),
-      .localGet (conversionFunction kind).locals[0]!.1] ++
-      retypeSource
-        (conversionFunction kind).locals[0]!.1
-        (conversionFunction kind).locals[1]!.1
-        (conversionFunction kind).locals[2]!.1 := by
+            (conversionFunction kind).params[0]!.1
+            (conversionFunction kind).locals[0]!.1 ++ [
+          .localGet (conversionFunction kind).locals[0]!.1] ++
+          retypeSource
+            (conversionFunction kind).locals[0]!.1
+            (conversionFunction kind).locals[1]!.1
+            (conversionFunction kind).locals[2]!.1)] := by
   cases kind <;> rfl
 
 theorem conversionFunction_locals_size (kind : NatConversionKind) :
@@ -184,19 +181,15 @@ theorem conversionFunction_locals_size (kind : NatConversionKind) :
 /-- The adapter preserves the direct tagged decode exactly. -/
 theorem instructions_immediateSource
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {value raw : Lean.FVarId}
-    {valueIndex rawIndex : Nat}
+    {labels : List Lean.FVarId} {value : Lean.FVarId}
+    {valueIndex : Nat}
     (valueFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList) value =
-        some valueIndex)
-    (rawFound : FirTalos.findFVar?
-      (sourceFunction.params.toList ++ sourceFunction.locals.toList) raw =
-        some rawIndex) :
+        some valueIndex) :
     FirTalos.instructions sourceModule sourceFunction labels
-      (immediateSource value raw) =
-        .ok (immediateProgram valueIndex rawIndex) := by
+      (immediateSource value) = .ok (immediateProgram valueIndex) := by
   simp [immediateSource, immediateProgram, FirTalos.instructions,
-    FirTalos.instruction, valueFound, rawFound, Bind.bind, Except.bind,
+    FirTalos.instruction, valueFound, Bind.bind, Except.bind,
     pure, Except.pure]
 
 /-- Exact adaptation of the checked arm.  The three resolved indices are
@@ -260,21 +253,19 @@ theorem instructions_conversionFunctionBody_of_shape
         .i32Const .uint32 1,
         .i32And,
         .ifElse
-          (immediateSource
-            (conversionFunction kind).params[0]!.1
-            (conversionFunction kind).locals[0]!.1)
-          sourceFallback,
-        .localGet (conversionFunction kind).locals[0]!.1] ++
-        retypeSource
-          (conversionFunction kind).locals[0]!.1
-          (conversionFunction kind).locals[1]!.1
-          (conversionFunction kind).locals[2]!.1)
+          (immediateSource (conversionFunction kind).params[0]!.1)
+          (sourceFallback ++ [
+            .localGet (conversionFunction kind).locals[0]!.1] ++
+            retypeSource
+              (conversionFunction kind).locals[0]!.1
+              (conversionFunction kind).locals[1]!.1
+              (conversionFunction kind).locals[2]!.1)])
     (fallbackAdapted : FirTalos.instructions sourceModule
       (conversionFunction kind) [] sourceFallback = .ok targetFallback) :
     FirTalos.instructions sourceModule (conversionFunction kind) []
       (conversionFunction kind).body =
         .ok (conversionProgram kind targetFallback) := by
-  rw [shape, FirTalos.Correctness.instructions_append]
+  rw [shape]
   have valueFound : FirTalos.findFVar?
       ((conversionFunction kind).params.toList ++
         (conversionFunction kind).locals.toList)
@@ -296,13 +287,40 @@ theorem instructions_conversionFunctionBody_of_shape
       (conversionFunction kind).locals[2]!.1 = some (resultIndex kind) := by
     cases kind <;> decide
   have immediateAdapted := instructions_immediateSource
-    (sourceModule := sourceModule) (labels := []) valueFound rawFound
+    (sourceModule := sourceModule) (labels := []) valueFound
   have retypeAdapted := instructions_retypeSource
     (sourceModule := sourceModule) (labels := []) rawFound savedFound resultFound
+  have checkedAdapted : FirTalos.instructions sourceModule
+      (conversionFunction kind) []
+      (sourceFallback ++ [
+        .localGet (conversionFunction kind).locals[0]!.1] ++
+        retypeSource
+          (conversionFunction kind).locals[0]!.1
+          (conversionFunction kind).locals[1]!.1
+          (conversionFunction kind).locals[2]!.1) =
+        .ok (targetFallback ++ [.localGet (rawIndex kind)] ++
+          retypeProgram (rawIndex kind) (savedIndex kind)
+            (resultIndex kind)) := by
+    rw [FirTalos.Correctness.instructions_append,
+      FirTalos.Correctness.instructions_append, fallbackAdapted]
+    simp [FirTalos.instructions, FirTalos.instruction, rawFound,
+      retypeAdapted, Bind.bind, Except.bind, pure, Except.pure]
+  have checkedAdapted' : FirTalos.instructions sourceModule
+      (conversionFunction kind) []
+      (sourceFallback ++
+        .localGet (conversionFunction kind).locals[0]!.1 ::
+          retypeSource
+            (conversionFunction kind).locals[0]!.1
+            (conversionFunction kind).locals[1]!.1
+            (conversionFunction kind).locals[2]!.1) =
+        .ok (targetFallback ++ .localGet (rawIndex kind) ::
+          retypeProgram (rawIndex kind) (savedIndex kind)
+            (resultIndex kind)) := by
+    simpa [List.append_assoc] using checkedAdapted
   cases kind <;>
     simp [conversionProgram, rawIndex, savedIndex, resultIndex,
-      FirTalos.instructions, FirTalos.instruction, valueFound, rawFound,
-      fallbackAdapted, immediateAdapted, retypeAdapted, Bind.bind,
+      FirTalos.instructions, FirTalos.instruction, valueFound,
+      immediateAdapted, checkedAdapted', Bind.bind,
       Except.bind, pure, Except.pure]
 
 theorem adaptedConversionFunction_body_of_shape
@@ -317,15 +335,13 @@ theorem adaptedConversionFunction_body_of_shape
         .i32Const .uint32 1,
         .i32And,
         .ifElse
-          (immediateSource
-            (conversionFunction kind).params[0]!.1
-            (conversionFunction kind).locals[0]!.1)
-          sourceFallback,
-        .localGet (conversionFunction kind).locals[0]!.1] ++
-        retypeSource
-          (conversionFunction kind).locals[0]!.1
-          (conversionFunction kind).locals[1]!.1
-          (conversionFunction kind).locals[2]!.1)
+          (immediateSource (conversionFunction kind).params[0]!.1)
+          (sourceFallback ++ [
+            .localGet (conversionFunction kind).locals[0]!.1] ++
+            retypeSource
+              (conversionFunction kind).locals[0]!.1
+              (conversionFunction kind).locals[1]!.1
+              (conversionFunction kind).locals[2]!.1)])
     (fallbackAdapted : FirTalos.instructions sourceModule
       (conversionFunction kind) [] sourceFallback = .ok targetFallback) :
     targetFunction.body = conversionProgram kind targetFallback ++
@@ -382,23 +398,26 @@ theorem wp_checkedProgram
     {locals afterRaw : Wasm.Locals}
     {validateIndex highIndex lowIndex valueIndex rawIndex : Nat}
     {word : UInt32} {natural : Nat} {highWord lowWord : UInt32}
-    {tail : List Wasm.Value}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
     (calls : CheckedNaturalCalls env module validateIndex highIndex lowIndex
       store word natural highWord lowWord)
     (valueLocal : locals.get valueIndex = some (.i32 word))
     (rawSet :
       ({ locals with values := .i64 (UInt64.ofNat natural) :: tail }).set?
         rawIndex (.i64 (UInt64.ofNat natural)) = some afterRaw)
-    (continued : Q (.Fallthrough store { afterRaw with values := tail })) :
+    (continued : Wasm.wp module rest Q store
+      { afterRaw with values := tail } env) :
     Wasm.wp module
-      (checkedProgram validateIndex highIndex lowIndex valueIndex rawIndex)
+      (checkedProgram validateIndex highIndex lowIndex valueIndex rawIndex ++
+        rest)
       Q store { locals with values := tail } env := by
   have valueLocalWith (values : List Wasm.Value) :
       ({ locals with values := values } : Wasm.Locals).get valueIndex =
         some (.i32 word) := by
     simpa using valueLocal
   unfold checkedProgram
-  simp only [Wasm.wp_localGet_cons, valueLocalWith]
+  simp only [List.cons_append, List.nil_append, Wasm.wp_localGet_cons,
+    valueLocalWith]
   apply Wasm.wp_call_tw (calls.validate tail)
   intro final values validated
   rcases validated with ⟨rfl, valuesEq⟩
@@ -484,21 +503,20 @@ theorem wp_retypeProgram
     resultSet, savedGet', resultGet', Wasm.wp_ret_cons]
   simpa only [ResidentMemoryRel.write64_restore] using returned
 
-/-- The optimized arm decodes one canonical immediate word and stores the
-exact `UInt64` payload in the shared raw-result local. -/
+/-- The optimized arm decodes one canonical immediate word and returns the
+exact `UInt64` payload directly.  Its postcondition contains the original
+store and locals, making the absence of memory, allocation, ownership, and
+scratch-local effects explicit. -/
 theorem wp_immediateProgram
     {module : Wasm.Module} {env : Wasm.HostEnv α}
     {Q : Wasm.Assertion α} {store : Wasm.Store α}
-    {locals afterRaw : Wasm.Locals} {valueIndex rawIndex : Nat}
+    {locals : Wasm.Locals} {valueIndex : Nat}
     {payload : UInt64} {tail : List Wasm.Value}
     (fits : payload.toNat ≤ maxImmediatePayload)
     (valueLocal : locals.get valueIndex = some (.i32 (UInt32.ofNat
       (Word32.encodeImmediate payload.toNat fits).value)))
-    (rawSet :
-      ({ locals with values := .i64 payload :: tail }).set? rawIndex
-        (.i64 payload) = some afterRaw)
-    (continued : Q (.Fallthrough store { afterRaw with values := tail })) :
-    Wasm.wp module (immediateProgram valueIndex rawIndex) Q store
+    (returned : Q (.Return store (.i64 payload :: tail))) :
+    Wasm.wp module (immediateProgram valueIndex) Q store
       { locals with values := tail } env := by
   have valueLocal' :
       ({ locals with values := tail } : Wasm.Locals).get valueIndex =
@@ -511,34 +529,21 @@ theorem wp_immediateProgram
   have shiftOne : (1 % 32 : UInt32) = 1 := by decide
   rw [shiftOne]
   rw [immediateRaw_eq_payload payload fits]
-  simp only [Wasm.wp_localSet_cons, rawSet]
-  simpa using continued
+  simpa only [Wasm.wp_ret_cons] using returned
 
 /-- The immediate dispatcher of either conversion helper returns the exact
-USize payload, restores scratch memory, and leaves the checked fallback
-unreachable. -/
+USize payload and leaves the checked fallback unreachable.  It requires no
+memory-bound premise and preserves the store exactly because it performs no
+memory, allocation, ownership, or scratch-local operation. -/
 theorem wp_conversionProgramImmediate
     {module : Wasm.Module} {env : Wasm.HostEnv α}
     {Q : Wasm.Assertion α} {store : Wasm.Store α}
-    {locals afterBranch afterRaw afterSaved afterResult : Wasm.Locals}
+    {locals : Wasm.Locals}
     {kind : NatConversionKind} {payload : UInt64}
     {tail : List Wasm.Value} {fallback rest : Wasm.Program}
     (fits : payload.toNat ≤ maxImmediatePayload)
-    (pagesPositive : 0 < store.mem.pages)
     (valueLocal : locals.get 0 = some (.i32 (UInt32.ofNat
       (Word32.encodeImmediate payload.toNat fits).value)))
-    (branchSet :
-      ({ locals with values := .i64 payload :: tail }).set? (rawIndex kind)
-        (.i64 payload) = some afterBranch)
-    (rawSet :
-      ({ afterBranch with values := .i64 payload :: tail }).set?
-        (rawIndex kind) (.i64 payload) = some afterRaw)
-    (savedSet :
-      ({ afterRaw with values := .i64 (store.mem.read64 0) :: tail }).set?
-        (savedIndex kind) (.i64 (store.mem.read64 0)) = some afterSaved)
-    (resultSet :
-      ({ afterSaved with values := .i64 payload :: tail }).set?
-        (resultIndex kind) (.i64 payload) = some afterResult)
     (returned : Q (.Return store (.i64 payload :: tail))) :
     Wasm.wp module (conversionProgram kind fallback ++ rest) Q store
       { locals with values := tail } env := by
@@ -560,21 +565,7 @@ theorem wp_conversionProgramImmediate
   simp only [List.cons_append, List.nil_append, Wasm.wp_localGet_cons,
     valueLocal', Wasm.wp_const_cons, Wasm.wp_and_cons, selected]
   apply Wasm.wp_iff_cons rfl
-  apply wp_immediateProgram fits valueLocal branchSet
-  have branchUpdate := FirTalos.Correctness.localUpdate_of_set? branchSet
-  have rawGet : afterBranch.get (rawIndex kind) = some (.i64 payload) :=
-    branchUpdate.1
-  have rawGet' :
-      ({ afterBranch with values := tail } : Wasm.Locals).get
-        (rawIndex kind) = some (.i64 payload) := by
-    simpa using rawGet
-  simp only [List.take_zero, List.drop_zero, List.nil_append,
-    Wasm.wp_localGet_cons, rawGet']
-  have casted := wp_retypeProgram
-    (module := module) (env := env) (Q := Q) pagesPositive
-    (by cases kind <;> decide) (by cases kind <;> decide)
-    rawSet savedSet resultSet returned
-  simpa [retypeProgram] using casted
+  exact wp_immediateProgram fits valueLocal returned
 
 /-- The complementary dispatcher branch validates a non-immediate natural,
 reads its low limb through the stable accessor contract, and returns the
@@ -617,7 +608,8 @@ theorem wp_conversionProgramChecked
   unfold conversionProgram
   simp only [List.cons_append, List.nil_append, Wasm.wp_localGet_cons,
     valueLocal', Wasm.wp_const_cons, Wasm.wp_and_cons, notImmediate]
-  apply Wasm.wp_iff_cons rfl
+  apply Wasm.wp_iff_cons (c := (0 : UInt32)) (vs := tail) rfl
+  simp only [if_neg (by simp : ¬ ((0 : UInt32) ≠ 0))]
   apply wp_checkedProgram calls valueLocal branchSet
   have branchUpdate := FirTalos.Correctness.localUpdate_of_set? branchSet
   have rawGet : afterBranch.get (rawIndex kind) =
@@ -664,18 +656,15 @@ theorem terminatesWith_conversionFunctionImmediate_of_adapted
         .i32Const .uint32 1,
         .i32And,
         .ifElse
-          (immediateSource
-            (conversionFunction kind).params[0]!.1
-            (conversionFunction kind).locals[0]!.1)
-          sourceFallback,
-        .localGet (conversionFunction kind).locals[0]!.1] ++
-        retypeSource
-          (conversionFunction kind).locals[0]!.1
-          (conversionFunction kind).locals[1]!.1
-          (conversionFunction kind).locals[2]!.1)
+          (immediateSource (conversionFunction kind).params[0]!.1)
+          (sourceFallback ++ [
+            .localGet (conversionFunction kind).locals[0]!.1] ++
+            retypeSource
+              (conversionFunction kind).locals[0]!.1
+              (conversionFunction kind).locals[1]!.1
+              (conversionFunction kind).locals[2]!.1)])
     (fallbackAdapted : FirTalos.instructions sourceModule
-      (conversionFunction kind) [] sourceFallback = .ok targetFallback)
-    (pagesPositive : 0 < store.mem.pages) :
+      (conversionFunction kind) [] sourceFallback = .ok targetFallback) :
     Wasm.TerminatesWith env module functionIndex store
       (callArguments kind (UInt32.ofNat
         (Word32.encodeImmediate payload.toNat fits).value) ++ tail)
@@ -698,59 +687,6 @@ theorem terminatesWith_conversionFunctionImmediate_of_adapted
         Wasm.Function.numParams, paramsEq, conversionFunction,
         Fir.Wasm.Emit.ResidentUSize.ofNatFunction,
         Fir.Wasm.Emit.ResidentUSize.ofNatLTFunction]
-  have targetLocalsLength : targetFunction.locals.length = 3 := by
-    rw [localsEq, List.length_map, Array.length_toList,
-      conversionFunction_locals_size]
-  have branchValid :
-      ({ entry with values := [.i64 payload] }).validIndex (rawIndex kind) := by
-    cases kind <;>
-      simp [entry, arguments, callArguments, Wasm.Function.toLocals,
-        Wasm.Function.numParams, paramsEq, targetLocalsLength, rawIndex,
-        conversionFunction, Fir.Wasm.Emit.ResidentUSize.ofNatFunction,
-        Fir.Wasm.Emit.ResidentUSize.ofNatLTFunction]
-  obtain ⟨afterBranch, branchSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists branchValid
-  have branchLengths := FirTalos.Correctness.locals_lengths_of_set? branchSet
-  have rawValid :
-      ({ afterBranch with values := [.i64 payload] }).validIndex
-        (rawIndex kind) := by
-    simp only [Wasm.Locals.validIndex]
-    cases kind <;>
-      simp [branchLengths.1, branchLengths.2, entry, arguments, callArguments,
-        Wasm.Function.toLocals, Wasm.Function.numParams, paramsEq,
-        targetLocalsLength, rawIndex, conversionFunction,
-        Fir.Wasm.Emit.ResidentUSize.ofNatFunction,
-        Fir.Wasm.Emit.ResidentUSize.ofNatLTFunction]
-  obtain ⟨afterRaw, rawSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists rawValid
-  have rawLengths := FirTalos.Correctness.locals_lengths_of_set? rawSet
-  have savedValid :
-      ({ afterRaw with values := [.i64 (store.mem.read64 0)] }).validIndex
-        (savedIndex kind) := by
-    simp only [Wasm.Locals.validIndex]
-    cases kind <;>
-      simp [rawLengths.1, rawLengths.2, branchLengths.1, branchLengths.2,
-        entry, arguments, callArguments, Wasm.Function.toLocals,
-        Wasm.Function.numParams, paramsEq, targetLocalsLength, rawIndex,
-        savedIndex, conversionFunction,
-        Fir.Wasm.Emit.ResidentUSize.ofNatFunction,
-        Fir.Wasm.Emit.ResidentUSize.ofNatLTFunction]
-  obtain ⟨afterSaved, savedSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists savedValid
-  have savedLengths := FirTalos.Correctness.locals_lengths_of_set? savedSet
-  have resultValid :
-      ({ afterSaved with values := [.i64 payload] }).validIndex
-        (resultIndex kind) := by
-    simp only [Wasm.Locals.validIndex]
-    cases kind <;>
-      simp [savedLengths.1, savedLengths.2, rawLengths.1, rawLengths.2,
-        branchLengths.1, branchLengths.2, entry, arguments, callArguments,
-        Wasm.Function.toLocals, Wasm.Function.numParams, paramsEq,
-        targetLocalsLength, rawIndex, resultIndex,
-        conversionFunction, Fir.Wasm.Emit.ResidentUSize.ofNatFunction,
-        Fir.Wasm.Emit.ResidentUSize.ofNatLTFunction]
-  obtain ⟨afterResult, resultSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists resultValid
   have returned :
       FirTalos.Correctness.FunctionBodyPost targetFunction arguments
         (fun final values =>
@@ -766,8 +702,7 @@ theorem terminatesWith_conversionFunctionImmediate_of_adapted
       (module := module) (env := env) (store := store) (locals := entry)
       (fallback := targetFallback)
       (rest := FirTalos.functionTerminal sourceModule (conversionFunction kind))
-      (tail := []) fits pagesPositive valueLocal branchSet rawSet savedSet
-      resultSet returned)
+      (tail := []) fits valueLocal returned)
 
 /-- The promoted-tag and arbitrary-limb path of both actual adapted helpers
 is a fuel-free defined call whenever the installed validator/accessors satisfy
