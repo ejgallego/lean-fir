@@ -109,7 +109,14 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   refinement of the stable immediate-Nat decision and Nat-to-`USize` helpers
   is accepted through proof handoff `3ab5b747` (functional heads `bbf91fd4`
   and `33d2b3f7`); independent clean elaboration confirmation follows at
-  `b96efca1`, and both modules are included by the Talos umbrella.
+  `b96efca1`, and both modules are included by the Talos umbrella. W7's
+  direct-result `USize.ofNat` successor is accepted through tracked handoff
+  `680ff128` (functional head `db6d46a7`): tagged inputs now return a semantic
+  `.usize` directly without scratch-memory traffic, while promoted,
+  arbitrary-limb, and malformed inputs retain the checked path. W6's matching
+  refinement and independent natural-limb accessor boundary follow through
+  tracked proof handoff `132b59b8` (functional heads `668e1288` and
+  `4fde5829`).
 - Landing order:
   1. W7-2's Verso source-module replay repair and generic immutable-package
      publisher are accepted in that order through `912bf68a`.
@@ -202,6 +209,11 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
       `3ab5b747` and clean confirmation `b96efca1`. The Talos umbrella imports
       both `ConcreteResidentNatDecision` and `ConcreteResidentUSize`; the
       direct-result W7 successor remains an independent proof adaptation.
+  20. W7's direct-result `USize.ofNat` successor follows through tracked
+      generation handoff `680ff128`, then W6's rebased proof stack follows
+      through `132b59b8`. The tagged arm returns without touching memory; the
+      checked arm retains validation, modulo-`2^64` recombination, and the
+      restoring scratch cast. No shared signature or layout changes.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -217,14 +229,47 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   an independently authorized head. SpatialHitScene's multi-entry synthetic
   capture has not yet been assessed for the repaired hybrid API. Proof
   adaptation for the accepted immediate `Nat.mul` and `Nat.sub` bodies remains
-  queued, as does W7's direct-result successor to the now-proved stable
-  `USize.ofNat` helper. None blocks generation acceptance because no helper
-  signature or shared layout changed.
+  queued. None blocks generation acceptance because no helper signature or
+  shared layout changed.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
 
 ## Latest completed integration lease
+
+- Milestone: `W7-W6-DIRECT-RESULT-USIZE`.
+- Integration owner: `wasm-gen`, accepting W7 tracked generation handoff
+  `680ff128` and the rebased W6 proof handoff `132b59b8`; functional heads are
+  `db6d46a7`, `4fde5829`, and `668e1288` on baseline `1f4509fa`.
+- Change: canonical tagged Nat inputs to `USize.ofNat` and `USize.ofNatLT`
+  decode through shift-right-one, zero-extend directly to semantic `.usize`,
+  and return without scratch-memory stores or loads. The checked promoted and
+  arbitrary-limb path remains validator-first, computes modulo `2^64`, and
+  retains the restoring scratch cast. W6 proves the direct arm preserves the
+  complete concrete store and separately establishes the natural-limb
+  accessor boundary consumed by later checked-path work.
+- Contracts: no Lean semantic, helper signature, symbolic Wasm instruction,
+  semantic ABI, concrete layout, source entry, adapter API, ownership, or arena
+  contract changed.
+- Acceptance: Lean Beam and focused real-Wasm fixed-width checks pass.
+  `make check` reports 713 unique cases and 2,121/2,121 equal comparisons;
+  `make talos-check` passes all 3,165 jobs; the complete deterministic W7
+  artifact gate passes all 44 concrete artifacts and 15 source probes.
+  Order-balanced lean-zip medians improve from 143.16195775 ms to
+  140.25860675 ms, about 2.03%, while two clean CPU profiles reduce
+  `fir_ext_USize_ofNat` self samples from 735 to 132/128, about 82%.
+- Artifact: immutable local preview
+  `.deps/evidence/lean-zip-numeric/usize-direct-clean-package` has package ID
+  `05dc1f0c41e1-273d0d6cd9ca-aef61428f530ebfb13b2`; its 936,202-byte
+  zero-import Wasm SHA-256 is
+  `95a575a3ef7928b406d02a167daffee0362728a8346fcc3b1109f4e55f509dc4`,
+  and its 999,568-byte sidecar SHA-256 is
+  `aa3d60d8910e65f62d2bc1726a12b64cf60a4c5b1ae9cdf62ac49437d91d0ed5`.
+- Result: local `main` advances through `132b59b8`. The package remains local
+  for lean-zip acceptance; `fir_dec_once` stays parked behind a separate
+  upstream-faithful ownership design.
+
+## Previous completed integration lease
 
 - Milestone: `W6-IMMEDIATE-NAT-DECISION-USIZE`.
 - Integration owner: `wasm-gen`, accepting W6's tracked proof handoff
