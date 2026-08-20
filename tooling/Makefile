@@ -4,7 +4,7 @@ FIR_BINARYEN_DIR ?= $(REPO_ROOT)/.deps/lcnf-c-wasm/emsdk/upstream/bin
 FIR_TOOLING_TMPDIR ?= $(REPO_ROOT)/.deps/tooling-tmp
 BINARYEN_REVISION := version 128 (version_127-18-g2eb472cd6)
 
-.PHONY: no-skips unit-check binaryen-check wasm-check check
+.PHONY: no-skips unit-check binaryen-check wasm-check profile-check check
 
 no-skips:
 	@if rg -n 'test[.]skip|skip[[:space:]]*:' "$(TOOLING_DIR)" \
@@ -18,7 +18,8 @@ unit-check: no-skips
 		FIR_TOOLING_TMPDIR="$(FIR_TOOLING_TMPDIR)" \
 		node --test \
 			tooling/worktree-temp-unit.test.mjs \
-			tooling/wasm/function-index-unit.test.mjs
+			tooling/wasm/function-index-unit.test.mjs \
+			tooling/profile/node-profile-unit.test.mjs
 
 binaryen-check:
 	@for tool in wasm-as wasm-opt; do \
@@ -44,4 +45,10 @@ wasm-check: unit-check binaryen-check
 		FIR_TOOLING_TMPDIR="$(FIR_TOOLING_TMPDIR)" \
 		node --test tooling/wasm/function-index.test.mjs
 
-check: wasm-check
+profile-check: unit-check binaryen-check
+	cd "$(REPO_ROOT)" && \
+		FIR_BINARYEN_DIR="$(FIR_BINARYEN_DIR)" \
+		FIR_TOOLING_TMPDIR="$(FIR_TOOLING_TMPDIR)" \
+		node --test tooling/profile/node-profile.test.mjs
+
+check: wasm-check profile-check
