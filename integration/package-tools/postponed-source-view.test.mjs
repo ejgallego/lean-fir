@@ -7,7 +7,7 @@ const valid = {
   lean: "/does/not/run",
   leanPath: "/lean/path",
   moduleName: "Client.Source",
-  outputRoot: "/tmp/fir-postponed-source-view-test",
+  outputRoot: "/workspace/.deps/fir-postponed-source-view-test",
   packageName: "ClientSourceView",
   sourceFile: "/client/Source.lean",
 };

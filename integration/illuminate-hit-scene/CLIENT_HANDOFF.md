@@ -34,6 +34,11 @@ The final module is self-contained, owns its memory, has zero imports, and
 exports only the structured entry, its bit-exact-coordinate facade, four heap
 operations, and memory.
 
+Its build manifest records the exact `fir.standard-libm/v2` link frontier:
+`Float.acos`, `Float.cos`, `Float.cbrt`, `Float.sin`, and `Float.atan2`. These
+functions are linked into the final module; application JavaScript supplies no
+math handlers.
+
 The admitted input capability is `lean-4.33-Illuminate.HitScene/v2`. Its path
 constructor includes the four prepared Float bounds emitted by Illuminate;
 v1 packages and scenes are incompatible and must not be staged.

@@ -16,7 +16,6 @@ def illuminateRoot : String :=
 lean_lib «IlluminateHitSceneSource» where
   srcDir := System.FilePath.mk illuminateRoot / "src"
   globs := #[.submodules `Illuminate]
-  leanOptions := #[⟨`compiler.postponeCompile, true⟩]
 
 @[default_target]
 lean_lib «IlluminateFirHitScene»

@@ -8,13 +8,18 @@ open Lean
 /-- The real prepared hit-scene query requested by Illuminate. -/
 def entry : Name := ``Illuminate.HitScene.query
 
-/--
-Capture the real entry and recursively discovered dependencies in their
-ordinary separately compiled final-LCNF units. This preserves the module-level
-closed-term boundary used by Lean's own native emitter.
--/
-def captureSource : CoreM Fir.Validation.Lcnf.Artifact :=
-  Fir.Wasm.Emit.Source.compileEntryModuleWiseInternalized entry
+/-- The upstream module whose exact final-LCNF groups own the public entry. -/
+def sourceModule : Name := `Illuminate.Diagram.HitScene
+
+/-- Capture the real entry and recursively discovered dependencies in their
+ordinary separately compiled final-LCNF units. Only the entry module is
+replayed from a postponed source view; ordinary imported modules are closed
+through FIR's generic final-dependency path. -/
+def captureSource : CoreM Fir.Validation.Lcnf.Artifact := do
+  let artifact ← Fir.Wasm.Emit.Source.compileEntryModuleWiseInternalizedFrom
+    sourceModule entry entry
+    Fir.Wasm.Emit.ResidentLinker.closedApplicationRetainedExternalNames
+  Fir.Wasm.Emit.Source.internalizeFinalDependencies artifact
     Fir.Wasm.Emit.ResidentLinker.closedApplicationRetainedExternalNames
 
 /--
@@ -23,6 +28,12 @@ closed-term sharing when all roots are recompiled as one synthetic unit.
 -/
 def captureSourceSingleUnit : CoreM Fir.Validation.Lcnf.Artifact :=
   Fir.Wasm.Emit.Source.compileEntryFinalCapturedInternalized entry #[]
+    Fir.Wasm.Emit.ResidentLinker.closedApplicationRetainedExternalNames
+
+/-- Diagnostic reproducer for per-root generated-name ABI drift. Production
+uses `captureSource`, which preserves the entry module's native boundary. -/
+def captureSourceIndividual : CoreM Fir.Validation.Lcnf.Artifact :=
+  Fir.Wasm.Emit.Source.compileEntryIndividuallyInternalized entry
     Fir.Wasm.Emit.ResidentLinker.closedApplicationRetainedExternalNames
 
 /-- Lower the unmodified source closure before resident runtime linking. -/

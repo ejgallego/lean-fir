@@ -15,13 +15,14 @@ import {
 } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-
+import { buildPostponedSourceView } from
+  "../package-tools/postponed-source-view.mjs";
 import {
   ILLUMINATE_HIT_SCENE_ADAPTER_API_VERSION,
   ILLUMINATE_HIT_SCENE_INPUT_LAYOUT_VERSION,
   ILLUMINATE_HIT_SCENE_OWNERSHIP_VERSION,
 } from "./illuminate-hit-scene-browser-adapter.mjs";
-import { standardMathRuntimeCapability } from
+import { standardLibmRuntimeCapability } from
   "../wasm-runtime/contract.mjs";
 
 const directory = dirname(fileURLToPath(import.meta.url));
@@ -33,7 +34,7 @@ const fixturePath = resolve(process.env.ILLUMINATE_HIT_SCENE_FIXTURE ??
 const buildDirectory = join(directory, "_build");
 const baseStem = join(buildDirectory, "illuminate-hit-scene-base.wasm");
 const frontierStem = join(buildDirectory, "illuminate-hit-scene-frontier.wasm");
-const mathStem = join(buildDirectory, "illuminate-hit-scene-math.wasm");
+const libmStem = join(buildDirectory, "illuminate-hit-scene-libm.wasm");
 const completeStem = join(buildDirectory, "illuminate-hit-scene-complete.wasm");
 const sourcePin = JSON.parse(readFileSync(join(directory,
   "illuminate-source.json"), "utf8"));
@@ -52,6 +53,7 @@ function run(command, args, options = {}) {
   return execFileSync(command, args, {
     cwd: options.cwd ?? directory,
     encoding: options.encoding ?? "utf8",
+    env: { ...process.env, ...options.env },
     stdio: options.capture === false ? "inherit" : ["ignore", "pipe", "inherit"],
     maxBuffer: 64 * 1024 * 1024,
   });
@@ -114,9 +116,22 @@ if (process.env.FIR_HIT_SCENE_REUSE_FRONTIER !== "1") {
   run("lake", ["--keep-toolchain", "--reconfigure",
     `-KilluminateRoot=${illuminateRoot}`, "build",
     "IlluminateFirHitScene.Compile"], { capture: false });
-  run("lake", ["--keep-toolchain", "--reconfigure",
-    `-KilluminateRoot=${illuminateRoot}`, "env", "lean",
-    "-DmaxHeartbeats=0", "Emit.lean"], { capture: false });
+  const lean = capture("lake", ["--keep-toolchain", "env", "which", "lean"]);
+  const leanPath = capture("lake", ["--keep-toolchain", "env", "printenv",
+    "LEAN_PATH"]);
+  const sourceView = buildPostponedSourceView({
+    lean,
+    leanPath,
+    moduleName: "Illuminate.Diagram.HitScene",
+    outputRoot: join(directory, ".lake/build/lib/lean"),
+    packageName: "IlluminateFirHitSceneSourceView",
+    sourceFile: join(illuminateRoot,
+      "src/Illuminate/Diagram/HitScene.lean"),
+  });
+  run(lean, ["-DmaxHeartbeats=0", "Emit.lean"], {
+    capture: false,
+    env: { LEAN_PATH: sourceView.leanPath },
+  });
 }
 const frontierHash = sha256(readFileSync(frontierStem));
 if (process.env.FIR_HIT_SCENE_REQUIRE_REPEAT === "1") {
@@ -125,34 +140,47 @@ if (process.env.FIR_HIT_SCENE_REQUIRE_REPEAT === "1") {
     "repeated resident generation was not deterministic");
 }
 
+const expectedFrontierImports = Object.freeze([
+  { module: "lean.extern", name: "Float.acos", kind: "function" },
+  { module: "lean.extern", name: "Float.cos", kind: "function" },
+  { module: "lean.extern", name: "Float.cbrt", kind: "function" },
+  { module: "lean.extern", name: "Float.sin", kind: "function" },
+  { module: "lean.extern", name: "Float.atan2", kind: "function" },
+]);
+const frontierImports = WebAssembly.Module.imports(new WebAssembly.Module(
+  readFileSync(frontierStem)));
+assert.deepEqual(frontierImports, expectedFrontierImports,
+  "HitScene frontier libm import inventory changed");
+
 const emsdk = join(firRoot, ".deps/lcnf-c-wasm/emsdk");
 const emcc = join(emsdk, "upstream/emscripten/emcc");
 const externalRuntimeDirectory = join(firRoot, "integration/wasm-runtime");
-const externalMathSource = join(externalRuntimeDirectory, "math-runtime.c");
+const externalLibmSource = join(externalRuntimeDirectory, "libm-runtime.c");
 const externalRuntimeLinker = join(externalRuntimeDirectory, "link-runtime.mjs");
 const externalRuntimeContract = join(externalRuntimeDirectory, "contract.mjs");
-run(emcc, [externalMathSource, "-O3", "-flto",
+run(emcc, [externalLibmSource, "-O3", "-flto",
   "--no-entry", "-sSTANDALONE_WASM=1", "-sIMPORTED_MEMORY=1",
   "-sALLOW_MEMORY_GROWTH=1", "-sINITIAL_MEMORY=65536",
   "-sSTACK_SIZE=16384", "-Wl,--gc-sections", "-Wl,--strip-all",
-  "-o", mathStem], { capture: false });
+  "-o", libmStem], { capture: false });
 run(process.execPath, [externalRuntimeLinker, frontierStem,
-  mathStem, completeStem], { capture: false });
+  libmStem, completeStem], { capture: false });
 const firstCompleteHash = sha256(readFileSync(completeStem));
 if (process.env.FIR_HIT_SCENE_REQUIRE_REPEAT === "1") {
-  const repeatedMath = join(buildDirectory, "illuminate-hit-scene-math-repeat.wasm");
+  const repeatedLibm = join(buildDirectory,
+    "illuminate-hit-scene-libm-repeat.wasm");
   const repeatedComplete = join(buildDirectory,
     "illuminate-hit-scene-complete-repeat.wasm");
-  run(emcc, [externalMathSource, "-O3", "-flto",
+  run(emcc, [externalLibmSource, "-O3", "-flto",
     "--no-entry", "-sSTANDALONE_WASM=1", "-sIMPORTED_MEMORY=1",
     "-sALLOW_MEMORY_GROWTH=1", "-sINITIAL_MEMORY=65536",
     "-sSTACK_SIZE=16384", "-Wl,--gc-sections", "-Wl,--strip-all",
-    "-o", repeatedMath], { capture: false });
+    "-o", repeatedLibm], { capture: false });
   run(process.execPath, [externalRuntimeLinker, frontierStem,
-    repeatedMath, repeatedComplete], { capture: false });
+    repeatedLibm, repeatedComplete], { capture: false });
   assert.equal(sha256(readFileSync(repeatedComplete)), firstCompleteHash,
     "repeated complete-runtime link was not deterministic");
-  rmSync(repeatedMath, { force: true });
+  rmSync(repeatedLibm, { force: true });
   rmSync(repeatedComplete, { force: true });
 }
 
@@ -164,7 +192,7 @@ const frontierInventory = JSON.parse(readFileSync(
 const descriptor = JSON.parse(readFileSync(`${frontierStem}.json`, "utf8"));
 descriptor.imports = [];
 descriptor.completeRuntime = true;
-descriptor.externalRuntime = standardMathRuntimeCapability(
+descriptor.externalRuntime = standardLibmRuntimeCapability(
   frontierInventory.imports.map(({ name }) => name));
 const module = new WebAssembly.Module(wasm);
 const imports = WebAssembly.Module.imports(module);
@@ -206,12 +234,12 @@ const smoke = readFileSync(join(directory, "package-smoke.mjs"));
 const leanToolchain = readFileSync(join(directory, "lean-toolchain"), "utf8").trim();
 const leanVersion = capture("lake", ["--keep-toolchain", "env", "lean",
   "--version"]);
-const mathExports = WebAssembly.Module.exports(new WebAssembly.Module(
-  readFileSync(mathStem))).filter(({ kind }) => kind === "function")
+const libmExports = WebAssembly.Module.exports(new WebAssembly.Module(
+  readFileSync(libmStem))).filter(({ kind }) => kind === "function")
   .map(({ name }) => name).filter((name) => !name.startsWith("_") &&
     !name.startsWith("emscripten_"));
 const build = {
-  schemaVersion: "fir.illuminate-hit-scene.build/v1",
+  schemaVersion: "fir.illuminate-hit-scene.build/v2",
   sources: {
     fir: { repository: "git@github.com:ejgallego/lean-fir.git", ...fir },
     illuminate: {
@@ -231,7 +259,7 @@ const build = {
     leanVersion,
     emscriptenVersion: capture(emcc, ["--version"]).split("\n")[0],
     emscriptenSha256: sha256(readFileSync(emcc)),
-    externalRuntimeSourceSha256: sha256(readFileSync(externalMathSource)),
+    externalRuntimeSourceSha256: sha256(readFileSync(externalLibmSource)),
     externalRuntimeContractSha256:
       sha256(readFileSync(externalRuntimeContract)),
   },
@@ -261,9 +289,9 @@ const build = {
     capturedDeclarations: frontierInventory.capturedDeclarations,
     reviewedExternalsBeforeLink: frontierInventory.reviewedExternalsBeforeLink,
     retainedFunctions: frontierInventory.functions,
-    unresolvedBeforeMathLink: frontierInventory.imports,
+    unresolvedBeforeLibmLink: frontierInventory.imports,
     runtimeOperationsAfterResidentLink: frontierInventory.runtimeOperations,
-    mathRuntimeFunctions: mathExports,
+    libmRuntimeFunctions: libmExports,
   },
   capabilities: {
     completeRuntime: {
@@ -271,7 +299,7 @@ const build = {
       selfContained: true,
       functionImports: 0,
       memoryImports: 0,
-      externalRuntime: standardMathRuntimeCapability(
+      externalRuntime: standardLibmRuntimeCapability(
         frontierInventory.imports.map(({ name }) => name)),
     },
     inputLayout: {

@@ -13,22 +13,17 @@ another platform's libc by a few ULPs; special-value behavior and ABI bit
 transport are checked explicitly. This is the same portability boundary Lean
 upstream chooses for these opaque declarations.
 
-`math-runtime.c` implements the older Lean 4.33 math boundary and reads FIR's
-module-owned Lean object representation directly. Its version-1 compatibility
-surface still contains the historical `Float.ofNat` and `Float.ofScientific`
-providers for older frontier packages; those providers accept Naturals with at
-most one 64-bit limb and decimal exponents through 20, trapping outside that
-declared capability.
-
-Generic closed applications no longer retain those two declarations at the C
-frontier. `Fir.Wasm.Emit.ResidentFloatSource` compiles Lean's exposed
-`Float.ofNat` and `Float.ofScientific` definitions through LCNF, and resident
+Generic closed applications do not retain `Float.ofNat` or
+`Float.ofScientific` at the C frontier.
+`Fir.Wasm.Emit.ResidentFloatSource` compiles Lean's exposed `Float.ofNat` and
+`Float.ofScientific` definitions through LCNF, and resident
 Nat/Int/BitVec/Float helpers close their complete arbitrary-precision model
 path. The Talos `source-float-conversions` artifact is zero-import and checks
 fast/slow paths, subnormals, overflow, arbitrary Naturals, and exact result
-bits against a native Lean oracle. Illuminate's full-action and selection
-players consume this source path directly; the legacy contract remains
-versioned here only for packages that have not yet been regenerated.
+bits against a native Lean oracle. Illuminate's full-action, selection,
+HitScene, and SpatialHitScene packages consume this source path directly. The
+former `fir.standard-math/v1` compatibility provider has no active consumers
+and has been retired.
 
 `contract.mjs` describes the separately compiled C runtime. In particular, it
 declares a 65536-byte low-memory reservation for the compiled C data and stack.

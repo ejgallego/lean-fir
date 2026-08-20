@@ -29,12 +29,19 @@ run_cmd do
     let formatted ← liftCoreM <|
       Lean.Compiler.LCNF.ppDecl' declaration .impure
     pure s!"{formatted.pretty}\n"
+  let capturedText ← source.program.decls.mapM fun declaration => do
+    let formatted ← liftCoreM <|
+      Lean.Compiler.LCNF.ppDecl' declaration .impure
+    pure s!"{formatted.pretty}\n"
   let partialApplicationDiagnostics ← source.program.decls.filterMapM fun declaration => do
     if partialApplicationDiagnosticNames.contains declaration.name then
       let formatted ← liftCoreM <|
         Lean.Compiler.LCNF.ppDecl' declaration .impure
       return some s!"{formatted.pretty}\n"
     return none
+  let rawLoweringError := match Fir.Wasm.lower source.program with
+    | .ok _ => Json.null
+    | .error error => (toString (repr error) : Json)
   let result ← liftCoreM <|
     Fir.Wasm.Emit.Source.compileModuleArtifact source
   let loweredAt ← IO.monoMsNow
@@ -53,10 +60,13 @@ run_cmd do
     ("baseFunctions", baseFunctions),
     ("runtimeOperations", runtimeOperations.size),
     ("runtimeOperationNames", runtimeOperationArrayJson runtimeOperations),
+    ("rawLoweringError", rawLoweringError),
     ("loweringError", loweringError)]
   IO.FS.writeFile "_build/hit-scene-probe.json" (inventory.pretty ++ "\n")
   IO.FS.writeFile "_build/hit-scene-unsupported.lcnf"
     (String.intercalate "\n" unsupportedText.toList)
+  IO.FS.writeFile "_build/hit-scene-captured.lcnf"
+    (String.intercalate "\n" capturedText.toList)
   IO.FS.writeFile "_build/hit-scene-partial-application.lcnf"
     (String.intercalate "\n" partialApplicationDiagnostics.toList)
   logInfo m!"captured {source.program.decls.size} HitScene declarations with {source.externalNames.size} externals and {unsupported.size} unsupported declarations (capture {capturedAt - startedAt}ms, lower {loweredAt - capturedAt}ms)"

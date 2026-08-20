@@ -88,7 +88,7 @@ FIR_SPATIAL_HIT_SCENE_REQUIRE_REPEAT=1
 immutable handoff.
 
 The publisher atomically advances the canonical pointer only after it has
-linked the shared C/libm runtime, verified zero imports and exact exports, run
+linked the shared standard-libm v2 runtime, verified zero imports and exact exports, run
 the packaged smoke, and checked every package digest.
 
 Run the order-balanced FIR reference/spatial comparison with at least seven
@@ -105,10 +105,12 @@ the benchmark does not insert clocks into the untimed adapter path.
 
 ## Ratcheted coverage
 
-The closure contains 194 source declarations and 41 reviewed externals. The
-resident frontier contains 780 functions, zero runtime operations, and the
-same 15 standard Float/libm declarations used by the accepted reference
-package before the final zero-import merge.
+The closure contains 301 source declarations and 57 reviewed externals. The
+resident frontier contains 760 functions, zero runtime operations, and five
+genuine platform-libm declarations (`Float.acos`, `Float.cos`, `Float.cbrt`,
+`Float.sin`, and `Float.atan2`) before the final zero-import merge. Core Float
+arithmetic, conversions, `sqrt`, and `floor` are source-compiled or resident
+in Wasm.
 
 The package smoke covers:
 

@@ -21,11 +21,19 @@ const fromBits = (bits) => {
 
 assert.equal(fixture.schemaVersion, "illuminate.hit-scene-benchmark/v1");
 assert.equal(fixture.queries.length, 301);
+assert.equal(build.schemaVersion, "fir.illuminate-hit-scene.build/v2");
 assert.equal(build.capabilities.inputLayout.version,
   "lean-4.33-Illuminate.HitScene/v2");
 assert.equal(build.wasm.sha256, sha256(wasm));
 assert.equal(build.fixture.sha256,
   sha256(readFileSync(join(directory, "hit-scene-benchmark.json"))));
+assert.deepEqual(build.capabilities.completeRuntime.externalRuntime, {
+  version: "fir.standard-libm/v2",
+  declarations: ["Float.acos", "Float.cos", "Float.cbrt", "Float.sin",
+    "Float.atan2"],
+  reservedMemoryBytes: 65536,
+  numericContract: "platform-libm-special-values-and-bounded-error",
+});
 
 const module = new WebAssembly.Module(wasm);
 assert.deepEqual(WebAssembly.Module.imports(module), []);

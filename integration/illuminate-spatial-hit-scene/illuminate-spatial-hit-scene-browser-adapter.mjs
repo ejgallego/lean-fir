@@ -21,6 +21,14 @@ const SCENE = Symbol("fir.illuminate-spatial-hit-scene.scene");
 const ADAPTER_STATE = new WeakMap();
 const SCENE_STATE = new WeakMap();
 const FLOAT_BITS = new DataView(new ArrayBuffer(8));
+const STANDARD_LIBM_RUNTIME_VERSION = "fir.standard-libm/v2";
+const STANDARD_LIBM_DECLARATIONS = Object.freeze([
+  "Float.acos",
+  "Float.cos",
+  "Float.cbrt",
+  "Float.sin",
+  "Float.atan2",
+]);
 
 const KIND = Object.freeze({
   constructor: 1,
@@ -657,6 +665,16 @@ function validateBuild(build) {
   const runtime = requireObject(
     build.capabilities?.completeRuntime?.externalRuntime,
     "BUILD.json complete-runtime externalRuntime");
+  requireCondition(runtime.version === STANDARD_LIBM_RUNTIME_VERSION,
+    "BUILD.json has the wrong external-runtime version");
+  requireCondition(Array.isArray(runtime.declarations) &&
+    runtime.declarations.length === STANDARD_LIBM_DECLARATIONS.length &&
+    runtime.declarations.every((name, index) =>
+      name === STANDARD_LIBM_DECLARATIONS[index]),
+  "BUILD.json has the wrong external-runtime declarations");
+  requireCondition(runtime.numericContract ===
+    "platform-libm-special-values-and-bounded-error",
+  "BUILD.json has the wrong external-runtime numeric contract");
   requireCondition(Number.isSafeInteger(runtime.reservedMemoryBytes) &&
     runtime.reservedMemoryBytes >= HEAP_BASE &&
     runtime.reservedMemoryBytes <= MAX_UINT32 &&

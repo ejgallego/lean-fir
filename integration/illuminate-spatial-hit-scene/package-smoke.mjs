@@ -23,6 +23,7 @@ const fromBits = (bits) => {
 
 assert.equal(fixture.schemaVersion, "illuminate.hit-scene-benchmark/v1");
 assert.equal(fixture.queries.length, 301);
+assert.equal(build.schemaVersion, "fir.illuminate-spatial-hit-scene.build/v2");
 assert.equal(suite.schemaVersion, "illuminate.hit-scene-benchmark-suite/v1");
 assert.deepEqual(suite.fixtures.map(({ queries }) => queries.length),
   [83, 301, 625]);
@@ -33,6 +34,13 @@ assert.equal(build.fixture.sha256,
   sha256(readFileSync(join(directory, "hit-scene-benchmark.json"))));
 assert.equal(build.fixtureSuite.sha256,
   sha256(readFileSync(join(directory, "hit-scene-benchmark-suite.json"))));
+assert.deepEqual(build.capabilities.completeRuntime.externalRuntime, {
+  version: "fir.standard-libm/v2",
+  declarations: ["Float.acos", "Float.cos", "Float.cbrt", "Float.sin",
+    "Float.atan2"],
+  reservedMemoryBytes: 65536,
+  numericContract: "platform-libm-special-values-and-bounded-error",
+});
 
 const module = new WebAssembly.Module(wasm);
 assert.deepEqual(WebAssembly.Module.imports(module), []);

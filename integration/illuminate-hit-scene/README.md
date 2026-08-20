@@ -50,11 +50,13 @@ the adapter starts the FIR arena above that prefix before encoding the scene.
 
 ## Build and publish
 
-Create the clean source view once:
+Create the clean source view once in the W7 worktree's persistent, ignored
+dependency directory:
 
 ```sh
+mkdir -p .deps/source-views .deps/tmp
 git -C /home/egallego/lean/illuminate worktree add --detach \
-  /tmp/illuminate-hit-scene-pinned \
+  "$PWD/.deps/source-views/illuminate-hit-scene" \
   88dcfee895a55e804641bff485024cffec1b5419
 ```
 
@@ -64,7 +66,8 @@ Install the repository-pinned Emscripten toolchain, then publish:
 integration/lcnf-c-wasm/setup-emscripten.sh
 
 cd integration/illuminate-hit-scene
-ILLUMINATE_ROOT=/tmp/illuminate-hit-scene-pinned \
+TMPDIR=$PWD/../../.deps/tmp \
+ILLUMINATE_ROOT=$PWD/../../.deps/source-views/illuminate-hit-scene \
 ILLUMINATE_HIT_SCENE_FIXTURE=/absolute/path/to/hit-scene-benchmark.json \
   node package.mjs
 ```
@@ -73,7 +76,8 @@ For the release gate, repeat from a clean FIR worktree and require the freshly
 generated frontier and complete module to match the prior bytes:
 
 ```sh
-ILLUMINATE_ROOT=/tmp/illuminate-hit-scene-pinned \
+TMPDIR=$PWD/../../.deps/tmp \
+ILLUMINATE_ROOT=$PWD/../../.deps/source-views/illuminate-hit-scene \
 ILLUMINATE_HIT_SCENE_FIXTURE=/absolute/path/to/hit-scene-benchmark.json \
 FIR_HIT_SCENE_REQUIRE_REPEAT=1 \
   node package.mjs
@@ -107,12 +111,15 @@ The package smoke checks:
 - malformed input rejection; and
 - complete package checksums.
 
-The closure contains 162 source declarations and 34 reviewed externals. The
-resident frontier contains 444 functions and 15 C/libm Float operations before
-the final merge. Exact counts, hashes, sizes, and inventories are ratcheted in
-`closure-contract.json` and reproduced in package `BUILD.json`.
+The closure contains 267 source declarations and 53 reviewed externals. The
+resident frontier contains 681 functions and five genuine platform-libm Float
+operations (`acos`, `cos`, `cbrt`, `sin`, and `atan2`) before the final merge.
+All other reachable Float operations, including `Float.ofNat` and
+`Float.ofScientific`, are source-compiled or resident in Wasm. Exact counts,
+hashes, sizes, and inventories are ratcheted in `closure-contract.json` and
+reproduced in package `BUILD.json`.
 
-The standard C/libm boundary and checked export-preserving linker are shared
+The standard-libm v2 boundary and checked export-preserving linker are shared
 with other closed applications under `integration/wasm-runtime`; this package
 does not carry a HitScene-specific runtime implementation.
 

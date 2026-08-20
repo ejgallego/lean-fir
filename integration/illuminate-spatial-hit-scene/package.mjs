@@ -21,7 +21,7 @@ import {
   ILLUMINATE_SPATIAL_HIT_SCENE_INPUT_LAYOUT_VERSION,
   ILLUMINATE_SPATIAL_HIT_SCENE_OWNERSHIP_VERSION,
 } from "./illuminate-spatial-hit-scene-browser-adapter.mjs";
-import { standardMathRuntimeCapability } from
+import { standardLibmRuntimeCapability } from
   "../wasm-runtime/contract.mjs";
 
 const directory = dirname(fileURLToPath(import.meta.url));
@@ -35,7 +35,8 @@ const suitePath = resolve(process.env.ILLUMINATE_SPATIAL_HIT_SCENE_SUITE ??
 const buildDirectory = join(directory, "_build");
 const baseStem = join(buildDirectory, "illuminate-spatial-hit-scene-base.wasm");
 const frontierStem = join(buildDirectory, "illuminate-spatial-hit-scene-frontier.wasm");
-const mathStem = join(buildDirectory, "illuminate-spatial-hit-scene-math.wasm");
+const libmStem = join(buildDirectory,
+  "illuminate-spatial-hit-scene-libm.wasm");
 const completeStem = join(buildDirectory, "illuminate-spatial-hit-scene-complete.wasm");
 const sourcePin = JSON.parse(readFileSync(join(directory,
   "illuminate-source.json"), "utf8"));
@@ -135,34 +136,47 @@ if (process.env.FIR_SPATIAL_HIT_SCENE_REQUIRE_REPEAT === "1") {
     "repeated resident generation was not deterministic");
 }
 
+const expectedFrontierImports = Object.freeze([
+  { module: "lean.extern", name: "Float.acos", kind: "function" },
+  { module: "lean.extern", name: "Float.cos", kind: "function" },
+  { module: "lean.extern", name: "Float.cbrt", kind: "function" },
+  { module: "lean.extern", name: "Float.sin", kind: "function" },
+  { module: "lean.extern", name: "Float.atan2", kind: "function" },
+]);
+const frontierImports = WebAssembly.Module.imports(new WebAssembly.Module(
+  readFileSync(frontierStem)));
+assert.deepEqual(frontierImports, expectedFrontierImports,
+  "SpatialHitScene frontier libm import inventory changed");
+
 const emsdk = join(firRoot, ".deps/lcnf-c-wasm/emsdk");
 const emcc = join(emsdk, "upstream/emscripten/emcc");
 const externalRuntimeDirectory = join(firRoot, "integration/wasm-runtime");
-const externalMathSource = join(externalRuntimeDirectory, "math-runtime.c");
+const externalLibmSource = join(externalRuntimeDirectory, "libm-runtime.c");
 const externalRuntimeLinker = join(externalRuntimeDirectory, "link-runtime.mjs");
 const externalRuntimeContract = join(externalRuntimeDirectory, "contract.mjs");
-run(emcc, [externalMathSource, "-O3", "-flto",
+run(emcc, [externalLibmSource, "-O3", "-flto",
   "--no-entry", "-sSTANDALONE_WASM=1", "-sIMPORTED_MEMORY=1",
   "-sALLOW_MEMORY_GROWTH=1", "-sINITIAL_MEMORY=65536",
   "-sSTACK_SIZE=16384", "-Wl,--gc-sections", "-Wl,--strip-all",
-  "-o", mathStem], { capture: false });
+  "-o", libmStem], { capture: false });
 run(process.execPath, [externalRuntimeLinker, frontierStem,
-  mathStem, completeStem], { capture: false });
+  libmStem, completeStem], { capture: false });
 const firstCompleteHash = sha256(readFileSync(completeStem));
 if (process.env.FIR_SPATIAL_HIT_SCENE_REQUIRE_REPEAT === "1") {
-  const repeatedMath = join(buildDirectory, "illuminate-spatial-hit-scene-math-repeat.wasm");
+  const repeatedLibm = join(buildDirectory,
+    "illuminate-spatial-hit-scene-libm-repeat.wasm");
   const repeatedComplete = join(buildDirectory,
     "illuminate-spatial-hit-scene-complete-repeat.wasm");
-  run(emcc, [externalMathSource, "-O3", "-flto",
+  run(emcc, [externalLibmSource, "-O3", "-flto",
     "--no-entry", "-sSTANDALONE_WASM=1", "-sIMPORTED_MEMORY=1",
     "-sALLOW_MEMORY_GROWTH=1", "-sINITIAL_MEMORY=65536",
     "-sSTACK_SIZE=16384", "-Wl,--gc-sections", "-Wl,--strip-all",
-    "-o", repeatedMath], { capture: false });
+    "-o", repeatedLibm], { capture: false });
   run(process.execPath, [externalRuntimeLinker, frontierStem,
-    repeatedMath, repeatedComplete], { capture: false });
+    repeatedLibm, repeatedComplete], { capture: false });
   assert.equal(sha256(readFileSync(repeatedComplete)), firstCompleteHash,
     "repeated complete-runtime link was not deterministic");
-  rmSync(repeatedMath, { force: true });
+  rmSync(repeatedLibm, { force: true });
   rmSync(repeatedComplete, { force: true });
 }
 
@@ -174,7 +188,7 @@ const frontierInventory = JSON.parse(readFileSync(
 const descriptor = JSON.parse(readFileSync(`${frontierStem}.json`, "utf8"));
 descriptor.imports = [];
 descriptor.completeRuntime = true;
-descriptor.externalRuntime = standardMathRuntimeCapability(
+descriptor.externalRuntime = standardLibmRuntimeCapability(
   frontierInventory.imports.map(({ name }) => name));
 const module = new WebAssembly.Module(wasm);
 const imports = WebAssembly.Module.imports(module);
@@ -222,12 +236,12 @@ const smoke = readFileSync(join(directory, "package-smoke.mjs"));
 const leanToolchain = readFileSync(join(directory, "lean-toolchain"), "utf8").trim();
 const leanVersion = capture("lake", ["--keep-toolchain", "env", "lean",
   "--version"]);
-const mathExports = WebAssembly.Module.exports(new WebAssembly.Module(
-  readFileSync(mathStem))).filter(({ kind }) => kind === "function")
+const libmExports = WebAssembly.Module.exports(new WebAssembly.Module(
+  readFileSync(libmStem))).filter(({ kind }) => kind === "function")
   .map(({ name }) => name).filter((name) => !name.startsWith("_") &&
     !name.startsWith("emscripten_"));
 const build = {
-  schemaVersion: "fir.illuminate-spatial-hit-scene.build/v1",
+  schemaVersion: "fir.illuminate-spatial-hit-scene.build/v2",
   sources: {
     fir: { repository: "git@github.com:ejgallego/lean-fir.git", ...fir },
     illuminate: {
@@ -247,7 +261,7 @@ const build = {
     leanVersion,
     emscriptenVersion: capture(emcc, ["--version"]).split("\n")[0],
     emscriptenSha256: sha256(readFileSync(emcc)),
-    externalRuntimeSourceSha256: sha256(readFileSync(externalMathSource)),
+    externalRuntimeSourceSha256: sha256(readFileSync(externalLibmSource)),
     externalRuntimeContractSha256:
       sha256(readFileSync(externalRuntimeContract)),
   },
@@ -284,9 +298,9 @@ const build = {
     capturedDeclarations: frontierInventory.capturedDeclarations,
     reviewedExternalsBeforeLink: frontierInventory.reviewedExternalsBeforeLink,
     retainedFunctions: frontierInventory.functions,
-    unresolvedBeforeMathLink: frontierInventory.imports,
+    unresolvedBeforeLibmLink: frontierInventory.imports,
     runtimeOperationsAfterResidentLink: frontierInventory.runtimeOperations,
-    mathRuntimeFunctions: mathExports,
+    libmRuntimeFunctions: libmExports,
   },
   capabilities: {
     completeRuntime: {
@@ -294,7 +308,7 @@ const build = {
       selfContained: true,
       functionImports: 0,
       memoryImports: 0,
-      externalRuntime: standardMathRuntimeCapability(
+      externalRuntime: standardLibmRuntimeCapability(
         frontierInventory.imports.map(({ name }) => name)),
     },
     inputLayout: {

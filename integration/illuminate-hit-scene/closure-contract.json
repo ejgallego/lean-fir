@@ -1,10 +1,10 @@
 {
-  "capturedDeclarations": 162,
-  "reviewedExternalsBeforeLink": 34,
-  "baseWasmBytes": 30965,
-  "frontierFunctions": 444,
-  "frontierFunctionSha256": "e73366a126cc8c71666a1fce54c82b98f52d5d26c0318dac52ecd15127123bf7",
-  "frontierImports": 15,
-  "frontierImportSha256": "3971b46725ec96dd9c422c725f4c602008ceb8d2aafe28f5a3b41e23666cea3c",
-  "completeWasmBytes": 46089
+  "capturedDeclarations": 267,
+  "reviewedExternalsBeforeLink": 53,
+  "baseWasmBytes": 51601,
+  "frontierFunctions": 681,
+  "frontierFunctionSha256": "8358a38808a9d007c533d99be8561e9ac5b27ece070c4a363f672e3236ab4399",
+  "frontierImports": 5,
+  "frontierImportSha256": "cd13f19b2fe1e7723b9756a56bb940bd14e614499eb3bc3ebeceb0245b9582de",
+  "completeWasmBytes": 67556
 }
