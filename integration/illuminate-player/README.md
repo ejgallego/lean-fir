@@ -3,8 +3,10 @@
 This integration publishes the accepted full-action v3 live player and a
 separately versioned selection-only v4 player. The v3 API remains unchanged;
 v4 retains only timing and selection state in Wasm while JavaScript owns SVG,
-parameter bindings, and per-frame parameter strings. Both package fingerprints
-are tied to the source revision in `illuminate-source.json`.
+parameter bindings, and per-frame parameter strings. Both generic source
+closures compile upstream `Float.ofNat` and `Float.ofScientific` directly, so
+neither artifact has a C/Emscripten provider. Both package fingerprints are
+tied to the source revision in `illuminate-source.json`.
 
 This integration compiles the real Lean 4.33 entries from
 `Illuminate.Animation.FirLive`:
@@ -146,8 +148,9 @@ zero-argument calls. Those declarations are pure; this keeps their values in
 scratch and makes the allocator frontier the module's sole mutable heap root.
 `Emit.lean` fails unless the resident frontier has zero cache initializers,
 exactly one resident global, zero unresolved operations, and only declarations
-covered by the shared external-runtime policy. Packaging then links that
-checked frontier with `integration/wasm-runtime` and requires zero imports.
+covered by the shared runtime policy. The generic closed-module optimizer then
+removes unreachable internal code without adding a provider and requires zero
+imports before and after optimization.
 
 The public function surface is exactly:
 
@@ -161,8 +164,8 @@ fir_heap_alloc
 ```
 
 Memory is module-owned. The complete module descriptor and `BUILD.json`
-declare the shared runtime's reserved low-memory prefix; the adapter validates
-both records and advances a fresh frontier past that prefix before encoding.
+declare the module's 1,024-byte resident heap base; the adapter validates both
+records and requires each fresh instance to begin at that exact frontier.
 `fir_heap_set_frontier` keeps its historical monotonic
 synchronization contract; backward restoration is deliberately isolated in
 `fir_heap_rewind`. Resident helpers remain internal unless listed above.
@@ -233,19 +236,20 @@ persistent-checkpoint ownership protocol:
 one shared compiled module, one instance per opaque player, a retained compact
 selection graph and fixed state slot below the checkpoint, and cleared/re-wound
 event and result scratch after every call. Its source and package smokes enforce
-the 16 KiB/400-allocation creation bounds, the declared runtime reservation,
-and a flat frontier across
+the 16 KiB/400-allocation creation bounds, the module-declared 1,024-byte heap
+base, and a flat frontier across
 10,000 production scalar ticks. The hot path has zero host-encoded event bytes,
 zero host resident-allocation calls, and zero diagnostic-clock reads; result
 scratch is still cleared and rewound. A final `dispatchTickTimed` audit checks
 that the post-production frontier remains exactly flat.
 
 The exact linked-module ratchets include the accepted proof-indexed resident
-Array implementation. Source declaration, retained-function, and helper
-inventories are unchanged from the prior package; only the generic Array helper
-bodies changed. The v3 and selection complete modules are respectively 32,334
-and 35,370 bytes, with their full SHA-256 identities pinned by the package
-generators in addition to `SHA256SUMS`.
+Array implementation and the upstream source closure for Float construction.
+The provider-free v3 and selection modules are respectively 37,287 and 40,398
+bytes. Both start with zero imports, module-owned memory, and an allocator
+frontier of 1,024; neither reserves the legacy provider's first 64 KiB page.
+Their complete SHA-256 identities are pinned by the package generators in
+addition to `SHA256SUMS`.
 
 The selection package exports the two generic source entries, the bit-exact
 tick façade, and the four allocator operations:

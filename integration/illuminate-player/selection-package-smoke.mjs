@@ -16,7 +16,7 @@ const manifest = JSON.parse(await readFile(
 const build = JSON.parse(await readFile("BUILD.json", "utf8"));
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
-assert.equal(build.schemaVersion, "fir.illuminate-selection-player.build/v2");
+assert.equal(build.schemaVersion, "fir.illuminate-selection-player.build/v3");
 assert.equal(build.wasm.sha256, sha256(bytes));
 assert.equal(build.capabilities.browserAdapter.apiVersion,
   ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION);
@@ -26,8 +26,12 @@ assert.equal(build.capabilities.ownership.version,
   ILLUMINATE_SELECTION_PLAYER_OWNERSHIP_VERSION);
 assert.equal(build.capabilities.hotEvent.version,
   ILLUMINATE_SELECTION_PLAYER_HOT_EVENT_VERSION);
-assert.equal(build.capabilities.completeRuntime.externalRuntime.reservedMemoryBytes,
-  manifest.externalRuntime.reservedMemoryBytes);
+assert.deepEqual(build.capabilities.completeRuntime.residentRuntime,
+  manifest.residentRuntime);
+assert.equal(manifest.residentRuntime.provider, "none");
+assert.deepEqual(manifest.residentRuntime.externalDeclarations, []);
+assert.deepEqual(manifest.residentRuntime.sourceCompiledDeclarations,
+  ["Float.ofNat", "Float.ofScientific"]);
 
 const module = new WebAssembly.Module(bytes);
 assert.deepEqual(WebAssembly.Module.imports(module), []);
@@ -46,13 +50,13 @@ await assert.rejects(createIlluminateSelectionPlayerAdapter({
   bytes,
   manifest: {
     ...manifest,
-    externalRuntime: {
-      ...manifest.externalRuntime,
-      reservedMemoryBytes: manifest.externalRuntime.reservedMemoryBytes - 8,
+    residentRuntime: {
+      ...manifest.residentRuntime,
+      heapBase: manifest.residentRuntime.heapBase - 8,
     },
   },
   build,
-}), /external-runtime memory reservations disagree/);
+}), /resident-runtime heap bases disagree/);
 
 const animation = {
   fps: 20,
@@ -108,11 +112,9 @@ assert.deepEqual(materialize(created.action), [
 assert.ok(created.memory.selectionBytes <= 16 * 1024);
 assert.ok(created.memory.persistentAllocationCalls <= 400);
 assert.equal(created.memory.selectionAllocationCalls, 1);
-assert.equal(created.memory.frontierBefore,
-  manifest.externalRuntime.reservedMemoryBytes);
-assert.equal(created.memory.reservedFrontier,
-  manifest.externalRuntime.reservedMemoryBytes);
-assert.ok(created.memory.pagesAfter >= 2);
+assert.equal(created.memory.frontierBefore, manifest.residentRuntime.heapBase);
+assert.equal(created.memory.heapBase, manifest.residentRuntime.heapBase);
+assert.ok(created.memory.pagesAfter >= 1);
 
 const events = [
   { kind: "advance" },

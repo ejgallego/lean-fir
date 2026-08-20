@@ -13,7 +13,7 @@ const manifest = JSON.parse(await readFile(
   "_build/illuminate-player-complete.wasm.json", "utf8"));
 const build = {
   capabilities: {
-    completeRuntime: { externalRuntime: manifest.externalRuntime },
+    completeRuntime: { residentRuntime: manifest.residentRuntime },
     browserAdapter: { apiVersion: ILLUMINATE_PLAYER_ADAPTER_API_VERSION },
     inputLayout: { version: ILLUMINATE_PLAYER_INPUT_LAYOUT_VERSION },
     ownership: { version: ILLUMINATE_PLAYER_OWNERSHIP_VERSION },
@@ -131,8 +131,7 @@ adapter.disposePlayer(second.player);
 for (let index = 0; index < 32; ++index) {
   const cycle = adapter.createPlayer(animation);
   assert.equal(cycle.ok, true);
-  assert.equal(cycle.memory.frontierBefore,
-    manifest.externalRuntime.reservedMemoryBytes);
+  assert.equal(cycle.memory.frontierBefore, manifest.residentRuntime.heapBase);
   adapter.disposePlayer(cycle.player);
 }
 
@@ -154,7 +153,10 @@ for (let index = 0; index < 10_000; ++index) {
     steady.memory.persistentCheckpoint);
   steadyPeak = Math.max(steadyPeak, tick.memory.peakFrontier);
 }
-assert.equal(steadyPeak - steady.memory.persistentCheckpoint, 704);
+// Upstream Float construction uses its full model closure in scratch; the
+// arena must remain flat even though its per-call peak is larger than the old
+// bounded C-provider path.
+assert.equal(steadyPeak - steady.memory.persistentCheckpoint, 4232);
 adapter.disposePlayer(steady.player);
 
 const decodeFailureAdapter = await createIlluminatePlayerAdapter({

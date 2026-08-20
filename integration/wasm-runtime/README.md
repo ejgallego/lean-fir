@@ -26,13 +26,20 @@ frontier. `Fir.Wasm.Emit.ResidentFloatSource` compiles Lean's exposed
 Nat/Int/BitVec/Float helpers close their complete arbitrary-precision model
 path. The Talos `source-float-conversions` artifact is zero-import and checks
 fast/slow paths, subnormals, overflow, arbitrary Naturals, and exact result
-bits against a native Lean oracle. The legacy contract remains versioned here
-until packages that still consume it are regenerated.
+bits against a native Lean oracle. Illuminate's full-action and selection
+players consume this source path directly; the legacy contract remains
+versioned here only for packages that have not yet been regenerated.
 
-`contract.mjs` is the single packaging-side description of this runtime. In
-particular, it declares a 65536-byte low-memory reservation for the compiled C
-data and stack. Complete-package metadata carries that value, and adapters must
-advance a fresh FIR heap frontier to it before allocating Lean values.
+`contract.mjs` describes the separately compiled C runtime. In particular, it
+declares a 65536-byte low-memory reservation for the compiled C data and stack.
+Only packages that actually link that provider carry the reservation and
+advance their FIR heap frontier past it.
+
+Provider-free resident modules use `optimize-closed-module.mjs`. It accepts an
+already import-free module, applies the same closed-world Binaryen cleanup used
+after external linking, and rejects any import or export-surface change. It
+uses only its caller-supplied input and output paths; it creates no temporary
+directory.
 
 The linker discovers the intended public surface from the frontier module. It
 normalizes Emscripten's imported-memory maximum, links by exact external name

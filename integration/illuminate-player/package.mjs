@@ -20,9 +20,8 @@ import {
   ILLUMINATE_PLAYER_ADAPTER_API_VERSION,
   ILLUMINATE_PLAYER_INPUT_LAYOUT_VERSION,
   ILLUMINATE_PLAYER_OWNERSHIP_VERSION,
+  ILLUMINATE_PLAYER_RUNTIME_VERSION,
 } from "./illuminate-player-browser-adapter.mjs";
-import { standardMathRuntimeCapability } from
-  "../wasm-runtime/contract.mjs";
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const firRoot = realpathSync(join(directory, "../.."));
@@ -32,16 +31,11 @@ const buildDirectory = join(directory, "_build");
 const baseStem = join(buildDirectory, "illuminate-player-base.wasm");
 const generatedStem = join(buildDirectory, "illuminate-player-resident.wasm");
 const completeStem = join(buildDirectory, "illuminate-player-complete.wasm");
-const externalMathStem = join(buildDirectory,
-  "illuminate-player-external-math.wasm");
 const externalRuntimeDirectory = join(firRoot, "integration/wasm-runtime");
-const externalMathSource = join(externalRuntimeDirectory, "math-runtime.c");
-const externalRuntimeLinker = join(externalRuntimeDirectory,
-  "link-runtime.mjs");
-const externalRuntimeContract = join(externalRuntimeDirectory,
-  "contract.mjs");
-const emcc = join(firRoot,
-  ".deps/lcnf-c-wasm/emsdk/upstream/emscripten/emcc");
+const closedModuleOptimizer = join(externalRuntimeDirectory,
+  "optimize-closed-module.mjs");
+const wasmOpt = join(firRoot,
+  ".deps/lcnf-c-wasm/emsdk/upstream/bin/wasm-opt");
 const expectedIlluminateSource = Object.freeze(JSON.parse(readFileSync(
   join(directory, "illuminate-source.json"), "utf8")));
 const illuminateSourceFiles = [
@@ -50,19 +44,19 @@ const illuminateSourceFiles = [
   "src/Illuminate/Animation/FirLive.lean",
 ];
 const expectedClosure = Object.freeze({
-  finalLcnfDeclarations: 99,
+  finalLcnfDeclarations: 212,
   finalLcnfDeclarationSha256:
-    "4f45433e267588ceb356dc3f124b7d4561598c603f0ca9173e2bf2cd043a1aae",
-  retainedSourceFunctions: 72,
+    "3f00817eae0edfe1f904cba1812353e2015c818a5f2c2092506d9ccc6f062a75",
+  retainedSourceFunctions: 168,
   retainedSourceFunctionSha256:
-    "5cd74013314d0fc12f162935bd830f360687c9b3d241057d39ee65e2ad1f2d75",
-  residentHelpers: 190,
+    "478fe708cf0d20544de518c183d3c6781eb2485e974ba951b44b33909077ed4a",
+  residentHelpers: 302,
   residentHelperSha256:
-    "aee31058e18e2b2ac5c7e4d5e8775afb0073b48f6a84d01a19e10d5a657c7dda",
-  baseWasmBytes: 19097,
-  completeWasmBytes: 32334,
+    "7fae93acebad76ecf682e223f512c2d6e81c8b6fd094a8c5f91816b02c88c864",
+  baseWasmBytes: 33639,
+  completeWasmBytes: 37287,
   completeWasmSha256:
-    "8fc7e56bd597163153e35e24a0288a22f8f3bde6f40906ea332661d91845fed5",
+    "25e3f3ec476b7bb9cc650d89b3664c1a55880b44fde54576078278f5e2e87643",
 });
 const outputNames = [
   "BUILD.json",
@@ -147,13 +141,7 @@ run("lake", [
   "lean",
   "Emit.lean",
 ]);
-run(emcc, [externalMathSource, "-O3", "-flto", "--no-entry",
-  "-sSTANDALONE_WASM=1", "-sIMPORTED_MEMORY=1",
-  "-sALLOW_MEMORY_GROWTH=1", "-sINITIAL_MEMORY=65536",
-  "-sSTACK_SIZE=16384", "-Wl,--gc-sections", "-Wl,--strip-all",
-  "-o", externalMathStem]);
-run(process.execPath, [externalRuntimeLinker, generatedStem,
-  externalMathStem, completeStem]);
+run(process.execPath, [closedModuleOptimizer, generatedStem, completeStem]);
 
 const wasm = readFileSync(completeStem);
 const frontierWasm = readFileSync(generatedStem);
@@ -162,12 +150,24 @@ const module = new WebAssembly.Module(wasm);
 const imports = WebAssembly.Module.imports(module);
 const frontierImports = WebAssembly.Module.imports(
   new WebAssembly.Module(frontierWasm));
+const sourceCompiledDeclarations = Object.freeze([
+  "Float.ofNat",
+  "Float.ofScientific",
+]);
+const residentInstance = new WebAssembly.Instance(module, {});
+const heapBase = Number(residentInstance.exports.fir_heap_frontier());
+const residentRuntime = Object.freeze({
+  version: ILLUMINATE_PLAYER_RUNTIME_VERSION,
+  provider: "none",
+  sourceCompiledDeclarations,
+  externalDeclarations: Object.freeze([]),
+  heapBase,
+});
 const descriptor = {
   ...JSON.parse(readFileSync(`${generatedStem}.json`, "utf8")),
   imports: [],
   completeRuntime: true,
-  externalRuntime: standardMathRuntimeCapability(
-    frontierImports.map(({ name }) => name)),
+  residentRuntime,
 };
 const descriptorBytes = Buffer.from(`${JSON.stringify(descriptor)}\n`);
 writeFileSync(`${completeStem}.json`, descriptorBytes);
@@ -182,6 +182,10 @@ const functionExports = exports.filter((item) => item.kind === "function")
 const memoryExports = exports.filter((item) => item.kind === "memory")
   .map((item) => item.name);
 const declarations = sourceDeclarations(lcnf);
+for (const declaration of sourceCompiledDeclarations) {
+  assert(declarations.includes(declaration),
+    `Illuminate source closure omitted ${declaration}`);
+}
 const wasmHash = sha256(wasm);
 const adapterBytes = readFileSync(join(directory,
   "illuminate-player-browser-adapter.mjs"));
@@ -195,10 +199,8 @@ const leanVersion = capture("lake", ["--keep-toolchain", "env", "lean",
 
 assert.deepEqual(imports, []);
 assert.deepEqual(descriptor.imports, []);
-assert.deepEqual(frontierImports, [
-  { module: "lean.extern", name: "Float.ofScientific", kind: "function" },
-  { module: "lean.extern", name: "Float.ofNat", kind: "function" },
-]);
+assert.deepEqual(frontierImports, []);
+assert.equal(heapBase, 1024);
 assert.equal(memoryExports.includes("memory"), true);
 assert.equal(functionExports.includes(descriptor.entry), true);
 assert.deepEqual(functionExports, [
@@ -255,15 +257,14 @@ assert.equal(wasmHash, expectedClosure.completeWasmSha256,
   "Illuminate complete-runtime Wasm bytes changed");
 
 const build = {
-  schemaVersion: "fir.illuminate-player.build/v1",
+  schemaVersion: "fir.illuminate-player.build/v2",
   sources: { fir, illuminate },
   toolchain: {
     leanToolchain,
     leanVersion,
-    emscriptenVersion: capture(emcc, ["--version"]).split("\n")[0],
-    externalRuntimeSourceSha256: sha256(readFileSync(externalMathSource)),
-    externalRuntimeContractSha256:
-      sha256(readFileSync(externalRuntimeContract)),
+    binaryenVersion: capture(wasmOpt, ["--version"]),
+    closedModuleOptimizerSha256:
+      sha256(readFileSync(closedModuleOptimizer)),
   },
   entries: [
     {
@@ -306,11 +307,10 @@ const build = {
   },
   capabilities: {
     completeRuntime: {
-      version: "fir.illuminate-player.complete-runtime/v1",
+      version: "fir.illuminate-player.complete-runtime/v2",
       selfContained: true,
       unresolvedRuntimeOperations: [],
-      externalRuntime: standardMathRuntimeCapability(
-        frontierImports.map(({ name }) => name)),
+      residentRuntime,
     },
     browserAdapter: {
       apiVersion: ILLUMINATE_PLAYER_ADAPTER_API_VERSION,
@@ -371,6 +371,7 @@ const build = {
       "module-owned allocation and scalar stores",
       "constructors, setters, increments, releases, and cache setters",
       "small and big Nat operations",
+      "source-compiled upstream Float.ofNat and Float.ofScientific",
       "Float subtraction, division, multiplication, comparison, round, and toUInt64",
       "Array allocation, size/usize, Nat/USize reads, and push",
       "USize comparison and addition",

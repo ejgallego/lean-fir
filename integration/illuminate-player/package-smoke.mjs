@@ -9,17 +9,24 @@ const bytes = await readFile(new URL("illuminate-player.wasm", here));
 const manifest = JSON.parse(await readFile(
   new URL("illuminate-player.wasm.json", here), "utf8"));
 const build = JSON.parse(await readFile(new URL("BUILD.json", here), "utf8"));
+assert.equal(build.schemaVersion, "fir.illuminate-player.build/v2");
+assert.deepEqual(build.capabilities.completeRuntime.residentRuntime,
+  manifest.residentRuntime);
+assert.equal(manifest.residentRuntime.provider, "none");
+assert.deepEqual(manifest.residentRuntime.externalDeclarations, []);
+assert.deepEqual(manifest.residentRuntime.sourceCompiledDeclarations,
+  ["Float.ofNat", "Float.ofScientific"]);
 await assert.rejects(createIlluminatePlayerAdapter({
   bytes,
   manifest: {
     ...manifest,
-    externalRuntime: {
-      ...manifest.externalRuntime,
-      reservedMemoryBytes: manifest.externalRuntime.reservedMemoryBytes - 8,
+    residentRuntime: {
+      ...manifest.residentRuntime,
+      heapBase: manifest.residentRuntime.heapBase - 8,
     },
   },
   build,
-}), /external-runtime memory reservations disagree/);
+}), /resident-runtime heap bases disagree/);
 const adapter = await createIlluminatePlayerAdapter({ bytes, manifest, build });
 
 const animation = {
@@ -67,8 +74,8 @@ assert.equal(live.memory.animationBytes,
   live.memory.frontierAfterAnimation - live.memory.frontierBefore);
 assert.ok(live.memory.animationObjectCount > 1);
 assert.equal(live.memory.animationAllocationCalls, 1);
-assert.equal(live.memory.frontierBefore,
-  manifest.externalRuntime.reservedMemoryBytes);
+assert.equal(live.memory.frontierBefore, manifest.residentRuntime.heapBase);
+assert.equal(live.memory.heapBase, manifest.residentRuntime.heapBase);
 assert.equal(live.memory.stateSlotBytes,
   live.memory.persistentCheckpoint - live.memory.frontierAfterAnimation);
 assert.equal(live.memory.stateSlotObjectCount,
@@ -106,7 +113,8 @@ for (let index = 0; index < 10_000; ++index) {
     steady.memory.persistentCheckpoint);
   peakFrontier = Math.max(peakFrontier, tick.memory.peakFrontier);
 }
-assert.equal(peakFrontier - steady.memory.persistentCheckpoint, 704);
+// Source-compiled Float construction is allocation-faithful and rewound.
+assert.equal(peakFrontier - steady.memory.persistentCheckpoint, 4232);
 adapter.disposePlayer(steady.player);
 
 const first = adapter.createPlayer(animation);

@@ -5,9 +5,11 @@ export const ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION =
 export const ILLUMINATE_SELECTION_PLAYER_INPUT_LAYOUT_VERSION =
   "lean-4.33-Illuminate.Animation.SelectionAnimation/v4";
 export const ILLUMINATE_SELECTION_PLAYER_OWNERSHIP_VERSION =
-  "fir.illuminate-player.persistent-checkpoint/v2";
+  "fir.illuminate-player.persistent-checkpoint/v3";
 export const ILLUMINATE_SELECTION_PLAYER_HOT_EVENT_VERSION =
   "fir.illuminate-player.hot-event/v2";
+export const ILLUMINATE_SELECTION_PLAYER_RUNTIME_VERSION =
+  "fir.closed-resident-runtime/v1";
 
 const PAGE_BYTES = 65536;
 const HEAP_BASE = 1024;
@@ -811,29 +813,42 @@ function validateBuild(build) {
   "BUILD.json has the wrong hot-event version");
 }
 
-function runtimeReservedFrontier(manifest, build) {
-  const descriptorRuntime = requireObject(manifest.externalRuntime,
-    "module descriptor externalRuntime");
+function runtimeHeapBase(manifest, build) {
+  const descriptorRuntime = requireObject(manifest.residentRuntime,
+    "module descriptor residentRuntime");
   const buildRuntime = requireObject(
-    build.capabilities?.completeRuntime?.externalRuntime,
-    "BUILD.json complete-runtime externalRuntime");
+    build.capabilities?.completeRuntime?.residentRuntime,
+    "BUILD.json complete-runtime residentRuntime");
   requireCondition(descriptorRuntime.version === buildRuntime.version,
-    "external-runtime versions disagree");
-  requireCondition(descriptorRuntime.reservedMemoryBytes ===
-    buildRuntime.reservedMemoryBytes,
-  "external-runtime memory reservations disagree");
-  const reserved = descriptorRuntime.reservedMemoryBytes;
-  requireCondition(Number.isSafeInteger(reserved) && reserved >= HEAP_BASE &&
-    reserved <= MAX_UINT32 && reserved % 8 === 0,
-  "external-runtime reservedMemoryBytes is invalid");
-  return reserved;
+    "resident-runtime versions disagree");
+  requireCondition(descriptorRuntime.version ===
+    ILLUMINATE_SELECTION_PLAYER_RUNTIME_VERSION,
+  "resident-runtime version is unsupported");
+  requireCondition(descriptorRuntime.provider === "none" &&
+    buildRuntime.provider === "none",
+  "selection package must not declare an external runtime provider");
+  requireCondition(Array.isArray(descriptorRuntime.externalDeclarations) &&
+    descriptorRuntime.externalDeclarations.length === 0 &&
+    Array.isArray(buildRuntime.externalDeclarations) &&
+    buildRuntime.externalDeclarations.length === 0,
+  "selection package must not declare external runtime operations");
+  requireCondition(JSON.stringify(descriptorRuntime.sourceCompiledDeclarations) ===
+    JSON.stringify(buildRuntime.sourceCompiledDeclarations),
+  "source-compiled runtime declarations disagree");
+  requireCondition(descriptorRuntime.heapBase === buildRuntime.heapBase,
+    "resident-runtime heap bases disagree");
+  const heapBase = descriptorRuntime.heapBase;
+  requireCondition(Number.isSafeInteger(heapBase) && heapBase >= HEAP_BASE &&
+    heapBase <= MAX_UINT32 && heapBase % 8 === 0,
+  "resident-runtime heapBase is invalid");
+  return heapBase;
 }
 
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function instanceState(module, now, maximumNodes, reservedFrontier) {
+function instanceState(module, now, maximumNodes, heapBase) {
   const started = now();
   const instance = new WebAssembly.Instance(module, {});
   const instantiateMs = elapsed(now, started);
@@ -871,23 +886,19 @@ function instanceState(module, now, maximumNodes, reservedFrontier) {
     decoder: new TextDecoder("utf-8", { fatal: true }),
     maximumNodes,
     instantiateMs,
-    reservedFrontier,
+    heapBase,
   };
   const freshFrontier = u32(state.frontier());
-  requireCondition(freshFrontier >= HEAP_BASE && freshFrontier % 8 === 0 &&
-    freshFrontier <= reservedFrontier,
-  `fresh resident frontier ${freshFrontier} overlaps the external runtime`);
-  requireCondition(reservedFrontier <= state.memory.buffer.byteLength,
-    `external runtime reservation ${reservedFrontier} exceeds module memory`);
-  if (freshFrontier !== reservedFrontier) state.setFrontier(reservedFrontier);
-  requireCondition(readFrontier(state) === reservedFrontier,
-    `resident frontier did not advance to ${reservedFrontier}`);
+  requireCondition(freshFrontier === heapBase,
+    `fresh resident frontier ${freshFrontier} differs from heap base ${heapBase}`);
+  requireCondition(heapBase <= state.memory.buffer.byteLength,
+    `resident heap base ${heapBase} exceeds module memory`);
   return state;
 }
 
 function readFrontier(state) {
   const value = u32(state.frontier());
-  requireCondition(value >= state.reservedFrontier && value % 8 === 0,
+  requireCondition(value >= state.heapBase && value % 8 === 0,
     `resident frontier ${value} is invalid`);
   requireCondition(value <= state.memory.buffer.byteLength,
     `resident frontier ${value} exceeds module memory`);
@@ -1067,7 +1078,7 @@ function dispatchTickProduction(owner, player, timestamp) {
 
 export class IlluminateSelectionPlayerAdapter {
   constructor({ module, manifest, build, now, startupTimings, maximumNodes,
-    reservedFrontier }) {
+    heapBase }) {
     this.manifest = manifest;
     this.build = build;
     this.startupTimings = Object.freeze({ ...startupTimings });
@@ -1075,7 +1086,7 @@ export class IlluminateSelectionPlayerAdapter {
       module,
       now,
       maximumNodes,
-      reservedFrontier,
+      heapBase,
     });
   }
 
@@ -1119,11 +1130,11 @@ export class IlluminateSelectionPlayerAdapter {
       persistentAllocationCalls: 0,
       pagesBefore: undefined,
       pagesAfter: undefined,
-      reservedFrontier: adapter.reservedFrontier,
+      heapBase: adapter.heapBase,
     };
     try {
       state = instanceState(adapter.module, adapter.now, adapter.maximumNodes,
-        adapter.reservedFrontier);
+        adapter.heapBase);
       timings.instantiateMs = state.instantiateMs;
       memory.frontierBefore = readFrontier(state);
       memory.pagesBefore = state.memory.buffer.byteLength / PAGE_BYTES;
@@ -1315,7 +1326,7 @@ export async function createIlluminateSelectionPlayerAdapter({
     "maximumNodes must be a positive safe integer");
   validateManifest(manifest);
   validateBuild(build);
-  const reservedFrontier = runtimeReservedFrontier(manifest, build);
+  const heapBase = runtimeHeapBase(manifest, build);
   const compileStarted = now();
   const module = await WebAssembly.compile(bytes);
   const compileMs = elapsed(now, compileStarted);
@@ -1327,7 +1338,7 @@ export async function createIlluminateSelectionPlayerAdapter({
     build,
     now,
     maximumNodes,
-    reservedFrontier,
+    heapBase,
     startupTimings: {
       fetchMs: startupTimings.fetchMs ?? 0,
       compileMs,
