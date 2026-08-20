@@ -66,7 +66,10 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   follow-ups. The canonical lean-zip raw consumer is regenerated on the v2
   libm surface through tracked handoff `78e5da9a` (functional head
   `7903b7f1`), with source-compiled Float construction, an exact one-function
-  `Float.log2` symbolic frontier, and a zero-import final package.
+  `Float.log2` symbolic frontier, and a zero-import final package. Its stored
+  and Level-1 companions are republished from persistent FIR-local source
+  views through tracked handoff `7a3163e5` (functional head `5e30208f`), with
+  reviewed byte-only ratchets and unchanged semantic inventories.
 - Landing order:
   1. W7-2's Verso source-module replay repair and generic immutable-package
      publisher are accepted in that order through `912bf68a`.
@@ -114,6 +117,10 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   9. The lean-zip raw consumer then regenerates through tracked handoff
      `78e5da9a` after rebasing over the accepted W6 proof stack. The proof-only
      delta leaves its executable identities byte-identical.
+  10. Lean-zip stored and Level-1 package ratchets follow through tracked
+      handoff `7a3163e5`; persistent `.deps/source-views` replace all
+      periodically cleaned source-view defaults without changing compilation
+      semantics or ownership.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -132,6 +139,34 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   removal, or branch deletion is implied by this lease.
 
 ## Latest completed integration lease
+
+- Milestone: `W7-LEAN-ZIP-PERSISTENT-SOURCE-VIEWS`.
+- Integration owner: `wasm-gen`, accepting its own clean tracked handoff
+  `7a3163e5`; the functional head is `5e30208f` on `27de2d1f`.
+- Change: lean-zip stored and Level-1 package setup now uses persistent,
+  ignored, FIR-worktree-local `.deps/source-views` checkouts. Their exact final
+  byte ratchets advance to the current deterministic outputs after the
+  accepted scalar/runtime stack. The W7 roadmap now reflects the accepted
+  Array, Nat, scalar, source-Float, and adapter milestones and current raw
+  closure inventory.
+- Contracts: none. Declaration, source-function, resident-helper, import,
+  runtime-operation, ABI, cache-floor, scratch-rewind, and ownership
+  inventories are unchanged.
+- Acceptance: repeated generation, stored and Level-1 native/Wasm
+  differentials, zero-import adapters, persistent-cache and scratch checks,
+  package smokes, and six exporter tests pass. `make check` reports
+  2,121/2,121 equal comparisons; all 3,162 Talos jobs and the complete W7
+  artifact/concrete gate pass. No bug card was needed.
+- Artifacts: the 12,779-byte stored module is SHA-256
+  `9b9630dba3d5d04913b2e95647e8613596672bd1d3c4a7373a5c33ec32773e25`.
+  The 331,043-byte Level-1 module is SHA-256
+  `fcccdfaf024d78c35e37152a338a2ae75cf035d28390d274dd8a4497abb6d6b3`.
+  Both own memory and have zero function and memory imports.
+- Result: local `main` advances through `7a3163e5`. No feature branch or
+  external package was published. The next W7 slice migrates Illuminate
+  selection from `fir.standard-math/v1` to source-compiled Float.
+
+## Previous completed integration lease
 
 - Milestone: `W7-LEAN-ZIP-STANDARD-LIBM-V2`.
 - Integration owner: `wasm-gen`, accepting its own clean tracked handoff
