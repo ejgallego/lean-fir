@@ -185,6 +185,15 @@ time from 391.71/387.83 ms to 270.49/284.03 ms in two captures. Generic compare
 self samples fall by 89.8%, magnitude low/high by 62.8%/76.2%, and natural
 validation by 75.7%, with identical compressed bytes and a flat frontier.
 
+`USize.ofNat` and `USize.ofNatLT` now decode a canonical tagged Nat directly
+to the Wasm `i64` lane. Promoted and arbitrary-limb Nats use the generic
+checked big-numeric accessors, including Lean's modulo-`2^64` behavior for
+values wider than one limb. Against the preceding decision-helper package,
+the same profile contract lowers median raw-entry time from 270.49/284.03 ms
+to 219.84/220.72 ms, a further reduction of about 19%/22%. The helper's
+combined self samples fall by about 61%; compressed bytes remain identical
+and the post-call frontier remains flat at 9,237,304 bytes.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not

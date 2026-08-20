@@ -14,10 +14,10 @@
   "releaseLeanSourceFunctions": 390,
   "releaseResidentHelpers": 1915,
   "releaseOptimizerOrLinkedRuntimeFunctions": 0,
-  "releaseFunctionIndexSha256": "44d1a5bd49aa22a04160b652104c13a2cedd8db85f2efd807ae4124e9eb3318a",
-  "releaseFunctionSidecarBytes": 999548,
-  "releaseFunctionSidecarSha256": "5b4b3cf83f9bdd60894dbf7cedf00353735374db78d86d934d47442ece003093",
+  "releaseFunctionIndexSha256": "3c9ca42902c9dc5afec95117719ee278da5d358ed15d550617622511d178efe9",
+  "releaseFunctionSidecarBytes": 999568,
+  "releaseFunctionSidecarSha256": "f1ac6dd38b8b068ddd85b1cdc52ba561c04a4524c9f2dde1e93647dc059d11b5",
   "baseWasmBytes": 1084233,
-  "frontierWasmBytes": 1619270,
-  "completeWasmBytes": 936061
+  "frontierWasmBytes": 1619354,
+  "completeWasmBytes": 936077
 }

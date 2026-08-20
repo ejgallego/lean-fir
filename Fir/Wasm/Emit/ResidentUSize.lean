@@ -1,4 +1,4 @@
-import Fir.Wasm.Emit.ResidentNumeric
+import Fir.Wasm.Emit.ResidentBigNumeric
 
 namespace Fir.Wasm.Emit.ResidentUSize
 
@@ -161,18 +161,35 @@ def addFunction : Function :=
 def subFunction : Function :=
   binaryFunction `USize.sub .i64Sub
 
-private def ofNatBody : List Instruction := [
+private def checkedNatToRawUSize : List Instruction := [
   .localGet valueParam,
-  .call (.declaration ResidentNumeric.validateNaturalName),
+  .call (.declaration ResidentBigNumeric.validateNaturalName),
   .localGet valueParam,
-  .call (.declaration ResidentNumeric.naturalHighName),
+  .i32Const .uint32 0,
+  .call (.declaration ResidentBigNumeric.naturalHighName),
   .i64ExtendI32U .uint64,
   .i64Const .uint64 32,
   .i64Shl,
   .localGet valueParam,
-  .call (.declaration ResidentNumeric.naturalLowName),
+  .i32Const .uint32 0,
+  .call (.declaration ResidentBigNumeric.naturalLowName),
   .i64ExtendI32U .uint64,
-  .i64Or] ++ retypeUSize
+  .i64Or,
+  .localSet raw64Local]
+
+private def immediateNatToRawUSize : List Instruction := [
+  .localGet valueParam,
+  .i32Const .uint32 1,
+  .i32ShrU,
+  .i64ExtendI32U .uint64,
+  .localSet raw64Local]
+
+private def ofNatBody : List Instruction := [
+  .localGet valueParam,
+  .i32Const .uint32 1,
+  .i32And,
+  .ifElse immediateNatToRawUSize checkedNatToRawUSize,
+  .localGet raw64Local] ++ retypeUSize
 
 def ofNatFunction : Function := {
   name := externalName `USize.ofNat
@@ -315,8 +332,8 @@ def internalizeAvailable (module : Module) (validate : Bool := true) :
     module.imports.any (·.declaration? == some declaration)
   if present.any fun declaration =>
       #[`USize.ofNat, `USize.ofNatLT].contains declaration then
-    for name in #[ResidentNumeric.validateNaturalName,
-        ResidentNumeric.naturalLowName, ResidentNumeric.naturalHighName] do
+    for name in #[ResidentBigNumeric.validateNaturalName,
+        ResidentBigNumeric.naturalLowName, ResidentBigNumeric.naturalHighName] do
       unless module.functions.any (·.name == name) do
         throw (.missingNumericHelper name)
   if present.contains `USize.toNat then

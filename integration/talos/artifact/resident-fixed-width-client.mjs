@@ -353,10 +353,23 @@ export async function checkResidentFixedWidth(bytes) {
     "USize.add wraps");
   equal(u64(exports.fir_ext_USize_sub(0n, 1n)), mask64,
     "USize.sub wraps");
+  for (const value of [0, 1, 0x3fffffff, 0x7fffffff]) {
+    const immediateNatural = 2 * value + 1;
+    equal(u64(exports.fir_ext_USize_ofNat(immediateNatural)), BigInt(value),
+      `USize.ofNat immediate ${value}`);
+    equal(u64(exports.fir_ext_USize_ofNatLT(immediateNatural, 0)), BigInt(value),
+      `USize.ofNatLT immediate ${value}`);
+  }
   equal(u64(exports.fir_ext_USize_ofNat(wideNatural)), wide,
-    "USize.ofNat");
+    "USize.ofNat promoted one-limb");
   equal(u64(exports.fir_ext_USize_ofNatLT(wideNatural, 0)), wide,
-    "USize.ofNatLT");
+    "USize.ofNatLT promoted one-limb");
+  const arbitraryUSizeNatural = arbitraryNatural(exports,
+    (1n << 128n) | 0xfedcba9876543210n);
+  equal(u64(exports.fir_ext_USize_ofNat(arbitraryUSizeNatural)),
+    0xfedcba9876543210n, "USize.ofNat arbitrary-limb modulo reduction");
+  equal(u64(exports.fir_ext_USize_ofNatLT(arbitraryUSizeNatural, 0)),
+    0xfedcba9876543210n, "USize.ofNatLT arbitrary-limb modulo reduction");
   equal(exports.fir_ext_USize_toUInt32(0x0123456789abcdefn) >>> 0,
     0x89abcdef, "USize.toUInt32");
   equal(naturalValue(exports.memory,
