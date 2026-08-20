@@ -177,19 +177,21 @@ private def checkedNatToRawUSize : List Instruction := [
   .i64Or,
   .localSet raw64Local]
 
-private def immediateNatToRawUSize : List Instruction := [
+private def immediateNatToUSize : List Instruction := [
   .localGet valueParam,
   .i32Const .uint32 1,
   .i32ShrU,
-  .i64ExtendI32U .uint64,
-  .localSet raw64Local]
+  .i64ExtendI32U .usize,
+  .ret]
+
+private def checkedNatToUSize : List Instruction :=
+  checkedNatToRawUSize ++ [.localGet raw64Local] ++ retypeUSize
 
 private def ofNatBody : List Instruction := [
   .localGet valueParam,
   .i32Const .uint32 1,
   .i32And,
-  .ifElse immediateNatToRawUSize checkedNatToRawUSize,
-  .localGet raw64Local] ++ retypeUSize
+  .ifElse immediateNatToUSize checkedNatToUSize]
 
 def ofNatFunction : Function := {
   name := externalName `USize.ofNat
@@ -283,6 +285,23 @@ def functions : Array Function := #[
   shiftRightFunction,
   modFunction,
   ofNatLTFunction]
+
+private partial def instructionUsesMemory : Instruction → Bool
+  | .i32Load .. | .i32Load8S .. | .i32Load8U ..
+  | .i32Load16S .. | .i32Load16U .. | .i64Load ..
+  | .i64Load8S .. | .i64Load8U .. | .i64Load16S ..
+  | .i64Load16U .. | .i64Load32S .. | .i64Load32U ..
+  | .f32Load .. | .f64Load .. | .i32Store8 .. | .i32Store16 ..
+  | .i32Store .. | .i64Store8 .. | .i64Store16 .. | .i64Store32 ..
+  | .i64Store .. | .f32Store .. | .f64Store .. | .memorySize
+  | .memoryGrow => true
+  | .block _ body | .loop _ body => body.any instructionUsesMemory
+  | .ifElse thenBody elseBody =>
+      thenBody.any instructionUsesMemory || elseBody.any instructionUsesMemory
+  | _ => false
+
+#guard immediateNatToUSize.contains (.i64ExtendI32U .usize)
+#guard !immediateNatToUSize.any instructionUsesMemory
 
 private partial def rewriteInstruction (present : Array Name) : Instruction → Instruction
   | .call (.declaration declaration) =>
