@@ -226,6 +226,17 @@ package, the median of steady-state medians changed from 143.16 ms
 `fir_dec_once` remained independent. Output bytes and the flat 9,237,304-byte
 post-call frontier were unchanged.
 
+`USize.toNat` now mirrors Lean's generic runtime path for canonical immediates:
+values below `2^31` are tagged directly in the Wasm object lane, without a
+scratch-memory retype or a call to the natural constructor. Values at or above
+the boundary retain the existing checked constructor, including promoted
+results. Against the preceding direct-`USize.ofNat` package, eight
+order-balanced unprofiled process rounds changed the median of steady-state
+medians from 137.91 ms (MAD 0.47 ms) to 130.66 ms (MAD 1.42 ms), about 5.3%.
+`fir_ext_USize_toNat` self samples changed from 104 to 24/28, while generic
+natural-constructor samples changed from 84 to 29/31. Compressed bytes and the
+flat 9,237,304-byte post-call frontier were unchanged.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not
