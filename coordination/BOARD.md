@@ -78,7 +78,11 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `3ba58f87`): both use exact module-wise source capture, link only their
   five-function platform-libm frontier through `fir.standard-libm/v2`, and
   finish with zero imports. The now-unreferenced `fir.standard-math/v1`
-  provider is retired.
+  provider is retired. W7's generic native-source-boundary repair follows
+  through tracked handoff `b36d9d98` (functional head `65f4a57c`): postponed
+  entry modules keep their exact final-LCNF groups, ordinary imported roots are
+  final-pass captured separately, and the linked closure is reachability
+  pruned. HitScene production now uses this repaired hybrid path.
 - Landing order:
   1. W7-2's Verso source-module replay repair and generic immutable-package
      publisher are accepted in that order through `912bf68a`.
@@ -138,6 +142,11 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
       Their exact five-function opaque platform-libm frontiers link through
       the accepted standard-libm/v2 provider, after which the unused legacy
       standard-math/v1 provider is deleted.
+  13. The generic source-boundary repair follows through tracked handoff
+      `b36d9d98`. HitScene migrates from grouped imported dependencies to exact
+      postponed entry-module replay plus individually captured ordinary roots;
+      SpatialHitScene's multi-entry synthetic path remains unchanged pending a
+      separate consumer review.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -150,17 +159,51 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   FIR. The Array panic-observation fixture audit is accepted and parked behind
   the existing shared-observation bug card; it has no feature landing. Later
   tooling surfaces remain on their combined development branch until each has
-  an independently authorized head.
-  Individual source-root capture of HitScene remains blocked by confirmed
-  generated private/closed-helper ABI drift in
-  `FIR-BUG-wasm-none-individual-hit-scene-generated-helper-admission`;
-  production uses faithful module-wise postponed-group replay without
-  weakening admission.
+  an independently authorized head. SpatialHitScene's multi-entry synthetic
+  capture has not yet been assessed for the repaired hybrid API.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
 
 ## Latest completed integration lease
+
+- Milestone: `W7-NATIVE-SOURCE-BOUNDARY-HITSCENE`.
+- Integration owner: `wasm-gen`, accepting its own clean tracked handoff
+  `b36d9d98`; the functional head is `65f4a57c` on `1b8a5a11`.
+- Change: `compileEntryIndividuallyInternalized` now preserves the source units
+  made available by Lean's final compiler pipeline. It replays a postponed
+  public entry's exact module groups, compiles recursively discovered ordinary
+  imported roots through fresh final-impure capture, and reachability-prunes
+  the merged graph. HitScene production consumes the generic hybrid path. The
+  postponed-source-view builder also supports deterministic rebuilds after
+  Lean made prior interface artifacts read-only.
+- Contracts: no Lean semantic, semantic Wasm ABI, resident-helper signature,
+  symbolic-module, or W6 proof contract changed. HitScene retains its public
+  production/diagnostic query API, bit-exact coordinates, module-owned memory,
+  persistent checkpoint, copied results, scratch rewind, disposal, and exact
+  `fir.standard-libm/v2` frontier.
+- Acceptance: the positive individual HitScene probe records 313 reachable
+  declarations, 53 reviewed externals, 261 base functions, zero unsupported
+  declarations, successful admission, and successful lowering. The package
+  passes all 301 fixture queries and 10,000 flat-frontier queries, deterministic
+  repeat generation/link, and complete checksums. `make check` reports
+  2,121/2,121 equal comparisons; all 3,162 Talos jobs and the complete W7
+  artifact gate pass, including 704 native/LCNF/V8 cases, 44/44 concrete
+  artifacts, and 15/15 source probes. All scratch remained in persistent
+  worktree-local storage.
+- Artifact: clean FIR producer `65f4a57c` and clean Illuminate source
+  `88dcfee895a5` produce immutable package
+  `integration/illuminate-hit-scene/_build/illuminate-hit-scene-8c890b70828ec3b2`.
+  Its 64,217-byte zero-import module has SHA-256
+  `0a59717fef0dafb2fac65e0cbc44c39b5116ab5bd30796be4b1853e1e25d7480`;
+  package SHA-256 is
+  `8c890b70828ec3b2e426251b2a7049ce00896d9d7cf17332bcfd33ce90ca28c5`.
+- Result: local `main` advances through `b36d9d98`. Bug card
+  `FIR-BUG-wasm-none-individual-hit-scene-generated-helper-admission` is fixed
+  without an admission weakening or declaration-specific shim. No external
+  package is published.
+
+## Previous completed integration lease
 
 - Milestone: `W7-ILLUMINATE-HIT-SCENE-STANDARD-LIBM`.
 - Integration owner: `wasm-gen`, accepting its own clean tracked handoff
