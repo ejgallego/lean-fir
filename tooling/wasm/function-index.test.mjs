@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import test from "node:test";
+
+import { makeToolingTemporaryDirectory } from "../worktree-temp.mjs";
 
 import {
   binaryenOptimizerName,
@@ -42,7 +43,7 @@ function run(tool, args, options = {}) {
 
 test("captures final optimized indices without changing release bytes",
   () => {
-    const directory = mkdtempSync(join(tmpdir(), "fir-function-index-"));
+    const directory = makeToolingTemporaryDirectory("fir-function-index-");
     try {
       const input = join(directory, "input.wasm");
       const named = join(directory, "named.wasm");
@@ -111,7 +112,7 @@ test("captures final optimized indices without changing release bytes",
 
 test("resolves imported functions across final maps and call graphs",
   () => {
-    const directory = mkdtempSync(join(tmpdir(), "fir-function-imports-"));
+    const directory = makeToolingTemporaryDirectory("fir-function-imports-");
     try {
       const input = join(directory, "input.wasm");
       const named = join(directory, "named.wasm");
@@ -240,7 +241,7 @@ test("resolves imported functions across final maps and call graphs",
 
 test("extracts a bounded function-local instruction view",
   () => {
-    const directory = mkdtempSync(join(tmpdir(), "fir-function-view-"));
+    const directory = makeToolingTemporaryDirectory("fir-function-view-");
     try {
       const wasm = join(directory, "fixture.wasm");
       const wat = join(directory, "function.wat");
@@ -294,7 +295,8 @@ test("extracts a bounded function-local instruction view",
 
 test("rejects a sidecar after the artifact changes",
   () => {
-    const directory = mkdtempSync(join(tmpdir(), "fir-function-index-hash-"));
+    const directory = makeToolingTemporaryDirectory(
+      "fir-function-index-hash-");
     try {
       const wasm = join(directory, "fixture.wasm");
       run("wasm-as", [...features, fixture, "-o", wasm]);

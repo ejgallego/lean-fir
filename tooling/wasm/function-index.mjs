@@ -2,9 +2,10 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
+
+import { makeToolingTemporaryDirectory } from "../worktree-temp.mjs";
 
 import {
   binaryenOptimizerName,
@@ -147,7 +148,7 @@ if (command === "prepare") {
   const binaryenDirectory = required(args, "--binaryen-dir");
   const wasmPath = required(args, "--wasm");
   const wasm = readFileSync(wasmPath);
-  const temporary = mkdtempSync(join(tmpdir(), "fir-function-restamp-"));
+  const temporary = makeToolingTemporaryDirectory("fir-function-restamp-");
   let functionMap;
   try {
     functionMap = run(binaryenDirectory, "wasm-opt", [
@@ -178,7 +179,7 @@ if (command === "prepare") {
     "-o",
     wasmPath,
   ], { encoding: "utf8" });
-  const temporary = mkdtempSync(join(tmpdir(), "fir-function-graph-"));
+  const temporary = makeToolingTemporaryDirectory("fir-function-graph-");
   let callGraph;
   try {
     const graphCopy = join(temporary, "graph-copy.wasm");
@@ -254,7 +255,7 @@ if (command === "prepare") {
   const maxLines = Number(args.get("--max-lines") ?? 160);
   assert(Number.isSafeInteger(maxLines) && maxLines >= 8,
     "--max-lines must be an integer of at least eight");
-  const temporary = mkdtempSync(join(tmpdir(), "fir-function-view-"));
+  const temporary = makeToolingTemporaryDirectory("fir-function-view-");
   let wat;
   try {
     const watPath = join(temporary, "function.wat");
