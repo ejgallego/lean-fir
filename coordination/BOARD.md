@@ -91,7 +91,12 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   direct equality/unsigned order, while promoted, heap-backed, persistent, and
   arbitrary-limb values retain the checked magnitude path. Lean-zip's closure
   inventories and ABI are unchanged; its exact-release profiles improve by
-  27--31% with identical bytes and a flat frontier.
+  27--31% with identical bytes and a flat frontier. W7's direct tagged-Nat to
+  `USize` conversion follows through tracked handoff `80bb2dd1` (functional
+  head `c12dba9c`): immediate inputs bypass generic validation, while the
+  checked fallback now accepts arbitrary-limb Nats and preserves Lean's
+  modulo-`2^64` semantics. Lean-zip improves by another 19--22% with identical
+  bytes and a flat frontier.
 - Landing order:
   1. W7-2's Verso source-module replay repair and generic immutable-package
      publisher are accepted in that order through `912bf68a`.
@@ -164,6 +169,10 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
       sidecar are generation-ready; W6 refinement remains independently queued
       in `W7-W6-20260820-001`, and the lean-zip lane retains Chrome/FIR-C
       performance acceptance.
+  16. W7's tagged-Nat to `USize` dispatch follows through tracked handoff
+      `80bb2dd1`. The helper signatures and layout are unchanged; W6 refinement
+      remains independent, while the corrected arbitrary-limb fallback is
+      guarded by the resident fixed-width real-engine fixture.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -179,7 +188,8 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   an independently authorized head. SpatialHitScene's multi-entry synthetic
   capture has not yet been assessed for the repaired hybrid API. W6 refinement
   of the newly accepted immediate-Nat decision branch remains open under
-  `W7-W6-20260820-001`; it does not block generation acceptance because no
+  `W7-W6-20260820-001`; proof adaptation for the accepted `USize.ofNat` body is
+  also queued independently. Neither blocks generation acceptance because no
   helper signature or shared layout changed.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
@@ -187,31 +197,31 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
-- Milestone: `W7-IMMEDIATE-NAT-DECISIONS`.
+- Milestone: `W7-IMMEDIATE-NAT-TO-USIZE`.
 - Integration owner: `wasm-gen`, accepting its own clean tracked handoff
-  `9c0a73a5`; the functional head is `9dd5ea7a` on `181b1097`.
-- Change: arbitrary-precision resident `Nat.decEq`, `Nat.decLt`, and `Nat.decLe`
-  compare two canonical tagged immediates directly. Every mixed, promoted,
-  persistent, heap-backed, or arbitrary-limb pair retains the original checked
-  generic path.
+  `80bb2dd1`; the functional head is `c12dba9c` on `7637dd95`.
+- Change: resident `USize.ofNat` and `USize.ofNatLT` decode canonical tagged
+  Nats directly into the `i64` lane. Promoted and arbitrary-limb values take
+  the checked `ResidentBigNumeric` path; the latter now reduce modulo `2^64`
+  rather than trapping.
 - Contracts: no Lean semantics, semantic Wasm ABI, helper signature, concrete
   representation, source entry, adapter API, ownership, or arena contract
   changed. Lean-zip remains 769 captured declarations, 139 externals, 630
   source functions, 2,782 pre-optimization helpers, and 2,305 final functions.
-- Acceptance: exact-contract profile medians improve from 391.71/387.83 ms to
-  270.49/284.03 ms. Generic compare samples fall 89.8%, magnitude low/high
-  62.8%/76.2%, and natural validation 75.7%, with identical compressed bytes
-  and a flat frontier. The focused real-Wasm numeric fixture, deterministic
-  package gate, five inputs across levels 1--10, `make check`, all 3,162 Talos
-  jobs, and the complete W7 artifact gate pass.
+- Acceptance: exact-contract profile medians improve from 270.49/284.03 ms to
+  219.84/220.72 ms. `USize.ofNat` self samples fall about 61%, with identical
+  compressed bytes and a flat frontier. The immediate/promoted/arbitrary-limb
+  real-Wasm fixture, deterministic package gate, five inputs across levels
+  1--10, `make check`, all 3,162 Talos jobs, and the complete W7 artifact gate
+  pass. Bug card `FIR-BUG-wasm-none-usize-ofnat-arbitrary-natural` is fixed.
 - Artifact: clean package
-  `.deps/evidence/lean-zip-numeric/clean-package` has package ID
-  `9dd5ea7a9960-273d0d6cd9ca-e2c1415d3adddc83beda`; its 936,061-byte zero-import
-  Wasm SHA-256 is
-  `fafdd9a9a8fdb7f42983596b49eccb9554f9deca05045fb0f99cd4103e4bbb21`,
-  and its 999,548-byte sidecar SHA-256 is
-  `5b4b3cf83f9bdd60894dbf7cedf00353735374db78d86d934d47442ece003093`.
-- Result: local `main` advances through `9c0a73a5`. The package remains local
+  `.deps/evidence/lean-zip-numeric/usize-clean-package` has package ID
+  `c12dba9c6197-273d0d6cd9ca-a2e10ca4130c28c1ac4b`; its 936,077-byte
+  zero-import Wasm SHA-256 is
+  `ba9eb0be837382a3586310ac40e4a9e6a1868605ac87db40986923ff3a247637`,
+  and its 999,568-byte sidecar SHA-256 is
+  `f1ac6dd38b8b068ddd85b1cdc52ba561c04a4524c9f2dde1e93647dc059d11b5`.
+- Result: local `main` advances through `80bb2dd1`. The package remains local
   for lean-zip acceptance; W6 proof adaptation is queued separately.
 
 ## Previous completed integration lease
