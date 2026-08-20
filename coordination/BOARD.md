@@ -69,7 +69,11 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `Float.log2` symbolic frontier, and a zero-import final package. Its stored
   and Level-1 companions are republished from persistent FIR-local source
   views through tracked handoff `7a3163e5` (functional head `5e30208f`), with
-  reviewed byte-only ratchets and unchanged semantic inventories.
+  reviewed byte-only ratchets and unchanged semantic inventories. Illuminate's
+  full-action and selection players are provider-free through tracked handoff
+  `a45de4c9` (functional head `1b1668f1`): both source-compile upstream Float
+  construction, start at the module's 1,024-byte heap base, and retain zero
+  imports without the legacy standard-math provider.
 - Landing order:
   1. W7-2's Verso source-module replay repair and generic immutable-package
      publisher are accepted in that order through `912bf68a`.
@@ -121,6 +125,11 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
       handoff `7a3163e5`; persistent `.deps/source-views` replace all
       periodically cleaned source-view defaults without changing compilation
       semantics or ownership.
+  11. Illuminate's full-action and selection consumers follow through tracked
+      handoff `a45de4c9`. Their already-closed resident modules use generic
+      fail-closed Binaryen cleanup directly; no C provider or 64 KiB runtime
+      reservation remains. HitScene-family migration remains a later consumer
+      slice.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -139,6 +148,37 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   removal, or branch deletion is implied by this lease.
 
 ## Latest completed integration lease
+
+- Milestone: `W7-ILLUMINATE-PROVIDER-FREE-SOURCE-FLOAT`.
+- Integration owner: `wasm-gen`, accepting its own clean tracked handoff
+  `a45de4c9`; the functional head is `1b1668f1` on `54165c6a`.
+- Change: the real Illuminate full-action and selection final-LCNF closures now
+  compile upstream `Float.ofNat` and `Float.ofScientific` through FIR's generic
+  source path. Their package generators optimize the already import-free
+  resident modules directly and no longer build or link the bounded C provider.
+  Adapters validate the exact 1,024-byte module heap base instead of advancing
+  every fresh instance past a 65,536-byte provider reservation.
+- Contracts: no Lean semantic, Wasm ABI, resident-helper, symbolic-module, or
+  proof contract changed. Package-local ownership metadata advances to
+  `persistent-checkpoint/v3` and `fir.closed-resident-runtime/v1`; public APIs,
+  structured entries, exports, bit-exact Float transport, persistent
+  checkpoints, copied outputs, and disposal remain unchanged.
+- Acceptance: both packages publish byte-identically twice, all source and
+  packaged smokes pass, all 107 legacy/full-action/selection traces agree, and
+  both 10,000-call arena tests remain flat. `make check` reports 2,121/2,121
+  equal comparisons; all 3,162 Talos jobs and the complete W7 artifact gate
+  pass. No bug card was needed.
+- Artifacts: the 37,287-byte full-action module has SHA-256
+  `25e3f3ec476b7bb9cc650d89b3664c1a55880b44fde54576078278f5e2e87643`;
+  the 40,398-byte selection module has SHA-256
+  `9a5364ac0e4f78559f29089e9005820c9a9246850d1d19d04ba35671e997eefd`.
+  Both own memory and have zero function and memory imports.
+- Result: local `main` advances through `a45de4c9`. No external package is
+  published. The next W7 consumer slice audits HitScene and SpatialHitScene,
+  after which the legacy `fir.standard-math/v1` contract can be retired if no
+  consumers remain.
+
+## Previous completed integration lease
 
 - Milestone: `W7-LEAN-ZIP-PERSISTENT-SOURCE-VIEWS`.
 - Integration owner: `wasm-gen`, accepting its own clean tracked handoff
