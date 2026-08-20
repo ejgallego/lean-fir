@@ -100,7 +100,12 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   tracked handoff `71203523` (functional head `0811a912`): two tagged payloads
   multiply exactly in Wasm `i64`, while promoted, mixed, arbitrary-limb, and
   malformed values retain the checked generic path. Lean-zip improves by a
-  further 13--15%, with identical compressed bytes and a flat frontier.
+  further 13--15%, with identical compressed bytes and a flat frontier. W7's
+  direct tagged `Nat.sub` follows through tracked handoff `f21c97e6`
+  (functional head `2e9040e0`): tagged-word order and arithmetic implement
+  exact truncated subtraction without allocation, while all other inputs
+  retain the checked arbitrary-precision walkers. Lean-zip improves by another
+  24--26%, again with identical compressed bytes and a flat frontier.
 - Landing order:
   1. W7-2's Verso source-module replay repair and generic immutable-package
      publisher are accepted in that order through `912bf68a`.
@@ -183,6 +188,12 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
       queued independently, while real-Wasm fixtures cover nonallocating and
       promoted tagged products, arbitrary limbs, ownership, and malformed
       operands.
+  18. W7's tagged/tagged `Nat.sub` dispatch follows through tracked handoff
+      `f21c97e6`. The helper signature, canonical Nat representation, and
+      checked arbitrary-precision fallback are unchanged; W6 refinement is
+      queued independently, while real-Wasm fixtures cover saturation at zero,
+      tagged boundaries, no allocation, arbitrary limbs, stack safety, and
+      malformed operands.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -200,13 +211,43 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   of the newly accepted immediate-Nat decision branch remains open under
   `W7-W6-20260820-001`; proof adaptation for the accepted `USize.ofNat` body is
   also queued independently. Proof adaptation for the accepted immediate
-  `Nat.mul` body is queued separately as well. None blocks generation
-  acceptance because no helper signature or shared layout changed.
+  `Nat.mul` and `Nat.sub` bodies is queued separately as well. None blocks
+  generation acceptance because no helper signature or shared layout changed.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
 
 ## Latest completed integration lease
+
+- Milestone: `W7-IMMEDIATE-NAT-SUB`.
+- Integration owner: `wasm-gen`, accepting its own clean tracked handoff
+  `f21c97e6`; the functional head is `2e9040e0` on `4fea3692`.
+- Change: resident `Nat.sub` dispatches two canonical tagged Nats before its
+  checked arbitrary-precision body. Tagged object words preserve unsigned
+  payload order; subtracting them and restoring the tag computes the exact
+  difference, while the underflow case returns tagged zero. The branch
+  allocates nothing.
+- Contracts: no Lean semantics, semantic Wasm ABI, helper signature, concrete
+  representation, source entry, adapter API, ownership, or arena contract
+  changed. Lean-zip remains 769 captured declarations, 139 externals, 630
+  source functions, 2,782 pre-optimization helpers, and 2,305 final functions.
+- Acceptance: exact-contract profile medians improve from 190.94/187.20 ms to
+  141.08/142.32 ms, about 26%/24%. `Nat.sub` combined self samples fall about
+  75% and magnitude-low samples about 98%, with identical compressed bytes and
+  a flat frontier. The focused real-Wasm big-numeric fixture, deterministic
+  package gate, five inputs across levels 1--10, `make check`, all 3,162 Talos
+  jobs, and the complete W7 artifact gate pass.
+- Artifact: clean package
+  `.deps/evidence/lean-zip-numeric/natsub-clean-package` has package ID
+  `2e9040e01ee4-273d0d6cd9ca-c3a99b3c7a6a4ef61fe1`; its 936,202-byte
+  zero-import Wasm SHA-256 is
+  `8aa5a302e328b1b60cc8a5d2f41998e831547d114022336ca3c64cbeb11711e6`,
+  and its 999,568-byte sidecar SHA-256 is
+  `a245a858c1297f90e7b584b47489361f5f7aec394c6380ecb7cbc9f24580d5ff`.
+- Result: local `main` advances through `f21c97e6`. The package remains local
+  for lean-zip acceptance; W6 proof adaptation is queued separately.
+
+## Previous completed integration lease
 
 - Milestone: `W7-IMMEDIATE-NAT-MUL`.
 - Integration owner: `wasm-gen`, accepting its own clean tracked handoff
