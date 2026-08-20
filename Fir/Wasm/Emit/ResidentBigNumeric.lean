@@ -1420,32 +1420,55 @@ private def finishNaturalDifference : List Instruction :=
         .localGet rawLocal] ++
         retypeRawResult .tobject objectResultLocal)]
 
+/-- Tagged Nat words preserve unsigned payload order.  Subtracting the two
+words cancels their tag bits; adding the tag back therefore computes the
+canonical immediate word for truncated natural subtraction without decoding
+or allocating. -/
+private def immediateNaturalDifference : List Instruction := [
+  .localGet leftParam,
+  .localGet rightParam,
+  .i32LtU,
+  .ifElse
+    [.i32Const .uint32 1,
+      .localSet rawLocal]
+    [.localGet leftParam,
+      .localGet rightParam,
+      .i32Sub,
+      .i32Const .uint32 1,
+      .i32Add,
+      .localSet rawLocal],
+  .localGet rawLocal] ++
+  retypeRawResult .tobject objectResultLocal
+
+private def checkedNaturalDifference : List Instruction := [
+  .i32Const .uint32 0,
+  .localSet leftFlavorParam,
+  .i32Const .uint32 0,
+  .localSet rightFlavorParam] ++
+  validateNaturalsAndCounts ++ [
+  .localGet leftParam,
+  .i32Const .uint32 0,
+  .localGet rightParam,
+  .i32Const .uint32 0,
+  .call (.declaration compareName),
+  .localSet compareLocal,
+  .localGet compareLocal,
+  .i32Const .uint32 2,
+  .i32Eq,
+  .ifElse
+    finishNaturalDifference
+    ([.i32Const .uint32 0,
+      .i32Const .uint32 0,
+      .call (.declaration ResidentNumeric.makeNaturalName)] ++
+      retypeRawResult .tobject objectResultLocal)]
+
 def natSubFunction : Function := {
   name := externalName `Nat.sub
   params := #[(leftParam, .tobject), (rightParam, .tobject)]
   results := #[.tobject]
   locals := naturalArithmeticLocals
-  body := [
-    .i32Const .uint32 0,
-    .localSet leftFlavorParam,
-    .i32Const .uint32 0,
-    .localSet rightFlavorParam] ++
-    validateNaturalsAndCounts ++ [
-    .localGet leftParam,
-    .i32Const .uint32 0,
-    .localGet rightParam,
-    .i32Const .uint32 0,
-    .call (.declaration compareName),
-    .localSet compareLocal,
-    .localGet compareLocal,
-    .i32Const .uint32 2,
-    .i32Eq,
-    .ifElse
-      finishNaturalDifference
-      ([.i32Const .uint32 0,
-        .i32Const .uint32 0,
-        .call (.declaration ResidentNumeric.makeNaturalName)] ++
-        retypeRawResult .tobject objectResultLocal)] }
+  body := withImmediateNaturalPair leftParam rightParam
+    immediateNaturalDifference checkedNaturalDifference }
 
 private def integerCombineLocals : Array (FVarId × AbiKind) := #[
   (leftFlavorParam, .uint32),

@@ -204,6 +204,16 @@ uses the checked multiplication implementation. Against the preceding
 samples fall by about 94%, with identical compressed bytes and the same flat
 9,237,304-byte frontier.
 
+`Nat.sub` likewise dispatches two canonical tagged operands before its checked
+arbitrary-precision path. Tagged object words preserve payload order, and
+subtracting the words then adding the tag computes exact truncated subtraction
+without decoding or allocation; `left < right` returns tagged zero. Promoted,
+mixed, arbitrary-limb, and malformed inputs retain full validation. Against
+the preceding `Nat.mul` package, level-6 medians fall from 190.94/187.20 ms to
+141.08/142.32 ms, about 26%/24%. `fir_big_ext_Nat_sub` combined self samples
+fall by about 75% and magnitude-low samples by about 98%, with identical
+compressed bytes and the same flat 9,237,304-byte frontier.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not

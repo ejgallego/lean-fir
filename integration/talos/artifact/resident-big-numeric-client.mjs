@@ -11,6 +11,16 @@ function exported(instance, name) {
   return value;
 }
 
+function expectTrap(action, message) {
+  let trapped = false;
+  try {
+    action();
+  } catch (error) {
+    trapped = error instanceof WebAssembly.RuntimeError;
+  }
+  assert.equal(trapped, true, `${message} did not trap`);
+}
+
 function synchronize(host) {
   host.synchronizeResidentFrontierBeforeImport();
 }
@@ -127,6 +137,7 @@ export async function checkResidentBigNumeric({ bytes, manifest }) {
   const natSub = exported(instance, "fir_big_ext_Nat_sub");
   const natDecLt = exported(instance, "fir_big_ext_Nat_decLt");
   const natDecLe = exported(instance, "fir_big_ext_Nat_decLe");
+  const frontier = exported(instance, "fir_heap_frontier");
 
   const n256 = 1n << 256n;
   const n384 = 1n << 384n;
@@ -225,6 +236,31 @@ export async function checkResidentBigNumeric({ bytes, manifest }) {
     assert.equal(natDecLe(leftInput, rightInput), left <= right ? 1 : 0,
       `Nat.decLe immediate pair ${left}, ${right}`);
   }
+
+  const immediateSubFrontier = frontier() >>> 0;
+  for (const [left, right, expected] of [
+    [0n, 0n, 0n],
+    [0n, 1n, 0n],
+    [1n, 0n, 1n],
+    [52n, 17n, 35n],
+    [maxImmediate - 1n, maxImmediate, 0n],
+    [maxImmediate, maxImmediate - 1n, 1n],
+    [maxImmediate, 0n, maxImmediate],
+  ]) {
+    const leftInput = naturalInput(host, left);
+    const rightInput = naturalInput(host, right);
+    const result = natSub(leftInput, rightInput);
+    assert.equal(host.classify(result), "immediate",
+      `Nat.sub immediate result was promoted: ${left} - ${right}`);
+    assert.equal(naturalValue(host, result), expected,
+      `Nat.sub immediate mismatch: ${left} - ${right}`);
+  }
+  assert.equal(frontier() >>> 0, immediateSubFrontier,
+    "Nat.sub immediate pairs allocated in the resident heap");
+  expectTrap(() => natSub(0, naturalInput(host, 1n)),
+    "Nat.sub malformed heap left operand");
+  expectTrap(() => natSub(naturalInput(host, 1n), 0),
+    "Nat.sub malformed heap right operand");
 
   assert.equal(naturalValue(host,
     natAdd(naturalInput(host, a), naturalInput(host, b))), a + b);
