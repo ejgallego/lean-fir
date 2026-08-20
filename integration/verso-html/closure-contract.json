@@ -5,7 +5,7 @@
   "residentHelpers": 421,
   "completeFunctions": 495,
   "baseWasmBytes": 65607,
-  "completeWasmBytes": 145114,
+  "completeWasmBytes": 145219,
   "retainedSourceFunctionSha256": "92f3cca5387ffb3343bc904fa44c5a6e268059fd675f03c7b2ee8c9a34369fca",
   "residentHelperSha256": "53b7022b897980150dc1a70d358d6c599ab83a25f2241e3ca6a751a130eddd14",
   "lazyCacheInitializers": 0,

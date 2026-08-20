@@ -6,7 +6,7 @@ cd "$here"
 verso_root=${VERSO_ROOT:-$(realpath .verso)}
 
 lake --keep-toolchain --reconfigure -KversoRoot="$verso_root" \
-  build VersoFirHtml.Compile
+  build VersoHtmlSource VersoFirHtml.Compile
 VERSO_ROOT="$verso_root" node package.mjs
 package=$(realpath _build/verso-html-current)
 VERSO_ROOT="$verso_root" node package.mjs
