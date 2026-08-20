@@ -9,9 +9,12 @@ open Lean
 /-!
 # Wasm-resident target platform queries
 
-The generated modules target wasm32 with the Lean runtime's 64-bit scalar
-lanes.  `System.Platform.getNumBits` therefore has the same constant result as
-Lean's native Wasm runtime: the immediate natural `64`.
+The generated modules target wasm32 while explicitly transporting the 64-bit
+scalar semantics of final-impure LCNF captured by FIR's x86_64 Lean toolchain.
+`System.Platform.getNumBits` therefore returns the immediate natural `64` for
+FIR's named `wasm32-lean64` contract. This deliberately differs from Lean's
+native wasm32 runtime, where target `size_t` and the platform query are 32-bit;
+see `FIR-BUG-wasm-none-usize-target-width-contract`.
 -/
 
 inductive LinkError where
