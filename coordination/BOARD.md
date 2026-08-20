@@ -85,7 +85,13 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   pruned. HitScene production now uses this repaired hybrid path. The Verso
   HTML clean-check dependency repair is accepted through tracked handoff
   `3767af90` (functional head `c4051bff`), so its native oracle no longer
-  depends on a pre-existing `VersoSlides.Pretty` build product.
+  depends on a pre-existing `VersoSlides.Pretty` build product. W7's generic
+  immediate-Nat decision dispatch is accepted through tracked handoff
+  `9c0a73a5` (functional head `9dd5ea7a`): two canonical immediate words use
+  direct equality/unsigned order, while promoted, heap-backed, persistent, and
+  arbitrary-limb values retain the checked magnitude path. Lean-zip's closure
+  inventories and ABI are unchanged; its exact-release profiles improve by
+  27--31% with identical bytes and a flat frontier.
 - Landing order:
   1. W7-2's Verso source-module replay repair and generic immutable-package
      publisher are accepted in that order through `912bf68a`.
@@ -153,6 +159,11 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   14. The Verso HTML clean-check repair follows through tracked handoff
       `3767af90`; the package gate explicitly builds its declared source
       library before invoking the native oracle.
+  15. W7's immediate-Nat equality/order dispatch follows through tracked
+      handoff `9c0a73a5`. Its zero-import lean-zip package and exact function
+      sidecar are generation-ready; W6 refinement remains independently queued
+      in `W7-W6-20260820-001`, and the lean-zip lane retains Chrome/FIR-C
+      performance acceptance.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -166,12 +177,44 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   the existing shared-observation bug card; it has no feature landing. Later
   tooling surfaces remain on their combined development branch until each has
   an independently authorized head. SpatialHitScene's multi-entry synthetic
-  capture has not yet been assessed for the repaired hybrid API.
+  capture has not yet been assessed for the repaired hybrid API. W6 refinement
+  of the newly accepted immediate-Nat decision branch remains open under
+  `W7-W6-20260820-001`; it does not block generation acceptance because no
+  helper signature or shared layout changed.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
 
 ## Latest completed integration lease
+
+- Milestone: `W7-IMMEDIATE-NAT-DECISIONS`.
+- Integration owner: `wasm-gen`, accepting its own clean tracked handoff
+  `9c0a73a5`; the functional head is `9dd5ea7a` on `181b1097`.
+- Change: arbitrary-precision resident `Nat.decEq`, `Nat.decLt`, and `Nat.decLe`
+  compare two canonical tagged immediates directly. Every mixed, promoted,
+  persistent, heap-backed, or arbitrary-limb pair retains the original checked
+  generic path.
+- Contracts: no Lean semantics, semantic Wasm ABI, helper signature, concrete
+  representation, source entry, adapter API, ownership, or arena contract
+  changed. Lean-zip remains 769 captured declarations, 139 externals, 630
+  source functions, 2,782 pre-optimization helpers, and 2,305 final functions.
+- Acceptance: exact-contract profile medians improve from 391.71/387.83 ms to
+  270.49/284.03 ms. Generic compare samples fall 89.8%, magnitude low/high
+  62.8%/76.2%, and natural validation 75.7%, with identical compressed bytes
+  and a flat frontier. The focused real-Wasm numeric fixture, deterministic
+  package gate, five inputs across levels 1--10, `make check`, all 3,162 Talos
+  jobs, and the complete W7 artifact gate pass.
+- Artifact: clean package
+  `.deps/evidence/lean-zip-numeric/clean-package` has package ID
+  `9dd5ea7a9960-273d0d6cd9ca-e2c1415d3adddc83beda`; its 936,061-byte zero-import
+  Wasm SHA-256 is
+  `fafdd9a9a8fdb7f42983596b49eccb9554f9deca05045fb0f99cd4103e4bbb21`,
+  and its 999,548-byte sidecar SHA-256 is
+  `5b4b3cf83f9bdd60894dbf7cedf00353735374db78d86d934d47442ece003093`.
+- Result: local `main` advances through `9c0a73a5`. The package remains local
+  for lean-zip acceptance; W6 proof adaptation is queued separately.
+
+## Previous completed integration lease
 
 - Milestone: `W7-VERSO-HTML-CLEAN-CHECK`.
 - Integration owner: `wasm-gen`, accepting its own clean tracked handoff
