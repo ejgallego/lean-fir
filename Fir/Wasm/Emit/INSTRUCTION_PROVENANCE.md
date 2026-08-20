@@ -1,8 +1,8 @@
 # Exact-release Wasm instruction provenance checkpoint
 
-Status: feasibility checkpoint only. This document does not define a stable
-package format and does not change the emitter, optimizer flags, or benchmark
-artifact.
+Status: additive encoder-origin trace and deterministic optimizer fixture
+implemented. This document does not define a stable package format and does
+not change the ordinary encoder, optimizer flags, or benchmark artifact.
 
 ## Question
 
@@ -71,35 +71,37 @@ line 1. The existing lean-zip CPU profile has the same shape. The current
 profile can identify a final function but supplies no sampled instruction
 offset with which to query an instruction map.
 
-Consequently, emitting a source map now would preserve useful provenance and
-improve diagnostic naming, but it would not by itself provide hot call-site
-attribution to the current profiler. Tooling must first select a consumer that
-exposes final Wasm bytecode positions. V8 advertises an experimental
-source-map-aware `perf` mode; that and debug-companion DevTools or opt-in
-instrumentation are consumer candidates, not assumptions in the compiler
-schema.
+Consequently, emitting a source map preserves useful provenance and improves
+diagnostic naming, but does not by itself provide hot call-site attribution to
+the current Node profiler. Tooling selected V8 `d8` with source-map-aware
+`perf` annotations as the first instruction consumer. Its minimum key is a
+synthetic source filename and one-based source line; it does not expose a
+source-map column or inline stack. Node remains the exact-function consumer.
 
 ## Proposed narrow compiler surface
 
-The least disruptive W7 surface is an additive encoder result rather than a
-new field on every symbolic `Instruction`:
+The implemented W7 surface is an additive encoder result rather than a new
+field on every symbolic `Instruction`:
 
 ```text
 encodeWithOrigins(module) -> {
   bytes,
-  instructionOrigins
+  origins
 }
 ```
 
-`bytes` must equal the existing encoder output. `instructionOrigins` records
-the encoded byte offset of each emitted symbolic instruction together with a
-stable origin allocated after FIR resident linking and dead-code elimination,
-before binary encoding. A first origin can contain:
+The ordinary `encode` path remains unchanged. `encodeWithOrigins` first calls
+that same internal encoder, then checks every function body and opcode against
+the produced bytes before returning absolute module offsets. Any section,
+body, or opcode drift fails closed. Each origin contains:
 
-- symbolic function identity;
-- structured instruction path or preorder identity within that function;
-- symbolic opcode; and
-- direct-call target when the instruction is a call.
+- symbolic function identity and absolute pre-optimization Wasm function
+  index;
+- structured instruction path and preorder identity within that function;
+- exact opcode bytes and complete encoded symbolic-instruction size;
+- direct-call target when the instruction is a call;
+- absolute opcode byte offset in the module; and
+- a unique synthetic source filename and one-based source line.
 
 This does not yet promise an LCNF operation, block, source span, or inline
 ancestry. The current symbolic Wasm `Instruction`, `Function`, and `Module`
@@ -113,6 +115,26 @@ The encoded offsets can seed a synthetic input source map. Each Binaryen stage
 then consumes the preceding map and emits the next map. The diagnostic output
 is retained until its final map is written; stripping that output must
 reproduce the independently generated canonical release exactly.
+
+The Lean fixture contains nested and top-level `i32.add` instructions with the
+same opcode, plus a direct call. It checks ordinary/traced byte identity,
+absolute opcode agreement, distinct structured paths, sequential source lines,
+function indices, and exact call-target retention.
+
+The external two-module fixture runs twice through assembly, merge, meta-DCE,
+function reorder, and `-O3`. Its optimized entry retains two same-opcode add
+sites from different source functions while eliminating the call. Both runs
+produce the same 58-byte release, 121-byte mapped companion, 230-byte source
+map, and classification report. Stripping the companion reproduces the
+canonical release at SHA-256:
+
+```text
+0cf51807b1ccedeedbc81293acd275cd17d86b2ba2e186fc383e80a2d888a1b8
+```
+
+The final classification is seven mapped, five deleted, zero unknown, and zero
+ambiguous origin keys. In particular, both surviving additions remain mapped
+and the inlined call site remains deleted rather than being reassigned.
 
 ## Proposed evidence boundary
 
@@ -140,18 +162,14 @@ DWARF is not the first mechanism. Retaining fully valid DWARF constrains some
 Binaryen transformations, while source-map locations already survive the
 pipeline without changing release optimization.
 
-## Sequenced next slices
+## Remaining sequence
 
-1. Tooling selects and checks a profiler or diagnostic consumer that exposes a
-   final instruction location.
-2. W7 adds the additive encoder trace and a checked assertion that its `bytes`
-   equal the ordinary encoder output.
-3. W7 promotes the two-module fixture into a deterministic gate across merge,
-   meta-DCE, reorder, and optimization, including release-byte identity and
-   mapping-coverage assertions.
-4. W7 and tooling agree on a versioned, release-bound sidecar only after the
-   consumer's minimum location key is known.
-5. Package integration remains opt-in until representative size and
+1. Run the mapped companion through a real `d8 --perf-prof` capture and prove
+   that its native-PC debug lines resolve the surviving synthetic source/line
+   keys. No suitable `d8` executable is installed on the current host.
+2. After that capture, W7 and tooling may agree on a versioned, release-bound
+   sidecar. The current Lean structures are an API, not that package schema.
+3. Package integration remains opt-in until representative size and
    generation-time measurements are recorded.
 
 This sequence keeps the generic compiler evidence independent of lean-zip and

@@ -3,6 +3,8 @@ set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../../.." && pwd)"
+mkdir -p "$here/_build/tmp"
+export TMPDIR="$here/_build/tmp"
 exhaustive_pretty="${FIR_PRETTYM_EXHAUSTIVE_CHECKPOINTS:-0}"
 if [[ "$exhaustive_pretty" != 0 && "$exhaustive_pretty" != 1 ]]; then
   echo "FIR_PRETTYM_EXHAUSTIVE_CHECKPOINTS must be 0 or 1" >&2
@@ -19,6 +21,9 @@ trap 'rm -rf "$first" "$second"' EXIT
 cd "$here"
 node --test "$root/integration/package-tools/immutable-package.test.mjs"
 node --test "$root/integration/package-tools/postponed-source-view.test.mjs"
+node instruction-provenance-fixture/check.mjs \
+  "$root/.deps/lcnf-c-wasm/emsdk/upstream/bin" \
+  "$here/_build/instruction-provenance-fixture"
 lake build
 lake exe fir-wasm-artifact resident-global _build/resident-global.wasm
 node run-resident-global.mjs _build/resident-global.wasm

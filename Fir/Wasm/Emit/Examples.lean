@@ -859,4 +859,73 @@ def scalarSurfaceModule : Module := {
 #guard validateModule scalarSurfaceModule |>.isOk
 #guard encode scalarSurfaceModule |>.isOk
 
+private def originTraceLocal : Lean.FVarId := ⟨`originTraceLocal⟩
+private def originTraceBlock : Lean.FVarId := ⟨`originTraceBlock⟩
+
+private def originTraceHelper : Function := {
+  name := `originTraceHelper
+  params := #[]
+  results := #[]
+  locals := #[]
+  body := [.ret] }
+
+/--
+The nested and top-level additions deliberately share an opcode. A consumer
+that correlates origins by opcode or list position instead of the structured
+path therefore fails this fixture.
+-/
+private def originTraceEntry : Function := {
+  name := `originTraceEntry
+  params := #[]
+  results := #[]
+  locals := #[(originTraceLocal, .uint32)]
+  body := [
+    .block originTraceBlock [
+      .call (.declaration `originTraceHelper),
+      .i32Const .uint32 1,
+      .i32Const .uint32 2,
+      .i32Add,
+      .localSet originTraceLocal],
+    .i32Const .uint32 3,
+    .i32Const .uint32 4,
+    .i32Add,
+    .localSet originTraceLocal,
+    .ret] }
+
+private def originTraceModule : Module := {
+  imports := #[]
+  functions := #[originTraceHelper, originTraceEntry]
+  exports := #[`originTraceEntry]
+  initializers := #[]
+  runtimeOperations := #[] }
+
+private def originTraceLocationsUnique (origins : Array InstructionOrigin) : Bool :=
+  let locations := origins.toList.map fun origin =>
+    s!"{origin.syntheticSource}:{origin.sourceLine}"
+  locations.eraseDups.length == locations.length
+
+private def originTraceOpcodesAgree (encoding : OriginEncoding) : Bool :=
+  encoding.origins.all fun origin =>
+    encoding.bytes.data.extract origin.offset
+      (origin.offset + origin.opcode.size) == origin.opcode
+
+#guard validateModule originTraceModule |>.isOk
+#guard match encode originTraceModule, encodeWithOrigins originTraceModule with
+  | .ok bytes, .ok traced =>
+      let entryOrigins := traced.origins.filter (·.function == `originTraceEntry)
+      let additions := entryOrigins.filter (·.opcode == #[0x6a])
+      bytes == traced.bytes &&
+        traced.origins.size == 12 &&
+        entryOrigins.size == 11 &&
+        additions.size == 2 &&
+        additions[0]!.path != additions[1]!.path &&
+        entryOrigins.toList.zipIdx.all (fun (origin, index) =>
+          origin.functionIndex == 1 && origin.preorder == index &&
+            origin.sourceLine == index + 1) &&
+        traced.origins.any (fun origin =>
+          origin.callTarget == some (.declaration `originTraceHelper)) &&
+        originTraceLocationsUnique traced.origins &&
+        originTraceOpcodesAgree traced
+  | _, _ => false
+
 end Fir.Wasm.Emit.Examples

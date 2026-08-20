@@ -13,7 +13,53 @@ inductive EncodeError where
   | unknownLabel (function : Name) (fvarId : FVarId)
   | unknownCallTarget (function : Name)
   | unknownExport (name : Name)
+  | invalidOriginTrace (message : String)
   deriving Inhabited, BEq, Repr
+
+/-- The structured region containing one symbolic Wasm instruction. -/
+inductive InstructionRegion where
+  | functionBody
+  | blockBody
+  | loopBody
+  | thenBody
+  | elseBody
+  deriving Inhabited, BEq, Repr
+
+/-- One stable edge in an instruction's path through a symbolic function body. -/
+structure InstructionPathStep where
+  region : InstructionRegion
+  index : Nat
+  deriving Inhabited, BEq, Repr
+
+/--
+Release-independent compiler evidence for one encoded symbolic instruction.
+`offset` is the absolute byte offset of the instruction opcode in `bytes`.
+Structured instructions include their nested body in `encodedSize`, so those
+ranges may contain child origins; `opcode` identifies only the opcode bytes.
+
+`syntheticSource` and one-based `sourceLine` form the location key consumed by
+V8's source-map-aware perf path. They are unique within one encoded module and
+do not claim an LCNF source span or optimizer inline ancestry.
+-/
+structure InstructionOrigin where
+  function : Name
+  /-- Absolute Wasm function index, including imports. -/
+  functionIndex : Nat
+  path : Array InstructionPathStep
+  preorder : Nat
+  opcode : Array UInt8
+  callTarget : Option CallTarget
+  offset : Nat
+  encodedSize : Nat
+  syntheticSource : String
+  sourceLine : Nat
+  deriving Inhabited, BEq
+
+/-- Byte-identical ordinary encoding plus opt-in symbolic instruction evidence. -/
+structure OriginEncoding where
+  bytes : ByteArray
+  origins : Array InstructionOrigin
+  deriving Inhabited, BEq
 
 private partial def encodeU32 (value : Nat) : Bytes :=
   let low := value % 0x80
@@ -345,6 +391,83 @@ private partial def encodeInstructions (context : Context) :
 
 end
 
+private structure RawInstructionOrigin where
+  path : Array InstructionPathStep
+  opcode : Array UInt8
+  callTarget : Option CallTarget
+  offset : Nat
+  encodedSize : Nat
+
+private def instructionCallTarget? : Instruction → Option CallTarget
+  | .call target => some target
+  | _ => none
+
+private def instructionOpcodeSize : Instruction → Nat
+  | .i32TruncSatF32S _
+  | .i32TruncSatF32U _
+  | .i32TruncSatF64S _
+  | .i32TruncSatF64U _
+  | .i64TruncSatF32S _
+  | .i64TruncSatF32U _
+  | .i64TruncSatF64S _
+  | .i64TruncSatF64U _ => 2
+  | _ => 1
+
+private def rawInstructionOrigin (path : Array InstructionPathStep)
+    (offset : Nat) (instruction : Instruction) (bytes : Bytes) :
+    RawInstructionOrigin := {
+  path
+  opcode := bytes.extract 0 (instructionOpcodeSize instruction)
+  callTarget := instructionCallTarget? instruction
+  offset
+  encodedSize := bytes.size }
+
+mutual
+
+private partial def traceInstruction (context : Context)
+    (path : Array InstructionPathStep) (offset : Nat) (instruction : Instruction) :
+    Except EncodeError (Bytes × Array RawInstructionOrigin) :=
+  match instruction with
+  | .block label body => do
+      let nested := { context with labels := some label :: context.labels }
+      let traced ← traceInstructions nested path .blockBody (offset + 2) body
+      let bytes := #[0x02, 0x40] ++ traced.1 ++ #[0x0b]
+      return (bytes, #[rawInstructionOrigin path offset instruction bytes] ++ traced.2)
+  | .loop label body => do
+      let nested := { context with labels := some label :: context.labels }
+      let traced ← traceInstructions nested path .loopBody (offset + 2) body
+      let bytes := #[0x03, 0x40] ++ traced.1 ++ #[0x0b]
+      return (bytes, #[rawInstructionOrigin path offset instruction bytes] ++ traced.2)
+  | .ifElse thenBody elseBody => do
+      let nested := { context with labels := none :: context.labels }
+      let tracedThen ← traceInstructions nested path .thenBody (offset + 2) thenBody
+      let tracedElse ← traceInstructions nested path .elseBody
+        (offset + 2 + tracedThen.1.size + 1) elseBody
+      let bytes := #[0x04, 0x40] ++ tracedThen.1 ++ #[0x05] ++
+        tracedElse.1 ++ #[0x0b]
+      let children := tracedThen.2 ++ tracedElse.2
+      return (bytes, #[rawInstructionOrigin path offset instruction bytes] ++ children)
+  | _ => do
+      let bytes ← encodeInstruction context instruction
+      return (bytes, #[rawInstructionOrigin path offset instruction bytes])
+
+private partial def traceInstructions (context : Context)
+    (pathPrefix : Array InstructionPathStep) (region : InstructionRegion)
+    (offset : Nat) (instructions : List Instruction) :
+    Except EncodeError (Bytes × Array RawInstructionOrigin) := do
+  let rec trace (index offset : Nat) (bytes : Bytes)
+      (origins : Array RawInstructionOrigin) : List Instruction →
+      Except EncodeError (Bytes × Array RawInstructionOrigin)
+    | [] => return (bytes, origins)
+    | instruction :: rest => do
+        let path := pathPrefix.push { region, index }
+        let traced ← traceInstruction context path offset instruction
+        trace (index + 1) (offset + traced.1.size) (bytes ++ traced.1)
+          (origins ++ traced.2) rest
+  trace 0 offset #[] #[] instructions
+
+end
+
 private def encodeImport (index : Nat) (import_ : Import) : Bytes :=
   encodeName import_.moduleName ++ encodeName import_.itemName ++ #[0x00] ++ encodeU32 index
 
@@ -378,6 +501,33 @@ private def encodeFunctionBody (module : Module) (checkIndex : CheckIndex)
   let terminal := if flow.fallthrough.isNone then #[0x00] else #[]
   let payload := encodeVector localDeclarations ++ body ++ terminal ++ #[0x0b]
   return encodeU32 payload.size ++ payload
+
+private partial def unsignedLebPrefixSize (bytes : Bytes) (offset : Nat := 0) :
+    Option Nat :=
+  if h : offset < bytes.size then
+    if bytes[offset].toNat < 0x80 then
+      some (offset + 1)
+    else
+      unsignedLebPrefixSize bytes (offset + 1)
+  else
+    none
+
+private def traceFunctionBody (module : Module) (checkIndex : CheckIndex)
+    (index : EncodeIndex) (function : Function) :
+    Except EncodeError (Bytes × Array RawInstructionOrigin) := do
+  let bytes ← encodeFunctionBody module checkIndex index function
+  let localDeclarations := function.locals.toList.map fun (_, kind) =>
+    encodeU32 1 ++ #[encodeValueType kind.valueType]
+  let localPrefix := encodeVector localDeclarations
+  let context : Context := {
+    module, index, function, localIndices := buildLocalIndex function }
+  let traced ← traceInstructions context #[] .functionBody 0 function.body
+  let some sizePrefix := unsignedLebPrefixSize bytes |
+    throw (.invalidOriginTrace s!"invalid function-body size for {function.name}")
+  let instructionOffset := sizePrefix + localPrefix.size
+  let origins := traced.2.map fun origin =>
+    { origin with offset := instructionOffset + origin.offset }
+  return (bytes, origins)
 
 private def encodeExport (index : EncodeIndex) (name : Name) : Except EncodeError Bytes := do
   let some target := index.functionTargets.get? name | throw (.unknownExport name)
@@ -476,6 +626,92 @@ private def encodeCore (module : Module) (validate : Bool) :
   unless module.dataSegments.isEmpty do
     bytes := bytes ++ encodeSection 0x0b dataPayload
   return ByteArray.mk bytes
+
+private partial def decodeU32At (bytes : Bytes) (offset : Nat)
+    (shift : Nat := 0) (value : Nat := 0) : Option (Nat × Nat) :=
+  if shift > 28 then
+    none
+  else if h : offset < bytes.size then
+    let byte := bytes[offset]
+    let value := value + (byte.toNat % 0x80) * (2 ^ shift)
+    if byte.toNat < 0x80 then
+      some (value, offset + 1)
+    else
+      decodeU32At bytes (offset + 1) (shift + 7) value
+  else
+    none
+
+private partial def findCodeSection? (bytes : Bytes) (offset : Nat := header.size) :
+    Option (Nat × Nat) :=
+  if h : offset < bytes.size then
+    let id := bytes[offset]
+    match decodeU32At bytes (offset + 1) with
+    | none => none
+    | some (size, payloadOffset) =>
+        let payloadEnd := payloadOffset + size
+        if payloadEnd > bytes.size then
+          none
+        else if id == 0x0a then
+          some (payloadOffset, payloadEnd)
+        else
+          findCodeSection? bytes payloadEnd
+  else
+    none
+
+private def traceOrigins (module : Module) (bytes : ByteArray) :
+    Except EncodeError (Array InstructionOrigin) := do
+  if module.functions.isEmpty then return #[]
+  let some (codeOffset, codeEnd) := findCodeSection? bytes.data |
+    throw (.invalidOriginTrace "encoded module has no valid code section")
+  let some (functionCount, firstBodyOffset) := decodeU32At bytes.data codeOffset |
+    throw (.invalidOriginTrace "encoded code section has no function vector")
+  unless functionCount == module.functions.size do
+    throw (.invalidOriginTrace
+      s!"encoded code count {functionCount} != symbolic count {module.functions.size}")
+  let checkIndex := module.checkIndex
+  let index := buildEncodeIndex module
+  let (finalOffset, origins) ← module.functions.toList.zipIdx.foldlM
+    (init := (firstBodyOffset, #[])) fun (bodyOffset, origins) (function, ordinal) => do
+      let traced ← traceFunctionBody module checkIndex index function
+      let bodyEnd := bodyOffset + traced.1.size
+      unless bodyEnd ≤ codeEnd &&
+          bytes.data.extract bodyOffset bodyEnd == traced.1 do
+        throw (.invalidOriginTrace s!"function-body drift for {function.name}")
+      let functionIndex := module.imports.size + ordinal
+      let syntheticSource := s!"fir-wasm-origin/{functionIndex}/{function.name}"
+      let functionOrigins ← traced.2.toList.zipIdx.mapM fun (origin, preorder) => do
+        let absoluteOffset := bodyOffset + origin.offset
+        unless absoluteOffset + origin.opcode.size ≤ bytes.size &&
+            bytes.data.extract absoluteOffset
+              (absoluteOffset + origin.opcode.size) == origin.opcode do
+          throw (.invalidOriginTrace
+            s!"opcode drift at {function.name}:{preorder + 1}")
+        return {
+          function := function.name
+          functionIndex
+          path := origin.path
+          preorder
+          opcode := origin.opcode
+          callTarget := origin.callTarget
+          offset := absoluteOffset
+          encodedSize := origin.encodedSize
+          syntheticSource
+          sourceLine := preorder + 1 }
+      return (bodyEnd, origins ++ functionOrigins.toArray)
+  unless finalOffset == codeEnd do
+    throw (.invalidOriginTrace
+      s!"encoded code section ends at {codeEnd}, traced bodies end at {finalOffset}")
+  return origins
+
+/--
+Validate and serialize one FIR symbolic module while retaining opt-in
+instruction origins. The ordinary binary is produced by the unchanged
+`encodeCore` path; tracing then checks every body and opcode against those
+already-produced bytes and fails closed on layout drift.
+-/
+def encodeWithOrigins (module : Module) : Except EncodeError OriginEncoding := do
+  let bytes ← encodeCore module true
+  return { bytes, origins := ← traceOrigins module bytes }
 
 /-- Validate and serialize one FIR symbolic module. -/
 def encode (module : Module) : Except EncodeError ByteArray :=
