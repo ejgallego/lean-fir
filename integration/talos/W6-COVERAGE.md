@@ -404,6 +404,13 @@ Cross-cutting W6.5 state:
 - `isShared` composes through immediate, promoted, and ordinary object
   representations, the exact direct UInt8 result lane, generated unary host
   call, destination-local write, and continuation; and
+- resident `USize.ofNat` and `USize.ofNatLT` have actual adapted-helper
+  theorems for the canonical immediate path and for the checked
+  promoted/arbitrary-limb path: the former returns the exact payload, while
+  the latter consumes a stable validation/accessor contract and returns the
+  Nat modulo `2^64`; both preserve signatures, caller tails, stores, and the
+  generated invalid-representation failure ordering, with the installed
+  BigNumeric helper-to-contract theorem still pending; and
 - all five supported integer/`USize` unbox variants compose through tagged or
   descriptor-matched heap representations, exact i32/i64 result lanes, the
   generated unary host call, destination-local write, and continuation; live

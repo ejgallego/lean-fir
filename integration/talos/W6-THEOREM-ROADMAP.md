@@ -1703,11 +1703,27 @@ promoted, heap-backed, mixed-representation, and arbitrary-limb path remains
 the same checked branch; the pre-existing pure-scalar external theorem and its
 compiler admission are unchanged.
 
+The optimized `USize.ofNat` and `USize.ofNatLT` helpers now have a common
+actual-function proof.  The canonical tagged arm decodes the payload directly,
+extends it to the exact `UInt64`/USize word, and crosses a proved 64-bit
+scratch-memory cast that restores the complete store.  The proof accounts for
+`ofNatLT`'s compiler-generated erased argument without changing its signature.
+For promoted tags and heap naturals, `CheckedNaturalCalls` is the reusable
+boundary: validation runs first, zero-index high/low accessors leave the store
+unchanged, and their recombination is exactly `UInt64.ofNat natural`, hence
+the source Nat modulo `2^64`.  The actual adapted outer helpers terminate with
+that result under this contract, preserve the caller tail, and retain their
+existing invalid-representation failure path.  Relating the installed
+`validateNatural`/`naturalHigh`/`naturalLow` bodies to this contract is the next
+BigNumeric implementation slice; clients no longer need to reopen the USize
+dispatcher or scratch-cast proof.
+
 The next resident-helper proof slices are promoted/heap-backed sums, followed
-by the operation-specific `StateRelated` successors needed to instantiate the
-generic resident replacement theorem at compiler admission.  The decision
-slice also still needs that final replacement instantiation; its actual helper
-body and immediate representation law no longer block it.
+by the BigNumeric accessor implementation theorem and the operation-specific
+`StateRelated` successors needed to instantiate the generic resident
+replacement theorem at compiler admission.  The decision and USize slices
+also still need those final replacement instantiations; their actual outer
+helper bodies and representation laws no longer block them.
 
 Unchecked typed Array helpers use a separate proof-indexed admission boundary.
 A live `ResidentArrayObjectRel` already supplies a checked header, exact

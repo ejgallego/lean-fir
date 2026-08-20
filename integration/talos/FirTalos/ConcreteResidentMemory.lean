@@ -80,6 +80,115 @@ theorem write32_restore (memory : Wasm.Mem) (address value : UInt32) :
     bv_decide
   rfl
 
+set_option linter.unusedSimpArgs false in
+/-- Writing back the 64-bit lane just read from one address restores the
+Talos memory extensionally.  `USize.ofNat` uses this at its scratch-memory
+retyping boundary. -/
+theorem write64_read64_self (memory : Wasm.Mem) (address : UInt32) :
+    memory.write64 address (memory.read64 address) = memory := by
+  cases memory
+  simp [Wasm.Mem.write64, Wasm.Mem.read64]
+  funext other
+  by_cases selected0 : other = address.toNat
+  · subst other
+    simp (config := { maxSteps := 4000000 })
+    bv_decide
+  by_cases selected1 : other = address.toNat + 1
+  · subst other
+    simp (config := { maxSteps := 4000000 }) [selected0]
+    bv_decide
+  by_cases selected2 : other = address.toNat + 2
+  · subst other
+    simp (config := { maxSteps := 4000000 }) [selected0, selected1]
+    bv_decide
+  by_cases selected3 : other = address.toNat + 3
+  · subst other
+    simp (config := { maxSteps := 4000000 })
+      [selected0, selected1, selected2]
+    bv_decide
+  by_cases selected4 : other = address.toNat + 4
+  · subst other
+    simp (config := { maxSteps := 4000000 })
+      [selected0, selected1, selected2, selected3]
+    bv_decide
+  by_cases selected5 : other = address.toNat + 5
+  · subst other
+    simp (config := { maxSteps := 4000000 })
+      [selected0, selected1, selected2, selected3, selected4]
+    bv_decide
+  by_cases selected6 : other = address.toNat + 6
+  · subst other
+    simp (config := { maxSteps := 4000000 })
+      [selected0, selected1, selected2, selected3, selected4, selected5]
+    bv_decide
+  by_cases selected7 : other = address.toNat + 7
+  · subst other
+    simp (config := { maxSteps := 4000000 })
+      [selected0, selected1, selected2, selected3, selected4, selected5,
+        selected6]
+    bv_decide
+  simp [selected0, selected1, selected2, selected3, selected4, selected5,
+    selected6, selected7]
+
+/-- A 64-bit Talos store is immediately observable by a matching load. -/
+theorem read64_write64_self
+    (memory : Wasm.Mem) (address : UInt32) (value : UInt64) :
+    (memory.write64 address value).read64 address = value := by
+  cases memory
+  simp [Wasm.Mem.write64, Wasm.Mem.read64]
+  bv_decide
+
+set_option linter.unusedSimpArgs false in
+/-- Restoring the lane observed before a temporary 64-bit overwrite recovers
+the original memory byte for byte. -/
+theorem write64_restore
+    (memory : Wasm.Mem) (address : UInt32) (value : UInt64) :
+    (memory.write64 address value).write64 address
+        (memory.read64 address) = memory := by
+  cases memory
+  simp [Wasm.Mem.write64, Wasm.Mem.read64]
+  funext other
+  by_cases selected0 : other = address.toNat
+  · subst other
+    simp (config := { maxSteps := 4000000 })
+    bv_decide
+  by_cases selected1 : other = address.toNat + 1
+  · subst other
+    simp (config := { maxSteps := 4000000 }) [selected0]
+    bv_decide
+  by_cases selected2 : other = address.toNat + 2
+  · subst other
+    simp (config := { maxSteps := 4000000 }) [selected0, selected1]
+    bv_decide
+  by_cases selected3 : other = address.toNat + 3
+  · subst other
+    simp (config := { maxSteps := 4000000 })
+      [selected0, selected1, selected2]
+    bv_decide
+  by_cases selected4 : other = address.toNat + 4
+  · subst other
+    simp (config := { maxSteps := 4000000 })
+      [selected0, selected1, selected2, selected3]
+    bv_decide
+  by_cases selected5 : other = address.toNat + 5
+  · subst other
+    simp (config := { maxSteps := 4000000 })
+      [selected0, selected1, selected2, selected3, selected4]
+    bv_decide
+  by_cases selected6 : other = address.toNat + 6
+  · subst other
+    simp (config := { maxSteps := 4000000 })
+      [selected0, selected1, selected2, selected3, selected4, selected5]
+    bv_decide
+  by_cases selected7 : other = address.toNat + 7
+  · subst other
+    simp (config := { maxSteps := 4000000 })
+      [selected0, selected1, selected2, selected3, selected4, selected5,
+        selected6]
+    bv_decide
+  simp [selected0, selected1, selected2, selected3, selected4, selected5,
+    selected6, selected7]
+
 theorem initial :
     ResidentMemoryRel MemoryState.initial (Wasm.Mem.empty 1) := by
   constructor
