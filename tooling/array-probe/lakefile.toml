@@ -1,0 +1,10 @@
+name = "FirArrayProbe"
+version = "0.1.0"
+defaultTargets = ["FirArrayProbe"]
+
+[[require]]
+name = "fir"
+path = "../.."
+
+[[lean_lib]]
+name = "FirArrayProbe"

@@ -1,10 +1,12 @@
 TOOLING_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 REPO_ROOT := $(abspath $(TOOLING_DIR)/..)
+ARRAY_PROBE_DIR := $(TOOLING_DIR)/array-probe
 FIR_BINARYEN_DIR ?= $(REPO_ROOT)/.deps/lcnf-c-wasm/emsdk/upstream/bin
 FIR_TOOLING_TMPDIR ?= $(REPO_ROOT)/.deps/tooling-tmp
+FIR_LAKE_CACHE_DIR ?= $(shell bash "$(REPO_ROOT)/scripts/fir-lake-cache-path.sh")
 BINARYEN_REVISION := version 128 (version_127-18-g2eb472cd6)
 
-.PHONY: no-skips unit-check binaryen-check wasm-check profile-check check
+.PHONY: no-skips unit-check binaryen-check wasm-check profile-check array-probe-check check
 
 no-skips:
 	@if rg -n 'test[.]skip|skip[[:space:]]*:' "$(TOOLING_DIR)" \
@@ -51,4 +53,23 @@ profile-check: unit-check binaryen-check
 		FIR_TOOLING_TMPDIR="$(FIR_TOOLING_TMPDIR)" \
 		node --test tooling/profile/node-profile.test.mjs
 
-check: wasm-check profile-check
+array-probe-check: binaryen-check
+	cd "$(ARRAY_PROBE_DIR)" && \
+		LAKE_CACHE_DIR="$(FIR_LAKE_CACHE_DIR)" \
+		LAKE_ARTIFACT_CACHE=true \
+		LAKE_RESTORE_ARTIFACTS=true \
+		lake build FirArrayProbe && \
+		LAKE_CACHE_DIR="$(FIR_LAKE_CACHE_DIR)" \
+		LAKE_ARTIFACT_CACHE=true \
+		LAKE_RESTORE_ARTIFACTS=true \
+		lake env lean Emit.lean && \
+		node check.mjs _build/array-probe.raw.wasm && \
+		FIR_BINARYEN_DIR="$(FIR_BINARYEN_DIR)" \
+		FIR_TOOLING_TMPDIR="$(FIR_TOOLING_TMPDIR)" \
+		node build.mjs && \
+		node check.mjs _build/package/array-probe.wasm && \
+		node ../wasm/function-index.mjs verify \
+			--wasm _build/package/array-probe.wasm \
+			--sidecar _build/package/array-probe.wasm.functions.json
+
+check: wasm-check profile-check array-probe-check

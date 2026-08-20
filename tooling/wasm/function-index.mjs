@@ -78,7 +78,8 @@ function optimizerArgs(args) {
 }
 
 function featureArgs(items) {
-  return items.filter((item) => item.startsWith("--enable-") ||
+  return items.filter((item) => item === "--all-features" ||
+    item.startsWith("--enable-") ||
     item.startsWith("--disable-"));
 }
 
