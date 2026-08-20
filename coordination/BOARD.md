@@ -105,7 +105,11 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   (functional head `2e9040e0`): tagged-word order and arithmetic implement
   exact truncated subtraction without allocation, while all other inputs
   retain the checked arbitrary-precision walkers. Lean-zip improves by another
-  24--26%, again with identical compressed bytes and a flat frontier.
+  24--26%, again with identical compressed bytes and a flat frontier. W6's
+  refinement of the stable immediate-Nat decision and Nat-to-`USize` helpers
+  is accepted through proof handoff `3ab5b747` (functional heads `bbf91fd4`
+  and `33d2b3f7`); independent clean elaboration confirmation follows at
+  `b96efca1`, and both modules are included by the Talos umbrella.
 - Landing order:
   1. W7-2's Verso source-module replay repair and generic immutable-package
      publisher are accepted in that order through `912bf68a`.
@@ -194,6 +198,10 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
       queued independently, while real-Wasm fixtures cover saturation at zero,
       tagged boundaries, no allocation, arbitrary limbs, stack safety, and
       malformed operands.
+  19. W6's stable-helper refinement follows through tracked proof handoff
+      `3ab5b747` and clean confirmation `b96efca1`. The Talos umbrella imports
+      both `ConcreteResidentNatDecision` and `ConcreteResidentUSize`; the
+      direct-result W7 successor remains an independent proof adaptation.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -207,17 +215,34 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   the existing shared-observation bug card; it has no feature landing. Later
   tooling surfaces remain on their combined development branch until each has
   an independently authorized head. SpatialHitScene's multi-entry synthetic
-  capture has not yet been assessed for the repaired hybrid API. W6 refinement
-  of the newly accepted immediate-Nat decision branch remains open under
-  `W7-W6-20260820-001`; proof adaptation for the accepted `USize.ofNat` body is
-  also queued independently. Proof adaptation for the accepted immediate
-  `Nat.mul` and `Nat.sub` bodies is queued separately as well. None blocks
-  generation acceptance because no helper signature or shared layout changed.
+  capture has not yet been assessed for the repaired hybrid API. Proof
+  adaptation for the accepted immediate `Nat.mul` and `Nat.sub` bodies remains
+  queued, as does W7's direct-result successor to the now-proved stable
+  `USize.ofNat` helper. None blocks generation acceptance because no helper
+  signature or shared layout changed.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
 
 ## Latest completed integration lease
+
+- Milestone: `W6-IMMEDIATE-NAT-DECISION-USIZE`.
+- Integration owner: `wasm-gen`, accepting W6's tracked proof handoff
+  `3ab5b747` and independent clean-build confirmation `b96efca1`; functional
+  heads are `bbf91fd4` and `33d2b3f7` on generation baseline `c4c9fb4c`.
+- Change: W6 proves the stable immediate-Nat decision dispatcher and the
+  stable direct tagged-Nat-to-`USize` dispatcher against the concrete runtime,
+  while retaining the checked heap-backed paths.
+- Contracts: proof-only. No helper implementation, signature, symbolic Wasm
+  ABI, concrete layout, ownership rule, adapter, or package changed.
+- Acceptance: Lean Beam sync/save and the direct `FirTalos` umbrella build pass
+  with both proof modules imported; `make check` reports 2,121/2,121 equal
+  comparisons and all 3,162 Talos jobs pass.
+- Result: local `main` advances through the W6 confirmation and the
+  integration-owned umbrella import. W7's next direct-result optimization is
+  generation-ready and returns to W6 as a separate proof adaptation.
+
+## Previous completed integration lease
 
 - Milestone: `W7-IMMEDIATE-NAT-SUB`.
 - Integration owner: `wasm-gen`, accepting its own clean tracked handoff
