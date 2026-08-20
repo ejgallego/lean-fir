@@ -132,6 +132,15 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   included by the Talos umbrella at `31b7ae80`. They prove the exact immediate
   branches, constructor or truncated-subtraction results, scratch restoration,
   and caller-tail preservation while retaining the checked fallbacks unchanged.
+  W7's scratch-free `Nat.decEq`, `Nat.decLt`, and `Nat.decLe` result path is
+  accepted at `bd5e28ab` (functional head `c96cf72d`), followed atomically by
+  W6's adapted refinement through tracked proof handoff `8ae0f5c3`
+  (functional head `18bb219e`). The generated helpers preserve their checked
+  arbitrary-precision fallbacks but return normalized `UInt8` decisions through
+  a typed integer roundtrip that Binaryen erases; final bodies contain no memory
+  operations and lean-zip's order-balanced median improves by 4.45%. The proof
+  establishes the exact `UInt8` relation with unchanged store and caller tail,
+  without a positive-memory premise or scratch locals.
 - Landing order:
   1. W7-2's Verso source-module replay repair and generic immutable-package
      publisher are accepted in that order through `912bf68a`.
@@ -238,6 +247,11 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   22. W6's tagged `Nat.mul` and `Nat.sub` refinement modules follow through
       tracked proof handoff `26bbc06d`; integration-owned umbrella imports land
       at `31b7ae80`. No W7 implementation or shared runtime contract changes.
+  23. W7's scratch-free natural-decision result path and exact lean-zip ratchet
+      land first at `bd5e28ab`, immediately followed by W6's adapted concrete
+      refinement and tracked handoff at `8ae0f5c3`. Integration validates the
+      combined stack before advancing main, so the old pinned scratch proof is
+      never exposed as a red integration checkpoint.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
