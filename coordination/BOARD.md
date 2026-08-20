@@ -116,7 +116,14 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   arbitrary-limb, and malformed inputs retain the checked path. W6's matching
   refinement and independent natural-limb accessor boundary follow through
   tracked proof handoff `132b59b8` (functional heads `668e1288` and
-  `4fde5829`).
+  `4fde5829`). W7's direct `USize.toNat` representation dispatch follows
+  through tracked handoff `e2f9c8af` (functional head `124ea621`): values
+  below `2^31` return as canonical tagged objects without scratch memory or a
+  natural-constructor call, while the exact checked promoted/wide path remains.
+  Lean-zip improves by another 5.3% with identical compressed bytes and a flat
+  frontier. The separate wasm32 USize-width question is recorded without
+  changing FIR's current captured-Lean64 contract; W6 refinement coverage is
+  queued independently in `W7-W6-20260820-011`.
 - Landing order:
   1. W7-2's Verso source-module replay repair and generic immutable-package
      publisher are accepted in that order through `912bf68a`.
@@ -214,6 +221,11 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
       through `132b59b8`. The tagged arm returns without touching memory; the
       checked arm retains validation, modulo-`2^64` recombination, and the
       restoring scratch cast. No shared signature or layout changes.
+  21. W7's direct `USize.toNat` successor follows through tracked generation
+      handoff `e2f9c8af`. The immediate arm mirrors Lean's generic tagged
+      representation path; the checked constructor arm, helper signature,
+      concrete layout, semantic ABI, and frozen wasm32-lean64 width remain
+      unchanged. Missing W6 refinement coverage is a separate queue item.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
