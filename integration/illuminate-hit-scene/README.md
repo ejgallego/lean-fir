@@ -111,13 +111,19 @@ The package smoke checks:
 - malformed input rejection; and
 - complete package checksums.
 
-The closure contains 267 source declarations and 53 reviewed externals. The
-resident frontier contains 681 functions and five genuine platform-libm Float
+The closure contains 313 source declarations and 53 reviewed externals. The
+resident frontier contains 774 functions and five genuine platform-libm Float
 operations (`acos`, `cos`, `cbrt`, `sin`, and `atan2`) before the final merge.
 All other reachable Float operations, including `Float.ofNat` and
 `Float.ofScientific`, are source-compiled or resident in Wasm. Exact counts,
 hashes, sizes, and inventories are ratcheted in `closure-contract.json` and
 reproduced in package `BUILD.json`.
+
+The entry's postponed module is replayed at its exact Lean source-group
+boundary. Ordinary imported roots are then compiled in separate final-LCNF
+units, so private specializations and closed terms keep the same ownership
+boundary as Lean's native pipeline. The final named-call closure is pruned
+before Wasm admission.
 
 The standard-libm v2 boundary and checked export-preserving linker are shared
 with other closed applications under `integration/wasm-runtime`; this package

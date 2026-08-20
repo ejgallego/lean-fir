@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-individual-hit-scene-generated-helper-admission
-status: confirmed
+status: fixed
 classification: compiler
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: d8b18978322de05a8f3dba51ef03cf5461676c17
@@ -9,12 +9,12 @@ pass: none
 discovered-by: source-closure-test
 first-seen: 2026-08-20
 reproduction: integration/illuminate-hit-scene/ProbeIndividual.lean
-regression: none
+regression: integration/illuminate-hit-scene/ProbeIndividual.lean
 ---
 
 # Summary
 
-FIR's native-like per-source-root capture can regenerate a private closed name
+FIR's former per-source-root capture could regenerate a private closed name
 with a scalar body while a regenerated caller retains the imported boxed ABI
 for that same name. Wasm admission rejects the resulting inconsistent closure;
 the first reported declaration is Lean's generic
@@ -68,7 +68,7 @@ form is unsupported.
 
 ## Semantic impact
 
-This blocks migration of the HitScene package to the generic native-like
+This blocked migration of the HitScene package to the generic native-like
 source capture path and prevents a faithful inventory of its source-compiled
 Float and residual libm boundary.
 
@@ -81,12 +81,12 @@ Illuminate or this private declaration name.
 
 ## Workaround
 
-Production HitScene capture replays the exact postponed entry module through
+Production HitScene capture previously replayed the exact postponed entry module through
 `compileEntryModuleWiseInternalizedFrom`, then closes ordinary imported source
 with `internalizeFinalDependencies`. This is the generic module-preserving
-composition used by the Verso packages; it does not weaken admission or add a
-declaration-specific runtime helper. The independent per-root API remains
-incorrect for this closure and is tracked by `ProbeIndividual.lean`.
+composition used by the Verso packages. It did not weaken admission or add a
+declaration-specific runtime helper, but it grouped ordinary imported roots
+into one synthetic dependency unit.
 
 ## Upstream tracking
 
@@ -94,4 +94,19 @@ None.
 
 ## Resolution and regression
 
-Pending.
+`compileEntryIndividuallyInternalized` now distinguishes two upstream source
+boundaries. A public entry in a postponed module is resolved through Lean's
+module `constNames` index and replayed as its exact deferred declaration
+groups, even though it has no imported impure signature. Ordinary imported
+roots are captured independently at the final-impure pass after their owned
+compiler mappings are reset. The final merged graph is pruned from the public
+entry, removing generated boxed adapters that were emitted alongside a root
+but are not reachable.
+
+No admission rule was weakened and no Illuminate declaration is named by the
+generic repair. `ProbeIndividual.lean` now requires zero unsupported
+declarations, successful `validateSupported`, and successful Wasm lowering. It
+records 313 reachable declarations, 53 externals, and 261 base functions. The
+published candidate retains the exact five-function libm frontier, has zero
+final imports, passes all 301 fixture queries and the 10,000-query flat-arena
+test, and shrinks the complete Wasm module from 67,556 to 64,217 bytes.

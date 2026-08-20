@@ -242,6 +242,15 @@ run_cmd do
   if source.externalNames.any fun name =>
       name.toString.contains specializationFragment then
     throwError "individual source-unit capture left the shift specialization external"
+  match Fir.Wasm.validateSupported source.program with
+  | .error error =>
+      throwError "individual source-unit capture failed Wasm admission: {repr error}"
+  | .ok _ => pure ()
+  let lowered ← liftCoreM <| compileModuleArtifact source
+  match lowered with
+  | .ok _ => pure ()
+  | .error error =>
+      throwError "individual source-unit capture failed Wasm lowering: {repr error}"
 
 run_cmd do
   let entries := #[``idFloat32Fixture, ``idFloatFixture]

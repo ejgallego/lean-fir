@@ -11,15 +11,18 @@ def entry : Name := ``Illuminate.HitScene.query
 /-- The upstream module whose exact final-LCNF groups own the public entry. -/
 def sourceModule : Name := `Illuminate.Diagram.HitScene
 
-/-- Capture the real entry and recursively discovered dependencies in their
-ordinary separately compiled final-LCNF units. Only the entry module is
-replayed from a postponed source view; ordinary imported modules are closed
-through FIR's generic final-dependency path. -/
-def captureSource : CoreM Fir.Validation.Lcnf.Artifact := do
+/-- Diagnostic grouped-dependency capture retained for inventory comparison. -/
+def captureSourceModuleWise : CoreM Fir.Validation.Lcnf.Artifact := do
   let artifact ← Fir.Wasm.Emit.Source.compileEntryModuleWiseInternalizedFrom
     sourceModule entry entry
     Fir.Wasm.Emit.ResidentLinker.closedApplicationRetainedExternalNames
   Fir.Wasm.Emit.Source.internalizeFinalDependencies artifact
+    Fir.Wasm.Emit.ResidentLinker.closedApplicationRetainedExternalNames
+
+/-- Capture the postponed entry module at its exact native group boundary and
+compile ordinary imported roots in separate final-LCNF units. -/
+def captureSource : CoreM Fir.Validation.Lcnf.Artifact :=
+  Fir.Wasm.Emit.Source.compileEntryIndividuallyInternalized entry
     Fir.Wasm.Emit.ResidentLinker.closedApplicationRetainedExternalNames
 
 /--
@@ -30,11 +33,9 @@ def captureSourceSingleUnit : CoreM Fir.Validation.Lcnf.Artifact :=
   Fir.Wasm.Emit.Source.compileEntryFinalCapturedInternalized entry #[]
     Fir.Wasm.Emit.ResidentLinker.closedApplicationRetainedExternalNames
 
-/-- Diagnostic reproducer for per-root generated-name ABI drift. Production
-uses `captureSource`, which preserves the entry module's native boundary. -/
+/-- Compatibility name retained by the focused individual-capture probe. -/
 def captureSourceIndividual : CoreM Fir.Validation.Lcnf.Artifact :=
-  Fir.Wasm.Emit.Source.compileEntryIndividuallyInternalized entry
-    Fir.Wasm.Emit.ResidentLinker.closedApplicationRetainedExternalNames
+  captureSource
 
 /-- Lower the unmodified source closure before resident runtime linking. -/
 def compileBaseModule : CoreM (Except Fir.Wasm.Emit.Source.CompileError

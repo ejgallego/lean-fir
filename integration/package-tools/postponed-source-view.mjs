@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 
 function requiredString(value, label) {
@@ -34,8 +34,15 @@ export function buildPostponedSourceView({
   const moduleStem = join(outputRoot, ...moduleName.split("."));
   const olean = `${moduleStem}.olean`;
   const ilean = `${moduleStem}.ilean`;
+  const privateOlean = `${moduleStem}.olean.private`;
   const setup = join(outputRoot, `${moduleName}.setup.json`);
   mkdirSync(dirname(olean), { recursive: true });
+  // Lean publishes interface artifacts read-only. Unlink this builder's exact
+  // prior outputs before a deterministic rebuild instead of asking Lean to
+  // overwrite them in place.
+  for (const path of [olean, ilean, privateOlean]) {
+    rmSync(path, { force: true });
+  }
   const setupValue = {
     plugins: [],
     package: packageName,
@@ -52,7 +59,6 @@ export function buildPostponedSourceView({
     env: { ...process.env, LEAN_PATH: leanPath },
     stdio: ["ignore", "inherit", "inherit"],
   });
-  const privateOlean = `${moduleStem}.olean.private`;
   for (const path of [olean, privateOlean]) {
     if (!existsSync(path)) {
       throw new Error(`postponed source view did not produce ${path}`);

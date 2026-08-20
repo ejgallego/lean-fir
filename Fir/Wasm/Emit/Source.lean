@@ -457,21 +457,23 @@ private def enqueueSourceRoot (completed pending : Array SourceCompilationRoot)
   else addSourceCompilationRoot pending root
 
 private def compileIndividualSourceRoot (root : SourceCompilationRoot) :
-    CoreM Fir.Validation.Lcnf.Artifact :=
-  if root.companions.isEmpty then
-    withoutModifyingEnv <| Fir.Validation.Lcnf.compileEntry root.name
-  else withoutModifyingEnv do
-    resetFinalImpureCapture
-    LCNF.addPass ``finalImpureCaptureInstaller
-    compileEntryFinalCaptured root.name root.companions
+    CoreM Fir.Validation.Lcnf.Artifact := do
+  Core.prependError m!"Failed to compile individual source root `{root.name}`" do
+    withoutModifyingEnv do
+      resetFinalImpureCapture
+      LCNF.addPass ``finalImpureCaptureInstaller
+      compileEntryFinalCaptured root.name root.companions
 
 private partial def compileEntryIndividuallyInternalizedAux (entry : Name)
     (retainedExternalNames : Array String)
     (completed pending : Array SourceCompilationRoot)
     (artifacts : Array Fir.Validation.Lcnf.Artifact) :
     CoreM Fir.Validation.Lcnf.Artifact := do
-  let some root := pending[0]? |
-    return ← mergeSeparatelyCompiledArtifacts entry artifacts
+  let some root := pending[0]? | do
+    let merged ← mergeSeparatelyCompiledArtifacts entry artifacts
+    match pruneUnreachableDeclarations merged with
+    | .ok artifact => return artifact
+    | .error message => throwError message
   let pending := pending.extract 1 pending.size
   let artifact ← compileIndividualSourceRoot root
   let excluded := completed.map (·.name) ++ pending.map (·.name)
@@ -490,20 +492,6 @@ private partial def compileEntryIndividuallyInternalizedAux (entry : Name)
   let pending := discoveries.foldl (enqueueSourceRoot completed) pending
   compileEntryIndividuallyInternalizedAux entry retainedExternalNames
     completed pending (artifacts.push artifact)
-
-/--
-Compile every recursively discovered imported source root as its own ordinary
-LCNF unit before linking the resulting declaration graphs. This mirrors the
-native cross-module boundary for prebuilt modules whose macro-inlined helpers
-do not have standalone published LCNF signatures; grouping those roots into a
-new synthetic compiler unit would ask Lean to compile such generated helpers
-as independent declarations.
--/
-def compileEntryIndividuallyInternalized (entry : Name)
-    (retainedExternalNames : Array String := #[]) :
-    CoreM Fir.Validation.Lcnf.Artifact :=
-  compileEntryIndividuallyInternalizedAux entry retainedExternalNames
-    #[] #[{ name := entry }] #[]
 
 private def initializePersistentExtension {α β σ} [Inhabited σ]
     (extension : PersistentEnvExtension α β σ) (env : Environment) : IO Environment := do
@@ -632,6 +620,16 @@ private def sourceModuleFor? (environment : Environment) (name : Name) :
   let some moduleIndex := environment.getModuleIdxFor? sourceRoot | return none
   return some (environment.header.moduleNames[moduleIndex]!, sourceRoot)
 
+/-- Resolve an ordinary public source entry even when its module postponed
+final-LCNF compilation and therefore exported no impure signature. Generated
+helpers are excluded because they live in `extraConstNames`, not `constNames`;
+dependency discovery continues to use the stricter signature-aware resolver. -/
+private def postponedEntryModuleFor? (environment : Environment) (entry : Name) :
+    Option (Name × Name) := do
+  let moduleIndex ← environment.getModuleIdxFor? entry
+  guard <| environment.header.moduleData[moduleIndex]!.constNames.contains entry
+  return (environment.header.moduleNames[moduleIndex]!, entry)
+
 private partial def compileEntryDeferredModulesInternalizedAux (entry : Name)
     (retainedExternalNames : Array String) (environment : Environment)
     (pending : Array (Name × Name × Bool)) (seenModules : Array Name)
@@ -690,10 +688,50 @@ def compileEntryModuleWiseInternalized (entry : Name)
     (retainedExternalNames : Array String := #[]) :
     CoreM Fir.Validation.Lcnf.Artifact := do
   let environment ← getEnv
-  let some (moduleName, sourceRoot) ← sourceModuleFor? environment entry |
+  let sourceModule? ← sourceModuleFor? environment entry
+  let some (moduleName, sourceRoot) :=
+      sourceModule?.orElse fun _ => postponedEntryModuleFor? environment entry |
     throwError "entry `{entry}` has no source module"
   compileEntryModuleWiseInternalizedFrom moduleName sourceRoot entry
     retainedExternalNames
+
+/--
+Capture an entry at the same source-unit boundary Lean made available, then
+compile every recursively discovered ordinary imported source root as its own
+LCNF unit. A module built with `compiler.postponeCompile=true` must first replay
+its exact deferred declaration groups: its private/closed helpers and sibling
+signatures are module-owned and cannot be regenerated faithfully as unrelated
+one-declaration units. Prebuilt modules without deferred groups retain the
+individual-root path, which avoids synthesizing a larger cross-module compiler
+unit around macro-inlined helpers.
+-/
+def compileEntryIndividuallyInternalized (entry : Name)
+    (retainedExternalNames : Array String := #[]) :
+    CoreM Fir.Validation.Lcnf.Artifact := do
+  let environment ← getEnv
+  let signatureModule? ← sourceModuleFor? environment entry
+  let sourceModule? := signatureModule?.orElse
+    fun _ => postponedEntryModuleFor? environment entry
+  let moduleArtifact? ← match sourceModule? with
+    | some (moduleName, sourceRoot) =>
+        compileDeferredModuleFinalCaptured moduleName sourceRoot
+    | none => pure none
+  let some moduleArtifact := moduleArtifact? |
+    return ← Core.prependError
+      m!"Entry `{entry}` has no deferred source module ({repr sourceModule?})" do
+        compileEntryIndividuallyInternalizedAux entry retainedExternalNames
+          #[] #[{ name := entry }] #[]
+  let moduleArtifact ← match pruneUnreachableDeclarations moduleArtifact with
+    | .ok artifact => pure artifact
+    | .error message => throwError message
+  let completed : Array SourceCompilationRoot :=
+    moduleArtifact.program.decls.filterMap fun declaration =>
+      if moduleArtifact.externalNames.contains declaration.name then none
+      else some { name := declaration.name }
+  let pending ← discoveredFinalSourceRoots moduleArtifact retainedExternalNames
+    (completed.map (·.name))
+  compileEntryIndividuallyInternalizedAux entry retainedExternalNames
+    completed pending #[moduleArtifact]
 
 /--
 Compile an entry and its recursively discovered source dependencies as one

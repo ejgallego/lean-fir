@@ -23,11 +23,11 @@ const SCENE_STATE = new WeakMap();
 const FLOAT_BITS = new DataView(new ArrayBuffer(8));
 const STANDARD_LIBM_RUNTIME_VERSION = "fir.standard-libm/v2";
 const STANDARD_LIBM_DECLARATIONS = Object.freeze([
-  "Float.acos",
   "Float.cos",
-  "Float.cbrt",
   "Float.sin",
   "Float.atan2",
+  "Float.acos",
+  "Float.cbrt",
 ]);
 
 const KIND = Object.freeze({

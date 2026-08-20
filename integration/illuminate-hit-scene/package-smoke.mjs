@@ -29,8 +29,8 @@ assert.equal(build.fixture.sha256,
   sha256(readFileSync(join(directory, "hit-scene-benchmark.json"))));
 assert.deepEqual(build.capabilities.completeRuntime.externalRuntime, {
   version: "fir.standard-libm/v2",
-  declarations: ["Float.acos", "Float.cos", "Float.cbrt", "Float.sin",
-    "Float.atan2"],
+  declarations: ["Float.cos", "Float.sin", "Float.atan2", "Float.acos",
+    "Float.cbrt"],
   reservedMemoryBytes: 65536,
   numericContract: "platform-libm-special-values-and-bounded-error",
 });

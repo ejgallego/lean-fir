@@ -141,11 +141,11 @@ if (process.env.FIR_HIT_SCENE_REQUIRE_REPEAT === "1") {
 }
 
 const expectedFrontierImports = Object.freeze([
-  { module: "lean.extern", name: "Float.acos", kind: "function" },
   { module: "lean.extern", name: "Float.cos", kind: "function" },
-  { module: "lean.extern", name: "Float.cbrt", kind: "function" },
   { module: "lean.extern", name: "Float.sin", kind: "function" },
   { module: "lean.extern", name: "Float.atan2", kind: "function" },
+  { module: "lean.extern", name: "Float.acos", kind: "function" },
+  { module: "lean.extern", name: "Float.cbrt", kind: "function" },
 ]);
 const frontierImports = WebAssembly.Module.imports(new WebAssembly.Module(
   readFileSync(frontierStem)));
