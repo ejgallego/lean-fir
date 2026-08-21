@@ -37,27 +37,30 @@ so. The relevant upstream sources are:
 - <https://chromium.googlesource.com/v8/v8/+/refs/heads/main/src/d8/d8.cc>
 - <https://chromium.googlesource.com/v8/v8/+/refs/heads/main/tools/profiling/linux-perf-d8.py>
 
-The real `d8` gate has now run. V8 15.4.29 opens W7-2's source map, but its
-Wasm source-map reader rejects the standard one-field unmapped segment at the
-end of the map. The exact companion therefore produces sampled Wasm native
-PCs without a debug-line table. A diagnostic mapped-only projection proves
-that `d8` and `perf inject` preserve the selected location key, but that
-projection is not the canonical source map; the compatibility boundary is
-recorded below.
+The first real `d8` gate exposed two compatibility boundaries. V8 15.4.29
+rejects the standard one-field unmapped segment at the end of Binaryen's exact
+map, and its JIT event carries only one filename for an entire Wasm function.
+W7-2's accepted diagnostic projection addresses both without changing the
+authoritative map: every segment uses one fixed profiling filename, while a
+separate legend maps dense one-based line IDs to exact FIR origins or the
+reserved explicit-unknown token. The repeat consumer gate is recorded below.
 
 ## Minimum location key
 
 The perf consumer exposes:
 
 ```text
-(synthetic source filename, one-based source line)
+(fixed profiling source filename, one-based legend line ID)
 ```
 
 It does not expose a final Wasm bytecode offset, a source-map column, or an
-inline stack. W7 should allocate a unique line within each synthetic symbolic
-function source. Tooling resolves that pair to one origin-table row. Repeated,
-missing, or multiply resolved pairs fail closed; they are never repaired by
-instruction order.
+inline stack. V8's `JitLogger::LogRecordedBuffer` chooses the filename from the
+first valid source-map entry and later entries contribute line numbers only, so
+distinct per-origin source filenames cannot preserve intra-function changes.
+The profiling projection instead allocates one stable line ID per complete
+origin-table row and reserves line 1 for explicit unknown. Tooling resolves the
+line through the checksummed legend. Repeated, missing, or multiply resolved
+IDs fail closed; they are never repaired by instruction order.
 
 The origin row needs only the compiler facts already proposed by W7:
 
@@ -75,6 +78,8 @@ A first consumer sidecar must bind:
 - canonical stripped release byte length and SHA-256;
 - mapped companion byte length and SHA-256;
 - final source-map byte length and SHA-256;
+- profiling-projection byte length and SHA-256;
+- profiling-legend schema, row count, byte length, and SHA-256;
 - origin-table byte length and SHA-256;
 - exact Binaryen version and ordered transformation arguments;
 - the final function-index sidecar SHA-256;
@@ -86,7 +91,7 @@ The verifier rejects hash drift, duplicate location keys, a source-map entry
 without an origin, or an origin classified both mapped and deleted. A native
 PC without debug-line information is `unknown`, not a nearest-neighbor match.
 
-The synthetic filename and one-based line are sufficient as the identity
+The fixed profiling filename and legend line are sufficient as the identity
 carried by a native-PC annotation. They are not, by themselves, a complete
 sidecar: the authoritative sidecar must still retain final instruction
 identity and explicit mapped, deleted, unknown, and ambiguous states. A
@@ -127,8 +132,9 @@ and debug-line entries.
 
 ## Real d8 gate evidence
 
-The gate consumed W7-2's deterministic optimizer fixture from commit
-`7444a33b`. The exact ignored outputs had these identities:
+The gate consumed W7-2's deterministic optimizer fixture from original handoff
+commit `7444a33b`, now landed without artifact drift as `8ff33577`. The exact
+ignored outputs had these identities:
 
 ```text
 850b6fae3fdc9761585dda42baf99b3e15aa5001e14adaa4c4cf8cd526b8427c  instruction-provenance.wasm
@@ -189,12 +195,55 @@ Binaryen's source-map disassembly shows that removing the sentinel extends
 the five deleted keys distinct, and consumer PCs lacking an exact annotation
 remain explicitly unknown.
 
-## Next gate
+## Accepted repeat gate
 
-W7-2 should add a V8-consumable profiling projection without changing the
-canonical stripped release or losing the authoritative unmapped/deleted
-classification. The repeat gate must resolve sampled final instructions to
-their expected synthetic keys and reject any reassignment caused by an
-unmapped interval. Only then should the instruction sidecar be versioned for
-packages. Representative size and build-time costs remain separate from this
-consumer-compatibility result.
+W7-2 implemented the single-file line-ID projection at original handoff commit
+`4eebbdae`, now landed without artifact drift as `b01f203b`. The canonical
+release, companion, and exact Binaryen map remain unchanged. The additional
+deterministic artifacts are:
+
+```text
+57b954865e27242c6043da3fd2767201004067570618216c49b11b69cc10a72e  first-profiling.map, 123 bytes
+cc19ac9f429560515f00382e9182c5fa157088706064aa30aea4a45a0330a433  first-profiling.legend.json, 1,497 bytes
+b4fbea0d3a513a58b3971e51005171564c0ff96ff6f91880aa764ef06c17dbb1  first-report.json, 1,671 bytes
+```
+
+The legend has schema `fir.wasm.instruction-profile-legend/v1`, uses the fixed
+source `fir-wasm-profile/profiling-v1`, reserves line 1 for
+`fir-wasm-unmapped/profiling-v1`, and assigns dense lines 2 through 13 to the
+complete pre-optimization origin inventory. Resolving the projected map
+through that legend reproduces seven mapped and five deleted exact origins,
+one explicit profiling-gap token, and zero ambiguous origins. Deleted origins
+are not reassigned.
+
+Tooling regenerated all six identities directly from committed source before
+the consumer run. This was necessary because the producer's mutable `_build`
+directory had retained the new map and legend but a stale report after its
+worktree switched branches. Producer-to-consumer handoffs should therefore
+publish or freeze a complete output set atomically.
+
+The accepted repeat capture used the same pinned V8 15.4.29 binary and
+100,000,000-call Liftoff-debug workload. It completed with checksum
+`1343710208`, retained 3,253 samples with zero lost, and attributed 8.09% self
+time to `JS:entry-0-liftoff`. d8 accepted the projection and the injected ELF
+contained profiling line 5 at native `0x102`; legend line 5 resolves exactly to
+the authoritative mapped token `fir-wasm-origin/1/fixture.entry:1`. V8 emitted
+no row for the terminal reserved line-1 gap and the line-5 range was
+zero-length, so sampled hot PCs remain unresolved. Controls with arithmetic,
+control flow, and memory established that V8 places these experimental rows on
+cold or terminal native ranges. Requiring a resolved hot sample here would test
+V8 range coverage rather than FIR provenance, so that criterion is explicitly
+deferred.
+
+Raw accepted-repeat identities are:
+
+```text
+e7e0451f300277bf751f4fdcd3517730e3a03d57a6e350cdba7b6102d578144a  perf.data
+d933d7efd2b22376b8ee348364b87c7d3388a501af1694480e324cb6c6eb37be  perf.jit.data
+1055b8da345b3bf8d6f8652cd7fc774cbe76e2fab1ae1448de47295836589bd3  jit-6.dump
+80e62ab4179af32da8d2506ba5455d56050d20259aa49409b013e49d0c62ca51  jitted-6-2528.so
+```
+
+This completes the consumer/projection decision. Package-schema stabilization,
+representative size and generation-time measurements, and a consumer with
+verified hot-code native ranges remain separate future work.
