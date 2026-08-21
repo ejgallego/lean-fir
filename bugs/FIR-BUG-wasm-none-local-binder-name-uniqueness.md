@@ -77,6 +77,18 @@ retain or check the existing impure hygiene invariant and prove the collector
 agreement theorem from it. It should not add a caller-supplied recursive local
 certificate or weaken local-kind equality.
 
+## Proof-interface dependency
+
+Checking `Program.ImpureHygienic` at `WasmSupported` is necessary but is not by
+itself a kernel-usable freshness proof. `ImpureHygiene.codeBinders` remains an
+opaque `partial def`, so downstream code cannot invert the accepted binder
+list to show that a later local cannot replace the current `let` destination.
+The shared repair must therefore also expose a transparent structural
+consequence (or totalize the existing traversal), as already tracked by
+`FIR-BUG-impure-none-opaque-hygiene`. Defining a second Wasm-only binder
+certificate would merely duplicate the phase invariant and is not the intended
+resolution.
+
 ## Workaround
 
 none

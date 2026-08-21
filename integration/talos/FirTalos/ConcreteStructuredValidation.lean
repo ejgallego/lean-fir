@@ -2073,6 +2073,82 @@ theorem ConcreteStructuredValidatedCodeCoreRel.withSuccessor
       nextWitness nextSource nextTarget :=
   ⟨nextCore, nextValidation⟩
 
+/-- A successful proof-facing ABI classification is the same successful value
+classification consumed by production lowering. -/
+private theorem checkedAbiKind_of_abiValueKind?
+    {type : Lean.Expr} {kind : Fir.Wasm.AbiKind}
+    (found : Fir.Wasm.abiValueKind? type = some kind) :
+    Fir.Wasm.checkedAbiKind type = .ok kind := by
+  unfold Fir.Wasm.abiValueKind? at found
+  cases classified : Fir.Wasm.abiKind? type with
+  | error error => simp [classified] at found
+  | ok kind? =>
+      cases kind? with
+      | none => simp [classified] at found
+      | some actual =>
+          have actualEq : actual = kind := by
+            simpa [classified] using found
+          subst actual
+          simp [Fir.Wasm.checkedAbiKind, Fir.Wasm.abiKind, classified,
+            Bind.bind, Except.bind, pure, Except.pure]
+
+/-- Successful named-call validation retains the exact compatibility check
+that production `effectiveLetValueKind` performs for the selected result. -/
+private theorem supportedNamedCall_result_compatible
+    {program : Fir.LeanIR.ImpureProgram}
+    {locals : Fir.Wasm.LocalKinds}
+    {declared result : Fir.Wasm.AbiKind}
+    {name : Lean.Name}
+    {args : Array (Lean.Compiler.LCNF.Arg .impure)}
+    {target : Lean.Compiler.LCNF.Decl .impure}
+    (supported :
+      Fir.Wasm.supportedNamedCall program locals declared name args = true)
+    (targetFound : program.findDecl? name = some target)
+    (resultFound :
+      Fir.Wasm.effectiveDeclarationResultKind? target = some result) :
+    result.leanCompatible declared = true := by
+  unfold Fir.Wasm.supportedNamedCall at supported
+  simp only [targetFound] at supported
+  rw [resultFound] at supported
+  split at supported <;> simp_all
+
+/-- Refining the public object-family result of a box twice is idempotent. -/
+private theorem boxResultKind_idempotent_tobject (type : Lean.Expr) :
+    Fir.Wasm.boxResultKind type
+      (Fir.Wasm.boxResultKind type .tobject) =
+        Fir.Wasm.boxResultKind type .tobject := by
+  unfold Fir.Wasm.boxResultKind
+  split <;> simp_all
+
+/-- The proof-facing `let` validator and production local-kind refinement
+select exactly the same ABI kind.  This factors the common compiler-admission
+equation for every direct primitive and both named-call lanes. -/
+theorem supportedLetDeclKind?_effectiveLetValueKind
+    {program : Fir.LeanIR.ImpureProgram}
+    {locals : Fir.Wasm.LocalKinds}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {kind : Fir.Wasm.AbiKind}
+    (supported :
+      Fir.Wasm.supportedLetDeclKind? program locals decl = some kind) :
+    Fir.Wasm.effectiveLetValueKind program decl = .ok kind := by
+  unfold Fir.Wasm.supportedLetDeclKind? at supported
+  cases declaredFound : Fir.Wasm.abiValueKind? decl.type with
+  | none => simp [declaredFound] at supported
+  | some declared =>
+      have checked :
+          Fir.Wasm.checkedAbiKind decl.type = .ok declared :=
+        checkedAbiKind_of_abiValueKind? declaredFound
+      rw [declaredFound] at supported
+      unfold Fir.Wasm.effectiveLetValueKind Fir.Wasm.letValueKind
+      cases valueFound : decl.value <;>
+        simp_all [Bind.bind, Except.bind, pure, Except.pure,
+          Option.bind_eq_some_iff] <;>
+        aesop (config := { warnOnNonterminal := false })
+      all_goals
+        first
+        | apply supportedNamedCall_result_compatible <;> assumption
+        | apply boxResultKind_idempotent_tobject
+
 /-- Whole-program impure hygiene specializes to the exact declaration found
 by the production name lookup.  This is a static phase fact: it carries no
 compiler execution, target path, or recursive admission evidence. -/
