@@ -23,7 +23,7 @@ private def caseBodyCheck : Wasm.Program → Bool
       literal0 == 2 && falseIndex == 1 && falseLoad == 1 &&
       cLoad1 == 0 && getTag1 == 1 && trueTag == 1 &&
       depth1 == 0 && results1 == 0 && literal1 == 3 &&
-      trueIndex == 1 && trueLoad == 1
+      trueIndex == 2 && trueLoad == 2
   | _ => false
 
 private theorem caseBody_eq_of_check {body : Wasm.Program}
@@ -34,7 +34,7 @@ private theorem caseBody_eq_of_check {body : Wasm.Program}
         [.call 2, .localSet 1, .localGet 1, .ret]
         [.localGet 0, .call 1, .const 1, .eq,
           .iff 0 0
-            [.call 3, .localSet 1, .localGet 1, .ret]
+            [.call 3, .localSet 2, .localGet 2, .ret]
             [.unreachable]],
       .unreachable] := by
   unfold caseBodyCheck at checked
@@ -96,13 +96,13 @@ def abiCaseDeclFalse : Lean.Compiler.LCNF.LetDecl .impure :=
   letDecl r tobjectType (.lit (.nat 0))
 
 def abiCaseDeclTrue : Lean.Compiler.LCNF.LetDecl .impure :=
-  letDecl r tobjectType (.lit (.nat 1))
+  letDecl u tobjectType (.lit (.nat 1))
 
 def abiCaseFalseCode : Lean.Compiler.LCNF.Code .impure :=
   .let abiCaseDeclFalse (.return r)
 
 def abiCaseTrueCode : Lean.Compiler.LCNF.Code .impure :=
-  .let abiCaseDeclTrue (.return r)
+  .let abiCaseDeclTrue (.return u)
 
 def abiCaseCases : Lean.Compiler.LCNF.Cases .impure :=
   .mk ``Bool tobjectType c #[
@@ -114,7 +114,7 @@ def abiCaseCode : Lean.Compiler.LCNF.Code .impure :=
 
 def abiCaseContext : Fir.Wasm.Context :=
   { program := abiCaseProgram
-    localKinds := [(r, .tobject), (c, .tagged)] }
+    localKinds := [(u, .tobject), (r, .tobject), (c, .tagged)] }
 
 private def emptyCaseAdaptedModule : AdaptedModule :=
   { wasmModule := default, sourceMap := default }
@@ -187,7 +187,7 @@ theorem abiCaseMain_body :
         [.call 2, .localSet 1, .localGet 1, .ret]
         [.localGet 0, .call 1, .const 1, .eq,
           .iff 0 0
-            [.call 3, .localSet 1, .localGet 1, .ret]
+            [.call 3, .localSet 2, .localGet 2, .ret]
             [.unreachable]],
       .unreachable] := by
   apply caseBody_eq_of_check
@@ -201,7 +201,7 @@ def abiCaseMainCore : Wasm.Program :=
       [.call 2, .localSet 1, .localGet 1, .ret]
       [.localGet 0, .call 1, .const 1, .eq,
         .iff 0 0
-          [.call 3, .localSet 1, .localGet 1, .ret]
+          [.call 3, .localSet 2, .localGet 2, .ret]
           [.unreachable]]]
 
 theorem abiCaseMain_body_eq_core :
@@ -265,20 +265,20 @@ def abiCaseInitialStore : Wasm.Store RuntimeHost :=
 def abiCaseStoreC : Wasm.Store RuntimeHost :=
   successfulHostStore abiCaseInitialStore {} abiCaseHandlesC
 
-def abiCaseStoreR : Wasm.Store RuntimeHost :=
+def abiCaseStoreU : Wasm.Store RuntimeHost :=
   successfulHostStore abiCaseStoreC {} abiCaseHandlesC
 
 def abiCaseLocalsC : Wasm.Locals :=
-  { locals := [.i32 1, .i32 0] }
+  { locals := [.i32 1, .i32 0, .i32 0] }
 
-def abiCaseLocalsR : Wasm.Locals :=
-  { locals := [.i32 1, .i32 1] }
+def abiCaseLocalsU : Wasm.Locals :=
+  { locals := [.i32 1, .i32 0, .i32 1] }
 
 def abiCaseEnvC : Env :=
   bind [] c abiCaseTrueValue
 
-def abiCaseEnvR : Env :=
-  bind abiCaseEnvC r abiCaseTrueValue
+def abiCaseEnvU : Env :=
+  bind abiCaseEnvC u abiCaseTrueValue
 
 def abiCaseImport (index : Nat) : Wasm.ImportDecl :=
   abiCaseAdaptedModule.wasmModule.imports[index]!
@@ -335,13 +335,13 @@ theorem abiCaseTagC :
     getTag abiCaseStoreC.host.runtime abiCaseTrueValue = .ok 1 := by
   rfl
 
-theorem abiCaseEncodeR :
+theorem abiCaseEncodeU :
     abiCaseStoreC.host.handles.encode .tobject abiCaseTrueValue =
       .ok (abiCaseHandlesC, 1) := by
   rfl
 
-theorem abiCaseSetR :
-    abiCaseLocalsC.set? 1 (.i32 1) = some abiCaseLocalsR := by
+theorem abiCaseSetU :
+    abiCaseLocalsC.set? 2 (.i32 1) = some abiCaseLocalsU := by
   native_decide
 
 theorem abiCaseDeclC_kind :
@@ -380,7 +380,11 @@ theorem abiCaseCompileTrue :
 
 theorem abiCaseGetR :
     Fir.Wasm.getLocal abiCaseContext r = .ok (.localGet r, .tobject) := by
-  simp [Fir.Wasm.getLocal, abiCaseContext, Fir.Wasm.findLocalKind?, r, c]
+  simp [Fir.Wasm.getLocal, abiCaseContext, Fir.Wasm.findLocalKind?, r, u, c]
+
+theorem abiCaseGetU :
+    Fir.Wasm.getLocal abiCaseContext u = .ok (.localGet u, .tobject) := by
+  simp [Fir.Wasm.getLocal, abiCaseContext, Fir.Wasm.findLocalKind?, u, r, c]
 
 theorem abiCaseAllocCall_found :
     callIndex? abiCaseSourceModule
@@ -407,6 +411,10 @@ theorem abiCaseC_found :
 
 theorem abiCaseR_found :
     findFVar? (functionBindings abiCaseSourceFunction) r = some 1 := by
+  native_decide
+
+theorem abiCaseU_found :
+    findFVar? (functionBindings abiCaseSourceFunction) u = some 2 := by
   native_decide
 
 theorem abiCaseArgumentsEvaluated :
@@ -490,7 +498,7 @@ theorem abiCaseTrueBranch_simulation :
     CodeSimulation abiCaseContext abiCaseSourceModule abiCaseSourceFunction []
       abiCaseAdaptedModule.wasmModule abiCaseResolvedHosts.env
       {} abiCaseEnvC abiCaseTrueCode
-      [.call 3, .localSet 1, .localGet 1, .ret]
+      [.call 3, .localSet 2, .localGet 2, .ret]
       abiCaseStoreC abiCaseLocalsC {} abiCaseTrueValue .tobject := by
   have valueAdapted :
       instructions abiCaseSourceModule abiCaseSourceFunction []
@@ -504,19 +512,19 @@ theorem abiCaseTrueBranch_simulation :
     (hostEnv := abiCaseResolvedHosts.env)
     (spec := abiCaseResolvedHosts.spec)
     (id := 3) (imp := abiCaseImport 3)
-    (decl := abiCaseDeclTrue) (resultIndex := 1) (value := 1)
-    (after := abiCaseHandlesC) (handle := 1) (updated := abiCaseLocalsR)
+    (decl := abiCaseDeclTrue) (resultIndex := 2) (value := 1)
+    (after := abiCaseHandlesC) (handle := 1) (updated := abiCaseLocalsU)
     rfl abiCaseStateC_related (by native_decide) (by native_decide)
     abiCaseImport3_found abiCaseHostsSatisfy (by native_decide)
     (by simp [ResolvedHosts.spec, abiCaseResolvedHosts_operations])
     (by native_decide) (by native_decide)
-    (by simpa [abiCaseTrueValue, literal, maxTaggedPayload] using abiCaseEncodeR)
-    abiCaseSetR
+    (by simpa [abiCaseTrueValue, literal, maxTaggedPayload] using abiCaseEncodeU)
+    abiCaseSetU
   simp only [abiCaseTrueCode]
   apply CodeSimulation.letValue abiCaseCompileTrue valueAdapted
     (by native_decide) step
-  apply CodeSimulation.ret abiCaseGetR (by native_decide) (by native_decide)
-    (lookup_bind_self abiCaseEnvC r abiCaseTrueValue)
+  apply CodeSimulation.ret abiCaseGetU (by native_decide) (by native_decide)
+    (lookup_bind_self abiCaseEnvC u abiCaseTrueValue)
   simpa [abiCaseDeclTrue, letDecl, abiCaseTrueValue, literal,
     maxTaggedPayload, successfulHostStore, abiCaseStoreC] using step.2.2.1
 
@@ -524,7 +532,7 @@ theorem abiCaseTrueBranch_codeWP :
     CodeWP abiCaseContext abiCaseSourceModule abiCaseSourceFunction []
       abiCaseAdaptedModule.wasmModule abiCaseResolvedHosts.env
       {} abiCaseEnvC abiCaseTrueCode
-      [.call 3, .localSet 1, .localGet 1, .ret]
+      [.call 3, .localSet 2, .localGet 2, .ret]
       abiCaseStoreC abiCaseLocalsC []
       (ReturnPost {} abiCaseTrueValue .tobject []) :=
   abiCaseTrueBranch_simulation.toCodeWP
@@ -539,9 +547,9 @@ theorem abiCaseCasesStep :
           [.call 2, .localSet 1, .localGet 1, .ret]
           [.localGet 0, .call 1, .const 1, .eq,
             .iff 0 0
-              [.call 3, .localSet 1, .localGet 1, .ret]
+              [.call 3, .localSet 2, .localGet 2, .ret]
               [.unreachable]]]
-      [.call 3, .localSet 1, .localGet 1, .ret]
+      [.call 3, .localSet 2, .localGet 2, .ret]
       abiCaseStoreC abiCaseLocalsC {} abiCaseTrueValue .tobject := by
   constructor
   · refine ⟨abiCaseTrueValue, 1, ?_, abiCaseTagC, ?_⟩
@@ -557,7 +565,7 @@ theorem abiCaseCasesStep :
         CodeWP abiCaseContext abiCaseSourceModule abiCaseSourceFunction []
           abiCaseAdaptedModule.wasmModule abiCaseResolvedHosts.env
           {} abiCaseEnvC abiCaseTrueCode
-          [.call 3, .localSet 1, .localGet 1, .ret]
+          [.call 3, .localSet 2, .localGet 2, .ret]
           abiCaseStoreC abiCaseLocalsC []
           (CaseResumePost abiCaseAdaptedModule.wasmModule
             abiCaseResolvedHosts.env []
@@ -580,7 +588,7 @@ theorem abiCaseCasesStep :
           [.ctorAlt trueInfo abiCaseTrueCode] [.unreachable]
           [.localGet 0, .call 1, .const 1, .eq,
             .iff 0 0
-              [.call 3, .localSet 1, .localGet 1, .ret]
+              [.call 3, .localSet 2, .localGet 2, .ret]
               [.unreachable]]
           abiCaseStoreC abiCaseLocalsC []
           (CaseResumePost abiCaseAdaptedModule.wasmModule
@@ -616,7 +624,7 @@ theorem abiCaseCasesStep :
               [.call 2, .localSet 1, .localGet 1, .ret]
               [.localGet 0, .call 1, .const 1, .eq,
                 .iff 0 0
-                  [.call 3, .localSet 1, .localGet 1, .ret]
+                  [.call 3, .localSet 2, .localGet 2, .ret]
                   [.unreachable]]]
           abiCaseStoreC abiCaseLocalsC [] Q := by
       apply caseChainWP_constructor_miss

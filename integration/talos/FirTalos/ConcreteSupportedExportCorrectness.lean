@@ -225,7 +225,7 @@ theorem ConcreteSupportedFunction.validatedBody
       refine ⟨parameterLocals, rfl, ?_⟩
       simpa [parametersFound, spec.sourceDeclarationBody,
         spec.sourceResultSelected] using
-        declarationSupported.2
+        declarationSupported.2.2
 
 /-- Reindex declaration validation by the active result equality retained by
 the structured global simulation relation. -/

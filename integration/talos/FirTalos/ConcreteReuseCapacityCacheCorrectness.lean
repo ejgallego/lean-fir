@@ -12585,7 +12585,7 @@ private theorem declarationParameterIdsUnique_of_lowerSupported
         at declarationValidated
   unfold Fir.Wasm.supportedDecl at supported
   simp only [Bool.and_eq_true] at supported
-  exact supported.1.1
+  exact supported.2.1.1
 
 /-- Pointwise inversion of successful `Except`-valued list traversal. -/
 private theorem exceptListMapM_getElem?_eq_some
