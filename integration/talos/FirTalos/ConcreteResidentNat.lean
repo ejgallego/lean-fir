@@ -756,18 +756,18 @@ theorem wp_retypeRawObjectResultProgram
   simpa only [ResidentMemoryRel.write32_restore] using returned
 
 /-- Exact Talos form of the public `Nat.add` two-immediate arm.  The shared
-payload decoder feeds zero high words to `naturalSum`, whose raw result then
-crosses the common scratch-slot object cast. -/
+payload decoder feeds zero high words to `naturalSum`, whose already-valid
+object result crosses the typed, scratch-free word round trip. -/
 def immediateAddProgram (naturalSumIndex : Nat) : Wasm.Program :=
   ResidentPrimitives.immediateNaturalPayload 0 ++ [.const 0] ++
     ResidentPrimitives.immediateNaturalPayload 1 ++ [
       .const 0,
       .call naturalSumIndex] ++
-    retypeRawObjectResultProgram 2 3 4
+    ResidentPrimitives.unsignedI32RoundTrip ++ [.ret]
 
 /-- Symbolic source spelling of `immediateAddProgram`; the public function's
-private local identifiers are supplied positionally by the shape theorem. -/
-def immediateAddSource (left right raw saved result : Lean.FVarId) :
+parameter identifiers are supplied positionally by the shape theorem. -/
+def immediateAddSource (left right : Lean.FVarId) :
     List Fir.Wasm.Instruction :=
   Fir.Wasm.Emit.ResidentBigNumeric.immediateNaturalPayload left ++ [
       .i32Const .uint32 0] ++
@@ -775,7 +775,7 @@ def immediateAddSource (left right raw saved result : Lean.FVarId) :
       .i32Const .uint32 0,
       .call (.declaration
         Fir.Wasm.Emit.ResidentNumeric.naturalSumName)] ++
-    retypeRawObjectResultSource raw saved result
+    ResidentPrimitives.typedObjectWordRoundTripSource ++ [.ret]
 
 /-- The public resident `Nat.add` function is the common pair dispatcher with
 the exact immediate arm above and an opaque checked arbitrary-precision arm. -/
@@ -787,10 +787,7 @@ theorem natAddFunction_immediate_shape :
           Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[1]!.1
           (immediateAddSource
             Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[0]!.1
-            Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[1]!.1
-            Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[0]!.1
-            Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[1]!.1
-            Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[2]!.1)
+            Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[1]!.1)
           fallback := by
   refine ⟨_, rfl⟩
 
@@ -805,41 +802,32 @@ theorem natAddFunction_locals_size :
 program used by its execution theorem. -/
 theorem instructions_immediateAddSource
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {left right raw saved result : Lean.FVarId}
-    {leftIndex rightIndex rawIndex savedIndex resultIndex naturalSumIndex : Nat}
+    {labels : List Lean.FVarId} {left right : Lean.FVarId}
+    {leftIndex rightIndex naturalSumIndex : Nat}
     (leftFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList) left =
         some leftIndex)
     (rightFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList) right =
         some rightIndex)
-    (rawFound : FirTalos.findFVar?
-      (sourceFunction.params.toList ++ sourceFunction.locals.toList) raw =
-        some rawIndex)
-    (savedFound : FirTalos.findFVar?
-      (sourceFunction.params.toList ++ sourceFunction.locals.toList) saved =
-        some savedIndex)
-    (resultFound : FirTalos.findFVar?
-      (sourceFunction.params.toList ++ sourceFunction.locals.toList) result =
-        some resultIndex)
     (naturalSumFound : FirTalos.callIndex? sourceModule
       (.declaration Fir.Wasm.Emit.ResidentNumeric.naturalSumName) =
         some naturalSumIndex) :
     FirTalos.instructions sourceModule sourceFunction labels
-      (immediateAddSource left right raw saved result) =
+      (immediateAddSource left right) =
         .ok (ResidentPrimitives.immediateNaturalPayload leftIndex ++
           [.const 0] ++
           ResidentPrimitives.immediateNaturalPayload rightIndex ++ [
             .const 0,
             .call naturalSumIndex] ++
-          retypeRawObjectResultProgram rawIndex savedIndex resultIndex) := by
+          ResidentPrimitives.unsignedI32RoundTrip ++ [.ret]) := by
   simp [immediateAddSource,
     Fir.Wasm.Emit.ResidentBigNumeric.immediateNaturalPayload,
     ResidentPrimitives.immediateNaturalPayload,
-    retypeRawObjectResultSource, retypeRawObjectResultProgram,
+    ResidentPrimitives.typedObjectWordRoundTripSource,
+    ResidentPrimitives.unsignedI32RoundTrip,
     FirTalos.instructions, FirTalos.instruction, leftFound, rightFound,
-    rawFound, savedFound, resultFound, naturalSumFound,
-    Bind.bind, Except.bind, pure, Except.pure]
+    naturalSumFound, Bind.bind, Except.bind, pure, Except.pure]
 
 /-- Exact adaptation of the complete public `Nat.add` body, retaining the
 opaque fallback but exposing the common dispatcher and immediate arm. -/
@@ -854,10 +842,7 @@ theorem instructions_natAddFunctionBody_of_shape
           Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[1]!.1
           (immediateAddSource
             Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[0]!.1
-            Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[1]!.1
-            Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[0]!.1
-            Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[1]!.1
-            Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[2]!.1)
+            Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[1]!.1)
           sourceFallback)
     (naturalSumFound : FirTalos.callIndex? sourceModule
       (.declaration Fir.Wasm.Emit.ResidentNumeric.naturalSumName) =
@@ -881,10 +866,8 @@ theorem instructions_natAddFunctionBody_of_shape
         (sourceFunction :=
           Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction)
         (labels := []) (leftIndex := 0) (rightIndex := 1)
-        (rawIndex := 2) (savedIndex := 3) (resultIndex := 4)
         (naturalSumIndex := naturalSumIndex)
-        (by decide) (by decide) (by decide) (by decide) (by decide)
-        naturalSumFound)
+        (by decide) (by decide) naturalSumFound)
   · exact fallbackAdapted
 
 /-- Successful adaptation installs precisely the proved `Nat.add` dispatcher
@@ -902,10 +885,7 @@ theorem adaptedNatAddFunction_body_of_shape
           Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[1]!.1
           (immediateAddSource
             Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[0]!.1
-            Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[1]!.1
-            Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[0]!.1
-            Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[1]!.1
-            Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[2]!.1)
+            Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[1]!.1)
           sourceFallback)
     (naturalSumFound : FirTalos.callIndex? sourceModule
       (.declaration Fir.Wasm.Emit.ResidentNumeric.naturalSumName) =
@@ -936,18 +916,22 @@ def immediateSumWord
     (leftPayload.toNat + rightPayload.toNat) sumFits).value
 
 /-- The two-immediate `Nat.add` arm composes the shared decoders, the factored
-natural-sum call, and the common scratch-slot cast. -/
+natural-sum call, and the scratch-free typed word round trip.  The explicit
+`ValueRel` premise is the operation-specific validity boundary omitted by the
+generic physical lemma: the result may be either a tagged immediate or a live
+heap representation, but it cannot be an arbitrary `i32`. -/
 theorem wp_immediateAddProgram
     {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
     {Q : Wasm.Assertion host} {store : Wasm.Store host}
-    {locals afterRaw afterSaved afterResult : Wasm.Locals}
+    {locals : Wasm.Locals} {witness : RefinementWitness}
     {naturalSumIndex : Nat} {leftWord rightWord : Word32}
     {leftReference rightReference : Fir.LeanIR.Impure.ObjectRef}
-    {leftPayload rightPayload : UInt64} {tail : List Wasm.Value}
+    {leftPayload rightPayload resultPayload : UInt64} {resultWord : Word32}
+    {tail : List Wasm.Value}
     (pair : ImmediateNaturalPairRel leftWord rightWord leftReference
       rightReference leftPayload rightPayload)
-    (sumFits : leftPayload.toNat + rightPayload.toNat ≤ maxImmediatePayload)
-    (pagesPositive : 0 < store.mem.pages)
+    (_resultRelated : ValueRel witness .tobject (.word32 resultWord)
+      (.object (.tagged resultPayload)))
     (leftLocal : locals.get 0 = some (.i32 (UInt32.ofNat leftWord.value)))
     (rightLocal : locals.get 1 = some (.i32 (UInt32.ofNat rightWord.value)))
     (naturalSumRun :
@@ -956,18 +940,9 @@ theorem wp_immediateAddProgram
           .i32 0, .i32 (UInt32.ofNat leftPayload.toNat)] ++ tail)
         (fun final values =>
           final = store ∧
-            values = .i32 (immediateSumWord pair sumFits) :: tail))
-    (rawSet :
-      ({ locals with values := .i32 (immediateSumWord pair sumFits) :: tail
-        }).set? 2 (.i32 (immediateSumWord pair sumFits)) = some afterRaw)
-    (savedSet :
-      ({ afterRaw with values := .i32 (store.mem.read32 0) :: tail
-        }).set? 3 (.i32 (store.mem.read32 0)) = some afterSaved)
-    (resultSet :
-      ({ afterSaved with values := .i32 (immediateSumWord pair sumFits) :: tail
-        }).set? 4 (.i32 (immediateSumWord pair sumFits)) = some afterResult)
+            values = .i32 (UInt32.ofNat resultWord.value) :: tail))
     (returned :
-      Q (.Return store (.i32 (immediateSumWord pair sumFits) :: tail))) :
+      Q (.Return store (.i32 (UInt32.ofNat resultWord.value) :: tail))) :
     Wasm.wp module (immediateAddProgram naturalSumIndex) Q store
       { locals with values := tail } env := by
   unfold immediateAddProgram
@@ -979,9 +954,8 @@ theorem wp_immediateAddProgram
   apply Wasm.wp_call_tw naturalSumRun
   intro final values completed
   rcases completed with ⟨rfl, rfl⟩
-  apply wp_retypeRawObjectResultProgram pagesPositive (by decide) (by decide)
-    rawSet savedSet resultSet
-  simpa using returned
+  apply ResidentPrimitives.wp_unsignedI32RoundTrip
+  simpa only [Wasm.wp_ret_cons] using returned
 
 /-- The common pair dispatcher selects the immediate-add arm for a related
 pair; its checked fallback and terminal suffix remain unreachable after the
@@ -989,15 +963,16 @@ arm's explicit return. -/
 theorem wp_immediateAddDispatch
     {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
     {Q : Wasm.Assertion host} {store : Wasm.Store host}
-    {locals afterRaw afterSaved afterResult : Wasm.Locals}
+    {locals : Wasm.Locals} {witness : RefinementWitness}
     {naturalSumIndex : Nat} {leftWord rightWord : Word32}
     {leftReference rightReference : Fir.LeanIR.Impure.ObjectRef}
-    {leftPayload rightPayload : UInt64} {tail : List Wasm.Value}
+    {leftPayload rightPayload resultPayload : UInt64} {resultWord : Word32}
+    {tail : List Wasm.Value}
     {fallback rest : Wasm.Program}
     (pair : ImmediateNaturalPairRel leftWord rightWord leftReference
       rightReference leftPayload rightPayload)
-    (sumFits : leftPayload.toNat + rightPayload.toNat ≤ maxImmediatePayload)
-    (pagesPositive : 0 < store.mem.pages)
+    (resultRelated : ValueRel witness .tobject (.word32 resultWord)
+      (.object (.tagged resultPayload)))
     (leftLocal : locals.get 0 = some (.i32 (UInt32.ofNat leftWord.value)))
     (rightLocal : locals.get 1 = some (.i32 (UInt32.ofNat rightWord.value)))
     (naturalSumRun :
@@ -1006,26 +981,17 @@ theorem wp_immediateAddDispatch
           .i32 0, .i32 (UInt32.ofNat leftPayload.toNat)] ++ tail)
         (fun final values =>
           final = store ∧
-            values = .i32 (immediateSumWord pair sumFits) :: tail))
-    (rawSet :
-      ({ locals with values := .i32 (immediateSumWord pair sumFits) :: tail
-        }).set? 2 (.i32 (immediateSumWord pair sumFits)) = some afterRaw)
-    (savedSet :
-      ({ afterRaw with values := .i32 (store.mem.read32 0) :: tail
-        }).set? 3 (.i32 (store.mem.read32 0)) = some afterSaved)
-    (resultSet :
-      ({ afterSaved with values := .i32 (immediateSumWord pair sumFits) :: tail
-        }).set? 4 (.i32 (immediateSumWord pair sumFits)) = some afterResult)
+            values = .i32 (UInt32.ofNat resultWord.value) :: tail))
     (returned :
-      Q (.Return store (.i32 (immediateSumWord pair sumFits) :: tail))) :
+      Q (.Return store (.i32 (UInt32.ofNat resultWord.value) :: tail))) :
     Wasm.wp module
       (ResidentPrimitives.immediateNaturalPairDispatch 0 1
           (immediateAddProgram naturalSumIndex) fallback ++ rest)
       Q store { locals with values := tail } env := by
   apply ResidentPrimitives.wp_immediateNaturalPairDispatch pair leftLocal
     rightLocal
-  apply wp_immediateAddProgram pair sumFits pagesPositive leftLocal rightLocal
-    naturalSumRun rawSet savedSet resultSet
+  apply wp_immediateAddProgram pair resultRelated leftLocal rightLocal
+    naturalSumRun
   simpa using returned
 
 /-- The immediate path of the actual adapted resident `Nat.add` function is a
@@ -1054,10 +1020,7 @@ theorem terminatesWith_natAddFunctionImmediate_of_adapted
           Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[1]!.1
           (immediateAddSource
             Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[0]!.1
-            Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[1]!.1
-            Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[0]!.1
-            Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[1]!.1
-            Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[2]!.1)
+            Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[1]!.1)
           sourceFallback)
     (naturalSumFound : FirTalos.callIndex? sourceModule
       (.declaration Fir.Wasm.Emit.ResidentNumeric.naturalSumName) =
@@ -1084,8 +1047,7 @@ theorem terminatesWith_natAddFunctionImmediate_of_adapted
         some targetMakeNatural)
     (pair : ImmediateNaturalPairRel leftWord rightWord leftReference
       rightReference leftPayload rightPayload)
-    (sumFits : leftPayload.toNat + rightPayload.toNat ≤ maxImmediatePayload)
-    (pagesPositive : 0 < store.mem.pages) :
+    (sumFits : leftPayload.toNat + rightPayload.toNat ≤ maxImmediatePayload) :
     Wasm.TerminatesWith env module functionIndex store
       ([.i32 (UInt32.ofNat rightWord.value),
         .i32 (UInt32.ofNat leftWord.value)] ++ tail)
@@ -1111,9 +1073,6 @@ theorem terminatesWith_natAddFunctionImmediate_of_adapted
       some (.i32 (UInt32.ofNat rightWord.value)) := by
     simp [entry, Wasm.Function.toLocals, Wasm.Function.numParams, paramsEq,
       Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction]
-  have targetLocalsLength : targetFunction.locals.length = 17 := by
-    rw [localsEq, List.length_map, Array.length_toList,
-      natAddFunction_locals_size]
   have naturalSumRun :
       Wasm.TerminatesWith env module naturalSumIndex store
         [.i32 0, .i32 (UInt32.ofNat rightPayload.toNat),
@@ -1130,35 +1089,26 @@ theorem terminatesWith_natAddFunctionImmediate_of_adapted
         sumFits naturalSumAdapted makeNaturalFound makeNaturalAdapted
         naturalSumNotImport naturalSumTargetFound makeNaturalNotImport
         makeNaturalTargetFound)
-  have rawValid :
-      ({ entry with values := [.i32 (immediateSumWord pair sumFits)]
-        }).validIndex 2 := by
-    simp [entry, Wasm.Function.toLocals, Wasm.Function.numParams, paramsEq,
-      targetLocalsLength,
-      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction]
-  obtain ⟨afterRaw, rawSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists rawValid
-  have rawLengths := FirTalos.Correctness.locals_lengths_of_set? rawSet
-  have savedValid :
-      ({ afterRaw with values := [.i32 (store.mem.read32 0)]
-        }).validIndex 3 := by
-    simp only [Wasm.Locals.validIndex]
-    simp [rawLengths.1, rawLengths.2, entry, Wasm.Function.toLocals,
-      Wasm.Function.numParams, paramsEq, targetLocalsLength,
-      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction]
-  obtain ⟨afterSaved, savedSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists savedValid
-  have savedLengths := FirTalos.Correctness.locals_lengths_of_set? savedSet
-  have resultValid :
-      ({ afterSaved with values := [.i32 (immediateSumWord pair sumFits)]
-        }).validIndex 4 := by
-    simp only [Wasm.Locals.validIndex]
-    simp [savedLengths.1, savedLengths.2, rawLengths.1, rawLengths.2,
-      entry, Wasm.Function.toLocals, Wasm.Function.numParams, paramsEq,
-      targetLocalsLength,
-      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction]
-  obtain ⟨afterResult, resultSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists resultValid
+  have sumLt : leftPayload.toNat + rightPayload.toNat < 18446744073709551616 := by
+    unfold maxImmediatePayload at sumFits
+    omega
+  have resultRelated :
+      ValueRel (default : RefinementWitness) .tobject
+        (.word32 (Word32.encodeImmediate
+          (leftPayload.toNat + rightPayload.toNat) sumFits))
+        (.object (.tagged (UInt64.ofNat
+          (leftPayload.toNat + rightPayload.toNat)))) := by
+    apply ValueRel.tobject
+    apply ObjectReferenceRel.tagged
+    have payloadFits :
+        (UInt64.ofNat
+          (leftPayload.toNat + rightPayload.toNat)).toNat ≤
+            maxImmediatePayload := by
+      simpa [Nat.mod_eq_of_lt sumLt] using sumFits
+    simpa [Nat.mod_eq_of_lt sumLt] using
+      (TaggedReferenceRel.immediate
+        (witness := (default : RefinementWitness))
+        (UInt64.ofNat (leftPayload.toNat + rightPayload.toNat)) payloadFits)
   have returned :
       FirTalos.Correctness.FunctionBodyPost targetFunction
           ([.i32 (UInt32.ofNat rightWord.value),
@@ -1176,8 +1126,12 @@ theorem terminatesWith_natAddFunctionImmediate_of_adapted
       (naturalSumIndex := naturalSumIndex) (fallback := targetFallback)
       (rest := FirTalos.functionTerminal sourceModule
         Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction)
-      (tail := []) pair sumFits pagesPositive leftLocal rightLocal
-      naturalSumRun rawSet savedSet resultSet returned)
+      (witness := (default : RefinementWitness))
+      (resultWord := Word32.encodeImmediate
+        (leftPayload.toNat + rightPayload.toNat) sumFits)
+      (resultPayload := UInt64.ofNat
+        (leftPayload.toNat + rightPayload.toNat))
+      (tail := []) pair resultRelated leftLocal rightLocal naturalSumRun returned)
 
 /-- Exact target shape of the nonzero immediate branch of `Nat.mod`. -/
 def immediateModProgram (makeNaturalIndex : Nat) : Wasm.Program :=
