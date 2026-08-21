@@ -237,6 +237,26 @@ medians from 137.91 ms (MAD 0.47 ms) to 130.66 ms (MAD 1.42 ms), about 5.3%.
 natural-constructor samples changed from 84 to 29/31. Compressed bytes and the
 flat 9,237,304-byte post-call frontier were unchanged.
 
+The checked one-limb and multi-limb exits of `Nat.add` now use the same typed
+object-word round trip as its immediate exit. Both checked exits first validate
+their inputs and then return either `fir_numeric_natural_sum`'s canonical Nat
+or the live object allocated by `fir_big_numeric_allocate`; borrowing linear-
+memory address zero solely to retype either word was redundant. The final
+`fir_big_ext_Nat_add` body decreases from 268 to 228 bytes and from 130 to 111
+instructions. Its three scratch loads and three scratch-only stores disappear;
+the remaining two stores write a genuine carry limb. The frontier module
+decreases from 1,619,431 to 1,619,339 bytes and the complete module from
+936,112 to 936,072 bytes, with all closure counts, calls, imports, and semantic
+outputs unchanged.
+
+This is a deterministic code-shape and ownership improvement, not a measured
+lean-zip speedup. Eight order-balanced 256-KiB level-6 rounds gave internal
+execute medians of 124.15 ms before and 124.48 ms after (+0.27%, within noise),
+while whole-process medians moved in the opposite direction by -0.61%. Two
+artifact-bound V8 profiles likewise placed `Nat.add` at overlapping 3.60% and
+3.50% median Wasm-self shares. Every run preserved the exact compressed-byte
+hash and flat 9,237,304-byte frontier.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not
