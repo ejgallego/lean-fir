@@ -26,6 +26,30 @@ def reusedBinderDecl : LCNF.Decl .impure :=
 
 #guard !declHygienic reusedBinderDecl
 
+def twoBinderCode : LCNF.Code .impure :=
+  .let (letDecl x objType (.lit (.nat 5))) <|
+  .let (letDecl y objType (.lit (.nat 6))) <|
+  .return y
+
+def twoBinderDecl : LCNF.Decl .impure :=
+  decl `twoBinder #[] objType (.code twoBinderCode)
+
+#guard declHygienic twoBinderDecl
+
+/-- Kernel regression: executable hygiene exposes the structural freshness of
+the two sequential let binders, rather than remaining an opaque Boolean. -/
+theorem twoBinderNamesDistinct : x.name ≠ y.name := by
+  have accepted : declHygienic twoBinderDecl = true := by native_decide
+  have unique := declHygienic_binderNamesUnique accepted
+  simpa [twoBinderDecl, decl, declBinders, twoBinderCode, codeBinders,
+    BinderNamesUnique, paramIds, letDecl] using unique
+
+/-- Kernel regression for the formerly opaque terminal scope equation. -/
+theorem returnScoped_of_codeScoped
+    (scope : Scope) (accepted : codeScoped scope (.return x) = true) :
+    scope.vars.contains x = true := by
+  simpa [codeScoped] using accepted
+
 def unscopedReturnDecl : LCNF.Decl .impure :=
   decl `unscopedReturn #[] objType (.code (.return x))
 

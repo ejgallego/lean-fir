@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-local-binder-name-uniqueness
-status: confirmed
+status: fixed
 classification: compiler
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: 7fd2d2d97feb82ca7d905ec8db13e30c49aeab33
@@ -99,6 +99,10 @@ none
 
 ## Resolution and regression
 
-Unresolved. W6 can continue admission for nodes that do not introduce new
-locals. Direct `let`, call-frame suspension, and bind resumption require the
-compiler-collector bridge after the hygiene boundary is made explicit.
+Fixed by retaining `ImpureHygiene.declHygienic` in `supportedDecl`, so the
+executable path used by both `supportedProgram` and `lowerSupported` rejects
+duplicate declaration-body binder names. `WasmSupported.impureHygienic`
+projects the same check back to the existing phase invariant. The focused
+regression uses two sequential `let` binders with one name and different
+object/`UInt8` ABI kinds; admission fails before local collection can replace
+the first binding.

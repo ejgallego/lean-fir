@@ -886,12 +886,19 @@ theorem reuseCapacitySafeProgram_code
 
 def supportedDecl (program : Fir.LeanIR.ImpureProgram)
     (decl : LCNF.Decl .impure) : Bool :=
-  declarationParameterIdsUnique decl && abiTypeKnown decl.type &&
-    match addSupportedDeclarationParams? program decl, decl.value with
-    | some _, .extern _ => true
-    | some locals, .code code =>
-        supportedCode program locals (effectiveDeclarationResultKind? decl) code
-    | _, _ => false
+  Fir.LeanIR.ImpureHygiene.declHygienic decl &&
+    (declarationParameterIdsUnique decl && abiTypeKnown decl.type &&
+      match addSupportedDeclarationParams? program decl, decl.value with
+      | some _, .extern _ => true
+      | some locals, .code code =>
+          supportedCode program locals (effectiveDeclarationResultKind? decl) code
+      | _, _ => false)
+
+theorem supportedDecl_declHygienic
+    (accepted : supportedDecl program decl = true) :
+    Fir.LeanIR.ImpureHygiene.declHygienic decl = true := by
+  simp only [supportedDecl, Bool.and_eq_true] at accepted
+  exact accepted.1
 
 def supportedProgram (program : Fir.LeanIR.ImpureProgram) : Bool :=
   program.decls.all (supportedDecl program) &&
@@ -907,6 +914,17 @@ theorem WasmSupported.reuseCapacitySafe
     reuseCapacitySafeProgram program = true := by
   simp [WasmSupported, supportedProgram] at supported
   exact supported.2
+
+/-- Wasm admission retains the existing impure phase hygiene invariant. -/
+theorem WasmSupported.impureHygienic
+    {program : Fir.LeanIR.ImpureProgram} (supported : WasmSupported program) :
+    program.ImpureHygienic := by
+  simp only [WasmSupported, supportedProgram, Bool.and_eq_true] at supported
+  unfold Fir.LeanIR.Program.ImpureHygienic
+  rw [Array.all_eq_true']
+  intro decl member
+  exact supportedDecl_declHygienic
+    ((Array.all_eq_true'.mp supported.1.1) decl member)
 
 inductive ValidationError where
   | externalDeclaration (name : Name)

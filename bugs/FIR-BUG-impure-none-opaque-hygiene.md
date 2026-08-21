@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-impure-none-opaque-hygiene
-status: confirmed
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -9,7 +9,7 @@ pass: none
 discovered-by: proof
 first-seen: 2026-07-17
 reproduction: Fir/LeanIR/Hygiene.lean#codeScoped
-regression: none
+regression: Fir/LeanIR/HygieneExamples.lean
 ---
 
 # Summary
@@ -96,6 +96,12 @@ none
 
 ## Resolution and regression
 
-Unresolved. Refactor the hygiene and binder traversals into transparent total
-definitions, prove their equations, derive `ProgramBodiesRelated` from
-`CheckedImpureProgram`, and add a kernel regression for the return case.
+Fixed by replacing the opaque mutually recursive scope and binder traversals
+with total transparent code/alternative-list traversals. Their public
+`codeScoped`, `altScoped`, `funDeclScoped`, `codeBinders`, and `altBinders`
+surfaces retain the executable behavior while exposing kernel equations.
+`declHygienic_binderNamesUnique` proves declaration-wide pairwise binder-name
+freshness from the executable checker; `HygieneExamples.twoBinderNamesDistinct`
+is the kernel-facing regression. Pass-specific proof-certificate cleanup and
+deriving `ProgramBodiesRelated` are follow-ups, not prerequisites for using
+the repaired shared interface.

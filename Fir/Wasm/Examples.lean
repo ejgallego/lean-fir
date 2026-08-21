@@ -275,6 +275,24 @@ def duplicateParameterProgram : Fir.LeanIR.ImpureProgram :=
       | _ => false
   | .error _ => false
 
+/-- A raw impure declaration may reuse one body-binder name at two different
+ABI kinds. The source checker at the first let then disagrees with the
+deduplicated production local row unless phase hygiene is retained. -/
+def duplicateBodyBinderDecl : LCNF.Decl .impure :=
+  decl `duplicateBodyBinder #[] u8Type (.code <|
+    .let (letDecl x objType (.lit (.nat 11))) <|
+    .let (letDecl x u8Type (.unbox x)) <|
+    .return x)
+
+def duplicateBodyBinderProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[duplicateBodyBinderDecl] }
+
+#guard !Fir.LeanIR.ImpureHygiene.declHygienic duplicateBodyBinderDecl
+#guard !supportedProgram duplicateBodyBinderProgram
+#guard match lowerSupported duplicateBodyBinderProgram with
+  | .error (.validation (.unsupportedCode `duplicateBodyBinder)) => true
+  | _ => false
+
 def abiClosureFirstDecl : LCNF.Decl .impure :=
   decl `abiClosureFirst #[param x LCNF.ImpureType.tobject,
     param y LCNF.ImpureType.tobject] LCNF.ImpureType.tobject (.code (.return x))
@@ -619,7 +637,7 @@ def abiCaseProgram : Fir.LeanIR.ImpureProgram :=
         .ctorAlt falseInfo
           (.let (letDecl r tobjectType (.lit (.nat 0))) (.return r)),
         .ctorAlt trueInfo
-          (.let (letDecl r tobjectType (.lit (.nat 1))) (.return r))]))] }
+          (.let (letDecl u tobjectType (.lit (.nat 1))) (.return u))]))] }
 
 def scalarUInt8CaseProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `main #[param c u8Type] tobjectType (.code <|
@@ -627,7 +645,7 @@ def scalarUInt8CaseProgram : Fir.LeanIR.ImpureProgram :=
         .ctorAlt falseInfo
           (.let (letDecl r tobjectType (.lit (.nat 0))) (.return r)),
         .ctorAlt trueInfo
-          (.let (letDecl r tobjectType (.lit (.nat 1))) (.return r))]))] }
+          (.let (letDecl u tobjectType (.lit (.nat 1))) (.return u))]))] }
 
 def guardedResetJoinBody : LCNF.Code .impure :=
   .cases (.mk ``Bool objType u #[
