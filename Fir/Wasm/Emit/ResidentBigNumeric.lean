@@ -1385,6 +1385,15 @@ private def callImmediateNaturalSum : List Instruction :=
     .i32Const .uint32 0,
     .call (.declaration ResidentNumeric.naturalSumName)]
 
+private partial def instructionUsesObjectScratchRetype : Instruction → Bool
+  | .i32Load .tobject 0 => true
+  | .block _ body | .loop _ body =>
+      body.any instructionUsesObjectScratchRetype
+  | .ifElse thenBody elseBody =>
+      thenBody.any instructionUsesObjectScratchRetype ||
+        elseBody.any instructionUsesObjectScratchRetype
+  | _ => false
+
 def natAddFunction : Function := {
   name := externalName `Nat.add
   params := #[(leftParam, .tobject), (rightParam, .tobject)]
@@ -1403,12 +1412,18 @@ def natAddFunction : Function := {
         .i32Eq,
         .ifElse
           (callOneLimbNaturalSum ++
-            retypeRawResult .tobject objectResultLocal)
+            retypeKnownObjectResult)
           (allocateNatural resultCountLocal ++ [
             .localSet rawLocal] ++
             writeSum rawLocal ++ [
             .localGet rawLocal] ++
-            retypeRawResult .tobject objectResultLocal)]) }
+            retypeKnownObjectResult)]) }
+
+/- `Nat.add` validates every checked operand before constructing its result,
+so all three exits already hold either a canonical tagged Nat or a live
+resident Natural.  No exit should reborrow linear-memory address zero merely
+to change the symbolic result kind. -/
+#guard !natAddFunction.body.any instructionUsesObjectScratchRetype
 
 private def scanDifference (left leftFlavor right rightFlavor total : FVarId) :
     List Instruction := [

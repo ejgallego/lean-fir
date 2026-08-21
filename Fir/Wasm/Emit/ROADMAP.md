@@ -232,6 +232,25 @@ beyond 64 bits. This work also removed the one-limb restrictions from
 `Nat.shiftRight` and fixed-width `ofNat` conversions; the C conversion exports
 remain only as a version-1 compatibility surface for packages not yet rebuilt.
 
+### G1g. Typed checked natural-addition results (generation-ready)
+
+Every `Nat.add` exit now crosses the symbolic `.uint32`/`.tobject` distinction
+with the typed unsigned-word round trip. The immediate exit is valid by the
+canonical tagged-pair dispatch. The checked one-limb exit validates both
+operands and returns the canonical result of `naturalSum`; the multi-limb exit
+returns the live Natural allocated and populated by the checked limb writer.
+No exit needs linear-memory address zero as a type-changing scratch slot.
+
+A source-shape guard rejects any future typed-object scratch load in
+`natAddFunction`. The standalone real-Wasm matrix covers tagged, promoted,
+mixed, arbitrary-limb, carry-growth, malformed-input, and 8,192-limb cases.
+The exact lean-zip release removes 19 instructions, three memory loads, and
+three scratch-only stores from `fir_big_ext_Nat_add`, shrinking that body by 40
+bytes while preserving every call edge, import, output hash, and arena
+frontier. Representative timing and sampled attribution overlap, so this slice
+makes no workload speed claim. W6 proof adaptation remains the acceptance
+boundary.
+
 ### G2. Separate production and diagnostic adapter costs (accepted)
 
 Finish the pending Illuminate selection-player request with an actually
