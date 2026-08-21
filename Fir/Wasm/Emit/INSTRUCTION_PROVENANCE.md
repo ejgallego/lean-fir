@@ -186,9 +186,58 @@ identities and exactly one explicit profiling-gap token. The exact map,
 projection, legend, and report are each generated twice and compared
 byte-for-byte by the artifact gate.
 
-## Proposed evidence boundary
+## Real-package regeneration boundary
 
-No schema is accepted yet, but a viable first sidecar must bind at least:
+The compact prettyM regression exercises the origin encoder on a real
+self-contained source package without adding diagnostics to that package. The
+ordinary 120,831-byte module remains byte-identical whether or not the opt-in
+origin table is requested, at SHA-256
+`25c53d7c3d94969c32378739c878f6fb0eaddd208f7c3daa9a00c4a33fa5c020`.
+It contains 393 defined functions and 35,639 symbolic instruction origins.
+
+Serializing every rich in-memory field as repeated JSON produced a discarded
+37,201,538-byte research dump. The checked table instead groups origins by
+function and stores only absolute opcode offset, complete encoded size, and
+opcode bytes; function index, preorder, source token, public status, and
+source/resident classification are recorded once or derived from order. That
+table is 605,429 bytes at SHA-256
+`56ec162a614364e6bae18aade9448c8e3f8dd82de9ecb7db124898cca2c7ff20`.
+Two measured encode-and-write runs took 2,914 ms and 4,408 ms; this cost is
+paid only when the flag is requested.
+The rich `encodeWithOrigins` result remains available in Lean for local
+debugging; the compact file is only a regenerable tooling interchange.
+
+The generator exposes this explicitly rather than changing its normal output:
+
+```sh
+lake build fir-prettyM-artifact
+lake env .lake/build/bin/fir-prettyM-artifact \
+  --instruction-origins _build/prettyM.origins.json \
+  integration/talos/artifact/FirWasmPrettyTraceExample.lean \
+  _build/prettyM.wasm
+```
+
+The artifact gate generates the table twice, compares it byte-for-byte, and
+checks every opcode against the ordinary module. It does not add the table to
+the immutable prettyM package or its browser download.
+
+The same probe also rejects a premature optimized sidecar contract. With the
+pinned Binaryen pipeline, the ordinary optimized module is 49,417 bytes at
+SHA-256
+`8ae1c092d292878d9e92fa578500b4925a1df9d7a1397d07aff2b2b6453f8380`.
+Keeping debug locations long enough to emit the final map changes the stripped
+module to 49,813 bytes at SHA-256
+`f2b810c4e22197c93f52dfc9c215ec7052f5813af54e00713146296375bc8df7`.
+Consequently that map is not evidence about the canonical optimized release.
+FIR must not publish it as though it were; consumers can regenerate the input
+origin table when investigating a profile.
+
+## Deferred release-bound evidence
+
+There is no reason to publish this evidence for ordinary consumers: the
+compiler can regenerate it from source when a profiling investigation needs
+it. If a future use case requires archiving release-bound instruction
+evidence, that evidence must bind at least:
 
 - canonical stripped release byte length and SHA-256;
 - mapped companion byte length and SHA-256;
@@ -215,16 +264,14 @@ pipeline without changing release optimization.
 
 ## Remaining sequence
 
-1. Repeat the real `d8 --perf-prof` consumer check with the single-file line-ID
-   projection. It must parse, expose exact legend-backed JIT rows, preserve the
-   authoritative mapped/deleted/unknown classification, and never reassign a
-   deleted origin. Sampled hot-PC attribution remains deferred until a
-   consumer demonstrates native ranges covering hot Wasm code.
-2. After that repeat gate, W7 and tooling may agree on a versioned,
-   release-bound sidecar. The current Lean structures and projection are APIs,
-   not that package schema.
-3. Package integration remains opt-in until representative size and
-   generation-time measurements are recorded.
+1. Keep instruction origins opt-in and regenerate them only for a concrete
+   profiling investigation. Do not add them to ordinary application packages.
+2. Sampled hot-PC attribution remains deferred until a consumer demonstrates
+   native ranges covering hot Wasm code.
+3. A future release-bound optimized map must reproduce the independently
+   generated stripped release exactly. Until then the current Lean structures,
+   compact origin table, and projection are tooling APIs rather than a
+   published package schema.
 
 This sequence keeps the generic compiler evidence independent of lean-zip and
 avoids committing to an unconsumable package format.

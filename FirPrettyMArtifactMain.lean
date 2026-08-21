@@ -25,12 +25,19 @@ private unsafe def compileArtifact (sourcePath : System.FilePath) (moduleName en
   return artifact
 
 private def usage : String :=
-  "usage: fir-prettyM-artifact <fixture.lean> <output.wasm>\n" ++
-  "   or: fir-prettyM-artifact <fixture.lean> <module> <entry> <output.wasm>"
+  "usage: fir-prettyM-artifact [--instruction-origins <origins.json>] " ++
+  "<fixture.lean> <output.wasm>\n" ++
+  "   or: fir-prettyM-artifact [--instruction-origins <origins.json>] " ++
+  "<fixture.lean> <module> <entry> <output.wasm>"
 
 unsafe def run (args : List String) : IO UInt32 := do
   try
-    let (source, moduleName, entry, output) ← match args with
+    let (originOutput?, positional) : Option System.FilePath × List String :=
+      match args with
+      | "--instruction-origins" :: originOutput :: rest =>
+          (some originOutput, rest)
+      | _ => (none, args)
+    let (source, moduleName, entry, output) ← match positional with
       | [source, output] =>
           pure (source, `FirWasmPrettyTraceExample,
             `Fir.Wasm.Emit.SourceFixture.prettyFormatTraceRaw, output)
@@ -41,6 +48,13 @@ unsafe def run (args : List String) : IO UInt32 := do
           return 2
     let artifact ← compileArtifact source moduleName entry
     IO.ofExcept <| (← artifact.write output).mapError fun error => s!"{repr error}"
+    if let some originOutput := originOutput? then
+      let originsStarted ← IO.monoMsNow
+      IO.ofExcept <| (← artifact.writeInstructionOrigins originOutput).mapError
+        fun error => s!"{repr error}"
+      let originsFinished ← IO.monoMsNow
+      IO.println <| s!"prettyM: wrote instruction origins to {originOutput} " ++
+        s!"in {originsFinished - originsStarted}ms"
     IO.println s!"prettyM: wrote {artifact.bytes.size} bytes to {output}"
     return 0
   catch error =>

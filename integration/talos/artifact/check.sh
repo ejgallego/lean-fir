@@ -151,17 +151,27 @@ generate_source_artifacts() {
       "$here/FirWasmSourceExample.lean"
     FIR_PRETTYM_CHECKPOINTS=1 lake -d "$root" env lean \
       "$here/FirWasmPrettyTraceExample.lean"
+    env -u FIR_PRETTYM_CHECKPOINTS lake -d "$root" env "$pretty_generator" \
+      --instruction-origins \
+      "$here/_build/source-pretty-format-trace-resident-closed.origins.json" \
+      "$here/FirWasmPrettyTraceExample.lean" \
+      "$here/_build/source-pretty-format-trace-resident-closed.wasm"
   else
     env -u FIR_PRETTYM_CHECKPOINTS lake -d "$root" env "$pretty_generator" \
       "$here/FirWasmSourceExample.lean" FirWasmSourceExample \
       Fir.Wasm.Emit.SourceFixture.prettyFormatRaw \
       "$here/_build/source-pretty-format-resident-closed.wasm"
     env -u FIR_PRETTYM_CHECKPOINTS lake -d "$root" env "$pretty_generator" \
+      --instruction-origins \
+      "$here/_build/source-pretty-format-trace-resident-closed.origins.json" \
       "$here/FirWasmPrettyTraceExample.lean" \
       "$here/_build/source-pretty-format-trace-resident-closed.wasm"
   fi
 }
 generate_source_artifacts
+test -s _build/source-pretty-format-trace-resident-closed.origins.json
+cp _build/source-pretty-format-trace-resident-closed.origins.json \
+  _build/source-pretty-format-trace-resident-closed-first.origins.json
 mapfile -t source_artifacts < <(
   node --input-type=module -e '
     import { CONCRETE_SOURCE_PROBES } from "./concrete-corpus.mjs";
@@ -221,6 +231,11 @@ for resident_pretty in "${resident_pretties[@]}"; do
   done
 done
 generate_source_artifacts
+cmp _build/source-pretty-format-trace-resident-closed-first.origins.json \
+  _build/source-pretty-format-trace-resident-closed.origins.json
+node check-instruction-origins.mjs \
+  _build/source-pretty-format-trace-resident-closed.wasm \
+  _build/source-pretty-format-trace-resident-closed.origins.json
 for source in "${source_artifacts[@]}"; do
   cmp "_build/$source-first.wasm" "_build/$source.wasm"
   cmp "_build/$source-first.wasm.json" "_build/$source.wasm.json"

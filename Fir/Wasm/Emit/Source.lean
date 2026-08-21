@@ -1076,4 +1076,71 @@ def ModuleArtifact.write (artifact : ModuleArtifact) (path : System.FilePath) :
 def Artifact.write (artifact : Artifact) (path : System.FilePath) : IO Unit := do
   writeArtifactFiles artifact.toModuleArtifact artifact.manifest path
 
+private def compactInstructionOriginJson (origin : InstructionOrigin) : Json :=
+  Json.arr #[
+    origin.offset,
+    origin.encodedSize,
+    Json.arr <| origin.opcode.map fun byte => byte.toNat]
+
+/--
+Return opt-in, release-byte-checked symbolic instruction provenance for a
+compiled source artifact. The ordinary artifact writer remains unchanged.
+-/
+def ModuleArtifact.instructionOriginsJson (artifact : ModuleArtifact) :
+    Except CompileError Json := do
+  let encoding ← match Fir.Wasm.Emit.encodeWithOrigins artifact.module with
+    | .ok encoding => pure encoding
+    | .error error => throw (.encoding error)
+  unless encoding.bytes == artifact.bytes do
+    throw (.encoding (.invalidOriginTrace
+      "origin encoding changed the ordinary artifact bytes"))
+  let functions := artifact.module.functions.map (·.name)
+  let sourceFunctions := artifact.source.program.decls.filterMap fun declaration =>
+    match declaration.value with
+    | .code _ => some declaration.name
+    | .extern _ => none
+  let retainedSourceFunctions := sourceFunctions.filter functions.contains
+  let residentHelpers := functions.filter fun name =>
+    !retainedSourceFunctions.contains name
+  let functionImports := artifact.module.imports.size
+  let functionRows := functions.mapIdx fun ordinal name =>
+    let functionIndex := functionImports + ordinal
+    let origins := encoding.origins.filter (·.functionIndex == functionIndex)
+    let kind := if retainedSourceFunctions.contains name then
+        "lean-source"
+      else if residentHelpers.contains name then
+        "resident-helper"
+      else
+        "unclassified-definition"
+    Json.mkObj [
+      ("index", functionIndex),
+      ("name", name.toString),
+      ("kind", kind),
+      ("public", artifact.module.exports.contains name),
+      ("source", s!"fir-wasm-origin/{functionIndex}/{name}"),
+      ("origins", Json.arr <| origins.map compactInstructionOriginJson)]
+  return Json.mkObj [
+    ("schema", "fir.wasm.instruction-origins/v1"),
+    ("artifact", Json.mkObj [
+      ("byteLength", artifact.bytes.size),
+      ("functionImports", functionImports),
+      ("definedFunctions", functions.size),
+      ("originCount", encoding.origins.size)]),
+    ("encoding", Json.mkObj [
+      ("functionOrder", "defined-function-order"),
+      ("originOrder", "symbolic-preorder"),
+      ("originRow", Json.arr #["absoluteOpcodeOffset", "encodedSize", "opcodeBytes"])]),
+    ("functions", Json.arr functionRows)]
+
+/-- Write only the opt-in symbolic instruction-origin table. -/
+def ModuleArtifact.writeInstructionOrigins (artifact : ModuleArtifact)
+    (path : System.FilePath) : IO (Except CompileError Unit) := do
+  let origins ← match artifact.instructionOriginsJson with
+    | .ok origins => pure origins
+    | .error error => return .error error
+  if let some parent := path.parent then
+    IO.FS.createDirAll parent
+  IO.FS.writeFile path (origins.compress ++ "\n")
+  return .ok ()
+
 end Fir.Wasm.Emit.Source
