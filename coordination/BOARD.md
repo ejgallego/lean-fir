@@ -15,21 +15,23 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Active integration lease
 
-- Milestone: `W6-LET-KIND-ADMISSION-PREP`.
+- Milestone: `W6-W7-DIRECT-NAT-RESULT`.
 - Integration owner: `wasm-proof`, taking a narrow landing lease by explicit
-  user assignment while no `wasm-gen` agent is live. The lease covers the
-  green W6 hygiene/kind-selection preparation, mailbox reconciliation, and
-  serialization of W7's direct-result `Nat.add` successor before returning to
-  `wasm-gen`; feature ownership remains with each lane.
-- Current checkpoint: W6 hygiene/kind-selection preparation is accepted on
-  `main` through tracked handoff `dab82804` (functional head `ae38a33b`). W7
-  now rebases its direct-result `Nat.add` stack through tracked head
+  user assignment while W7 develops the separately isolated hygiene contract.
+  The lease covers the green W6 direct-result proof preparation, mailbox
+  reconciliation, and serialization of W7's direct-result `Nat.add` successor
+  before returning to `wasm-gen`; feature ownership remains with each lane.
+- Current checkpoint: W6's generic typed object-word round-trip proof is
+  accepted through tracked handoff `b777ea50` (functional head `7e1a47fb`),
+  following the earlier hygiene/kind-selection preparation through
+  `dab82804`. W7 now rebases its direct-result `Nat.add` stack through tracked head
   `d52bd067` (functional head `6a020114`, exact ratchet `c7303630`) on that
-  baseline and returns the exact rebased head. W6 then rebases on that head and
-  adapts `ConcreteResidentNat`. The generation and proof successors land
-  atomically so `main` never exposes the known stale Talos proof. Shared
-  transparent-hygiene admission remains a separate contract request in
-  operational thread `W6-W7-20260820-021`.
+  accepted baseline and returns the exact rebased head. W6 then specializes
+  the physical theorem to `naturalSum`'s tagged-or-live-heap result in
+  `ConcreteResidentNat`. The generation and proof successors land atomically
+  so `main` never exposes the known stale Talos proof. Shared
+  transparent-hygiene work remains isolated in operational thread
+  `W6-W7-20260820-021` until this checkpoint closes.
 - Accepted baseline: `main` contains the complete
   `W7-ILLUMINATE-SELECTION-CATALOG-EXPORT` stack through tracked lane head
   `5081015a` and the independently isolated
