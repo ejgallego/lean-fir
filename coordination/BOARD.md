@@ -15,23 +15,25 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Active integration lease
 
-- Milestone: `W6-W7-DIRECT-NAT-RESULT`.
-- Integration owner: `wasm-proof`, taking a narrow landing lease by explicit
-  user assignment while W7 develops the separately isolated hygiene contract.
-  The lease covers the green W6 direct-result proof preparation, mailbox
-  reconciliation, and serialization of W7's direct-result `Nat.add` successor
-  before returning to `wasm-gen`; feature ownership remains with each lane.
-- Current checkpoint: W6's generic typed object-word round-trip proof is
-  accepted through tracked handoff `b777ea50` (functional head `7e1a47fb`),
-  following the earlier hygiene/kind-selection preparation through
-  `dab82804`. W7 now rebases its direct-result `Nat.add` stack through tracked head
-  `d52bd067` (functional head `6a020114`, exact ratchet `c7303630`) on that
-  accepted baseline and returns the exact rebased head. W6 then specializes
-  the physical theorem to `naturalSum`'s tagged-or-live-heap result in
-  `ConcreteResidentNat`. The generation and proof successors land atomically
-  so `main` never exposes the known stale Talos proof. Shared
-  transparent-hygiene work remains isolated in operational thread
-  `W6-W7-20260820-021` until this checkpoint closes.
+- Milestone: `W6-W7-DIRECT-NAT-RESULT`, linked/accepted.
+- Integration owner: `wasm-proof`, completing the narrow landing lease assigned
+  by the user. The accepted stack preserves feature ownership and returns the
+  next shared-contract checkpoint to `wasm-gen` after this atomic advance.
+- Current checkpoint: W7's scratch-free direct-result `Nat.add` generation is
+  accepted at functional head `04d54c38`, exact lean-zip ratchet `c7d38522`,
+  and refreshed tracked handoff `3f4f7f2a`, based directly on `main` at
+  `90ac4bad`. W6's matching implementation-to-Talos refinement follows at
+  functional head `8553f720` and tracked handoff `c8e0a1ab`. The operation
+  theorem retains a `ValueRel` premise for the semantic tagged Natural, so the
+  exact word may be canonical immediate or promoted live-heap representation
+  but cannot be an arbitrary `i32`; the checked fallback is unchanged. Lean
+  Beam, the focused 3,078-job proof cone, all 713 repository cases and
+  2,121/2,121 comparisons, and all 3,167 Talos jobs pass. W7's exact parent
+  records the complete 44-artifact/15-source-probe gate. The generation and
+  proof successors advance `main` atomically, so no stale-proof intermediate is
+  exposed. Next, W7 rebases the isolated transparent-hygiene candidate
+  `ad6e0ff3` onto this accepted main and W6 supplies its two known consumer
+  adaptations under operational thread `W6-W7-20260820-021`.
 - Accepted baseline: `main` contains the complete
   `W7-ILLUMINATE-SELECTION-CATALOG-EXPORT` stack through tracked lane head
   `5081015a` and the independently isolated
@@ -153,6 +155,12 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   operations and lean-zip's order-balanced median improves by 4.45%. The proof
   establishes the exact `UInt8` relation with unchanged store and caller tail,
   without a positive-memory premise or scratch locals.
+  W7's direct-result `Nat.add` successor is accepted at `04d54c38` with exact
+  ratchet `c7d38522` and refreshed handoff `3f4f7f2a`, followed atomically by
+  W6's proof at `8553f720` and tracked handoff `c8e0a1ab`. The immediate-input
+  arm preserves the already-related Natural object word through a typed
+  unsigned-extend/wrap pair without scratch traffic; the checked fallback,
+  naturalSum implementation, ABI, layout, and helper signatures are unchanged.
 - Landing order:
   1. W7-2's Verso source-module replay repair and generic immutable-package
      publisher are accepted in that order through `912bf68a`.
@@ -264,6 +272,11 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
       refinement and tracked handoff at `8ae0f5c3`. Integration validates the
       combined stack before advancing main, so the old pinned scratch proof is
       never exposed as a red integration checkpoint.
+  24. W7's direct-result `Nat.add` body, exact lean-zip ratchet, and refreshed
+      tracked handoff land through `3f4f7f2a`, immediately followed by W6's
+      operation-specific `ValueRel` refinement and tracked handoff through
+      `c8e0a1ab`. The combined stack advances atomically; the separately
+      isolated impure-hygiene contract rebases afterward.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -5049,6 +5062,19 @@ candidate hashes in the lane and contract tables remain historical provenance
 until their stacks land and must not be used as current feature-branch
 identities.
 
+- `W6-W7-DIRECT-NAT-RESULT` is linked/accepted through W7 functional head
+  `04d54c38`, ratchet `c7d38522`, and tracked handoff `3f4f7f2a`, followed
+  atomically by W6 functional proof `8553f720` and tracked handoff `c8e0a1ab`,
+  all based on `main` at `90ac4bad`. The emitted immediate-input `Nat.add` arm
+  returns the already-related `naturalSum` object through the typed scratch-free
+  word round trip. The proof preserves exact store, memory, result word, and
+  caller tail for the semantic tagged Natural relation, covering canonical and
+  promoted representations while rejecting an arbitrary word. The complete W7
+  artifact gate, Lean Beam, the focused 3,078-job proof cone, all 713 repository
+  cases and 2,121/2,121 comparisons, and all 3,167 Talos jobs pass. The next
+  serialized checkpoint is the transparent impure-hygiene contract and its two
+  W6 consumers.
+
 - `W6-FINITE-TRACE-ROADMAP-ALIGNMENT` is linked/accepted through active
   record `90a89664`, documentation functional head `e46a5b86`, and ready
   mailbox `d70ef62d`, based directly on `main` at `14cc46ad`. The three W6
@@ -5743,7 +5769,7 @@ validation work continues; their historical handoff text remains unchanged.
 | `WASM-CORE-SCALAR-SURFACE` | integration | W6, W7, validation, binary/Talos adapters | released | isolated contract `43ab6619`; queue `8484c0be` | Completes FIR's typed scalar core vocabulary rather than synthesizing standard machine operations in resident helpers: all wasm32/wasm64 integer arithmetic, comparison, bitwise, shift/rotate/count operations; the f32/f64 arithmetic, unary, comparison, constant, and scalar-memory families; all scalar integer memory widths; and the core numeric conversion, sign-extension, saturating-conversion, and reinterpretation families. The binary encoder, symbolic validator, Talos adapter, and executable 163-case opcode fixture advance atomically. Table/reference calls, GC, exceptions, SIMD, atomics, and bulk-memory remain separately modelled subsystems, not silently claimed by this scalar contract. W7 rebases before resident-helper loop removal in separate consumer commits; W6 requires no proof adaptation. |
 | `WASM-SETTAG-UINT32-ADMISSION` | integration/W6 proof | W6, W7, validation | released | isolated contract `982ed402`; proof consumer `e8def3a8`; mailbox `7f7e51fa`; bug card `FIR-BUG-wasm-none-settag-uint32-admission` fixed | Requires every production-accepted source `.setTag` value to satisfy `tag < UInt32.size`, matching the unbounded source `Nat` to the concrete wasm32 header instead of silently wrapping. The first excluded value has a fail-closed `supportedProgram`/`lowerSupported` regression. W6 now derives the exact compiler local, range, live-constructor shape, and semantic update from validation plus one successful source step. W7 and validation rebase without generated-code, ABI, runtime, layout, helper-signature, or artifact adaptation. |
 | `WASM-STRUCTURED-VALIDATION-TOTALITY` | W6/integration | W6, W7, validation | released | isolated contract `72856600`; proof consumer `42fb2d5d`; mailbox `c07eaf4b` | Replaces opaque partial `supportedCodeWithJoins` recursion with a terminating traversal and an explicit alternative-list helper. The helper is proved extensionally equal to the former `Array.all` check, preserving production acceptance while exposing equations needed by the compiler-correctness proof. W7 and validation rebase; no generated code, semantic ABI, concrete runtime, or artifact adaptation is required. |
-| `WASM-IMPURE-BINDER-HYGIENE-VISIBILITY` | integration/W7 | W6 compiler correctness, W7, validation | active | operational thread `W6-W7-20260820-021`; claimed branch `integration/impure-hygiene` at base `1fbe39e9` | Retains `Program.ImpureHygienic` as the sole admitted invariant while replacing its opaque partial binder traversal with a total, proof-visible shared traversal and exposing the existing invariant through `WasmSupported`. The first proof surface supplies declaration-wide pairwise freshness plus transparent let/join/case equations. It adds no Wasm-only certificate, ABI, layout, lowering-behavior, or resident-helper change. The isolated contract waits behind the direct-result `Nat.add` generation/proof checkpoint before landing. |
+| `WASM-IMPURE-BINDER-HYGIENE-VISIBILITY` | integration/W7 | W6 compiler correctness, W7, validation | active | operational thread `W6-W7-20260820-021`; clean candidate `ad6e0ff3` on base `90ac4bad` | Retains `Program.ImpureHygienic` as the sole admitted invariant while replacing its opaque partial binder traversal with a total, proof-visible shared traversal and exposing the existing invariant through `WasmSupported`. The first proof surface supplies declaration-wide pairwise freshness plus transparent let/join/case equations. It adds no Wasm-only certificate, ABI, layout, lowering-behavior, or resident-helper change. After the accepted direct-result `Nat.add` checkpoint, W7 rebases this isolated contract and W6 adapts `ConcreteSupportedExportCorrectness` plus the raw function-case example before landing it as a separate shared-contract slice. |
 | `LEAN-4.33-UPGRADE` | integration | pass proof, W6, W7, validation, artifact clients | released | landed stack through `476f001b`; Verso source `eb8d2b8f`; Talos pin `0e05edbc` | Moves every live FIR toolchain and versioned package contract to Lean 4.33.0 while preserving the semantic Wasm ABI, concrete layout, and resident-helper signatures. All surviving lanes rebase before continuing; historical 4.32 records remain provenance. |
 | `LANE-W6-W7-SPLIT` | integration | W6, W7, harness | released | `9cb483f` | Gives W6 and W7 independent branches and worktrees |
 | `RESET-ERASED-RELEASE` | integration | pass proof, W6, validation | released | `373b0a9` | Reset treats erased ownership slots as no-ops; proof adaptation `8c2fff6`, W6 adaptation `afd7ab0`, and validation observation `3b82b0b` are landed |
