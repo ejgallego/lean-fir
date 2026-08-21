@@ -55,7 +55,9 @@ function sha256(path) {
 }
 
 const base64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-const profilingGapSource = "fir-wasm-unmapped/profiling-v1";
+const profilingSource = "fir-wasm-profile/profiling-v1";
+const profilingUnknownToken = "fir-wasm-unmapped/profiling-v1";
+const profilingUnknownLine = 1;
 
 function decodeVlq(text, start) {
   let value = 0;
@@ -166,59 +168,94 @@ function sourceLocations(sourceMapPath) {
     })));
 }
 
-function writeProfilingProjection(exactMapPath, projectionPath) {
+function profilingLegend() {
+  assert.equal(sourceOrigins.size, originRows.length,
+    "origin table contains duplicate tokens");
+  return {
+    schema: "fir.wasm.instruction-profile-legend/v1",
+    source: profilingSource,
+    entries: [
+      { line: profilingUnknownLine, kind: "unknown", token: profilingUnknownToken },
+      ...[...sourceOrigins].sort().map((token, index) => ({
+        line: index + 2,
+        kind: "origin",
+        token,
+      })),
+    ],
+  };
+}
+
+function writeProfilingProjection(exactMapPath, projectionPath, legendPath) {
   const exact = JSON.parse(readFileSync(exactMapPath, "utf8"));
   assert.equal(exact.version, 3);
-  assert(!exact.sources.includes(profilingGapSource),
-    "exact map already contains the reserved profiling-gap source");
+  assert(!exact.sources.includes(profilingSource),
+    "exact map already contains the reserved profiling source");
+  const legend = profilingLegend();
+  const byToken = new Map(legend.entries.map(entry => [entry.token, entry]));
+  assert.equal(byToken.size, legend.entries.length,
+    "profiling legend contains duplicate tokens");
   const exactLines = decodeMappings(exact);
-  const gapSourceIndex = exact.sources.length;
-  let gapLine = 0;
+  let gapCount = 0;
   const projectedLines = exactLines.map(segments => segments.map(segment => {
-    if (segment.sourceIndex !== undefined) return { ...segment };
+    let line = profilingUnknownLine;
+    if (segment.sourceIndex !== undefined) {
+      const token = `${exact.sources[segment.sourceIndex]}:${segment.sourceLine + 1}`;
+      const entry = byToken.get(token);
+      assert.equal(entry?.kind, "origin", `missing profiling legend origin ${token}`);
+      line = entry.line;
+    } else {
+      gapCount += 1;
+    }
     return {
       generatedColumn: segment.generatedColumn,
-      sourceIndex: gapSourceIndex,
-      sourceLine: gapLine++,
+      sourceIndex: 0,
+      sourceLine: line - 1,
       sourceColumn: 0,
+      ...(segment.nameIndex === undefined ? {} : { nameIndex: segment.nameIndex }),
     };
   }));
-  assert(gapLine > 0, "fixture no longer exercises an unmapped interval");
+  assert(gapCount > 0, "fixture no longer exercises an unmapped interval");
   const projection = {
     ...exact,
-    sources: [...exact.sources, profilingGapSource],
+    sources: [profilingSource],
     mappings: encodeMappings(projectedLines),
   };
   if (exact.sourcesContent !== undefined) {
-    projection.sourcesContent = [...exact.sourcesContent, null];
+    projection.sourcesContent = [null];
   }
   const roundTrip = decodeMappings(projection);
   assert.equal(roundTrip.flat().length, exactLines.flat().length);
   assert(roundTrip.flat().every(segment => segment.sourceIndex !== undefined),
     "profiling projection still contains a V8-incompatible unmapped segment");
-  let expectedGapLine = 0;
+  let verifiedGapCount = 0;
   for (const [lineIndex, exactSegments] of exactLines.entries()) {
     const projectedSegments = roundTrip[lineIndex];
     assert.equal(projectedSegments.length, exactSegments.length);
     for (const [segmentIndex, exactSegment] of exactSegments.entries()) {
       const projectedSegment = projectedSegments[segmentIndex];
       assert.equal(projectedSegment.generatedColumn, exactSegment.generatedColumn);
+      let expectedLine = profilingUnknownLine;
       if (exactSegment.sourceIndex !== undefined) {
-        assert.deepEqual(projectedSegment, exactSegment,
-          "profiling projection changed an authoritative mapped segment");
+        const token = `${exact.sources[exactSegment.sourceIndex]}:${exactSegment.sourceLine + 1}`;
+        expectedLine = byToken.get(token).line;
       } else {
-        assert.deepEqual(projectedSegment, {
-          generatedColumn: exactSegment.generatedColumn,
-          sourceIndex: gapSourceIndex,
-          sourceLine: expectedGapLine++,
-          sourceColumn: 0,
-        }, "profiling projection failed to preserve an explicit gap identity");
+        verifiedGapCount += 1;
       }
+      assert.deepEqual(projectedSegment, {
+        generatedColumn: exactSegment.generatedColumn,
+        sourceIndex: 0,
+        sourceLine: expectedLine - 1,
+        sourceColumn: 0,
+        ...(exactSegment.nameIndex === undefined ? {} : {
+          nameIndex: exactSegment.nameIndex,
+        }),
+      }, "profiling projection changed a line-ID identity");
     }
   }
-  assert.equal(expectedGapLine, gapLine);
+  assert.equal(verifiedGapCount, gapCount);
   writeFileSync(projectionPath, `${JSON.stringify(projection)}\n`);
-  return { gapCount: gapLine };
+  writeFileSync(legendPath, `${JSON.stringify(legend, null, 2)}\n`);
+  return { gapCount, legend };
 }
 
 function classify(mapPath, { expectedUnknown = [] } = {}) {
@@ -254,6 +291,62 @@ function classify(mapPath, { expectedUnknown = [] } = {}) {
     // propagation. This diagnostic list makes that multiplicity explicit; it
     // is not resolved by ordering or nearest-neighbor matching.
     repeatedMappings: duplicateKeys.sort(),
+    mappingCount: locations.length,
+  };
+}
+
+function classifyProfilingProjection(mapPath, legendPath) {
+  const sourceMap = JSON.parse(readFileSync(mapPath, "utf8"));
+  const legend = JSON.parse(readFileSync(legendPath, "utf8"));
+  assert.equal(legend.schema, "fir.wasm.instruction-profile-legend/v1");
+  assert.equal(legend.source, profilingSource);
+  assert.deepEqual(sourceMap.sources, [profilingSource]);
+
+  const byLine = new Map();
+  const byToken = new Map();
+  for (const [index, entry] of legend.entries.entries()) {
+    assert(Number.isSafeInteger(entry.line) && entry.line > 0,
+      "profiling legend line must be a positive safe integer");
+    assert.equal(entry.line, index + 1,
+      "profiling legend lines must be dense and deterministic");
+    assert(entry.kind === "origin" || entry.kind === "unknown");
+    assert(!byLine.has(entry.line), `duplicate profiling line ${entry.line}`);
+    assert(!byToken.has(entry.token), `duplicate profiling token ${entry.token}`);
+    byLine.set(entry.line, entry);
+    byToken.set(entry.token, entry);
+  }
+  assert.deepEqual(byLine.get(profilingUnknownLine), {
+    line: profilingUnknownLine,
+    kind: "unknown",
+    token: profilingUnknownToken,
+  });
+  const legendOrigins = new Set(legend.entries
+    .filter(entry => entry.kind === "origin").map(entry => entry.token));
+  assert.deepEqual([...legendOrigins].sort(), [...sourceOrigins].sort(),
+    "profiling legend does not cover the complete origin table");
+
+  const locations = sourceLocations(mapPath);
+  const mapped = new Set();
+  const unknown = new Set();
+  const repeated = new Set();
+  const seenLines = new Set();
+  for (const location of locations) {
+    assert.equal(location.source, profilingSource);
+    const entry = byLine.get(location.line);
+    assert(entry !== undefined, `profiling line ${location.line} has no legend row`);
+    if (seenLines.has(location.line)) repeated.add(location.line);
+    seenLines.add(location.line);
+    if (entry.kind === "origin") mapped.add(entry.token);
+    else unknown.add(entry.token);
+  }
+  const deleted = [...sourceOrigins].filter(token => !mapped.has(token)).sort();
+  return {
+    schema: "fir.wasm.instruction-profiling-map/v2",
+    mapped: [...mapped].sort(),
+    deleted,
+    unknown: [...unknown].sort(),
+    ambiguous: [],
+    repeatedLines: [...repeated].sort((left, right) => left - right),
     mappingCount: locations.length,
   };
 }
@@ -329,15 +422,14 @@ function pipeline(label) {
   ]);
   const classification = classify(finalMap);
   const profilingMap = path("profiling.map");
-  const projection = writeProfilingProjection(finalMap, profilingMap);
-  const expectedProfilingUnknown = Array.from({ length: projection.gapCount },
-    (_, index) => `${profilingGapSource}:${index + 1}`);
-  const profilingClassification = classify(profilingMap, {
-    expectedUnknown: expectedProfilingUnknown,
-  });
-  assert.deepEqual(profilingClassification.mapped,
-    [...classification.mapped, ...expectedProfilingUnknown].sort());
+  const profilingLegend = path("profiling.legend.json");
+  const projection = writeProfilingProjection(
+    finalMap, profilingMap, profilingLegend);
+  const profilingClassification = classifyProfilingProjection(
+    profilingMap, profilingLegend);
+  assert.deepEqual(profilingClassification.mapped, classification.mapped);
   assert.deepEqual(profilingClassification.deleted, classification.deleted);
+  assert.deepEqual(profilingClassification.unknown, [profilingUnknownToken]);
   assert.deepEqual(profilingClassification.ambiguous, classification.ambiguous);
   const report = path("report.json");
   writeFileSync(report, `${JSON.stringify({
@@ -353,11 +445,19 @@ function pipeline(label) {
       sha256: sha256(finalMap),
     },
     profilingProjection: {
-      schema: "fir.wasm.instruction-profiling-map/v1",
-      gapSource: profilingGapSource,
+      schema: profilingClassification.schema,
+      source: profilingSource,
+      unknownLine: profilingUnknownLine,
+      explicitGapCount: projection.gapCount,
       explicitUnknown: profilingClassification.unknown,
       bytes: readFileSync(profilingMap).length,
       sha256: sha256(profilingMap),
+      legend: {
+        schema: projection.legend.schema,
+        rows: projection.legend.entries.length,
+        bytes: readFileSync(profilingLegend).length,
+        sha256: sha256(profilingLegend),
+      },
     },
   }, null, 2)}\n`);
   return {
@@ -365,6 +465,7 @@ function pipeline(label) {
     companion,
     finalMap,
     profilingMap,
+    profilingLegend,
     report,
     classification,
     profilingClassification,
@@ -379,6 +480,8 @@ equalFile(first.companion, second.companion,
 equalFile(first.finalMap, second.finalMap, "source map is nondeterministic");
 equalFile(first.profilingMap, second.profilingMap,
   "profiling projection is nondeterministic");
+equalFile(first.profilingLegend, second.profilingLegend,
+  "profiling legend is nondeterministic");
 equalFile(first.report, second.report, "classification report is nondeterministic");
 
 console.log(`instruction provenance fixture: ${first.classification.mapped.length} mapped, ` +

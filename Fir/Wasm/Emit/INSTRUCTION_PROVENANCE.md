@@ -1,10 +1,11 @@
 # Exact-release Wasm instruction provenance checkpoint
 
 Status: additive encoder-origin trace, deterministic optimizer fixture, and
-explicit profiling-map projection implemented. The real `d8` control confirms
-the location identity but exposed one source-map compatibility boundary. This
-document does not define a stable package format and does not change the
-ordinary encoder, optimizer flags, or benchmark artifact.
+single-file line-ID profiling projection implemented. Real `d8` controls
+confirm that the line identities reach JIT debug rows, while exposing limits
+in V8's filename and sampled-range transport. This document does not define a
+stable package format and does not change the ordinary encoder, optimizer
+flags, or benchmark artifact.
 
 ## Question
 
@@ -95,13 +96,26 @@ survives the `d8` JIT-dump path. That edit is not accepted: it extends the
 preceding origin over the interval that Binaryen deliberately marked unmapped.
 The exact map therefore remains authoritative.
 
-The deterministic profiling projection instead replaces each one-field gap
-with a unique line in the reserved non-origin source
-`fir-wasm-unmapped/profiling-v1`. It does not alter any mapped segment. A native
-PC on one of those lines is explicitly `unknown`, never a neighboring origin;
-pre-optimization origins absent from the exact map remain `deleted`. This map
-is a diagnostic compatibility view, not a standards-correct replacement for
-the exact Binaryen map.
+Further controls established two stricter V8 boundaries. First, the d8 JIT
+event chooses one filename from the first valid mapping for the entire Wasm
+function; later mappings contribute only line numbers. Distinct per-origin
+filenames therefore cannot represent intra-function FIR origins. Second, a
+memory-bearing probe made multiple projected line IDs visible to `addr2line`,
+but V8 placed those native rows after the sampled hot body. Perf consequently
+reported hot Wasm PCs as unknown even though the JIT line table contained the
+projected identities. Requiring sampled hot-PC attribution from this V8 build
+would test its range coverage rather than FIR provenance correctness.
+
+The implemented diagnostic projection uses the single source
+`fir-wasm-profile/profiling-v1`. Line 1 is the explicit non-origin token
+`fir-wasm-unmapped/profiling-v1`; deterministic lines 2 onward name every row
+of the complete pre-optimization origin table through a separate checksummed
+legend. Each exact mapped segment retains its generated column and optional
+name while selecting the corresponding legend line. Each standard unmapped
+segment selects line 1. A native PC on that line is `unknown`, never a
+neighboring origin; origins absent from the authoritative exact map remain
+`deleted`. This projection is a diagnostic compatibility view, not a
+standards-correct replacement for the exact Binaryen map.
 
 ## Proposed narrow compiler surface
 
@@ -163,11 +177,14 @@ and the inlined call site remains deleted rather than being reassigned.
 
 The exact map remains 230 bytes at SHA-256
 `c9cfaf027b3da1529fd4d26e95b34eb76b7dcc1a6e5362d2a064c9d1f2355722`.
-The V8-compatible profiling projection is 267 bytes at SHA-256
-`96680e47878348d162820e6fe022e053c8743704697a7a36d9379efe6b9581fd`;
-it retains the same seven mapped and five deleted origin identities and adds
-exactly one explicit profiling-gap identity. Both maps are generated twice and
-compared byte-for-byte by the artifact gate.
+The V8-compatible line-ID projection is 123 bytes at SHA-256
+`57b954865e27242c6043da3fd2767201004067570618216c49b11b69cc10a72e`.
+Its 13-row legend is 1,497 bytes at SHA-256
+`cc19ac9f429560515f00382e9182c5fa157088706064aa30aea4a45a0330a433`.
+The projection resolves to the same seven mapped and five deleted origin
+identities and exactly one explicit profiling-gap token. The exact map,
+projection, legend, and report are each generated twice and compared
+byte-for-byte by the artifact gate.
 
 ## Proposed evidence boundary
 
@@ -177,6 +194,7 @@ No schema is accepted yet, but a viable first sidecar must bind at least:
 - mapped companion byte length and SHA-256;
 - final source-map byte length and SHA-256;
 - origin-table byte length and SHA-256;
+- profiling projection and line-ID legend byte lengths and SHA-256 values;
 - exact Binaryen version and ordered arguments for every transforming stage;
 - the existing final function-index sidecar identity; and
 - explicit counts for mapped, deleted, and unknown origins.
@@ -197,9 +215,11 @@ pipeline without changing release optimization.
 
 ## Remaining sequence
 
-1. Repeat the real `d8 --perf-prof` capture with the explicit profiling
-   projection. The injected debug-line table must contain both a surviving
-   origin and the reserved gap line, and no deleted origin may be reassigned.
+1. Repeat the real `d8 --perf-prof` consumer check with the single-file line-ID
+   projection. It must parse, expose exact legend-backed JIT rows, preserve the
+   authoritative mapped/deleted/unknown classification, and never reassign a
+   deleted origin. Sampled hot-PC attribution remains deferred until a
+   consumer demonstrates native ranges covering hot Wasm code.
 2. After that repeat gate, W7 and tooling may agree on a versioned,
    release-bound sidecar. The current Lean structures and projection are APIs,
    not that package schema.
