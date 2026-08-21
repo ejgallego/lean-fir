@@ -15,11 +15,19 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Active integration lease
 
-- Milestone: `MULTI-LANE-CONSOLIDATION-20260814`.
-- Integration owner: `wasm-gen`, resuming the integration lease for the
-  lean-zip regeneration by explicit user assignment after W6 completed its
-  serialized proof landing. The lease covers landing coordination only;
-  feature ownership remains with each lane.
+- Milestone: `W6-LET-KIND-ADMISSION-PREP`.
+- Integration owner: `wasm-proof`, taking a narrow landing lease by explicit
+  user assignment while no `wasm-gen` agent is live. The lease covers the
+  green W6 hygiene/kind-selection preparation, mailbox reconciliation, and
+  serialization of W7's direct-result `Nat.add` successor before returning to
+  `wasm-gen`; feature ownership remains with each lane.
+- Current checkpoint: land W6 ready head `60c59553` (functional head
+  `1952e707`) on accepted main `1fbe39e9`. W7 then rebases generation head
+  `c7303630` and its tracked handoff on the accepted W6 baseline; W6 rebases on
+  that exact generation head before adapting `ConcreteResidentNat`. The
+  generation and proof successors land atomically so `main` never exposes the
+  known stale Talos proof. Shared transparent-hygiene admission remains a
+  separate contract request in operational thread `W6-W7-20260820-021`.
 - Accepted baseline: `main` contains the complete
   `W7-ILLUMINATE-SELECTION-CATALOG-EXPORT` stack through tracked lane head
   `5081015a` and the independently isolated
