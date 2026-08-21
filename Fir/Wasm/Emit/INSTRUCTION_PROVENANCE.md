@@ -1,8 +1,10 @@
 # Exact-release Wasm instruction provenance checkpoint
 
-Status: additive encoder-origin trace and deterministic optimizer fixture
-implemented. This document does not define a stable package format and does
-not change the ordinary encoder, optimizer flags, or benchmark artifact.
+Status: additive encoder-origin trace, deterministic optimizer fixture, and
+explicit profiling-map projection implemented. The real `d8` control confirms
+the location identity but exposed one source-map compatibility boundary. This
+document does not define a stable package format and does not change the
+ordinary encoder, optimizer flags, or benchmark artifact.
 
 ## Question
 
@@ -78,6 +80,29 @@ the current Node profiler. Tooling selected V8 `d8` with source-map-aware
 synthetic source filename and one-based source line; it does not expose a
 source-map column or inline stack. Node remains the exact-function consumer.
 
+### Real d8 compatibility result
+
+Tooling ran V8 15.4.29 from `jsvu` 3.0.5 with perf 6.19.10 against the exact
+121-byte companion and 230-byte Binaryen map below. `d8` opened the map, but
+its Wasm decoder requires four fields in every segment and rejected the final
+standard one-field unmapped segment. The 2,570-sample exact capture retained
+the expected `JS:entry-0-liftoff` symbol, but its injected ELF consequently had
+no debug-line section or synthetic filename.
+
+Removing that terminal segment for diagnosis made native PC `0x102` resolve to
+`fir-wasm-origin/1/fixture.entry:1`, proving that filename plus one-based line
+survives the `d8` JIT-dump path. That edit is not accepted: it extends the
+preceding origin over the interval that Binaryen deliberately marked unmapped.
+The exact map therefore remains authoritative.
+
+The deterministic profiling projection instead replaces each one-field gap
+with a unique line in the reserved non-origin source
+`fir-wasm-unmapped/profiling-v1`. It does not alter any mapped segment. A native
+PC on one of those lines is explicitly `unknown`, never a neighboring origin;
+pre-optimization origins absent from the exact map remain `deleted`. This map
+is a diagnostic compatibility view, not a standards-correct replacement for
+the exact Binaryen map.
+
 ## Proposed narrow compiler surface
 
 The implemented W7 surface is an additive encoder result rather than a new
@@ -136,6 +161,14 @@ The final classification is seven mapped, five deleted, zero unknown, and zero
 ambiguous origin keys. In particular, both surviving additions remain mapped
 and the inlined call site remains deleted rather than being reassigned.
 
+The exact map remains 230 bytes at SHA-256
+`c9cfaf027b3da1529fd4d26e95b34eb76b7dcc1a6e5362d2a064c9d1f2355722`.
+The V8-compatible profiling projection is 267 bytes at SHA-256
+`96680e47878348d162820e6fe022e053c8743704697a7a36d9379efe6b9581fd`;
+it retains the same seven mapped and five deleted origin identities and adds
+exactly one explicit profiling-gap identity. Both maps are generated twice and
+compared byte-for-byte by the artifact gate.
+
 ## Proposed evidence boundary
 
 No schema is accepted yet, but a viable first sidecar must bind at least:
@@ -164,11 +197,12 @@ pipeline without changing release optimization.
 
 ## Remaining sequence
 
-1. Run the mapped companion through a real `d8 --perf-prof` capture and prove
-   that its native-PC debug lines resolve the surviving synthetic source/line
-   keys. No suitable `d8` executable is installed on the current host.
-2. After that capture, W7 and tooling may agree on a versioned, release-bound
-   sidecar. The current Lean structures are an API, not that package schema.
+1. Repeat the real `d8 --perf-prof` capture with the explicit profiling
+   projection. The injected debug-line table must contain both a surviving
+   origin and the reserved gap line, and no deleted origin may be reassigned.
+2. After that repeat gate, W7 and tooling may agree on a versioned,
+   release-bound sidecar. The current Lean structures and projection are APIs,
+   not that package schema.
 3. Package integration remains opt-in until representative size and
    generation-time measurements are recorded.
 

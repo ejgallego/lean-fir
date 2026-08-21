@@ -55,6 +55,8 @@ function sha256(path) {
 }
 
 const base64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const profilingGapSource = "fir-wasm-unmapped/profiling-v1";
+
 function decodeVlq(text, start) {
   let value = 0;
   let shift = 0;
@@ -74,15 +76,26 @@ function decodeVlq(text, start) {
   throw new Error("unterminated source-map VLQ");
 }
 
-function sourceLocations(sourceMapPath) {
-  const sourceMap = JSON.parse(readFileSync(sourceMapPath, "utf8"));
-  assert.equal(sourceMap.version, 3);
+function encodeVlq(value) {
+  let remaining = Math.abs(value) * 2 + (value < 0 ? 1 : 0);
+  let encoded = "";
+  do {
+    let digit = remaining % 32;
+    remaining = Math.floor(remaining / 32);
+    if (remaining !== 0) digit |= 32;
+    encoded += base64[digit];
+  } while (remaining !== 0);
+  return encoded;
+}
+
+function decodeMappings(sourceMap) {
   let sourceIndex = 0;
   let sourceLine = 0;
   let sourceColumn = 0;
-  const locations = [];
-  for (const generatedLine of sourceMap.mappings.split(";")) {
+  let nameIndex = 0;
+  return sourceMap.mappings.split(";").map(generatedLine => {
     let generatedColumn = 0;
+    const segments = [];
     for (const segment of generatedLine.split(",")) {
       if (segment === "") continue;
       const fields = [];
@@ -95,24 +108,120 @@ function sourceLocations(sourceMapPath) {
       assert(fields.length === 1 || fields.length === 4 || fields.length === 5,
         `unsupported source-map segment ${segment}`);
       generatedColumn += fields[0];
+      const decoded = { generatedColumn };
       if (fields.length >= 4) {
         sourceIndex += fields[1];
         sourceLine += fields[2];
         sourceColumn += fields[3];
         assert(sourceIndex >= 0 && sourceIndex < sourceMap.sources.length);
         assert(sourceLine >= 0 && sourceColumn >= 0 && generatedColumn >= 0);
-        locations.push({
-          generatedColumn,
-          source: sourceMap.sources[sourceIndex],
-          line: sourceLine + 1,
-        });
+        Object.assign(decoded, { sourceIndex, sourceLine, sourceColumn });
+        if (fields.length === 5) {
+          nameIndex += fields[4];
+          assert(nameIndex >= 0 && nameIndex < sourceMap.names.length);
+          decoded.nameIndex = nameIndex;
+        }
+      }
+      segments.push(decoded);
+    }
+    return segments;
+  });
+}
+
+function encodeMappings(lines) {
+  let sourceIndex = 0;
+  let sourceLine = 0;
+  let sourceColumn = 0;
+  let nameIndex = 0;
+  return lines.map(segments => {
+    let generatedColumn = 0;
+    return segments.map(segment => {
+      const fields = [segment.generatedColumn - generatedColumn];
+      generatedColumn = segment.generatedColumn;
+      if (segment.sourceIndex !== undefined) {
+        fields.push(segment.sourceIndex - sourceIndex);
+        fields.push(segment.sourceLine - sourceLine);
+        fields.push(segment.sourceColumn - sourceColumn);
+        sourceIndex = segment.sourceIndex;
+        sourceLine = segment.sourceLine;
+        sourceColumn = segment.sourceColumn;
+        if (segment.nameIndex !== undefined) {
+          fields.push(segment.nameIndex - nameIndex);
+          nameIndex = segment.nameIndex;
+        }
+      }
+      return fields.map(encodeVlq).join("");
+    }).join(",");
+  }).join(";");
+}
+
+function sourceLocations(sourceMapPath) {
+  const sourceMap = JSON.parse(readFileSync(sourceMapPath, "utf8"));
+  assert.equal(sourceMap.version, 3);
+  return decodeMappings(sourceMap).flatMap(segments =>
+    segments.filter(segment => segment.sourceIndex !== undefined).map(segment => ({
+      generatedColumn: segment.generatedColumn,
+      source: sourceMap.sources[segment.sourceIndex],
+      line: segment.sourceLine + 1,
+    })));
+}
+
+function writeProfilingProjection(exactMapPath, projectionPath) {
+  const exact = JSON.parse(readFileSync(exactMapPath, "utf8"));
+  assert.equal(exact.version, 3);
+  assert(!exact.sources.includes(profilingGapSource),
+    "exact map already contains the reserved profiling-gap source");
+  const exactLines = decodeMappings(exact);
+  const gapSourceIndex = exact.sources.length;
+  let gapLine = 0;
+  const projectedLines = exactLines.map(segments => segments.map(segment => {
+    if (segment.sourceIndex !== undefined) return { ...segment };
+    return {
+      generatedColumn: segment.generatedColumn,
+      sourceIndex: gapSourceIndex,
+      sourceLine: gapLine++,
+      sourceColumn: 0,
+    };
+  }));
+  assert(gapLine > 0, "fixture no longer exercises an unmapped interval");
+  const projection = {
+    ...exact,
+    sources: [...exact.sources, profilingGapSource],
+    mappings: encodeMappings(projectedLines),
+  };
+  if (exact.sourcesContent !== undefined) {
+    projection.sourcesContent = [...exact.sourcesContent, null];
+  }
+  const roundTrip = decodeMappings(projection);
+  assert.equal(roundTrip.flat().length, exactLines.flat().length);
+  assert(roundTrip.flat().every(segment => segment.sourceIndex !== undefined),
+    "profiling projection still contains a V8-incompatible unmapped segment");
+  let expectedGapLine = 0;
+  for (const [lineIndex, exactSegments] of exactLines.entries()) {
+    const projectedSegments = roundTrip[lineIndex];
+    assert.equal(projectedSegments.length, exactSegments.length);
+    for (const [segmentIndex, exactSegment] of exactSegments.entries()) {
+      const projectedSegment = projectedSegments[segmentIndex];
+      assert.equal(projectedSegment.generatedColumn, exactSegment.generatedColumn);
+      if (exactSegment.sourceIndex !== undefined) {
+        assert.deepEqual(projectedSegment, exactSegment,
+          "profiling projection changed an authoritative mapped segment");
+      } else {
+        assert.deepEqual(projectedSegment, {
+          generatedColumn: exactSegment.generatedColumn,
+          sourceIndex: gapSourceIndex,
+          sourceLine: expectedGapLine++,
+          sourceColumn: 0,
+        }, "profiling projection failed to preserve an explicit gap identity");
       }
     }
   }
-  return locations;
+  assert.equal(expectedGapLine, gapLine);
+  writeFileSync(projectionPath, `${JSON.stringify(projection)}\n`);
+  return { gapCount: gapLine };
 }
 
-function classify(mapPath) {
+function classify(mapPath, { expectedUnknown = [] } = {}) {
   const locations = sourceLocations(mapPath);
   const mappedKeys = new Set(locations.map(({ source, line }) =>
     `${source}:${line}`));
@@ -123,7 +232,8 @@ function classify(mapPath) {
   const ambiguous = [...sourceOrigins].filter(key =>
     originRows.filter(candidate => candidate === key).length > 1);
 
-  assert.equal(unknown.length, 0, "optimizer produced an unattributed location");
+  assert.deepEqual(unknown.sort(), [...expectedUnknown].sort(),
+    "map produced an unexpected unattributed location");
   assert.equal(ambiguous.length, 0, "origin table contains a duplicate location key");
   assert(mappedKeys.has("fir-wasm-origin/0/runtime.helper:3"),
     "inlined helper add lost its origin");
@@ -218,6 +328,17 @@ function pipeline(label) {
     { name: "fixture.entry", kind: "function" },
   ]);
   const classification = classify(finalMap);
+  const profilingMap = path("profiling.map");
+  const projection = writeProfilingProjection(finalMap, profilingMap);
+  const expectedProfilingUnknown = Array.from({ length: projection.gapCount },
+    (_, index) => `${profilingGapSource}:${index + 1}`);
+  const profilingClassification = classify(profilingMap, {
+    expectedUnknown: expectedProfilingUnknown,
+  });
+  assert.deepEqual(profilingClassification.mapped,
+    [...classification.mapped, ...expectedProfilingUnknown].sort());
+  assert.deepEqual(profilingClassification.deleted, classification.deleted);
+  assert.deepEqual(profilingClassification.ambiguous, classification.ambiguous);
   const report = path("report.json");
   writeFileSync(report, `${JSON.stringify({
     ...classification,
@@ -231,8 +352,23 @@ function pipeline(label) {
       bytes: readFileSync(finalMap).length,
       sha256: sha256(finalMap),
     },
+    profilingProjection: {
+      schema: "fir.wasm.instruction-profiling-map/v1",
+      gapSource: profilingGapSource,
+      explicitUnknown: profilingClassification.unknown,
+      bytes: readFileSync(profilingMap).length,
+      sha256: sha256(profilingMap),
+    },
   }, null, 2)}\n`);
-  return { release, companion, finalMap, report, classification };
+  return {
+    release,
+    companion,
+    finalMap,
+    profilingMap,
+    report,
+    classification,
+    profilingClassification,
+  };
 }
 
 const first = pipeline("first");
@@ -241,9 +377,12 @@ equalFile(first.release, second.release, "release fixture is nondeterministic");
 equalFile(first.companion, second.companion,
   "provenance companion is nondeterministic");
 equalFile(first.finalMap, second.finalMap, "source map is nondeterministic");
+equalFile(first.profilingMap, second.profilingMap,
+  "profiling projection is nondeterministic");
 equalFile(first.report, second.report, "classification report is nondeterministic");
 
 console.log(`instruction provenance fixture: ${first.classification.mapped.length} mapped, ` +
   `${first.classification.deleted.length} deleted, ` +
   `${first.classification.unknown.length} unknown, ` +
-  `${first.classification.ambiguous.length} ambiguous`);
+  `${first.classification.ambiguous.length} ambiguous, ` +
+  `${first.profilingClassification.unknown.length} explicit profiling gap`);
