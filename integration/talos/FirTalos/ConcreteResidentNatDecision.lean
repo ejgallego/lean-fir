@@ -305,17 +305,13 @@ theorem wp_immediateDecisionDispatch
         kind leftPayload rightPayload)) := by
     simpa using rawGet
   unfold decisionResultProgram
-  simp only [List.cons_append, List.nil_append, Wasm.wp_localGet_cons, rawGet',
-    Wasm.wp_extendUI32_cons, UInt64.ofNat_uInt32ToNat,
-    Wasm.wp_wrapI64_cons]
-  have retyped : UInt32.ofNat
-      ((ResidentPrimitives.immediateNaturalDecisionResult kind leftPayload
-        rightPayload).toUInt64.toNat % 2 ^ 32) =
-      ResidentPrimitives.immediateNaturalDecisionResult kind leftPayload
-        rightPayload := by
-    apply UInt32.toNat_inj.mp
-    simp
-  rw [retyped]
+  simp only [List.cons_append, List.nil_append, Wasm.wp_localGet_cons, rawGet']
+  change Wasm.wp module
+    (ResidentPrimitives.unsignedI32RoundTrip ++ (.ret :: rest)) Q store
+    { afterBranch with values :=
+      (.i32 (ResidentPrimitives.immediateNaturalDecisionResult
+        kind leftPayload rightPayload) :: tail) } env
+  apply ResidentPrimitives.wp_unsignedI32RoundTrip
   simpa only [Wasm.wp_ret_cons] using returned
 
 /-- The immediate path of each actual adapted resident Nat decision helper is

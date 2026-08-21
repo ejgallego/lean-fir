@@ -43,6 +43,21 @@ def immediateNaturalRemainder (leftIndex rightIndex : Nat) : Wasm.Program :=
   immediateNaturalPayload leftIndex ++ immediateNaturalPayload rightIndex ++
     [.remU]
 
+/-- Talos spelling of an unsigned i32-to-i64 extension followed by an i64-to-i32
+wrap.  This program states only the physical bit-preservation fact; every ABI
+or object-validity claim stays with the operation-specific refinement theorem
+that produced the word. -/
+def unsignedI32RoundTrip : Wasm.Program := [
+  .extendUI32,
+  .wrapI64]
+
+/-- Object-typed symbolic spelling of `unsignedI32RoundTrip`. The intermediate
+`uint64` and final `tobject` kinds make the intended ABI transition explicit
+without borrowing linear-memory scratch. -/
+def typedObjectWordRoundTripSource : List Fir.Wasm.Instruction := [
+  .i64ExtendI32U .uint64,
+  .i32WrapI64 .tobject]
+
 /-- Exact scalar result of W7's direct two-immediate Nat decision branch. -/
 def immediateNaturalDecisionResult
     (kind : Fir.Wasm.Emit.ResidentBigNumeric.DecisionKind)
@@ -104,6 +119,40 @@ theorem instructions_immediateNaturalPayload
   simp [Fir.Wasm.Emit.ResidentBigNumeric.immediateNaturalPayload,
     immediateNaturalPayload, FirTalos.instructions, FirTalos.instruction,
     found, Bind.bind, Except.bind, pure, Except.pure]
+
+/-- The adapter preserves the exact two-instruction typed object-word round
+trip.  This is a shape theorem only: the caller remains responsible for
+showing that the input word represents the claimed Lean object. -/
+theorem instructions_typedObjectWordRoundTripSource
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} :
+    FirTalos.instructions sourceModule sourceFunction labels
+      typedObjectWordRoundTripSource =
+        .ok unsignedI32RoundTrip := by
+  simp [typedObjectWordRoundTripSource, unsignedI32RoundTrip,
+    FirTalos.instructions, FirTalos.instruction, Bind.bind, Except.bind,
+    pure, Except.pure]
+
+/-- Unsigned extension followed by wrapping preserves every physical i32
+word, the complete store (and therefore memory), and the caller operand tail.
+The theorem deliberately makes no semantic object-validity claim. -/
+theorem wp_unsignedI32RoundTrip
+    {module : Wasm.Module} {env : Wasm.HostEnv α}
+    {Q : Wasm.Assertion α} {store : Wasm.Store α} {locals : Wasm.Locals}
+    {word : UInt32} {tail : List Wasm.Value} {rest : Wasm.Program}
+    (continuation : Wasm.wp module rest Q store
+      { locals with values := .i32 word :: tail } env) :
+    Wasm.wp module (unsignedI32RoundTrip ++ rest) Q store
+      { locals with values := .i32 word :: tail } env := by
+  simp only [unsignedI32RoundTrip, List.cons_append, List.nil_append,
+    Wasm.wp_extendUI32_cons, UInt64.ofNat_uInt32ToNat,
+    Wasm.wp_wrapI64_cons]
+  have roundTrip :
+      UInt32.ofNat (word.toUInt64.toNat % 2 ^ 32) = word := by
+    apply UInt32.toNat_inj.mp
+    simp
+  rw [roundTrip]
+  exact continuation
 
 /-- Successful adaptation of the two operation-specific branches lifts to
 successful adaptation of the emitter's common pair dispatcher. -/
