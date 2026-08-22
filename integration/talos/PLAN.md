@@ -6458,6 +6458,29 @@ is execution-facing: prove that W7's resident allocator call realizes that raw
 allocation/initial relation, and compose the existing exact writer-loop
 theorem so its returned store supplies `WrittenLimbPrefix` to this closure.
 
+The generic resident allocator execution boundary is now closed.  A complete
+`ResidentAllocatorRel` pairs finite W6 memory with Talos linear memory, the
+resident frontier global, the heap-base/wasm32 cursor bounds, and zero bytes
+beyond the currently visible extent.  The last clause is essential: Talos
+models bytes as a total function, so it is what proves that `memory.grow`
+reveals the same zero-filled pages as W6's finite `growToFit`.  Exact scalar
+WP theorems cover both the no-growth and successful-growth bodies of W7's
+emitted allocator, and the W6 corollary derives every machine check from a
+successful aligned raw allocation, executes the actual adapted body, returns
+the old frontier, and re-establishes the complete relation at the successor
+heap.
+
+This proof found one real terminal-boundary discrepancy rather than hiding it
+in the relation: W6 accepts an allocation whose successor cursor is exactly
+`2^32`, but the resident wasm32 allocator must reject it because its `i32`
+frontier would wrap to zero.  `FIR-BUG-wasm-none-frontier-word-modulus-boundary`
+records the issue, and the first bridge theorem states the missing strict-end
+condition explicitly until the shared allocation/budget contract is repaired.
+The next execution slice installs the eight common-header lanes performed by
+W7's BigNumeric object allocator on top of this raw reservation, then attaches
+the proved writer-loop call and checked `Nat.add` dispatcher to the existing
+self-contained live-heap/typed-return closure.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
