@@ -6288,6 +6288,27 @@ model and proves it equal to the canonical limb operation through `UInt32`'s
 injective `toNat` view.  This is preferable to making every later loop-state
 simplification normalize wrapped arithmetic inside a whole local frame.
 
+The complete installed `sumCarryFrom` scan is now covered as well.  Its Talos
+loop invariant says that the unprocessed suffixes, beginning at the current
+absolute index and carry, still produce the same final carry as the original
+word lists.  The independent variant `count - index` proves termination; the
+machine increment theorem rules out wasm32 wrap while the invariant bounds the
+index.  Exact adapter lemmas then identify W7's symbolic guard, private step,
+and back-edge with that proved loop and lift the result through the adapted
+function's standard (unreachable) terminal suffix.  Thus the installed body,
+not merely an extracted arithmetic fragment, returns exactly the carry of the
+pure `addLimbWords` recurrence whenever the magnitude accessors return the
+corresponding low/high word pairs without changing the store.
+
+The proof-engineering lesson is to parameterize the structured-loop theorem by
+one semantic invariant while keeping the Talos control variant separate.  The
+same loop rule then serves concrete limb lists and future canonical-Nat views,
+and neither fuel nor an execution certificate leaks into the helper contract.
+The next operational boundary is the installed `writeSumFrom` loop: reuse the
+same carry invariant, add the exact low/high payload stores and their framed
+byte prefix, and connect the completed payload to `allocateNatural` of the
+operand sum.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
