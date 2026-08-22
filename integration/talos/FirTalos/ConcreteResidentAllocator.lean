@@ -763,6 +763,16 @@ theorem wp_allocateProgram_of_allocate
     simp only [finalStore, finalMemoryEq, addressEq]
     rw [additionWord]
 
+/-- Canonical Talos function shape of the resident raw allocator.  Keeping
+the optional physical suffix explicit lets execution proofs compose with the
+adapter without assuming how its terminal-marker policy evolves. -/
+def allocateTargetFunction (frontierIndex : Nat)
+    (suffix : Wasm.Program := []) : Wasm.Function := {
+  params := [.i32]
+  locals := [.i32, .i32, .i32, .i32, .i32]
+  results := [.i32]
+  body := allocateProgram frontierIndex ++ suffix }
+
 /-- The symbolic allocator adapts exactly to the target body above.  This
 pins the proof to W7's public emitter definition while keeping its private
 identifier names out of the theorem statement. -/
@@ -802,6 +812,26 @@ theorem instructions_allocateFunction
     Except.pure]
   decide
 
+/-- Successful adaptation produces the complete canonical target function,
+not merely a body fragment.  Call-level proofs can therefore recover the
+parameter, local, result, and terminal-suffix conventions from one fact. -/
+theorem adaptedAllocateFunction_eq
+    {sourceModule : Fir.Wasm.Module} {frontierIndex : Nat}
+    {targetFunction : Wasm.Function}
+    (adapted : FirTalos.function sourceModule
+      (Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex) =
+        .ok targetFunction) :
+    targetFunction = allocateTargetFunction frontierIndex
+      (FirTalos.functionTerminal sourceModule
+        (Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex)) := by
+  unfold FirTalos.function at adapted
+  rw [instructions_allocateFunction] at adapted
+  simp only [Bind.bind, Except.bind, pure, Except.pure,
+    Except.ok.injEq] at adapted
+  simpa [allocateTargetFunction,
+    Fir.Wasm.Emit.ResidentAllocator.allocateFunction, FirTalos.abiKind,
+    Fir.Wasm.AbiKind.valueType, FirTalos.valueType] using adapted.symm
+
 /-- Successful adaptation installs the proved allocator body followed only
 by the adapter's standard physical terminal suffix. -/
 theorem adaptedAllocateFunction_body
@@ -813,11 +843,78 @@ theorem adaptedAllocateFunction_body
     targetFunction.body = allocateProgram frontierIndex ++
       FirTalos.functionTerminal sourceModule
         (Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex) := by
-  rcases FirTalos.Correctness.function_preserves_body adapted with
-    ⟨actualBody, actualAdapted, targetBody⟩
-  rw [instructions_allocateFunction] at actualAdapted
-  injection actualAdapted with actualBodyEq
-  simpa [actualBodyEq] using targetBody
+  rw [adaptedAllocateFunction_eq adapted]
+  rfl
+
+/-- A successful checked W6 allocation yields the exact total-correctness
+theorem for the actual adapted resident allocator call.  This is the reusable
+call boundary for every resident object constructor: clients no longer carry
+an independently trusted `TerminatesWith` premise for `fir_heap_alloc`. -/
+theorem terminatesWith_allocateFunction_of_allocate
+    {host : Type} {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {env : Wasm.HostEnv host} {targetFunction : Wasm.Function}
+    {functionIndex frontierIndex : Nat}
+    {before after : MemoryState} {store : Wasm.Store host}
+    {requestedBytes : Nat} {address : Word32}
+    (adapted : FirTalos.function sourceModule
+      (Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex) =
+        .ok targetFunction)
+    (notImport : module.imports[functionIndex]? = none)
+    (found : module.funcs[functionIndex - module.imports.length]? =
+      some targetFunction)
+    (memory32 : module.memIs64 = false)
+    (valid : before.FrontierInvariant)
+    (related : ResidentAllocatorRel before store frontierIndex)
+    (requestedAligned : requestedBytes % target.heapAlignment = 0)
+    (allocated : before.allocate requestedBytes = .ok (after, address))
+    (strictEnd : after.heapCursor < wordModulus)
+    (withinCap : (after.heapCursor - 1) / wasmPageBytes + 1 ≤
+      store.memoryCap module 0) :
+    ∃ finalStore,
+      ResidentAllocatorRel after finalStore frontierIndex ∧
+      Wasm.TerminatesWith env module functionIndex store
+        [.i32 (UInt32.ofNat requestedBytes)]
+        (fun final values =>
+          final = finalStore ∧
+            values = [.i32 (UInt32.ofNat address.value)]) := by
+  obtain ⟨finalStore, finalRelated, coreWP⟩ :=
+    wp_allocateProgram_of_allocate memory32 valid related requestedAligned
+      allocated strictEnd withinCap
+  refine ⟨finalStore, finalRelated, ?_⟩
+  have targetShape := adaptedAllocateFunction_eq adapted
+  rw [targetShape] at found
+  let suffix := FirTalos.functionTerminal sourceModule
+    (Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex)
+  let targetFunction' := allocateTargetFunction frontierIndex suffix
+  refine FirTalos.Correctness.terminatesWith_of_wp_body_at
+    (function := targetFunction')
+    (Post := fun final values =>
+      final = finalStore ∧
+        values = [.i32 (UInt32.ofNat address.value)])
+    notImport (by simpa [targetFunction', suffix] using found) ?_
+  have coreWP' : Wasm.wp module (allocateProgram frontierIndex)
+      (fun completion => completion = .Return finalStore
+        [.i32 (UInt32.ofNat address.value)]) store
+      (targetFunction'.toLocals
+        (([.i32 (UInt32.ofNat requestedBytes)] : List Wasm.Value).take
+          targetFunction'.numParams).reverse) env := by
+    simpa [targetFunction', allocateTargetFunction, allocateEntry,
+      Wasm.Function.toLocals, Wasm.Function.numParams,
+      Wasm.ValueType.zero] using coreWP
+  have physicalWP : Wasm.wp module targetFunction'.body
+      (fun completion => completion = .Return finalStore
+        [.i32 (UInt32.ofNat address.value)]) store
+      (targetFunction'.toLocals
+        (([.i32 (UInt32.ofNat requestedBytes)] : List Wasm.Value).take
+          targetFunction'.numParams).reverse) env := by
+    change Wasm.wp module (allocateProgram frontierIndex ++ suffix) _ _ _ _
+    exact FirTalos.Correctness.Wasm.wp_append_of_no_fallthrough
+      (by intros; simp) coreWP'
+  apply Wasm.wp.conseq _ physicalWP
+  intro completion completed
+  subst completion
+  simp [FirTalos.Correctness.FunctionBodyPost, targetFunction',
+    allocateTargetFunction, Wasm.Function.numParams]
 
 end ResidentAllocator
 

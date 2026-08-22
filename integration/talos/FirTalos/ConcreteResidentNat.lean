@@ -4578,6 +4578,46 @@ theorem instructions_writeSumFromFunction
     magnitudeHighFound]
   rfl
 
+/-- Canonical Talos function shape of the complete BigNumeric limb writer. -/
+def writeSumTargetFunction (magnitudeLowIndex magnitudeHighIndex : Nat)
+    (suffix : Wasm.Program := []) : Wasm.Function := {
+  params := [.i32, .i32, .i32, .i32, .i32, .i32, .i32, .i32]
+  locals := [.i32, .i32, .i32, .i32, .i32, .i32, .i32, .i32, .i32]
+  results := [.i32]
+  body := writeSumLoopProgram magnitudeLowIndex magnitudeHighIndex ++ suffix }
+
+/-- Successful adaptation produces the complete canonical writer function,
+including its parameter, local, result, and terminal-suffix conventions. -/
+theorem adaptedWriteSumFromFunction_eq
+    {sourceModule : Fir.Wasm.Module} {targetFunction : Wasm.Function}
+    {magnitudeLowIndex magnitudeHighIndex : Nat}
+    (adapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction =
+        .ok targetFunction)
+    (magnitudeLowFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeLowName) =
+        some magnitudeLowIndex)
+    (magnitudeHighFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeHighName) =
+        some magnitudeHighIndex) :
+    targetFunction = writeSumTargetFunction magnitudeLowIndex magnitudeHighIndex
+      (FirTalos.functionTerminal sourceModule
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction) := by
+  unfold FirTalos.function at adapted
+  rw [instructions_writeSumFromFunction magnitudeLowFound magnitudeHighFound]
+    at adapted
+  simp only [Bind.bind, Except.bind, pure, Except.pure,
+    Except.ok.injEq] at adapted
+  have localsEq :
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals.toList.map
+        (fun entry => FirTalos.abiKind entry.snd) =
+          [.i32, .i32, .i32, .i32, .i32, .i32, .i32, .i32, .i32] := by
+    rfl
+  rw [localsEq] at adapted
+  simpa [writeSumTargetFunction,
+    Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction, FirTalos.abiKind,
+    Fir.Wasm.AbiKind.valueType, FirTalos.valueType] using adapted.symm
+
 /-- Successful function adaptation installs precisely the proved writer loop
 followed by the adapter's unreachable terminal suffix. -/
 theorem adaptedWriteSumFromFunction_body
@@ -4596,8 +4636,9 @@ theorem adaptedWriteSumFromFunction_body
       writeSumLoopProgram magnitudeLowIndex magnitudeHighIndex ++
         FirTalos.functionTerminal sourceModule
           Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction := by
-  exact adaptedFunction_body_of_exact adapted
-    (instructions_writeSumFromFunction magnitudeLowFound magnitudeHighFound)
+  rw [adaptedWriteSumFromFunction_eq adapted magnitudeLowFound
+    magnitudeHighFound]
+  rfl
 
 /-- Complete writer-loop theorem over equally sized machine limb views and an
 abstract growing-memory frame.
@@ -5601,6 +5642,120 @@ theorem wp_writeSumLoopProgram_of_exactPrefix
           simpa [leftLimb, rightLimb] using recurrence.1.1.symm)
       rw [sumCarryNextIndex_toNat beforeCount]
       exact WrittenLimbPrefix.next invariant.2.2 outputWordAt
+
+/-- Call-level total correctness for the actual adapted BigNumeric sum writer.
+The caller's operand tail is preserved exactly, while the physical result
+store records precisely the pure output-limb prefix. -/
+theorem terminatesWith_writeSumFromFunction_of_exactPrefix
+    {host : Type} {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {env : Wasm.HostEnv host} {targetFunction : Wasm.Function}
+    {functionIndex magnitudeLowIndex magnitudeHighIndex : Nat}
+    {initialStore : Wasm.Store host}
+    {left leftFlavor right rightFlavor result count initialCarry : UInt32}
+    {tail : List Wasm.Value} {leftWords rightWords : List LimbWords}
+    (adapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction =
+        .ok targetFunction)
+    (magnitudeLowFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeLowName) =
+        some magnitudeLowIndex)
+    (magnitudeHighFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeHighName) =
+        some magnitudeHighIndex)
+    (notImport : module.imports[functionIndex]? = none)
+    (found : module.funcs[functionIndex - module.imports.length]? =
+      some targetFunction)
+    (leftLength : leftWords.length = count.toNat)
+    (rightLength : rightWords.length = count.toNat)
+    (leftLowRun : ∀ (index : UInt32) (current : Wasm.Store host)
+      (beforeCount : index.toNat < count.toNat),
+      WrittenLimbPrefix initialStore result
+          (addLimbWords leftWords rightWords initialCarry).1
+          index.toNat current →
+      Wasm.TerminatesWith env module magnitudeLowIndex current
+        [.i32 index, .i32 leftFlavor, .i32 left]
+        (fun final values => final = current ∧
+          values = [.i32 (leftWords[index.toNat]'(by omega)).1]))
+    (leftHighRun : ∀ (index : UInt32) (current : Wasm.Store host)
+      (beforeCount : index.toNat < count.toNat),
+      WrittenLimbPrefix initialStore result
+          (addLimbWords leftWords rightWords initialCarry).1
+          index.toNat current →
+      Wasm.TerminatesWith env module magnitudeHighIndex current
+        [.i32 index, .i32 leftFlavor, .i32 left]
+        (fun final values => final = current ∧
+          values = [.i32 (leftWords[index.toNat]'(by omega)).2]))
+    (rightLowRun : ∀ (index : UInt32) (current : Wasm.Store host)
+      (beforeCount : index.toNat < count.toNat),
+      WrittenLimbPrefix initialStore result
+          (addLimbWords leftWords rightWords initialCarry).1
+          index.toNat current →
+      Wasm.TerminatesWith env module magnitudeLowIndex current
+        [.i32 index, .i32 rightFlavor, .i32 right]
+        (fun final values => final = current ∧
+          values = [.i32 (rightWords[index.toNat]'(by omega)).1]))
+    (rightHighRun : ∀ (index : UInt32) (current : Wasm.Store host)
+      (beforeCount : index.toNat < count.toNat),
+      WrittenLimbPrefix initialStore result
+          (addLimbWords leftWords rightWords initialCarry).1
+          index.toNat current →
+      Wasm.TerminatesWith env module magnitudeHighIndex current
+        [.i32 index, .i32 rightFlavor, .i32 right]
+        (fun final values => final = current ∧
+          values = [.i32 (rightWords[index.toNat]'(by omega)).2]))
+    (writeInBounds : ∀ (index : UInt32) (current : Wasm.Store host)
+      (_beforeCount : index.toNat < count.toNat),
+      WrittenLimbPrefix initialStore result
+          (addLimbWords leftWords rightWords initialCarry).1
+          index.toNat current →
+      ¬(checkedLimbBase result index).toNat + 4 >
+          current.mem.pages * 65536 ∧
+        ¬(checkedLimbBase result index).toNat + 4 + 4 >
+          current.mem.pages * 65536) :
+    Wasm.TerminatesWith env module functionIndex initialStore
+      ([.i32 initialCarry, .i32 count, .i32 0, .i32 result,
+        .i32 rightFlavor, .i32 right, .i32 leftFlavor, .i32 left] ++ tail)
+      (fun final values =>
+        WrittenLimbPrefix initialStore result
+          (addLimbWords leftWords rightWords initialCarry).1
+          count.toNat final ∧
+        values =
+          .i32 (addLimbWords leftWords rightWords initialCarry).2 :: tail) := by
+  let suffix := FirTalos.functionTerminal sourceModule
+    Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction
+  let targetFunction' := writeSumTargetFunction magnitudeLowIndex
+    magnitudeHighIndex suffix
+  let args : List Wasm.Value :=
+    [.i32 initialCarry, .i32 count, .i32 0, .i32 result,
+      .i32 rightFlavor, .i32 right, .i32 leftFlavor, .i32 left] ++ tail
+  have targetShape := adaptedWriteSumFromFunction_eq adapted
+    magnitudeLowFound magnitudeHighFound
+  rw [targetShape] at found
+  refine FirTalos.Correctness.terminatesWith_of_wp_body_at
+    (function := targetFunction') (args := args)
+    (Post := fun final values =>
+      WrittenLimbPrefix initialStore result
+          (addLimbWords leftWords rightWords initialCarry).1
+          count.toNat final ∧
+        values =
+          .i32 (addLimbWords leftWords rightWords initialCarry).2 :: tail)
+    notImport (by simpa [targetFunction', suffix] using found) ?_
+  change Wasm.wp module
+    (writeSumLoopProgram magnitudeLowIndex magnitudeHighIndex ++ suffix) _
+    initialStore
+    (writeSumArithmeticLocals left leftFlavor right rightFlavor result 0
+      count initialCarry 0 0 0 0 0 0 0 0 0 []) env
+  apply wp_writeSumLoopProgram_of_exactPrefix
+    (leftWords := leftWords) (rightWords := rightWords)
+    leftLength rightLength
+  · simpa using leftLowRun
+  · simpa using leftHighRun
+  · simpa using rightLowRun
+  · simpa using rightHighRun
+  · exact writeInBounds
+  · intro finalStore written
+    simpa [FirTalos.Correctness.FunctionBodyPost, targetFunction',
+      writeSumTargetFunction, args, Wasm.Function.numParams] using written
 
 /-- Exact successor store after materializing the low half of a carry limb. -/
 def checkedCarryLowStore (store : Wasm.Store host) (object index : UInt32) :

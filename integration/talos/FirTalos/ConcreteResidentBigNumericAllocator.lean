@@ -117,6 +117,25 @@ def scale8Word (count : UInt32) : UInt32 :=
   let fourTimes := twice + twice
   fourTimes + fourTimes
 
+/-- The resident three-doubling sequence is exactly one W6 semantic-slot
+extent, modulo the physical word as required by Wasm arithmetic. -/
+theorem scale8Word_ofNat (limbCount : Nat) :
+    scale8Word (UInt32.ofNat limbCount) =
+      UInt32.ofNat (target.semanticSlotBytes * limbCount) := by
+  simp only [scale8Word]
+  rw [← UInt32.ofNat_add, ← UInt32.ofNat_add, ← UInt32.ofNat_add]
+  congr
+  simp [target]
+  omega
+
+/-- A BigNumeric payload contains whole eight-byte semantic slots, so its
+common-header extent is already allocator-aligned. -/
+theorem objectAllocationBytes_eq (limbCount : Nat) :
+    align8 (headerBytes + target.semanticSlotBytes * limbCount) =
+      headerBytes + target.semanticSlotBytes * limbCount := by
+  apply align8_eq_of_mod_eq_zero
+  simp [headerBytes, target]
+
 /-- Talos spelling of the checked count guard. -/
 def trapUnlessTrueProgram (condition : Wasm.Program) : Wasm.Program :=
   ResidentAllocator.trapWhenTrueProgram (condition ++ [.const 0, .eq])
@@ -158,6 +177,16 @@ def allocateObjectProgram (allocatorIndex : Nat) : Wasm.Program :=
     .store32 (UInt32.ofNat headerAux3Offset),
     .localGet 5,
     .ret]
+
+/-- Canonical Talos function shape of the shared BigNumeric object allocator.
+The adapter's optional physical terminal suffix remains explicit so the call
+theorem depends on adaptation rather than a fixed suffix policy. -/
+def allocateObjectTargetFunction (allocatorIndex : Nat)
+    (suffix : Wasm.Program := []) : Wasm.Function := {
+  params := [.i32, .i32, .i32, .i32]
+  locals := [.i32, .i32]
+  results := [.i32]
+  body := allocateObjectProgram allocatorIndex ++ suffix }
 
 /-- Concrete local frame of the four-parameter/two-local object allocator. -/
 def allocateObjectEntry (kind marker sign count : UInt32) : Wasm.Locals := {
@@ -398,6 +427,118 @@ theorem wp_allocateObjectProgram
                     · simp [allocatedObjectLocals, Wasm.Locals.get]
                     · simpa [writeHeaderStore] using returned
 
+/-- A successful W6 object allocation is realized by the complete emitted
+BigNumeric allocation body using the actual adapted `fir_heap_alloc` callee.
+The result relates the fully header-initialized W6 state to the exact physical
+store returned by the Wasm helper. -/
+theorem wp_allocateObjectProgram_of_allocateObject
+    {host : Type} {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {env : Wasm.HostEnv host} {targetAllocator : Wasm.Function}
+    {allocatorIndex frontierIndex : Nat}
+    {before after : MemoryState} {store : Wasm.Store host}
+    {kind : ObjectKind} {marker sign : UInt32} {limbCount : Nat}
+    {address : Word32}
+    (allocatorAdapted : FirTalos.function sourceModule
+      (Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex) =
+        .ok targetAllocator)
+    (allocatorNotImport : module.imports[allocatorIndex]? = none)
+    (allocatorFound :
+      module.funcs[allocatorIndex - module.imports.length]? =
+        some targetAllocator)
+    (memory32 : module.memIs64 = false)
+    (valid : before.FrontierInvariant)
+    (related : ResidentAllocatorRel before store frontierIndex)
+    (countFits : limbCount < 536870908)
+    (allocated : before.allocateObject kind
+      (target.semanticSlotBytes * limbCount) false marker
+      (UInt32.ofNat limbCount) sign 0 = .ok (after, address))
+    (strictEnd : after.heapCursor < wordModulus)
+    (withinCap : (after.heapCursor - 1) / wasmPageBytes + 1 ≤
+      store.memoryCap module 0) :
+    ∃ finalStore,
+      ResidentAllocatorRel after finalStore frontierIndex ∧
+      Wasm.wp module (allocateObjectProgram allocatorIndex)
+        (fun completion => completion = .Return finalStore
+          [.i32 (UInt32.ofNat address.value)]) store
+        (allocateObjectEntry kind.code marker sign
+          (UInt32.ofNat limbCount)) env := by
+  obtain ⟨middle, rawAllocation, headerWritten, cursorEq, _⟩ :=
+    MemoryState.allocateObject_header before after kind
+      (target.semanticSlotBytes * limbCount) false marker
+      (UInt32.ofNat limbCount) sign 0 address allocated
+  have requestedAligned :
+      align8 (headerBytes + target.semanticSlotBytes * limbCount) %
+          target.heapAlignment = 0 := by
+    change align8 (headerBytes + target.semanticSlotBytes * limbCount) % 8 = 0
+    exact align8_mod (headerBytes + target.semanticSlotBytes * limbCount)
+  have middleStrict : middle.heapCursor < wordModulus := by
+    rw [← cursorEq]
+    exact strictEnd
+  have middleWithinCap :
+      (middle.heapCursor - 1) / wasmPageBytes + 1 ≤
+        store.memoryCap module 0 := by
+    rw [← cursorEq]
+    exact withinCap
+  obtain ⟨allocatedStore, middleRelated, allocatorRun⟩ :=
+    ResidentAllocator.terminatesWith_allocateFunction_of_allocate
+      allocatorAdapted allocatorNotImport allocatorFound memory32 valid related
+      requestedAligned rawAllocation middleStrict middleWithinCap
+  have countFits32 : limbCount < UInt32.size := by
+    unfold UInt32.size
+    omega
+  have countFitsWord : UInt32.ofNat limbCount < 536870908 := by
+    rw [UInt32.lt_iff_toNat_lt,
+      UInt32.toNat_ofNat_of_lt' countFits32]
+    exact countFits
+  have allocationWord :
+      UInt32.ofNat
+          (align8 (headerBytes + target.semanticSlotBytes * limbCount)) =
+        UInt32.ofNat headerBytes + scale8Word (UInt32.ofNat limbCount) := by
+    rw [objectAllocationBytes_eq, scale8Word_ofNat,
+      ← UInt32.ofNat_add]
+  have allocatorRun' : Wasm.TerminatesWith env module allocatorIndex store
+      [.i32 (UInt32.ofNat headerBytes +
+        scale8Word (UInt32.ofNat limbCount))]
+      (fun final values =>
+        final = allocatedStore ∧
+          values = [.i32 (UInt32.ofNat address.value)]) := by
+    simpa only [allocationWord] using allocatorRun
+  have rawPost := MemoryState.allocate_spec before middle
+    (align8 (headerBytes + target.semanticSlotBytes * limbCount)) address
+    rawAllocation
+  have headerInBounds :
+      address.value + headerBytes ≤ middle.memory.size := by
+    have endInBounds := rawPost.endInBounds
+    rw [align8_align8] at endInBounds
+    have minimum := align8_ge
+      (headerBytes + target.semanticSlotBytes * limbCount)
+    omega
+  have addressFits : address.value < UInt32.size := by
+    simpa [wordModulus, UInt32.size] using address.isLt
+  have physicalHeaderInBounds :
+      (UInt32.ofNat address.value).toNat + headerBytes ≤
+        allocatedStore.mem.pages * wasmPageBytes := by
+    rw [UInt32.toNat_ofNat_of_lt' addressFits,
+      ← middleRelated.toResidentMemoryRel.size_eq]
+    exact headerInBounds
+  let finalStore := writeHeaderStore allocatedStore
+    (UInt32.ofNat address.value) kind.code marker sign
+      (UInt32.ofNat limbCount)
+  have finalRelatedRaw := writeAllocationHeaderStore_refines middleRelated
+    allocationWord headerInBounds headerWritten
+  have stateEq : ({ middle with memory := after.memory } : MemoryState) =
+      after := by
+    cases middle
+    cases after
+    simp_all
+  have finalRelated : ResidentAllocatorRel after finalStore frontierIndex := by
+    rw [← stateEq]
+    simpa [finalStore] using finalRelatedRaw
+  refine ⟨finalStore, finalRelated, ?_⟩
+  apply wp_allocateObjectProgram countFitsWord allocatorRun'
+    physicalHeaderInBounds
+  rfl
+
 /-- The full symbolic object allocator adapts exactly to the target program. -/
 theorem instructions_allocateFunction
     {sourceModule : Fir.Wasm.Module} {allocatorIndex : Nat}
@@ -447,6 +588,118 @@ theorem instructions_allocateFunction
       FirTalos.instructions, FirTalos.instruction, allocatorFound, kindFound,
       markerFound, signFound, countFound, scaledFound, addressFound,
       Bind.bind, Except.bind, pure, Except.pure]
+
+/-- Successful adaptation produces the complete canonical BigNumeric
+allocator function, including its call index and physical terminal suffix. -/
+theorem adaptedAllocateObjectFunction_eq
+    {sourceModule : Fir.Wasm.Module} {allocatorIndex : Nat}
+    {targetFunction : Wasm.Function}
+    (allocatorFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentAllocator.allocateName) =
+        some allocatorIndex)
+    (adapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.allocateFunction =
+        .ok targetFunction) :
+    targetFunction = allocateObjectTargetFunction allocatorIndex
+      (FirTalos.functionTerminal sourceModule
+        Fir.Wasm.Emit.ResidentBigNumeric.allocateFunction) := by
+  unfold FirTalos.function at adapted
+  rw [instructions_allocateFunction allocatorFound] at adapted
+  simp only [Bind.bind, Except.bind, pure, Except.pure,
+    Except.ok.injEq] at adapted
+  simpa [allocateObjectTargetFunction,
+    Fir.Wasm.Emit.ResidentBigNumeric.allocateFunction, FirTalos.abiKind,
+    Fir.Wasm.AbiKind.valueType, FirTalos.valueType] using adapted.symm
+
+/-- Call-level total correctness for the actual adapted BigNumeric allocator.
+The caller's operand tail is preserved exactly, and the returned physical
+address is related to the fully initialized W6 object state. -/
+theorem terminatesWith_allocateObjectFunction_of_allocateObject
+    {host : Type} {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {env : Wasm.HostEnv host}
+    {targetFunction targetAllocator : Wasm.Function}
+    {functionIndex allocatorIndex frontierIndex : Nat}
+    {before after : MemoryState} {store : Wasm.Store host}
+    {kind : ObjectKind} {marker sign : UInt32} {limbCount : Nat}
+    {address : Word32} {tail : List Wasm.Value}
+    (allocatorCallFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentAllocator.allocateName) =
+        some allocatorIndex)
+    (objectAdapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.allocateFunction =
+        .ok targetFunction)
+    (objectNotImport : module.imports[functionIndex]? = none)
+    (objectFound :
+      module.funcs[functionIndex - module.imports.length]? =
+        some targetFunction)
+    (allocatorAdapted : FirTalos.function sourceModule
+      (Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex) =
+        .ok targetAllocator)
+    (allocatorNotImport : module.imports[allocatorIndex]? = none)
+    (allocatorFound :
+      module.funcs[allocatorIndex - module.imports.length]? =
+        some targetAllocator)
+    (memory32 : module.memIs64 = false)
+    (valid : before.FrontierInvariant)
+    (related : ResidentAllocatorRel before store frontierIndex)
+    (countFits : limbCount < 536870908)
+    (allocated : before.allocateObject kind
+      (target.semanticSlotBytes * limbCount) false marker
+      (UInt32.ofNat limbCount) sign 0 = .ok (after, address))
+    (strictEnd : after.heapCursor < wordModulus)
+    (withinCap : (after.heapCursor - 1) / wasmPageBytes + 1 ≤
+      store.memoryCap module 0) :
+    ∃ finalStore,
+      ResidentAllocatorRel after finalStore frontierIndex ∧
+      Wasm.TerminatesWith env module functionIndex store
+        ([.i32 (UInt32.ofNat limbCount), .i32 sign, .i32 marker,
+          .i32 kind.code] ++ tail)
+        (fun final values =>
+          final = finalStore ∧
+            values = .i32 (UInt32.ofNat address.value) :: tail) := by
+  obtain ⟨finalStore, finalRelated, coreWP⟩ :=
+    wp_allocateObjectProgram_of_allocateObject allocatorAdapted
+      allocatorNotImport allocatorFound memory32 valid related countFits
+      allocated strictEnd withinCap
+  refine ⟨finalStore, finalRelated, ?_⟩
+  have targetShape :=
+    adaptedAllocateObjectFunction_eq allocatorCallFound objectAdapted
+  rw [targetShape] at objectFound
+  let suffix := FirTalos.functionTerminal sourceModule
+    Fir.Wasm.Emit.ResidentBigNumeric.allocateFunction
+  let targetFunction' := allocateObjectTargetFunction allocatorIndex suffix
+  let args : List Wasm.Value :=
+    [.i32 (UInt32.ofNat limbCount), .i32 sign, .i32 marker, .i32 kind.code] ++
+      tail
+  refine FirTalos.Correctness.terminatesWith_of_wp_body_at
+    (function := targetFunction') (args := args)
+    (Post := fun final values =>
+      final = finalStore ∧
+        values = .i32 (UInt32.ofNat address.value) :: tail)
+    objectNotImport
+    (by simpa [targetFunction', suffix] using objectFound) ?_
+  have coreWP' : Wasm.wp module (allocateObjectProgram allocatorIndex)
+      (fun completion => completion = .Return finalStore
+        [.i32 (UInt32.ofNat address.value)]) store
+      (targetFunction'.toLocals
+        (args.take targetFunction'.numParams).reverse) env := by
+    simpa [targetFunction', allocateObjectTargetFunction,
+      allocateObjectEntry, args, Wasm.Function.toLocals,
+      Wasm.Function.numParams, Wasm.ValueType.zero] using coreWP
+  have physicalWP : Wasm.wp module targetFunction'.body
+      (fun completion => completion = .Return finalStore
+        [.i32 (UInt32.ofNat address.value)]) store
+      (targetFunction'.toLocals
+        (args.take targetFunction'.numParams).reverse) env := by
+    change Wasm.wp module (allocateObjectProgram allocatorIndex ++ suffix)
+      _ _ _ _
+    exact FirTalos.Correctness.Wasm.wp_append_of_no_fallthrough
+      (by intros; simp) coreWP'
+  apply Wasm.wp.conseq _ physicalWP
+  intro completion completed
+  subst completion
+  simp [FirTalos.Correctness.FunctionBodyPost, targetFunction',
+    allocateObjectTargetFunction, args, Wasm.Function.numParams]
 
 end ResidentBigNumericAllocator
 

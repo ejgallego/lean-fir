@@ -6508,6 +6508,30 @@ header transition, then compose the already-proved `writeSumFrom` execution
 and self-contained live-heap/typed-return closure.  The checked `Nat.add`
 dispatcher can consume that result without any new byte-layout proof.
 
+The allocator-call part of that boundary is now complete.  Canonical target
+function descriptions record the complete adapted signature, local frame,
+result convention, body, and physical terminal suffix for both the raw
+allocator and the BigNumeric object allocator.  A successful checked W6
+`allocate` transition therefore proves total correctness of the actual
+installed raw helper, and a successful W6 `allocateObject` transition composes
+that call with all eight header writes.  The resulting existential physical
+store is related by the full `ResidentAllocatorRel` to the header-initialized
+W6 state; callers no longer provide an independently trusted
+`TerminatesWith` premise for either allocation layer.
+
+The same full-function boundary now covers `writeSumFrom`.  Successful
+adaptation identifies its eight parameters, nine locals, result, structured
+writer loop, and terminal suffix.  The call-level theorem lifts the exact
+processed-prefix loop invariant to total correctness of the actual installed
+helper: for arbitrary caller stack tails it returns the pure `addLimbWords`
+carry and a store satisfying the exact `WrittenLimbPrefix` relation.  The next
+slice is deliberately narrow: prove the low/high magnitude accessors at an
+arbitrary in-range limb from the resident memory relation, then instantiate
+those calls and the two new allocator/writer call boundaries in the checked
+`Nat.add` producer.  At that point the existing self-contained heap and typed
+return closure can remove the remaining abstract helper-call premises without
+another arithmetic or layout proof.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
