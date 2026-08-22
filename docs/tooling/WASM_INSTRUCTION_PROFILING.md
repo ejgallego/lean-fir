@@ -244,6 +244,9 @@ d933d7efd2b22376b8ee348364b87c7d3388a501af1694480e324cb6c6eb37be  perf.jit.data
 80e62ab4179af32da8d2506ba5455d56050d20259aa49409b013e49d0c62ca51  jitted-6-2528.so
 ```
 
-This completes the consumer/projection decision. Package-schema stabilization,
-representative size and generation-time measurements, and a consumer with
-verified hot-code native ranges remain separate future work.
+This completes the consumer/projection decision. The first representative
+size and generation-time measurements, including the production lean-zip
+scaling limit, are recorded in
+[`WASM_PROVENANCE_COST.md`](WASM_PROVENANCE_COST.md). Package-schema
+stabilization and a consumer with verified hot-code native ranges remain
+separate future work.
