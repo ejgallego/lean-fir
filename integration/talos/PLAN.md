@@ -6339,11 +6339,22 @@ shifted step, stores, and back-edge with this loop and install it in the
 adapted target body followed only by the unreachable standard terminal.
 
 The important memory-proof boundary is therefore explicit: the loop theorem
-does not need to know that the destination is a Natural allocation.  The next
-slice defines the concrete prefix frame for the allocated result payload,
-proves that the exact low/high successor stores extend it with the pure output
-digit, and then converts the completed frame to the existing
-`allocateNatural`/`NaturalResultRefines` theorem at one final boundary.
+does not need to know that the destination is a Natural allocation.  The
+concrete specialization now records an inductive `WrittenLimbPrefix`: index
+zero is the initial store, and every successor is exactly W7's two `write32`
+operations for the corresponding pure `addLimbWords` digit.  Its strengthened
+suffix invariant retains the complete remaining output list as well as the
+terminal carry, so the complete loop returns a store containing exactly that
+materialization history rather than merely some sequence of in-bounds writes.
+
+Recording stores before decoding them is the useful boundary here.  The
+arithmetic loop remains independent of non-wraparound and pairwise address
+separation; those facts belong to a subsequent memory projection showing
+that later limb stores preserve earlier low/high reads.  Once allocation
+bounds discharge that projection, the completed prefix can be converted to
+the existing `allocateNatural`/`NaturalResultRefines` theorem at one final
+boundary.  This separation also exposes precisely which assumptions would be
+invalid if the modular wasm32 limb address wrapped.
 
 ## Parallel agent packages
 

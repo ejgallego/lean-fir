@@ -1724,6 +1724,27 @@ def addLimbWords : List LimbWords → List LimbWords → UInt32 →
       ((low, high) :: rest.1, rest.2)
   | _, _, carry => ([], carry)
 
+/-- Equal-length inputs produce exactly one output limb per input limb. -/
+theorem addLimbWords_length
+    (left right : List LimbWords) (carry : UInt32)
+    (sameLength : left.length = right.length) :
+    (addLimbWords left right carry).1.length = left.length := by
+  induction left generalizing right carry with
+  | nil =>
+      cases right with
+      | nil => rfl
+      | cons right rights => simp at sameLength
+  | cons left lefts inductionHypothesis =>
+      cases right with
+      | nil => simp at sameLength
+      | cons right rights =>
+          have restSameLength : lefts.length = rights.length := by
+            simpa using sameLength
+          simp [addLimbWords,
+            inductionHypothesis rights
+              (limbSumCarryOut left.1 left.2 right.1 right.2 carry)
+              restSameLength]
+
 /-- Processed-prefix invariant for the shared scan/writer arithmetic.  The
 output prefix plus its final carry has exactly the value of both equally sized
 input prefixes plus the incoming bit. -/
@@ -4566,6 +4587,182 @@ theorem wp_writeSumLoopProgram_of_limbWordsAndFrame
       simpa [Inv, leftLimb, rightLimb] using carryResult
     · rw [sumCarryNextIndex_toNat beforeCount]
       exact nextFrame
+
+/-- Exact materialization history for the first `n` limbs of a result payload.
+
+The relation deliberately records the generated Talos stores, rather than
+assuming a decoder theorem up front.  Its later memory projection therefore
+has a small, explicit obligation: later, disjoint limb stores preserve every
+earlier low/high word. -/
+inductive WrittenLimbPrefix
+    (initial : Wasm.Store host) (result : UInt32) (words : List LimbWords) :
+    Nat → Wasm.Store host → Prop where
+  | zero : WrittenLimbPrefix initial result words 0 initial
+  | step {index : Nat} {current : Wasm.Store host} {low high : UInt32}
+      (written : WrittenLimbPrefix initial result words index current)
+      (wordAt : words[index]? = some (low, high)) :
+      WrittenLimbPrefix initial result words (index + 1)
+        (writeSumFinalStore current result (UInt32.ofNat index) low high)
+
+/-- Extend an exact written prefix at a wasm32 index without leaking an
+`ofNat` round trip into the loop invariant. -/
+theorem WrittenLimbPrefix.next
+    {initial current : Wasm.Store host} {result index low high : UInt32}
+    {words : List LimbWords}
+    (written : WrittenLimbPrefix initial result words index.toNat current)
+    (wordAt : words[index.toNat]? = some (low, high)) :
+    WrittenLimbPrefix initial result words (index.toNat + 1)
+      (writeSumFinalStore current result index low high) := by
+  have indexRoundtrip : UInt32.ofNat index.toNat = index := by
+    apply UInt32.toNat.inj
+    simp
+  simpa [indexRoundtrip] using WrittenLimbPrefix.step written wordAt
+
+/-- The complete writer loop materializes exactly the pure output prefix, not
+merely an arbitrary sequence of in-bounds stores. -/
+theorem wp_writeSumLoopProgram_of_exactPrefix
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {magnitudeLowIndex magnitudeHighIndex : Nat}
+    {Q : Wasm.Assertion host} {initialStore : Wasm.Store host}
+    {left leftFlavor right rightFlavor result count initialCarry : UInt32}
+    {initialLeftLow initialLeftHigh initialRightLow initialRightHigh low high
+      carryLocal carryExtra scaled : UInt32}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    {leftWords rightWords : List LimbWords}
+    (leftLength : leftWords.length = count.toNat)
+    (rightLength : rightWords.length = count.toNat)
+    (leftLowRun : ∀ (index : UInt32) (current : Wasm.Store host)
+      (beforeCount : index.toNat < count.toNat),
+      WrittenLimbPrefix initialStore result
+          (addLimbWords leftWords rightWords initialCarry).1
+          index.toNat current →
+      Wasm.TerminatesWith env module magnitudeLowIndex current
+        ([.i32 index, .i32 leftFlavor, .i32 left] ++ tail)
+        (fun final values => final = current ∧
+          values = .i32 (leftWords[index.toNat]'(by omega)).1 :: tail))
+    (leftHighRun : ∀ (index : UInt32) (current : Wasm.Store host)
+      (beforeCount : index.toNat < count.toNat),
+      WrittenLimbPrefix initialStore result
+          (addLimbWords leftWords rightWords initialCarry).1
+          index.toNat current →
+      Wasm.TerminatesWith env module magnitudeHighIndex current
+        ([.i32 index, .i32 leftFlavor, .i32 left] ++ tail)
+        (fun final values => final = current ∧
+          values = .i32 (leftWords[index.toNat]'(by omega)).2 :: tail))
+    (rightLowRun : ∀ (index : UInt32) (current : Wasm.Store host)
+      (beforeCount : index.toNat < count.toNat),
+      WrittenLimbPrefix initialStore result
+          (addLimbWords leftWords rightWords initialCarry).1
+          index.toNat current →
+      Wasm.TerminatesWith env module magnitudeLowIndex current
+        ([.i32 index, .i32 rightFlavor, .i32 right] ++ tail)
+        (fun final values => final = current ∧
+          values = .i32 (rightWords[index.toNat]'(by omega)).1 :: tail))
+    (rightHighRun : ∀ (index : UInt32) (current : Wasm.Store host)
+      (beforeCount : index.toNat < count.toNat),
+      WrittenLimbPrefix initialStore result
+          (addLimbWords leftWords rightWords initialCarry).1
+          index.toNat current →
+      Wasm.TerminatesWith env module magnitudeHighIndex current
+        ([.i32 index, .i32 rightFlavor, .i32 right] ++ tail)
+        (fun final values => final = current ∧
+          values = .i32 (rightWords[index.toNat]'(by omega)).2 :: tail))
+    (writeInBounds : ∀ (index : UInt32) (current : Wasm.Store host)
+      (_beforeCount : index.toNat < count.toNat),
+      WrittenLimbPrefix initialStore result
+          (addLimbWords leftWords rightWords initialCarry).1
+          index.toNat current →
+      ¬(checkedLimbBase result index).toNat + 4 >
+          current.mem.pages * 65536 ∧
+        ¬(checkedLimbBase result index).toNat + 4 + 4 >
+          current.mem.pages * 65536)
+    (completed : ∀ finalStore,
+      WrittenLimbPrefix initialStore result
+          (addLimbWords leftWords rightWords initialCarry).1
+          count.toNat finalStore →
+      Q (.Return finalStore
+        (.i32 (addLimbWords leftWords rightWords initialCarry).2 :: tail))) :
+    Wasm.wp module
+      (writeSumLoopProgram magnitudeLowIndex magnitudeHighIndex ++ rest) Q
+      initialStore
+      (writeSumArithmeticLocals left leftFlavor right rightFlavor result 0
+        count initialCarry initialLeftLow initialLeftHigh initialRightLow
+        initialRightHigh low high carryLocal carryExtra scaled tail) env := by
+  let outputWords := (addLimbWords leftWords rightWords initialCarry).1
+  let expectedCarry := (addLimbWords leftWords rightWords initialCarry).2
+  have sameLength : leftWords.length = rightWords.length := by
+    rw [leftLength, rightLength]
+  have outputLength : outputWords.length = count.toNat := by
+    change (addLimbWords leftWords rightWords initialCarry).1.length =
+      count.toNat
+    rw [addLimbWords_length leftWords rightWords initialCarry
+      sameLength, leftLength]
+  let Inv : UInt32 → UInt32 → Wasm.Store host → Prop :=
+    fun index carry current =>
+      index.toNat ≤ count.toNat ∧
+      addLimbWords (leftWords.drop index.toNat)
+          (rightWords.drop index.toNat) carry =
+        (outputWords.drop index.toNat, expectedCarry) ∧
+      WrittenLimbPrefix initialStore result outputWords index.toNat current
+  apply wp_writeSumLoopProgram_of_invariant (Inv := Inv)
+  · exact ⟨by simp, by simp [outputWords, expectedCarry], .zero⟩
+  · intro index carry current invariant
+    exact invariant.1
+  · intro carry current invariant
+    have leftDrop : leftWords.drop count.toNat = [] := by
+      rw [← leftLength]
+      simp
+    have rightDrop : rightWords.drop count.toNat = [] := by
+      rw [← rightLength]
+      simp
+    have outputDrop : outputWords.drop count.toNat = [] := by
+      rw [← outputLength]
+      simp
+    have carryEq : carry = expectedCarry := by
+      simpa [Inv, leftDrop, rightDrop, outputDrop, addLimbWords] using
+        congrArg Prod.snd invariant.2.1
+    rw [carryEq]
+    simpa [outputWords, expectedCarry] using completed current invariant.2.2
+  · intro index carry current invariant beforeCount
+    let leftLimb : LimbWords := leftWords[index.toNat]'(by omega)
+    let rightLimb : LimbWords := rightWords[index.toNat]'(by omega)
+    have outputBefore : index.toNat < outputWords.length := by
+      rw [outputLength]
+      exact beforeCount
+    have leftLowRun' := leftLowRun index current beforeCount invariant.2.2
+    have leftHighRun' := leftHighRun index current beforeCount invariant.2.2
+    have rightLowRun' := rightLowRun index current beforeCount invariant.2.2
+    have rightHighRun' := rightHighRun index current beforeCount invariant.2.2
+    obtain ⟨lowInBounds, highInBounds⟩ :=
+      writeInBounds index current beforeCount invariant.2.2
+    refine ⟨leftLimb.1, leftLimb.2, rightLimb.1, rightLimb.2,
+      leftLowRun', leftHighRun', rightLowRun', rightHighRun', lowInBounds,
+      highInBounds, ?_⟩
+    have leftDrop := List.drop_eq_getElem_cons
+      (l := leftWords) (i := index.toNat) (by omega)
+    have rightDrop := List.drop_eq_getElem_cons
+      (l := rightWords) (i := index.toNat) (by omega)
+    have outputDrop := List.drop_eq_getElem_cons
+      (l := outputWords) (i := index.toNat) outputBefore
+    have recurrence := invariant.2.1
+    rw [leftDrop, rightDrop, outputDrop] at recurrence
+    simp only [addLimbWords, Prod.mk.injEq, List.cons.injEq] at recurrence
+    refine ⟨?_, ?_, ?_⟩
+    · rw [sumCarryNextIndex_toNat beforeCount]
+      omega
+    · rw [sumCarryNextIndex_toNat beforeCount]
+      apply Prod.ext
+      · simpa [leftLimb, rightLimb] using recurrence.1.2
+      · simpa [leftLimb, rightLimb] using recurrence.2
+    · have outputWordAt : outputWords[index.toNat]? = some (
+          limbSumLow leftLimb.1 rightLimb.1 carry,
+          limbSumHigh leftLimb.1 leftLimb.2 rightLimb.1 rightLimb.2
+            carry) := by
+        rw [getElem?_pos outputWords index.toNat outputBefore]
+        exact congrArg some (by
+          simpa [leftLimb, rightLimb] using recurrence.1.1.symm)
+      rw [sumCarryNextIndex_toNat beforeCount]
+      exact WrittenLimbPrefix.next invariant.2.2 outputWordAt
 
 /-- Exact successor store after materializing the low half of a carry limb. -/
 def checkedCarryLowStore (store : Wasm.Store host) (object index : UInt32) :
