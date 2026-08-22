@@ -15,27 +15,23 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Active integration lease
 
-- Milestone: `WASM-IMPURE-BINDER-HYGIENE-VISIBILITY`, linked/accepted.
-- Integration owner: `wasm-proof`, completing the narrow landing lease assigned
-  by the user. The accepted stack preserves feature ownership and returns the
-  next shared-contract checkpoint to `wasm-gen` after this atomic advance.
-- Current checkpoint: W7's proof-visible impure-hygiene contract is accepted at
-  `818a1be1`, based directly on prior accepted `main` `66aa9281`. It retains
-  `Program.ImpureHygienic` as the single shared invariant, makes its binder
-  traversal total and transparent, exposes declaration-wide freshness and
-  `WasmSupported.impureHygienic`, and rejects duplicate raw LCNF binders without
-  adding a Wasm-only certificate. W6's consumer repair follows at functional
-  head `1d44bfe5` and tracked handoff `e7554e0f`: supported-body and
-  parameter-uniqueness proofs project through the strengthened conjunction,
-  while the exact Bool case proof follows globally fresh alternative binders
-  `r`/`u` through generated locals 1/2. Forced full Talos recompilation found a
-  third stale projection consumer beyond the two named in W7's handoff; it was
-  repaired without weakening the invariant or changing runtime behavior. Lean
-  Beam, direct recompilation, the focused 3,117/3,118-job cones, all 713
-  repository cases and 2,121/2,121 comparisons, and all 3,167 Talos jobs pass.
-  The contract and proof successors advance `main` atomically, so no
-  stale-proof intermediate is exposed. W7 and validation rebase before their
-  next dependent work.
+- Milestone: `W7-W6-CHECKED-NAT-TYPED-RESULT`, linked/accepted locally.
+- Integration owner: `wasm-gen`, accepting the exact W7 generation and
+  lean-zip ratchet followed atomically by W6's typed-result proof checkpoint.
+- Current checkpoint: pushed tooling baseline `713c6e52` is followed by W7
+  functional head `fcc47335`, exact lean-zip ratchet `3cdb7ce1`, tracked W7
+  handoff `208f8095`, W6 proof head `c0427a57`, and tracked W6 handoff
+  `47635960`. The immediate, validated one-limb, and freshly allocated
+  multi-limb exits now return their already-canonical object words without an
+  address-zero scratch cast. W6 proves the one-limb object relation and both
+  multi-limb allocation/carry-store result shapes close through
+  `LiveHeapRel`/`ResidentMemoryRel`; no arbitrary physical `i32` is admitted as
+  `.tobject`. Lean Beam, forced direct Lean compilation, the 3,118-job focused
+  cone, all 713 repository cases and 2,121/2,121 comparisons, all 3,167 Talos
+  jobs, and the complete deterministic W7 artifact gate pass. The stronger
+  processed-limb-prefix proof that `sumCarryFrom` and `writeSumFrom` compute the
+  mathematical sum remains active in W6 and does not block this typed-result
+  checkpoint.
 - Accepted baseline: `main` contains the complete
   `W7-ILLUMINATE-SELECTION-CATALOG-EXPORT` stack through tracked lane head
   `5081015a` and the independently isolated
@@ -163,6 +159,11 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   arm preserves the already-related Natural object word through a typed
   unsigned-extend/wrap pair without scratch traffic; the checked fallback,
   naturalSum implementation, ABI, layout, and helper signatures are unchanged.
+  The checked-result successor is accepted locally through tracked W7 handoff
+  `208f8095` and W6 handoff `47635960` (functional heads `fcc47335` and
+  `c0427a57`). It removes the same scratch cast from validated one-limb and
+  allocated multi-limb exits and proves their concrete object-validity
+  boundary without changing arithmetic, layout, signatures, or ownership.
 - Landing order:
   1. W7-2's Verso source-module replay repair and generic immutable-package
      publisher are accepted in that order through `912bf68a`.
@@ -284,12 +285,18 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
       tracked handoff `e7554e0f`. The combined stack advances atomically so
       `supportedDecl`'s strengthened conjunction never reaches `main` with
       stale Talos projections.
+  26. W7's checked-result `Nat.add` successor and exact lean-zip ratchet land
+      at `fcc47335` and `3cdb7ce1`, immediately followed by W6's typed-result
+      proof `c0427a57` and tracked handoff `47635960`. The complete artifact
+      gate validates the combined stack before publication; W6's stronger
+      arithmetic-loop induction continues independently.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
   invalidating long deterministic package and external-engine gates.
-- Not ready: W6 promoted/heap-backed `Nat.add`, the operation-specific
-  `StateRelated` successor for full resident replacement, and the
+- Not ready: W6's processed-limb-prefix proof for `sumCarryFrom` and
+  `writeSumFrom`, the operation-specific `StateRelated` successor for full
+  resident replacement, and the
   integration-owned compiler-to-Array-admission bridge remain open. Verso
   consumption of the local-only exact-head Flat package and
   its mailbox closure remain client-owned; no compatibility alias was added in
