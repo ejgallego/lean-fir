@@ -6263,6 +6263,21 @@ with the already-proved exact body pieces. This proof API is working state,
 not a frozen client contract; it may be reshaped whenever a cleaner runtime or
 induction boundary is useful.
 
+The arithmetic core now supplies that processed-prefix invariant.  One exact
+wasm32 add-with-carry step proves both its base-`2^32` value equation and that
+the generated sum of its two overflow tests is itself a bit; the high-half and
+next-limb carry premises are therefore derived from the implementation rather
+than assumed.  Lifting the step over equally sized low/high-word lists proves
+the base-`2^64` prefix equation.  The concrete bridge splits canonical
+`UInt64` limbs into those word pairs and pads the shorter operand with zero
+limbs, matching the installed magnitude accessors beyond an operand's own
+count.  A useful proof-engineering lesson is to keep the recursive invariant
+machine-shaped and convert to `naturalLimbsValue` only once at the
+allocation/refinement edge; this avoids repeating bit-vector decomposition in
+the scan and writer proofs.  The remaining work is operational: attach this
+invariant to the two installed Talos loops and to the writer's exact memory
+frame.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

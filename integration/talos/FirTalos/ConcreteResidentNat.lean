@@ -655,6 +655,318 @@ theorem terminatesWith_naturalSumRelated_of_adapted
 def naturalWordsValue (low high : UInt32) : Nat :=
   low.toNat + 2 ^ 32 * high.toNat
 
+/-! ## Arithmetic core of the installed arbitrary-precision addition loops -/
+
+/-- The wrapped wasm32 result of adding two words and a one-bit incoming
+carry.  The spelling follows `ResidentBigNumeric.sumStep`: first add both
+operand words, then add the incoming carry. -/
+def wordAddWithCarry (left right carry : UInt32) : UInt32 :=
+  left + right + carry
+
+/-- The outgoing carry computed by `ResidentBigNumeric.sumStep` for one
+wasm32 word.  The two tests cannot both contribute when `carry` is a bit, but
+retaining their generated addition here keeps the proof tied to the installed
+machine code. -/
+def wordAddCarryOut (left right carry : UInt32) : UInt32 :=
+  (if left + right < left then 1 else 0) +
+    (if wordAddWithCarry left right carry < carry then 1 else 0)
+
+/-- One wasm32 word addition preserves the unbounded value when its outgoing
+carry is interpreted in base `2^32`.  The second conjunct is the invariant
+needed to feed that carry into the high half of a limb or the next limb. -/
+theorem wordAddWithCarry_spec
+    (left right carry : UInt32) (carryBit : carry = 0 ∨ carry = 1) :
+    (wordAddWithCarry left right carry).toNat +
+          UInt32.size * (wordAddCarryOut left right carry).toNat =
+        left.toNat + right.toNat + carry.toNat ∧
+      (wordAddCarryOut left right carry = 0 ∨
+        wordAddCarryOut left right carry = 1) := by
+  have leftLt := left.toNat_lt
+  have rightLt := right.toNat_lt
+  have carryNat : carry.toNat = 0 ∨ carry.toNat = 1 := by
+    rcases carryBit with rfl | rfl <;> simp
+  unfold wordAddCarryOut wordAddWithCarry
+  simp only [UInt32.size, UInt32.lt_iff_toNat_lt, UInt32.toNat_add]
+  by_cases baseFits : left.toNat + right.toNat < 2 ^ 32
+  · rw [Nat.mod_eq_of_lt baseFits]
+    rw [if_neg (by omega)]
+    by_cases resultFits :
+        left.toNat + right.toNat + carry.toNat < 2 ^ 32
+    · rw [Nat.mod_eq_of_lt resultFits]
+      rw [if_neg (by omega)]
+      simp
+    · have resultOverflow :
+          2 ^ 32 ≤ left.toNat + right.toNat + carry.toNat :=
+        Nat.le_of_not_gt resultFits
+      have resultSubLt :
+          left.toNat + right.toNat + carry.toNat - 2 ^ 32 < 2 ^ 32 := by
+        omega
+      rw [Nat.mod_eq_sub_mod resultOverflow,
+        Nat.mod_eq_of_lt resultSubLt]
+      rw [if_pos (by omega)]
+      simp
+      omega
+  · have baseOverflow : 2 ^ 32 ≤ left.toNat + right.toNat :=
+      Nat.le_of_not_gt baseFits
+    have baseSubLt :
+        left.toNat + right.toNat - 2 ^ 32 < 2 ^ 32 := by
+      omega
+    rw [Nat.mod_eq_sub_mod baseOverflow, Nat.mod_eq_of_lt baseSubLt]
+    rw [if_pos (by omega)]
+    have resultFits :
+        left.toNat + right.toNat - 2 ^ 32 + carry.toNat < 2 ^ 32 := by
+      omega
+    rw [Nat.mod_eq_of_lt resultFits]
+    rw [if_neg (by omega)]
+    simp
+    omega
+
+/-- Low half produced by one installed 64-bit-limb addition step. -/
+def limbSumLow (leftLow rightLow carry : UInt32) : UInt32 :=
+  wordAddWithCarry leftLow rightLow carry
+
+/-- Carry from the low half into the high half of the same limb. -/
+def limbSumMiddleCarry (leftLow rightLow carry : UInt32) : UInt32 :=
+  wordAddCarryOut leftLow rightLow carry
+
+/-- High half produced after feeding the low-half carry into the second
+wasm32 addition. -/
+def limbSumHigh (leftLow leftHigh rightLow rightHigh carry : UInt32) :
+    UInt32 :=
+  wordAddWithCarry leftHigh rightHigh
+    (limbSumMiddleCarry leftLow rightLow carry)
+
+/-- Carry from one complete base-`2^64` limb into the next limb. -/
+def limbSumCarryOut
+    (leftLow leftHigh rightLow rightHigh carry : UInt32) : UInt32 :=
+  wordAddCarryOut leftHigh rightHigh
+    (limbSumMiddleCarry leftLow rightLow carry)
+
+/-- The exact two-word arithmetic performed by `ResidentBigNumeric.sumStep`
+is one base-`2^64` addition step.  Besides its numerical equation, the theorem
+exports the bit invariant required by the following loop iteration. -/
+theorem limbSum_spec
+    (leftLow leftHigh rightLow rightHigh carry : UInt32)
+    (carryBit : carry = 0 ∨ carry = 1) :
+    naturalWordsValue
+          (limbSumLow leftLow rightLow carry)
+          (limbSumHigh leftLow leftHigh rightLow rightHigh carry) +
+        2 ^ 64 *
+          (limbSumCarryOut leftLow leftHigh rightLow rightHigh carry).toNat =
+      naturalWordsValue leftLow leftHigh +
+        naturalWordsValue rightLow rightHigh + carry.toNat ∧
+      (limbSumCarryOut leftLow leftHigh rightLow rightHigh carry = 0 ∨
+        limbSumCarryOut leftLow leftHigh rightLow rightHigh carry = 1) := by
+  obtain ⟨lowValue, middleCarryBit⟩ :=
+    wordAddWithCarry_spec leftLow rightLow carry carryBit
+  obtain ⟨highValue, finalCarryBit⟩ :=
+    wordAddWithCarry_spec leftHigh rightHigh
+      (limbSumMiddleCarry leftLow rightLow carry) middleCarryBit
+  refine ⟨?_, finalCarryBit⟩
+  unfold limbSumCarryOut limbSumHigh limbSumMiddleCarry limbSumLow
+  unfold naturalWordsValue
+  unfold limbSumMiddleCarry at highValue
+  norm_num [UInt32.size] at lowValue highValue ⊢
+  omega
+
+/-- The two wasm32 halves of one little-endian base-`2^64` limb. -/
+abbrev LimbWords := UInt32 × UInt32
+
+def limbWordsValue (limb : LimbWords) : Nat :=
+  naturalWordsValue limb.1 limb.2
+
+/-- Unbounded value of a least-significant-limb-first word list. -/
+def limbWordsListValue : List LimbWords → Nat
+  | [] => 0
+  | limb :: limbs => limbWordsValue limb + 2 ^ 64 * limbWordsListValue limbs
+
+/-- Split the concrete runtime's `UInt64` limb into the low/high wasm32 words
+observed by the resident magnitude accessors. -/
+def limbWordsOfUInt64 (limb : UInt64) : LimbWords :=
+  (limb.toUInt32, (limb >>> (32 : UInt64)).toUInt32)
+
+theorem limbWordsValue_ofUInt64 (limb : UInt64) :
+    limbWordsValue (limbWordsOfUInt64 limb) = limb.toNat := by
+  have limbLt : limb.toNat < 2 ^ 64 := by
+    simpa [UInt64.size] using limb.toNat_lt
+  have highLt : limb.toNat / 2 ^ 32 < 2 ^ 32 := by
+    omega
+  unfold limbWordsValue limbWordsOfUInt64 naturalWordsValue
+  simp only [UInt64.toNat_toUInt32, UInt64.toNat_shiftRight]
+  have shift32 : (32 : UInt64).toNat % 64 = 32 := by decide
+  rw [shift32, Nat.shiftRight_eq_div_pow, Nat.mod_eq_of_lt highLt]
+  exact Nat.mod_add_div limb.toNat (2 ^ 32)
+
+/-- The W6 word-pair view and the concrete runtime's `UInt64`-limb view have
+the same little-endian unbounded value. -/
+theorem limbWordsListValue_ofUInt64s (limbs : List UInt64) :
+    limbWordsListValue (limbs.map limbWordsOfUInt64) =
+      naturalLimbsValue limbs := by
+  induction limbs with
+  | nil => rfl
+  | cons limb limbs inductionHypothesis =>
+      simp [limbWordsListValue, naturalLimbsValue,
+        limbWordsValue_ofUInt64, inductionHypothesis, UInt64.size]
+
+@[simp] theorem limbWordsListValue_replicate_zero (count : Nat) :
+    limbWordsListValue (List.replicate count ((0, 0) : LimbWords)) = 0 := by
+  induction count with
+  | zero => rfl
+  | succ count inductionHypothesis =>
+      simp [List.replicate_succ, limbWordsListValue, limbWordsValue,
+        naturalWordsValue, inductionHypothesis]
+
+theorem limbWordsListValue_append_zeros
+    (limbs : List LimbWords) (count : Nat) :
+    limbWordsListValue
+        (limbs ++ List.replicate count ((0, 0) : LimbWords)) =
+      limbWordsListValue limbs := by
+  induction limbs with
+  | nil => simp [limbWordsListValue]
+  | cons limb limbs inductionHypothesis =>
+      simp [limbWordsListValue, inductionHypothesis]
+
+/-- Pad a least-significant-first limb view to a shared loop count.  This is
+the pure counterpart of `magnitudeLow`/`magnitudeHigh` returning zero beyond
+an operand's own count. -/
+def padLimbWords (count : Nat) (limbs : List LimbWords) : List LimbWords :=
+  limbs ++ List.replicate (count - limbs.length) (0, 0)
+
+theorem padLimbWords_length {count : Nat} {limbs : List LimbWords}
+    (fits : limbs.length ≤ count) :
+    (padLimbWords count limbs).length = count := by
+  simp [padLimbWords, Nat.add_sub_of_le fits]
+
+theorem padLimbWords_value (count : Nat) (limbs : List LimbWords) :
+    limbWordsListValue (padLimbWords count limbs) =
+      limbWordsListValue limbs := by
+  exact limbWordsListValue_append_zeros limbs (count - limbs.length)
+
+/-- Canonical concrete Natural limbs, split into the wasm32 words seen by the
+installed addition loops and padded to their common maximum count. -/
+def paddedNaturalLimbWords (count value : Nat) : List LimbWords :=
+  padLimbWords count ((naturalLimbs value).map limbWordsOfUInt64)
+
+theorem paddedNaturalLimbWords_length {count value : Nat}
+    (fits : (naturalLimbs value).length ≤ count) :
+    (paddedNaturalLimbWords count value).length = count := by
+  apply padLimbWords_length
+  simpa using fits
+
+theorem paddedNaturalLimbWords_value (count value : Nat) :
+    limbWordsListValue (paddedNaturalLimbWords count value) = value := by
+  rw [paddedNaturalLimbWords, padLimbWords_value,
+    limbWordsListValue_ofUInt64s, naturalLimbs_value]
+
+/-- Pure recursion matching the carry flow of both installed addition loops.
+The mismatched-list cases are unreachable once validation has padded both
+operand views to the common maximum count. -/
+def addLimbWords : List LimbWords → List LimbWords → UInt32 →
+    List LimbWords × UInt32
+  | [], [], carry => ([], carry)
+  | left :: lefts, right :: rights, carry =>
+      let low := limbSumLow left.1 right.1 carry
+      let high := limbSumHigh left.1 left.2 right.1 right.2 carry
+      let nextCarry :=
+        limbSumCarryOut left.1 left.2 right.1 right.2 carry
+      let rest := addLimbWords lefts rights nextCarry
+      ((low, high) :: rest.1, rest.2)
+  | _, _, carry => ([], carry)
+
+/-- Processed-prefix invariant for the shared scan/writer arithmetic.  The
+output prefix plus its final carry has exactly the value of both equally sized
+input prefixes plus the incoming bit. -/
+theorem addLimbWords_spec
+    (left right : List LimbWords) (carry : UInt32)
+    (sameLength : left.length = right.length)
+    (carryBit : carry = 0 ∨ carry = 1) :
+    limbWordsListValue (addLimbWords left right carry).1 +
+          2 ^ (64 * left.length) *
+            (addLimbWords left right carry).2.toNat =
+        limbWordsListValue left + limbWordsListValue right + carry.toNat ∧
+      ((addLimbWords left right carry).2 = 0 ∨
+        (addLimbWords left right carry).2 = 1) := by
+  induction left generalizing right carry with
+  | nil =>
+      cases right with
+      | nil => simp [addLimbWords, limbWordsListValue, carryBit]
+      | cons right rights => simp at sameLength
+  | cons left lefts inductionHypothesis =>
+      cases right with
+      | nil => simp at sameLength
+      | cons right rights =>
+          have restSameLength : lefts.length = rights.length := by
+            simpa using sameLength
+          obtain ⟨stepValue, nextCarryBit⟩ :=
+            limbSum_spec left.1 left.2 right.1 right.2 carry carryBit
+          obtain ⟨restValue, finalCarryBit⟩ :=
+            inductionHypothesis rights
+              (limbSumCarryOut left.1 left.2 right.1 right.2 carry)
+              restSameLength nextCarryBit
+          refine ⟨?_, finalCarryBit⟩
+          simp only [addLimbWords, limbWordsListValue, limbWordsValue,
+            List.length_cons]
+          calc
+            _ = naturalWordsValue
+                  (limbSumLow left.1 right.1 carry)
+                  (limbSumHigh left.1 left.2 right.1 right.2 carry) +
+                2 ^ 64 *
+                  (limbWordsListValue
+                      (addLimbWords lefts rights
+                        (limbSumCarryOut left.1 left.2 right.1 right.2
+                          carry)).1 +
+                    2 ^ (64 * lefts.length) *
+                      (addLimbWords lefts rights
+                        (limbSumCarryOut left.1 left.2 right.1 right.2
+                          carry)).2.toNat) := by
+                    rw [Nat.mul_succ, Nat.pow_add, Nat.mul_add]
+                    ac_rfl
+            _ = naturalWordsValue
+                  (limbSumLow left.1 right.1 carry)
+                  (limbSumHigh left.1 left.2 right.1 right.2 carry) +
+                2 ^ 64 *
+                  (limbWordsListValue lefts + limbWordsListValue rights +
+                    (limbSumCarryOut left.1 left.2 right.1 right.2
+                      carry).toNat) := by rw [restValue]
+            _ = (naturalWordsValue left.1 left.2 +
+                    2 ^ 64 * limbWordsListValue lefts) +
+                  (naturalWordsValue right.1 right.2 +
+                    2 ^ 64 * limbWordsListValue rights) + carry.toNat := by
+                    simp only [Nat.mul_add]
+                    norm_num at stepValue ⊢
+                    omega
+
+/-- End-to-end pure contract that the installed scan and writer loops must
+realize.  With canonical operands padded to the validated maximum count, the
+computed prefix and final carry denote the mathematical Nat sum. -/
+theorem addPaddedNaturalLimbWords_spec
+    {count left right : Nat}
+    (leftFits : (naturalLimbs left).length ≤ count)
+    (rightFits : (naturalLimbs right).length ≤ count) :
+    limbWordsListValue
+          (addLimbWords (paddedNaturalLimbWords count left)
+            (paddedNaturalLimbWords count right) 0).1 +
+        2 ^ (64 * count) *
+          (addLimbWords (paddedNaturalLimbWords count left)
+            (paddedNaturalLimbWords count right) 0).2.toNat =
+      left + right ∧
+    ((addLimbWords (paddedNaturalLimbWords count left)
+          (paddedNaturalLimbWords count right) 0).2 = 0 ∨
+      (addLimbWords (paddedNaturalLimbWords count left)
+          (paddedNaturalLimbWords count right) 0).2 = 1) := by
+  have leftLength := paddedNaturalLimbWords_length leftFits
+  have rightLength := paddedNaturalLimbWords_length rightFits
+  have sameLength :
+      (paddedNaturalLimbWords count left).length =
+        (paddedNaturalLimbWords count right).length := by
+    rw [leftLength, rightLength]
+  have specification := addLimbWords_spec
+    (paddedNaturalLimbWords count left)
+    (paddedNaturalLimbWords count right) 0 sameLength (Or.inl rfl)
+  rw [leftLength, paddedNaturalLimbWords_value,
+    paddedNaturalLimbWords_value] at specification
+  simpa using specification
+
 /-- Every semantic Nat literal returns an object reference, independently of
 whether its canonical concrete representation is immediate, promoted, or an
 ordinary limb object. -/
