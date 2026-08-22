@@ -6278,6 +6278,16 @@ the scan and writer proofs.  The remaining work is operational: attach this
 invariant to the two installed Talos loops and to the writer's exact memory
 frame.
 
+The first operational bridge now pins W7's private `sumStep` to a public W6
+source spelling, proves its exact adaptation to Talos, and executes the four
+magnitude reads plus the complete arithmetic suffix.  One small but useful
+detail is that Talos exposes stack order in commutative `i32.add` expressions,
+so the reduced term is written as `carry + (right + left)` even when the
+contract uses `(left + right) + carry`.  The proof keeps a tiny emitted-order
+model and proves it equal to the canonical limb operation through `UInt32`'s
+injective `toNat` view.  This is preferable to making every later loop-state
+simplification normalize wrapped arithmetic inside a whole local frame.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

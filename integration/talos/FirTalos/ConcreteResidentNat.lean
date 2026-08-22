@@ -769,6 +769,460 @@ theorem limbSum_spec
   norm_num [UInt32.size] at lowValue highValue ⊢
   omega
 
+/-! ### One installed scan-loop arithmetic step -/
+
+/-- Commutativity of wrapped wasm32 addition.  `UInt32` intentionally does
+not expose the usual algebraic typeclass hierarchy, so instruction proofs use
+this local bridge through its injective mathematical view. -/
+theorem uint32_add_comm (left right : UInt32) :
+    left + right = right + left := by
+  apply UInt32.toNat.inj
+  simp only [UInt32.toNat_add]
+  rw [Nat.add_comm]
+
+/-- Operand order exposed by Talos after executing the emitter's two
+`local.get`s.  Addition is commutative, but retaining this spelling makes the
+instruction proof reduce definitionally instead of asking simplification to
+normalize arithmetic inside an entire local frame. -/
+def emittedWordAddWithCarry (left right carry : UInt32) : UInt32 :=
+  carry + (right + left)
+
+/-- Canonical carry spelling using the emitter's operand order. -/
+def emittedWordAddCarryOut (left right carry : UInt32) : UInt32 :=
+  (if right + left < left then 1 else 0) +
+    (if emittedWordAddWithCarry left right carry < carry then 1 else 0)
+
+@[simp] theorem emittedWordAddWithCarry_eq
+    (left right carry : UInt32) :
+    emittedWordAddWithCarry left right carry =
+      wordAddWithCarry left right carry := by
+  unfold emittedWordAddWithCarry wordAddWithCarry
+  calc
+    carry + (right + left) = (right + left) + carry :=
+      uint32_add_comm _ _
+    _ = (left + right) + carry := by rw [uint32_add_comm right left]
+
+@[simp] theorem emittedWordAddCarryOut_eq
+    (left right carry : UInt32) :
+    emittedWordAddCarryOut left right carry =
+      wordAddCarryOut left right carry := by
+  unfold emittedWordAddCarryOut wordAddCarryOut
+  rw [emittedWordAddWithCarry_eq, uint32_add_comm right left]
+
+def emittedLimbSumLow (leftLow rightLow carry : UInt32) : UInt32 :=
+  emittedWordAddWithCarry leftLow rightLow carry
+
+def emittedLimbSumMiddleCarry
+    (leftLow rightLow carry : UInt32) : UInt32 :=
+  (if emittedWordAddWithCarry leftLow rightLow carry < carry then 1 else 0) +
+    (if rightLow + leftLow < leftLow then 1 else 0)
+
+def emittedLimbSumHigh
+    (leftLow leftHigh rightLow rightHigh carry : UInt32) : UInt32 :=
+  emittedWordAddWithCarry leftHigh rightHigh
+    (emittedLimbSumMiddleCarry leftLow rightLow carry)
+
+def emittedLimbSumCarryOut
+    (leftLow leftHigh rightLow rightHigh carry : UInt32) : UInt32 :=
+  emittedWordAddCarryOut leftHigh rightHigh
+    (emittedLimbSumMiddleCarry leftLow rightLow carry)
+
+@[simp] theorem emittedLimbSumLow_eq
+    (leftLow rightLow carry : UInt32) :
+    emittedLimbSumLow leftLow rightLow carry =
+      limbSumLow leftLow rightLow carry := by
+  simp [emittedLimbSumLow, limbSumLow]
+
+@[simp] theorem emittedLimbSumMiddleCarry_eq
+    (leftLow rightLow carry : UInt32) :
+    emittedLimbSumMiddleCarry leftLow rightLow carry =
+      limbSumMiddleCarry leftLow rightLow carry := by
+  unfold emittedLimbSumMiddleCarry limbSumMiddleCarry wordAddCarryOut
+  rw [emittedWordAddWithCarry_eq, uint32_add_comm rightLow leftLow]
+  apply uint32_add_comm
+
+@[simp] theorem emittedLimbSumHigh_eq
+    (leftLow leftHigh rightLow rightHigh carry : UInt32) :
+    emittedLimbSumHigh leftLow leftHigh rightLow rightHigh carry =
+      limbSumHigh leftLow leftHigh rightLow rightHigh carry := by
+  simp [emittedLimbSumHigh, limbSumHigh]
+
+@[simp] theorem emittedLimbSumCarryOut_eq
+    (leftLow leftHigh rightLow rightHigh carry : UInt32) :
+    emittedLimbSumCarryOut leftLow leftHigh rightLow rightHigh carry =
+      limbSumCarryOut leftLow leftHigh rightLow rightHigh carry := by
+  simp [emittedLimbSumCarryOut, limbSumCarryOut]
+
+/-- Talos spelling of the arithmetic suffix of `sumStep` in
+`sumCarryFromFunction`.  The four magnitude accessor calls have already
+placed their results in locals `7` through `10`; this suffix overwrites the
+low/high result and carry scratch locals exactly as emitted by W7. -/
+def sumCarryArithmeticProgram : Wasm.Program := [
+  .localGet 7, .localGet 9, .add, .localSet 11,
+  .localGet 11, .localGet 7, .ltU, .localSet 13,
+  .localGet 11, .localGet 6, .add, .localSet 11,
+  .localGet 11, .localGet 6, .ltU, .localSet 14,
+  .localGet 13, .localGet 14, .add, .localSet 13,
+  .localGet 8, .localGet 10, .add, .localSet 12,
+  .localGet 12, .localGet 8, .ltU, .localSet 14,
+  .localGet 12, .localGet 13, .add, .localSet 12,
+  .localGet 12, .localGet 13, .ltU, .localSet 13,
+  .localGet 13, .localGet 14, .add, .localSet 13]
+
+/-- Explicit local frame at the arithmetic boundary of one
+`sumCarryFromFunction` loop iteration.  Naming the scratch words makes the
+theorem independent of zero initialization and therefore reusable after the
+first iteration. -/
+def sumCarryArithmeticLocals
+    (left leftFlavor right rightFlavor index count carry : UInt32)
+    (leftLow leftHigh rightLow rightHigh low high carryLocal carryExtra
+      scaled : UInt32)
+    (values : List Wasm.Value) : Wasm.Locals := {
+  params := [.i32 left, .i32 leftFlavor, .i32 right, .i32 rightFlavor,
+    .i32 index, .i32 count, .i32 carry]
+  locals := [.i32 leftLow, .i32 leftHigh, .i32 rightLow, .i32 rightHigh,
+    .i32 low, .i32 high, .i32 carryLocal, .i32 carryExtra, .i32 scaled]
+  values := values }
+
+/-- Direct execution of the installed arithmetic suffix realizes the
+emitter-order model definitionally.  All parameters, magnitude inputs, the
+unrelated scaled-address scratch local, the store, and the operand-stack tail
+are framed. -/
+theorem wp_sumCarryArithmeticProgram_emitted
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {left leftFlavor right rightFlavor index count carry : UInt32}
+    {leftLow leftHigh rightLow rightHigh low high carryLocal carryExtra
+      scaled : UInt32}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    (continued : Wasm.wp module rest Q store
+      (sumCarryArithmeticLocals left leftFlavor right rightFlavor index count
+        carry leftLow leftHigh rightLow rightHigh
+        (emittedLimbSumLow leftLow rightLow carry)
+        (emittedLimbSumHigh leftLow leftHigh rightLow rightHigh carry)
+        (emittedLimbSumCarryOut leftLow leftHigh rightLow rightHigh carry)
+        (if rightHigh + leftHigh < leftHigh then 1 else 0)
+        scaled tail) env) :
+    Wasm.wp module (sumCarryArithmeticProgram ++ rest) Q store
+      (sumCarryArithmeticLocals left leftFlavor right rightFlavor index count
+        carry leftLow leftHigh rightLow rightHigh low high carryLocal
+        carryExtra scaled tail) env := by
+  simp [sumCarryArithmeticProgram, sumCarryArithmeticLocals]
+  exact continued
+
+/-- Direct execution of the installed arithmetic suffix realizes the pure
+base-`2^64` limb step.  The emitter-order equalities above are the only bridge
+needed between stack order and the canonical arithmetic contract. -/
+theorem wp_sumCarryArithmeticProgram
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {left leftFlavor right rightFlavor index count carry : UInt32}
+    {leftLow leftHigh rightLow rightHigh low high carryLocal carryExtra
+      scaled : UInt32}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    (continued : Wasm.wp module rest Q store
+      (sumCarryArithmeticLocals left leftFlavor right rightFlavor index count
+        carry leftLow leftHigh rightLow rightHigh
+        (limbSumLow leftLow rightLow carry)
+        (limbSumHigh leftLow leftHigh rightLow rightHigh carry)
+        (limbSumCarryOut leftLow leftHigh rightLow rightHigh carry)
+        (if rightHigh + leftHigh < leftHigh then 1 else 0)
+        scaled tail) env) :
+    Wasm.wp module (sumCarryArithmeticProgram ++ rest) Q store
+      (sumCarryArithmeticLocals left leftFlavor right rightFlavor index count
+        carry leftLow leftHigh rightLow rightHigh low high carryLocal
+        carryExtra scaled tail) env := by
+  apply wp_sumCarryArithmeticProgram_emitted
+  simpa using continued
+
+/-- One complete `sumStep` in the fixed local layout of
+`sumCarryFromFunction`: four read-only magnitude calls followed by the proved
+arithmetic suffix. -/
+def sumCarryStepProgram (magnitudeLowIndex magnitudeHighIndex : Nat) :
+    Wasm.Program := [
+  .localGet 0, .localGet 1, .localGet 4,
+  .call magnitudeLowIndex, .localSet 7,
+  .localGet 0, .localGet 1, .localGet 4,
+  .call magnitudeHighIndex, .localSet 8,
+  .localGet 2, .localGet 3, .localGet 4,
+  .call magnitudeLowIndex, .localSet 9,
+  .localGet 2, .localGet 3, .localGet 4,
+  .call magnitudeHighIndex, .localSet 10] ++
+  sumCarryArithmeticProgram
+
+/-- Public proof-side spelling of the emitter's private `sumStep`. -/
+def sumCarryStepSource
+    (left leftFlavor right rightFlavor index carryParam leftLow leftHigh
+      rightLow rightHigh low high carryLocal carryExtra : Lean.FVarId) :
+    List Fir.Wasm.Instruction := [
+  .localGet left, .localGet leftFlavor, .localGet index,
+  .call (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeLowName),
+  .localSet leftLow,
+  .localGet left, .localGet leftFlavor, .localGet index,
+  .call (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeHighName),
+  .localSet leftHigh,
+  .localGet right, .localGet rightFlavor, .localGet index,
+  .call (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeLowName),
+  .localSet rightLow,
+  .localGet right, .localGet rightFlavor, .localGet index,
+  .call (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeHighName),
+  .localSet rightHigh,
+  .localGet leftLow, .localGet rightLow, .i32Add, .localSet low,
+  .localGet low, .localGet leftLow, .i32LtU, .localSet carryLocal,
+  .localGet low, .localGet carryParam, .i32Add, .localSet low,
+  .localGet low, .localGet carryParam, .i32LtU, .localSet carryExtra,
+  .localGet carryLocal, .localGet carryExtra, .i32Add, .localSet carryLocal,
+  .localGet leftHigh, .localGet rightHigh, .i32Add, .localSet high,
+  .localGet high, .localGet leftHigh, .i32LtU, .localSet carryExtra,
+  .localGet high, .localGet carryLocal, .i32Add, .localSet high,
+  .localGet high, .localGet carryLocal, .i32LtU, .localSet carryLocal,
+  .localGet carryLocal, .localGet carryExtra, .i32Add, .localSet carryLocal]
+
+/-- The private step embedded in W7's public scan helper is exactly the
+proof-side source spelling.  The loop label remains existential because it
+has no data-semantic role and is private to the emitter. -/
+theorem sumCarryFromFunction_step_shape :
+    ∃ loopLabel,
+      Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.body = [
+        .loop loopLabel <|
+          [.localGet
+              Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[4]!.1,
+            .localGet
+              Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[5]!.1,
+            .i32Eq,
+            .ifElse
+              [.localGet
+                  Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[6]!.1,
+                .ret]
+              []] ++
+          sumCarryStepSource
+            Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[0]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[1]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[2]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[3]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[4]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[6]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals[0]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals[1]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals[2]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals[3]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals[4]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals[5]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals[6]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals[7]!.1 ++
+          [.localGet
+              Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals[6]!.1,
+            .localSet
+              Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[6]!.1,
+            .localGet
+              Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[4]!.1,
+            .i32Const .uint32 1,
+            .i32Add,
+            .localSet
+              Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[4]!.1,
+            .br loopLabel]] := by
+  refine ⟨_, rfl⟩
+
+/-- Successful helper lookup adapts W7's exact source step to the fixed Talos
+program used by `wp_sumCarryStepProgram`. -/
+theorem instructions_sumCarryStepSource
+    {sourceModule : Fir.Wasm.Module} {labels : List Lean.FVarId}
+    {magnitudeLowIndex magnitudeHighIndex : Nat}
+    (magnitudeLowFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeLowName) =
+        some magnitudeLowIndex)
+    (magnitudeHighFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeHighName) =
+        some magnitudeHighIndex) :
+    FirTalos.instructions sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction labels
+      (sumCarryStepSource
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[0]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[1]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[2]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[3]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[4]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[6]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals[0]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals[1]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals[2]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals[3]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals[4]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals[5]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals[6]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals[7]!.1) =
+      .ok (sumCarryStepProgram magnitudeLowIndex magnitudeHighIndex) := by
+  have leftFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[0]!.1 =
+        some 0 := by decide
+  have leftFlavorFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[1]!.1 =
+        some 1 := by decide
+  have rightFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[2]!.1 =
+        some 2 := by decide
+  have rightFlavorFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[3]!.1 =
+        some 3 := by decide
+  have indexFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[4]!.1 =
+        some 4 := by decide
+  have carryParamFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[6]!.1 =
+        some 6 := by decide
+  have leftLowFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals[0]!.1 =
+        some 7 := by decide
+  have leftHighFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals[1]!.1 =
+        some 8 := by decide
+  have rightLowFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals[2]!.1 =
+        some 9 := by decide
+  have rightHighFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals[3]!.1 =
+        some 10 := by decide
+  have lowFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals[4]!.1 =
+        some 11 := by decide
+  have highFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals[5]!.1 =
+        some 12 := by decide
+  have carryLocalFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals[6]!.1 =
+        some 13 := by decide
+  have carryExtraFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals[7]!.1 =
+        some 14 := by decide
+  set_option maxRecDepth 100000 in
+    simp [sumCarryStepSource, sumCarryStepProgram, sumCarryArithmeticProgram,
+      FirTalos.instructions, FirTalos.instruction, leftFound, leftFlavorFound,
+      rightFound, rightFlavorFound, indexFound, carryParamFound, leftLowFound,
+      leftHighFound, rightLowFound, rightHighFound, lowFound, highFound,
+      carryLocalFound, carryExtraFound, magnitudeLowFound, magnitudeHighFound,
+      Bind.bind, Except.bind, pure, Except.pure]
+
+/-- One installed scan-loop step implements one pure limb step whenever the
+four accessor calls return the selected operand words without changing the
+store.  No arithmetic fact is assumed about those words here; connecting the
+accessor results to canonical padded Nat limbs is the next refinement edge. -/
+theorem wp_sumCarryStepProgram
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {magnitudeLowIndex magnitudeHighIndex : Nat}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {left leftFlavor right rightFlavor index count carry : UInt32}
+    {oldLeftLow oldLeftHigh oldRightLow oldRightHigh low high carryLocal
+      carryExtra scaled : UInt32}
+    {leftLow leftHigh rightLow rightHigh : UInt32}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    (leftLowRun : Wasm.TerminatesWith env module magnitudeLowIndex store
+      ([.i32 index, .i32 leftFlavor, .i32 left] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 leftLow :: tail))
+    (leftHighRun : Wasm.TerminatesWith env module magnitudeHighIndex store
+      ([.i32 index, .i32 leftFlavor, .i32 left] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 leftHigh :: tail))
+    (rightLowRun : Wasm.TerminatesWith env module magnitudeLowIndex store
+      ([.i32 index, .i32 rightFlavor, .i32 right] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 rightLow :: tail))
+    (rightHighRun : Wasm.TerminatesWith env module magnitudeHighIndex store
+      ([.i32 index, .i32 rightFlavor, .i32 right] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 rightHigh :: tail))
+    (continued : Wasm.wp module rest Q store
+      (sumCarryArithmeticLocals left leftFlavor right rightFlavor index count
+        carry leftLow leftHigh rightLow rightHigh
+        (limbSumLow leftLow rightLow carry)
+        (limbSumHigh leftLow leftHigh rightLow rightHigh carry)
+        (limbSumCarryOut leftLow leftHigh rightLow rightHigh carry)
+        (if rightHigh + leftHigh < leftHigh then 1 else 0)
+        scaled tail) env) :
+    Wasm.wp module (sumCarryStepProgram magnitudeLowIndex magnitudeHighIndex ++
+        rest) Q store
+      (sumCarryArithmeticLocals left leftFlavor right rightFlavor index count
+        carry oldLeftLow oldLeftHigh oldRightLow oldRightHigh low high
+        carryLocal carryExtra scaled tail) env := by
+  rw [sumCarryStepProgram, List.append_assoc]
+  simp [sumCarryArithmeticLocals]
+  apply ResidentPrimitives.wp_definedCallResultSet
+      (arguments := [.i32 index, .i32 leftFlavor, .i32 left])
+      (tail := tail)
+      (locals := sumCarryArithmeticLocals left leftFlavor right rightFlavor
+        index count carry oldLeftLow oldLeftHigh oldRightLow oldRightHigh low
+        high carryLocal carryExtra scaled (.i32 leftLow :: tail))
+      (updated := sumCarryArithmeticLocals left leftFlavor right rightFlavor
+        index count carry leftLow oldLeftHigh oldRightLow oldRightHigh low high
+        carryLocal carryExtra scaled (.i32 leftLow :: tail))
+      (physicalResult := .i32 leftLow)
+      (callRun := leftLowRun) (targetSet := by rfl)
+  simp [sumCarryArithmeticLocals]
+  apply ResidentPrimitives.wp_definedCallResultSet
+      (arguments := [.i32 index, .i32 leftFlavor, .i32 left])
+      (tail := tail)
+      (locals := sumCarryArithmeticLocals left leftFlavor right rightFlavor
+        index count carry leftLow oldLeftHigh oldRightLow oldRightHigh low high
+        carryLocal carryExtra scaled (.i32 leftHigh :: tail))
+      (updated := sumCarryArithmeticLocals left leftFlavor right rightFlavor
+        index count carry leftLow leftHigh oldRightLow oldRightHigh low high
+        carryLocal carryExtra scaled (.i32 leftHigh :: tail))
+      (physicalResult := .i32 leftHigh)
+      (callRun := leftHighRun) (targetSet := by rfl)
+  simp [sumCarryArithmeticLocals]
+  apply ResidentPrimitives.wp_definedCallResultSet
+      (arguments := [.i32 index, .i32 rightFlavor, .i32 right])
+      (tail := tail)
+      (locals := sumCarryArithmeticLocals left leftFlavor right rightFlavor
+        index count carry leftLow leftHigh oldRightLow oldRightHigh low high
+        carryLocal carryExtra scaled (.i32 rightLow :: tail))
+      (updated := sumCarryArithmeticLocals left leftFlavor right rightFlavor
+        index count carry leftLow leftHigh rightLow oldRightHigh low high
+        carryLocal carryExtra scaled (.i32 rightLow :: tail))
+      (physicalResult := .i32 rightLow)
+      (callRun := rightLowRun) (targetSet := by rfl)
+  simp [sumCarryArithmeticLocals]
+  apply ResidentPrimitives.wp_definedCallResultSet
+      (arguments := [.i32 index, .i32 rightFlavor, .i32 right])
+      (tail := tail)
+      (locals := sumCarryArithmeticLocals left leftFlavor right rightFlavor
+        index count carry leftLow leftHigh rightLow oldRightHigh low high
+        carryLocal carryExtra scaled (.i32 rightHigh :: tail))
+      (updated := sumCarryArithmeticLocals left leftFlavor right rightFlavor
+        index count carry leftLow leftHigh rightLow rightHigh low high
+        carryLocal carryExtra scaled (.i32 rightHigh :: tail))
+      (physicalResult := .i32 rightHigh)
+      (callRun := rightHighRun) (targetSet := by rfl)
+  exact wp_sumCarryArithmeticProgram continued
+
 /-- The two wasm32 halves of one little-endian base-`2^64` limb. -/
 abbrev LimbWords := UInt32 × UInt32
 
