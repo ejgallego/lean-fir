@@ -5662,6 +5662,230 @@ theorem WrittenLimbPrefix.naturalObjectRel_completeWithCarry_of_memoryRel
     (by simpa [header] using finalHeaderRead) finalRelated payloadInBounds
     valueEq
 
+/-- Insert a freshly reserved, fully decoded Natural object into the complete
+live-heap refinement.
+
+The theorem deliberately separates object representation from heap/witness
+bookkeeping.  A resident helper may establish `NaturalObjectRel` by exact
+execution, then discharge only prefix extension and the final frontier here;
+all location, descriptor, spatial, fuel, and typed-value consequences are
+derived uniformly. -/
+theorem liveHeapRel_of_freshNaturalObjectRel
+    {state allocated result : MemoryState} {witness : RefinementWitness}
+    {runtime : Fir.LeanIR.Impure.RuntimeState} {value payloadBytes : Nat}
+    {address : Word32} {header : Header} {persistent : Bool}
+    {aux0 aux1 aux2 aux3 : UInt32}
+    (related : LiveHeapRel state witness runtime)
+    (allocation : state.allocateObject .natural payloadBytes persistent
+      aux0 aux1 aux2 aux3 = .ok (allocated, address))
+    (extension : state.PrefixExtension result)
+    (finalFrontier : result.FrontierInvariant)
+    (objectRelated : NaturalObjectRel result address value header) :
+    let nextWitness := witness.bindNatural runtime.nextLocation address value
+    witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
+      LiveHeapRel result nextWitness (semanticNaturalResult runtime value) ∧
+      ValueRel nextWitness .tobject (.word32 address)
+        (.object (.heap runtime.nextLocation)) := by
+  dsimp only
+  have freshAddress := related.frontier.allocateObject_address allocation
+  have locationFresh :
+      witness.locations.lookup? runtime.nextLocation = none := by
+    cases found : witness.locations.lookup? runtime.nextLocation with
+    | none => rfl
+    | some oldAddress =>
+        exfalso
+        obtain ⟨cell, semanticFound, _⟩ :=
+          related.concreteToSemantic runtime.nextLocation oldAddress found
+        have beforeNext :=
+          related.locationsBeforeNext runtime.nextLocation cell semanticFound
+        exact (Nat.lt_irrefl runtime.nextLocation) beforeNext
+  have descriptorFresh : ∀ old descriptor,
+      witness.descriptors.lookup? old = some descriptor →
+      address.value ≠ old.value := by
+    intro old descriptor found equal
+    have owned := related.descriptorsOwned old descriptor found
+    simp [headerBytes] at owned
+    omega
+  have witnessExtension := witness.bindNatural_extends runtime.nextLocation
+    address value locationFresh descriptorFresh
+  have locationAddressFresh : ∀ old oldAddress,
+      witness.locations.lookup? old = some oldAddress → oldAddress ≠ address := by
+    intro old oldAddress found equal
+    obtain ⟨cell, _, cellRelated⟩ :=
+      related.concreteToSemantic old oldAddress found
+    have owned := cellRelated.headerOwned
+    subst oldAddress
+    simp [headerBytes] at owned
+    omega
+  have promotedAddressFresh : ∀ payload oldAddress,
+      witness.promotedTags.Contains payload oldAddress →
+      address ≠ oldAddress := by
+    intro payload oldAddress found equal
+    have promoted := related.promoted payload oldAddress found
+    obtain ⟨oldHeader, _, _, _, _, _, extent, payloadFits⟩ := promoted.header
+    subst oldAddress
+    simp [headerBytes] at payloadFits extent
+    omega
+  obtain ⟨addressHeap, rawHeaderRead, _, headerMinimum, headerAligned, _⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts result address header
+      objectRelated.headerRead
+  have headerOwned : address.value + headerBytes ≤ result.heapCursor :=
+    Nat.le_trans (Nat.add_le_add_left headerMinimum address.value)
+      objectRelated.extent
+  have witnessWellFormed := related.witnessWellFormed.bindNatural
+    runtime.nextLocation address value addressHeap locationAddressFresh
+      promotedAddressFresh
+  have newRegion : ∃ newHeader,
+      Header.read result.memory address = .ok newHeader ∧
+      headerBytes ≤ newHeader.allocationBytes.toNat ∧
+      newHeader.allocationBytes.toNat % target.heapAlignment = 0 ∧
+      address.value + newHeader.allocationBytes.toNat ≤ result.heapCursor :=
+    ⟨header, rawHeaderRead, headerMinimum, headerAligned,
+      objectRelated.extent⟩
+  obtain ⟨descriptorRegion, descriptorDisjoint⟩ :=
+    related.extendDescriptorSpatial extension address freshAddress
+      (fun other different =>
+        witness.lookup_bindNatural_descriptor_other runtime.nextLocation
+          address other value different)
+      newRegion
+  have newCellRelated : LiveCellRel result
+      (witness.bindNatural runtime.nextLocation address value) address
+      (semanticNaturalCell value) := by
+    apply LiveCellRel.natural
+      (RefinementWitness.lookup_bindNatural_descriptor witness
+        runtime.nextLocation address value)
+      (by rfl) objectRelated.headerRead objectRelated.headerKind
+        objectRelated.marker objectRelated.extent objectRelated.limbsFit
+        objectRelated.decoded
+    · simpa [semanticNaturalCell] using objectRelated.refCountOne
+    · simpa [semanticNaturalCell] using objectRelated.ordinary
+    · rfl
+  refine ⟨witnessExtension,
+    ClosureAllocationsPersistent.bindNatural witness runtime.nextLocation
+      address value,
+    ?_, ValueRel.new_natural_result witness runtime.nextLocation address value⟩
+  refine {
+    frontier := finalFrontier
+    witnessWellFormed
+    locationsBeforeNext := ?_
+    releaseFuelBound := ?_
+    descriptorsOwned := ?_
+    descriptorRegion
+    descriptorDisjoint
+    semanticToConcrete := ?_
+    concreteToSemantic := ?_
+    promoted := ?_ }
+  · intro location cell found
+    by_cases isNew : location = runtime.nextLocation
+    · subst location
+      change runtime.nextLocation < runtime.nextLocation + 1
+      exact Nat.lt_succ_self runtime.nextLocation
+    · have oldFound : Fir.LeanIR.Impure.findCell? runtime.heap location =
+          some cell := by
+        simpa [semanticNaturalResult, Fir.LeanIR.Impure.findCell?, isNew,
+          Ne.symm isNew] using found
+      have oldBefore := related.locationsBeforeNext location cell oldFound
+      exact Nat.lt_trans oldBefore (Nat.lt_succ_self runtime.nextLocation)
+  · have cursorGrowth : state.heapCursor + headerBytes ≤ result.heapCursor := by
+      rw [← freshAddress]
+      exact headerOwned
+    have oldFuel := related.releaseFuelBound
+    simp [semanticNaturalResult, headerBytes] at oldFuel cursorGrowth ⊢
+    omega
+  · intro other descriptor found
+    by_cases isNew : address.value = other.value
+    · rw [← isNew]
+      exact headerOwned
+    · rw [witness.lookup_bindNatural_descriptor_other runtime.nextLocation
+        address other value isNew] at found
+      exact Nat.le_trans (related.descriptorsOwned other descriptor found)
+        extension.cursor
+  · intro location cell found
+    by_cases isNew : location = runtime.nextLocation
+    · subst location
+      have cellEq : cell = semanticNaturalCell value := by
+        simpa [semanticNaturalResult, Fir.LeanIR.Impure.findCell?] using
+          found.symm
+      subst cell
+      exact ⟨address,
+        RefinementWitness.lookup_bindNatural_location witness
+          runtime.nextLocation address value,
+        .live newCellRelated⟩
+    · have oldFound : Fir.LeanIR.Impure.findCell? runtime.heap location =
+          some cell := by
+        simpa [semanticNaturalResult, Fir.LeanIR.Impure.findCell?, isNew,
+          Ne.symm isNew] using found
+      obtain ⟨oldAddress, mapped, cellRelated⟩ :=
+        related.semanticToConcrete location cell oldFound
+      exact ⟨oldAddress, witnessExtension.locations _ _ mapped,
+        (cellRelated.prefixExtension extension).witnessExtension
+          witnessExtension⟩
+  · intro location concreteAddress mapped
+    by_cases isNew : location = runtime.nextLocation
+    · subst location
+      simp [RefinementWitness.bindNatural, LocationMap.lookup?] at mapped
+      subst concreteAddress
+      exact ⟨semanticNaturalCell value,
+        by simp [semanticNaturalResult, Fir.LeanIR.Impure.findCell?],
+        .live newCellRelated⟩
+    · rw [witness.lookup_bindNatural_location_other runtime.nextLocation
+        location address value isNew] at mapped
+      obtain ⟨cell, oldFound, cellRelated⟩ :=
+        related.concreteToSemantic location concreteAddress mapped
+      exact ⟨cell, by
+          simpa [semanticNaturalResult, Fir.LeanIR.Impure.findCell?, isNew,
+            Ne.symm isNew],
+        (cellRelated.prefixExtension extension).witnessExtension
+          witnessExtension⟩
+  · intro payload concreteAddress mapped
+    exact ((related.promoted payload concreteAddress mapped).prefixExtension
+      extension).witnessExtension witnessExtension
+
+/-- End-to-end live-heap boundary for a completed resident Natural writer.
+
+All arithmetic, exact stores, header preservation, object decoding, witness
+extension, spatial separation, and returned object typing are composed here.
+The remaining helper-specific execution obligations are the raw allocation
+transition, exact writer history, and preservation of the ordinary W6
+frontier/prefix invariants by those physical writes. -/
+theorem WrittenLimbPrefix.liveHeapRel_completeWithCarry_of_memoryRel
+    {initial current : Wasm.Store host} {address : Word32} {carry : UInt32}
+    {words : List LimbWords} {count value : Nat}
+    {state allocated heap : MemoryState} {witness : RefinementWitness}
+    {runtime : Fir.LeanIR.Impure.RuntimeState}
+    (written : WrittenLimbPrefix initial (UInt32.ofNat address.value) words
+      count current)
+    (wordsLength : words.length = count)
+    (carryBit : carry = 0 ∨ carry = 1)
+    (allocation : state.allocateObject .natural
+      (target.semanticSlotBytes * (count + carry.toNat)) false
+        bigNaturalMarker (UInt32.ofNat (count + carry.toNat)) 0 0 =
+          .ok (allocated, address))
+    (heapRelated : LiveHeapRel state witness runtime)
+    (extension : state.PrefixExtension heap)
+    (finalFrontier : heap.FrontierInvariant)
+    (cursorEq : heap.heapCursor = allocated.heapCursor)
+    (initialRelated : ResidentMemoryRel allocated initial.mem)
+    (finalRelated : ResidentMemoryRel heap
+      (completedAddStore current (UInt32.ofNat address.value) count carry).mem)
+    (payloadInBounds :
+      address.value + headerBytes + 8 * (count + carry.toNat) ≤
+        heap.memory.size)
+    (valueEq : limbWordsListValue (completedAddLimbWords words carry) = value) :
+    let nextWitness := witness.bindNatural runtime.nextLocation address value
+    witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
+      LiveHeapRel heap nextWitness (semanticNaturalResult runtime value) ∧
+      ValueRel nextWitness .tobject (.word32 address)
+        (.object (.heap runtime.nextLocation)) := by
+  have objectRelated :=
+    written.naturalObjectRel_completeWithCarry_of_memoryRel wordsLength
+      carryBit allocation cursorEq initialRelated finalRelated payloadInBounds
+      valueEq
+  exact liveHeapRel_of_freshNaturalObjectRel heapRelated allocation extension
+    finalFrontier objectRelated
+
 /-- Exact symbolic multi-limb result producer in checked `Nat.add`.
 
 It allocates a natural object of `resultCount`, writes all common limbs,
@@ -6934,6 +7158,64 @@ theorem wp_checkedAllocatedNaturalReturn_of_allocateNatural
     allocateNatural_heap_liveHeapRel before after witness runtime value address
       heapRelated large allocated
   exact ⟨nextHeapRelated, memoryRelated,
+    wp_checkedAllocatedNaturalReturnProgram rawLocal valueRelated⟩
+
+/-- Exact resident-writer replacement for the former `allocateNatural`
+shortcut at the generated typed-return suffix.
+
+The returned address is justified by the raw allocator, exact physical limb
+history, transported header, decoded mathematical value, and full live-heap
+extension.  The suffix itself remains the existing scratch-free typed object
+round trip. -/
+theorem wp_checkedAllocatedNaturalReturn_of_memoryRel
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {initial current : Wasm.Store host} {address : Word32} {carry : UInt32}
+    {words : List LimbWords} {count value : Nat}
+    {before allocated after : MemoryState} {witness : RefinementWitness}
+    {runtime : Fir.LeanIR.Impure.RuntimeState}
+    {locals : Wasm.Locals} {rawIndex : Nat} {tail : List Wasm.Value}
+    (written : WrittenLimbPrefix initial (UInt32.ofNat address.value) words
+      count current)
+    (wordsLength : words.length = count)
+    (carryBit : carry = 0 ∨ carry = 1)
+    (allocation : before.allocateObject .natural
+      (target.semanticSlotBytes * (count + carry.toNat)) false
+        bigNaturalMarker (UInt32.ofNat (count + carry.toNat)) 0 0 =
+          .ok (allocated, address))
+    (heapRelated : LiveHeapRel before witness runtime)
+    (extension : before.PrefixExtension after)
+    (finalFrontier : after.FrontierInvariant)
+    (cursorEq : after.heapCursor = allocated.heapCursor)
+    (initialRelated : ResidentMemoryRel allocated initial.mem)
+    (finalRelated : ResidentMemoryRel after
+      (completedAddStore current (UInt32.ofNat address.value) count carry).mem)
+    (payloadInBounds :
+      address.value + headerBytes + 8 * (count + carry.toNat) ≤
+        after.memory.size)
+    (valueEq : limbWordsListValue (completedAddLimbWords words carry) = value)
+    (rawLocal : locals.get rawIndex =
+      some (.i32 (UInt32.ofNat address.value))) :
+    let nextWitness := witness.bindNatural runtime.nextLocation address value
+    witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
+      LiveHeapRel after nextWitness (semanticNaturalResult runtime value) ∧
+      ResidentMemoryRel after
+        (completedAddStore current (UInt32.ofNat address.value) count carry).mem ∧
+      Wasm.wp module (checkedAllocatedNaturalReturnProgram rawIndex)
+        (TypedNaturalReturnPost nextWitness address
+          (.heap runtime.nextLocation)
+          (completedAddStore current (UInt32.ofNat address.value) count carry)
+          tail)
+        (completedAddStore current (UInt32.ofNat address.value) count carry)
+        { locals with values := tail } env := by
+  dsimp only
+  obtain ⟨witnessExtension, closureAllocationsPersistent, nextHeapRelated,
+      valueRelated⟩ :=
+    written.liveHeapRel_completeWithCarry_of_memoryRel wordsLength carryBit
+      allocation heapRelated extension finalFrontier cursorEq initialRelated
+      finalRelated payloadInBounds valueEq
+  exact ⟨witnessExtension, closureAllocationsPersistent, nextHeapRelated,
+    finalRelated,
     wp_checkedAllocatedNaturalReturnProgram rawLocal valueRelated⟩
 
 /-- The public resident `Nat.add` function is the common pair dispatcher with

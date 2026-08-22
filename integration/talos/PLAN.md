@@ -6423,6 +6423,24 @@ freshness from the raw reservation, insert this `NaturalObjectRel` as the new
 `LiveCellRel.natural`, and then feed the resulting `ValueRel` to the existing
 typed-return suffix and whole checked-addition theorem.
 
+The fresh-object bookkeeping is now factored and completed.  From a raw
+reservation, a final `NaturalObjectRel`, a prefix extension, and the final
+frontier, the common theorem derives the bound Natural descriptor/location,
+witness extension, closure-allocation persistence, spatial descriptor region
+and disjointness, complete `LiveHeapRel`, and typed object `ValueRel`.  The
+exact completed-writer theorem composes directly with that result, and the
+generated local-get/object-round-trip suffix now has a corresponding theorem
+that returns the raw address under the extended witness.
+
+This isolates the next real implementation proof.  It is no longer witness
+or typed-return reasoning: W6 must lift each exact resident `write32` in the
+writer history through `ResidentMemoryRel.writeUInt32`, constructing the
+corresponding final `MemoryState` while preserving `PrefixExtension`,
+`FrontierInvariant`, cursor equality, and payload bounds.  Once that state
+transport is attached to the already-proved writer loop, the live-heap and
+typed-return theorem consumes it without any further arithmetic or object
+decoding assumptions.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
