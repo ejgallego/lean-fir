@@ -22,6 +22,8 @@ Options:
   --extra-c-source <file>
                          Compile and link a C bridge. May be repeated.
   --heap-view             Expose Module.HEAPU8 for bulk bridge transfers.
+  --runtime-profile <profile>
+                         Lean runtime profile: threaded (default) or unthreaded.
   --start <symbol>        Run a zero-argument IO UInt32 export after module init.
   --root <directory>      Lean source root (default: repository root).
   --out-dir <directory>  Artifact directory.
@@ -195,6 +197,7 @@ artifact_name=""
 start_symbol=""
 heap_view=0
 rebuild=0
+runtime_profile="threaded"
 declare -a exported_symbols=()
 declare -a extra_sources=()
 declare -a extra_c_sources=()
@@ -225,6 +228,11 @@ while (($# > 0)); do
     --heap-view)
       heap_view=1
       shift
+      ;;
+    --runtime-profile)
+      require_option_value "$1" "$#"
+      runtime_profile="$2"
+      shift 2
       ;;
     --start)
       require_option_value "$1" "$#"
@@ -268,6 +276,14 @@ while (($# > 0)); do
   esac
 done
 
+case "$runtime_profile" in
+  threaded | unthreaded)
+    ;;
+  *)
+    die "unsupported runtime profile: $runtime_profile"
+    ;;
+esac
+
 if [[ -z "$entry_source" ]]; then
   usage >&2
   exit 1
@@ -302,7 +318,11 @@ for tool in env find git grep lake mktemp mv node python3 rm sed sha256sum sort;
 done
 
 emsdk_dir="$deps_root/emsdk"
-lean_build="$deps_root/lean4-emscripten-build"
+if [[ "$runtime_profile" == "threaded" ]]; then
+  lean_build="$deps_root/lean4-emscripten-build"
+else
+  lean_build="$deps_root/lean4-emscripten-build-unthreaded"
+fi
 lean_runtime="$lean_build/lib/lean/libleanrt.a"
 lean_init="$lean_build/lib/lean/libInit.a"
 lean_std="$lean_build/lib/lean/libStd.a"
@@ -310,11 +330,11 @@ lean_include="$lean_build/include"
 
 for dependency in "$emsdk_dir/emsdk_env.sh" "$lean_runtime" "$lean_init" "$lean_std"; do
   if [[ ! -f "$dependency" ]]; then
-    die "Emscripten Lean runtime is not ready; run $lane_dir/setup-emscripten.sh"
+    die "Emscripten Lean runtime profile '$runtime_profile' is not ready; run $lane_dir/setup-emscripten.sh --runtime-profile $runtime_profile"
   fi
 done
 if [[ ! -f "$lean_include/lean/lean.h" ]]; then
-  die "Emscripten Lean headers are not ready; run $lane_dir/setup-emscripten.sh"
+  die "Emscripten Lean headers for profile '$runtime_profile' are not ready; run $lane_dir/setup-emscripten.sh --runtime-profile $runtime_profile"
 fi
 
 lean_version="$(lake -d "$repo_root" env lean --version)"
@@ -389,7 +409,11 @@ lean_include_tree_digest="$({
 } | hash_key)"
 
 mkdir -p "$out_dir"
-cache_dir="$out_dir/.fir-emscripten-cache/$artifact_name"
+if [[ "$runtime_profile" == "threaded" ]]; then
+  cache_dir="$out_dir/.fir-emscripten-cache/$artifact_name"
+else
+  cache_dir="$out_dir/.fir-emscripten-cache/$artifact_name-unthreaded"
+fi
 mkdir -p "$cache_dir"
 build_tmp="$(mktemp -d "$out_dir/.fir-emscripten-build.XXXXXX")"
 cleanup() {
@@ -410,9 +434,11 @@ compile_flags=(
   -fno-fast-math
   -ffp-contract=off
   -fwasm-exceptions
-  -pthread
-  -I "$lean_build/include"
 )
+if [[ "$runtime_profile" == "threaded" ]]; then
+  compile_flags+=(-pthread)
+fi
+compile_flags+=(-I "$lean_build/include")
 
 declare -a sources=("$entry_source" "${extra_sources[@]}")
 declare -a generated_sources=()
@@ -567,7 +593,11 @@ link_flags=(
   -O3
   -flto
   -fwasm-exceptions
-  -pthread
+)
+if [[ "$runtime_profile" == "threaded" ]]; then
+  link_flags+=(-pthread)
+fi
+link_flags+=(
   --no-entry
   "-Wl,--gc-sections"
   "-Wl,--strip-all"
@@ -587,6 +617,9 @@ link_key="$({
   key_field cache-format fir-lcnf-c-wasm-v1
   key_field stage link
   key_field artifact-name "$artifact_name"
+  if [[ "$runtime_profile" != "threaded" ]]; then
+    key_field runtime-profile "$runtime_profile"
+  fi
   key_field emxx "$emxx_tool"
   key_field emxx-sha256 "$emxx_tool_digest"
   key_field emxx-version "$emxx_version"
@@ -654,6 +687,7 @@ manifest_args=(
   --lean-commit "$FIR_LCNF_C_LEAN_COMMIT"
   --emscripten-version "$FIR_LCNF_C_EMSDK_VERSION"
   --emscripten-commit "$FIR_LCNF_C_EMSDK_COMMIT"
+  --runtime-profile "$runtime_profile"
 )
 for source in "${extra_sources[@]}"; do
   manifest_args+=(--extra-source "$source")

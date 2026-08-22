@@ -32,7 +32,7 @@ second compiler:
 | Profile | Support status | Host contract | Current acceptance fixture |
 | --- | --- | --- | --- |
 | `freestanding` | primary, deliberately narrow | `wasm32-unknown-unknown`, no imports or libc | raw `UInt64` expression and tail loop |
-| `emscripten` | primary for realistic programs | browser/Node ES module plus pinned `libleanrt`, `libInit`, and `libStd` | lists, arrays, strings, closures, `Except`, `Std.HashMap`, and real `IO.eprintln` |
+| `emscripten` | primary for realistic programs | browser/Node ES module plus pinned `libleanrt`, `libInit`, and `libStd`; explicit threaded or unthreaded runtime | lists, arrays, strings, closures, `Except`, `Std.HashMap`, and real `IO.eprintln` |
 | `wasi` | experimental, ABI 3 frozen | single-threaded Lean core-object runtime in a WASI Preview 1 reactor (`wasm32-wasip1`) | boxed `UInt64`, lists, object and byte arrays, strings, captured one/two-argument closures, exact reclamation, scalar C, and a real monotonic-clock import |
 
 Normal lane acceptance runs the freestanding and Emscripten profiles through
@@ -58,7 +58,11 @@ second object model.
 
 The Emscripten setup builds the complete Lean runtime plus the generated
 `libInit` and `libStd` archives from the exact source commit matching the
-frontend. All three archives are compiled at `-O3` with LTO. The linked module
+frontend. The default `threaded` profile retains the historical runtime and
+cache paths. The explicit `unthreaded` profile uses a separate runtime build
+directory, omits `-pthread` from generated, bridge, host, and link commands,
+and runs in an ordinary browser page without cross-origin isolation. All three
+archives are compiled at `-O3` with LTO. The linked module
 initializes `RuntimeSmoke`, reaches the real `Init` implementation of
 `IO.eprintln`, and has no lane-local replacement for that symbol. Link-time
 garbage collection retains only the reachable runtime/library cone.
@@ -133,9 +137,11 @@ All profiles use:
 
 The freestanding and WASI core profiles also remove exceptions and unwind
 tables. Emscripten follows Lean's supported runtime settings:
-`-fwasm-exceptions`, `-pthread`, growing memory, and the filesystem surface
-needed by full `Init`. The thread-enabled artifact therefore requires
-shared-memory-capable hosts; browsers need cross-origin isolation headers.
+`-fwasm-exceptions`, growing memory, and the filesystem surface needed by full
+`Init`. The default threaded profile also uses `-pthread` and therefore
+requires shared-memory-capable hosts; browsers need cross-origin isolation
+headers. The unthreaded profile uses Lean's upstream `MULTI_THREAD=OFF` build
+and records `threads: false` and `crossOriginIsolated: false` in its manifest.
 
 `-ffast-math` is intentionally disabled and floating-point contraction is
 disabled. FIR validates exact floating-point bit patterns, so those semantic
@@ -186,16 +192,30 @@ FIR_BROWSER=google-chrome \
   bash integration/lcnf-c-wasm/check-emscripten.sh
 ```
 
+Prepare the independent unthreaded runtime when a package must load from an
+ordinary static page:
+
+```sh
+bash integration/lcnf-c-wasm/setup-emscripten.sh \
+  --runtime-profile unthreaded
+bash integration/lcnf-c-wasm/check-emscripten-unthreaded.sh
+```
+
 To build a module for Node or a cross-origin-isolated browser:
 
 ```sh
 bash integration/lcnf-c-wasm/build-emscripten.sh \
+  --runtime-profile threaded \
   --root integration/lcnf-c-wasm \
   --out-dir _build/my-module \
   --export fir_lcnf_c_runtime_checksum \
   --start fir_lcnf_c_runtime_probe \
   integration/lcnf-c-wasm/RuntimeSmoke.lean
 ```
+
+Pass `--runtime-profile unthreaded` to link the same generated Lean code
+against the unthreaded runtime. The manifest records the profile and exact
+flags; its compile and link flag lists contain no `-pthread` entry.
 
 Load the emitted artifacts through the shared manifest loader:
 

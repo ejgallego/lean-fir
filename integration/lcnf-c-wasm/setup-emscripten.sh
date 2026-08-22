@@ -5,13 +5,60 @@ lane_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(git -C "$lane_dir" rev-parse --show-toplevel)"
 deps_root="${FIR_LCNF_C_WASM_DEPS:-$repo_root/.deps/lcnf-c-wasm}"
 
+usage() {
+  cat <<'EOF'
+usage: setup-emscripten.sh [--runtime-profile threaded|unthreaded]
+
+Build the pinned Lean runtime, Init, and Std archives for Emscripten.
+The default profile is threaded and retains the historical build directory.
+EOF
+}
+
+die() {
+  echo "setup-emscripten.sh: $*" >&2
+  exit 1
+}
+
+runtime_profile="threaded"
+while (($# > 0)); do
+  case "$1" in
+    --runtime-profile)
+      if (($# < 2)); then
+        die "$1 requires a value"
+      fi
+      runtime_profile="$2"
+      shift 2
+      ;;
+    --help)
+      usage
+      exit 0
+      ;;
+    *)
+      die "unknown option: $1"
+      ;;
+  esac
+done
+
+case "$runtime_profile" in
+  threaded)
+    lean_build="$deps_root/lean4-emscripten-build"
+    multi_thread="ON"
+    ;;
+  unthreaded)
+    lean_build="$deps_root/lean4-emscripten-build-unthreaded"
+    multi_thread="OFF"
+    ;;
+  *)
+    die "unsupported runtime profile: $runtime_profile"
+    ;;
+esac
+
 # shellcheck source=toolchain-pins.sh
 # shellcheck disable=SC1091
 source "$lane_dir/toolchain-pins.sh"
 
 emsdk_dir="$deps_root/emsdk"
 lean_src="$deps_root/lean4"
-lean_build="$deps_root/lean4-emscripten-build"
 lean_patch="$lane_dir/patches/lean-4.33.0-emscripten-uv-stubs.patch"
 jobs="${FIR_WASM_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '4')}"
 
@@ -72,7 +119,7 @@ emcmake cmake \
   -B "$lean_build" \
   -DCMAKE_BUILD_TYPE=Release \
   -DSTAGE=0 \
-  -DMULTI_THREAD=ON \
+  "-DMULTI_THREAD=$multi_thread" \
   -DUSE_GMP=OFF \
   -DUSE_MIMALLOC=OFF \
   -DMMAP=OFF \
@@ -115,7 +162,8 @@ for archive in libleanrt.a libInit.a libStd.a; do
   test -f "$lean_build/lib/lean/$archive"
 done
 
-printf 'Emscripten %s and Lean runtime/Init/Std %s are ready in %s\n' \
+printf 'Emscripten %s and Lean runtime/Init/Std %s (%s) are ready in %s\n' \
   "$FIR_LCNF_C_EMSDK_VERSION" \
   "$FIR_LCNF_C_LEAN_VERSION" \
-  "$deps_root"
+  "$runtime_profile" \
+  "$lean_build"

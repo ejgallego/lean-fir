@@ -107,6 +107,9 @@ for (let index = 0; index < args.length; index += 1) {
     case "--emscripten-commit":
       options.emscriptenCommit = value;
       break;
+    case "--runtime-profile":
+      options.runtimeProfile = value;
+      break;
     case "--compile-flag":
       options.compileFlags.push(value);
       break;
@@ -130,11 +133,18 @@ for (const required of [
   "leanCommit",
   "emscriptenVersion",
   "emscriptenCommit",
+  "runtimeProfile",
 ]) {
   if (options[required] === undefined) {
     fail(`missing --${required.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`);
   }
 }
+
+if (!new Set(["threaded", "unthreaded"]).has(options.runtimeProfile)) {
+  fail(`unsupported runtime profile: ${options.runtimeProfile}`);
+}
+
+const threaded = options.runtimeProfile === "threaded";
 
 const out = resolve(options.out);
 const modulePath = resolve(options.module);
@@ -169,13 +179,15 @@ const manifest = {
     },
   },
   build: {
+    runtimeProfile: options.runtimeProfile,
     compileFlags: options.compileFlags,
     linkFlags: options.linkFlags,
     runtimeArchives: ["libleanrt.a", "libInit.a", "libStd.a"],
     exactFloatingPoint: true,
   },
   runtime: {
-    threads: true,
+    threads: threaded,
+    crossOriginIsolated: threaded,
     wasmExceptions: true,
     memoryGrowth: true,
     environments: ["node", "web"],

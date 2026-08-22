@@ -25,6 +25,25 @@ const [manifestText, nativeResults] = await Promise.all([
   readFile(nativeResultsPath, "utf8"),
 ]);
 const parsedManifest = JSON.parse(manifestText);
+if (parsedManifest.build?.runtimeProfile !== "threaded") {
+  throw new Error(
+    `unexpected default runtime profile: ${parsedManifest.build?.runtimeProfile}`,
+  );
+}
+if (
+  parsedManifest.runtime?.threads !== true ||
+  parsedManifest.runtime.crossOriginIsolated !== true
+) {
+  throw new Error(
+    `untruthful threaded metadata: ${JSON.stringify(parsedManifest.runtime)}`,
+  );
+}
+if (!parsedManifest.build.compileFlags.includes("-pthread")) {
+  throw new Error("threaded compile flags omit -pthread");
+}
+if (!parsedManifest.build.linkFlags.includes("-pthread")) {
+  throw new Error("threaded link flags omit -pthread");
+}
 
 async function requireDigestRejection(artifact, label) {
   const tamperedManifest = structuredClone(parsedManifest);
