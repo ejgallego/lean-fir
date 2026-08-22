@@ -30,6 +30,15 @@ function requireSha256(value, label) {
   return value;
 }
 
+function normalizedStringList(value, label) {
+  assert.ok(Array.isArray(value), `${label} must be an Array`);
+  const result = value.map((item, index) =>
+    requireString(item, `${label}[${index}]`));
+  assert.equal(new Set(result).size, result.length,
+    `${label} repeats a value`);
+  return result;
+}
+
 function normalizedSource(role, source) {
   assert.ok(source !== null && typeof source === "object" &&
     !Array.isArray(source), `source ${role} must be an object`);
@@ -78,16 +87,17 @@ function normalizedOperations(config, build) {
       `source-package operation ${index} name`);
     assert.ok(operation.mode === "production" || operation.mode === "diagnostic",
       `source-package operation ${name} has invalid mode`);
-    const phases = operation.phases ?? [];
-    assert.ok(Array.isArray(phases),
-      `source-package operation ${name} phases must be an Array`);
-    for (const [phaseIndex, phase] of phases.entries()) {
-      requireString(phase,
-        `source-package operation ${name} phases[${phaseIndex}]`);
-    }
-    assert.equal(new Set(phases).size, phases.length,
-      `source-package operation ${name} repeats a phase`);
-    return { name, mode: operation.mode, phases: [...phases] };
+    const phases = normalizedStringList(operation.phases ?? [],
+      `source-package operation ${name} phases`);
+    return {
+      name,
+      mode: operation.mode,
+      inputContract: requireString(operation.inputContract,
+        `source-package operation ${name} input contract`),
+      resultContract: requireString(operation.resultContract,
+        `source-package operation ${name} result contract`),
+      phases,
+    };
   });
   assert.equal(new Set(operations.map(({ name }) => name)).size,
     operations.length, "source-package operations repeat a name");
@@ -96,6 +106,32 @@ function normalizedOperations(config, build) {
   assert.deepEqual(operations.map(({ name }) => name), inventory,
     "source-package operations differ from BUILD.json");
   return operations;
+}
+
+function normalizedLeanToolchain(config, build) {
+  assert.ok(config !== null && typeof config === "object" &&
+    !Array.isArray(config), "source-package Lean toolchain policy invalid");
+  const toolchain = requireString(valueAt(build, config.toolchainPath,
+    "Lean toolchain"), "Lean toolchain");
+  const description = requireString(valueAt(build, config.versionPath,
+    "Lean version"), "Lean version");
+  const match = /^Lean \(version ([^,]+), [^,]+, commit ([0-9a-f]{40}), [^)]+\)$/
+    .exec(description);
+  assert.notEqual(match, null,
+    "Lean version must contain normalized version and full commit");
+  return { toolchain, version: match[1], commit: match[2] };
+}
+
+function normalizedAcceptance(config) {
+  assert.ok(config !== null && typeof config === "object" &&
+    !Array.isArray(config), "source-package acceptance policy invalid");
+  assert.ok(config.status === "accepted" || config.status === "provisional",
+    "source-package acceptance status invalid");
+  return {
+    status: config.status,
+    authority: requireString(config.authority,
+      "source-package acceptance authority"),
+  };
 }
 
 /**
@@ -125,6 +161,12 @@ export function describeSourcePackage(verification, packagePolicy) {
   assert.ok(packagePolicy.payloadFiles.includes(adapter.file),
     "source-package adapter must be checksummed");
   const operations = normalizedOperations(config, build);
+  const evidenceFiles = normalizedStringList(config.evidenceFiles ?? [],
+    "source-package evidence files");
+  for (const file of evidenceFiles) {
+    assert.ok(packagePolicy.payloadFiles.includes(file),
+      `source-package evidence file is not checksummed: ${file}`);
+  }
   const ownershipCapability = valueAt(build, config.ownership.capabilityPath,
     "ownership capability");
   assert.equal(typeof config.ownership.rawAddressesExposed, "boolean",
@@ -138,6 +180,7 @@ export function describeSourcePackage(verification, packagePolicy) {
       name: packagePolicy.name,
       build: { file: buildFile, schemaField,
         schemaVersion: packagePolicy.build.schemaVersion },
+      acceptance: normalizedAcceptance(config.acceptance),
     },
     provenance: { sources: provenance },
     producer: {
@@ -145,6 +188,9 @@ export function describeSourcePackage(verification, packagePolicy) {
         "source-package producer project"),
       backend: requireString(config.producer.backend,
         "source-package producer backend"),
+      toolchain: {
+        lean: normalizedLeanToolchain(config.producer.lean, build),
+      },
       artifact: {
         file: metadata.file,
         byteLength: metadata.byteLength,
@@ -156,6 +202,11 @@ export function describeSourcePackage(verification, packagePolicy) {
         file: adapter.file,
         apiVersion: requireString(valueAt(build, adapter.apiVersionPath,
           "browser-adapter API version"), "browser-adapter API version"),
+        startupFields: normalizedStringList(adapter.startupFields ?? [],
+          "browser-adapter startup fields"),
+        initializationFields: normalizedStringList(
+          adapter.initializationFields ?? [],
+          "browser-adapter initialization fields"),
       },
     },
     verifier: {
@@ -167,6 +218,7 @@ export function describeSourcePackage(verification, packagePolicy) {
         payloadFiles: [...packagePolicy.payloadFiles],
       },
       smoke: packagePolicy.smokeFile,
+      evidenceFiles,
     },
     operations,
     ownership: {
@@ -180,6 +232,14 @@ export function describeSourcePackage(verification, packagePolicy) {
       reclamation: requireString(config.ownership.reclamation,
         "source-package ownership reclamation"),
       rawAddressesExposed: config.ownership.rawAddressesExposed,
+      transfer: {
+        publicInput: requireString(config.ownership.transfer?.publicInput,
+          "source-package public-input transfer"),
+        encodedInput: requireString(config.ownership.transfer?.encodedInput,
+          "source-package encoded-input transfer"),
+        output: requireString(config.ownership.transfer?.output,
+          "source-package output transfer"),
+      },
     },
   };
 }

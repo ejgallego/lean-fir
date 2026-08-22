@@ -110,6 +110,11 @@ function packageFixture(path, smoke = "process.exit(0);\n") {
   const wasm = selectionWasm();
   const build = {
     schemaVersion: selectionPackagePolicy.build.schemaVersion,
+    toolchain: {
+      leanToolchain: "leanprover/lean4:v4.33.0",
+      leanVersion: "Lean (version 4.33.0, fixture-target, commit " +
+        `${"4".repeat(40)}, Release)`,
+    },
     sources: {
       fir: {
         repository: "https://example.invalid/fir.git",

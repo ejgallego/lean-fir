@@ -25,8 +25,9 @@ part of this shared surface.
 
 `source-package.mjs` projects a verified package into the optional
 `browser-benchmarks/source-package/v1` discovery vocabulary. It normalizes
-provenance, producer and adapter identity, verifier inputs, production versus
-diagnostic operations, public phase names, and ownership. See
+provenance, exact Lean/producer/adapter identity, verifier-backed acceptance,
+versioned operation contracts, startup/initialization and per-call fields,
+checksummed evidence files, and transfer ownership. See
 `SOURCE_PACKAGE.md`. The current coordination draft is returned in memory and
 does not change immutable package bytes or identities.
 

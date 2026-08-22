@@ -65,26 +65,63 @@ export const selectionPackagePolicy = Object.freeze({
     expectedExports: selectionExpectedExports,
   },
   sourcePackage: {
-    producer: { project: "fir", backend: "fir-native-wasm" },
+    producer: {
+      project: "fir",
+      backend: "fir-native-wasm",
+      lean: {
+        toolchainPath: ["toolchain", "leanToolchain"],
+        versionPath: ["toolchain", "leanVersion"],
+      },
+    },
+    acceptance: { status: "accepted", authority: "verifier-policy" },
+    evidenceFiles: ["illuminate-selection-player.wasm.json"],
     adapter: {
       file: "illuminate-selection-player-browser-adapter.mjs",
       apiVersionPath: ["capabilities", "browserAdapter", "apiVersion"],
       operationInventoryPath: ["capabilities", "browserAdapter", "methods"],
+      startupFields: [],
+      initializationFields: [],
     },
     operations: [
       { name: "createPlayer", mode: "production",
+        inputContract:
+          `${ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION}#createPlayer/input`,
+        resultContract:
+          `${ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION}#createPlayer/result`,
         phases: ["instantiateMs", "projectMs", "selectionEncodeMs",
           "stateSlotMs", "executeMs", "decodeMs", "rewindMs", "totalMs",
           "overheadMs"] },
       { name: "dispatch", mode: "diagnostic",
+        inputContract:
+          `${ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION}#dispatch/input`,
+        resultContract:
+          `${ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION}#dispatch/result`,
         phases: ["encodeMs", "executeMs", "decodeMs", "rewindMs", "totalMs",
           "overheadMs"] },
-      { name: "dispatchTick", mode: "production", phases: [] },
+      { name: "dispatchTick", mode: "production",
+        inputContract:
+          `${ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION}#dispatchTick/input`,
+        resultContract:
+          `${ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION}#dispatchTick/result`,
+        phases: [] },
       { name: "dispatchTickTimed", mode: "diagnostic",
+        inputContract:
+          `${ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION}#dispatchTickTimed/input`,
+        resultContract:
+          `${ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION}#dispatchTickTimed/result`,
         phases: ["encodeMs", "executeMs", "decodeMs", "rewindMs", "totalMs",
           "overheadMs"] },
-      { name: "disposePlayer", mode: "production", phases: [] },
+      { name: "disposePlayer", mode: "production",
+        inputContract:
+          `${ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION}#disposePlayer/input`,
+        resultContract:
+          `${ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION}#disposePlayer/result`,
+        phases: [] },
       { name: "replayTrace", mode: "diagnostic",
+        inputContract:
+          `${ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION}#replayTrace/input`,
+        resultContract:
+          `${ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION}#replayTrace/result`,
         phases: ["creation", "dispatches", "totalMs"] },
     ],
     ownership: {
@@ -93,6 +130,11 @@ export const selectionPackagePolicy = Object.freeze({
       arena: "persistent-prefix-with-rewound-scratch",
       reclamation: "drop-instance",
       rawAddressesExposed: false,
+      transfer: {
+        publicInput: "borrowed-immutable-javascript-values",
+        encodedInput: "fresh-transferred-lean-graph",
+        output: "decoded-javascript-copy",
+      },
     },
   },
 });

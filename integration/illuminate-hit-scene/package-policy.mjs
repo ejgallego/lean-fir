@@ -43,21 +43,50 @@ export const hitScenePackagePolicy = Object.freeze({
     memoryOwner: "module",
   },
   sourcePackage: {
-    producer: { project: "fir", backend: "fir-native-wasm" },
+    producer: {
+      project: "fir",
+      backend: "fir-native-wasm",
+      lean: {
+        toolchainPath: ["toolchain", "leanToolchain"],
+        versionPath: ["toolchain", "leanVersion"],
+      },
+    },
+    acceptance: { status: "accepted", authority: "verifier-policy" },
+    evidenceFiles: ["illuminate-hit-scene.wasm.json"],
     adapter: {
       file: "illuminate-hit-scene-browser-adapter.mjs",
       apiVersionPath: ["capabilities", "browserAdapter", "apiVersion"],
       operationInventoryPath: ["capabilities", "browserAdapter", "operations"],
+      startupFields: [],
+      initializationFields: [],
     },
     operations: [
       { name: "createHitScene", mode: "production",
+        inputContract:
+          `${ILLUMINATE_HIT_SCENE_ADAPTER_API_VERSION}#createHitScene/input`,
+        resultContract:
+          `${ILLUMINATE_HIT_SCENE_ADAPTER_API_VERSION}#createHitScene/result`,
         phases: ["instantiateMs", "parseProjectMs", "encodeMs", "totalMs",
           "overheadMs"] },
-      { name: "hitTest", mode: "production", phases: [] },
+      { name: "hitTest", mode: "production",
+        inputContract:
+          `${ILLUMINATE_HIT_SCENE_ADAPTER_API_VERSION}#hitTest/input`,
+        resultContract:
+          `${ILLUMINATE_HIT_SCENE_ADAPTER_API_VERSION}#hitTest/result`,
+        phases: [] },
       { name: "hitTestDiagnostic", mode: "diagnostic",
+        inputContract:
+          `${ILLUMINATE_HIT_SCENE_ADAPTER_API_VERSION}#hitTestDiagnostic/input`,
+        resultContract:
+          `${ILLUMINATE_HIT_SCENE_ADAPTER_API_VERSION}#hitTestDiagnostic/result`,
         phases: ["inputMs", "executeMs", "decodeMs", "rewindMs", "totalMs",
           "overheadMs"] },
-      { name: "disposeHitScene", mode: "production", phases: [] },
+      { name: "disposeHitScene", mode: "production",
+        inputContract:
+          `${ILLUMINATE_HIT_SCENE_ADAPTER_API_VERSION}#disposeHitScene/input`,
+        resultContract:
+          `${ILLUMINATE_HIT_SCENE_ADAPTER_API_VERSION}#disposeHitScene/result`,
+        phases: [] },
     ],
     ownership: {
       capabilityPath: ["capabilities", "ownership"],
@@ -65,6 +94,11 @@ export const hitScenePackagePolicy = Object.freeze({
       arena: "persistent-prefix-with-rewound-scratch",
       reclamation: "drop-instance",
       rawAddressesExposed: false,
+      transfer: {
+        publicInput: "borrowed-immutable-javascript-values",
+        encodedInput: "fresh-transferred-lean-graph",
+        output: "decoded-javascript-copy",
+      },
     },
   },
 });

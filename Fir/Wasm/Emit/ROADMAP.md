@@ -386,23 +386,35 @@ The optional shared descriptor vocabulary is
 verifier, operations, ownership, and phase names, not application behavior.
 The producer-side draft is now implemented as a read-only descriptor derived
 from an already verified package. It normalizes exact source commits and
-relevant-file digests, the producing project/backend and Wasm artifact, the
-verification/checksum/smoke contract, production versus diagnostic operations,
-their public phase fields, and the instance/arena/reclamation policy. It
-rejects incomplete provenance, checksum drift, operation drift, duplicate
-phases, and ownership facts inconsistent with the accepted BUILD metadata.
+relevant-file digests, the producing project/backend/Lean identity and Wasm
+artifact, verifier-backed acceptance, the checksum/smoke/evidence contract,
+production versus diagnostic operations with versioned input/result contracts,
+startup/initialization/per-call fields, and complete transfer plus arena
+ownership. It rejects incomplete provenance, checksum drift, operation drift,
+duplicate fields, unbound evidence, malformed Lean identity, and ownership
+facts inconsistent with the accepted BUILD metadata.
 
 HitScene v2 and selection-player v3 exercise the draft without changing their
-BUILD schemas, inventories, package identifiers, or bytes. Review snapshots
-live only under the ignored worktree-local `.deps/source-package-review/`:
-HitScene is 4,290 bytes with SHA-256
+BUILD schemas, inventories, package identifiers, or bytes. The first review
+snapshots live only under the ignored worktree-local
+`.deps/source-package-review/`: HitScene is 4,290 bytes with SHA-256
 `dad988f4e24142a89f6b25d941ba4de081728fa49cc70e714454cd895df3c26d`;
 selection is 4,523 bytes with SHA-256
 `6aabb23f8073b682c75f6b01d68aa2994a4781b98ded91daec511b283e0f87b5`.
-Illuminate animation, Verso, and lean-zip owners have been asked to review the
-classification and vocabulary before it becomes package payload. Publication
-inside BUILD versus as a checksummed sibling is deliberately deferred to that
-review and must be a separate metadata-version/package-identity slice.
+Verso and lean-zip accepted the boundary and requested exact Lean identity,
+verifier-backed acceptance, versioned operation input/result contracts,
+separate startup and lazy-initialization fields, checksummed producer evidence,
+and explicit public-input/encoded-input/output transfer ownership. The current
+consumer-review candidate adds those facts without embedding application
+schemas: operation contracts are identifiers owned by the versioned adapter
+API, while startup and initialization inventories remain producer-named public
+fields rather than a universal timing ontology.
+
+Both completed reviews prefer a checksummed `SOURCE_PACKAGE.json` sibling with
+a small BUILD pointer. Illuminate review is still outstanding, so publication
+remains deferred. Adding the sibling, changing BUILD metadata, and creating new
+immutable package identities must be a separate atomic-publication slice after
+all three consumers agree.
 
 ### G4. Continue generic compilation by evidence
 
