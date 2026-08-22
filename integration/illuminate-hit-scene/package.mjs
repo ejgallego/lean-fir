@@ -3,25 +3,29 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
   existsSync,
-  lstatSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
-  renameSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildPostponedSourceView } from
   "../package-tools/postponed-source-view.mjs";
+import { publishImmutablePackage } from
+  "../package-tools/immutable-package.mjs";
+import { verifyBrowserPackage } from
+  "../package-tools/verified-package.mjs";
 import {
   ILLUMINATE_HIT_SCENE_ADAPTER_API_VERSION,
   ILLUMINATE_HIT_SCENE_INPUT_LAYOUT_VERSION,
   ILLUMINATE_HIT_SCENE_OWNERSHIP_VERSION,
 } from "./illuminate-hit-scene-browser-adapter.mjs";
+import {
+  hitScenePackagePolicy,
+  hitScenePayloadFiles,
+} from "./package-policy.mjs";
 import { standardLibmRuntimeCapability } from
   "../wasm-runtime/contract.mjs";
 
@@ -40,14 +44,7 @@ const sourcePin = JSON.parse(readFileSync(join(directory,
   "illuminate-source.json"), "utf8"));
 const expectedClosure = JSON.parse(readFileSync(join(directory,
   "closure-contract.json"), "utf8"));
-const outputNames = [
-  "BUILD.json",
-  "hit-scene-benchmark.json",
-  "illuminate-hit-scene-browser-adapter.mjs",
-  "illuminate-hit-scene.wasm",
-  "illuminate-hit-scene.wasm.json",
-  "smoke.mjs",
-];
+const outputNames = hitScenePayloadFiles;
 
 function run(command, args, options = {}) {
   return execFileSync(command, args, {
@@ -88,17 +85,6 @@ function assertPinnedSource() {
 
 function assertOptional(actual, expected, label) {
   if (expected !== null) assert.equal(actual, expected, `${label} changed`);
-}
-
-function publishCurrent(destination) {
-  const current = join(buildDirectory, "illuminate-hit-scene-current");
-  const temporary = join(buildDirectory,
-    `.illuminate-hit-scene-current-${process.pid}`);
-  rmSync(temporary, { force: true });
-  symlinkSync(relative(buildDirectory, destination), temporary);
-  renameSync(temporary, current);
-  assert.equal(lstatSync(current).isSymbolicLink(), true);
-  assert.equal(realpathSync(current), realpathSync(destination));
 }
 
 const illuminate = assertPinnedSource();
@@ -336,38 +322,38 @@ const build = {
   },
 };
 
-const publication = mkdtempSync(join(buildDirectory,
-  ".illuminate-hit-scene-package-"));
-writeFileSync(join(publication, "BUILD.json"),
-  `${JSON.stringify(build, null, 2)}\n`);
-writeFileSync(join(publication, "illuminate-hit-scene.wasm"), wasm);
-writeFileSync(join(publication, "illuminate-hit-scene.wasm.json"),
-  `${JSON.stringify(descriptor, null, 2)}\n`);
-writeFileSync(join(publication, "illuminate-hit-scene-browser-adapter.mjs"),
-  adapter);
-writeFileSync(join(publication, "hit-scene-benchmark.json"), fixture);
-writeFileSync(join(publication, "smoke.mjs"), smoke);
+const payload = new Map([
+  ["BUILD.json", Buffer.from(`${JSON.stringify(build, null, 2)}\n`)],
+  ["hit-scene-benchmark.json", fixture],
+  ["illuminate-hit-scene-browser-adapter.mjs", adapter],
+  ["illuminate-hit-scene.wasm", wasm],
+  ["illuminate-hit-scene.wasm.json",
+    Buffer.from(`${JSON.stringify(descriptor, null, 2)}\n`)],
+  ["smoke.mjs", smoke],
+]);
 const sums = outputNames.map((name) =>
-  `${sha256(readFileSync(join(publication, name)))}  ${name}`).join("\n") + "\n";
-writeFileSync(join(publication, "SHA256SUMS"), sums);
-run(process.execPath, [join(publication, "smoke.mjs")], {
-  cwd: publication, capture: false,
-});
+  `${sha256(payload.get(name))}  ${name}`).join("\n") + "\n";
 
 const packageSha256 = sha256(sums);
-const destination = join(buildDirectory,
-  `illuminate-hit-scene-${packageSha256.slice(0, 16)}`);
-if (existsSync(destination)) {
-  for (const name of [...outputNames, "SHA256SUMS"]) {
-    assert.equal(sha256(readFileSync(join(publication, name))),
-      sha256(readFileSync(join(destination, name))),
-      `immutable publication differs for ${name}`);
-  }
-  rmSync(publication, { recursive: true, force: true });
-} else {
-  renameSync(publication, destination);
-}
-publishCurrent(destination);
+const packageId = `illuminate-hit-scene-${packageSha256.slice(0, 16)}`;
+const { directory: destination } = publishImmutablePackage({
+  packagesDirectory: buildDirectory,
+  packageId,
+  outputNames,
+  currentLink: join(buildDirectory, "illuminate-hit-scene-current"),
+  populate(staging) {
+    for (const [name, bytes] of payload) {
+      writeFileSync(join(staging, name), bytes);
+    }
+  },
+  validate(staging) {
+    verifyBrowserPackage(staging, hitScenePackagePolicy);
+    run(process.execPath, [join(staging, "smoke.mjs")], {
+      cwd: staging, capture: false,
+    });
+  },
+});
+verifyBrowserPackage(destination, hitScenePackagePolicy);
 console.log(JSON.stringify({
   package: destination,
   current: join(buildDirectory, "illuminate-hit-scene-current"),

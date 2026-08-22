@@ -1,33 +1,27 @@
 #!/usr/bin/env node
 
-import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import {
-  chmodSync,
-  copyFileSync,
-  lstatSync,
-  mkdirSync,
-  mkdtempSync,
   readFileSync,
-  readdirSync,
   realpathSync,
-  renameSync,
-  rmSync,
 } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+import {
+  installVerifiedPackage,
+  resolveFreshOutputPath,
+  verifyBrowserPackage,
+} from "../package-tools/verified-package.mjs";
+import {
+  selectionPackagePolicy,
+  selectionPayloadFiles,
+} from "./selection-package-policy.mjs";
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const firRoot = realpathSync(join(directory, "../.."));
 
-export const payloadFiles = Object.freeze([
-  "BUILD.json",
-  "illuminate-selection-player-browser-adapter.mjs",
-  "illuminate-selection-player.wasm",
-  "illuminate-selection-player.wasm.json",
-  "smoke.mjs",
-]);
+export const payloadFiles = selectionPayloadFiles;
 
 export const packageFiles = Object.freeze([
   ...payloadFiles,
@@ -169,58 +163,8 @@ export function validateSourceCheckouts({
   return { producer: producerState, illuminate: illuminateState };
 }
 
-function sha256(value) {
-  return createHash("sha256").update(value).digest("hex");
-}
-
-function pathExists(path) {
-  try {
-    lstatSync(path);
-    return true;
-  } catch (error) {
-    if (error?.code === "ENOENT") return false;
-    throw error;
-  }
-}
-
-function outputPath(value) {
-  assert.equal(typeof value, "string", "output path must be a string");
-  assert.notEqual(value, "", "output path must not be empty");
-  const finalComponent = basename(value);
-  assert.notEqual(finalComponent, ".", "output path must not end in .");
-  assert.notEqual(finalComponent, "..", "output path must not end in ..");
-  assert.notEqual(finalComponent, "/", "output path must have a final component");
-  const absolute = resolve(value);
-  if (pathExists(absolute)) {
-    throw new Error(`output directory must be fresh: ${absolute}`);
-  }
-  mkdirSync(dirname(absolute), { recursive: true });
-  return join(realpathSync(dirname(absolute)), basename(absolute));
-}
-
 export function verifyPackageDirectory(path) {
-  const expectedNames = [...packageFiles].sort();
-  assert.deepEqual(readdirSync(path).sort(), expectedNames,
-    "selection package must contain exactly the six public files");
-  for (const name of packageFiles) {
-    const state = lstatSync(join(path, name));
-    assert.equal(state.isFile(), true, `${name} must be a regular file`);
-    assert.equal(state.isSymbolicLink(), false, `${name} must not be a symbolic link`);
-  }
-
-  const manifest = readFileSync(join(path, "SHA256SUMS"), "utf8");
-  assert.ok(manifest.endsWith("\n"), "SHA256SUMS must end with a newline");
-  const entries = manifest.slice(0, -1).split("\n").map((line, index) => {
-    const match = /^([0-9a-f]{64})  ([^/\\\0]+)$/.exec(line);
-    assert.ok(match, `invalid SHA256SUMS line ${index + 1}`);
-    return { digest: match[1], name: match[2] };
-  });
-  assert.deepEqual(entries.map(({ name }) => name), payloadFiles,
-    "SHA256SUMS must cover the exact ordered payload inventory");
-  for (const { digest, name } of entries) {
-    assert.equal(sha256(readFileSync(join(path, name))), digest,
-      `checksum mismatch for ${name}`);
-  }
+  return verifyBrowserPackage(path, selectionPackagePolicy);
 }
 
 function defaultSmoke(path) {
@@ -235,29 +179,12 @@ export function publishAcceptedPackage({
   outputDirectory,
   runSmoke = defaultSmoke,
 }) {
-  const source = realpathSync(sourceDirectory);
-  verifyPackageDirectory(source);
-  const output = outputPath(outputDirectory);
-  const staging = mkdtempSync(join(dirname(output), `.${basename(output)}.stage.`));
-  let published = false;
-  try {
-    for (const name of packageFiles) {
-      copyFileSync(join(source, name), join(staging, name));
-      chmodSync(join(staging, name), 0o644);
-    }
-    verifyPackageDirectory(staging);
-    runSmoke(staging);
-    renameSync(staging, output);
-    published = true;
-    verifyPackageDirectory(output);
-    runSmoke(output);
-    return output;
-  } catch (error) {
-    if (published) rmSync(output, { recursive: true, force: true });
-    throw error;
-  } finally {
-    if (!published) rmSync(staging, { recursive: true, force: true });
-  }
+  return installVerifiedPackage({
+    sourceDirectory,
+    outputDirectory,
+    policy: selectionPackagePolicy,
+    runSmoke,
+  });
 }
 
 function runMain() {
@@ -275,7 +202,7 @@ function runMain() {
     expectedProducerRoot: firRoot,
     expectedIlluminateRevision: expectedSource.revision,
   });
-  const output = outputPath(options.output);
+  const output = resolveFreshOutputPath(options.output);
 
   execFileSync(join(directory, "check.sh"), [], {
     cwd: directory,

@@ -116,3 +116,34 @@ test("detects tampering and rejects unsafe inventories", () =>
     assert.equal(readdirSync(join(root, "packages"))
       .includes("fixture-extra"), false);
   }));
+
+test("runs validation before publishing or replacing the current link", () =>
+  withDirectory((root) => {
+    const packagesDirectory = join(root, "packages");
+    const currentLink = join(root, "current");
+    const accepted = publishImmutablePackage({
+      packagesDirectory,
+      packageId: "accepted-v1",
+      outputNames,
+      populate: populate(),
+      currentLink,
+      validate(directory) {
+        assert.equal(readFileSync(join(directory, "BUILD.json"), "utf8"),
+          "{\"format\":1}\n");
+      },
+    });
+    assert.equal(realpathSync(currentLink), realpathSync(accepted.directory));
+
+    assert.throws(() => publishImmutablePackage({
+      packagesDirectory,
+      packageId: "rejected-v2",
+      outputNames,
+      populate: populate(Buffer.from([1, 97, 115, 109])),
+      currentLink,
+      validate() {
+        throw new Error("policy rejected package");
+      },
+    }), /policy rejected package/);
+    assert.equal(realpathSync(currentLink), realpathSync(accepted.directory));
+    assert.equal(readdirSync(packagesDirectory).includes("rejected-v2"), false);
+  }));

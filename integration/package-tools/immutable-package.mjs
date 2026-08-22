@@ -96,10 +96,13 @@ export function publishImmutablePackage({
   outputNames,
   populate,
   currentLink = null,
+  validate = null,
 }) {
   assert.equal(typeof packagesDirectory, "string",
     "packagesDirectory must be a string");
   assert.equal(typeof populate, "function", "populate must be a function");
+  assert.ok(validate === null || typeof validate === "function",
+    "validate must be null or a function");
   requireComponent(packageId, "packageId");
   const names = requireOutputNames(outputNames);
   const destination = join(packagesDirectory, packageId);
@@ -114,6 +117,7 @@ export function publishImmutablePackage({
     const sums = checksumManifest(staging, names);
     writeFileSync(join(staging, "SHA256SUMS"), sums);
     verifyChecksumManifest(staging, names);
+    if (validate !== null) validate(staging);
 
     if (existsSync(destination)) {
       for (const name of [...names, "SHA256SUMS"]) {

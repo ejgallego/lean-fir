@@ -99,6 +99,11 @@ verifies every checksum, and atomically moves
 changes therefore publish a new directory even when the Wasm bytes are
 unchanged.
 
+The checksum, BUILD capability, zero-import, module-owned-memory, and exact
+export checks use the shared `integration/package-tools/verified-package.mjs`
+contract with the local `package-policy.mjs`. HitScene query differentials and
+flat-frontier limits remain in its packaged smoke rather than the shared tool.
+
 ## Accepted coverage
 
 The package smoke checks:

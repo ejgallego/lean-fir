@@ -23,6 +23,10 @@ import {
   publishAcceptedPackage,
   validateSourceCheckouts,
 } from "./export-selection-package.mjs";
+import {
+  selectionExpectedExports,
+  selectionPackagePolicy,
+} from "./selection-package-policy.mjs";
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const exporter = join(directory, "export-selection-package.mjs");
@@ -57,13 +61,91 @@ function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function unsignedLeb(value) {
+  const bytes = [];
+  do {
+    const next = value & 0x7f;
+    value >>>= 7;
+    bytes.push(value === 0 ? next : next | 0x80);
+  } while (value !== 0);
+  return bytes;
+}
+
+function section(id, contents) {
+  return [id, ...unsignedLeb(contents.length), ...contents];
+}
+
+function stringBytes(value) {
+  const bytes = [...Buffer.from(value, "utf8")];
+  return [...unsignedLeb(bytes.length), ...bytes];
+}
+
+function selectionWasm() {
+  const functions = selectionExpectedExports
+    .filter(({ kind }) => kind === "function");
+  const types = section(1, [1, 0x60, 0, 0]);
+  const declarations = section(3,
+    [...unsignedLeb(functions.length), ...functions.map(() => 0)]);
+  const memory = section(5, [1, 0, 1]);
+  const exports = section(7, [
+    ...unsignedLeb(selectionExpectedExports.length),
+    ...selectionExpectedExports.flatMap(({ name, kind }, index) => [
+      ...stringBytes(name),
+      kind === "function" ? 0 : 2,
+      kind === "function" ? index : 0,
+    ]),
+  ]);
+  const code = section(10, [
+    ...unsignedLeb(functions.length),
+    ...functions.flatMap(() => [2, 0, 0x0b]),
+  ]);
+  return Buffer.from([
+    0, 0x61, 0x73, 0x6d, 1, 0, 0, 0,
+    ...types, ...declarations, ...memory, ...exports, ...code,
+  ]);
+}
+
 function packageFixture(path, smoke = "process.exit(0);\n") {
   mkdirSync(path);
+  const wasm = selectionWasm();
+  const build = {
+    schemaVersion: selectionPackagePolicy.build.schemaVersion,
+    wasm: {
+      file: "illuminate-selection-player.wasm",
+      byteLength: wasm.byteLength,
+      sha256: sha256(wasm),
+      functionImportCount: 0,
+      memoryImportCount: 0,
+      memoryOwner: "module",
+      memoryExports: ["memory"],
+      functionExportCount: 7,
+    },
+    capabilities: {
+      completeRuntime: {
+        version: "fir.illuminate-player.complete-runtime/v2",
+        selfContained: true,
+        residentRuntime: {
+          version: "fir.closed-resident-runtime/v1",
+          provider: "none",
+          externalDeclarations: [],
+        },
+      },
+      browserAdapter: { apiVersion: "fir.illuminate-player.browser/v5" },
+      hotEvent: { version: "fir.illuminate-player.hot-event/v2" },
+      inputLayout: {
+        version: "lean-4.33-Illuminate.Animation.SelectionAnimation/v4",
+      },
+      ownership: {
+        version: "fir.illuminate-player.persistent-checkpoint/v3",
+      },
+    },
+  };
   const contents = new Map([
-    ["BUILD.json", "{\"schemaVersion\":\"test\"}\n"],
+    ["BUILD.json", `${JSON.stringify(build)}\n`],
     ["illuminate-selection-player-browser-adapter.mjs", "export {};\n"],
-    ["illuminate-selection-player.wasm", Buffer.from([0, 97, 115, 109])],
-    ["illuminate-selection-player.wasm.json", "{\"imports\":[]}\n"],
+    ["illuminate-selection-player.wasm", wasm],
+    ["illuminate-selection-player.wasm.json",
+      "{\"imports\":[],\"completeRuntime\":true}\n"],
     ["smoke.mjs", smoke],
   ]);
   for (const [name, value] of contents) writeFileSync(join(path, name), value);

@@ -3,17 +3,12 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   copyFileSync,
-  existsSync,
-  lstatSync,
   mkdirSync,
   readFileSync,
   realpathSync,
-  renameSync,
-  rmSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -23,6 +18,14 @@ import {
   ILLUMINATE_SELECTION_PLAYER_OWNERSHIP_VERSION,
   ILLUMINATE_SELECTION_PLAYER_RUNTIME_VERSION,
 } from "./illuminate-selection-player-browser-adapter.mjs";
+import { publishImmutablePackage } from
+  "../package-tools/immutable-package.mjs";
+import { verifyBrowserPackage } from
+  "../package-tools/verified-package.mjs";
+import {
+  selectionPackagePolicy,
+  selectionPayloadFiles,
+} from "./selection-package-policy.mjs";
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const firRoot = realpathSync(join(directory, "../.."));
@@ -62,13 +65,7 @@ const expectedClosure = Object.freeze({
   completeWasmSha256:
     "9a5364ac0e4f78559f29089e9005820c9a9246850d1d19d04ba35671e997eefd",
 });
-const outputNames = [
-  "BUILD.json",
-  "illuminate-selection-player-browser-adapter.mjs",
-  "illuminate-selection-player.wasm",
-  "illuminate-selection-player.wasm.json",
-  "smoke.mjs",
-];
+const outputNames = selectionPayloadFiles;
 
 function run(command, args, options = {}) {
   return execFileSync(command, args, {
@@ -117,17 +114,6 @@ function sourceDeclarations(text) {
   return text.split("\n")
     .filter((line) => line.startsWith("def "))
     .map((line) => line.slice(4).split(/\s/, 1)[0]);
-}
-
-function replaceCurrentLink(targetDirectory) {
-  const current = join(buildDirectory, "illuminate-selection-player-current");
-  const temporary = join(buildDirectory,
-    `.illuminate-selection-player-current-${process.pid}`);
-  rmSync(temporary, { force: true });
-  symlinkSync(relative(buildDirectory, targetDirectory), temporary);
-  renameSync(temporary, current);
-  assert.equal(lstatSync(current).isSymbolicLink(), true);
-  assert.equal(realpathSync(current), realpathSync(targetDirectory));
 }
 
 assertExpectedIlluminateSource();
@@ -466,34 +452,26 @@ const packageFingerprint = sha256(Buffer.concat([
 const packageId = `${fir.commit.slice(0, 12)}-${illuminate.commit.slice(0, 12)}-` +
   packageFingerprint.slice(0, 20);
 const packages = join(buildDirectory, "illuminate-selection-player-packages");
-const destination = join(packages, packageId);
-const staging = join(packages, `.staging-${packageId}-${process.pid}`);
-mkdirSync(packages, { recursive: true });
-rmSync(staging, { recursive: true, force: true });
-mkdirSync(staging);
-copyFileSync(completeStem,
-  join(staging, "illuminate-selection-player.wasm"));
-writeFileSync(join(staging, "illuminate-selection-player.wasm.json"),
-  descriptorBytes);
-writeFileSync(join(staging, "illuminate-selection-player-browser-adapter.mjs"),
-  adapterBytes);
-writeFileSync(join(staging, "smoke.mjs"), smokeBytes);
-writeFileSync(join(staging, "BUILD.json"), buildBytes);
-const sums = outputNames.map((name) =>
-  `${sha256(readFileSync(join(staging, name)))}  ${name}`).join("\n") + "\n";
-writeFileSync(join(staging, "SHA256SUMS"), sums);
-
-if (existsSync(destination)) {
-  for (const name of [...outputNames, "SHA256SUMS"]) {
-    assert.deepEqual(readFileSync(join(staging, name)),
-      readFileSync(join(destination, name)),
-      `immutable package ${packageId} differs at ${name}`);
-  }
-  rmSync(staging, { recursive: true });
-} else {
-  renameSync(staging, destination);
-}
-replaceCurrentLink(destination);
+const { directory: destination } = publishImmutablePackage({
+  packagesDirectory: packages,
+  packageId,
+  outputNames,
+  currentLink: join(buildDirectory, "illuminate-selection-player-current"),
+  validate(staging) {
+    verifyBrowserPackage(staging, selectionPackagePolicy);
+  },
+  populate(staging) {
+    copyFileSync(completeStem,
+      join(staging, "illuminate-selection-player.wasm"));
+    writeFileSync(join(staging, "illuminate-selection-player.wasm.json"),
+      descriptorBytes);
+    writeFileSync(join(staging,
+      "illuminate-selection-player-browser-adapter.mjs"), adapterBytes);
+    writeFileSync(join(staging, "smoke.mjs"), smokeBytes);
+    writeFileSync(join(staging, "BUILD.json"), buildBytes);
+  },
+});
+verifyBrowserPackage(destination, selectionPackagePolicy);
 console.log(JSON.stringify({
   ok: true,
   packageId,

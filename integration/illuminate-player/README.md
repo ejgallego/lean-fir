@@ -215,6 +215,11 @@ the existing selection integration gate, then verifies and smokes the accepted
 immutable package before and after atomically moving its six regular files into
 the fresh caller-owned output. For direct local use, the compatibility form
 `ILLUMINATE_ROOT=... export-selection-package.mjs OUTPUT` remains available.
+The exact checksum inventory, BUILD capability versions, zero-import Wasm
+surface, module-owned memory, and public exports are described by
+`selection-package-policy.mjs` and enforced by the shared verified-package
+installer. Selection semantics and flat-checkpoint assertions stay in the
+package-local smoke.
 
 The adapter API exposes `createPlayer`, generic diagnostic `dispatch`,
 constructor-specific `dispatchTick` and `dispatchTickTimed`, `disposePlayer`,
