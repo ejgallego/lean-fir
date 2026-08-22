@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/ejgallego/illuminate.git",
+  "revision": "23f291b15b4ec1ce0e41564d040329a44acb5172",
+  "relevantFiles": [
+    {
+      "path": "src/Illuminate/Animation/Types.lean",
+      "sha256": "97a030fdd3ef718912479343cadf0131616a8a9b458901e963dc3709cf5633a3"
+    },
+    {
+      "path": "src/Illuminate/Animation/Player.lean",
+      "sha256": "e1f98f9d02118f4b61a3f935dbdf49b1c3caf7c0b52aa0f80b7232fb740cd620"
+    },
+    {
+      "path": "src/Illuminate/Animation/FirLive.lean",
+      "sha256": "941daf939d9faa966aa8fb848b4a8f7ce0525ba6420d3843067e2c97908e2121"
+    },
+    {
+      "path": "src/Illuminate/Animation/FirSelection.lean",
+      "sha256": "a80771bcc8a4b09db99f004559726654dacc102d9982909ccf863f3d60ed0e83"
+    }
+  ]
+}
