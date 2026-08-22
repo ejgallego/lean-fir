@@ -58,6 +58,34 @@ theorem read32_write32_self
   simp [Wasm.Mem.write32, Wasm.Mem.read32]
   bv_decide
 
+/-- A 32-bit store preserves every byte outside its four-byte lane. -/
+theorem bytes_write32_of_disjoint
+    (memory : Wasm.Mem) (address value : UInt32) (byte : Nat)
+    (disjoint : byte < address.toNat ∨ address.toNat + 3 < byte) :
+    (memory.write32 address value).bytes byte = memory.bytes byte := by
+  have different0 : byte ≠ address.toNat := by omega
+  have different1 : byte ≠ address.toNat + 1 := by omega
+  have different2 : byte ≠ address.toNat + 2 := by omega
+  have different3 : byte ≠ address.toNat + 3 := by omega
+  simp [Wasm.Mem.write32, different0, different1, different2, different3]
+
+/-- A 32-bit store preserves a disjoint 32-bit read.  The premise is stated
+on unbounded byte addresses; callers deriving it from wasm32 arithmetic must
+therefore make nonwraparound explicit. -/
+theorem read32_write32_disjoint
+    (memory : Wasm.Mem) (written read value : UInt32)
+    (disjoint : written.toNat + 3 < read.toNat ∨
+      read.toNat + 3 < written.toNat) :
+    (memory.write32 written value).read32 read = memory.read32 read := by
+  simp only [Wasm.Mem.read32]
+  rw [bytes_write32_of_disjoint memory written value read.toNat (by omega)]
+  rw [bytes_write32_of_disjoint memory written value (read.toNat + 1)
+    (by omega)]
+  rw [bytes_write32_of_disjoint memory written value (read.toNat + 2)
+    (by omega)]
+  rw [bytes_write32_of_disjoint memory written value (read.toNat + 3)
+    (by omega)]
+
 /-- Restoring the word observed before a temporary 32-bit overwrite recovers
 the original memory, including every byte outside the scratch lane. -/
 theorem write32_restore (memory : Wasm.Mem) (address value : UInt32) :

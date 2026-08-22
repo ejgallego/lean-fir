@@ -4618,6 +4618,114 @@ theorem WrittenLimbPrefix.next
     simp
   simpa [indexRoundtrip] using WrittenLimbPrefix.step written wordAt
 
+/-- Address of one low/high wasm32 half in a materialized Natural payload. -/
+def writtenLimbHalfAddress
+    (result : UInt32) (index : Nat) (high : Bool) : UInt32 :=
+  checkedLimbBase result (UInt32.ofNat index) +
+    UInt32.ofNat (if high then 4 else 0)
+
+/-- Every distinct half-limb coordinate in the written prefix occupies a
+disjoint four-byte lane.  Because the comparison uses `toNat`, this predicate
+also records the required absence of modular address wraparound. -/
+def WrittenLimbAddressesDisjoint (result : UInt32) (count : Nat) : Prop :=
+  ∀ i j highI highJ,
+    i < count → j < count → (i ≠ j ∨ highI ≠ highJ) →
+    (writtenLimbHalfAddress result i highI).toNat + 3 <
+        (writtenLimbHalfAddress result j highJ).toNat ∨
+      (writtenLimbHalfAddress result j highJ).toNat + 3 <
+        (writtenLimbHalfAddress result i highI).toNat
+
+/-- Extensional read view of the first `count` materialized limbs. -/
+def ReadableLimbPrefix
+    (store : Wasm.Store host) (result : UInt32) (words : List LimbWords)
+    (count : Nat) : Prop :=
+  ∀ i low high, i < count → words[i]? = some (low, high) →
+    store.mem.read32 (writtenLimbHalfAddress result i false) = low ∧
+      store.mem.read32 (writtenLimbHalfAddress result i true) = high
+
+/-- Both stores of a later limb preserve a read from a disjoint word lane. -/
+theorem read32_writeSumFinalStore_disjoint
+    (store : Wasm.Store host) (result index low high readAddress : UInt32)
+    (lowDisjoint :
+      (checkedLimbBase result index + UInt32.ofNat 0).toNat + 3 <
+          readAddress.toNat ∨
+        readAddress.toNat + 3 <
+          (checkedLimbBase result index + UInt32.ofNat 0).toNat)
+    (highDisjoint :
+      (checkedLimbBase result index + UInt32.ofNat 4).toNat + 3 <
+          readAddress.toNat ∨
+        readAddress.toNat + 3 <
+          (checkedLimbBase result index + UInt32.ofNat 4).toNat) :
+    (writeSumFinalStore store result index low high).mem.read32 readAddress =
+      store.mem.read32 readAddress := by
+  unfold writeSumFinalStore writeSumLowStore
+  rw [ResidentMemoryRel.read32_write32_disjoint _ _ _ _ highDisjoint]
+  exact ResidentMemoryRel.read32_write32_disjoint _ _ _ _ lowDisjoint
+
+/-- An exact store history projects to exact readable limbs once its byte
+lanes are known to be pairwise disjoint.  This is the bridge from the writer
+loop's execution invariant to the extensional payload view needed by the
+concrete Natural decoder. -/
+theorem WrittenLimbPrefix.readable
+    {initial current : Wasm.Store host} {result : UInt32}
+    {words : List LimbWords} {count : Nat}
+    (written : WrittenLimbPrefix initial result words count current)
+    (disjoint : WrittenLimbAddressesDisjoint result count) :
+    ReadableLimbPrefix current result words count := by
+  induction written with
+  | zero =>
+      intro i _ _ inPrefix _
+      omega
+  | @step index previous low high written wordAt ih =>
+      have indexInPrefix : index < index + 1 := by omega
+      have earlierDisjoint : WrittenLimbAddressesDisjoint result index := by
+        intro i j highI highJ iInPrefix jInPrefix different
+        exact disjoint i j highI highJ (by omega) (by omega) different
+      have earlierReadable := ih earlierDisjoint
+      intro i readLow readHigh iInPrefix readWordAt
+      by_cases latest : i = index
+      · subst i
+        have wordsEqual : (low, high) = (readLow, readHigh) :=
+          Option.some.inj (wordAt.symm.trans readWordAt)
+        cases wordsEqual
+        have highLowDisjoint := disjoint index index true false
+          indexInPrefix indexInPrefix (Or.inr (by decide))
+        constructor
+        · unfold writeSumFinalStore writeSumLowStore
+          rw [ResidentMemoryRel.read32_write32_disjoint]
+          · exact ResidentMemoryRel.read32_write32_self _ _ _
+          · simpa [writtenLimbHalfAddress] using highLowDisjoint
+        · unfold writeSumFinalStore
+          exact ResidentMemoryRel.read32_write32_self _ _ _
+      · have earlierIndex : i < index := by omega
+        have earlierWords := earlierReadable i readLow readHigh
+          earlierIndex readWordAt
+        have lowLowDisjoint := disjoint index i false false
+          indexInPrefix iInPrefix (Or.inl (Ne.symm latest))
+        have highLowDisjoint := disjoint index i true false
+          indexInPrefix iInPrefix (Or.inl (Ne.symm latest))
+        have lowHighDisjoint := disjoint index i false true
+          indexInPrefix iInPrefix (Or.inl (Ne.symm latest))
+        have highHighDisjoint := disjoint index i true true
+          indexInPrefix iInPrefix (Or.inl (Ne.symm latest))
+        constructor
+        · calc
+            (writeSumFinalStore previous result (UInt32.ofNat index) low high).mem.read32
+                (writtenLimbHalfAddress result i false) =
+                previous.mem.read32 (writtenLimbHalfAddress result i false) :=
+              read32_writeSumFinalStore_disjoint _ _ _ _ _ _
+                (by simpa [writtenLimbHalfAddress] using lowLowDisjoint)
+                (by simpa [writtenLimbHalfAddress] using highLowDisjoint)
+            _ = readLow := earlierWords.1
+        · calc
+            (writeSumFinalStore previous result (UInt32.ofNat index) low high).mem.read32
+                (writtenLimbHalfAddress result i true) =
+                previous.mem.read32 (writtenLimbHalfAddress result i true) :=
+              read32_writeSumFinalStore_disjoint _ _ _ _ _ _
+                (by simpa [writtenLimbHalfAddress] using lowHighDisjoint)
+                (by simpa [writtenLimbHalfAddress] using highHighDisjoint)
+            _ = readHigh := earlierWords.2
+
 /-- The complete writer loop materializes exactly the pure output prefix, not
 merely an arbitrary sequence of in-bounds stores. -/
 theorem wp_writeSumLoopProgram_of_exactPrefix

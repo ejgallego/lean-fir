@@ -6356,6 +6356,18 @@ the existing `allocateNatural`/`NaturalResultRefines` theorem at one final
 boundary.  This separation also exposes precisely which assumptions would be
 invalid if the modular wasm32 limb address wrapped.
 
+That memory projection is now explicit.  A reusable Talos frame theorem says
+that `write32` preserves a `read32` whose unbounded four-byte lane is disjoint,
+and `WrittenLimbPrefix.readable` lifts it across the complete inductive store
+history.  Under pairwise lane separation, every recorded pure low/high word is
+therefore read back exactly from the final store.  Stating separation after
+converting each wasm32 address with `toNat` is deliberate: it makes address
+nonwraparound an observable allocation/layout obligation instead of silently
+assuming that modular pointer arithmetic behaves like natural-number
+addition.  The next slice is correspondingly narrow: derive this separation
+from the successful Natural allocation bounds, then reuse the existing
+decoder/refinement boundary rather than reproving arithmetic inside memory.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
