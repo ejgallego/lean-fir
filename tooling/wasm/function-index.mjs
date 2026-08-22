@@ -16,6 +16,7 @@ import {
   moduleShape,
   parseFunctionMap,
   restampCapture,
+  sha256,
   validateSidecar,
 } from "./function-index-lib.mjs";
 import { makeFunctionView } from "./function-view-lib.mjs";
@@ -23,6 +24,7 @@ import { makeFunctionView } from "./function-view-lib.mjs";
 function usage() {
   return `usage:
   function-index.mjs prepare --wasm FILE --inventory FILE --named-wasm FILE --capture FILE
+  function-index.mjs direct --binaryen-dir DIR --wasm FILE --inventory FILE --output FILE
   function-index.mjs restamp --binaryen-dir DIR --wasm FILE --capture FILE --wasm-opt-args FILE --named-wasm FILE --output FILE
   function-index.mjs optimize --binaryen-dir DIR --input FILE --wasm FILE --capture FILE --wasm-opt-args FILE --output FILE
   function-index.mjs finalize --wasm FILE --capture FILE --function-map FILE --call-graph FILE --output FILE
@@ -145,6 +147,50 @@ if (command === "prepare") {
   writeFileSync(namedPath, injectFunctionIdentities(wasm,
     capture.identities));
   writeJson(capturePath, capture);
+} else if (command === "direct") {
+  const binaryenDirectory = required(args, "--binaryen-dir");
+  const wasmPath = required(args, "--wasm");
+  const inventoryPath = required(args, "--inventory");
+  const wasm = readFileSync(wasmPath);
+  const capture = makeCapture(wasm, readJson(inventoryPath),
+    basename(wasmPath));
+  const identityMap = capture.identities.map(({ index, token }) =>
+    `${index}:${token}`).join("\n");
+  const temporary = makeToolingTemporaryDirectory("fir-function-direct-");
+  let callGraph;
+  try {
+    const graphCopy = join(temporary, "graph-copy.wasm");
+    callGraph = run(binaryenDirectory, "wasm-opt", [
+      "--all-features", "--print-function-map", "--print-call-graph",
+      wasmPath, "-o", graphCopy,
+    ], { encoding: "utf8" });
+    const shape = moduleShape(wasm);
+    assert.equal(moduleShape(readFileSync(graphCopy)).functionCount,
+      shape.functionCount,
+    "direct call-graph inspection changed the function count");
+    assert.deepEqual(parseFunctionMap(callGraph).map(({ index,
+      optimizerName }) => [index, optimizerName]),
+    Array.from({ length: shape.functionCount }, (_, index) => [index,
+      binaryenOptimizerName(index, shape.functionImportCount)]),
+    "direct call-graph inspection changed the final function order");
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+  const sidecar = makeSidecar(wasm, capture, identityMap, callGraph, {
+    artifactFile: basename(wasmPath),
+    producer: {
+      tool: "tooling/wasm/function-index.mjs direct",
+      identityBoundary: "exact-emitter-final-order/v1",
+      inventory: {
+        file: basename(inventoryPath),
+        byteLength: readFileSync(inventoryPath).length,
+        sha256: sha256(readFileSync(inventoryPath)),
+      },
+      binaryenVersion: run(binaryenDirectory, "wasm-opt", ["--version"],
+        { encoding: "utf8" }).trim(),
+    },
+  });
+  writeJson(required(args, "--output"), sidecar);
 } else if (command === "restamp") {
   const binaryenDirectory = required(args, "--binaryen-dir");
   const wasmPath = required(args, "--wasm");

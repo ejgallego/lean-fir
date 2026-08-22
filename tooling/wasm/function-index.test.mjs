@@ -110,6 +110,37 @@ test("captures final optimized indices without changing release bytes",
     }
   });
 
+test("captures an exact emitter-final module without rewriting it", () => {
+  const directory = makeToolingTemporaryDirectory("fir-function-direct-");
+  try {
+    const wasm = join(directory, "fixture.wasm");
+    const inventoryPath = join(directory, "fixture.inventory.json");
+    const sidecarPath = join(directory, "fixture.wasm.functions.json");
+    run("wasm-as", [...features, fixture, "-o", wasm]);
+    const inventory = {
+      functions: ["Fixture.leaf", "Fixture.entry", "Fixture.dead"],
+      sourceFunctions: ["Fixture.leaf", "Fixture.entry", "Fixture.dead"],
+      residentHelpers: [],
+    };
+    writeFileSync(inventoryPath, `${JSON.stringify(inventory, null, 2)}\n`);
+    const before = readFileSync(wasm);
+    execFileSync(process.execPath, [functionTool, "direct",
+      "--binaryen-dir", binaryen, "--wasm", wasm,
+      "--inventory", inventoryPath, "--output", sidecarPath],
+    { encoding: "utf8" });
+    assert.deepEqual(readFileSync(wasm), before,
+      "direct capture must not rewrite final emitter bytes");
+    const sidecar = JSON.parse(readFileSync(sidecarPath, "utf8"));
+    validateSidecar(before, sidecar);
+    assert.equal(sidecar.capture.producer.identityBoundary,
+      "exact-emitter-final-order/v1");
+    assert.deepEqual(inspectFunction(sidecar, "Fixture.entry").directCallees,
+      [0]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("resolves imported functions across final maps and call graphs",
   () => {
     const directory = makeToolingTemporaryDirectory("fir-function-imports-");
