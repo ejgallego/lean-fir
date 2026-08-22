@@ -54,6 +54,16 @@ manifest.sources = {
     commit: sourceContract.revision,
     dirty: false,
     relevantFiles: sourceContract.relevantFiles,
+    sourceView: {
+      mechanism: "Lake external source root with entry-context C specialization",
+      modules: [
+        "Illuminate.Animation.Types",
+        "Illuminate.Animation.Player",
+        "Illuminate.Animation.FirSelection",
+      ],
+      consumedCheckoutBuildArtifacts: false,
+      generatedDependencyC: ["Types.c", "Player.c", "FirSelection.c"],
+    },
   },
   generatedInputs,
 };

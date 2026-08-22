@@ -19,17 +19,21 @@ if [[ "$actual_revision" != "$revision" ]]; then
 fi
 
 rm -rf "$source_root" "$stage_root"
-mkdir -p "$source_root" "$build_dir" "$source_root/runtime"
+mkdir -p \
+  "$source_root" \
+  "$build_dir" \
+  "$source_root/src/generated" \
+  "$source_root/src/runtime"
 git -C "$illuminate_repo" archive "$revision" \
   src/Illuminate/Animation/Types.lean \
   src/Illuminate/Animation/Player.lean \
   src/Illuminate/Animation/FirLive.lean \
   src/Illuminate/Animation/FirSelection.lean |
-  tar -x -C "$source_root" --strip-components=1
+  tar -x -C "$source_root"
 install -m 0644 "$lane_dir/IlluminateLlvmSelection.lean" \
-  "$source_root/IlluminateLlvmSelection.lean"
+  "$source_root/src/IlluminateLlvmSelection.lean"
 install -m 0644 "$lane_dir/runtime/selection-player-bridge.c" \
-  "$source_root/runtime/selection-player-bridge.c"
+  "$source_root/src/runtime/selection-player-bridge.c"
 
 node - "$source_contract" "$source_root" <<'NODE'
 const { createHash } = require("node:crypto");
@@ -37,7 +41,7 @@ const { readFileSync } = require("node:fs");
 const path = require("node:path");
 const contract = require(process.argv[2]);
 for (const source of contract.relevantFiles) {
-  const local = path.join(process.argv[3], source.path.replace(/^src\//, ""));
+  const local = path.join(process.argv[3], source.path);
   const digest = createHash("sha256").update(readFileSync(local)).digest("hex");
   if (digest !== source.sha256) {
     throw new Error(`${source.path}: expected ${source.sha256}, got ${digest}`);
@@ -45,15 +49,25 @@ for (const source of contract.relevantFiles) {
 }
 NODE
 
-"$builder" \
+lake -d "$lane_dir" --reconfigure \
+  "-KilluminateRoot=$source_root" \
+  build +IlluminateLlvmSelection:c
+lean_path="$(lake -d "$lane_dir" env printenv LEAN_PATH)"
+for module in Types Player FirSelection; do
+  install -m 0644 \
+    "$lane_dir/.lake/build/ir/Illuminate/Animation/$module.c" \
+    "$source_root/src/generated/$module.c"
+done
+
+LEAN_PATH="$lean_path" "$builder" \
   --runtime-profile unthreaded \
-  --root "$source_root" \
+  --root "$source_root/src" \
   --out-dir "$build_dir" \
   --name illuminate-selection-player \
-  --extra-source "$source_root/Illuminate/Animation/Types.lean" \
-  --extra-source "$source_root/Illuminate/Animation/Player.lean" \
-  --extra-source "$source_root/Illuminate/Animation/FirSelection.lean" \
-  --extra-c-source "$source_root/runtime/selection-player-bridge.c" \
+  --extra-c-source "$source_root/src/generated/Types.c" \
+  --extra-c-source "$source_root/src/generated/Player.c" \
+  --extra-c-source "$source_root/src/generated/FirSelection.c" \
+  --extra-c-source "$source_root/src/runtime/selection-player-bridge.c" \
   --heap-view \
   --export fir_illuminate_selection_input_alloc \
   --export fir_illuminate_selection_create \
@@ -65,7 +79,7 @@ NODE
   --export fir_illuminate_selection_dispose \
   --export fir_illuminate_selection_live_count \
   --export fir_illuminate_selection_release \
-  "$source_root/IlluminateLlvmSelection.lean"
+  "$source_root/src/IlluminateLlvmSelection.lean"
 
 install -m 0644 "$repo_root/integration/lcnf-c-wasm/emscripten-loader.mjs" \
   "$build_dir/emscripten-loader.mjs"

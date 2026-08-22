@@ -16,7 +16,10 @@ cc -std=c11 -Wall -Wextra -Werror -fsyntax-only \
 export LAKE_CACHE_DIR="$(bash "$repo_root/scripts/fir-lake-cache-path.sh")"
 export LAKE_ARTIFACT_CACHE=true
 export LAKE_RESTORE_ARTIFACTS=true
-lake -d "$lane_dir" build wireTests
+native_illuminate_root="${ILLUMINATE_ROOT:-$lane_dir/.illuminate}"
+lake -d "$lane_dir" --reconfigure \
+  "-KilluminateRoot=$native_illuminate_root" \
+  build wireTests
 "$lane_dir/.lake/build/bin/wireTests"
 
 "$lane_dir/package.sh"

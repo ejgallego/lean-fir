@@ -15,6 +15,13 @@ IEEE-754 binary64 bits.
 ## Build
 
 The generic Emscripten setup must contain the unthreaded Lean runtime profile.
+Package assembly extracts the exact pinned Illuminate sources and prepares
+their ordinary code-generation oleans and entry-context dependency C through
+this integration's external-source Lake project. Lean's direct C emitter
+requires those importer-specialized declarations, unlike FIR-native
+postponed-LCNF capture. The generic builder still compiles the real wire entry
+from source and links the generated dependency C. It does not consume
+Illuminate's `.lake` artifacts or reproduce the player code.
 After running its setup command, build and test an immutable package with:
 
 ```sh
