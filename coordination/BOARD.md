@@ -15,23 +15,23 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Active integration lease
 
-- Milestone: `W7-W6-CHECKED-NAT-TYPED-RESULT`, linked/accepted locally.
-- Integration owner: `wasm-gen`, accepting the exact W7 generation and
-  lean-zip ratchet followed atomically by W6's typed-result proof checkpoint.
-- Current checkpoint: pushed tooling baseline `713c6e52` is followed by W7
-  functional head `fcc47335`, exact lean-zip ratchet `3cdb7ce1`, tracked W7
-  handoff `208f8095`, W6 proof head `c0427a57`, and tracked W6 handoff
-  `47635960`. The immediate, validated one-limb, and freshly allocated
-  multi-limb exits now return their already-canonical object words without an
-  address-zero scratch cast. W6 proves the one-limb object relation and both
-  multi-limb allocation/carry-store result shapes close through
-  `LiveHeapRel`/`ResidentMemoryRel`; no arbitrary physical `i32` is admitted as
-  `.tobject`. Lean Beam, forced direct Lean compilation, the 3,118-job focused
-  cone, all 713 repository cases and 2,121/2,121 comparisons, all 3,167 Talos
-  jobs, and the complete deterministic W7 artifact gate pass. The stronger
-  processed-limb-prefix proof that `sumCarryFrom` and `writeSumFrom` compute the
-  mathematical sum remains active in W6 and does not block this typed-result
-  checkpoint.
+- Milestone: `W7-SHARED-REFERENCE-DECREMENT`, generation linked/accepted;
+  independent W6 refinement queued.
+- Integration owner: `wasm-gen`, accepting the upstream-shaped W7 release
+  fast path and its package ratchets while W6 continues the earlier checked-Nat
+  theorem before claiming the new release proof.
+- Current checkpoint: exact caller attribution is accepted at `b626350d`,
+  followed by W7 functional head `3ee84c76`, tracked W7 handoff `6dfa54d0`,
+  and the live external caller-attribution gate at `f158a237`. `fir_dec_once`
+  now removes five header reads from the ordinary shared-reference path while
+  preserving the complete 32-byte-header bounds trap and all persistent,
+  malformed, and last-reference behavior. Exact prettyM and lean-zip packages
+  are 120,756 and 936,082 bytes with zero imports; bound output digests and
+  arena frontiers are unchanged. Lean Beam, all 713 repository cases and
+  2,121/2,121 comparisons, all 3,167 Talos jobs, the complete deterministic W7
+  artifact gate, and clean lean-zip double generation pass. W6 refinement is
+  open in `W7-W6-20260822-001`; the earlier checked-Nat proof continues
+  independently and does not block this generation landing.
 - Accepted baseline: `main` contains the complete
   `W7-ILLUMINATE-SELECTION-CATALOG-EXPORT` stack through tracked lane head
   `5081015a` and the independently isolated
