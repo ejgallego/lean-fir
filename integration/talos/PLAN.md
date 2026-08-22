@@ -6441,6 +6441,23 @@ transport is attached to the already-proved writer loop, the live-heap and
 typed-return theorem consumes it without any further arithmetic or object
 decoding assumptions.
 
+That state transport is now proved.  Induction over `WrittenLimbPrefix`
+replays each low/high Talos `write32` as checked W6 `writeUInt32` operations
+through `ResidentMemoryRel.writeUInt32`.  Because every destination begins at
+the fresh allocation frontier and remains within its reserved capacity, the
+constructed state preserves the original prefix and allocator cursor as well
+as `FrontierInvariant`.  Completing the induction with the optional carry
+store derives the final memory relation and payload bound automatically.
+
+Consequently the live-heap and typed-return closures now require no assumed
+final heap, prefix extension, frontier, cursor equality, header, or payload
+bound: they existentially construct the correct W6 heap from the raw W6
+allocation, its initial resident-memory relation, the exact writer history,
+and the mathematical value equation.  The remaining whole-helper connection
+is execution-facing: prove that W7's resident allocator call realizes that raw
+allocation/initial relation, and compose the existing exact writer-loop
+theorem so its returned store supplies `WrittenLimbPrefix` to this closure.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

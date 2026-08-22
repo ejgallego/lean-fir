@@ -5020,6 +5020,150 @@ theorem ResidentMemoryRel.readLiveHeader_of_headerBytesFrame
     headerMinimum, headerAligned, finalExtent, Bind.bind, Except.bind, pure,
     Except.pure]
 
+/-- A checked 32-bit write at or beyond a retained prefix preserves that
+prefix.  This is the state-level companion to `ResidentMemoryRel.writeUInt32`
+used when replaying exact resident payload histories in W6 memory. -/
+theorem prefixExtension_writeUInt32After
+    {before current : MemoryState} {memory : LinearMemory}
+    {offset : Nat} {value : UInt32}
+    (extension : before.PrefixExtension current)
+    (inBounds : offset + 3 < current.memory.size)
+    (written : current.memory.writeUInt32 offset value = .ok memory)
+    (afterPrefix : before.heapCursor ≤ offset) :
+    before.PrefixExtension ({ current with memory } : MemoryState) := by
+  obtain ⟨actual, actualWrite, actualSize, _, _, _, _, byteFrame⟩ :=
+    LinearMemory.writeUInt32_spec current.memory offset value inBounds
+  rw [actualWrite] at written
+  cases written
+  refine {
+    cursor := extension.cursor
+    memorySize := by simpa [actualSize] using extension.memorySize
+    readByte := ?_ }
+  intro address beforeCursor
+  rw [byteFrame address (by omega) (by omega) (by omega) (by omega)]
+  exact extension.readByte address beforeCursor
+
+/-- Replay an exact resident limb prefix in checked W6 memory.
+
+Each Talos `write32` is paired with `LinearMemory.writeUInt32` through the
+common memory relation.  The constructed W6 state preserves the original
+pre-allocation prefix, the frontier invariant, and the allocator cursor. -/
+theorem WrittenLimbPrefix.refineMemory_of_allocateObject
+    {initial current : Wasm.Store host} {resultWord : UInt32}
+    {words : List LimbWords} {index capacity : Nat}
+    {before allocated : MemoryState} {address : Word32}
+    {persistent : Bool} {aux0 aux1 aux2 aux3 : UInt32}
+    (written : WrittenLimbPrefix initial resultWord words index current)
+    (resultWordEq : resultWord = UInt32.ofNat address.value)
+    (indexWithinCapacity : index ≤ capacity)
+    (valid : before.FrontierInvariant)
+    (allocation : before.allocateObject .natural
+      (target.semanticSlotBytes * capacity) persistent aux0 aux1 aux2 aux3 =
+        .ok (allocated, address))
+    (initialRelated : ResidentMemoryRel allocated initial.mem) :
+    ∃ heap,
+      before.PrefixExtension heap ∧
+      heap.FrontierInvariant ∧
+      heap.heapCursor = allocated.heapCursor ∧
+      ResidentMemoryRel heap current.mem := by
+  subst resultWord
+  induction written with
+  | zero =>
+      exact ⟨allocated,
+        valid.allocateObject_prefixExtension allocation,
+        valid.allocateObject allocation, rfl, initialRelated⟩
+  | @step index previous low high written wordAt ih =>
+      obtain ⟨previousHeap, previousExtension, previousValid,
+          previousCursor, previousRelated⟩ :=
+        ih (by omega)
+      have indexInCapacity : index < capacity := by omega
+      let lowOffset := address.value + headerBytes + 8 * index
+      let highOffset := lowOffset + 4
+      have addressToNat :
+          (UInt32.ofNat address.value).toNat = address.value := by
+        apply UInt32.toNat_ofNat_of_lt'
+        simpa [wordModulus, UInt32.size] using address.isLt
+      have lowAddressEq :
+          checkedLimbBase (UInt32.ofNat address.value) (UInt32.ofNat index) +
+              UInt32.ofNat 0 = UInt32.ofNat lowOffset := by
+        simpa [lowOffset, writtenLimbHalfAddress, addressToNat] using
+          (writtenLimbHalfAddress_eq_ofNat
+            (UInt32.ofNat address.value) index false)
+      have highAddressEq :
+          checkedLimbBase (UInt32.ofNat address.value) (UInt32.ofNat index) +
+              UInt32.ofNat 4 = UInt32.ofNat highOffset := by
+        simpa [highOffset, lowOffset, writtenLimbHalfAddress, addressToNat,
+          Nat.add_assoc] using
+          (writtenLimbHalfAddress_eq_ofNat
+            (UInt32.ofNat address.value) index true)
+      have allocatedExtent := MemoryState.allocateObject_extent allocation
+      have aligned := align8_ge
+        (headerBytes + target.semanticSlotBytes * capacity)
+      have lowBeforeFrontier : lowOffset + 4 ≤ previousHeap.heapCursor := by
+        rw [previousCursor, allocatedExtent]
+        simp only [target] at aligned ⊢
+        omega
+      have lowInBounds : lowOffset + 3 < previousHeap.memory.size :=
+        Nat.lt_of_lt_of_le (by omega) previousValid.cursorInBounds
+      obtain ⟨lowMemory, lowWrite, _, _, _, _, _, _⟩ :=
+        LinearMemory.writeUInt32_spec previousHeap.memory lowOffset low
+          lowInBounds
+      let lowHeap : MemoryState := { previousHeap with memory := lowMemory }
+      have lowRelated : ResidentMemoryRel lowHeap
+          (writeSumLowStore previous (UInt32.ofNat address.value)
+            (UInt32.ofNat index) low).mem := by
+        have relatedWrite := previousRelated.writeUInt32 lowInBounds lowWrite
+        change ResidentMemoryRel lowHeap
+          (previous.mem.write32
+            (checkedLimbBase (UInt32.ofNat address.value)
+              (UInt32.ofNat index) + UInt32.ofNat 0) low)
+        rw [lowAddressEq]
+        exact relatedWrite
+      have lowValid : lowHeap.FrontierInvariant := by
+        exact previousValid.writeUInt32 lowBeforeFrontier lowWrite
+      have freshAddress := valid.allocateObject_address allocation
+      have lowAfterPrefix : before.heapCursor ≤ lowOffset := by
+        rw [← freshAddress]
+        simp [lowOffset, headerBytes]
+        omega
+      have lowExtension : before.PrefixExtension lowHeap :=
+        prefixExtension_writeUInt32After previousExtension lowInBounds lowWrite
+          lowAfterPrefix
+      have highBeforeFrontier : highOffset + 4 ≤ lowHeap.heapCursor := by
+        change highOffset + 4 ≤ previousHeap.heapCursor
+        rw [previousCursor, allocatedExtent]
+        simp only [target] at aligned ⊢
+        dsimp only [highOffset, lowOffset]
+        omega
+      have highInBounds : highOffset + 3 < lowHeap.memory.size :=
+        Nat.lt_of_lt_of_le (by omega) lowValid.cursorInBounds
+      obtain ⟨highMemory, highWrite, _, _, _, _, _, _⟩ :=
+        LinearMemory.writeUInt32_spec lowHeap.memory highOffset high
+          highInBounds
+      let highHeap : MemoryState := { lowHeap with memory := highMemory }
+      have highRelated : ResidentMemoryRel highHeap
+          (writeSumFinalStore previous (UInt32.ofNat address.value)
+            (UInt32.ofNat index) low high).mem := by
+        have relatedWrite := lowRelated.writeUInt32 highInBounds highWrite
+        change ResidentMemoryRel highHeap
+          ((writeSumLowStore previous (UInt32.ofNat address.value)
+            (UInt32.ofNat index) low).mem.write32
+              (checkedLimbBase (UInt32.ofNat address.value)
+                (UInt32.ofNat index) + UInt32.ofNat 4) high)
+        rw [highAddressEq]
+        exact relatedWrite
+      have highValid : highHeap.FrontierInvariant := by
+        exact lowValid.writeUInt32 highBeforeFrontier highWrite
+      have highAfterPrefix : before.heapCursor ≤ highOffset := by
+        rw [← freshAddress]
+        simp [highOffset, lowOffset, headerBytes]
+        omega
+      have highExtension : before.PrefixExtension highHeap :=
+        prefixExtension_writeUInt32After lowExtension highInBounds highWrite
+          highAfterPrefix
+      exact ⟨highHeap, highExtension, highValid, by
+        simpa [highHeap, lowHeap] using previousCursor, highRelated⟩
+
 /-- Extensional read view of the first `count` materialized limbs. -/
 def ReadableLimbPrefix
     (store : Wasm.Store host) (result : UInt32) (words : List LimbWords)
@@ -5526,6 +5670,53 @@ theorem WrittenLimbPrefix.headerBytesFrame_completeWithCarry_of_allocateObject
   exact completed.headerBytesFrame
     (writtenLimbPayloadFits_of_allocateObject allocation) offset offsetInHeader
 
+/-- Construct the final W6 memory state corresponding to the completed
+resident writer, including its optional carry limb.  All structural heap
+premises consumed by the live-heap theorem are returned explicitly. -/
+theorem WrittenLimbPrefix.refineMemory_completeWithCarry_of_allocateObject
+    {initial current : Wasm.Store host} {address : Word32} {carry : UInt32}
+    {words : List LimbWords} {count : Nat}
+    {before allocated : MemoryState}
+    (written : WrittenLimbPrefix initial (UInt32.ofNat address.value) words
+      count current)
+    (wordsLength : words.length = count)
+    (carryBit : carry = 0 ∨ carry = 1)
+    (valid : before.FrontierInvariant)
+    (allocation : before.allocateObject .natural
+      (target.semanticSlotBytes * (count + carry.toNat)) false
+        bigNaturalMarker (UInt32.ofNat (count + carry.toNat)) 0 0 =
+          .ok (allocated, address))
+    (initialRelated : ResidentMemoryRel allocated initial.mem) :
+    ∃ heap,
+      before.PrefixExtension heap ∧
+      heap.FrontierInvariant ∧
+      heap.heapCursor = allocated.heapCursor ∧
+      ResidentMemoryRel heap
+        (completedAddStore current (UInt32.ofNat address.value) count carry).mem ∧
+      address.value + headerBytes + 8 * (count + carry.toNat) ≤
+        heap.memory.size := by
+  have completed := written.completeWithCarry wordsLength carryBit
+  obtain ⟨heap, extension, finalValid, cursorEq, finalRelated⟩ :=
+    completed.refineMemory_of_allocateObject rfl (Nat.le_refl _) valid
+      allocation initialRelated
+  have allocatedExtent := MemoryState.allocateObject_extent allocation
+  have aligned := align8_ge
+    (headerBytes + target.semanticSlotBytes * (count + carry.toNat))
+  have payloadInBounds :
+      address.value + headerBytes + 8 * (count + carry.toNat) ≤
+        heap.memory.size := by
+    calc
+      address.value + headerBytes + 8 * (count + carry.toNat) ≤
+          address.value + align8
+            (headerBytes + target.semanticSlotBytes *
+              (count + carry.toNat)) := by
+            simp only [target] at aligned ⊢
+            omega
+      _ = allocated.heapCursor := allocatedExtent.symm
+      _ = heap.heapCursor := cursorEq.symm
+      _ ≤ heap.memory.size := finalValid.cursorInBounds
+  exact ⟨heap, extension, finalValid, cursorEq, finalRelated, payloadInBounds⟩
+
 /-- End-to-end payload decoder boundary for the installed writer plus its
 optional carry store.  The raw reservation supplies lane separation; the
 common memory relation transports exact resident reads to W6's decoder. -/
@@ -5885,6 +6076,47 @@ theorem WrittenLimbPrefix.liveHeapRel_completeWithCarry_of_memoryRel
       valueEq
   exact liveHeapRel_of_freshNaturalObjectRel heapRelated allocation extension
     finalFrontier objectRelated
+
+/-- Self-contained W6 heap construction for the completed resident Natural
+writer.  Raw allocation, the exact writer history, the allocator memory
+relation, and the mathematical value now suffice; the final heap and all of
+its structural refinement facts are derived rather than assumed. -/
+theorem WrittenLimbPrefix.liveHeapRel_completeWithCarry_of_allocateObject
+    {initial current : Wasm.Store host} {address : Word32} {carry : UInt32}
+    {words : List LimbWords} {count value : Nat}
+    {before allocated : MemoryState} {witness : RefinementWitness}
+    {runtime : Fir.LeanIR.Impure.RuntimeState}
+    (written : WrittenLimbPrefix initial (UInt32.ofNat address.value) words
+      count current)
+    (wordsLength : words.length = count)
+    (carryBit : carry = 0 ∨ carry = 1)
+    (allocation : before.allocateObject .natural
+      (target.semanticSlotBytes * (count + carry.toNat)) false
+        bigNaturalMarker (UInt32.ofNat (count + carry.toNat)) 0 0 =
+          .ok (allocated, address))
+    (heapRelated : LiveHeapRel before witness runtime)
+    (initialRelated : ResidentMemoryRel allocated initial.mem)
+    (valueEq : limbWordsListValue (completedAddLimbWords words carry) = value) :
+    ∃ heap,
+      let nextWitness := witness.bindNatural runtime.nextLocation address value
+      witness.Extends nextWitness ∧
+        ClosureAllocationsPersistent witness nextWitness ∧
+        LiveHeapRel heap nextWitness (semanticNaturalResult runtime value) ∧
+        ResidentMemoryRel heap
+          (completedAddStore current (UInt32.ofNat address.value) count carry).mem ∧
+        ValueRel nextWitness .tobject (.word32 address)
+          (.object (.heap runtime.nextLocation)) := by
+  obtain ⟨heap, extension, finalValid, cursorEq, finalRelated,
+      payloadInBounds⟩ :=
+    written.refineMemory_completeWithCarry_of_allocateObject wordsLength
+      carryBit heapRelated.frontier allocation initialRelated
+  obtain ⟨witnessExtension, closureAllocationsPersistent, finalHeapRelated,
+      valueRelated⟩ :=
+    written.liveHeapRel_completeWithCarry_of_memoryRel wordsLength carryBit
+      allocation heapRelated extension finalValid cursorEq initialRelated
+      finalRelated payloadInBounds valueEq
+  exact ⟨heap, witnessExtension, closureAllocationsPersistent,
+    finalHeapRelated, finalRelated, valueRelated⟩
 
 /-- Exact symbolic multi-limb result producer in checked `Nat.add`.
 
@@ -7216,6 +7448,53 @@ theorem wp_checkedAllocatedNaturalReturn_of_memoryRel
       finalRelated payloadInBounds valueEq
   exact ⟨witnessExtension, closureAllocationsPersistent, nextHeapRelated,
     finalRelated,
+    wp_checkedAllocatedNaturalReturnProgram rawLocal valueRelated⟩
+
+/-- Self-contained typed-return closure for the exact resident writer.
+
+The final W6 heap is existentially constructed by replaying the resident
+stores, so no final memory relation, prefix extension, frontier, cursor, or
+payload-bound premise remains at this boundary. -/
+theorem wp_checkedAllocatedNaturalReturn_of_allocateObject
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {initial current : Wasm.Store host} {address : Word32} {carry : UInt32}
+    {words : List LimbWords} {count value : Nat}
+    {before allocated : MemoryState} {witness : RefinementWitness}
+    {runtime : Fir.LeanIR.Impure.RuntimeState}
+    {locals : Wasm.Locals} {rawIndex : Nat} {tail : List Wasm.Value}
+    (written : WrittenLimbPrefix initial (UInt32.ofNat address.value) words
+      count current)
+    (wordsLength : words.length = count)
+    (carryBit : carry = 0 ∨ carry = 1)
+    (allocation : before.allocateObject .natural
+      (target.semanticSlotBytes * (count + carry.toNat)) false
+        bigNaturalMarker (UInt32.ofNat (count + carry.toNat)) 0 0 =
+          .ok (allocated, address))
+    (heapRelated : LiveHeapRel before witness runtime)
+    (initialRelated : ResidentMemoryRel allocated initial.mem)
+    (valueEq : limbWordsListValue (completedAddLimbWords words carry) = value)
+    (rawLocal : locals.get rawIndex =
+      some (.i32 (UInt32.ofNat address.value))) :
+    ∃ heap,
+      let nextWitness := witness.bindNatural runtime.nextLocation address value
+      witness.Extends nextWitness ∧
+        ClosureAllocationsPersistent witness nextWitness ∧
+        LiveHeapRel heap nextWitness (semanticNaturalResult runtime value) ∧
+        ResidentMemoryRel heap
+          (completedAddStore current (UInt32.ofNat address.value) count carry).mem ∧
+        Wasm.wp module (checkedAllocatedNaturalReturnProgram rawIndex)
+          (TypedNaturalReturnPost nextWitness address
+            (.heap runtime.nextLocation)
+            (completedAddStore current (UInt32.ofNat address.value) count carry)
+            tail)
+          (completedAddStore current (UInt32.ofNat address.value) count carry)
+          { locals with values := tail } env := by
+  obtain ⟨heap, witnessExtension, closureAllocationsPersistent,
+      finalHeapRelated, finalRelated, valueRelated⟩ :=
+    written.liveHeapRel_completeWithCarry_of_allocateObject wordsLength
+      carryBit allocation heapRelated initialRelated valueEq
+  exact ⟨heap, witnessExtension, closureAllocationsPersistent,
+    finalHeapRelated, finalRelated,
     wp_checkedAllocatedNaturalReturnProgram rawLocal valueRelated⟩
 
 /-- The public resident `Nat.add` function is the common pair dispatcher with
