@@ -115,7 +115,7 @@ These are noisy attribution measurements, not elapsed-time performance claims.
 They demonstrate that the final-function aggregator remains useful and
 fail-closed independently of instruction provenance.
 
-## lean-zip provenance scaling result
+## Initial lean-zip provenance scaling result
 
 An ignored thin probe called the real `LeanZipFir.Compile.compileRaw` and the
 generic `ModuleArtifact.writeInstructionOrigins` API. It did not copy the
@@ -138,18 +138,63 @@ production timeout is consistent with that scaling, but no native sampled
 profile was collected, so this note does not claim a lower-level runtime
 hotspot.
 
-## Decision and follow-up
+## Repaired production result
+
+W7-2 repaired the diagnostic path in `e28a67f1`. The serializer now consumes
+the already ordered origin stream once instead of filtering the complete table
+for every function. Fail-closed encoded-body and opcode validation remains in
+place, but compares byte ranges in situ rather than allocating and immediately
+releasing a slice for every check. The ordinary encoder and compact origin
+schema are unchanged.
+
+Profiling was necessary to find the second half of the repair. After the
+one-pass grouping change alone, recursive slice destruction and repeated
+`ByteArray.data` projection still dominated. In the final profile,
+`lean_byte_array_data` fell below the 0.5% reporting threshold and recursive
+destruction fell to 4.07% self time; ordinary interpreter and Array work became
+the leading costs.
+
+The production probe then completed seven measured lean-zip runs. Every round
+reproduced the same ordinary/diagnostic Wasm and compact-table identities:
+
+- 3,412 defined functions and 518,933 checked symbolic instruction origins;
+- Wasm: 1,619,348 bytes, SHA-256
+  `a311390c4c47d83eb7a856f3e9a591b58df6eacc9578fda21216d150fcf168b0`;
+- compact table: 9,046,210 bytes, SHA-256
+  `e4d6829e8cd3fe2f7dc63b040409613e857db67f50e428521a1d1f0f1b0d9406`;
+- origin-phase milliseconds:
+  `[15384, 14954, 16065, 13734, 16229, 13536, 15139]`, median 15,139 and
+  median absolute deviation 926;
+- complete wall seconds:
+  `[45.48, 48.20, 49.02, 46.79, 51.99, 45.72, 52.29]`, median 48.20 and
+  median absolute deviation 2.48;
+- median peak RSS 4,892,680 KiB, median absolute deviation 124 KiB.
+
+The size difference from the initial stopped probe reflects the newer compiler
+and source closure used by both ordinary and diagnostic arms of the repaired
+experiment. Within every repaired round, ordinary and diagnostic Wasm are
+byte-identical. The canonical instruction-origin checker resolves all 518,933
+rows to their recorded opcodes.
+
+For the unchanged current prettyM input, the repair also preserves both files
+byte-for-byte: 120,756-byte Wasm at
+`576a9c5a3bb62fd6764e6c5cd431f074127617b5bddc16045142644f089fb959`
+and 605,161-byte origin JSON at
+`75d6d99b664ae209925c134d04c3d8ff78694654f613897acd936e8af80fba71`.
+The complete artifact gate regenerated its 393-function, 35,622-origin table
+twice in 94--96 ms.
+
+## Decision and residual follow-up
 
 1. Accept the W7-2 API and prettyM validation as release-neutral and useful.
 2. Keep origin tables opt-in and unpackaged.
 3. Preserve the strict separation between pre-optimization origins and
    exact-release final-function profiles.
-4. Before repeating lean-zip, group the already ordered origin rows by function
-   in one pass, making table construction proportional to functions plus
-   origins. Avoid constructing one filtered copy of the complete origin array
-   per function.
-5. Rerun the same lean-zip probe with a bounded origin phase, then collect at
-   least seven measured runs only if the repaired single run is practical.
+4. Treat the production scaling issue as resolved by the ordered one-pass
+   grouping and allocation-free byte-range validation.
+5. Retain raw origin tables as regenerable diagnostics. Consider streaming or
+   compression only if a concrete consumer needs the 9 MB lean-zip table; do
+   not add it to ordinary immutable packages preemptively.
 
-This is a tooling scalability follow-up, not a compiler-semantics discrepancy
-or a package-contract change.
+This was a tooling scalability repair, not a compiler-semantics discrepancy or
+a package-contract change.
