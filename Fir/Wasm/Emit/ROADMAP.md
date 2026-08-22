@@ -295,6 +295,20 @@ logic to justify a small shared surface. Extract, in this order:
 2. a declarative package descriptor for immutable publication; and
 3. bounded codec hooks plus common production/diagnostic phase names.
 
+The first slice is accepted. `integration/package-tools/verified-package.mjs`
+checks the exact regular-file/checksum inventory, declared BUILD schema and
+capability versions, artifact length and digest, import counts, memory owner,
+descriptor closure, and public Wasm exports. Its fresh-output installer stages
+beside the caller-owned destination, runs the package-local smoke before and
+after atomic rename, and removes rejected output. HitScene v2 and the selection
+player supply only small declarative policies; their existing semantic and
+flat-frontier smokes remain unchanged. Exact install replays reproduced every
+accepted file byte-for-byte, including the 64,217-byte HitScene module and the
+40,398-byte selection module, both with zero imports and module-owned memory.
+The two producers now also reuse the accepted immutable publisher, whose new
+validation hook runs before either an immutable directory or current link is
+exposed.
+
 This is deliberately not a build framework or coordination service. Extract
 only behavior already duplicated by at least two accepted packages. Keep
 workload semantics, oracle comparisons, and memory limits in each integration.
