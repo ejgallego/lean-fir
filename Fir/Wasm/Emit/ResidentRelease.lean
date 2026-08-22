@@ -15,6 +15,7 @@ private def countLocal : FVarId := ⟨`count⟩
 private def captureCountLocal : FVarId := ⟨`captureCount⟩
 private def descriptorLocal : FVarId := ⟨`descriptor⟩
 private def refCountLocal : FVarId := ⟨`refCount⟩
+private def flagsLocal : FVarId := ⟨`flags⟩
 private def markerLocal : FVarId := ⟨`marker⟩
 private def arrayCursorLocal : FVarId := ⟨`arrayCursor⟩
 private def arrayIndexLocal : FVarId := ⟨`arrayIndex⟩
@@ -194,40 +195,21 @@ private def decrementAboveOneBody : List Instruction :=
     .i32Store .uint32 (u32 headerRefCountOffset),
     .ret]
 
-private def ordinaryReleaseBody
+/-
+Loading the terminal header word is the cheapest exact preservation of the old
+full-header memory-boundary check. It also caches the closure descriptor for
+the cold last-reference path. The ordinary shared-reference path deliberately
+does not interpret object kind or auxiliary metadata.
+-/
+private def probeCompleteHeader : List Instruction :=
+  [.localGet addressLocal,
+    .i32Load .uint32 (u32 headerAux3Offset),
+    .localSet descriptorLocal]
+
+private def lastReferenceReleaseBody
     (descriptors : Array (Array AbiKind)) :
     Except LinkError (List Instruction) := do
   let owned ← ownedReleaseBody descriptors
-  return (
-    [.localGet addressLocal,
-      .i32Load .uint32 (u32 headerRefCountOffset),
-      .localSet refCountLocal,
-      .localGet refCountLocal] ++
-    equalsConst .uint32 0 ++
-    [.ifElse
-      [.unreachable]
-      ([.i32Const .uint32 1,
-        .localGet refCountLocal,
-        .i32LtU,
-        .ifElse
-          decrementAboveOneBody
-          ([.localGet addressLocal,
-            .call (.declaration releaseHeaderName)] ++ owned)])])
-
-private def persistentReleaseBody : List Instruction :=
-  [.localGet kindLocal] ++
-  equalsConst .uint32 ObjectKind.natural.code ++
-  [.ifElse
-    ([.localGet addressLocal,
-      .i32Load .uint32 (u32 headerAux0Offset)] ++
-      equalsConst .uint32 promotedTagMarker ++
-      [.ifElse checkedNoop [.ret]])
-    [.ret]]
-
-private def liveReleaseBody
-    (descriptors : Array (Array AbiKind)) :
-    Except LinkError (List Instruction) := do
-  let ordinary ← ordinaryReleaseBody descriptors
   return (
     [.localGet addressLocal,
       .i32Load .uint32 (u32 headerKindOffset),
@@ -242,10 +224,50 @@ private def liveReleaseBody
       .i32Load .uint32 (u32 headerAux2Offset),
       .localSet captureCountLocal,
       .localGet addressLocal,
-      .i32Load .uint32 (u32 headerAux3Offset),
-      .localSet descriptorLocal,
-      .localGet addressLocal,
-      .i32Load .uint32 (u32 headerFlagsOffset),
+      .call (.declaration releaseHeaderName)] ++ owned)
+
+private def ordinaryReleaseBody
+    (descriptors : Array (Array AbiKind)) :
+    Except LinkError (List Instruction) := do
+  let lastReference ← lastReferenceReleaseBody descriptors
+  return (
+    [.localGet addressLocal,
+      .i32Load .uint32 (u32 headerRefCountOffset),
+      .localSet refCountLocal,
+      .localGet refCountLocal] ++
+    equalsConst .uint32 0 ++
+    [.ifElse
+      [.unreachable]
+      ([.i32Const .uint32 1,
+        .localGet refCountLocal,
+        .i32LtU,
+        .ifElse
+          decrementAboveOneBody
+          lastReference])])
+
+private def persistentReleaseBody : List Instruction :=
+  [.localGet addressLocal,
+    .i32Load .uint32 (u32 headerKindOffset),
+    .localSet kindLocal,
+    .localGet addressLocal,
+    .i32Load .uint32 (u32 headerAux0Offset),
+    .localSet markerLocal,
+    .localGet kindLocal] ++
+  equalsConst .uint32 ObjectKind.natural.code ++
+  [.ifElse
+    ([.localGet addressLocal,
+      .i32Load .uint32 (u32 headerAux0Offset)] ++
+      equalsConst .uint32 promotedTagMarker ++
+      [.ifElse checkedNoop [.ret]])
+    [.ret]]
+
+private def liveReleaseBody
+    (descriptors : Array (Array AbiKind)) :
+    Except LinkError (List Instruction) := do
+  let ordinary ← ordinaryReleaseBody descriptors
+  return (
+    probeCompleteHeader ++
+    [.localGet flagsLocal,
       .i32Const .uint32 persistentFlag,
       .i32And] ++
     equalsConst .uint32 persistentFlag ++
@@ -262,6 +284,8 @@ private def alignedReleaseBody
       .localSet addressLocal,
       .localGet addressLocal,
       .i32Load .uint32 (u32 headerFlagsOffset),
+      .localSet flagsLocal,
+      .localGet flagsLocal,
       .i32Const .uint32 liveFlag,
       .i32And] ++
     equalsConst .uint32 liveFlag ++
@@ -284,6 +308,7 @@ private def decrementOnceFunction
       (captureCountLocal, .uint32),
       (descriptorLocal, .uint32),
       (refCountLocal, .uint32),
+      (flagsLocal, .uint32),
       (markerLocal, .uint32),
       (arrayCursorLocal, .uint32),
       (arrayIndexLocal, .uint32)]
@@ -514,6 +539,22 @@ def manifest : Json :=
       exampleDescriptors.map fun descriptor =>
         Json.arr (descriptor.map fun kind => Json.str (toString (repr kind)))),
     ("status", "generation-only; W6 recursive-release contract proof pending")]
+
+#guard probeCompleteHeader == [
+  .localGet addressLocal,
+  .i32Load .uint32 (u32 headerAux3Offset),
+  .localSet descriptorLocal]
+
+#guard match liveReleaseBody exampleDescriptors with
+  | .ok body => body.take probeCompleteHeader.length == probeCompleteHeader
+  | .error _ => false
+
+#guard match ordinaryReleaseBody exampleDescriptors with
+  | .ok body => body.take 3 == [
+      .localGet addressLocal,
+      .i32Load .uint32 (u32 headerRefCountOffset),
+      .localSet refCountLocal]
+  | .error _ => false
 
 #guard match residentExampleModule with
   | .ok module =>

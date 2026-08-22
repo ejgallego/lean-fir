@@ -257,6 +257,19 @@ artifact-bound V8 profiles likewise placed `Nat.add` at overlapping 3.60% and
 3.50% median Wasm-self shares. Every run preserved the exact compressed-byte
 hash and flat 9,237,304-byte frontier.
 
+The shared-reference path in `fir_dec_once` now follows Lean's release shape
+more closely: after the live check it loads the persistent flag and reference
+count before decoding cold object metadata. A terminal-header-word probe keeps
+the previous complete-header bounds trap. The final helper grows by 10 bytes,
+the frontier from 1,619,339 to 1,619,356 bytes, and the externally linked
+module from 936,072 to 936,082 bytes; inventories, imports, compressed output,
+and the flat 9,237,304-byte frontier remain unchanged. In four artifact-bound
+profiles its median normalized self share changes from 14.24% to 13.59%.
+Across sixteen order-balanced level-6 pairs the paired median is -31.90 ms,
+but only 9/16 pairs improve and dispersion is high, so the accepted result is
+the five removed common-path header reads rather than an end-to-end speedup
+claim.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not

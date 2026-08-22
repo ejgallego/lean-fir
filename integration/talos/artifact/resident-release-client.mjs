@@ -181,6 +181,18 @@ export async function checkResidentReleases(bytes) {
     (candidate) => candidate.resident_dec_checked(parent),
     "underflowing checked decrement");
   await expectTrap(module,
+    (memory) => {
+      const address = memory.buffer.byteLength - 16;
+      const memoryView = view(memory);
+      memoryView.setUint32(address, 1, true);
+      memoryView.setUint32(address + 4, 2, true);
+      memoryView.setUint32(address + 8, 2, true);
+      memoryView.setUint32(address + 12, 32, true);
+    },
+    (candidate) => candidate.resident_dec_checked(
+      candidate.memory.buffer.byteLength - 16),
+    "truncated shared-object header");
+  await expectTrap(module,
     (memory) => writeHeader(memory, closure, {
       kind: 2,
       allocationBytes: 40,

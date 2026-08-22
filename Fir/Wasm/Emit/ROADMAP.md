@@ -251,6 +251,37 @@ frontier. Representative timing and sampled attribution overlap, so this slice
 makes no workload speed claim. W6 proof adaptation remains the acceptance
 boundary.
 
+### G1h. Decrement shared references before cold metadata decoding (generation-ready)
+
+Lean's common release path needs only the live/persistent flags and reference
+count before it can decrement a shared object and return. FIR previously
+decoded object kind and all four auxiliary header words before making that
+decision. The generation-ready implementation now reads the flags once,
+probes the terminal header word to preserve the complete-header memory-boundary
+trap, and loads the reference count. Kind and auxiliary metadata move to the
+persistent or last-reference branches that interpret them. The helper
+signature, 32-byte header contract, closure descriptors, recursive release,
+and ownership behavior are unchanged.
+
+Generated-shape guards pin the terminal-word probe at the start of the live
+path and the reference-count load at the start of the ordinary path. The
+external-engine release matrix additionally checks that a live shared object
+with only the first 16 header bytes present still traps; persistent objects
+retain their count, and last-reference constructor, closure, Array, String,
+and Natural cases retain their recursive-release behavior.
+
+The deterministic result is five fewer header reads on the common live,
+nonpersistent, shared-reference path. `fir_dec_once` grows by 17 bytes in
+prettyM and 10 bytes in lean-zip because the cold-path control is split rather
+than duplicated. Its median normalized V8 self share changes from 9.55% to
+8.12% in prettyM and from 14.24% to 13.59% in lean-zip. Two independent sets
+of eight alternating AB/BA rounds preserve exact output digests and frontiers.
+The combined paired median changes are -14.41 ms for prettyM, with 12/16 pairs
+improving, and -31.90 ms for lean-zip, with 9/16 improving. Dispersion is high,
+especially for lean-zip, so these are directional workload results rather than
+a precise end-to-end speedup claim. W6 proof adaptation remains the acceptance
+boundary.
+
 ### G2. Separate production and diagnostic adapter costs (accepted)
 
 Finish the pending Illuminate selection-player request with an actually
