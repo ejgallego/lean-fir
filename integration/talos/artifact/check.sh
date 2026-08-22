@@ -20,6 +20,7 @@ trap 'rm -rf "$first" "$second"' EXIT
 
 cd "$here"
 node --test "$root/integration/package-tools/immutable-package.test.mjs"
+node --test "$root/integration/package-tools/source-package.test.mjs"
 node --test "$root/integration/package-tools/verified-package.test.mjs"
 node --test "$root/integration/package-tools/postponed-source-view.test.mjs"
 node instruction-provenance-fixture/check.mjs \

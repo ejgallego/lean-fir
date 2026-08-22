@@ -14,6 +14,7 @@ import {
 import { basename, dirname, join, resolve } from "node:path";
 
 import { sha256, verifyChecksumManifest } from "./immutable-package.mjs";
+import { describeSourcePackage } from "./source-package.mjs";
 
 export const BROWSER_PACKAGE_POLICY_VERSION =
   "fir.browser-package-policy/v1";
@@ -159,7 +160,13 @@ export function verifyBrowserPackage(directory, packagePolicy) {
     }
   }
 
-  return { root, build, descriptor, wasm, module, imports, exports };
+  const verification = {
+    root, build, descriptor, wasm, metadata, module, imports, exports,
+  };
+  return {
+    ...verification,
+    sourcePackage: describeSourcePackage(verification, policy),
+  };
 }
 
 export function resolveFreshOutputPath(value) {

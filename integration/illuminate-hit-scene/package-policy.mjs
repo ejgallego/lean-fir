@@ -42,4 +42,29 @@ export const hitScenePackagePolicy = Object.freeze({
     requireZeroImports: true,
     memoryOwner: "module",
   },
+  sourcePackage: {
+    producer: { project: "fir", backend: "fir-native-wasm" },
+    adapter: {
+      file: "illuminate-hit-scene-browser-adapter.mjs",
+      apiVersionPath: ["capabilities", "browserAdapter", "apiVersion"],
+      operationInventoryPath: ["capabilities", "browserAdapter", "operations"],
+    },
+    operations: [
+      { name: "createHitScene", mode: "production",
+        phases: ["instantiateMs", "parseProjectMs", "encodeMs", "totalMs",
+          "overheadMs"] },
+      { name: "hitTest", mode: "production", phases: [] },
+      { name: "hitTestDiagnostic", mode: "diagnostic",
+        phases: ["inputMs", "executeMs", "decodeMs", "rewindMs", "totalMs",
+          "overheadMs"] },
+      { name: "disposeHitScene", mode: "production", phases: [] },
+    ],
+    ownership: {
+      capabilityPath: ["capabilities", "ownership"],
+      model: "persistent-checkpoint-per-instance",
+      arena: "persistent-prefix-with-rewound-scratch",
+      reclamation: "drop-instance",
+      rawAddressesExposed: false,
+    },
+  },
 });

@@ -110,6 +110,17 @@ function packageFixture(path, smoke = "process.exit(0);\n") {
   const wasm = selectionWasm();
   const build = {
     schemaVersion: selectionPackagePolicy.build.schemaVersion,
+    sources: {
+      fir: {
+        repository: "https://example.invalid/fir.git",
+        commit: "1".repeat(40), dirty: false, relevantFiles: [],
+      },
+      illuminate: {
+        repository: "https://example.invalid/illuminate.git",
+        commit: "2".repeat(40), dirty: false,
+        relevantFiles: [{ path: "Player.lean", sha256: "3".repeat(64) }],
+      },
+    },
     wasm: {
       file: "illuminate-selection-player.wasm",
       byteLength: wasm.byteLength,
@@ -130,7 +141,11 @@ function packageFixture(path, smoke = "process.exit(0);\n") {
           externalDeclarations: [],
         },
       },
-      browserAdapter: { apiVersion: "fir.illuminate-player.browser/v5" },
+      browserAdapter: {
+        apiVersion: "fir.illuminate-player.browser/v5",
+        methods: selectionPackagePolicy.sourcePackage.operations
+          .map(({ name }) => name),
+      },
       hotEvent: { version: "fir.illuminate-player.hot-event/v2" },
       inputLayout: {
         version: "lean-4.33-Illuminate.Animation.SelectionAnimation/v4",

@@ -23,6 +23,13 @@ smokes it before and after the atomic rename, and removes a rejected output.
 Application semantics and workload-specific memory limits are deliberately not
 part of this shared surface.
 
+`source-package.mjs` projects a verified package into the optional
+`browser-benchmarks/source-package/v1` discovery vocabulary. It normalizes
+provenance, producer and adapter identity, verifier inputs, production versus
+diagnostic operations, public phase names, and ownership. See
+`SOURCE_PACKAGE.md`. The current coordination draft is returned in memory and
+does not change immutable package bytes or identities.
+
 Accepted producers can pass a `validate(staging)` callback to
 `publishImmutablePackage`. It runs after the exact checksum manifest exists but
 before either the immutable directory or its current symlink is exposed.
