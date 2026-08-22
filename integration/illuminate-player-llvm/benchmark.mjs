@@ -2,10 +2,6 @@ import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
-import {
-  loadEmscriptenIlluminateSelectionPlayerAdapter,
-} from "./illuminate-selection-player-emscripten-adapter.mjs";
-
 function parseNatural(value, label) {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed <= 0) {
@@ -48,6 +44,11 @@ if (options.rounds < 7) throw new Error("headline benchmark requires at least se
 const manifestUrl = options.manifest === undefined
   ? new URL("./illuminate-selection-player.manifest.json", import.meta.url)
   : pathToFileURL(options.manifest);
+const adapterModuleUrl = new URL(
+  "./illuminate-selection-player-emscripten-adapter.mjs",
+  manifestUrl,
+);
+const { loadEmscriptenIlluminateSelectionPlayerAdapter } = await import(adapterModuleUrl);
 const adapter = await loadEmscriptenIlluminateSelectionPlayerAdapter(manifestUrl);
 
 const animation = {
@@ -174,5 +175,9 @@ const report = {
   rounds: allRounds,
 };
 const json = `${JSON.stringify(report, null, 2)}\n`;
-if (options.out !== undefined) await writeFile(options.out, json);
-process.stdout.write(json);
+if (options.out !== undefined) {
+  await writeFile(options.out, json);
+  process.stdout.write(`wrote ${options.out}\n${JSON.stringify(report.summary, null, 2)}\n`);
+} else {
+  process.stdout.write(json);
+}
