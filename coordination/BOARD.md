@@ -31,7 +31,14 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   2,121/2,121 comparisons, all 3,167 Talos jobs, the complete deterministic W7
   artifact gate, and clean lean-zip double generation pass. W6 refinement is
   open in `W7-W6-20260822-001`; the earlier checked-Nat proof continues
-  independently and does not block this generation landing.
+  independently and does not block this generation landing. A temporary W7-2
+  integration window accepted the independent profile-evidence hardening at
+  `2effc606`, bounded opt-in instruction-origin generation at `e28a67f1`, and
+  the reconciled production cost record at `90c047cf`. The lean-zip diagnostic
+  now emits 518,933 checked origins in a 9,046,210-byte table with a 15,139 ms
+  seven-run median while preserving ordinary Wasm bytes; origin tables remain
+  regenerable and outside ordinary packages. No runtime, ABI, helper, semantic,
+  ownership, or W6 proof contract changed.
 - Accepted baseline: `main` contains the complete
   `W7-ILLUMINATE-SELECTION-CATALOG-EXPORT` stack through tracked lane head
   `5081015a` and the independently isolated
