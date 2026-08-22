@@ -6327,6 +6327,24 @@ their physical local indices are identical.  The remaining writer work is to
 lift this data-producing prefix through the structured loop while threading a
 growing payload-memory frame.
 
+That complete structured writer loop is now proved.  Its invariant is indexed
+by the current absolute limb, carry, and evolving Talos store, while its
+termination measure remains the independent `count - index`.  The generic
+step premise supplies the four read-only magnitude results, the two store
+bounds, and preservation of whatever payload invariant the client chooses.
+A first limb-list instantiation separates the pure suffix/carry recurrence
+from an abstract `Frame n store` describing the first `n` materialized result
+limbs.  Exact source-shape and adapter lemmas identify W7's private guard,
+shifted step, stores, and back-edge with this loop and install it in the
+adapted target body followed only by the unreachable standard terminal.
+
+The important memory-proof boundary is therefore explicit: the loop theorem
+does not need to know that the destination is a Natural allocation.  The next
+slice defines the concrete prefix frame for the allocated result payload,
+proves that the exact low/high successor stores extend it with the pure output
+digit, and then converts the completed frame to the existing
+`allocateNatural`/`NaturalResultRefines` theorem at one final boundary.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

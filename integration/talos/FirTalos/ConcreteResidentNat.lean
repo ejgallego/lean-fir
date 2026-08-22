@@ -4008,6 +4008,565 @@ theorem wp_writeSumStepAndStoresProgram
   apply wp_writeSumStepProgram leftLowRun leftHighRun rightLowRun rightHighRun
   exact wp_writeSumLimbStoresProgram lowInBounds highInBounds continued
 
+/-! ### Installed natural writer loop -/
+
+/-- Carry/index back-edge of `writeSumFrom` in its shifted local layout. -/
+def writeSumContinueProgram : Wasm.Program := [
+  .localGet 14, .localSet 7,
+  .localGet 5, .const 1, .add, .localSet 5,
+  .br 0]
+
+/-- Exact control effect of the writer back-edge. -/
+theorem wp_writeSumContinueProgram
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {left leftFlavor right rightFlavor result index count carry : UInt32}
+    {leftLow leftHigh rightLow rightHigh low high nextCarry carryExtra
+      scaled : UInt32}
+    {tail : List Wasm.Value}
+    (continued : Q (.Break 0 store
+      (writeSumArithmeticLocals left leftFlavor right rightFlavor result
+        (sumCarryNextIndex index) count nextCarry leftLow leftHigh rightLow
+        rightHigh low high nextCarry carryExtra scaled tail))) :
+    Wasm.wp module writeSumContinueProgram Q store
+      (writeSumArithmeticLocals left leftFlavor right rightFlavor result index
+        count carry leftLow leftHigh rightLow rightHigh low high nextCarry
+        carryExtra scaled tail) env := by
+  simpa [writeSumContinueProgram, writeSumArithmeticLocals,
+    sumCarryNextIndex] using continued
+
+/-- Fixed Talos body of the installed natural writer. -/
+def writeSumLoopBody (magnitudeLowIndex magnitudeHighIndex : Nat) :
+    Wasm.Program := [
+  .localGet 5, .localGet 6, .eq,
+  .iff 0 0 [.localGet 7, .ret] []] ++
+  writeSumStepAndStoresProgram magnitudeLowIndex magnitudeHighIndex ++
+  writeSumContinueProgram
+
+/-- Fixed Talos loop installed by W7's `writeSumFromFunction`. -/
+def writeSumLoopProgram (magnitudeLowIndex magnitudeHighIndex : Nat) :
+    Wasm.Program := [
+  .loop 0 0 (writeSumLoopBody magnitudeLowIndex magnitudeHighIndex)]
+
+/-- At the terminal index, the writer returns its current carry without
+reading operands or mutating the result payload. -/
+theorem wp_writeSumLoopBody_exit
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {magnitudeLowIndex magnitudeHighIndex : Nat}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {left leftFlavor right rightFlavor result count carry : UInt32}
+    {leftLow leftHigh rightLow rightHigh low high carryLocal carryExtra
+      scaled : UInt32}
+    {tail : List Wasm.Value}
+    (completed : Q (.Return store (.i32 carry :: tail))) :
+    Wasm.wp module (writeSumLoopBody magnitudeLowIndex magnitudeHighIndex) Q
+      store
+      (writeSumArithmeticLocals left leftFlavor right rightFlavor result count
+        count carry leftLow leftHigh rightLow rightHigh low high carryLocal
+        carryExtra scaled tail) env := by
+  unfold writeSumLoopBody
+  simp [writeSumArithmeticLocals]
+  apply Wasm.wp_iff_cons rfl
+  simpa [writeSumArithmeticLocals] using completed
+
+/-- A nonterminal writer body executes one exact arithmetic-and-store step,
+then installs the generated carry and branches back to the loop header. -/
+theorem wp_writeSumLoopBody_continue
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {magnitudeLowIndex magnitudeHighIndex : Nat}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {left leftFlavor right rightFlavor result index count carry : UInt32}
+    {oldLeftLow oldLeftHigh oldRightLow oldRightHigh low high carryLocal
+      carryExtra scaled : UInt32}
+    {leftLow leftHigh rightLow rightHigh : UInt32}
+    {tail : List Wasm.Value}
+    (notDone : index ≠ count)
+    (leftLowRun : Wasm.TerminatesWith env module magnitudeLowIndex store
+      ([.i32 index, .i32 leftFlavor, .i32 left] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 leftLow :: tail))
+    (leftHighRun : Wasm.TerminatesWith env module magnitudeHighIndex store
+      ([.i32 index, .i32 leftFlavor, .i32 left] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 leftHigh :: tail))
+    (rightLowRun : Wasm.TerminatesWith env module magnitudeLowIndex store
+      ([.i32 index, .i32 rightFlavor, .i32 right] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 rightLow :: tail))
+    (rightHighRun : Wasm.TerminatesWith env module magnitudeHighIndex store
+      ([.i32 index, .i32 rightFlavor, .i32 right] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 rightHigh :: tail))
+    (lowInBounds :
+      ¬(checkedLimbBase result index).toNat + 4 >
+        store.mem.pages * 65536)
+    (highInBounds :
+      ¬(checkedLimbBase result index).toNat + 4 + 4 >
+        store.mem.pages * 65536)
+    (continued : Q (.Break 0
+      (writeSumFinalStore store result index
+        (limbSumLow leftLow rightLow carry)
+        (limbSumHigh leftLow leftHigh rightLow rightHigh carry))
+      (writeSumArithmeticLocals left leftFlavor right rightFlavor result
+        (sumCarryNextIndex index) count
+        (limbSumCarryOut leftLow leftHigh rightLow rightHigh carry)
+        leftLow leftHigh rightLow rightHigh
+        (limbSumLow leftLow rightLow carry)
+        (limbSumHigh leftLow leftHigh rightLow rightHigh carry)
+        (limbSumCarryOut leftLow leftHigh rightLow rightHigh carry)
+        (if rightHigh + leftHigh < leftHigh then 1 else 0)
+        (checkedScale8Word index) tail))) :
+    Wasm.wp module (writeSumLoopBody magnitudeLowIndex magnitudeHighIndex) Q
+      store
+      (writeSumArithmeticLocals left leftFlavor right rightFlavor result index
+        count carry oldLeftLow oldLeftHigh oldRightLow oldRightHigh low high
+        carryLocal carryExtra scaled tail) env := by
+  unfold writeSumLoopBody
+  simp [writeSumArithmeticLocals, notDone]
+  apply Wasm.wp_iff_cons rfl
+  simp
+  apply wp_writeSumStepAndStoresProgram leftLowRun leftHighRun rightLowRun
+    rightHighRun lowInBounds highInBounds
+  apply wp_writeSumContinueProgram
+  exact continued
+
+/-- Machine-frame lifting of a semantic writer invariant indexed by the
+current absolute limb, carry, and evolving store. -/
+def writeSumLoopInvariant
+    (left leftFlavor right rightFlavor result count : UInt32)
+    (tail : List Wasm.Value)
+    (Inv : UInt32 → UInt32 → Wasm.Store host → Prop) :
+    Wasm.AssertionF host :=
+  fun current locals =>
+    ∃ index carry leftLow leftHigh rightLow rightHigh low high carryLocal
+        carryExtra scaled,
+      locals = writeSumArithmeticLocals left leftFlavor right rightFlavor
+        result index count carry leftLow leftHigh rightLow rightHigh low high
+        carryLocal carryExtra scaled tail ∧
+      Inv index carry current
+
+/-- Variant read from the writer's shifted absolute-index parameter. -/
+def writeSumLoopMeasure (count : UInt32) :
+    Wasm.Store host → Wasm.Locals → Nat :=
+  fun _ locals =>
+    match locals.get 5 with
+    | some (.i32 index) => count.toNat - index.toNat
+    | _ => 0
+
+/-- Generic total-correctness rule for the installed natural writer.
+
+The semantic invariant owns the growing payload-memory frame and may depend on
+the evolving store. Talos control contributes only the independent
+`count - index` variant. No allocation predicate, fuel, or execution
+certificate is baked into this reusable loop boundary. -/
+theorem wp_writeSumLoopProgram_of_invariant
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {magnitudeLowIndex magnitudeHighIndex : Nat}
+    {Q : Wasm.Assertion host} {initialStore : Wasm.Store host}
+    {left leftFlavor right rightFlavor result count initialIndex initialCarry :
+      UInt32}
+    {leftLow leftHigh rightLow rightHigh low high carryLocal carryExtra
+      scaled : UInt32}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    {Inv : UInt32 → UInt32 → Wasm.Store host → Prop}
+    (initialInv : Inv initialIndex initialCarry initialStore)
+    (bounded : ∀ index carry current, Inv index carry current →
+      index.toNat ≤ count.toNat)
+    (atEnd : ∀ carry current, Inv count carry current →
+      Q (.Return current (.i32 carry :: tail)))
+    (step : ∀ index carry current, Inv index carry current →
+      index.toNat < count.toNat →
+      ∃ stepLeftLow stepLeftHigh stepRightLow stepRightHigh,
+        Wasm.TerminatesWith env module magnitudeLowIndex current
+          ([.i32 index, .i32 leftFlavor, .i32 left] ++ tail)
+          (fun final values =>
+            final = current ∧ values = .i32 stepLeftLow :: tail) ∧
+        Wasm.TerminatesWith env module magnitudeHighIndex current
+          ([.i32 index, .i32 leftFlavor, .i32 left] ++ tail)
+          (fun final values =>
+            final = current ∧ values = .i32 stepLeftHigh :: tail) ∧
+        Wasm.TerminatesWith env module magnitudeLowIndex current
+          ([.i32 index, .i32 rightFlavor, .i32 right] ++ tail)
+          (fun final values =>
+            final = current ∧ values = .i32 stepRightLow :: tail) ∧
+        Wasm.TerminatesWith env module magnitudeHighIndex current
+          ([.i32 index, .i32 rightFlavor, .i32 right] ++ tail)
+          (fun final values =>
+            final = current ∧ values = .i32 stepRightHigh :: tail) ∧
+        ¬(checkedLimbBase result index).toNat + 4 >
+          current.mem.pages * 65536 ∧
+        ¬(checkedLimbBase result index).toNat + 4 + 4 >
+          current.mem.pages * 65536 ∧
+        Inv (sumCarryNextIndex index)
+          (limbSumCarryOut stepLeftLow stepLeftHigh stepRightLow
+            stepRightHigh carry)
+          (writeSumFinalStore current result index
+            (limbSumLow stepLeftLow stepRightLow carry)
+            (limbSumHigh stepLeftLow stepLeftHigh stepRightLow stepRightHigh
+              carry))) :
+    Wasm.wp module
+      (writeSumLoopProgram magnitudeLowIndex magnitudeHighIndex ++ rest) Q
+      initialStore
+      (writeSumArithmeticLocals left leftFlavor right rightFlavor result
+        initialIndex count initialCarry leftLow leftHigh rightLow rightHigh low
+        high carryLocal carryExtra scaled tail) env := by
+  unfold writeSumLoopProgram
+  apply Wasm.wp_loop_cons
+    (Inv := writeSumLoopInvariant left leftFlavor right rightFlavor result
+      count tail Inv)
+    (μ := writeSumLoopMeasure count)
+  · exact ⟨initialIndex, initialCarry, leftLow, leftHigh, rightLow,
+      rightHigh, low, high, carryLocal, carryExtra, scaled, rfl, initialInv⟩
+  · rintro current locals
+      ⟨index, carry, oldLeftLow, oldLeftHigh, oldRightLow, oldRightHigh,
+        oldLow, oldHigh, oldCarryLocal, oldCarryExtra, oldScaled, rfl,
+        invariant⟩
+    by_cases done : index = count
+    · subst index
+      exact wp_writeSumLoopBody_exit (atEnd carry current invariant)
+    · have beforeCount : index.toNat < count.toNat := by
+        have indexBound := bounded index carry current invariant
+        have differentNat : index.toNat ≠ count.toNat := by
+          intro same
+          exact done (UInt32.toNat.inj same)
+        omega
+      obtain ⟨stepLeftLow, stepLeftHigh, stepRightLow, stepRightHigh,
+        leftLowRun, leftHighRun, rightLowRun, rightHighRun, lowInBounds,
+        highInBounds, nextInvariant⟩ :=
+        step index carry current invariant beforeCount
+      apply wp_writeSumLoopBody_continue done leftLowRun leftHighRun
+        rightLowRun rightHighRun lowInBounds highInBounds
+      refine ⟨?_, ?_⟩
+      · exact ⟨sumCarryNextIndex index,
+          limbSumCarryOut stepLeftLow stepLeftHigh stepRightLow stepRightHigh
+            carry,
+          stepLeftLow, stepLeftHigh, stepRightLow, stepRightHigh,
+          limbSumLow stepLeftLow stepRightLow carry,
+          limbSumHigh stepLeftLow stepLeftHigh stepRightLow stepRightHigh carry,
+          limbSumCarryOut stepLeftLow stepLeftHigh stepRightLow stepRightHigh
+            carry,
+          (if stepRightHigh + stepLeftHigh < stepLeftHigh then 1 else 0),
+          checkedScale8Word index, rfl, nextInvariant⟩
+      · simp [writeSumLoopMeasure, writeSumArithmeticLocals,
+          sumCarryNextIndex_toNat beforeCount]
+        omega
+
+/-- W7's private writer loop is exactly the public proof-side assembly of its
+guard, shifted arithmetic step, two payload stores, and back-edge. -/
+theorem writeSumFromFunction_loop_shape :
+    ∃ loopLabel,
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.body = [
+        .loop loopLabel <|
+          sumCarryGuardSource
+              Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[5]!.1
+              Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[6]!.1
+              Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[7]!.1 ++
+          sumCarryStepSource
+            Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[0]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[1]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[2]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[3]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[5]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[7]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[0]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[1]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[2]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[3]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[4]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[5]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[6]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[7]!.1 ++
+          writeSumLimbStoresSource ++
+          sumCarryContinueSource
+            Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[6]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[7]!.1
+            Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[5]!.1
+            loopLabel] := by
+  let loopLabel : Lean.FVarId :=
+    match Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.body with
+    | [.loop label _] => label
+    | _ => ⟨`invalidWriteSumLoop⟩
+  refine ⟨loopLabel, ?_⟩
+  rfl
+
+/-- Exact adaptation of the writer's terminal guard. -/
+theorem instructions_writeSumGuardSource
+    {sourceModule : Fir.Wasm.Module} {labels : List Lean.FVarId} :
+    FirTalos.instructions sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction labels
+      (sumCarryGuardSource
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[5]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[6]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[7]!.1) =
+      .ok [
+        .localGet 5, .localGet 6, .eq,
+        .iff 0 0 [.localGet 7, .ret] []] := by
+  have indexFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[5]!.1 =
+        some 5 := by decide
+  have countFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[6]!.1 =
+        some 6 := by decide
+  have carryFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[7]!.1 =
+        some 7 := by decide
+  simp [sumCarryGuardSource, FirTalos.instructions, FirTalos.instruction,
+    indexFound, countFound, carryFound, Bind.bind, Except.bind, pure,
+    Except.pure]
+
+/-- Exact adaptation of the writer's carry/index back-edge. -/
+theorem instructions_writeSumContinueSource
+    {sourceModule : Fir.Wasm.Module} {labels : List Lean.FVarId}
+    {loopLabel : Lean.FVarId} :
+    FirTalos.instructions sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction
+      (loopLabel :: labels)
+      (sumCarryContinueSource
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[6]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[7]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[5]!.1
+        loopLabel) = .ok writeSumContinueProgram := by
+  have carryLocalFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[6]!.1 =
+        some 14 := by decide
+  have carryFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[7]!.1 =
+        some 7 := by decide
+  have indexFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[5]!.1 =
+        some 5 := by decide
+  simp [sumCarryContinueSource, writeSumContinueProgram,
+    FirTalos.instructions, FirTalos.instruction, FirTalos.findLabel?,
+    carryLocalFound, carryFound, indexFound, Bind.bind, Except.bind, pure,
+    Except.pure]
+
+/-- Exact adaptation of the complete private writer loop body. -/
+theorem instructions_writeSumLoopBodySource
+    {sourceModule : Fir.Wasm.Module} {labels : List Lean.FVarId}
+    {loopLabel : Lean.FVarId} {magnitudeLowIndex magnitudeHighIndex : Nat}
+    (magnitudeLowFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeLowName) =
+        some magnitudeLowIndex)
+    (magnitudeHighFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeHighName) =
+        some magnitudeHighIndex) :
+    FirTalos.instructions sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction
+      (loopLabel :: labels)
+      (sumCarryGuardSource
+          Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[5]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[6]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[7]!.1 ++
+        sumCarryStepSource
+          Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[0]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[1]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[2]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[3]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[5]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[7]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[0]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[1]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[2]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[3]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[4]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[5]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[6]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[7]!.1 ++
+        writeSumLimbStoresSource ++
+        sumCarryContinueSource
+          Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[6]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[7]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[5]!.1
+          loopLabel) =
+      .ok (writeSumLoopBody magnitudeLowIndex magnitudeHighIndex) := by
+  rw [FirTalos.Correctness.instructions_append,
+    FirTalos.Correctness.instructions_append,
+    FirTalos.Correctness.instructions_append]
+  rw [instructions_writeSumGuardSource,
+    instructions_writeSumStepSource magnitudeLowFound magnitudeHighFound,
+    instructions_writeSumLimbStoresSource,
+    instructions_writeSumContinueSource]
+  rfl
+
+/-- W7's complete symbolic `writeSumFrom` body adapts to the fixed writer loop
+consumed by the store-indexed invariant theorem. -/
+theorem instructions_writeSumFromFunction
+    {sourceModule : Fir.Wasm.Module}
+    {magnitudeLowIndex magnitudeHighIndex : Nat}
+    (magnitudeLowFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeLowName) =
+        some magnitudeLowIndex)
+    (magnitudeHighFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeHighName) =
+        some magnitudeHighIndex) :
+    FirTalos.instructions sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction []
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.body =
+        .ok (writeSumLoopProgram magnitudeLowIndex magnitudeHighIndex) := by
+  obtain ⟨loopLabel, shape⟩ := writeSumFromFunction_loop_shape
+  rw [shape]
+  simp only [FirTalos.instructions, FirTalos.instruction]
+  rw [instructions_writeSumLoopBodySource magnitudeLowFound
+    magnitudeHighFound]
+  rfl
+
+/-- Successful function adaptation installs precisely the proved writer loop
+followed by the adapter's unreachable terminal suffix. -/
+theorem adaptedWriteSumFromFunction_body
+    {sourceModule : Fir.Wasm.Module} {targetFunction : Wasm.Function}
+    {magnitudeLowIndex magnitudeHighIndex : Nat}
+    (adapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction =
+        .ok targetFunction)
+    (magnitudeLowFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeLowName) =
+        some magnitudeLowIndex)
+    (magnitudeHighFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeHighName) =
+        some magnitudeHighIndex) :
+    targetFunction.body =
+      writeSumLoopProgram magnitudeLowIndex magnitudeHighIndex ++
+        FirTalos.functionTerminal sourceModule
+          Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction := by
+  exact adaptedFunction_body_of_exact adapted
+    (instructions_writeSumFromFunction magnitudeLowFound magnitudeHighFound)
+
+/-- Complete writer-loop theorem over equally sized machine limb views and an
+abstract growing-memory frame.
+
+`Frame n store` describes the first `n` result limbs already materialized in
+`store`. The only memory-specific obligation is that one exact low/high store
+pair extends this frame. This keeps object allocation and canonical-Nat
+validity outside the structured-loop proof. -/
+theorem wp_writeSumLoopProgram_of_limbWordsAndFrame
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {magnitudeLowIndex magnitudeHighIndex : Nat}
+    {Q : Wasm.Assertion host} {initialStore : Wasm.Store host}
+    {left leftFlavor right rightFlavor result count initialCarry : UInt32}
+    {initialLeftLow initialLeftHigh initialRightLow initialRightHigh low high
+      carryLocal carryExtra scaled : UInt32}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    {leftWords rightWords : List LimbWords}
+    {Frame : Nat → Wasm.Store host → Prop}
+    (leftLength : leftWords.length = count.toNat)
+    (rightLength : rightWords.length = count.toNat)
+    (initialFrame : Frame 0 initialStore)
+    (leftLowRun : ∀ (index : UInt32) (current : Wasm.Store host)
+      (beforeCount : index.toNat < count.toNat),
+      Frame index.toNat current →
+      Wasm.TerminatesWith env module magnitudeLowIndex current
+        ([.i32 index, .i32 leftFlavor, .i32 left] ++ tail)
+        (fun final values =>
+          final = current ∧
+            values = .i32 (leftWords[index.toNat]'(by omega)).1 :: tail))
+    (leftHighRun : ∀ (index : UInt32) (current : Wasm.Store host)
+      (beforeCount : index.toNat < count.toNat),
+      Frame index.toNat current →
+      Wasm.TerminatesWith env module magnitudeHighIndex current
+        ([.i32 index, .i32 leftFlavor, .i32 left] ++ tail)
+        (fun final values =>
+          final = current ∧
+            values = .i32 (leftWords[index.toNat]'(by omega)).2 :: tail))
+    (rightLowRun : ∀ (index : UInt32) (current : Wasm.Store host)
+      (beforeCount : index.toNat < count.toNat),
+      Frame index.toNat current →
+      Wasm.TerminatesWith env module magnitudeLowIndex current
+        ([.i32 index, .i32 rightFlavor, .i32 right] ++ tail)
+        (fun final values =>
+          final = current ∧
+            values = .i32 (rightWords[index.toNat]'(by omega)).1 :: tail))
+    (rightHighRun : ∀ (index : UInt32) (current : Wasm.Store host)
+      (beforeCount : index.toNat < count.toNat),
+      Frame index.toNat current →
+      Wasm.TerminatesWith env module magnitudeHighIndex current
+        ([.i32 index, .i32 rightFlavor, .i32 right] ++ tail)
+        (fun final values =>
+          final = current ∧
+            values = .i32 (rightWords[index.toNat]'(by omega)).2 :: tail))
+    (writeFrame : ∀ (index : UInt32) (current : Wasm.Store host)
+      (beforeCount : index.toNat < count.toNat) (writtenLow writtenHigh : UInt32),
+      Frame index.toNat current →
+      ¬(checkedLimbBase result index).toNat + 4 >
+          current.mem.pages * 65536 ∧
+        ¬(checkedLimbBase result index).toNat + 4 + 4 >
+          current.mem.pages * 65536 ∧
+        Frame (index.toNat + 1)
+          (writeSumFinalStore current result index writtenLow writtenHigh))
+    (completed : ∀ finalStore,
+      Frame count.toNat finalStore →
+      Q (.Return finalStore
+        (.i32 (addLimbWords leftWords rightWords initialCarry).2 :: tail))) :
+    Wasm.wp module
+      (writeSumLoopProgram magnitudeLowIndex magnitudeHighIndex ++ rest) Q
+      initialStore
+      (writeSumArithmeticLocals left leftFlavor right rightFlavor result 0
+        count initialCarry initialLeftLow initialLeftHigh initialRightLow
+        initialRightHigh low high carryLocal carryExtra scaled tail) env := by
+  let expectedCarry := (addLimbWords leftWords rightWords initialCarry).2
+  let Inv : UInt32 → UInt32 → Wasm.Store host → Prop :=
+    fun index carry current =>
+      index.toNat ≤ count.toNat ∧
+      (addLimbWords (leftWords.drop index.toNat)
+        (rightWords.drop index.toNat) carry).2 = expectedCarry ∧
+      Frame index.toNat current
+  apply wp_writeSumLoopProgram_of_invariant
+    (Inv := Inv)
+  · exact ⟨by simp, by simp [expectedCarry], initialFrame⟩
+  · intro index carry current invariant
+    exact invariant.1
+  · intro carry current invariant
+    have leftDrop : leftWords.drop count.toNat = [] := by
+      rw [← leftLength]
+      simp
+    have rightDrop : rightWords.drop count.toNat = [] := by
+      rw [← rightLength]
+      simp
+    have carryEq : carry = expectedCarry := by
+      simpa [Inv, leftDrop, rightDrop, addLimbWords] using invariant.2.1
+    rw [carryEq]
+    simpa [expectedCarry] using completed current invariant.2.2
+  · intro index carry current invariant beforeCount
+    let leftLimb : LimbWords := leftWords[index.toNat]'(by omega)
+    let rightLimb : LimbWords := rightWords[index.toNat]'(by omega)
+    have leftLowRun' := leftLowRun index current beforeCount invariant.2.2
+    have leftHighRun' := leftHighRun index current beforeCount invariant.2.2
+    have rightLowRun' := rightLowRun index current beforeCount invariant.2.2
+    have rightHighRun' := rightHighRun index current beforeCount invariant.2.2
+    obtain ⟨lowInBounds, highInBounds, nextFrame⟩ :=
+      writeFrame index current beforeCount
+        (limbSumLow leftLimb.1 rightLimb.1 carry)
+        (limbSumHigh leftLimb.1 leftLimb.2 rightLimb.1 rightLimb.2 carry)
+        invariant.2.2
+    refine ⟨leftLimb.1, leftLimb.2, rightLimb.1, rightLimb.2,
+      leftLowRun', leftHighRun', rightLowRun', rightHighRun', lowInBounds,
+      highInBounds, ?_⟩
+    refine ⟨?_, ?_, ?_⟩
+    · rw [sumCarryNextIndex_toNat beforeCount]
+      omega
+    · have leftDrop := List.drop_eq_getElem_cons
+          (l := leftWords) (i := index.toNat) (by omega)
+      have rightDrop := List.drop_eq_getElem_cons
+          (l := rightWords) (i := index.toNat) (by omega)
+      have carryResult := invariant.2.1
+      rw [leftDrop, rightDrop] at carryResult
+      simp only [addLimbWords] at carryResult
+      rw [sumCarryNextIndex_toNat beforeCount]
+      simpa [Inv, leftLimb, rightLimb] using carryResult
+    · rw [sumCarryNextIndex_toNat beforeCount]
+      exact nextFrame
+
 /-- Exact successor store after materializing the low half of a carry limb. -/
 def checkedCarryLowStore (store : Wasm.Store host) (object index : UInt32) :
     Wasm.Store host :=
