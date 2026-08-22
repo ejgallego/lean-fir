@@ -6233,6 +6233,36 @@ host floating conversion. No shared semantic contract, physical layout,
 symbolic Wasm instruction, or W7 resident-helper signature changed in this
 slice; Float32/Float box and unbox operations remain separate follow-up work.
 
+The checked resident `Nat.add` proof now treats each arbitrary-precision limb
+as one little-endian base-`2^64` digit, represented in wasm32 memory by its low
+and high `i32` halves. The exact W7 body is factored into validation/count
+setup, maximum-count selection, carry scan, allocation/writing, optional final
+carry stores, and the typed object-word return. W6 proves the scalar prefix,
+both result-count branches, the three-doubling byte-address primitive, and the
+two final carry stores directly in Talos. Both carry outcomes close against
+`allocateNatural_heap_liveHeapRel`, yielding a live canonical Natural and a
+real `ValueRel`; no arbitrary `i32` is admitted as `tobject`, and the new typed
+return does not touch address zero.
+
+A useful design rule emerged from this proof: physical memory success and
+semantic object validity must remain separate premises until their final
+composition. An in-bounds `i32.store` proves only the exact successor bytes
+and local preservation. It does not prove that the address names a Natural.
+Conversely, the concrete allocation theorem supplies the live-heap/object
+relation only for the mathematical value whose complete layout is present in
+the final memory. Keeping these boundaries separate prevents a raw writer
+result from becoming a typed Lean object by accident and leaves the address
+primitive reusable by other resident arithmetic helpers.
+
+The remaining checked-addition boundary is deliberately semantic rather than
+certificate-based: prove the installed `sumCarryFrom` and `writeSumFrom`
+structured loops implement base-`2^64` addition, return the same carry bit,
+and make the final memory equal to `allocateNatural` of the operand sum. The
+proof should use a loop invariant over the processed limb prefix, then compose
+with the already-proved exact body pieces. This proof API is working state,
+not a frozen client contract; it may be reshaped whenever a cleaner runtime or
+induction boundary is useful.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
