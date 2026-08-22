@@ -68,3 +68,21 @@ npm run test:player-traces
 The module is intentionally unthreaded and does not require COOP/COEP or
 `crossOriginIsolated`. The manifest and `SHA256SUMS` authenticate the exact
 loader, adapter, module, Wasm, smoke test, and source identities.
+
+## Benchmark
+
+Run the package-local fixed-event experiment without a profiler:
+
+```sh
+node integration/illuminate-player-llvm/benchmark.mjs \
+  --manifest=/absolute/package/illuminate-selection-player.manifest.json \
+  --out=integration/illuminate-player-llvm/_build/benchmark.json
+```
+
+The default design excludes two warmup rounds and alternates generic/scalar
+order across nine measured rounds of 1,000 identical non-integer ticks. It
+checks every resulting selection for equality and retains raw callback
+samples plus median, p95, and median-absolute-deviation summaries for encode,
+execute, decode, combined marshal, adapter overhead, and outer overhead. Run
+the cross-engine dashboard separately; this script compares only the two
+transport paths inside the same LLVM artifact.

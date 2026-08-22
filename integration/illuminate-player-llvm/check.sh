@@ -6,6 +6,7 @@ repo_root="$(git -C "$lane_dir" rev-parse --show-toplevel)"
 
 git -C "$repo_root" diff --check
 node --check "$lane_dir/enhance-manifest.mjs"
+node --check "$lane_dir/benchmark.mjs"
 node --check "$lane_dir/illuminate-selection-player-emscripten-adapter.mjs"
 node --check "$lane_dir/smoke.mjs"
 cc -std=c11 -Wall -Wextra -Werror -fsyntax-only \
