@@ -63,6 +63,117 @@ function add(map, key, delta) {
   map.set(key, (map.get(key) ?? 0) + delta);
 }
 
+function profileNodeParents(profile, nodes) {
+  assert.equal(nodes.size, profile.nodes.length,
+    "CPU profile contains duplicate node ids");
+  const parents = new Map();
+  for (const node of profile.nodes) {
+    const children = node.children ?? [];
+    assert(Array.isArray(children),
+      `CPU profile node ${node.id} has invalid children`);
+    const localChildren = new Set();
+    for (const child of children) {
+      assert(nodes.has(child),
+        `CPU profile node ${node.id} refers to missing child ${child}`);
+      assert.notEqual(child, node.id,
+        `CPU profile node ${node.id} is its own child`);
+      assert.equal(localChildren.has(child), false,
+        `CPU profile node ${node.id} repeats child ${child}`);
+      localChildren.add(child);
+      assert.equal(parents.has(child), false,
+        `CPU profile node ${child} has multiple parents`);
+      parents.set(child, node.id);
+    }
+  }
+
+  const states = new Map();
+  for (const id of nodes.keys()) {
+    if (states.get(id) === 2) continue;
+    const path = [];
+    let current = id;
+    while (current !== undefined && states.get(current) !== 2) {
+      assert.notEqual(states.get(current), 1,
+        `CPU profile parent graph contains a cycle at node ${current}`);
+      states.set(current, 1);
+      path.push(current);
+      current = parents.get(current);
+    }
+    for (const item of path) states.set(item, 2);
+  }
+  return parents;
+}
+
+function frameLabel(callFrame) {
+  return callFrame?.functionName || callFrame?.url || "(anonymous)";
+}
+
+function rootCallerDescriptor() {
+  return {
+    kind: "root",
+    index: null,
+    name: null,
+    url: null,
+    origin: null,
+    family: "profile/root",
+  };
+}
+
+function callerDescriptor(node, sidecar, strictFunctionIndices) {
+  if (node === undefined || node.callFrame?.functionName === "(root)") {
+    return rootCallerDescriptor();
+  }
+  const index = frameIndex(node.callFrame ?? {});
+  if (index === null) {
+    return {
+      kind: "host-or-runtime",
+      index: null,
+      name: frameLabel(node.callFrame),
+      url: node.callFrame?.url || null,
+      origin: null,
+      family: "host-or-runtime/unattributed",
+    };
+  }
+  const function_ = sidecar.functions[index];
+  if (strictFunctionIndices) {
+    assert(function_ !== undefined,
+      `CPU profile caller refers to Wasm function ${index} outside the sidecar`);
+  }
+  return {
+    kind: "wasm",
+    index,
+    name: function_?.name ?? null,
+    url: null,
+    origin: function_?.origin ?? "unattributed",
+    family: profileFunctionFamily(function_),
+  };
+}
+
+function callerKey(targetIndex, caller) {
+  return JSON.stringify([
+    targetIndex,
+    caller.kind,
+    caller.index,
+    caller.name,
+    caller.url,
+  ]);
+}
+
+function addCallerEdge(edges, targetIndex, target, caller, delta) {
+  const key = callerKey(targetIndex, caller);
+  const edge = edges.get(key) ?? {
+    targetIndex,
+    targetName: target?.name ?? null,
+    targetOrigin: target?.origin ?? "unattributed",
+    targetFamily: profileFunctionFamily(target),
+    caller,
+    selfMicros: 0,
+    selfSamples: 0,
+  };
+  edge.selfMicros += delta;
+  edge.selfSamples += 1;
+  edges.set(key, edge);
+}
+
 export function summarizeCpuProfile(profile, sidecar, {
   startMicros = 0,
   durationMicros = Number.POSITIVE_INFINITY,
@@ -79,11 +190,13 @@ export function summarizeCpuProfile(profile, sidecar, {
   "profile summary duration must be nonnegative");
   assert(Array.isArray(profile.nodes), "CPU profile contains no node array");
   const nodes = new Map(profile.nodes.map((node) => [node.id, node]));
+  const parents = profileNodeParents(profile, nodes);
   const deltas = sampleDeltas(profile);
   const groups = new Map();
   const functions = new Map();
   const functionSamples = new Map();
   const frames = new Map();
+  const callerEdges = new Map();
   let resolvedWasmMicros = 0;
   let unresolvedWasmMicros = 0;
   let hostMicros = 0;
@@ -108,9 +221,7 @@ export function summarizeCpuProfile(profile, sidecar, {
       hostMicros += delta;
       hostSamples += 1;
       add(groups, "host-or-runtime/unattributed", delta);
-      const label = node.callFrame?.functionName || node.callFrame?.url ||
-        "(anonymous)";
-      add(frames, label, delta);
+      add(frames, frameLabel(node.callFrame), delta);
       continue;
     }
     const function_ = sidecar.functions[index];
@@ -128,6 +239,10 @@ export function summarizeCpuProfile(profile, sidecar, {
     add(groups, profileFunctionFamily(function_), delta);
     add(functions, index, delta);
     add(functionSamples, index, 1);
+    const parentId = parents.get(nodeId);
+    const caller = callerDescriptor(parentId === undefined ? undefined :
+      nodes.get(parentId), sidecar, strictFunctionIndices);
+    addCallerEdge(callerEdges, index, function_, caller, delta);
   }
   const descending = (left, right) => right.selfMicros - left.selfMicros ||
     String(left.name ?? left.index).localeCompare(
@@ -148,6 +263,13 @@ export function summarizeCpuProfile(profile, sidecar, {
     resolvedWasmSamples,
     unresolvedWasmSamples,
     hostSamples,
+    callerAttribution: {
+      method: "v8-cpu-profile-parent-edge/v1",
+      resolvedWasmSelfSamples: resolvedWasmSamples,
+      unresolvedWasmSelfSamples: unresolvedWasmSamples,
+      attributedWasmSelfSamples: [...callerEdges.values()].reduce(
+        (sum, edge) => sum + edge.selfSamples, 0),
+    },
     groups: [...groups].map(([name, selfMicros]) => ({ name, selfMicros }))
       .sort(descending),
     functions: [...functions].map(([index, selfMicros]) => ({
@@ -158,6 +280,13 @@ export function summarizeCpuProfile(profile, sidecar, {
       selfMicros,
       selfSamples: functionSamples.get(index),
     })).sort(descending),
+    callerEdges: [...callerEdges.values()].sort((left, right) =>
+      left.targetIndex - right.targetIndex ||
+      right.selfMicros - left.selfMicros ||
+      left.caller.kind.localeCompare(right.caller.kind) ||
+      (left.caller.index ?? Number.MAX_SAFE_INTEGER) -
+        (right.caller.index ?? Number.MAX_SAFE_INTEGER) ||
+      String(left.caller.name).localeCompare(String(right.caller.name))),
     hostFrames: [...frames].map(([name, selfMicros]) => ({ name, selfMicros }))
       .sort(descending),
   };

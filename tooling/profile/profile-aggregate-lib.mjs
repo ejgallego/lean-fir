@@ -19,7 +19,7 @@ import {
   validateSidecar,
 } from "../wasm/function-index-lib.mjs";
 
-export const profileAggregateSchema = "fir.sampled-profile-aggregate/v1";
+export const profileAggregateSchema = "fir.sampled-profile-aggregate/v2";
 
 function json(bytes, label) {
   try {
@@ -81,7 +81,24 @@ function summarizeRun(profile, sidecar, options, label) {
     .sort((left, right) => right.selfSamples - left.selfSamples ||
       right.selfMicros - left.selfMicros || left.index - right.index);
   const ranks = new Map(ranked.map(({ index }, index_) => [index, index_ + 1]));
-  return { summary, functions, ranks };
+  const callerEdges = new Map();
+  for (const edge of summary.callerEdges) {
+    const target = callerEdges.get(edge.targetIndex) ?? new Map();
+    const identity = JSON.stringify([
+      edge.caller.kind,
+      edge.caller.index,
+      edge.caller.name,
+      edge.caller.url,
+    ]);
+    assert.equal(target.has(identity), false,
+      "CPU profile summary contains a duplicate caller edge");
+    target.set(identity, edge);
+    callerEdges.set(edge.targetIndex, target);
+  }
+  assert.equal(summary.callerAttribution.attributedWasmSelfSamples,
+    summary.resolvedWasmSamples + summary.unresolvedWasmSamples,
+    `${label} does not attribute every Wasm self sample to a caller edge`);
+  return { summary, functions, ranks, callerEdges };
 }
 
 function loadRun(evidencePath, runIndex, artifact, functionSidecar,
@@ -122,7 +139,8 @@ function loadRun(evidencePath, runIndex, artifact, functionSidecar,
   assert((Number.isFinite(durationMicros) && durationMicros >= 0) ||
     durationMicros === Number.POSITIVE_INFINITY,
     "profile evidence has an invalid attribution-window duration");
-  const { summary, functions, ranks } = summarizeRun(profile, sidecar, {
+  const { summary, functions, ranks, callerEdges } = summarizeRun(
+    profile, sidecar, {
     startMicros: window.startMicros,
     durationMicros,
   }, "exact-release profile attribution window");
@@ -147,8 +165,10 @@ function loadRun(evidencePath, runIndex, artifact, functionSidecar,
     wasmSelfMicros: summary.resolvedWasmMicros,
     hostSamples: summary.hostSamples,
     hostMicros: summary.hostMicros,
+    callerAttribution: summary.callerAttribution,
     functions,
     ranks,
+    callerEdges,
   };
 }
 
@@ -156,8 +176,8 @@ function loadUnboundRun(profilePath, runIndex, sidecar) {
   const resolvedProfile = resolve(profilePath);
   const rawBytes = readFileSync(resolvedProfile);
   const profile = json(rawBytes, `raw CPU profile ${resolvedProfile}`);
-  const { summary, functions, ranks } = summarizeRun(profile, sidecar, {},
-    "raw profile");
+  const { summary, functions, ranks, callerEdges } = summarizeRun(
+    profile, sidecar, {}, "raw profile");
   return {
     id: `run-${runIndex + 1}`,
     binding: "unbound-raw-profile",
@@ -175,8 +195,10 @@ function loadUnboundRun(profilePath, runIndex, sidecar) {
     wasmSelfMicros: summary.resolvedWasmMicros,
     hostSamples: summary.hostSamples,
     hostMicros: summary.hostMicros,
+    callerAttribution: summary.callerAttribution,
     functions,
     ranks,
+    callerEdges,
   };
 }
 
@@ -236,6 +258,55 @@ export function aggregateProfileEvidence({
     });
     const ranks = perRun.flatMap(({ rank }) => rank === null ? [] : [rank]);
     const rank = statistics(ranks);
+    const callerIdentities = new Set(runs.flatMap((run) =>
+      [...(run.callerEdges.get(index)?.keys() ?? [])]));
+    const callers = [...callerIdentities].map((identity) => {
+      const descriptor = runs.map((run) =>
+        run.callerEdges.get(index)?.get(identity)?.caller).find(Boolean);
+      assert(descriptor !== undefined,
+        "caller identity has no descriptor in any input run");
+      const callerPerRun = runs.map((run) => {
+        const edge = run.callerEdges.get(index)?.get(identity);
+        const targetSelfSamples = run.functions.get(index)?.selfSamples ?? 0;
+        return {
+          run: run.id,
+          selfSamples: edge?.selfSamples ?? 0,
+          selfMicros: edge?.selfMicros ?? 0,
+          wasmSelfShare: (edge?.selfSamples ?? 0) / run.wasmSelfSamples,
+          targetSelfShare: targetSelfSamples === 0 ? null :
+            (edge?.selfSamples ?? 0) / targetSelfSamples,
+        };
+      });
+      const targetShares = callerPerRun.flatMap(({ targetSelfShare }) =>
+        targetSelfShare === null ? [] : [targetSelfShare]);
+      return {
+        ...descriptor,
+        perRun: callerPerRun,
+        aggregate: {
+          selfSamples: statistics(callerPerRun.map(({ selfSamples }) =>
+            selfSamples)),
+          selfMicros: statistics(callerPerRun.map(({ selfMicros }) =>
+            selfMicros)),
+          wasmSelfShare: statistics(callerPerRun.map(({ wasmSelfShare }) =>
+            wasmSelfShare)),
+          targetSelfShare: {
+            ...statistics(targetShares),
+            targetSampledRuns: targetShares.length,
+            edgePresentRuns: callerPerRun.filter(({ selfSamples }) =>
+              selfSamples !== 0).length,
+          },
+        },
+      };
+    }).sort((left, right) =>
+      right.aggregate.wasmSelfShare.median -
+        left.aggregate.wasmSelfShare.median ||
+      right.aggregate.wasmSelfShare.max - left.aggregate.wasmSelfShare.max ||
+      right.aggregate.targetSelfShare.median -
+        left.aggregate.targetSelfShare.median ||
+      left.kind.localeCompare(right.kind) ||
+      (left.index ?? Number.MAX_SAFE_INTEGER) -
+        (right.index ?? Number.MAX_SAFE_INTEGER) ||
+      String(left.name).localeCompare(String(right.name)));
     return {
       index,
       name: function_.name,
@@ -244,6 +315,7 @@ export function aggregateProfileEvidence({
       family: profileFunctionFamily(function_),
       bodyBytes: function_.bodyBytes,
       perRun,
+      callers,
       aggregate: {
         selfSamples: statistics(perRun.map(({ selfSamples }) => selfSamples)),
         selfMicros: statistics(perRun.map(({ selfMicros }) => selfMicros)),
@@ -268,7 +340,14 @@ export function aggregateProfileEvidence({
     artifact,
     functionSidecar,
     runCount: runs.length,
-    runs: runs.map(({ functions: _functions, ranks: _ranks, ...run }) => run),
+    callerAttribution: {
+      method: "v8-cpu-profile-parent-edge/v1",
+      unit: "sampled-target-self-time",
+      caller: "immediate-parent-profile-node",
+      coverage: "all-wasm-self-samples",
+    },
+    runs: runs.map(({ functions: _functions, ranks: _ranks,
+      callerEdges: _callerEdges, ...run }) => run),
     functions,
   };
 }

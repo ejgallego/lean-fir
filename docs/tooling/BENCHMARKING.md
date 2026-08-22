@@ -54,9 +54,11 @@ frontiers, persistent growth, and linear-memory pages when available.
 - [`tooling/profile/`](../../tooling/profile/README.md) captures a checked,
   steady-only Node/V8 profile and binds the raw profile and derived attribution
   to the exact Wasm, sidecar, and workload. Its cross-run resolver folds V8
-  nodes by final function identity and reports per-run shares plus median,
-  dispersion, and rank stability without treating profiler time as a headline
-  benchmark.
+  nodes by final function identity, attributes sampled leaves to their
+  immediate caller nodes, and reports per-run shares plus median, dispersion,
+  and rank stability without treating profiler time as a headline benchmark.
+- [Exact-release Wasm caller attribution](WASM_CALLER_ATTRIBUTION.md) records
+  the first production prettyM and lean-zip caller census and its limitations.
 - [`tooling/array-probe/`](../../tooling/array-probe/README.md) compiles ordinary
   Lean through the production FIR pipeline and distinguishes repeated reads,
   allocation, unique updates, and shared copy-on-write. It is a mechanism

@@ -96,13 +96,23 @@ digest, those runs and the aggregate are explicitly labeled unbound even though
 the selected Wasm and sidecar are verified and all indices resolve. Prefer
 `--evidence` for new captures.
 
-The `fir.sampled-profile-aggregate/v1` report groups duplicate V8 nodes by
+The `fir.sampled-profile-aggregate/v2` report groups duplicate V8 nodes by
 absolute final function index. It retains per-run self samples, sampled
 microseconds, normalized Wasm-self share, and rank; cross-run fields report the
 median, median absolute deviation, range, and rank span. Exact name, origin,
 family, and body bytes come only from the verified sidecar. Host samples remain
 visible at run level, while a Wasm index outside the complete sidecar is
 rejected as malformed.
+
+Each sampled Wasm leaf is also attributed to its immediate parent node in the
+V8 CPU-profile tree. Per-function `callers` retain recursive Wasm callers,
+host/runtime function-and-URL frames, and a root bucket rather than guessing
+across missing frames. Each edge reports its share of total Wasm self samples
+and, conditional on the target being sampled in a run, its share of that
+target's self samples.
+The aggregator rejects duplicate node ids, missing or multiply-parented
+children, parent cycles, and caller indices outside the exact sidecar. This is
+sampled caller evidence, not a dynamic call count or an inclusive-time metric.
 
 The command refuses mixed artifacts, sidecars, duplicate input paths, raw
 profile hash mismatches in bound evidence, empty Wasm windows, and output

@@ -58,14 +58,16 @@ function fixtureSidecar(wasm) {
   };
 }
 
-function frame(id, index) {
-  return {
+function frame(id, index, children = undefined) {
+  const result = {
     id,
     callFrame: {
       functionName: index === null ? "host" : `wasm-function[${index}]`,
       url: index === null ? "file:///driver.mjs" : "wasm://fixture",
     },
   };
+  if (children !== undefined) result.children = children;
+  return result;
 }
 
 function writeEvidence(directory, name, profile, wasm, sidecarBytes, {
@@ -129,14 +131,19 @@ function fixture(directory) {
   const first = writeEvidence(directory, "first", {
     startTime: 0,
     endTime: 40,
-    nodes: [frame(1, 0), frame(2, 0), frame(3, 1), frame(4, null)],
+    nodes: [
+      frame(1, 0, [2]),
+      frame(2, 0),
+      frame(3, 1),
+      frame(4, null, [1, 3]),
+    ],
     samples: [1, 2, 3, 4],
     timeDeltas: [10, 10, 10, 10],
   }, wasm, sidecarBytes);
   const second = writeEvidence(directory, "second", {
     startTime: 0,
     endTime: 50,
-    nodes: [frame(1, 0), frame(2, 1), frame(3, null)],
+    nodes: [frame(1, 0), frame(2, 1), frame(3, null, [1, 2])],
     samples: [1, 2, 2, 2, 3],
     timeDeltas: [10, 10, 10, 10, 10],
   }, wasm, sidecarBytes);
@@ -168,6 +175,21 @@ test("aggregates duplicate V8 nodes by exact final function identity", () => {
     assert.equal(hot.aggregate.wasmSelfShare.median, 11 / 24);
     assert.equal(hot.aggregate.rank.span, 1);
     assert.equal(hot.bodyBytes, 2);
+    assert.equal(report.callerAttribution.method,
+      "v8-cpu-profile-parent-edge/v1");
+    assert.equal(report.runs[0].callerAttribution.attributedWasmSelfSamples, 3);
+    const hostCaller = hot.callers.find(({ kind }) =>
+      kind === "host-or-runtime");
+    const recursiveCaller = hot.callers.find(({ kind, index }) =>
+      kind === "wasm" && index === 0);
+    assert.deepEqual(hostCaller.perRun.map(({ selfSamples,
+      targetSelfShare }) => ({ selfSamples, targetSelfShare })), [
+      { selfSamples: 1, targetSelfShare: 0.5 },
+      { selfSamples: 1, targetSelfShare: 1 },
+    ]);
+    assert.equal(hostCaller.aggregate.targetSelfShare.median, 0.75);
+    assert.equal(recursiveCaller.aggregate.wasmSelfShare.median, 1 / 6);
+    assert.equal(recursiveCaller.aggregate.targetSelfShare.median, 0.25);
     assert.equal(allocation.family, "resident/allocation");
     assert.equal(allocation.aggregate.wasmSelfShare.median, 13 / 24);
   } finally {
@@ -205,6 +227,19 @@ test("rejects mixed artifacts, malformed indices, and output reuse", () => {
       sidecarPath: paths.sidecarPath,
       evidencePaths: [malformed],
     }), /function 9 outside the sidecar/);
+
+    const malformedCaller = writeEvidence(directory, "malformed-caller", {
+      startTime: 0,
+      endTime: 10,
+      nodes: [frame(1, 9, [2]), frame(2, 0)],
+      samples: [2],
+      timeDeltas: [10],
+    }, paths.wasm, paths.sidecarBytes);
+    assert.throws(() => aggregateProfileEvidence({
+      wasmPath: paths.wasmPath,
+      sidecarPath: paths.sidecarPath,
+      evidencePaths: [malformedCaller],
+    }), /caller refers to Wasm function 9 outside the sidecar/);
 
     const output = join(directory, "aggregate.json");
     const result = execFileSync(process.execPath, [
