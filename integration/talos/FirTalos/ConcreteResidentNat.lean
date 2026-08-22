@@ -3239,6 +3239,62 @@ def checkedConstantLimbPartProgram (objectIndex indexIndex scaledIndex : Nat)
     .const value,
     .store32 (UInt32.ofNat offset)]
 
+/-- Public proof-side spelling of one dynamic limb half store.  This is the
+same address calculation as the final constant-carry writer, but obtains the
+stored word from a local produced by the arithmetic step. -/
+def checkedLocalLimbPartSource
+    (object index scaled value : Lean.FVarId) (offset : Nat) :
+    List Fir.Wasm.Instruction :=
+  checkedScale8Source index scaled ++ [
+    .localGet object,
+    .i32Const .uint32 32,
+    .i32Add,
+    .localGet scaled,
+    .i32Add,
+    .localGet value,
+    .i32Store .uint32 (UInt32.ofNat offset)]
+
+/-- Exact Talos spelling of `checkedLocalLimbPartSource`. -/
+def checkedLocalLimbPartProgram
+    (objectIndex indexIndex scaledIndex valueIndex : Nat) (offset : Nat) :
+    Wasm.Program :=
+  checkedScale8Program indexIndex scaledIndex ++ [
+    .localGet objectIndex,
+    .const 32,
+    .add,
+    .localGet scaledIndex,
+    .add,
+    .localGet valueIndex,
+    .store32 (UInt32.ofNat offset)]
+
+/-- Successful local resolution adapts a dynamic half-limb store independently
+of its surrounding function and label stack. -/
+theorem instructions_checkedLocalLimbPartSource
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {object index scaled value : Lean.FVarId}
+    {objectIndex indexIndex scaledIndex valueIndex offset : Nat}
+    (objectFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) object =
+        some objectIndex)
+    (indexFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) index =
+        some indexIndex)
+    (scaledFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) scaled =
+        some scaledIndex)
+    (valueFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) value =
+        some valueIndex) :
+    FirTalos.instructions sourceModule sourceFunction labels
+      (checkedLocalLimbPartSource object index scaled value offset) =
+        .ok (checkedLocalLimbPartProgram objectIndex indexIndex scaledIndex
+          valueIndex offset) := by
+  simp [checkedLocalLimbPartSource, checkedLocalLimbPartProgram,
+    checkedScale8Source, checkedScale8Program, FirTalos.instructions,
+    FirTalos.instruction, objectFound, indexFound, scaledFound, valueFound,
+    Bind.bind, Except.bind, pure, Except.pure]
+
 /-- Exact pair of stores used when a multi-limb addition has a final carry.
 The new most-significant limb is the 64-bit value one, hence low word one and
 high word zero. -/
@@ -3390,6 +3446,567 @@ theorem wp_checkedConstantLimbPartProgram
           { afterThird with values := tail } env)
   rw [if_neg writeInBounds]
   exact continued
+
+/-- One locally sourced half-limb store, exposing the exact successor memory
+while framing every local except the scale scratch destination. -/
+theorem wp_checkedLocalLimbPartProgram
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {initial afterFirst afterSecond afterThird : Wasm.Locals}
+    {objectIndex indexIndex scaledIndex valueIndex : Nat}
+    {object index value : UInt32} {offset : Nat}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    (objectNeScaled : objectIndex ≠ scaledIndex)
+    (valueNeScaled : valueIndex ≠ scaledIndex)
+    (objectLocal : initial.get objectIndex = some (.i32 object))
+    (indexLocal : initial.get indexIndex = some (.i32 index))
+    (valueLocal : initial.get valueIndex = some (.i32 value))
+    (firstSet :
+      ({ initial with values := .i32 (index + index) :: tail }).set?
+          scaledIndex (.i32 (index + index)) = some afterFirst)
+    (secondSet :
+      ({ afterFirst with values :=
+          (.i32 (index + index + (index + index)) :: tail) }).set?
+          scaledIndex (.i32 (index + index + (index + index))) =
+            some afterSecond)
+    (thirdSet :
+      ({ afterSecond with values := .i32 (checkedScale8Word index) :: tail }).set?
+          scaledIndex (.i32 (checkedScale8Word index)) = some afterThird)
+    (writeInBounds :
+      ¬(checkedLimbBase object index).toNat + (UInt32.ofNat offset).toNat + 4 >
+        store.mem.pages * 65536)
+    (continued :
+      Wasm.wp module rest Q
+        { store with mem := (store.mem.write32
+            (checkedLimbBase object index + UInt32.ofNat offset) value) }
+        { afterThird with values := tail } env) :
+    Wasm.wp module
+      (checkedLocalLimbPartProgram objectIndex indexIndex scaledIndex
+          valueIndex offset ++ rest)
+      Q store { initial with values := tail } env := by
+  have firstUpdate := FirTalos.Correctness.localUpdate_of_set? firstSet
+  have secondUpdate := FirTalos.Correctness.localUpdate_of_set? secondSet
+  have thirdUpdate := FirTalos.Correctness.localUpdate_of_set? thirdSet
+  have preservedAfterThird
+      (preservedIndex : Nat) (preservedNeScaled : preservedIndex ≠ scaledIndex)
+      (preservedValue : UInt32)
+      (preservedLocal : initial.get preservedIndex = some (.i32 preservedValue))
+      (values : List Wasm.Value) :
+      ({ afterThird with values } : Wasm.Locals).get preservedIndex =
+        some (.i32 preservedValue) := by
+    calc
+      _ = afterThird.get preservedIndex := rfl
+      _ = ({ afterSecond with values := .i32 (checkedScale8Word index) :: tail } :
+          Wasm.Locals).get preservedIndex := thirdUpdate.2 preservedNeScaled
+      _ = afterSecond.get preservedIndex := rfl
+      _ = ({ afterFirst with values :=
+          (.i32 (index + index + (index + index)) :: tail) } :
+          Wasm.Locals).get preservedIndex := secondUpdate.2 preservedNeScaled
+      _ = afterFirst.get preservedIndex := rfl
+      _ = ({ initial with values := .i32 (index + index) :: tail } :
+          Wasm.Locals).get preservedIndex := firstUpdate.2 preservedNeScaled
+      _ = initial.get preservedIndex := rfl
+      _ = some (.i32 preservedValue) := preservedLocal
+  have objectAfterThird (values : List Wasm.Value) :
+      ({ afterThird with values } : Wasm.Locals).get objectIndex =
+        some (.i32 object) :=
+    preservedAfterThird objectIndex objectNeScaled object objectLocal values
+  have valueAfterThird (values : List Wasm.Value) :
+      ({ afterThird with values } : Wasm.Locals).get valueIndex =
+        some (.i32 value) :=
+    preservedAfterThird valueIndex valueNeScaled value valueLocal values
+  have scaledAfterThird (values : List Wasm.Value) :
+      ({ afterThird with values } : Wasm.Locals).get scaledIndex =
+        some (.i32 (checkedScale8Word index)) := by
+    simpa using thirdUpdate.1
+  unfold checkedLocalLimbPartProgram
+  rw [List.append_assoc]
+  apply wp_checkedScale8Program indexLocal firstSet secondSet thirdSet
+  simp only [List.cons_append, List.nil_append, Wasm.wp_localGet_cons,
+    objectAfterThird, Wasm.wp_const_cons, Wasm.wp_add_cons,
+    scaledAfterThird, valueAfterThird, Wasm.wp_store32_cons]
+  change (if (checkedLimbBase object index).toNat +
+      (UInt32.ofNat offset).toNat + 4 >
+      store.mem.pages * 65536 then
+        Q (.Trap store "out of bounds memory access")
+      else
+        Wasm.wp module rest Q
+          { store with mem := (store.mem.write32
+              (checkedLimbBase object index + UInt32.ofNat offset) value) }
+          { afterThird with values := tail } env)
+  rw [if_neg writeInBounds]
+  exact continued
+
+/-- Explicit local frame at the two payload stores in `writeSumFrom`. -/
+def writeSumArithmeticLocals
+    (left leftFlavor right rightFlavor result index count carry : UInt32)
+    (leftLow leftHigh rightLow rightHigh low high carryLocal carryExtra
+      scaled : UInt32)
+    (values : List Wasm.Value) : Wasm.Locals := {
+  params := [.i32 left, .i32 leftFlavor, .i32 right, .i32 rightFlavor,
+    .i32 result, .i32 index, .i32 count, .i32 carry]
+  locals := [.i32 leftLow, .i32 leftHigh, .i32 rightLow, .i32 rightHigh,
+    .i32 low, .i32 high, .i32 carryLocal, .i32 carryExtra, .i32 scaled]
+  values := values }
+
+/-- Arithmetic suffix of `sumStep` in `writeSumFrom`'s shifted local layout. -/
+def writeSumArithmeticProgram : Wasm.Program := [
+  .localGet 8, .localGet 10, .add, .localSet 12,
+  .localGet 12, .localGet 8, .ltU, .localSet 14,
+  .localGet 12, .localGet 7, .add, .localSet 12,
+  .localGet 12, .localGet 7, .ltU, .localSet 15,
+  .localGet 14, .localGet 15, .add, .localSet 14,
+  .localGet 9, .localGet 11, .add, .localSet 13,
+  .localGet 13, .localGet 9, .ltU, .localSet 15,
+  .localGet 13, .localGet 14, .add, .localSet 13,
+  .localGet 13, .localGet 14, .ltU, .localSet 14,
+  .localGet 14, .localGet 15, .add, .localSet 14]
+
+/-- Four magnitude calls plus arithmetic in `writeSumFrom`'s shifted frame. -/
+def writeSumStepProgram (magnitudeLowIndex magnitudeHighIndex : Nat) :
+    Wasm.Program := [
+  .localGet 0, .localGet 1, .localGet 5,
+  .call magnitudeLowIndex, .localSet 8,
+  .localGet 0, .localGet 1, .localGet 5,
+  .call magnitudeHighIndex, .localSet 9,
+  .localGet 2, .localGet 3, .localGet 5,
+  .call magnitudeLowIndex, .localSet 10,
+  .localGet 2, .localGet 3, .localGet 5,
+  .call magnitudeHighIndex, .localSet 11] ++
+  writeSumArithmeticProgram
+
+/-- The private shared `sumStep` adapts to its shifted numeric layout inside
+W7's `writeSumFromFunction`. -/
+theorem instructions_writeSumStepSource
+    {sourceModule : Fir.Wasm.Module} {labels : List Lean.FVarId}
+    {magnitudeLowIndex magnitudeHighIndex : Nat}
+    (magnitudeLowFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeLowName) =
+        some magnitudeLowIndex)
+    (magnitudeHighFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeHighName) =
+        some magnitudeHighIndex) :
+    FirTalos.instructions sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction labels
+      (sumCarryStepSource
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[0]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[1]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[2]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[3]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[5]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[7]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[0]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[1]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[2]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[3]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[4]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[5]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[6]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[7]!.1) =
+      .ok (writeSumStepProgram magnitudeLowIndex magnitudeHighIndex) := by
+  have leftFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[0]!.1 =
+        some 0 := by decide
+  have leftFlavorFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[1]!.1 =
+        some 1 := by decide
+  have rightFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[2]!.1 =
+        some 2 := by decide
+  have rightFlavorFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[3]!.1 =
+        some 3 := by decide
+  have indexFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[5]!.1 =
+        some 5 := by decide
+  have carryFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[7]!.1 =
+        some 7 := by decide
+  have leftLowFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[0]!.1 =
+        some 8 := by decide
+  have leftHighFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[1]!.1 =
+        some 9 := by decide
+  have rightLowFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[2]!.1 =
+        some 10 := by decide
+  have rightHighFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[3]!.1 =
+        some 11 := by decide
+  have lowFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[4]!.1 =
+        some 12 := by decide
+  have highFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[5]!.1 =
+        some 13 := by decide
+  have carryLocalFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[6]!.1 =
+        some 14 := by decide
+  have carryExtraFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[7]!.1 =
+        some 15 := by decide
+  set_option maxRecDepth 100000 in
+    simp [sumCarryStepSource, writeSumStepProgram,
+      writeSumArithmeticProgram, FirTalos.instructions, FirTalos.instruction,
+      leftFound, leftFlavorFound, rightFound, rightFlavorFound, indexFound,
+      carryFound, leftLowFound, leftHighFound, rightLowFound, rightHighFound,
+      lowFound, highFound, carryLocalFound, carryExtraFound,
+      magnitudeLowFound, magnitudeHighFound, Bind.bind, Except.bind, pure,
+      Except.pure]
+
+/-- Direct execution of the shifted arithmetic suffix realizes the same
+emitted operand-order model as the carry-only scan. -/
+theorem wp_writeSumArithmeticProgram_emitted
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {left leftFlavor right rightFlavor result index count carry : UInt32}
+    {leftLow leftHigh rightLow rightHigh low high carryLocal carryExtra
+      scaled : UInt32}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    (continued : Wasm.wp module rest Q store
+      (writeSumArithmeticLocals left leftFlavor right rightFlavor result index
+        count carry leftLow leftHigh rightLow rightHigh
+        (emittedLimbSumLow leftLow rightLow carry)
+        (emittedLimbSumHigh leftLow leftHigh rightLow rightHigh carry)
+        (emittedLimbSumCarryOut leftLow leftHigh rightLow rightHigh carry)
+        (if rightHigh + leftHigh < leftHigh then 1 else 0)
+        scaled tail) env) :
+    Wasm.wp module (writeSumArithmeticProgram ++ rest) Q store
+      (writeSumArithmeticLocals left leftFlavor right rightFlavor result index
+        count carry leftLow leftHigh rightLow rightHigh low high carryLocal
+        carryExtra scaled tail) env := by
+  simp [writeSumArithmeticProgram, writeSumArithmeticLocals]
+  exact continued
+
+/-- The emitted-order equalities convert the shifted arithmetic suffix to the
+canonical pure base-`2^64` limb operation. -/
+theorem wp_writeSumArithmeticProgram
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {left leftFlavor right rightFlavor result index count carry : UInt32}
+    {leftLow leftHigh rightLow rightHigh low high carryLocal carryExtra
+      scaled : UInt32}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    (continued : Wasm.wp module rest Q store
+      (writeSumArithmeticLocals left leftFlavor right rightFlavor result index
+        count carry leftLow leftHigh rightLow rightHigh
+        (limbSumLow leftLow rightLow carry)
+        (limbSumHigh leftLow leftHigh rightLow rightHigh carry)
+        (limbSumCarryOut leftLow leftHigh rightLow rightHigh carry)
+        (if rightHigh + leftHigh < leftHigh then 1 else 0)
+        scaled tail) env) :
+    Wasm.wp module (writeSumArithmeticProgram ++ rest) Q store
+      (writeSumArithmeticLocals left leftFlavor right rightFlavor result index
+        count carry leftLow leftHigh rightLow rightHigh low high carryLocal
+        carryExtra scaled tail) env := by
+  apply wp_writeSumArithmeticProgram_emitted
+  simpa using continued
+
+/-- One complete shifted `sumStep` performs the same four read-only magnitude
+calls and pure limb recurrence as the installed carry-only scan. -/
+theorem wp_writeSumStepProgram
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {magnitudeLowIndex magnitudeHighIndex : Nat}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {left leftFlavor right rightFlavor result index count carry : UInt32}
+    {oldLeftLow oldLeftHigh oldRightLow oldRightHigh low high carryLocal
+      carryExtra scaled : UInt32}
+    {leftLow leftHigh rightLow rightHigh : UInt32}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    (leftLowRun : Wasm.TerminatesWith env module magnitudeLowIndex store
+      ([.i32 index, .i32 leftFlavor, .i32 left] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 leftLow :: tail))
+    (leftHighRun : Wasm.TerminatesWith env module magnitudeHighIndex store
+      ([.i32 index, .i32 leftFlavor, .i32 left] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 leftHigh :: tail))
+    (rightLowRun : Wasm.TerminatesWith env module magnitudeLowIndex store
+      ([.i32 index, .i32 rightFlavor, .i32 right] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 rightLow :: tail))
+    (rightHighRun : Wasm.TerminatesWith env module magnitudeHighIndex store
+      ([.i32 index, .i32 rightFlavor, .i32 right] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 rightHigh :: tail))
+    (continued : Wasm.wp module rest Q store
+      (writeSumArithmeticLocals left leftFlavor right rightFlavor result index
+        count carry leftLow leftHigh rightLow rightHigh
+        (limbSumLow leftLow rightLow carry)
+        (limbSumHigh leftLow leftHigh rightLow rightHigh carry)
+        (limbSumCarryOut leftLow leftHigh rightLow rightHigh carry)
+        (if rightHigh + leftHigh < leftHigh then 1 else 0)
+        scaled tail) env) :
+    Wasm.wp module
+      (writeSumStepProgram magnitudeLowIndex magnitudeHighIndex ++ rest) Q store
+      (writeSumArithmeticLocals left leftFlavor right rightFlavor result index
+        count carry oldLeftLow oldLeftHigh oldRightLow oldRightHigh low high
+        carryLocal carryExtra scaled tail) env := by
+  rw [writeSumStepProgram, List.append_assoc]
+  simp [writeSumArithmeticLocals]
+  apply ResidentPrimitives.wp_definedCallResultSet
+      (arguments := [.i32 index, .i32 leftFlavor, .i32 left])
+      (tail := tail)
+      (locals := writeSumArithmeticLocals left leftFlavor right rightFlavor
+        result index count carry oldLeftLow oldLeftHigh oldRightLow oldRightHigh
+        low high carryLocal carryExtra scaled (.i32 leftLow :: tail))
+      (updated := writeSumArithmeticLocals left leftFlavor right rightFlavor
+        result index count carry leftLow oldLeftHigh oldRightLow oldRightHigh
+        low high carryLocal carryExtra scaled (.i32 leftLow :: tail))
+      (physicalResult := .i32 leftLow)
+      (callRun := leftLowRun) (targetSet := by rfl)
+  simp [writeSumArithmeticLocals]
+  apply ResidentPrimitives.wp_definedCallResultSet
+      (arguments := [.i32 index, .i32 leftFlavor, .i32 left])
+      (tail := tail)
+      (locals := writeSumArithmeticLocals left leftFlavor right rightFlavor
+        result index count carry leftLow oldLeftHigh oldRightLow oldRightHigh
+        low high carryLocal carryExtra scaled (.i32 leftHigh :: tail))
+      (updated := writeSumArithmeticLocals left leftFlavor right rightFlavor
+        result index count carry leftLow leftHigh oldRightLow oldRightHigh
+        low high carryLocal carryExtra scaled (.i32 leftHigh :: tail))
+      (physicalResult := .i32 leftHigh)
+      (callRun := leftHighRun) (targetSet := by rfl)
+  simp [writeSumArithmeticLocals]
+  apply ResidentPrimitives.wp_definedCallResultSet
+      (arguments := [.i32 index, .i32 rightFlavor, .i32 right])
+      (tail := tail)
+      (locals := writeSumArithmeticLocals left leftFlavor right rightFlavor
+        result index count carry leftLow leftHigh oldRightLow oldRightHigh
+        low high carryLocal carryExtra scaled (.i32 rightLow :: tail))
+      (updated := writeSumArithmeticLocals left leftFlavor right rightFlavor
+        result index count carry leftLow leftHigh rightLow oldRightHigh
+        low high carryLocal carryExtra scaled (.i32 rightLow :: tail))
+      (physicalResult := .i32 rightLow)
+      (callRun := rightLowRun) (targetSet := by rfl)
+  simp [writeSumArithmeticLocals]
+  apply ResidentPrimitives.wp_definedCallResultSet
+      (arguments := [.i32 index, .i32 rightFlavor, .i32 right])
+      (tail := tail)
+      (locals := writeSumArithmeticLocals left leftFlavor right rightFlavor
+        result index count carry leftLow leftHigh rightLow oldRightHigh
+        low high carryLocal carryExtra scaled (.i32 rightHigh :: tail))
+      (updated := writeSumArithmeticLocals left leftFlavor right rightFlavor
+        result index count carry leftLow leftHigh rightLow rightHigh
+        low high carryLocal carryExtra scaled (.i32 rightHigh :: tail))
+      (physicalResult := .i32 rightHigh)
+      (callRun := rightHighRun) (targetSet := by rfl)
+  exact wp_writeSumArithmeticProgram continued
+
+/-- Exact pair of locally sourced stores in one `writeSumFrom` iteration. -/
+def writeSumLimbStoresProgram : Wasm.Program :=
+  checkedLocalLimbPartProgram 4 5 16 12 0 ++
+    checkedLocalLimbPartProgram 4 5 16 13 4
+
+/-- Public proof-side spelling of the two private dynamic stores embedded in
+W7's `writeSumFromFunction`. -/
+def writeSumLimbStoresSource : List Fir.Wasm.Instruction :=
+  checkedLocalLimbPartSource
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[4]!.1
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[5]!.1
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[8]!.1
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[4]!.1 0 ++
+    checkedLocalLimbPartSource
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[4]!.1
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[5]!.1
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[8]!.1
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[5]!.1 4
+
+/-- Exact adaptation of the two private `writeSumFrom` payload stores. -/
+theorem instructions_writeSumLimbStoresSource
+    {sourceModule : Fir.Wasm.Module} {labels : List Lean.FVarId} :
+    FirTalos.instructions sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction labels
+      writeSumLimbStoresSource = .ok writeSumLimbStoresProgram := by
+  unfold writeSumLimbStoresSource writeSumLimbStoresProgram
+  rw [FirTalos.Correctness.instructions_append]
+  rw [instructions_checkedLocalLimbPartSource
+    (objectIndex := 4) (indexIndex := 5) (scaledIndex := 16)
+    (valueIndex := 12) (offset := 0)
+    (objectFound := by decide) (indexFound := by decide)
+    (scaledFound := by decide) (valueFound := by decide)]
+  rw [instructions_checkedLocalLimbPartSource
+    (objectIndex := 4) (indexIndex := 5) (scaledIndex := 16)
+    (valueIndex := 13) (offset := 4)
+    (objectFound := by decide) (indexFound := by decide)
+    (scaledFound := by decide) (valueFound := by decide)]
+  rfl
+
+/-- Exact successor store after writing one generated low word. -/
+def writeSumLowStore
+    (store : Wasm.Store host) (result index low : UInt32) :
+    Wasm.Store host :=
+  { store with mem := (store.mem.write32
+      (checkedLimbBase result index + UInt32.ofNat 0) low) }
+
+/-- Exact successor store after writing both generated words of one limb. -/
+def writeSumFinalStore
+    (store : Wasm.Store host) (result index low high : UInt32) :
+    Wasm.Store host :=
+  let lowStore := writeSumLowStore store result index low
+  { lowStore with mem := (lowStore.mem.write32
+      (checkedLimbBase result index + UInt32.ofNat 4) high) }
+
+/-- The two emitted dynamic stores write exactly the generated low/high words
+and otherwise preserve the store and complete arithmetic local frame. -/
+theorem wp_writeSumLimbStoresProgram
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {left leftFlavor right rightFlavor result index count carry : UInt32}
+    {leftLow leftHigh rightLow rightHigh low high carryLocal carryExtra
+      scaled : UInt32}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    (lowInBounds :
+      ¬(checkedLimbBase result index).toNat + 4 >
+        store.mem.pages * 65536)
+    (highInBounds :
+      ¬(checkedLimbBase result index).toNat + 4 + 4 >
+        store.mem.pages * 65536)
+    (continued :
+      Wasm.wp module rest Q
+        (writeSumFinalStore store result index low high)
+        (writeSumArithmeticLocals left leftFlavor right rightFlavor result
+          index count carry leftLow leftHigh rightLow rightHigh low high
+          carryLocal carryExtra (checkedScale8Word index) tail) env) :
+    Wasm.wp module (writeSumLimbStoresProgram ++ rest) Q store
+      (writeSumArithmeticLocals left leftFlavor right rightFlavor result index
+        count carry leftLow leftHigh rightLow rightHigh low high carryLocal
+        carryExtra scaled tail) env := by
+  unfold writeSumLimbStoresProgram
+  rw [List.append_assoc]
+  apply wp_checkedLocalLimbPartProgram
+    (initial := writeSumArithmeticLocals left leftFlavor right rightFlavor
+      result index count carry leftLow leftHigh rightLow rightHigh low high
+      carryLocal carryExtra scaled tail)
+    (afterFirst := writeSumArithmeticLocals left leftFlavor right rightFlavor
+      result index count carry leftLow leftHigh rightLow rightHigh low high
+      carryLocal carryExtra (index + index) (.i32 (index + index) :: tail))
+    (afterSecond := writeSumArithmeticLocals left leftFlavor right rightFlavor
+      result index count carry leftLow leftHigh rightLow rightHigh low high
+      carryLocal carryExtra (index + index + (index + index))
+        (.i32 (index + index + (index + index)) :: tail))
+    (afterThird := writeSumArithmeticLocals left leftFlavor right rightFlavor
+      result index count carry leftLow leftHigh rightLow rightHigh low high
+      carryLocal carryExtra (checkedScale8Word index)
+        (.i32 (checkedScale8Word index) :: tail))
+    (by decide) (by decide) (by rfl) (by rfl) (by rfl)
+    (by simp [writeSumArithmeticLocals, Wasm.Locals.set?])
+    (by simp [writeSumArithmeticLocals, Wasm.Locals.set?])
+    (by simp [writeSumArithmeticLocals, Wasm.Locals.set?]) lowInBounds
+  apply wp_checkedLocalLimbPartProgram
+    (initial := writeSumArithmeticLocals left leftFlavor right rightFlavor
+      result index count carry leftLow leftHigh rightLow rightHigh low high
+      carryLocal carryExtra (checkedScale8Word index) tail)
+    (afterFirst := writeSumArithmeticLocals left leftFlavor right rightFlavor
+      result index count carry leftLow leftHigh rightLow rightHigh low high
+      carryLocal carryExtra (index + index) (.i32 (index + index) :: tail))
+    (afterSecond := writeSumArithmeticLocals left leftFlavor right rightFlavor
+      result index count carry leftLow leftHigh rightLow rightHigh low high
+      carryLocal carryExtra (index + index + (index + index))
+        (.i32 (index + index + (index + index)) :: tail))
+    (afterThird := writeSumArithmeticLocals left leftFlavor right rightFlavor
+      result index count carry leftLow leftHigh rightLow rightHigh low high
+      carryLocal carryExtra (checkedScale8Word index)
+        (.i32 (checkedScale8Word index) :: tail))
+    (by decide) (by decide) (by rfl) (by rfl) (by rfl)
+    (by simp [writeSumArithmeticLocals, Wasm.Locals.set?])
+    (by simp [writeSumArithmeticLocals, Wasm.Locals.set?])
+    (by simp [writeSumArithmeticLocals, Wasm.Locals.set?])
+  · simpa [writeSumLowStore, Wasm.Mem.write32] using highInBounds
+  · simpa [writeSumFinalStore, writeSumLowStore,
+      writeSumArithmeticLocals] using continued
+
+/-- One complete nonterminal writer iteration before its carry/index
+back-edge: read both operand limbs, compute their sum, and store its two words. -/
+def writeSumStepAndStoresProgram
+    (magnitudeLowIndex magnitudeHighIndex : Nat) : Wasm.Program :=
+  writeSumStepProgram magnitudeLowIndex magnitudeHighIndex ++
+    writeSumLimbStoresProgram
+
+/-- The complete data-producing prefix of one writer iteration computes the
+pure limb recurrence and materializes its low/high words at the selected
+payload coordinate. -/
+theorem wp_writeSumStepAndStoresProgram
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {magnitudeLowIndex magnitudeHighIndex : Nat}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {left leftFlavor right rightFlavor result index count carry : UInt32}
+    {oldLeftLow oldLeftHigh oldRightLow oldRightHigh low high carryLocal
+      carryExtra scaled : UInt32}
+    {leftLow leftHigh rightLow rightHigh : UInt32}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    (leftLowRun : Wasm.TerminatesWith env module magnitudeLowIndex store
+      ([.i32 index, .i32 leftFlavor, .i32 left] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 leftLow :: tail))
+    (leftHighRun : Wasm.TerminatesWith env module magnitudeHighIndex store
+      ([.i32 index, .i32 leftFlavor, .i32 left] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 leftHigh :: tail))
+    (rightLowRun : Wasm.TerminatesWith env module magnitudeLowIndex store
+      ([.i32 index, .i32 rightFlavor, .i32 right] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 rightLow :: tail))
+    (rightHighRun : Wasm.TerminatesWith env module magnitudeHighIndex store
+      ([.i32 index, .i32 rightFlavor, .i32 right] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 rightHigh :: tail))
+    (lowInBounds :
+      ¬(checkedLimbBase result index).toNat + 4 >
+        store.mem.pages * 65536)
+    (highInBounds :
+      ¬(checkedLimbBase result index).toNat + 4 + 4 >
+        store.mem.pages * 65536)
+    (continued : Wasm.wp module rest Q
+      (writeSumFinalStore store result index
+        (limbSumLow leftLow rightLow carry)
+        (limbSumHigh leftLow leftHigh rightLow rightHigh carry))
+      (writeSumArithmeticLocals left leftFlavor right rightFlavor result index
+        count carry leftLow leftHigh rightLow rightHigh
+        (limbSumLow leftLow rightLow carry)
+        (limbSumHigh leftLow leftHigh rightLow rightHigh carry)
+        (limbSumCarryOut leftLow leftHigh rightLow rightHigh carry)
+        (if rightHigh + leftHigh < leftHigh then 1 else 0)
+        (checkedScale8Word index) tail) env) :
+    Wasm.wp module
+      (writeSumStepAndStoresProgram magnitudeLowIndex magnitudeHighIndex ++
+        rest) Q store
+      (writeSumArithmeticLocals left leftFlavor right rightFlavor result index
+        count carry oldLeftLow oldLeftHigh oldRightLow oldRightHigh low high
+        carryLocal carryExtra scaled tail) env := by
+  unfold writeSumStepAndStoresProgram
+  rw [List.append_assoc]
+  apply wp_writeSumStepProgram leftLowRun leftHighRun rightLowRun rightHighRun
+  exact wp_writeSumLimbStoresProgram lowInBounds highInBounds continued
 
 /-- Exact successor store after materializing the low half of a carry limb. -/
 def checkedCarryLowStore (store : Wasm.Store host) (object index : UInt32) :

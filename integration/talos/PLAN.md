@@ -6309,6 +6309,24 @@ same carry invariant, add the exact low/high payload stores and their framed
 byte prefix, and connect the completed payload to `allocateNatural` of the
 operand sum.
 
+The first `writeSumFrom` data slice now reuses that recurrence in the writer's
+shifted parameter/local layout and factors its private dynamic payload writer
+into one generic half-word rule.  The rule proves the three-doubling address
+calculation, frames every non-scratch local, and exposes exactly one in-bounds
+`write32`; its two-store composition writes the generated low word and then
+the generated high word at offsets zero and four.  Exact adapter lemmas tie
+both the shifted four-accessor arithmetic step and those two private stores to
+W7's source.  Their composed WP theorem therefore materializes one pure
+`addLimbWords` digit while retaining the generated carry for the back-edge.
+
+This reinforces a useful factoring boundary: share arithmetic through its
+semantic low/high/carry result, but keep source-local resolution and numeric
+frame layout in small adapter/execution lemmas.  `sumCarryFrom` and
+`writeSumFrom` then share the mathematical recurrence without pretending that
+their physical local indices are identical.  The remaining writer work is to
+lift this data-producing prefix through the structured loop while threading a
+growing payload-memory frame.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
