@@ -28,6 +28,184 @@ structure ResidentMemoryRel (heap : MemoryState) (memory : Wasm.Mem) : Prop wher
 
 namespace ResidentMemoryRel
 
+/-- A physical 32-bit store leaves the number of resident memory pages
+unchanged.  Stating this projection fact once keeps proofs of consecutive
+stores from unfolding Talos's byte-function implementation. -/
+@[simp] theorem write32_pages (memory : Wasm.Mem) (address value : UInt32) :
+    (memory.write32 address value).pages = memory.pages := by
+  rfl
+
+/-- Compact store-level spelling of one physical word update.  Keeping this
+opaque prevents a sequence of record updates from expanding every unchanged
+`Wasm.Store` field in downstream weakest-precondition goals. -/
+def write32Store (store : Wasm.Store host) (address value : UInt32) :
+    Wasm.Store host :=
+  { store with mem := store.mem.write32 address value }
+
+@[simp] theorem write32Store_mem
+    (store : Wasm.Store host) (address value : UInt32) :
+    (write32Store store address value).mem = store.mem.write32 address value := by
+  rfl
+
+@[simp] theorem write32Store_pages
+    (store : Wasm.Store host) (address value : UInt32) :
+    (write32Store store address value).mem.pages = store.mem.pages := by
+  rfl
+
+/-- Adjacent little-endian word updates at the physical Wasm store level. -/
+def writeUInt32sMemory (memory : Wasm.Mem) (address : UInt32) :
+    List UInt32 → Wasm.Mem
+  | [] => memory
+  | value :: rest =>
+      writeUInt32sMemory (memory.write32 address value) (address + 4) rest
+
+/-- Store-level fold corresponding to `writeUInt32sMemory`. -/
+def writeUInt32sStore (store : Wasm.Store host) (address : UInt32) :
+    List UInt32 → Wasm.Store host
+  | [] => store
+  | value :: rest =>
+      writeUInt32sStore (write32Store store address value) (address + 4) rest
+
+/-- Folding compact store updates changes only memory and is extensionally the
+same adjacent-word update used by the W6/Talos memory relation. -/
+theorem writeUInt32sStore_eq
+    (store : Wasm.Store host) (address : UInt32) (values : List UInt32) :
+    writeUInt32sStore store address values =
+      { store with mem := writeUInt32sMemory store.mem address values } := by
+  induction values generalizing store address with
+  | nil => rfl
+  | cons value rest ih =>
+      simp only [writeUInt32sStore, writeUInt32sMemory]
+      rw [ih]
+      rfl
+
+/-- Execute one in-bounds `i32.store` from an already prepared operand stack.
+This is the instruction-level composition rule used by all resident object
+writers; callers prove value production separately and continue from the
+exact updated store. -/
+theorem wp_store32_of_inBounds
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {locals : Wasm.Locals} {address value offset : UInt32}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    (inBounds : address.toNat + offset.toNat + 4 ≤
+      store.mem.pages * wasmPageBytes)
+    (continued : Wasm.wp module rest Q
+      (write32Store store (address + offset) value)
+      { locals with values := tail } env) :
+    Wasm.wp module (.store32 offset :: rest) Q store
+      { locals with values := .i32 value :: .i32 address :: tail } env := by
+  simpa only [write32Store, Wasm.wp_store32_cons,
+    if_neg (Nat.not_lt.mpr (by simpa [wasmPageBytes] using inBounds))]
+    using continued
+
+/-- Load an address and value from arbitrary locals, then execute one checked
+32-bit store.  The local-lookup premises make the rule independent of any
+particular resident helper's frame layout. -/
+theorem wp_store32_localGet_of_inBounds
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {locals : Wasm.Locals} {address value offset : UInt32}
+    {addressIndex valueIndex : Nat} {tail : List Wasm.Value}
+    {rest : Wasm.Program}
+    (addressFound : locals.get addressIndex = some (.i32 address))
+    (valueFound : locals.get valueIndex = some (.i32 value))
+    (inBounds : address.toNat + offset.toNat + 4 ≤
+      store.mem.pages * wasmPageBytes)
+    (continued : Wasm.wp module rest Q
+      (write32Store store (address + offset) value)
+      { locals with values := tail } env) :
+    Wasm.wp module
+      (.localGet addressIndex :: .localGet valueIndex :: .store32 offset :: rest)
+      Q store { locals with values := tail } env := by
+  simp only [Wasm.wp_localGet_cons]
+  have addressFound' :
+      ({ locals with values := tail } : Wasm.Locals).get addressIndex =
+        some (.i32 address) := by
+    simpa [Wasm.Locals.get] using addressFound
+  simp only [addressFound']
+  have valueFound' :
+      ({ locals with values := .i32 address :: tail } : Wasm.Locals).get
+          valueIndex = some (.i32 value) := by
+    simpa [Wasm.Locals.get] using valueFound
+  simp only [valueFound']
+  exact wp_store32_of_inBounds inBounds continued
+
+/-- Load an address local and store one constant word at a checked offset. -/
+theorem wp_store32_const_of_inBounds
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {locals : Wasm.Locals} {address value offset : UInt32}
+    {addressIndex : Nat} {tail : List Wasm.Value} {rest : Wasm.Program}
+    (addressFound : locals.get addressIndex = some (.i32 address))
+    (inBounds : address.toNat + offset.toNat + 4 ≤
+      store.mem.pages * wasmPageBytes)
+    (continued : Wasm.wp module rest Q
+      (write32Store store (address + offset) value)
+      { locals with values := tail } env) :
+    Wasm.wp module
+      (.localGet addressIndex :: .const value :: .store32 offset :: rest)
+      Q store { locals with values := tail } env := by
+  simp only [Wasm.wp_localGet_cons]
+  have addressFound' :
+      ({ locals with values := tail } : Wasm.Locals).get addressIndex =
+        some (.i32 address) := by
+    simpa [Wasm.Locals.get] using addressFound
+  simp only [addressFound', Wasm.wp_const_cons]
+  exact wp_store32_of_inBounds inBounds continued
+
+/-- Load an address, add a constant to a word from another local, and store
+the modular sum.  This is the common allocation-size header pattern. -/
+theorem wp_store32_constAddLocalGet_of_inBounds
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {locals : Wasm.Locals} {address constant value offset : UInt32}
+    {addressIndex valueIndex : Nat} {tail : List Wasm.Value}
+    {rest : Wasm.Program}
+    (addressFound : locals.get addressIndex = some (.i32 address))
+    (valueFound : locals.get valueIndex = some (.i32 value))
+    (inBounds : address.toNat + offset.toNat + 4 ≤
+      store.mem.pages * wasmPageBytes)
+    (continued : Wasm.wp module rest Q
+      (write32Store store (address + offset) (value + constant))
+      { locals with values := tail } env) :
+    Wasm.wp module
+      (.localGet addressIndex :: .const constant :: .localGet valueIndex ::
+        .add :: .store32 offset :: rest)
+      Q store { locals with values := tail } env := by
+  simp only [Wasm.wp_localGet_cons]
+  have addressFound' :
+      ({ locals with values := tail } : Wasm.Locals).get addressIndex =
+        some (.i32 address) := by
+    simpa [Wasm.Locals.get] using addressFound
+  simp only [addressFound', Wasm.wp_const_cons, Wasm.wp_localGet_cons]
+  have valueFound' :
+      ({ locals with values := .i32 constant :: .i32 address :: tail } :
+          Wasm.Locals).get valueIndex = some (.i32 value) := by
+    simpa [Wasm.Locals.get] using valueFound
+  simp only [valueFound', Wasm.wp_add_cons]
+  exact wp_store32_of_inBounds inBounds continued
+
+/-- Return one i32 local without changing the store or the caller's operand
+tail.  This closes resident writer proofs without simplifying their store
+representation. -/
+theorem wp_localGet_return
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {locals : Wasm.Locals} {index : Nat} {value : UInt32}
+    {tail : List Wasm.Value}
+    (found : locals.get index = some (.i32 value))
+    (returned : Q (.Return store (.i32 value :: tail))) :
+    Wasm.wp module [.localGet index, .ret] Q store
+      { locals with values := tail } env := by
+  simp only [Wasm.wp_localGet_cons]
+  have found' :
+      ({ locals with values := tail } : Wasm.Locals).get index =
+        some (.i32 value) := by
+    simpa [Wasm.Locals.get] using found
+  simp only [found', Wasm.wp_ret_cons]
+  exact returned
+
 /-- Writing back the word just read from one address restores the Talos
 memory extensionally.  Resident ABI casts use this to justify their temporary
 scratch-slot overwrite without exposing the byte proof at every call site. -/

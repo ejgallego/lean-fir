@@ -6481,6 +6481,33 @@ W7's BigNumeric object allocator on top of this raw reservation, then attaches
 the proved writer-loop call and checked `Nat.add` dispatcher to the existing
 self-contained live-heap/typed-return closure.
 
+That common-header execution boundary is now closed through reusable proof
+abstractions rather than a helper-specific expansion of eight byte stores.
+`ResidentMemoryRel.write32Store` keeps a physical store update opaque;
+`writeUInt32sStore` and `writeUInt32sMemory` state the generic adjacent-word
+fold and its exact store/memory correspondence.  Small WP composition rules
+cover a prepared store, local and constant word sources, the common
+constant-plus-local allocation-size source, and the final local return.  This
+surface is directly reusable by strings, arrays, closures, and other resident
+object writers.
+
+`ConcreteResidentBigNumericAllocator` identifies the exact W7 symbolic body,
+its Talos adaptation, count guard, scale-by-eight calculation, raw allocator
+call, all eight checked header writes, and returned address.  The compact
+operation-specific `writeHeaderStore` is proved equal to the generic word
+fold; `writeHeaderStore_refines` transports any matching checked W6
+`Header.write`, and `writeAllocationHeaderStore_refines` specializes that
+boundary to the canonical nonpersistent allocation header used by Nat and
+Int objects.  The proof elaborates at the default heartbeat and recursion
+limits and introduces no new ABI or runtime assumption.
+
+The remaining execution-facing step is now sharply isolated: instantiate the
+abstract raw allocator call in `wp_allocateObjectProgram` with
+`wp_allocateProgram_of_allocate`, derive the canonical W6 object allocation
+header transition, then compose the already-proved `writeSumFrom` execution
+and self-contained live-heap/typed-return closure.  The checked `Nat.add`
+dispatcher can consume that result without any new byte-layout proof.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

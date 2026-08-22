@@ -189,6 +189,55 @@ theorem pagesForEnd_word_toNat
   rw [Nat.mod_eq_of_lt]
   omega
 
+/-- Adjacent checked W6 word stores refine the corresponding Talos stores
+while preserving the complete allocating-runtime relation. -/
+theorem writeUInt32s
+    {heap : MemoryState} {store : Wasm.Store host} {frontierIndex : Nat}
+    (related : ResidentAllocatorRel heap store frontierIndex)
+    {address : Nat} {values : List UInt32} {result : LinearMemory}
+    (inBounds : address + 4 * values.length ≤ heap.memory.size)
+    (written : heap.memory.writeUInt32s address values = .ok result) :
+    ResidentAllocatorRel { heap with memory := result }
+      { store with mem :=
+          (ResidentMemoryRel.writeUInt32sMemory store.mem
+            (UInt32.ofNat address) values) }
+      frontierIndex := by
+  induction values generalizing heap store address result with
+  | nil =>
+      simp [LinearMemory.writeUInt32s] at written
+      subst result
+      simpa [ResidentMemoryRel.writeUInt32sMemory] using related
+  | cons value rest ih =>
+      simp only [List.length_cons] at inBounds
+      have headInBounds : address + 3 < heap.memory.size := by omega
+      obtain ⟨middle, headWrite, middleSize, _, _, _, _, _⟩ :=
+        LinearMemory.writeUInt32_spec heap.memory address value headInBounds
+      unfold LinearMemory.writeUInt32s at written
+      rw [headWrite] at written
+      have middleRelated := related.writeUInt32 headInBounds headWrite
+      have tailInBounds : address + 4 + 4 * rest.length ≤ middle.size := by
+        omega
+      have tailRelated := ih middleRelated tailInBounds written
+      simpa [ResidentMemoryRel.writeUInt32sMemory, UInt32.ofNat_add] using
+        tailRelated
+
+/-- The eight adjacent W6 common-header stores refine one exact Talos header
+memory update. -/
+theorem writeHeader
+    {heap : MemoryState} {store : Wasm.Store host} {frontierIndex : Nat}
+    (related : ResidentAllocatorRel heap store frontierIndex)
+    {address : Word32} {header : Header} {result : LinearMemory}
+    (inBounds : address.value + headerBytes ≤ heap.memory.size)
+    (written : header.write heap.memory address = .ok result) :
+    ResidentAllocatorRel { heap with memory := result }
+      { store with mem :=
+          (ResidentMemoryRel.writeUInt32sMemory store.mem
+            (UInt32.ofNat address.value) header.words) }
+      frontierIndex := by
+  apply related.writeUInt32s
+  · simpa [Header.words, headerBytes] using inBounds
+  · exact written
+
 end ResidentAllocatorRel
 
 namespace ResidentAllocator

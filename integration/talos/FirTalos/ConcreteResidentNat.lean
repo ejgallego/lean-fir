@@ -1,5 +1,5 @@
 import Fir.Wasm.Emit.ResidentNatArithmetic
-import FirTalos.ConcreteResidentAllocator
+import FirTalos.ConcreteResidentBigNumericAllocator
 import FirTalos.ConcreteRuntime
 import FirTalos.ConcreteResidentPrimitives
 import FirTalos.Correctness.Adapter
