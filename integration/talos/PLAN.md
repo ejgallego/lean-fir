@@ -6405,6 +6405,24 @@ allocator/header execution and this final memory relation to
 `LiveCellRel.natural`, then feed that object relation to the typed return and
 whole-helper theorem.
 
+That structural object boundary is now proved without trusting a final-header
+premise.  Exact limb histories preserve resident memory size and every byte of
+the 32-byte common header; successful reservation supplies the only wasm32
+nonwrap bound.  A reusable `ResidentMemoryRel` frame theorem transports those
+bytes between the allocator and final stores into W6's checked
+`readLiveHeader`.  Combining the transported header, raw allocation extent,
+aligned payload capacity, and extensional decoder result yields the complete
+`NaturalObjectRel` for the mathematical sum.  W7 therefore needs to expose
+the allocator's initial memory relation, the already-proved exact writer
+history, the final memory relation, unchanged heap cursor, and payload bounds;
+it does not need an independent header certificate or canonical limb list.
+
+The next boundary moves from one object to the live heap: bind the fresh
+Natural descriptor/location in the refinement witness, establish spatial
+freshness from the raw reservation, insert this `NaturalObjectRel` as the new
+`LiveCellRel.natural`, and then feed the resulting `ValueRel` to the existing
+typed-return suffix and whole checked-addition theorem.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
