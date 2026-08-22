@@ -318,6 +318,25 @@ their bytes or explain an intentional metadata-version change.
 The optional shared descriptor vocabulary is
 `browser-benchmarks/source-package/v1`; it describes provenance, producer,
 verifier, operations, ownership, and phase names, not application behavior.
+The producer-side draft is now implemented as a read-only descriptor derived
+from an already verified package. It normalizes exact source commits and
+relevant-file digests, the producing project/backend and Wasm artifact, the
+verification/checksum/smoke contract, production versus diagnostic operations,
+their public phase fields, and the instance/arena/reclamation policy. It
+rejects incomplete provenance, checksum drift, operation drift, duplicate
+phases, and ownership facts inconsistent with the accepted BUILD metadata.
+
+HitScene v2 and selection-player v3 exercise the draft without changing their
+BUILD schemas, inventories, package identifiers, or bytes. Review snapshots
+live only under the ignored worktree-local `.deps/source-package-review/`:
+HitScene is 4,290 bytes with SHA-256
+`dad988f4e24142a89f6b25d941ba4de081728fa49cc70e714454cd895df3c26d`;
+selection is 4,523 bytes with SHA-256
+`6aabb23f8073b682c75f6b01d68aa2994a4781b98ded91daec511b283e0f87b5`.
+Illuminate animation, Verso, and lean-zip owners have been asked to review the
+classification and vocabulary before it becomes package payload. Publication
+inside BUILD versus as a checksummed sibling is deliberately deferred to that
+review and must be a separate metadata-version/package-identity slice.
 
 ### G4. Continue generic compilation by evidence
 
