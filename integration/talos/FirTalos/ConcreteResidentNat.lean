@@ -3332,6 +3332,13 @@ def checkedScale8Word (index : UInt32) : UInt32 :=
   let fourTimes := twice + twice
   fourTimes + fourTimes
 
+/-- The emitter's three doublings are multiplication by eight in wasm32's
+modular arithmetic. -/
+theorem checkedScale8Word_eq_mul8 (index : UInt32) :
+    checkedScale8Word index = 8 * index := by
+  unfold checkedScale8Word
+  bv_decide
+
 /-- Effective payload base computed by a checked carry-limb store. -/
 def checkedLimbBase (object index : UInt32) : UInt32 :=
   checkedScale8Word index + (UInt32.ofNat headerBytes + object)
@@ -4635,6 +4642,97 @@ def WrittenLimbAddressesDisjoint (result : UInt32) (count : Nat) : Prop :=
       (writtenLimbHalfAddress result j highJ).toNat + 3 <
         (writtenLimbHalfAddress result i highI).toNat
 
+/-- The generated address is the canonical wasm32 encoding of its ordinary
+base-plus-eight-times-index coordinate.  This equality is modular and needs
+no allocation premise. -/
+theorem writtenLimbHalfAddress_eq_ofNat
+    (result : UInt32) (index : Nat) (high : Bool) :
+    writtenLimbHalfAddress result index high = UInt32.ofNat
+      (result.toNat + headerBytes + 8 * index + if high then 4 else 0) := by
+  rw [writtenLimbHalfAddress, checkedLimbBase, checkedScale8Word_eq_mul8]
+  have resultRoundtrip : UInt32.ofNat result.toNat = result := by
+    apply UInt32.toNat.inj
+    simp
+  nth_rewrite 1 [← resultRoundtrip]
+  simp only [UInt32.ofNat_add, UInt32.ofNat_mul]
+  ac_rfl
+
+/-- A payload-wide address-space bound removes the modular reduction from
+every generated half-limb coordinate in the prefix. -/
+theorem writtenLimbHalfAddress_toNat_of_payloadFits
+    {result : UInt32} {count index : Nat} {high : Bool}
+    (payloadFits : result.toNat + headerBytes + 8 * count ≤ UInt32.size)
+    (indexInPrefix : index < count) :
+    (writtenLimbHalfAddress result index high).toNat =
+      result.toNat + headerBytes + 8 * index + if high then 4 else 0 := by
+  rw [writtenLimbHalfAddress_eq_ofNat]
+  apply UInt32.toNat_ofNat_of_lt'
+  cases high
+  · change result.toNat + headerBytes + 8 * index + 0 < UInt32.size
+    omega
+  · change result.toNat + headerBytes + 8 * index + 4 < UInt32.size
+    omega
+
+/-- A nonwrapping contiguous Natural payload has pairwise-disjoint generated
+four-byte lanes. -/
+theorem writtenLimbAddressesDisjoint_of_payloadFits
+    {result : UInt32} {count : Nat}
+    (payloadFits : result.toNat + headerBytes + 8 * count ≤ UInt32.size) :
+    WrittenLimbAddressesDisjoint result count := by
+  intro i j highI highJ iInPrefix jInPrefix different
+  rw [writtenLimbHalfAddress_toNat_of_payloadFits payloadFits iInPrefix,
+    writtenLimbHalfAddress_toNat_of_payloadFits payloadFits jInPrefix]
+  rcases Nat.lt_trichotomy i j with before | same | after
+  · left
+    cases highI <;> cases highJ <;> simp_all <;> omega
+  · subst j
+    rcases different with impossible | different
+    · exact (impossible rfl).elim
+    · cases highI <;> cases highJ <;> simp_all
+  · right
+    cases highI <;> cases highJ <;> simp_all <;> omega
+
+/-- A successful raw Natural-object reservation provides exactly the
+nonwrapping payload bound needed by the writer projection.  Header fields are
+irrelevant here; only the allocated eight-byte limb extent matters. -/
+theorem writtenLimbAddressesDisjoint_of_allocateObject
+    {state allocated : MemoryState} {count : Nat}
+    {persistent : Bool} {aux0 aux1 aux2 aux3 : UInt32} {address : Word32}
+    (allocation : state.allocateObject .natural
+      (target.semanticSlotBytes * count) persistent aux0 aux1 aux2 aux3 =
+        .ok (allocated, address)) :
+    WrittenLimbAddressesDisjoint (UInt32.ofNat address.value) count := by
+  obtain ⟨raw, rawAllocation, _, _, _⟩ :=
+    MemoryState.allocateObject_header state allocated .natural
+      (target.semanticSlotBytes * count) persistent aux0 aux1 aux2 aux3 address
+      allocation
+  have post := MemoryState.allocate_spec state raw
+    (align8 (headerBytes + target.semanticSlotBytes * count)) address
+    rawAllocation
+  have addressToNat : (UInt32.ofNat address.value).toNat = address.value := by
+    apply UInt32.toNat_ofNat_of_lt'
+    simpa [wordModulus, UInt32.size] using address.isLt
+  apply writtenLimbAddressesDisjoint_of_payloadFits
+  rw [addressToNat]
+  have unaligned := align8_ge
+    (headerBytes + target.semanticSlotBytes * count)
+  have within := post.endWithinAddressSpace
+  simp only [align8_align8] at within
+  simpa [target, wordModulus, UInt32.size, Nat.add_assoc] using
+    (Nat.le_trans (Nat.add_le_add_left unaligned address.value) within)
+
+/-- The ordinary W6 heap-Natural allocation discharges the writer's complete
+lane-separation premise for its canonical limb count. -/
+theorem writtenLimbAddressesDisjoint_of_allocateNatural
+    {state result : MemoryState} {value : Nat} {address : Word32}
+    (large : Fir.LeanIR.Impure.maxTaggedPayload < value)
+    (allocation : allocateNatural state value = .ok (result, address)) :
+    WrittenLimbAddressesDisjoint (UInt32.ofNat address.value)
+      (naturalLimbs value).length := by
+  obtain ⟨_, middle, _, objectAllocation, _, _⟩ :=
+    allocateNatural_heap_decompose state result value address large allocation
+  exact writtenLimbAddressesDisjoint_of_allocateObject objectAllocation
+
 /-- Extensional read view of the first `count` materialized limbs. -/
 def ReadableLimbPrefix
     (store : Wasm.Store host) (result : UInt32) (words : List LimbWords)
@@ -4725,6 +4823,34 @@ theorem WrittenLimbPrefix.readable
                 (by simpa [writtenLimbHalfAddress] using lowHighDisjoint)
                 (by simpa [writtenLimbHalfAddress] using highHighDisjoint)
             _ = readHigh := earlierWords.2
+
+/-- A successful raw Natural reservation discharges the exact writer
+history's layout premise, yielding final readable output words directly. -/
+theorem WrittenLimbPrefix.readable_of_allocateObject
+    {initial current : Wasm.Store host} {words : List LimbWords} {count : Nat}
+    {state allocated : MemoryState} {persistent : Bool}
+    {aux0 aux1 aux2 aux3 : UInt32} {address : Word32}
+    (written : WrittenLimbPrefix initial (UInt32.ofNat address.value) words
+      count current)
+    (allocation : state.allocateObject .natural
+      (target.semanticSlotBytes * count) persistent aux0 aux1 aux2 aux3 =
+        .ok (allocated, address)) :
+    ReadableLimbPrefix current (UInt32.ofNat address.value) words count :=
+  written.readable (writtenLimbAddressesDisjoint_of_allocateObject allocation)
+
+/-- In particular, an ordinary heap-Natural allocation discharges the layout
+premise for an exact writer history of its canonical number of limbs. -/
+theorem WrittenLimbPrefix.readable_of_allocateNatural
+    {initial current : Wasm.Store host} {words : List LimbWords}
+    {state result : MemoryState} {value : Nat} {address : Word32}
+    (written : WrittenLimbPrefix initial (UInt32.ofNat address.value) words
+      (naturalLimbs value).length current)
+    (large : Fir.LeanIR.Impure.maxTaggedPayload < value)
+    (allocation : allocateNatural state value = .ok (result, address)) :
+    ReadableLimbPrefix current (UInt32.ofNat address.value) words
+      (naturalLimbs value).length :=
+  written.readable
+    (writtenLimbAddressesDisjoint_of_allocateNatural large allocation)
 
 /-- The complete writer loop materializes exactly the pure output prefix, not
 merely an arbitrary sequence of in-bounds stores. -/

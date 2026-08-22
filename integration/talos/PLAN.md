@@ -6368,6 +6368,23 @@ addition.  The next slice is correspondingly narrow: derive this separation
 from the successful Natural allocation bounds, then reuse the existing
 decoder/refinement boundary rather than reproving arithmetic inside memory.
 
+The allocation-boundary slice now discharges that premise.  Three-doubling
+address arithmetic is normalized to `8 * index`; a payload-wide wasm32 bound
+then removes every modular reduction and proves all distinct four-byte halves
+disjoint.  Most usefully, the bound comes directly from the raw allocator's
+`AllocatePost.endWithinAddressSpace`: neither a pre-existing linear-memory
+size assumption nor the full heap refinement is needed.  Consequently both a
+successful raw Natural-object reservation and ordinary `allocateNatural`
+compose with `WrittenLimbPrefix` to produce exact final `read32` words.
+
+This is a useful runtime-design boundary: address-space safety is guaranteed
+at reservation time, while memory growth and arithmetic correctness remain
+independent consumers of that guarantee.  The next proof no longer concerns
+aliasing.  It must identify the writer's `count` output limbs plus optional
+terminal carry with the canonical `naturalLimbs` of the mathematical sum, so
+the existing Natural decoder and `NaturalResultRefines` theorem can consume
+the exact readable payload.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
