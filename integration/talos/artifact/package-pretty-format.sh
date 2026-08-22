@@ -39,6 +39,10 @@ if (($# > 1)); then
   exit 1
 fi
 source_artifact="$here/_build/source-pretty-format-trace-resident-closed.wasm"
+source_inventory="$source_artifact.inventory.json"
+source_function_sidecar="$source_artifact.functions.json"
+binaryen="$root/.deps/lcnf-c-wasm/emsdk/upstream/bin"
+function_index_tool="$root/tooling/wasm/function-index.mjs"
 
 file_digest() {
   local line
@@ -65,6 +69,7 @@ generator_cache_hit() {
     "$source_artifact"
     "$source_artifact.json"
     "$source_artifact.lcnf"
+    "$source_inventory"
   )
   local -a stored_digests=()
 
@@ -92,6 +97,7 @@ record_generator_cache() {
   file_digest "$source_artifact" > "$digests_tmp"
   file_digest "$source_artifact.json" >> "$digests_tmp"
   file_digest "$source_artifact.lcnf" >> "$digests_tmp"
+  file_digest "$source_inventory" >> "$digests_tmp"
   mv -f "$digests_tmp" "$generator_cache_digests"
   mv -f "$key_tmp" "$generator_cache_key"
 }
@@ -115,7 +121,7 @@ if [[ "$build" == true ]]; then
   )"
   mapfile -t generator_dependencies <<< "$generator_dependency_list"
   generator_key="$({
-    key_field cache-format fir-prettyM-source-v2
+    key_field cache-format fir-prettyM-source-v3
     key_field root "$root"
     key_field source "$generator_source"
     key_field source-sha256 "$(file_digest "$generator_source")"
@@ -125,7 +131,7 @@ if [[ "$build" == true ]]; then
     key_field lean-sha256 "$(file_digest "$lean_tool")"
     key_field lean-version "$lean_version"
     key_field lake-version "$lake_version"
-    key_field command "lake -d <root> env fir-prettyM-artifact FirWasmPrettyTraceExample.lean <output.wasm>"
+    key_field command "lake -d <root> env fir-prettyM-artifact --function-inventory <inventory.json> FirWasmPrettyTraceExample.lean <output.wasm>"
     dependency_index=0
     for dependency in "${generator_dependencies[@]}"; do
       [[ -f "$dependency" ]] || {
@@ -148,6 +154,7 @@ if [[ "$build" == true ]]; then
     printf 'BUILD prettyM source artifact\n'
     env -u FIR_PRETTYM_CHECKPOINTS \
       lake -d "$root" env "$generator_executable" \
+      --function-inventory "$source_inventory" \
       "$generator_source" "$source_artifact"
     test -s "$source_artifact"
     test -s "$source_artifact.json"
@@ -159,6 +166,16 @@ fi
 test -s "$source_artifact"
 test -s "$source_artifact.json"
 test -s "$source_artifact.lcnf"
+test -s "$source_inventory"
+
+node "$function_index_tool" direct \
+  --binaryen-dir "$binaryen" \
+  --wasm "$source_artifact" \
+  --inventory "$source_inventory" \
+  --output "$source_function_sidecar"
+node "$function_index_tool" verify \
+  --wasm "$source_artifact" \
+  --sidecar "$source_function_sidecar"
 
 out_parent="$(dirname "$out")"
 out_name="$(basename "$out")"
@@ -195,6 +212,8 @@ mkdir -p \
 install -m 0644 "$source_artifact" "$stage/prettyM.wasm"
 install -m 0644 "$source_artifact.json" "$stage/prettyM.wasm.json"
 install -m 0644 "$source_artifact.lcnf" "$stage/prettyM.wasm.lcnf"
+install -m 0644 "$source_function_sidecar" \
+  "$stage/prettyM.wasm.functions.json"
 install -m 0644 "$here/prettyM-package/README.md" "$stage/README.md"
 install -m 0644 "$here/prettyM-package/smoke.mjs" "$stage/smoke.mjs"
 install -m 0644 "$here/prettyM-browser-adapter.mjs" \
@@ -227,6 +246,9 @@ const [out, root] = process.argv.slice(2);
 const bytes = fs.readFileSync(path.join(out, "prettyM.wasm"));
 const manifest = JSON.parse(
   fs.readFileSync(path.join(out, "prettyM.wasm.json"), "utf8"));
+const functionSidecarBytes = fs.readFileSync(
+  path.join(out, "prettyM.wasm.functions.json"));
+const functionSidecar = JSON.parse(functionSidecarBytes);
 const module = new WebAssembly.Module(bytes);
 const imports = WebAssembly.Module.imports(module);
 const exports = WebAssembly.Module.exports(module);
@@ -251,6 +273,14 @@ const build = {
     file: "prettyM.wasm",
     bytes: bytes.length,
     sha256: createHash("sha256").update(bytes).digest("hex"),
+  },
+  functionIndex: {
+    file: "prettyM.wasm.functions.json",
+    schemaVersion: functionSidecar.schemaVersion,
+    bytes: functionSidecarBytes.length,
+    sha256: createHash("sha256").update(functionSidecarBytes).digest("hex"),
+    artifactSha256: functionSidecar.artifact.sha256,
+    identityBoundary: functionSidecar.capture.producer.identityBoundary,
   },
   entry: manifest.entry,
   params: manifest.params,
@@ -353,6 +383,7 @@ NODE
     README.md \
     prettyM.wasm \
     prettyM.wasm.json \
+    prettyM.wasm.functions.json \
     prettyM.wasm.lcnf \
     prettyM-browser-adapter.mjs \
     check-prettyM-browser-adapter.mjs \

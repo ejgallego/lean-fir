@@ -154,6 +154,8 @@ generate_source_artifacts() {
     env -u FIR_PRETTYM_CHECKPOINTS lake -d "$root" env "$pretty_generator" \
       --instruction-origins \
       "$here/_build/source-pretty-format-trace-resident-closed.origins.json" \
+      --function-inventory \
+      "$here/_build/source-pretty-format-trace-resident-closed.wasm.inventory.json" \
       "$here/FirWasmPrettyTraceExample.lean" \
       "$here/_build/source-pretty-format-trace-resident-closed.wasm"
   else
@@ -164,14 +166,29 @@ generate_source_artifacts() {
     env -u FIR_PRETTYM_CHECKPOINTS lake -d "$root" env "$pretty_generator" \
       --instruction-origins \
       "$here/_build/source-pretty-format-trace-resident-closed.origins.json" \
+      --function-inventory \
+      "$here/_build/source-pretty-format-trace-resident-closed.wasm.inventory.json" \
       "$here/FirWasmPrettyTraceExample.lean" \
       "$here/_build/source-pretty-format-trace-resident-closed.wasm"
   fi
+  node "$root/tooling/wasm/function-index.mjs" direct \
+    --binaryen-dir "$root/.deps/lcnf-c-wasm/emsdk/upstream/bin" \
+    --wasm "$here/_build/source-pretty-format-trace-resident-closed.wasm" \
+    --inventory \
+      "$here/_build/source-pretty-format-trace-resident-closed.wasm.inventory.json" \
+    --output \
+      "$here/_build/source-pretty-format-trace-resident-closed.wasm.functions.json"
 }
 generate_source_artifacts
 test -s _build/source-pretty-format-trace-resident-closed.origins.json
+test -s _build/source-pretty-format-trace-resident-closed.wasm.inventory.json
+test -s _build/source-pretty-format-trace-resident-closed.wasm.functions.json
 cp _build/source-pretty-format-trace-resident-closed.origins.json \
   _build/source-pretty-format-trace-resident-closed-first.origins.json
+cp _build/source-pretty-format-trace-resident-closed.wasm.inventory.json \
+  _build/source-pretty-format-trace-resident-closed-first.wasm.inventory.json
+cp _build/source-pretty-format-trace-resident-closed.wasm.functions.json \
+  _build/source-pretty-format-trace-resident-closed-first.wasm.functions.json
 mapfile -t source_artifacts < <(
   node --input-type=module -e '
     import { CONCRETE_SOURCE_PROBES } from "./concrete-corpus.mjs";
@@ -233,9 +250,16 @@ done
 generate_source_artifacts
 cmp _build/source-pretty-format-trace-resident-closed-first.origins.json \
   _build/source-pretty-format-trace-resident-closed.origins.json
+cmp _build/source-pretty-format-trace-resident-closed-first.wasm.inventory.json \
+  _build/source-pretty-format-trace-resident-closed.wasm.inventory.json
+cmp _build/source-pretty-format-trace-resident-closed-first.wasm.functions.json \
+  _build/source-pretty-format-trace-resident-closed.wasm.functions.json
 node check-instruction-origins.mjs \
   _build/source-pretty-format-trace-resident-closed.wasm \
   _build/source-pretty-format-trace-resident-closed.origins.json
+node "$root/tooling/wasm/function-index.mjs" verify \
+  --wasm _build/source-pretty-format-trace-resident-closed.wasm \
+  --sidecar _build/source-pretty-format-trace-resident-closed.wasm.functions.json
 for source in "${source_artifacts[@]}"; do
   cmp "_build/$source-first.wasm" "_build/$source.wasm"
   cmp "_build/$source-first.wasm.json" "_build/$source.wasm.json"

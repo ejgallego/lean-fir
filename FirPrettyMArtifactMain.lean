@@ -26,17 +26,33 @@ private unsafe def compileArtifact (sourcePath : System.FilePath) (moduleName en
 
 private def usage : String :=
   "usage: fir-prettyM-artifact [--instruction-origins <origins.json>] " ++
+  "[--function-inventory <inventory.json>] " ++
   "<fixture.lean> <output.wasm>\n" ++
   "   or: fir-prettyM-artifact [--instruction-origins <origins.json>] " ++
+  "[--function-inventory <inventory.json>] " ++
   "<fixture.lean> <module> <entry> <output.wasm>"
+
+private def parseOptions (args : List String) :
+    Except String (Option System.FilePath × Option System.FilePath × List String) :=
+  go args none none
+where
+  go : List String → Option System.FilePath → Option System.FilePath →
+      Except String (Option System.FilePath × Option System.FilePath × List String)
+    | "--instruction-origins" :: path :: rest, none, inventory =>
+        go rest (some path) inventory
+    | "--function-inventory" :: path :: rest, origins, none =>
+        go rest origins (some path)
+    | rest@(option :: _), origins, inventory =>
+        if option.startsWith "--" then
+          throw s!"unknown or duplicate option {option}"
+        else
+          pure (origins, inventory, rest)
+    | [], origins, inventory => pure (origins, inventory, [])
 
 unsafe def run (args : List String) : IO UInt32 := do
   try
-    let (originOutput?, positional) : Option System.FilePath × List String :=
-      match args with
-      | "--instruction-origins" :: originOutput :: rest =>
-          (some originOutput, rest)
-      | _ => (none, args)
+    let (originOutput?, inventoryOutput?, positional) ←
+      IO.ofExcept <| parseOptions args
     let (source, moduleName, entry, output) ← match positional with
       | [source, output] =>
           pure (source, `FirWasmPrettyTraceExample,
@@ -48,6 +64,9 @@ unsafe def run (args : List String) : IO UInt32 := do
           return 2
     let artifact ← compileArtifact source moduleName entry
     IO.ofExcept <| (← artifact.write output).mapError fun error => s!"{repr error}"
+    if let some inventoryOutput := inventoryOutput? then
+      artifact.writeFunctionInventory inventoryOutput
+      IO.println s!"prettyM: wrote function inventory to {inventoryOutput}"
     if let some originOutput := originOutput? then
       let originsStarted ← IO.monoMsNow
       IO.ofExcept <| (← artifact.writeInstructionOrigins originOutput).mapError

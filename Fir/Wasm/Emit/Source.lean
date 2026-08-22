@@ -1076,6 +1076,42 @@ def ModuleArtifact.write (artifact : ModuleArtifact) (path : System.FilePath) :
 def Artifact.write (artifact : Artifact) (path : System.FilePath) : IO Unit := do
   writeArtifactFiles artifact.toModuleArtifact artifact.manifest path
 
+private def ModuleArtifact.functionInventory (artifact : ModuleArtifact) :
+    Array Name × Array Name × Array Name :=
+  let functions := artifact.module.functions.map (·.name)
+  let sourceFunctions := artifact.source.program.decls.filterMap fun declaration =>
+    match declaration.value with
+    | .code _ => some declaration.name
+    | .extern _ => none
+  let retainedSourceFunctions := sourceFunctions.filter functions.contains
+  let residentHelpers := functions.filter fun name =>
+    !retainedSourceFunctions.contains name
+  (functions, retainedSourceFunctions, residentHelpers)
+
+/--
+Return the exact emitter-final function inventory consumed by generic Wasm
+function-index tooling. This inventory is meaningful only for `artifact.bytes`,
+whose defined functions have the same order as `artifact.module.functions`.
+-/
+def ModuleArtifact.functionInventoryJson (artifact : ModuleArtifact) : Json :=
+  let (functions, sourceFunctions, residentHelpers) := artifact.functionInventory
+  Json.mkObj [
+    ("schemaVersion", "fir.wasm.emitter-function-inventory/v1"),
+    ("artifact", Json.mkObj [
+      ("byteLength", artifact.bytes.size),
+      ("functionImports", artifact.module.imports.size),
+      ("definedFunctions", functions.size)]),
+    ("functions", Json.arr <| functions.map fun name => name.toString),
+    ("sourceFunctions", Json.arr <| sourceFunctions.map fun name => name.toString),
+    ("residentHelpers", Json.arr <| residentHelpers.map fun name => name.toString)]
+
+/-- Write only the opt-in exact emitter-final function inventory. -/
+def ModuleArtifact.writeFunctionInventory (artifact : ModuleArtifact)
+    (path : System.FilePath) : IO Unit := do
+  if let some parent := path.parent then
+    IO.FS.createDirAll parent
+  IO.FS.writeFile path (artifact.functionInventoryJson.compress ++ "\n")
+
 private def compactInstructionOriginJson (origin : InstructionOrigin) : Json :=
   Json.arr #[
     origin.offset,
@@ -1094,14 +1130,7 @@ def ModuleArtifact.instructionOriginsJson (artifact : ModuleArtifact) :
   unless encoding.bytes == artifact.bytes do
     throw (.encoding (.invalidOriginTrace
       "origin encoding changed the ordinary artifact bytes"))
-  let functions := artifact.module.functions.map (·.name)
-  let sourceFunctions := artifact.source.program.decls.filterMap fun declaration =>
-    match declaration.value with
-    | .code _ => some declaration.name
-    | .extern _ => none
-  let retainedSourceFunctions := sourceFunctions.filter functions.contains
-  let residentHelpers := functions.filter fun name =>
-    !retainedSourceFunctions.contains name
+  let (functions, retainedSourceFunctions, residentHelpers) := artifact.functionInventory
   let functionImports := artifact.module.imports.size
   let functionRows := functions.mapIdx fun ordinal name =>
     let functionIndex := functionImports + ordinal

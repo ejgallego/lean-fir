@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 
 import {
@@ -19,6 +20,9 @@ const manifest = JSON.parse(
   fs.readFileSync(new URL("./prettyM.wasm.json", import.meta.url), "utf8"));
 const build = JSON.parse(
   fs.readFileSync(new URL("./BUILD.json", import.meta.url), "utf8"));
+const functionSidecarBytes = fs.readFileSync(
+  new URL("./prettyM.wasm.functions.json", import.meta.url));
+const functionSidecar = JSON.parse(functionSidecarBytes);
 const module = new WebAssembly.Module(bytes);
 const imports = WebAssembly.Module.imports(module);
 
@@ -54,6 +58,18 @@ assert.equal(
 assert.equal(build.functionImports, functionImportCount);
 assert.equal(build.memoryImports, 0);
 assert.equal(build.memoryExports, 1);
+assert.equal(functionSidecar.schemaVersion, "fir.wasm.function-index/v1");
+assert.equal(functionSidecar.artifact.byteLength, bytes.length);
+assert.equal(functionSidecar.artifact.sha256,
+  createHash("sha256").update(bytes).digest("hex"));
+assert.equal(build.functionIndex.schemaVersion, functionSidecar.schemaVersion);
+assert.equal(build.functionIndex.bytes, functionSidecarBytes.length);
+assert.equal(build.functionIndex.sha256,
+  createHash("sha256").update(functionSidecarBytes).digest("hex"));
+assert.equal(build.functionIndex.artifactSha256,
+  functionSidecar.artifact.sha256);
+assert.equal(build.functionIndex.identityBoundary,
+  "exact-emitter-final-order/v1");
 assert.deepStrictEqual(build.capabilities.output, {
   semantic: "PrettyTrace",
   physical: manifest.result,

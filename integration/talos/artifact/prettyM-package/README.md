@@ -108,7 +108,7 @@ integration/talos/artifact/package-pretty-format.sh
 
 The default command reuses a previously generated source artifact only when
 the generator, imported Lean artifacts and transitive Lake trace, toolchain,
-and all three stored output digests still match. Pass `--rebuild` to force the
+and all four stored output digests still match. Pass `--rebuild` to force the
 native final-only source-generation step. The normal artifact gate independently
 generates the plain and styled final artifacts twice and compares them
 byte-for-byte. Set `FIR_PRETTYM_EXHAUSTIVE_CHECKPOINTS=1` when running
@@ -152,9 +152,13 @@ PASS concrete styled prettyM trace (Fir.Wasm.Emit.SourceFixture.prettyFormatTrac
 ```
 
 `SHA256SUMS` authenticates the capability metadata, README, Wasm module,
-descriptor, final LCNF capture, smoke client, and copied runtime sources.
+descriptor, exact final-function sidecar, final LCNF capture, smoke client,
+and copied runtime sources. `prettyM.wasm.functions.json` binds every final
+Wasm function index to the emitter's source/resident identity and the exact
+`prettyM.wasm` SHA-256. It is diagnostic metadata; the browser adapter does
+not download or consume it.
 `BUILD.json` records the source commit and dirty state, raw boundary, artifact
-size and digest, measured capabilities, and exact test command.
+and sidecar sizes and digests, measured capabilities, and exact test command.
 
 ## Runtime boundary
 
