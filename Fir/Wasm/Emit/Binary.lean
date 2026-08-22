@@ -658,12 +658,25 @@ private partial def findCodeSection? (bytes : Bytes) (offset : Nat := header.siz
   else
     none
 
+/-- Compare an encoded range without allocating and immediately releasing a slice. -/
+@[inline] private def bytesRangeEquals (actual : Bytes) (offset : Nat)
+    (expected : Bytes) : Bool :=
+  if offset + expected.size > actual.size then
+    false
+  else
+    Id.run do
+      for index in [:expected.size] do
+        unless actual[offset + index]! == expected[index]! do
+          return false
+      return true
+
 private def traceOrigins (module : Module) (bytes : ByteArray) :
     Except EncodeError (Array InstructionOrigin) := do
   if module.functions.isEmpty then return #[]
-  let some (codeOffset, codeEnd) := findCodeSection? bytes.data |
+  let encodedBytes := bytes.data
+  let some (codeOffset, codeEnd) := findCodeSection? encodedBytes |
     throw (.invalidOriginTrace "encoded module has no valid code section")
-  let some (functionCount, firstBodyOffset) := decodeU32At bytes.data codeOffset |
+  let some (functionCount, firstBodyOffset) := decodeU32At encodedBytes codeOffset |
     throw (.invalidOriginTrace "encoded code section has no function vector")
   unless functionCount == module.functions.size do
     throw (.invalidOriginTrace
@@ -675,15 +688,13 @@ private def traceOrigins (module : Module) (bytes : ByteArray) :
       let traced ← traceFunctionBody module checkIndex index function
       let bodyEnd := bodyOffset + traced.1.size
       unless bodyEnd ≤ codeEnd &&
-          bytes.data.extract bodyOffset bodyEnd == traced.1 do
+          bytesRangeEquals encodedBytes bodyOffset traced.1 do
         throw (.invalidOriginTrace s!"function-body drift for {function.name}")
       let functionIndex := module.imports.size + ordinal
       let syntheticSource := s!"fir-wasm-origin/{functionIndex}/{function.name}"
       let functionOrigins ← traced.2.toList.zipIdx.mapM fun (origin, preorder) => do
         let absoluteOffset := bodyOffset + origin.offset
-        unless absoluteOffset + origin.opcode.size ≤ bytes.size &&
-            bytes.data.extract absoluteOffset
-              (absoluteOffset + origin.opcode.size) == origin.opcode do
+        unless bytesRangeEquals encodedBytes absoluteOffset origin.opcode do
           throw (.invalidOriginTrace
             s!"opcode drift at {function.name}:{preorder + 1}")
         return {

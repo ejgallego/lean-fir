@@ -1132,22 +1132,38 @@ def ModuleArtifact.instructionOriginsJson (artifact : ModuleArtifact) :
       "origin encoding changed the ordinary artifact bytes"))
   let (functions, retainedSourceFunctions, residentHelpers) := artifact.functionInventory
   let functionImports := artifact.module.imports.size
-  let functionRows := functions.mapIdx fun ordinal name =>
+  /-
+  `traceOrigins` emits defined functions in module order and symbolic
+  instructions in preorder. Consume that stream once: filtering the complete
+  origin array for every function makes this diagnostic quadratic.
+  -/
+  let mut originCursor := 0
+  let mut functionRows : Array Json := #[]
+  for ordinal in [:functions.size] do
+    let name := functions[ordinal]!
     let functionIndex := functionImports + ordinal
-    let origins := encoding.origins.filter (·.functionIndex == functionIndex)
+    let mut origins : Array Json := #[]
+    while h : originCursor < encoding.origins.size do
+      let origin := encoding.origins[originCursor]
+      if origin.functionIndex != functionIndex then break
+      origins := origins.push (compactInstructionOriginJson origin)
+      originCursor := originCursor + 1
     let kind := if retainedSourceFunctions.contains name then
         "lean-source"
       else if residentHelpers.contains name then
         "resident-helper"
       else
         "unclassified-definition"
-    Json.mkObj [
+    functionRows := functionRows.push <| Json.mkObj [
       ("index", functionIndex),
       ("name", name.toString),
       ("kind", kind),
       ("public", artifact.module.exports.contains name),
       ("source", s!"fir-wasm-origin/{functionIndex}/{name}"),
-      ("origins", Json.arr <| origins.map compactInstructionOriginJson)]
+      ("origins", Json.arr origins)]
+  unless originCursor == encoding.origins.size do
+    throw (.encoding (.invalidOriginTrace
+      "instruction origins are not ordered by defined function index"))
   return Json.mkObj [
     ("schema", "fir.wasm.instruction-origins/v1"),
     ("artifact", Json.mkObj [
