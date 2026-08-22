@@ -9,7 +9,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { performance } from "node:perf_hooks";
 
@@ -18,10 +18,247 @@ import { validateSidecar } from "../wasm/function-index-lib.mjs";
 
 export { residentHelperFamily } from "../runtime-classification.mjs";
 
-export const profileEvidenceSchema = "fir.sampled-profile/v1";
+export const legacyProfileEvidenceSchema = "fir.sampled-profile/v1";
+export const profileEvidenceSchema = "fir.sampled-profile/v2";
+export const profileComparabilitySchema = "fir.profile-comparability/v1";
+export const workloadReceiptSchema = "fir.profile-workload-receipt/v1";
+export const profileQualityPolicy = Object.freeze({
+  minimumWasmSelfSamples: 100,
+});
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+function jsonValue(value, label) {
+  let encoded;
+  try {
+    encoded = JSON.stringify(value);
+  } catch (error) {
+    throw new Error(`${label} is not JSON-compatible: ${error.message}`);
+  }
+  assert.notEqual(encoded, undefined, `${label} is not a JSON value`);
+  const decoded = JSON.parse(encoded);
+  assert.deepEqual(decoded, value,
+    `${label} must contain only stable JSON values`);
+  return decoded;
+}
+
+function jsonObject(value, label) {
+  const result = jsonValue(value, label);
+  assert(result !== null && typeof result === "object" &&
+    !Array.isArray(result), `${label} must be a JSON object`);
+  return result;
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  if (value !== null && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) =>
+      `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function deepFreeze(value) {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) deepFreeze(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+function identity(descriptor, label) {
+  if (descriptor === null || typeof descriptor !== "object") return null;
+  assert(Number.isSafeInteger(descriptor.byteLength) &&
+    descriptor.byteLength >= 0, `${label} has an invalid byte length`);
+  assert.equal(typeof descriptor.sha256, "string",
+    `${label} has no SHA-256 identity`);
+  assert.match(descriptor.sha256, /^[0-9a-f]{64}$/,
+    `${label} has an invalid SHA-256 identity`);
+  return {
+    byteLength: descriptor.byteLength,
+    sha256: descriptor.sha256,
+  };
+}
+
+function receiptEntries(receiptDirectory, entries, kind) {
+  assert(Array.isArray(entries), `workload receipt ${kind} must be an array`);
+  const roles = new Set();
+  return entries.map((entry) => {
+    assert(entry !== null && typeof entry === "object" &&
+      !Array.isArray(entry), `workload receipt ${kind} entry must be an object`);
+    assert.equal(typeof entry.role, "string",
+      `workload receipt ${kind} entry has no role`);
+    assert(entry.role.length !== 0,
+      `workload receipt ${kind} role must not be empty`);
+    assert.equal(roles.has(entry.role), false,
+      `workload receipt repeats ${kind} role ${entry.role}`);
+    roles.add(entry.role);
+    assert.equal(typeof entry.path, "string",
+      `workload receipt ${kind} ${entry.role} has no path`);
+    assert(entry.path.length !== 0 && !isAbsolute(entry.path),
+      `workload receipt ${kind} ${entry.role} path must be relative`);
+    const resolvedPath = resolve(receiptDirectory, entry.path);
+    const bytes = readFileSync(resolvedPath);
+    return {
+      resolvedPath,
+      bytes,
+      descriptor: {
+        role: entry.role,
+        file: basename(resolvedPath),
+        byteLength: bytes.length,
+        sha256: sha256(bytes),
+      },
+    };
+  }).sort((left, right) =>
+    left.descriptor.role.localeCompare(right.descriptor.role));
+}
+
+function loadWorkloadReceipt(path) {
+  if (path === undefined) return null;
+  const resolvedPath = resolve(path);
+  const bytes = readFileSync(resolvedPath);
+  const receipt = jsonValue(JSON.parse(bytes), "workload receipt");
+  assert.equal(receipt.schemaVersion, workloadReceiptSchema,
+    `unsupported workload receipt schema ${receipt.schemaVersion}`);
+  for (const name of ["id", "semanticEndpoint", "instancePolicy"]) {
+    assert.equal(typeof receipt[name], "string",
+      `workload receipt ${name} must be a string`);
+    assert(receipt[name].length !== 0,
+      `workload receipt ${name} must not be empty`);
+  }
+  const parameters = jsonObject(receipt.parameters ?? {},
+    "workload receipt parameters");
+  const directory = dirname(resolvedPath);
+  const dependencies = receiptEntries(directory,
+    receipt.dependencies ?? [], "dependencies");
+  const inputs = receiptEntries(directory, receipt.inputs ?? [], "inputs");
+  const paths = [...dependencies, ...inputs].map(({ resolvedPath: item }) =>
+    item);
+  assert.equal(new Set(paths).size, paths.length,
+    "workload receipt repeats a dependency or input path");
+  return {
+    resolvedPath,
+    bytes,
+    dependencies,
+    inputs,
+    descriptor: {
+      schemaVersion: receipt.schemaVersion,
+      file: basename(resolvedPath),
+      byteLength: bytes.length,
+      sha256: sha256(bytes),
+      id: receipt.id,
+      semanticEndpoint: receipt.semanticEndpoint,
+      instancePolicy: receipt.instancePolicy,
+      parameters,
+    },
+  };
+}
+
+function descriptorDimensions(items) {
+  if (!Array.isArray(items)) return null;
+  const roles = new Set();
+  return items.map((descriptor) => {
+    assert.equal(typeof descriptor?.role, "string",
+      "profile workload artifact has no role");
+    assert(descriptor.role.length !== 0,
+      "profile workload artifact role must not be empty");
+    assert.equal(roles.has(descriptor.role), false,
+      `profile workload repeats artifact role ${descriptor.role}`);
+    roles.add(descriptor.role);
+    return {
+      role: descriptor.role,
+      ...identity(descriptor,
+        `profile workload artifact ${descriptor.role}`),
+    };
+  }).sort((left, right) => left.role.localeCompare(right.role));
+}
+
+export function makeProfileComparability({
+  schemaVersion,
+  workload,
+  runtime,
+  observations,
+}) {
+  const limitations = [];
+  if (schemaVersion !== profileEvidenceSchema) {
+    limitations.push("legacy-profile-evidence-schema");
+  }
+  if (workload?.receipt?.schemaVersion !== workloadReceiptSchema) {
+    limitations.push("workload-receipt-missing");
+  }
+  const runtimeFields = ["node", "v8", "platform", "arch",
+    "samplingIntervalMicros"];
+  for (const field of runtimeFields) {
+    if (runtime?.[field] === undefined || runtime?.[field] === null) {
+      limitations.push(`runtime-${field}-missing`);
+    }
+  }
+  const dimensions = {
+    workload: {
+      module: identity(workload, "profile workload module"),
+      receipt: identity(workload?.receipt, "profile workload receipt"),
+      metadata: jsonValue(workload?.metadata ?? null,
+        "profile workload metadata"),
+      dependencies: descriptorDimensions(workload?.dependencies),
+      inputs: descriptorDimensions(workload?.inputs),
+    },
+    runtime: Object.fromEntries(runtimeFields.map((field) =>
+      [field, runtime?.[field] ?? null])),
+    observations: jsonValue(observations ?? null, "profile observations"),
+  };
+  if (dimensions.workload.module === null) {
+    limitations.push("workload-module-identity-missing");
+  }
+  if (dimensions.workload.dependencies === null) {
+    limitations.push("workload-dependencies-missing");
+  }
+  if (dimensions.workload.inputs === null) {
+    limitations.push("workload-inputs-missing");
+  }
+  const uniqueLimitations = [...new Set(limitations)].sort();
+  const eligible = uniqueLimitations.length === 0;
+  return {
+    schemaVersion: profileComparabilitySchema,
+    eligible,
+    key: eligible ? sha256(Buffer.from(canonicalJson(dimensions))) : null,
+    limitations: uniqueLimitations,
+    dimensions,
+  };
+}
+
+export function makeProfileQuality(summary, comparability) {
+  const totalSamples = summary.resolvedWasmSamples +
+    summary.unresolvedWasmSamples + summary.hostSamples;
+  const wasmSamples = summary.resolvedWasmSamples +
+    summary.unresolvedWasmSamples;
+  const limitations = [...comparability.limitations];
+  if (summary.window?.method !== "phase-overlap-time-deltas/v1") {
+    limitations.push("approximate-temporal-attribution");
+  }
+  if (summary.unresolvedWasmSamples !== 0) {
+    limitations.push("unresolved-wasm-samples");
+  }
+  if (wasmSamples === 0) limitations.push("no-wasm-self-samples");
+  if (wasmSamples < profileQualityPolicy.minimumWasmSelfSamples) {
+    limitations.push("low-wasm-self-sample-count");
+  }
+  return {
+    classification: limitations.length === 0 ? "checked-diagnostic" :
+      "screening",
+    limitations: [...new Set(limitations)].sort(),
+    policy: profileQualityPolicy,
+    metrics: {
+      includedSamples: summary.sampleCount,
+      wasmSelfSamples: wasmSamples,
+      hostSamples: summary.hostSamples,
+      wasmSelfSampleShare: totalSamples === 0 ? null : wasmSamples / totalSamples,
+      sampledMicros: summary.totalSampleMicros,
+    },
+  };
 }
 
 function frameIndex(callFrame) {
@@ -42,21 +279,31 @@ export function profileFunctionFamily(function_) {
   return "wasm/linked-or-optimizer";
 }
 
-function sampleDeltas(profile) {
+function sampleDeltas(profile, requireTimeDeltas) {
   assert(Array.isArray(profile.samples) && profile.samples.length !== 0,
     "CPU profile contains no samples");
-  if (Array.isArray(profile.timeDeltas) &&
-      profile.timeDeltas.length === profile.samples.length) {
+  if (profile.timeDeltas !== undefined) {
+    assert(Array.isArray(profile.timeDeltas) &&
+      profile.timeDeltas.length === profile.samples.length,
+    "CPU profile time deltas do not match its samples");
     assert(profile.timeDeltas.every((delta) =>
       Number.isFinite(delta) && delta >= 0),
     "CPU profile contains an invalid sample delta");
-    return profile.timeDeltas;
+    return {
+      values: profile.timeDeltas,
+      method: "phase-overlap-time-deltas/v1",
+    };
   }
+  assert.equal(requireTimeDeltas, false,
+    "exact CPU profile evidence requires sample time deltas");
   const total = profile.endTime - profile.startTime;
   assert(Number.isFinite(total) && total >= 0,
     "CPU profile has no usable time interval");
-  return Array.from({ length: profile.samples.length }, () =>
-    total / profile.samples.length);
+  return {
+    values: Array.from({ length: profile.samples.length }, () =>
+      total / profile.samples.length),
+    method: "uniform-profile-interval/v1",
+  };
 }
 
 function add(map, key, delta) {
@@ -178,6 +425,7 @@ export function summarizeCpuProfile(profile, sidecar, {
   startMicros = 0,
   durationMicros = Number.POSITIVE_INFINITY,
   strictFunctionIndices = false,
+  requireTimeDeltas = false,
 } = {}) {
   assert(profile !== null && typeof profile === "object",
     "CPU profile must be an object");
@@ -191,7 +439,8 @@ export function summarizeCpuProfile(profile, sidecar, {
   assert(Array.isArray(profile.nodes), "CPU profile contains no node array");
   const nodes = new Map(profile.nodes.map((node) => [node.id, node]));
   const parents = profileNodeParents(profile, nodes);
-  const deltas = sampleDeltas(profile);
+  const temporal = sampleDeltas(profile, requireTimeDeltas);
+  const deltas = temporal.values;
   const groups = new Map();
   const functions = new Map();
   const functionSamples = new Map();
@@ -249,7 +498,7 @@ export function summarizeCpuProfile(profile, sidecar, {
       String(right.name ?? right.index));
   return {
     window: {
-      method: "phase-overlap-time-deltas/v1",
+      method: temporal.method,
       startMicros,
       durationMicros: Number.isFinite(durationMicros) ? durationMicros : null,
       rawProfileMicros: deltas.reduce((sum, item) => sum + item, 0),
@@ -318,8 +567,10 @@ export async function runNodeProfile({
   wasmPath,
   sidecarPath,
   workloadPath,
+  workloadReceiptPath,
   outputDirectory,
   metadata = {},
+  metadataPath,
   samplingIntervalMicros = 1000,
 }) {
   assert(Number.isSafeInteger(samplingIntervalMicros) &&
@@ -338,12 +589,24 @@ export async function runNodeProfile({
     const workloadBytes = readFileSync(resolvedWorkload);
     const sidecar = JSON.parse(sidecarBytes);
     validateSidecar(wasmBytes, sidecar);
+    const workloadReceipt = loadWorkloadReceipt(workloadReceiptPath);
+    const resolvedMetadata = metadataPath === undefined ? undefined :
+      resolve(metadataPath);
+    const metadataBytes = resolvedMetadata === undefined ? undefined :
+      readFileSync(resolvedMetadata);
+    const fileMetadata = metadataBytes === undefined ? {} :
+      JSON.parse(metadataBytes);
     const workload = await import(
       `${pathToFileURL(resolvedWorkload).href}?profile=${Date.now()}`);
     for (const name of ["setup", "firstCall", "steady"]) {
       assert.equal(typeof workload[name], "function",
         `profile workload must export ${name}`);
     }
+    const workloadMetadata = jsonValue({
+      ...jsonObject(metadata, "profile metadata"),
+      ...jsonObject(fileMetadata, "profile metadata file"),
+      ...jsonObject(workload.metadata ?? {}, "workload module metadata"),
+    }, "merged profile workload metadata");
     return {
       resolvedWasm,
       resolvedSidecar,
@@ -353,12 +616,17 @@ export async function runNodeProfile({
       workloadBytes,
       sidecar,
       workload,
+      workloadMetadata,
+      workloadReceipt,
+      resolvedMetadata,
+      metadataBytes,
     };
   });
   const context = {
     wasmPath: acquire.value.resolvedWasm,
     wasmBytes: Buffer.from(acquire.value.wasmBytes),
-    sidecar: acquire.value.sidecar,
+    sidecar: deepFreeze(jsonValue(acquire.value.sidecar,
+      "function sidecar context")),
     artifactSha256: sha256(acquire.value.wasmBytes),
   };
   let state;
@@ -417,10 +685,28 @@ export async function runNodeProfile({
       "function sidecar");
     stableFile(acquire.value.resolvedWorkload, acquire.value.workloadBytes,
       "profile workload");
+    if (acquire.value.resolvedMetadata !== undefined) {
+      stableFile(acquire.value.resolvedMetadata, acquire.value.metadataBytes,
+        "profile metadata");
+    }
+    if (acquire.value.workloadReceipt !== null) {
+      stableFile(acquire.value.workloadReceipt.resolvedPath,
+        acquire.value.workloadReceipt.bytes, "profile workload receipt");
+      for (const item of [
+        ...acquire.value.workloadReceipt.dependencies,
+        ...acquire.value.workloadReceipt.inputs,
+      ]) {
+        stableFile(item.resolvedPath, item.bytes,
+          `profile workload artifact ${item.descriptor.role}`);
+      }
+    }
   }
-  const summary = summarizeCpuProfile(profile, acquire.value.sidecar, {
+  const authoritativeSidecar = JSON.parse(acquire.value.sidecarBytes);
+  validateSidecar(acquire.value.wasmBytes, authoritativeSidecar);
+  const summary = summarizeCpuProfile(profile, authoritativeSidecar, {
     startMicros: startProfileMs * 1000,
     durationMicros: steady.elapsedMs * 1000,
+    requireTimeDeltas: true,
   });
   const staging = `${resolvedOutput}.tmp-${process.pid}-${Date.now()}`;
   assert.equal(existsSync(staging), false,
@@ -429,6 +715,40 @@ export async function runNodeProfile({
   mkdirSync(staging);
   const rawProfilePath = join(resolvedOutput, "profile.cpuprofile");
   const rawProfileBytes = Buffer.from(`${JSON.stringify(profile)}\n`);
+  const workloadEvidence = {
+    file: basename(acquire.value.resolvedWorkload),
+    byteLength: acquire.value.workloadBytes.length,
+    sha256: sha256(acquire.value.workloadBytes),
+    metadata: acquire.value.workloadMetadata,
+    metadataSource: acquire.value.metadataBytes === undefined ? null : {
+      file: basename(acquire.value.resolvedMetadata),
+      byteLength: acquire.value.metadataBytes.length,
+      sha256: sha256(acquire.value.metadataBytes),
+    },
+    receipt: acquire.value.workloadReceipt?.descriptor ?? null,
+    dependencies: acquire.value.workloadReceipt?.dependencies.map(
+      ({ descriptor }) => descriptor) ?? null,
+    inputs: acquire.value.workloadReceipt?.inputs.map(
+      ({ descriptor }) => descriptor) ?? null,
+  };
+  const runtime = {
+    node: process.version,
+    v8: process.versions.v8,
+    platform: process.platform,
+    arch: process.arch,
+    samplingIntervalMicros,
+  };
+  const observations = {
+    firstCall: firstObservation,
+    warmup: warmupObservation,
+    steady: steadyObservation,
+  };
+  const comparability = makeProfileComparability({
+    schemaVersion: profileEvidenceSchema,
+    workload: workloadEvidence,
+    runtime,
+    observations,
+  });
   const evidence = {
     schemaVersion: profileEvidenceSchema,
     evidenceClass: "sampled-profile",
@@ -441,22 +761,11 @@ export async function runNodeProfile({
       file: basename(acquire.value.resolvedSidecar),
       byteLength: acquire.value.sidecarBytes.length,
       sha256: sha256(acquire.value.sidecarBytes),
-      schemaVersion: acquire.value.sidecar.schemaVersion,
-      artifactSha256: acquire.value.sidecar.artifact.sha256,
+      schemaVersion: authoritativeSidecar.schemaVersion,
+      artifactSha256: authoritativeSidecar.artifact.sha256,
     },
-    workload: {
-      file: basename(acquire.value.resolvedWorkload),
-      byteLength: acquire.value.workloadBytes.length,
-      sha256: sha256(acquire.value.workloadBytes),
-      metadata: { ...metadata, ...(acquire.value.workload.metadata ?? {}) },
-    },
-    runtime: {
-      node: process.version,
-      v8: process.versions.v8,
-      platform: process.platform,
-      arch: process.arch,
-      samplingIntervalMicros,
-    },
+    workload: workloadEvidence,
+    runtime,
     phases: {
       acquireMs: acquire.elapsedMs,
       setupMs: setup.elapsedMs,
@@ -468,16 +777,14 @@ export async function runNodeProfile({
       teardownMs,
       totalMs: performance.now() - totalStart,
     },
-    observations: {
-      firstCall: firstObservation,
-      warmup: warmupObservation,
-      steady: steadyObservation,
-    },
+    observations,
     rawProfile: {
       file: basename(rawProfilePath),
       byteLength: rawProfileBytes.length,
       sha256: sha256(rawProfileBytes),
     },
+    comparability,
+    quality: makeProfileQuality(summary, comparability),
     summary,
   };
   const evidencePath = join(resolvedOutput, "evidence.json");

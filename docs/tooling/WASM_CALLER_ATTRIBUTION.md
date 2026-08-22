@@ -6,8 +6,11 @@ count or elapsed-time comparison.
 
 ## Method
 
-`fir.sampled-profile-aggregate/v2` assigns every sampled Wasm leaf to its
-immediate parent node in the V8 CPU-profile tree. It preserves four cases:
+The retained production census below was emitted as
+`fir.sampled-profile-aggregate/v2`. Current aggregate v3 preserves the same
+caller method while adding comparable-run and evidence-quality checks. Both
+assign every sampled Wasm leaf to its immediate parent node in the V8
+CPU-profile tree and preserve four cases:
 
 - an exact final Wasm function from the verified function sidecar;
 - a recursive edge when caller and target have the same final index;
@@ -25,7 +28,8 @@ exact sidecar are rejected. Every accepted run checks that the caller-edge
 sample total equals its Wasm self-sample total.
 
 The pinned external tooling gate additionally collects a fresh Node Inspector
-profile from an ordinary Binaryen-built fixture, invokes the aggregate-v2 CLI,
+profile from an ordinary Binaryen-built fixture, invokes the current aggregate
+CLI,
 checks caller coverage for every sampled function, and requires the concrete
 `Fixture.entry` to `Fixture.leaf` Wasm caller edge. Synthetic unit cases retain
 the malformed-graph and recursive/host/root boundary checks.

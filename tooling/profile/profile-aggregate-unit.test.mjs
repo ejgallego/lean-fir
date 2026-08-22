@@ -15,7 +15,14 @@ import {
   sha256,
   sidecarSchema,
 } from "../wasm/function-index-lib.mjs";
-import { profileEvidenceSchema } from "./node-profile-lib.mjs";
+import {
+  legacyProfileEvidenceSchema,
+  makeProfileComparability,
+  makeProfileQuality,
+  profileEvidenceSchema,
+  summarizeCpuProfile,
+  workloadReceiptSchema,
+} from "./node-profile-lib.mjs";
 import {
   aggregateProfileEvidence,
   profileAggregateSchema,
@@ -72,14 +79,64 @@ function frame(id, index, children = undefined) {
 
 function writeEvidence(directory, name, profile, wasm, sidecarBytes, {
   artifactSha256 = sha256(wasm),
+  evidenceSchema = profileEvidenceSchema,
+  workloadId = "fixture-workload",
+  samplingIntervalMicros = 1000,
+  receiptSha256 = "1".repeat(64),
+  inputSha256 = "2".repeat(64),
+  deriveStrictTimeDeltas = true,
+  deriveStrictFunctionIndices = true,
 } = {}) {
   const runDirectory = join(directory, name);
   mkdirSync(runDirectory);
   const rawBytes = Buffer.from(`${JSON.stringify(profile)}\n`);
   const rawPath = join(runDirectory, "profile.cpuprofile");
   writeFileSync(rawPath, rawBytes);
+  const workload = {
+    file: "fixture-workload.mjs",
+    byteLength: 1,
+    sha256: "4".repeat(64),
+    metadata: { id: workloadId },
+    metadataSource: null,
+    receipt: evidenceSchema === profileEvidenceSchema ? {
+      schemaVersion: workloadReceiptSchema,
+      file: "fixture-receipt.json",
+      byteLength: 1,
+      sha256: receiptSha256,
+      id: workloadId,
+      semanticEndpoint: "checked fixture result",
+      instancePolicy: "fresh-instance-per-run",
+      parameters: {},
+    } : null,
+    dependencies: evidenceSchema === profileEvidenceSchema ? [] : null,
+    inputs: evidenceSchema === profileEvidenceSchema ? [{
+      role: "fixture-input",
+      file: "fixture-input.json",
+      byteLength: 1,
+      sha256: inputSha256,
+    }] : null,
+  };
+  const runtime = {
+    node: process.version,
+    v8: process.versions.v8,
+    platform: process.platform,
+    arch: process.arch,
+    samplingIntervalMicros,
+  };
+  const observations = { steady: { digest: "checked" } };
+  const comparability = makeProfileComparability({
+    schemaVersion: evidenceSchema,
+    workload,
+    runtime,
+    observations,
+  });
+  const sidecar = JSON.parse(sidecarBytes);
+  const summary = summarizeCpuProfile(profile, sidecar, {
+    strictFunctionIndices: deriveStrictFunctionIndices,
+    requireTimeDeltas: deriveStrictTimeDeltas,
+  });
   const evidence = {
-    schemaVersion: profileEvidenceSchema,
+    schemaVersion: evidenceSchema,
     evidenceClass: "sampled-profile",
     artifact: {
       file: "fixture.wasm",
@@ -93,20 +150,19 @@ function writeEvidence(directory, name, profile, wasm, sidecarBytes, {
       schemaVersion: sidecarSchema,
       artifactSha256,
     },
-    workload: {
-      file: "fixture-workload.mjs",
-      byteLength: 1,
-      sha256: "fixture",
-      metadata: { id: name },
-    },
-    runtime: { node: process.version, v8: process.versions.v8 },
+    workload,
+    runtime,
     phases: { steadyProfiledMs: 1 },
-    observations: { steady: { digest: "checked" } },
+    observations,
     rawProfile: {
       file: "profile.cpuprofile",
       byteLength: rawBytes.length,
       sha256: sha256(rawBytes),
     },
+    comparability: evidenceSchema === profileEvidenceSchema ?
+      comparability : undefined,
+    quality: evidenceSchema === profileEvidenceSchema ?
+      makeProfileQuality(summary, comparability) : undefined,
     summary: {
       window: {
         method: "phase-overlap-time-deltas/v1",
@@ -162,7 +218,12 @@ test("aggregates duplicate V8 nodes by exact final function identity", () => {
     assert.equal(report.schemaVersion, profileAggregateSchema);
     assert.equal(report.binding, "exact-release");
     assert.equal(report.runCount, 2);
-    assert.equal(report.binding, "exact-release");
+    assert.equal(report.comparability.status, "comparable");
+    assert.equal(report.comparability.override, false);
+    assert.equal(report.quality.classification, "screening");
+    assert(report.quality.limitations.includes(
+      "run-1:low-wasm-self-sample-count"));
+    assert.equal(report.quality.metrics.wasmSelfSamples.min, 3);
     assert.equal(report.runs[0].wasmSelfSamples, 3);
     assert.equal(report.runs[1].wasmSelfSamples, 4);
     const hot = report.functions.find(({ index }) => index === 0);
@@ -221,7 +282,9 @@ test("rejects mixed artifacts, malformed indices, and output reuse", () => {
       nodes: [frame(1, 9)],
       samples: [1],
       timeDeltas: [10],
-    }, paths.wasm, paths.sidecarBytes);
+    }, paths.wasm, paths.sidecarBytes, {
+      deriveStrictFunctionIndices: false,
+    });
     assert.throws(() => aggregateProfileEvidence({
       wasmPath: paths.wasmPath,
       sidecarPath: paths.sidecarPath,
@@ -234,12 +297,90 @@ test("rejects mixed artifacts, malformed indices, and output reuse", () => {
       nodes: [frame(1, 9, [2]), frame(2, 0)],
       samples: [2],
       timeDeltas: [10],
-    }, paths.wasm, paths.sidecarBytes);
+    }, paths.wasm, paths.sidecarBytes, {
+      deriveStrictFunctionIndices: false,
+    });
     assert.throws(() => aggregateProfileEvidence({
       wasmPath: paths.wasmPath,
       sidecarPath: paths.sidecarPath,
       evidencePaths: [malformedCaller],
     }), /caller refers to Wasm function 9 outside the sidecar/);
+
+    const timeless = writeEvidence(directory, "timeless", {
+      startTime: 0,
+      endTime: 10,
+      nodes: [frame(1, 0)],
+      samples: [1],
+    }, paths.wasm, paths.sidecarBytes, {
+      deriveStrictTimeDeltas: false,
+    });
+    assert.throws(() => aggregateProfileEvidence({
+      wasmPath: paths.wasmPath,
+      sidecarPath: paths.sidecarPath,
+      evidencePaths: [timeless],
+    }), /requires sample time deltas/);
+
+    const incompatible = writeEvidence(directory, "incompatible", {
+      startTime: 0,
+      endTime: 10,
+      nodes: [frame(1, 0)],
+      samples: [1],
+      timeDeltas: [10],
+    }, paths.wasm, paths.sidecarBytes, { samplingIntervalMicros: 2000 });
+    assert.throws(() => aggregateProfileEvidence({
+      wasmPath: paths.wasmPath,
+      sidecarPath: paths.sidecarPath,
+      evidencePaths: [paths.first, incompatible],
+    }), /comparability-key-mismatch/);
+    const exploratory = aggregateProfileEvidence({
+      wasmPath: paths.wasmPath,
+      sidecarPath: paths.sidecarPath,
+      evidencePaths: [paths.first, incompatible],
+      allowIncomparable: true,
+    });
+    assert.equal(exploratory.comparability.status,
+      "incomparable-override");
+    assert.equal(exploratory.quality.classification, "screening");
+    const exploratoryOutput = join(directory, "exploratory.json");
+    execFileSync(process.execPath, [
+      aggregateTool,
+      "--wasm", paths.wasmPath,
+      "--sidecar", paths.sidecarPath,
+      "--evidence", paths.first,
+      "--evidence", incompatible,
+      "--allow-incomparable",
+      "--out", exploratoryOutput,
+    ]);
+    assert.equal(JSON.parse(readFileSync(exploratoryOutput, "utf8"))
+      .comparability.status, "incomparable-override");
+
+    const changedInput = writeEvidence(directory, "changed-input", {
+      startTime: 0,
+      endTime: 10,
+      nodes: [frame(1, 0)],
+      samples: [1],
+      timeDeltas: [10],
+    }, paths.wasm, paths.sidecarBytes, { inputSha256: "3".repeat(64) });
+    assert.throws(() => aggregateProfileEvidence({
+      wasmPath: paths.wasmPath,
+      sidecarPath: paths.sidecarPath,
+      evidencePaths: [paths.first, changedInput],
+    }), /comparability-key-mismatch/);
+
+    const legacy = writeEvidence(directory, "legacy", {
+      startTime: 0,
+      endTime: 10,
+      nodes: [frame(1, 0)],
+      samples: [1],
+      timeDeltas: [10],
+    }, paths.wasm, paths.sidecarBytes, {
+      evidenceSchema: legacyProfileEvidenceSchema,
+    });
+    assert.throws(() => aggregateProfileEvidence({
+      wasmPath: paths.wasmPath,
+      sidecarPath: paths.sidecarPath,
+      evidencePaths: [paths.first, legacy],
+    }), /legacy-profile-evidence-schema/);
 
     const output = join(directory, "aggregate.json");
     const result = execFileSync(process.execPath, [

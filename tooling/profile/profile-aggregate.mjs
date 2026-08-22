@@ -10,13 +10,21 @@ import {
 
 function usage() {
   return "usage: profile-aggregate.mjs --wasm FILE --sidecar FILE " +
-    "[--evidence FILE ...] [--profile FILE ...] --out FILE";
+    "[--evidence FILE ...] [--profile FILE ...] [--allow-incomparable] " +
+    "--out FILE";
 }
 
 function arguments_(items) {
-  const result = { evidence: [], profile: [] };
-  for (let index = 0; index < items.length; index += 2) {
+  const result = { evidence: [], profile: [], allowIncomparable: false };
+  for (let index = 0; index < items.length;) {
     const name = items[index];
+    if (name === "--allow-incomparable") {
+      assert.equal(result.allowIncomparable, false,
+        "duplicate argument --allow-incomparable");
+      result.allowIncomparable = true;
+      index += 1;
+      continue;
+    }
     const value = items[index + 1];
     assert(name?.startsWith("--") && value !== undefined,
       `invalid arguments\n${usage()}`);
@@ -28,6 +36,7 @@ function arguments_(items) {
       assert(result[name] === undefined, `duplicate argument ${name}`);
       result[name] = resolve(value);
     }
+    index += 2;
   }
   for (const name of ["--wasm", "--sidecar", "--out"]) {
     assert.equal(typeof result[name], "string", `missing ${name}\n${usage()}`);
@@ -43,6 +52,7 @@ const report = aggregateProfileEvidence({
   sidecarPath: args["--sidecar"],
   evidencePaths: args.evidence,
   profilePaths: args.profile,
+  allowIncomparable: args.allowIncomparable,
 });
 const output = writeAggregateReport(args["--out"], report);
 process.stdout.write(`${output.path}\n`);

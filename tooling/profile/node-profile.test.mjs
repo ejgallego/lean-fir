@@ -16,12 +16,16 @@ import {
   profileEvidenceSchema,
   runNodeProfile,
 } from "./node-profile-lib.mjs";
+import { profileAggregateSchema } from "./profile-aggregate-lib.mjs";
 
 const binaryen = process.env.FIR_BINARYEN_DIR;
 assert.equal(typeof binaryen, "string",
   "FIR_BINARYEN_DIR must name the pinned Binaryen bin directory");
 const fixture = resolve(import.meta.dirname, "test/profile-fixture.wat");
 const workload = resolve(import.meta.dirname, "test/fixture-workload.mjs");
+const workloadReceipt = resolve(import.meta.dirname,
+  "test/fixture-workload-receipt.json");
+const workloadInput = resolve(import.meta.dirname, "test/profile-fixture.wat");
 const profileTool = resolve(import.meta.dirname, "node-profile.mjs");
 const aggregateTool = resolve(import.meta.dirname, "profile-aggregate.mjs");
 
@@ -54,14 +58,22 @@ test("CLI profiles only checked steady work and binds immutable evidence",
     try {
       const { wasmPath, sidecarPath } = buildFixture(directory);
       const outputDirectory = join(directory, "profile");
+      const metadataPath = join(directory, "metadata.json");
+      writeFileSync(metadataPath,
+        `${JSON.stringify({ campaign: "live-tooling-gate" })}\n`);
       const wasmBefore = readFileSync(wasmPath);
       const sidecarBefore = readFileSync(sidecarPath);
       const workloadBefore = readFileSync(workload);
+      const receiptBefore = readFileSync(workloadReceipt);
+      const inputBefore = readFileSync(workloadInput);
+      const metadataBefore = readFileSync(metadataPath);
       const evidencePath = execFileSync(process.execPath, [
         profileTool,
         "--wasm", wasmPath,
         "--sidecar", sidecarPath,
         "--workload", workload,
+        "--workload-receipt", workloadReceipt,
+        "--metadata", metadataPath,
         "--out-dir", outputDirectory,
         "--sampling-interval-micros", "100",
       ], { encoding: "utf8" }).trim();
@@ -70,7 +82,8 @@ test("CLI profiles only checked steady work and binds immutable evidence",
       const rawBytes = readFileSync(rawPath);
       assert.equal(evidence.schemaVersion, profileEvidenceSchema);
       assert.deepEqual(evidence.observations, {
-        firstCall: { result: 0 },
+        firstCall: { result: 0, originalName: "Fixture.leaf",
+          sidecarMutationBlocked: true },
         warmup: { result: 0, rounds: 1000 },
         steady: { result: 0, rounds: 50_000_000 },
       });
@@ -84,6 +97,20 @@ test("CLI profiles only checked steady work and binds immutable evidence",
       assert(evidence.summary.resolvedWasmMicros > 0,
         "expected at least one steady Wasm sample");
       assert.equal(evidence.summary.unresolvedWasmMicros, 0);
+      assert.equal(evidence.comparability.eligible, true);
+      assert.match(evidence.comparability.key, /^[0-9a-f]{64}$/);
+      assert.equal(evidence.quality.classification, "checked-diagnostic");
+      assert.equal(evidence.workload.receipt.id, "fir-tooling-wasm-loop");
+      assert.equal(evidence.workload.inputs[0].role,
+        "wasm-source-fixture");
+      assert.equal(evidence.workload.inputs[0].sha256, sha256(inputBefore));
+      assert.deepEqual(evidence.workload.metadata, {
+        campaign: "live-tooling-gate",
+        id: "fir-tooling-wasm-loop",
+        purpose: "exercise steady-only Wasm CPU-profile attribution",
+      });
+      assert.equal(evidence.workload.metadataSource.sha256,
+        sha256(metadataBefore));
       assert.equal(evidence.rawProfile.sha256, sha256(rawBytes));
       assert.equal(rawBytes.at(-1), 10);
 
@@ -97,9 +124,11 @@ test("CLI profiles only checked steady work and binds immutable evidence",
       ]);
       const aggregate = JSON.parse(readFileSync(aggregatePath, "utf8"));
       assert.equal(aggregate.schemaVersion,
-        "fir.sampled-profile-aggregate/v2");
+        profileAggregateSchema);
       assert.equal(aggregate.binding, "exact-release");
       assert.equal(aggregate.runCount, 1);
+      assert.equal(aggregate.comparability.status, "single-run");
+      assert.equal(aggregate.quality.classification, "screening");
       assert.equal(aggregate.runs[0].callerAttribution.unresolvedWasmSelfSamples,
         0);
       assert.equal(
@@ -124,6 +153,9 @@ test("CLI profiles only checked steady work and binds immutable evidence",
       assert.deepEqual(readFileSync(wasmPath), wasmBefore);
       assert.deepEqual(readFileSync(sidecarPath), sidecarBefore);
       assert.deepEqual(readFileSync(workload), workloadBefore);
+      assert.deepEqual(readFileSync(workloadReceipt), receiptBefore);
+      assert.deepEqual(readFileSync(workloadInput), inputBefore);
+      assert.deepEqual(readFileSync(metadataPath), metadataBefore);
       assert.throws(() => execFileSync(process.execPath, [
         profileTool,
         "--wasm", wasmPath,
@@ -135,6 +167,16 @@ test("CLI profiles only checked steady work and binds immutable evidence",
       assert.equal(sha256(readFileSync(evidencePath)),
         sha256(Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`)),
       "rejected reuse must preserve existing evidence");
+      assert.throws(() => execFileSync(process.execPath, [
+        profileTool,
+        "--wasm", wasmPath,
+        "--sidecar", sidecarPath,
+        "--workload", workload,
+        "--out-dir", join(directory, "typo-profile"),
+        "--workload-recepit", workloadReceipt,
+      ], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
+      (error) => error.stderr.includes(
+        "unknown argument --workload-recepit"));
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

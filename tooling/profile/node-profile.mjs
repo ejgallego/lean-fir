@@ -1,21 +1,25 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { runNodeProfile } from "./node-profile-lib.mjs";
 
 function usage() {
   return "usage: node-profile.mjs --wasm FILE --sidecar FILE --workload FILE " +
-    "--out-dir DIR [--metadata FILE] [--sampling-interval-micros N]";
+    "--out-dir DIR [--workload-receipt FILE] [--metadata FILE] " +
+    "[--sampling-interval-micros N]";
 }
 
 function arguments_(items) {
   const result = new Map();
+  const allowed = new Set(["--wasm", "--sidecar", "--workload",
+    "--workload-receipt", "--out-dir", "--metadata",
+    "--sampling-interval-micros"]);
   for (let index = 0; index < items.length; index += 2) {
     const name = items[index];
     assert(name?.startsWith("--"), usage());
+    assert(allowed.has(name), `unknown argument ${name}\n${usage()}`);
     assert(index + 1 < items.length, `missing value for ${name}\n${usage()}`);
     assert(!result.has(name), `duplicate argument ${name}`);
     result.set(name, items[index + 1]);
@@ -36,9 +40,10 @@ const result = await runNodeProfile({
   wasmPath: required(args, "--wasm"),
   sidecarPath: required(args, "--sidecar"),
   workloadPath: required(args, "--workload"),
+  workloadReceiptPath: args.get("--workload-receipt") === undefined ?
+    undefined : resolve(args.get("--workload-receipt")),
   outputDirectory: required(args, "--out-dir"),
-  metadata: metadataPath === undefined ? {} :
-    JSON.parse(readFileSync(resolve(metadataPath), "utf8")),
+  metadataPath: metadataPath === undefined ? undefined : resolve(metadataPath),
   samplingIntervalMicros: interval === undefined ? 1000 : Number(interval),
 });
 process.stdout.write(`${result.evidencePath}\n`);

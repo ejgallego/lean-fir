@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "fir.profile-workload-receipt/v1",
+  "id": "fir-tooling-wasm-loop",
+  "semanticEndpoint": "fixture.entry returns zero",
+  "instancePolicy": "fresh-instance-per-profile",
+  "parameters": {
+    "warmupRounds": 1000,
+    "steadyRounds": 50000000
+  },
+  "dependencies": [],
+  "inputs": [
+    {
+      "role": "wasm-source-fixture",
+      "path": "profile-fixture.wat"
+    }
+  ]
+}

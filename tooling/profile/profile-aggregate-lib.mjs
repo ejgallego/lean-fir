@@ -10,6 +10,10 @@ import {
 import { basename, dirname, resolve } from "node:path";
 
 import {
+  legacyProfileEvidenceSchema,
+  makeProfileComparability,
+  makeProfileQuality,
+  profileComparabilitySchema,
   profileEvidenceSchema,
   profileFunctionFamily,
   summarizeCpuProfile,
@@ -19,7 +23,7 @@ import {
   validateSidecar,
 } from "../wasm/function-index-lib.mjs";
 
-export const profileAggregateSchema = "fir.sampled-profile-aggregate/v2";
+export const profileAggregateSchema = "fir.sampled-profile-aggregate/v3";
 
 function json(bytes, label) {
   try {
@@ -106,8 +110,9 @@ function loadRun(evidencePath, runIndex, artifact, functionSidecar,
   const resolvedEvidence = resolve(evidencePath);
   const evidenceBytes = readFileSync(resolvedEvidence);
   const evidence = json(evidenceBytes, `profile evidence ${resolvedEvidence}`);
-  assert.equal(evidence.schemaVersion, profileEvidenceSchema,
-    `unsupported profile evidence schema ${evidence.schemaVersion}`);
+  assert([profileEvidenceSchema, legacyProfileEvidenceSchema].includes(
+    evidence.schemaVersion),
+  `unsupported profile evidence schema ${evidence.schemaVersion}`);
   assert.equal(evidence.evidenceClass, "sampled-profile",
     "input evidence is not a sampled profile");
   assert.equal(evidence.artifact?.sha256, artifact.sha256,
@@ -143,7 +148,21 @@ function loadRun(evidencePath, runIndex, artifact, functionSidecar,
     profile, sidecar, {
     startMicros: window.startMicros,
     durationMicros,
+    requireTimeDeltas: true,
   }, "exact-release profile attribution window");
+  const comparability = makeProfileComparability({
+    schemaVersion: evidence.schemaVersion,
+    workload: evidence.workload,
+    runtime: evidence.runtime,
+    observations: evidence.observations,
+  });
+  if (evidence.schemaVersion === profileEvidenceSchema) {
+    assert.deepEqual(evidence.comparability, comparability,
+      "profile evidence comparability descriptor does not match its contents");
+    assert.deepEqual(evidence.quality,
+      makeProfileQuality(summary, comparability),
+    "profile evidence quality descriptor does not match its raw profile");
+  }
   return {
     id: `run-${runIndex + 1}`,
     binding: "exact-release",
@@ -166,6 +185,8 @@ function loadRun(evidencePath, runIndex, artifact, functionSidecar,
     hostSamples: summary.hostSamples,
     hostMicros: summary.hostMicros,
     callerAttribution: summary.callerAttribution,
+    comparability,
+    quality: makeProfileQuality(summary, comparability),
     functions,
     ranks,
     callerEdges,
@@ -178,6 +199,13 @@ function loadUnboundRun(profilePath, runIndex, sidecar) {
   const profile = json(rawBytes, `raw CPU profile ${resolvedProfile}`);
   const { summary, functions, ranks, callerEdges } = summarizeRun(
     profile, sidecar, {}, "raw profile");
+  const comparability = {
+    schemaVersion: profileComparabilitySchema,
+    eligible: false,
+    key: null,
+    limitations: ["unbound-raw-profile"],
+    dimensions: null,
+  };
   return {
     id: `run-${runIndex + 1}`,
     binding: "unbound-raw-profile",
@@ -196,9 +224,83 @@ function loadUnboundRun(profilePath, runIndex, sidecar) {
     hostSamples: summary.hostSamples,
     hostMicros: summary.hostMicros,
     callerAttribution: summary.callerAttribution,
+    comparability,
+    quality: makeProfileQuality(summary, comparability),
     functions,
     ranks,
     callerEdges,
+  };
+}
+
+function assessComparability(runs, allowIncomparable) {
+  if (runs.length === 1) {
+    return {
+      status: "single-run",
+      key: runs[0].comparability.key,
+      limitations: [...new Set([
+        "single-run",
+        ...runs[0].comparability.limitations,
+      ])].sort(),
+      override: false,
+    };
+  }
+  const eligible = runs.every((run) => run.comparability.eligible);
+  const keys = new Set(runs.map((run) => run.comparability.key));
+  if (eligible && keys.size === 1) {
+    return {
+      status: "comparable",
+      key: runs[0].comparability.key,
+      limitations: [],
+      override: false,
+    };
+  }
+  const limitations = [];
+  for (const run of runs) {
+    for (const limitation of run.comparability.limitations) {
+      limitations.push(`${run.id}:${limitation}`);
+    }
+  }
+  if (eligible && keys.size !== 1) {
+    limitations.push("comparability-key-mismatch");
+  }
+  const uniqueLimitations = [...new Set(limitations)].sort();
+  assert.equal(allowIncomparable, true,
+    `profile runs are not comparable: ${uniqueLimitations.join(", ")}; ` +
+    "use the explicit incomparable-run override only for exploratory reports");
+  return {
+    status: "incomparable-override",
+    key: null,
+    limitations: uniqueLimitations,
+    override: true,
+  };
+}
+
+function aggregateQuality(runs, comparability) {
+  const wasmSamples = runs.map(({ wasmSelfSamples }) => wasmSelfSamples);
+  const hostShares = runs.map(({ wasmSelfSamples, hostSamples }) =>
+    hostSamples / (wasmSelfSamples + hostSamples));
+  const limitations = [...comparability.limitations];
+  for (const run of runs) {
+    for (const limitation of run.quality.limitations) {
+      limitations.push(`${run.id}:${limitation}`);
+    }
+  }
+  const uniqueLimitations = [...new Set(limitations)].sort();
+  return {
+    classification: comparability.status === "comparable" &&
+      uniqueLimitations.length === 0 ? "comparable-diagnostic" : "screening",
+    limitations: uniqueLimitations,
+    metrics: {
+      runCount: runs.length,
+      wasmSelfSamples: {
+        min: Math.min(...wasmSamples),
+        max: Math.max(...wasmSamples),
+      },
+      hostSampleShare: {
+        min: Math.min(...hostShares),
+        max: Math.max(...hostShares),
+      },
+    },
   };
 }
 
@@ -207,9 +309,12 @@ export function aggregateProfileEvidence({
   sidecarPath,
   evidencePaths = [],
   profilePaths = [],
+  allowIncomparable = false,
 }) {
   assert(Array.isArray(evidencePaths), "evidence paths must be an array");
   assert(Array.isArray(profilePaths), "raw profile paths must be an array");
+  assert.equal(typeof allowIncomparable, "boolean",
+    "incomparable-run override must be boolean");
   assert(evidencePaths.length + profilePaths.length !== 0,
     "at least one sampled-profile evidence file or raw profile is required");
   const resolvedEvidence = evidencePaths.map((path) => resolve(path));
@@ -241,6 +346,7 @@ export function aggregateProfileEvidence({
     ...resolvedProfiles.map((path, index) =>
       loadUnboundRun(path, index + resolvedEvidence.length, sidecar)),
   ];
+  const comparability = assessComparability(runs, allowIncomparable);
   const sampledIndices = new Set(runs.flatMap(({ functions }) =>
     [...functions.keys()]));
   const functions = [...sampledIndices].map((index) => {
@@ -340,6 +446,8 @@ export function aggregateProfileEvidence({
     artifact,
     functionSidecar,
     runCount: runs.length,
+    comparability,
+    quality: aggregateQuality(runs, comparability),
     callerAttribution: {
       method: "v8-cpu-profile-parent-edge/v1",
       unit: "sampled-target-self-time",

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  makeProfileQuality,
+  profileQualityPolicy,
   residentHelperFamily,
   summarizeCpuProfile,
 } from "./node-profile-lib.mjs";
@@ -68,6 +70,7 @@ test("keeps unresolved Wasm and host frames explicit", () => {
     startMicros: 5,
     durationMicros: 20,
   });
+  assert.equal(summary.window.method, "uniform-profile-interval/v1");
   assert.equal(summary.window.rawProfileMicros, 30);
   assert.equal(summary.totalSampleMicros, 20);
   assert.equal(summary.unresolvedWasmMicros, 10);
@@ -76,6 +79,9 @@ test("keeps unresolved Wasm and host frames explicit", () => {
     { name: "host-or-runtime/unattributed", selfMicros: 10 },
     { name: "wasm/unattributed", selfMicros: 10 },
   ]);
+  assert.throws(() => summarizeCpuProfile(profile, { functions: [] }, {
+    requireTimeDeltas: true,
+  }), /requires sample time deltas/);
 });
 
 test("attributes Wasm self samples to immediate recursive, Wasm, and host callers",
@@ -190,7 +196,34 @@ test("classifies boxing separately and rejects malformed profiles", () => {
     { functions: [] }), /missing node 2/);
   assert.throws(() => summarizeCpuProfile({ ...valid, timeDeltas: [-1] },
     { functions: [] }), /invalid sample delta/);
+  assert.throws(() => summarizeCpuProfile({ ...valid,
+    samples: [1, 1], timeDeltas: [1] }, { functions: [] }),
+  /time deltas do not match/);
   assert.throws(() => summarizeCpuProfile(valid, { functions: [] }, {
     startMicros: -1,
   }), /nonnegative finite offset/);
 });
+
+test("classifies structurally bound profiles below the sample floor as screening",
+  () => {
+    const summary = {
+      window: { method: "phase-overlap-time-deltas/v1" },
+      sampleCount: profileQualityPolicy.minimumWasmSelfSamples - 1,
+      resolvedWasmSamples: profileQualityPolicy.minimumWasmSelfSamples - 1,
+      unresolvedWasmSamples: 0,
+      hostSamples: 0,
+      totalSampleMicros: 99_000,
+    };
+    const comparability = { eligible: true, limitations: [] };
+    const screening = makeProfileQuality(summary, comparability);
+    assert.equal(screening.classification, "screening");
+    assert.deepEqual(screening.limitations,
+      ["low-wasm-self-sample-count"]);
+    const checked = makeProfileQuality({
+      ...summary,
+      sampleCount: profileQualityPolicy.minimumWasmSelfSamples,
+      resolvedWasmSamples: profileQualityPolicy.minimumWasmSelfSamples,
+    }, comparability);
+    assert.equal(checked.classification, "checked-diagnostic");
+    assert.deepEqual(checked.limitations, []);
+  });
