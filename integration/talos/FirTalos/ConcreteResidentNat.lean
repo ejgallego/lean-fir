@@ -1636,6 +1636,10 @@ observed by the resident magnitude accessors. -/
 def limbWordsOfUInt64 (limb : UInt64) : LimbWords :=
   (limb.toUInt32, (limb >>> (32 : UInt64)).toUInt32)
 
+/-- Reassemble the resident low/high word pair as one concrete-runtime limb. -/
+def limbUInt64OfWords (limb : LimbWords) : UInt64 :=
+  limb.1.toUInt64 + limb.2.toUInt64 * 4294967296
+
 theorem limbWordsValue_ofUInt64 (limb : UInt64) :
     limbWordsValue (limbWordsOfUInt64 limb) = limb.toNat := by
   have limbLt : limb.toNat < 2 ^ 64 := by
@@ -1647,6 +1651,36 @@ theorem limbWordsValue_ofUInt64 (limb : UInt64) :
   have shift32 : (32 : UInt64).toNat % 64 = 32 := by decide
   rw [shift32, Nat.shiftRight_eq_div_pow, Nat.mod_eq_of_lt highLt]
   exact Nat.mod_add_div limb.toNat (2 ^ 32)
+
+@[simp] theorem limbWordsOfUInt64_limbUInt64OfWords (limb : LimbWords) :
+    limbWordsOfUInt64 (limbUInt64OfWords limb) = limb := by
+  rcases limb with ⟨low, high⟩
+  apply Prod.ext
+  · change (low.toUInt64 + high.toUInt64 * 4294967296).toUInt32 = low
+    bv_decide
+  · change
+      ((low.toUInt64 + high.toUInt64 * 4294967296) >>>
+        (32 : UInt64)).toUInt32 = high
+    bv_decide
+
+@[simp] theorem limbUInt64OfWords_toNat (limb : LimbWords) :
+    (limbUInt64OfWords limb).toNat = limbWordsValue limb := by
+  calc
+    _ = limbWordsValue
+          (limbWordsOfUInt64 (limbUInt64OfWords limb)) :=
+      (limbWordsValue_ofUInt64 (limbUInt64OfWords limb)).symm
+    _ = limbWordsValue limb := by simp
+
+/-- Reassembling every word pair preserves the complete little-endian
+unbounded list value. -/
+theorem naturalLimbsValue_map_limbUInt64OfWords (limbs : List LimbWords) :
+    naturalLimbsValue (limbs.map limbUInt64OfWords) =
+      limbWordsListValue limbs := by
+  induction limbs with
+  | nil => rfl
+  | cons limb limbs inductionHypothesis =>
+      simp [naturalLimbsValue, limbWordsListValue, inductionHypothesis,
+        UInt64.size]
 
 /-- The W6 word-pair view and the concrete runtime's `UInt64`-limb view have
 the same little-endian unbounded value. -/
@@ -1676,6 +1710,21 @@ theorem limbWordsListValue_append_zeros
   | nil => simp [limbWordsListValue]
   | cons limb limbs inductionHypothesis =>
       simp [limbWordsListValue, inductionHypothesis]
+
+/-- Little-endian list concatenation shifts the appended high limbs by the
+complete width of the low prefix. -/
+theorem limbWordsListValue_append (low high : List LimbWords) :
+    limbWordsListValue (low ++ high) =
+      limbWordsListValue low +
+        2 ^ (64 * low.length) * limbWordsListValue high := by
+  induction low with
+  | nil => simp [limbWordsListValue]
+  | cons limb low inductionHypothesis =>
+      simp only [List.cons_append, limbWordsListValue, List.length_cons,
+        inductionHypothesis]
+      rw [Nat.mul_succ, Nat.pow_add]
+      norm_num
+      ring
 
 /-- Pad a least-significant-first limb view to a shared loop count.  This is
 the pure counterpart of `magnitudeLow`/`magnitudeHigh` returning zero beyond
@@ -1808,6 +1857,53 @@ theorem addLimbWords_spec
                     norm_num at stepValue ⊢
                     omega
 
+/-- Final payload list produced by the installed writer and its conditional
+carry-limb stores. -/
+def completedAddLimbWords (words : List LimbWords) (carry : UInt32) :
+    List LimbWords :=
+  if carry = 0 then words else words ++ [(1, 0)]
+
+theorem completedAddLimbWords_length
+    (words : List LimbWords) (carry : UInt32)
+    (carryBit : carry = 0 ∨ carry = 1) :
+    (completedAddLimbWords words carry).length =
+      words.length + carry.toNat := by
+  rcases carryBit with rfl | rfl <;>
+    simp [completedAddLimbWords]
+
+theorem completedAddLimbWords_value
+    (words : List LimbWords) (carry : UInt32)
+    (carryBit : carry = 0 ∨ carry = 1) :
+    limbWordsListValue (completedAddLimbWords words carry) =
+      limbWordsListValue words +
+        2 ^ (64 * words.length) * carry.toNat := by
+  rcases carryBit with rfl | rfl
+  · simp [completedAddLimbWords]
+  · rw [completedAddLimbWords, if_neg (by decide),
+      limbWordsListValue_append]
+    simp [limbWordsListValue, limbWordsValue, naturalWordsValue]
+
+/-- Appending the writer's optional carry limb turns the arithmetic invariant
+into the exact unbounded value and physical result count. -/
+theorem completedAddLimbWords_spec
+    (left right : List LimbWords) (carry : UInt32)
+    (sameLength : left.length = right.length)
+    (carryBit : carry = 0 ∨ carry = 1) :
+    let result := addLimbWords left right carry
+    limbWordsListValue (completedAddLimbWords result.1 result.2) =
+        limbWordsListValue left + limbWordsListValue right + carry.toNat ∧
+      (completedAddLimbWords result.1 result.2).length =
+        left.length + result.2.toNat := by
+  dsimp only
+  obtain ⟨value, finalCarryBit⟩ :=
+    addLimbWords_spec left right carry sameLength carryBit
+  have outputLength := addLimbWords_length left right carry sameLength
+  constructor
+  · rw [completedAddLimbWords_value _ _ finalCarryBit, outputLength]
+    exact value
+  · rw [completedAddLimbWords_length _ _ finalCarryBit,
+      outputLength]
+
 /-- End-to-end pure contract that the installed scan and writer loops must
 realize.  With canonical operands padded to the validated maximum count, the
 computed prefix and final carry denote the mathematical Nat sum. -/
@@ -1838,6 +1934,37 @@ theorem addPaddedNaturalLimbWords_spec
   rw [leftLength, paddedNaturalLimbWords_value,
     paddedNaturalLimbWords_value] at specification
   simpa using specification
+
+/-- The complete physical payload, including a possible final carry limb,
+decodes exactly to the mathematical sum and has the allocator's result count. -/
+theorem completedAddPaddedNaturalLimbWords_spec
+    {count left right : Nat}
+    (leftFits : (naturalLimbs left).length ≤ count)
+    (rightFits : (naturalLimbs right).length ≤ count) :
+    let result := addLimbWords (paddedNaturalLimbWords count left)
+      (paddedNaturalLimbWords count right) 0
+    limbWordsListValue (completedAddLimbWords result.1 result.2) =
+        left + right ∧
+      (completedAddLimbWords result.1 result.2).length =
+        count + result.2.toNat := by
+  dsimp only
+  obtain ⟨sumValue, carryBit⟩ :=
+    addPaddedNaturalLimbWords_spec leftFits rightFits
+  have leftLength := paddedNaturalLimbWords_length leftFits
+  have rightLength := paddedNaturalLimbWords_length rightFits
+  have sameLength :
+      (paddedNaturalLimbWords count left).length =
+        (paddedNaturalLimbWords count right).length := by
+    rw [leftLength, rightLength]
+  have outputLength := addLimbWords_length
+    (paddedNaturalLimbWords count left)
+    (paddedNaturalLimbWords count right) 0 sameLength
+  constructor
+  · rw [completedAddLimbWords_value _ _ carryBit, outputLength,
+      leftLength]
+    exact sumValue
+  · rw [completedAddLimbWords_length _ _ carryBit, outputLength,
+      leftLength]
 
 /-- Complete installed carry-scan theorem over equally sized machine limb
 views.  The helper starts at absolute index zero and returns exactly the final
@@ -4625,6 +4752,22 @@ theorem WrittenLimbPrefix.next
     simp
   simpa [indexRoundtrip] using WrittenLimbPrefix.step written wordAt
 
+/-- Extending the specification list after the already-written prefix does
+not change its exact store history. -/
+theorem WrittenLimbPrefix.appendWords
+    {initial current : Wasm.Store host} {result : UInt32}
+    {words : List LimbWords} {count : Nat}
+    (written : WrittenLimbPrefix initial result words count current)
+    (suffix : List LimbWords) :
+    WrittenLimbPrefix initial result (words ++ suffix) count current := by
+  induction written with
+  | zero => exact .zero
+  | step written wordAt inductionHypothesis =>
+      apply WrittenLimbPrefix.step inductionHypothesis
+      rw [List.getElem?_append_left]
+      · exact wordAt
+      · exact (List.getElem?_eq_some_iff.mp wordAt).1
+
 /-- Address of one low/high wasm32 half in a materialized Natural payload. -/
 def writtenLimbHalfAddress
     (result : UInt32) (index : Nat) (high : Bool) : UInt32 :=
@@ -4852,6 +4995,77 @@ theorem WrittenLimbPrefix.readable_of_allocateNatural
   written.readable
     (writtenLimbAddressesDisjoint_of_allocateNatural large allocation)
 
+/-- Transport one exact readable resident word pair through the common memory
+relation to the checked W6 linear-memory operations. -/
+theorem ReadableLimbPrefix.readUInt32Pair
+    {heap : MemoryState} {store : Wasm.Store host} {result : UInt32}
+    {words : List LimbWords} {count index : Nat} {low high : UInt32}
+    (readable : ReadableLimbPrefix store result words count)
+    (related : ResidentMemoryRel heap store.mem)
+    (payloadInBounds :
+      result.toNat + headerBytes + 8 * count ≤ heap.memory.size)
+    (indexInPrefix : index < count)
+    (wordAt : words[index]? = some (low, high)) :
+    heap.memory.readUInt32
+          (result.toNat + headerBytes + 8 * index) = .ok low ∧
+      heap.memory.readUInt32
+          (result.toNat + headerBytes + 8 * index + 4) = .ok high := by
+  have residentReads := readable index low high indexInPrefix wordAt
+  have lowInBounds :
+      result.toNat + headerBytes + 8 * index + 3 < heap.memory.size := by
+    omega
+  have highInBounds :
+      result.toNat + headerBytes + 8 * index + 4 + 3 < heap.memory.size := by
+    omega
+  have residentLow : store.mem.read32 (UInt32.ofNat
+      (result.toNat + headerBytes + 8 * index)) = low := by
+    simpa [writtenLimbHalfAddress_eq_ofNat] using residentReads.1
+  have residentHigh : store.mem.read32 (UInt32.ofNat
+      (result.toNat + headerBytes + 8 * index + 4)) = high := by
+    simpa [writtenLimbHalfAddress_eq_ofNat] using residentReads.2
+  constructor
+  · rw [related.readUInt32_eq_read32 lowInBounds, residentLow]
+  · rw [related.readUInt32_eq_read32 highInBounds, residentHigh]
+
+/-- Exact readable resident word pairs decode through W6's ordinary Natural
+limb reader to their unbounded little-endian value.  No canonicality premise
+is needed: `readNaturalLimbs` is intentionally an extensional decoder. -/
+theorem ReadableLimbPrefix.readNaturalLimbs
+    {heap : MemoryState} {store : Wasm.Store host} {result : UInt32}
+    {words : List LimbWords} {count : Nat}
+    (readable : ReadableLimbPrefix store result words count)
+    (related : ResidentMemoryRel heap store.mem)
+    (wordsLength : words.length = count)
+    (payloadInBounds :
+      result.toNat + headerBytes + 8 * count ≤ heap.memory.size) :
+    Fir.Wasm.Concrete.readNaturalLimbs heap.memory result.toNat 0 count =
+      .ok (limbWordsListValue words) := by
+  have limbAt : ∀ offset limb,
+      (words.map limbUInt64OfWords)[offset]? = some limb →
+      heap.memory.readUInt64
+          (result.toNat + headerBytes +
+            target.semanticSlotBytes * (0 + offset)) = .ok limb := by
+    intro offset limb mappedAt
+    rw [List.getElem?_map] at mappedAt
+    cases wordAt : words[offset]? with
+    | none => simp [wordAt] at mappedAt
+    | some word =>
+        have limbEq : limbUInt64OfWords word = limb := by
+          simpa [wordAt] using mappedAt
+        subst limb
+        have offsetInWords := (List.getElem?_eq_some_iff.mp wordAt).1
+        have offsetInPrefix : offset < count := by omega
+        rcases word with ⟨low, high⟩
+        have reads := readable.readUInt32Pair related payloadInBounds
+          offsetInPrefix wordAt
+        unfold LinearMemory.readUInt64
+        simp only [target, Nat.zero_add]
+        rw [reads.1, reads.2]
+        rfl
+  have decoded := readNaturalLimbs_of_limbAt heap.memory result.toNat 0
+    (words.map limbUInt64OfWords) limbAt
+  simpa [wordsLength, naturalLimbsValue_map_limbUInt64OfWords] using decoded
+
 /-- The complete writer loop materializes exactly the pure output prefix, not
 merely an arbitrary sequence of in-bounds stores. -/
 theorem wp_writeSumLoopProgram_of_exactPrefix
@@ -5011,6 +5225,71 @@ def checkedCarryFinalStore (store : Wasm.Store host) (object index : UInt32) :
   let lowStore := checkedCarryLowStore store object index
   { lowStore with mem := (lowStore.mem.write32
       (checkedLimbBase object index + UInt32.ofNat 4) 0) }
+
+theorem checkedCarryFinalStore_eq_writeSumFinalStore
+    (store : Wasm.Store host) (object index : UInt32) :
+    checkedCarryFinalStore store object index =
+      writeSumFinalStore store object index 1 0 := by
+  rfl
+
+/-- Final store selected by the producer after the writer returns its carry. -/
+def completedAddStore (store : Wasm.Store host) (object : UInt32)
+    (count : Nat) (carry : UInt32) : Wasm.Store host :=
+  if carry = 0 then store else
+    checkedCarryFinalStore store object (UInt32.ofNat count)
+
+/-- The exact writer history extends by precisely the producer's constant
+`[1, 0]` carry limb when the arithmetic carry is nonzero. -/
+theorem WrittenLimbPrefix.completeWithCarry
+    {initial current : Wasm.Store host} {result carry : UInt32}
+    {words : List LimbWords} {count : Nat}
+    (written : WrittenLimbPrefix initial result words count current)
+    (wordsLength : words.length = count)
+    (carryBit : carry = 0 ∨ carry = 1) :
+    WrittenLimbPrefix initial result (completedAddLimbWords words carry)
+      (count + carry.toNat) (completedAddStore current result count carry) := by
+  rcases carryBit with rfl | rfl
+  · simpa [completedAddLimbWords, completedAddStore] using written
+  · have carryAt : (words ++ [(1, 0)])[count]? = some (1, 0) := by
+      rw [← wordsLength]
+      simp
+    have extended := WrittenLimbPrefix.step
+      (written.appendWords [(1, 0)]) carryAt
+    simpa [completedAddLimbWords, completedAddStore,
+      checkedCarryFinalStore_eq_writeSumFinalStore] using extended
+
+/-- End-to-end payload decoder boundary for the installed writer plus its
+optional carry store.  The raw reservation supplies lane separation; the
+common memory relation transports exact resident reads to W6's decoder. -/
+theorem WrittenLimbPrefix.readNaturalLimbs_completeWithCarry_of_allocateObject
+    {initial current : Wasm.Store host} {address : Word32} {carry : UInt32}
+    {words : List LimbWords} {count : Nat}
+    {state allocated heap : MemoryState} {persistent : Bool}
+    {aux0 aux1 aux2 aux3 : UInt32}
+    (written : WrittenLimbPrefix initial (UInt32.ofNat address.value) words
+      count current)
+    (wordsLength : words.length = count)
+    (carryBit : carry = 0 ∨ carry = 1)
+    (allocation : state.allocateObject .natural
+      (target.semanticSlotBytes * (count + carry.toNat)) persistent
+        aux0 aux1 aux2 aux3 = .ok (allocated, address))
+    (related : ResidentMemoryRel heap
+      (completedAddStore current (UInt32.ofNat address.value) count carry).mem)
+    (payloadInBounds :
+      address.value + headerBytes + 8 * (count + carry.toNat) ≤
+        heap.memory.size) :
+    Fir.Wasm.Concrete.readNaturalLimbs heap.memory address.value 0
+        (count + carry.toNat) =
+      .ok (limbWordsListValue (completedAddLimbWords words carry)) := by
+  have completed := written.completeWithCarry wordsLength carryBit
+  have readable := completed.readable_of_allocateObject allocation
+  have completedLength := completedAddLimbWords_length words carry carryBit
+  have addressToNat : (UInt32.ofNat address.value).toNat = address.value := by
+    apply UInt32.toNat_ofNat_of_lt'
+    simpa [wordModulus, UInt32.size] using address.isLt
+  have decoded := readable.readNaturalLimbs related
+    (by omega) (by simpa [addressToNat] using payloadInBounds)
+  simpa [addressToNat] using decoded
 
 /-- Exact symbolic multi-limb result producer in checked `Nat.add`.
 

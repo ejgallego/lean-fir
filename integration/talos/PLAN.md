@@ -6385,6 +6385,26 @@ terminal carry with the canonical `naturalLimbs` of the mathematical sum, so
 the existing Natural decoder and `NaturalResultRefines` theorem can consume
 the exact readable payload.
 
+A closer audit of that decoder boundary removes the proposed canonical-list
+obligation.  `readNaturalLimbs` is extensional, and `LiveCellRel.natural`
+requires a fitting payload plus the decoded mathematical value; it does not
+require byte-for-byte equality with the particular `naturalLimbs` list chosen
+by `allocateNatural`.  W6 now reassembles each exact low/high pair as a
+`UInt64`, transports those reads through `ResidentMemoryRel`, and proves that
+the ordinary decoder returns `limbWordsListValue` of the written list.
+
+The producer's physical completion is explicit as well: zero carry retains
+the writer prefix, while carry one appends exactly `[low = 1, high = 0]` at the
+next limb and selects the two constant W7 stores.  The completed list has
+length `count + carry` and value exactly the operand sum.  A single composite
+theorem now takes a raw Natural reservation, the exact writer history, its
+carry bit, the common memory relation, and the payload bound, and concludes
+the W6 `readNaturalLimbs` result for the complete physical payload.  The next
+boundary is therefore structural rather than arithmetic: connect the W7 raw
+allocator/header execution and this final memory relation to
+`LiveCellRel.natural`, then feed that object relation to the typed return and
+whole-helper theorem.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
