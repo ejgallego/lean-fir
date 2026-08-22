@@ -73,15 +73,22 @@ complete pinned-Binaryen and compiled-probe gate with `make tooling-check`.
 
 ## Thin roadmap
 
-1. Capture one real `d8 --perf-prof --perf-prof-annotate-wasm` fixture before
-   freezing the instruction-origin evidence schema.
-2. Let each client register its representative workload and report consumer in
+The checked steady Node collector, exact final-function sidecar, bounded
+function view, real `d8` instruction consumer, compiled Array probe, and
+exact-release caller aggregation are established surfaces rather than open
+roadmap items.
+
+1. Use exact caller aggregates to evaluate W7 candidates on fresh client
+   profiles, then route changed runtime contracts to W6 through the existing
+   lane protocol.
+2. Before repeating opt-in instruction origins on a large package, have W7
+   replace per-function filtering of the complete origin array with one-pass
+   grouping. Keep this diagnostic separate from exact-release attribution.
+3. Let each client register its representative workload and report consumer in
    the VIR catalog; FIR supplies artifact identities and profile/probe outputs.
-3. Replace retained legacy raw profiles with collector-produced bound evidence
+4. Replace retained legacy raw profiles with collector-produced bound evidence
    when a client next refreshes that workload; raw profiles remain explicitly
    unbound meanwhile.
-4. Use fresh client profiles to choose W7 optimization work, then route changed
-   runtime contracts to W6 through the existing lane protocol.
 
 FIR should not add a dashboard, duplicate client corpora, fixed millisecond
 gates, profiler-enabled release packages, or a general benchmark framework to

@@ -23,6 +23,7 @@ assert.equal(typeof binaryen, "string",
 const fixture = resolve(import.meta.dirname, "test/profile-fixture.wat");
 const workload = resolve(import.meta.dirname, "test/fixture-workload.mjs");
 const profileTool = resolve(import.meta.dirname, "node-profile.mjs");
+const aggregateTool = resolve(import.meta.dirname, "profile-aggregate.mjs");
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
@@ -85,6 +86,41 @@ test("CLI profiles only checked steady work and binds immutable evidence",
       assert.equal(evidence.summary.unresolvedWasmMicros, 0);
       assert.equal(evidence.rawProfile.sha256, sha256(rawBytes));
       assert.equal(rawBytes.at(-1), 10);
+
+      const aggregatePath = join(directory, "aggregate.json");
+      execFileSync(process.execPath, [
+        aggregateTool,
+        "--wasm", wasmPath,
+        "--sidecar", sidecarPath,
+        "--evidence", evidencePath,
+        "--out", aggregatePath,
+      ]);
+      const aggregate = JSON.parse(readFileSync(aggregatePath, "utf8"));
+      assert.equal(aggregate.schemaVersion,
+        "fir.sampled-profile-aggregate/v2");
+      assert.equal(aggregate.binding, "exact-release");
+      assert.equal(aggregate.runCount, 1);
+      assert.equal(aggregate.runs[0].callerAttribution.unresolvedWasmSelfSamples,
+        0);
+      assert.equal(
+        aggregate.runs[0].callerAttribution.attributedWasmSelfSamples,
+        aggregate.runs[0].wasmSelfSamples);
+      for (const function_ of aggregate.functions) {
+        assert.equal(function_.callers.reduce((sum, caller) =>
+          sum + caller.perRun[0].selfSamples, 0),
+        function_.perRun[0].selfSamples,
+        `caller edges must cover ${function_.name}`);
+      }
+      const leaf = aggregate.functions.find(({ name }) =>
+        name === "Fixture.leaf");
+      assert(leaf !== undefined,
+        "live profile must sample the fixture leaf function");
+      const entryCaller = leaf.callers.find(({ kind, name }) =>
+        kind === "wasm" && name === "Fixture.entry");
+      assert(entryCaller !== undefined,
+        "live profile must retain the entry-to-leaf caller edge");
+      assert.equal(entryCaller.aggregate.targetSelfShare.edgePresentRuns, 1);
+
       assert.deepEqual(readFileSync(wasmPath), wasmBefore);
       assert.deepEqual(readFileSync(sidecarPath), sidecarBefore);
       assert.deepEqual(readFileSync(workload), workloadBefore);

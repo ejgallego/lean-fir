@@ -24,6 +24,12 @@ multiple parents, parent cycles, and sampled or caller Wasm indices outside the
 exact sidecar are rejected. Every accepted run checks that the caller-edge
 sample total equals its Wasm self-sample total.
 
+The pinned external tooling gate additionally collects a fresh Node Inspector
+profile from an ordinary Binaryen-built fixture, invokes the aggregate-v2 CLI,
+checks caller coverage for every sampled function, and requires the concrete
+`Fixture.entry` to `Fixture.leaf` Wasm caller edge. Synthetic unit cases retain
+the malformed-graph and recursive/host/root boundary checks.
+
 ## Production controls
 
 Both controls reused four untouched, semantically checked CPU profiles from

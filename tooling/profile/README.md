@@ -72,8 +72,10 @@ make -C tooling profile-check \
 
 The live test verifies artifact/sidecar/workload immutability, raw evidence
 hashes, resolved Wasm samples, checked phase observations, and absence of
-partial output after an unchecked steady result. The gate never downloads
-tools and never skips when its dependency is missing.
+partial output after an unchecked steady result. It also passes the captured
+profile through aggregate v2, checks complete per-function caller coverage,
+and requires the real `Fixture.entry` to `Fixture.leaf` Wasm caller edge. The
+gate never downloads tools and never skips when its dependency is missing.
 
 ## Cross-run final-function resolver
 
