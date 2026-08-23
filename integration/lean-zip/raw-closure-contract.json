@@ -11,15 +11,15 @@
   "residentHelpersSha256": "38abe14c6b02e1ab99091aed3b4bdf295c6dcd9770f57607508fa0e31ac5a509",
   "completeFunctionsSha256": "351d452ac4c918f2e562bc4ee80be668f0a0d7efe6c40ed25080c7a4fec28381",
   "releaseFunctionImports": 0,
-  "releaseDefinedFunctions": 504,
-  "releaseFunctions": 504,
+  "releaseDefinedFunctions": 505,
+  "releaseFunctions": 505,
   "releaseLeanSourceFunctions": 228,
-  "releaseResidentHelpers": 276,
+  "releaseResidentHelpers": 277,
   "releaseOptimizerOrLinkedRuntimeFunctions": 0,
-  "releaseFunctionIndexSha256": "eefa524e064f64df710db23cbdfe0f6dded67f38f59513afb5ca749555a32131",
-  "releaseFunctionSidecarBytes": 208398,
-  "releaseFunctionSidecarSha256": "8f3a9bd1dcf315f05c3f13acdc375de2d1968df187e47d46b608baf6a25796f1",
+  "releaseFunctionIndexSha256": "8955c7511b6c9b599ed33cda9a959f09ff3d16a66d3d710c2288c81a50b143c7",
+  "releaseFunctionSidecarBytes": 209543,
+  "releaseFunctionSidecarSha256": "029a537b5f7e5523db097c069f675e06877237736a93a30406c7faafd0fb73c6",
   "baseWasmBytes": 444470,
-  "frontierWasmBytes": 669029,
-  "completeWasmBytes": 393275
+  "frontierWasmBytes": 669055,
+  "completeWasmBytes": 384533
 }

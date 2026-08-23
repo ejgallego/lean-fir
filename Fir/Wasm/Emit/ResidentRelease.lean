@@ -328,19 +328,42 @@ private def decrementOnceFunction
                 equalsConst .uint32 0 ++
                 [.ifElse aligned [.unreachable]])])] }
 
+private def decrementOnceCall (check : Bool) : List Instruction :=
+  [.localGet objectParam,
+    .i32Const .uint32 (if check then 1 else 0),
+    .call (.declaration decrementOnceName)]
+
+/-
+Lean's native `lean_dec` keeps the scalar test in the compiled caller and only
+enters the cold recursive release path for a heap reference.  Checked FIR
+decrements also accept the erased zero sentinel, so test it beside tagged
+immediates before calling `fir_dec_once`.  The helper deliberately retains its
+own checks: resident container helpers call it directly, and malformed heap
+references must keep trapping at that public generation boundary.
+-/
+private def checkedDecrementCalls (calls : List Instruction) :
+    List Instruction :=
+  [.localGet objectParam,
+    .i32Const .uint32 1,
+    .i32And,
+    .ifElse []
+      ([.localGet objectParam] ++
+        equalsConst .tobject 0 ++
+        [.ifElse [] calls])]
+
 private def decrementWrapper (ordinal amount : Nat) (check : Bool) :
     Except LinkError Function := do
   let _ ← checkedWord amount
-  let call :=
-    [.localGet objectParam,
-      .i32Const .uint32 (if check then 1 else 0),
-      .call (.declaration decrementOnceName)]
+  let calls := (List.replicate amount (decrementOnceCall check)).flatten
+  let body := if amount == 0 then [] else if check then
+    checkedDecrementCalls calls
+  else calls
   return {
     name := releaseName ordinal
     params := #[(objectParam, .tobject)]
     results := #[]
     locals := #[]
-    body := (List.replicate amount call).flatten ++ [.ret] }
+    body := body ++ [.ret] }
 
 private def deleteReleasedBody : List Instruction :=
   [.localGet addressLocal,
@@ -554,6 +577,19 @@ def manifest : Json :=
       .localGet addressLocal,
       .i32Load .uint32 (u32 headerRefCountOffset),
       .localSet refCountLocal]
+  | .error _ => false
+
+#guard match decrementWrapper 0 1 true with
+  | .ok function => function.body == checkedDecrementCalls
+      (decrementOnceCall true) ++ [.ret]
+  | .error _ => false
+
+#guard match decrementWrapper 1 1 false with
+  | .ok function => function.body == decrementOnceCall false ++ [.ret]
+  | .error _ => false
+
+#guard match decrementWrapper 2 0 true with
+  | .ok function => function.body == [.ret]
   | .error _ => false
 
 #guard match residentExampleModule with

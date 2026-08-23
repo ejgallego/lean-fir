@@ -317,6 +317,34 @@ lowering so the compiler never constructs the removed candidates; that move
 must preserve the generic opaque-boundary path and receive the corresponding
 proof adaptation.
 
+### G1j. Keep checked decrement scalar gates in compiled callers (generation-ready)
+
+Upstream Lean's `lean_dec` performs the scalar/tag test inline and enters the
+cold recursive release routine only for a heap reference. FIR previously sent
+every checked decrement through `fir_dec_once`, including tagged Nat values
+and the checked erased-zero sentinel. Resident container helpers still need
+the complete public helper, but compiler-generated release wrappers can follow
+the upstream split without changing their signature or heap behavior.
+
+Checked wrappers now classify tagged immediates and zero once before the
+possibly repeated decrement sequence. Those values return without calling the
+recursive helper. Ordinary, shared, persistent, promoted-Nat, malformed, and
+last-reference values retain the existing `fir_dec_once` path; unchecked
+wrappers are byte-for-byte direct calls, and a zero-amount decrement remains a
+no-op without inspecting its argument. Generated-shape guards pin all three
+cases.
+
+On the exact 256-KiB seeded-random level-6 lean-zip workload, two
+artifact-bound profiles reduce median `fir_dec_once` Wasm-self share from
+15.81% to 1.61%; the retained checked wrapper accounts for 1.72%, for a 79%
+combined decrement-path reduction. The final module falls from 393,275 to
+384,533 bytes even though one 22-byte wrapper survives, because the optimizer
+removes 8,763 bytes from matched callers. Sixteen diagnostics-off alternating
+AB/BA pairs move the median exported-entry time from 94.80 ms to 92.54 ms
+(-2.4%); 15/16 pairs improve and the paired median is -2.36 ms. Exact output,
+all ten levels, zero imports, and the flat 9,237,304-byte frontier remain
+unchanged. W6 proof review remains the acceptance boundary.
+
 ### G2. Separate production and diagnostic adapter costs (accepted)
 
 Finish the pending Illuminate selection-player request with an actually

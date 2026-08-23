@@ -285,6 +285,15 @@ constant publication, and the flat 9,237,304-byte rewind frontier are
 unchanged. This post-lowering slice does not yet reduce all-target lowering
 time.
 
+Checked compiler-generated decrements now mirror upstream `lean_dec`: tagged
+immediates and the checked erased-zero sentinel are classified in the compiled
+caller, while heap references retain the complete `fir_dec_once` path.
+Unprofiled alternating level-6 pairs move from a 94.80 ms median to 92.54 ms
+(-2.4%, 15/16 improving), while two artifact-bound profiles reduce the combined
+checked-wrapper plus `fir_dec_once` share by about 79%. The exact module falls
+from 393,275 to 384,533 bytes; compressed output, imports, and the flat
+9,237,304-byte frontier are unchanged.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not
