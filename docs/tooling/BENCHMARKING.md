@@ -78,9 +78,10 @@ dependency boundary, and fail-closed provider-neutral job behavior.
 ## Thin roadmap
 
 The checked steady Node collector, exact final-function sidecar, bounded
-function view, real `d8` instruction consumer, compiled Array probe, and
-exact-release caller aggregation are established surfaces rather than open
-roadmap items.
+function view, real `d8` instruction consumer, compiled Array probe,
+exact-release caller aggregation, and ordered one-pass
+[instruction-origin generation](WASM_PROVENANCE_COST.md) are established
+surfaces rather than open roadmap items.
 
 1. The trusted closed-ByteArray candidate is evaluated: fresh lean-zip evidence
    confirms that `fir_byte_array_validate` is absent from both the final module
@@ -88,14 +89,9 @@ roadmap items.
    exact-caller evaluation is W7's prettyM constructor-allocation candidate,
    after W7 publishes its immutable package and receipt identities; route any
    changed runtime contract to W6 through the existing lane protocol.
-2. Keep instruction-origin one-pass grouping as a conditional, lower-priority
-   task. Before repeating opt-in instruction origins on a substantially larger
-   package, have W7 replace per-function filtering of the complete origin array
-   with one-pass grouping. Keep this diagnostic separate from exact-release
-   attribution; current production package sizes do not justify doing it first.
-3. Let each client register its representative workload and report consumer in
+2. Let each client register its representative workload and report consumer in
    the VIR catalog; FIR supplies artifact identities and profile/probe outputs.
-4. Replace retained legacy raw profiles with collector-produced bound evidence
+3. Replace retained legacy raw profiles with collector-produced bound evidence
    when a client next refreshes that workload; raw profiles remain explicitly
    unbound meanwhile.
 
