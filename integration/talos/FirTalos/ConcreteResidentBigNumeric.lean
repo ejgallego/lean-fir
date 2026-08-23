@@ -497,6 +497,715 @@ theorem terminatesWith_validateCommon_of_naturalAdmission
     allocationInBounds flagsRead countRead allocationRead live countPositive
     countFits allocationExact
 
+/-- Exact low/high view of the canonical most-significant Natural limb.  It
+packages both Natural-only validator facts: the top limb is nonzero, and a
+one-limb heap Natural has its high word outside the tagged range. -/
+theorem NaturalValidatorAdmission.topWords
+    {heap : MemoryState} {address : Word32} {value : Nat} {header : Header}
+    (related : NaturalValidatorAdmission heap address value header) :
+    ∃ low high : UInt32,
+      heap.memory.readUInt32
+          (address.value + headerBytes +
+            8 * (header.aux1.toNat - 1)) = .ok low ∧
+      heap.memory.readUInt32
+          (address.value + headerBytes +
+            8 * (header.aux1.toNat - 1) + 4) = .ok high ∧
+      ¬(low = 0 ∧ high = 0) ∧
+      (header.aux1.toNat = 1 → ¬high < 2147483648) := by
+  obtain ⟨limb, atTop, limbNonzero, limbRead⟩ := related.topLimb
+  unfold LinearMemory.readUInt64 at limbRead
+  cases lowRead : heap.memory.readUInt32
+      (address.value + headerBytes +
+        target.semanticSlotBytes * (header.aux1.toNat - 1)) with
+  | error failure =>
+      rw [lowRead] at limbRead
+      contradiction
+  | ok low =>
+      rw [lowRead] at limbRead
+      cases highRead : heap.memory.readUInt32
+          (address.value + headerBytes +
+            target.semanticSlotBytes * (header.aux1.toNat - 1) + 4) with
+      | error failure =>
+          rw [highRead] at limbRead
+          contradiction
+      | ok high =>
+          rw [highRead] at limbRead
+          simp only [Bind.bind, Except.bind, pure, Except.pure,
+            Except.ok.injEq] at limbRead
+          have lowEq : low = limb.toUInt32 := by
+            rw [← limbRead]
+            bv_decide
+          have highEq : high = (limb >>> (32 : UInt64)).toUInt32 := by
+            rw [← limbRead]
+            bv_decide
+          refine ⟨low, high, ?_, ?_, ?_, ?_⟩
+          · simpa [target] using lowRead
+          · simpa [target] using highRead
+          · rintro ⟨lowZero, highZero⟩
+            have limbZero : limb = 0 := by
+              rw [← limbRead, lowZero, highZero]
+              decide
+            exact limbNonzero limbZero
+          · intro one
+            obtain ⟨only, limbsEq, highNotLt⟩ :=
+              related.oneLimbHigh_not_lt one
+            have limbEq : limb = only := by
+              rw [one, limbsEq] at atTop
+              simpa using atTop.symm
+            rw [highEq, limbEq]
+            exact highNotLt
+
+private def equalsConstSource (value : UInt32) :
+    List Fir.Wasm.Instruction :=
+  [.i32Const .uint32 value, .i32Eq]
+
+private def loadHeaderSource (offset : Nat) : List Fir.Wasm.Instruction :=
+  [.localGet valueParam, .i32Load .uint32 (UInt32.ofNat offset)]
+
+private def requirePersistentSource : List Fir.Wasm.Instruction :=
+  ResidentBigNumericAllocator.trapUnlessTrueSource
+      (loadHeaderSource headerFlagsOffset ++
+        [.i32Const .uint32 persistentFlag, .i32And]) ++
+    ResidentAllocator.trapWhenTrueSource
+      (loadHeaderSource headerRefCountOffset)
+
+private def requireOrdinaryOrPersistentSource : List Fir.Wasm.Instruction :=
+  loadHeaderSource headerFlagsOffset ++
+    equalsConstSource (liveFlag + persistentFlag) ++
+    [.ifElse
+      (ResidentAllocator.trapWhenTrueSource
+        (loadHeaderSource headerRefCountOffset))
+      (ResidentBigNumericAllocator.trapUnlessTrueSource
+          (loadHeaderSource headerFlagsOffset ++
+            equalsConstSource liveFlag) ++
+        ResidentBigNumericAllocator.trapUnlessTrueSource
+          (loadHeaderSource headerRefCountOffset))]
+
+private def requireReservedZeroSource : List Fir.Wasm.Instruction :=
+  ResidentAllocator.trapWhenTrueSource
+      (loadHeaderSource headerAux2Offset) ++
+    ResidentAllocator.trapWhenTrueSource
+      (loadHeaderSource headerAux3Offset)
+
+private def requireOneCountSource : List Fir.Wasm.Instruction :=
+  ResidentBigNumericAllocator.trapUnlessTrueSource [
+    .localGet countLocal,
+    .i32Const .uint32 1,
+    .i32Eq]
+
+private def loadTopLowSource : List Fir.Wasm.Instruction := [
+  .localGet valueParam,
+  .localGet countLocal,
+  .i32Const .uint32 1,
+  .i32Sub,
+  .call (.declaration Fir.Wasm.Emit.ResidentBigNumeric.naturalLowName)]
+
+private def loadTopHighSource : List Fir.Wasm.Instruction := [
+  .localGet valueParam,
+  .localGet countLocal,
+  .i32Const .uint32 1,
+  .i32Sub,
+  .call (.declaration Fir.Wasm.Emit.ResidentBigNumeric.naturalHighName)]
+
+private def requireTopNonzeroSource : List Fir.Wasm.Instruction :=
+  ResidentBigNumericAllocator.trapUnlessTrueSource
+    ((loadTopLowSource ++ equalsConstSource 0) ++
+      (loadTopHighSource ++ equalsConstSource 0) ++
+      [.i32And] ++ equalsConstSource 0)
+
+private def naturalPromotedValidationSource : List Fir.Wasm.Instruction :=
+  requireOneCountSource ++ requirePersistentSource ++
+    requireReservedZeroSource ++
+    ResidentBigNumericAllocator.trapUnlessTrueSource
+      (loadTopHighSource ++
+        [.i32Const .uint32 2147483648, .i32LtU]) ++
+    loadTopHighSource ++ equalsConstSource 0 ++
+    [.ifElse
+      (ResidentBigNumericAllocator.trapUnlessTrueSource
+        ([.i32Const .uint32 (UInt32.ofNat maxImmediatePayload)] ++
+          loadTopLowSource ++ [.i32LtU]))
+      []]
+
+private def naturalBigValidationSource : List Fir.Wasm.Instruction :=
+  requireOrdinaryOrPersistentSource ++ requireReservedZeroSource ++
+    requireTopNonzeroSource ++ [
+      .localGet countLocal,
+      .i32Const .uint32 1,
+      .i32Eq,
+      .ifElse
+        (ResidentAllocator.trapWhenTrueSource
+          (loadTopHighSource ++
+            [.i32Const .uint32 2147483648, .i32LtU]))
+        []]
+
+/-- Public proof-side spelling of W7's complete Natural validator. -/
+def validateNaturalSource : List Fir.Wasm.Instruction := [
+  .localGet valueParam,
+  .i32Const .uint32 1,
+  .i32And,
+  .ifElse
+    [.ret]
+    ([.localGet valueParam,
+      .call (.declaration
+        Fir.Wasm.Emit.ResidentBigNumeric.validateCommonName),
+      .localSet countLocal] ++
+      ResidentBigNumericAllocator.trapUnlessTrueSource
+        (loadHeaderSource headerKindOffset ++
+          equalsConstSource ObjectKind.natural.code) ++
+      loadHeaderSource headerAux0Offset ++
+      equalsConstSource promotedTagMarker ++
+      [.ifElse
+        (naturalPromotedValidationSource ++ [.ret])
+        (ResidentBigNumericAllocator.trapUnlessTrueSource
+            (loadHeaderSource headerAux0Offset ++
+              equalsConstSource bigNaturalMarker) ++
+          naturalBigValidationSource ++ [.ret])])]
+
+private def equalsConstProgram (value : UInt32) : Wasm.Program :=
+  [.const value, .eq]
+
+private def loadHeaderProgram (offset : Nat) : Wasm.Program :=
+  [.localGet 0, .load32 (UInt32.ofNat offset)]
+
+private def requirePersistentProgram : Wasm.Program :=
+  ResidentBigNumericAllocator.trapUnlessTrueProgram
+      (loadHeaderProgram headerFlagsOffset ++
+        [.const persistentFlag, .and]) ++
+    ResidentAllocator.trapWhenTrueProgram
+      (loadHeaderProgram headerRefCountOffset)
+
+private def requireOrdinaryOrPersistentProgram : Wasm.Program :=
+  loadHeaderProgram headerFlagsOffset ++
+    equalsConstProgram (liveFlag + persistentFlag) ++
+    [.iff 0 0
+      (ResidentAllocator.trapWhenTrueProgram
+        (loadHeaderProgram headerRefCountOffset))
+      (ResidentBigNumericAllocator.trapUnlessTrueProgram
+          (loadHeaderProgram headerFlagsOffset ++ equalsConstProgram liveFlag) ++
+        ResidentBigNumericAllocator.trapUnlessTrueProgram
+          (loadHeaderProgram headerRefCountOffset))]
+
+private def requireReservedZeroProgram : Wasm.Program :=
+  ResidentAllocator.trapWhenTrueProgram
+      (loadHeaderProgram headerAux2Offset) ++
+    ResidentAllocator.trapWhenTrueProgram
+      (loadHeaderProgram headerAux3Offset)
+
+private def requireOneCountProgram : Wasm.Program :=
+  ResidentBigNumericAllocator.trapUnlessTrueProgram [
+    .localGet 1, .const 1, .eq]
+
+private def loadTopLowProgram (naturalLowIndex : Nat) : Wasm.Program := [
+  .localGet 0, .localGet 1, .const 1, .sub, .call naturalLowIndex]
+
+private def loadTopHighProgram (naturalHighIndex : Nat) : Wasm.Program := [
+  .localGet 0, .localGet 1, .const 1, .sub, .call naturalHighIndex]
+
+private def requireTopNonzeroProgram
+    (naturalLowIndex naturalHighIndex : Nat) : Wasm.Program :=
+  ResidentBigNumericAllocator.trapUnlessTrueProgram
+    ((loadTopLowProgram naturalLowIndex ++ equalsConstProgram 0) ++
+      (loadTopHighProgram naturalHighIndex ++ equalsConstProgram 0) ++
+      [.and] ++ equalsConstProgram 0)
+
+private def naturalPromotedValidationProgram
+    (naturalLowIndex naturalHighIndex : Nat) : Wasm.Program :=
+  requireOneCountProgram ++ requirePersistentProgram ++
+    requireReservedZeroProgram ++
+    ResidentBigNumericAllocator.trapUnlessTrueProgram
+      (loadTopHighProgram naturalHighIndex ++ [.const 2147483648, .ltU]) ++
+    loadTopHighProgram naturalHighIndex ++ equalsConstProgram 0 ++
+    [.iff 0 0
+      (ResidentBigNumericAllocator.trapUnlessTrueProgram
+        ([.const (UInt32.ofNat maxImmediatePayload)] ++
+          loadTopLowProgram naturalLowIndex ++ [.ltU]))
+      []]
+
+private def naturalBigValidationProgram
+    (naturalLowIndex naturalHighIndex : Nat) : Wasm.Program :=
+  requireOrdinaryOrPersistentProgram ++ requireReservedZeroProgram ++
+    requireTopNonzeroProgram naturalLowIndex naturalHighIndex ++ [
+      .localGet 1, .const 1, .eq,
+      .iff 0 0
+        (ResidentAllocator.trapWhenTrueProgram
+          (loadTopHighProgram naturalHighIndex ++
+            [.const 2147483648, .ltU]))
+        []]
+
+/-- The big-Natural validator is a sequence of independent guards.  This
+right-associated spelling lets their WP lemmas compose without exposing the
+instruction lists of the guards to one another. -/
+private theorem naturalBigValidationProgram_withReturn_factor
+    (naturalLowIndex naturalHighIndex : Nat) :
+    naturalBigValidationProgram naturalLowIndex naturalHighIndex ++ [.ret] =
+      requireOrdinaryOrPersistentProgram ++
+        (requireReservedZeroProgram ++
+          (requireTopNonzeroProgram naturalLowIndex naturalHighIndex ++
+            ([.localGet 1, .const 1, .eq,
+              .iff 0 0
+                (ResidentAllocator.trapWhenTrueProgram
+                  (loadTopHighProgram naturalHighIndex ++
+                    [.const 2147483648, .ltU]))
+                []] ++ [.ret]))) := by
+  simp only [naturalBigValidationProgram, List.append_assoc]
+
+/-- Exact Talos instruction program for the complete Natural validator. -/
+def validateNaturalProgram (validateCommonIndex naturalLowIndex
+    naturalHighIndex : Nat) : Wasm.Program := [
+  .localGet 0, .const 1, .and,
+  .iff 0 0
+    [.ret]
+    ([.localGet 0, .call validateCommonIndex, .localSet 1] ++
+      ResidentBigNumericAllocator.trapUnlessTrueProgram
+        (loadHeaderProgram headerKindOffset ++
+          equalsConstProgram ObjectKind.natural.code) ++
+      loadHeaderProgram headerAux0Offset ++
+      equalsConstProgram promotedTagMarker ++
+      [.iff 0 0
+        (naturalPromotedValidationProgram naturalLowIndex naturalHighIndex ++
+          [.ret])
+        (ResidentBigNumericAllocator.trapUnlessTrueProgram
+            (loadHeaderProgram headerAux0Offset ++
+              equalsConstProgram bigNaturalMarker) ++
+          naturalBigValidationProgram naturalLowIndex naturalHighIndex ++
+          [.ret])])]
+
+/-- W7's complete Natural validator has exactly the public proof-side shape. -/
+theorem validateNaturalFunction_shape :
+    Fir.Wasm.Emit.ResidentBigNumeric.validateNaturalFunction.body =
+      validateNaturalSource := by
+  rfl
+
+theorem validateNaturalFunction_params :
+    Fir.Wasm.Emit.ResidentBigNumeric.validateNaturalFunction.params =
+      #[(valueParam, .tobject)] := by
+  rfl
+
+theorem validateNaturalFunction_locals :
+    Fir.Wasm.Emit.ResidentBigNumeric.validateNaturalFunction.locals =
+      #[(countLocal, .uint32)] := by
+  rfl
+
+theorem validateNaturalFunction_results :
+    Fir.Wasm.Emit.ResidentBigNumeric.validateNaturalFunction.results =
+      #[] := by
+  rfl
+
+/-- Exact symbolic-to-Talos adaptation of the complete Natural validator. -/
+theorem instructions_validateNaturalFunction
+    {sourceModule : Fir.Wasm.Module}
+    {validateCommonIndex naturalLowIndex naturalHighIndex : Nat}
+    (validateCommonFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.validateCommonName) =
+        some validateCommonIndex)
+    (naturalLowFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.naturalLowName) =
+        some naturalLowIndex)
+    (naturalHighFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.naturalHighName) =
+        some naturalHighIndex) :
+    FirTalos.instructions sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.validateNaturalFunction []
+      Fir.Wasm.Emit.ResidentBigNumeric.validateNaturalFunction.body =
+        .ok (validateNaturalProgram validateCommonIndex naturalLowIndex
+          naturalHighIndex) := by
+  have valueFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.validateNaturalFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.validateNaturalFunction.locals.toList)
+      valueParam = some 0 := by decide
+  have countFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.validateNaturalFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.validateNaturalFunction.locals.toList)
+      countLocal = some 1 := by decide
+  rw [validateNaturalFunction_shape]
+  set_option maxRecDepth 100000 in
+    simp [validateNaturalSource, validateNaturalProgram,
+      naturalPromotedValidationSource, naturalPromotedValidationProgram,
+      naturalBigValidationSource, naturalBigValidationProgram,
+      requirePersistentSource, requirePersistentProgram,
+      requireOrdinaryOrPersistentSource, requireOrdinaryOrPersistentProgram,
+      requireReservedZeroSource, requireReservedZeroProgram,
+      requireOneCountSource, requireOneCountProgram,
+      requireTopNonzeroSource, requireTopNonzeroProgram,
+      loadTopLowSource, loadTopLowProgram, loadTopHighSource,
+      loadTopHighProgram, loadHeaderSource, loadHeaderProgram,
+      equalsConstSource, equalsConstProgram,
+      ResidentAllocator.trapWhenTrueSource,
+      ResidentAllocator.trapWhenTrueProgram,
+      ResidentBigNumericAllocator.trapUnlessTrueSource,
+      ResidentBigNumericAllocator.trapUnlessTrueProgram,
+      FirTalos.instructions, FirTalos.instruction, valueFound, countFound,
+      validateCommonFound, naturalLowFound, naturalHighFound,
+      Bind.bind, Except.bind, pure, Except.pure]
+
+/-- An adapted complete Natural validator consists of the exact proof-side
+program followed only by the adapter's standard terminal suffix. -/
+theorem adaptedValidateNaturalFunction_body
+    {sourceModule : Fir.Wasm.Module} {targetFunction : Wasm.Function}
+    {validateCommonIndex naturalLowIndex naturalHighIndex : Nat}
+    (adapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.validateNaturalFunction =
+        .ok targetFunction)
+    (validateCommonFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.validateCommonName) =
+        some validateCommonIndex)
+    (naturalLowFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.naturalLowName) =
+        some naturalLowIndex)
+    (naturalHighFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.naturalHighName) =
+        some naturalHighIndex) :
+    targetFunction.body =
+        validateNaturalProgram validateCommonIndex naturalLowIndex
+            naturalHighIndex ++
+          FirTalos.functionTerminal sourceModule
+            Fir.Wasm.Emit.ResidentBigNumeric.validateNaturalFunction := by
+  exact ResidentPrimitives.adaptedFunction_body_of_exact adapted
+    (instructions_validateNaturalFunction validateCommonFound naturalLowFound
+      naturalHighFound)
+
+/-- The three installed calls used by the heap arm of Natural validation.
+The record is deliberately independent of how the helpers are generated or
+linked: the validator proof needs only their exact trace-free behavior. -/
+structure NaturalValidationCalls {host : Type}
+    (env : Wasm.HostEnv host) (module : Wasm.Module)
+    (validateCommonIndex naturalLowIndex naturalHighIndex : Nat)
+    (store : Wasm.Store host) (word count topIndex low high : UInt32) : Prop where
+  common : ∀ tail,
+    Wasm.TerminatesWith env module validateCommonIndex store
+      (.i32 word :: tail)
+      (fun final values =>
+        final = store ∧ values = .i32 count :: tail)
+  low : ∀ tail,
+    Wasm.TerminatesWith env module naturalLowIndex store
+      ([.i32 topIndex, .i32 word] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 low :: tail)
+  high : ∀ tail,
+    Wasm.TerminatesWith env module naturalHighIndex store
+      ([.i32 topIndex, .i32 word] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 high :: tail)
+
+/-- The shared ownership check accepts exactly the two live concrete header
+encodings used by resident objects: persistent with zero refcount, or
+ordinary with nonzero refcount. -/
+theorem wp_requireOrdinaryOrPersistentProgram
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {locals : Wasm.Locals} {word flags refCount : UInt32}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    (valueLocal : locals.get 0 = some (.i32 word))
+    (flagsInBounds :
+      ¬(word.toNat + (UInt32.ofNat headerFlagsOffset).toNat + 4 >
+        store.mem.pages * 65536))
+    (refCountInBounds :
+      ¬(word.toNat + (UInt32.ofNat headerRefCountOffset).toNat + 4 >
+        store.mem.pages * 65536))
+    (flagsRead : store.mem.read32
+      (word + UInt32.ofNat headerFlagsOffset) = flags)
+    (refCountRead : store.mem.read32
+      (word + UInt32.ofNat headerRefCountOffset) = refCount)
+    (ownership :
+      (flags = liveFlag + persistentFlag ∧ refCount = 0) ∨
+      (flags = liveFlag ∧ refCount ≠ 0))
+    (continued : Wasm.wp module rest Q store
+      { locals with values := tail } env) :
+    Wasm.wp module (requireOrdinaryOrPersistentProgram ++ rest) Q store
+      { locals with values := tail } env := by
+  have valueLocal' (values : List Wasm.Value) :
+      ({ locals with values } : Wasm.Locals).get 0 = some (.i32 word) := by
+    simpa using valueLocal
+  rcases ownership with persistent | ordinary
+  · rcases persistent with ⟨flagsEq, refCountEq⟩
+    unfold requireOrdinaryOrPersistentProgram
+    simp only [ResidentAllocator.trapWhenTrueProgram,
+      ResidentBigNumericAllocator.trapUnlessTrueProgram,
+      loadHeaderProgram, equalsConstProgram, List.cons_append,
+      List.nil_append, Wasm.wp_localGet_cons, valueLocal',
+      Wasm.wp_load32_cons]
+    rw [if_neg flagsInBounds, flagsRead, flagsEq]
+    simp only [Wasm.wp_const_cons, Wasm.wp_eq_cons, if_true]
+    apply Wasm.wp_iff_cons rfl
+    rw [if_pos (by decide : (1 : UInt32) ≠ 0)]
+    simp only [List.take_zero, List.drop_zero, List.nil_append,
+      Wasm.wp_localGet_cons, valueLocal', Wasm.wp_load32_cons]
+    rw [if_neg refCountInBounds, refCountRead, refCountEq]
+    apply Wasm.wp_iff_cons rfl
+    rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+    simpa only [Wasm.wp_nil, List.take_zero, List.drop_zero,
+      List.nil_append] using continued
+  · rcases ordinary with ⟨flagsEq, refCountNe⟩
+    have flagsNe : liveFlag ≠ liveFlag + persistentFlag := by decide
+    unfold requireOrdinaryOrPersistentProgram
+    simp only [ResidentAllocator.trapWhenTrueProgram,
+      ResidentBigNumericAllocator.trapUnlessTrueProgram,
+      loadHeaderProgram, equalsConstProgram, List.cons_append,
+      List.nil_append, Wasm.wp_localGet_cons, valueLocal',
+      Wasm.wp_load32_cons]
+    rw [if_neg flagsInBounds, flagsRead, flagsEq]
+    simp only [Wasm.wp_const_cons, Wasm.wp_eq_cons, if_neg flagsNe]
+    apply Wasm.wp_iff_cons rfl
+    rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+    simp only [List.take_zero, List.drop_zero, List.nil_append,
+      Wasm.wp_localGet_cons, valueLocal', Wasm.wp_load32_cons]
+    rw [if_neg flagsInBounds, flagsRead, flagsEq]
+    simp only [Wasm.wp_const_cons, Wasm.wp_eq_cons, if_true,
+      if_neg (by decide : (1 : UInt32) ≠ 0)]
+    apply Wasm.wp_iff_cons rfl
+    rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+    simp only [Wasm.wp_nil, List.take_zero, List.drop_zero, List.nil_append,
+      Wasm.wp_localGet_cons, valueLocal', Wasm.wp_load32_cons]
+    rw [if_neg refCountInBounds, refCountRead]
+    simp only [Wasm.wp_const_cons, Wasm.wp_eq_cons, if_neg refCountNe]
+    apply Wasm.wp_iff_cons rfl
+    rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+    simpa only [Wasm.wp_nil, List.take_zero, List.drop_zero,
+      List.nil_append] using continued
+
+/-- Reserved-header validation is a reusable two-load guard, independent of
+the payload kind whose header owns the lanes. -/
+theorem wp_requireReservedZeroProgram
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {locals : Wasm.Locals} {word aux2 aux3 : UInt32}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    (valueLocal : locals.get 0 = some (.i32 word))
+    (aux2InBounds :
+      ¬(word.toNat + (UInt32.ofNat headerAux2Offset).toNat + 4 >
+        store.mem.pages * 65536))
+    (aux3InBounds :
+      ¬(word.toNat + (UInt32.ofNat headerAux3Offset).toNat + 4 >
+        store.mem.pages * 65536))
+    (aux2Read : store.mem.read32
+      (word + UInt32.ofNat headerAux2Offset) = aux2)
+    (aux3Read : store.mem.read32
+      (word + UInt32.ofNat headerAux3Offset) = aux3)
+    (reserved2 : aux2 = 0)
+    (reserved3 : aux3 = 0)
+    (continued : Wasm.wp module rest Q store
+      { locals with values := tail } env) :
+    Wasm.wp module (requireReservedZeroProgram ++ rest) Q store
+      { locals with values := tail } env := by
+  have valueLocal' (values : List Wasm.Value) :
+      ({ locals with values } : Wasm.Locals).get 0 = some (.i32 word) := by
+    simpa using valueLocal
+  unfold requireReservedZeroProgram
+  simp only [ResidentAllocator.trapWhenTrueProgram, loadHeaderProgram,
+    List.cons_append, List.nil_append, Wasm.wp_localGet_cons, valueLocal',
+    Wasm.wp_load32_cons]
+  rw [if_neg aux2InBounds, aux2Read, reserved2]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [Wasm.wp_nil, List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_localGet_cons, valueLocal', Wasm.wp_load32_cons]
+  rw [if_neg aux3InBounds, aux3Read, reserved3]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simpa only [Wasm.wp_nil, List.take_zero, List.drop_zero,
+    List.nil_append] using continued
+
+/-- Scalar execution boundary for the complete heap-backed Natural validator.
+All memory reads and nested calls are explicit; canonical W6 admission below
+will discharge this contract as one unit. -/
+theorem wp_validateNaturalProgram_big
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {initial afterCount : Wasm.Locals}
+    {validateCommonIndex naturalLowIndex naturalHighIndex : Nat}
+    {word count topIndex low high kind flags refCount aux0 aux2 aux3 : UInt32}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    (calls : NaturalValidationCalls env module validateCommonIndex
+      naturalLowIndex naturalHighIndex store word count topIndex low high)
+    (valueLocal : initial.get 0 = some (.i32 word))
+    (countSet :
+      ({ initial with values := .i32 count :: tail }).set? 1 (.i32 count) =
+        some afterCount)
+    (heapSelected : 1 &&& word = 0)
+    (topIndexEq : count - 1 = topIndex)
+    (kindInBounds :
+      ¬(word.toNat + (UInt32.ofNat headerKindOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (flagsInBounds :
+      ¬(word.toNat + (UInt32.ofNat headerFlagsOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (refCountInBounds :
+      ¬(word.toNat + (UInt32.ofNat headerRefCountOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (aux0InBounds :
+      ¬(word.toNat + (UInt32.ofNat headerAux0Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (aux2InBounds :
+      ¬(word.toNat + (UInt32.ofNat headerAux2Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (aux3InBounds :
+      ¬(word.toNat + (UInt32.ofNat headerAux3Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (kindRead : store.mem.read32
+      (word + UInt32.ofNat headerKindOffset) = kind)
+    (flagsRead : store.mem.read32
+      (word + UInt32.ofNat headerFlagsOffset) = flags)
+    (refCountRead : store.mem.read32
+      (word + UInt32.ofNat headerRefCountOffset) = refCount)
+    (aux0Read : store.mem.read32
+      (word + UInt32.ofNat headerAux0Offset) = aux0)
+    (aux2Read : store.mem.read32
+      (word + UInt32.ofNat headerAux2Offset) = aux2)
+    (aux3Read : store.mem.read32
+      (word + UInt32.ofNat headerAux3Offset) = aux3)
+    (kindExact : kind = ObjectKind.natural.code)
+    (markerExact : aux0 = bigNaturalMarker)
+    (ownership :
+      (flags = liveFlag + persistentFlag ∧ refCount = 0) ∨
+      (flags = liveFlag ∧ refCount ≠ 0))
+    (reserved2 : aux2 = 0)
+    (reserved3 : aux3 = 0)
+    (topNonzero : ¬(low = 0 ∧ high = 0))
+    (oneHigh : count = 1 → ¬high < 2147483648)
+    (returned : Q (.Return store tail)) :
+    Wasm.wp module
+      (validateNaturalProgram validateCommonIndex naturalLowIndex
+          naturalHighIndex ++ rest)
+      Q store { initial with values := tail } env := by
+  have countUpdate := FirTalos.Correctness.localUpdate_of_set? countSet
+  have valueAfterCount (values : List Wasm.Value) :
+      ({ afterCount with values } : Wasm.Locals).get 0 = some (.i32 word) := by
+    change afterCount.get 0 = some (.i32 word)
+    rw [countUpdate.2 (by decide)]
+    simpa using valueLocal
+  have countAfterCount (values : List Wasm.Value) :
+      ({ afterCount with values } : Wasm.Locals).get 1 = some (.i32 count) := by
+    simpa using countUpdate.1
+  have valueLocal' :
+      ({ initial with values := tail } : Wasm.Locals).get 0 =
+        some (.i32 word) := by
+    simpa using valueLocal
+  have kindInBounds' :
+      ¬(word.toNat + (UInt32.ofNat headerKindOffset).toNat + 4 >
+        store.mem.pages * 65536) := by
+    simpa [wasmPageBytes] using kindInBounds
+  have flagsInBounds' :
+      ¬(word.toNat + (UInt32.ofNat headerFlagsOffset).toNat + 4 >
+        store.mem.pages * 65536) := by
+    simpa [wasmPageBytes] using flagsInBounds
+  have refCountInBounds' :
+      ¬(word.toNat + (UInt32.ofNat headerRefCountOffset).toNat + 4 >
+        store.mem.pages * 65536) := by
+    simpa [wasmPageBytes] using refCountInBounds
+  have aux0InBounds' :
+      ¬(word.toNat + (UInt32.ofNat headerAux0Offset).toNat + 4 >
+        store.mem.pages * 65536) := by
+    simpa [wasmPageBytes] using aux0InBounds
+  have aux2InBounds' :
+      ¬(word.toNat + (UInt32.ofNat headerAux2Offset).toNat + 4 >
+        store.mem.pages * 65536) := by
+    simpa [wasmPageBytes] using aux2InBounds
+  have aux3InBounds' :
+      ¬(word.toNat + (UInt32.ofNat headerAux3Offset).toNat + 4 >
+        store.mem.pages * 65536) := by
+    simpa [wasmPageBytes] using aux3InBounds
+  unfold validateNaturalProgram loadHeaderProgram equalsConstProgram
+  simp only [ResidentAllocator.trapWhenTrueProgram,
+    ResidentBigNumericAllocator.trapUnlessTrueProgram,
+    List.cons_append, List.nil_append, Wasm.wp_localGet_cons, valueLocal',
+    Wasm.wp_const_cons, Wasm.wp_and_cons, heapSelected]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_localGet_cons, valueLocal']
+  apply Wasm.wp_call_tw (calls.common tail)
+  intro final values commonRun
+  rcases commonRun with ⟨rfl, valuesEq⟩
+  rw [valuesEq]
+  simp only [Wasm.wp_localSet_cons, countSet, Wasm.wp_localGet_cons,
+    valueAfterCount, Wasm.wp_load32_cons]
+  rw [if_neg kindInBounds', kindRead, kindExact]
+  simp only [Wasm.wp_const_cons, Wasm.wp_eq_cons,
+    if_neg (by decide : (1 : UInt32) ≠ 0), if_true]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [Wasm.wp_nil, List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_localGet_cons, valueAfterCount, Wasm.wp_load32_cons]
+  rw [if_neg aux0InBounds', aux0Read, markerExact]
+  simp only [Wasm.wp_const_cons, Wasm.wp_eq_cons,
+    if_neg (by decide : bigNaturalMarker ≠ promotedTagMarker)]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [Wasm.wp_nil, List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_localGet_cons, valueAfterCount, Wasm.wp_load32_cons]
+  rw [if_neg aux0InBounds', aux0Read, markerExact]
+  simp only [Wasm.wp_const_cons, Wasm.wp_eq_cons,
+    if_neg (by decide : (1 : UInt32) ≠ 0), if_true]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [Wasm.wp_nil, List.take_zero, List.drop_zero, List.nil_append]
+  rw [naturalBigValidationProgram_withReturn_factor]
+  apply wp_requireOrdinaryOrPersistentProgram (valueAfterCount tail)
+    flagsInBounds'
+    refCountInBounds' flagsRead refCountRead ownership
+  apply wp_requireReservedZeroProgram (valueAfterCount tail) aux2InBounds'
+    aux3InBounds' aux2Read aux3Read reserved2 reserved3
+  unfold requireTopNonzeroProgram loadTopLowProgram loadTopHighProgram
+  simp only [ResidentBigNumericAllocator.trapUnlessTrueProgram,
+    ResidentAllocator.trapWhenTrueProgram, equalsConstProgram,
+    List.cons_append, List.nil_append,
+    Wasm.wp_localGet_cons, valueAfterCount, countAfterCount,
+    Wasm.wp_const_cons,
+    Wasm.wp_sub_cons]
+  rw [topIndexEq]
+  apply Wasm.wp_call_tw (calls.low tail)
+  intro final values lowRun
+  rcases lowRun with ⟨rfl, valuesEq⟩
+  rw [valuesEq]
+  simp only [Wasm.wp_const_cons, Wasm.wp_eq_cons,
+    Wasm.wp_localGet_cons, valueAfterCount, countAfterCount,
+    Wasm.wp_sub_cons]
+  rw [topIndexEq]
+  apply Wasm.wp_call_tw (calls.high (.i32 (if low = 0 then 1 else 0) :: tail))
+  intro final values highRun
+  rcases highRun with ⟨rfl, valuesEq⟩
+  rw [valuesEq]
+  have topBitsZero :
+      ((if high = 0 then 1 else 0) &&&
+        (if low = 0 then 1 else 0) : UInt32) = 0 := by
+    by_cases lowZero : low = 0
+    · have highNonzero : high ≠ 0 := by
+        intro highZero
+        exact topNonzero ⟨lowZero, highZero⟩
+      simp [lowZero, highNonzero]
+    · simp [lowZero]
+  simp only [Wasm.wp_const_cons, Wasm.wp_eq_cons, Wasm.wp_and_cons]
+  rw [topBitsZero]
+  simp only [if_true,
+    if_neg (by decide : (1 : UInt32) ≠ 0)]
+  apply Wasm.wp_iff_cons rfl
+  simp only [if_neg (by decide : ¬(0 : UInt32) ≠ 0), Wasm.wp_nil,
+    List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_localGet_cons, countAfterCount, Wasm.wp_const_cons]
+  rw [Wasm.wp_eq_cons]
+  apply Wasm.wp_iff_cons rfl
+  split
+  · rename_i one
+    have countOne : count = 1 := by
+      simpa only [decide_eq_true_eq] using one
+    simp only [if_pos (by decide : (1 : UInt32) ≠ 0),
+      Wasm.wp_localGet_cons, valueAfterCount, countAfterCount,
+      Wasm.wp_const_cons, Wasm.wp_sub_cons]
+    rw [topIndexEq]
+    apply Wasm.wp_call_tw (calls.high tail)
+    intro final values highRun
+    rcases highRun with ⟨rfl, valuesEq⟩
+    rw [valuesEq]
+    wp_run
+    simp [oneHigh countOne]
+    apply Wasm.wp_iff_cons rfl
+    simp only [if_neg (by decide : ¬(0 : UInt32) ≠ 0), Wasm.wp_nil,
+      List.take_zero, List.drop_zero, List.nil_append]
+    exact returned
+  · simpa only [if_neg (by decide : ¬(0 : UInt32) ≠ 0),
+      Wasm.wp_nil, List.take_zero, List.drop_zero, List.nil_append,
+      Wasm.wp_ret_cons] using returned
+
 def naturalCountSourceFunction : Fir.Wasm.Function :=
   Fir.Wasm.Emit.ResidentBigNumeric.naturalCountFunction
 
@@ -2183,6 +2892,256 @@ theorem terminatesWith_naturalLimbZero_of_concreteRead
     simpa using transported.symm
   exact terminatesWith_naturalLimbZero_of_adapted adapted notImport found
     selected targetInBounds targetRead
+
+/-- Installed common/low/high helpers realize the abstract call boundary used
+by the complete Natural validator for every canonical W6 admission.  The
+existential words are the exact two halves of the canonical top limb. -/
+theorem naturalValidationCalls_of_naturalAdmission
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {validateCommonTarget naturalLowTarget naturalHighTarget : Wasm.Function}
+    {validateCommonIndex naturalLowIndex naturalHighIndex : Nat}
+    {heap : MemoryState} {store : Wasm.Store host}
+    {address : Word32} {value : Nat} {header : Header}
+    (validateCommonAdapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.validateCommonFunction =
+        .ok validateCommonTarget)
+    (validateCommonNotImport :
+      module.imports[validateCommonIndex]? = none)
+    (validateCommonInstalled :
+      module.funcs[validateCommonIndex - module.imports.length]? =
+        some validateCommonTarget)
+    (naturalLowAdapted : FirTalos.function sourceModule
+      (sourceFunction .low) = .ok naturalLowTarget)
+    (naturalLowNotImport : module.imports[naturalLowIndex]? = none)
+    (naturalLowInstalled :
+      module.funcs[naturalLowIndex - module.imports.length]? =
+        some naturalLowTarget)
+    (naturalHighAdapted : FirTalos.function sourceModule
+      (sourceFunction .high) = .ok naturalHighTarget)
+    (naturalHighNotImport : module.imports[naturalHighIndex]? = none)
+    (naturalHighInstalled :
+      module.funcs[naturalHighIndex - module.imports.length]? =
+        some naturalHighTarget)
+    (memoryRelated : ResidentMemoryRel heap store.mem)
+    (related : NaturalValidatorAdmission heap address value header) :
+    ∃ low high : UInt32,
+      NaturalValidationCalls env module validateCommonIndex naturalLowIndex
+          naturalHighIndex store (UInt32.ofNat address.value) header.aux1
+            (header.aux1 - 1) low high ∧
+      ¬(low = 0 ∧ high = 0) ∧
+      (header.aux1 = 1 → ¬high < 2147483648) := by
+  obtain ⟨addressHeap, _, _, _, _, objectInBounds⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts heap address header
+      related.headerRead
+  have countPositive : 0 < header.aux1.toNat := by
+    rw [related.limbCount]
+    cases limbs : naturalLimbs value with
+    | nil => exact (naturalLimbs_ne_nil value limbs).elim
+    | cons limb rest => simp
+  have oneLe : (1 : UInt32) ≤ header.aux1 := by
+    rw [UInt32.le_iff_toNat_le]
+    simp only [UInt32.toNat_ofNat, Nat.reducePow, Nat.reduceMod]
+    omega
+  have topIndexToNat : (header.aux1 - 1).toNat =
+      header.aux1.toNat - 1 := by
+    rw [UInt32.toNat_sub_of_le header.aux1 1 oneLe]
+    rfl
+  have payloadExtent := objectInBounds
+  rw [related.allocationBytes] at payloadExtent
+  simp [target] at payloadExtent
+  have limbLengthPositive : 0 < (naturalLimbs value).length := by
+    rw [← related.limbCount]
+    exact countPositive
+  obtain ⟨low, high, lowRead, highRead, topNonzero, oneHigh⟩ :=
+    FirTalos.Concrete.ResidentBigNumeric.NaturalValidatorAdmission.topWords
+      related
+  have lowInBounds :
+      address.value + headerBytes + 8 * (header.aux1 - 1).toNat +
+          (byteOffset .low).toNat + 4 ≤ heap.memory.size := by
+    rw [topIndexToNat]
+    rw [related.limbCount]
+    simp only [byteOffset, UInt32.toNat_zero, Nat.add_zero]
+    omega
+  have highInBounds :
+      address.value + headerBytes + 8 * (header.aux1 - 1).toNat +
+          (byteOffset .high).toNat + 4 ≤ heap.memory.size := by
+    rw [topIndexToNat]
+    rw [related.limbCount]
+    simp only [byteOffset, UInt32.toNat_ofNat, Nat.reducePow, Nat.reduceMod]
+    omega
+  have lowRead' :
+      heap.memory.readUInt32
+        (address.value + headerBytes + 8 * (header.aux1 - 1).toNat +
+          (byteOffset .low).toNat) = .ok low := by
+    simpa [topIndexToNat, byteOffset] using lowRead
+  have highRead' :
+      heap.memory.readUInt32
+        (address.value + headerBytes + 8 * (header.aux1 - 1).toNat +
+          (byteOffset .high).toNat) = .ok high := by
+    simpa [topIndexToNat, byteOffset] using highRead
+  refine ⟨low, high, { common := ?_, low := ?_, high := ?_ },
+    topNonzero, ?_⟩
+  · intro tail
+    exact terminatesWith_validateCommon_of_naturalAdmission
+      validateCommonAdapted validateCommonNotImport validateCommonInstalled
+      memoryRelated related
+  · intro tail
+    exact terminatesWith_naturalLimb_of_concreteRead
+      (part := .low) (index := header.aux1 - 1) naturalLowAdapted
+      naturalLowNotImport naturalLowInstalled memoryRelated addressHeap
+      lowInBounds lowRead'
+  · intro tail
+    exact terminatesWith_naturalLimb_of_concreteRead
+      (part := .high) (index := header.aux1 - 1) naturalHighAdapted
+      naturalHighNotImport naturalHighInstalled memoryRelated addressHeap
+      highInBounds highRead'
+  · intro one
+    apply oneHigh
+    have := congrArg UInt32.toNat one
+    simpa using this
+
+/-- The installed generated Natural validator accepts every canonical W6
+heap-Natural admission.  It is trace-free, preserves the complete Wasm store,
+and leaves the caller operand tail unchanged.  All header loads, top-limb
+accesses, ownership cases, and helper calls are discharged internally. -/
+theorem terminatesWith_validateNatural_of_naturalAdmission
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {validateNaturalTarget validateCommonTarget naturalLowTarget
+      naturalHighTarget : Wasm.Function}
+    {validateNaturalIndex validateCommonIndex naturalLowIndex
+      naturalHighIndex : Nat}
+    {heap : MemoryState} {store : Wasm.Store host}
+    {address : Word32} {value : Nat} {header : Header}
+    {tail : List Wasm.Value}
+    (validateNaturalAdapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.validateNaturalFunction =
+        .ok validateNaturalTarget)
+    (validateCommonFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.validateCommonName) =
+        some validateCommonIndex)
+    (naturalLowFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.naturalLowName) =
+        some naturalLowIndex)
+    (naturalHighFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.naturalHighName) =
+        some naturalHighIndex)
+    (validateNaturalNotImport :
+      module.imports[validateNaturalIndex]? = none)
+    (validateNaturalInstalled :
+      module.funcs[validateNaturalIndex - module.imports.length]? =
+        some validateNaturalTarget)
+    (validateCommonAdapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.validateCommonFunction =
+        .ok validateCommonTarget)
+    (validateCommonNotImport :
+      module.imports[validateCommonIndex]? = none)
+    (validateCommonInstalled :
+      module.funcs[validateCommonIndex - module.imports.length]? =
+        some validateCommonTarget)
+    (naturalLowAdapted : FirTalos.function sourceModule
+      (sourceFunction .low) = .ok naturalLowTarget)
+    (naturalLowNotImport : module.imports[naturalLowIndex]? = none)
+    (naturalLowInstalled :
+      module.funcs[naturalLowIndex - module.imports.length]? =
+        some naturalLowTarget)
+    (naturalHighAdapted : FirTalos.function sourceModule
+      (sourceFunction .high) = .ok naturalHighTarget)
+    (naturalHighNotImport : module.imports[naturalHighIndex]? = none)
+    (naturalHighInstalled :
+      module.funcs[naturalHighIndex - module.imports.length]? =
+        some naturalHighTarget)
+    (memoryRelated : ResidentMemoryRel heap store.mem)
+    (related : NaturalValidatorAdmission heap address value header) :
+    Wasm.TerminatesWith env module validateNaturalIndex store
+      ([.i32 (UInt32.ofNat address.value)] ++ tail)
+      (fun final values => final = store ∧ values = tail) := by
+  have signature :=
+    FirTalos.Correctness.function_preserves_signature validateNaturalAdapted
+  rcases signature with ⟨paramsEq, localsEq, resultsEq⟩
+  have body := adaptedValidateNaturalFunction_body validateNaturalAdapted
+    validateCommonFound naturalLowFound naturalHighFound
+  apply FirTalos.Correctness.terminatesWith_of_wp_body_at
+    validateNaturalNotImport validateNaturalInstalled
+  rw [body]
+  let word := UInt32.ofNat address.value
+  let arguments := [.i32 word] ++ tail
+  let entry := validateNaturalTarget.toLocals
+    (arguments.take validateNaturalTarget.numParams).reverse
+  have valueLocal : entry.get 0 = some (.i32 word) := by
+    simp [entry, arguments, Wasm.Function.toLocals,
+      Wasm.Function.numParams, paramsEq, validateNaturalFunction_params]
+  have targetLocalsLength : validateNaturalTarget.locals.length = 1 := by
+    simp [localsEq, validateNaturalFunction_locals]
+  have countValid :
+      ({ entry with values := [.i32 header.aux1] }).validIndex 1 := by
+    simp [entry, arguments, Wasm.Function.toLocals,
+      Wasm.Function.numParams, paramsEq, validateNaturalFunction_params,
+      targetLocalsLength]
+  obtain ⟨afterCount, countSet⟩ :=
+    FirTalos.Correctness.locals_set?_exists
+      (value := .i32 header.aux1) countValid
+  have returned :
+      FirTalos.Correctness.FunctionBodyPost validateNaturalTarget arguments
+        (fun final values => final = store ∧ values = tail)
+        (.Return store []) := by
+    simp [FirTalos.Correctness.FunctionBodyPost, arguments,
+      Wasm.Function.numParams, paramsEq, resultsEq,
+      validateNaturalFunction_params, validateNaturalFunction_results]
+  obtain ⟨addressHeap, _, headerLive, headerMinimum, _, objectInBounds⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts heap address header
+      related.headerRead
+  have headerInBounds :
+      address.value + headerBytes ≤ heap.memory.size := by
+    omega
+  obtain ⟨kindInBounds, kindRead⟩ := residentHeaderUInt32 memoryRelated
+    headerInBounds (by decide) related.rawHeader.readKind
+  obtain ⟨flagsInBounds, flagsRead⟩ := residentHeaderUInt32
+    memoryRelated headerInBounds (by decide) related.rawHeader.readFlags
+  obtain ⟨refCountInBounds, refCountRead⟩ := residentHeaderUInt32
+    memoryRelated headerInBounds (by decide) related.rawHeader.readRefCount
+  obtain ⟨aux0InBounds, aux0Read⟩ := residentHeaderUInt32 memoryRelated
+    headerInBounds (by decide) related.rawHeader.readAux0
+  obtain ⟨aux2InBounds, aux2Read⟩ := residentHeaderUInt32 memoryRelated
+    headerInBounds (by decide) related.rawHeader.readAux2
+  obtain ⟨aux3InBounds, aux3Read⟩ := residentHeaderUInt32 memoryRelated
+    headerInBounds (by decide) related.rawHeader.readAux3
+  obtain ⟨low, high, calls, topNonzero, oneHigh⟩ :=
+    naturalValidationCalls_of_naturalAdmission validateCommonAdapted
+      validateCommonNotImport validateCommonInstalled naturalLowAdapted
+      naturalLowNotImport naturalLowInstalled naturalHighAdapted
+      naturalHighNotImport naturalHighInstalled memoryRelated related
+  have selected : 1 &&& word = 0 := by
+    simpa [word] using heapWord_selected address addressHeap
+  have kindExact : header.kind.code = ObjectKind.natural.code := by
+    rw [related.headerKind]
+  have ownership :
+      (header.flags = liveFlag + persistentFlag ∧ header.refCount = 0) ∨
+      (header.flags = liveFlag ∧ header.refCount ≠ 0) := by
+    cases persistent : header.persistent with
+    | false =>
+        right
+        constructor
+        · simp [Header.flags, persistent, headerLive, liveFlag]
+        · simpa [persistent] using related.ownership
+    | true =>
+        left
+        constructor
+        · simp [Header.flags, persistent, headerLive, liveFlag,
+            persistentFlag]
+        · simpa [persistent] using related.ownership
+  simpa [entry, arguments, word, Wasm.Function.toLocals] using
+    (wp_validateNaturalProgram_big
+      (module := module) (env := env) (store := store) (initial := entry)
+      (afterCount := afterCount) (tail := [])
+      (rest := FirTalos.functionTerminal sourceModule
+        Fir.Wasm.Emit.ResidentBigNumeric.validateNaturalFunction)
+      calls valueLocal countSet selected rfl kindInBounds flagsInBounds
+      refCountInBounds aux0InBounds aux2InBounds aux3InBounds kindRead
+      flagsRead refCountRead aux0Read aux2Read aux3Read kindExact
+      related.marker ownership related.reserved2 related.reserved3
+      topNonzero oneHigh returned)
 
 /-- The first 64-bit limb of any successful nonempty natural decode supplies
 the exact low/high words used by `CheckedNaturalCalls`, independently of the

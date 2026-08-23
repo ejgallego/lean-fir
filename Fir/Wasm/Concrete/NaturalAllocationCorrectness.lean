@@ -43,6 +43,40 @@ theorem naturalLimbs_value (value : Nat) :
       rw [UInt64.toNat_ofNat_of_lt' remainder]
       exact Nat.mod_add_div value UInt64.size
 
+/-- The executable splitter always emits at least one limb, including for
+zero. -/
+theorem naturalLimbs_ne_nil (value : Nat) : naturalLimbs value ≠ [] := by
+  rw [naturalLimbs]
+  split <;> simp
+
+/-- A positive Natural has a nonzero canonical most-significant limb.  This
+is the representation fact used by resident validators to reject redundant
+leading zero limbs. -/
+theorem naturalLimbs_getLast_ne_zero (value : Nat) (positive : 0 < value) :
+    ∀ limb, (naturalLimbs value).getLast? = some limb → limb ≠ 0 := by
+  induction value using naturalLimbs.induct with
+  | case1 value small =>
+      rw [naturalLimbs]
+      simp only [small, ↓reduceDIte, List.getLast?_singleton,
+        Option.some.injEq]
+      intro limb limbEq
+      subst limb
+      intro zero
+      have valueZero := congrArg UInt64.toNat zero
+      rw [UInt64.toNat_ofNat_of_lt' small] at valueZero
+      simp at valueZero
+      omega
+  | case2 value large ih =>
+      rw [naturalLimbs]
+      simp only [large, ↓reduceDIte]
+      have quotientPositive : 0 < value / UInt64.size := by
+        apply Nat.div_pos
+        · omega
+        · decide
+      rw [List.getLast?_cons_of_ne_nil
+        (naturalLimbs_ne_nil (value / UInt64.size))]
+      exact ih quotientPositive
+
 theorem LinearMemory.readUInt64_of_byteFrame
     (before after : LinearMemory) (address : Nat)
     (frame : ∀ offset, offset < 8 →
@@ -839,6 +873,77 @@ theorem NaturalValidatorAdmission.decoded
   rw [accepted]
   simp only [↓reduceIte]
   rw [related.decodedLimbs]
+
+/-- Canonical admission exposes the exact nonzero most-significant limb and
+its physical payload slot.  Validator proofs can consume this fact without
+repeating list-last or splitter-canonicality arguments. -/
+theorem NaturalValidatorAdmission.topLimb
+    {state : MemoryState} {address : Word32} {value : Nat} {header : Header}
+    (related : NaturalValidatorAdmission state address value header) :
+    ∃ limb,
+      (naturalLimbs value)[header.aux1.toNat - 1]? = some limb ∧
+      limb ≠ 0 ∧
+      state.memory.readUInt64
+        (address.value + headerBytes +
+          target.semanticSlotBytes * (header.aux1.toNat - 1)) = .ok limb := by
+  have nonempty := naturalLimbs_ne_nil value
+  let limb := (naturalLimbs value).getLast nonempty
+  have lastEq : (naturalLimbs value).getLast? = some limb := by
+    exact List.getLast?_eq_some_getLast nonempty
+  have atLast :
+      (naturalLimbs value)[(naturalLimbs value).length - 1]? = some limb := by
+    rw [← List.getLast?_eq_getElem?]
+    exact lastEq
+  have positive : 0 < value := by
+    have large := related.heapBacked
+    unfold Fir.LeanIR.Impure.maxTaggedPayload at large
+    omega
+  have limbNonzero : limb ≠ 0 :=
+    naturalLimbs_getLast_ne_zero value positive limb lastEq
+  have limbRead := related.limbAt
+    ((naturalLimbs value).length - 1) limb atLast
+  refine ⟨limb, ?_, limbNonzero, ?_⟩
+  · rw [related.limbCount]
+    exact atLast
+  · rw [related.limbCount]
+    exact limbRead
+
+/-- A one-limb heap Natural necessarily occupies the upper half of the
+64-bit limb range.  Otherwise it would still be source-tagged and would not
+have the heap-backed admission carried by this relation. -/
+theorem NaturalValidatorAdmission.oneLimbHigh_not_lt
+    {state : MemoryState} {address : Word32} {value : Nat} {header : Header}
+    (related : NaturalValidatorAdmission state address value header)
+    (one : header.aux1.toNat = 1) :
+    ∃ limb, naturalLimbs value = [limb] ∧
+      ¬(limb >>> (32 : UInt64)).toUInt32 < 2147483648 := by
+  have lengthOne : (naturalLimbs value).length = 1 := by
+    rw [← related.limbCount]
+    exact one
+  obtain ⟨limb, limbsEq⟩ := List.length_eq_one_iff.mp lengthOne
+  have limbValue : limb.toNat = value := by
+    have represented := naturalLimbs_value value
+    rw [limbsEq] at represented
+    simpa [naturalLimbsValue] using represented
+  have limbLt : limb.toNat < 2 ^ 64 := by
+    simpa [UInt64.size] using limb.toNat_lt
+  have highLt : limb.toNat / 2 ^ 32 < 2 ^ 32 := by
+    omega
+  have highToNat :
+      (limb >>> (32 : UInt64)).toUInt32.toNat = limb.toNat / 2 ^ 32 := by
+    simp only [UInt64.toNat_toUInt32, UInt64.toNat_shiftRight]
+    have shift32 : (32 : UInt64).toNat % 64 = 32 := by decide
+    rw [shift32, Nat.shiftRight_eq_div_pow, Nat.mod_eq_of_lt highLt]
+  refine ⟨limb, limbsEq, ?_⟩
+  intro highSmall
+  rw [UInt32.lt_iff_toNat_lt, highToNat] at highSmall
+  have constantToNat : (2147483648 : UInt32).toNat = 2147483648 := by
+    decide
+  rw [constantToNat] at highSmall
+  have large := related.heapBacked
+  unfold Fir.LeanIR.Impure.maxTaggedPayload at large
+  rw [← limbValue] at large
+  omega
 
 /-- Canonical Natural admission is stable under fresh allocation: every byte
 it depends on lies below the old heap frontier. -/
