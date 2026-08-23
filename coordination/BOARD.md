@@ -44,6 +44,16 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `make check`. The older production-provenance handoff at `6fb8a25d` is
   superseded rather than replayed: main already contains that report plus the
   later one-pass origin-grouping repair and its seven-run production result.
+- Independent generation integration: W7-2's checked/trusted resident
+  ByteArray split is accepted at `64fc857b`, followed by exact lean-zip
+  ratchets at `dc35f594`. Raw/public helpers retain malformed-header and bounds
+  validation; typed closed applications remove only the redundant resident
+  header checks and final-LCNF proof-index branches. Copy-on-write, capacity,
+  uniqueness, ownership, recursive release, clamping, and overflow behavior
+  are unchanged. The production levels 1--10 package remains module-owned and
+  zero-import at 393,275 bytes and 504 final functions. W6's theorem-side
+  audit remains independently open; no helper signature, concrete layout, or
+  semantic ABI changed.
 - Accepted baseline: `main` contains the complete
   `W7-ILLUMINATE-SELECTION-CATALOG-EXPORT` stack through tracked lane head
   `5081015a` and the independently isolated
@@ -302,6 +312,12 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
       proof `c0427a57` and tracked handoff `47635960`. The complete artifact
       gate validates the combined stack before publication; W6's stronger
       arithmetic-loop induction continues independently.
+  27. W7-2's checked/trusted resident ByteArray split lands at `64fc857b`,
+      followed by the exact stored, Level-1, and production raw package
+      ratchets at `dc35f594`. Closed typed applications consume the existing
+      resident-representation and final-LCNF proof premises; public/raw calls
+      remain fully checked. W6's independent audit does not block executable
+      acceptance unless it identifies an unsound premise.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -323,6 +339,42 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
+
+## Latest completed integration lease
+
+- Milestone: `W7-TRUSTED-RESIDENT-BYTEARRAY-CALLS`.
+- Integration owner: `wasm-gen`, consuming W7-2 functional head `29d11bf5`
+  as `64fc857b` on accepted `main` at `602503be`, followed by exact package
+  ratchet commit `dc35f594`.
+- Runtime split: standalone and raw/public ByteArray calls retain the complete
+  packed-header, malformed-input, dynamic-bounds, clamping, overflow,
+  capacity, ownership, uniqueness, and copy-on-write checks. Typed closed
+  applications select trusted bodies that remove only representation checks
+  already established by the resident boundary and bounds branches whose
+  final-LCNF proof arguments are erased. `ByteArray.get` still decodes its Nat
+  index, and every dynamic `copySlice` condition remains checked.
+- Contracts: none. The slice changes no semantic operation, symbolic Wasm
+  instruction, concrete layout, helper signature, application ABI, ownership
+  rule, or W6 descriptor metadata. W6's theorem-side audit remains open in
+  `W72-W6-20260822-001` and is deliberately separate from generation-ready
+  executable acceptance.
+- Acceptance: `git diff --check`; complete `make check` with 713 unique cases,
+  2,121/2,121 equal comparisons, and zero findings; all 3,173 Talos jobs; and
+  the complete deterministic W7 artifact gate pass. The exact lean-zip source
+  views pass stored and Level-1 native/Node differentials, zero-import package
+  smoke, scratch/cache reclamation, and the browser smoke in Chrome 151. The
+  raw dispatcher passes five native/Wasm cases across all ten levels,
+  independent inflate, zero-import complete-runtime smoke, deterministic
+  function-sidecar verification, and persistent-cache/scratch reclamation.
+- Package result: stored is 12,498 bytes with 66 resident helpers; Level-1 is
+  179,137 bytes with 471 resident helpers; production raw is 393,275 bytes,
+  SHA-256 `06bec0d90846f4ce40e19169346d4dbfc19a79556bb23c787241b73bce04749f`,
+  with 630 source functions, 830 resident helpers, 504 final functions, and
+  zero function or memory imports. No external package was published.
+- Bug cards: none.
+- Result: the trusted ByteArray generation slice is linked/accepted. W7 rebases
+  its independent early closure-dispatch lowering on the new `main` before
+  final package profiling and client regeneration.
 
 ## Latest completed integration lease
 
