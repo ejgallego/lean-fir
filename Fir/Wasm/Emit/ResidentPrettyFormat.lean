@@ -463,7 +463,7 @@ def compileModule (entry : Name) :
   let source ← Fir.Wasm.Emit.PrettyFormat.compileSource entry
   match source with
   | .ok source =>
-      Source.compileModuleArtifactWith source fun module =>
+      Source.compileModuleArtifactWithClosedClosures source fun module =>
         Fir.Wasm.Emit.ResidentLinker.linkModule
           Fir.Wasm.Emit.ResidentLinker.prettyFormatPolicy module
   | .error error => return .error error

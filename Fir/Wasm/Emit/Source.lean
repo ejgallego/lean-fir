@@ -1,5 +1,6 @@
 import Fir.Validation.LCNF
 import Fir.Wasm.Emit.BitExactFloat
+import Fir.Wasm.Emit.ClosureDispatch
 import Fir.Wasm.Emit.CompilerPrivate
 import Fir.Wasm.Emit.Manifest
 import Fir.Wasm.WellFormed
@@ -895,6 +896,41 @@ def compileModuleArtifactWith (source : Fir.Validation.Lcnf.Artifact)
     (transform : Fir.Wasm.Module → Except CompileError Fir.Wasm.Module) :
     CoreM (Except CompileError ModuleArtifact) :=
   compileModuleArtifactWithExports source #[source.entry] transform
+
+/--
+Lower a captured source program whose public input boundary cannot contain
+pre-existing Lean closures, then retain only closure-dispatch targets allocated
+by the program's own final-LCNF `pap` nodes.
+
+This is an explicit package capability rather than the generic default: code
+which accepts an opaque closure from its host must keep using
+`compileModuleArtifactWithExports`. The stable W6 closure tables are preserved;
+only unreachable generated matcher branches and their runtime imports are
+removed before the caller's resident-link transform runs.
+-/
+def compileModuleArtifactWithClosedClosuresAndExports
+    (source : Fir.Validation.Lcnf.Artifact) (exports : Array Name)
+    (transform : Fir.Wasm.Module → Except CompileError Fir.Wasm.Module) :
+    CoreM (Except CompileError ModuleArtifact) :=
+  compileModuleArtifactWithExports source exports fun module => do
+    let (module, _) ←
+      Fir.Wasm.Emit.ClosureDispatch.pruneClosedProgram source.program module
+        |>.mapError fun error =>
+          CompileError.manifest
+            s!"closed closure-dispatch pruning failed: {repr error}"
+    transform module
+
+/-- Single-entry form of `compileModuleArtifactWithClosedClosuresAndExports`. -/
+def compileModuleArtifactWithClosedClosures
+    (source : Fir.Validation.Lcnf.Artifact)
+    (transform : Fir.Wasm.Module → Except CompileError Fir.Wasm.Module) :
+    CoreM (Except CompileError ModuleArtifact) :=
+  compileModuleArtifactWithClosedClosuresAndExports source #[source.entry] transform
+
+/-- Lower and encode one source artifact with a closed heap-closure boundary. -/
+def compileClosedClosureModuleArtifact (source : Fir.Validation.Lcnf.Artifact) :
+    CoreM (Except CompileError ModuleArtifact) :=
+  compileModuleArtifactWithClosedClosures source .ok
 
 /-- Lower and encode an already captured compiler artifact. -/
 def compileModuleArtifact (source : Fir.Validation.Lcnf.Artifact) :

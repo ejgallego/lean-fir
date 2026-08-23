@@ -123,6 +123,27 @@ run_cmd do
     throwError "internalized Format facade export changed: {repr artifact.module.exports}"
   unless artifact.bytes.size > Fir.Wasm.Emit.header.size do
     throwError "internalized Format facade did not encode a complete Wasm module"
+  let closedResult ← liftCoreM <|
+    compileClosedClosureModuleArtifact artifact.source
+  let closed ← match closedResult with
+    | .ok closed => pure closed
+    | .error error =>
+        throwError "closed-boundary Format facade did not compile: {repr error}"
+  let targets := Fir.Wasm.Emit.ClosureDispatch.partialApplicationTargets
+    artifact.source.program
+  unless !targets.isEmpty && targets.size < artifact.module.closureDispatch.size do
+    throwError
+      "Format closure target pruning did not expose a strict finite target set: {repr targets}"
+  let closedTargets := closed.module.runtimeOperations.filterMap
+    Fir.Wasm.RuntimeOp.closureTarget?
+  unless closedTargets.all targets.contains do
+    throwError
+      "closed-boundary Format facade retained a non-source closure target: {repr closedTargets}"
+  unless closed.module.runtimeOperations.size < artifact.module.runtimeOperations.size do
+    throwError "closed-boundary Format facade did not reduce runtime operations"
+  unless closed.module.closureDispatch == artifact.module.closureDispatch &&
+      closed.module.closureDescriptors == artifact.module.closureDescriptors do
+    throwError "closed-boundary Format facade changed stable W6 closure metadata"
 
 run_cmd do
   unless validationSchemaAcceptsAbiKind .bool .uint8 do
