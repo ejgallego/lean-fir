@@ -117,6 +117,84 @@ private theorem Header.rebuild_from_words (header : Header) :
     ⟨kind, persistent, live, refCount, allocationBytes, aux0, aux1, aux2, aux3⟩
   cases persistent <;> cases live <;> simp [Header.flags]
 
+/-- A successful common-header decode exposes the stored auxiliary word.
+
+Resident helpers frequently read `aux1` directly after a separate validation
+step has established the full checked header.  Keeping this projection next
+to the decoder avoids replaying its preceding kind, flag, and allocation-word
+reads in every instruction-level refinement proof. -/
+theorem Header.read_aux1_eq_ok (memory : LinearMemory) (address : Word32)
+    (header : Header) (read : Header.read memory address = .ok header) :
+    memory.readUInt32 (address.value + headerAux1Offset) = .ok header.aux1 := by
+  unfold Header.read at read
+  dsimp only at read
+  cases kindRead : memory.readUInt32 (address.value + headerKindOffset) with
+  | error failure =>
+      rw [kindRead] at read
+      simp only [Bind.bind, Except.bind] at read
+      contradiction
+  | ok kindCode =>
+      rw [kindRead] at read
+      simp only [Bind.bind, Except.bind] at read
+      cases kindFound : ObjectKind.ofCode? kindCode with
+      | none =>
+          rw [kindFound] at read
+          contradiction
+      | some kind =>
+          rw [kindFound] at read
+          cases flagsRead :
+              memory.readUInt32 (address.value + headerFlagsOffset) with
+          | error failure =>
+              rw [flagsRead] at read
+              contradiction
+          | ok flags =>
+              rw [flagsRead] at read
+              cases refCountRead :
+                  memory.readUInt32 (address.value + headerRefCountOffset) with
+              | error failure =>
+                  rw [refCountRead] at read
+                  contradiction
+              | ok refCount =>
+                  rw [refCountRead] at read
+                  cases allocationBytesRead : memory.readUInt32
+                      (address.value + headerAllocationBytesOffset) with
+                  | error failure =>
+                      rw [allocationBytesRead] at read
+                      contradiction
+                  | ok allocationBytes =>
+                      rw [allocationBytesRead] at read
+                      cases aux0Read : memory.readUInt32
+                          (address.value + headerAux0Offset) with
+                      | error failure =>
+                          rw [aux0Read] at read
+                          contradiction
+                      | ok aux0 =>
+                          rw [aux0Read] at read
+                          cases aux1Read : memory.readUInt32
+                              (address.value + headerAux1Offset) with
+                          | error failure =>
+                              rw [aux1Read] at read
+                              contradiction
+                          | ok aux1 =>
+                              rw [aux1Read] at read
+                              cases aux2Read : memory.readUInt32
+                                  (address.value + headerAux2Offset) with
+                              | error failure =>
+                                  rw [aux2Read] at read
+                                  contradiction
+                              | ok aux2 =>
+                                  rw [aux2Read] at read
+                                  cases aux3Read : memory.readUInt32
+                                      (address.value + headerAux3Offset) with
+                                  | error failure =>
+                                      rw [aux3Read] at read
+                                      contradiction
+                                  | ok aux3 =>
+                                      rw [aux3Read] at read
+                                      simp only [pure, Except.pure,
+                                        Except.ok.injEq] at read
+                                      rw [← read]
+
 /-- An in-bounds common-header write succeeds and establishes all eight word
 postconditions plus a frame rule for disjoint 32-bit reads. -/
 theorem Header.write_spec (memory : LinearMemory) (address : Word32)

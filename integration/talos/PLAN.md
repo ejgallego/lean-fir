@@ -6551,6 +6551,26 @@ the checked `Nat.add` producer: instantiate its operand reads through this
 boundary, then compose the already-proved allocator and `writeSumFrom` calls
 with the existing self-contained live-heap/typed-return closure.
 
+The natural-flavor magnitude dispatcher layer is now closed as well.  A
+general `Header.read_aux1_eq_ok` projection lets the installed `naturalCount`
+proof consume a checked live header without replaying the full monadic header
+decoder.  Tagged naturals return count one without memory access; heap
+naturals return the exact `aux1` count through `ResidentMemoryRel`.
+`magnitudeCount` delegates to that call when flavor is zero, and the installed
+`magnitudeLow`/`magnitudeHigh` proofs use the resulting count to select one of
+two exact behaviors: zero padding at an out-of-range index, or delegation to
+the already-proved arbitrary-index natural accessor.  None of these natural
+theorems assumes an integer-helper contract.
+
+This removes the helper-code gap in the writer's four operand reads.  The
+remaining producer obligation is a frame/composition fact, not another
+instruction proof: writes into the freshly allocated result must preserve
+the two input natural views and their W6/Talos memory relation at every loop
+iteration.  Once that disjointness boundary supplies the four magnitude calls
+for the evolving writer store, the existing exact-prefix writer theorem,
+allocator theorem, and typed live-heap closure compose the checked `Nat.add`
+producer end to end.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

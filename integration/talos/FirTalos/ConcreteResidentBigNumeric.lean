@@ -31,8 +31,1008 @@ def byteOffset : NaturalLimbPart → UInt32
   | .high => 4
 
 def valueParam : Lean.FVarId := ⟨`value⟩
+def flavorParam : Lean.FVarId := ⟨`flavor⟩
 def indexParam : Lean.FVarId := ⟨`index⟩
 def scaledLocal : Lean.FVarId := ⟨`scaledValue⟩
+def countLocal : Lean.FVarId := ⟨`countValue⟩
+
+def naturalCountSourceFunction : Fir.Wasm.Function :=
+  Fir.Wasm.Emit.ResidentBigNumeric.naturalCountFunction
+
+def naturalCountSource : List Fir.Wasm.Instruction := [
+  .localGet valueParam,
+  .i32Const .uint32 1,
+  .i32And,
+  .ifElse
+    [.i32Const .uint32 1, .ret]
+    [.localGet valueParam,
+      .i32Load .uint32 (UInt32.ofNat headerAux1Offset),
+      .ret]]
+
+def naturalCountProgram : Wasm.Program := [
+  .localGet 0,
+  .const 1,
+  .and,
+  .iff 0 0 [.const 1, .ret]
+    [.localGet 0, .load32 (UInt32.ofNat headerAux1Offset), .ret]]
+
+theorem naturalCountSourceFunction_body :
+    naturalCountSourceFunction.body = naturalCountSource := by
+  rfl
+
+theorem naturalCountSourceFunction_params :
+    naturalCountSourceFunction.params = #[(valueParam, .tobject)] := by
+  rfl
+
+theorem naturalCountSourceFunction_locals :
+    naturalCountSourceFunction.locals = #[] := by
+  rfl
+
+theorem naturalCountSourceFunction_results :
+    naturalCountSourceFunction.results = #[.uint32] := by
+  rfl
+
+/-- Exact adaptation of W7's natural limb-count helper. -/
+theorem instructions_naturalCountSourceFunction
+    {sourceModule : Fir.Wasm.Module} :
+    FirTalos.instructions sourceModule naturalCountSourceFunction []
+      naturalCountSourceFunction.body = .ok naturalCountProgram := by
+  rw [naturalCountSourceFunction_body]
+  have valueFound : FirTalos.findFVar?
+      (naturalCountSourceFunction.params.toList ++
+        naturalCountSourceFunction.locals.toList) valueParam = some 0 := by
+    decide
+  simp [naturalCountSource, naturalCountProgram, FirTalos.instructions,
+    FirTalos.instruction, valueFound, Bind.bind, Except.bind, pure,
+    Except.pure]
+
+/-- Exact installed target body, including the adapter's terminal suffix. -/
+theorem adaptedNaturalCountSourceFunction_body
+    {sourceModule : Fir.Wasm.Module} {targetFunction : Wasm.Function}
+    (adapted : FirTalos.function sourceModule naturalCountSourceFunction =
+      .ok targetFunction) :
+    targetFunction.body = naturalCountProgram ++
+      FirTalos.functionTerminal sourceModule naturalCountSourceFunction := by
+  exact ResidentPrimitives.adaptedFunction_body_of_exact adapted
+    instructions_naturalCountSourceFunction
+
+/-- The immediate representation always contributes one 64-bit magnitude
+limb.  This proof is representation-only and performs no memory access. -/
+theorem wp_naturalCountProgram_immediate
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {initial : Wasm.Locals} {word : UInt32}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    (immediate : 1 &&& word = 1)
+    (valueLocal : initial.get 0 = some (.i32 word))
+    (returned : Q (.Return store (.i32 1 :: tail))) :
+    Wasm.wp module (naturalCountProgram ++ rest) Q store
+      { initial with values := tail } env := by
+  have valueLocal' :
+      ({ initial with values := tail } : Wasm.Locals).get 0 =
+        some (.i32 word) := by
+    simpa using valueLocal
+  unfold naturalCountProgram
+  simp only [List.cons_append, List.nil_append, Wasm.wp_localGet_cons,
+    valueLocal', Wasm.wp_const_cons, Wasm.wp_and_cons, immediate]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_pos (by decide : (1 : UInt32) ≠ 0)]
+  simp only [Wasm.wp_const_cons, Wasm.wp_ret_cons]
+  exact returned
+
+/-- The heap representation returns the header's stored limb count, leaving
+the store and caller operand tail unchanged. -/
+theorem wp_naturalCountProgram_heap
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {initial : Wasm.Locals} {word count : UInt32}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    (notImmediate : 1 &&& word = 0)
+    (valueLocal : initial.get 0 = some (.i32 word))
+    (readInBounds :
+      ¬(word.toNat + (UInt32.ofNat headerAux1Offset).toNat + 4 >
+        store.mem.pages * 65536))
+    (readEq : store.mem.read32
+      (word + UInt32.ofNat headerAux1Offset) = count)
+    (returned : Q (.Return store (.i32 count :: tail))) :
+    Wasm.wp module (naturalCountProgram ++ rest) Q store
+      { initial with values := tail } env := by
+  have valueLocal' :
+      ({ initial with values := tail } : Wasm.Locals).get 0 =
+        some (.i32 word) := by
+    simpa using valueLocal
+  unfold naturalCountProgram
+  simp only [List.cons_append, List.nil_append, Wasm.wp_localGet_cons,
+    valueLocal', Wasm.wp_const_cons, Wasm.wp_and_cons, notImmediate]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [Wasm.wp_localGet_cons, valueLocal', Wasm.wp_load32_cons]
+  split
+  · rename_i outOfBounds
+    exact (readInBounds outOfBounds).elim
+  · simp only [readEq, Wasm.wp_ret_cons]
+    exact returned
+
+/-- Installed immediate count helper, with exact trace-free store behavior. -/
+theorem terminatesWith_naturalCountImmediate_of_adapted
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {targetFunction : Wasm.Function} {functionIndex : Nat}
+    {store : Wasm.Store host} {word : UInt32} {tail : List Wasm.Value}
+    (adapted : FirTalos.function sourceModule naturalCountSourceFunction =
+      .ok targetFunction)
+    (notImport : module.imports[functionIndex]? = none)
+    (found : module.funcs[functionIndex - module.imports.length]? =
+      some targetFunction)
+    (immediate : 1 &&& word = 1) :
+    Wasm.TerminatesWith env module functionIndex store
+      ([.i32 word] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 1 :: tail) := by
+  have signature :=
+    FirTalos.Correctness.function_preserves_signature adapted
+  rcases signature with ⟨paramsEq, localsEq, resultsEq⟩
+  have body := adaptedNaturalCountSourceFunction_body adapted
+  apply FirTalos.Correctness.terminatesWith_of_wp_body_at notImport found
+  rw [body]
+  let arguments := [.i32 word] ++ tail
+  let entry := targetFunction.toLocals
+    (arguments.take targetFunction.numParams).reverse
+  have valueLocal : entry.get 0 = some (.i32 word) := by
+    simp [entry, arguments, Wasm.Function.toLocals,
+      Wasm.Function.numParams, paramsEq, naturalCountSourceFunction_params]
+  have returned :
+      FirTalos.Correctness.FunctionBodyPost targetFunction arguments
+        (fun final values =>
+          final = store ∧ values = .i32 1 :: tail)
+        (.Return store [.i32 1]) := by
+    simp [FirTalos.Correctness.FunctionBodyPost, arguments,
+      Wasm.Function.numParams, paramsEq, resultsEq,
+      naturalCountSourceFunction_params, naturalCountSourceFunction_results]
+  simpa [entry, arguments, Wasm.Function.toLocals] using
+    (wp_naturalCountProgram_immediate
+      (module := module) (env := env) (store := store) (initial := entry)
+      (rest := FirTalos.functionTerminal sourceModule
+        naturalCountSourceFunction)
+      (tail := []) immediate valueLocal returned)
+
+/-- Installed heap count helper under the exact physical load contract. -/
+theorem terminatesWith_naturalCountHeap_of_adapted
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {targetFunction : Wasm.Function} {functionIndex : Nat}
+    {store : Wasm.Store host} {word count : UInt32}
+    {tail : List Wasm.Value}
+    (adapted : FirTalos.function sourceModule naturalCountSourceFunction =
+      .ok targetFunction)
+    (notImport : module.imports[functionIndex]? = none)
+    (found : module.funcs[functionIndex - module.imports.length]? =
+      some targetFunction)
+    (notImmediate : 1 &&& word = 0)
+    (readInBounds :
+      ¬(word.toNat + (UInt32.ofNat headerAux1Offset).toNat + 4 >
+        store.mem.pages * 65536))
+    (readEq : store.mem.read32
+      (word + UInt32.ofNat headerAux1Offset) = count) :
+    Wasm.TerminatesWith env module functionIndex store
+      ([.i32 word] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 count :: tail) := by
+  have signature :=
+    FirTalos.Correctness.function_preserves_signature adapted
+  rcases signature with ⟨paramsEq, localsEq, resultsEq⟩
+  have body := adaptedNaturalCountSourceFunction_body adapted
+  apply FirTalos.Correctness.terminatesWith_of_wp_body_at notImport found
+  rw [body]
+  let arguments := [.i32 word] ++ tail
+  let entry := targetFunction.toLocals
+    (arguments.take targetFunction.numParams).reverse
+  have valueLocal : entry.get 0 = some (.i32 word) := by
+    simp [entry, arguments, Wasm.Function.toLocals,
+      Wasm.Function.numParams, paramsEq, naturalCountSourceFunction_params]
+  have returned :
+      FirTalos.Correctness.FunctionBodyPost targetFunction arguments
+        (fun final values =>
+          final = store ∧ values = .i32 count :: tail)
+        (.Return store [.i32 count]) := by
+    simp [FirTalos.Correctness.FunctionBodyPost, arguments,
+      Wasm.Function.numParams, paramsEq, resultsEq,
+      naturalCountSourceFunction_params, naturalCountSourceFunction_results]
+  simpa [entry, arguments, Wasm.Function.toLocals] using
+    (wp_naturalCountProgram_heap
+      (module := module) (env := env) (store := store) (initial := entry)
+      (rest := FirTalos.functionTerminal sourceModule
+        naturalCountSourceFunction)
+      (tail := []) notImmediate valueLocal readInBounds readEq returned)
+
+/-- A checked W6 live header discharges the heap count helper's physical
+address, bounds, and load premises.  This is the reusable refinement boundary
+for validated natural operands; consumers no longer reason about `aux1` byte
+coordinates directly. -/
+theorem terminatesWith_naturalCount_of_liveHeader
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {targetFunction : Wasm.Function} {functionIndex : Nat}
+    {heap : MemoryState} {store : Wasm.Store host}
+    {address : Word32} {header : Header} {tail : List Wasm.Value}
+    (adapted : FirTalos.function sourceModule naturalCountSourceFunction =
+      .ok targetFunction)
+    (notImport : module.imports[functionIndex]? = none)
+    (found : module.funcs[functionIndex - module.imports.length]? =
+      some targetFunction)
+    (memoryRelated : ResidentMemoryRel heap store.mem)
+    (headerRead : heap.readLiveHeader address = .ok header) :
+    Wasm.TerminatesWith env module functionIndex store
+      ([.i32 (UInt32.ofNat address.value)] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 header.aux1 :: tail) := by
+  obtain ⟨addressHeap, rawHeaderRead, _, headerMinimum, _, headerExtent⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts heap address header
+      headerRead
+  have selected : 1 &&& UInt32.ofNat address.value = 0 := by
+    have even := address.lowBit_zero_of_classify_heap addressHeap
+    apply UInt32.toNat_inj.mp
+    simp [even, UInt32.toNat_ofNat_of_lt'
+      (by simpa [wordModulus] using address.isLt)]
+  let concreteAddress := address.value + headerAux1Offset
+  have auxFits : headerAux1Offset + 4 ≤ headerBytes := by decide
+  have concreteInBounds : concreteAddress + 3 < heap.memory.size := by
+    dsimp [concreteAddress]
+    omega
+  have concreteRead :
+      heap.memory.readUInt32 concreteAddress = .ok header.aux1 := by
+    simpa [concreteAddress] using
+      Header.read_aux1_eq_ok heap.memory address header rawHeaderRead
+  have transported :=
+    memoryRelated.readUInt32_eq_read32 concreteInBounds
+  have targetAddress :
+      UInt32.ofNat concreteAddress =
+        UInt32.ofNat address.value + UInt32.ofNat headerAux1Offset := by
+    dsimp [concreteAddress]
+    rw [UInt32.ofNat_add]
+  have targetRead :
+      store.mem.read32
+        (UInt32.ofNat address.value + UInt32.ofNat headerAux1Offset) =
+          header.aux1 := by
+    rw [← targetAddress]
+    rw [concreteRead] at transported
+    simpa using transported.symm
+  have addressToNat : (UInt32.ofNat address.value).toNat = address.value :=
+    UInt32.toNat_ofNat_of_lt' (by
+      simpa [wordModulus] using address.isLt)
+  have offsetToNat :
+      (UInt32.ofNat headerAux1Offset).toNat = headerAux1Offset :=
+    UInt32.toNat_ofNat_of_lt' (by decide)
+  have memorySize : heap.memory.size = store.mem.pages * 65536 := by
+    simpa [wasmPageBytes] using memoryRelated.size_eq
+  have targetInBounds :
+      ¬((UInt32.ofNat address.value).toNat +
+          (UInt32.ofNat headerAux1Offset).toNat + 4 >
+        store.mem.pages * 65536) := by
+    rw [addressToNat, offsetToNat, ← memorySize]
+    dsimp [concreteAddress] at concreteInBounds
+    omega
+  exact terminatesWith_naturalCountHeap_of_adapted adapted notImport found
+    selected targetInBounds targetRead
+
+/-- Ordinary heap-natural decoding supplies the live-header count contract. -/
+theorem terminatesWith_naturalCount_of_objectRel
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {targetFunction : Wasm.Function} {functionIndex : Nat}
+    {heap : MemoryState} {store : Wasm.Store host}
+    {address : Word32} {header : Header} {value : Nat}
+    {tail : List Wasm.Value}
+    (adapted : FirTalos.function sourceModule naturalCountSourceFunction =
+      .ok targetFunction)
+    (notImport : module.imports[functionIndex]? = none)
+    (found : module.funcs[functionIndex - module.imports.length]? =
+      some targetFunction)
+    (memoryRelated : ResidentMemoryRel heap store.mem)
+    (related : NaturalObjectRel heap address value header) :
+    Wasm.TerminatesWith env module functionIndex store
+      ([.i32 (UInt32.ofNat address.value)] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 header.aux1 :: tail) := by
+  exact terminatesWith_naturalCount_of_liveHeader adapted notImport found
+    memoryRelated related.headerRead
+
+def magnitudeCountSourceFunction : Fir.Wasm.Function :=
+  Fir.Wasm.Emit.ResidentBigNumeric.magnitudeCountFunction
+
+def magnitudeCountSource : List Fir.Wasm.Instruction := [
+  .localGet flavorParam,
+  .ifElse
+    [.localGet valueParam,
+      .call (.declaration
+        Fir.Wasm.Emit.ResidentBigNumeric.integerCountName),
+      .ret]
+    [.localGet valueParam,
+      .call (.declaration
+        Fir.Wasm.Emit.ResidentBigNumeric.naturalCountName),
+      .ret]]
+
+def magnitudeCountProgram (integerCountIndex naturalCountIndex : Nat) :
+    Wasm.Program := [
+  .localGet 1,
+  .iff 0 0
+    [.localGet 0, .call integerCountIndex, .ret]
+    [.localGet 0, .call naturalCountIndex, .ret]]
+
+theorem magnitudeCountSourceFunction_body :
+    magnitudeCountSourceFunction.body = magnitudeCountSource := by
+  rfl
+
+theorem magnitudeCountSourceFunction_params :
+    magnitudeCountSourceFunction.params =
+      #[(valueParam, .tobject), (flavorParam, .uint32)] := by
+  rfl
+
+theorem magnitudeCountSourceFunction_locals :
+    magnitudeCountSourceFunction.locals = #[] := by
+  rfl
+
+theorem magnitudeCountSourceFunction_results :
+    magnitudeCountSourceFunction.results = #[.uint32] := by
+  rfl
+
+/-- Exact adaptation of the natural/integer magnitude-count dispatcher. -/
+theorem instructions_magnitudeCountSourceFunction
+    {sourceModule : Fir.Wasm.Module}
+    {integerCountIndex naturalCountIndex : Nat}
+    (integerCountFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.integerCountName) =
+        some integerCountIndex)
+    (naturalCountFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.naturalCountName) =
+        some naturalCountIndex) :
+    FirTalos.instructions sourceModule magnitudeCountSourceFunction []
+      magnitudeCountSourceFunction.body =
+        .ok (magnitudeCountProgram integerCountIndex naturalCountIndex) := by
+  rw [magnitudeCountSourceFunction_body]
+  have valueFound : FirTalos.findFVar?
+      (magnitudeCountSourceFunction.params.toList ++
+        magnitudeCountSourceFunction.locals.toList) valueParam = some 0 := by
+    decide
+  have flavorFound : FirTalos.findFVar?
+      (magnitudeCountSourceFunction.params.toList ++
+        magnitudeCountSourceFunction.locals.toList) flavorParam = some 1 := by
+    decide
+  simp [magnitudeCountSource, magnitudeCountProgram, FirTalos.instructions,
+    FirTalos.instruction, valueFound, flavorFound, integerCountFound,
+    naturalCountFound, Bind.bind, Except.bind, pure, Except.pure]
+
+theorem adaptedMagnitudeCountSourceFunction_body
+    {sourceModule : Fir.Wasm.Module} {targetFunction : Wasm.Function}
+    {integerCountIndex naturalCountIndex : Nat}
+    (adapted : FirTalos.function sourceModule magnitudeCountSourceFunction =
+      .ok targetFunction)
+    (integerCountFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.integerCountName) =
+        some integerCountIndex)
+    (naturalCountFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.naturalCountName) =
+        some naturalCountIndex) :
+    targetFunction.body =
+        magnitudeCountProgram integerCountIndex naturalCountIndex ++
+          FirTalos.functionTerminal sourceModule
+            magnitudeCountSourceFunction := by
+  exact ResidentPrimitives.adaptedFunction_body_of_exact adapted
+    (instructions_magnitudeCountSourceFunction integerCountFound
+      naturalCountFound)
+
+/-- Natural flavor (`0`) delegates exactly to the installed natural-count
+helper.  No integer helper behavior is assumed. -/
+theorem wp_magnitudeCountProgram_natural
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {initial : Wasm.Locals} {integerCountIndex naturalCountIndex : Nat}
+    {word count : UInt32} {tail : List Wasm.Value}
+    {rest : Wasm.Program}
+    (valueLocal : initial.get 0 = some (.i32 word))
+    (flavorLocal : initial.get 1 = some (.i32 0))
+    (naturalCountRun : Wasm.TerminatesWith env module naturalCountIndex store
+      (.i32 word :: tail)
+      (fun final values =>
+        final = store ∧ values = .i32 count :: tail))
+    (returned : Q (.Return store (.i32 count :: tail))) :
+    Wasm.wp module
+      (magnitudeCountProgram integerCountIndex naturalCountIndex ++ rest)
+      Q store { initial with values := tail } env := by
+  have valueLocal' (values : List Wasm.Value) :
+      ({ initial with values } : Wasm.Locals).get 0 =
+        some (.i32 word) := by
+    simpa using valueLocal
+  have flavorLocal' :
+      ({ initial with values := tail } : Wasm.Locals).get 1 =
+        some (.i32 0) := by
+    simpa using flavorLocal
+  unfold magnitudeCountProgram
+  simp only [List.cons_append, List.nil_append, Wasm.wp_localGet_cons,
+    flavorLocal']
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [Wasm.wp_localGet_cons, valueLocal']
+  apply Wasm.wp_call_tw naturalCountRun
+  intro final values completed
+  rcases completed with ⟨rfl, rfl⟩
+  simp only [Wasm.wp_ret_cons]
+  exact returned
+
+/-- Installed natural-flavor magnitude count, composed from the installed
+natural-count helper and preserving the outer caller tail exactly. -/
+theorem terminatesWith_magnitudeCountNatural_of_adapted
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {targetFunction : Wasm.Function} {functionIndex : Nat}
+    {integerCountIndex naturalCountIndex : Nat}
+    {store : Wasm.Store host} {word count : UInt32}
+    {tail : List Wasm.Value}
+    (adapted : FirTalos.function sourceModule magnitudeCountSourceFunction =
+      .ok targetFunction)
+    (integerCountFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.integerCountName) =
+        some integerCountIndex)
+    (naturalCountFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.naturalCountName) =
+        some naturalCountIndex)
+    (notImport : module.imports[functionIndex]? = none)
+    (found : module.funcs[functionIndex - module.imports.length]? =
+      some targetFunction)
+    (naturalCountRun : Wasm.TerminatesWith env module naturalCountIndex store
+      [.i32 word]
+      (fun final values => final = store ∧ values = [.i32 count])) :
+    Wasm.TerminatesWith env module functionIndex store
+      ([.i32 0, .i32 word] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 count :: tail) := by
+  have signature :=
+    FirTalos.Correctness.function_preserves_signature adapted
+  rcases signature with ⟨paramsEq, localsEq, resultsEq⟩
+  have body := adaptedMagnitudeCountSourceFunction_body adapted
+    integerCountFound naturalCountFound
+  apply FirTalos.Correctness.terminatesWith_of_wp_body_at notImport found
+  rw [body]
+  let arguments := [.i32 0, .i32 word] ++ tail
+  let entry := targetFunction.toLocals
+    (arguments.take targetFunction.numParams).reverse
+  have valueLocal : entry.get 0 = some (.i32 word) := by
+    simp [entry, arguments, Wasm.Function.toLocals,
+      Wasm.Function.numParams, paramsEq, magnitudeCountSourceFunction_params]
+  have flavorLocal : entry.get 1 = some (.i32 0) := by
+    simp [entry, arguments, Wasm.Function.toLocals,
+      Wasm.Function.numParams, paramsEq, magnitudeCountSourceFunction_params]
+  have returned :
+      FirTalos.Correctness.FunctionBodyPost targetFunction arguments
+        (fun final values =>
+          final = store ∧ values = .i32 count :: tail)
+        (.Return store [.i32 count]) := by
+    simp [FirTalos.Correctness.FunctionBodyPost, arguments,
+      Wasm.Function.numParams, paramsEq, resultsEq,
+      magnitudeCountSourceFunction_params,
+      magnitudeCountSourceFunction_results]
+  simpa [entry, arguments, Wasm.Function.toLocals] using
+    (wp_magnitudeCountProgram_natural
+      (module := module) (env := env) (store := store) (initial := entry)
+      (integerCountIndex := integerCountIndex)
+      (naturalCountIndex := naturalCountIndex)
+      (rest := FirTalos.functionTerminal sourceModule
+        magnitudeCountSourceFunction)
+      (tail := []) valueLocal flavorLocal naturalCountRun returned)
+
+/-- Fully concrete natural-flavor count for a validated heap object. -/
+theorem terminatesWith_magnitudeCountNatural_of_liveHeader
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {naturalCountTarget magnitudeCountTarget : Wasm.Function}
+    {naturalCountIndex magnitudeCountIndex integerCountIndex : Nat}
+    {heap : MemoryState} {store : Wasm.Store host}
+    {address : Word32} {header : Header} {tail : List Wasm.Value}
+    (naturalCountAdapted : FirTalos.function sourceModule
+      naturalCountSourceFunction = .ok naturalCountTarget)
+    (naturalCountNotImport : module.imports[naturalCountIndex]? = none)
+    (naturalCountInstalled :
+      module.funcs[naturalCountIndex - module.imports.length]? =
+        some naturalCountTarget)
+    (magnitudeCountAdapted : FirTalos.function sourceModule
+      magnitudeCountSourceFunction = .ok magnitudeCountTarget)
+    (integerCountFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.integerCountName) =
+        some integerCountIndex)
+    (naturalCountFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.naturalCountName) =
+        some naturalCountIndex)
+    (magnitudeCountNotImport : module.imports[magnitudeCountIndex]? = none)
+    (magnitudeCountInstalled :
+      module.funcs[magnitudeCountIndex - module.imports.length]? =
+        some magnitudeCountTarget)
+    (memoryRelated : ResidentMemoryRel heap store.mem)
+    (headerRead : heap.readLiveHeader address = .ok header) :
+    Wasm.TerminatesWith env module magnitudeCountIndex store
+      ([.i32 0, .i32 (UInt32.ofNat address.value)] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 header.aux1 :: tail) := by
+  have naturalCountRun :
+      Wasm.TerminatesWith env module naturalCountIndex store
+        [.i32 (UInt32.ofNat address.value)]
+        (fun final values =>
+          final = store ∧ values = [.i32 header.aux1]) :=
+    terminatesWith_naturalCount_of_liveHeader
+      (env := env) (tail := []) naturalCountAdapted naturalCountNotImport
+      naturalCountInstalled memoryRelated headerRead
+  exact terminatesWith_magnitudeCountNatural_of_adapted
+    (env := env) (tail := tail) magnitudeCountAdapted integerCountFound
+    naturalCountFound magnitudeCountNotImport magnitudeCountInstalled
+    naturalCountRun
+
+/-- Fully concrete natural-flavor count for an ordinary heap natural. -/
+theorem terminatesWith_magnitudeCountNatural_of_objectRel
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {naturalCountTarget magnitudeCountTarget : Wasm.Function}
+    {naturalCountIndex magnitudeCountIndex integerCountIndex : Nat}
+    {heap : MemoryState} {store : Wasm.Store host}
+    {address : Word32} {header : Header} {value : Nat}
+    {tail : List Wasm.Value}
+    (naturalCountAdapted : FirTalos.function sourceModule
+      naturalCountSourceFunction = .ok naturalCountTarget)
+    (naturalCountNotImport : module.imports[naturalCountIndex]? = none)
+    (naturalCountInstalled :
+      module.funcs[naturalCountIndex - module.imports.length]? =
+        some naturalCountTarget)
+    (magnitudeCountAdapted : FirTalos.function sourceModule
+      magnitudeCountSourceFunction = .ok magnitudeCountTarget)
+    (integerCountFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.integerCountName) =
+        some integerCountIndex)
+    (naturalCountFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.naturalCountName) =
+        some naturalCountIndex)
+    (magnitudeCountNotImport : module.imports[magnitudeCountIndex]? = none)
+    (magnitudeCountInstalled :
+      module.funcs[magnitudeCountIndex - module.imports.length]? =
+        some magnitudeCountTarget)
+    (memoryRelated : ResidentMemoryRel heap store.mem)
+    (related : NaturalObjectRel heap address value header) :
+    Wasm.TerminatesWith env module magnitudeCountIndex store
+      ([.i32 0, .i32 (UInt32.ofNat address.value)] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 header.aux1 :: tail) := by
+  exact terminatesWith_magnitudeCountNatural_of_liveHeader
+    naturalCountAdapted naturalCountNotImport naturalCountInstalled
+    magnitudeCountAdapted integerCountFound naturalCountFound
+    magnitudeCountNotImport magnitudeCountInstalled memoryRelated
+    related.headerRead
+
+def magnitudeLimbSourceFunction : NaturalLimbPart → Fir.Wasm.Function
+  | .low => Fir.Wasm.Emit.ResidentBigNumeric.magnitudeLowFunction
+  | .high => Fir.Wasm.Emit.ResidentBigNumeric.magnitudeHighFunction
+
+def naturalLimbCallTarget : NaturalLimbPart → Fir.Wasm.CallTarget
+  | .low => .declaration Fir.Wasm.Emit.ResidentBigNumeric.naturalLowName
+  | .high => .declaration Fir.Wasm.Emit.ResidentBigNumeric.naturalHighName
+
+def integerLimbCallTarget : NaturalLimbPart → Fir.Wasm.CallTarget
+  | .low => .declaration Fir.Wasm.Emit.ResidentBigNumeric.integerLowName
+  | .high => .declaration Fir.Wasm.Emit.ResidentBigNumeric.integerHighName
+
+def magnitudeLimbSource (part : NaturalLimbPart) :
+    List Fir.Wasm.Instruction := [
+  .localGet valueParam,
+  .localGet flavorParam,
+  .call (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeCountName),
+  .localSet countLocal,
+  .localGet indexParam,
+  .localGet countLocal,
+  .i32LtU,
+  .ifElse
+    [.localGet flavorParam,
+      .ifElse
+        [.localGet valueParam,
+          .localGet indexParam,
+          .call (integerLimbCallTarget part),
+          .ret]
+        [.localGet valueParam,
+          .localGet indexParam,
+          .call (naturalLimbCallTarget part),
+          .ret]]
+    [.i32Const .uint32 0, .ret]]
+
+def magnitudeLimbProgram (magnitudeCountIndex integerLimbIndex
+    naturalLimbIndex : Nat) : Wasm.Program := [
+  .localGet 0,
+  .localGet 1,
+  .call magnitudeCountIndex,
+  .localSet 3,
+  .localGet 2,
+  .localGet 3,
+  .ltU,
+  .iff 0 0
+    [.localGet 1,
+      .iff 0 0
+        [.localGet 0, .localGet 2, .call integerLimbIndex, .ret]
+        [.localGet 0, .localGet 2, .call naturalLimbIndex, .ret]]
+    [.const 0, .ret]]
+
+theorem magnitudeLimbSourceFunction_body (part : NaturalLimbPart) :
+    (magnitudeLimbSourceFunction part).body = magnitudeLimbSource part := by
+  cases part <;> rfl
+
+theorem magnitudeLimbSourceFunction_params (part : NaturalLimbPart) :
+    (magnitudeLimbSourceFunction part).params =
+      #[(valueParam, .tobject), (flavorParam, .uint32),
+        (indexParam, .uint32)] := by
+  cases part <;> rfl
+
+theorem magnitudeLimbSourceFunction_locals (part : NaturalLimbPart) :
+    (magnitudeLimbSourceFunction part).locals =
+      #[(countLocal, .uint32)] := by
+  cases part <;> rfl
+
+theorem magnitudeLimbSourceFunction_results (part : NaturalLimbPart) :
+    (magnitudeLimbSourceFunction part).results = #[.uint32] := by
+  cases part <;> rfl
+
+/-- Exact adaptation of either magnitude low/high dispatcher. -/
+theorem instructions_magnitudeLimbSourceFunction
+    {sourceModule : Fir.Wasm.Module} {part : NaturalLimbPart}
+    {magnitudeCountIndex integerLimbIndex naturalLimbIndex : Nat}
+    (magnitudeCountFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeCountName) =
+        some magnitudeCountIndex)
+    (integerLimbFound : FirTalos.callIndex? sourceModule
+      (integerLimbCallTarget part) = some integerLimbIndex)
+    (naturalLimbFound : FirTalos.callIndex? sourceModule
+      (naturalLimbCallTarget part) = some naturalLimbIndex) :
+    FirTalos.instructions sourceModule (magnitudeLimbSourceFunction part) []
+      (magnitudeLimbSourceFunction part).body =
+        .ok (magnitudeLimbProgram magnitudeCountIndex integerLimbIndex
+          naturalLimbIndex) := by
+  rw [magnitudeLimbSourceFunction_body]
+  have valueFound : FirTalos.findFVar?
+      ((magnitudeLimbSourceFunction part).params.toList ++
+        (magnitudeLimbSourceFunction part).locals.toList) valueParam =
+          some 0 := by
+    cases part <;> decide
+  have flavorFound : FirTalos.findFVar?
+      ((magnitudeLimbSourceFunction part).params.toList ++
+        (magnitudeLimbSourceFunction part).locals.toList) flavorParam =
+          some 1 := by
+    cases part <;> decide
+  have indexFound : FirTalos.findFVar?
+      ((magnitudeLimbSourceFunction part).params.toList ++
+        (magnitudeLimbSourceFunction part).locals.toList) indexParam =
+          some 2 := by
+    cases part <;> decide
+  have countFound : FirTalos.findFVar?
+      ((magnitudeLimbSourceFunction part).params.toList ++
+        (magnitudeLimbSourceFunction part).locals.toList) countLocal =
+          some 3 := by
+    cases part <;> decide
+  simp [magnitudeLimbSource, magnitudeLimbProgram,
+    FirTalos.instructions, FirTalos.instruction, valueFound, flavorFound,
+    indexFound, countFound, magnitudeCountFound, integerLimbFound,
+    naturalLimbFound, Bind.bind, Except.bind, pure, Except.pure]
+
+theorem adaptedMagnitudeLimbSourceFunction_body
+    {sourceModule : Fir.Wasm.Module} {targetFunction : Wasm.Function}
+    {part : NaturalLimbPart}
+    {magnitudeCountIndex integerLimbIndex naturalLimbIndex : Nat}
+    (adapted : FirTalos.function sourceModule
+      (magnitudeLimbSourceFunction part) = .ok targetFunction)
+    (magnitudeCountFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeCountName) =
+        some magnitudeCountIndex)
+    (integerLimbFound : FirTalos.callIndex? sourceModule
+      (integerLimbCallTarget part) = some integerLimbIndex)
+    (naturalLimbFound : FirTalos.callIndex? sourceModule
+      (naturalLimbCallTarget part) = some naturalLimbIndex) :
+    targetFunction.body =
+        magnitudeLimbProgram magnitudeCountIndex integerLimbIndex
+            naturalLimbIndex ++
+          FirTalos.functionTerminal sourceModule
+            (magnitudeLimbSourceFunction part) := by
+  exact ResidentPrimitives.adaptedFunction_body_of_exact adapted
+    (instructions_magnitudeLimbSourceFunction magnitudeCountFound
+      integerLimbFound naturalLimbFound)
+
+/-- An in-range natural-flavor magnitude access is exactly count, bounds
+check, and delegation to the corresponding natural low/high helper. -/
+theorem wp_magnitudeLimbProgram_natural_inBounds
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {initial afterCount : Wasm.Locals}
+    {magnitudeCountIndex integerLimbIndex naturalLimbIndex : Nat}
+    {word index count result : UInt32} {tail : List Wasm.Value}
+    {rest : Wasm.Program}
+    (valueLocal : initial.get 0 = some (.i32 word))
+    (flavorLocal : initial.get 1 = some (.i32 0))
+    (indexLocal : initial.get 2 = some (.i32 index))
+    (countSet :
+      ({ initial with values := .i32 count :: tail }).set? 3
+        (.i32 count) = some afterCount)
+    (indexInBounds : index < count)
+    (magnitudeCountRun : Wasm.TerminatesWith env module magnitudeCountIndex
+      store ([.i32 0, .i32 word] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 count :: tail))
+    (naturalLimbRun : Wasm.TerminatesWith env module naturalLimbIndex store
+      ([.i32 index, .i32 word] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 result :: tail))
+    (returned : Q (.Return store (.i32 result :: tail))) :
+    Wasm.wp module
+      (magnitudeLimbProgram magnitudeCountIndex integerLimbIndex
+          naturalLimbIndex ++ rest)
+      Q store { initial with values := tail } env := by
+  have countUpdate := FirTalos.Correctness.localUpdate_of_set? countSet
+  have initialAt (slot : Nat) (value : Wasm.Value)
+      (found : initial.get slot = some value) (values : List Wasm.Value) :
+      ({ initial with values } : Wasm.Locals).get slot = some value := by
+    simpa using found
+  have afterCountAt (slot : Nat) (value : Wasm.Value)
+      (different : slot ≠ 3) (found : initial.get slot = some value)
+      (values : List Wasm.Value) :
+      ({ afterCount with values } : Wasm.Locals).get slot = some value := by
+    change afterCount.get slot = some value
+    rw [countUpdate.2 different]
+    exact found
+  have countAt (values : List Wasm.Value) :
+      ({ afterCount with values } : Wasm.Locals).get 3 =
+        some (.i32 count) := by
+    simpa using countUpdate.1
+  unfold magnitudeLimbProgram
+  simp only [List.cons_append, List.nil_append, Wasm.wp_localGet_cons,
+    initialAt 0 (.i32 word) valueLocal,
+    initialAt 1 (.i32 0) flavorLocal]
+  apply Wasm.wp_call_tw magnitudeCountRun
+  intro final values completedCount
+  rcases completedCount with ⟨rfl, rfl⟩
+  simp only [Wasm.wp_localSet_cons, countSet, Wasm.wp_localGet_cons,
+    afterCountAt 2 (.i32 index) (by decide) indexLocal,
+    countAt]
+  rw [Wasm.wp_ltU_cons]
+  simp only [indexInBounds, ↓reduceIte]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_pos (by decide : (1 : UInt32) ≠ 0)]
+  simp only [Wasm.wp_localGet_cons,
+    afterCountAt 1 (.i32 0) (by decide) flavorLocal]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [Wasm.wp_localGet_cons,
+    afterCountAt 0 (.i32 word) (by decide) valueLocal,
+    afterCountAt 2 (.i32 index) (by decide) indexLocal]
+  apply Wasm.wp_call_tw naturalLimbRun
+  intro final values completedLimb
+  rcases completedLimb with ⟨rfl, rfl⟩
+  simp only [Wasm.wp_ret_cons]
+  exact returned
+
+/-- An out-of-range magnitude access returns zero after the count call and
+does not require either natural or integer limb helper. -/
+theorem wp_magnitudeLimbProgram_natural_outOfBounds
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {initial afterCount : Wasm.Locals}
+    {magnitudeCountIndex integerLimbIndex naturalLimbIndex : Nat}
+    {word index count : UInt32} {tail : List Wasm.Value}
+    {rest : Wasm.Program}
+    (valueLocal : initial.get 0 = some (.i32 word))
+    (flavorLocal : initial.get 1 = some (.i32 0))
+    (indexLocal : initial.get 2 = some (.i32 index))
+    (countSet :
+      ({ initial with values := .i32 count :: tail }).set? 3
+        (.i32 count) = some afterCount)
+    (indexOutOfBounds : ¬index < count)
+    (magnitudeCountRun : Wasm.TerminatesWith env module magnitudeCountIndex
+      store ([.i32 0, .i32 word] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 count :: tail))
+    (returned : Q (.Return store (.i32 0 :: tail))) :
+    Wasm.wp module
+      (magnitudeLimbProgram magnitudeCountIndex integerLimbIndex
+          naturalLimbIndex ++ rest)
+      Q store { initial with values := tail } env := by
+  have countUpdate := FirTalos.Correctness.localUpdate_of_set? countSet
+  have initialAt (slot : Nat) (value : Wasm.Value)
+      (found : initial.get slot = some value) (values : List Wasm.Value) :
+      ({ initial with values } : Wasm.Locals).get slot = some value := by
+    simpa using found
+  have afterCountAt (slot : Nat) (value : Wasm.Value)
+      (different : slot ≠ 3) (found : initial.get slot = some value)
+      (values : List Wasm.Value) :
+      ({ afterCount with values } : Wasm.Locals).get slot = some value := by
+    change afterCount.get slot = some value
+    rw [countUpdate.2 different]
+    exact found
+  have countAt (values : List Wasm.Value) :
+      ({ afterCount with values } : Wasm.Locals).get 3 =
+        some (.i32 count) := by
+    simpa using countUpdate.1
+  unfold magnitudeLimbProgram
+  simp only [List.cons_append, List.nil_append, Wasm.wp_localGet_cons,
+    initialAt 0 (.i32 word) valueLocal,
+    initialAt 1 (.i32 0) flavorLocal]
+  apply Wasm.wp_call_tw magnitudeCountRun
+  intro final values completedCount
+  rcases completedCount with ⟨rfl, rfl⟩
+  simp only [Wasm.wp_localSet_cons, countSet, Wasm.wp_localGet_cons,
+    afterCountAt 2 (.i32 index) (by decide) indexLocal, countAt]
+  rw [Wasm.wp_ltU_cons]
+  simp only [indexOutOfBounds, ↓reduceIte]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [Wasm.wp_const_cons, Wasm.wp_ret_cons]
+  exact returned
+
+/-- Installed in-range natural-flavor magnitude access.  Its only semantic
+dependencies are the exact installed count and natural-limb calls. -/
+theorem terminatesWith_magnitudeLimbNatural_inBounds_of_adapted
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {targetFunction : Wasm.Function} {functionIndex : Nat}
+    {part : NaturalLimbPart}
+    {magnitudeCountIndex integerLimbIndex naturalLimbIndex : Nat}
+    {store : Wasm.Store host} {word index count result : UInt32}
+    {tail : List Wasm.Value}
+    (adapted : FirTalos.function sourceModule
+      (magnitudeLimbSourceFunction part) = .ok targetFunction)
+    (magnitudeCountFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeCountName) =
+        some magnitudeCountIndex)
+    (integerLimbFound : FirTalos.callIndex? sourceModule
+      (integerLimbCallTarget part) = some integerLimbIndex)
+    (naturalLimbFound : FirTalos.callIndex? sourceModule
+      (naturalLimbCallTarget part) = some naturalLimbIndex)
+    (notImport : module.imports[functionIndex]? = none)
+    (found : module.funcs[functionIndex - module.imports.length]? =
+      some targetFunction)
+    (indexInBounds : index < count)
+    (magnitudeCountRun : Wasm.TerminatesWith env module magnitudeCountIndex
+      store [.i32 0, .i32 word]
+      (fun final values => final = store ∧ values = [.i32 count]))
+    (naturalLimbRun : Wasm.TerminatesWith env module naturalLimbIndex store
+      [.i32 index, .i32 word]
+      (fun final values => final = store ∧ values = [.i32 result])) :
+    Wasm.TerminatesWith env module functionIndex store
+      ([.i32 index, .i32 0, .i32 word] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 result :: tail) := by
+  have signature :=
+    FirTalos.Correctness.function_preserves_signature adapted
+  rcases signature with ⟨paramsEq, localsEq, resultsEq⟩
+  have body := adaptedMagnitudeLimbSourceFunction_body adapted
+    magnitudeCountFound integerLimbFound naturalLimbFound
+  apply FirTalos.Correctness.terminatesWith_of_wp_body_at notImport found
+  rw [body]
+  let arguments := [.i32 index, .i32 0, .i32 word] ++ tail
+  let entry := targetFunction.toLocals
+    (arguments.take targetFunction.numParams).reverse
+  have valueLocal : entry.get 0 = some (.i32 word) := by
+    simp [entry, arguments, Wasm.Function.toLocals,
+      Wasm.Function.numParams, paramsEq,
+      magnitudeLimbSourceFunction_params]
+  have flavorLocal : entry.get 1 = some (.i32 0) := by
+    simp [entry, arguments, Wasm.Function.toLocals,
+      Wasm.Function.numParams, paramsEq,
+      magnitudeLimbSourceFunction_params]
+  have indexLocal : entry.get 2 = some (.i32 index) := by
+    simp [entry, arguments, Wasm.Function.toLocals,
+      Wasm.Function.numParams, paramsEq,
+      magnitudeLimbSourceFunction_params]
+  have targetLocalsLength : targetFunction.locals.length = 1 := by
+    simp [localsEq, magnitudeLimbSourceFunction_locals]
+  have countValid :
+      ({ entry with values := [.i32 count] }).validIndex 3 := by
+    simp [entry, arguments, Wasm.Function.toLocals,
+      Wasm.Function.numParams, paramsEq,
+      magnitudeLimbSourceFunction_params, targetLocalsLength]
+  obtain ⟨afterCount, countSet⟩ :=
+    FirTalos.Correctness.locals_set?_exists
+      (value := .i32 count) countValid
+  have returned :
+      FirTalos.Correctness.FunctionBodyPost targetFunction arguments
+        (fun final values =>
+          final = store ∧ values = .i32 result :: tail)
+        (.Return store [.i32 result]) := by
+    simp [FirTalos.Correctness.FunctionBodyPost, arguments,
+      Wasm.Function.numParams, paramsEq, resultsEq,
+      magnitudeLimbSourceFunction_params,
+      magnitudeLimbSourceFunction_results]
+  simpa [entry, arguments, Wasm.Function.toLocals] using
+    (wp_magnitudeLimbProgram_natural_inBounds
+      (module := module) (env := env) (store := store) (initial := entry)
+      (afterCount := afterCount)
+      (magnitudeCountIndex := magnitudeCountIndex)
+      (integerLimbIndex := integerLimbIndex)
+      (naturalLimbIndex := naturalLimbIndex)
+      (rest := FirTalos.functionTerminal sourceModule
+        (magnitudeLimbSourceFunction part))
+      (tail := []) valueLocal flavorLocal indexLocal countSet indexInBounds
+      magnitudeCountRun naturalLimbRun returned)
+
+/-- Installed out-of-range natural-flavor magnitude access.  The helper
+returns zero without invoking either physical limb accessor. -/
+theorem terminatesWith_magnitudeLimbNatural_outOfBounds_of_adapted
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {targetFunction : Wasm.Function} {functionIndex : Nat}
+    {part : NaturalLimbPart}
+    {magnitudeCountIndex integerLimbIndex naturalLimbIndex : Nat}
+    {store : Wasm.Store host} {word index count : UInt32}
+    {tail : List Wasm.Value}
+    (adapted : FirTalos.function sourceModule
+      (magnitudeLimbSourceFunction part) = .ok targetFunction)
+    (magnitudeCountFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeCountName) =
+        some magnitudeCountIndex)
+    (integerLimbFound : FirTalos.callIndex? sourceModule
+      (integerLimbCallTarget part) = some integerLimbIndex)
+    (naturalLimbFound : FirTalos.callIndex? sourceModule
+      (naturalLimbCallTarget part) = some naturalLimbIndex)
+    (notImport : module.imports[functionIndex]? = none)
+    (found : module.funcs[functionIndex - module.imports.length]? =
+      some targetFunction)
+    (indexOutOfBounds : ¬index < count)
+    (magnitudeCountRun : Wasm.TerminatesWith env module magnitudeCountIndex
+      store [.i32 0, .i32 word]
+      (fun final values => final = store ∧ values = [.i32 count])) :
+    Wasm.TerminatesWith env module functionIndex store
+      ([.i32 index, .i32 0, .i32 word] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 0 :: tail) := by
+  have signature :=
+    FirTalos.Correctness.function_preserves_signature adapted
+  rcases signature with ⟨paramsEq, localsEq, resultsEq⟩
+  have body := adaptedMagnitudeLimbSourceFunction_body adapted
+    magnitudeCountFound integerLimbFound naturalLimbFound
+  apply FirTalos.Correctness.terminatesWith_of_wp_body_at notImport found
+  rw [body]
+  let arguments := [.i32 index, .i32 0, .i32 word] ++ tail
+  let entry := targetFunction.toLocals
+    (arguments.take targetFunction.numParams).reverse
+  have valueLocal : entry.get 0 = some (.i32 word) := by
+    simp [entry, arguments, Wasm.Function.toLocals,
+      Wasm.Function.numParams, paramsEq,
+      magnitudeLimbSourceFunction_params]
+  have flavorLocal : entry.get 1 = some (.i32 0) := by
+    simp [entry, arguments, Wasm.Function.toLocals,
+      Wasm.Function.numParams, paramsEq,
+      magnitudeLimbSourceFunction_params]
+  have indexLocal : entry.get 2 = some (.i32 index) := by
+    simp [entry, arguments, Wasm.Function.toLocals,
+      Wasm.Function.numParams, paramsEq,
+      magnitudeLimbSourceFunction_params]
+  have targetLocalsLength : targetFunction.locals.length = 1 := by
+    simp [localsEq, magnitudeLimbSourceFunction_locals]
+  have countValid :
+      ({ entry with values := [.i32 count] }).validIndex 3 := by
+    simp [entry, arguments, Wasm.Function.toLocals,
+      Wasm.Function.numParams, paramsEq,
+      magnitudeLimbSourceFunction_params, targetLocalsLength]
+  obtain ⟨afterCount, countSet⟩ :=
+    FirTalos.Correctness.locals_set?_exists
+      (value := .i32 count) countValid
+  have returned :
+      FirTalos.Correctness.FunctionBodyPost targetFunction arguments
+        (fun final values =>
+          final = store ∧ values = .i32 0 :: tail)
+        (.Return store [.i32 0]) := by
+    simp [FirTalos.Correctness.FunctionBodyPost, arguments,
+      Wasm.Function.numParams, paramsEq, resultsEq,
+      magnitudeLimbSourceFunction_params,
+      magnitudeLimbSourceFunction_results]
+  simpa [entry, arguments, Wasm.Function.toLocals] using
+    (wp_magnitudeLimbProgram_natural_outOfBounds
+      (module := module) (env := env) (store := store) (initial := entry)
+      (afterCount := afterCount)
+      (magnitudeCountIndex := magnitudeCountIndex)
+      (integerLimbIndex := integerLimbIndex)
+      (naturalLimbIndex := naturalLimbIndex)
+      (rest := FirTalos.functionTerminal sourceModule
+        (magnitudeLimbSourceFunction part))
+      (tail := []) valueLocal flavorLocal indexLocal countSet indexOutOfBounds
+      magnitudeCountRun returned)
 
 def scale8Source : List Fir.Wasm.Instruction :=
   ResidentPrimitives.scale8Source indexParam scaledLocal
