@@ -46,8 +46,8 @@
     "tiers": [
       {
         "id": "source-lcnf",
-        "minimumCases": 668,
-        "minimumComparisons": 668,
+        "minimumCases": 670,
+        "minimumComparisons": 670,
         "requiredBackends": [
           "lcnf",
           "native"
@@ -66,8 +66,8 @@
       },
       {
         "id": "wasm-v8",
-        "minimumCases": 668,
-        "minimumComparisons": 1336,
+        "minimumCases": 670,
+        "minimumComparisons": 1340,
         "requiredBackends": [
           "lcnf",
           "native",
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 677,
-      "minimumTierCases": 1345,
-      "minimumComparisons": 2013
+      "minimumUniqueCases": 679,
+      "minimumTierCases": 1349,
+      "minimumComparisons": 2019
     },
     "machine": {
-      "minimumCases": 677,
-      "minimumInterpreterSteps": 7469,
+      "minimumCases": 679,
+      "minimumInterpreterSteps": 7632,
       "requiredStaticForms": [
         "box",
         "cases",
@@ -517,6 +517,11 @@
       {
         "tier": "source-lcnf",
         "tag": "cached-array-dag",
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "cached-effect-release",
         "minimumCases": 2
       },
       {
@@ -982,6 +987,11 @@
       {
         "tier": "wasm-v8",
         "tag": "cached-array-dag",
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "cached-effect-release",
         "minimumCases": 2
       },
       {
@@ -1487,6 +1497,42 @@
           "persistent",
           "recursive-persistence",
           "string"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "cache-effect-release-pair",
+        "allTags": [
+          "alias-multiplicity-three",
+          "cache",
+          "cached-effect-release",
+          "effect",
+          "release-before-effect",
+          "suspension",
+          "transient-owner"
+        ],
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "cache-effect-release-skipped",
+        "allTags": [
+          "cached-effect-release",
+          "path-exclusion",
+          "post-effect-reuse",
+          "release-before-effect"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "cache-effect-release-taken",
+        "allTags": [
+          "cached-effect-release",
+          "post-effect-mutation",
+          "post-effect-reuse",
+          "release-before-effect"
         ],
         "minimumCases": 1
       },
@@ -2520,6 +2566,42 @@
           "persistent",
           "recursive-persistence",
           "string"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "cache-effect-release-pair",
+        "allTags": [
+          "alias-multiplicity-three",
+          "cache",
+          "cached-effect-release",
+          "effect",
+          "release-before-effect",
+          "suspension",
+          "transient-owner"
+        ],
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "cache-effect-release-skipped",
+        "allTags": [
+          "cached-effect-release",
+          "path-exclusion",
+          "post-effect-reuse",
+          "release-before-effect"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "cache-effect-release-taken",
+        "allTags": [
+          "cached-effect-release",
+          "post-effect-mutation",
+          "post-effect-reuse",
+          "release-before-effect"
         ],
         "minimumCases": 1
       },

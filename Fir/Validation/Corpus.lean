@@ -2527,6 +2527,35 @@ def recordByteArray (value : ByteArray) (byte : UInt8) : ByteArray :=
 def recordByteArrayTwice (value : ByteArray) : ByteArray :=
   recordByteArray (recordByteArray value 1) 2
 
+/-!
+Copy a repeated-child cached String DAG into a transient three-alias owner,
+project the two surviving aliases, and release the ignored alias before an
+ordered external suspension. The selected path then either preserves one
+survivor or appends through it before the same cache is read again.
+-/
+structure TransientCachedStringAliases where
+  left : String
+  right : String
+  ignored : String
+
+@[noinline]
+def makeTransientCachedStringAliases
+    (source : CachedSharedStringOwner) : TransientCachedStringAliases :=
+  { left := source.left, right := source.right, ignored := source.left }
+
+@[noinline]
+def cachedSharedStringDagAcrossEffect
+    (mutate : Bool) :
+    String × Nat × String × CachedSharedStringOwner :=
+  let cached := cachedSharedStringOwner
+  let aliases := makeTransientCachedStringAliases cached
+  let outside := aliases.left
+  let selected := aliases.right
+  let marker := record 7
+  let result := if mutate then String.Internal.append selected "!" else selected
+  let second := cachedSharedStringOwner
+  (outside, marker, result, second)
+
 /--
 Use a captured ByteArray for the final time before passing its outside alias to
 an ordered effect. The post-effect read observes the updated result.
@@ -2980,6 +3009,14 @@ private def cachedSharedStringDagReuseDatum
       .ctor "Prod.mk" 0 #[.string value.2.2.1,
         cachedSharedStringOwnerDatum value.2.2.2]]]
 
+private def cachedSharedStringDagAcrossEffectDatum
+    (value : String × Nat × String × Source.CachedSharedStringOwner) :
+    ValidationDatum :=
+  .ctor "Prod.mk" 0 #[.string value.1,
+    .ctor "Prod.mk" 0 #[.nat value.2.1,
+      .ctor "Prod.mk" 0 #[.string value.2.2.1,
+        cachedSharedStringOwnerDatum value.2.2.2]]]
+
 private def cachedSharedUInt8ArrayOwnerDatum
     (value : Source.CachedSharedUInt8ArrayOwner) : ValidationDatum :=
   .ctor "CachedSharedUInt8ArrayOwner.mk" 0
@@ -3241,6 +3278,11 @@ private def cachedSharedStringOwnerSchema : ValidationSchema :=
 private def cachedSharedStringDagReuseSchema : ValidationSchema :=
   .ctor "Prod.mk" 0 #[cachedSharedStringOwnerSchema,
     .ctor "Prod.mk" 0 #[.string,
+      .ctor "Prod.mk" 0 #[.string, cachedSharedStringOwnerSchema]]]
+
+private def cachedSharedStringDagAcrossEffectSchema : ValidationSchema :=
+  .ctor "Prod.mk" 0 #[.string,
+    .ctor "Prod.mk" 0 #[.nat,
       .ctor "Prod.mk" 0 #[.string, cachedSharedStringOwnerSchema]]]
 
 private def cachedSharedUInt8ArrayOwnerSchema : ValidationSchema :=
@@ -4071,6 +4113,23 @@ private def cachedSharedStringDagReuseTakenFormTrace : Array String :=
     "ctor", "return", "inc", "return", "oproj", "oproj", "join", "cases", "fap",
     "lit", "return", "inc", "fap", "extern", "jump", "inc", "ctor", "inc", "ctor",
     "ctor", "return"]
+
+private def cachedSharedStringDagEffectSkippedFormTrace : Array String :=
+  #["fap", "fap", "fap", "lit", "return", "fap", "lit", "return", "inc", "inc",
+    "ctor", "return", "inc", "return", "fap", "fap", "inc", "fap", "oproj",
+    "oproj", "join", "isShared", "cases", "inc", "inc", "dec", "jump", "inc",
+    "join", "cases", "ctor", "jump", "return", "return", "oproj", "oproj",
+    "fap", "lit", "fap", "extern", "return", "join", "cases", "inc", "jump",
+    "inc", "ctor", "inc", "ctor", "inc", "ctor", "return"]
+
+private def cachedSharedStringDagEffectTakenFormTrace : Array String :=
+  #["fap", "fap", "fap", "lit", "return", "fap", "lit", "return", "inc", "inc",
+    "ctor", "return", "inc", "return", "fap", "fap", "inc", "fap", "oproj",
+    "oproj", "join", "isShared", "cases", "inc", "inc", "dec", "jump", "inc",
+    "join", "cases", "ctor", "jump", "return", "return", "oproj", "oproj",
+    "fap", "lit", "fap", "extern", "return", "join", "cases", "fap", "lit",
+    "return", "inc", "fap", "extern", "jump", "inc", "ctor", "inc", "ctor",
+    "inc", "ctor", "return"]
 
 private def cachedSharedUInt8ArrayDagReuseSkippedFormTrace : Array String :=
   #["fap", "fap", "fap", "lit", "return", "fap", "lit", "fap", "lit", "fap",
@@ -5635,6 +5694,127 @@ private def preConversionCases : Array Case := #[
     requiredExecutedExternalTrace := some #[``String.Internal.append]
     provenance := firProvenance
       "Append through one repeated cached String child while retaining its sibling and an outside alias" },
+  { id := "cached-shared-string-dag-effect-skipped"
+    entry := ``Source.cachedSharedStringDagAcrossEffect
+    dependencies :=
+      #[``Source.cachedSharedStringOwner,
+        ``Source.makeTransientCachedStringAliases, ``Source.record]
+    args := #[.bool false]
+    argSchemas := #[.bool]
+    resultSchema := cachedSharedStringDagAcrossEffectSchema
+    native := fun _ => cachedSharedStringDagAcrossEffectDatum
+      (Source.cachedSharedStringDagAcrossEffect false)
+    nativeBefore := NativeEffects.reset
+    nativeEffects := fun _ => NativeEffects.take
+    tags := #["stress", "ownership", "persistent", "cache", "nullary-cache",
+      "recursive-persistence", "constructor", "object", "heap", "string",
+      "large-nat", "repeated-call", "cache-miss", "cache-hit", "initialization",
+      "alias", "shared", "repeated-alias", "repeated-child-alias",
+      "outside-alias", "alias-preservation", "shared-dag", "effect",
+      "ordered-effect", "call-boundary", "alias-across-effect", "suspension",
+      "post-effect-reuse", "cached-effect-release", "transient-owner",
+      "alias-multiplicity-three", "release",
+      "release-before-effect", "release-fidelity", "allocation",
+      "shared-allocation", "path-exclusion"]
+    requiredLcnfForms :=
+      #["cases", "ctor", "dec", "extern", "fap", "inc", "isShared", "join",
+        "jump", "lit", "oproj", "oset", "return"]
+    requiredExecutedLcnfForms :=
+      #["cases", "ctor", "dec", "extern", "fap", "inc", "isShared", "join",
+        "jump", "lit", "oproj", "return"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "cases", minimum := 3, maximum := some 3 },
+        { form := "ctor", minimum := 5, maximum := some 5 },
+        { form := "dec", minimum := 1, maximum := some 1 },
+        { form := "extern", minimum := 1, maximum := some 1 },
+        { form := "fap", minimum := 9, maximum := some 9 },
+        { form := "inc", minimum := 11, maximum := some 11 },
+        { form := "isShared", minimum := 1, maximum := some 1 },
+        { form := "join", minimum := 3, maximum := some 3 },
+        { form := "jump", minimum := 3, maximum := some 3 },
+        { form := "lit", minimum := 3, maximum := some 3 },
+        { form := "oproj", minimum := 4, maximum := some 4 },
+        { form := "oset", minimum := 0, maximum := some 0 },
+        { form := "return", minimum := 8, maximum := some 8 }]
+    requiredExecutedLcnfFormTrace :=
+      some cachedSharedStringDagEffectSkippedFormTrace
+    requiredAdministrativeStepKinds := cachedHeapOwnerAdministrativeKinds
+    requiredExternals :=
+      #[``NativeEffects.recordImpl, ``String.Internal.append]
+    requiredExecutedExternals := #[``NativeEffects.recordImpl]
+    requiredExecutedExternalCounts :=
+      #[{ external := ``NativeEffects.recordImpl, minimum := 1, maximum := some 1 },
+        { external := ``String.Internal.append, minimum := 0, maximum := some 0 }]
+    requiredExecutedExternalTrace := some #[``NativeEffects.recordImpl]
+    effectProjections := #[{
+      external := ``NativeEffects.recordImpl
+      operation := "validation.record"
+      argSchemas := #[.nat]
+      resultSchema := some .nat }]
+    provenance := firProvenance
+      "Release one transient alias of a cached String DAG before an ordered effect, preserve two survivors, skip mutation, and reuse the cache" },
+  { id := "cached-shared-string-dag-effect-taken"
+    entry := ``Source.cachedSharedStringDagAcrossEffect
+    dependencies :=
+      #[``Source.cachedSharedStringOwner,
+        ``Source.makeTransientCachedStringAliases, ``Source.record]
+    args := #[.bool true]
+    argSchemas := #[.bool]
+    resultSchema := cachedSharedStringDagAcrossEffectSchema
+    native := fun _ => cachedSharedStringDagAcrossEffectDatum
+      (Source.cachedSharedStringDagAcrossEffect true)
+    nativeBefore := NativeEffects.reset
+    nativeEffects := fun _ => NativeEffects.take
+    tags := #["stress", "ownership", "persistent", "cache", "nullary-cache",
+      "recursive-persistence", "constructor", "object", "heap", "string",
+      "large-nat", "repeated-call", "cache-miss", "cache-hit", "initialization",
+      "alias", "shared", "repeated-alias", "repeated-child-alias",
+      "outside-alias", "alias-preservation", "shared-dag", "effect",
+      "ordered-effect", "call-boundary", "alias-across-effect", "suspension",
+      "post-effect-reuse", "cached-effect-release", "transient-owner",
+      "alias-multiplicity-three", "release",
+      "release-before-effect", "release-fidelity", "allocation",
+      "shared-allocation", "post-effect-mutation", "copy-on-write",
+      "mutation", "external"]
+    requiredLcnfForms :=
+      #["cases", "ctor", "dec", "extern", "fap", "inc", "isShared", "join",
+        "jump", "lit", "oproj", "oset", "return"]
+    requiredExecutedLcnfForms :=
+      #["cases", "ctor", "dec", "extern", "fap", "inc", "isShared", "join",
+        "jump", "lit", "oproj", "return"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "cases", minimum := 3, maximum := some 3 },
+        { form := "ctor", minimum := 5, maximum := some 5 },
+        { form := "dec", minimum := 1, maximum := some 1 },
+        { form := "extern", minimum := 2, maximum := some 2 },
+        { form := "fap", minimum := 11, maximum := some 11 },
+        { form := "inc", minimum := 11, maximum := some 11 },
+        { form := "isShared", minimum := 1, maximum := some 1 },
+        { form := "join", minimum := 3, maximum := some 3 },
+        { form := "jump", minimum := 3, maximum := some 3 },
+        { form := "lit", minimum := 4, maximum := some 4 },
+        { form := "oproj", minimum := 4, maximum := some 4 },
+        { form := "oset", minimum := 0, maximum := some 0 },
+        { form := "return", minimum := 9, maximum := some 9 }]
+    requiredExecutedLcnfFormTrace :=
+      some cachedSharedStringDagEffectTakenFormTrace
+    requiredAdministrativeStepKinds := cachedHeapOwnerAdministrativeKinds
+    requiredExternals :=
+      #[``NativeEffects.recordImpl, ``String.Internal.append]
+    requiredExecutedExternals :=
+      #[``NativeEffects.recordImpl, ``String.Internal.append]
+    requiredExecutedExternalCounts :=
+      #[{ external := ``NativeEffects.recordImpl, minimum := 1, maximum := some 1 },
+        { external := ``String.Internal.append, minimum := 1, maximum := some 1 }]
+    requiredExecutedExternalTrace :=
+      some #[``NativeEffects.recordImpl, ``String.Internal.append]
+    effectProjections := #[{
+      external := ``NativeEffects.recordImpl
+      operation := "validation.record"
+      argSchemas := #[.nat]
+      resultSchema := some .nat }]
+    provenance := firProvenance
+      "Release one transient alias of a cached String DAG before an ordered effect, append through one survivor, and reuse the cache" },
   { id := "cached-shared-uint8-array-dag-reuse-skipped"
     entry := ``Source.cachedSharedUInt8ArrayDagReuse
     dependencies := #[``Source.cachedSharedUInt8ArrayOwner]
