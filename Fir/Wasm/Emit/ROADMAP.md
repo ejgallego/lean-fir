@@ -345,6 +345,26 @@ AB/BA pairs move the median exported-entry time from 94.80 ms to 92.54 ms
 all ten levels, zero imports, and the flat 9,237,304-byte frontier remain
 unchanged. W6 proof review remains the acceptance boundary.
 
+### G1k. Return trusted ByteArray sizes through the typed result bridge (generation-ready)
+
+The source compiler already proves the closed-call argument is a resident
+ByteArray before selecting its trusted helper. That helper now keeps its
+existing `< 2^31` size trap and returns the tagged Nat with the same typed
+extend/tag/wrap bridge as direct Nat/USize results. It no longer borrows the
+scratch slot solely to reclassify the physical word. The checked public helper,
+input validation, helper signature, object layout, and ownership contract are
+unchanged; generated-shape guards pin both bodies and the trusted local set.
+
+On the exact 256-KiB seeded-random level-6 lean-zip workload, 32
+diagnostics-off alternating AB/BA pairs move median exported-entry time from
+88.64 ms to 86.62 ms (-2.3%); 30/32 pairs improve and the paired median is
+-1.75 ms. Two artifact-bound profiles have comparable-diagnostic quality,
+exact output, and a flat 9,237,304-byte frontier. Binaryen removes
+`fir_ext_ByteArray_size` from the optimized module. The final artifact grows
+from 384,533 to 387,598 bytes (+0.8%) because the direct sequence is duplicated
+into callers, while the final function count falls from 505 to 504 and imports
+remain zero. W6 proof review remains the acceptance boundary.
+
 ### G2. Separate production and diagnostic adapter costs (accepted)
 
 Finish the pending Illuminate selection-player request with an actually

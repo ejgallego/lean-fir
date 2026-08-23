@@ -156,14 +156,14 @@ complete identities plus the runtime source, contract, and Emscripten identity.
 The exact source-Float raw closure is ratcheted in
 `raw-closure-contract.json`: 769 captured declarations, 139 reviewed
 externals, 630 retained source functions, 23 final-LCNF partial-application
-targets, 831 resident helpers, and 1,461 complete pre-optimization functions.
+targets, 830 resident helpers, and 1,460 complete pre-optimization functions.
 In addition to counts and Wasm byte lengths, the contract pins SHA-256 digests
 of the ordered external, source-function, source-closure-target,
 resident-helper, and complete-function inventories. This prevents a same-count
 closure change from passing the package gate without review.
 
-The same contract ratchets the final optimized artifact at 508 functions and
-zero function imports, with 228 surviving Lean-source functions, 280 resident
+The same contract ratchets the final optimized artifact at 504 functions and
+zero function imports, with 228 surviving Lean-source functions, 276 resident
 helpers, and no optimizer-or-linked-runtime functions. The function index
 digest and sidecar digest make an index-preserving but identity-changing
 release a reviewed package change rather than an unnoticed one.
@@ -293,6 +293,22 @@ Unprofiled alternating level-6 pairs move from a 94.80 ms median to 92.54 ms
 checked-wrapper plus `fir_dec_once` share by about 79%. The exact module falls
 from 393,275 to 384,533 bytes; compressed output, imports, and the flat
 9,237,304-byte frontier are unchanged.
+
+The trusted `ByteArray.size` helper now returns its range-checked tagged Nat
+through the typed object-word bridge already used by direct Nat/USize results.
+It no longer stores and reloads the same physical word through scratch memory
+solely to reclassify it as tagged. The checked public helper is unchanged, and
+the trusted path retains the exact `< 2^31` trap before constructing the tag.
+Binaryen consequently removes `fir_ext_ByteArray_size` from the final module.
+
+Against the accepted checked-decrement package, 32 diagnostics-off alternating
+AB/BA level-6 pairs move median exported-entry time from 88.64 ms to 86.62 ms
+(-2.3%); 30/32 pairs improve and the paired median is -1.75 ms. Two
+artifact-bound profiles preserve the exact compressed digest and flat
+9,237,304-byte frontier, with no sampled `ByteArray.size` helper. The final
+module grows from 384,533 to 387,598 bytes (+3,065, 0.8%) because Binaryen
+duplicates the small direct size sequence into callers, while the final
+function inventory decreases from 505 to 504 and remains zero-import.
 
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
