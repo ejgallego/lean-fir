@@ -37,6 +37,13 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `W7-W6-20260822-002`; the prior release refinement remains independently open
   in `W7-W6-20260822-001`. The accepted post-pass does not yet reduce the
   all-target lowering time and makes no runtime-speed claim.
+- Independent integration maintenance: the provider-neutral external-tooling
+  CI contract is accepted at `88ca108e`. `make tooling-check` now fails closed
+  outside the supported Node 22/24 LTS matrix, retains the exact pinned
+  Binaryen and live-profile gates, and remains separate from ordinary
+  `make check`. The older production-provenance handoff at `6fb8a25d` is
+  superseded rather than replayed: main already contains that report plus the
+  later one-pass origin-grouping repair and its seven-run production result.
 - Accepted baseline: `main` contains the complete
   `W7-ILLUMINATE-SELECTION-CATALOG-EXPORT` stack through tracked lane head
   `5081015a` and the independently isolated
