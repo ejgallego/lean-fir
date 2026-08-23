@@ -2398,6 +2398,96 @@ theorem wp_adaptedSumCarryFromFunction_of_limbWords
   exact wp_sumCarryLoopProgram_of_limbWords leftLength rightLength leftLowRun
     leftHighRun rightLowRun rightHighRun completed
 
+/-- Call-level contract for the actual installed `sumCarryFrom` helper.
+The function-entry convention, zero-initialized scratch locals, result arity,
+and preservation of the caller tail are all derived from successful
+adaptation.  Consumers only provide the extensional low/high accessor runs. -/
+theorem terminatesWith_sumCarryFromFunction_of_limbWords
+    {host : Type} {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {env : Wasm.HostEnv host} {targetFunction : Wasm.Function}
+    {functionIndex magnitudeLowIndex magnitudeHighIndex : Nat}
+    {store : Wasm.Store host}
+    {left leftFlavor right rightFlavor count initialCarry : UInt32}
+    {tail : List Wasm.Value} {leftWords rightWords : List LimbWords}
+    (adapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction =
+        .ok targetFunction)
+    (magnitudeLowFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeLowName) =
+        some magnitudeLowIndex)
+    (magnitudeHighFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeHighName) =
+        some magnitudeHighIndex)
+    (notImport : module.imports[functionIndex]? = none)
+    (found : module.funcs[functionIndex - module.imports.length]? =
+      some targetFunction)
+    (leftLength : leftWords.length = count.toNat)
+    (rightLength : rightWords.length = count.toNat)
+    (leftLowRun : ∀ (index : UInt32)
+      (beforeCount : index.toNat < count.toNat),
+      Wasm.TerminatesWith env module magnitudeLowIndex store
+        [.i32 index, .i32 leftFlavor, .i32 left]
+        (fun final values => final = store ∧
+          values = [.i32 (leftWords[index.toNat]'(by omega)).1]))
+    (leftHighRun : ∀ (index : UInt32)
+      (beforeCount : index.toNat < count.toNat),
+      Wasm.TerminatesWith env module magnitudeHighIndex store
+        [.i32 index, .i32 leftFlavor, .i32 left]
+        (fun final values => final = store ∧
+          values = [.i32 (leftWords[index.toNat]'(by omega)).2]))
+    (rightLowRun : ∀ (index : UInt32)
+      (beforeCount : index.toNat < count.toNat),
+      Wasm.TerminatesWith env module magnitudeLowIndex store
+        [.i32 index, .i32 rightFlavor, .i32 right]
+        (fun final values => final = store ∧
+          values = [.i32 (rightWords[index.toNat]'(by omega)).1]))
+    (rightHighRun : ∀ (index : UInt32)
+      (beforeCount : index.toNat < count.toNat),
+      Wasm.TerminatesWith env module magnitudeHighIndex store
+        [.i32 index, .i32 rightFlavor, .i32 right]
+        (fun final values => final = store ∧
+          values = [.i32 (rightWords[index.toNat]'(by omega)).2])) :
+    Wasm.TerminatesWith env module functionIndex store
+      ([.i32 initialCarry, .i32 count, .i32 0,
+        .i32 rightFlavor, .i32 right, .i32 leftFlavor, .i32 left] ++ tail)
+      (fun final values => final = store ∧
+        values =
+          .i32 (addLimbWords leftWords rightWords initialCarry).2 :: tail) := by
+  have signature :=
+    FirTalos.Correctness.function_preserves_signature adapted
+  rcases signature with ⟨paramsEq, localsEq, resultsEq⟩
+  have targetLocalsEq : targetFunction.locals =
+      [.i32, .i32, .i32, .i32, .i32, .i32, .i32, .i32, .i32] := by
+    rw [localsEq]
+    rfl
+  let arguments : List Wasm.Value :=
+    [.i32 initialCarry, .i32 count, .i32 0,
+      .i32 rightFlavor, .i32 right, .i32 leftFlavor, .i32 left] ++ tail
+  let entry := targetFunction.toLocals
+    ((arguments.take targetFunction.numParams).reverse)
+  apply FirTalos.Correctness.terminatesWith_of_wp_body_at notImport found
+  have returned :
+      FirTalos.Correctness.FunctionBodyPost targetFunction arguments
+        (fun final values => final = store ∧
+          values =
+            .i32 (addLimbWords leftWords rightWords initialCarry).2 :: tail)
+        (.Return store
+          [.i32 (addLimbWords leftWords rightWords initialCarry).2]) := by
+    simp [FirTalos.Correctness.FunctionBodyPost, arguments,
+      Wasm.Function.numParams, paramsEq, resultsEq,
+      Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction]
+  simpa [entry, arguments, Wasm.Function.toLocals, Wasm.Function.numParams,
+    paramsEq, targetLocalsEq, Wasm.ValueType.zero, sumCarryArithmeticLocals,
+    Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction] using
+      (wp_adaptedSumCarryFromFunction_of_limbWords
+        (module := module) (env := env) (store := store)
+        (left := left) (leftFlavor := leftFlavor)
+        (right := right) (rightFlavor := rightFlavor)
+        (count := count) (initialCarry := initialCarry)
+        (tail := []) adapted magnitudeLowFound magnitudeHighFound
+        leftLength rightLength leftLowRun leftHighRun rightLowRun rightHighRun
+        returned)
+
 /-- Every semantic Nat literal returns an object reference, independently of
 whether its canonical concrete representation is immediate, promoted, or an
 ordinary limb object. -/
@@ -5922,6 +6012,25 @@ structure NaturalMagnitudeInstallation
   low : NaturalMagnitudePartInstallation sourceModule module counts .low
   high : NaturalMagnitudePartInstallation sourceModule module counts .high
 
+/-- Static installation facts for the read-only carry prepass, tied to the
+same complete Natural magnitude ABI as the allocating sum writer. -/
+structure NaturalSumCarryInstallation
+    (sourceModule : Fir.Wasm.Module) (module : Wasm.Module)
+    (magnitude : NaturalMagnitudeInstallation sourceModule module) where
+  targetFunction : Wasm.Function
+  index : Nat
+  adapted : FirTalos.function sourceModule
+    Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction = .ok targetFunction
+  magnitudeLowFound : FirTalos.callIndex? sourceModule
+    (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeLowName) =
+      some magnitude.low.magnitudeIndex
+  magnitudeHighFound : FirTalos.callIndex? sourceModule
+    (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeHighName) =
+      some magnitude.high.magnitudeIndex
+  notImport : module.imports[index]? = none
+  installed : module.funcs[index - module.imports.length]? =
+    some targetFunction
+
 /-- Static installation facts for the sum writer, tied to one complete
 Natural magnitude ABI. -/
 structure NaturalSumWriterInstallation
@@ -6249,6 +6358,193 @@ theorem terminatesWith_naturalLimb_of_writtenPrefix_view
           adapted notImport found written related valid countLe allocation
           initialRelated indexInBounds (by
             simpa [ResidentBigNumeric.byteOffset] using reads.2))
+
+/-- A complete installed Natural magnitude lane reads one exact word from a
+checked operand in an unchanged concrete store.  Unlike the writer-oriented
+variant below, this theorem has no fresh-allocation or written-prefix frame:
+it is the stable read-only boundary used by the carry prepass.
+
+Indices inside the physical operand delegate to the installed Natural limb
+accessor; indices between the operand count and the common arithmetic count
+take the magnitude helper's zero-padding branch. -/
+theorem NaturalMagnitudePartInstallation.terminatesWith_paddedLimbViewWord_of_memoryRel
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {counts : NaturalMagnitudeCountInstallation sourceModule module}
+    {part : ResidentBigNumeric.NaturalLimbPart}
+    (installed : NaturalMagnitudePartInstallation sourceModule module
+      counts part)
+    {store : Wasm.Store host} {state : MemoryState}
+    {input : Word32} {inputValue commonCount : Nat}
+    {inputHeader : Header} {limbs : List UInt64} {index : UInt32}
+    {paddedWord : LimbWords} {tail : List Wasm.Value}
+    (related : NaturalObjectRel state input inputValue inputHeader)
+    (view : NaturalLimbView state input inputHeader inputValue limbs)
+    (valid : state.FrontierInvariant)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (operandFits : limbs.length ≤ commonCount)
+    (indexInCount : index.toNat < commonCount)
+    (paddedAt : (paddedLimbViewWords commonCount limbs)[index.toNat]? =
+      some paddedWord) :
+    Wasm.TerminatesWith env module installed.magnitudeIndex store
+      ([.i32 index, .i32 0, .i32 (UInt32.ofNat input.value)] ++ tail)
+      (fun final values => final = store ∧
+        values = .i32 (limbWordPart part paddedWord) :: tail) := by
+  have magnitudeCountRun :
+      Wasm.TerminatesWith env module counts.magnitudeCountIndex store
+        [.i32 0, .i32 (UInt32.ofNat input.value)]
+        (fun final values =>
+          final = store ∧ values = [.i32 inputHeader.aux1]) :=
+    ResidentBigNumeric.terminatesWith_magnitudeCountNatural_of_objectRel
+      (tail := []) counts.naturalCountAdapted counts.naturalCountNotImport
+      counts.naturalCountInstalled counts.magnitudeCountAdapted
+      counts.integerCountFound counts.naturalCountFound
+      counts.magnitudeCountNotImport counts.magnitudeCountInstalled
+      memoryRelated related
+  by_cases indexInLimbs : index.toNat < limbs.length
+  · let limb := limbs[index.toNat]'indexInLimbs
+    have limbAt : limbs[index.toNat]? = some limb := by
+      simp [limb, indexInLimbs]
+    have indexInHeader : index < inputHeader.aux1 := by
+      rw [UInt32.lt_iff_toNat_lt, ← view.length]
+      exact indexInLimbs
+    obtain ⟨inputHeap, _, _, _, _, _⟩ :=
+      MemoryState.PrefixExtension.readLiveHeader_facts state input inputHeader
+        related.headerRead
+    have reads := view.readWords limbAt
+    have payloadInBounds :
+        input.value + headerBytes + 8 * index.toNat +
+            (ResidentBigNumeric.byteOffset part).toNat + 4 ≤
+          state.memory.size := by
+      have limbsFit := related.limbsFit
+      have extent := related.extent
+      have cursorInBounds := valid.cursorInBounds
+      have indexInHeaderNat : index.toNat < inputHeader.aux1.toNat := by
+        rw [← view.length]
+        exact indexInLimbs
+      simp [target] at limbsFit
+      cases part <;> simp [ResidentBigNumeric.byteOffset] at reads ⊢ <;>
+        omega
+    have naturalLimbRun :
+        Wasm.TerminatesWith env module installed.naturalLimbIndex store
+          [.i32 index, .i32 (UInt32.ofNat input.value)]
+          (fun final values => final = store ∧
+            values = [.i32
+              (limbWordPart part (limbWordsOfUInt64 limb))]) := by
+      apply ResidentBigNumeric.terminatesWith_naturalLimb_of_concreteRead
+        installed.naturalLimbAdapted installed.naturalLimbNotImport
+        installed.naturalLimbInstalled memoryRelated inputHeap payloadInBounds
+      cases part with
+      | low => simpa [limbWordPart, ResidentBigNumeric.byteOffset] using reads.1
+      | high =>
+          simpa [limbWordPart, ResidentBigNumeric.byteOffset] using reads.2
+    have paddedLimbAt := paddedLimbViewWords_getElem?_of_lt
+      (count := commonCount) indexInLimbs limbAt
+    have paddedWordEq : paddedWord = limbWordsOfUInt64 limb := by
+      rw [paddedAt] at paddedLimbAt
+      exact Option.some.inj paddedLimbAt
+    have magnitudeRun :=
+      ResidentBigNumeric.terminatesWith_magnitudeLimbNatural_inBounds_of_adapted
+        (tail := tail) installed.magnitudeAdapted
+        installed.magnitudeCountFound installed.integerLimbFound
+        installed.naturalLimbFound installed.magnitudeNotImport
+        installed.magnitudeInstalled indexInHeader magnitudeCountRun
+        naturalLimbRun
+    simpa [paddedWordEq] using magnitudeRun
+  · have indexOutOfHeader : ¬index < inputHeader.aux1 := by
+      rw [UInt32.lt_iff_toNat_lt, ← view.length]
+      exact indexInLimbs
+    have paddedZeroAt := paddedLimbViewWords_getElem?_of_ge operandFits
+      (Nat.le_of_not_gt indexInLimbs) indexInCount
+    have paddedWordEq : paddedWord = (0, 0) := by
+      rw [paddedAt] at paddedZeroAt
+      exact Option.some.inj paddedZeroAt
+    have magnitudeRun :=
+      ResidentBigNumeric.terminatesWith_magnitudeLimbNatural_outOfBounds_of_adapted
+        (tail := tail) installed.magnitudeAdapted
+        installed.magnitudeCountFound installed.integerLimbFound
+        installed.naturalLimbFound installed.magnitudeNotImport
+        installed.magnitudeInstalled indexOutOfHeader magnitudeCountRun
+    simpa [paddedWordEq] using magnitudeRun
+
+/-- The installed carry prepass consumes two checked physical Natural views
+and returns exactly the final carry of the pure limb addition.  All four
+pointwise magnitude-accessor obligations are discharged through the shared
+read-only operand theorem, so the complete call preserves the store and its
+caller tail exactly. -/
+theorem NaturalSumCarryInstallation.terminatesWith_of_operandViews
+    {host : Type} {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {env : Wasm.HostEnv host}
+    {magnitude : NaturalMagnitudeInstallation sourceModule module}
+    (carry : NaturalSumCarryInstallation sourceModule module magnitude)
+    {store : Wasm.Store host} {state : MemoryState}
+    {left right : Word32} {leftValue rightValue : Nat}
+    {leftHeader rightHeader : Header} {leftLimbs rightLimbs : List UInt64}
+    {count initialCarry : UInt32} {tail : List Wasm.Value}
+    (leftRelated : NaturalObjectRel state left leftValue leftHeader)
+    (leftView : NaturalLimbView state left leftHeader leftValue leftLimbs)
+    (rightRelated : NaturalObjectRel state right rightValue rightHeader)
+    (rightView : NaturalLimbView state right rightHeader rightValue rightLimbs)
+    (valid : state.FrontierInvariant)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (leftFits : leftLimbs.length ≤ count.toNat)
+    (rightFits : rightLimbs.length ≤ count.toNat) :
+    Wasm.TerminatesWith env module carry.index store
+      ([.i32 initialCarry, .i32 count, .i32 0,
+        .i32 0, .i32 (UInt32.ofNat right.value),
+        .i32 0, .i32 (UInt32.ofNat left.value)] ++ tail)
+      (fun final values => final = store ∧
+        values = .i32
+          (addLimbWords
+            (paddedLimbViewWords count.toNat leftLimbs)
+            (paddedLimbViewWords count.toNat rightLimbs) initialCarry).2 ::
+              tail) := by
+  let leftWords := paddedLimbViewWords count.toNat leftLimbs
+  let rightWords := paddedLimbViewWords count.toNat rightLimbs
+  have leftLength : leftWords.length = count.toNat :=
+    paddedLimbViewWords_length leftFits
+  have rightLength : rightWords.length = count.toNat :=
+    paddedLimbViewWords_length rightFits
+  apply terminatesWith_sumCarryFromFunction_of_limbWords
+    (leftWords := leftWords) (rightWords := rightWords)
+    carry.adapted carry.magnitudeLowFound carry.magnitudeHighFound
+    carry.notImport carry.installed leftLength rightLength
+  · intro index beforeCount
+    let word := leftWords[index.toNat]'(by omega)
+    have wordAt : leftWords[index.toNat]? = some word := by
+      simp [word, beforeCount, leftLength]
+    have run :=
+      magnitude.low.terminatesWith_paddedLimbViewWord_of_memoryRel
+        (env := env) (tail := []) leftRelated leftView valid memoryRelated
+        leftFits beforeCount wordAt
+    simpa [limbWordPart, word] using run
+  · intro index beforeCount
+    let word := leftWords[index.toNat]'(by omega)
+    have wordAt : leftWords[index.toNat]? = some word := by
+      simp [word, beforeCount, leftLength]
+    have run :=
+      magnitude.high.terminatesWith_paddedLimbViewWord_of_memoryRel
+        (env := env) (tail := []) leftRelated leftView valid memoryRelated
+        leftFits beforeCount wordAt
+    simpa [limbWordPart, word] using run
+  · intro index beforeCount
+    let word := rightWords[index.toNat]'(by omega)
+    have wordAt : rightWords[index.toNat]? = some word := by
+      simp [word, beforeCount, rightLength]
+    have run :=
+      magnitude.low.terminatesWith_paddedLimbViewWord_of_memoryRel
+        (env := env) (tail := []) rightRelated rightView valid memoryRelated
+        rightFits beforeCount wordAt
+    simpa [limbWordPart, word] using run
+  · intro index beforeCount
+    let word := rightWords[index.toNat]'(by omega)
+    have wordAt : rightWords[index.toNat]? = some word := by
+      simp [word, beforeCount, rightLength]
+    have run :=
+      magnitude.high.terminatesWith_paddedLimbViewWord_of_memoryRel
+        (env := env) (tail := []) rightRelated rightView valid memoryRelated
+        rightFits beforeCount wordAt
+    simpa [limbWordPart, word] using run
 
 /-- A complete installed Natural magnitude lane reads exactly the requested
 word of a checked physical operand view padded to the writer's common count.
