@@ -320,6 +320,7 @@ theorem allocateConstructor_nonempty_liveHeapRel
     fieldKinds⟩
   refine {
     frontier := finalFrontier
+    frontierBase := Nat.le_trans related.frontierBase extension.cursor
     witnessWellFormed
     locationsBeforeNext := ?_
     releaseFuelBound := ?_

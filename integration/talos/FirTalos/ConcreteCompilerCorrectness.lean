@@ -6723,8 +6723,7 @@ theorem ConcreteRuntimeRel.unboxFacts_of_sourceCompatible
                               mapped descriptor unboxed
                           exact ⟨decoded, .heap (.mapped mapped) descriptor,
                             concreteRead, valueEq⟩
-                      | natural descriptor objectEq headerRead headerKind
-                          marker extent limbsFit decoded refCount persistent
+                      | natural descriptor objectEq _ refCount persistent
                           cellLive =>
                           rw [compatibleObjectEq] at objectEq
                           contradiction

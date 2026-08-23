@@ -1029,6 +1029,7 @@ theorem allocateClosure_liveHeapRel
   refine ⟨?_, ?_, ?_⟩
   · refine {
       frontier := finalFrontier
+      frontierBase := Nat.le_trans related.frontierBase heapExtension.cursor
       witnessWellFormed
       locationsBeforeNext := ?_
       releaseFuelBound := ?_

@@ -728,6 +728,202 @@ theorem IntegerObjectRel.headerOwned
       (naturalLimbs (integerMagnitude value)).length)
   omega
 
+/-- Exact physical view of the eight common-header words.  `Header.read`
+intentionally decodes flags to booleans, so it cannot by itself exclude
+unsupported high flag bits; instruction-level validators use this relation
+when they load the raw lanes. -/
+structure Header.ExactWords (memory : LinearMemory) (address : Word32)
+    (header : Header) : Prop where
+  wordAt : ∀ index word, header.words[index]? = some word →
+    memory.readUInt32 (address.value + 4 * index) = .ok word
+
+theorem Header.ExactWords.readKind
+    {memory : LinearMemory} {address : Word32} {header : Header}
+    (exact : Header.ExactWords memory address header) :
+    memory.readUInt32 (address.value + headerKindOffset) =
+      .ok header.kind.code := by
+  simpa [Header.words, headerKindOffset] using
+    exact.wordAt 0 header.kind.code (by simp [Header.words])
+
+theorem Header.ExactWords.readFlags
+    {memory : LinearMemory} {address : Word32} {header : Header}
+    (exact : Header.ExactWords memory address header) :
+    memory.readUInt32 (address.value + headerFlagsOffset) =
+      .ok header.flags := by
+  simpa [Header.words, headerFlagsOffset] using
+    exact.wordAt 1 header.flags (by simp [Header.words])
+
+theorem Header.ExactWords.readRefCount
+    {memory : LinearMemory} {address : Word32} {header : Header}
+    (exact : Header.ExactWords memory address header) :
+    memory.readUInt32 (address.value + headerRefCountOffset) =
+      .ok header.refCount := by
+  simpa [Header.words, headerRefCountOffset] using
+    exact.wordAt 2 header.refCount (by simp [Header.words])
+
+theorem Header.ExactWords.readAllocationBytes
+    {memory : LinearMemory} {address : Word32} {header : Header}
+    (exact : Header.ExactWords memory address header) :
+    memory.readUInt32 (address.value + headerAllocationBytesOffset) =
+      .ok header.allocationBytes := by
+  simpa [Header.words, headerAllocationBytesOffset] using
+    exact.wordAt 3 header.allocationBytes (by simp [Header.words])
+
+theorem Header.ExactWords.readAux0
+    {memory : LinearMemory} {address : Word32} {header : Header}
+    (exact : Header.ExactWords memory address header) :
+    memory.readUInt32 (address.value + headerAux0Offset) = .ok header.aux0 := by
+  simpa [Header.words, headerAux0Offset] using
+    exact.wordAt 4 header.aux0 (by simp [Header.words])
+
+theorem Header.ExactWords.readAux1
+    {memory : LinearMemory} {address : Word32} {header : Header}
+    (exact : Header.ExactWords memory address header) :
+    memory.readUInt32 (address.value + headerAux1Offset) = .ok header.aux1 := by
+  simpa [Header.words, headerAux1Offset] using
+    exact.wordAt 5 header.aux1 (by simp [Header.words])
+
+theorem Header.ExactWords.readAux2
+    {memory : LinearMemory} {address : Word32} {header : Header}
+    (exact : Header.ExactWords memory address header) :
+    memory.readUInt32 (address.value + headerAux2Offset) = .ok header.aux2 := by
+  simpa [Header.words, headerAux2Offset] using
+    exact.wordAt 6 header.aux2 (by simp [Header.words])
+
+theorem Header.ExactWords.readAux3
+    {memory : LinearMemory} {address : Word32} {header : Header}
+    (exact : Header.ExactWords memory address header) :
+    memory.readUInt32 (address.value + headerAux3Offset) = .ok header.aux3 := by
+  simpa [Header.words, headerAux3Offset] using
+    exact.wordAt 7 header.aux3 (by simp [Header.words])
+
+theorem Header.ExactWords.prefixExtension
+    {before after : MemoryState} {address : Word32} {header : Header}
+    (exact : Header.ExactWords before.memory address header)
+    (extension : before.PrefixExtension after)
+    (owned : address.value + headerBytes ≤ before.heapCursor) :
+    Header.ExactWords after.memory address header := by
+  refine ⟨?_⟩
+  intro index word wordAt
+  have indexLt := (List.getElem?_eq_some_iff.mp wordAt).1
+  have withinHeader : 4 * index + 4 ≤ headerBytes := by
+    simp [Header.words] at indexLt
+    simp [headerBytes]
+    omega
+  rw [extension.readUInt32 (address.value + 4 * index) (by omega)]
+  exact exact.wordAt index word wordAt
+
+/-- A successful full-header write exposes the exact eight raw words of the
+new header.  Ownership transitions use this constructor to re-establish
+validator admission without decoding lossy Boolean flag fields. -/
+theorem Header.ExactWords.ofWrite_eq_ok
+    {before after : LinearMemory} {address : Word32} {header : Header}
+    (inBounds : address.value + headerBytes ≤ before.size)
+    (written : header.write before address = .ok after) :
+    Header.ExactWords after address header := by
+  obtain ⟨actual, actualWrite, post⟩ :=
+    Header.write_spec before address header inBounds
+  rw [actualWrite] at written
+  have actualEq : actual = after := Except.ok.inj written
+  subst after
+  exact ⟨post.wordAt⟩
+
+/-- Fresh object allocation installs all eight raw common-header words
+exactly, not merely their lossy decoded Boolean projections. -/
+theorem Header.ExactWords.ofAllocateObject
+    {state result : MemoryState} {kind : ObjectKind} {payloadBytes : Nat}
+    {persistent : Bool} {aux0 aux1 aux2 aux3 : UInt32} {address : Word32}
+    (allocated : state.allocateObject kind payloadBytes persistent
+      aux0 aux1 aux2 aux3 = .ok (result, address)) :
+    Header.ExactWords result.memory address
+      (Header.forAllocation kind (align8 (headerBytes + payloadBytes))
+        persistent aux0 aux1 aux2 aux3) := by
+  obtain ⟨middle, rawAllocation, headerWrite, _, _⟩ :=
+    MemoryState.allocateObject_header state result kind payloadBytes persistent
+      aux0 aux1 aux2 aux3 address allocated
+  have allocationPost := MemoryState.allocate_spec state middle
+    (align8 (headerBytes + payloadBytes)) address rawAllocation
+  have headerInBounds : address.value + headerBytes ≤ middle.memory.size := by
+    have minimum := align8_ge (headerBytes + payloadBytes)
+    have endInBounds := allocationPost.endInBounds
+    rw [align8_align8] at endInBounds
+    omega
+  exact Header.ExactWords.ofWrite_eq_ok headerInBounds headerWrite
+
+/-- Canonical physical boundary required by the resident Natural validator.
+
+Unlike `Header.read`, this relation records every exact raw header word: the
+decoded booleans intentionally forget any unsupported high flag bits.  The
+payload is related to the canonical `naturalLimbs` list rather than merely to
+its mathematical value, excluding leading-zero limbs.  Ownership is stated
+independently of allocation so retain, release, and persistence proofs can
+preserve this same boundary. -/
+structure NaturalValidatorAdmission (state : MemoryState) (address : Word32)
+    (value : Nat) (header : Header) : Prop where
+  headerRead : state.readLiveHeader address = .ok header
+  rawHeader : Header.ExactWords state.memory address header
+  addressBase : heapBase ≤ address.value
+  headerKind : header.kind = .natural
+  marker : header.aux0 = bigNaturalMarker
+  limbCount : header.aux1.toNat = (naturalLimbs value).length
+  reserved2 : header.aux2 = 0
+  reserved3 : header.aux3 = 0
+  allocationBytes : header.allocationBytes.toNat =
+    headerBytes + target.semanticSlotBytes * (naturalLimbs value).length
+  limbAt : ∀ offset limb, (naturalLimbs value)[offset]? = some limb →
+    state.memory.readUInt64
+      (address.value + headerBytes + target.semanticSlotBytes * offset) = .ok limb
+  heapBacked : maxTaggedPayload < value
+  ownership : if header.persistent then header.refCount = 0
+    else header.refCount ≠ 0
+  extent : address.value + header.allocationBytes.toNat ≤ state.heapCursor
+
+theorem NaturalValidatorAdmission.headerOwned
+    {state : MemoryState} {address : Word32} {value : Nat} {header : Header}
+    (related : NaturalValidatorAdmission state address value header) :
+    address.value + headerBytes ≤ state.heapCursor := by
+  have extent := related.extent
+  rw [related.allocationBytes] at extent
+  omega
+
+/-- Canonical Natural admission is stable under fresh allocation: every byte
+it depends on lies below the old heap frontier. -/
+theorem NaturalValidatorAdmission.prefixExtension
+    {before after : MemoryState} {address : Word32} {value : Nat}
+    {header : Header}
+    (related : NaturalValidatorAdmission before address value header)
+    (extension : before.PrefixExtension after) :
+    NaturalValidatorAdmission after address value header := by
+  have headerAfter := extension.readLiveHeader_eq_ok address header
+    related.headerOwned related.headerRead
+  refine {
+    headerRead := headerAfter
+    rawHeader := related.rawHeader.prefixExtension extension related.headerOwned
+    addressBase := related.addressBase
+    headerKind := related.headerKind
+    marker := related.marker
+    limbCount := related.limbCount
+    reserved2 := related.reserved2
+    reserved3 := related.reserved3
+    allocationBytes := related.allocationBytes
+    limbAt := ?_
+    heapBacked := related.heapBacked
+    ownership := related.ownership
+    extent := Nat.le_trans related.extent extension.cursor }
+  intro offset limb atOffset
+  have offsetLt := (List.getElem?_eq_some_iff.mp atOffset).1
+  have limbOwned : address.value + headerBytes +
+      target.semanticSlotBytes * offset + target.semanticSlotBytes ≤
+        before.heapCursor := by
+    have extent := related.extent
+    rw [related.allocationBytes] at extent
+    simp [target] at extent ⊢
+    omega
+  rw [extension.readUInt64
+    (address.value + headerBytes + target.semanticSlotBytes * offset) (by
+      simpa [target] using limbOwned)]
+  exact related.limbAt offset limb atOffset
+
 /-- Relation for live semantic cells implemented by the current W6 runtime.
 Dead cells and future heap objects receive cases in their own implementation
 slices rather than being hidden behind a permissive catch-all. -/
@@ -756,14 +952,7 @@ inductive LiveCellRel (state : MemoryState) (witness : RefinementWitness)
   | natural {value header cell}
       (descriptor : witness.descriptors.lookup? address = some (.natural value))
       (objectEq : cell.object = .natural value)
-      (headerRead : state.readLiveHeader address = .ok header)
-      (headerKind : header.kind = .natural)
-      (marker : header.aux0 = bigNaturalMarker)
-      (extent : address.value + header.allocationBytes.toNat ≤ state.heapCursor)
-      (limbsFit : headerBytes +
-        target.semanticSlotBytes * header.aux1.toNat ≤
-          header.allocationBytes.toNat)
-      (decoded : readNatural state address = .ok value)
+      (related : NaturalValidatorAdmission state address value header)
       (refCount : header.refCount.toNat = cell.rc)
       (persistent : header.persistent = cell.persistent)
       (live : cell.live = true) :
@@ -968,29 +1157,9 @@ theorem LiveCellRel.prefixExtension
   | boxed descriptor objectEq objectRelated refCount persistent live =>
       exact .boxed descriptor objectEq (objectRelated.prefixExtension extension)
         refCount persistent live
-  | natural descriptor objectEq headerRead headerKind marker extent limbsFit
-        decoded refCount persistent live =>
-      obtain ⟨heap, _, _, minimum, _, _⟩ :=
-        MemoryState.PrefixExtension.readLiveHeader_facts before address _ headerRead
-      have headerOwned : address.value + headerBytes ≤ before.heapCursor := by
-        omega
-      have headerAfter := extension.readLiveHeader_eq_ok address _ headerOwned headerRead
-      have decoderEq : readNatural after address = readNatural before address := by
-        unfold readNatural
-        simp [heap]
-        rw [headerAfter, headerRead]
-        simp only [Bind.bind, Except.bind]
-        simp [liftMemory, headerKind, marker]
-        rw [extension.readNaturalLimbs address.value 0 _ (by
-          simp [target] at limbsFit extent ⊢
-          omega)]
-      apply LiveCellRel.natural descriptor objectEq headerAfter headerKind marker
-        (Nat.le_trans extent extension.cursor) limbsFit
-      · rw [decoderEq]
-        exact decoded
-      · exact refCount
-      · exact persistent
-      · exact live
+  | natural descriptor objectEq objectRelated refCount persistent live =>
+      exact .natural descriptor objectEq
+        (objectRelated.prefixExtension extension) refCount persistent live
   | integer descriptor objectEq objectRelated refCount persistent live =>
       exact .integer descriptor objectEq
         (objectRelated.prefixExtension extension) refCount persistent live
@@ -1019,10 +1188,9 @@ theorem LiveCellRel.witnessExtension
   | boxed descriptor objectEq objectRelated refCount persistent live =>
       exact .boxed (extension.descriptors _ _ descriptor) objectEq objectRelated
         refCount persistent live
-  | natural descriptor objectEq headerRead headerKind marker extent limbsFit
-        decoded refCount persistent live =>
-      exact .natural (extension.descriptors _ _ descriptor) objectEq headerRead
-        headerKind marker extent limbsFit decoded refCount persistent live
+  | natural descriptor objectEq objectRelated refCount persistent live =>
+      exact .natural (extension.descriptors _ _ descriptor) objectEq
+        objectRelated refCount persistent live
   | integer descriptor objectEq objectRelated refCount persistent live =>
       exact .integer (extension.descriptors _ _ descriptor) objectEq objectRelated
         refCount persistent live
@@ -1034,6 +1202,43 @@ theorem LiveCellRel.witnessExtension
         (objectRelated.witnessExtension extension) refCount persistent live
   | closure closureRelated =>
       exact .closure (closureRelated.witnessExtension extension)
+
+/-- A live cell known semantically to contain a Natural exposes the canonical
+resident-validator boundary carried by the Natural case of the simulation
+relation.  This packages all impossible object-family cases once. -/
+theorem LiveCellRel.naturalValidatorAdmission_of_objectEq
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell} {value : Nat}
+    (related : LiveCellRel state witness address cell)
+    (objectEq : cell.object = .natural value) :
+    ∃ header, NaturalValidatorAdmission state address value header := by
+  cases related with
+  | constructor descriptor storedObjectEq objectRelated headerRead headerKind
+        refCount persistent live =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | boxed descriptor storedObjectEq objectRelated refCount persistent live =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | @natural storedValue header _ descriptor storedObjectEq objectRelated refCount
+        persistent live =>
+      rw [objectEq] at storedObjectEq
+      injection storedObjectEq with valueEq
+      subst storedValue
+      exact ⟨header, objectRelated⟩
+  | integer descriptor storedObjectEq objectRelated refCount persistent live =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | string descriptor storedObjectEq objectRelated refCount persistent live =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | array descriptor storedObjectEq objectRelated refCount persistent live =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, storedObjectEq⟩ := closureRelated.objectEq
+      rw [objectEq] at storedObjectEq
+      contradiction
 
 /-- Released headers remain canonical through fresh allocation beyond their
 owned prefix. -/
@@ -1061,10 +1266,7 @@ theorem LiveCellRel.headerOwned
   cases related with
   | constructor _ _ objectRelated _ _ _ _ _ => exact objectRelated.headerOwned
   | boxed _ _ objectRelated _ _ _ => exact objectRelated.headerOwned
-  | natural _ _ headerRead _ _ extent _ _ _ _ _ =>
-      have minimum :=
-        (MemoryState.PrefixExtension.readLiveHeader_facts state address _ headerRead).2.2.2.1
-      omega
+  | natural _ _ objectRelated _ _ _ => exact objectRelated.headerOwned
   | @integer value _ _ _ _ objectRelated _ _ _ =>
       have extent := objectRelated.extent
       rw [objectRelated.allocationBytes] at extent
@@ -1106,7 +1308,7 @@ theorem LiveCellRel.descriptor
   cases related with
   | constructor descriptor _ _ _ _ _ _ _ => exact ⟨_, descriptor⟩
   | boxed descriptor _ _ _ _ _ => exact ⟨_, descriptor⟩
-  | natural descriptor _ _ _ _ _ _ _ _ _ _ => exact ⟨_, descriptor⟩
+  | natural descriptor _ _ _ _ _ => exact ⟨_, descriptor⟩
   | integer descriptor _ _ _ _ _ => exact ⟨_, descriptor⟩
   | string descriptor _ _ _ _ _ => exact ⟨_, descriptor⟩
   | array descriptor _ _ _ _ _ => exact ⟨_, descriptor⟩
@@ -1226,6 +1428,11 @@ join it in their W6 slices. -/
 structure LiveHeapRel (state : MemoryState) (witness : RefinementWitness)
     (semantic : RuntimeState) : Prop where
   frontier : state.FrontierInvariant
+  /-- Every compiler-visible heap allocation starts in the resident heap
+  region.  Validator proofs need this lower bound in addition to alignment and
+  memory bounds; keeping it in the simulation relation makes it stable across
+  all concrete transitions. -/
+  frontierBase : heapBase ≤ state.heapCursor
   witnessWellFormed : witness.WellFormed
   locationsBeforeNext : ∀ location cell,
     findCell? semantic.heap location = some cell → location < semantic.nextLocation
@@ -1290,7 +1497,7 @@ theorem LiveHeapRel.deadCellRel
           cases liveRelated with
           | constructor _ _ _ _ _ _ _ live => simp_all
           | boxed _ _ _ _ _ live => simp_all
-          | natural _ _ _ _ _ _ _ _ _ _ live => simp_all
+          | natural _ _ _ _ _ live => simp_all
           | integer _ _ _ _ _ live => simp_all
           | string _ _ _ _ _ live => simp_all
           | array _ _ _ _ _ live => simp_all
@@ -1298,6 +1505,29 @@ theorem LiveHeapRel.deadCellRel
               cases closureRelated with
               | closure _ _ _ _ _ _ _ _ _ live => simp_all
       | dead _ _ _ deadRelated => exact deadRelated
+
+/-- The ordinary W6 heap simulation is itself sufficient admission for the
+resident Natural validator.  A mapped, live semantic Natural requires no
+separate compiler certificate: its exact header words, canonical limbs,
+ownership metadata, and heap extent are invariants of `LiveHeapRel`. -/
+theorem LiveHeapRel.naturalValidatorAdmission
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {address : Word32} {location : Location} {cell : HeapCell} {value : Nat}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : HeapReferenceRel witness address location)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .natural value) :
+    ∃ header, NaturalValidatorAdmission state address value header := by
+  cases mapped with
+  | mapped mappedLookup =>
+      obtain ⟨mappedCell, mappedFound, cellRelated⟩ :=
+        related.concreteToSemantic location address mappedLookup
+      rw [found] at mappedFound
+      have cellEq := Option.some.inj mappedFound
+      subst mappedCell
+      exact (cellRelated.live_of_eq_true live).naturalValidatorAdmission_of_objectEq
+        objectEq
 
 /-- Initial proof witness for one generated module. Runtime identity maps are
 empty, while the immutable closure dispatch and capture-descriptor tables are
@@ -1339,6 +1569,7 @@ theorem LiveHeapRel.initial (dispatch : ClosureDispatchTable)
       ({} : RuntimeState) := by
   refine {
     frontier := MemoryState.initial_frontierInvariant
+    frontierBase := by simp [MemoryState.initial]
     witnessWellFormed := initialWitness_wellFormed dispatch descriptors
     locationsBeforeNext := ?_
     releaseFuelBound := ?_
@@ -1390,6 +1621,7 @@ theorem LiveHeapRel.prefixExtension
     LiveHeapRel after witness semantic := by
   refine {
     frontier
+    frontierBase := Nat.le_trans related.frontierBase extension.cursor
     witnessWellFormed := related.witnessWellFormed
     locationsBeforeNext := related.locationsBeforeNext
     releaseFuelBound := Nat.le_trans related.releaseFuelBound extension.cursor

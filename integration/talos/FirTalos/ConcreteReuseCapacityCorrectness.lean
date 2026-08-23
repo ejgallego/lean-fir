@@ -4125,8 +4125,8 @@ theorem reuseStep_of_capacityEvidence
                 persistent cellLive =>
                 rw [objectEq] at relatedObjectEq
                 contradiction
-            | natural descriptor relatedObjectEq headerRead headerKind marker
-                extent limbsFit naturalRead refCount persistent cellLive =>
+            | natural descriptor relatedObjectEq objectRelated refCount persistent
+                cellLive =>
                 rw [objectEq] at relatedObjectEq
                 contradiction
             | integer descriptor relatedObjectEq objectRelated refCount

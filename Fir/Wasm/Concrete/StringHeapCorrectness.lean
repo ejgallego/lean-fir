@@ -106,6 +106,7 @@ theorem allocateString_liveHeapRel
   refine ⟨?_, ValueRel.new_string_result witness runtime.nextLocation address value⟩
   refine {
     frontier := finalFrontier
+    frontierBase := Nat.le_trans related.frontierBase extension.cursor
     witnessWellFormed
     locationsBeforeNext := ?_
     releaseFuelBound := ?_

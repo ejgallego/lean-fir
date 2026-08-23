@@ -497,9 +497,8 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_fault_refines
                           liveEq leafCell ordinary one fuel check
                     rw [semanticSuccess] at semanticOperation
                     contradiction
-                | @natural value header _ descriptor objectEq headerRead
-                      headerKind marker extent limbsFit decoded refCount
-                      persistent cellLive =>
+                | @natural value header _ descriptor objectEq objectRelated
+                      refCount persistent cellLive =>
                     let leafCell : NonrecursiveCell cell :=
                       .inl (.inl (.inr ⟨value, objectEq⟩))
                     obtain ⟨_, _, _, semanticSuccess, _⟩ :=
@@ -1522,8 +1521,7 @@ theorem LiveHeapRel.resetObject_unique_fault_refines
   | boxed descriptor objectEq objectRelated refCount persistent cellLive =>
       rw [constructor] at objectEq
       contradiction
-  | natural descriptor objectEq headerRead headerKind marker extent
-      limbsFit decoded refCount persistent cellLive =>
+  | natural descriptor objectEq objectRelated refCount persistent cellLive =>
       rw [constructor] at objectEq
       contradiction
   | integer descriptor objectEq objectRelated refCount persistent cellLive =>
@@ -1667,8 +1665,7 @@ theorem LiveHeapRel.resetObject_unique_ne_releaseFuelExhausted
   | boxed descriptor objectEq objectRelated refCount persistent cellLive =>
       rw [constructor] at objectEq
       contradiction
-  | natural descriptor objectEq headerRead headerKind marker extent
-      limbsFit decoded refCount persistent cellLive =>
+  | natural descriptor objectEq objectRelated refCount persistent cellLive =>
       rw [constructor] at objectEq
       contradiction
   | integer descriptor objectEq objectRelated refCount persistent cellLive =>

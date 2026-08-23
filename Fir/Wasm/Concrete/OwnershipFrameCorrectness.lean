@@ -804,6 +804,60 @@ theorem MemoryState.AllocationFrame.readNatural_eq
   simp only [liftMemory, Bind.bind, Except.bind]
   rw [frame.readNaturalLimbs 0 header.aux1.toNat (by simpa using limbsFit)]
 
+/-- Canonical Natural validator admission observes exactly one complete
+allocation.  Consequently it transports across any frame of that allocation,
+including the exact raw header words and the canonical limb sequence. -/
+theorem NaturalValidatorAdmission.allocationFrame
+    {before after : MemoryState} {address : Word32} {value : Nat}
+    {header : Header}
+    (related : NaturalValidatorAdmission before address value header)
+    (frame : before.AllocationFrame after address
+      header.allocationBytes.toNat) :
+    NaturalValidatorAdmission after address value header := by
+  have minimum : headerBytes ≤ header.allocationBytes.toNat := by
+    rw [related.allocationBytes]
+    omega
+  refine {
+    headerRead := by
+      rw [frame.readLiveHeader minimum]
+      exact related.headerRead
+    rawHeader := ⟨by
+      intro index word wordAt
+      have indexLt := (List.getElem?_eq_some_iff.mp wordAt).1
+      have owned : 4 * index + 4 ≤ header.allocationBytes.toNat := by
+        have headerOwned : 4 * index + 4 ≤ headerBytes := by
+          simp [Header.words] at indexLt
+          simp [headerBytes]
+          omega
+        exact Nat.le_trans headerOwned minimum
+      rw [frame.readUInt32 (offset := 4 * index) owned]
+      exact related.rawHeader.wordAt index word wordAt⟩
+    addressBase := related.addressBase
+    headerKind := related.headerKind
+    marker := related.marker
+    limbCount := related.limbCount
+    reserved2 := related.reserved2
+    reserved3 := related.reserved3
+    allocationBytes := related.allocationBytes
+    limbAt := by
+      intro offset limb limbAt
+      have offsetLt := (List.getElem?_eq_some_iff.mp limbAt).1
+      have owned : headerBytes + target.semanticSlotBytes * offset + 8 ≤
+          header.allocationBytes.toNat := by
+        rw [related.allocationBytes]
+        simp [target] at offsetLt ⊢
+        omega
+      rw [show address.value + headerBytes +
+          target.semanticSlotBytes * offset =
+        address.value + (headerBytes +
+          target.semanticSlotBytes * offset) by omega]
+      rw [frame.readUInt64
+        (offset := headerBytes + target.semanticSlotBytes * offset) owned]
+      simpa [Nat.add_assoc] using related.limbAt offset limb limbAt
+    heapBacked := related.heapBacked
+    ownership := related.ownership
+    extent := by rw [frame.cursor]; exact related.extent }
+
 theorem MemoryState.AllocationFrame.readInteger_eq
     {before after : MemoryState} {address : Word32} {header : Header}
     (frame : before.AllocationFrame after address header.allocationBytes.toNat)
@@ -1458,20 +1512,15 @@ theorem LiveCellRel.leaf_allocationFrame
       subst regionHeader
       exact .boxed descriptor objectEq (objectRelated.allocationFrame frame)
         refCount persistent live
-  | @natural value actualHeader _ descriptor objectEq liveHeaderRead headerKind
-        marker extent limbsFit decoded refCount persistent live =>
+  | @natural value actualHeader _ descriptor objectEq objectRelated refCount
+        persistent live =>
       obtain ⟨_, rawRead, _, minimum, _, _⟩ :=
         MemoryState.PrefixExtension.readLiveHeader_facts before address actualHeader
-          liveHeaderRead
+          objectRelated.headerRead
       rw [headerRead] at rawRead
       have headerEq := Except.ok.inj rawRead
       subst regionHeader
-      have headerAfter : after.readLiveHeader address = .ok actualHeader := by
-        rw [frame.readLiveHeader minimum]
-        exact liveHeaderRead
-      exact .natural descriptor objectEq headerAfter headerKind marker
-        (by rw [frame.cursor]; exact extent) limbsFit
-        (by rw [frame.readNatural_eq liveHeaderRead limbsFit]; exact decoded)
+      exact .natural descriptor objectEq (objectRelated.allocationFrame frame)
         refCount persistent live
   | @integer value actualHeader _ descriptor objectEq objectRelated refCount
         persistent live =>
@@ -1585,20 +1634,15 @@ theorem LiveCellRel.allocationFrame
       subst regionHeader
       exact .boxed descriptor objectEq (objectRelated.allocationFrame frame)
         refCount persistent live
-  | @natural value actualHeader _ descriptor objectEq liveHeaderRead headerKind
-        marker extent limbsFit decoded refCount persistent live =>
+  | @natural value actualHeader _ descriptor objectEq objectRelated refCount
+        persistent live =>
       obtain ⟨_, rawRead, _, minimum, _, _⟩ :=
         MemoryState.PrefixExtension.readLiveHeader_facts before address actualHeader
-          liveHeaderRead
+          objectRelated.headerRead
       rw [headerRead] at rawRead
       have headerEq := Except.ok.inj rawRead
       subst regionHeader
-      have headerAfter : after.readLiveHeader address = .ok actualHeader := by
-        rw [frame.readLiveHeader minimum]
-        exact liveHeaderRead
-      exact .natural descriptor objectEq headerAfter headerKind marker
-        (by rw [frame.cursor]; exact extent) limbsFit
-        (by rw [frame.readNatural_eq liveHeaderRead limbsFit]; exact decoded)
+      exact .natural descriptor objectEq (objectRelated.allocationFrame frame)
         refCount persistent live
   | @integer value actualHeader _ descriptor objectEq objectRelated refCount
         persistent live =>
@@ -1800,13 +1844,14 @@ theorem LiveCellRel.ownershipHeader
       exact ⟨_, objectRelated.headerRead, rawRead, by
         simp [Header.isPromotedTag, objectRelated.headerKind, different],
         persistent, refCount⟩
-  | natural descriptor objectEq headerRead headerKind marker extent limbsFit
-        decoded refCount persistent live =>
+  | natural descriptor objectEq objectRelated refCount persistent live =>
       obtain ⟨_, rawRead, _, _, _, _⟩ :=
-        MemoryState.PrefixExtension.readLiveHeader_facts state address _ headerRead
-      exact ⟨_, headerRead, rawRead, by
-        simp [Header.isPromotedTag, headerKind, marker, bigNaturalMarker,
-          promotedTagMarker], persistent, refCount⟩
+        MemoryState.PrefixExtension.readLiveHeader_facts state address _
+          objectRelated.headerRead
+      exact ⟨_, objectRelated.headerRead, rawRead, by
+        simp [Header.isPromotedTag, objectRelated.headerKind,
+          objectRelated.marker, bigNaturalMarker, promotedTagMarker],
+        persistent, refCount⟩
   | integer descriptor objectEq objectRelated refCount persistent live =>
       obtain ⟨_, rawRead, _, _, _, _⟩ :=
         MemoryState.PrefixExtension.readLiveHeader_facts state address _
@@ -3076,8 +3121,8 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines_with_capacity
               have runtimeEq := Except.ok.inj (semanticBranch.symm.trans semanticOperation)
               subst branchRuntime
               exact ⟨result, concreteBranch, finalRelated, capacity⟩
-          | @natural value header _ descriptor objectEq headerRead headerKind
-                marker extent limbsFit decoded refCount persistent cellLive =>
+          | @natural value header _ descriptor objectEq objectRelated refCount
+                persistent cellLive =>
               let leafCell : NonrecursiveCell cell :=
                 .inl (.inl (.inr ⟨value, objectEq⟩))
               obtain ⟨result, branchRuntime, concreteBranch, semanticBranch,

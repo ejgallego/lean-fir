@@ -1073,15 +1073,13 @@ theorem LiveCellRel.rebindConstructor_other
             address reboundInfo reboundFieldKinds different]
           exact descriptor)
         objectEq objectRelated refCount persistent live
-  | natural descriptor objectEq headerRead headerKind marker extent limbsFit
-      decoded refCount persistent live =>
+  | natural descriptor objectEq objectRelated refCount persistent live =>
       exact .natural
         (by
           rw [witness.lookup_rebindConstructor_descriptor_other reboundAddress
             address reboundInfo reboundFieldKinds different]
           exact descriptor)
-        objectEq headerRead headerKind marker extent limbsFit decoded refCount
-          persistent live
+        objectEq objectRelated refCount persistent live
   | integer descriptor objectEq objectRelated refCount persistent live =>
       exact .integer
         (by
@@ -1232,6 +1230,7 @@ theorem LiveHeapRel.setCell_rebindConstructor_of_frames
   refine ⟨nextRuntime, updated, ?_⟩
   refine {
     frontier
+    frontierBase := by rw [cursor]; exact related.frontierBase
     witnessWellFormed :=
       related.witnessWellFormed.rebindConstructor address reboundInfo
         reboundFieldKinds
@@ -2055,10 +2054,11 @@ theorem LiveHeapRel.resetObject_expectedConstructor_refines
           (by simp [objectRelated.headerKind])
           (by simp [Header.isPromotedTag, objectRelated.headerKind, different])
           refCount persistent
-    | natural descriptor objectEq headerRead headerKind marker extent limbsFit
-        decoded refCount persistent cellLive =>
-        exact failOfHeader _ headerRead (by simp [headerKind])
-          (by simp [Header.isPromotedTag, headerKind, marker,
+    | natural descriptor objectEq objectRelated refCount persistent cellLive =>
+        exact failOfHeader _ objectRelated.headerRead
+          (by simp [objectRelated.headerKind])
+          (by simp [Header.isPromotedTag, objectRelated.headerKind,
+            objectRelated.marker,
             bigNaturalMarker, promotedTagMarker])
           refCount persistent
     | integer descriptor objectEq objectRelated refCount persistent cellLive =>
@@ -2188,8 +2188,7 @@ theorem LiveHeapRel.resetObject_outOfBounds_refines
     | boxed descriptor objectEq objectRelated refCount persistent cellLive =>
         rw [constructor] at objectEq
         contradiction
-    | natural descriptor objectEq headerRead headerKind marker extent limbsFit
-        decoded refCount persistent cellLive =>
+    | natural descriptor objectEq objectRelated refCount persistent cellLive =>
         rw [constructor] at objectEq
         contradiction
     | integer descriptor objectEq objectRelated refCount persistent cellLive =>
@@ -2548,8 +2547,7 @@ theorem LiveHeapRel.resetObject_refines_unique
   | boxed descriptor objectEq objectRelated refCount persistent cellLive =>
       rw [constructor] at objectEq
       contradiction
-  | natural descriptor objectEq headerRead headerKind marker extent
-      limbsFit decoded refCount persistent cellLive =>
+  | natural descriptor objectEq objectRelated refCount persistent cellLive =>
       rw [constructor] at objectEq
       contradiction
   | integer descriptor objectEq objectRelated refCount persistent cellLive =>
@@ -2702,9 +2700,9 @@ theorem LiveHeapRel.reuseObject_expectedConstructor_refines
     | boxed descriptor objectEq objectRelated refCount persistent cellLive =>
         exact failOfHeader _ objectRelated.headerRead
           (by simp [objectRelated.headerKind])
-    | natural descriptor objectEq headerRead headerKind marker extent limbsFit
-        decoded refCount persistent cellLive =>
-        exact failOfHeader _ headerRead (by simp [headerKind])
+    | natural descriptor objectEq objectRelated refCount persistent cellLive =>
+        exact failOfHeader _ objectRelated.headerRead
+          (by simp [objectRelated.headerKind])
     | integer descriptor objectEq objectRelated refCount persistent cellLive =>
         exact failOfHeader _ objectRelated.headerRead
           (by simp [objectRelated.headerKind])

@@ -513,6 +513,7 @@ theorem LiveHeapRel.auxiliary
     LiveHeapRel state witness after := by
   refine {
     frontier := related.frontier
+    frontierBase := related.frontierBase
     witnessWellFormed := related.witnessWellFormed
     locationsBeforeNext := ?_
     releaseFuelBound := ?_

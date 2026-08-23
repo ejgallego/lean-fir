@@ -34,8 +34,8 @@ theorem LiveHeapRel.closureMatches_refines
   | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
-  | natural descriptor storedObjectEq headerRead headerKind marker extent
-      limbsFit decoded refCount persistent cellLive =>
+  | natural descriptor storedObjectEq objectRelated refCount persistent
+      cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
   | integer descriptor storedObjectEq objectRelated refCount persistent cellLive =>
@@ -94,8 +94,8 @@ theorem LiveHeapRel.projectClosureCapture_refines
   | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
-  | natural descriptor storedObjectEq headerRead headerKind marker extent
-      limbsFit decoded refCount persistent cellLive =>
+  | natural descriptor storedObjectEq objectRelated refCount persistent
+      cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
   | integer descriptor storedObjectEq objectRelated refCount persistent cellLive =>

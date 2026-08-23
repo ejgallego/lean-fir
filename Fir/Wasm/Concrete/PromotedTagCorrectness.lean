@@ -303,6 +303,7 @@ theorem allocatePromotedTag_liveHeapRel
   refine ⟨?_, ValueRel.new_promoted_tobject witness payload address⟩
   refine {
     frontier := finalFrontier
+    frontierBase := Nat.le_trans related.frontierBase extension.cursor
     witnessWellFormed
     locationsBeforeNext := related.locationsBeforeNext
     releaseFuelBound := Nat.le_trans related.releaseFuelBound extension.cursor

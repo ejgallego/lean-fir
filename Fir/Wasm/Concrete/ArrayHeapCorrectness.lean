@@ -147,6 +147,7 @@ theorem allocateResidentArray_liveHeapRel
     alloc_array_eq runtime elements capacity⟩
   refine {
     frontier := finalFrontier
+    frontierBase := Nat.le_trans related.frontierBase memoryExtension.cursor
     witnessWellFormed
     locationsBeforeNext := ?_
     releaseFuelBound := ?_

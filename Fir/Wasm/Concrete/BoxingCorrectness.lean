@@ -464,6 +464,7 @@ theorem allocateBoxedScalar_liveHeapRel
   refine ⟨?_, ValueRel.new_boxed_result witness runtime.nextLocation address scalar.kind⟩
   refine {
     frontier := finalFrontier
+    frontierBase := Nat.le_trans related.frontierBase extension.cursor
     witnessWellFormed
     locationsBeforeNext := ?_
     releaseFuelBound := ?_
@@ -604,8 +605,8 @@ theorem LiveHeapRel.readBoxedScalar_heap_refines
       have resultRel := BoxedScalar.valueRel witness actualScalar
       rw [objectRelated.scalarKind] at resultRel
       simpa [returned] using resultRel
-  case natural storedDescriptor objectEq headerRead headerKind marker extent
-      limbsFit decoded refCount persistent cellLive =>
+  case natural storedDescriptor objectEq objectRelated refCount persistent
+      cellLive =>
       rw [storedDescriptor] at descriptor
       have impossible := Option.some.inj descriptor
       cases impossible
@@ -844,10 +845,12 @@ theorem LiveHeapRel.readBoxedScalar_expectedScalar_refines
                   simp only [Bind.bind, Except.bind] at unboxFailed
                   rw [objectEq] at unboxFailed
                   contradiction
-              | natural descriptor objectEq headerRead headerKind marker extent
-                  limbsFit decoded refCount persistent cellLive =>
-                  exact failOfHeader _ headerRead (by simp [headerKind])
-                    (by simp [Header.isPromotedTag, headerKind, marker,
+              | natural descriptor objectEq objectRelated refCount persistent
+                  cellLive =>
+                  exact failOfHeader _ objectRelated.headerRead
+                    (by simp [objectRelated.headerKind])
+                    (by simp [Header.isPromotedTag, objectRelated.headerKind,
+                      objectRelated.marker,
                       bigNaturalMarker, promotedTagMarker])
               | integer descriptor objectEq objectRelated refCount persistent
                   cellLive =>

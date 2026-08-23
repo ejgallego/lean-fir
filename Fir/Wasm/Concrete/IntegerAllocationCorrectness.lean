@@ -497,6 +497,7 @@ theorem allocateInteger_liveHeapRel
     ValueRel.new_integer_result witness runtime.nextLocation address value⟩
   refine {
     frontier := finalFrontier
+    frontierBase := Nat.le_trans related.frontierBase extension.cursor
     witnessWellFormed
     locationsBeforeNext := ?_
     releaseFuelBound := ?_

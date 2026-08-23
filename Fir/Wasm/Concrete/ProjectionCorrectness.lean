@@ -224,8 +224,7 @@ theorem LiveHeapRel.scalarField_of_projected
       simp only [Bind.bind, Except.bind] at projected
       rw [objectEq] at projected
       simp at projected
-  | natural descriptor objectEq headerRead headerKind marker extent
-      limbsFit decoded refCount persistent cellLive =>
+  | natural descriptor objectEq objectRelated refCount persistent cellLive =>
       simp [getScalarField, getConstructor, getLiveCell, found, live] at projected
       simp only [Bind.bind, Except.bind] at projected
       rw [objectEq] at projected
@@ -612,7 +611,7 @@ theorem LiveHeapRel.readObjectField_refines
       simp only [Bind.bind, Except.bind] at projected
       rw [objectEq] at projected
       simp at projected
-  | natural _ objectEq _ _ _ _ _ _ _ _ _ =>
+  | natural _ objectEq _ _ _ _ =>
       simp [getObjectField, getConstructor, getLiveCell, found, live] at projected
       simp only [Bind.bind, Except.bind] at projected
       rw [objectEq] at projected
@@ -664,8 +663,8 @@ theorem LiveHeapRel.readResidentArraySize_refines
   | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
-  | natural descriptor storedObjectEq headerRead headerKind marker extent limbsFit
-        decoded refCount persistent cellLive =>
+  | natural descriptor storedObjectEq objectRelated refCount persistent
+        cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
   | integer descriptor storedObjectEq objectRelated refCount persistent cellLive =>
@@ -718,8 +717,8 @@ theorem LiveHeapRel.readResidentArrayElementBorrowed_refines
   | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
-  | natural descriptor storedObjectEq headerRead headerKind marker extent limbsFit
-        decoded refCount persistent cellLive =>
+  | natural descriptor storedObjectEq objectRelated refCount persistent
+        cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
   | integer descriptor storedObjectEq objectRelated refCount persistent cellLive =>
@@ -778,7 +777,7 @@ theorem LiveHeapRel.readUSizeField_refines
       simp only [Bind.bind, Except.bind] at projected
       rw [objectEq] at projected
       simp at projected
-  | natural _ objectEq _ _ _ _ _ _ _ _ _ =>
+  | natural _ objectEq _ _ _ _ =>
       simp [getUSizeField, getConstructor, getLiveCell, found, live] at projected
       simp only [Bind.bind, Except.bind] at projected
       rw [objectEq] at projected
@@ -862,7 +861,7 @@ theorem LiveHeapRel.readUSizeSlot_refines
       simp only [Bind.bind, Except.bind] at projected
       rw [objectEq] at projected
       simp at projected
-  | natural _ objectEq _ _ _ _ _ _ _ _ _ =>
+  | natural _ objectEq _ _ _ _ =>
       simp [getUSizeSlot, getConstructor, getLiveCell, found, live] at projected
       simp only [Bind.bind, Except.bind] at projected
       rw [objectEq] at projected
@@ -926,7 +925,7 @@ theorem LiveHeapRel.readObjectField_outOfBounds_refines
       rw [storedDescriptor] at descriptor
       have impossible := Option.some.inj descriptor
       cases impossible
-  | natural storedDescriptor _ _ _ _ _ _ _ _ _ _ =>
+  | natural storedDescriptor _ _ _ _ _ =>
       rw [storedDescriptor] at descriptor
       have impossible := Option.some.inj descriptor
       cases impossible
@@ -988,7 +987,7 @@ theorem LiveHeapRel.readUSizeField_outOfBounds_refines
       rw [storedDescriptor] at descriptor
       have impossible := Option.some.inj descriptor
       cases impossible
-  | natural storedDescriptor _ _ _ _ _ _ _ _ _ _ =>
+  | natural storedDescriptor _ _ _ _ _ =>
       rw [storedDescriptor] at descriptor
       have impossible := Option.some.inj descriptor
       cases impossible
@@ -1072,7 +1071,7 @@ theorem LiveHeapRel.readUSizeSlot_outOfBounds_refines
       rw [storedDescriptor] at descriptor
       have impossible := Option.some.inj descriptor
       cases impossible
-  | natural storedDescriptor _ _ _ _ _ _ _ _ _ _ =>
+  | natural storedDescriptor _ _ _ _ _ =>
       rw [storedDescriptor] at descriptor
       have impossible := Option.some.inj descriptor
       cases impossible
@@ -1208,7 +1207,7 @@ theorem LiveHeapRel.writeObjectField_outOfBounds_refines
   | boxed _ storedObjectEq _ _ _ _ =>
       rw [objectEq] at storedObjectEq
       contradiction
-  | natural _ storedObjectEq _ _ _ _ _ _ _ _ _ =>
+  | natural _ storedObjectEq _ _ _ _ =>
       rw [objectEq] at storedObjectEq
       contradiction
   | integer _ storedObjectEq _ _ _ _ =>
@@ -1262,7 +1261,7 @@ theorem LiveHeapRel.writeUSizeField_outOfBounds_refines
   | boxed _ storedObjectEq _ _ _ _ =>
       rw [objectEq] at storedObjectEq
       contradiction
-  | natural _ storedObjectEq _ _ _ _ _ _ _ _ _ =>
+  | natural _ storedObjectEq _ _ _ _ =>
       rw [objectEq] at storedObjectEq
       contradiction
   | integer _ storedObjectEq _ _ _ _ =>
@@ -1331,7 +1330,7 @@ theorem LiveHeapRel.writeUSizeSlot_outOfBounds_refines
   | boxed _ storedObjectEq _ _ _ _ =>
       rw [objectEq] at storedObjectEq
       contradiction
-  | natural _ storedObjectEq _ _ _ _ _ _ _ _ _ =>
+  | natural _ storedObjectEq _ _ _ _ =>
       rw [objectEq] at storedObjectEq
       contradiction
   | integer _ storedObjectEq _ _ _ _ =>
@@ -1380,7 +1379,7 @@ theorem LiveHeapRel.readTag_refines
       simp only [Bind.bind, Except.bind] at semanticTag
       rw [objectEq] at semanticTag
       simp at semanticTag
-  | natural _ objectEq _ _ _ _ _ _ _ _ _ =>
+  | natural _ objectEq _ _ _ _ =>
       simp [getTag, getLiveCell, found, live] at semanticTag
       simp only [Bind.bind, Except.bind] at semanticTag
       rw [objectEq] at semanticTag
@@ -1745,10 +1744,12 @@ theorem LiveHeapRel.readTag_expectedConstructor_refines
                     (by simp [objectRelated.headerKind])
                     (by simp [Header.isPromotedTag, objectRelated.headerKind,
                       different])
-              | natural descriptor objectEq headerRead headerKind marker extent
-                  limbsFit decoded refCount persistent cellLive =>
-                  exact failOfHeader _ headerRead (by simp [headerKind])
-                    (by simp [Header.isPromotedTag, headerKind, marker,
+              | natural descriptor objectEq objectRelated refCount persistent
+                  cellLive =>
+                  exact failOfHeader _ objectRelated.headerRead
+                    (by simp [objectRelated.headerKind])
+                    (by simp [Header.isPromotedTag, objectRelated.headerKind,
+                      objectRelated.marker,
                       bigNaturalMarker, promotedTagMarker])
               | integer descriptor objectEq objectRelated refCount persistent
                   cellLive =>
@@ -1855,9 +1856,10 @@ theorem LiveHeapRel.readConstructorHeader_expectedConstructor_refines
                   cellLive =>
                   exact failOfHeader _ objectRelated.headerRead
                     (by simp [objectRelated.headerKind])
-              | natural descriptor objectEq headerRead headerKind marker extent
-                  limbsFit decoded refCount persistent cellLive =>
-                  exact failOfHeader _ headerRead (by simp [headerKind])
+              | natural descriptor objectEq objectRelated refCount persistent
+                  cellLive =>
+                  exact failOfHeader _ objectRelated.headerRead
+                    (by simp [objectRelated.headerKind])
               | integer descriptor objectEq objectRelated refCount persistent
                   cellLive =>
                   exact failOfHeader _ objectRelated.headerRead

@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-natural-validator-refinement-admission
-status: candidate
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: eca10875e2a8513d90e887ccc83a6b22a551c9fa
@@ -9,7 +9,7 @@ pass: none
 discovered-by: proof
 first-seen: 2026-08-23
 reproduction: Fir/Wasm/Concrete/HeapRefinement.lean
-regression: none
+regression: Fir/Wasm/Concrete/HeapRefinement.lean
 ---
 
 # Summary
@@ -95,7 +95,18 @@ none
 
 ## Resolution and regression
 
-Unresolved. Define the validator-admission relation, prove canonical Natural
-allocation and all ownership transitions preserve it, connect it to
-`LiveCellRel.natural`, and add a proof-level regression showing that every
-related Natural completes the installed validator call.
+Fixed in the W6 Natural-admission invariant slice. `NaturalValidatorAdmission`
+now lives with the heap refinement contract, and `LiveCellRel.natural` carries
+that admission directly instead of only a decoded `NaturalObjectRel`.
+`LiveHeapRel.naturalValidatorAdmission` is the proof-level regression: every
+mapped live semantic Natural exposes the exact canonical admission required by
+the installed validator. Canonical allocation establishes the invariant, while
+reference-count, ownership, persistence, mutation, reset/reuse, framing, and
+fault transitions preserve it.
+
+The exact generated validator theorem
+`terminatesWith_validateNatural_of_naturalAdmission` therefore composes with
+the compiler-facing heap relation without a trusted caller premise. The
+resident result writer separately requires its arithmetic producer to prove
+that the newly emitted result limbs are canonical; mere equality of decoded
+numeric values is intentionally not accepted as a substitute.

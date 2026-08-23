@@ -2536,7 +2536,7 @@ theorem ConcreteRuntimeRel.constructorDescriptor_of_getConstructor
                         liveEq, ↓reduceIte, Bind.bind, Except.bind] at decoded
                       rw [objectEq] at decoded
                       contradiction
-                  | natural _ objectEq _ _ _ _ _ _ _ _ _ =>
+                  | natural _ objectEq _ _ _ _ =>
                       simp only [getConstructor, getLiveCell, semanticFound,
                         liveEq, ↓reduceIte, Bind.bind, Except.bind] at decoded
                       rw [objectEq] at decoded
