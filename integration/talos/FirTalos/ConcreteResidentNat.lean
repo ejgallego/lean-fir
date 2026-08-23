@@ -1,4 +1,5 @@
 import Fir.Wasm.Emit.ResidentNatArithmetic
+import FirTalos.ConcreteResidentBigNumeric
 import FirTalos.ConcreteResidentBigNumericAllocator
 import FirTalos.ConcreteRuntime
 import FirTalos.ConcreteResidentPrimitives
@@ -35,11 +36,7 @@ theorem adaptedFunction_body_of_exact
       sourceFunction.body = .ok targetBody) :
     targetFunction.body = targetBody ++
       FirTalos.functionTerminal sourceModule sourceFunction := by
-  rcases FirTalos.Correctness.function_preserves_body adapted with
-    ⟨actualBody, actualAdapted, targetBodyEq⟩
-  rw [bodyAdapted] at actualAdapted
-  injection actualAdapted with actualBodyEq
-  simpa [actualBodyEq] using targetBodyEq
+  exact ResidentPrimitives.adaptedFunction_body_of_exact adapted bodyAdapted
 
 /-- Talos control skeleton of `fir_numeric_make_natural`. The three
 allocation alternatives stay abstract because the immediate proof never
@@ -3339,29 +3336,13 @@ address calculation.  Keeping it named makes the two carry-limb stores in the
 checked `Nat.add` path explicit without exposing the generator's private
 helper name. -/
 def checkedScale8Source (source destination : Lean.FVarId) :
-    List Fir.Wasm.Instruction := [
-  .localGet source,
-  .localGet source,
-  .i32Add,
-  .localSet destination,
-  .localGet destination,
-  .localGet destination,
-  .i32Add,
-  .localSet destination,
-  .localGet destination,
-  .localGet destination,
-  .i32Add,
-  .localSet destination]
+    List Fir.Wasm.Instruction :=
+  ResidentPrimitives.scale8Source source destination
 
 /-- Exact Talos spelling of `checkedScale8Source`. -/
 def checkedScale8Program (sourceIndex destinationIndex : Nat) :
-    Wasm.Program := [
-  .localGet sourceIndex, .localGet sourceIndex, .add,
-  .localSet destinationIndex,
-  .localGet destinationIndex, .localGet destinationIndex, .add,
-  .localSet destinationIndex,
-  .localGet destinationIndex, .localGet destinationIndex, .add,
-  .localSet destinationIndex]
+    Wasm.Program :=
+  ResidentPrimitives.scale8Program sourceIndex destinationIndex
 
 /-- Source instructions that write one constant half of the final carry limb.
 The emitter deliberately recomputes the scaled index before each half-word. -/
@@ -3440,7 +3421,9 @@ theorem instructions_checkedLocalLimbPartSource
         .ok (checkedLocalLimbPartProgram objectIndex indexIndex scaledIndex
           valueIndex offset) := by
   simp [checkedLocalLimbPartSource, checkedLocalLimbPartProgram,
-    checkedScale8Source, checkedScale8Program, FirTalos.instructions,
+    checkedScale8Source, checkedScale8Program,
+    ResidentPrimitives.scale8Source, ResidentPrimitives.scale8Program,
+    FirTalos.instructions,
     FirTalos.instruction, objectFound, indexFound, scaledFound, valueFound,
     Bind.bind, Except.bind, pure, Except.pure]
 
@@ -3456,16 +3439,13 @@ definition is intentionally modular: it is the exact `i32` address arithmetic
 performed by Wasm, before a later layout theorem rules out wraparound for a
 valid natural allocation. -/
 def checkedScale8Word (index : UInt32) : UInt32 :=
-  let twice := index + index
-  let fourTimes := twice + twice
-  fourTimes + fourTimes
+  ResidentPrimitives.scale8Word index
 
 /-- The emitter's three doublings are multiplication by eight in wasm32's
 modular arithmetic. -/
 theorem checkedScale8Word_eq_mul8 (index : UInt32) :
-    checkedScale8Word index = 8 * index := by
-  unfold checkedScale8Word
-  bv_decide
+    checkedScale8Word index = 8 * index :=
+  ResidentPrimitives.scale8Word_eq_mul8 index
 
 /-- Effective payload base computed by a checked carry-limb store. -/
 def checkedLimbBase (object index : UInt32) : UInt32 :=
@@ -3498,33 +3478,8 @@ theorem wp_checkedScale8Program
       Wasm.wp module rest Q store { afterThird with values := tail } env) :
     Wasm.wp module (checkedScale8Program sourceIndex destinationIndex ++ rest)
       Q store { initial with values := tail } env := by
-  have firstUpdate := FirTalos.Correctness.localUpdate_of_set? firstSet
-  have secondUpdate := FirTalos.Correctness.localUpdate_of_set? secondSet
-  have sourceAt (values : List Wasm.Value) :
-      ({ initial with values } : Wasm.Locals).get sourceIndex =
-        some (.i32 index) := by
-    simpa using sourceLocal
-  have firstAt (values : List Wasm.Value) :
-      ({ afterFirst with values } : Wasm.Locals).get destinationIndex =
-        some (.i32 (index + index)) := by
-    simpa using firstUpdate.1
-  have secondAt (values : List Wasm.Value) :
-      ({ afterSecond with values } : Wasm.Locals).get destinationIndex =
-        some (.i32 (index + index + (index + index))) := by
-    simpa using secondUpdate.1
-  unfold checkedScale8Program
-  simp only [List.cons_append, List.nil_append, Wasm.wp_localGet_cons,
-    sourceAt, Wasm.wp_add_cons, Wasm.wp_localSet_cons, firstSet, firstAt,
-    secondSet, secondAt]
-  change
-    match ({ afterSecond with values :=
-        (.i32 (checkedScale8Word index) :: tail) }).set? destinationIndex
-          (.i32 (checkedScale8Word index)) with
-    | some updated =>
-        Wasm.wp module rest Q store { updated with values := tail } env
-    | none => Q (.Invalid "localSet index out of bounds")
-  rw [thirdSet]
-  exact continued
+  exact ResidentPrimitives.wp_scale8Program sourceLocal firstSet secondSet
+    thirdSet continued
 
 /-- One constant half-limb store, factored from its scale-by-eight address
 calculation.  Its postcondition names the exact Wasm memory update; semantic
@@ -5357,6 +5312,65 @@ theorem ReadableLimbPrefix.readUInt32Pair
   · rw [related.readUInt32_eq_read32 lowInBounds, residentLow]
   · rw [related.readUInt32_eq_read32 highInBounds, residentHigh]
 
+/-- A readable writer prefix supplies both installed public accessor calls at
+any materialized index.  This packages the extensional writer invariant into
+the exact call boundary consumed by the checked `Nat.add` loop: unchanged
+store, unchanged caller tail, and the low/high words at that index. -/
+theorem ReadableLimbPrefix.naturalLimbCalls
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {lowTarget highTarget : Wasm.Function} {lowIndex highIndex : Nat}
+    {heap : MemoryState} {store : Wasm.Store host} {address : Word32}
+    {words : List LimbWords} {count : Nat} {index low high : UInt32}
+    (readable : ReadableLimbPrefix store (UInt32.ofNat address.value)
+      words count)
+    (related : ResidentMemoryRel heap store.mem)
+    (addressHeap : address.classify = .heap)
+    (payloadInBounds :
+      address.value + headerBytes + 8 * count ≤ heap.memory.size)
+    (indexInPrefix : index.toNat < count)
+    (wordAt : words[index.toNat]? = some (low, high))
+    (lowAdapted : FirTalos.function sourceModule
+      (ResidentBigNumeric.sourceFunction .low) = .ok lowTarget)
+    (lowNotImport : module.imports[lowIndex]? = none)
+    (lowFound : module.funcs[lowIndex - module.imports.length]? =
+      some lowTarget)
+    (highAdapted : FirTalos.function sourceModule
+      (ResidentBigNumeric.sourceFunction .high) = .ok highTarget)
+    (highNotImport : module.imports[highIndex]? = none)
+    (highFound : module.funcs[highIndex - module.imports.length]? =
+      some highTarget) :
+    (∀ tail, Wasm.TerminatesWith env module lowIndex store
+      ([.i32 index, .i32 (UInt32.ofNat address.value)] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 low :: tail)) ∧
+    (∀ tail, Wasm.TerminatesWith env module highIndex store
+      ([.i32 index, .i32 (UInt32.ofNat address.value)] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 high :: tail)) := by
+  have addressToNat : (UInt32.ofNat address.value).toNat = address.value :=
+    UInt32.toNat_ofNat_of_lt'
+      (by simpa [wordModulus] using address.isLt)
+  have readableBounds :
+      (UInt32.ofNat address.value).toNat + headerBytes + 8 * count ≤
+        heap.memory.size := by
+    simpa [addressToNat] using payloadInBounds
+  have reads := readable.readUInt32Pair related readableBounds
+    indexInPrefix wordAt
+  constructor
+  · intro tail
+    apply ResidentBigNumeric.terminatesWith_naturalLimb_of_concreteRead
+      lowAdapted lowNotImport lowFound related addressHeap
+    · simp [ResidentBigNumeric.byteOffset]
+      omega
+    · simpa [ResidentBigNumeric.byteOffset, addressToNat] using reads.1
+  · intro tail
+    apply ResidentBigNumeric.terminatesWith_naturalLimb_of_concreteRead
+      highAdapted highNotImport highFound related addressHeap
+    · simp [ResidentBigNumeric.byteOffset]
+      omega
+    · simpa [ResidentBigNumeric.byteOffset, addressToNat] using reads.2
+
 /-- Exact readable resident word pairs decode through W6's ordinary Natural
 limb reader to their unbounded little-endian value.  No canonicality premise
 is needed: `readNaturalLimbs` is intentionally an extensional decoder. -/
@@ -6462,6 +6476,7 @@ theorem instructions_checkedMultiLimbProducerSource
       checkedCarryLimbWritesProgram,
       checkedConstantLimbPartSource, checkedConstantLimbPartProgram,
       checkedScale8Source, checkedScale8Program,
+      ResidentPrimitives.scale8Source, ResidentPrimitives.scale8Program,
       FirTalos.instructions, FirTalos.instruction, allocateFound, writeSumFound,
       leftFound, rightFound, leftFlavorFound, rightFlavorFound, countFound,
       resultCountFound, rawFound, carryFound, carryExtraFound, scaledFound,

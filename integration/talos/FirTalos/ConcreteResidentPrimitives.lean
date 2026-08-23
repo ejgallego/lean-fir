@@ -3,6 +3,7 @@ import Fir.Wasm.Emit.ResidentBigNumeric
 import FirTalos.ConcreteResidentMemory
 import FirTalos.Correctness.Adapter
 import FirTalos.Correctness.Composition
+import FirTalos.Correctness.Locals
 import Interpreter.Wasm.Wp.Tactic
 
 namespace FirTalos.Concrete
@@ -19,6 +20,120 @@ below operation-specific helper proofs.
 -/
 
 namespace ResidentPrimitives
+
+/-- Generic bridge from exact body adaptation to the body installed in the
+target function.  Keeping this below operation-specific resident modules lets
+Nat, USize, and BigNumeric expose exact Talos bodies without importing one
+another merely for adapter bookkeeping. -/
+theorem adaptedFunction_body_of_exact
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {targetFunction : Wasm.Function} {targetBody : Wasm.Program}
+    (adapted : FirTalos.function sourceModule sourceFunction =
+      .ok targetFunction)
+    (bodyAdapted : FirTalos.instructions sourceModule sourceFunction []
+      sourceFunction.body = .ok targetBody) :
+    targetFunction.body = targetBody ++
+      FirTalos.functionTerminal sourceModule sourceFunction := by
+  rcases FirTalos.Correctness.function_preserves_body adapted with
+    ⟨actualBody, actualAdapted, targetBodyEq⟩
+  rw [bodyAdapted] at actualAdapted
+  injection actualAdapted with actualBodyEq
+  simpa [actualBodyEq] using targetBodyEq
+
+/-- Shared source spelling of the resident multiply-by-eight address
+calculation.  Nat writers and BigNumeric readers use the same three i32
+doublings and should share its execution proof. -/
+def scale8Source (source destination : Lean.FVarId) :
+    List Fir.Wasm.Instruction := [
+  .localGet source,
+  .localGet source,
+  .i32Add,
+  .localSet destination,
+  .localGet destination,
+  .localGet destination,
+  .i32Add,
+  .localSet destination,
+  .localGet destination,
+  .localGet destination,
+  .i32Add,
+  .localSet destination]
+
+/-- Exact Talos spelling of `scale8Source`. -/
+def scale8Program (sourceIndex destinationIndex : Nat) : Wasm.Program := [
+  .localGet sourceIndex, .localGet sourceIndex, .add,
+  .localSet destinationIndex,
+  .localGet destinationIndex, .localGet destinationIndex, .add,
+  .localSet destinationIndex,
+  .localGet destinationIndex, .localGet destinationIndex, .add,
+  .localSet destinationIndex]
+
+/-- Machine-word result of the shared three-doubling sequence. -/
+def scale8Word (index : UInt32) : UInt32 :=
+  let twice := index + index
+  let fourTimes := twice + twice
+  fourTimes + fourTimes
+
+/-- Three doublings are multiplication by eight in wasm32 modular
+arithmetic. -/
+theorem scale8Word_eq_mul8 (index : UInt32) :
+    scale8Word index = 8 * index := by
+  unfold scale8Word
+  bv_decide
+
+/-- Reusable execution rule for the resident multiply-by-eight sequence.
+
+The statement exposes only the source local and Talos's three checked local
+updates, so readers and writers can compose it without agreeing on a larger
+frame layout. -/
+theorem wp_scale8Program
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {initial afterFirst afterSecond afterThird : Wasm.Locals}
+    {sourceIndex destinationIndex : Nat} {index : UInt32}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    (sourceLocal : initial.get sourceIndex = some (.i32 index))
+    (firstSet :
+      ({ initial with values := .i32 (index + index) :: tail }).set?
+          destinationIndex (.i32 (index + index)) = some afterFirst)
+    (secondSet :
+      ({ afterFirst with values :=
+          (.i32 (index + index + (index + index)) :: tail) }).set?
+          destinationIndex (.i32 (index + index + (index + index))) =
+            some afterSecond)
+    (thirdSet :
+      ({ afterSecond with values := .i32 (scale8Word index) :: tail }).set?
+          destinationIndex (.i32 (scale8Word index)) = some afterThird)
+    (continued :
+      Wasm.wp module rest Q store { afterThird with values := tail } env) :
+    Wasm.wp module (scale8Program sourceIndex destinationIndex ++ rest)
+      Q store { initial with values := tail } env := by
+  have firstUpdate := FirTalos.Correctness.localUpdate_of_set? firstSet
+  have secondUpdate := FirTalos.Correctness.localUpdate_of_set? secondSet
+  have sourceAt (values : List Wasm.Value) :
+      ({ initial with values } : Wasm.Locals).get sourceIndex =
+        some (.i32 index) := by
+    simpa using sourceLocal
+  have firstAt (values : List Wasm.Value) :
+      ({ afterFirst with values } : Wasm.Locals).get destinationIndex =
+        some (.i32 (index + index)) := by
+    simpa using firstUpdate.1
+  have secondAt (values : List Wasm.Value) :
+      ({ afterSecond with values } : Wasm.Locals).get destinationIndex =
+        some (.i32 (index + index + (index + index))) := by
+    simpa using secondUpdate.1
+  unfold scale8Program
+  simp only [List.cons_append, List.nil_append, Wasm.wp_localGet_cons,
+    sourceAt, Wasm.wp_add_cons, Wasm.wp_localSet_cons, firstSet, firstAt,
+    secondSet, secondAt]
+  change
+    match ({ afterSecond with values :=
+        (.i32 (scale8Word index) :: tail) }).set? destinationIndex
+          (.i32 (scale8Word index)) with
+    | some updated =>
+        Wasm.wp module rest Q store { updated with values := tail } env
+    | none => Q (.Invalid "localSet index out of bounds")
+  rw [thirdSet]
+  exact continued
 
 def immediateNaturalPairTest (leftIndex rightIndex : Nat) : Wasm.Program := [
   .localGet leftIndex,

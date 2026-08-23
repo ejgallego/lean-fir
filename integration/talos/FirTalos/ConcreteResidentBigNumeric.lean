@@ -1,4 +1,7 @@
-import FirTalos.ConcreteResidentUSize
+import Fir.Wasm.Concrete.NaturalAllocationCorrectness
+import FirTalos.ConcreteResidentPrimitives
+import FirTalos.Correctness.Function
+import FirTalos.Correctness.Locals
 
 namespace FirTalos.Concrete
 
@@ -7,10 +10,9 @@ open Fir.Wasm.Concrete
 /-!
 # Resident arbitrary-precision natural accessors
 
-This module connects W7's installed BigNumeric validation/accessor helpers to
-the stable `CheckedNaturalCalls` boundary used by the Nat-to-USize proof.  The
-first layer factors the common low/high limb implementation and its exact
-Talos adaptation before attaching concrete heap facts.
+This module connects W7's installed BigNumeric low/high accessors to W6's
+finite concrete memory at arbitrary limb indices.  Consumer-specific packages
+such as USize's `CheckedNaturalCalls` stay above this Nat-independent layer.
 -/
 
 namespace ResidentBigNumeric
@@ -32,19 +34,8 @@ def valueParam : Lean.FVarId := ⟨`value⟩
 def indexParam : Lean.FVarId := ⟨`index⟩
 def scaledLocal : Lean.FVarId := ⟨`scaledValue⟩
 
-def scale8Source : List Fir.Wasm.Instruction := [
-  .localGet indexParam,
-  .localGet indexParam,
-  .i32Add,
-  .localSet scaledLocal,
-  .localGet scaledLocal,
-  .localGet scaledLocal,
-  .i32Add,
-  .localSet scaledLocal,
-  .localGet scaledLocal,
-  .localGet scaledLocal,
-  .i32Add,
-  .localSet scaledLocal]
+def scale8Source : List Fir.Wasm.Instruction :=
+  ResidentPrimitives.scale8Source indexParam scaledLocal
 
 def naturalLimbSource (part : NaturalLimbPart) :
     List Fir.Wasm.Instruction := [
@@ -77,19 +68,8 @@ def immediateLimbProgram : NaturalLimbPart → Wasm.Program
   | .low => [.localGet 0, .const 1, .shrU, .ret]
   | .high => [.const 0, .ret]
 
-def heapLimbProgram (part : NaturalLimbPart) : Wasm.Program := [
-  .localGet 1,
-  .localGet 1,
-  .add,
-  .localSet 2,
-  .localGet 2,
-  .localGet 2,
-  .add,
-  .localSet 2,
-  .localGet 2,
-  .localGet 2,
-  .add,
-  .localSet 2,
+def heapLimbProgram (part : NaturalLimbPart) : Wasm.Program :=
+  ResidentPrimitives.scale8Program 1 2 ++ [
   .localGet 0,
   .const (UInt32.ofNat headerBytes),
   .add,
@@ -146,9 +126,10 @@ theorem instructions_sourceFunction
     cases part <;> decide
   cases part <;>
     simp [naturalLimbSource, scale8Source, naturalLimbProgram,
-      immediateLimbProgram, heapLimbProgram, byteOffset, FirTalos.instructions,
-      FirTalos.instruction, valueFound, indexFound, scaledFound, Bind.bind,
-      Except.bind, pure, Except.pure]
+      immediateLimbProgram, heapLimbProgram,
+      ResidentPrimitives.scale8Source, ResidentPrimitives.scale8Program,
+      byteOffset, FirTalos.instructions, FirTalos.instruction, valueFound,
+      indexFound, scaledFound, Bind.bind, Except.bind, pure, Except.pure]
 
 /-- Exact installed target body, including the adapter's terminal suffix. -/
 theorem adaptedSourceFunction_body
@@ -158,8 +139,231 @@ theorem adaptedSourceFunction_body
       .ok targetFunction) :
     targetFunction.body = naturalLimbProgram part ++
       FirTalos.functionTerminal sourceModule (sourceFunction part) := by
-  exact ResidentNat.adaptedFunction_body_of_exact adapted
+  exact ResidentPrimitives.adaptedFunction_body_of_exact adapted
     (instructions_sourceFunction part)
+
+/-- Heap-classified object words select the heap arm of the public limb
+accessors.  This small fact belongs with the accessor itself rather than with
+any particular consumer such as USize conversion. -/
+theorem heapWord_selected (word : Word32)
+    (heap : word.classify = .heap) :
+    1 &&& UInt32.ofNat word.value = 0 := by
+  have even := word.lowBit_zero_of_classify_heap heap
+  apply UInt32.toNat_inj.mp
+  simp [even, UInt32.toNat_ofNat_of_lt'
+    (by simpa [wordModulus] using word.isLt)]
+
+/-- The heap arm at an arbitrary limb index returns exactly the selected
+32-bit half-limb.  Its only arithmetic abstraction is the shared modular
+multiply-by-eight primitive; object layout and non-wrapping facts remain for
+the concrete-memory refinement theorem below. -/
+theorem wp_heapLimbProgram
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {initial afterFirst afterSecond afterThird : Wasm.Locals}
+    {part : NaturalLimbPart} {word index result : UInt32}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    (valueLocal : initial.get 0 = some (.i32 word))
+    (indexLocal : initial.get 1 = some (.i32 index))
+    (firstSet :
+      ({ initial with values := .i32 (index + index) :: tail }).set? 2
+        (.i32 (index + index)) = some afterFirst)
+    (secondSet :
+      ({ afterFirst with values :=
+          (.i32 (index + index + (index + index)) :: tail) }).set? 2
+        (.i32 (index + index + (index + index))) = some afterSecond)
+    (thirdSet :
+      ({ afterSecond with values :=
+          (.i32 (ResidentPrimitives.scale8Word index) :: tail) }).set? 2
+        (.i32 (ResidentPrimitives.scale8Word index)) = some afterThird)
+    (readInBounds :
+      ¬((ResidentPrimitives.scale8Word index +
+          (UInt32.ofNat headerBytes + word)).toNat +
+        (byteOffset part).toNat + 4 > store.mem.pages * 65536))
+    (readEq :
+      store.mem.read32
+        (ResidentPrimitives.scale8Word index +
+          (UInt32.ofNat headerBytes + word) + byteOffset part) = result)
+    (returned : Q (.Return store (.i32 result :: tail))) :
+    Wasm.wp module (heapLimbProgram part ++ rest) Q store
+      { initial with values := tail } env := by
+  have firstUpdate := FirTalos.Correctness.localUpdate_of_set? firstSet
+  have secondUpdate := FirTalos.Correctness.localUpdate_of_set? secondSet
+  have thirdUpdate := FirTalos.Correctness.localUpdate_of_set? thirdSet
+  have valueAfterFirst : afterFirst.get 0 = some (.i32 word) := by
+    rw [firstUpdate.2 (show 0 ≠ 2 by decide)]
+    simpa using valueLocal
+  have valueAfterSecond : afterSecond.get 0 = some (.i32 word) := by
+    rw [secondUpdate.2 (show 0 ≠ 2 by decide)]
+    simpa using valueAfterFirst
+  have valueThird (values : List Wasm.Value) :
+      ({ afterThird with values } : Wasm.Locals).get 0 =
+        some (.i32 word) := by
+    rw [show ({ afterThird with values } : Wasm.Locals).get 0 =
+      afterThird.get 0 by rfl, thirdUpdate.2 (show 0 ≠ 2 by decide)]
+    simpa using valueAfterSecond
+  have scaledThird (values : List Wasm.Value) :
+      ({ afterThird with values } : Wasm.Locals).get 2 =
+        some (.i32 (ResidentPrimitives.scale8Word index)) := by
+    simpa using thirdUpdate.1
+  unfold heapLimbProgram
+  rw [List.append_assoc]
+  apply ResidentPrimitives.wp_scale8Program indexLocal firstSet secondSet
+    thirdSet
+  simp only [List.cons_append, List.nil_append, Wasm.wp_localGet_cons,
+    valueThird, Wasm.wp_const_cons, Wasm.wp_add_cons, scaledThird,
+    Wasm.wp_load32_cons]
+  split
+  · rename_i outOfBounds
+    exact (readInBounds outOfBounds).elim
+  · simp only [readEq, Wasm.wp_ret_cons]
+    simpa using returned
+
+/-- The low-bit dispatcher selects the arbitrary-index heap accessor without
+changing the store, caller tail, or loaded word. -/
+theorem wp_naturalLimbProgram_heap
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {initial afterFirst afterSecond afterThird : Wasm.Locals}
+    {part : NaturalLimbPart} {word index result : UInt32}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    (notImmediate : 1 &&& word = 0)
+    (valueLocal : initial.get 0 = some (.i32 word))
+    (indexLocal : initial.get 1 = some (.i32 index))
+    (firstSet :
+      ({ initial with values := .i32 (index + index) :: tail }).set? 2
+        (.i32 (index + index)) = some afterFirst)
+    (secondSet :
+      ({ afterFirst with values :=
+          (.i32 (index + index + (index + index)) :: tail) }).set? 2
+        (.i32 (index + index + (index + index))) = some afterSecond)
+    (thirdSet :
+      ({ afterSecond with values :=
+          (.i32 (ResidentPrimitives.scale8Word index) :: tail) }).set? 2
+        (.i32 (ResidentPrimitives.scale8Word index)) = some afterThird)
+    (readInBounds :
+      ¬((ResidentPrimitives.scale8Word index +
+          (UInt32.ofNat headerBytes + word)).toNat +
+        (byteOffset part).toNat + 4 > store.mem.pages * 65536))
+    (readEq :
+      store.mem.read32
+        (ResidentPrimitives.scale8Word index +
+          (UInt32.ofNat headerBytes + word) + byteOffset part) = result)
+    (returned : Q (.Return store (.i32 result :: tail))) :
+    Wasm.wp module (naturalLimbProgram part ++ rest) Q store
+      { initial with values := tail } env := by
+  have valueLocal' :
+      ({ initial with values := tail } : Wasm.Locals).get 0 =
+        some (.i32 word) := by simpa using valueLocal
+  unfold naturalLimbProgram
+  simp only [List.cons_append, List.nil_append, Wasm.wp_localGet_cons,
+    valueLocal', Wasm.wp_const_cons, Wasm.wp_and_cons, notImmediate]
+  apply Wasm.wp_iff_cons rfl
+  exact wp_heapLimbProgram valueLocal indexLocal firstSet secondSet thirdSet
+    readInBounds readEq returned
+
+/-- An adapted and installed public low/high accessor is a fuel-free call at
+any in-bounds limb index.  It returns the exact selected memory word above the
+caller's operand tail and leaves the complete store unchanged. -/
+theorem terminatesWith_naturalLimb_of_adapted
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {targetFunction : Wasm.Function} {functionIndex : Nat}
+    {part : NaturalLimbPart} {store : Wasm.Store host}
+    {word index result : UInt32} {tail : List Wasm.Value}
+    (adapted : FirTalos.function sourceModule (sourceFunction part) =
+      .ok targetFunction)
+    (notImport : module.imports[functionIndex]? = none)
+    (found : module.funcs[functionIndex - module.imports.length]? =
+      some targetFunction)
+    (notImmediate : 1 &&& word = 0)
+    (readInBounds :
+      ¬((ResidentPrimitives.scale8Word index +
+          (UInt32.ofNat headerBytes + word)).toNat +
+        (byteOffset part).toNat + 4 > store.mem.pages * 65536))
+    (readEq :
+      store.mem.read32
+        (ResidentPrimitives.scale8Word index +
+          (UInt32.ofNat headerBytes + word) + byteOffset part) = result) :
+    Wasm.TerminatesWith env module functionIndex store
+      ([.i32 index, .i32 word] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 result :: tail) := by
+  have signature :=
+    FirTalos.Correctness.function_preserves_signature adapted
+  rcases signature with ⟨paramsEq, localsEq, resultsEq⟩
+  have body := adaptedSourceFunction_body adapted
+  apply FirTalos.Correctness.terminatesWith_of_wp_body_at notImport found
+  rw [body]
+  let arguments := [.i32 index, .i32 word] ++ tail
+  let entry := targetFunction.toLocals
+    (arguments.take targetFunction.numParams).reverse
+  have valueLocal : entry.get 0 = some (.i32 word) := by
+    simp [entry, arguments, Wasm.Function.toLocals,
+      Wasm.Function.numParams, paramsEq, sourceFunction_params]
+  have indexLocal : entry.get 1 = some (.i32 index) := by
+    simp [entry, arguments, Wasm.Function.toLocals,
+      Wasm.Function.numParams, paramsEq, sourceFunction_params]
+  have targetLocalsLength : targetFunction.locals.length = 1 := by
+    simp [localsEq, sourceFunction_locals]
+  have firstValid :
+      ({ entry with values := [.i32 (index + index)] }).validIndex 2 := by
+    simp [entry, arguments, Wasm.Function.toLocals, Wasm.Function.numParams,
+      paramsEq, sourceFunction_params, targetLocalsLength]
+  obtain ⟨afterFirst, firstSet⟩ :=
+    FirTalos.Correctness.locals_set?_exists
+      (value := .i32 (index + index)) firstValid
+  have firstLengths :=
+    FirTalos.Correctness.locals_lengths_of_set? firstSet
+  have secondValid :
+      ({ afterFirst with values :=
+          [.i32 (index + index + (index + index))] }).validIndex 2 := by
+    simp [firstLengths.1, firstLengths.2, entry, arguments,
+      Wasm.Function.toLocals, Wasm.Function.numParams, paramsEq,
+      sourceFunction_params, targetLocalsLength]
+  obtain ⟨afterSecond, secondSet⟩ :=
+    FirTalos.Correctness.locals_set?_exists
+      (value := .i32 (index + index + (index + index))) secondValid
+  have secondLengths :=
+    FirTalos.Correctness.locals_lengths_of_set? secondSet
+  have thirdValid :
+      ({ afterSecond with values :=
+          [.i32 (ResidentPrimitives.scale8Word index)] }).validIndex 2 := by
+    simp [secondLengths.1, secondLengths.2, firstLengths.1, firstLengths.2,
+      entry, arguments, Wasm.Function.toLocals, Wasm.Function.numParams,
+      paramsEq, sourceFunction_params, targetLocalsLength]
+  obtain ⟨afterThird, thirdSet⟩ :=
+    FirTalos.Correctness.locals_set?_exists
+      (value := .i32 (ResidentPrimitives.scale8Word index)) thirdValid
+  have returned :
+      FirTalos.Correctness.FunctionBodyPost targetFunction arguments
+        (fun final values =>
+          final = store ∧ values = .i32 result :: tail)
+        (.Return store [.i32 result]) := by
+    simp [FirTalos.Correctness.FunctionBodyPost, arguments,
+      Wasm.Function.numParams, paramsEq, resultsEq, sourceFunction_params,
+      sourceFunction_results]
+  simpa [entry, arguments, Wasm.Function.toLocals] using
+    (wp_naturalLimbProgram_heap
+      (module := module) (env := env) (store := store) (initial := entry)
+      (rest := FirTalos.functionTerminal sourceModule (sourceFunction part))
+      (tail := []) notImmediate valueLocal indexLocal firstSet secondSet
+      thirdSet readInBounds readEq returned)
+
+/-- The modular machine base used by a limb accessor is the wasm32 encoding
+of the ordinary object-base-plus-eight-times-index coordinate. -/
+theorem limbBaseAddress_eq_ofNat (address : Word32) (index : UInt32) :
+    ResidentPrimitives.scale8Word index +
+        (UInt32.ofNat headerBytes + UInt32.ofNat address.value) =
+      UInt32.ofNat
+        (address.value + headerBytes + 8 * index.toNat) := by
+  rw [ResidentPrimitives.scale8Word_eq_mul8]
+  have indexRoundtrip : UInt32.ofNat index.toNat = index := by
+    apply UInt32.toNat.inj
+    simp
+  nth_rewrite 1 [← indexRoundtrip]
+  simp only [UInt32.ofNat_add, UInt32.ofNat_mul]
+  ac_rfl
 
 /-- At limb index zero, the heap arm performs the shared scale-by-eight
 sequence and returns exactly the selected 32-bit half-limb.  The local-update
@@ -224,7 +428,7 @@ theorem wp_heapLimbProgram_zero
         (headerBytes + word.toNat) % 4294967296 +
           (byteOffset part).toNat + 4) := by
     simpa [UInt32.toNat_add] using readInBounds
-  unfold heapLimbProgram
+  unfold heapLimbProgram ResidentPrimitives.scale8Program
   simp only [List.cons_append, List.nil_append, Wasm.wp_localGet_cons,
     indexInitial, Wasm.wp_add_cons]
   rw [zeroAdd]
@@ -365,8 +569,87 @@ theorem terminatesWith_naturalLimbZero_of_adapted
       thirdSet readInBounds readEq returned)
 
 /-- A checked read in W6's finite linear memory supplies every machine fact
-needed by the installed index-zero accessor.  This is the reusable boundary
-between concrete natural-layout proofs and the resident low/high helpers. -/
+needed by an installed arbitrary-index accessor.  The single payload bound
+both proves the W6 read is defined and removes all wasm32 address wrapping. -/
+theorem terminatesWith_naturalLimb_of_concreteRead
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {targetFunction : Wasm.Function} {functionIndex : Nat}
+    {part : NaturalLimbPart} {heap : MemoryState} {store : Wasm.Store host}
+    {address : Word32} {index result : UInt32} {tail : List Wasm.Value}
+    (adapted : FirTalos.function sourceModule (sourceFunction part) =
+      .ok targetFunction)
+    (notImport : module.imports[functionIndex]? = none)
+    (found : module.funcs[functionIndex - module.imports.length]? =
+      some targetFunction)
+    (memoryRelated : ResidentMemoryRel heap store.mem)
+    (addressHeap : address.classify = .heap)
+    (payloadInBounds :
+      address.value + headerBytes + 8 * index.toNat +
+          (byteOffset part).toNat + 4 ≤ heap.memory.size)
+    (concreteRead :
+      heap.memory.readUInt32
+        (address.value + headerBytes + 8 * index.toNat +
+          (byteOffset part).toNat) = .ok result) :
+    Wasm.TerminatesWith env module functionIndex store
+      ([.i32 index, .i32 (UInt32.ofNat address.value)] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 result :: tail) := by
+  let baseAddress := address.value + headerBytes + 8 * index.toNat
+  have baseLt : baseAddress < UInt32.size := by
+    have sizeLe := memoryRelated.size_le
+    dsimp [baseAddress]
+    omega
+  have baseWord :
+      ResidentPrimitives.scale8Word index +
+          (UInt32.ofNat headerBytes + UInt32.ofNat address.value) =
+        UInt32.ofNat baseAddress := by
+    simpa [baseAddress] using limbBaseAddress_eq_ofNat address index
+  have baseToNat :
+      (ResidentPrimitives.scale8Word index +
+        (UInt32.ofNat headerBytes + UInt32.ofNat address.value)).toNat =
+          baseAddress := by
+    rw [baseWord]
+    exact UInt32.toNat_ofNat_of_lt' baseLt
+  have selected : 1 &&& UInt32.ofNat address.value = 0 :=
+    heapWord_selected address addressHeap
+  have memorySize :
+      heap.memory.size = store.mem.pages * 65536 := by
+    simpa [wasmPageBytes] using memoryRelated.size_eq
+  have targetInBounds :
+      ¬((ResidentPrimitives.scale8Word index +
+          (UInt32.ofNat headerBytes + UInt32.ofNat address.value)).toNat +
+        (byteOffset part).toNat + 4 > store.mem.pages * 65536) := by
+    rw [baseToNat, ← memorySize]
+    dsimp [baseAddress]
+    omega
+  let concreteAddress := baseAddress + (byteOffset part).toNat
+  have concreteAddressInBounds : concreteAddress + 3 < heap.memory.size := by
+    dsimp [concreteAddress, baseAddress]
+    omega
+  have transported :=
+    memoryRelated.readUInt32_eq_read32 concreteAddressInBounds
+  have targetAddress :
+      UInt32.ofNat concreteAddress =
+        ResidentPrimitives.scale8Word index +
+          (UInt32.ofNat headerBytes + UInt32.ofNat address.value) +
+            byteOffset part := by
+    dsimp [concreteAddress]
+    rw [UInt32.ofNat_add, ← baseWord]
+    simp
+  have targetRead :
+      store.mem.read32
+        (ResidentPrimitives.scale8Word index +
+          (UInt32.ofNat headerBytes + UInt32.ofNat address.value) +
+            byteOffset part) = result := by
+    rw [← targetAddress]
+    rw [concreteRead] at transported
+    simpa [concreteAddress, baseAddress] using transported.symm
+  exact terminatesWith_naturalLimb_of_adapted adapted notImport found
+    selected targetInBounds targetRead
+
+/-- Compatibility specialization of the concrete accessor boundary at index
+zero, retained for the USize conversion proof. -/
 theorem terminatesWith_naturalLimbZero_of_concreteRead
     {host : Type} {sourceModule : Fir.Wasm.Module}
     {module : Wasm.Module} {env : Wasm.HostEnv host}
@@ -405,7 +688,7 @@ theorem terminatesWith_naturalLimbZero_of_concreteRead
       UInt32.toNat_ofNat_of_lt' addressLt]
     rw [Nat.mod_eq_of_lt baseLt]
   have selected : 1 &&& UInt32.ofNat address.value = 0 :=
-    ResidentUSize.checkedWord_selected address addressHeap
+    heapWord_selected address addressHeap
   have memorySize :
       heap.memory.size = store.mem.pages * 65536 := by
     simpa [wasmPageBytes] using memoryRelated.size_eq
@@ -554,60 +837,6 @@ theorem NaturalObjectRel.firstWords
     simp [target] at limbsFit
     omega
   exact ⟨low, high, payloadInBounds, lowRead, highRead, modulo⟩
-
-/-- Once validation of the same natural word is available, an ordinary
-heap-natural relation constructs the complete `CheckedNaturalCalls` witness.
-Thus the remaining validator proof is isolated from limb loading and modulo
-recombination. -/
-theorem NaturalObjectRel.checkedNaturalCalls_of_validate
-    {host : Type} {sourceModule : Fir.Wasm.Module}
-    {module : Wasm.Module} {env : Wasm.HostEnv host}
-    {lowTarget highTarget : Wasm.Function}
-    {validateIndex lowIndex highIndex : Nat}
-    {heap : MemoryState} {store : Wasm.Store host}
-    {address : Word32} {value : Nat} {header : Header}
-    (related : NaturalObjectRel heap address value header)
-    (large : maxTaggedPayload < value)
-    (memoryRelated : ResidentMemoryRel heap store.mem)
-    (lowAdapted : FirTalos.function sourceModule (sourceFunction .low) =
-      .ok lowTarget)
-    (lowNotImport : module.imports[lowIndex]? = none)
-    (lowFound : module.funcs[lowIndex - module.imports.length]? =
-      some lowTarget)
-    (highAdapted : FirTalos.function sourceModule (sourceFunction .high) =
-      .ok highTarget)
-    (highNotImport : module.imports[highIndex]? = none)
-    (highFound : module.funcs[highIndex - module.imports.length]? =
-      some highTarget)
-    (validateCall : ∀ tail,
-      Wasm.TerminatesWith env module validateIndex store
-        (.i32 (UInt32.ofNat address.value) :: tail)
-        (fun final values => final = store ∧ values = tail)) :
-    ∃ high low : UInt32,
-      ResidentUSize.CheckedNaturalCalls env module validateIndex highIndex
-        lowIndex store (UInt32.ofNat address.value) value high low := by
-  obtain ⟨low, high, payloadInBounds, lowRead, highRead, modulo⟩ :=
-    FirTalos.Concrete.ResidentBigNumeric.NaturalObjectRel.firstWords
-      related large
-  have addressHeap :=
-    (MemoryState.PrefixExtension.readLiveHeader_facts heap address header
-      related.headerRead).1
-  refine ⟨high, low, {
-    validate := validateCall
-    high := ?_
-    low := ?_
-    modulo := modulo }⟩
-  · intro tail
-    apply terminatesWith_naturalLimbZero_of_concreteRead highAdapted
-      highNotImport highFound memoryRelated addressHeap
-    · simpa [byteOffset] using payloadInBounds
-    · simpa [byteOffset] using highRead
-  · intro tail
-    apply terminatesWith_naturalLimbZero_of_concreteRead lowAdapted
-      lowNotImport lowFound memoryRelated addressHeap
-    · simp [byteOffset]
-      omega
-    · simpa [byteOffset] using lowRead
 
 end ResidentBigNumeric
 

@@ -879,6 +879,64 @@ theorem checkedResult_related (witness : RefinementWitness) (natural : Nat) :
 
 end ResidentUSize
 
+namespace ResidentBigNumeric
+
+/-- Once validation of the same natural word is available, an ordinary
+heap-natural relation constructs the complete USize conversion witness.  This
+consumer bridge deliberately lives above both the layout/accessor layer and
+`ResidentUSize.CheckedNaturalCalls`, keeping the lower BigNumeric module free
+of a reverse dependency on Nat and USize. -/
+theorem NaturalObjectRel.checkedNaturalCalls_of_validate
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {lowTarget highTarget : Wasm.Function}
+    {validateIndex lowIndex highIndex : Nat}
+    {heap : MemoryState} {store : Wasm.Store host}
+    {address : Word32} {value : Nat} {header : Header}
+    (related : NaturalObjectRel heap address value header)
+    (large : maxTaggedPayload < value)
+    (memoryRelated : ResidentMemoryRel heap store.mem)
+    (lowAdapted : FirTalos.function sourceModule (sourceFunction .low) =
+      .ok lowTarget)
+    (lowNotImport : module.imports[lowIndex]? = none)
+    (lowFound : module.funcs[lowIndex - module.imports.length]? =
+      some lowTarget)
+    (highAdapted : FirTalos.function sourceModule (sourceFunction .high) =
+      .ok highTarget)
+    (highNotImport : module.imports[highIndex]? = none)
+    (highFound : module.funcs[highIndex - module.imports.length]? =
+      some highTarget)
+    (validateCall : ∀ tail,
+      Wasm.TerminatesWith env module validateIndex store
+        (.i32 (UInt32.ofNat address.value) :: tail)
+        (fun final values => final = store ∧ values = tail)) :
+    ∃ high low : UInt32,
+      ResidentUSize.CheckedNaturalCalls env module validateIndex highIndex
+        lowIndex store (UInt32.ofNat address.value) value high low := by
+  obtain ⟨low, high, payloadInBounds, lowRead, highRead, modulo⟩ :=
+    NaturalObjectRel.firstWords related large
+  have addressHeap :=
+    (MemoryState.PrefixExtension.readLiveHeader_facts heap address header
+      related.headerRead).1
+  refine ⟨high, low, {
+    validate := validateCall
+    high := ?_
+    low := ?_
+    modulo := modulo }⟩
+  · intro tail
+    apply terminatesWith_naturalLimbZero_of_concreteRead highAdapted
+      highNotImport highFound memoryRelated addressHeap
+    · simpa [byteOffset] using payloadInBounds
+    · simpa [byteOffset] using highRead
+  · intro tail
+    apply terminatesWith_naturalLimbZero_of_concreteRead lowAdapted
+      lowNotImport lowFound memoryRelated addressHeap
+    · simp [byteOffset]
+      omega
+    · simpa [byteOffset] using lowRead
+
+end ResidentBigNumeric
+
 /-!
 # Resident USize-to-Nat refinement
 

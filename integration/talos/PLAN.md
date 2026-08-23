@@ -6532,6 +6532,25 @@ those calls and the two new allocator/writer call boundaries in the checked
 return closure can remove the remaining abstract helper-call premises without
 another arithmetic or layout proof.
 
+The arbitrary-index accessor boundary is now complete.  The emitter's three
+doublings have one shared proof-side spelling and weakest-precondition theorem
+in `ResidentPrimitives`; both the Nat writer and BigNumeric reader reuse that
+primitive instead of maintaining parallel arithmetic proofs.  Installed
+`naturalLow` and `naturalHigh` calls are proved fuel-free at every checked
+heap index, preserve the entire store and caller tail, and return the exact W6
+`readUInt32` result.  A single payload-extent premise both transports the read
+through `ResidentMemoryRel` and rules out wasm32 address wrapping.
+
+`ReadableLimbPrefix.naturalLimbCalls` is the writer-facing composition
+boundary.  It turns one extensional prefix fact, an in-prefix index, and the
+installed low/high helper descriptions into both exact accessor calls.  The
+old zero-index USize consumer remains available above this layer, while the
+BigNumeric accessor module is now Nat/USize-independent and part of the
+ordinary Talos dependency cone.  The next slice can therefore focus solely on
+the checked `Nat.add` producer: instantiate its operand reads through this
+boundary, then compose the already-proved allocator and `writeSumFrom` calls
+with the existing self-contained live-heap/typed-return closure.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
