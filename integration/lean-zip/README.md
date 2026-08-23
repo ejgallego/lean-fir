@@ -328,6 +328,20 @@ and the same flat 9,237,304-byte frontier. Host timing was strongly bimodal
 across separate processes and changed sign with co-resident module compilation
 order, so this slice makes no end-to-end speedup claim.
 
+`USize.ofNat` now has the same caller/cold-helper split as Lean's generic C
+runtime: a call-site scalar-tag test decodes the overwhelmingly common tagged
+Nat directly, while heap Nats still enter the checked resident helper. The
+resident linker carries each inline rule's target, replacement, and fresh-local
+requirements through persistent planning; it does not rely on Binaryen's broad
+inlining threshold. On the same 256-KiB seeded-random level-6 workload,
+`fir_ext_USize_ofNat` moves from 7.80% median Wasm-self share to no samples in
+two artifact-bound profiles. Sixteen order-balanced separate-process pairs move
+the median exported-entry time from 103.20 ms to 92.13 ms (-10.7%, 14/16 pairs
+improving). The complete module grows from 387,379 to 396,588 bytes (+2.38%);
+the global inliner probe needed a 1.07-MiB module to remove the same hot
+boundary. Exact compressed output and the flat 9,237,304-byte frontier remain
+unchanged.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not

@@ -1,4 +1,5 @@
 import Fir.Wasm.Emit.ResidentBigNumeric
+import Fir.Wasm.Emit.ResidentCallSite
 
 namespace Fir.Wasm.Emit.ResidentUSize
 
@@ -20,6 +21,7 @@ inductive LinkError where
   | reservedDeclaration (name : Name)
   | missingExternal (name : Name)
   | incompatibleExternal (name : Name)
+  | callSite (error : ResidentCallSite.Error)
   | incompatibleMemory
   | invalidOutput (error : SymbolicError)
   deriving Inhabited, Repr
@@ -57,6 +59,9 @@ private def usizeResultLocal : FVarId := ⟨`usizeResult⟩
 private def objectResultLocal : FVarId := ⟨`objectResult⟩
 private def valueParam : FVarId := ⟨`value⟩
 private def erasedParam : FVarId := ⟨`erased⟩
+private def inlineOfNatLocal : FVarId := ⟨`_fir_inline_USize_ofNat_value⟩
+private def inlineOfNatResultLocal : FVarId :=
+  ⟨`_fir_inline_USize_ofNat_result⟩
 
 private def retypeUInt8 : List Instruction := [
   .i32Const .uint32 0,
@@ -326,6 +331,32 @@ private partial def instructionUsesMemory : Instruction → Bool
 #guard immediateUSizeToNat.contains (.i32WrapI64 .tagged)
 #guard !immediateUSizeToNat.any instructionUsesMemory
 
+/--
+Upstream defines `lean_usize_of_nat` as a static-inline scalar test whose
+boxed-Nat arm calls the out-of-line runtime. The checked resident helper stays
+as that cold arm and as the semantic fallback for every non-immediate Nat.
+-/
+def callSiteRewrites : Array ResidentCallSite.Rewrite := #[{
+  target := .declaration `USize.ofNat
+  locals := #[(inlineOfNatLocal, .tobject),
+    (inlineOfNatResultLocal, .usize)]
+  body := [
+  .localSet inlineOfNatLocal,
+  .localGet inlineOfNatLocal,
+  .i32Const .uint32 1,
+  .i32And,
+  .ifElse
+    [.localGet inlineOfNatLocal,
+      .i32Const .uint32 1,
+      .i32ShrU,
+      .i64ExtendI32U .usize,
+      .localSet inlineOfNatResultLocal]
+    [.localGet inlineOfNatLocal,
+      .call (.declaration (externalName `USize.ofNat)),
+      .localSet inlineOfNatResultLocal],
+  .localGet inlineOfNatResultLocal]
+}]
+
 private partial def rewriteInstruction (present : Array Name) : Instruction → Instruction
   | .call (.declaration declaration) =>
       if present.contains declaration then
@@ -396,7 +427,13 @@ def internalizeAvailable (module : Module) (validate : Bool := true) :
   let selectedHelperNames := present.map externalName
   let selectedFunctions := functions.filter fun function =>
     selectedHelperNames.contains function.name
-  let linkedFunctions := module.functions.map fun function =>
+  let callerRewrites := if present.contains `USize.ofNat then
+      callSiteRewrites
+    else #[]
+  let callerRewritten ← module.functions.mapM fun function =>
+    ResidentCallSite.rewriteFunction callerRewrites function
+      |>.mapError LinkError.callSite
+  let linkedFunctions := callerRewritten.map fun function =>
     { function with body := function.body.map (rewriteInstruction present) }
   let functions := linkedFunctions ++ selectedFunctions
   let result : Module := {

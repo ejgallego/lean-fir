@@ -257,6 +257,7 @@ private def applySteps (validate : Bool) (steps : List Step) (module : Module) :
 
 private structure RewritePlan where
   callRewrites : Std.HashMap CallTarget (List Instruction) := {}
+  callSiteRewrites : Array ResidentCallSite.Rewrite := #[]
   deriving Inhabited
 
 mutual
@@ -277,9 +278,13 @@ mutual
     | instruction => [instruction]
 end
 
-private def rewriteFunctionBatch (plan : RewritePlan) (function : Function) : Function :=
-  if plan.callRewrites.isEmpty then function
-  else { function with body := rewriteInstructionsBatch plan function.body }
+private def rewriteFunctionBatch (plan : RewritePlan) (function : Function) :
+    Except Source.CompileError Function := do
+  let function ← ResidentCallSite.reserveLocals plan.callSiteRewrites function
+    |>.mapError fun error =>
+      .manifest s!"failed to reserve resident call-site locals: {repr error}"
+  if plan.callRewrites.isEmpty then return function
+  return { function with body := rewriteInstructionsBatch plan function.body }
 
 /-- Steps that inspect or replace existing function bodies cannot run against
 the skeleton/probe planning view. Materialize the persistent planning phase
@@ -294,6 +299,10 @@ private def rewriteProbeName : Name := `_fir_resident_link_rewrite_probe
 
 private def rewriteProbeLabel (index : Nat) : FVarId :=
   ⟨Name.mkSimple s!"_fir_resident_link_rewrite_probe_{index}"⟩
+
+private def callSiteRewritesForStep : Step → Array ResidentCallSite.Rewrite
+  | .usizeAvailable => ResidentUSize.callSiteRewrites
+  | _ => #[]
 
 /--
 Run a contiguous group of helper-family installers against one persistent
@@ -352,9 +361,14 @@ private def applyPersistentPlan (steps : Array Step) (module : Module) :
       throw (.manifest s!"resident plan {repr steps} changed a rewrite probe label")
     unless body == [.call target] do
       callRewrites := callRewrites.insert target body
-  let plan : RewritePlan := { callRewrites }
+  let callSiteRewrites := steps.flatMap callSiteRewritesForStep |>.filter fun rewrite =>
+    match rewrite.target with
+    | .declaration declaration => externalDeclarations.contains declaration
+    | .runtime _ => false
+  let plan : RewritePlan := { callRewrites, callSiteRewrites }
   let newFunctions := planned.functions.extract prefixSize planned.functions.size
-  let functions := module.functions.map (rewriteFunctionBatch plan) ++ newFunctions
+  let rewrittenFunctions ← module.functions.mapM (rewriteFunctionBatch plan)
+  let functions := rewrittenFunctions ++ newFunctions
   /- The persistent planning view orders the probe before generated helpers.
   Recollect once after replacing the probe with the real source cohort so the
   public runtime-operation order remains exactly the module's function order. -/
