@@ -8137,6 +8137,526 @@ def checkedMultiLimbResultProgram (allocateIndex writeSumIndex : Nat) :
   checkedMultiLimbProducerProgram allocateIndex writeSumIndex ++
     typedNaturalReturnProgram
 
+/-- The complete checked source fallback of public resident `Nat.add`.
+
+Naming the whole fragment gives the final proof one exact compiler boundary:
+validation and count/carry discovery are followed by the generated result
+count dispatch, and both branches end at the same typed Natural return. -/
+def checkedNatAddFallbackSource : List Fir.Wasm.Instruction :=
+  checkedNatAddPrefixSource
+      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[0]!.1
+      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[1]!.1
+      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[3]!.1
+      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[4]!.1
+      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[5]!.1
+      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[6]!.1
+      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[7]!.1
+      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[8]!.1
+      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[13]!.1 ++ [
+    .localGet Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[8]!.1,
+    .i32Const .uint32 1,
+    .i32Eq,
+    .ifElse
+      (checkedOneLimbProducerSource
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[0]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[1]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[3]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[4]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[9]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[10]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[11]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[12]!.1 ++
+        typedNaturalReturnSource)
+      (checkedMultiLimbProducerSource
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[0]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[1]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[3]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[4]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[7]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[8]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[0]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[13]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[14]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[15]!.1 ++
+        typedNaturalReturnSource)]
+
+/-- Exact Talos spelling of `checkedNatAddFallbackSource`. -/
+def checkedNatAddFallbackProgram
+    (validateNaturalIndex magnitudeCountIndex sumCarryIndex magnitudeLowIndex
+      magnitudeHighIndex naturalSumIndex allocateIndex writeSumIndex : Nat) :
+    Wasm.Program :=
+  checkedNatAddPrefixProgram validateNaturalIndex magnitudeCountIndex
+      sumCarryIndex ++
+    checkedResultDispatchProgram
+      (checkedOneLimbProducerProgram magnitudeLowIndex magnitudeHighIndex
+          naturalSumIndex ++ typedNaturalReturnProgram)
+      (checkedMultiLimbResultProgram allocateIndex writeSumIndex)
+
+/-- The checked fallback in the emitted public function is exactly the named
+source fragment; no existential prefix or producer remains at this boundary. -/
+theorem natAddFunction_checkedFallback_exact_shape :
+    Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.body =
+      Fir.Wasm.Emit.ResidentBigNumeric.withImmediateNaturalPair
+        Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[0]!.1
+        Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[1]!.1
+        (immediateAddSource
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[0]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[1]!.1)
+        checkedNatAddFallbackSource := by
+  rfl
+
+/-- Adapting the complete checked fallback preserves its named prefix,
+dispatch, and typed result producers exactly. -/
+theorem instructions_checkedNatAddFallbackSource
+    {sourceModule : Fir.Wasm.Module}
+    {validateNaturalIndex magnitudeCountIndex sumCarryIndex magnitudeLowIndex
+      magnitudeHighIndex naturalSumIndex allocateIndex writeSumIndex : Nat}
+    (validateNaturalFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.validateNaturalName) =
+        some validateNaturalIndex)
+    (magnitudeCountFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeCountName) =
+        some magnitudeCountIndex)
+    (sumCarryFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromName) =
+        some sumCarryIndex)
+    (magnitudeLowFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeLowName) =
+        some magnitudeLowIndex)
+    (magnitudeHighFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeHighName) =
+        some magnitudeHighIndex)
+    (naturalSumFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentNumeric.naturalSumName) =
+        some naturalSumIndex)
+    (allocateFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.allocateName) =
+        some allocateIndex)
+    (writeSumFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromName) =
+        some writeSumIndex) :
+    FirTalos.instructions sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction []
+      checkedNatAddFallbackSource =
+        .ok (checkedNatAddFallbackProgram validateNaturalIndex
+          magnitudeCountIndex sumCarryIndex magnitudeLowIndex
+          magnitudeHighIndex naturalSumIndex allocateIndex writeSumIndex) := by
+  have prefixAdapted := instructions_checkedNatAddPrefixSource
+    validateNaturalFound magnitudeCountFound sumCarryFound
+  have oneAdapted := instructions_checkedOneLimbProducerSource
+    magnitudeLowFound magnitudeHighFound naturalSumFound
+  have multiAdapted := instructions_checkedMultiLimbProducerSource
+    allocateFound writeSumFound
+  have returnAdapted := instructions_typedNaturalReturnSource
+    (sourceModule := sourceModule)
+    (sourceFunction := Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction)
+    (labels := [])
+  have oneResultAdapted : FirTalos.instructions sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction []
+      (checkedOneLimbProducerSource
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[0]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[1]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[3]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[4]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[9]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[10]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[11]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[12]!.1 ++
+        typedNaturalReturnSource) =
+      .ok (checkedOneLimbProducerProgram magnitudeLowIndex magnitudeHighIndex
+        naturalSumIndex ++ typedNaturalReturnProgram) := by
+    rw [FirTalos.Correctness.instructions_append, oneAdapted, returnAdapted]
+    rfl
+  have multiResultAdapted : FirTalos.instructions sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction []
+      (checkedMultiLimbProducerSource
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[0]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[1]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[3]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[4]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[7]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[8]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[0]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[13]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[14]!.1
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[15]!.1 ++
+        typedNaturalReturnSource) =
+      .ok (checkedMultiLimbProducerProgram allocateIndex writeSumIndex ++
+        typedNaturalReturnProgram) := by
+    rw [FirTalos.Correctness.instructions_append, multiAdapted, returnAdapted]
+    rfl
+  have resultCountFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.locals[8]!.1 =
+        some 10 := by decide
+  rw [checkedNatAddFallbackSource,
+    FirTalos.Correctness.instructions_append, prefixAdapted]
+  simp [checkedNatAddFallbackProgram, checkedResultDispatchProgram,
+    checkedMultiLimbResultProgram, FirTalos.instructions,
+    FirTalos.instruction, resultCountFound, oneResultAdapted,
+    multiResultAdapted, Bind.bind, Except.bind, pure, Except.pure]
+
+/-- One execution package for the common checked `Nat.add` prefix.
+
+The generated prefix performs seven local writes and five helper calls before
+either result producer runs.  Bundling that administrative evidence keeps the
+semantic one-limb and multi-limb proofs focused on their distinct allocation
+contracts, while retaining the exact trapping order in one shared theorem. -/
+structure CheckedNatAddPrefixExecution {host : Type}
+    (env : Wasm.HostEnv host) (module : Wasm.Module)
+    (store : Wasm.Store host) (initial : Wasm.Locals)
+    (validateNaturalIndex magnitudeCountIndex sumCarryIndex : Nat)
+    (leftWord rightWord leftCount rightCount carry : UInt32)
+    (tail : List Wasm.Value) where
+  afterLeftFlavor : Wasm.Locals
+  afterRightFlavor : Wasm.Locals
+  afterLeftCount : Wasm.Locals
+  afterRightCount : Wasm.Locals
+  afterCount : Wasm.Locals
+  afterCarry : Wasm.Locals
+  afterResultCount : Wasm.Locals
+  leftLocal : initial.get 0 = some (.i32 leftWord)
+  rightLocal : initial.get 1 = some (.i32 rightWord)
+  leftFlavorSet :
+    ({ initial with values := .i32 0 :: tail }).set? 5 (.i32 0) =
+      some afterLeftFlavor
+  rightFlavorSet :
+    ({ afterLeftFlavor with values := .i32 0 :: tail }).set? 6 (.i32 0) =
+      some afterRightFlavor
+  leftCountSet :
+    ({ afterRightFlavor with values := .i32 leftCount :: tail }).set? 7
+      (.i32 leftCount) = some afterLeftCount
+  rightCountSet :
+    ({ afterLeftCount with values := .i32 rightCount :: tail }).set? 8
+      (.i32 rightCount) = some afterRightCount
+  countSet :
+    ({ afterRightCount with values :=
+        (.i32 (checkedMaxCountWord leftCount rightCount) :: tail) }).set? 9
+      (.i32 (checkedMaxCountWord leftCount rightCount)) = some afterCount
+  carrySet :
+    ({ afterCount with values := .i32 carry :: tail }).set? 15
+      (.i32 carry) = some afterCarry
+  resultCountSet :
+    ({ afterCarry with values :=
+        (.i32 (carry + checkedMaxCountWord leftCount rightCount) :: tail) }).set?
+      10 (.i32 (carry + checkedMaxCountWord leftCount rightCount)) =
+        some afterResultCount
+  validateLeft : Wasm.TerminatesWith env module validateNaturalIndex store
+    (.i32 leftWord :: tail)
+    (fun final values => final = store ∧ values = tail)
+  validateRight : Wasm.TerminatesWith env module validateNaturalIndex store
+    (.i32 rightWord :: tail)
+    (fun final values => final = store ∧ values = tail)
+  leftCountRun : Wasm.TerminatesWith env module magnitudeCountIndex store
+    ([.i32 0, .i32 leftWord] ++ tail)
+    (fun final values => final = store ∧ values = .i32 leftCount :: tail)
+  rightCountRun : Wasm.TerminatesWith env module magnitudeCountIndex store
+    ([.i32 0, .i32 rightWord] ++ tail)
+    (fun final values => final = store ∧ values = .i32 rightCount :: tail)
+  sumCarryRun : Wasm.TerminatesWith env module sumCarryIndex store
+    ([.i32 0, .i32 (checkedMaxCountWord leftCount rightCount), .i32 0,
+        .i32 0, .i32 rightWord, .i32 0, .i32 leftWord] ++ tail)
+    (fun final values => final = store ∧ values = .i32 carry :: tail)
+
+section CheckedNatAddFallbackControl
+
+variable {host : Type} {env : Wasm.HostEnv host} {module : Wasm.Module}
+  {store : Wasm.Store host} {initial : Wasm.Locals}
+  {validateNaturalIndex magnitudeCountIndex sumCarryIndex : Nat}
+  {leftWord rightWord leftCount rightCount carry : UInt32}
+  {tail : List Wasm.Value}
+
+namespace CheckedNatAddPrefixExecution
+
+/-- Machine result count installed by a checked-prefix execution. -/
+def resultCount (_execution : CheckedNatAddPrefixExecution env module store
+    initial validateNaturalIndex magnitudeCountIndex sumCarryIndex leftWord
+    rightWord leftCount rightCount carry tail) : UInt32 :=
+  carry + checkedMaxCountWord leftCount rightCount
+
+/-- The packaged final local state exposes the exact result count consumed by
+the generated dispatch. -/
+theorem resultCountLocal
+    (execution : CheckedNatAddPrefixExecution env module store initial
+      validateNaturalIndex magnitudeCountIndex sumCarryIndex leftWord
+      rightWord leftCount rightCount carry tail) :
+    execution.afterResultCount.get 10 =
+      some (.i32 execution.resultCount) := by
+  exact (FirTalos.Correctness.localUpdate_of_set?
+    execution.resultCountSet).1
+
+/-- Locals untouched by all seven prefix writes are preserved in the final
+dispatch state. -/
+theorem localEq
+    (execution : CheckedNatAddPrefixExecution env module store initial
+      validateNaturalIndex magnitudeCountIndex sumCarryIndex leftWord
+      rightWord leftCount rightCount carry tail)
+    {index : Nat} (ne5 : index ≠ 5) (ne6 : index ≠ 6)
+    (ne7 : index ≠ 7) (ne8 : index ≠ 8) (ne9 : index ≠ 9)
+    (ne15 : index ≠ 15) (ne10 : index ≠ 10) :
+    execution.afterResultCount.get index = initial.get index := by
+  have leftFlavorUpdate := FirTalos.Correctness.localUpdate_of_set?
+    execution.leftFlavorSet
+  have rightFlavorUpdate := FirTalos.Correctness.localUpdate_of_set?
+    execution.rightFlavorSet
+  have leftCountUpdate := FirTalos.Correctness.localUpdate_of_set?
+    execution.leftCountSet
+  have rightCountUpdate := FirTalos.Correctness.localUpdate_of_set?
+    execution.rightCountSet
+  have countUpdate := FirTalos.Correctness.localUpdate_of_set?
+    execution.countSet
+  have carryUpdate := FirTalos.Correctness.localUpdate_of_set?
+    execution.carrySet
+  have resultCountUpdate := FirTalos.Correctness.localUpdate_of_set?
+    execution.resultCountSet
+  calc
+    _ = execution.afterCarry.get index := resultCountUpdate.2 ne10
+    _ = execution.afterCount.get index := carryUpdate.2 ne15
+    _ = execution.afterRightCount.get index := countUpdate.2 ne9
+    _ = execution.afterLeftCount.get index := rightCountUpdate.2 ne8
+    _ = execution.afterRightFlavor.get index := leftCountUpdate.2 ne7
+    _ = execution.afterLeftFlavor.get index := rightFlavorUpdate.2 ne6
+    _ = initial.get index := leftFlavorUpdate.2 ne5
+
+theorem finalLeftLocal
+    (execution : CheckedNatAddPrefixExecution env module store initial
+      validateNaturalIndex magnitudeCountIndex sumCarryIndex leftWord
+      rightWord leftCount rightCount carry tail) :
+    execution.afterResultCount.get 0 = some (.i32 leftWord) := by
+  rw [execution.localEq (by decide) (by decide) (by decide) (by decide)
+    (by decide) (by decide) (by decide)]
+  exact execution.leftLocal
+
+theorem finalRightLocal
+    (execution : CheckedNatAddPrefixExecution env module store initial
+      validateNaturalIndex magnitudeCountIndex sumCarryIndex leftWord
+      rightWord leftCount rightCount carry tail) :
+    execution.afterResultCount.get 1 = some (.i32 rightWord) := by
+  rw [execution.localEq (by decide) (by decide) (by decide) (by decide)
+    (by decide) (by decide) (by decide)]
+  exact execution.rightLocal
+
+theorem leftFlavorLocal
+    (execution : CheckedNatAddPrefixExecution env module store initial
+      validateNaturalIndex magnitudeCountIndex sumCarryIndex leftWord
+      rightWord leftCount rightCount carry tail) :
+    execution.afterResultCount.get 5 = some (.i32 0) := by
+  have rightFlavorUpdate := FirTalos.Correctness.localUpdate_of_set?
+    execution.rightFlavorSet
+  have leftCountUpdate := FirTalos.Correctness.localUpdate_of_set?
+    execution.leftCountSet
+  have rightCountUpdate := FirTalos.Correctness.localUpdate_of_set?
+    execution.rightCountSet
+  have countUpdate := FirTalos.Correctness.localUpdate_of_set?
+    execution.countSet
+  have carryUpdate := FirTalos.Correctness.localUpdate_of_set?
+    execution.carrySet
+  have resultCountUpdate := FirTalos.Correctness.localUpdate_of_set?
+    execution.resultCountSet
+  calc
+    _ = execution.afterCarry.get 5 := resultCountUpdate.2 (by decide)
+    _ = execution.afterCount.get 5 := carryUpdate.2 (by decide)
+    _ = execution.afterRightCount.get 5 := countUpdate.2 (by decide)
+    _ = execution.afterLeftCount.get 5 := rightCountUpdate.2 (by decide)
+    _ = execution.afterRightFlavor.get 5 := leftCountUpdate.2 (by decide)
+    _ = execution.afterLeftFlavor.get 5 := rightFlavorUpdate.2 (by decide)
+    _ = some (.i32 0) :=
+      (FirTalos.Correctness.localUpdate_of_set?
+        execution.leftFlavorSet).1
+
+theorem rightFlavorLocal
+    (execution : CheckedNatAddPrefixExecution env module store initial
+      validateNaturalIndex magnitudeCountIndex sumCarryIndex leftWord
+      rightWord leftCount rightCount carry tail) :
+    execution.afterResultCount.get 6 = some (.i32 0) := by
+  have leftCountUpdate := FirTalos.Correctness.localUpdate_of_set?
+    execution.leftCountSet
+  have rightCountUpdate := FirTalos.Correctness.localUpdate_of_set?
+    execution.rightCountSet
+  have countUpdate := FirTalos.Correctness.localUpdate_of_set?
+    execution.countSet
+  have carryUpdate := FirTalos.Correctness.localUpdate_of_set?
+    execution.carrySet
+  have resultCountUpdate := FirTalos.Correctness.localUpdate_of_set?
+    execution.resultCountSet
+  calc
+    _ = execution.afterCarry.get 6 := resultCountUpdate.2 (by decide)
+    _ = execution.afterCount.get 6 := carryUpdate.2 (by decide)
+    _ = execution.afterRightCount.get 6 := countUpdate.2 (by decide)
+    _ = execution.afterLeftCount.get 6 := rightCountUpdate.2 (by decide)
+    _ = execution.afterRightFlavor.get 6 := leftCountUpdate.2 (by decide)
+    _ = some (.i32 0) :=
+      (FirTalos.Correctness.localUpdate_of_set?
+        execution.rightFlavorSet).1
+
+theorem countLocal
+    (execution : CheckedNatAddPrefixExecution env module store initial
+      validateNaturalIndex magnitudeCountIndex sumCarryIndex leftWord
+      rightWord leftCount rightCount carry tail) :
+    execution.afterResultCount.get 9 =
+      some (.i32 (checkedMaxCountWord leftCount rightCount)) := by
+  have carryUpdate := FirTalos.Correctness.localUpdate_of_set?
+    execution.carrySet
+  have resultCountUpdate := FirTalos.Correctness.localUpdate_of_set?
+    execution.resultCountSet
+  calc
+    _ = execution.afterCarry.get 9 := resultCountUpdate.2 (by decide)
+    _ = execution.afterCount.get 9 := carryUpdate.2 (by decide)
+    _ = some (.i32 (checkedMaxCountWord leftCount rightCount)) :=
+      (FirTalos.Correctness.localUpdate_of_set? execution.countSet).1
+
+theorem carryLocal
+    (execution : CheckedNatAddPrefixExecution env module store initial
+      validateNaturalIndex magnitudeCountIndex sumCarryIndex leftWord
+      rightWord leftCount rightCount carry tail) :
+    execution.afterResultCount.get 15 = some (.i32 carry) := by
+  calc
+    _ = execution.afterCarry.get 15 :=
+      (FirTalos.Correctness.localUpdate_of_set?
+        execution.resultCountSet).2 (by decide)
+    _ = some (.i32 carry) :=
+      (FirTalos.Correctness.localUpdate_of_set? execution.carrySet).1
+
+/-- Prefix writes preserve the local-frame extent, hence every previously
+valid scratch index remains valid for the selected result producer. -/
+theorem validIndex
+    (execution : CheckedNatAddPrefixExecution env module store initial
+      validateNaturalIndex magnitudeCountIndex sumCarryIndex leftWord
+      rightWord leftCount rightCount carry tail)
+    {index : Nat} (valid : initial.validIndex index) :
+    execution.afterResultCount.validIndex index := by
+  have preserve {beforeLocals afterLocals : Wasm.Locals}
+      {writtenIndex : Nat} {value : Wasm.Value}
+      (updated : beforeLocals.set? writtenIndex value = some afterLocals)
+      (beforeValid : beforeLocals.validIndex index) :
+      afterLocals.validIndex index := by
+    have lengths := FirTalos.Correctness.locals_lengths_of_set? updated
+    unfold Wasm.Locals.validIndex at beforeValid ⊢
+    omega
+  have leftInputValid :
+      ({ initial with values := .i32 0 :: tail } : Wasm.Locals).validIndex
+        index := by
+    simpa [Wasm.Locals.validIndex] using valid
+  have afterLeftValid := preserve execution.leftFlavorSet leftInputValid
+  have rightInputValid :
+      ({ execution.afterLeftFlavor with values := .i32 0 :: tail } :
+        Wasm.Locals).validIndex index := by
+    simpa [Wasm.Locals.validIndex] using afterLeftValid
+  have afterRightValid := preserve execution.rightFlavorSet rightInputValid
+  have leftCountInputValid :
+      ({ execution.afterRightFlavor with values := .i32 leftCount :: tail } :
+        Wasm.Locals).validIndex index := by
+    simpa [Wasm.Locals.validIndex] using afterRightValid
+  have afterLeftCountValid := preserve execution.leftCountSet leftCountInputValid
+  have rightCountInputValid :
+      ({ execution.afterLeftCount with values := .i32 rightCount :: tail } :
+        Wasm.Locals).validIndex index := by
+    simpa [Wasm.Locals.validIndex] using afterLeftCountValid
+  have afterRightCountValid :=
+    preserve execution.rightCountSet rightCountInputValid
+  have countInputValid :
+      ({ execution.afterRightCount with values :=
+        (.i32 (checkedMaxCountWord leftCount rightCount) :: tail) } :
+        Wasm.Locals).validIndex index := by
+    simpa [Wasm.Locals.validIndex] using afterRightCountValid
+  have afterCountValid := preserve execution.countSet countInputValid
+  have carryInputValid :
+      ({ execution.afterCount with values := .i32 carry :: tail } :
+        Wasm.Locals).validIndex index := by
+    simpa [Wasm.Locals.validIndex] using afterCountValid
+  have afterCarryValid := preserve execution.carrySet carryInputValid
+  have resultCountInputValid :
+      ({ execution.afterCarry with values :=
+        (.i32 execution.resultCount :: tail) } : Wasm.Locals).validIndex
+          index := by
+    simpa [Wasm.Locals.validIndex] using afterCarryValid
+  exact preserve execution.resultCountSet resultCountInputValid
+
+/-- A packaged prefix execution composes with any continuation beginning in
+its exact final local state. -/
+theorem wp
+    (execution : CheckedNatAddPrefixExecution env module store initial
+      validateNaturalIndex magnitudeCountIndex sumCarryIndex leftWord
+      rightWord leftCount rightCount carry tail)
+    {Q : Wasm.Assertion host} {rest : Wasm.Program}
+    (continued : Wasm.wp module rest Q store
+      { execution.afterResultCount with values := tail } env) :
+    Wasm.wp module
+      (checkedNatAddPrefixProgram validateNaturalIndex magnitudeCountIndex
+        sumCarryIndex ++ rest) Q store
+      { initial with values := tail } env := by
+  exact wp_checkedNatAddPrefixProgram execution.leftLocal execution.rightLocal
+    execution.leftFlavorSet execution.rightFlavorSet execution.leftCountSet
+    execution.rightCountSet execution.countSet execution.carrySet
+    execution.resultCountSet execution.validateLeft execution.validateRight
+    execution.leftCountRun execution.rightCountRun execution.sumCarryRun
+    continued
+
+end CheckedNatAddPrefixExecution
+
+/-- Exact checked fallback composition when the computed result has one limb. -/
+theorem wp_checkedNatAddFallbackProgram_one
+    (execution : CheckedNatAddPrefixExecution env module store initial
+      validateNaturalIndex magnitudeCountIndex sumCarryIndex leftWord
+      rightWord leftCount rightCount carry tail)
+    {magnitudeLowIndex magnitudeHighIndex naturalSumIndex allocateIndex
+      writeSumIndex : Nat}
+    {resultStore : Wasm.Store host} {resultWitness : RefinementWitness}
+    {resultWord : Word32}
+    {resultReference : Fir.LeanIR.Impure.ObjectRef}
+    (resultCountOne : execution.resultCount = 1)
+    (oneCorrect : Wasm.wp module
+      (checkedOneLimbProducerProgram magnitudeLowIndex magnitudeHighIndex
+        naturalSumIndex ++ typedNaturalReturnProgram)
+      (TypedNaturalReturnPost resultWitness resultWord resultReference
+        resultStore tail)
+      store { execution.afterResultCount with values := tail } env) :
+    Wasm.wp module
+      (checkedNatAddFallbackProgram validateNaturalIndex magnitudeCountIndex
+        sumCarryIndex magnitudeLowIndex magnitudeHighIndex naturalSumIndex
+        allocateIndex writeSumIndex)
+      (TypedNaturalReturnPost resultWitness resultWord resultReference
+        resultStore tail)
+      store { initial with values := tail } env := by
+  unfold checkedNatAddFallbackProgram
+  apply execution.wp
+  apply wp_checkedResultDispatchProgram_one
+  · simpa [resultCountOne] using execution.resultCountLocal
+  · exact oneCorrect
+
+/-- Exact checked fallback composition when the computed result requires the
+allocation/writer branch. -/
+theorem wp_checkedNatAddFallbackProgram_multi
+    (execution : CheckedNatAddPrefixExecution env module store initial
+      validateNaturalIndex magnitudeCountIndex sumCarryIndex leftWord
+      rightWord leftCount rightCount carry tail)
+    {magnitudeLowIndex magnitudeHighIndex naturalSumIndex allocateIndex
+      writeSumIndex : Nat}
+    {resultStore : Wasm.Store host} {resultWitness : RefinementWitness}
+    {resultWord : Word32}
+    {resultReference : Fir.LeanIR.Impure.ObjectRef}
+    (resultCountNotOne : execution.resultCount ≠ 1)
+    (multiCorrect : Wasm.wp module
+      (checkedMultiLimbResultProgram allocateIndex writeSumIndex)
+      (TypedNaturalReturnPost resultWitness resultWord resultReference
+        resultStore tail)
+      store { execution.afterResultCount with values := tail } env) :
+    Wasm.wp module
+      (checkedNatAddFallbackProgram validateNaturalIndex magnitudeCountIndex
+        sumCarryIndex magnitudeLowIndex magnitudeHighIndex naturalSumIndex
+        allocateIndex writeSumIndex)
+      (TypedNaturalReturnPost resultWitness resultWord resultReference
+        resultStore tail)
+      store { initial with values := tail } env := by
+  unfold checkedNatAddFallbackProgram
+  apply execution.wp
+  apply wp_checkedResultDispatchProgram_multi execution.resultCountLocal
+    resultCountNotOne
+  exact multiCorrect
+
+end CheckedNatAddFallbackControl
+
 /-- Execution of the checked multi-limb producer when the precomputed carry
 is zero.
 
@@ -9161,6 +9681,110 @@ theorem NaturalSumWriterInstallation.wp_checkedMultiLimbResultProgram_of_admissi
       (by simpa [paddedNaturalLimbWords, paddedLimbViewWords] using canonical)
       heapBacked)
 
+/-- Admission-driven semantic closure of the exact checked fallback's
+multi-limb case.
+
+The common prefix is supplied once as `CheckedNatAddPrefixExecution`; its
+preservation lemmas discharge every generated local consumed by the resident
+allocator/writer proof.  The only scalar bridges left explicit are that the
+selected count is the canonical maximum, the carry is the mathematical carry,
+and the machine result count denotes their non-wrapping sum. -/
+theorem NaturalSumWriterInstallation.wp_checkedNatAddFallbackProgram_multi_of_admissions
+    {host : Type} {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {env : Wasm.HostEnv host}
+    {magnitude : NaturalMagnitudeInstallation sourceModule module}
+    (writer : NaturalSumWriterInstallation sourceModule module magnitude)
+    (allocator : NaturalObjectAllocatorInstallation sourceModule module)
+    {store : Wasm.Store host} {before allocated : MemoryState}
+    {initial : Wasm.Locals}
+    {validateNaturalIndex magnitudeCountIndex sumCarryIndex magnitudeLowIndex
+      magnitudeHighIndex naturalSumIndex : Nat}
+    {left right result : Word32} {leftValue rightValue : Nat}
+    {leftHeader rightHeader : Header}
+    {leftCount rightCount count carry : UInt32}
+    {witness : RefinementWitness}
+    {runtime : Fir.LeanIR.Impure.RuntimeState} {tail : List Wasm.Value}
+    (execution : CheckedNatAddPrefixExecution env module store initial
+      validateNaturalIndex magnitudeCountIndex sumCarryIndex
+      (UInt32.ofNat left.value) (UInt32.ofNat right.value)
+      leftCount rightCount carry tail)
+    (leftRelated : NaturalObjectRel before left leftValue leftHeader)
+    (leftAdmission : NaturalValidatorAdmission before left leftValue leftHeader)
+    (rightRelated : NaturalObjectRel before right rightValue rightHeader)
+    (rightAdmission : NaturalValidatorAdmission before right rightValue
+      rightHeader)
+    (valid : before.FrontierInvariant)
+    (allocatorRelated : ResidentAllocatorRel before store
+      allocator.frontierIndex)
+    (countEq : checkedMaxCountWord leftCount rightCount = count)
+    (exactCount : count.toNat = max (naturalLimbs leftValue).length
+      (naturalLimbs rightValue).length)
+    (carryEq : carry =
+      (addLimbWords
+        (paddedNaturalLimbWords count.toNat leftValue)
+        (paddedNaturalLimbWords count.toNat rightValue) 0).2)
+    (resultCountEq : execution.resultCount = UInt32.ofNat (count.toNat +
+      (addLimbWords
+        (paddedNaturalLimbWords count.toNat leftValue)
+        (paddedNaturalLimbWords count.toNat rightValue) 0).2.toNat))
+    (resultCountNotOne : execution.resultCount ≠ 1)
+    (resultCountFits : count.toNat +
+      (addLimbWords
+        (paddedNaturalLimbWords count.toNat leftValue)
+        (paddedNaturalLimbWords count.toNat rightValue) 0).2.toNat < 536870908)
+    (allocation : before.allocateObject .natural
+      (target.semanticSlotBytes * (count.toNat +
+        (addLimbWords
+          (paddedNaturalLimbWords count.toNat leftValue)
+          (paddedNaturalLimbWords count.toNat rightValue) 0).2.toNat)) false
+      bigNaturalMarker (UInt32.ofNat (count.toNat +
+        (addLimbWords
+          (paddedNaturalLimbWords count.toNat leftValue)
+          (paddedNaturalLimbWords count.toNat rightValue) 0).2.toNat)) 0 0 =
+        .ok (allocated, result))
+    (strictEnd : allocated.heapCursor < wordModulus)
+    (withinCap : (allocated.heapCursor - 1) / wasmPageBytes + 1 ≤
+      store.memoryCap module 0)
+    (heapRelated : LiveHeapRel before witness runtime)
+    (scratchValid : initial.validIndex 17) :
+    let leftWords := paddedNaturalLimbWords count.toNat leftValue
+    let rightWords := paddedNaturalLimbWords count.toNat rightValue
+    let sum := addLimbWords leftWords rightWords 0
+    let nextWitness := witness.bindNatural runtime.nextLocation result
+      (leftValue + rightValue)
+    ∃ writerStore heap,
+      witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
+      LiveHeapRel heap nextWitness
+        (semanticNaturalResult runtime (leftValue + rightValue)) ∧
+      ResidentMemoryRel heap
+        (completedAddStore writerStore (UInt32.ofNat result.value)
+          count.toNat sum.2).mem ∧
+      Wasm.wp module
+        (checkedNatAddFallbackProgram validateNaturalIndex magnitudeCountIndex
+          sumCarryIndex magnitudeLowIndex magnitudeHighIndex naturalSumIndex
+          allocator.objectIndex writer.index)
+        (TypedNaturalReturnPost nextWitness result
+          (.heap runtime.nextLocation)
+          (completedAddStore writerStore (UInt32.ofNat result.value)
+            count.toNat sum.2) tail)
+        store { initial with values := tail } env := by
+  obtain ⟨writerStore, heap, extension, closurePersistence, heapRelation,
+      memoryRelation, multiCorrect⟩ :=
+    writer.wp_checkedMultiLimbResultProgram_of_admissions allocator
+      leftRelated leftAdmission rightRelated rightAdmission valid
+      allocatorRelated exactCount resultCountFits allocation strictEnd
+      withinCap heapRelated (execution.validIndex scratchValid)
+      execution.finalLeftLocal execution.finalRightLocal
+      execution.leftFlavorLocal execution.rightFlavorLocal
+      (by simpa [countEq] using execution.countLocal)
+      (by simpa [resultCountEq] using execution.resultCountLocal)
+      (by simpa [carryEq] using execution.carryLocal)
+  exact ⟨writerStore, heap, extension, closurePersistence, heapRelation,
+    memoryRelation,
+    wp_checkedNatAddFallbackProgram_multi execution resultCountNotOne
+      multiCorrect⟩
+
 /-- Complete checked one-limb result path, including the typed return suffix. -/
 def checkedOneLimbResultProgram (magnitudeLowIndex magnitudeHighIndex
     naturalSumIndex : Nat) : Wasm.Program :=
@@ -9521,6 +10145,119 @@ theorem wp_checkedOneLimbResult_of_concreteAllocation
     leftLowRun leftHighRun rightLowRun rightHighRun naturalSumRun
   exact valueRelated
 
+/-- Concrete-allocation closure of the exact checked fallback's one-limb
+case.  The packaged common prefix supplies the preserved operand locals and
+the generated zero flavors; this theorem only exposes the four magnitude
+observations and the existing concrete `naturalSum` allocation contract. -/
+theorem wp_checkedNatAddFallbackProgram_one_of_concreteAllocation
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {targetNaturalSum : Wasm.Function}
+    {validateNaturalIndex magnitudeCountIndex sumCarryIndex magnitudeLowIndex
+      magnitudeHighIndex naturalSumIndex makeNaturalIndex allocateIndex
+      writeSumIndex : Nat}
+    {store resultStore : Wasm.Store host} {initial : Wasm.Locals}
+    {leftWord rightWord leftCount rightCount carry : UInt32}
+    {afterLeftLow afterLeftHigh afterRightLow afterRightHigh : Wasm.Locals}
+    {leftLow leftHigh rightLow rightHigh : UInt32}
+    {before after : MemoryState} {witness : RefinementWitness}
+    {runtime : Fir.LeanIR.Impure.RuntimeState}
+    {value : Nat} {address : Word32} {tail : List Wasm.Value}
+    (execution : CheckedNatAddPrefixExecution env module store initial
+      validateNaturalIndex magnitudeCountIndex sumCarryIndex leftWord
+      rightWord leftCount rightCount carry tail)
+    (resultCountOne : execution.resultCount = 1)
+    (leftLowSet :
+      ({ execution.afterResultCount with values := .i32 leftLow :: tail }).set?
+        11 (.i32 leftLow) = some afterLeftLow)
+    (leftHighSet :
+      ({ afterLeftLow with values := .i32 leftHigh :: tail }).set? 12
+        (.i32 leftHigh) = some afterLeftHigh)
+    (rightLowSet :
+      ({ afterLeftHigh with values := .i32 rightLow :: tail }).set? 13
+        (.i32 rightLow) = some afterRightLow)
+    (rightHighSet :
+      ({ afterRightLow with values := .i32 rightHigh :: tail }).set? 14
+        (.i32 rightHigh) = some afterRightHigh)
+    (leftLowRun : ∀ callTail,
+      Wasm.TerminatesWith env module magnitudeLowIndex store
+        ([.i32 0, .i32 0, .i32 leftWord] ++ callTail)
+        (fun final values =>
+          final = store ∧ values = .i32 leftLow :: callTail))
+    (leftHighRun : ∀ callTail,
+      Wasm.TerminatesWith env module magnitudeHighIndex store
+        ([.i32 0, .i32 0, .i32 leftWord] ++ callTail)
+        (fun final values =>
+          final = store ∧ values = .i32 leftHigh :: callTail))
+    (rightLowRun : ∀ callTail,
+      Wasm.TerminatesWith env module magnitudeLowIndex store
+        ([.i32 0, .i32 0, .i32 rightWord] ++ callTail)
+        (fun final values =>
+          final = store ∧ values = .i32 rightLow :: callTail))
+    (rightHighRun : ∀ callTail,
+      Wasm.TerminatesWith env module magnitudeHighIndex store
+        ([.i32 0, .i32 0, .i32 rightWord] ++ callTail)
+        (fun final values =>
+          final = store ∧ values = .i32 rightHigh :: callTail))
+    (naturalSumAdapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentNumeric.naturalSumFunction =
+        .ok targetNaturalSum)
+    (makeNaturalFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentNumeric.makeNaturalName) =
+        some makeNaturalIndex)
+    (naturalSumNotImport : module.imports[naturalSumIndex]? = none)
+    (naturalSumFound :
+      module.funcs[naturalSumIndex - module.imports.length]? =
+        some targetNaturalSum)
+    (highBaseNoOverflow :
+      ¬ unsignedSumHighBase leftHigh rightHigh < leftHigh)
+    (highCarryNoOverflow :
+      ¬ unsignedSumHigh leftLow leftHigh rightLow rightHigh <
+        unsignedSumCarry leftLow rightLow)
+    (valueEq : value = naturalWordsValue
+      (unsignedSumLow leftLow rightLow)
+      (unsignedSumHigh leftLow leftHigh rightLow rightHigh))
+    (heapRelated : LiveHeapRel before witness runtime)
+    (allocated : allocateNatural before value = .ok (after, address))
+    (memoryRelated : ResidentMemoryRel after resultStore.mem)
+    (makeNaturalRun : Wasm.TerminatesWith env module makeNaturalIndex store
+      [.i32 (unsignedSumHigh leftLow leftHigh rightLow rightHigh),
+        .i32 (unsignedSumLow leftLow rightLow)]
+      (fun final values =>
+        final = resultStore ∧
+          values = [.i32 (UInt32.ofNat address.value)])) :
+    ∃ nextWitness reference,
+      witness.Extends nextWitness ∧
+        ClosureAllocationsPersistent witness nextWitness ∧
+        LiveHeapRel after nextWitness
+          (Fir.LeanIR.Impure.literal runtime (.nat value)).1 ∧
+        ResidentMemoryRel after resultStore.mem ∧
+        (Fir.LeanIR.Impure.literal runtime (.nat value)).2 =
+          .object reference ∧
+        value = naturalWordsValue
+          (unsignedSumLow leftLow rightLow)
+          (unsignedSumHigh leftLow leftHigh rightLow rightHigh) ∧
+        Wasm.wp module
+          (checkedNatAddFallbackProgram validateNaturalIndex magnitudeCountIndex
+            sumCarryIndex magnitudeLowIndex magnitudeHighIndex naturalSumIndex
+            allocateIndex writeSumIndex)
+          (TypedNaturalReturnPost nextWitness address reference resultStore
+            tail)
+          store { initial with values := tail } env := by
+  obtain ⟨nextWitness, reference, extension, closurePersistence, heapRelation,
+      memoryRelation, referenceEq, wordsEq, oneCorrect⟩ :=
+    wp_checkedOneLimbResult_of_concreteAllocation
+      execution.finalLeftLocal execution.finalRightLocal
+      execution.leftFlavorLocal execution.rightFlavorLocal leftLowSet
+      leftHighSet rightLowSet rightHighSet leftLowRun leftHighRun rightLowRun
+      rightHighRun naturalSumAdapted makeNaturalFound naturalSumNotImport
+      naturalSumFound highBaseNoOverflow highCarryNoOverflow valueEq
+      heapRelated allocated memoryRelated makeNaturalRun
+  exact ⟨nextWitness, reference, extension, closurePersistence, heapRelation,
+    memoryRelation, referenceEq, wordsEq,
+    wp_checkedNatAddFallbackProgram_one execution resultCountOne
+      (by simpa [checkedOneLimbResultProgram] using oneCorrect)⟩
+
 /-- Source suffix of the checked multi-limb branch after allocation and limb
 writing have established the result in `raw`. -/
 def checkedAllocatedNaturalReturnSource (raw : Lean.FVarId) :
@@ -9874,6 +10611,98 @@ theorem adaptedNatAddFunction_body_of_shape
   exact adaptedFunction_body_of_exact adapted
     (instructions_natAddFunctionBody_of_shape shape naturalSumFound
       fallbackAdapted)
+
+/-- Exact adaptation of the whole public resident `Nat.add` body.  All helper
+indices used by the generated checked fallback are resolved explicitly, so
+the resulting Talos body has no opaque source or target fragment. -/
+theorem instructions_natAddFunctionBody_exact
+    {sourceModule : Fir.Wasm.Module}
+    {validateNaturalIndex magnitudeCountIndex sumCarryIndex magnitudeLowIndex
+      magnitudeHighIndex naturalSumIndex allocateIndex writeSumIndex : Nat}
+    (validateNaturalFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.validateNaturalName) =
+        some validateNaturalIndex)
+    (magnitudeCountFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeCountName) =
+        some magnitudeCountIndex)
+    (sumCarryFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromName) =
+        some sumCarryIndex)
+    (magnitudeLowFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeLowName) =
+        some magnitudeLowIndex)
+    (magnitudeHighFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeHighName) =
+        some magnitudeHighIndex)
+    (naturalSumFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentNumeric.naturalSumName) =
+        some naturalSumIndex)
+    (allocateFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.allocateName) =
+        some allocateIndex)
+    (writeSumFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromName) =
+        some writeSumIndex) :
+    FirTalos.instructions sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction []
+      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.body =
+        .ok (ResidentPrimitives.immediateNaturalPairDispatch 0 1
+          (immediateAddProgram naturalSumIndex)
+          (checkedNatAddFallbackProgram validateNaturalIndex
+            magnitudeCountIndex sumCarryIndex magnitudeLowIndex
+            magnitudeHighIndex naturalSumIndex allocateIndex
+            writeSumIndex)) := by
+  apply instructions_natAddFunctionBody_of_shape
+    natAddFunction_checkedFallback_exact_shape naturalSumFound
+  exact instructions_checkedNatAddFallbackSource validateNaturalFound
+    magnitudeCountFound sumCarryFound magnitudeLowFound magnitudeHighFound
+    naturalSumFound allocateFound writeSumFound
+
+/-- Successful adaptation installs the exact proved public `Nat.add` body,
+up to the adapter's standard function-terminal suffix. -/
+theorem adaptedNatAddFunction_body_exact
+    {sourceModule : Fir.Wasm.Module} {targetFunction : Wasm.Function}
+    {validateNaturalIndex magnitudeCountIndex sumCarryIndex magnitudeLowIndex
+      magnitudeHighIndex naturalSumIndex allocateIndex writeSumIndex : Nat}
+    (adapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction = .ok targetFunction)
+    (validateNaturalFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.validateNaturalName) =
+        some validateNaturalIndex)
+    (magnitudeCountFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeCountName) =
+        some magnitudeCountIndex)
+    (sumCarryFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromName) =
+        some sumCarryIndex)
+    (magnitudeLowFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeLowName) =
+        some magnitudeLowIndex)
+    (magnitudeHighFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeHighName) =
+        some magnitudeHighIndex)
+    (naturalSumFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentNumeric.naturalSumName) =
+        some naturalSumIndex)
+    (allocateFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.allocateName) =
+        some allocateIndex)
+    (writeSumFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromName) =
+        some writeSumIndex) :
+    targetFunction.body =
+      ResidentPrimitives.immediateNaturalPairDispatch 0 1
+          (immediateAddProgram naturalSumIndex)
+          (checkedNatAddFallbackProgram validateNaturalIndex
+            magnitudeCountIndex sumCarryIndex magnitudeLowIndex
+            magnitudeHighIndex naturalSumIndex allocateIndex
+            writeSumIndex) ++
+        FirTalos.functionTerminal sourceModule
+          Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction := by
+  exact adaptedFunction_body_of_exact adapted
+    (instructions_natAddFunctionBody_exact validateNaturalFound
+      magnitudeCountFound sumCarryFound magnitudeLowFound magnitudeHighFound
+      naturalSumFound allocateFound writeSumFound)
 
 /-- Canonical physical result of a two-immediate Nat addition whose sum is
 still in the immediate range. -/
