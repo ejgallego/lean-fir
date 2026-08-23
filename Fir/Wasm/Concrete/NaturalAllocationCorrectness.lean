@@ -682,6 +682,123 @@ theorem allocateNatural_heap_prefixExtension
         omega))
     _ = state.memory.readByte byte := objectExtension.readByte byte beforeCursor
 
+/-- Canonical physical boundary required by the resident Natural validator.
+
+Unlike `Header.read`, this relation records the exact raw flags word: the
+decoded booleans intentionally forget any unsupported high flag bits.  The
+payload is related to the canonical `naturalLimbs` list rather than merely to
+its mathematical value, excluding leading-zero limbs.  Ownership is stated
+independently of allocation so retain, release, and persistence proofs can
+preserve this same boundary. -/
+structure NaturalValidatorAdmission (state : MemoryState) (address : Word32)
+    (value : Nat) (header : Header) : Prop where
+  headerRead : state.readLiveHeader address = .ok header
+  rawFlags : state.memory.readUInt32 (address.value + headerFlagsOffset) =
+    .ok header.flags
+  headerKind : header.kind = .natural
+  marker : header.aux0 = bigNaturalMarker
+  limbCount : header.aux1.toNat = (naturalLimbs value).length
+  reserved2 : header.aux2 = 0
+  reserved3 : header.aux3 = 0
+  allocationBytes : header.allocationBytes.toNat =
+    headerBytes + target.semanticSlotBytes * (naturalLimbs value).length
+  limbAt : ∀ offset limb, (naturalLimbs value)[offset]? = some limb →
+    state.memory.readUInt64
+      (address.value + headerBytes + target.semanticSlotBytes * offset) = .ok limb
+  heapBacked : maxTaggedPayload < value
+  ownership : if header.persistent then header.refCount = 0
+    else header.refCount ≠ 0
+  extent : address.value + header.allocationBytes.toNat ≤ state.heapCursor
+
+theorem NaturalValidatorAdmission.headerOwned
+    {state : MemoryState} {address : Word32} {value : Nat} {header : Header}
+    (related : NaturalValidatorAdmission state address value header) :
+    address.value + headerBytes ≤ state.heapCursor := by
+  have extent := related.extent
+  rw [related.allocationBytes] at extent
+  omega
+
+/-- Canonical payload admission implies the complete recursive limb decoder,
+without replaying the allocator or the validator instruction sequence. -/
+theorem NaturalValidatorAdmission.decodedLimbs
+    {state : MemoryState} {address : Word32} {value : Nat} {header : Header}
+    (related : NaturalValidatorAdmission state address value header) :
+    readNaturalLimbs state.memory address.value 0 header.aux1.toNat =
+      .ok value := by
+  have decodedCanonical : readNaturalLimbs state.memory address.value 0
+      (naturalLimbs value).length = .ok (naturalLimbsValue (naturalLimbs value)) :=
+    readNaturalLimbs_of_limbAt state.memory address.value 0
+      (naturalLimbs value) (by
+        intro offset limb atOffset
+        simpa [target] using related.limbAt offset limb atOffset)
+  rw [related.limbCount]
+  simpa [naturalLimbs_value] using decodedCanonical
+
+/-- The canonical validator boundary also implies W6's mathematical Natural
+decoder.  This direction is pure layout refinement, not execution evidence. -/
+theorem NaturalValidatorAdmission.decoded
+    {state : MemoryState} {address : Word32} {value : Nat} {header : Header}
+    (related : NaturalValidatorAdmission state address value header) :
+    readNatural state address = .ok value := by
+  have addressHeap :=
+    (MemoryState.PrefixExtension.readLiveHeader_facts state address header
+      related.headerRead).1
+  have accepted :
+      header.kind == ObjectKind.natural && header.aux0 == bigNaturalMarker := by
+    rw [related.headerKind, related.marker]
+    decide
+  unfold readNatural
+  simp only [addressHeap, ↓reduceIte, Bind.bind, Except.bind]
+  rw [related.headerRead]
+  simp only [liftMemory]
+  rw [accepted]
+  simp only [↓reduceIte]
+  rw [related.decodedLimbs]
+
+/-- Canonical Natural admission is stable under fresh allocation: every byte
+it depends on lies below the old heap frontier. -/
+theorem NaturalValidatorAdmission.prefixExtension
+    {before after : MemoryState} {address : Word32} {value : Nat}
+    {header : Header}
+    (related : NaturalValidatorAdmission before address value header)
+    (extension : before.PrefixExtension after) :
+    NaturalValidatorAdmission after address value header := by
+  have headerAfter := extension.readLiveHeader_eq_ok address header
+    related.headerOwned related.headerRead
+  have flagsAfter : after.memory.readUInt32
+      (address.value + headerFlagsOffset) = .ok header.flags := by
+    rw [extension.readUInt32 (address.value + headerFlagsOffset) (by
+      have owned := related.headerOwned
+      simp [headerFlagsOffset, headerBytes] at owned ⊢
+      omega)]
+    exact related.rawFlags
+  refine {
+    headerRead := headerAfter
+    rawFlags := flagsAfter
+    headerKind := related.headerKind
+    marker := related.marker
+    limbCount := related.limbCount
+    reserved2 := related.reserved2
+    reserved3 := related.reserved3
+    allocationBytes := related.allocationBytes
+    limbAt := ?_
+    heapBacked := related.heapBacked
+    ownership := related.ownership
+    extent := Nat.le_trans related.extent extension.cursor }
+  intro offset limb atOffset
+  have offsetLt := (List.getElem?_eq_some_iff.mp atOffset).1
+  have limbOwned : address.value + headerBytes +
+      target.semanticSlotBytes * offset + target.semanticSlotBytes ≤
+        before.heapCursor := by
+    have extent := related.extent
+    rw [related.allocationBytes] at extent
+    simp [target] at extent ⊢
+    omega
+  rw [extension.readUInt64
+    (address.value + headerBytes + target.semanticSlotBytes * offset) (by
+      simpa [target] using limbOwned)]
+  exact related.limbAt offset limb atOffset
+
 /-- Fully decoded shape of a fresh heap-backed natural. -/
 structure NaturalObjectRel (state : MemoryState) (address : Word32)
     (value : Nat) (header : Header) : Prop where
@@ -842,6 +959,132 @@ theorem allocateNatural_heap_objectRel
       (headerBytes + target.semanticSlotBytes * (naturalLimbs value).length)
     simpa [header, Header.forAllocation, allocationBytes, allocationToNat,
       countToNat] using aligned
+
+/-- A successful large-Natural allocation establishes the complete canonical
+boundary consumed by the resident validator.  In particular this theorem
+retains the exact raw flags word that `Header.read` alone cannot recover. -/
+theorem allocateNatural_heap_validatorAdmission
+    (state result : MemoryState) (value : Nat) (address : Word32)
+    (valid : state.FrontierInvariant)
+    (large : maxTaggedPayload < value)
+    (allocated : allocateNatural state value = .ok (result, address)) :
+    result.FrontierInvariant ∧
+      ∃ header, NaturalValidatorAdmission result address value header := by
+  obtain ⟨limbCount, middle, countEncoded, objectAllocation, limbWrite,
+      cursorEq⟩ :=
+    allocateNatural_heap_decompose state result value address large allocated
+  obtain ⟨countFits, countEq⟩ := uint32Field_success
+    "natural limb count" (naturalLimbs value).length limbCount countEncoded
+  have countToNat : limbCount.toNat = (naturalLimbs value).length := by
+    rw [countEq]
+    exact UInt32.toNat_ofNat_of_lt' countFits
+  have middleValid := valid.allocateObject objectAllocation
+  have middleExtent := MemoryState.allocateObject_extent objectAllocation
+  have payloadEnd : address.value + headerBytes +
+      target.semanticSlotBytes * (0 + (naturalLimbs value).length) ≤
+        middle.heapCursor := by
+    simp only [Nat.zero_add]
+    rw [middleExtent]
+    have aligned := align8_ge
+      (headerBytes + target.semanticSlotBytes * (naturalLimbs value).length)
+    simpa [Nat.add_assoc] using Nat.add_le_add_left aligned address.value
+  have payloadInBounds : address.value + headerBytes +
+      target.semanticSlotBytes * (0 + (naturalLimbs value).length) ≤
+        middle.memory.size := Nat.le_trans payloadEnd middleValid.cursorInBounds
+  have payloadPost := writeNaturalLimbs_post middle.memory result.memory
+    address.value 0 (naturalLimbs value) payloadInBounds limbWrite
+  have stateEq : ({ middle with memory := result.memory } : MemoryState) = result := by
+    cases middle
+    cases result
+    simp_all
+  have finalValid : result.FrontierInvariant := by
+    rw [← stateEq]
+    exact middleValid.writeNaturalLimbs payloadEnd limbWrite
+  let exactBytes :=
+    headerBytes + target.semanticSlotBytes * (naturalLimbs value).length
+  have exactBytesAligned : exactBytes % target.heapAlignment = 0 := by
+    simp [exactBytes, target, headerBytes]
+  have alignedExact : align8 exactBytes = exactBytes := by
+    apply align8_eq_of_mod_eq_zero
+    simpa [target] using exactBytesAligned
+  let header := Header.forAllocation .natural exactBytes false
+    bigNaturalMarker limbCount
+  have headerBefore : middle.readLiveHeader address = .ok header := by
+    simpa [header, exactBytes, alignedExact] using
+      MemoryState.readLiveHeader_of_allocateObject_eq_ok state middle .natural
+        (target.semanticSlotBytes * (naturalLimbs value).length) false
+        bigNaturalMarker limbCount 0 0 address objectAllocation
+  have headerFrame := middle.readLiveHeader_of_writeNaturalLimbs result.memory
+    address (naturalLimbs value) payloadPost
+  have headerRead : result.readLiveHeader address = .ok header := by
+    rw [← stateEq, headerFrame]
+    exact headerBefore
+  obtain ⟨rawState, rawAllocation, headerWrite, _, _⟩ :=
+    MemoryState.allocateObject_header state middle .natural
+      (target.semanticSlotBytes * (naturalLimbs value).length) false
+      bigNaturalMarker limbCount 0 0 address objectAllocation
+  have allocationPost := MemoryState.allocate_spec state rawState (align8 exactBytes)
+    address (by simpa [exactBytes] using rawAllocation)
+  have headerInBounds : address.value + headerBytes ≤ rawState.memory.size := by
+    have endInBounds := allocationPost.endInBounds
+    rw [align8_align8] at endInBounds
+    have minimum := align8_ge exactBytes
+    omega
+  obtain ⟨headerMemory, headerWriteEq, headerPost⟩ :=
+    Header.write_spec rawState.memory address header headerInBounds
+  have writtenHeader : header.write rawState.memory address = .ok middle.memory := by
+    simpa [header, exactBytes, alignedExact] using headerWrite
+  rw [headerWriteEq] at writtenHeader
+  have headerMemoryEq : headerMemory = middle.memory := Except.ok.inj writtenHeader
+  subst headerMemory
+  have middleRawFlags : middle.memory.readUInt32
+      (address.value + headerFlagsOffset) = .ok header.flags := by
+    simpa [Header.words, headerFlagsOffset] using
+      headerPost.wordAt 1 header.flags (by simp [Header.words])
+  have resultRawFlags : result.memory.readUInt32
+      (address.value + headerFlagsOffset) = .ok header.flags := by
+    calc
+      result.memory.readUInt32 (address.value + headerFlagsOffset) =
+          middle.memory.readUInt32 (address.value + headerFlagsOffset) :=
+        payloadPost.readUInt32_prefix _ (by
+          simp [headerFlagsOffset, headerBytes, target])
+      _ = .ok header.flags := middleRawFlags
+  have addressNonzero : address.value ≠ 0 := by
+    intro zero
+    have heap := allocationPost.addressClass
+    simp [Word32.classify, zero] at heap
+  have exactBytesLt : exactBytes < UInt32.size := by
+    have within := allocationPost.endWithinAddressSpace
+    rw [align8_align8, alignedExact] at within
+    have belowWordModulus : exactBytes < wordModulus := by omega
+    simpa [wordModulus] using belowWordModulus
+  have exactBytesToNat : (UInt32.ofNat exactBytes).toNat = exactBytes :=
+    UInt32.toNat_ofNat_of_lt' exactBytesLt
+  have resultExtent : address.value + exactBytes ≤ result.heapCursor := by
+    rw [cursorEq, middleExtent]
+    simpa [exactBytes] using Nat.add_le_add_left
+      (align8_ge
+        (headerBytes + target.semanticSlotBytes * (naturalLimbs value).length))
+      address.value
+  refine ⟨finalValid, header, {
+    headerRead
+    rawFlags := resultRawFlags
+    headerKind := rfl
+    marker := rfl
+    limbCount := by simpa [header, Header.forAllocation] using countToNat
+    reserved2 := rfl
+    reserved3 := rfl
+    allocationBytes := by
+      change (UInt32.ofNat exactBytes).toNat = exactBytes
+      exact exactBytesToNat
+    limbAt := ?_
+    heapBacked := large
+    ownership := by simp [header, Header.forAllocation]
+    extent := ?_ }⟩
+  · intro offset limb atOffset
+    have read := payloadPost.limbAt offset limb atOffset
+    simpa [target] using read
+  · simpa [header, Header.forAllocation, exactBytesToNat] using resultExtent
 
 def semanticNaturalCell (value : Nat) : HeapCell := {
   object := .natural value }
