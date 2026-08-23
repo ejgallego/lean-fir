@@ -1,7 +1,9 @@
 import Fir.Wasm.Concrete.NaturalAllocationCorrectness
+import FirTalos.ConcreteResidentBigNumericAllocator
 import FirTalos.ConcreteResidentPrimitives
 import FirTalos.Correctness.Function
 import FirTalos.Correctness.Locals
+import Interpreter.Wasm.Wp.Tactic
 
 namespace FirTalos.Concrete
 
@@ -35,6 +37,465 @@ def flavorParam : Lean.FVarId := ⟨`flavor⟩
 def indexParam : Lean.FVarId := ⟨`index⟩
 def scaledLocal : Lean.FVarId := ⟨`scaledValue⟩
 def countLocal : Lean.FVarId := ⟨`countValue⟩
+
+/-- Public proof-side spelling of W7's common BigNumeric validator. -/
+def validateCommonSource : List Fir.Wasm.Instruction :=
+  let trapWhenTrue := ResidentAllocator.trapWhenTrueSource
+  let trapUnlessTrue := ResidentBigNumericAllocator.trapUnlessTrueSource
+  let load32 (offset : Nat) :=
+    [.localGet valueParam, .i32Load .uint32 (UInt32.ofNat offset)]
+  trapWhenTrue [
+    .localGet valueParam,
+    .i32Const .uint32 (UInt32.ofNat heapBase),
+    .i32LtU] ++
+  trapWhenTrue [
+    .localGet valueParam,
+    .i32Const .uint32 (UInt32.ofNat (target.heapAlignment - 1)),
+    .i32And] ++
+  trapUnlessTrue
+    (load32 headerFlagsOffset ++
+      [.i32Const .uint32 liveFlag, .i32And]) ++
+  load32 headerAux1Offset ++
+  [.localSet countLocal] ++
+  trapUnlessTrue [.localGet countLocal] ++
+  trapUnlessTrue [
+    .localGet countLocal,
+    .i32Const .uint32 536870908,
+    .i32LtU] ++
+  trapUnlessTrue
+    (load32 headerAllocationBytesOffset ++
+      ResidentBigNumericAllocator.scale8Source countLocal scaledLocal ++ [
+        .i32Const .uint32 (UInt32.ofNat headerBytes),
+        .localGet scaledLocal,
+        .i32Add,
+        .i32Eq]) ++
+  [.localGet countLocal, .ret]
+
+/-- The emitter's public common validator has exactly the proof-side shape. -/
+theorem validateCommonFunction_shape :
+    Fir.Wasm.Emit.ResidentBigNumeric.validateCommonFunction.body =
+      validateCommonSource := by
+  rfl
+
+/-- Exact adapted instruction program for the common BigNumeric validator.
+Local zero is the object word; locals one and two are count and scaled count. -/
+def validateCommonProgram : Wasm.Program :=
+  let trapWhenTrue := ResidentAllocator.trapWhenTrueProgram
+  let trapUnlessTrue := ResidentBigNumericAllocator.trapUnlessTrueProgram
+  let load32 (offset : Nat) :=
+    [.localGet 0, .load32 (UInt32.ofNat offset)]
+  trapWhenTrue [.localGet 0, .const (UInt32.ofNat heapBase), .ltU] ++
+  trapWhenTrue [
+    .localGet 0,
+    .const (UInt32.ofNat (target.heapAlignment - 1)),
+    .and] ++
+  trapUnlessTrue
+    (load32 headerFlagsOffset ++ [.const liveFlag, .and]) ++
+  load32 headerAux1Offset ++
+  [.localSet 1] ++
+  trapUnlessTrue [.localGet 1] ++
+  trapUnlessTrue [.localGet 1, .const 536870908, .ltU] ++
+  trapUnlessTrue
+    (load32 headerAllocationBytesOffset ++
+      ResidentBigNumericAllocator.scale8Program 1 2 ++ [
+        .const (UInt32.ofNat headerBytes),
+        .localGet 2,
+        .add,
+        .eq]) ++
+  [.localGet 1, .ret]
+
+/-- Exact symbolic-to-Talos adaptation of the common validator. -/
+theorem instructions_validateCommonFunction
+    {sourceModule : Fir.Wasm.Module} :
+    FirTalos.instructions sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.validateCommonFunction []
+      Fir.Wasm.Emit.ResidentBigNumeric.validateCommonFunction.body =
+        .ok validateCommonProgram := by
+  have valueFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.validateCommonFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.validateCommonFunction.locals.toList)
+      valueParam = some 0 := by decide
+  have countFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.validateCommonFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.validateCommonFunction.locals.toList)
+      countLocal = some 1 := by decide
+  have scaledFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentBigNumeric.validateCommonFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentBigNumeric.validateCommonFunction.locals.toList)
+      scaledLocal = some 2 := by decide
+  rw [validateCommonFunction_shape]
+  set_option maxRecDepth 100000 in
+    simp [validateCommonSource, validateCommonProgram,
+      ResidentAllocator.trapWhenTrueSource,
+      ResidentAllocator.trapWhenTrueProgram,
+      ResidentBigNumericAllocator.trapUnlessTrueSource,
+      ResidentBigNumericAllocator.trapUnlessTrueProgram,
+      ResidentBigNumericAllocator.scale8Source,
+      ResidentBigNumericAllocator.scale8Program,
+      FirTalos.instructions, FirTalos.instruction, valueFound, countFound,
+      scaledFound, Bind.bind, Except.bind, pure, Except.pure]
+
+theorem validateCommonFunction_params :
+    Fir.Wasm.Emit.ResidentBigNumeric.validateCommonFunction.params =
+      #[(valueParam, .tobject)] := by
+  rfl
+
+theorem validateCommonFunction_locals :
+    Fir.Wasm.Emit.ResidentBigNumeric.validateCommonFunction.locals =
+      #[(countLocal, .uint32), (scaledLocal, .uint32)] := by
+  rfl
+
+theorem validateCommonFunction_results :
+    Fir.Wasm.Emit.ResidentBigNumeric.validateCommonFunction.results =
+      #[.uint32] := by
+  rfl
+
+/-- An adapted common validator consists of the exact proof-side program
+followed only by the adapter's standard terminal suffix. -/
+theorem adaptedValidateCommonFunction_body
+    {sourceModule : Fir.Wasm.Module} {targetFunction : Wasm.Function}
+    (adapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.validateCommonFunction =
+        .ok targetFunction) :
+    targetFunction.body = validateCommonProgram ++
+      FirTalos.functionTerminal sourceModule
+        Fir.Wasm.Emit.ResidentBigNumeric.validateCommonFunction := by
+  exact ResidentPrimitives.adaptedFunction_body_of_exact adapted
+    instructions_validateCommonFunction
+
+def validateCommonEntry (word : UInt32) : Wasm.Locals := {
+  params := [.i32 word]
+  locals := [.i32 0, .i32 0]
+  values := [] }
+
+/-- Scalar execution boundary for the exact common validator program.  The
+premises are precisely its three physical loads and arithmetic guards. -/
+theorem wp_validateCommonProgram
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {word flags count allocationBytes : UInt32}
+    {rest : Wasm.Program}
+    (addressNotBelow : ¬word < UInt32.ofNat heapBase)
+    (addressAligned : word &&& UInt32.ofNat (target.heapAlignment - 1) = 0)
+    (flagsInBounds :
+      ¬(word.toNat + (UInt32.ofNat headerFlagsOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (countInBounds :
+      ¬(word.toNat + (UInt32.ofNat headerAux1Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (allocationInBounds :
+      ¬(word.toNat + (UInt32.ofNat headerAllocationBytesOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (flagsRead : store.mem.read32
+      (word + UInt32.ofNat headerFlagsOffset) = flags)
+    (countRead : store.mem.read32
+      (word + UInt32.ofNat headerAux1Offset) = count)
+    (allocationRead : store.mem.read32
+      (word + UInt32.ofNat headerAllocationBytesOffset) = allocationBytes)
+    (live : flags &&& liveFlag ≠ 0)
+    (countPositive : count ≠ 0)
+    (countFits : count < 536870908)
+    (allocationExact : allocationBytes = UInt32.ofNat headerBytes +
+      ResidentBigNumericAllocator.scale8Word count)
+    (returned : Q (.Return store [.i32 count])) :
+    Wasm.wp module (validateCommonProgram ++ rest) Q store
+      (validateCommonEntry word) env := by
+  have valueLocal (values : List Wasm.Value) :
+      ({ validateCommonEntry word with values } : Wasm.Locals).get 0 =
+        some (.i32 word) := by
+    rfl
+  have addressAligned' :
+      UInt32.ofNat (target.heapAlignment - 1) &&& word = 0 := by
+    simpa [UInt32.and_comm] using addressAligned
+  have live' : liveFlag &&& flags ≠ 0 := by
+    simpa [UInt32.and_comm] using live
+  have flagsInBounds' : ¬(store.mem.pages * 65536 <
+      word.toNat + headerFlagsOffset % 4294967296 + 4) := by
+    simpa [wasmPageBytes] using flagsInBounds
+  have countInBounds' : ¬(store.mem.pages * 65536 <
+      word.toNat + headerAux1Offset % 4294967296 + 4) := by
+    simpa [wasmPageBytes] using countInBounds
+  have allocationInBounds' : ¬(store.mem.pages * 65536 <
+      word.toNat + headerAllocationBytesOffset % 4294967296 + 4) := by
+    simpa [wasmPageBytes] using allocationInBounds
+  unfold validateCommonProgram
+  simp only [ResidentAllocator.trapWhenTrueProgram,
+    ResidentBigNumericAllocator.trapUnlessTrueProgram,
+    ResidentBigNumericAllocator.scale8Program, List.cons_append,
+    List.nil_append]
+  simp only [Wasm.wp_localGet_cons]
+  simp [validateCommonEntry, Wasm.Locals.get, addressNotBelow]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [Wasm.wp_nil, List.take_zero, List.drop_zero, List.nil_append]
+  simp only [Wasm.wp_localGet_cons, Wasm.wp_const_cons,
+    Wasm.wp_and_cons]
+  apply Wasm.wp_iff_cons rfl
+  rw [addressAligned']
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [Wasm.wp_nil, List.take_zero, List.drop_zero, List.nil_append]
+  rw [Wasm.wp_localGet_cons]
+  simp [Wasm.Locals.get]
+  rw [if_neg flagsInBounds', flagsRead, if_neg live']
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [Wasm.wp_nil, List.take_zero, List.drop_zero, List.nil_append]
+  rw [Wasm.wp_localGet_cons]
+  simp [Wasm.Locals.get]
+  rw [if_neg countInBounds', countRead]
+  rw [if_neg countPositive]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [Wasm.wp_nil, List.take_zero, List.drop_zero, List.nil_append]
+  rw [Wasm.wp_localGet_cons]
+  simp [Wasm.Locals.get, countFits]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [Wasm.wp_nil, List.take_zero, List.drop_zero, List.nil_append]
+  rw [Wasm.wp_localGet_cons]
+  simp [Wasm.Locals.get]
+  rw [if_neg allocationInBounds', allocationRead, allocationExact]
+  have requestEq :
+      count + count + (count + count) +
+          (count + count + (count + count)) + UInt32.ofNat headerBytes =
+        UInt32.ofNat headerBytes +
+          ResidentBigNumericAllocator.scale8Word count := by
+    simp only [ResidentBigNumericAllocator.scale8Word]
+    ac_rfl
+  rw [requestEq, if_pos rfl]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [Wasm.wp_nil, List.take_zero, List.drop_zero, List.nil_append]
+  wp_run
+  exact returned
+
+/-- Installed common BigNumeric validator under its exact scalar memory and
+arithmetic contract.  It is trace-free, preserves the store, and returns the
+validated limb count ahead of the caller operand tail. -/
+theorem terminatesWith_validateCommon_of_adapted
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {targetFunction : Wasm.Function} {functionIndex : Nat}
+    {store : Wasm.Store host} {word flags count allocationBytes : UInt32}
+    {tail : List Wasm.Value}
+    (adapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.validateCommonFunction =
+        .ok targetFunction)
+    (notImport : module.imports[functionIndex]? = none)
+    (found : module.funcs[functionIndex - module.imports.length]? =
+      some targetFunction)
+    (addressNotBelow : ¬word < UInt32.ofNat heapBase)
+    (addressAligned : word &&& UInt32.ofNat (target.heapAlignment - 1) = 0)
+    (flagsInBounds :
+      ¬(word.toNat + (UInt32.ofNat headerFlagsOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (countInBounds :
+      ¬(word.toNat + (UInt32.ofNat headerAux1Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (allocationInBounds :
+      ¬(word.toNat +
+        (UInt32.ofNat headerAllocationBytesOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (flagsRead : store.mem.read32
+      (word + UInt32.ofNat headerFlagsOffset) = flags)
+    (countRead : store.mem.read32
+      (word + UInt32.ofNat headerAux1Offset) = count)
+    (allocationRead : store.mem.read32
+      (word + UInt32.ofNat headerAllocationBytesOffset) = allocationBytes)
+    (live : flags &&& liveFlag ≠ 0)
+    (countPositive : count ≠ 0)
+    (countFits : count < 536870908)
+    (allocationExact : allocationBytes = UInt32.ofNat headerBytes +
+      ResidentBigNumericAllocator.scale8Word count) :
+    Wasm.TerminatesWith env module functionIndex store
+      ([.i32 word] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 count :: tail) := by
+  have signature :=
+    FirTalos.Correctness.function_preserves_signature adapted
+  rcases signature with ⟨paramsEq, localsEq, resultsEq⟩
+  have body := adaptedValidateCommonFunction_body adapted
+  apply FirTalos.Correctness.terminatesWith_of_wp_body_at notImport found
+  rw [body]
+  let arguments := [.i32 word] ++ tail
+  let entry := targetFunction.toLocals
+    (arguments.take targetFunction.numParams).reverse
+  have returned :
+      FirTalos.Correctness.FunctionBodyPost targetFunction arguments
+        (fun final values =>
+          final = store ∧ values = .i32 count :: tail)
+        (.Return store [.i32 count]) := by
+    simp [FirTalos.Correctness.FunctionBodyPost, arguments,
+      Wasm.Function.numParams, paramsEq, resultsEq,
+      validateCommonFunction_params, validateCommonFunction_results]
+  have uint32Zero :
+      (FirTalos.abiKind Fir.Wasm.AbiKind.uint32).zero = .i32 0 := by
+    rfl
+  simpa [entry, arguments, Wasm.Function.toLocals, validateCommonEntry,
+      Wasm.Function.numParams, paramsEq, localsEq,
+      validateCommonFunction_params, validateCommonFunction_locals,
+      uint32Zero] using
+    (wp_validateCommonProgram
+      (module := module) (env := env) (store := store)
+      (rest := FirTalos.functionTerminal sourceModule
+        Fir.Wasm.Emit.ResidentBigNumeric.validateCommonFunction)
+      addressNotBelow addressAligned flagsInBounds countInBounds
+      allocationInBounds flagsRead countRead allocationRead live
+      countPositive countFits allocationExact returned)
+
+/-- Transport one exact W6 header lane to the Wasm memory view, packaging
+both the validator's bounds premise and its physical `i32.load` result.  The
+caller supplies only that the complete common header is in bounds. -/
+theorem residentHeaderUInt32
+    {heap : MemoryState} {memory : Wasm.Mem} {address : Word32}
+    {offset : Nat} {word : UInt32}
+    (memoryRelated : ResidentMemoryRel heap memory)
+    (headerInBounds : address.value + headerBytes ≤ heap.memory.size)
+    (offsetInHeader : offset + 4 ≤ headerBytes)
+    (read : heap.memory.readUInt32 (address.value + offset) = .ok word) :
+    ¬((UInt32.ofNat address.value).toNat +
+        (UInt32.ofNat offset).toNat + 4 >
+      memory.pages * wasmPageBytes) ∧
+    memory.read32
+      (UInt32.ofNat address.value + UInt32.ofNat offset) = word := by
+  have concreteInBounds :
+      address.value + offset + 3 < heap.memory.size := by
+    omega
+  have transported :=
+    memoryRelated.readUInt32_eq_read32 concreteInBounds
+  have addressToNat :
+      (UInt32.ofNat address.value).toNat = address.value :=
+    UInt32.toNat_ofNat_of_lt' (by
+      simpa [wordModulus] using address.isLt)
+  have offsetLt : offset < UInt32.size := by
+    simp [headerBytes, UInt32.size] at offsetInHeader ⊢
+    omega
+  have offsetToNat : (UInt32.ofNat offset).toNat = offset :=
+    UInt32.toNat_ofNat_of_lt' offsetLt
+  have memorySize : heap.memory.size = memory.pages * wasmPageBytes :=
+    memoryRelated.size_eq
+  constructor
+  · rw [addressToNat, offsetToNat, ← memorySize]
+    omega
+  · have targetAddress :
+        UInt32.ofNat (address.value + offset) =
+          UInt32.ofNat address.value + UInt32.ofNat offset := by
+      rw [UInt32.ofNat_add]
+    rw [← targetAddress]
+    rw [read] at transported
+    simpa using transported.symm
+
+/-- Canonical W6 Natural admission discharges the complete common-validator
+contract.  No instruction-level load, bounds, or modular-arithmetic premise
+escapes this theorem. -/
+theorem terminatesWith_validateCommon_of_naturalAdmission
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {targetFunction : Wasm.Function} {functionIndex : Nat}
+    {heap : MemoryState} {store : Wasm.Store host}
+    {address : Word32} {value : Nat} {header : Header}
+    {tail : List Wasm.Value}
+    (adapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentBigNumeric.validateCommonFunction =
+        .ok targetFunction)
+    (notImport : module.imports[functionIndex]? = none)
+    (found : module.funcs[functionIndex - module.imports.length]? =
+      some targetFunction)
+    (memoryRelated : ResidentMemoryRel heap store.mem)
+    (related : NaturalValidatorAdmission heap address value header) :
+    Wasm.TerminatesWith env module functionIndex store
+      ([.i32 (UInt32.ofNat address.value)] ++ tail)
+      (fun final values =>
+        final = store ∧ values = .i32 header.aux1 :: tail) := by
+  obtain ⟨addressHeap, _, headerLive, headerMinimum, _, headerExtent⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts heap address header
+      related.headerRead
+  have commonHeaderInBounds :
+      address.value + headerBytes ≤ heap.memory.size := by
+    omega
+  have addressFits32 : address.value < UInt32.size := by
+    simpa [wordModulus, UInt32.size] using address.isLt
+  have addressNotBelow :
+      ¬UInt32.ofNat address.value < UInt32.ofNat heapBase := by
+    intro below
+    rw [UInt32.lt_iff_toNat_lt,
+      UInt32.toNat_ofNat_of_lt' addressFits32,
+      UInt32.toNat_ofNat_of_lt' (by decide : heapBase < UInt32.size)] at below
+    exact (Nat.not_lt_of_ge related.addressBase) below
+  have addressAlignedNat :
+      address.value % target.heapAlignment = 0 := by
+    unfold Word32.classify at addressHeap
+    split at addressHeap <;> try contradiction
+    split at addressHeap <;> try contradiction
+    split at addressHeap <;> try contradiction
+    assumption
+  have addressAligned :
+      UInt32.ofNat address.value &&&
+          UInt32.ofNat (target.heapAlignment - 1) = 0 := by
+    have aligned8 : address.value % 8 = 0 := by
+      simpa [target] using addressAlignedNat
+    simpa [target] using
+      ResidentAllocator.alignedWord_of_mod8 addressFits32 aligned8
+  obtain ⟨flagsInBounds, flagsRead⟩ := residentHeaderUInt32 memoryRelated
+    commonHeaderInBounds (by decide) related.rawHeader.readFlags
+  obtain ⟨countInBounds, countRead⟩ := residentHeaderUInt32 memoryRelated
+    commonHeaderInBounds (by decide) related.rawHeader.readAux1
+  obtain ⟨allocationInBounds, allocationRead⟩ :=
+    residentHeaderUInt32 memoryRelated commonHeaderInBounds (by decide)
+      related.rawHeader.readAllocationBytes
+  have live : header.flags &&& liveFlag ≠ 0 := by
+    cases persistent : header.persistent
+    · simp [Header.flags, persistent, headerLive, liveFlag]
+    · simp [Header.flags, persistent, headerLive, liveFlag]
+      decide
+  have limbsNonempty : naturalLimbs value ≠ [] := by
+    rw [naturalLimbs]
+    split <;> simp
+  have limbLengthPositive : 0 < (naturalLimbs value).length := by
+    cases limbs : naturalLimbs value with
+    | nil => exact (limbsNonempty limbs).elim
+    | cons limb rest => simp
+  have countPositive : header.aux1 ≠ 0 := by
+    intro countZero
+    have countEq := related.limbCount
+    rw [countZero] at countEq
+    simp only [UInt32.toNat_zero] at countEq
+    omega
+  have allocationLt :
+      header.allocationBytes.toNat < UInt32.size :=
+    header.allocationBytes.toNat_lt_size
+  rw [related.allocationBytes] at allocationLt
+  have limbLengthFits : (naturalLimbs value).length < 536870908 := by
+    simp [headerBytes, target, UInt32.size] at allocationLt ⊢
+    omega
+  have countFits : header.aux1 < 536870908 := by
+    rw [UInt32.lt_iff_toNat_lt, related.limbCount]
+    simpa using limbLengthFits
+  have limbLengthFits32 : (naturalLimbs value).length < UInt32.size := by
+    simp [UInt32.size] at limbLengthFits ⊢
+    omega
+  have countWord :
+      header.aux1 = UInt32.ofNat (naturalLimbs value).length := by
+    apply UInt32.toNat_inj.mp
+    rw [related.limbCount,
+      UInt32.toNat_ofNat_of_lt' limbLengthFits32]
+  have exactBytesLt :
+      headerBytes +
+          target.semanticSlotBytes * (naturalLimbs value).length <
+        UInt32.size := by
+    exact allocationLt
+  have allocationExact :
+      header.allocationBytes = UInt32.ofNat headerBytes +
+        ResidentBigNumericAllocator.scale8Word header.aux1 := by
+    rw [countWord, ResidentBigNumericAllocator.scale8Word_ofNat,
+      ← UInt32.ofNat_add]
+    apply UInt32.toNat_inj.mp
+    rw [related.allocationBytes,
+      UInt32.toNat_ofNat_of_lt' exactBytesLt]
+  exact terminatesWith_validateCommon_of_adapted adapted notImport found
+    addressNotBelow addressAligned flagsInBounds countInBounds
+    allocationInBounds flagsRead countRead allocationRead live countPositive
+    countFits allocationExact
 
 def naturalCountSourceFunction : Fir.Wasm.Function :=
   Fir.Wasm.Emit.ResidentBigNumeric.naturalCountFunction
