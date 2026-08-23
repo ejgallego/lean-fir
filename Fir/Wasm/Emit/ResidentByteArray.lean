@@ -468,25 +468,51 @@ private def releaseConsumedFunctionFor (validation : InputValidation) : Function
 
 def releaseConsumedFunction : Function := releaseConsumedFunctionFor .checked
 
+private def loadSizeAndCheck : List Instruction := [
+  .localGet sourceParam,
+  .i32Load .uint32 (u32 headerAux1Offset),
+  .localSet sizeLocal] ++
+  trapUnlessTrue [
+    .localGet sizeLocal,
+    .i32Const .uint32 0x80000000,
+    .i32LtU]
+
+private def checkedSizeResult : List Instruction := [
+  .localGet sizeLocal,
+  .localGet sizeLocal,
+  .i32Add,
+  .i32Const .uint32 1,
+  .i32Add] ++ retypeRaw .tagged taggedResultLocal
+
+/-
+The trusted closed-application path already carries the resident ByteArray
+invariant.  Preserve its existing tagged-Nat range check, then use the same
+typed extend/tag/wrap bridge as the accepted direct Nat/USize result paths.
+Binaryen erases the bridge to the physical i32 representation, without using
+scratch memory merely to reclassify that word as `.tagged`.
+-/
+private def trustedSizeResult : List Instruction := [
+  .localGet sizeLocal,
+  .i64ExtendI32U .uint64,
+  .i64Const .uint64 1,
+  .i64Shl,
+  .i64Const .uint64 1,
+  .i64Or,
+  .i32WrapI64 .tagged,
+  .ret]
+
 private def sizeFunctionFor (validation : InputValidation) : Function := {
   name := externalName `ByteArray.size
   params := #[(sourceParam, .object)]
   results := #[.tagged]
-  locals := #[(sizeLocal, .uint32), (rawLocal, .uint32),
-    (savedScratchLocal, .uint32), (taggedResultLocal, .tagged)]
-  body := validateByteArrayInput validation sourceParam ++ [
-    .localGet sourceParam,
-    .i32Load .uint32 (u32 headerAux1Offset),
-    .localSet sizeLocal] ++
-    trapUnlessTrue [
-      .localGet sizeLocal,
-      .i32Const .uint32 0x80000000,
-      .i32LtU] ++ [
-    .localGet sizeLocal,
-    .localGet sizeLocal,
-    .i32Add,
-    .i32Const .uint32 1,
-    .i32Add] ++ retypeRaw .tagged taggedResultLocal }
+  locals := match validation with
+    | .checked => #[(sizeLocal, .uint32), (rawLocal, .uint32),
+        (savedScratchLocal, .uint32), (taggedResultLocal, .tagged)]
+    | .trusted => #[(sizeLocal, .uint32)]
+  body := validateByteArrayInput validation sourceParam ++ loadSizeAndCheck ++
+    match validation with
+    | .checked => checkedSizeResult
+    | .trusted => trustedSizeResult }
 
 def sizeFunction : Function := sizeFunctionFor .checked
 
@@ -1138,8 +1164,12 @@ private def inputValidatorAfterPrefixDelta (prefixLength : Nat)
     (checked.body.drop (prefixLength + validation.length)) ==
       trusted.body.drop prefixLength
 
-#guard inputValidatorDelta sourceParam
-  (sizeFunctionFor .checked) (sizeFunctionFor .trusted)
+#guard (sizeFunctionFor .checked).body ==
+  validateByteArrayInput .checked sourceParam ++ loadSizeAndCheck ++
+    checkedSizeResult
+#guard (sizeFunctionFor .trusted).body == loadSizeAndCheck ++ trustedSizeResult
+#guard (sizeFunctionFor .trusted).locals == #[(sizeLocal, .uint32)]
+#guard trustedSizeResult.contains (.i32WrapI64 .tagged)
 #guard inputValidatorDelta destinationParam
   (releaseConsumedFunctionFor .checked) (releaseConsumedFunctionFor .trusted)
 #guard inputValidatorAfterPrefixDelta 2 destinationParam
