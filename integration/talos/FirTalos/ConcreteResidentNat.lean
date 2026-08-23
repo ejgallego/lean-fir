@@ -1634,6 +1634,82 @@ observed by the resident magnitude accessors. -/
 def limbWordsOfUInt64 (limb : UInt64) : LimbWords :=
   (limb.toUInt32, (limb >>> (32 : UInt64)).toUInt32)
 
+def limbWordPart (part : ResidentBigNumeric.NaturalLimbPart)
+    (limb : LimbWords) : UInt32 :=
+  match part with
+  | .low => limb.1
+  | .high => limb.2
+
+@[simp] theorem limbWordPart_zero
+    (part : ResidentBigNumeric.NaturalLimbPart) :
+    limbWordPart part (0, 0) = 0 := by
+  cases part <;> rfl
+
+/-- Exact physical limb view of a checked Natural object.  The list records
+the object's stored count and reads, not a canonical re-encoding of its
+mathematical value; leading zero limbs are therefore represented faithfully. -/
+structure NaturalLimbView (state : MemoryState) (address : Word32)
+    (header : Header) (value : Nat) (limbs : List UInt64) : Prop where
+  length : limbs.length = header.aux1.toNat
+  limbAt : ∀ offset limb, limbs[offset]? = some limb →
+    state.memory.readUInt64
+      (address.value + headerBytes + target.semanticSlotBytes * offset) =
+        .ok limb
+  valueEq : naturalLimbsValue limbs = value
+
+/-- Every checked Natural object admits an exact, possibly noncanonical,
+physical limb view. -/
+theorem NaturalObjectRel.exists_naturalLimbView
+    {state : MemoryState} {address : Word32} {header : Header} {value : Nat}
+    (related : NaturalObjectRel state address value header) :
+    ∃ limbs, NaturalLimbView state address header value limbs := by
+  obtain ⟨limbs, length, limbAt, valueEq⟩ :=
+    readNaturalLimbs_eq_ok_exists_limbAt related.decodedLimbs
+  refine ⟨limbs, length, ?_, valueEq⟩
+  intro offset limb atOffset
+  simpa using limbAt offset limb atOffset
+
+/-- One exact 64-bit limb view projects to the low/high wasm32 words observed
+by the two installed resident accessors. -/
+theorem NaturalLimbView.readWords
+    {state : MemoryState} {address : Word32} {header : Header} {value : Nat}
+    {limbs : List UInt64} (view : NaturalLimbView state address header value limbs)
+    {offset : Nat} {limb : UInt64} (atOffset : limbs[offset]? = some limb) :
+    state.memory.readUInt32
+          (address.value + headerBytes + 8 * offset) =
+        .ok (limbWordsOfUInt64 limb).1 ∧
+      state.memory.readUInt32
+          (address.value + headerBytes + 8 * offset + 4) =
+        .ok (limbWordsOfUInt64 limb).2 := by
+  have read := view.limbAt offset limb atOffset
+  simp only [target] at read
+  unfold LinearMemory.readUInt64 at read
+  cases lowRead : state.memory.readUInt32
+      (address.value + headerBytes + 8 * offset) with
+  | error failure =>
+      rw [lowRead] at read
+      contradiction
+  | ok low =>
+      rw [lowRead] at read
+      cases highRead : state.memory.readUInt32
+          (address.value + headerBytes + 8 * offset + 4) with
+      | error failure =>
+          rw [highRead] at read
+          contradiction
+      | ok high =>
+          rw [highRead] at read
+          simp only [Bind.bind, Except.bind, pure, Except.pure,
+            Except.ok.injEq] at read
+          have lowEq : low = limb.toUInt32 := by
+            rw [← read]
+            bv_decide
+          have highEq : high = (limb >>> (32 : UInt64)).toUInt32 := by
+            rw [← read]
+            bv_decide
+          constructor
+          · simp [limbWordsOfUInt64, lowEq]
+          · simp [limbWordsOfUInt64, highEq]
+
 /-- Reassemble the resident low/high word pair as one concrete-runtime limb. -/
 def limbUInt64OfWords (limb : LimbWords) : UInt64 :=
   limb.1.toUInt64 + limb.2.toUInt64 * 4294967296
@@ -1739,6 +1815,50 @@ theorem padLimbWords_value (count : Nat) (limbs : List LimbWords) :
     limbWordsListValue (padLimbWords count limbs) =
       limbWordsListValue limbs := by
   exact limbWordsListValue_append_zeros limbs (count - limbs.length)
+
+/-- Pad an exact physical limb view to the common count consumed by the
+resident addition loops. -/
+def paddedLimbViewWords (count : Nat) (limbs : List UInt64) :
+    List LimbWords :=
+  padLimbWords count (limbs.map limbWordsOfUInt64)
+
+theorem paddedLimbViewWords_length {count : Nat} {limbs : List UInt64}
+    (fits : limbs.length ≤ count) :
+    (paddedLimbViewWords count limbs).length = count := by
+  apply padLimbWords_length
+  simpa using fits
+
+/-- Inside the stored operand extent, padding preserves the exact physical
+word pair. -/
+theorem paddedLimbViewWords_getElem?_of_lt
+    {count index : Nat} {limbs : List UInt64} {limb : UInt64}
+    (indexInLimbs : index < limbs.length)
+    (limbAt : limbs[index]? = some limb) :
+    (paddedLimbViewWords count limbs)[index]? =
+      some (limbWordsOfUInt64 limb) := by
+  unfold paddedLimbViewWords padLimbWords
+  rw [List.getElem?_append_left (by simpa using indexInLimbs)]
+  simp [List.getElem?_map, limbAt]
+
+/-- Between an operand's stored count and the common writer count, padding
+is exactly the zero pair returned by the magnitude dispatcher. -/
+theorem paddedLimbViewWords_getElem?_of_ge
+    {count index : Nat} {limbs : List UInt64}
+    (fits : limbs.length ≤ count)
+    (indexAtOrAfter : limbs.length ≤ index)
+    (indexInCount : index < count) :
+    (paddedLimbViewWords count limbs)[index]? = some (0, 0) := by
+  unfold paddedLimbViewWords padLimbWords
+  rw [List.getElem?_append_right (by simpa using indexAtOrAfter)]
+  apply List.getElem?_replicate_of_lt
+  simp only [List.length_map]
+  omega
+
+theorem paddedLimbViewWords_value (count : Nat) (limbs : List UInt64) :
+    limbWordsListValue (paddedLimbViewWords count limbs) =
+      naturalLimbsValue limbs := by
+  rw [paddedLimbViewWords, padLimbWords_value,
+    limbWordsListValue_ofUInt64s]
 
 /-- Canonical concrete Natural limbs, split into the wasm32 words seen by the
 installed addition loops and padded to their common maximum count. -/
@@ -4872,6 +4992,59 @@ theorem writtenLimbPayloadFits_of_allocateObject
   simpa [target, wordModulus, UInt32.size, Nat.add_assoc] using
     (Nat.le_trans (Nat.add_le_add_left unaligned address.value) within)
 
+/-- Every low/high store selected by a common-count writer loop is in bounds
+after a successful result reservation.  The proof is independent of the
+words already written: exact prefix histories preserve the page count, while
+the W6 frontier invariant bounds the complete reserved payload. -/
+theorem WrittenLimbPrefix.writeLimbInBounds_of_allocateObject
+    {host : Type} {initial current : Wasm.Store host}
+    {state allocated : MemoryState} {result : Word32}
+    {words : List LimbWords} {prefixCount commonCount capacity : Nat}
+    {persistent : Bool} {aux0 aux1 aux2 aux3 : UInt32} {index : UInt32}
+    (written : WrittenLimbPrefix initial (UInt32.ofNat result.value) words
+      prefixCount current)
+    (valid : state.FrontierInvariant)
+    (commonFits : commonCount ≤ capacity)
+    (indexInCommon : index.toNat < commonCount)
+    (allocation : state.allocateObject .natural
+      (target.semanticSlotBytes * capacity) persistent aux0 aux1 aux2 aux3 =
+        .ok (allocated, result))
+    (initialRelated : ResidentMemoryRel allocated initial.mem) :
+    ¬(checkedLimbBase (UInt32.ofNat result.value) index).toNat + 4 >
+        current.mem.pages * 65536 ∧
+      ¬(checkedLimbBase (UInt32.ofNat result.value) index).toNat + 4 + 4 >
+        current.mem.pages * 65536 := by
+  have allocatedValid := valid.allocateObject allocation
+  have allocatedExtent := MemoryState.allocateObject_extent allocation
+  have resultToNat : (UInt32.ofNat result.value).toNat = result.value := by
+    apply UInt32.toNat_ofNat_of_lt'
+    simpa [wordModulus, UInt32.size] using result.isLt
+  have payloadInBounds :
+      (UInt32.ofNat result.value).toNat + headerBytes + 8 * capacity ≤
+        allocated.memory.size := by
+    rw [resultToNat]
+    calc
+      result.value + headerBytes + 8 * capacity ≤
+          result.value + align8
+            (headerBytes + target.semanticSlotBytes * capacity) := by
+        have aligned := align8_ge
+          (headerBytes + target.semanticSlotBytes * capacity)
+        simp only [target] at aligned ⊢
+        omega
+      _ = allocated.heapCursor := allocatedExtent.symm
+      _ ≤ allocated.memory.size := allocatedValid.cursorInBounds
+  have lowAddress :
+      (checkedLimbBase (UInt32.ofNat result.value) index).toNat =
+        (UInt32.ofNat result.value).toNat + headerBytes + 8 * index.toNat := by
+    have address := writtenLimbHalfAddress_toNat_of_payloadFits
+      (writtenLimbPayloadFits_of_allocateObject allocation)
+      (index := index.toNat) (high := false) (by omega)
+    simpa [writtenLimbHalfAddress] using address
+  have memorySize : allocated.memory.size = initial.mem.pages * 65536 := by
+    simpa [wasmPageBytes] using initialRelated.size_eq
+  constructor <;>
+    rw [written.pages_eq, ← memorySize, lowAddress] <;> omega
+
 /-- A successful raw Natural-object reservation provides exactly the
 pairwise lane separation needed by the writer projection. -/
 theorem writtenLimbAddressesDisjoint_of_allocateObject
@@ -5187,6 +5360,745 @@ theorem read32_writeSumFinalStore_disjoint
   unfold writeSumFinalStore writeSumLowStore
   rw [ResidentMemoryRel.read32_write32_disjoint _ _ _ _ highDisjoint]
   exact ResidentMemoryRel.read32_write32_disjoint _ _ _ _ lowDisjoint
+
+/-- A four-byte read lane is disjoint from every low/high result lane in a
+written prefix.  This is deliberately phrased over the exact modular
+addresses used by the generated stores: callers must supply any no-wraparound
+facts needed to establish the unbounded byte inequalities. -/
+def WrittenLimbReadDisjoint
+    (result : UInt32) (count : Nat) (readAddress : UInt32) : Prop :=
+  ∀ index, index < count →
+    ((writtenLimbHalfAddress result index false).toNat + 3 <
+          readAddress.toNat ∨
+        readAddress.toNat + 3 <
+          (writtenLimbHalfAddress result index false).toNat) ∧
+      ((writtenLimbHalfAddress result index true).toNat + 3 <
+          readAddress.toNat ∨
+        readAddress.toNat + 3 <
+          (writtenLimbHalfAddress result index true).toNat)
+
+/-- Exact result-prefix writes preserve any physical word read whose lane is
+disjoint from every low/high lane in that prefix.  Unlike a global
+`ResidentMemoryRel`, this local frame remains true while a fresh result
+payload evolves. -/
+theorem WrittenLimbPrefix.read32_of_disjoint
+    {initial current : Wasm.Store host} {result readAddress : UInt32}
+    {words : List LimbWords} {count : Nat}
+    (written : WrittenLimbPrefix initial result words count current)
+    (disjoint : WrittenLimbReadDisjoint result count readAddress) :
+    current.mem.read32 readAddress = initial.mem.read32 readAddress := by
+  induction written with
+  | zero => rfl
+  | @step index previous low high written wordAt ih =>
+      have latest := disjoint index (by omega)
+      calc
+        (writeSumFinalStore previous result (UInt32.ofNat index) low high).mem.read32
+            readAddress = previous.mem.read32 readAddress :=
+          read32_writeSumFinalStore_disjoint _ _ _ _ _ _
+            (by simpa [writtenLimbHalfAddress] using latest.1)
+            (by simpa [writtenLimbHalfAddress] using latest.2)
+        _ = initial.mem.read32 readAddress := by
+          apply ih
+          intro earlier earlierInPrefix
+          exact disjoint earlier (by omega)
+
+/-- A nonwrapping result payload is disjoint from every physical word lane
+that ends before the payload begins. -/
+theorem writtenLimbReadDisjoint_of_beforePayload
+    {result readAddress : UInt32} {count : Nat}
+    (payloadFits : result.toNat + headerBytes + 8 * count ≤ UInt32.size)
+    (readBefore : readAddress.toNat + 3 < result.toNat + headerBytes) :
+    WrittenLimbReadDisjoint result count readAddress := by
+  intro index indexInPrefix
+  constructor
+  · right
+    rw [writtenLimbHalfAddress_toNat_of_payloadFits payloadFits indexInPrefix]
+    simp
+    omega
+  · right
+    rw [writtenLimbHalfAddress_toNat_of_payloadFits payloadFits indexInPrefix]
+    simp
+    omega
+
+/-- Exact prefix writes preserve any word lane ending before a nonwrapping
+result payload. -/
+theorem WrittenLimbPrefix.read32_of_beforePayload
+    {initial current : Wasm.Store host} {result readAddress : UInt32}
+    {words : List LimbWords} {count : Nat}
+    (written : WrittenLimbPrefix initial result words count current)
+    (payloadFits : result.toNat + headerBytes + 8 * count ≤ UInt32.size)
+    (readBefore : readAddress.toNat + 3 < result.toNat + headerBytes) :
+    current.mem.read32 readAddress = initial.mem.read32 readAddress :=
+  written.read32_of_disjoint
+    (writtenLimbReadDisjoint_of_beforePayload payloadFits readBefore)
+
+/-- A successful fresh object reservation supplies the nonwrapping result
+payload bound needed to frame any earlier word lane.  The writer may cover a
+prefix of the reserved capacity. -/
+theorem WrittenLimbPrefix.read32_of_allocateObject_before
+    {initial current : Wasm.Store host} {address : Word32}
+    {words : List LimbWords} {count capacity : Nat}
+    {state allocated : MemoryState} {persistent : Bool}
+    {aux0 aux1 aux2 aux3 : UInt32} {readAddress : UInt32}
+    (written : WrittenLimbPrefix initial (UInt32.ofNat address.value) words
+      count current)
+    (countLe : count ≤ capacity)
+    (allocation : state.allocateObject .natural
+      (target.semanticSlotBytes * capacity) persistent aux0 aux1 aux2 aux3 =
+        .ok (allocated, address))
+    (readBefore : readAddress.toNat + 3 <
+      (UInt32.ofNat address.value).toNat + headerBytes) :
+    current.mem.read32 readAddress = initial.mem.read32 readAddress := by
+  apply written.read32_of_beforePayload
+  · have capacityFits :=
+      writtenLimbPayloadFits_of_allocateObject
+        (count := capacity) allocation
+    omega
+  · exact readBefore
+
+/-- Transport one owned W6 word read through a fresh result allocation and
+an evolving exact writer prefix.  The result packages precisely the physical
+load premises used by resident helpers: unchanged pages, an in-bounds lane,
+and the exact current-store word. -/
+theorem WrittenLimbPrefix.readUInt32_of_allocateObject_before
+    {initial current : Wasm.Store host} {state allocated : MemoryState}
+    {result : Word32} {words : List LimbWords} {count capacity address : Nat}
+    {persistent : Bool} {aux0 aux1 aux2 aux3 value : UInt32}
+    (written : WrittenLimbPrefix initial (UInt32.ofNat result.value) words
+      count current)
+    (valid : state.FrontierInvariant)
+    (countLe : count ≤ capacity)
+    (allocation : state.allocateObject .natural
+      (target.semanticSlotBytes * capacity) persistent aux0 aux1 aux2 aux3 =
+        .ok (allocated, result))
+    (initialRelated : ResidentMemoryRel allocated initial.mem)
+    (owned : address + 4 ≤ state.heapCursor)
+    (concreteRead : state.memory.readUInt32 address = .ok value) :
+    ¬((UInt32.ofNat address).toNat + 4 > current.mem.pages * 65536) ∧
+      current.mem.read32 (UInt32.ofNat address) = value := by
+  have extension := valid.allocateObject_prefixExtension allocation
+  have fresh := valid.allocateObject_address allocation
+  have resultLt : result.value < UInt32.size := by
+    simpa [wordModulus, UInt32.size] using result.isLt
+  have resultToNat : (UInt32.ofNat result.value).toNat = result.value :=
+    UInt32.toNat_ofNat_of_lt' resultLt
+  have addressLt : address < UInt32.size := by
+    omega
+  have addressToNat : (UInt32.ofNat address).toNat = address :=
+    UInt32.toNat_ofNat_of_lt' addressLt
+  have readBefore : (UInt32.ofNat address).toNat + 3 <
+      (UInt32.ofNat result.value).toNat + headerBytes := by
+    rw [addressToNat, resultToNat, fresh]
+    simp [headerBytes]
+    omega
+  have framed := written.read32_of_allocateObject_before countLe allocation
+    readBefore
+  have allocatedRead : allocated.memory.readUInt32 address = .ok value := by
+    rw [extension.readUInt32 address owned]
+    exact concreteRead
+  have stateInBounds := valid.cursorInBounds
+  have memoryGrowth := extension.memorySize
+  have allocatedInBounds : address + 3 < allocated.memory.size := by
+    omega
+  have transported :=
+    initialRelated.readUInt32_eq_read32 allocatedInBounds
+  rw [allocatedRead] at transported
+  have initialRead : initial.mem.read32 (UInt32.ofNat address) = value := by
+    simpa using transported.symm
+  have memorySize : allocated.memory.size = initial.mem.pages * 65536 := by
+    simpa [wasmPageBytes] using initialRelated.size_eq
+  constructor
+  · rw [written.pages_eq, ← memorySize, addressToNat]
+    omega
+  · rw [framed, initialRead]
+
+/-- The stored count lane of an existing Natural lies strictly before the
+payload of an object freshly allocated at the current frontier. -/
+theorem NaturalObjectRel.headerAux1Address_before_freshObjectPayload
+    {state allocated : MemoryState} {input result : Word32}
+    {value capacity : Nat} {header : Header} {persistent : Bool}
+    {aux0 aux1 aux2 aux3 : UInt32}
+    (related : NaturalObjectRel state input value header)
+    (valid : state.FrontierInvariant)
+    (allocation : state.allocateObject .natural
+      (target.semanticSlotBytes * capacity) persistent aux0 aux1 aux2 aux3 =
+        .ok (allocated, result)) :
+    (UInt32.ofNat input.value + UInt32.ofNat headerAux1Offset).toNat + 3 <
+      (UInt32.ofNat result.value).toNat + headerBytes := by
+  have fresh := valid.allocateObject_address allocation
+  have limbsFit := related.limbsFit
+  have extent := related.extent
+  simp [target] at limbsFit
+  have inputHeaderOwned : input.value + headerBytes ≤ state.heapCursor := by
+    omega
+  have resultLt : result.value < UInt32.size := by
+    simpa [wordModulus, UInt32.size] using result.isLt
+  have auxFits : headerAux1Offset + 4 ≤ headerBytes := by decide
+  have inputAddressLt : input.value + headerAux1Offset < UInt32.size := by
+    omega
+  have inputAddressToNat :
+      (UInt32.ofNat input.value + UInt32.ofNat headerAux1Offset).toNat =
+        input.value + headerAux1Offset := by
+    rw [← UInt32.ofNat_add]
+    exact UInt32.toNat_ofNat_of_lt' inputAddressLt
+  have resultToNat : (UInt32.ofNat result.value).toNat = result.value :=
+    UInt32.toNat_ofNat_of_lt' resultLt
+  rw [inputAddressToNat, resultToNat]
+  calc
+    input.value + headerAux1Offset + 3 < input.value + headerBytes := by
+      omega
+    _ ≤ state.heapCursor := inputHeaderOwned
+    _ = result.value := fresh.symm
+    _ < result.value + headerBytes := by simp [headerBytes]
+
+/-- Every low/high limb lane of an existing Natural lies strictly before the
+payload of an object freshly allocated at the current frontier. -/
+theorem NaturalObjectRel.limbAddress_before_freshObjectPayload
+    {state allocated : MemoryState} {input result : Word32}
+    {value capacity index : Nat} {header : Header} {persistent high : Bool}
+    {aux0 aux1 aux2 aux3 : UInt32}
+    (related : NaturalObjectRel state input value header)
+    (valid : state.FrontierInvariant)
+    (allocation : state.allocateObject .natural
+      (target.semanticSlotBytes * capacity) persistent aux0 aux1 aux2 aux3 =
+        .ok (allocated, result))
+    (indexInBounds : index < header.aux1.toNat) :
+    (writtenLimbHalfAddress (UInt32.ofNat input.value) index high).toNat + 3 <
+      (UInt32.ofNat result.value).toNat + headerBytes := by
+  have fresh := valid.allocateObject_address allocation
+  have inputToNat : (UInt32.ofNat input.value).toNat = input.value := by
+    apply UInt32.toNat_ofNat_of_lt'
+    simpa [wordModulus, UInt32.size] using input.isLt
+  have resultLt : result.value < UInt32.size := by
+    simpa [wordModulus, UInt32.size] using result.isLt
+  have resultToNat : (UInt32.ofNat result.value).toNat = result.value :=
+    UInt32.toNat_ofNat_of_lt' resultLt
+  have limbsFit := related.limbsFit
+  have extent := related.extent
+  simp [target] at limbsFit
+  have payloadOwned :
+      input.value + headerBytes + 8 * header.aux1.toNat ≤
+        state.heapCursor := by
+    omega
+  have payloadFits :
+      (UInt32.ofNat input.value).toNat + headerBytes +
+          8 * header.aux1.toNat ≤ UInt32.size := by
+    rw [inputToNat]
+    rw [← fresh] at payloadOwned
+    omega
+  rw [writtenLimbHalfAddress_toNat_of_payloadFits payloadFits indexInBounds,
+    inputToNat, resultToNat, fresh]
+  cases high <;> simp <;> omega
+
+/-- Writes to a fresh result prefix preserve an existing Natural's physical
+header-count word. -/
+theorem WrittenLimbPrefix.readNaturalAux1_of_allocateObject
+    {initial current : Wasm.Store host} {state allocated : MemoryState}
+    {input result : Word32} {inputValue count capacity : Nat}
+    {inputHeader : Header} {words : List LimbWords} {persistent : Bool}
+    {aux0 aux1 aux2 aux3 : UInt32}
+    (written : WrittenLimbPrefix initial (UInt32.ofNat result.value) words
+      count current)
+    (related : NaturalObjectRel state input inputValue inputHeader)
+    (valid : state.FrontierInvariant)
+    (countLe : count ≤ capacity)
+    (allocation : state.allocateObject .natural
+      (target.semanticSlotBytes * capacity) persistent aux0 aux1 aux2 aux3 =
+        .ok (allocated, result)) :
+    current.mem.read32
+        (UInt32.ofNat input.value + UInt32.ofNat headerAux1Offset) =
+      initial.mem.read32
+        (UInt32.ofNat input.value + UInt32.ofNat headerAux1Offset) :=
+  written.read32_of_allocateObject_before countLe allocation
+    (NaturalObjectRel.headerAux1Address_before_freshObjectPayload
+      related valid allocation)
+
+/-- Writes to a fresh result prefix preserve either physical half of every
+in-bounds limb of an existing Natural. -/
+theorem WrittenLimbPrefix.readNaturalLimb_of_allocateObject
+    {initial current : Wasm.Store host} {state allocated : MemoryState}
+    {input result : Word32} {inputValue count capacity index : Nat}
+    {inputHeader : Header} {words : List LimbWords} {persistent high : Bool}
+    {aux0 aux1 aux2 aux3 : UInt32}
+    (written : WrittenLimbPrefix initial (UInt32.ofNat result.value) words
+      count current)
+    (related : NaturalObjectRel state input inputValue inputHeader)
+    (valid : state.FrontierInvariant)
+    (countLe : count ≤ capacity)
+    (allocation : state.allocateObject .natural
+      (target.semanticSlotBytes * capacity) persistent aux0 aux1 aux2 aux3 =
+        .ok (allocated, result))
+    (indexInBounds : index < inputHeader.aux1.toNat) :
+    current.mem.read32
+        (writtenLimbHalfAddress (UInt32.ofNat input.value) index high) =
+      initial.mem.read32
+        (writtenLimbHalfAddress (UInt32.ofNat input.value) index high) :=
+  written.read32_of_allocateObject_before countLe allocation
+    (NaturalObjectRel.limbAddress_before_freshObjectPayload
+      related valid allocation indexInBounds)
+
+/-- Static adaptation and installation facts for the Natural-flavor count
+dispatcher.  Keeping this bundle separate from any store packages the part of
+the resident ABI that is shared by every operand read in the writer loop. -/
+structure NaturalMagnitudeCountInstallation
+    (sourceModule : Fir.Wasm.Module) (module : Wasm.Module) where
+  naturalCountTarget : Wasm.Function
+  magnitudeCountTarget : Wasm.Function
+  naturalCountIndex : Nat
+  magnitudeCountIndex : Nat
+  integerCountIndex : Nat
+  naturalCountAdapted : FirTalos.function sourceModule
+    ResidentBigNumeric.naturalCountSourceFunction = .ok naturalCountTarget
+  naturalCountNotImport : module.imports[naturalCountIndex]? = none
+  naturalCountInstalled :
+    module.funcs[naturalCountIndex - module.imports.length]? =
+      some naturalCountTarget
+  magnitudeCountAdapted : FirTalos.function sourceModule
+    ResidentBigNumeric.magnitudeCountSourceFunction = .ok magnitudeCountTarget
+  integerCountFound : FirTalos.callIndex? sourceModule
+    (.declaration Fir.Wasm.Emit.ResidentBigNumeric.integerCountName) =
+      some integerCountIndex
+  naturalCountFound : FirTalos.callIndex? sourceModule
+    (.declaration Fir.Wasm.Emit.ResidentBigNumeric.naturalCountName) =
+      some naturalCountIndex
+  magnitudeCountNotImport : module.imports[magnitudeCountIndex]? = none
+  magnitudeCountInstalled :
+    module.funcs[magnitudeCountIndex - module.imports.length]? =
+      some magnitudeCountTarget
+
+/-- Static adaptation and installation facts for one low/high Natural
+magnitude lane.  The count dispatcher is shared explicitly, while the actual
+and bypassed limb targets remain visible for the dispatch proof. -/
+structure NaturalMagnitudePartInstallation
+    (sourceModule : Fir.Wasm.Module) (module : Wasm.Module)
+    (counts : NaturalMagnitudeCountInstallation sourceModule module)
+    (part : ResidentBigNumeric.NaturalLimbPart) where
+  magnitudeTarget : Wasm.Function
+  naturalLimbTarget : Wasm.Function
+  magnitudeIndex : Nat
+  integerLimbIndex : Nat
+  naturalLimbIndex : Nat
+  magnitudeAdapted : FirTalos.function sourceModule
+    (ResidentBigNumeric.magnitudeLimbSourceFunction part) = .ok magnitudeTarget
+  magnitudeCountFound : FirTalos.callIndex? sourceModule
+    (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeCountName) =
+      some counts.magnitudeCountIndex
+  integerLimbFound : FirTalos.callIndex? sourceModule
+    (ResidentBigNumeric.integerLimbCallTarget part) = some integerLimbIndex
+  naturalLimbFound : FirTalos.callIndex? sourceModule
+    (ResidentBigNumeric.naturalLimbCallTarget part) = some naturalLimbIndex
+  magnitudeNotImport : module.imports[magnitudeIndex]? = none
+  magnitudeInstalled :
+    module.funcs[magnitudeIndex - module.imports.length]? = some magnitudeTarget
+  naturalLimbAdapted : FirTalos.function sourceModule
+    (ResidentBigNumeric.sourceFunction part) = .ok naturalLimbTarget
+  naturalLimbNotImport : module.imports[naturalLimbIndex]? = none
+  naturalLimbInstalled :
+    module.funcs[naturalLimbIndex - module.imports.length]? =
+      some naturalLimbTarget
+
+/-- Complete Natural-flavor magnitude ABI used by an arithmetic writer. -/
+structure NaturalMagnitudeInstallation
+    (sourceModule : Fir.Wasm.Module) (module : Wasm.Module) where
+  counts : NaturalMagnitudeCountInstallation sourceModule module
+  low : NaturalMagnitudePartInstallation sourceModule module counts .low
+  high : NaturalMagnitudePartInstallation sourceModule module counts .high
+
+/-- Static installation facts for the sum writer, tied to one complete
+Natural magnitude ABI. -/
+structure NaturalSumWriterInstallation
+    (sourceModule : Fir.Wasm.Module) (module : Wasm.Module)
+    (magnitude : NaturalMagnitudeInstallation sourceModule module) where
+  targetFunction : Wasm.Function
+  index : Nat
+  adapted : FirTalos.function sourceModule
+    Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction = .ok targetFunction
+  magnitudeLowFound : FirTalos.callIndex? sourceModule
+    (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeLowName) =
+      some magnitude.low.magnitudeIndex
+  magnitudeHighFound : FirTalos.callIndex? sourceModule
+    (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeHighName) =
+      some magnitude.high.magnitudeIndex
+  notImport : module.imports[index]? = none
+  installed : module.funcs[index - module.imports.length]? =
+    some targetFunction
+
+/-- The installed Natural-count helper remains callable from every evolving
+result-prefix store.  Its one physical header read is transported from the
+old Natural through the fresh allocation and exact result writes. -/
+theorem terminatesWith_naturalCount_of_writtenPrefix
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {targetFunction : Wasm.Function} {functionIndex : Nat}
+    {initial current : Wasm.Store host} {state allocated : MemoryState}
+    {input result : Word32} {inputValue count capacity : Nat}
+    {inputHeader : Header} {words : List LimbWords} {persistent : Bool}
+    {aux0 aux1 aux2 aux3 : UInt32} {tail : List Wasm.Value}
+    (adapted : FirTalos.function sourceModule
+      ResidentBigNumeric.naturalCountSourceFunction = .ok targetFunction)
+    (notImport : module.imports[functionIndex]? = none)
+    (found : module.funcs[functionIndex - module.imports.length]? =
+      some targetFunction)
+    (written : WrittenLimbPrefix initial (UInt32.ofNat result.value) words
+      count current)
+    (related : NaturalObjectRel state input inputValue inputHeader)
+    (valid : state.FrontierInvariant)
+    (countLe : count ≤ capacity)
+    (allocation : state.allocateObject .natural
+      (target.semanticSlotBytes * capacity) persistent aux0 aux1 aux2 aux3 =
+        .ok (allocated, result))
+    (initialRelated : ResidentMemoryRel allocated initial.mem) :
+    Wasm.TerminatesWith env module functionIndex current
+      ([.i32 (UInt32.ofNat input.value)] ++ tail)
+      (fun final values =>
+        final = current ∧ values = .i32 inputHeader.aux1 :: tail) := by
+  obtain ⟨inputHeap, rawHeaderRead, _, headerMinimum, _, _⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts state input inputHeader
+      related.headerRead
+  let concreteAddress := input.value + headerAux1Offset
+  have auxFits : headerAux1Offset + 4 ≤ headerBytes := by decide
+  have extent := related.extent
+  have owned : concreteAddress + 4 ≤ state.heapCursor := by
+    dsimp [concreteAddress]
+    omega
+  have concreteRead :
+      state.memory.readUInt32 concreteAddress = .ok inputHeader.aux1 := by
+    simpa [concreteAddress] using
+      Header.read_aux1_eq_ok state.memory input inputHeader rawHeaderRead
+  have physical := written.readUInt32_of_allocateObject_before valid countLe
+    allocation initialRelated owned concreteRead
+  have inputToNat : (UInt32.ofNat input.value).toNat = input.value := by
+    apply UInt32.toNat_ofNat_of_lt'
+    simpa [wordModulus, UInt32.size] using input.isLt
+  have offsetToNat :
+      (UInt32.ofNat headerAux1Offset).toNat = headerAux1Offset :=
+    UInt32.toNat_ofNat_of_lt' (by decide)
+  have fresh := valid.allocateObject_address allocation
+  have resultLt : result.value < UInt32.size := by
+    simpa [wordModulus, UInt32.size] using result.isLt
+  have concreteAddressLt : concreteAddress < UInt32.size := by
+    omega
+  have concreteAddressToNat :
+      (UInt32.ofNat concreteAddress).toNat = concreteAddress :=
+    UInt32.toNat_ofNat_of_lt' concreteAddressLt
+  have selected : 1 &&& UInt32.ofNat input.value = 0 :=
+    ResidentBigNumeric.heapWord_selected input inputHeap
+  have readInBounds :
+      ¬((UInt32.ofNat input.value).toNat +
+          (UInt32.ofNat headerAux1Offset).toNat + 4 >
+        current.mem.pages * 65536) := by
+    have physicalBound := physical.1
+    rw [concreteAddressToNat] at physicalBound
+    rw [inputToNat, offsetToNat]
+    simpa [concreteAddress] using physicalBound
+  have readEq : current.mem.read32
+      (UInt32.ofNat input.value + UInt32.ofNat headerAux1Offset) =
+        inputHeader.aux1 := by
+    simpa [concreteAddress, UInt32.ofNat_add] using physical.2
+  exact ResidentBigNumeric.terminatesWith_naturalCountHeap_of_adapted
+    (tail := tail) adapted notImport found selected readInBounds readEq
+
+/-- Natural-flavor magnitude counting inherits the evolving-prefix frame
+without exposing its delegated header load to the writer proof. -/
+theorem terminatesWith_magnitudeCountNatural_of_writtenPrefix
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {naturalCountTarget magnitudeCountTarget : Wasm.Function}
+    {naturalCountIndex magnitudeCountIndex integerCountIndex : Nat}
+    {initial current : Wasm.Store host} {state allocated : MemoryState}
+    {input result : Word32} {inputValue count capacity : Nat}
+    {inputHeader : Header} {words : List LimbWords} {persistent : Bool}
+    {aux0 aux1 aux2 aux3 : UInt32} {tail : List Wasm.Value}
+    (naturalCountAdapted : FirTalos.function sourceModule
+      ResidentBigNumeric.naturalCountSourceFunction = .ok naturalCountTarget)
+    (naturalCountNotImport : module.imports[naturalCountIndex]? = none)
+    (naturalCountInstalled :
+      module.funcs[naturalCountIndex - module.imports.length]? =
+        some naturalCountTarget)
+    (magnitudeCountAdapted : FirTalos.function sourceModule
+      ResidentBigNumeric.magnitudeCountSourceFunction =
+        .ok magnitudeCountTarget)
+    (integerCountFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.integerCountName) =
+        some integerCountIndex)
+    (naturalCountFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentBigNumeric.naturalCountName) =
+        some naturalCountIndex)
+    (magnitudeCountNotImport : module.imports[magnitudeCountIndex]? = none)
+    (magnitudeCountInstalled :
+      module.funcs[magnitudeCountIndex - module.imports.length]? =
+        some magnitudeCountTarget)
+    (written : WrittenLimbPrefix initial (UInt32.ofNat result.value) words
+      count current)
+    (related : NaturalObjectRel state input inputValue inputHeader)
+    (valid : state.FrontierInvariant)
+    (countLe : count ≤ capacity)
+    (allocation : state.allocateObject .natural
+      (target.semanticSlotBytes * capacity) persistent aux0 aux1 aux2 aux3 =
+        .ok (allocated, result))
+    (initialRelated : ResidentMemoryRel allocated initial.mem) :
+    Wasm.TerminatesWith env module magnitudeCountIndex current
+      ([.i32 0, .i32 (UInt32.ofNat input.value)] ++ tail)
+      (fun final values =>
+        final = current ∧ values = .i32 inputHeader.aux1 :: tail) := by
+  have naturalCountRun :
+      Wasm.TerminatesWith env module naturalCountIndex current
+        [.i32 (UInt32.ofNat input.value)]
+        (fun final values =>
+          final = current ∧ values = [.i32 inputHeader.aux1]) :=
+    terminatesWith_naturalCount_of_writtenPrefix
+      (tail := []) naturalCountAdapted naturalCountNotImport
+      naturalCountInstalled written related valid countLe allocation
+      initialRelated
+  exact ResidentBigNumeric.terminatesWith_magnitudeCountNatural_of_adapted
+    (tail := tail) magnitudeCountAdapted integerCountFound naturalCountFound
+    magnitudeCountNotImport magnitudeCountInstalled naturalCountRun
+
+/-- An installed arbitrary-index Natural limb accessor remains callable from
+every evolving result-prefix store.  The caller supplies the one checked W6
+word read selected by `part`; allocation and writer framing supply all Talos
+address, bounds, and current-store facts. -/
+theorem terminatesWith_naturalLimb_of_writtenPrefix
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {targetFunction : Wasm.Function} {functionIndex : Nat}
+    {part : ResidentBigNumeric.NaturalLimbPart}
+    {initial current : Wasm.Store host} {state allocated : MemoryState}
+    {input result : Word32} {inputValue count capacity : Nat}
+    {inputHeader : Header} {words : List LimbWords} {persistent : Bool}
+    {aux0 aux1 aux2 aux3 : UInt32} {index limb : UInt32}
+    {tail : List Wasm.Value}
+    (adapted : FirTalos.function sourceModule
+      (ResidentBigNumeric.sourceFunction part) = .ok targetFunction)
+    (notImport : module.imports[functionIndex]? = none)
+    (found : module.funcs[functionIndex - module.imports.length]? =
+      some targetFunction)
+    (written : WrittenLimbPrefix initial (UInt32.ofNat result.value) words
+      count current)
+    (related : NaturalObjectRel state input inputValue inputHeader)
+    (valid : state.FrontierInvariant)
+    (countLe : count ≤ capacity)
+    (allocation : state.allocateObject .natural
+      (target.semanticSlotBytes * capacity) persistent aux0 aux1 aux2 aux3 =
+        .ok (allocated, result))
+    (initialRelated : ResidentMemoryRel allocated initial.mem)
+    (indexInBounds : index.toNat < inputHeader.aux1.toNat)
+    (concreteRead : state.memory.readUInt32
+      (input.value + headerBytes + 8 * index.toNat +
+        (ResidentBigNumeric.byteOffset part).toNat) = .ok limb) :
+    Wasm.TerminatesWith env module functionIndex current
+      ([.i32 index, .i32 (UInt32.ofNat input.value)] ++ tail)
+      (fun final values =>
+        final = current ∧ values = .i32 limb :: tail) := by
+  obtain ⟨inputHeap, _, _, _, _, _⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts state input inputHeader
+      related.headerRead
+  let baseAddress := input.value + headerBytes + 8 * index.toNat
+  let concreteAddress :=
+    baseAddress + (ResidentBigNumeric.byteOffset part).toNat
+  have limbsFit := related.limbsFit
+  have extent := related.extent
+  simp [target] at limbsFit
+  have owned : concreteAddress + 4 ≤ state.heapCursor := by
+    dsimp [concreteAddress, baseAddress]
+    cases part <;> simp [ResidentBigNumeric.byteOffset] at concreteRead ⊢ <;>
+      omega
+  have physical := written.readUInt32_of_allocateObject_before valid countLe
+    allocation initialRelated owned (by simpa [concreteAddress, baseAddress]
+      using concreteRead)
+  have fresh := valid.allocateObject_address allocation
+  have resultLt : result.value < UInt32.size := by
+    simpa [wordModulus, UInt32.size] using result.isLt
+  have concreteAddressLt : concreteAddress < UInt32.size := by
+    omega
+  have concreteAddressToNat :
+      (UInt32.ofNat concreteAddress).toNat = concreteAddress :=
+    UInt32.toNat_ofNat_of_lt' concreteAddressLt
+  have baseAddressLt : baseAddress < UInt32.size := by
+    dsimp [concreteAddress] at concreteAddressLt
+    omega
+  have baseWord := ResidentBigNumeric.limbBaseAddress_eq_ofNat input index
+  have baseToNat :
+      (ResidentPrimitives.scale8Word index +
+        (UInt32.ofNat headerBytes + UInt32.ofNat input.value)).toNat =
+          baseAddress := by
+    rw [baseWord]
+    exact UInt32.toNat_ofNat_of_lt' baseAddressLt
+  have addressToNat :
+      (UInt32.ofNat concreteAddress).toNat =
+        (ResidentPrimitives.scale8Word index +
+          (UInt32.ofNat headerBytes + UInt32.ofNat input.value)).toNat +
+            (ResidentBigNumeric.byteOffset part).toNat := by
+    rw [concreteAddressToNat, baseToNat]
+  have targetAddress : UInt32.ofNat concreteAddress =
+      ResidentPrimitives.scale8Word index +
+        (UInt32.ofNat headerBytes + UInt32.ofNat input.value) +
+          ResidentBigNumeric.byteOffset part := by
+    dsimp [concreteAddress]
+    rw [UInt32.ofNat_add, ← baseWord]
+    simp
+  have selected : 1 &&& UInt32.ofNat input.value = 0 :=
+    ResidentBigNumeric.heapWord_selected input inputHeap
+  have readInBounds :
+      ¬((ResidentPrimitives.scale8Word index +
+          (UInt32.ofNat headerBytes + UInt32.ofNat input.value)).toNat +
+        (ResidentBigNumeric.byteOffset part).toNat + 4 >
+          current.mem.pages * 65536) := by
+    rw [← addressToNat]
+    exact physical.1
+  have readEq : current.mem.read32
+      (ResidentPrimitives.scale8Word index +
+        (UInt32.ofNat headerBytes + UInt32.ofNat input.value) +
+          ResidentBigNumeric.byteOffset part) = limb := by
+    rw [← targetAddress]
+    exact physical.2
+  exact ResidentBigNumeric.terminatesWith_naturalLimb_of_adapted
+    (tail := tail) adapted notImport found selected readInBounds readEq
+
+/-- Operand-view specialization of the evolving-prefix limb call.  The
+checked Natural relation supplies one exact stored `UInt64`; this theorem
+selects its low or high wasm32 half and discharges the physical read premise
+uniformly. -/
+theorem terminatesWith_naturalLimb_of_writtenPrefix_view
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {targetFunction : Wasm.Function} {functionIndex : Nat}
+    {part : ResidentBigNumeric.NaturalLimbPart}
+    {initial current : Wasm.Store host} {state allocated : MemoryState}
+    {input result : Word32} {inputValue count capacity : Nat}
+    {inputHeader : Header} {words : List LimbWords} {persistent : Bool}
+    {aux0 aux1 aux2 aux3 : UInt32} {index : UInt32}
+    {limbs : List UInt64} {limb : UInt64} {tail : List Wasm.Value}
+    (adapted : FirTalos.function sourceModule
+      (ResidentBigNumeric.sourceFunction part) = .ok targetFunction)
+    (notImport : module.imports[functionIndex]? = none)
+    (found : module.funcs[functionIndex - module.imports.length]? =
+      some targetFunction)
+    (written : WrittenLimbPrefix initial (UInt32.ofNat result.value) words
+      count current)
+    (related : NaturalObjectRel state input inputValue inputHeader)
+    (view : NaturalLimbView state input inputHeader inputValue limbs)
+    (valid : state.FrontierInvariant)
+    (countLe : count ≤ capacity)
+    (allocation : state.allocateObject .natural
+      (target.semanticSlotBytes * capacity) persistent aux0 aux1 aux2 aux3 =
+        .ok (allocated, result))
+    (initialRelated : ResidentMemoryRel allocated initial.mem)
+    (limbAt : limbs[index.toNat]? = some limb) :
+    Wasm.TerminatesWith env module functionIndex current
+      ([.i32 index, .i32 (UInt32.ofNat input.value)] ++ tail)
+      (fun final values => final = current ∧
+        values = .i32 (limbWordPart part (limbWordsOfUInt64 limb)) :: tail) := by
+  have indexInBounds : index.toNat < inputHeader.aux1.toNat := by
+    rw [← view.length]
+    exact (List.getElem?_eq_some_iff.mp limbAt).1
+  have reads := view.readWords limbAt
+  cases part with
+  | low =>
+      simpa [limbWordPart] using
+        (terminatesWith_naturalLimb_of_writtenPrefix
+          adapted notImport found written related valid countLe allocation
+          initialRelated indexInBounds (by
+            simpa [ResidentBigNumeric.byteOffset] using reads.1))
+  | high =>
+      simpa [limbWordPart] using
+        (terminatesWith_naturalLimb_of_writtenPrefix
+          adapted notImport found written related valid countLe allocation
+          initialRelated indexInBounds (by
+            simpa [ResidentBigNumeric.byteOffset] using reads.2))
+
+/-- A complete installed Natural magnitude lane reads exactly the requested
+word of a checked physical operand view padded to the writer's common count.
+This single statement covers both dispatch branches: stored limbs delegate to
+the physical Natural accessor, while indices beyond the operand count return
+the same zero pair introduced by `paddedLimbViewWords`. -/
+theorem NaturalMagnitudePartInstallation.terminatesWith_paddedLimbViewWord
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {counts : NaturalMagnitudeCountInstallation sourceModule module}
+    {part : ResidentBigNumeric.NaturalLimbPart}
+    (installed : NaturalMagnitudePartInstallation sourceModule module
+      counts part)
+    {initial current : Wasm.Store host} {state allocated : MemoryState}
+    {input result : Word32} {inputValue prefixCount capacity commonCount : Nat}
+    {inputHeader : Header} {writtenWords : List LimbWords}
+    {persistent : Bool} {aux0 aux1 aux2 aux3 : UInt32}
+    {limbs : List UInt64} {index : UInt32} {paddedWord : LimbWords}
+    {tail : List Wasm.Value}
+    (written : WrittenLimbPrefix initial (UInt32.ofNat result.value)
+      writtenWords prefixCount current)
+    (related : NaturalObjectRel state input inputValue inputHeader)
+    (view : NaturalLimbView state input inputHeader inputValue limbs)
+    (valid : state.FrontierInvariant)
+    (prefixFits : prefixCount ≤ capacity)
+    (allocation : state.allocateObject .natural
+      (target.semanticSlotBytes * capacity) persistent aux0 aux1 aux2 aux3 =
+        .ok (allocated, result))
+    (initialRelated : ResidentMemoryRel allocated initial.mem)
+    (operandFits : limbs.length ≤ commonCount)
+    (indexInCount : index.toNat < commonCount)
+    (paddedAt : (paddedLimbViewWords commonCount limbs)[index.toNat]? =
+      some paddedWord) :
+    Wasm.TerminatesWith env module installed.magnitudeIndex current
+      ([.i32 index, .i32 0, .i32 (UInt32.ofNat input.value)] ++ tail)
+      (fun final values => final = current ∧
+        values = .i32 (limbWordPart part paddedWord) :: tail) := by
+  have magnitudeCountRun :
+      Wasm.TerminatesWith env module counts.magnitudeCountIndex current
+        [.i32 0, .i32 (UInt32.ofNat input.value)]
+        (fun final values =>
+          final = current ∧ values = [.i32 inputHeader.aux1]) :=
+    terminatesWith_magnitudeCountNatural_of_writtenPrefix
+      (tail := []) counts.naturalCountAdapted counts.naturalCountNotImport
+      counts.naturalCountInstalled counts.magnitudeCountAdapted
+      counts.integerCountFound counts.naturalCountFound
+      counts.magnitudeCountNotImport counts.magnitudeCountInstalled written
+      related valid prefixFits allocation initialRelated
+  by_cases indexInLimbs : index.toNat < limbs.length
+  · let limb := limbs[index.toNat]'indexInLimbs
+    have limbAt : limbs[index.toNat]? = some limb := by
+      simp [limb, indexInLimbs]
+    have indexInHeader : index < inputHeader.aux1 := by
+      rw [UInt32.lt_iff_toNat_lt, ← view.length]
+      exact indexInLimbs
+    have naturalLimbRun :
+        Wasm.TerminatesWith env module installed.naturalLimbIndex current
+          [.i32 index, .i32 (UInt32.ofNat input.value)]
+          (fun final values => final = current ∧
+            values = [.i32
+              (limbWordPart part (limbWordsOfUInt64 limb))]) :=
+      terminatesWith_naturalLimb_of_writtenPrefix_view
+        (tail := []) installed.naturalLimbAdapted
+        installed.naturalLimbNotImport installed.naturalLimbInstalled written
+        related view valid prefixFits allocation initialRelated limbAt
+    have paddedLimbAt := paddedLimbViewWords_getElem?_of_lt
+      (count := commonCount) indexInLimbs limbAt
+    have paddedWordEq : paddedWord = limbWordsOfUInt64 limb := by
+      rw [paddedAt] at paddedLimbAt
+      exact Option.some.inj paddedLimbAt
+    have magnitudeRun :=
+      ResidentBigNumeric.terminatesWith_magnitudeLimbNatural_inBounds_of_adapted
+        (tail := tail) installed.magnitudeAdapted
+        installed.magnitudeCountFound installed.integerLimbFound
+        installed.naturalLimbFound installed.magnitudeNotImport
+        installed.magnitudeInstalled indexInHeader magnitudeCountRun
+        naturalLimbRun
+    simpa [paddedWordEq] using magnitudeRun
+  · have indexOutOfHeader : ¬index < inputHeader.aux1 := by
+      rw [UInt32.lt_iff_toNat_lt, ← view.length]
+      exact indexInLimbs
+    have paddedZeroAt := paddedLimbViewWords_getElem?_of_ge operandFits
+      (Nat.le_of_not_gt indexInLimbs) indexInCount
+    have paddedWordEq : paddedWord = (0, 0) := by
+      rw [paddedAt] at paddedZeroAt
+      exact Option.some.inj paddedZeroAt
+    have magnitudeRun :=
+      ResidentBigNumeric.terminatesWith_magnitudeLimbNatural_outOfBounds_of_adapted
+        (tail := tail) installed.magnitudeAdapted
+        installed.magnitudeCountFound installed.integerLimbFound
+        installed.naturalLimbFound installed.magnitudeNotImport
+        installed.magnitudeInstalled indexOutOfHeader magnitudeCountRun
+    simpa [paddedWordEq] using magnitudeRun
 
 /-- An exact store history projects to exact readable limbs once its byte
 lanes are known to be pairwise disjoint.  This is the bridge from the writer
@@ -5770,6 +6682,99 @@ theorem terminatesWith_writeSumFromFunction_of_exactPrefix
   · intro finalStore written
     simpa [FirTalos.Correctness.FunctionBodyPost, targetFunction',
       writeSumTargetFunction, args, Wasm.Function.numParams] using written
+
+/-- The installed Natural sum writer consumes two checked physical operand
+views.  Its four delegated low/high calls are derived uniformly from the
+shared magnitude ABI, so the only remaining loop premise is writable result
+memory. -/
+theorem NaturalSumWriterInstallation.terminatesWith_of_operandViews
+    {host : Type} {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {env : Wasm.HostEnv host}
+    {magnitude : NaturalMagnitudeInstallation sourceModule module}
+    (writer : NaturalSumWriterInstallation sourceModule module magnitude)
+    {initialStore : Wasm.Store host} {state allocated : MemoryState}
+    {left right result : Word32} {leftValue rightValue : Nat}
+    {leftHeader rightHeader : Header} {leftLimbs rightLimbs : List UInt64}
+    {count initialCarry : UInt32} {capacity : Nat}
+    {persistent : Bool} {aux0 aux1 aux2 aux3 : UInt32}
+    {tail : List Wasm.Value}
+    (leftRelated : NaturalObjectRel state left leftValue leftHeader)
+    (leftView : NaturalLimbView state left leftHeader leftValue leftLimbs)
+    (rightRelated : NaturalObjectRel state right rightValue rightHeader)
+    (rightView : NaturalLimbView state right rightHeader rightValue rightLimbs)
+    (valid : state.FrontierInvariant)
+    (countFits : count.toNat ≤ capacity)
+    (leftFits : leftLimbs.length ≤ count.toNat)
+    (rightFits : rightLimbs.length ≤ count.toNat)
+    (allocation : state.allocateObject .natural
+      (target.semanticSlotBytes * capacity) persistent aux0 aux1 aux2 aux3 =
+        .ok (allocated, result))
+    (initialRelated : ResidentMemoryRel allocated initialStore.mem) :
+    Wasm.TerminatesWith env module writer.index initialStore
+      ([.i32 initialCarry, .i32 count, .i32 0,
+        .i32 (UInt32.ofNat result.value),
+        .i32 0, .i32 (UInt32.ofNat right.value),
+        .i32 0, .i32 (UInt32.ofNat left.value)] ++ tail)
+      (fun final values =>
+        WrittenLimbPrefix initialStore (UInt32.ofNat result.value)
+          (addLimbWords
+            (paddedLimbViewWords count.toNat leftLimbs)
+            (paddedLimbViewWords count.toNat rightLimbs) initialCarry).1
+          count.toNat final ∧
+        values = .i32
+          (addLimbWords
+            (paddedLimbViewWords count.toNat leftLimbs)
+            (paddedLimbViewWords count.toNat rightLimbs) initialCarry).2 ::
+              tail) := by
+  let leftWords := paddedLimbViewWords count.toNat leftLimbs
+  let rightWords := paddedLimbViewWords count.toNat rightLimbs
+  have leftLength : leftWords.length = count.toNat :=
+    paddedLimbViewWords_length leftFits
+  have rightLength : rightWords.length = count.toNat :=
+    paddedLimbViewWords_length rightFits
+  apply terminatesWith_writeSumFromFunction_of_exactPrefix
+    (leftWords := leftWords) (rightWords := rightWords)
+    writer.adapted writer.magnitudeLowFound writer.magnitudeHighFound
+    writer.notImport writer.installed leftLength rightLength
+  · intro index current beforeCount written
+    let word := leftWords[index.toNat]'(by omega)
+    have wordAt : leftWords[index.toNat]? = some word := by
+      simp [word, beforeCount, leftLength]
+    have prefixFits : index.toNat ≤ capacity := by omega
+    have run := magnitude.low.terminatesWith_paddedLimbViewWord
+      (env := env) (tail := []) written leftRelated leftView valid prefixFits allocation
+      initialRelated leftFits beforeCount wordAt
+    simpa [limbWordPart, word] using run
+  · intro index current beforeCount written
+    let word := leftWords[index.toNat]'(by omega)
+    have wordAt : leftWords[index.toNat]? = some word := by
+      simp [word, beforeCount, leftLength]
+    have prefixFits : index.toNat ≤ capacity := by omega
+    have run := magnitude.high.terminatesWith_paddedLimbViewWord
+      (env := env) (tail := []) written leftRelated leftView valid prefixFits allocation
+      initialRelated leftFits beforeCount wordAt
+    simpa [limbWordPart, word] using run
+  · intro index current beforeCount written
+    let word := rightWords[index.toNat]'(by omega)
+    have wordAt : rightWords[index.toNat]? = some word := by
+      simp [word, beforeCount, rightLength]
+    have prefixFits : index.toNat ≤ capacity := by omega
+    have run := magnitude.low.terminatesWith_paddedLimbViewWord
+      (env := env) (tail := []) written rightRelated rightView valid prefixFits allocation
+      initialRelated rightFits beforeCount wordAt
+    simpa [limbWordPart, word] using run
+  · intro index current beforeCount written
+    let word := rightWords[index.toNat]'(by omega)
+    have wordAt : rightWords[index.toNat]? = some word := by
+      simp [word, beforeCount, rightLength]
+    have prefixFits : index.toNat ≤ capacity := by omega
+    have run := magnitude.high.terminatesWith_paddedLimbViewWord
+      (env := env) (tail := []) written rightRelated rightView valid prefixFits allocation
+      initialRelated rightFits beforeCount wordAt
+    simpa [limbWordPart, word] using run
+  · intro index current beforeCount written
+    exact written.writeLimbInBounds_of_allocateObject valid countFits
+      beforeCount allocation initialRelated
 
 /-- Exact successor store after materializing the low half of a carry limb. -/
 def checkedCarryLowStore (store : Wasm.Store host) (object index : UInt32) :

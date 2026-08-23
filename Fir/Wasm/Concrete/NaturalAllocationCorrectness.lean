@@ -207,6 +207,62 @@ theorem readNaturalLimbs_of_limbAt
       rw [ih (index + 1) tailAt]
       rfl
 
+/-- Conversely, every successful Natural-limb decode exposes an exact list
+of the physical limbs it read.  The list is not required to be canonical:
+validated resident objects may contain leading zero limbs, while their
+decoded mathematical value remains exact. -/
+theorem readNaturalLimbs_eq_ok_exists_limbAt
+    {memory : LinearMemory} {base index count value : Nat}
+    (decoded : readNaturalLimbs memory base index count = .ok value) :
+    ∃ limbs : List UInt64,
+      limbs.length = count ∧
+      (∀ offset limb, limbs[offset]? = some limb →
+        memory.readUInt64
+          (base + headerBytes + target.semanticSlotBytes * (index + offset)) =
+            .ok limb) ∧
+      naturalLimbsValue limbs = value := by
+  induction count generalizing index value with
+  | zero =>
+      simp only [readNaturalLimbs, Except.ok.injEq] at decoded
+      subst value
+      exact ⟨[], rfl, by simp, rfl⟩
+  | succ count ih =>
+      unfold readNaturalLimbs at decoded
+      cases limbRead : memory.readUInt64
+          (base + headerBytes + target.semanticSlotBytes * index) with
+      | error failure =>
+          rw [limbRead] at decoded
+          contradiction
+      | ok limb =>
+          rw [limbRead] at decoded
+          cases restRead : readNaturalLimbs memory base (index + 1) count with
+          | error failure =>
+              rw [restRead] at decoded
+              contradiction
+          | ok restValue =>
+              rw [restRead] at decoded
+              simp only [Bind.bind, Except.bind, pure, Except.pure,
+                Except.ok.injEq] at decoded
+              obtain ⟨rest, restLength, restAt, restValueEq⟩ :=
+                ih restRead
+              refine ⟨limb :: rest, by simp [restLength], ?_, ?_⟩
+              · intro offset item itemAt
+                cases offset with
+                | zero =>
+                    simp only [List.getElem?_cons_zero, Option.some.injEq]
+                      at itemAt
+                    subst item
+                    simpa using limbRead
+                | succ offset =>
+                    have restItemAt : rest[offset]? = some item := by
+                      simpa using itemAt
+                    have read := restAt offset item restItemAt
+                    simpa [Nat.succ_eq_add_one, Nat.add_assoc, Nat.add_comm,
+                      Nat.add_left_comm] using read
+              · simp only [naturalLimbsValue]
+                rw [restValueEq]
+                exact decoded
+
 /-- Reading exactly the limbs described by an exact writer post reconstructs
 their mathematical little-endian value. -/
 theorem WriteNaturalLimbsPost.readNaturalLimbs
@@ -638,6 +694,38 @@ structure NaturalObjectRel (state : MemoryState) (address : Word32)
     header.allocationBytes.toNat
   decoded : readNatural state address = .ok value
   refCountOne : header.refCount.toNat = 1
+
+/-- The checked Natural-object relation exposes its complete physical limb
+decoder result independently of whether the stored list is canonical. -/
+theorem NaturalObjectRel.decodedLimbs
+    {state : MemoryState} {address : Word32} {value : Nat} {header : Header}
+    (related : NaturalObjectRel state address value header) :
+    readNaturalLimbs state.memory address.value 0 header.aux1.toNat =
+      .ok value := by
+  obtain ⟨addressHeap, _, _, _, _, _⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts state address header
+      related.headerRead
+  have accepted :
+      header.kind == ObjectKind.natural && header.aux0 == bigNaturalMarker := by
+    rw [related.headerKind, related.marker]
+    decide
+  have decoded := related.decoded
+  unfold readNatural at decoded
+  simp only [addressHeap, ↓reduceIte, Bind.bind, Except.bind] at decoded
+  rw [related.headerRead] at decoded
+  simp only [liftMemory] at decoded
+  rw [accepted] at decoded
+  simp only [↓reduceIte] at decoded
+  cases readResult :
+      readNaturalLimbs state.memory address.value 0 header.aux1.toNat with
+  | error failure =>
+      rw [readResult] at decoded
+      contradiction
+  | ok actual =>
+      rw [readResult] at decoded
+      simp only [Except.ok.injEq] at decoded
+      subst actual
+      rfl
 
 /-- A successful large-natural allocation establishes the exact checked
 object decoder and preserves the allocator frontier invariant. -/
