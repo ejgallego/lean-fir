@@ -145,6 +145,21 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   deterministic regeneration, browser stress, and the full artifact gate
   pass. No W6 proof adaptation is required because the concrete bytes and
   stable contract are unchanged; noisy runtime samples support no speed claim.
+- Independent cached-DAG fixture integration: the test-fixtures stack is
+  accepted through clean tracked head `d13226d6` on current main, with
+  functional String-DAG head `410ea2d4` and generic `Array UInt8` DAG head
+  `83faa835`. Both pairs retain one outside alias and a cached owner with two
+  references to the same child, then compare a skipped path with String append
+  or copy-on-write Array mutation before reusing the cache. Exact LCNF form
+  traces and external counts pin cache initialization/hit, projections,
+  ownership increments, allocation, decrement, mutation, construction, and
+  completion. This changes no shared semantics, runtime, proof, generator,
+  layout, ABI, or artifact contract. Focused native/LCNF/V8 checks are green
+  and byte-identical across the final rebase; the applicable complete gates
+  cover 717 unique cases, 2,124/2,124 V8 comparisons, and all 3,172 Talos jobs.
+  `FIR-BUG-impure-none-array-mkempty-validation-external` and
+  `FIR-BUG-impure-none-byte-array-mk-validation-external` retain the two
+  deferred source-constructor validation boundaries without a workaround.
 - Independent consumer refresh: the Verso HTML source pin and package are
   accepted at `4ee28dd6` and `c88e4a54`. The package compiles clean Verso
   commit `970b071b73adc6e68c6de00bc183460f76d97731`, exact
