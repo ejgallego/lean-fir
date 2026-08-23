@@ -15,30 +15,28 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Active integration lease
 
-- Milestone: `W7-SHARED-REFERENCE-DECREMENT`, generation linked/accepted;
-  independent W6 refinement queued.
-- Integration owner: `wasm-gen`, accepting the upstream-shaped W7 release
-  fast path and its package ratchets while W6 continues the earlier checked-Nat
-  theorem before claiming the new release proof.
-- Current checkpoint: exact caller attribution is accepted at `b626350d`,
-  followed by W7 functional head `3ee84c76`, tracked W7 handoff `6dfa54d0`,
-  and the live external caller-attribution gate at `f158a237`. `fir_dec_once`
-  now removes five header reads from the ordinary shared-reference path while
-  preserving the complete 32-byte-header bounds trap and all persistent,
-  malformed, and last-reference behavior. Exact prettyM and lean-zip packages
-  are 120,756 and 936,082 bytes with zero imports; bound output digests and
-  arena frontiers are unchanged. Lean Beam, all 713 repository cases and
-  2,121/2,121 comparisons, all 3,167 Talos jobs, the complete deterministic W7
-  artifact gate, and clean lean-zip double generation pass. W6 refinement is
-  open in `W7-W6-20260822-001`; the earlier checked-Nat proof continues
-  independently and does not block this generation landing. A temporary W7-2
-  integration window accepted the independent profile-evidence hardening at
-  `2effc606`, bounded opt-in instruction-origin generation at `e28a67f1`, and
-  the reconciled production cost record at `90c047cf`. The lean-zip diagnostic
-  now emits 518,933 checked origins in a 9,046,210-byte table with a 15,139 ms
-  seven-run median while preserving ordinary Wasm bytes; origin tables remain
-  regenerable and outside ordinary packages. No runtime, ABI, helper, semantic,
-  ownership, or W6 proof contract changed.
+- Milestone: `W7-CLOSED-CLOSURE-DISPATCH`, generation linked/accepted; early
+  lowering and its proof-visible premise queued for W6 review.
+- Integration owner: `wasm-gen`, accepting the opt-in finite closure-target
+  package boundary while W6 continues its independent checked-Nat and release
+  refinements.
+- Current checkpoint: W7's generic implementation is accepted at `e05cbc80`,
+  lean-zip package ratchets at `d97fb643`, and tracked handoff at `ee1f3e2d`.
+  Data-only package boundaries collect the exact targets allocated by
+  final-LCNF `pap` nodes and remove other generated matcher branches after
+  lowering; opaque host closure ingress retains the all-target path. W6
+  `closureDispatch` and `closureDescriptors` metadata, helper signatures,
+  concrete layout, ownership, and semantics are unchanged. prettyM complete
+  Wasm decreases from 120,756 to 84,161 bytes. lean-zip raw decreases from
+  936,082 to 393,070 bytes and from 2,305 to 508 final functions; Level-1 is
+  179,656 bytes. All remain module-memory-owned and zero-import. Lean Beam,
+  all 713 repository cases and 2,121/2,121 comparisons, all 3,167 Talos jobs,
+  the complete deterministic W7 artifact gate, Chrome, and stored/Level-1/raw
+  lean-zip differentials pass. Clean-main package pointers are rooted at
+  `ee1f3e2d`. W6 review of early candidate-set lowering is open in
+  `W7-W6-20260822-002`; the prior release refinement remains independently open
+  in `W7-W6-20260822-001`. The accepted post-pass does not yet reduce the
+  all-target lowering time and makes no runtime-speed claim.
 - Accepted baseline: `main` contains the complete
   `W7-ILLUMINATE-SELECTION-CATALOG-EXPORT` stack through tracked lane head
   `5081015a` and the independently isolated
