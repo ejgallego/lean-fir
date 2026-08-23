@@ -4,8 +4,8 @@
   "retainedSourceFunctions": 296,
   "sourceClosureTargets": 15,
   "sourceClosureTargetsSha256": "4391db0db926435126e304549d17350ebdc63baf3c9b940a577064061ad4bad1",
-  "residentHelpers": 472,
-  "completeFunctions": 768,
+  "residentHelpers": 471,
+  "completeFunctions": 767,
   "baseWasmBytes": 97355,
-  "completeWasmBytes": 179656
+  "completeWasmBytes": 179137
 }
