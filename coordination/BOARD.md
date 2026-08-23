@@ -213,6 +213,15 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `c0427a57`). It removes the same scratch cast from validated one-limb and
   allocated multi-limb exits and proves their concrete object-validity
   boundary without changing arithmetic, layout, signatures, or ownership.
+  W6's generated checked multi-limb producer refinement is accepted through
+  tracked handoff `eca10875` (functional head `681190e3`). The proof composes
+  the installed resident allocator and count/low/high/magnitude/writer graph,
+  padded-limb addition, optional carry store, heap extension, preserved
+  `ResidentMemoryRel`, and exact `ValueRel` for the resulting Natural. Its
+  scratch and carry-store bounds are derived from one stable heap-validity fact
+  and the allocation prefix rather than trusted caller premises. No emitter,
+  helper signature, layout, ownership rule, semantic ABI, or source semantics
+  changed.
 - Landing order:
   1. W7-2's Verso source-module replay repair and generic immutable-package
      publisher are accepted in that order through `912bf68a`.
@@ -345,13 +354,17 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
       resident-representation and final-LCNF proof premises; public/raw calls
       remain fully checked. W6's independent audit does not block executable
       acceptance unless it identifies an unsound premise.
+  28. W6's installed allocator/writer refinement stack and generated checked
+      multi-limb Natural producer land through tracked proof handoff
+      `eca10875`. This is proof-only and follows the independent Verso HTML
+      consumer refresh; all 3,171 Talos jobs pass on that exact base.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
   invalidating long deterministic package and external-engine gates.
-- Not ready: W6's processed-limb-prefix proof for `sumCarryFrom` and
-  `writeSumFrom`, the operation-specific `StateRelated` successor for full
-  resident replacement, and the
+- Not ready: connection of W6's generated checked producer to the surrounding
+  public `natAdd` checked prefix and result-count split, the operation-specific
+  `StateRelated` successor for full resident replacement, and the
   integration-owned compiler-to-Array-admission bridge remain open. Verso
   consumption of the local-only exact-head Flat package and
   its mailbox closure remain client-owned; no compatibility alias was added in
@@ -359,10 +372,8 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   the existing shared-observation bug card; it has no feature landing. Later
   tooling surfaces remain on their combined development branch until each has
   an independently authorized head. SpatialHitScene's multi-entry synthetic
-  capture has not yet been assessed for the repaired hybrid API. Proof
-  adaptation for the accepted immediate `Nat.mul` and `Nat.sub` bodies remains
-  queued. None blocks generation acceptance because no helper signature or
-  shared layout changed.
+  capture has not yet been assessed for the repaired hybrid API. None blocks
+  generation acceptance because no helper signature or shared layout changed.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
