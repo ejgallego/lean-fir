@@ -63,6 +63,20 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   zero-import at 393,275 bytes and 504 final functions. W6's theorem-side
   audit remains independently open; no helper signature, concrete layout, or
   semantic ABI changed.
+- Independent release integration: W7-2's upstream-shaped checked decrement
+  gate is accepted at `7f300f3a` (original functional head `98929962`).
+  Compiler-generated checked wrappers now classify tagged immediates and the
+  erased-zero sentinel in the caller, matching upstream `lean_dec`, and enter
+  `fir_dec_once` only for heap references. Unchecked wrappers, zero-amount
+  decrements, the public helper, recursive release, helper signatures,
+  concrete layout, and semantic ABI are unchanged. The exact zero-import
+  lean-zip module decreases from 393,275 to 384,533 bytes with SHA-256
+  `1cfaf1673e8902e1204f32282c4d454667778354dc4a68a660d02e69831fc6dd`;
+  all ten native/Wasm levels, output/inflate checks, and the flat 9,237,304-byte
+  frontier pass. Sixteen order-balanced level-6 pairs improve in 15 cases with
+  a -2.4% median, while two artifact-bound profiles reduce the combined
+  checked-wrapper/`fir_dec_once` Wasm-self share by about 79%. W6 proof review
+  remains independently open in `W72-W6-20260822-002`.
 - Independent consumer refresh: the Verso HTML source pin and package are
   accepted at `4ee28dd6` and `c88e4a54`. The package compiles clean Verso
   commit `970b071b73adc6e68c6de00bc183460f76d97731`, exact
@@ -358,6 +372,9 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
       multi-limb Natural producer land through tracked proof handoff
       `eca10875`. This is proof-only and follows the independent Verso HTML
       consumer refresh; all 3,171 Talos jobs pass on that exact base.
+  29. W7-2's caller-side checked decrement gate is replayed onto current main
+      as `7f300f3a`; its independent W6 proof review remains open because no
+      stable helper contract changed.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
