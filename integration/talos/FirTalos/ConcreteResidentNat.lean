@@ -38,6 +38,40 @@ theorem adaptedFunction_body_of_exact
       FirTalos.functionTerminal sourceModule sourceFunction := by
   exact ResidentPrimitives.adaptedFunction_body_of_exact adapted bodyAdapted
 
+/-- Select one concrete successful result from a fuel-free call theorem and
+repackage the same run with an exact store/value postcondition.  This is the
+local deterministic-call bridge used when a relational writer postcondition
+must feed a control-level producer theorem naming its successor store. -/
+theorem terminatesWith_exists_exact
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {functionIndex : Nat} {initial : Wasm.Store host}
+    {arguments : List Wasm.Value} {P : Wasm.Store host → List Wasm.Value → Prop}
+    (run : Wasm.TerminatesWith env module functionIndex initial arguments P) :
+    ∃ final values,
+      P final values ∧
+        Wasm.TerminatesWith env module functionIndex initial arguments
+          (fun exactFinal exactValues =>
+            exactFinal = final ∧ exactValues = values) := by
+  obtain ⟨fuel, succeeds⟩ := run
+  obtain ⟨values, final, executed, post⟩ := succeeds fuel (Nat.le_refl fuel)
+  exact ⟨final, values, post,
+    Wasm.TerminatesWith.of_run fuel values final executed ⟨rfl, rfl⟩⟩
+
+/-- Strengthen a fuel-free call postcondition pointwise without exposing its
+fuel witness to downstream composition proofs. -/
+theorem terminatesWith_conseq
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {functionIndex : Nat} {initial : Wasm.Store host}
+    {arguments : List Wasm.Value}
+    {P Q : Wasm.Store host → List Wasm.Value → Prop}
+    (run : Wasm.TerminatesWith env module functionIndex initial arguments P)
+    (implication : ∀ final values, P final values → Q final values) :
+    Wasm.TerminatesWith env module functionIndex initial arguments Q := by
+  obtain ⟨fuel, succeeds⟩ := run
+  refine ⟨fuel, fun available enough => ?_⟩
+  obtain ⟨values, final, executed, post⟩ := succeeds available enough
+  exact ⟨values, final, executed, implication final values post⟩
+
 /-- Talos control skeleton of `fir_numeric_make_natural`. The three
 allocation alternatives stay abstract because the immediate proof never
 enters them; the actual emitter-adaptation theorem supplies those bodies. -/
@@ -2083,6 +2117,40 @@ theorem completedAddPaddedNaturalLimbWords_spec
     exact sumValue
   · rw [completedAddLimbWords_length _ _ carryBit, outputLength,
       leftLength]
+
+/-- The same complete-addition law for exact physical decoder views.  This
+form deliberately does not canonicalize either operand's stored limbs; it is
+the arithmetic bridge consumed by the checked heap/heap producer proof. -/
+theorem completedAddPaddedLimbViewWords_spec
+    {count : Nat} {left right : List UInt64}
+    (leftFits : left.length ≤ count)
+    (rightFits : right.length ≤ count) :
+    let result := addLimbWords (paddedLimbViewWords count left)
+      (paddedLimbViewWords count right) 0
+    limbWordsListValue (completedAddLimbWords result.1 result.2) =
+        naturalLimbsValue left + naturalLimbsValue right ∧
+      (completedAddLimbWords result.1 result.2).length =
+        count + result.2.toNat ∧
+      (result.2 = 0 ∨ result.2 = 1) := by
+  dsimp only
+  have leftLength := paddedLimbViewWords_length leftFits
+  have rightLength := paddedLimbViewWords_length rightFits
+  have sameLength :
+      (paddedLimbViewWords count left).length =
+        (paddedLimbViewWords count right).length := by
+    rw [leftLength, rightLength]
+  obtain ⟨sumValue, carryBit⟩ := addLimbWords_spec
+    (paddedLimbViewWords count left) (paddedLimbViewWords count right) 0
+    sameLength (Or.inl rfl)
+  have outputLength := addLimbWords_length
+    (paddedLimbViewWords count left) (paddedLimbViewWords count right) 0
+    sameLength
+  refine ⟨?_, ?_, carryBit⟩
+  · rw [completedAddLimbWords_value _ _ carryBit, outputLength, leftLength]
+    rw [leftLength, paddedLimbViewWords_value,
+      paddedLimbViewWords_value] at sumValue
+    simpa using sumValue
+  · rw [completedAddLimbWords_length _ _ carryBit, outputLength, leftLength]
 
 /-- Complete installed carry-scan theorem over equally sized machine limb
 views.  The helper starts at absolute index zero and returns exactly the final
@@ -5723,6 +5791,31 @@ structure NaturalSumWriterInstallation
   installed : module.funcs[index - module.imports.length]? =
     some targetFunction
 
+/-- Static installation graph for the public BigNumeric object allocator and
+its resident frontier allocator dependency. -/
+structure NaturalObjectAllocatorInstallation
+    (sourceModule : Fir.Wasm.Module) (module : Wasm.Module) where
+  objectTarget : Wasm.Function
+  allocatorTarget : Wasm.Function
+  objectIndex : Nat
+  allocatorIndex : Nat
+  frontierIndex : Nat
+  allocatorCallFound : FirTalos.callIndex? sourceModule
+    (.declaration Fir.Wasm.Emit.ResidentAllocator.allocateName) =
+      some allocatorIndex
+  objectAdapted : FirTalos.function sourceModule
+    Fir.Wasm.Emit.ResidentBigNumeric.allocateFunction = .ok objectTarget
+  objectNotImport : module.imports[objectIndex]? = none
+  objectInstalled :
+    module.funcs[objectIndex - module.imports.length]? = some objectTarget
+  allocatorAdapted : FirTalos.function sourceModule
+    (Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex) =
+      .ok allocatorTarget
+  allocatorNotImport : module.imports[allocatorIndex]? = none
+  allocatorInstalled :
+    module.funcs[allocatorIndex - module.imports.length]? = some allocatorTarget
+  memory32 : module.memIs64 = false
+
 /-- The installed Natural-count helper remains callable from every evolving
 result-prefix store.  Its one physical header read is transported from the
 old Natural through the fresh allocation and exact result writes. -/
@@ -6776,6 +6869,90 @@ theorem NaturalSumWriterInstallation.terminatesWith_of_operandViews
     exact written.writeLimbInBounds_of_allocateObject valid countFits
       beforeCount allocation initialRelated
 
+/-- Sequential allocator-to-writer composition for two checked heap Natural
+operands.  The raw object reservation is sized by the pure writer's final
+carry; the returned allocator memory relation is consumed directly by the
+exact operand-view writer theorem. -/
+theorem NaturalSumWriterInstallation.terminatesWith_after_allocateObject
+    {host : Type} {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {env : Wasm.HostEnv host}
+    {magnitude : NaturalMagnitudeInstallation sourceModule module}
+    (writer : NaturalSumWriterInstallation sourceModule module magnitude)
+    (allocator : NaturalObjectAllocatorInstallation sourceModule module)
+    {store : Wasm.Store host} {before allocated : MemoryState}
+    {left right result : Word32} {leftValue rightValue : Nat}
+    {leftHeader rightHeader : Header} {leftLimbs rightLimbs : List UInt64}
+    {count : UInt32} {tail : List Wasm.Value}
+    (leftRelated : NaturalObjectRel before left leftValue leftHeader)
+    (leftView : NaturalLimbView before left leftHeader leftValue leftLimbs)
+    (rightRelated : NaturalObjectRel before right rightValue rightHeader)
+    (rightView : NaturalLimbView before right rightHeader rightValue rightLimbs)
+    (valid : before.FrontierInvariant)
+    (allocatorRelated : ResidentAllocatorRel before store
+      allocator.frontierIndex)
+    (leftFits : leftLimbs.length ≤ count.toNat)
+    (rightFits : rightLimbs.length ≤ count.toNat)
+    (resultCountFits : count.toNat +
+      (addLimbWords
+        (paddedLimbViewWords count.toNat leftLimbs)
+        (paddedLimbViewWords count.toNat rightLimbs) 0).2.toNat < 536870908)
+    (allocation : before.allocateObject .natural
+      (target.semanticSlotBytes * (count.toNat +
+        (addLimbWords
+          (paddedLimbViewWords count.toNat leftLimbs)
+          (paddedLimbViewWords count.toNat rightLimbs) 0).2.toNat)) false
+      bigNaturalMarker (UInt32.ofNat (count.toNat +
+        (addLimbWords
+          (paddedLimbViewWords count.toNat leftLimbs)
+          (paddedLimbViewWords count.toNat rightLimbs) 0).2.toNat)) 0 0 =
+        .ok (allocated, result))
+    (strictEnd : allocated.heapCursor < wordModulus)
+    (withinCap : (allocated.heapCursor - 1) / wasmPageBytes + 1 ≤
+      store.memoryCap module 0) :
+    let leftWords := paddedLimbViewWords count.toNat leftLimbs
+    let rightWords := paddedLimbViewWords count.toNat rightLimbs
+    let sum := addLimbWords leftWords rightWords 0
+    let resultCount := count.toNat + sum.2.toNat
+    ∃ allocatedStore,
+      ResidentAllocatorRel allocated allocatedStore allocator.frontierIndex ∧
+      Wasm.TerminatesWith env module allocator.objectIndex store
+        ([.i32 (UInt32.ofNat resultCount), .i32 0,
+          .i32 bigNaturalMarker, .i32 ObjectKind.natural.code] ++ tail)
+        (fun final values => final = allocatedStore ∧
+          values = .i32 (UInt32.ofNat result.value) :: tail) ∧
+      Wasm.TerminatesWith env module writer.index allocatedStore
+        ([.i32 0, .i32 count, .i32 0, .i32 (UInt32.ofNat result.value),
+          .i32 0, .i32 (UInt32.ofNat right.value),
+          .i32 0, .i32 (UInt32.ofNat left.value)] ++ tail)
+        (fun final values =>
+          WrittenLimbPrefix allocatedStore (UInt32.ofNat result.value)
+            sum.1 count.toNat final ∧ values = .i32 sum.2 :: tail) := by
+  dsimp only
+  let leftWords := paddedLimbViewWords count.toNat leftLimbs
+  let rightWords := paddedLimbViewWords count.toNat rightLimbs
+  let sum := addLimbWords leftWords rightWords 0
+  let resultCount := count.toNat + sum.2.toNat
+  have allocation' : before.allocateObject .natural
+      (target.semanticSlotBytes * resultCount) false bigNaturalMarker
+        (UInt32.ofNat resultCount) 0 0 = .ok (allocated, result) := by
+    simpa [resultCount, sum, leftWords, rightWords] using allocation
+  obtain ⟨allocatedStore, allocatedRelated, allocateRun⟩ :=
+    ResidentBigNumericAllocator.terminatesWith_allocateObjectFunction_of_allocateObject
+      (env := env) (tail := tail) allocator.allocatorCallFound
+      allocator.objectAdapted
+      allocator.objectNotImport allocator.objectInstalled
+      allocator.allocatorAdapted allocator.allocatorNotImport
+      allocator.allocatorInstalled allocator.memory32 valid allocatorRelated
+      (by simpa [resultCount, sum, leftWords, rightWords] using resultCountFits)
+      allocation' strictEnd withinCap
+  have writerRun := writer.terminatesWith_of_operandViews
+    (env := env) (tail := tail) (initialCarry := 0) leftRelated leftView
+    rightRelated rightView valid (capacity := resultCount)
+    (by simp [resultCount]) leftFits rightFits allocation'
+    allocatedRelated.toResidentMemoryRel
+  refine ⟨allocatedStore, allocatedRelated, allocateRun, ?_⟩
+  simpa [leftWords, rightWords, sum] using writerRun
+
 /-- Exact successor store after materializing the low half of a carry limb. -/
 def checkedCarryLowStore (store : Wasm.Store host) (object index : UInt32) :
     Wasm.Store host :=
@@ -7292,6 +7469,125 @@ theorem WrittenLimbPrefix.liveHeapRel_completeWithCarry_of_allocateObject
       finalRelated payloadInBounds valueEq
   exact ⟨heap, witnessExtension, closureAllocationsPersistent,
     finalHeapRelated, finalRelated, valueRelated⟩
+
+/-- Semantic closure of one exact installed writer call over two physical
+decoder views.  The relational writer result is concretized once, its exact
+prefix and carry are decoded as `leftValue + rightValue`, and the final W6
+heap/witness relation is constructed including the optional carry limb. -/
+theorem NaturalSumWriterInstallation.typedResult_of_operandViewWriterRun
+    {host : Type} {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {env : Wasm.HostEnv host}
+    {magnitude : NaturalMagnitudeInstallation sourceModule module}
+    (writer : NaturalSumWriterInstallation sourceModule module magnitude)
+    {allocatedStore : Wasm.Store host} {before allocated : MemoryState}
+    {left right result : Word32} {leftValue rightValue : Nat}
+    {leftHeader rightHeader : Header} {leftLimbs rightLimbs : List UInt64}
+    {count : UInt32} {witness : RefinementWitness}
+    {runtime : Fir.LeanIR.Impure.RuntimeState} {tail : List Wasm.Value}
+    (leftView : NaturalLimbView before left leftHeader leftValue leftLimbs)
+    (rightView : NaturalLimbView before right rightHeader rightValue rightLimbs)
+    (leftFits : leftLimbs.length ≤ count.toNat)
+    (rightFits : rightLimbs.length ≤ count.toNat)
+    (allocation : before.allocateObject .natural
+      (target.semanticSlotBytes * (count.toNat +
+        (addLimbWords
+          (paddedLimbViewWords count.toNat leftLimbs)
+          (paddedLimbViewWords count.toNat rightLimbs) 0).2.toNat)) false
+      bigNaturalMarker (UInt32.ofNat (count.toNat +
+        (addLimbWords
+          (paddedLimbViewWords count.toNat leftLimbs)
+          (paddedLimbViewWords count.toNat rightLimbs) 0).2.toNat)) 0 0 =
+        .ok (allocated, result))
+    (heapRelated : LiveHeapRel before witness runtime)
+    (initialRelated : ResidentMemoryRel allocated allocatedStore.mem)
+    (writerRun : Wasm.TerminatesWith env module writer.index allocatedStore
+      ([.i32 0, .i32 count, .i32 0, .i32 (UInt32.ofNat result.value),
+        .i32 0, .i32 (UInt32.ofNat right.value),
+        .i32 0, .i32 (UInt32.ofNat left.value)] ++ tail)
+      (fun final values =>
+        WrittenLimbPrefix allocatedStore (UInt32.ofNat result.value)
+          (addLimbWords
+            (paddedLimbViewWords count.toNat leftLimbs)
+            (paddedLimbViewWords count.toNat rightLimbs) 0).1
+          count.toNat final ∧
+        values = .i32
+          (addLimbWords
+            (paddedLimbViewWords count.toNat leftLimbs)
+            (paddedLimbViewWords count.toNat rightLimbs) 0).2 :: tail)) :
+    let leftWords := paddedLimbViewWords count.toNat leftLimbs
+    let rightWords := paddedLimbViewWords count.toNat rightLimbs
+    let sum := addLimbWords leftWords rightWords 0
+    ∃ writerStore heap,
+      Wasm.TerminatesWith env module writer.index allocatedStore
+        ([.i32 0, .i32 count, .i32 0, .i32 (UInt32.ofNat result.value),
+          .i32 0, .i32 (UInt32.ofNat right.value),
+          .i32 0, .i32 (UInt32.ofNat left.value)] ++ tail)
+        (fun final values =>
+          final = writerStore ∧ values = .i32 sum.2 :: tail) ∧
+      witness.Extends
+        (witness.bindNatural runtime.nextLocation result
+          (leftValue + rightValue)) ∧
+      ClosureAllocationsPersistent witness
+        (witness.bindNatural runtime.nextLocation result
+          (leftValue + rightValue)) ∧
+      LiveHeapRel heap
+        (witness.bindNatural runtime.nextLocation result
+          (leftValue + rightValue))
+        (semanticNaturalResult runtime (leftValue + rightValue)) ∧
+      ResidentMemoryRel heap
+        (completedAddStore writerStore (UInt32.ofNat result.value)
+          count.toNat sum.2).mem ∧
+      ValueRel
+        (witness.bindNatural runtime.nextLocation result
+          (leftValue + rightValue))
+        .tobject (.word32 result) (.object (.heap runtime.nextLocation)) := by
+  dsimp only
+  let leftWords := paddedLimbViewWords count.toNat leftLimbs
+  let rightWords := paddedLimbViewWords count.toNat rightLimbs
+  let sum := addLimbWords leftWords rightWords 0
+  obtain ⟨writerStore, values, writtenPost, exactRun⟩ :=
+    terminatesWith_exists_exact writerRun
+  have written : WrittenLimbPrefix allocatedStore
+      (UInt32.ofNat result.value) sum.1 count.toNat writerStore := by
+    simpa [sum, leftWords, rightWords] using writtenPost.1
+  have valuesEq : values = .i32 sum.2 :: tail := by
+    simpa [sum, leftWords, rightWords] using writtenPost.2
+  have exactWriterRun : Wasm.TerminatesWith env module writer.index
+      allocatedStore
+      ([.i32 0, .i32 count, .i32 0, .i32 (UInt32.ofNat result.value),
+        .i32 0, .i32 (UInt32.ofNat right.value),
+        .i32 0, .i32 (UInt32.ofNat left.value)] ++ tail)
+      (fun final returned =>
+        final = writerStore ∧ returned = .i32 sum.2 :: tail) :=
+    terminatesWith_conseq exactRun (fun _ _ completed =>
+      ⟨completed.1, completed.2.trans valuesEq⟩)
+  obtain ⟨valueEqRaw, _, carryBitRaw⟩ :=
+    completedAddPaddedLimbViewWords_spec leftFits rightFits
+  have valueEq : limbWordsListValue
+      (completedAddLimbWords sum.1 sum.2) = leftValue + rightValue := by
+    rw [← leftView.valueEq, ← rightView.valueEq]
+    simpa [sum, leftWords, rightWords] using valueEqRaw
+  have wordsLength : sum.1.length = count.toNat := by
+    have sameLength : leftWords.length = rightWords.length := by
+      rw [paddedLimbViewWords_length leftFits,
+        paddedLimbViewWords_length rightFits]
+    calc
+      sum.1.length = leftWords.length := by
+        simpa [sum] using addLimbWords_length leftWords rightWords 0 sameLength
+      _ = count.toNat := paddedLimbViewWords_length leftFits
+  have carryBit : sum.2 = 0 ∨ sum.2 = 1 := by
+    simpa [sum, leftWords, rightWords] using carryBitRaw
+  have allocation' : before.allocateObject .natural
+      (target.semanticSlotBytes * (count.toNat + sum.2.toNat)) false
+        bigNaturalMarker (UInt32.ofNat (count.toNat + sum.2.toNat)) 0 0 =
+          .ok (allocated, result) := by
+    simpa [sum, leftWords, rightWords] using allocation
+  obtain ⟨heap, witnessExtension, closureAllocationsPersistent,
+      finalHeapRelated, finalRelated, valueRelated⟩ :=
+    written.liveHeapRel_completeWithCarry_of_allocateObject wordsLength
+      carryBit allocation' heapRelated initialRelated valueEq
+  exact ⟨writerStore, heap, exactWriterRun, witnessExtension,
+    closureAllocationsPersistent, finalHeapRelated, finalRelated, valueRelated⟩
 
 /-- Exact symbolic multi-limb result producer in checked `Nat.add`.
 
