@@ -184,6 +184,9 @@ for (const [field, expected] of Object.entries(expectedClosure)) {
     capturedDeclarations: inventory.capturedDeclarations,
     reviewedExternalsBeforeLink: inventory.reviewedExternalsBeforeLink,
     retainedSourceFunctions: inventory.sourceFunctions.length,
+    sourceClosureTargets: inventory.sourceClosureTargets.length,
+    sourceClosureTargetsSha256:
+      sha256(JSON.stringify(inventory.sourceClosureTargets)),
     residentHelpers: inventory.residentHelpers.length,
     completeFunctions: inventory.functions.length,
     baseWasmBytes: baseWasm.byteLength,
@@ -243,10 +246,18 @@ const build = {
     capturedDeclarations: inventory.capturedDeclarations,
     reviewedExternalsBeforeLink: inventory.reviewedExternalsBeforeLink,
     retainedSourceFunctions: inventory.sourceFunctions,
+    sourceClosureTargets: inventory.sourceClosureTargets,
     residentHelpers: inventory.residentHelpers,
     residualRuntimeOperations: inventory.runtimeOperations,
   },
   capabilities: {
+    closedClosureDispatch: {
+      version: "fir.wasm.closed-pap-dispatch/v1",
+      targetSource: "captured final-LCNF pap nodes",
+      inputBoundary: "no pre-existing Lean closure objects",
+      stableMetadata:
+        "W6 closureDispatch and closureDescriptors tables retained unchanged",
+    },
     byteArray: {
       layoutVersion: LEAN_ZIP_BYTE_ARRAY_LAYOUT_VERSION,
       representation: "32-byte resident header followed by packed UInt8 bytes",
@@ -359,6 +370,9 @@ for (const [field, expected] of Object.entries(expectedLevel1Closure)) {
     capturedDeclarations: level1Inventory.capturedDeclarations,
     reviewedExternalsBeforeLink: level1Inventory.reviewedExternalsBeforeLink,
     retainedSourceFunctions: level1Inventory.sourceFunctions.length,
+    sourceClosureTargets: level1Inventory.sourceClosureTargets.length,
+    sourceClosureTargetsSha256:
+      sha256(JSON.stringify(level1Inventory.sourceClosureTargets)),
     residentHelpers: level1Inventory.residentHelpers.length,
     completeFunctions: level1Inventory.functions.length,
     baseWasmBytes: level1BaseWasm.byteLength,
@@ -428,10 +442,18 @@ const level1Build = {
     reviewedExternalsBeforeLink:
       level1Inventory.reviewedExternalsBeforeLink,
     retainedSourceFunctions: level1Inventory.sourceFunctions,
+    sourceClosureTargets: level1Inventory.sourceClosureTargets,
     residentHelpers: level1Inventory.residentHelpers,
     residualRuntimeOperations: level1Inventory.runtimeOperations,
   },
   capabilities: {
+    closedClosureDispatch: {
+      version: "fir.wasm.closed-pap-dispatch/v1",
+      targetSource: "captured final-LCNF pap nodes",
+      inputBoundary: "no pre-existing Lean closure objects",
+      stableMetadata:
+        "W6 closureDispatch and closureDescriptors tables retained unchanged",
+    },
     byteArray: {
       layoutVersion: LEAN_ZIP_BYTE_ARRAY_LAYOUT_VERSION,
       representation: "32-byte resident header followed by packed UInt8 bytes",

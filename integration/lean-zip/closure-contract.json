@@ -2,8 +2,10 @@
   "capturedDeclarations": 21,
   "reviewedExternalsBeforeLink": 14,
   "retainedSourceFunctions": 7,
+  "sourceClosureTargets": 0,
+  "sourceClosureTargetsSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
   "residentHelpers": 67,
   "completeFunctions": 74,
   "baseWasmBytes": 1836,
-  "completeWasmBytes": 12779
+  "completeWasmBytes": 12747
 }

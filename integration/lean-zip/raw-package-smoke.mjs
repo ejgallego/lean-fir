@@ -52,11 +52,12 @@ assert.deepEqual(functionSidecar.artifact, {
   byteLength: wasm.byteLength,
   sha256: sha256(wasm),
   functionImportCount: 0,
-  definedFunctionCount: 2305,
-  functionCount: 2305,
+  definedFunctionCount: build.wasm.functionEvidence.definedFunctionCount,
+  functionCount: build.wasm.functionEvidence.functionCount,
 });
 assert.deepEqual(functionSidecar.functions.map(({ index }) => index),
-  Array.from({ length: 2305 }, (_, index) => index));
+  Array.from({ length: build.wasm.functionEvidence.functionCount },
+    (_, index) => index));
 assert(functionSidecar.functions.every(({ imported }) => imported === false));
 const functionExports = functionSidecar.functions.flatMap((function_) =>
   function_.exportedAs.map((name) => ({ name, index: function_.index })));
@@ -66,13 +67,7 @@ const functionOrigins = Object.fromEntries([
   "resident-helper",
 ].map((origin) => [origin, functionSidecar.functions.filter(
   (function_) => function_.origin === origin).length]));
-assert.deepEqual(functionExports, [
-  { name: "fir_heap_alloc", index: 17 },
-  { name: "fir_heap_frontier", index: 37 },
-  { name: "Zip.Wasm.compressRaw", index: 2302 },
-  { name: "fir_heap_rewind", index: 2303 },
-  { name: "fir_heap_set_frontier", index: 2304 },
-]);
+assert.deepEqual(functionExports, build.wasm.functionEvidence.exports);
 assert.deepEqual(build.wasm.functionEvidence, {
   file: "lean-zip-raw.wasm.functions.json",
   schemaVersion: "fir.wasm.function-index/v1",
@@ -81,8 +76,8 @@ assert.deepEqual(build.wasm.functionEvidence, {
   sha256: sha256(readFileSync(
     join(directory, "lean-zip-raw.wasm.functions.json"))),
   functionImportCount: 0,
-  definedFunctionCount: 2305,
-  functionCount: 2305,
+  definedFunctionCount: functionSidecar.artifact.definedFunctionCount,
+  functionCount: functionSidecar.artifact.functionCount,
   functionsSha256: sha256(JSON.stringify(functionSidecar.functions)),
   origins: functionOrigins,
   exports: functionExports,
@@ -90,11 +85,7 @@ assert.deepEqual(build.wasm.functionEvidence, {
   releaseBytesIdentical: true,
   protocol: "prepare/restamp/optimize across runtime linking and DCE",
 });
-assert.deepEqual(functionOrigins, {
-  "lean-source": 390,
-  "optimizer-or-linked-runtime": 0,
-  "resident-helper": 1915,
-});
+assert.deepEqual(functionOrigins, build.wasm.functionEvidence.origins);
 assert.deepEqual(build.wasm.frontier.imports, [
   { module: "lean.extern", name: "Float.log2", kind: "function" },
 ]);

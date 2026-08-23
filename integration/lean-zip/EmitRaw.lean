@@ -48,6 +48,9 @@ run_cmd do
       let retainedSourceFunctions := sourceFunctionNames.filter functionNames.contains
       let residentHelpers := functionNames.filter fun name =>
         !retainedSourceFunctions.contains name
+      let sourceClosureTargets :=
+        Fir.Wasm.Emit.ClosureDispatch.partialApplicationTargets
+          linked.source.program
       let inventory := Json.mkObj [
         ("entry", LeanZipFir.Compile.rawEntry.toString),
         ("capturedDeclarations", linked.source.program.decls.size),
@@ -60,6 +63,7 @@ run_cmd do
             some (functionSignatureJson function)
           else none),
         ("sourceFunctions", nameArrayJson retainedSourceFunctions),
+        ("sourceClosureTargets", nameArrayJson sourceClosureTargets),
         ("residentHelpers", nameArrayJson residentHelpers),
         ("residentGlobals", linked.module.globals.size),
         ("frontierImports", importNameArrayJson linked.module.imports),

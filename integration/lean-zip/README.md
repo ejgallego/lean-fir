@@ -155,16 +155,17 @@ complete identities plus the runtime source, contract, and Emscripten identity.
 
 The exact source-Float raw closure is ratcheted in
 `raw-closure-contract.json`: 769 captured declarations, 139 reviewed
-externals, 630 retained source functions, 2,782 resident helpers, and 3,412
-complete functions. In addition to counts and Wasm byte lengths, the contract
-pins SHA-256 digests of the ordered external, source-function, resident-helper,
-and complete-function inventories. This prevents a same-count closure change
-from passing the package gate without review.
+externals, 630 retained source functions, 23 final-LCNF partial-application
+targets, 831 resident helpers, and 1,461 complete pre-optimization functions.
+In addition to counts and Wasm byte lengths, the contract pins SHA-256 digests
+of the ordered external, source-function, source-closure-target,
+resident-helper, and complete-function inventories. This prevents a same-count
+closure change from passing the package gate without review.
 
-The same contract ratchets the final optimized artifact at 2,305 functions and
-zero function imports, with 390 surviving Lean-source functions, 1,915
-resident helpers, and no optimizer-or-linked-runtime functions. The function
-index digest and sidecar digest make an index-preserving but identity-changing
+The same contract ratchets the final optimized artifact at 508 functions and
+zero function imports, with 228 surviving Lean-source functions, 280 resident
+helpers, and no optimizer-or-linked-runtime functions. The function index
+digest and sidecar digest make an index-preserving but identity-changing
 release a reviewed package change rather than an unnoticed one.
 
 The additional final helper is `fir_numeric_natural_sum`: the generic
@@ -269,6 +270,20 @@ Across sixteen order-balanced level-6 pairs the paired median is -31.90 ms,
 but only 9/16 pairs improve and dispersion is high, so the accepted result is
 the five removed common-path header reads rather than an end-to-end speedup
 claim.
+
+The raw package declares a closed heap-closure boundary: its JavaScript input
+encoder transfers ByteArrays and the compression level, never a pre-existing
+Lean closure object. FIR therefore collects the 23 targets of actual
+final-LCNF `pap` nodes and removes generated matcher branches for every other
+captured declaration before resident linking. The generic opaque-closure
+compiler API remains unchanged, and W6 closure descriptor/dispatch metadata is
+retained for proof and ABI consumers. The package ratchet checks the ordered
+target inventory and its digest. Compared with the preceding all-target
+package, the complete module decreases from 936,082 to 393,070 bytes and from
+2,305 to 508 final functions; exact compressed output, zero imports, lazy
+constant publication, and the flat 9,237,304-byte rewind frontier are
+unchanged. This post-lowering slice does not yet reduce all-target lowering
+time.
 
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input

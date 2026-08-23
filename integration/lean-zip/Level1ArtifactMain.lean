@@ -44,7 +44,8 @@ private unsafe def compileArtifact (started : Nat) : IO Compilation := do
         `LeanZipFir.CapturedLevel1 `leanZipLevel1
       | throwError "cached Level-1 capture is unavailable"
     let capturedAt ← IO.monoMsNow
-    let baseResult ← Fir.Wasm.Emit.Source.compileModuleArtifact source
+    let baseResult ←
+      Fir.Wasm.Emit.Source.compileClosedClosureModuleArtifact source
     let loweredAt ← IO.monoMsNow
     let linkedResult := baseResult.bind fun artifact =>
       Fir.Wasm.Emit.ResidentLinker.linkArtifact
@@ -84,6 +85,8 @@ private def writeCompilation (compilation : Compilation) : IO Unit := do
   let retainedSourceFunctions := sourceFunctionNames.filter functionNames.contains
   let residentHelpers := functionNames.filter fun name =>
     !retainedSourceFunctions.contains name
+  let sourceClosureTargets :=
+    Fir.Wasm.Emit.ClosureDispatch.partialApplicationTargets linked.source.program
   let inventory := Json.mkObj [
     ("entry", entry.toString),
     ("capturedDeclarations", linked.source.program.decls.size),
@@ -96,6 +99,7 @@ private def writeCompilation (compilation : Compilation) : IO Unit := do
         some (functionSignatureJson function)
       else none),
     ("sourceFunctions", nameArrayJson retainedSourceFunctions),
+    ("sourceClosureTargets", nameArrayJson sourceClosureTargets),
     ("residentHelpers", nameArrayJson residentHelpers),
     ("residentGlobals", linked.module.globals.size),
     ("runtimeOperations", linked.module.runtimeOperations.size)]

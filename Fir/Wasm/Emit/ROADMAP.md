@@ -282,6 +282,41 @@ especially for lean-zip, so these are directional workload results rather than
 a precise end-to-end speedup claim. W6 proof adaptation remains the acceptance
 boundary.
 
+### G1i. Prune closed closure dispatch to source `pap` targets (generation-ready)
+
+Generic FIR modules must be prepared to apply a closure supplied through an
+opaque host boundary, so their generated dispatch retains every declaration in
+the captured closure table. Data-only Web packages have a stronger boundary:
+JavaScript transfers fresh Arrays, Strings, structures, and scalars, but never
+a pre-existing Lean closure. For that boundary, every dynamically applied
+target is allocated by a final-LCNF `pap` node in the captured program.
+
+The new opt-in source API records that boundary explicitly. After ordinary
+lowering it collects the exact `pap` target set, structurally removes other
+compiler-generated closure matcher branches, rebuilds the runtime-operation
+and import frontier, and validates the result. It fails closed if a residual
+closure target is not in the source set. The generic source API remains
+unchanged for opaque closure ingress, and the stable W6 `closureDispatch` and
+`closureDescriptors` tables remain byte-for-byte unchanged as proof/ABI
+metadata.
+
+The prettyM source uses 11 targets instead of the 1,019-candidate all-target
+product: 394 matcher branches remain and 625 are removed. Its complete Wasm
+falls from 120,756 to 84,161 bytes (30.3%). The lean-zip source uses 23 targets
+instead of the 439-declaration dispatch universe: 734 branches remain and
+10,888 are removed. Its pre-link runtime operations fall from 9,908 to 954,
+the complete module from 936,082 to 393,070 bytes (58.0%), and final functions
+from 2,305 to 508 (78.0%). Exact output, zero imports, deterministic generation,
+all ten compression levels, lazy-cache publication, and flat scratch rewind
+remain unchanged.
+
+This first slice deliberately runs after ordinary all-target lowering. It is a
+package-size and load/validation-complexity win, not yet a lowering-time win.
+The next shared W6/W7 step may thread the same finite target set into closure
+lowering so the compiler never constructs the removed candidates; that move
+must preserve the generic opaque-boundary path and receive the corresponding
+proof adaptation.
+
 ### G2. Separate production and diagnostic adapter costs (accepted)
 
 Finish the pending Illuminate selection-player request with an actually

@@ -203,6 +203,8 @@ run(process.execPath, [functionIndexTool, "verify", "--wasm", wasmStem,
 const inventoryHashes = Object.freeze({
   externalsSha256: sha256(JSON.stringify(inventory.externals)),
   sourceFunctionsSha256: sha256(JSON.stringify(inventory.sourceFunctions)),
+  sourceClosureTargetsSha256:
+    sha256(JSON.stringify(inventory.sourceClosureTargets)),
   residentHelpersSha256: sha256(JSON.stringify(inventory.residentHelpers)),
   completeFunctionsSha256: sha256(JSON.stringify(inventory.functions)),
 });
@@ -225,23 +227,24 @@ assert.deepEqual(functionSidecar.artifact, {
   byteLength: wasm.byteLength,
   sha256: sha256(wasm),
   functionImportCount: 0,
-  definedFunctionCount: 2305,
-  functionCount: 2305,
+  definedFunctionCount: expectedClosure.releaseDefinedFunctions,
+  functionCount: expectedClosure.releaseFunctions,
 });
 assert.deepEqual(functionSidecar.functions.map(({ index }) => index),
-  Array.from({ length: 2305 }, (_, index) => index));
+  Array.from({ length: expectedClosure.releaseFunctions }, (_, index) => index));
 assert(functionSidecar.functions.every(({ imported }) => imported === false));
 assert.deepEqual(functionOrigins, {
-  "lean-source": 390,
-  "optimizer-or-linked-runtime": 0,
-  "resident-helper": 1915,
+  "lean-source": expectedClosure.releaseLeanSourceFunctions,
+  "optimizer-or-linked-runtime":
+    expectedClosure.releaseOptimizerOrLinkedRuntimeFunctions,
+  "resident-helper": expectedClosure.releaseResidentHelpers,
 });
 assert.deepEqual(functionExports, [
-  { name: "fir_heap_alloc", index: 17 },
-  { name: "fir_heap_frontier", index: 37 },
-  { name: "Zip.Wasm.compressRaw", index: 2302 },
-  { name: "fir_heap_rewind", index: 2303 },
-  { name: "fir_heap_set_frontier", index: 2304 },
+  { name: "fir_heap_frontier", index: 16 },
+  { name: "fir_heap_alloc", index: 20 },
+  { name: "fir_heap_rewind", index: 503 },
+  { name: "fir_heap_set_frontier", index: 504 },
+  { name: "Zip.Wasm.compressRaw", index: 505 },
 ]);
 assert.deepEqual(inventory.frontierImports,
   frontierImports.map(({ name }) => name));
@@ -258,6 +261,7 @@ for (const [field, expected] of Object.entries(expectedClosure)) {
     capturedDeclarations: inventory.capturedDeclarations,
     reviewedExternalsBeforeLink: inventory.reviewedExternalsBeforeLink,
     retainedSourceFunctions: inventory.sourceFunctions.length,
+    sourceClosureTargets: inventory.sourceClosureTargets.length,
     residentHelpers: inventory.residentHelpers.length,
     completeFunctions: inventory.functions.length,
     ...inventoryHashes,
@@ -365,10 +369,18 @@ const build = {
     reviewedExternalsBeforeLink: inventory.reviewedExternalsBeforeLink,
     inventoryHashes,
     retainedSourceFunctions: inventory.sourceFunctions,
+    sourceClosureTargets: inventory.sourceClosureTargets,
     residentHelpers: inventory.residentHelpers,
     residualRuntimeOperations: inventory.runtimeOperations,
   },
   capabilities: {
+    closedClosureDispatch: {
+      version: "fir.wasm.closed-pap-dispatch/v1",
+      targetSource: "captured final-LCNF pap nodes",
+      inputBoundary: "no pre-existing Lean closure objects",
+      stableMetadata:
+        "W6 closureDispatch and closureDescriptors tables retained unchanged",
+    },
     completeRuntime: {
       version: "fir.lean-zip.raw.complete-runtime/v1",
       selfContained: true,

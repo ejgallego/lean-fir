@@ -41,6 +41,8 @@ run_cmd do
       let retainedSourceFunctions := sourceFunctionNames.filter functionNames.contains
       let residentHelpers := functionNames.filter fun name =>
         !retainedSourceFunctions.contains name
+      let sourceClosureTargets :=
+        Fir.Wasm.Emit.ClosureDispatch.partialApplicationTargets linked.source.program
       let inventory := Json.mkObj [
         ("entry", LeanZipFir.Compile.storedEntry.toString),
         ("capturedDeclarations", linked.source.program.decls.size),
@@ -53,6 +55,7 @@ run_cmd do
             some (functionSignatureJson function)
           else none),
         ("sourceFunctions", nameArrayJson retainedSourceFunctions),
+        ("sourceClosureTargets", nameArrayJson sourceClosureTargets),
         ("residentHelpers", nameArrayJson residentHelpers),
         ("residentGlobals", linked.module.globals.size),
         ("runtimeOperations", linked.module.runtimeOperations.size)]
@@ -85,6 +88,8 @@ run_cmd do
       let retainedSourceFunctions := sourceFunctionNames.filter functionNames.contains
       let residentHelpers := functionNames.filter fun name =>
         !retainedSourceFunctions.contains name
+      let sourceClosureTargets :=
+        Fir.Wasm.Emit.ClosureDispatch.partialApplicationTargets level1.source.program
       let inventory := Json.mkObj [
         ("entry", LeanZipFir.Compile.level1Entry.toString),
         ("capturedDeclarations", level1.source.program.decls.size),
@@ -97,6 +102,7 @@ run_cmd do
             some (functionSignatureJson function)
           else none),
         ("sourceFunctions", nameArrayJson retainedSourceFunctions),
+        ("sourceClosureTargets", nameArrayJson sourceClosureTargets),
         ("residentHelpers", nameArrayJson residentHelpers),
         ("residentGlobals", level1.module.globals.size),
         ("runtimeOperations", level1.module.runtimeOperations.size)]

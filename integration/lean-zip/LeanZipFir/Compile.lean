@@ -45,9 +45,11 @@ def captureRaw : CoreM Fir.Validation.Lcnf.Artifact :=
 private def compileStoredUnprepared : CoreM (Except Fir.Wasm.Emit.Source.CompileError
     Fir.Wasm.Emit.Source.ModuleArtifact) := do
   let source ← captureStored
-  Fir.Wasm.Emit.Source.compileModuleArtifact source
+  Fir.Wasm.Emit.Source.compileClosedClosureModuleArtifact source
 
-/-- Lower the unmodified source closure before adding resident ByteArray code. -/
+/-- Lower the source closure and prune non-allocatable closure-dispatch targets
+before adding resident ByteArray code. The transferred ByteArray boundary does
+not admit pre-existing Lean closures. -/
 def compileStoredBase : CoreM (Except Fir.Wasm.Emit.Source.CompileError
     Fir.Wasm.Emit.Source.ModuleArtifact) := do
   let result ← compileStoredUnprepared
@@ -65,9 +67,10 @@ def compileStored : CoreM (Except Fir.Wasm.Emit.Source.CompileError
 private def compileLevel1Unprepared : CoreM (Except Fir.Wasm.Emit.Source.CompileError
     Fir.Wasm.Emit.Source.ModuleArtifact) := do
   let source ← captureLevel1
-  Fir.Wasm.Emit.Source.compileModuleArtifact source
+  Fir.Wasm.Emit.Source.compileClosedClosureModuleArtifact source
 
-/-- Lower the unmodified Level-1 closure before resident linking. -/
+/-- Lower the Level-1 closure with its finite source-allocated closure targets
+before resident linking. -/
 def compileLevel1Base : CoreM (Except Fir.Wasm.Emit.Source.CompileError
     Fir.Wasm.Emit.Source.ModuleArtifact) := do
   compileLevel1Unprepared
@@ -87,9 +90,10 @@ def compileLevel1 : CoreM (Except Fir.Wasm.Emit.Source.CompileError
 private def compileRawUnprepared : CoreM (Except Fir.Wasm.Emit.Source.CompileError
     Fir.Wasm.Emit.Source.ModuleArtifact) := do
   let source ← captureRaw
-  Fir.Wasm.Emit.Source.compileModuleArtifact source
+  Fir.Wasm.Emit.Source.compileClosedClosureModuleArtifact source
 
-/-- Lower the complete dispatcher closure before resident linking. -/
+/-- Lower the complete dispatcher closure with its finite source-allocated
+closure targets before resident linking. -/
 def compileRawBase : CoreM (Except Fir.Wasm.Emit.Source.CompileError
     Fir.Wasm.Emit.Source.ModuleArtifact) := do
   compileRawUnprepared
