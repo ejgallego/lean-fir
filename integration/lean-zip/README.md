@@ -342,6 +342,20 @@ the global inliner probe needed a 1.07-MiB module to remove the same hot
 boundary. Exact compressed output and the flat 9,237,304-byte frontier remain
 unchanged.
 
+`USize.toNat` now uses the symmetric upstream caller/cold-helper split. Values
+below `2^31` are tagged directly at each compiled call site; larger values and
+the public helper retain the complete checked natural-constructor path. One
+matched screening profile moves `fir_ext_USize_toNat` from 33/1,236 Wasm-self
+samples (2.67%) to no samples in 1,461, confirming that the work is removed
+rather than shifted into the helper. Eight diagnostics-off AB/BA process pairs
+move the median of per-process medians from 88.61 ms to 83.52 ms (-5.7%); the
+paired median is -3.94 ms and 6/8 pairs improve. Host performance modes remain
+visible, so this is directional elapsed evidence rather than a stable headline
+claim. The reviewed closure inventories are unchanged, while the frontier grows
+from 697,558 to 724,108 bytes and the complete module from 396,588 to 406,574
+bytes (+2.52%). Exact compressed output and the flat 9,237,304-byte frontier
+remain unchanged.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not

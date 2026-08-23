@@ -62,6 +62,9 @@ private def erasedParam : FVarId := ⟨`erased⟩
 private def inlineOfNatLocal : FVarId := ⟨`_fir_inline_USize_ofNat_value⟩
 private def inlineOfNatResultLocal : FVarId :=
   ⟨`_fir_inline_USize_ofNat_result⟩
+private def inlineToNatLocal : FVarId := ⟨`_fir_inline_USize_toNat_value⟩
+private def inlineToNatResultLocal : FVarId :=
+  ⟨`_fir_inline_USize_toNat_result⟩
 
 private def retypeUInt8 : List Instruction := [
   .i32Const .uint32 0,
@@ -228,14 +231,16 @@ payload are boxed directly, while larger values retain the generic natural
 constructor. This threshold is representation-stable even if a future target
 specialization changes the physical `USize` lane from FIR's current Lean64
 contract. -/
-private def immediateUSizeToNat : List Instruction := [
-  .localGet valueParam,
+private def boxImmediateUSize (source : FVarId) : List Instruction := [
+  .localGet source,
   .i64Const .uint64 1,
   .i64Shl,
   .i64Const .uint64 1,
   .i64Or,
-  .i32WrapI64 .tagged,
-  .ret]
+  .i32WrapI64 .tagged]
+
+private def immediateUSizeToNat : List Instruction :=
+  boxImmediateUSize valueParam ++ [.ret]
 
 private def checkedUSizeToNat : List Instruction :=
   splitUSize valueParam lowLocal highLocal ++ [
@@ -331,12 +336,7 @@ private partial def instructionUsesMemory : Instruction → Bool
 #guard immediateUSizeToNat.contains (.i32WrapI64 .tagged)
 #guard !immediateUSizeToNat.any instructionUsesMemory
 
-/--
-Upstream defines `lean_usize_of_nat` as a static-inline scalar test whose
-boxed-Nat arm calls the out-of-line runtime. The checked resident helper stays
-as that cold arm and as the semantic fallback for every non-immediate Nat.
--/
-def callSiteRewrites : Array ResidentCallSite.Rewrite := #[{
+private def ofNatCallSiteRewrite : ResidentCallSite.Rewrite := {
   target := .declaration `USize.ofNat
   locals := #[(inlineOfNatLocal, .tobject),
     (inlineOfNatResultLocal, .usize)]
@@ -355,7 +355,50 @@ def callSiteRewrites : Array ResidentCallSite.Rewrite := #[{
       .call (.declaration (externalName `USize.ofNat)),
       .localSet inlineOfNatResultLocal],
   .localGet inlineOfNatResultLocal]
-}]
+}
+
+private def toNatCallSiteRewrite : ResidentCallSite.Rewrite := {
+  target := .declaration `USize.toNat
+  locals := #[(inlineToNatLocal, .usize),
+    (inlineToNatResultLocal, .tobject)]
+  body := [
+  .localSet inlineToNatLocal,
+  .localGet inlineToNatLocal,
+  .i64Const .uint64 2147483648,
+  .i64LtU,
+  .ifElse
+    (boxImmediateUSize inlineToNatLocal ++
+      [.localSet inlineToNatResultLocal])
+    [.localGet inlineToNatLocal,
+      .call (.declaration (externalName `USize.toNat)),
+      .localSet inlineToNatResultLocal],
+  .localGet inlineToNatResultLocal]
+}
+
+/--
+Upstream defines both `lean_usize_of_nat` and `lean_usize_to_nat` as
+static-inline scalar tests around cold out-of-line helpers. The resident
+helpers retain the complete checked semantics; these caller rules reproduce
+the common scalar and tagged-object arms without relying on a global inliner.
+-/
+def callSiteRewrites : Array ResidentCallSite.Rewrite := #[
+  ofNatCallSiteRewrite,
+  toNatCallSiteRewrite]
+
+#guard toNatCallSiteRewrite.locals == #[(inlineToNatLocal, .usize),
+  (inlineToNatResultLocal, .tobject)]
+#guard toNatCallSiteRewrite.body == [
+  .localSet inlineToNatLocal,
+  .localGet inlineToNatLocal,
+  .i64Const .uint64 2147483648,
+  .i64LtU,
+  .ifElse
+    (boxImmediateUSize inlineToNatLocal ++
+      [.localSet inlineToNatResultLocal])
+    [.localGet inlineToNatLocal,
+      .call (.declaration (externalName `USize.toNat)),
+      .localSet inlineToNatResultLocal],
+  .localGet inlineToNatResultLocal]
 
 private partial def rewriteInstruction (present : Array Name) : Instruction → Instruction
   | .call (.declaration declaration) =>
@@ -427,9 +470,10 @@ def internalizeAvailable (module : Module) (validate : Bool := true) :
   let selectedHelperNames := present.map externalName
   let selectedFunctions := functions.filter fun function =>
     selectedHelperNames.contains function.name
-  let callerRewrites := if present.contains `USize.ofNat then
-      callSiteRewrites
-    else #[]
+  let callerRewrites := callSiteRewrites.filter fun rewrite =>
+    match rewrite.target with
+    | .declaration declaration => present.contains declaration
+    | .runtime _ => false
   let callerRewritten ← module.functions.mapM fun function =>
     ResidentCallSite.rewriteFunction callerRewrites function
       |>.mapError LinkError.callSite

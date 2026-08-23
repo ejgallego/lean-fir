@@ -416,6 +416,25 @@ were directionally favorable in 10 cases, but host dispersion was too large
 for an end-to-end speed claim. Exact code size and poisoned-reuse semantics,
 not noisy elapsed time, are the acceptance evidence.
 
+### G1n. Inline the upstream `USize.toNat` scalar branch (generation-ready)
+
+Upstream `lean_usize_to_nat` tags values at or below the small-Nat boundary in
+its static-inline wrapper and calls the out-of-line constructor only for wider
+values. FIR now makes the same split at compiled call sites. The resident
+`fir_ext_USize_toNat` helper remains the complete checked cold path and retains
+its public signature, large-value allocation, and malformed-boundary behavior.
+The direct linker selects `USize.ofNat` and `USize.toNat` caller rules
+independently, so importing one does not reserve or apply the other rule.
+
+The exact lean-zip closure remains 769 captured declarations, 630 source
+functions, 830 resident helpers, and 504 final functions with zero imports.
+One matched screening profile moves the helper from 33/1,236 Wasm-self samples
+(2.67%) to zero in 1,461. Eight order-balanced process pairs give a directional
+paired median of -3.94 ms with 6/8 improving; the complete module grows from
+396,588 to 406,574 bytes (+2.52%). Native/Wasm output, all ten compression
+levels, lazy-cache ownership, and the flat 9,237,304-byte frontier remain exact.
+W6 proof review of the caller branch remains the separate acceptance boundary.
+
 ### G2. Separate production and diagnostic adapter costs (accepted)
 
 Finish the pending Illuminate selection-player request with an actually
