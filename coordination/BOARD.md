@@ -172,6 +172,22 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   deterministic regeneration, browser stress, and the full artifact gate
   pass. No W6 proof adaptation is required because the concrete bytes and
   stable contract are unchanged; noisy runtime samples support no speed claim.
+- Independent constructor-result integration: W7-1's scratch-free typed return
+  bridge is accepted at `17f9f9e8` (original functional head `9e739895`). A
+  valid resident allocator address now crosses the semantic result boundary by
+  unsigned i64 extension followed by a typed i32 wrap, which Binaryen erases,
+  rather than through two scratch loads, two stores, and two extra locals.
+  Allocation, extent, final bytes, layout, signatures, ownership, ABI, and the
+  frontier are unchanged; address zero is untouched. The zero-import
+  standalone fixture shrinks from 981 to 935 bytes with SHA-256
+  `7e2d06e1fadf426c338ee9a6255f3a3ce6b6ceabf8f4ceffbc3943f78737035b`.
+  On the exact early-closure candidate, plain/styled prettyM shrink by 967 and
+  1,151 bytes respectively, retaining 314 functions. Lean Beam, all 717 cases
+  and 2,133/2,133 comparisons, the complete deterministic W7 artifact gate,
+  and focused clean-main emission/Node checks pass. Talos retains only the
+  pre-existing selected-declaration closure theorem failure; the constructor
+  slice adds none. Consumer publication remains deferred until the closure
+  generation/proof pair lands.
 - Independent cached-DAG fixture integration: the test-fixtures stack is
   accepted through clean tracked head `d13226d6` on current main, with
   functional String-DAG head `410ea2d4` and generic `Array UInt8` DAG head
