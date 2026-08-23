@@ -44,6 +44,15 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `make check`. The older production-provenance handoff at `6fb8a25d` is
   superseded rather than replayed: main already contains that report plus the
   later one-pass origin-grouping repair and its seven-run production result.
+- Production profile maintenance: the artifact-bound prettyM and lean-zip
+  refresh is accepted at `78db6afe`. Four sampled-profile v2 captures and one
+  aggregate v3 per immutable `ee1f3e2d` package resolve every Wasm sample
+  through the exact release sidecars. The evidence prioritizes constructor
+  allocation for prettyM and the `lzMatchP`/reference-counting/numeric/
+  ByteArray cone for lean-zip. It remains a historical accepted-package
+  baseline: the newly accepted trusted-ByteArray package and W7's pending
+  early closure lowering require separate candidate captures rather than a
+  moving-pointer reinterpretation.
 - Independent generation integration: W7-2's checked/trusted resident
   ByteArray split is accepted at `64fc857b`, followed by exact lean-zip
   ratchets at `dc35f594`. Raw/public helpers retain malformed-header and bounds
@@ -339,6 +348,32 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 - Publication boundary: local integration and the already-authorized `main`
   push only. No feature push, PR, external package publication, worktree
   removal, or branch deletion is implied by this lease.
+
+## Latest completed integration lease
+
+- Milestone: `TOOLING-PRODUCTION-WASM-PROFILE-REFRESH`.
+- Integration owner: `wasm-gen`, replaying tooling head `556e1c87` as
+  `78db6afe` on accepted `main` at `481852cc`.
+- Evidence: four checked sampled-profile v2 captures and one comparable
+  aggregate v3 bind each accepted `ee1f3e2d` package, workload receipt, raw V8
+  profile, and exact final-function sidecar. All Wasm samples resolve; prettyM
+  has at least 212 samples per run and lean-zip at least 2,855. The retained
+  ignored evidence inventory is bound by SHA-256
+  `19fcb87d0f723771e6c55eacea521f5ea804adfc35903533ed1ebb31d06bb61e`.
+- Result: constructor allocation accounts for 38.0--46.3% of prettyM Wasm
+  self samples, ahead of reference counting. Lean-zip remains split among
+  source functions, numeric helpers, reference counting, and Array/ByteArray;
+  `Zip.Native.Deflate.lzMatchP`, `fir_dec_once`, and the now-optimized
+  `fir_byte_array_validate` cone are the leading exact functions in this
+  historical baseline.
+- Contracts: none. This lands one source-backed report and changes no tooling
+  executable, generator, runtime, proof, package, or benchmark catalog.
+  Subsequent packages receive independent captures with the same workload and
+  receipt identities; old evidence is never redirected through `*-current`.
+- Acceptance: both immutable package smokes, all eight checked captures, both
+  comparable aggregates, retained checksum verification, 21/21 tooling unit
+  tests, `git diff --check`, complete `make check` with 713 unique cases and
+  2,121/2,121 comparisons, and mailbox validation pass. Bug cards: none.
 
 ## Latest completed integration lease
 
