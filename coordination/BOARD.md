@@ -130,6 +130,21 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   exact compressed output and the flat frontier remain unchanged; the 2.38%
   module-size increase is retained explicitly. W6's caller-side proof audit
   remains independently open in `W72-W6-20260823-003`.
+- Independent constructor integration: W7-1's sparse initialization is
+  accepted at `64866288`. Constructor helpers now overwrite the eight header
+  words and low object-slot words directly, while zeroing exactly the
+  unwritten object-slot high words plus the USize/scalar/alignment suffix.
+  Layout, signatures, extent, field order, ownership, and every final byte are
+  unchanged. The standalone regression rewinds the module-owned arena,
+  poisons all 64 reused bytes with `0xff`, reallocates, and checks all 16
+  words, the frontier, and scratch restoration. The resident fixture shrinks
+  from 1,015 to 981 bytes; current-main prettyM shrinks from 88,223 to 85,418
+  bytes (3.18%) with zero imports and SHA-256
+  `47dd699a4553d600611b68cd4deeeb9d8ba4ba1a2cf5429e45d0fe681d5169c8`.
+  Lean Beam, all 713 cases and 2,121/2,121 comparisons, all 3,172 Talos jobs,
+  deterministic regeneration, browser stress, and the full artifact gate
+  pass. No W6 proof adaptation is required because the concrete bytes and
+  stable contract are unchanged; noisy runtime samples support no speed claim.
 - Independent consumer refresh: the Verso HTML source pin and package are
   accepted at `4ee28dd6` and `c88e4a54`. The package compiles clean Verso
   commit `970b071b73adc6e68c6de00bc183460f76d97731`, exact
