@@ -1,13 +1,13 @@
 {
-  "capturedDeclarations": 105,
-  "reviewedExternalsBeforeLink": 31,
-  "retainedSourceFunctions": 74,
-  "residentHelpers": 421,
-  "completeFunctions": 495,
-  "baseWasmBytes": 65607,
-  "completeWasmBytes": 145219,
-  "retainedSourceFunctionSha256": "92f3cca5387ffb3343bc904fa44c5a6e268059fd675f03c7b2ee8c9a34369fca",
-  "residentHelperSha256": "53b7022b897980150dc1a70d358d6c599ab83a25f2241e3ca6a751a130eddd14",
+  "capturedDeclarations": 110,
+  "reviewedExternalsBeforeLink": 32,
+  "retainedSourceFunctions": 78,
+  "residentHelpers": 439,
+  "completeFunctions": 517,
+  "baseWasmBytes": 71137,
+  "completeWasmBytes": 155103,
+  "retainedSourceFunctionSha256": "b5f8166c49e60a23b01c2ebd03207b316c1c78ace2b3b0910d90b6f6c1a956b5",
+  "residentHelperSha256": "774b4ba7c4fa6904668edd97634ef0e039ca09a6342a1dd1f35f9c199b204e75",
   "lazyCacheInitializers": 0,
   "residentGlobals": 3
 }

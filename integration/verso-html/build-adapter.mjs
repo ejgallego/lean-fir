@@ -51,7 +51,6 @@ function normalizeAnnotations(value, maximumNodes) {
   requireCondition(Array.isArray(value), "annotations must be an Array");
   requireCondition(value.length <= maximumNodes,
     "annotations exceeds " + maximumNodes + " entries");
-  const tags = new Set();
   let totalBytes = align8(HEADER_BYTES + SLOT_BYTES * value.length);
   const entries = value.map((entry, index) => {
     requireCondition(entry !== null && typeof entry === "object" &&
@@ -60,10 +59,6 @@ function normalizeAnnotations(value, maximumNodes) {
       Object.hasOwn(entry, "tag") && Object.hasOwn(entry, "annotation"),
     "annotations[" + index + "] must contain exactly tag and annotation");
     const tag = naturalPlan(natural(entry.tag, "annotations[" + index + "].tag"));
-    const tagKey = tag.value.toString();
-    requireCondition(!tags.has(tagKey),
-      "annotations contains duplicate tag " + tagKey);
-    tags.add(tagKey);
     const annotation = entry.annotation;
     requireCondition(annotation !== null && typeof annotation === "object" &&
       !Array.isArray(annotation),

@@ -23,6 +23,12 @@ private def cases : Array
     ("a" ++ Std.Format.tag 8 "b"), #[tagged 7 "outer"], 80, 0, 0),
   ("multiple end tags", Std.Format.tag 17
     (Std.Format.tag 29 "x"), #[tagged 17 "a", tagged 29 "b"], 80, 0, 0),
+  ("ascending annotation table", Std.Format.tag 7 "x",
+    #[tagged 3 "low", tagged 7 "middle", tagged 11 "high"], 80, 0, 0),
+  ("unsorted annotation table", Std.Format.tag 7 "x",
+    #[tagged 11 "high", tagged 7 "middle", tagged 3 "low"], 80, 0, 0),
+  ("duplicate annotation tag", Std.Format.tag 7 "x",
+    #[tagged 7 "first", tagged 7 "last"], 80, 0, 0),
   ("indented newline", Std.Format.nest 7
     ("a" ++ Std.Format.line ++ "b"), #[], 1, 2, 0),
   ("nonzero column", Std.Format.group

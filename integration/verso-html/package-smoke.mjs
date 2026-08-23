@@ -81,6 +81,16 @@ assert.equal(nested.html,
   '<span class="outer token">a</span>' +
   '<span class="inner token" data-binding="β">b</span>');
 
+const duplicate = adapter.render({
+  format: F.tag(7, F.text("x")),
+  annotations: [
+    { tag: 7, annotation: { cssClass: "first", binding: null } },
+    { tag: 7, annotation: { cssClass: "last", binding: null } },
+  ],
+  width: 80,
+});
+assert.equal(duplicate.html, '<span class="last token">x</span>');
+
 // Large enough to force memory growth while remaining a bounded package smoke.
 // The source owner tracks the separate >= 1 MiB throughput case because the
 // current source-level character-at-a-time escape loop is quadratic.

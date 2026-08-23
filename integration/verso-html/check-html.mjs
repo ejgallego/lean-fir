@@ -31,6 +31,12 @@ const cases = [
     [tagged(7, "outer")], 80, 0, 0],
   ["multiple end tags", F.tag(17, F.tag(29, F.text("x"))),
     [tagged(17, "a"), tagged(29, "b")], 80, 0, 0],
+  ["ascending annotation table", F.tag(7, F.text("x")),
+    [tagged(3, "low"), tagged(7, "middle"), tagged(11, "high")], 80, 0, 0],
+  ["unsorted annotation table", F.tag(7, F.text("x")),
+    [tagged(11, "high"), tagged(7, "middle"), tagged(3, "low")], 80, 0, 0],
+  ["duplicate annotation tag", F.tag(7, F.text("x")),
+    [tagged(7, "first"), tagged(7, "last")], 80, 0, 0],
   ["indented newline", F.nest(7,
     F.append(F.text("a"), F.append(F.line(), F.text("b")))), [], 1, 2, 0],
   ["nonzero column", F.group(F.append(F.text("hello"),
@@ -92,9 +98,4 @@ assert.throws(() => adapter.render({
   annotations: [{ tag: 1, annotation: { cssClass: 7 } }],
   width: 80,
 }), /cssClass must be a string/);
-assert.throws(() => adapter.render({
-  format: F.text("bad"),
-  annotations: [tagged(1, "a"), tagged(1, "b")],
-  width: 80,
-}), /duplicate tag/);
 console.log("malformed annotation contract: PASS");
