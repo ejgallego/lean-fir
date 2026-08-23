@@ -68,6 +68,7 @@ inductive Step where
   | arraysTrustedStrict
   | arraysTrustedAvailable
   | byteArraysAvailable
+  | byteArraysTrustedAvailable
   | natModStrict
   | natModAvailable
   | natShiftAvailable
@@ -116,6 +117,11 @@ private def validatePolicy (policy : Policy) : Except Source.CompileError Unit :
   if arraySteps.size > 1 then
     throw (.manifest
       s!"resident linker policy selects multiple Array linking modes: {repr arraySteps}")
+  let byteArraySteps := policy.steps.filter fun step =>
+    step == .byteArraysAvailable || step == .byteArraysTrustedAvailable
+  if byteArraySteps.size > 1 then
+    throw (.manifest
+      s!"resident linker policy selects multiple ByteArray linking modes: {repr byteArraySteps}")
   if incompatiblePair policy.steps .natModStrict .natModAvailable then
     throw (.manifest "resident linker policy selects both strict and available Nat.mod linking")
   if let some exports := policy.publicExports then
@@ -217,6 +223,9 @@ private def applyStep (validate : Bool) (step : Step) (module : Module) :
   | .byteArraysAvailable =>
       transform "available ByteArray operations"
         (ResidentByteArray.internalizeAvailable · validate) module
+  | .byteArraysTrustedAvailable =>
+      transform "available trusted ByteArray operations"
+        (ResidentByteArray.internalizeAvailableTrusted · validate) module
   | .natModStrict =>
       transform "Nat.mod" (ResidentNatMod.internalize · validate) module
   | .natModAvailable =>
@@ -599,7 +608,7 @@ def closedApplicationFamilySteps : Array Step := #[
   .fixedWidthAvailable,
   .floatAvailable,
   .arraysTrustedAvailable,
-  .byteArraysAvailable,
+  .byteArraysTrustedAvailable,
   .natModAvailable,
   .natShiftAvailable,
   .platformAvailable,
@@ -647,8 +656,18 @@ def closedApplicationFrontierPolicy (sourceExports : Array Name) : Policy := {
 
 #guard !closedApplicationFamilySteps.contains .arraysAvailable
 
+#guard closedApplicationFamilySteps.contains .byteArraysTrustedAvailable
+
+#guard !closedApplicationFamilySteps.contains .byteArraysAvailable
+
 #guard match validatePolicy {
   steps := #[.arraysAvailable, .arraysTrustedAvailable]
+} with
+  | .error _ => true
+  | .ok _ => false
+
+#guard match validatePolicy {
+  steps := #[.byteArraysAvailable, .byteArraysTrustedAvailable]
 } with
   | .error _ => true
   | .ok _ => false

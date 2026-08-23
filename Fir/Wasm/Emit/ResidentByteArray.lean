@@ -74,7 +74,36 @@ def externalName (declaration : Name) : Name :=
 def externalHelperNames : Array Name := externalDeclarations.map externalName
 def helperNames : Array Name := internalHelperNames ++ externalHelperNames
 
-private def selectedInternalHelperNames (declarations : Array Name) : Array Name :=
+private inductive InputValidation where
+  /-- Validate a raw/public ByteArray address before inspecting its header. -/
+  | checked
+  /-- Consume the resident ByteArray invariant carried by typed compiled code. -/
+  | trusted
+
+private inductive ProofIndexValidation where
+  /-- Reconstruct and check an erased proof premise for a raw/public call. -/
+  | checked
+  /-- Consume the erased proof premise carried by well-typed compiled code. -/
+  | trusted
+
+private structure CallValidation where
+  input : InputValidation
+  proofIndex : ProofIndexValidation
+
+private def checkedCalls : CallValidation := {
+  input := .checked
+  proofIndex := .checked }
+
+private def trustedCalls : CallValidation := {
+  input := .trusted
+  proofIndex := .trusted }
+
+private def usesInputValidator : InputValidation → Bool
+  | .checked => true
+  | .trusted => false
+
+private def selectedInternalHelperNames (declarations : Array Name)
+    (callValidation : CallValidation) : Array Name :=
   let needsRead := declarations.any fun declaration => #[
     `ByteArray.size,
     `ByteArray.copySlice,
@@ -99,8 +128,12 @@ private def selectedInternalHelperNames (declarations : Array Name) : Array Name
     declarations.contains `ByteArray.emptyWithCapacity ||
       declarations.contains `ByteArray.copySlice ||
       declarations.contains `ByteArray.get
-  let names := if needsRead then #[validateName] else #[]
-  let names := if needsRead || needsAllocation then
+  let needsCheckedRead :=
+    needsRead && usesInputValidator callValidation.input
+  let names := if needsCheckedRead then
+    #[validateName]
+  else #[]
+  let names := if needsCheckedRead || needsAllocation then
     names.push expectedAllocationName else names
   let names := if needsAllocation then names.push allocateName else names
   let names := if needsAllocation then names.push retypeObjectName else names
@@ -272,6 +305,14 @@ def validateFunction : Function := {
         .call (.declaration expectedAllocationName),
         .i32Eq]) ++ [.ret] }
 
+private def validateByteArrayInput (validation : InputValidation)
+    (array : FVarId) : List Instruction :=
+  match validation with
+  | .checked => [
+      .localGet array,
+      .call (.declaration validateName)]
+  | .trusted => []
+
 def allocateFunction : Function := {
   name := allocateName
   params := #[(sizeParam, .uint32), (capacityParam, .uint32)]
@@ -370,15 +411,13 @@ def copyBytesFunction : Function := {
       .br copyLoopLabel]] }
 
 /-- Consume one ByteArray reference after copying it to a fresh destination. -/
-def releaseConsumedFunction : Function := {
+private def releaseConsumedFunctionFor (validation : InputValidation) : Function := {
   name := releaseConsumedName
   params := #[(destinationParam, .object)]
   results := #[]
   locals := #[(addressLocal, .uint32), (flagsLocal, .uint32),
     (refCountLocal, .uint32)]
-  body := [
-    .localGet destinationParam,
-    .call (.declaration validateName),
+  body := validateByteArrayInput validation destinationParam ++ [
     .localGet destinationParam,
     .i32Const .uint32 0,
     .i32Add,
@@ -427,15 +466,15 @@ def releaseConsumedFunction : Function := {
     .i32Store .uint32 (u32 headerAux3Offset),
     .ret] }
 
-def sizeFunction : Function := {
+def releaseConsumedFunction : Function := releaseConsumedFunctionFor .checked
+
+private def sizeFunctionFor (validation : InputValidation) : Function := {
   name := externalName `ByteArray.size
   params := #[(sourceParam, .object)]
   results := #[.tagged]
   locals := #[(sizeLocal, .uint32), (rawLocal, .uint32),
     (savedScratchLocal, .uint32), (taggedResultLocal, .tagged)]
-  body := [
-    .localGet sourceParam,
-    .call (.declaration validateName),
+  body := validateByteArrayInput validation sourceParam ++ [
     .localGet sourceParam,
     .i32Load .uint32 (u32 headerAux1Offset),
     .localSet sizeLocal] ++
@@ -448,6 +487,8 @@ def sizeFunction : Function := {
     .i32Add,
     .i32Const .uint32 1,
     .i32Add] ++ retypeRaw .tagged taggedResultLocal }
+
+def sizeFunction : Function := sizeFunctionFor .checked
 
 def emptyWithCapacityFunction : Function := {
   name := externalName `ByteArray.emptyWithCapacity
@@ -572,21 +613,50 @@ private def selectReusableDestination : List Instruction := [
             .i32Const .uint32 1,
             .localSet reuseLocal] []]) []])]
 
-private def decodeUSizeOffset (width : Nat) : List Instruction :=
-  trapWhenTrue [
-    .localGet sizeLocal,
-    .i32Const .uint32 (u32 width),
-    .i32LtU] ++
-  trapWhenTrue [
-    .localGet sizeLocal,
-    .i32Const .uint32 (u32 width),
-    .i32Sub,
-    .i64ExtendI32U .usize,
-    .localGet indexParam,
-    .i64LtU] ++ [
-    .localGet indexParam,
-    .i32WrapI64 .uint32,
-    .localSet indexLocal]
+private def decodeProofNaturalIndex (validation : ProofIndexValidation) :
+    List Instruction :=
+  match validation with
+  | .checked => [
+      .localGet indexParam,
+      .call (.declaration decodeNatural32Name),
+      .localSet indexLocal] ++
+      trapUnlessTrue [
+        .localGet indexLocal,
+        .localGet sizeLocal,
+        .i32LtU]
+  /-
+  Unlike an Array, a byte-packed ByteArray can theoretically have more than
+  `2^31 - 1` elements while still fitting wasm32 memory. Preserve the Nat
+  representation decode, but consume the erased source proof instead of
+  rebuilding its bounds check.
+  -/
+  | .trusted => [
+      .localGet indexParam,
+      .call (.declaration decodeNatural32Name),
+      .localSet indexLocal]
+
+private def decodeUSizeOffset (validation : ProofIndexValidation)
+    (width : Nat) : List Instruction :=
+  match validation with
+  | .checked =>
+      trapWhenTrue [
+        .localGet sizeLocal,
+        .i32Const .uint32 (u32 width),
+        .i32LtU] ++
+      trapWhenTrue [
+        .localGet sizeLocal,
+        .i32Const .uint32 (u32 width),
+        .i32Sub,
+        .i64ExtendI32U .usize,
+        .localGet indexParam,
+        .i64LtU] ++ [
+        .localGet indexParam,
+        .i32WrapI64 .uint32,
+        .localSet indexLocal]
+  | .trusted => [
+      .localGet indexParam,
+      .i32WrapI64 .uint32,
+      .localSet indexLocal]
 
 private def dataAddress (object index : FVarId) : List Instruction := [
   .localGet object,
@@ -595,55 +665,62 @@ private def dataAddress (object index : FVarId) : List Instruction := [
   .localGet index,
   .i32Add]
 
-def getFunction : Function := {
+private def getFunctionFor (inputValidation : InputValidation)
+    (proofIndexValidation : ProofIndexValidation) : Function := {
   name := externalName `ByteArray.get
   params := #[(sourceParam, .object), (indexParam, .tobject),
     (proofParam, .erased)]
   results := #[.uint8]
   locals := #[(sizeLocal, .uint32), (indexLocal, .uint32)]
-  body := [
-    .localGet sourceParam,
-    .call (.declaration validateName),
-    .localGet sourceParam,
-    .i32Load .uint32 (u32 headerAux1Offset),
-    .localSet sizeLocal,
-    .localGet indexParam,
-    .call (.declaration decodeNatural32Name),
-    .localSet indexLocal] ++
-    trapUnlessTrue [
-      .localGet indexLocal,
-      .localGet sizeLocal,
-      .i32LtU] ++
+  body := validateByteArrayInput inputValidation sourceParam ++
+    (match proofIndexValidation with
+    | .checked => [
+        .localGet sourceParam,
+        .i32Load .uint32 (u32 headerAux1Offset),
+        .localSet sizeLocal]
+    | .trusted => []) ++
+    decodeProofNaturalIndex proofIndexValidation ++
     dataAddress sourceParam indexLocal ++ [
       .i32Load8U .uint8 0,
       .ret] }
 
-private def ugetFunction (declaration : Name) (width : Nat)
+def getFunction : Function := getFunctionFor .checked .checked
+
+private def ugetFunctionFor (inputValidation : InputValidation)
+    (proofIndexValidation : ProofIndexValidation)
+    (declaration : Name) (width : Nat)
     (result : AbiKind) (load : Instruction) : Function := {
   name := externalName declaration
   params := #[(sourceParam, .object), (indexParam, .usize),
     (proofParam, .erased)]
   results := #[result]
   locals := #[(sizeLocal, .uint32), (indexLocal, .uint32)]
-  body := [
-    .localGet sourceParam,
-    .call (.declaration validateName),
-    .localGet sourceParam,
-    .i32Load .uint32 (u32 headerAux1Offset),
-    .localSet sizeLocal] ++
-    decodeUSizeOffset width ++ dataAddress sourceParam indexLocal ++
+  body := validateByteArrayInput inputValidation sourceParam ++
+    (match proofIndexValidation with
+    | .checked => [
+        .localGet sourceParam,
+        .i32Load .uint32 (u32 headerAux1Offset),
+        .localSet sizeLocal]
+    | .trusted => []) ++
+    decodeUSizeOffset proofIndexValidation width ++
+    dataAddress sourceParam indexLocal ++
     [load, .ret] }
 
 def ugetByteFunction : Function :=
-  ugetFunction `ByteArray.uget 1 .uint8 (.i32Load8U .uint8 0)
+  ugetFunctionFor .checked .checked `ByteArray.uget 1 .uint8
+    (.i32Load8U .uint8 0)
 
 def ugetUInt32LEFunction : Function :=
-  ugetFunction `ByteArray.ugetUInt32LE 4 .uint32 (.i32Load .uint32 0)
+  ugetFunctionFor .checked .checked `ByteArray.ugetUInt32LE 4 .uint32
+    (.i32Load .uint32 0)
 
 def ugetUInt64LEFunction : Function :=
-  ugetFunction `ByteArray.ugetUInt64LE 8 .uint64 (.i64Load .uint64 0)
+  ugetFunctionFor .checked .checked `ByteArray.ugetUInt64LE 8 .uint64
+    (.i64Load .uint64 0)
 
-private def wideSetFunction (declaration : Name) (width : Nat)
+private def wideSetFunctionFor (inputValidation : InputValidation)
+    (proofIndexValidation : ProofIndexValidation)
+    (declaration : Name) (width : Nat)
     (valueKind : AbiKind) (store : Instruction) : Function := {
   name := externalName declaration
   params := #[(destinationParam, .object), (indexParam, .usize),
@@ -654,16 +731,14 @@ private def wideSetFunction (declaration : Name) (width : Nat)
     (reuseLocal, .uint32), (indexLocal, .uint32),
     (rawLocal, .uint32), (savedScratchLocal, .uint32),
     (objectResultLocal, .object)]
-  body := [
-    .localGet destinationParam,
-    .call (.declaration validateName),
+  body := validateByteArrayInput inputValidation destinationParam ++ [
     .localGet destinationParam,
     .i32Load .uint32 (u32 headerAux1Offset),
     .localSet sizeLocal,
     .localGet destinationParam,
     .i32Load .uint32 (u32 headerAux2Offset),
     .localSet capacityLocal] ++
-    decodeUSizeOffset width ++ [
+    decodeUSizeOffset proofIndexValidation width ++ [
     .localGet sizeLocal,
     .localSet newSizeLocal,
     .i32Const .uint32 0,
@@ -698,14 +773,15 @@ private def wideSetFunction (declaration : Name) (width : Nat)
         .ret])] }
 
 def usetUInt32LEFunction : Function :=
-  wideSetFunction `ByteArray.usetUInt32LE 4 .uint32 (.i32Store .uint32 0)
+  wideSetFunctionFor .checked .checked `ByteArray.usetUInt32LE 4 .uint32
+    (.i32Store .uint32 0)
 
 def usetUInt64LEFunction : Function :=
-  wideSetFunction `ByteArray.usetUInt64LE 8 .uint64 (.i64Store .uint64 0)
+  wideSetFunctionFor .checked .checked `ByteArray.usetUInt64LE 8 .uint64
+    (.i64Store .uint64 0)
 
-private def prepareAppend : List Instruction := [
-  .localGet destinationParam,
-  .call (.declaration validateName),
+private def prepareAppend (validation : InputValidation) : List Instruction :=
+  validateByteArrayInput validation destinationParam ++ [
   .localGet destinationParam,
   .i32Load .uint32 (u32 headerAux1Offset),
   .localSet sizeLocal,
@@ -747,7 +823,7 @@ private def appendByteAddress (object : FVarId) : List Instruction := [
   .localGet sizeLocal,
   .i32Add]
 
-def pushFunction : Function := {
+private def pushFunctionFor (validation : InputValidation) : Function := {
   name := externalName `ByteArray.push
   params := #[(destinationParam, .object), (valueParam, .uint8)]
   results := #[.object]
@@ -758,7 +834,7 @@ def pushFunction : Function := {
     (savedScratchLocal, .uint32), (objectResultLocal, .object)]
   body := [
     .i32Const .uint32 1,
-    .localSet appendCountLocal] ++ prepareAppend ++ [
+    .localSet appendCountLocal] ++ prepareAppend validation ++ [
     .localGet reuseLocal,
     .ifElse
       (appendByteAddress destinationParam ++ [
@@ -792,6 +868,8 @@ def pushFunction : Function := {
         .call (.declaration retypeObjectName),
         .ret])] }
 
+def pushFunction : Function := pushFunctionFor .checked
+
 private def appendWideBytes (object loopLabel : FVarId) : List Instruction :=
   appendByteAddress object ++ [.localSet destinationCursorLocal] ++ [
   .loop loopLabel (
@@ -815,7 +893,20 @@ private def appendWideBytes (object loopLabel : FVarId) : List Instruction :=
       .localSet appendCountLocal,
       .br loopLabel]])]
 
-def pushUInt64LEFunction : Function := {
+private def decodeAppendCount (validation : ProofIndexValidation) :
+    List Instruction :=
+  (match validation with
+  | .checked => trapWhenTrue [
+      .i64Const .usize 8,
+      .localGet countParam,
+      .i64LtU]
+  | .trusted => []) ++ [
+    .localGet countParam,
+    .i32WrapI64 .uint32,
+    .localSet appendCountLocal]
+
+private def pushUInt64LEFunctionFor (inputValidation : InputValidation)
+    (proofIndexValidation : ProofIndexValidation) : Function := {
   name := externalName `ByteArray.pushUInt64LE
   params := #[(destinationParam, .object), (valueParam, .uint64),
     (countParam, .usize), (proofParam, .erased)]
@@ -826,15 +917,9 @@ def pushUInt64LEFunction : Function := {
     (reuseLocal, .uint32), (destinationCursorLocal, .uint32),
     (wideValueLocal, .uint64), (rawLocal, .uint32),
     (savedScratchLocal, .uint32), (objectResultLocal, .object)]
-  body := trapWhenTrue [
-    .i64Const .usize 8,
-    .localGet countParam,
-    .i64LtU] ++ [
-    .localGet countParam,
-    .i32WrapI64 .uint32,
-    .localSet appendCountLocal,
+  body := decodeAppendCount proofIndexValidation ++ [
     .localGet valueParam,
-    .localSet wideValueLocal] ++ prepareAppend ++ [
+    .localSet wideValueLocal] ++ prepareAppend inputValidation ++ [
     .localGet reuseLocal,
     .ifElse
       (appendWideBytes destinationParam appendLoopLabel ++ [
@@ -864,7 +949,10 @@ def pushUInt64LEFunction : Function := {
         .call (.declaration retypeObjectName),
         .ret])] }
 
-def copySliceFunction : Function := {
+def pushUInt64LEFunction : Function :=
+  pushUInt64LEFunctionFor .checked .checked
+
+private def copySliceFunctionFor (validation : InputValidation) : Function := {
   name := externalName `ByteArray.copySlice
   params := #[(sourceParam, .object), (sourceOffsetParam, .tobject),
     (destinationParam, .object), (destinationOffsetParam, .tobject),
@@ -879,11 +967,8 @@ def copySliceFunction : Function := {
     (reuseLocal, .uint32),
     (rawLocal, .uint32), (savedScratchLocal, .uint32),
     (objectResultLocal, .object)]
-  body := [
-    .localGet sourceParam,
-    .call (.declaration validateName),
-    .localGet destinationParam,
-    .call (.declaration validateName),
+  body := validateByteArrayInput validation sourceParam ++
+    validateByteArrayInput validation destinationParam ++ [
     .localGet sourceParam,
     .i32Load .uint32 (u32 headerAux1Offset),
     .localSet sourceSizeLocal,
@@ -1008,26 +1093,87 @@ def copySliceFunction : Function := {
       .call (.declaration retypeObjectName),
       .ret]] }
 
-def functions : Array Function := #[
+def copySliceFunction : Function := copySliceFunctionFor .checked
+
+private def functionsFor (validation : CallValidation) : Array Function := #[
   validateFunction,
   expectedAllocationFunction,
   allocateFunction,
   retypeObjectFunction,
   decodeNatural32Function,
   copyBytesFunction,
-  releaseConsumedFunction,
-  getFunction,
-  ugetByteFunction,
-  ugetUInt32LEFunction,
-  ugetUInt64LEFunction,
-  usetUInt32LEFunction,
-  usetUInt64LEFunction,
-  pushFunction,
-  pushUInt64LEFunction,
-  copySliceFunction,
-  sizeFunction,
+  releaseConsumedFunctionFor validation.input,
+  getFunctionFor validation.input validation.proofIndex,
+  ugetFunctionFor validation.input validation.proofIndex
+    `ByteArray.uget 1 .uint8 (.i32Load8U .uint8 0),
+  ugetFunctionFor validation.input validation.proofIndex
+    `ByteArray.ugetUInt32LE 4 .uint32 (.i32Load .uint32 0),
+  ugetFunctionFor validation.input validation.proofIndex
+    `ByteArray.ugetUInt64LE 8 .uint64 (.i64Load .uint64 0),
+  wideSetFunctionFor validation.input validation.proofIndex
+    `ByteArray.usetUInt32LE 4 .uint32 (.i32Store .uint32 0),
+  wideSetFunctionFor validation.input validation.proofIndex
+    `ByteArray.usetUInt64LE 8 .uint64 (.i64Store .uint64 0),
+  pushFunctionFor validation.input,
+  pushUInt64LEFunctionFor validation.input validation.proofIndex,
+  copySliceFunctionFor validation.input,
+  sizeFunctionFor validation.input,
   mkFunction,
   emptyWithCapacityFunction]
+
+/-- Checked helper bodies used by the standalone/public ByteArray surface. -/
+def functions : Array Function := functionsFor checkedCalls
+
+private def inputValidatorDelta (param : FVarId)
+    (checked trusted : Function) : Bool :=
+  let validation := validateByteArrayInput .checked param
+  checked.body.take validation.length == validation &&
+    checked.body.drop validation.length == trusted.body
+
+private def inputValidatorAfterPrefixDelta (prefixLength : Nat)
+    (param : FVarId) (checked trusted : Function) : Bool :=
+  let validation := validateByteArrayInput .checked param
+  checked.body.take prefixLength == trusted.body.take prefixLength &&
+    (checked.body.drop prefixLength).take validation.length == validation &&
+    (checked.body.drop (prefixLength + validation.length)) ==
+      trusted.body.drop prefixLength
+
+#guard inputValidatorDelta sourceParam
+  (sizeFunctionFor .checked) (sizeFunctionFor .trusted)
+#guard inputValidatorDelta destinationParam
+  (releaseConsumedFunctionFor .checked) (releaseConsumedFunctionFor .trusted)
+#guard inputValidatorAfterPrefixDelta 2 destinationParam
+  (pushFunctionFor .checked) (pushFunctionFor .trusted)
+
+private def callsInputValidator : Instruction → Bool
+  | .call (.declaration declaration) =>
+      declaration == validateName
+  | _ => false
+
+private def trustedProofIndexedFunctions : Array Function := #[
+  getFunctionFor .trusted .trusted,
+  ugetFunctionFor .trusted .trusted
+    `ByteArray.uget 1 .uint8 (.i32Load8U .uint8 0),
+  ugetFunctionFor .trusted .trusted
+    `ByteArray.ugetUInt32LE 4 .uint32 (.i32Load .uint32 0),
+  ugetFunctionFor .trusted .trusted
+    `ByteArray.ugetUInt64LE 8 .uint64 (.i64Load .uint64 0),
+  wideSetFunctionFor .trusted .trusted
+    `ByteArray.usetUInt32LE 4 .uint32 (.i32Store .uint32 0),
+  wideSetFunctionFor .trusted .trusted
+    `ByteArray.usetUInt64LE 8 .uint64 (.i64Store .uint64 0),
+  pushUInt64LEFunctionFor .trusted .trusted]
+
+#guard trustedProofIndexedFunctions.all fun function =>
+  !function.body.any callsInputValidator
+
+#guard (getFunctionFor .trusted .trusted).body.take 3 ==
+  decodeProofNaturalIndex .trusted
+#guard (ugetFunctionFor .trusted .trusted
+  `ByteArray.uget 1 .uint8 (.i32Load8U .uint8 0)).body.take 3 ==
+  decodeUSizeOffset .trusted 1
+#guard (pushUInt64LEFunctionFor .trusted .trusted).body.take 3 ==
+  decodeAppendCount .trusted
 
 private def expectedSignature? (declaration : Name) : Option Signature :=
   if declaration == `ByteArray.copySlice then
@@ -1086,7 +1232,7 @@ private partial def rewriteInstruction (declarations : Array Name) :
   | instruction => instruction
 
 private def internalizeSelected (module : Module) (declarations : Array Name)
-    (validate : Bool) :
+    (callValidation : CallValidation) (validate : Bool) :
     Except LinkError Module := do
   if validate then
     match Fir.Wasm.validateModule module with
@@ -1110,7 +1256,8 @@ private def internalizeSelected (module : Module) (declarations : Array Name)
       throw (.missingOwnershipHelper ResidentRelease.decrementOnceName)
   let selectedExternalHelperNames := declarations.map externalName
   let selectedHelperNames :=
-    selectedInternalHelperNames declarations ++ selectedExternalHelperNames
+    selectedInternalHelperNames declarations callValidation ++
+      selectedExternalHelperNames
   for name in selectedHelperNames do
     if module.imports.any (·.declaration? == some name) ||
         module.functions.any (·.name == name) || module.exports.contains name then
@@ -1125,8 +1272,9 @@ private def internalizeSelected (module : Module) (declarations : Array Name)
       throw (.incompatibleExternal declaration)
   let linkedFunctions := module.functions.map fun function =>
     { function with body := function.body.map (rewriteInstruction declarations) }
-  let linkedFunctions := linkedFunctions ++ functions.filter fun function =>
+  let selectedFunctions := (functionsFor callValidation).filter fun function =>
     selectedHelperNames.contains function.name
+  let linkedFunctions := linkedFunctions ++ selectedFunctions
   let imports := module.imports.filter fun import_ =>
     match import_.declaration? with
     | some declaration => !declarations.contains declaration
@@ -1154,7 +1302,26 @@ def internalizeAvailable (module : Module) (validate : Bool := true) : Except Li
     else
       ResidentScalarBox.internalizeOperations module #[.unbox .uint8] validate
         |>.mapError .scalarHelperLink
-    internalizeSelected module declarations validate
+    internalizeSelected module declarations checkedCalls validate
+
+/--
+Internalize the ByteArray operations imported by a typed closed application.
+The generated bodies consume the resident ByteArray invariant and erased proof
+premises, while retaining dynamic slice, overflow, ownership, uniqueness, and
+copy-on-write behavior. Raw/public callers use `internalizeAvailable`.
+-/
+def internalizeAvailableTrusted (module : Module) (validate : Bool := true) :
+    Except LinkError Module :=
+  let declarations := externalDeclarations.filter fun declaration =>
+    module.imports.any (·.declaration? == some declaration)
+  if declarations.isEmpty then pure module else do
+    let module ← if !declarations.contains `ByteArray.mk ||
+        module.functions.any (·.name == ResidentScalarBox.unboxUInt8Name) then
+      pure module
+    else
+      ResidentScalarBox.internalizeOperations module #[.unbox .uint8] validate
+        |>.mapError .scalarHelperLink
+    internalizeSelected module declarations trustedCalls validate
 
 private def externalTypes (declaration : Name) : ExternalTypes :=
   if declaration == `ByteArray.copySlice then
@@ -1213,7 +1380,7 @@ private def scalarPrerequisiteFunction : Function := {
     .call (.runtime (.unbox .uint8)),
     .ret] }
 
-def residentExampleModule : Except String Module := do
+private def residentExampleInput : Except String Module := do
   let numeric ← ResidentNumeric.residentExampleModule
   let unboxOperation : RuntimeOp := .unbox .uint8
   let scalarInput : Module := {
@@ -1226,11 +1393,19 @@ def residentExampleModule : Except String Module := do
     |>.mapError fun error => s!"byte-array scalar prerequisite: {repr error}"
   let scalar ← ResidentRelease.internalizeReleases scalar
     |>.mapError fun error => s!"byte-array releases: {repr error}"
-  let module : Module := {
+  return {
     scalar with
     imports := scalar.imports ++ externalDeclarations.map externalImport }
-  internalizeSelected module externalDeclarations true
+
+def residentExampleModule : Except String Module := do
+  let module ← residentExampleInput
+  internalizeSelected module externalDeclarations checkedCalls true
     |>.mapError fun error => s!"byte-array: {repr error}"
+
+def residentTrustedExampleModule : Except String Module := do
+  let module ← residentExampleInput
+  internalizeSelected module externalDeclarations trustedCalls true
+    |>.mapError fun error => s!"trusted byte-array: {repr error}"
 
 def manifest : Json :=
   Json.mkObj [
@@ -1248,6 +1423,18 @@ def manifest : Json :=
       module.imports.isEmpty && module.runtimeOperations.isEmpty &&
       (externalDeclarations.all fun declaration =>
         module.exports.contains (externalName declaration)) &&
+      module.memory == some ResidentRuntime.residentMemory &&
+      (Fir.Wasm.validateModule module |>.isOk) &&
+      (Fir.Wasm.Emit.encode module |>.isOk)
+  | .error _ => false
+
+#guard match residentTrustedExampleModule with
+  | .ok module =>
+      module.imports.isEmpty && module.runtimeOperations.isEmpty &&
+      (externalDeclarations.all fun declaration =>
+        module.exports.contains (externalName declaration)) &&
+      !(module.functions.any fun function => function.name == validateName) &&
+      !module.exports.contains validateName &&
       module.memory == some ResidentRuntime.residentMemory &&
       (Fir.Wasm.validateModule module |>.isOk) &&
       (Fir.Wasm.Emit.encode module |>.isOk)
