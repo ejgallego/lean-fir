@@ -53,6 +53,15 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   baseline: the newly accepted trusted-ByteArray package and W7's pending
   early closure lowering require separate candidate captures rather than a
   moving-pointer reinterpretation.
+- Production evidence closure: tooling's corrected trusted-ByteArray binding
+  is accepted at `b0d30962`, followed by the roadmap cleanup at `9db76975`.
+  Client-owned evidence at lean-zip `b22b5b11` confirms
+  `fir_byte_array_validate` is absent from both the exact final sidecar and all
+  sampled execution, so validation is closed as a lean-zip runtime hotspot.
+  The already-landed ordered one-pass instruction-origin generator is now an
+  established surface rather than backlog. The next immutable exact-profile
+  request is W7's prettyM constructor-allocation candidate; tooling has no
+  independent code blocker meanwhile.
 - Independent generation integration: W7-2's checked/trusted resident
   ByteArray split is accepted at `64fc857b`, followed by exact lean-zip
   ratchets at `dc35f594`. Raw/public helpers retain malformed-header and bounds
