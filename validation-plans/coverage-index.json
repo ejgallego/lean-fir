@@ -46,8 +46,8 @@
     "tiers": [
       {
         "id": "source-lcnf",
-        "minimumCases": 664,
-        "minimumComparisons": 664,
+        "minimumCases": 666,
+        "minimumComparisons": 666,
         "requiredBackends": [
           "lcnf",
           "native"
@@ -66,8 +66,8 @@
       },
       {
         "id": "wasm-v8",
-        "minimumCases": 664,
-        "minimumComparisons": 1328,
+        "minimumCases": 666,
+        "minimumComparisons": 1332,
         "requiredBackends": [
           "lcnf",
           "native",
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 673,
-      "minimumTierCases": 1337,
-      "minimumComparisons": 2001
+      "minimumUniqueCases": 675,
+      "minimumTierCases": 1341,
+      "minimumComparisons": 2007
     },
     "machine": {
-      "minimumCases": 673,
-      "minimumInterpreterSteps": 7207,
+      "minimumCases": 675,
+      "minimumInterpreterSteps": 7296,
       "requiredStaticForms": [
         "box",
         "cases",
@@ -456,6 +456,11 @@
       },
       {
         "tier": "source-lcnf",
+        "tag": "alias-preservation",
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
         "tag": "allocation",
         "minimumCases": 22
       },
@@ -816,6 +821,11 @@
       },
       {
         "tier": "source-lcnf",
+        "tag": "shared-dag",
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
         "tag": "shared-intermediate-application",
         "minimumCases": 3
       },
@@ -922,6 +932,11 @@
       {
         "tier": "wasm-v8",
         "tag": "alias-across-effect",
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "alias-preservation",
         "minimumCases": 2
       },
       {
@@ -1211,6 +1226,11 @@
       },
       {
         "tier": "wasm-v8",
+        "tag": "shared-dag",
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
         "tag": "shared-intermediate-application",
         "minimumCases": 3
       },
@@ -1425,6 +1445,46 @@
           "persistent",
           "recursive-persistence",
           "repeated-call"
+        ],
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "cache-shared-dag-copy-on-write",
+        "allTags": [
+          "alias-preservation",
+          "cache",
+          "copy-on-write",
+          "outside-alias",
+          "repeated-child-alias",
+          "shared-dag"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "cache-shared-dag-path-exclusion",
+        "allTags": [
+          "alias-preservation",
+          "cache",
+          "outside-alias",
+          "path-exclusion",
+          "repeated-child-alias",
+          "shared-dag"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "cache-shared-dag-reuse",
+        "allTags": [
+          "cache",
+          "cache-hit",
+          "cache-miss",
+          "nullary-cache",
+          "repeated-call",
+          "repeated-child-alias",
+          "shared-dag"
         ],
         "minimumCases": 2
       },
@@ -2372,6 +2432,46 @@
           "persistent",
           "recursive-persistence",
           "repeated-call"
+        ],
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "cache-shared-dag-copy-on-write",
+        "allTags": [
+          "alias-preservation",
+          "cache",
+          "copy-on-write",
+          "outside-alias",
+          "repeated-child-alias",
+          "shared-dag"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "cache-shared-dag-path-exclusion",
+        "allTags": [
+          "alias-preservation",
+          "cache",
+          "outside-alias",
+          "path-exclusion",
+          "repeated-child-alias",
+          "shared-dag"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "cache-shared-dag-reuse",
+        "allTags": [
+          "cache",
+          "cache-hit",
+          "cache-miss",
+          "nullary-cache",
+          "repeated-call",
+          "repeated-child-alias",
+          "shared-dag"
         ],
         "minimumCases": 2
       },

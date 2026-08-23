@@ -378,6 +378,34 @@ def cachedHeapOwnerChildReuse
   let second := cachedHeapOwner
   (first, result, second)
 
+/-!
+The cached owner below contains the same heap child in both String fields. The
+consumer retains one projected alias outside the owner, optionally mutates the
+other, and then reads the nullary declaration again. This makes recursive cache
+persistence, repeated-child ownership, and copy-on-write preservation jointly
+observable.
+-/
+structure CachedSharedStringOwner where
+  left : String
+  right : String
+  payload : Nat
+
+@[noinline]
+def cachedSharedStringOwner : CachedSharedStringOwner :=
+  let child := "cached-shared\nα🙂"
+  { left := child, right := child, payload := 18446744073709551616 }
+
+@[noinline]
+def cachedSharedStringDagReuse
+    (mutate : Bool) :
+    CachedSharedStringOwner × String × String × CachedSharedStringOwner :=
+  let first := cachedSharedStringOwner
+  let outside := first.left
+  let selected := first.right
+  let result := if mutate then String.Internal.append selected "!" else selected
+  let second := cachedSharedStringOwner
+  (first, outside, result, second)
+
 @[noinline]
 def stringPushnNonBmp (source : String) (count : Nat) : String :=
   String.Internal.pushn source '😀' count
@@ -2910,6 +2938,19 @@ private def cachedHeapOwnerChildReuseDatum
   .ctor "Prod.mk" 0 #[cachedHeapOwnerDatum value.1,
     .ctor "Prod.mk" 0 #[.string value.2.1, cachedHeapOwnerDatum value.2.2]]
 
+private def cachedSharedStringOwnerDatum
+    (value : Source.CachedSharedStringOwner) : ValidationDatum :=
+  .ctor "CachedSharedStringOwner.mk" 0
+    #[.string value.left, .string value.right, .nat value.payload]
+
+private def cachedSharedStringDagReuseDatum
+    (value : Source.CachedSharedStringOwner × String × String ×
+      Source.CachedSharedStringOwner) : ValidationDatum :=
+  .ctor "Prod.mk" 0 #[cachedSharedStringOwnerDatum value.1,
+    .ctor "Prod.mk" 0 #[.string value.2.1,
+      .ctor "Prod.mk" 0 #[.string value.2.2.1,
+        cachedSharedStringOwnerDatum value.2.2.2]]]
+
 private def natPairDatum (value : Nat × Nat) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[.nat value.1, .nat value.2]
 
@@ -3151,6 +3192,14 @@ private def cachedHeapOwnerSchema : ValidationSchema :=
 private def cachedHeapOwnerChildReuseSchema : ValidationSchema :=
   .ctor "Prod.mk" 0 #[cachedHeapOwnerSchema,
     .ctor "Prod.mk" 0 #[.string, cachedHeapOwnerSchema]]
+
+private def cachedSharedStringOwnerSchema : ValidationSchema :=
+  .ctor "CachedSharedStringOwner.mk" 0 #[.string, .string, .nat]
+
+private def cachedSharedStringDagReuseSchema : ValidationSchema :=
+  .ctor "Prod.mk" 0 #[cachedSharedStringOwnerSchema,
+    .ctor "Prod.mk" 0 #[.string,
+      .ctor "Prod.mk" 0 #[.string, cachedSharedStringOwnerSchema]]]
 
 private def tailByteOwnerSchema : ValidationSchema :=
   .ctor "TailByteOwner.mk" 0 #[.bytes, .string]
@@ -3959,6 +4008,17 @@ private def cachedHeapOwnerChildReuseTakenFormTrace : Array String :=
   #["fap", "fap", "fap", "lit", "return", "fap", "lit", "return", "inc", "inc",
     "ctor", "return", "inc", "return", "join", "cases", "oproj", "fap", "lit",
     "return", "inc", "fap", "extern", "jump", "inc", "ctor", "ctor", "return"]
+
+private def cachedSharedStringDagReuseSkippedFormTrace : Array String :=
+  #["fap", "fap", "fap", "lit", "return", "fap", "lit", "return", "inc", "inc",
+    "ctor", "return", "inc", "return", "oproj", "oproj", "join", "cases", "inc",
+    "jump", "inc", "ctor", "inc", "ctor", "ctor", "return"]
+
+private def cachedSharedStringDagReuseTakenFormTrace : Array String :=
+  #["fap", "fap", "fap", "lit", "return", "fap", "lit", "return", "inc", "inc",
+    "ctor", "return", "inc", "return", "oproj", "oproj", "join", "cases", "fap",
+    "lit", "return", "inc", "fap", "extern", "jump", "inc", "ctor", "inc", "ctor",
+    "ctor", "return"]
 
 private def cachedHeapOwnerAdministrativeKinds : Array String :=
   #["admin:invoke-name", "admin:yield-bind", "admin:yield-cache", "admin:yield-done"]
@@ -5427,6 +5487,85 @@ private def preConversionCases : Array Case := #[
     requiredExecutedExternalTrace := some #[``String.Internal.append]
     provenance := firProvenance
       "Append through a cached owner's persistent child, then reuse the cached graph" },
+  { id := "cached-shared-string-dag-reuse-skipped"
+    entry := ``Source.cachedSharedStringDagReuse
+    dependencies := #[``Source.cachedSharedStringOwner]
+    args := #[.bool false]
+    argSchemas := #[.bool]
+    resultSchema := cachedSharedStringDagReuseSchema
+    native := fun _ => cachedSharedStringDagReuseDatum
+      (Source.cachedSharedStringDagReuse false)
+    tags := #["stress", "ownership", "persistent", "cache", "nullary-cache",
+      "recursive-persistence", "constructor", "object", "heap", "string",
+      "large-nat", "repeated-call", "cache-miss", "cache-hit", "initialization",
+      "alias", "shared", "repeated-alias", "repeated-child-alias",
+      "outside-alias", "alias-preservation", "shared-dag", "path-exclusion"]
+    requiredLcnfForms :=
+      #["cases", "ctor", "extern", "fap", "inc", "join", "jump", "lit", "oproj",
+        "return"]
+    requiredExecutedLcnfForms :=
+      #["cases", "ctor", "fap", "inc", "join", "jump", "lit", "oproj", "return"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "cases", minimum := 1, maximum := some 1 },
+        { form := "ctor", minimum := 4, maximum := some 4 },
+        { form := "extern", minimum := 0, maximum := some 0 },
+        { form := "fap", minimum := 4, maximum := some 4 },
+        { form := "inc", minimum := 6, maximum := some 6 },
+        { form := "join", minimum := 1, maximum := some 1 },
+        { form := "jump", minimum := 1, maximum := some 1 },
+        { form := "lit", minimum := 2, maximum := some 2 },
+        { form := "oproj", minimum := 2, maximum := some 2 },
+        { form := "return", minimum := 5, maximum := some 5 }]
+    requiredExecutedLcnfFormTrace :=
+      some cachedSharedStringDagReuseSkippedFormTrace
+    requiredAdministrativeStepKinds := cachedHeapOwnerAdministrativeKinds
+    requiredExternals := #[``String.Internal.append]
+    requiredExecutedExternalCounts :=
+      #[{ external := ``String.Internal.append, minimum := 0, maximum := some 0 }]
+    requiredExecutedExternalTrace := some #[]
+    provenance := firProvenance
+      "Retain one alias of a repeated cached String child while skipping mutation and reusing the cache" },
+  { id := "cached-shared-string-dag-reuse-taken"
+    entry := ``Source.cachedSharedStringDagReuse
+    dependencies := #[``Source.cachedSharedStringOwner]
+    args := #[.bool true]
+    argSchemas := #[.bool]
+    resultSchema := cachedSharedStringDagReuseSchema
+    native := fun _ => cachedSharedStringDagReuseDatum
+      (Source.cachedSharedStringDagReuse true)
+    tags := #["stress", "ownership", "persistent", "cache", "nullary-cache",
+      "recursive-persistence", "constructor", "object", "heap", "string",
+      "large-nat", "repeated-call", "cache-miss", "cache-hit", "initialization",
+      "alias", "shared", "repeated-alias", "repeated-child-alias",
+      "outside-alias", "alias-preservation", "shared-dag", "copy-on-write",
+      "mutation", "external"]
+    requiredLcnfForms :=
+      #["cases", "ctor", "extern", "fap", "inc", "join", "jump", "lit", "oproj",
+        "return"]
+    requiredExecutedLcnfForms :=
+      #["cases", "ctor", "extern", "fap", "inc", "join", "jump", "lit", "oproj",
+        "return"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "cases", minimum := 1, maximum := some 1 },
+        { form := "ctor", minimum := 4, maximum := some 4 },
+        { form := "extern", minimum := 1, maximum := some 1 },
+        { form := "fap", minimum := 6, maximum := some 6 },
+        { form := "inc", minimum := 6, maximum := some 6 },
+        { form := "join", minimum := 1, maximum := some 1 },
+        { form := "jump", minimum := 1, maximum := some 1 },
+        { form := "lit", minimum := 3, maximum := some 3 },
+        { form := "oproj", minimum := 2, maximum := some 2 },
+        { form := "return", minimum := 6, maximum := some 6 }]
+    requiredExecutedLcnfFormTrace :=
+      some cachedSharedStringDagReuseTakenFormTrace
+    requiredAdministrativeStepKinds := cachedHeapOwnerAdministrativeKinds
+    requiredExternals := #[``String.Internal.append]
+    requiredExecutedExternals := #[``String.Internal.append]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.append]
+    requiredExecutedExternalTrace := some #[``String.Internal.append]
+    provenance := firProvenance
+      "Append through one repeated cached String child while retaining its sibling and an outside alias" },
   { id := "string-pushn-zero"
     entry := ``Source.stringPushnNonBmp
     args := #[.string "Aé", .nat 0]
