@@ -141,9 +141,25 @@ run_cmd do
       "closed-boundary Format facade retained a non-source closure target: {repr closedTargets}"
   unless closed.module.runtimeOperations.size < artifact.module.runtimeOperations.size do
     throwError "closed-boundary Format facade did not reduce runtime operations"
-  unless closed.module.closureDispatch == artifact.module.closureDispatch &&
-      closed.module.closureDescriptors == artifact.module.closureDescriptors do
-    throwError "closed-boundary Format facade changed stable W6 closure metadata"
+  unless closed.module.closureDispatch ==
+      Fir.Wasm.collectClosureDispatch closed.module.runtimeOperations &&
+      closed.module.closureDescriptors ==
+        Fir.Wasm.collectClosureDescriptors closed.module.runtimeOperations do
+    throwError "closed-boundary Format facade metadata does not match retained operations"
+  unless closed.module.closureDispatch.size < artifact.module.closureDispatch.size &&
+      closed.module.closureDescriptors.size < artifact.module.closureDescriptors.size do
+    throwError "closed-boundary Format facade did not reduce closure metadata"
+  let pruned ← match
+      Fir.Wasm.Emit.ClosureDispatch.pruneClosedProgram artifact.source.program artifact.module with
+    | .ok (module, _) => pure module
+    | .error error =>
+        throwError "generic Format closure post-pruning failed: {repr error}"
+  let normalizedClosed := {
+    closed.module with
+    closureDispatch := pruned.closureDispatch
+    closureDescriptors := pruned.closureDescriptors }
+  unless normalizedClosed == pruned do
+    throwError "early closed-boundary lowering changed the executable symbolic module"
 
 run_cmd do
   unless validationSchemaAcceptsAbiKind .bool .uint8 do

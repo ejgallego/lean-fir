@@ -856,8 +856,11 @@ private def installBitExactFloatExports (module : Fir.Wasm.Module) :
       let module ← Fir.Wasm.Emit.BitExactFloat.install module entry
       installBitExactFloatExports module entries
 
-def compileModuleArtifactWithExports (source : Fir.Validation.Lcnf.Artifact)
+private def compileModuleArtifactWithExportsUsing
+    (source : Fir.Validation.Lcnf.Artifact)
     (exports : Array Name)
+    (lowerProgram : Fir.LeanIR.ImpureProgram →
+      Except Fir.Wasm.SupportedLoweringError Fir.Wasm.Module)
     (transform : Fir.Wasm.Module → Except CompileError Fir.Wasm.Module) :
     CoreM (Except CompileError ModuleArtifact) := do
   if exports.isEmpty then
@@ -867,7 +870,7 @@ def compileModuleArtifactWithExports (source : Fir.Validation.Lcnf.Artifact)
   unless exports.contains source.entry do
     return .error (.manifest s!"Wasm exports do not contain source entry {source.entry}")
   let module ←
-    match Fir.Wasm.lowerSupported source.program with
+    match lowerProgram source.program with
     | .ok module => pure module
     | .error error => return .error (.lowering error)
   for exportedName in exports do
@@ -887,6 +890,12 @@ def compileModuleArtifactWithExports (source : Fir.Validation.Lcnf.Artifact)
   let formattedLcnf ← source.format
   return .ok { source, module, bytes, formattedLcnf }
 
+def compileModuleArtifactWithExports (source : Fir.Validation.Lcnf.Artifact)
+    (exports : Array Name)
+    (transform : Fir.Wasm.Module → Except CompileError Fir.Wasm.Module) :
+    CoreM (Except CompileError ModuleArtifact) :=
+  compileModuleArtifactWithExportsUsing source exports Fir.Wasm.lowerSupported transform
+
 /--
 Lower an already captured compiler artifact with its canonical entry as the
 only public source export, apply one symbolic-module pipeline, and encode the
@@ -904,15 +913,19 @@ by the program's own final-LCNF `pap` nodes.
 
 This is an explicit package capability rather than the generic default: code
 which accepts an opaque closure from its host must keep using
-`compileModuleArtifactWithExports`. The stable W6 closure tables are preserved;
-only unreachable generated matcher branches and their runtime imports are
-removed before the caller's resident-link transform runs.
+`compileModuleArtifactWithExports`. The closed module derives its dispatch and
+descriptor tables from exactly the retained closure operations; their indices
+remain module-local and no opaque closure ID crosses this boundary. The final
+structural pass validates that no non-source target survived before the
+caller's resident-link transform runs.
 -/
 def compileModuleArtifactWithClosedClosuresAndExports
     (source : Fir.Validation.Lcnf.Artifact) (exports : Array Name)
     (transform : Fir.Wasm.Module → Except CompileError Fir.Wasm.Module) :
     CoreM (Except CompileError ModuleArtifact) :=
-  compileModuleArtifactWithExports source exports fun module => do
+  let targets := Fir.Wasm.Emit.ClosureDispatch.partialApplicationTargets source.program
+  compileModuleArtifactWithExportsUsing source exports
+      (fun program => Fir.Wasm.lowerSupportedWithClosureTargets program targets) fun module => do
     let (module, _) ←
       Fir.Wasm.Emit.ClosureDispatch.pruneClosedProgram source.program module
         |>.mapError fun error =>

@@ -364,6 +364,28 @@ exact output, and a flat 9,237,304-byte frontier. Binaryen removes
 from 384,533 to 387,598 bytes (+0.8%) because the direct sequence is duplicated
 into callers, while the final function count falls from 505 to 504 and imports
 remain zero. W6 proof review remains the acceptance boundary.
+### G1l. Lower closed closure dispatch from its finite source target set (proof review)
+
+The opt-in closed-boundary compiler now supplies the final-LCNF `pap` target
+set at `compileClosureDispatch`, so impossible matcher bodies are never
+constructed. The generic `lowerSupported` path remains all-target. The closed
+module derives `closureDispatch` and `closureDescriptors` from its retained
+operations: raw lean-zip uses 23 dispatch rows and 38 descriptor rows instead
+of the generic 439 and 194. These IDs are module-local; the boundary accepts no
+pre-existing closure object or external header ID.
+
+An exact raw lean-zip comparison normalizes only those two metadata arrays and
+then requires the early module to equal generic lowering followed by G1i's
+structural pass. Encoded normalized bytes are also equal. In the first
+controlled candidate run, generic lowering took 30,929 ms and finite-target
+lowering 18,443 ms, while removing 10,888 candidates and retaining 734. Host
+load varied substantially during the experiment, so this establishes the
+mechanism and a directional generation win rather than a precise percentage.
+
+W6 review remains the integration boundary: its refinement must state the
+closed-ingress premise and use the module's exact retained dispatch/descriptor
+tables. No helper signature, heap layout, closure header layout, or generic
+opaque-ingress behavior changes.
 
 ### G1l. Align trusted Array mutation setup with upstream Lean (generation-ready)
 

@@ -305,6 +305,13 @@ structure Context where
   localKinds : LocalKinds
   joins : JoinPoints := []
   cachedDeclarations : Array Name := #[]
+  /--
+  Optional finite declaration set for closure application dispatch. `none` keeps
+  the generic all-declaration path required when a host may supply an opaque
+  Lean closure; `some candidates` is valid only at a separately checked closed
+  heap-closure boundary.
+  -/
+  closureCandidates? : Option (Array (LCNF.Decl .impure)) := none
 
 def addUniqueName (names : Array Name) (name : Name) : Array Name :=
   if names.contains name then names else names.push name
@@ -1127,7 +1134,10 @@ def compileClosureCandidateChain
 def compileClosureDispatch (context : Context) (declId closureId : FVarId)
     (resultKind : AbiKind) (argumentCode : List Instruction)
     (argumentKinds : Array AbiKind) : List Instruction :=
-  let candidates := context.program.decls.toList.flatMap fun target =>
+  let targets := match context.closureCandidates? with
+    | none => context.program.decls
+    | some candidates => candidates
+  let candidates := targets.toList.flatMap fun target =>
     compileClosureCandidatesForTarget context.program declId closureId resultKind
       argumentCode argumentKinds target
   compileClosureCandidateChain candidates ++ [.localGet declId]
@@ -1968,8 +1978,10 @@ def updateRuntimeOps (operations removed : Array RuntimeOp)
     (operations.filter fun operation => !removed.contains operation)
     helpers
 
-def lowerDecl (program : Fir.LeanIR.ImpureProgram)
-    (cachedDeclarations : Array Name) (decl : LCNF.Decl .impure) :
+private def lowerDeclWithClosureCandidates (program : Fir.LeanIR.ImpureProgram)
+    (cachedDeclarations : Array Name)
+    (closureCandidates? : Option (Array (LCNF.Decl .impure)))
+    (decl : LCNF.Decl .impure) :
     Except CompileError (Option Function) := do
   match decl.value with
   | .extern _ => return none
@@ -1980,7 +1992,8 @@ def lowerDecl (program : Fir.LeanIR.ImpureProgram)
       let params := paramLocals.reverse
       let locals := bodyLocals.reverse
       let localKinds := params ++ locals
-      let context : Context := { program, localKinds, cachedDeclarations }
+      let context : Context := {
+        program, localKinds, cachedDeclarations, closureCandidates? }
       let body ← compileCode context code
       let results ← match effectiveDeclarationResultKind? decl with
         | some kind => pure #[kind]
@@ -1995,9 +2008,19 @@ def lowerDecl (program : Fir.LeanIR.ImpureProgram)
         locals := locals.toArray
         body }
 
-def lower (program : Fir.LeanIR.ImpureProgram) : Except CompileError Module := do
+/-- Lower one declaration with generic all-target closure dispatch. -/
+def lowerDecl (program : Fir.LeanIR.ImpureProgram)
+    (cachedDeclarations : Array Name) (decl : LCNF.Decl .impure) :
+    Except CompileError (Option Function) :=
+  lowerDeclWithClosureCandidates program cachedDeclarations none decl
+
+private def lowerWithClosureTargetFilter (program : Fir.LeanIR.ImpureProgram)
+    (closureTargets? : Option (Array Name)) : Except CompileError Module := do
   let cachedDeclarations := cachedDeclarationNames program
-  let functions ← program.decls.filterMapM (lowerDecl program cachedDeclarations)
+  let closureCandidates? := closureTargets?.map fun names =>
+    program.decls.filter fun target => names.contains target.name
+  let functions ← program.decls.filterMapM
+    (lowerDeclWithClosureCandidates program cachedDeclarations closureCandidates?)
   let operations := collectRuntimeOps functions
   unless operations.all RuntimeOp.abiWellFormed do
     throw (.malformed "generated runtime operation violates the semantic ABI")
@@ -2018,5 +2041,18 @@ def lower (program : Fir.LeanIR.ImpureProgram) : Except CompileError Module := d
     runtimeOperations := operations
     closureDispatch := collectClosureDispatch operations
     closureDescriptors := collectClosureDescriptors operations }
+
+/-- Lower with generic all-declaration closure dispatch. -/
+def lower (program : Fir.LeanIR.ImpureProgram) : Except CompileError Module :=
+  lowerWithClosureTargetFilter program none
+
+/--
+Lower with closure-application dispatch restricted to a finite declaration
+target set. The caller must separately establish that no closure outside this
+set can reach a generated closure application.
+-/
+def lowerWithClosureTargets (program : Fir.LeanIR.ImpureProgram)
+    (targets : Array Name) : Except CompileError Module :=
+  lowerWithClosureTargetFilter program (some targets)
 
 end Fir.Wasm

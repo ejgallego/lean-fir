@@ -958,4 +958,18 @@ def lowerSupported (program : Fir.LeanIR.ImpureProgram) :
   | .ok module => pure module
   | .error error => throw (.lowering error)
 
+/--
+Validate the ordinary supported-LCNF contract, then lower closure applications
+against an explicitly supplied finite target set. The semantic closed-boundary
+premise is intentionally supplied by the higher-level package capability.
+-/
+def lowerSupportedWithClosureTargets (program : Fir.LeanIR.ImpureProgram)
+    (targets : Array Name) : Except SupportedLoweringError Module := do
+  match validateSupported program with
+  | .ok _ => pure ()
+  | .error error => throw (.validation error)
+  match lowerWithClosureTargets program targets with
+  | .ok module => pure module
+  | .error error => throw (.lowering error)
+
 end Fir.Wasm
