@@ -116,6 +116,20 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   body shrinks from 386 to 344 bytes; noisy elapsed measurements support no
   end-to-end timing claim. W6 proof review remains independently open in
   `W72-W6-20260823-002`.
+- Independent USize caller integration: W7-2's upstream-shaped
+  `USize.ofNat` call-site fast path is accepted at `b8d40c42`. A generic
+  resident call-site rewrite record carries the exact target, replacement
+  body, and collision-checked locals through the persistent linker plan.
+  Tagged immediate Nats take Lean's static-inline scalar branch; heap and
+  otherwise non-immediate Nats retain the existing checked resident helper as
+  the cold path. The helper signature, arbitrary-precision behavior, ABI,
+  layout, and ownership are unchanged. The exact zero-import lean-zip module
+  has 504 final functions, is 396,588 bytes, and has SHA-256
+  `ce5db798fcbedb2bd5118571ea5fda67cfc7e59650f1956f7df9073f26f5092d`.
+  Sixteen order-balanced pairs improve in 14 cases with a -10.7% median while
+  exact compressed output and the flat frontier remain unchanged; the 2.38%
+  module-size increase is retained explicitly. W6's caller-side proof audit
+  remains independently open in `W72-W6-20260823-003`.
 - Independent consumer refresh: the Verso HTML source pin and package are
   accepted at `4ee28dd6` and `c88e4a54`. The package compiles clean Verso
   commit `970b071b73adc6e68c6de00bc183460f76d97731`, exact
