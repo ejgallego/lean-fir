@@ -130,6 +130,21 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   exact compressed output and the flat frontier remain unchanged; the 2.38%
   module-size increase is retained explicitly. W6's caller-side proof audit
   remains independently open in `W72-W6-20260823-003`.
+- Independent USize result integration: W7-2's upstream-shaped
+  `USize.toNat` caller fast path is accepted at `cbbf4a01`. Values below
+  `2^31` are tagged directly at the compiled call site, while larger values
+  retain the unchanged checked `fir_ext_USize_toNat` cold helper. The linker
+  selects `ofNat` and `toNat` rules independently; the public helper,
+  signature, arbitrary-width construction, layout, ownership, and semantic
+  ABI are unchanged. The exact zero-import lean-zip module retains 504 final
+  functions and grows from 396,588 to 406,574 bytes, SHA-256
+  `15c4890bd11a2c1fb585c727647968d707f9914eb93fc46b0aa34fb019911616`.
+  Native/Wasm output, all ten levels, checksum/sidecar verification, and the
+  flat 9,237,304-byte frontier pass. One matched screening profile removes all
+  sampled execution from the cold helper; eight balanced pairs are
+  directionally favorable in 6/8 with a -3.94 ms paired median, not a stable
+  workload claim. W6's separate caller proof audit is open in
+  `W72-W6-20260823-004`.
 - Independent constructor integration: W7-1's sparse initialization is
   accepted at `64866288`. Constructor helpers now overwrite the eight header
   words and low object-slot words directly, while zeroing exactly the
