@@ -44,9 +44,18 @@ private def store32 (kind : AbiKind) (value : List Instruction)
     (offset : UInt32) : List Instruction :=
   [.localGet addressLocal] ++ value ++ [.i32Store kind offset]
 
-private def zeroAllocation (allocationBytes : Nat) : List Instruction :=
-  (List.range (allocationBytes / 4)).flatMap fun index =>
-    store32 .uint32 [.i32Const .uint32 0] (u32 (4 * index))
+private def zeroUnwrittenBytes (layout : ConstructorLayout) :
+    List Instruction :=
+  let objectSlotHighWords :=
+    (List.range layout.objectFields).flatMap fun index =>
+      store32 .uint32 [.i32Const .uint32 0]
+        (u32 (layout.objectFieldsOffset +
+          target.semanticSlotBytes * index + 4))
+  let zeroSuffixWords :=
+    (layout.allocationBytes - layout.usizeFieldsOffset) / 4
+  objectSlotHighWords ++ (List.range zeroSuffixWords).flatMap fun index =>
+    store32 .uint32 [.i32Const .uint32 0]
+      (u32 (layout.usizeFieldsOffset + 4 * index))
 
 private def headerStores (info : Lean.Compiler.LCNF.CtorInfo)
     (allocationBytes : UInt32) : List Instruction :=
@@ -130,7 +139,7 @@ def constructorFunction (ordinal : Nat) (operation : RuntimeOp) :
       [.i32Const .uint32 allocationBytes,
         .call (.declaration ResidentAllocator.allocateName),
         .localSet addressLocal] ++
-      zeroAllocation layout.allocationBytes ++
+      zeroUnwrittenBytes layout ++
       headerStores info allocationBytes ++
       fieldStores fields ++
       retagAddress result }

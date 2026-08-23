@@ -388,6 +388,34 @@ module order changed their sign, so this is accepted as upstream-aligned code
 shape without an end-to-end timing claim. W6 must connect the trusted resident
 Array premise to the refcount-only classifier before contract acceptance.
 
+### G1m. Initialize only unwritten constructor storage (generation-ready)
+
+Resident constructor allocation previously zeroed every 32-bit word in the
+fresh extent and then immediately overwrote all eight header words plus the low
+word of every object slot. The helper now writes those values directly and
+zeros only bytes whose initialized value is semantically zero: each object
+slot's high word and the contiguous USize/scalar/alignment suffix. Constructor
+layout, helper signatures, allocation extent, field order, and every final byte
+remain unchanged.
+
+The standalone artifact rewinds the module-owned arena, poisons the entire
+64-byte reused extent with `0xff`, reallocates, and checks all 16 words: exact
+header, object values, object-slot high words, packed scalar storage, alignment,
+frontier, and scratch restoration. This avoids relying on WebAssembly's fresh
+zeroed memory. Lean Beam, all 713 repository cases and 2,121/2,121 comparisons,
+all 3,172 Talos jobs, deterministic regeneration, browser stack stress, and the
+complete artifact gate pass on current main.
+
+The resident constructor fixture shrinks from 1,015 to 981 bytes. The exact
+current-main prettyM module shrinks from 88,223 bytes (SHA-256
+`93462b3d47f7aac07a88576a5613f84459659abc18cbd24ea2d32e418b6248ad`)
+to 85,418 bytes (SHA-256
+`47dd699a4553d600611b68cd4deeeb9d8ba4ba1a2cf5429e45d0fe681d5169c8`),
+a 2,805-byte / 3.18% reduction with zero imports. Sixteen fresh-process pairs
+were directionally favorable in 10 cases, but host dispersion was too large
+for an end-to-end speed claim. Exact code size and poisoned-reuse semantics,
+not noisy elapsed time, are the acceptance evidence.
+
 ### G2. Separate production and diagnostic adapter costs (accepted)
 
 Finish the pending Illuminate selection-player request with an actually

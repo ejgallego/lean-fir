@@ -18,8 +18,9 @@ function u32(memory, address) {
 /**
  * Exercise the generation-only resident constructor family without any host
  * imports. The fixture covers an immediate constructor, a heap constructor,
- * exact header/object-slot layout, zeroed packed storage, frontier movement,
- * and preservation of the temporary retag word below the heap base.
+ * exact header/object-slot layout, zeroed packed storage after poisoned arena
+ * reuse, frontier movement, and preservation of the temporary retag word
+ * below the heap base.
  */
 export async function checkResidentConstructors(bytes) {
   const module = await WebAssembly.compile(bytes);
@@ -35,6 +36,10 @@ export async function checkResidentConstructors(bytes) {
     "resident heap-constructor export is missing");
   equal(typeof exports.fir_heap_frontier, "function",
     "resident constructor frontier export is missing");
+  equal(typeof exports.fir_heap_set_frontier, "function",
+    "resident constructor frontier setter export is missing");
+  equal(typeof exports.fir_heap_rewind, "function",
+    "resident constructor rewind export is missing");
 
   const view = new DataView(exports.memory.buffer);
   view.setUint32(0, 0xdecafbad, true);
@@ -90,6 +95,24 @@ export async function checkResidentConstructors(bytes) {
     "second allocation second field drifted");
   equal(u32(exports.memory, 0), 0xdecafbad,
     "second allocation failed to restore the scratch word");
+
+  exports.fir_heap_rewind(second);
+  new Uint8Array(exports.memory.buffer, second, 64).fill(0xff);
+  const reused = exports.resident_ctor_pair(37, 41);
+  equal(reused, second, "rewound constructor returned the wrong address");
+  equal(exports.fir_heap_frontier(), 1152,
+    "rewound constructor advanced the wrong extent");
+  const reusedWords = Array.from({ length: 16 }, (_, index) =>
+    u32(exports.memory, reused + 4 * index));
+  const expectedReusedWords = [
+    1, 2, 1, 64, 7, 2, 1, 3,
+    37, 0, 41, 0, 0, 0, 0, 0,
+  ];
+  expect(reusedWords.every((value, index) =>
+    value === expectedReusedWords[index]),
+    `constructor poisoned-reuse layout drifted: ${reusedWords}`);
+  equal(u32(exports.memory, 0), 0xdecafbad,
+    "rewound allocation failed to restore the scratch word");
 
   const { exports: growing } = await WebAssembly.instantiate(module, {});
   const host = new ConcreteHost();
