@@ -9039,6 +9039,128 @@ theorem NaturalSumWriterInstallation.wp_checkedMultiLimbResultProgram_of_operand
     simpa [completedAddStore, sum, leftWords, rightWords, carryOne] using
       control
 
+/-- Public checked heap/heap Natural-addition producer boundary.
+
+Canonical validator admission now discharges the exact physical operand
+views, maximum-count fits, positive operands, canonical completed payload,
+and heap-backed result internally.  A caller supplies the generated exact
+maximum count and ordinary allocator/local-state hypotheses, but no
+representation certificate or canonical-output premise. -/
+theorem NaturalSumWriterInstallation.wp_checkedMultiLimbResultProgram_of_admissions
+    {host : Type} {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {env : Wasm.HostEnv host}
+    {magnitude : NaturalMagnitudeInstallation sourceModule module}
+    (writer : NaturalSumWriterInstallation sourceModule module magnitude)
+    (allocator : NaturalObjectAllocatorInstallation sourceModule module)
+    {store : Wasm.Store host} {before allocated : MemoryState}
+    {initial : Wasm.Locals}
+    {left right result : Word32} {leftValue rightValue : Nat}
+    {leftHeader rightHeader : Header}
+    {count : UInt32} {witness : RefinementWitness}
+    {runtime : Fir.LeanIR.Impure.RuntimeState} {tail : List Wasm.Value}
+    (leftRelated : NaturalObjectRel before left leftValue leftHeader)
+    (leftAdmission : NaturalValidatorAdmission before left leftValue leftHeader)
+    (rightRelated : NaturalObjectRel before right rightValue rightHeader)
+    (rightAdmission : NaturalValidatorAdmission before right rightValue rightHeader)
+    (valid : before.FrontierInvariant)
+    (allocatorRelated : ResidentAllocatorRel before store
+      allocator.frontierIndex)
+    (exactCount : count.toNat = max (naturalLimbs leftValue).length
+      (naturalLimbs rightValue).length)
+    (resultCountFits : count.toNat +
+      (addLimbWords
+        (paddedNaturalLimbWords count.toNat leftValue)
+        (paddedNaturalLimbWords count.toNat rightValue) 0).2.toNat < 536870908)
+    (allocation : before.allocateObject .natural
+      (target.semanticSlotBytes * (count.toNat +
+        (addLimbWords
+          (paddedNaturalLimbWords count.toNat leftValue)
+          (paddedNaturalLimbWords count.toNat rightValue) 0).2.toNat)) false
+      bigNaturalMarker (UInt32.ofNat (count.toNat +
+        (addLimbWords
+          (paddedNaturalLimbWords count.toNat leftValue)
+          (paddedNaturalLimbWords count.toNat rightValue) 0).2.toNat)) 0 0 =
+        .ok (allocated, result))
+    (strictEnd : allocated.heapCursor < wordModulus)
+    (withinCap : (allocated.heapCursor - 1) / wasmPageBytes + 1 ≤
+      store.memoryCap module 0)
+    (heapRelated : LiveHeapRel before witness runtime)
+    (scratchValid : initial.validIndex 17)
+    (leftLocal : initial.get 0 =
+      some (.i32 (UInt32.ofNat left.value)))
+    (rightLocal : initial.get 1 =
+      some (.i32 (UInt32.ofNat right.value)))
+    (leftFlavorLocal : initial.get 5 = some (.i32 0))
+    (rightFlavorLocal : initial.get 6 = some (.i32 0))
+    (countLocal : initial.get 9 = some (.i32 count))
+    (resultCountLocal : initial.get 10 = some (.i32
+      (UInt32.ofNat (count.toNat +
+        (addLimbWords
+          (paddedNaturalLimbWords count.toNat leftValue)
+          (paddedNaturalLimbWords count.toNat rightValue) 0).2.toNat))))
+    (carryLocal : initial.get 15 = some (.i32
+      (addLimbWords
+        (paddedNaturalLimbWords count.toNat leftValue)
+        (paddedNaturalLimbWords count.toNat rightValue) 0).2)) :
+    let leftWords := paddedNaturalLimbWords count.toNat leftValue
+    let rightWords := paddedNaturalLimbWords count.toNat rightValue
+    let sum := addLimbWords leftWords rightWords 0
+    let nextWitness := witness.bindNatural runtime.nextLocation result
+      (leftValue + rightValue)
+    ∃ writerStore heap,
+      witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
+      LiveHeapRel heap nextWitness
+        (semanticNaturalResult runtime (leftValue + rightValue)) ∧
+      ResidentMemoryRel heap
+        (completedAddStore writerStore (UInt32.ofNat result.value)
+          count.toNat sum.2).mem ∧
+      Wasm.wp module
+        (checkedMultiLimbResultProgram allocator.objectIndex writer.index)
+        (TypedNaturalReturnPost nextWitness result
+          (.heap runtime.nextLocation)
+          (completedAddStore writerStore (UInt32.ofNat result.value)
+            count.toNat sum.2) tail)
+        store { initial with values := tail } env := by
+  have leftView :=
+    NaturalValidatorAdmission.canonicalNaturalLimbView leftAdmission
+  have rightView :=
+    NaturalValidatorAdmission.canonicalNaturalLimbView rightAdmission
+  have leftFits : (naturalLimbs leftValue).length ≤ count.toNat := by
+    rw [exactCount]
+    exact Nat.le_max_left _ _
+  have rightFits : (naturalLimbs rightValue).length ≤ count.toNat := by
+    rw [exactCount]
+    exact Nat.le_max_right _ _
+  have leftPositive : 0 < leftValue := by
+    have large := leftAdmission.heapBacked
+    unfold Fir.LeanIR.Impure.maxTaggedPayload at large
+    omega
+  have rightPositive : 0 < rightValue := by
+    have large := rightAdmission.heapBacked
+    unfold Fir.LeanIR.Impure.maxTaggedPayload at large
+    omega
+  have canonical := completedAddPaddedNaturalLimbWords_canonical
+    leftPositive rightPositive exactCount
+  have heapBacked :
+      Fir.LeanIR.Impure.maxTaggedPayload < leftValue + rightValue := by
+    have leftLarge := leftAdmission.heapBacked
+    omega
+  simpa [paddedNaturalLimbWords, paddedLimbViewWords] using
+    (writer.wp_checkedMultiLimbResultProgram_of_operandViews allocator
+      leftRelated leftView rightRelated rightView valid allocatorRelated
+      leftFits rightFits
+      (by simpa [paddedNaturalLimbWords, paddedLimbViewWords] using
+        resultCountFits)
+      (by simpa [paddedNaturalLimbWords, paddedLimbViewWords] using allocation)
+      strictEnd withinCap heapRelated scratchValid leftLocal rightLocal
+      leftFlavorLocal rightFlavorLocal countLocal
+      (by simpa [paddedNaturalLimbWords, paddedLimbViewWords] using
+        resultCountLocal)
+      (by simpa [paddedNaturalLimbWords, paddedLimbViewWords] using carryLocal)
+      (by simpa [paddedNaturalLimbWords, paddedLimbViewWords] using canonical)
+      heapBacked)
+
 /-- Complete checked one-limb result path, including the typed return suffix. -/
 def checkedOneLimbResultProgram (magnitudeLowIndex magnitudeHighIndex
     naturalSumIndex : Nat) : Wasm.Program :=
