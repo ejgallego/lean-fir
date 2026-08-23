@@ -86,6 +86,21 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   a -2.4% median, while two artifact-bound profiles reduce the combined
   checked-wrapper/`fir_dec_once` Wasm-self share by about 79%. W6 proof review
   remains independently open in `W72-W6-20260822-002`.
+- Independent ByteArray result integration: W7-2's trusted direct
+  `ByteArray.size` result is accepted at `5ae0af6f`, followed by the exact
+  lean-zip ratchet at `6137c051` (original heads `b2420656` and `158d0795`).
+  The closed trusted helper retains its `< 2^31` range trap and returns the
+  tagged Nat through the established typed extend/tag/wrap bridge, avoiding a
+  scratch-memory reclassification. The checked public helper, validation,
+  signature, layout, ownership, and semantic ABI are unchanged. The exact
+  zero-import lean-zip module has 504 final functions, is 387,598 bytes, and
+  has SHA-256
+  `c97edf12edd65306b82def994c36509c9c17a76f3f7218f024b287e136c501ac`.
+  Against the checked-decrement package, 32 order-balanced pairs improve in 30
+  cases with a -2.3% median and flat 9,237,304-byte frontier; the 3,065-byte
+  module growth is retained explicitly because Binaryen duplicates the direct
+  sequence into callers. W6 proof review remains independently open in
+  `W72-W6-20260823-001`.
 - Independent consumer refresh: the Verso HTML source pin and package are
   accepted at `4ee28dd6` and `c88e4a54`. The package compiles clean Verso
   commit `970b071b73adc6e68c6de00bc183460f76d97731`, exact
@@ -384,6 +399,9 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   29. W7-2's caller-side checked decrement gate is replayed onto current main
       as `7f300f3a`; its independent W6 proof review remains open because no
       stable helper contract changed.
+  30. W7-2's trusted direct `ByteArray.size` result and exact lean-zip package
+      ratchet land as `5ae0af6f` and `6137c051`; the independent W6 typed-result
+      bridge review remains open.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
