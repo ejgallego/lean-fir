@@ -1703,6 +1703,18 @@ theorem NaturalObjectRel.exists_naturalLimbView
   intro offset limb atOffset
   simpa using limbAt offset limb atOffset
 
+/-- Canonical validator admission supplies the exact physical operand view
+expected by the resident arithmetic loops.  This is the bridge from the
+global heap-simulation invariant to the pure canonical arithmetic model. -/
+theorem NaturalValidatorAdmission.canonicalNaturalLimbView
+    {state : MemoryState} {address : Word32} {header : Header} {value : Nat}
+    (related : NaturalValidatorAdmission state address value header) :
+    NaturalLimbView state address header value (naturalLimbs value) := by
+  exact {
+    length := related.limbCount.symm
+    limbAt := related.limbAt
+    valueEq := naturalLimbs_value value }
+
 /-- One exact 64-bit limb view projects to the low/high wasm32 words observed
 by the two installed resident accessors. -/
 theorem NaturalLimbView.readWords
@@ -2117,6 +2129,86 @@ theorem completedAddPaddedNaturalLimbWords_spec
     exact sumValue
   · rw [completedAddLimbWords_length _ _ carryBit, outputLength,
       leftLength]
+
+/-- A completed common-count addition over two canonical Natural operands is
+itself Lean's canonical base-`2^64` limb list.  The exact maximum operand count
+is essential: a merely oversized writer count could leave a redundant leading
+zero limb. -/
+theorem completedAddPaddedNaturalLimbWords_canonical
+    {count left right : Nat}
+    (leftPositive : 0 < left) (rightPositive : 0 < right)
+    (exactCount : count = max (naturalLimbs left).length
+      (naturalLimbs right).length) :
+    let sum := addLimbWords (paddedNaturalLimbWords count left)
+      (paddedNaturalLimbWords count right) 0
+    (completedAddLimbWords sum.1 sum.2).map limbUInt64OfWords =
+      naturalLimbs (left + right) := by
+  dsimp only
+  let leftWords := paddedNaturalLimbWords count left
+  let rightWords := paddedNaturalLimbWords count right
+  let sum := addLimbWords leftWords rightWords 0
+  let output := completedAddLimbWords sum.1 sum.2
+  have leftFits : (naturalLimbs left).length ≤ count := by
+    rw [exactCount]
+    exact Nat.le_max_left _ _
+  have rightFits : (naturalLimbs right).length ≤ count := by
+    rw [exactCount]
+    exact Nat.le_max_right _ _
+  have leftLengthPositive : 0 < (naturalLimbs left).length := by
+    cases limbsEq : naturalLimbs left with
+    | nil => exact False.elim (naturalLimbs_ne_nil left limbsEq)
+    | cons _ _ => simp
+  have countPositive : 0 < count := by omega
+  obtain ⟨outputValueRaw, outputLengthRaw⟩ :=
+    completedAddPaddedNaturalLimbWords_spec leftFits rightFits
+  obtain ⟨sumEquationRaw, carryBitRaw⟩ :=
+    addPaddedNaturalLimbWords_spec leftFits rightFits
+  have outputValue : naturalLimbsValue (output.map limbUInt64OfWords) =
+      left + right := by
+    rw [naturalLimbsValue_map_limbUInt64OfWords]
+    simpa [output, sum, leftWords, rightWords] using outputValueRaw
+  have outputLength : (output.map limbUInt64OfWords).length =
+      count + sum.2.toNat := by
+    simp only [List.length_map]
+    simpa [output, sum, leftWords, rightWords] using outputLengthRaw
+  have carryBit : sum.2 = 0 ∨ sum.2 = 1 := by
+    simpa [sum, leftWords, rightWords] using carryBitRaw
+  have sumEquation : limbWordsListValue sum.1 +
+        2 ^ (64 * count) * sum.2.toNat = left + right := by
+    simpa [sum, leftWords, rightWords] using sumEquationRaw
+  have commonLower : UInt64.size ^ (count - 1) ≤ left + right := by
+    obtain ⟨leftLower, _⟩ := naturalLimbs_pow_bounds left leftPositive
+    obtain ⟨rightLower, _⟩ := naturalLimbs_pow_bounds right rightPositive
+    rw [exactCount]
+    rcases le_total (naturalLimbs left).length
+        (naturalLimbs right).length with leftLe | rightLe
+    · rw [Nat.max_eq_right leftLe]
+      omega
+    · rw [Nat.max_eq_left rightLe]
+      omega
+  have basePower : UInt64.size ^ count = 2 ^ (64 * count) := by
+    simp [UInt64.size, Nat.pow_mul]
+  have resultLower : UInt64.size ^ (count + sum.2.toNat - 1) ≤
+      left + right := by
+    rcases carryBit with carryZero | carryOne
+    · simpa [carryZero] using commonLower
+    · have carryPower : UInt64.size ^ count ≤ left + right := by
+        rw [basePower]
+        simp [carryOne] at sumEquation
+        omega
+      simpa [carryOne] using carryPower
+  have resultWidthPositive : 0 < count + sum.2.toNat := by omega
+  have outputUpper : left + right <
+      UInt64.size ^ (count + sum.2.toNat) := by
+    have upper := naturalLimbsValue_lt_pow_length
+      (output.map limbUInt64OfWords)
+    rw [outputValue, outputLength] at upper
+    exact upper
+  have canonicalLength := naturalLimbs_length_eq_of_pow_bounds
+    resultWidthPositive resultLower outputUpper
+  apply naturalLimbsValue_injective_of_length_eq
+  · exact outputLength.trans canonicalLength.symm
+  · rw [outputValue, naturalLimbs_value]
 
 /-- The same complete-addition law for exact physical decoder views.  This
 form deliberately does not canonicalize either operand's stored limbs; it is

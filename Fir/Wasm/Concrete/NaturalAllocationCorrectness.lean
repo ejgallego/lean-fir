@@ -77,6 +77,161 @@ theorem naturalLimbs_getLast_ne_zero (value : Nat) (positive : 0 < value) :
         (naturalLimbs_ne_nil (value / UInt64.size))]
       exact ih quotientPositive
 
+/-- Fixed-width little-endian base-`2^64` representations are unique.  This
+is the representation-level bridge used by resident arithmetic proofs: once
+the writer's output count and decoded value agree with the canonical runtime
+splitter, no per-limb arithmetic needs to be repeated. -/
+theorem naturalLimbsValue_injective_of_length_eq
+    {left right : List UInt64}
+    (lengthEq : left.length = right.length)
+    (valueEq : naturalLimbsValue left = naturalLimbsValue right) :
+    left = right := by
+  induction left generalizing right with
+  | nil =>
+      cases right with
+      | nil => rfl
+      | cons _ _ => simp at lengthEq
+  | cons left rest inductionHypothesis =>
+      cases right with
+      | nil => simp at lengthEq
+      | cons right rights =>
+          have restLength : rest.length = rights.length := by
+            simpa using lengthEq
+          simp only [naturalLimbsValue] at valueEq
+          have leftLt : left.toNat < UInt64.size := left.toNat_lt
+          have rightLt : right.toNat < UInt64.size := right.toNat_lt
+          have limbValueEq : left.toNat = right.toNat := by
+            have reduced := congrArg (fun value => value % UInt64.size) valueEq
+            simpa [Nat.add_mod, leftLt, rightLt] using reduced
+          have limbEq : left = right := UInt64.toNat_inj.mp limbValueEq
+          have multipliedRestValueEq :
+              UInt64.size * naturalLimbsValue rest =
+                UInt64.size * naturalLimbsValue rights := by
+            omega
+          have restValueEq :
+              naturalLimbsValue rest = naturalLimbsValue rights := by
+            exact Nat.eq_of_mul_eq_mul_left (by decide)
+              multipliedRestValueEq
+          subst right
+          rw [inductionHypothesis restLength restValueEq]
+
+/-- A list of `n` concrete 64-bit limbs always denotes a value strictly
+below the next base-`2^64` place. -/
+theorem naturalLimbsValue_lt_pow_length (limbs : List UInt64) :
+    naturalLimbsValue limbs < UInt64.size ^ limbs.length := by
+  induction limbs with
+  | nil => simp [naturalLimbsValue]
+  | cons limb rest inductionHypothesis =>
+      simp only [naturalLimbsValue, List.length_cons]
+      rw [Nat.pow_succ]
+      have limbLt : limb.toNat < UInt64.size := limb.toNat_lt
+      have restSuccLe :
+          naturalLimbsValue rest + 1 ≤ UInt64.size ^ rest.length := by
+        omega
+      calc
+        limb.toNat + UInt64.size * naturalLimbsValue rest <
+            UInt64.size + UInt64.size * naturalLimbsValue rest := by
+          omega
+        _ = UInt64.size * (naturalLimbsValue rest + 1) := by
+          simp [Nat.mul_add, Nat.add_comm]
+        _ ≤ UInt64.size * (UInt64.size ^ rest.length) :=
+          Nat.mul_le_mul_left UInt64.size restSuccLe
+        _ = UInt64.size ^ rest.length * UInt64.size := by
+          exact Nat.mul_comm _ _
+
+/-- A limb list with a nonzero most-significant limb reaches its highest
+base-`2^64` place.  Together with `naturalLimbsValue_lt_pow_length`, this
+characterizes the width of normalized limb representations. -/
+theorem pow_pred_length_le_naturalLimbsValue_of_getLast_ne_zero
+    {limbs : List UInt64} {last : UInt64}
+    (atLast : limbs.getLast? = some last) (nonzero : last ≠ 0) :
+    UInt64.size ^ (limbs.length - 1) ≤ naturalLimbsValue limbs := by
+  induction limbs with
+  | nil => simp at atLast
+  | cons limb rest inductionHypothesis =>
+      by_cases restEmpty : rest = []
+      · subst rest
+        simp only [List.getLast?_singleton, Option.some.injEq] at atLast
+        subst last
+        have limbPositive : 0 < limb.toNat := by
+          exact Nat.pos_of_ne_zero (by
+            intro zero
+            apply nonzero
+            apply UInt64.toNat_inj.mp
+            simpa using zero)
+        simp [naturalLimbsValue]
+        omega
+      · rw [List.getLast?_cons_of_ne_nil restEmpty] at atLast
+        have restLower := inductionHypothesis atLast
+        have restLengthPositive : 0 < rest.length := by
+          cases rest with
+          | nil => contradiction
+          | cons _ _ => simp
+        have exponent : rest.length - 1 + 1 = rest.length := by omega
+        calc
+          UInt64.size ^ ((limb :: rest).length - 1) =
+              UInt64.size ^ rest.length := by simp
+          _ = UInt64.size ^ (rest.length - 1 + 1) := by rw [exponent]
+          _ = UInt64.size ^ (rest.length - 1) * UInt64.size := by
+            rw [Nat.pow_succ]
+          _ = UInt64.size * UInt64.size ^ (rest.length - 1) := by
+            exact Nat.mul_comm _ _
+          _ ≤ UInt64.size * naturalLimbsValue rest :=
+            Nat.mul_le_mul_left UInt64.size restLower
+          _ ≤ naturalLimbsValue (limb :: rest) := by
+            simp [naturalLimbsValue]
+
+/-- Lean's canonical splitter places a positive value between the powers
+selected by its exact limb count. -/
+theorem naturalLimbs_pow_bounds (value : Nat) (positive : 0 < value) :
+    UInt64.size ^ ((naturalLimbs value).length - 1) ≤ value ∧
+      value < UInt64.size ^ (naturalLimbs value).length := by
+  have nonempty := naturalLimbs_ne_nil value
+  let limb := (naturalLimbs value).getLast nonempty
+  have lastEq : (naturalLimbs value).getLast? = some limb :=
+    List.getLast?_eq_some_getLast nonempty
+  have nonzero := naturalLimbs_getLast_ne_zero value positive limb lastEq
+  constructor
+  · have lower :=
+      pow_pred_length_le_naturalLimbsValue_of_getLast_ne_zero lastEq nonzero
+    simpa [naturalLimbs_value] using lower
+  · simpa [naturalLimbs_value] using
+      naturalLimbsValue_lt_pow_length (naturalLimbs value)
+
+/-- Conversely, any positive-width power interval identifies the canonical
+limb count.  Arithmetic producers can prove these two numerical bounds and
+then reuse fixed-width representation uniqueness. -/
+theorem naturalLimbs_length_eq_of_pow_bounds
+    {value width : Nat} (widthPositive : 0 < width)
+    (lower : UInt64.size ^ (width - 1) ≤ value)
+    (upper : value < UInt64.size ^ width) :
+    (naturalLimbs value).length = width := by
+  have valuePositive : 0 < value := by
+    have powPositive : 0 < UInt64.size ^ (width - 1) :=
+      Nat.pow_pos (by decide)
+    omega
+  obtain ⟨canonicalLower, canonicalUpper⟩ :=
+    naturalLimbs_pow_bounds value valuePositive
+  have canonicalPositive : 0 < (naturalLimbs value).length := by
+    cases limbsEq : naturalLimbs value with
+    | nil => exact False.elim (naturalLimbs_ne_nil value limbsEq)
+    | cons _ _ => simp
+  apply Nat.le_antisymm
+  · apply Nat.not_lt.mp
+    intro widthLt
+    have exponentLe : width ≤ (naturalLimbs value).length - 1 := by omega
+    have powersLe : UInt64.size ^ width ≤
+        UInt64.size ^ ((naturalLimbs value).length - 1) :=
+      Nat.pow_le_pow_right (by decide) exponentLe
+    omega
+  · apply Nat.not_lt.mp
+    intro canonicalLt
+    have exponentLe : (naturalLimbs value).length ≤ width - 1 := by omega
+    have powersLe : UInt64.size ^ (naturalLimbs value).length ≤
+        UInt64.size ^ (width - 1) :=
+      Nat.pow_le_pow_right (by decide) exponentLe
+    omega
+
 theorem LinearMemory.readUInt64_of_byteFrame
     (before after : LinearMemory) (address : Nat)
     (frame : ∀ offset, offset < 8 →
