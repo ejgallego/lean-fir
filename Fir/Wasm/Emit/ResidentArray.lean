@@ -328,7 +328,7 @@ private def retypeAddressTObject : List Instruction := [
   .localGet tobjectResultLocal,
   .ret]
 
-private def captureInputAddress : List Instruction := [
+private def checkedInputAddress : List Instruction := [
   .i32Const .uint32 0,
   .i32Load .uint32 0,
   .localSet savedScratchLocal,
@@ -341,6 +341,25 @@ private def captureInputAddress : List Instruction := [
   .i32Const .uint32 0,
   .localGet savedScratchLocal,
   .i32Store .uint32 0]
+
+/-
+Typed closed applications already carry the resident Array representation
+invariant. Preserve the raw/public scratch retype, but let the trusted path use
+the same typed extend/wrap bridge as the accepted direct Nat/USize result
+paths. Binaryen erases the bridge to the physical i32 word, so exclusive Array
+updates no longer touch scratch memory before testing uniqueness.
+-/
+private def trustedInputAddress : List Instruction := [
+  .localGet arrayParam,
+  .i64ExtendI32U .uint64,
+  .i32WrapI64 .uint32,
+  .localSet inputAddressLocal]
+
+private def captureInputAddress (validation : InputValidation) :
+    List Instruction :=
+  match validation with
+  | .checked => checkedInputAddress
+  | .trusted => trustedInputAddress
 
 private def retypeTagged : List Instruction := [
   .i32Const .uint32 0,
@@ -880,7 +899,7 @@ private def copyElementsBody (retain : Bool)
       .localSet countLocal,
       .br loopLabel]) []]]
 
-private def selectExclusive : List Instruction := [
+private def checkedSelectExclusive : List Instruction := [
   .i32Const .uint32 0,
   .localSet exclusiveLocal,
   .localGet arrayParam,
@@ -893,6 +912,21 @@ private def selectExclusive : List Instruction := [
       .ifElse [
         .i32Const .uint32 1,
         .localSet exclusiveLocal] []]) []]
+
+/- `lean_is_exclusive` classifies a valid runtime object by its reference
+count. The trusted resident Array invariant already excludes malformed flag /
+reference-count combinations, so its hot mutation path can do the same single
+header load. Raw/public helpers retain the explicit flag check. -/
+private def trustedSelectExclusive : List Instruction := [
+  .localGet arrayParam,
+  .i32Load .uint32 (u32 headerRefCountOffset)] ++
+  equalsConst .uint32 1 ++ [
+  .localSet exclusiveLocal]
+
+private def selectExclusive (validation : InputValidation) : List Instruction :=
+  match validation with
+  | .checked => checkedSelectExclusive
+  | .trusted => trustedSelectExclusive
 
 private def retireTransferredArray : List Instruction := [
   .localGet inputAddressLocal,
@@ -1036,9 +1070,11 @@ private def pushFunctionFor (validation : InputValidation) : Function := {
     (targetCursorLocal, .uint32), (allocationBytesLocal, .uint32),
     (savedScratchLocal, .uint32), (objectResultLocal, .object),
     (elementLocal, .tobject)]
-  body := validateArrayInput validation arrayParam ++ captureInputAddress ++
+  body := validateArrayInput validation arrayParam ++
+    captureInputAddress validation ++
     loadSize arrayParam ++
-    loadCapacity arrayParam ++ selectExclusive ++ selectReusablePush ++ [
+    loadCapacity arrayParam ++ selectExclusive validation ++
+    selectReusablePush ++ [
     .localGet reuseLocal,
     .ifElse pushInPlaceValue pushAllocatedValue,
     .localGet objectResultLocal,
@@ -1059,9 +1095,10 @@ private def popFunctionFor (validation : InputValidation) : Function := {
     (targetCursorLocal, .uint32), (allocationBytesLocal, .uint32),
     (savedScratchLocal, .uint32), (objectResultLocal, .object),
     (elementLocal, .tobject)]
-  body := validateArrayInput validation arrayParam ++ captureInputAddress ++
+  body := validateArrayInput validation arrayParam ++
+    captureInputAddress validation ++
     loadSize arrayParam ++
-    loadCapacity arrayParam ++ selectExclusive ++ [
+    loadCapacity arrayParam ++ selectExclusive validation ++ [
     .localGet exclusiveLocal,
     .ifElse ([.localGet sizeLocal] ++ equalsConst .uint32 0 ++ [
       .ifElse [.localGet arrayParam, .ret] [],
@@ -1141,8 +1178,9 @@ private def copyUpdatedElementsBody : List Instruction := [
       .localSet countLocal,
       .br copyLoopLabel] []]]
 
-private def replaceAtDecodedIndexBody : List Instruction :=
-  loadCapacity arrayParam ++ selectExclusive ++ [
+private def replaceAtDecodedIndexBody (validation : InputValidation) :
+    List Instruction :=
+  loadCapacity arrayParam ++ selectExclusive validation ++ [
     .localGet exclusiveLocal,
     .ifElse (elementAddress ++ [
       .localGet sourceCursorLocal,
@@ -1178,10 +1216,11 @@ private def usetFunctionFor (inputValidation : InputValidation)
     (indexParam, .usize), (valueParam, .tobject), (proofParam, .erased)]
   results := #[.object]
   locals := setLocals
-  body := validateArrayInput inputValidation arrayParam ++ captureInputAddress ++
+  body := validateArrayInput inputValidation arrayParam ++
+    captureInputAddress inputValidation ++
     loadSize arrayParam ++
     decodeProofUSizeIndex proofIndexValidation indexParam indexLocal ++
-    replaceAtDecodedIndexBody }
+    replaceAtDecodedIndexBody inputValidation }
 
 def usetFunction : Function := usetFunctionFor .checked .checked
 
@@ -1192,10 +1231,11 @@ private def setFunctionFor (inputValidation : InputValidation)
     (indexParam, .tobject), (valueParam, .tobject), (proofParam, .erased)]
   results := #[.object]
   locals := setLocals
-  body := validateArrayInput inputValidation arrayParam ++ captureInputAddress ++
+  body := validateArrayInput inputValidation arrayParam ++
+    captureInputAddress inputValidation ++
     loadSize arrayParam ++
     decodeProofNaturalIndex proofIndexValidation indexParam indexLocal ++
-    replaceAtDecodedIndexBody }
+    replaceAtDecodedIndexBody inputValidation }
 
 def setFunction : Function := setFunctionFor .checked .checked
 
@@ -1233,8 +1273,10 @@ private def setBangFunctionFor (validation : InputValidation) : Function := {
     (indexParam, .tobject), (valueParam, .tobject)]
   results := #[.object]
   locals := setLocals.push (indexHighLocal, .uint32)
-  body := validateArrayInput validation arrayParam ++ captureInputAddress ++
-    loadSize arrayParam ++ decodeSetBangIndex ++ replaceAtDecodedIndexBody }
+  body := validateArrayInput validation arrayParam ++
+    captureInputAddress validation ++
+    loadSize arrayParam ++ decodeSetBangIndex ++
+    replaceAtDecodedIndexBody validation }
 
 def setBangFunction : Function := setBangFunctionFor .checked
 
@@ -1284,11 +1326,12 @@ private def swapFunctionFor (inputValidation : InputValidation)
     (targetCursorLocal, .uint32), (allocationBytesLocal, .uint32),
     (savedScratchLocal, .uint32), (objectResultLocal, .object),
     (elementLocal, .tobject), (element2Local, .tobject)]
-  body := validateArrayInput inputValidation arrayParam ++ captureInputAddress ++
+  body := validateArrayInput inputValidation arrayParam ++
+    captureInputAddress inputValidation ++
     loadSize arrayParam ++
     decodeProofNaturalIndex proofIndexValidation indexParam indexLocal ++
     decodeProofNaturalIndex proofIndexValidation index2Param index2Local ++
-    loadCapacity arrayParam ++ selectExclusive ++ [
+    loadCapacity arrayParam ++ selectExclusive inputValidation ++ [
     .localGet exclusiveLocal,
     .ifElse (callSwapDecodedElements inputAddressLocal ++ [
       .localGet arrayParam,
@@ -1302,9 +1345,16 @@ private def swapFunctionFor (inputValidation : InputValidation)
 
 def swapFunction : Function := swapFunctionFor .checked .checked
 
-#guard validatorDelta (pushFunctionFor .checked) (pushFunctionFor .trusted)
-#guard validatorDelta (popFunctionFor .checked) (popFunctionFor .trusted)
-#guard validatorDelta (setBangFunctionFor .checked)
+private def inputAddressPrefixDelta (checked trusted : Function) : Bool :=
+  let validation := requireArray arrayParam
+  checked.body.take validation.length == validation &&
+    (checked.body.drop validation.length).take checkedInputAddress.length ==
+        checkedInputAddress &&
+    trusted.body.take trustedInputAddress.length == trustedInputAddress
+
+#guard inputAddressPrefixDelta (pushFunctionFor .checked) (pushFunctionFor .trusted)
+#guard inputAddressPrefixDelta (popFunctionFor .checked) (popFunctionFor .trusted)
+#guard inputAddressPrefixDelta (setBangFunctionFor .checked)
   (setBangFunctionFor .trusted)
 
 private def callsProofIndexDecoder : Instruction → Bool
@@ -1342,6 +1392,22 @@ private def trustedProofIndexedFunctions : Array Function := #[
   usetFunctionFor .trusted .trusted,
   setFunctionFor .trusted .trusted,
   swapFunctionFor .trusted .trusted]
+
+private def trustedMutationFunctions : Array Function := #[
+  pushFunctionFor .trusted,
+  popFunctionFor .trusted,
+  usetFunctionFor .trusted .trusted,
+  setFunctionFor .trusted .trusted,
+  setBangFunctionFor .trusted,
+  swapFunctionFor .trusted .trusted]
+
+#guard captureInputAddress .checked == checkedInputAddress
+#guard captureInputAddress .trusted == trustedInputAddress
+#guard selectExclusive .checked == checkedSelectExclusive
+#guard selectExclusive .trusted == trustedSelectExclusive
+#guard trustedMutationFunctions.all fun function =>
+  !containsSequence checkedInputAddress function.body &&
+    !containsSequence checkedSelectExclusive function.body
 
 #guard trustedProofIndexedFunctions.all fun function =>
   !function.body.any callsProofIndexDecoder &&
