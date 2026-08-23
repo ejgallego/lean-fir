@@ -8388,6 +8388,298 @@ theorem wp_checkedMultiLimbResultProgram_noCarry_of_allocateNatural
     leftFlavorLocal rightFlavorLocal countLocal resultCountLocal carryLocal
     rawSet carryExtraSet allocateRun writeSumRun valueRelated
 
+/-- End-to-end generated multi-limb producer for two checked heap Natural
+operands.
+
+The caller supplies only stable input locals, one capacity fact for the
+generated scratch frame, checked physical operand views, and the ordinary
+allocator/frontier hypotheses.  All intermediate local updates, installed
+allocator/writer executions, optional carry stores, store bounds, completed
+payload arithmetic, heap extension, and result typing are derived here. -/
+theorem NaturalSumWriterInstallation.wp_checkedMultiLimbResultProgram_of_operandViews
+    {host : Type} {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {env : Wasm.HostEnv host}
+    {magnitude : NaturalMagnitudeInstallation sourceModule module}
+    (writer : NaturalSumWriterInstallation sourceModule module magnitude)
+    (allocator : NaturalObjectAllocatorInstallation sourceModule module)
+    {store : Wasm.Store host} {before allocated : MemoryState}
+    {initial : Wasm.Locals}
+    {left right result : Word32} {leftValue rightValue : Nat}
+    {leftHeader rightHeader : Header} {leftLimbs rightLimbs : List UInt64}
+    {count : UInt32} {witness : RefinementWitness}
+    {runtime : Fir.LeanIR.Impure.RuntimeState} {tail : List Wasm.Value}
+    (leftRelated : NaturalObjectRel before left leftValue leftHeader)
+    (leftView : NaturalLimbView before left leftHeader leftValue leftLimbs)
+    (rightRelated : NaturalObjectRel before right rightValue rightHeader)
+    (rightView : NaturalLimbView before right rightHeader rightValue rightLimbs)
+    (valid : before.FrontierInvariant)
+    (allocatorRelated : ResidentAllocatorRel before store
+      allocator.frontierIndex)
+    (leftFits : leftLimbs.length ≤ count.toNat)
+    (rightFits : rightLimbs.length ≤ count.toNat)
+    (resultCountFits : count.toNat +
+      (addLimbWords
+        (paddedLimbViewWords count.toNat leftLimbs)
+        (paddedLimbViewWords count.toNat rightLimbs) 0).2.toNat < 536870908)
+    (allocation : before.allocateObject .natural
+      (target.semanticSlotBytes * (count.toNat +
+        (addLimbWords
+          (paddedLimbViewWords count.toNat leftLimbs)
+          (paddedLimbViewWords count.toNat rightLimbs) 0).2.toNat)) false
+      bigNaturalMarker (UInt32.ofNat (count.toNat +
+        (addLimbWords
+          (paddedLimbViewWords count.toNat leftLimbs)
+          (paddedLimbViewWords count.toNat rightLimbs) 0).2.toNat)) 0 0 =
+        .ok (allocated, result))
+    (strictEnd : allocated.heapCursor < wordModulus)
+    (withinCap : (allocated.heapCursor - 1) / wasmPageBytes + 1 ≤
+      store.memoryCap module 0)
+    (heapRelated : LiveHeapRel before witness runtime)
+    (scratchValid : initial.validIndex 17)
+    (leftLocal : initial.get 0 =
+      some (.i32 (UInt32.ofNat left.value)))
+    (rightLocal : initial.get 1 =
+      some (.i32 (UInt32.ofNat right.value)))
+    (leftFlavorLocal : initial.get 5 = some (.i32 0))
+    (rightFlavorLocal : initial.get 6 = some (.i32 0))
+    (countLocal : initial.get 9 = some (.i32 count))
+    (resultCountLocal : initial.get 10 = some (.i32
+      (UInt32.ofNat (count.toNat +
+        (addLimbWords
+          (paddedLimbViewWords count.toNat leftLimbs)
+          (paddedLimbViewWords count.toNat rightLimbs) 0).2.toNat))))
+    (carryLocal : initial.get 15 = some (.i32
+      (addLimbWords
+        (paddedLimbViewWords count.toNat leftLimbs)
+        (paddedLimbViewWords count.toNat rightLimbs) 0).2)) :
+    let leftWords := paddedLimbViewWords count.toNat leftLimbs
+    let rightWords := paddedLimbViewWords count.toNat rightLimbs
+    let sum := addLimbWords leftWords rightWords 0
+    let nextWitness := witness.bindNatural runtime.nextLocation result
+      (leftValue + rightValue)
+    ∃ writerStore heap,
+      witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
+      LiveHeapRel heap nextWitness
+        (semanticNaturalResult runtime (leftValue + rightValue)) ∧
+      ResidentMemoryRel heap
+        (completedAddStore writerStore (UInt32.ofNat result.value)
+          count.toNat sum.2).mem ∧
+      Wasm.wp module
+        (checkedMultiLimbResultProgram allocator.objectIndex writer.index)
+        (TypedNaturalReturnPost nextWitness result
+          (.heap runtime.nextLocation)
+          (completedAddStore writerStore (UInt32.ofNat result.value)
+            count.toNat sum.2) tail)
+        store { initial with values := tail } env := by
+  dsimp only
+  let leftWords := paddedLimbViewWords count.toNat leftLimbs
+  let rightWords := paddedLimbViewWords count.toNat rightLimbs
+  let sum := addLimbWords leftWords rightWords 0
+  let resultCount := count.toNat + sum.2.toNat
+  obtain ⟨allocatedStore, allocatedRelated, allocateRun, writerRun⟩ :=
+    writer.terminatesWith_after_allocateObject allocator
+      (env := env) (tail := tail) leftRelated leftView rightRelated rightView
+      valid allocatorRelated leftFits rightFits
+      (by simpa [resultCount, sum, leftWords, rightWords] using resultCountFits)
+      (by simpa [resultCount, sum, leftWords, rightWords] using allocation)
+      strictEnd withinCap
+  obtain ⟨writerStore, values, writerPost, exactWriterRunRaw⟩ :=
+    terminatesWith_exists_exact writerRun
+  have written : WrittenLimbPrefix allocatedStore
+      (UInt32.ofNat result.value) sum.1 count.toNat writerStore := by
+    simpa [sum, leftWords, rightWords] using writerPost.1
+  have valuesEq : values = .i32 sum.2 :: tail := by
+    simpa [sum, leftWords, rightWords] using writerPost.2
+  have exactWriterRun : Wasm.TerminatesWith env module writer.index
+      allocatedStore
+      ([.i32 0, .i32 count, .i32 0, .i32 (UInt32.ofNat result.value),
+        .i32 0, .i32 (UInt32.ofNat right.value),
+        .i32 0, .i32 (UInt32.ofNat left.value)] ++ tail)
+      (fun final returned =>
+        final = writerStore ∧ returned = .i32 sum.2 :: tail) :=
+    terminatesWith_conseq exactWriterRunRaw (fun _ _ completed =>
+      ⟨completed.1, completed.2.trans valuesEq⟩)
+  obtain ⟨valueEqRaw, _, carryBitRaw⟩ :=
+    completedAddPaddedLimbViewWords_spec leftFits rightFits
+  have valueEq : limbWordsListValue
+      (completedAddLimbWords sum.1 sum.2) = leftValue + rightValue := by
+    rw [← leftView.valueEq, ← rightView.valueEq]
+    simpa [sum, leftWords, rightWords] using valueEqRaw
+  have wordsLength : sum.1.length = count.toNat := by
+    have sameLength : leftWords.length = rightWords.length := by
+      rw [paddedLimbViewWords_length leftFits,
+        paddedLimbViewWords_length rightFits]
+    calc
+      sum.1.length = leftWords.length := by
+        simpa [sum] using addLimbWords_length leftWords rightWords 0 sameLength
+      _ = count.toNat := paddedLimbViewWords_length leftFits
+  have carryBit : sum.2 = 0 ∨ sum.2 = 1 := by
+    simpa [sum, leftWords, rightWords] using carryBitRaw
+  have allocation' : before.allocateObject .natural
+      (target.semanticSlotBytes * (count.toNat + sum.2.toNat)) false
+        bigNaturalMarker (UInt32.ofNat (count.toNat + sum.2.toNat)) 0 0 =
+          .ok (allocated, result) := by
+    simpa [sum, leftWords, rightWords] using allocation
+  obtain ⟨heap, witnessExtension, closureAllocationsPersistent,
+      finalHeapRelated, finalRelated, valueRelated⟩ :=
+    written.liveHeapRel_completeWithCarry_of_allocateObject wordsLength
+      carryBit allocation' heapRelated allocatedRelated.toResidentMemoryRel
+      valueEq
+  have valid17_of_set {beforeLocals afterLocals : Wasm.Locals}
+      {index : Nat} {value : Wasm.Value}
+      (updated : beforeLocals.set? index value = some afterLocals)
+      (beforeValid : beforeLocals.validIndex 17) :
+      afterLocals.validIndex 17 := by
+    have lengths := FirTalos.Correctness.locals_lengths_of_set? updated
+    unfold Wasm.Locals.validIndex at beforeValid ⊢
+    omega
+  have rawInputTop :
+      ({ initial with values :=
+        (.i32 (UInt32.ofNat result.value) :: tail) } :
+          Wasm.Locals).validIndex 17 := by
+    simpa [Wasm.Locals.validIndex] using scratchValid
+  have rawInputValid :
+      ({ initial with values :=
+        (.i32 (UInt32.ofNat result.value) :: tail) } :
+          Wasm.Locals).validIndex 2 := by
+    unfold Wasm.Locals.validIndex at rawInputTop ⊢
+    omega
+  obtain ⟨afterRaw, rawSet⟩ :=
+    FirTalos.Correctness.locals_set?_exists
+      (value := .i32 (UInt32.ofNat result.value)) rawInputValid
+  have afterRawTop : afterRaw.validIndex 17 :=
+    valid17_of_set rawSet rawInputTop
+  have carryInputTop :
+      ({ afterRaw with values := (.i32 sum.2 :: tail) } :
+        Wasm.Locals).validIndex 17 := by
+    simpa [Wasm.Locals.validIndex] using afterRawTop
+  have carryInputValid :
+      ({ afterRaw with values := (.i32 sum.2 :: tail) } :
+        Wasm.Locals).validIndex 16 := by
+    unfold Wasm.Locals.validIndex at carryInputTop ⊢
+    omega
+  obtain ⟨afterCarryExtra, carryExtraSet⟩ :=
+    FirTalos.Correctness.locals_set?_exists
+      (value := .i32 sum.2) carryInputValid
+  have afterCarryTop : afterCarryExtra.validIndex 17 :=
+    valid17_of_set carryExtraSet carryInputTop
+  refine ⟨writerStore, heap, witnessExtension,
+    closureAllocationsPersistent, finalHeapRelated, finalRelated, ?_⟩
+  rcases carryBit with carryZero | carryOne
+  · have control := wp_checkedMultiLimbResultProgram_noCarry
+      leftLocal rightLocal leftFlavorLocal rightFlavorLocal countLocal
+      (by simpa [sum, leftWords, rightWords, resultCount] using resultCountLocal)
+      (by simpa [sum, carryZero, leftWords, rightWords] using carryLocal)
+      rawSet
+      (by simpa [carryZero] using carryExtraSet)
+      (by simpa [sum, leftWords, rightWords, resultCount] using allocateRun)
+      (by simpa [carryZero] using exactWriterRun) valueRelated
+    simpa [completedAddStore, sum, leftWords, rightWords, carryZero] using
+      control
+  · have rawUpdate := FirTalos.Correctness.localUpdate_of_set? rawSet
+    have carryUpdate :=
+      FirTalos.Correctness.localUpdate_of_set? carryExtraSet
+    have rawAfterCarry : afterCarryExtra.get 2 =
+        some (.i32 (UInt32.ofNat result.value)) := by
+      rw [carryUpdate.2 (by decide)]
+      simpa using rawUpdate.1
+    have countAfterRaw : afterRaw.get 9 = some (.i32 count) := by
+      rw [rawUpdate.2 (by decide)]
+      simpa using countLocal
+    have countAfterCarry : afterCarryExtra.get 9 = some (.i32 count) := by
+      rw [carryUpdate.2 (by decide)]
+      exact countAfterRaw
+    have carryScratchValid :
+        ({ afterCarryExtra with values :=
+          (.i32 (count + count) :: tail) } :
+            Wasm.Locals).validIndex 17 := by
+      simpa [Wasm.Locals.validIndex] using afterCarryTop
+    obtain ⟨lowFirst, lowFirstSet⟩ :=
+      FirTalos.Correctness.locals_set?_exists
+        (value := .i32 (count + count)) carryScratchValid
+    have lowFirstTop : lowFirst.validIndex 17 :=
+      valid17_of_set lowFirstSet carryScratchValid
+    have lowSecondValid :
+        ({ lowFirst with values :=
+          (.i32 (count + count + (count + count)) :: tail) } :
+            Wasm.Locals).validIndex 17 := by
+      simpa [Wasm.Locals.validIndex] using lowFirstTop
+    obtain ⟨lowSecond, lowSecondSet⟩ :=
+      FirTalos.Correctness.locals_set?_exists
+        (value := .i32 (count + count + (count + count))) lowSecondValid
+    have lowSecondTop : lowSecond.validIndex 17 :=
+      valid17_of_set lowSecondSet lowSecondValid
+    have lowThirdValid :
+        ({ lowSecond with values :=
+          (.i32 (checkedScale8Word count) :: tail) } :
+            Wasm.Locals).validIndex 17 := by
+      simpa [Wasm.Locals.validIndex] using lowSecondTop
+    obtain ⟨lowThird, lowThirdSet⟩ :=
+      FirTalos.Correctness.locals_set?_exists
+        (value := .i32 (checkedScale8Word count)) lowThirdValid
+    have lowThirdTop : lowThird.validIndex 17 :=
+      valid17_of_set lowThirdSet lowThirdValid
+    have highFirstValid :
+        ({ lowThird with values :=
+          (.i32 (count + count) :: tail) } : Wasm.Locals).validIndex 17 := by
+      simpa [Wasm.Locals.validIndex] using lowThirdTop
+    obtain ⟨highFirst, highFirstSet⟩ :=
+      FirTalos.Correctness.locals_set?_exists
+        (value := .i32 (count + count)) highFirstValid
+    have highFirstTop : highFirst.validIndex 17 :=
+      valid17_of_set highFirstSet highFirstValid
+    have highSecondValid :
+        ({ highFirst with values :=
+          (.i32 (count + count + (count + count)) :: tail) } :
+            Wasm.Locals).validIndex 17 := by
+      simpa [Wasm.Locals.validIndex] using highFirstTop
+    obtain ⟨highSecond, highSecondSet⟩ :=
+      FirTalos.Correctness.locals_set?_exists
+        (value := .i32 (count + count + (count + count))) highSecondValid
+    have highSecondTop : highSecond.validIndex 17 :=
+      valid17_of_set highSecondSet highSecondValid
+    have highThirdValid :
+        ({ highSecond with values :=
+          (.i32 (checkedScale8Word count) :: tail) } :
+            Wasm.Locals).validIndex 17 := by
+      simpa [Wasm.Locals.validIndex] using highSecondTop
+    obtain ⟨highThird, highThirdSet⟩ :=
+      FirTalos.Correctness.locals_set?_exists
+        (value := .i32 (checkedScale8Word count)) highThirdValid
+    have commonFits : count.toNat + 1 ≤ count.toNat + sum.2.toNat := by
+      simp [carryOne]
+    have indexInCommon : count.toNat < count.toNat + 1 := by omega
+    obtain ⟨lowBound, highBound⟩ :=
+      written.writeLimbInBounds_of_allocateObject valid commonFits
+        indexInCommon allocation' allocatedRelated.toResidentMemoryRel
+    have lowInBounds :
+        ¬(checkedLimbBase (UInt32.ofNat result.value) count).toNat +
+            (UInt32.ofNat 0).toNat + 4 > writerStore.mem.pages * 65536 := by
+      simpa using lowBound
+    have highInBounds :
+        ¬(checkedLimbBase (UInt32.ofNat result.value) count).toNat +
+            (UInt32.ofNat 4).toNat + 4 >
+          (checkedCarryLowStore writerStore
+            (UInt32.ofNat result.value) count).mem.pages * 65536 := by
+      simpa [checkedCarryLowStore, Wasm.Mem.write32] using highBound
+    have carryWrites := wp_checkedCarryLimbWritesProgram
+      (module := module) (env := env) (store := writerStore)
+      (initial := afterCarryExtra) (address := result) (count := count)
+      (tail := tail) rawAfterCarry countAfterCarry lowFirstSet lowSecondSet
+      lowThirdSet highFirstSet highSecondSet highThirdSet lowInBounds
+      highInBounds
+    have control := wp_checkedMultiLimbResultProgram_withCarry
+      (carryNonzero := by simp [carryOne]) leftLocal rightLocal
+      leftFlavorLocal rightFlavorLocal countLocal
+      (by simpa [sum, leftWords, rightWords, resultCount] using resultCountLocal)
+      (by simpa [sum, leftWords, rightWords] using carryLocal)
+      rawSet carryExtraSet
+      (by simpa [sum, leftWords, rightWords, resultCount] using allocateRun)
+      exactWriterRun carryWrites valueRelated
+    simpa [completedAddStore, sum, leftWords, rightWords, carryOne] using
+      control
+
 /-- Complete checked one-limb result path, including the typed return suffix. -/
 def checkedOneLimbResultProgram (magnitudeLowIndex magnitudeHighIndex
     naturalSumIndex : Nat) : Wasm.Program :=
