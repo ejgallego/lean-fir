@@ -19,8 +19,8 @@ function u32(memory, address) {
  * Exercise the generation-only resident constructor family without any host
  * imports. The fixture covers an immediate constructor, a heap constructor,
  * exact header/object-slot layout, zeroed packed storage after poisoned arena
- * reuse, frontier movement, and preservation of the temporary retag word
- * below the heap base.
+ * reuse, frontier movement, and proof that typed result reclassification does
+ * not touch the reserved word below the heap base.
  */
 export async function checkResidentConstructors(bytes) {
   const module = await WebAssembly.compile(bytes);
@@ -56,7 +56,7 @@ export async function checkResidentConstructors(bytes) {
   equal(exports.fir_heap_frontier(), 1088,
     "first heap constructor advanced the wrong extent");
   equal(u32(exports.memory, 0), 0xdecafbad,
-    "heap constructor failed to restore the scratch word");
+    "heap constructor changed the reserved word");
 
   const header = [
     u32(exports.memory, first + 0),
@@ -94,7 +94,7 @@ export async function checkResidentConstructors(bytes) {
   equal(u32(exports.memory, second + 40), 35,
     "second allocation second field drifted");
   equal(u32(exports.memory, 0), 0xdecafbad,
-    "second allocation failed to restore the scratch word");
+    "second allocation changed the reserved word");
 
   exports.fir_heap_rewind(second);
   new Uint8Array(exports.memory.buffer, second, 64).fill(0xff);
@@ -112,7 +112,7 @@ export async function checkResidentConstructors(bytes) {
     value === expectedReusedWords[index]),
     `constructor poisoned-reuse layout drifted: ${reusedWords}`);
   equal(u32(exports.memory, 0), 0xdecafbad,
-    "rewound allocation failed to restore the scratch word");
+    "rewound allocation changed the reserved word");
 
   const { exports: growing } = await WebAssembly.instantiate(module, {});
   const host = new ConcreteHost();

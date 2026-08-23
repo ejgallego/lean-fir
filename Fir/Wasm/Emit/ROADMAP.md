@@ -435,6 +435,32 @@ paired median of -3.94 ms with 6/8 improving; the complete module grows from
 levels, lazy-cache ownership, and the flat 9,237,304-byte frontier remain exact.
 W6 proof review of the caller branch remains the separate acceptance boundary.
 
+### G1o. Return constructor addresses through the typed result bridge (generation-ready)
+
+Heap constructor helpers already receive a valid, aligned wasm32 address from
+the resident allocator. They previously borrowed address zero to save one
+scratch word, store the address, reload it through the declared object-family
+result lane, and restore the scratch word. The helper now uses the established
+typed extend/wrap bridge: extend the raw `i32` word to `i64`, then wrap it back
+to the statically declared `.object` or `.tobject` result. Binaryen erases this
+physical round trip. Constructor allocation, final bytes, layout, signatures,
+ownership, and the module-owned frontier are unchanged; address zero is never
+touched.
+
+The generated-shape guard pins the one-local helper, exact four-instruction
+return suffix, and absence of loads. The standalone zero-import constructor
+fixture still covers immediate and heap constructors, poisoned 64-byte arena
+reuse, exact headers and fields, memory growth, and the untouched reserved
+word. It shrinks from 981 to 935 bytes. On the exact early-closure prettyM
+candidate, the plain module shrinks from 79,969 to 79,002 bytes and the styled
+trace from 83,521 to 82,370 bytes, retaining 314 final functions; instruction
+origins fall from 24,151 to 23,901. Deterministic generation, checksum and
+package verification, browser and raw clients, styled traces, stack stress,
+the native/LCNF/V8 differential cone, concrete readiness, and ownership checks
+all pass. These are exact code-shape and size results, not a runtime-speed
+claim. The future W6 resident-constructor implementation proof should target
+this scratch-free suffix; no stable concrete contract changed.
+
 ### G2. Separate production and diagnostic adapter costs (accepted)
 
 Finish the pending Illuminate selection-player request with an actually

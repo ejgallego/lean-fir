@@ -7,8 +7,6 @@ open Fir.Wasm.Concrete
 open Lean
 
 private def addressLocal : FVarId := ⟨`address⟩
-private def savedScratchLocal : FVarId := ⟨`savedScratch⟩
-private def resultLocal : FVarId := ⟨`result⟩
 
 inductive LinkError where
   | invalidInput (error : SymbolicError)
@@ -82,25 +80,15 @@ private def fieldStores (fields : Array AbiKind) : List Instruction :=
       (u32 (headerBytes + target.semanticSlotBytes * index))
 
 /--
-Retag one raw wasm32 address as the statically declared constructor result
-without adding a shared symbolic cast instruction. Bytes below `heapBase` are
-reserved by the resident heap contract. The helper nevertheless saves and
-restores the scratch word exactly, so the conversion frames every memory byte.
+Return one already-valid raw wasm32 address through the statically declared
+constructor result lane. The extend/wrap pair is the established typed bridge
+between distinct semantic ABI kinds with the same physical i32 representation;
+Binaryen erases it without borrowing linear-memory scratch.
 -/
-private def retagAddress (result : AbiKind) : List Instruction := [
-  .i32Const .uint32 0,
-  .i32Load .uint32 0,
-  .localSet savedScratchLocal,
-  .i32Const .uint32 0,
+private def typedAddressResult (result : AbiKind) : List Instruction := [
   .localGet addressLocal,
-  .i32Store .uint32 0,
-  .i32Const .uint32 0,
-  .i32Load result 0,
-  .localSet resultLocal,
-  .i32Const .uint32 0,
-  .localGet savedScratchLocal,
-  .i32Store .uint32 0,
-  .localGet resultLocal,
+  .i64ExtendI32U .uint64,
+  .i32WrapI64 result,
   .ret]
 
 def constructorFunction (ordinal : Nat) (operation : RuntimeOp) :
@@ -131,10 +119,7 @@ def constructorFunction (ordinal : Nat) (operation : RuntimeOp) :
     name
     params
     results := #[result]
-    locals := #[
-      (addressLocal, .uint32),
-      (savedScratchLocal, .uint32),
-      (resultLocal, result)]
+    locals := #[(addressLocal, .uint32)]
     body :=
       [.i32Const .uint32 allocationBytes,
         .call (.declaration ResidentAllocator.allocateName),
@@ -142,7 +127,7 @@ def constructorFunction (ordinal : Nat) (operation : RuntimeOp) :
       zeroUnwrittenBytes layout ++
       headerStores info allocationBytes ++
       fieldStores fields ++
-      retagAddress result }
+      typedAddressResult result }
 
 private structure Binding where
   operation : RuntimeOp
@@ -276,8 +261,20 @@ def manifest (operations : Array RuntimeOp) : Json :=
       Json.mkObj [
         ("entry", constructorName ordinal |>.toString)]),
     ("scratchAddress", 0),
-    ("scratchPolicy", "saved-and-restored"),
+    ("scratchPolicy", "untouched"),
+    ("resultRetype", "typed-extend-wrap"),
     ("status", "generation-only; W6 constructor contract proofs pending")]
+
+#guard match constructorFunction 1 exampleOperations[1]! with
+  | .ok function =>
+      function.locals == #[(addressLocal, .uint32)] &&
+      (function.body.reverse.take 4).reverse == typedAddressResult .object &&
+      !function.body.any fun instruction =>
+        match instruction with
+        | .i32Load .. | .i32Load8S .. | .i32Load8U ..
+        | .i32Load16S .. | .i32Load16U .. => true
+        | _ => false
+  | .error _ => false
 
 #guard match residentExampleModule with
   | .ok module =>
