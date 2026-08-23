@@ -6,7 +6,7 @@ FIR_TOOLING_TMPDIR ?= $(REPO_ROOT)/.deps/tooling-tmp
 FIR_LAKE_CACHE_DIR ?= $(shell bash "$(REPO_ROOT)/scripts/fir-lake-cache-path.sh")
 BINARYEN_REVISION := version 128 (version_127-18-g2eb472cd6)
 
-.PHONY: no-skips unit-check binaryen-check wasm-check profile-check array-probe-check check
+.PHONY: no-skips runtime-check unit-check binaryen-check wasm-check profile-check array-probe-check check
 
 no-skips:
 	@if rg -n 'test[.]skip|skip[[:space:]]*:' "$(TOOLING_DIR)" \
@@ -15,10 +15,14 @@ no-skips:
 		exit 1; \
 	fi
 
+runtime-check:
+	cd "$(REPO_ROOT)" && node tooling/ci-contract.mjs
+
 unit-check: no-skips
 	cd "$(REPO_ROOT)" && \
 		FIR_TOOLING_TMPDIR="$(FIR_TOOLING_TMPDIR)" \
 		node --test \
+			tooling/ci-contract-unit.test.mjs \
 			tooling/worktree-temp-unit.test.mjs \
 			tooling/wasm/function-index-unit.test.mjs \
 			tooling/profile/node-profile-unit.test.mjs \
@@ -73,4 +77,4 @@ array-probe-check: binaryen-check
 			--wasm _build/package/array-probe.wasm \
 			--sidecar _build/package/array-probe.wasm.functions.json
 
-check: unit-check wasm-check profile-check array-probe-check
+check: runtime-check unit-check wasm-check profile-check array-probe-check

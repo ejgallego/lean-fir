@@ -72,6 +72,8 @@ frontiers, persistent growth, and linear-memory pages when available.
 
 Run dependency-free tooling checks with `make tooling-unit-check`. Run the
 complete pinned-Binaryen and compiled-probe gate with `make tooling-check`.
+The [external tooling CI contract](CI.md) fixes the supported Node LTS matrix,
+dependency boundary, and fail-closed provider-neutral job behavior.
 
 ## Thin roadmap
 
