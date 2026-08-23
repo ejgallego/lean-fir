@@ -126,6 +126,35 @@ final module than the historical 2,305-function package. The caller movement
 is therefore a useful fresh prioritization signal, not evidence of a speedup or
 regression against the old campaign.
 
+## Trusted ByteArray follow-up
+
+Lean-zip independently accepted and profiled the trusted closed-ByteArray
+candidate on 2026-08-22. The client-owned evidence is retained at
+`lean-zip@b22b5b11:bench/results/wasm/2026-08-22-fir-bytearray-trusted-refresh/`;
+the `SHA256SUMS` file hashes to
+`9b8637cc0fb53a52886b3999556ccf71d68cfe4400bfe658d4d372ab8271764d`.
+FIR does not duplicate that workload, browser campaign, or raw profile corpus.
+
+The candidate package was produced at FIR `dc35f594`, contains a 393,275-byte
+zero-import Wasm module with SHA-256
+`06bec0d90846f4ce40e19169346d4dbfc19a79556bb23c787241b73bce04749f`,
+and binds a 208,398-byte exact-function sidecar with SHA-256
+`8f3a9bd1dcf315f05c3f13acdc375de2d1968df187e47d46b608baf6a25796f1`.
+Four checked v2 captures and their comparable-diagnostic v3 aggregate have no
+reported limitations. `fir_byte_array_validate` is absent from both the final
+sidecar and all sampled execution, closing validation as a lean-zip runtime
+hotspot. The fresh leading median shares are `lzMatchP` 29.65%, `fir_dec_once`
+15.92%, and `fir_ext_Array_set` 3.32%; `lzMatchP` supplies a median 52.5% of
+the remaining `fir_dec_once` samples.
+
+The client deliberately makes no cross-artifact browser timing claim because
+the retained A/B/A sweeps encountered material order and host-load movement.
+W7's separate order-balanced 28-sample run (35.395 ms control versus 31.506 ms
+candidate) remains directional evidence only. The next exact-profile candidate
+is therefore prettyM constructor allocation once W7 publishes a clean immutable
+package; shared decrement, Array writes, and numeric helpers remain separate
+questions rather than being attributed to this ByteArray slice.
+
 ## Tooling assessment and refresh policy
 
 No tooling source change was required. The existing collector, workload
