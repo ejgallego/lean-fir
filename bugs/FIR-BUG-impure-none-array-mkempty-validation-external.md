@@ -76,12 +76,32 @@ external. The Wasm provider successfully emits the module and manifest; V8
 instantiates and enters the module before the semantic host rejects the same
 external.
 
+On 2026-08-23, the S14/E3c cached-DAG probe reproduced the same boundary with
+a nullary declaration whose two fields share one literal `ByteArray`. Native
+Lean returned the complete cached owner, outside alias, mutation result, and
+second cached owner on both paths. LCNF stopped during cold initialization on
+the exact dynamic prefix `lit,fap,extern`, reporting `Array.mkEmpty` before any
+cache publication, projection, or `ByteArray.set!` step could execute. The
+focused evidence is produced by:
+
+```sh
+python3 scripts/validate_interpreters.py \
+  --plan validation-plans/native-lcnf.json \
+  --out-dir _build/validation-e3c \
+  --case cached-shared-byte-array-dag-reuse-skipped \
+  --case cached-shared-byte-array-dag-reuse-taken
+```
+
 ## Semantic impact
 
 Valid Lean source that constructs an Array literal from runtime values cannot
 be compared against either validation candidate. This also prevents ownership
 fixtures from exercising repeated child insertion through ordinary source
 syntax, even though `Array.push` itself is modeled.
+
+The cached-DAG reproduction additionally shows that Array literals prevent
+validation of nullary cached `ByteArray` initialization and recursive
+persistence, even when every post-initialization operation is already modeled.
 
 ## Classification and triage
 

@@ -406,6 +406,35 @@ def cachedSharedStringDagReuse
   let second := cachedSharedStringOwner
   (first, outside, result, second)
 
+/-!
+This cached owner repeats one generic UInt8 Array child. Retaining one
+projection while conditionally mutating the sibling makes recursive
+persistence, copy-on-write behavior, and reference-count fidelity observable
+before the cache is read again.
+-/
+structure CachedSharedUInt8ArrayOwner where
+  left : Array UInt8
+  right : Array UInt8
+  payload : Nat
+
+@[noinline]
+def cachedSharedUInt8ArrayOwner : CachedSharedUInt8ArrayOwner :=
+  let data : Array UInt8 :=
+    ((((Array.emptyWithCapacity 4).push 0).push 127).push 128).push 255
+  { left := data, right := data, payload := 18446744073709551616 }
+
+@[noinline]
+def cachedSharedUInt8ArrayDagReuse
+    (mutate : Bool) :
+    CachedSharedUInt8ArrayOwner × Array UInt8 × Array UInt8 ×
+      CachedSharedUInt8ArrayOwner :=
+  let first := cachedSharedUInt8ArrayOwner
+  let outside := first.left
+  let selected := first.right
+  let result := if mutate then selected.set! 2 255 else selected
+  let second := cachedSharedUInt8ArrayOwner
+  (first, outside, result, second)
+
 @[noinline]
 def stringPushnNonBmp (source : String) (count : Nat) : String :=
   String.Internal.pushn source '😀' count
@@ -2951,6 +2980,19 @@ private def cachedSharedStringDagReuseDatum
       .ctor "Prod.mk" 0 #[.string value.2.2.1,
         cachedSharedStringOwnerDatum value.2.2.2]]]
 
+private def cachedSharedUInt8ArrayOwnerDatum
+    (value : Source.CachedSharedUInt8ArrayOwner) : ValidationDatum :=
+  .ctor "CachedSharedUInt8ArrayOwner.mk" 0
+    #[uint8ArrayDatum value.left, uint8ArrayDatum value.right, .nat value.payload]
+
+private def cachedSharedUInt8ArrayDagReuseDatum
+    (value : Source.CachedSharedUInt8ArrayOwner × Array UInt8 × Array UInt8 ×
+      Source.CachedSharedUInt8ArrayOwner) : ValidationDatum :=
+  .ctor "Prod.mk" 0 #[cachedSharedUInt8ArrayOwnerDatum value.1,
+    .ctor "Prod.mk" 0 #[uint8ArrayDatum value.2.1,
+      .ctor "Prod.mk" 0 #[uint8ArrayDatum value.2.2.1,
+        cachedSharedUInt8ArrayOwnerDatum value.2.2.2]]]
+
 private def natPairDatum (value : Nat × Nat) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[.nat value.1, .nat value.2]
 
@@ -3200,6 +3242,16 @@ private def cachedSharedStringDagReuseSchema : ValidationSchema :=
   .ctor "Prod.mk" 0 #[cachedSharedStringOwnerSchema,
     .ctor "Prod.mk" 0 #[.string,
       .ctor "Prod.mk" 0 #[.string, cachedSharedStringOwnerSchema]]]
+
+private def cachedSharedUInt8ArrayOwnerSchema : ValidationSchema :=
+  .ctor "CachedSharedUInt8ArrayOwner.mk" 0
+    #[.array (.boxed (.bits 8)), .array (.boxed (.bits 8)), .nat]
+
+private def cachedSharedUInt8ArrayDagReuseSchema : ValidationSchema :=
+  .ctor "Prod.mk" 0 #[cachedSharedUInt8ArrayOwnerSchema,
+    .ctor "Prod.mk" 0 #[.array (.boxed (.bits 8)),
+      .ctor "Prod.mk" 0
+        #[.array (.boxed (.bits 8)), cachedSharedUInt8ArrayOwnerSchema]]]
 
 private def tailByteOwnerSchema : ValidationSchema :=
   .ctor "TailByteOwner.mk" 0 #[.bytes, .string]
@@ -4019,6 +4071,23 @@ private def cachedSharedStringDagReuseTakenFormTrace : Array String :=
     "ctor", "return", "inc", "return", "oproj", "oproj", "join", "cases", "fap",
     "lit", "return", "inc", "fap", "extern", "jump", "inc", "ctor", "inc", "ctor",
     "ctor", "return"]
+
+private def cachedSharedUInt8ArrayDagReuseSkippedFormTrace : Array String :=
+  #["fap", "fap", "fap", "lit", "return", "fap", "lit", "fap", "lit", "fap",
+    "lit", "fap", "lit", "lit", "fap", "extern", "box", "fap", "extern", "return",
+    "box", "inc", "fap", "extern", "return", "box", "inc", "fap", "extern", "return",
+    "box", "inc", "fap", "extern", "return", "inc", "inc", "ctor", "return", "inc",
+    "return", "oproj", "oproj", "join", "cases", "inc", "jump", "inc", "ctor", "inc",
+    "ctor", "ctor", "return"]
+
+private def cachedSharedUInt8ArrayDagReuseTakenFormTrace : Array String :=
+  #["fap", "lit", "fap", "extern", "dec", "fap", "fap", "lit", "return", "fap",
+    "lit", "fap", "lit", "fap", "lit", "fap", "lit", "lit", "fap", "extern", "box",
+    "fap", "extern", "return", "box", "inc", "fap", "extern", "return", "box", "inc",
+    "fap", "extern", "return", "box", "inc", "fap", "extern", "return", "inc", "inc",
+    "ctor", "return", "inc", "return", "oproj", "oproj", "join", "cases", "lit", "lit",
+    "box", "inc", "fap", "extern", "jump", "inc", "ctor", "inc", "ctor", "ctor",
+    "return"]
 
 private def cachedHeapOwnerAdministrativeKinds : Array String :=
   #["admin:invoke-name", "admin:yield-bind", "admin:yield-cache", "admin:yield-done"]
@@ -5566,6 +5635,106 @@ private def preConversionCases : Array Case := #[
     requiredExecutedExternalTrace := some #[``String.Internal.append]
     provenance := firProvenance
       "Append through one repeated cached String child while retaining its sibling and an outside alias" },
+  { id := "cached-shared-uint8-array-dag-reuse-skipped"
+    entry := ``Source.cachedSharedUInt8ArrayDagReuse
+    dependencies := #[``Source.cachedSharedUInt8ArrayOwner]
+    args := #[.bool false]
+    argSchemas := #[.bool]
+    resultSchema := cachedSharedUInt8ArrayDagReuseSchema
+    native := fun _ => cachedSharedUInt8ArrayDagReuseDatum
+      (Source.cachedSharedUInt8ArrayDagReuse false)
+    tags := #["stress", "ownership", "persistent", "cache", "cached-array-dag",
+      "nullary-cache",
+      "recursive-persistence", "constructor", "object", "heap", "array",
+      "generic", "boxed", "uint8", "explicit-capacity", "push", "external",
+      "large-nat",
+      "repeated-call", "cache-miss", "cache-hit", "initialization", "alias",
+      "shared", "repeated-alias", "repeated-child-alias", "outside-alias",
+      "alias-preservation", "shared-dag", "path-exclusion"]
+    requiredLcnfForms :=
+      #["box", "cases", "ctor", "extern", "fap", "inc", "join", "jump", "lit",
+        "oproj", "return"]
+    requiredExecutedLcnfForms :=
+      #["box", "cases", "ctor", "extern", "fap", "inc", "join", "jump", "lit",
+        "oproj", "return"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "box", minimum := 4, maximum := some 4 },
+        { form := "cases", minimum := 1, maximum := some 1 },
+        { form := "ctor", minimum := 4, maximum := some 4 },
+        { form := "extern", minimum := 5, maximum := some 5 },
+        { form := "fap", minimum := 12, maximum := some 12 },
+        { form := "inc", minimum := 9, maximum := some 9 },
+        { form := "join", minimum := 1, maximum := some 1 },
+        { form := "jump", minimum := 1, maximum := some 1 },
+        { form := "lit", minimum := 6, maximum := some 6 },
+        { form := "oproj", minimum := 2, maximum := some 2 },
+        { form := "return", minimum := 8, maximum := some 8 }]
+    requiredExecutedLcnfFormTrace :=
+      some cachedSharedUInt8ArrayDagReuseSkippedFormTrace
+    requiredAdministrativeStepKinds := cachedHeapOwnerAdministrativeKinds
+    requiredExternals :=
+      #[``Array.emptyWithCapacity, ``Array.push, ``Array.set!]
+    requiredExecutedExternals :=
+      #[``Array.emptyWithCapacity, ``Array.push]
+    requiredExecutedExternalCounts :=
+      #[{ external := ``Array.emptyWithCapacity, minimum := 1, maximum := some 1 },
+        { external := ``Array.push, minimum := 4, maximum := some 4 },
+        { external := ``Array.set!, minimum := 0, maximum := some 0 }]
+    requiredExecutedExternalTrace := some
+      #[``Array.emptyWithCapacity, ``Array.push, ``Array.push, ``Array.push,
+        ``Array.push]
+    provenance := firProvenance
+      "Build a cached UInt8 Array through explicit capacity/push operations, retain one repeated-child alias, skip mutation, and reuse the cache" },
+  { id := "cached-shared-uint8-array-dag-reuse-taken"
+    entry := ``Source.cachedSharedUInt8ArrayDagReuse
+    dependencies := #[``Source.cachedSharedUInt8ArrayOwner]
+    args := #[.bool true]
+    argSchemas := #[.bool]
+    resultSchema := cachedSharedUInt8ArrayDagReuseSchema
+    native := fun _ => cachedSharedUInt8ArrayDagReuseDatum
+      (Source.cachedSharedUInt8ArrayDagReuse true)
+    tags := #["stress", "ownership", "persistent", "cache", "cached-array-dag",
+      "nullary-cache",
+      "recursive-persistence", "constructor", "object", "heap", "array",
+      "generic", "boxed", "uint8", "explicit-capacity", "push", "large-nat",
+      "repeated-call", "cache-miss", "cache-hit", "initialization", "alias",
+      "shared", "repeated-alias", "repeated-child-alias", "outside-alias",
+      "alias-preservation", "shared-dag", "copy-on-write", "mutation", "external"]
+    requiredLcnfForms :=
+      #["box", "cases", "ctor", "dec", "extern", "fap", "inc", "join", "jump",
+        "lit", "oproj", "return"]
+    requiredExecutedLcnfForms :=
+      #["box", "cases", "ctor", "dec", "extern", "fap", "inc", "join", "jump",
+        "lit", "oproj", "return"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "box", minimum := 5, maximum := some 5 },
+        { form := "cases", minimum := 1, maximum := some 1 },
+        { form := "ctor", minimum := 4, maximum := some 4 },
+        { form := "dec", minimum := 1, maximum := some 1 },
+        { form := "extern", minimum := 7, maximum := some 7 },
+        { form := "fap", minimum := 14, maximum := some 14 },
+        { form := "inc", minimum := 9, maximum := some 9 },
+        { form := "join", minimum := 1, maximum := some 1 },
+        { form := "jump", minimum := 1, maximum := some 1 },
+        { form := "lit", minimum := 9, maximum := some 9 },
+        { form := "oproj", minimum := 2, maximum := some 2 },
+        { form := "return", minimum := 8, maximum := some 8 }]
+    requiredExecutedLcnfFormTrace :=
+      some cachedSharedUInt8ArrayDagReuseTakenFormTrace
+    requiredAdministrativeStepKinds := cachedHeapOwnerAdministrativeKinds
+    requiredExternals :=
+      #[``Array.emptyWithCapacity, ``Array.push, ``Array.set!]
+    requiredExecutedExternals :=
+      #[``Array.emptyWithCapacity, ``Array.push, ``Array.set!]
+    requiredExecutedExternalCounts :=
+      #[{ external := ``Array.emptyWithCapacity, minimum := 2, maximum := some 2 },
+        { external := ``Array.push, minimum := 4, maximum := some 4 },
+        { external := ``Array.set!, minimum := 1, maximum := some 1 }]
+    requiredExecutedExternalTrace := some
+      #[``Array.emptyWithCapacity, ``Array.emptyWithCapacity, ``Array.push,
+        ``Array.push, ``Array.push, ``Array.push, ``Array.set!]
+    provenance := firProvenance
+      "Build a cached UInt8 Array through explicit capacity/push operations, then mutate one repeated child while retaining its sibling and outside alias" },
   { id := "string-pushn-zero"
     entry := ``Source.stringPushnNonBmp
     args := #[.string "Aé", .nat 0]

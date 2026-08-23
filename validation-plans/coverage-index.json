@@ -46,8 +46,8 @@
     "tiers": [
       {
         "id": "source-lcnf",
-        "minimumCases": 666,
-        "minimumComparisons": 666,
+        "minimumCases": 668,
+        "minimumComparisons": 668,
         "requiredBackends": [
           "lcnf",
           "native"
@@ -66,8 +66,8 @@
       },
       {
         "id": "wasm-v8",
-        "minimumCases": 666,
-        "minimumComparisons": 1332,
+        "minimumCases": 668,
+        "minimumComparisons": 1336,
         "requiredBackends": [
           "lcnf",
           "native",
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 675,
-      "minimumTierCases": 1341,
-      "minimumComparisons": 2007
+      "minimumUniqueCases": 677,
+      "minimumTierCases": 1345,
+      "minimumComparisons": 2013
     },
     "machine": {
-      "minimumCases": 675,
-      "minimumInterpreterSteps": 7296,
+      "minimumCases": 677,
+      "minimumInterpreterSteps": 7469,
       "requiredStaticForms": [
         "box",
         "cases",
@@ -512,6 +512,11 @@
       {
         "tier": "source-lcnf",
         "tag": "cache-miss",
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "cached-array-dag",
         "minimumCases": 2
       },
       {
@@ -976,6 +981,11 @@
       },
       {
         "tier": "wasm-v8",
+        "tag": "cached-array-dag",
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
         "tag": "call-boundary",
         "minimumCases": 2
       },
@@ -1408,6 +1418,52 @@
         "name": "bytes-out-of-bounds",
         "allTags": ["bytes", "out-of-bounds"],
         "minimumCases": 3
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "cache-array-dag-copy-on-write",
+        "allTags": [
+          "alias-preservation",
+          "array",
+          "cache",
+          "cached-array-dag",
+          "copy-on-write",
+          "outside-alias",
+          "repeated-child-alias",
+          "shared-dag"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "cache-array-dag-path-exclusion",
+        "allTags": [
+          "alias-preservation",
+          "array",
+          "cache",
+          "cached-array-dag",
+          "outside-alias",
+          "path-exclusion",
+          "repeated-child-alias",
+          "shared-dag"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "cache-array-dag-reuse",
+        "allTags": [
+          "array",
+          "cache",
+          "cache-hit",
+          "cache-miss",
+          "cached-array-dag",
+          "nullary-cache",
+          "repeated-call",
+          "repeated-child-alias",
+          "shared-dag"
+        ],
+        "minimumCases": 2
       },
       {
         "tier": "source-lcnf",
@@ -2395,6 +2451,52 @@
         "name": "bytes-out-of-bounds",
         "allTags": ["bytes", "out-of-bounds"],
         "minimumCases": 3
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "cache-array-dag-copy-on-write",
+        "allTags": [
+          "alias-preservation",
+          "array",
+          "cache",
+          "cached-array-dag",
+          "copy-on-write",
+          "outside-alias",
+          "repeated-child-alias",
+          "shared-dag"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "cache-array-dag-path-exclusion",
+        "allTags": [
+          "alias-preservation",
+          "array",
+          "cache",
+          "cached-array-dag",
+          "outside-alias",
+          "path-exclusion",
+          "repeated-child-alias",
+          "shared-dag"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "cache-array-dag-reuse",
+        "allTags": [
+          "array",
+          "cache",
+          "cache-hit",
+          "cache-miss",
+          "cached-array-dag",
+          "nullary-cache",
+          "repeated-call",
+          "repeated-child-alias",
+          "shared-dag"
+        ],
+        "minimumCases": 2
       },
       {
         "tier": "wasm-v8",
