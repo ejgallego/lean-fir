@@ -101,6 +101,21 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   module growth is retained explicitly because Binaryen duplicates the direct
   sequence into callers. W6 proof review remains independently open in
   `W72-W6-20260823-001`.
+- Independent Array mutation integration: W7-2's upstream-shaped trusted
+  Array setup is accepted at `42fe34df`, followed by the exact lean-zip
+  ratchet at `aa0d1424`. Typed closed `push`, `pop`, `uset`, `set`, `set!`,
+  and `swap` calls use the established typed address bridge and classify
+  uniqueness with the same `refCount == 1` test as upstream
+  `lean_array_uset`; checked/public helpers retain raw-address retyping and
+  flag-aware validation. Mutation and copy-on-write bodies, ownership
+  transfers, helper signatures, concrete layout, and semantic ABI are
+  unchanged. The exact zero-import lean-zip module has 504 final functions,
+  is 387,379 bytes, and has SHA-256
+  `5754e0d48101ea78f04ee0243b5cdc300b20f0f769cd003e6513769845f5f949`.
+  Exact output and the flat 9,237,304-byte frontier are preserved. The helper
+  body shrinks from 386 to 344 bytes; noisy elapsed measurements support no
+  end-to-end timing claim. W6 proof review remains independently open in
+  `W72-W6-20260823-002`.
 - Independent consumer refresh: the Verso HTML source pin and package are
   accepted at `4ee28dd6` and `c88e4a54`. The package compiles clean Verso
   commit `970b071b73adc6e68c6de00bc183460f76d97731`, exact
