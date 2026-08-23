@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "repository": "https://github.com/ejgallego/verso-slides.git",
-  "revision": "eb8d2b8fcf145810996ad388d701e9337cfe1ceb",
-  "remoteRef": "ejgallego/upgrade/fir-html-lean-4.33",
+  "revision": "970b071b73adc6e68c6de00bc183460f76d97731",
+  "remoteRef": "origin/feat/vir-pretty-prototype",
   "upstreamBaseRevision": "db608f9611b2a6784310ade04f8d542a6f81cb58",
   "files": {
-    "VersoSlides/Pretty.lean": "bf4271d690b523d5709d19331568c27f2dcb42b0d9ee253dbc30205a5a336c8e"
+    "VersoSlides/Pretty.lean": "f4a9c956a78a5781b4a6963059e157c35dc20fc14b0081350a280a162ac7464d"
   }
 }
