@@ -310,6 +310,24 @@ module grows from 384,533 to 387,598 bytes (+3,065, 0.8%) because Binaryen
 duplicates the small direct size sequence into callers, while the final
 function inventory decreases from 505 to 504 and remains zero-import.
 
+Trusted Array mutations now mirror the setup of upstream `lean_array_uset`.
+Their already-validated Array object is converted to its raw address through
+the typed extend/wrap bridge instead of four scratch-memory operations, and
+exclusivity is classified by the single `refCount == 1` header test used by
+`lean_is_exclusive`. Checked/public helpers retain the prior scratch retype and
+flag-aware exclusivity test. Unique and shared copy-on-write bodies, retained
+element increments, replaced-element decrements, and consumed-array handling
+are unchanged. The generated-shape guards cover `push`, `pop`, `uset`, `set`,
+`set!`, and `swap`.
+
+In the level-6 artifact, `fir_ext_Array_set` shrinks from 386 to 344 bytes, the
+frontier from 669,017 to 668,657 bytes, and the complete module from 387,598 to
+387,379 bytes. Two sequential artifact-bound profiles move its median
+normalized Wasm-self share from 3.46% to 3.17% (about 8.5%) with exact output
+and the same flat 9,237,304-byte frontier. Host timing was strongly bimodal
+across separate processes and changed sign with co-resident module compilation
+order, so this slice makes no end-to-end speedup claim.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not

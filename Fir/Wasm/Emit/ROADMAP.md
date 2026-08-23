@@ -365,6 +365,29 @@ from 384,533 to 387,598 bytes (+0.8%) because the direct sequence is duplicated
 into callers, while the final function count falls from 505 to 504 and imports
 remain zero. W6 proof review remains the acceptance boundary.
 
+### G1l. Align trusted Array mutation setup with upstream Lean (generation-ready)
+
+Upstream `lean_array_uset` converts a valid Array to its runtime address and
+uses `lean_is_exclusive`, whose hot test is the reference count. FIR's trusted
+mutation helpers previously round-tripped the Array word through scratch memory
+and rechecked both flags and reference count even though typed closed execution
+already carries the resident Array invariant. Trusted `push`, `pop`, `uset`,
+`set`, `set!`, and `swap` now use the typed extend/wrap address bridge and the
+single `refCount == 1` classifier. Checked/public helpers keep their former
+scratch retype and flag-aware test. Unique updates, shared copies, ownership
+transfers, and release behavior are unchanged and remain covered by exact
+generated-shape guards and the source/V8 ownership corpus.
+
+For lean-zip level 6, `fir_ext_Array_set` shrinks from 386 to 344 bytes, the
+frontier from 669,017 to 668,657 bytes, and the complete zero-import module
+from 387,598 to 387,379 bytes. Two sequential artifact-bound profiles move the
+helper's median normalized Wasm-self share from 3.46% to 3.17% (about 8.5%),
+while exact output and the flat 9,237,304-byte frontier remain unchanged.
+Elapsed measurements were bimodal under concurrent host load and co-resident
+module order changed their sign, so this is accepted as upstream-aligned code
+shape without an end-to-end timing claim. W6 must connect the trusted resident
+Array premise to the refcount-only classifier before contract acceptance.
+
 ### G2. Separate production and diagnostic adapter costs (accepted)
 
 Finish the pending Illuminate selection-player request with an actually
