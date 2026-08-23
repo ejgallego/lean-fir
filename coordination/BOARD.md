@@ -63,6 +63,24 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   zero-import at 393,275 bytes and 504 final functions. W6's theorem-side
   audit remains independently open; no helper signature, concrete layout, or
   semantic ABI changed.
+- Independent consumer refresh: the Verso HTML source pin and package are
+  accepted at `4ee28dd6` and `c88e4a54`. The package compiles clean Verso
+  commit `970b071b73adc6e68c6de00bc183460f76d97731`, exact
+  `VersoSlides/Pretty.lean` digest
+  `f4a9c956a78a5781b4a6963059e157c35dc20fc14b0081350a280a162ac7464d`,
+  and the unchanged `VersoSlides.Pretty.formatHtmlForRuntime` entry. It retains
+  `fir.prettyM.html.browser/v1`, module-owned memory, zero imports, and the
+  five-function entry/frontier/rewind/allocator surface. The immutable complete
+  module is 155,103 bytes with SHA-256
+  `81b7bf1b6a62ecdd6723c24600020058ab6c578d47e9d9bcb61d6517a1c48d45`,
+  78 source functions, and 439 resident helpers. Ascending, unsorted, and
+  duplicate annotation tables now pass the native/Wasm oracle; the adapter
+  exposes Lean's existing last-match duplicate behavior instead of rejecting
+  it before entry. Package determinism, Node smoke, real Chrome, all 713 FIR
+  cases and 2,121/2,121 comparisons, all 3,173 Talos jobs, and the complete W7
+  artifact gate pass. This consumer refresh changes no W6 contract and was
+  built from accepted `main`, independently of the proof-blocked early closure
+  candidate.
 - Accepted baseline: `main` contains the complete
   `W7-ILLUMINATE-SELECTION-CATALOG-EXPORT` stack through tracked lane head
   `5081015a` and the independently isolated
