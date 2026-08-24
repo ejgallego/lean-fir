@@ -694,6 +694,32 @@ invocations. Coordinate with W7 for executable resident helpers and with W6
 for refinement, while the fixture lane owns only corpus cases, observations,
 and coverage requirements.
 
+### S17/B3-E3: cached ownership through self-tail state
+
+S17 connects recursion coverage to the cached repeated-child ownership family.
+Both cases retain one alias outside a self-tail call, carry two more aliases to
+the same cached String in a mixed object/scalar state, append through the
+returned survivor, and reread the nullary cache. The zero case skips the loop;
+the repeated case swaps both object fields and flips the Boolean selector
+through three tail transfers. Both therefore have the same native observation,
+including the preserved outside alias, appended result, repeated cached child,
+and large cached Nat.
+
+The strict focused probe has no discrepancy across native Lean, final LCNF, and
+real V8. The zero path executes 92 interpreter steps and explicitly pins zero
+object-field writes and zero `Nat.sub` calls. The three-transfer path executes
+183 steps, including six `oset`, four `sset`, twelve `oproj`, four `sproj`,
+six `dec`, and four `isShared` forms. Its exact external trace alternates four
+`Nat.decEq` checks with three `Nat.sub` calls before the single
+`String.Internal.append`. Full form and external traces are required for both
+paths, so later lowering cannot satisfy the coverage claim with an optimized
+scalar-only or non-tail substitute.
+
+State: active on `validation/closure-ownership-fixtures`; the detached
+native/LCNF/V8 dominance probe passes all six comparisons and opens all four
+Wasm products under strace. Clean full-corpus and Talos gates remain before the
+fixture-only handoff.
+
 ## Portfolio cadence
 
 1. Execute S4/B1 tail-call ownership as the memory/control bridge.

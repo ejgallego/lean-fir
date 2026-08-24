@@ -2594,6 +2594,42 @@ def cachedSharedStringDagAcrossCatch
   let second := cachedSharedStringOwner
   (outside, result, second)
 
+/-!
+Carry two aliases of the same cached String through a self-tail loop while a
+third alias remains live outside it. Every iteration swaps the carried aliases,
+flips the selector, constructs a fresh owner, and releases the previous owner.
+-/
+structure TailCachedStringState where
+  primary : String
+  secondary : String
+  choosePrimary : Bool
+
+@[noinline]
+def tailTransferCachedString : Nat → TailCachedStringState → String
+  | 0, state =>
+      if state.choosePrimary then state.primary else state.secondary
+  | remaining + 1, state =>
+      tailTransferCachedString remaining {
+        primary := state.secondary
+        secondary := state.primary
+        choosePrimary := !state.choosePrimary
+      }
+
+@[noinline]
+def cachedSharedStringDagAcrossTail
+    (steps : Nat) : String × String × CachedSharedStringOwner :=
+  let cached := cachedSharedStringOwner
+  let aliases := makeTransientCachedStringAliases cached
+  let outside := aliases.left
+  let selected := tailTransferCachedString steps {
+    primary := aliases.right
+    secondary := aliases.ignored
+    choosePrimary := true
+  }
+  let result := String.Internal.append selected "!"
+  let second := cachedSharedStringOwner
+  (outside, result, second)
+
 /--
 Use a captured ByteArray for the final time before passing its outside alias to
 an ordered effect. The post-effect read observes the updated result.
@@ -4197,6 +4233,35 @@ private def cachedSharedStringDagCatchErrorFormTrace : Array String :=
     "oproj", "inc", "inc", "fap", "cases", "dec", "lit", "ctor", "ctor",
     "return", "fap", "cases", "inc", "return", "dec", "fap", "lit", "return",
     "fap", "extern", "inc", "ctor", "inc", "ctor", "return"]
+
+private def cachedSharedStringDagTailZeroFormTrace : Array String :=
+  #["fap", "fap", "fap", "lit", "return", "fap", "lit", "return", "inc", "inc",
+    "ctor", "return", "inc", "return", "fap", "fap", "inc", "fap", "oproj",
+    "oproj", "join", "isShared", "cases", "inc", "inc", "dec", "jump", "inc",
+    "join", "cases", "ctor", "jump", "return", "return", "oproj", "oproj",
+    "oproj", "lit", "inc", "inc", "ctor", "sset", "fap", "lit", "fap",
+    "extern", "cases", "dec", "sproj", "cases", "oproj", "inc", "dec", "return",
+    "fap", "lit", "return", "fap", "extern", "inc", "ctor", "inc", "ctor",
+    "return"]
+
+private def cachedSharedStringDagTailThreeFormTrace : Array String :=
+  #["fap", "fap", "fap", "lit", "return", "fap", "lit", "return", "inc", "inc",
+    "ctor", "return", "inc", "return", "fap", "fap", "inc", "fap", "oproj",
+    "oproj", "join", "isShared", "cases", "inc", "inc", "dec", "jump", "inc",
+    "join", "cases", "ctor", "jump", "return", "return", "oproj", "oproj",
+    "oproj", "lit", "inc", "inc", "ctor", "sset", "fap", "lit", "fap",
+    "extern", "cases", "oproj", "oproj", "sproj", "join", "isShared", "cases",
+    "jump", "lit", "fap", "extern", "dec", "join", "cases", "jump", "join",
+    "cases", "oset", "oset", "jump", "sset", "fap", "lit", "fap", "extern",
+    "cases", "oproj", "oproj", "sproj", "join", "isShared", "cases", "jump",
+    "lit", "fap", "extern", "dec", "join", "cases", "lit", "jump", "join",
+    "cases", "oset", "oset", "jump", "sset", "fap", "lit", "fap", "extern",
+    "cases", "oproj", "oproj", "sproj", "join", "isShared", "cases", "jump",
+    "lit", "fap", "extern", "dec", "join", "cases", "jump", "join", "cases",
+    "oset", "oset", "jump", "sset", "fap", "lit", "fap", "extern", "cases",
+    "dec", "sproj", "cases", "oproj", "inc", "dec", "return", "return",
+    "return", "return", "fap", "lit", "return", "fap", "extern", "inc", "ctor",
+    "inc", "ctor", "return"]
 
 private def cachedSharedUInt8ArrayDagReuseSkippedFormTrace : Array String :=
   #["fap", "fap", "fap", "lit", "return", "fap", "lit", "fap", "lit", "fap",
@@ -5983,6 +6048,116 @@ private def preConversionCases : Array Case := #[
     requiredExecutedExternalTrace := some #[``String.Internal.append]
     provenance := firProvenance
       "Catch and discard a two-alias cached String error payload, reuse the retained survivor, append, and reread the cache" },
+  { id := "cached-shared-string-dag-tail-zero"
+    entry := ``Source.cachedSharedStringDagAcrossTail
+    dependencies :=
+      #[``Source.cachedSharedStringOwner,
+        ``Source.makeTransientCachedStringAliases,
+        ``Source.tailTransferCachedString]
+    args := #[.nat 0]
+    argSchemas := #[.nat]
+    resultSchema := cachedSharedStringDagAcrossCatchSchema
+    native := fun _ => cachedSharedStringDagAcrossCatchDatum
+      (Source.cachedSharedStringDagAcrossTail 0)
+    tags := #["stress", "ownership", "persistent", "cache", "string",
+      "cached-tail-transfer", "repeated-child-alias", "outside-alias",
+      "tail-control", "tail-ownership",
+      "zero-use", "release-fidelity", "copy-on-write", "external", "constructor",
+      "object", "heap", "alias", "shared", "repeated-alias", "alias-preservation",
+      "shared-dag", "cache-miss", "cache-hit", "repeated-call", "initialization",
+      "mixed-layout", "scalar-field", "path-exclusion", "tail-state"]
+    requiredLcnfForms :=
+      #["cases", "ctor", "dec", "extern", "fap", "inc", "isShared", "join",
+        "jump", "lit", "oproj", "oset", "return", "sproj", "sset"]
+    requiredExecutedLcnfForms :=
+      #["cases", "ctor", "dec", "extern", "fap", "inc", "isShared", "join",
+        "jump", "lit", "oproj", "return", "sproj", "sset"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "cases", minimum := 4, maximum := some 4 },
+        { form := "ctor", minimum := 5, maximum := some 5 },
+        { form := "dec", minimum := 3, maximum := some 3 },
+        { form := "extern", minimum := 2, maximum := some 2 },
+        { form := "fap", minimum := 11, maximum := some 11 },
+        { form := "inc", minimum := 12, maximum := some 12 },
+        { form := "isShared", minimum := 1, maximum := some 1 },
+        { form := "join", minimum := 2, maximum := some 2 },
+        { form := "jump", minimum := 2, maximum := some 2 },
+        { form := "lit", minimum := 5, maximum := some 5 },
+        { form := "oproj", minimum := 6, maximum := some 6 },
+        { form := "oset", minimum := 0, maximum := some 0 },
+        { form := "return", minimum := 9, maximum := some 9 },
+        { form := "sproj", minimum := 1, maximum := some 1 },
+        { form := "sset", minimum := 1, maximum := some 1 }]
+    requiredExecutedLcnfFormTrace := some cachedSharedStringDagTailZeroFormTrace
+    requiredAdministrativeStepKinds := cachedHeapOwnerAdministrativeKinds
+    requiredExternals :=
+      #[``Nat.decEq, ``Nat.sub, ``String.Internal.append]
+    requiredExecutedExternals := #[``Nat.decEq, ``String.Internal.append]
+    requiredExecutedExternalCounts :=
+      #[{ external := ``Nat.decEq, minimum := 1, maximum := some 1 },
+        { external := ``Nat.sub, minimum := 0, maximum := some 0 },
+        { external := ``String.Internal.append, minimum := 1, maximum := some 1 }]
+    requiredExecutedExternalTrace :=
+      some #[``Nat.decEq, ``String.Internal.append]
+    provenance := firProvenance
+      "Return a cached repeated-child survivor without entering the self-tail loop" },
+  { id := "cached-shared-string-dag-tail-three"
+    entry := ``Source.cachedSharedStringDagAcrossTail
+    dependencies :=
+      #[``Source.cachedSharedStringOwner,
+        ``Source.makeTransientCachedStringAliases,
+        ``Source.tailTransferCachedString]
+    args := #[.nat 3]
+    argSchemas := #[.nat]
+    resultSchema := cachedSharedStringDagAcrossCatchSchema
+    native := fun _ => cachedSharedStringDagAcrossCatchDatum
+      (Source.cachedSharedStringDagAcrossTail 3)
+    tags := #["stress", "ownership", "persistent", "cache", "string",
+      "cached-tail-transfer", "repeated-child-alias", "outside-alias",
+      "tail-control", "tail-ownership",
+      "repeated-use", "multiplicity", "release-fidelity", "copy-on-write",
+      "external", "constructor", "object", "heap", "alias", "shared",
+      "repeated-alias", "alias-preservation", "shared-dag", "cache-miss",
+      "cache-hit", "repeated-call", "initialization", "mixed-layout",
+      "scalar-field", "tail-state", "loop-carried-owner", "recursive-release",
+      "release", "object-update"]
+    requiredLcnfForms :=
+      #["cases", "ctor", "dec", "extern", "fap", "inc", "isShared", "join",
+        "jump", "lit", "oproj", "oset", "return", "sproj", "sset"]
+    requiredExecutedLcnfForms :=
+      #["cases", "ctor", "dec", "extern", "fap", "inc", "isShared", "join",
+        "jump", "lit", "oproj", "oset", "return", "sproj", "sset"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "cases", minimum := 16, maximum := some 16 },
+        { form := "ctor", minimum := 5, maximum := some 5 },
+        { form := "dec", minimum := 6, maximum := some 6 },
+        { form := "extern", minimum := 8, maximum := some 8 },
+        { form := "fap", minimum := 20, maximum := some 20 },
+        { form := "inc", minimum := 12, maximum := some 12 },
+        { form := "isShared", minimum := 4, maximum := some 4 },
+        { form := "join", minimum := 11, maximum := some 11 },
+        { form := "jump", minimum := 11, maximum := some 11 },
+        { form := "lit", minimum := 12, maximum := some 12 },
+        { form := "oproj", minimum := 12, maximum := some 12 },
+        { form := "oset", minimum := 6, maximum := some 6 },
+        { form := "return", minimum := 12, maximum := some 12 },
+        { form := "sproj", minimum := 4, maximum := some 4 },
+        { form := "sset", minimum := 4, maximum := some 4 }]
+    requiredExecutedLcnfFormTrace := some cachedSharedStringDagTailThreeFormTrace
+    requiredAdministrativeStepKinds := cachedHeapOwnerAdministrativeKinds
+    requiredExternals :=
+      #[``Nat.decEq, ``Nat.sub, ``String.Internal.append]
+    requiredExecutedExternals :=
+      #[``Nat.decEq, ``Nat.sub, ``String.Internal.append]
+    requiredExecutedExternalCounts :=
+      #[{ external := ``Nat.decEq, minimum := 4, maximum := some 4 },
+        { external := ``Nat.sub, minimum := 3, maximum := some 3 },
+        { external := ``String.Internal.append, minimum := 1, maximum := some 1 }]
+    requiredExecutedExternalTrace :=
+      some #[``Nat.decEq, ``Nat.sub, ``Nat.decEq, ``Nat.sub,
+        ``Nat.decEq, ``Nat.sub, ``Nat.decEq, ``String.Internal.append]
+    provenance := firProvenance
+      "Swap two cached child aliases through three self-tail owner transfers before append and cache reuse" },
   { id := "cached-shared-uint8-array-dag-reuse-skipped"
     entry := ``Source.cachedSharedUInt8ArrayDagReuse
     dependencies := #[``Source.cachedSharedUInt8ArrayOwner]
