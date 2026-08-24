@@ -1978,7 +1978,12 @@ def updateRuntimeOps (operations removed : Array RuntimeOp)
     (operations.filter fun operation => !removed.contains operation)
     helpers
 
-private def lowerDeclWithClosureCandidates (program : Fir.LeanIR.ImpureProgram)
+/--
+Proof-visible implementation shared by generic declaration lowering and the
+closed-package closure-target path. Correctness proofs unfold this exact
+production definition; it is not a separate lowering or application ABI.
+-/
+def lowerDeclWithClosureCandidates (program : Fir.LeanIR.ImpureProgram)
     (cachedDeclarations : Array Name)
     (closureCandidates? : Option (Array (LCNF.Decl .impure)))
     (decl : LCNF.Decl .impure) :
@@ -2014,7 +2019,13 @@ def lowerDecl (program : Fir.LeanIR.ImpureProgram)
     Except CompileError (Option Function) :=
   lowerDeclWithClosureCandidates program cachedDeclarations none decl
 
-private def lowerWithClosureTargetFilter (program : Fir.LeanIR.ImpureProgram)
+/--
+Proof-visible whole-module implementation shared by `lower` and
+`lowerWithClosureTargets`. Keeping this definition visible lets correctness
+proofs recover the exact function, import, initializer, and metadata equations
+without duplicating the production traversal.
+-/
+def lowerWithClosureTargetFilter (program : Fir.LeanIR.ImpureProgram)
     (closureTargets? : Option (Array Name)) : Except CompileError Module := do
   let cachedDeclarations := cachedDeclarationNames program
   let closureCandidates? := closureTargets?.map fun names =>
