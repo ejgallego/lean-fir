@@ -3058,6 +3058,15 @@ theorem uint32_count_carry_eq_one
       rw [sumEq, Nat.mod_self] at decoded
       contradiction
 
+/-- Canonical low/high wasm32 words of the first Natural limb.  The empty
+case is unreachable for `naturalLimbs`, but keeping this projection total
+lets installed-runtime contracts name their exact scalar inputs without
+carrying existential data outside `Prop`. -/
+def naturalFirstLimbWords (value : Nat) : LimbWords :=
+  match naturalLimbs value with
+  | [] => (0, 0)
+  | limb :: _ => limbWordsOfUInt64 limb
+
 /-- Pure semantic content of selecting the checked one-limb result branch.
 
 Besides forcing a one-limb common count and zero final carry, the fact records
@@ -3069,25 +3078,27 @@ structure CheckedNaturalAddOneLimbFacts
     (checkedNaturalAddCount leftHeader rightHeader).toNat = 1
   carryZero :
     checkedNaturalAddCarry leftHeader rightHeader leftValue rightValue = 0
-  limbWitnesses : ∃ leftLimb rightLimb : UInt64,
-    naturalLimbs leftValue = [leftLimb] ∧
-    naturalLimbs rightValue = [rightLimb] ∧
-    ¬ unsignedSumHighBase (limbWordsOfUInt64 leftLimb).2
-        (limbWordsOfUInt64 rightLimb).2 < (limbWordsOfUInt64 leftLimb).2 ∧
-    ¬ unsignedSumHigh (limbWordsOfUInt64 leftLimb).1
-          (limbWordsOfUInt64 leftLimb).2
-          (limbWordsOfUInt64 rightLimb).1
-          (limbWordsOfUInt64 rightLimb).2 <
-        unsignedSumCarry (limbWordsOfUInt64 leftLimb).1
-          (limbWordsOfUInt64 rightLimb).1 ∧
-    leftValue + rightValue =
-      naturalWordsValue
-        (unsignedSumLow (limbWordsOfUInt64 leftLimb).1
-          (limbWordsOfUInt64 rightLimb).1)
-        (unsignedSumHigh (limbWordsOfUInt64 leftLimb).1
-          (limbWordsOfUInt64 leftLimb).2
-          (limbWordsOfUInt64 rightLimb).1
-          (limbWordsOfUInt64 rightLimb).2)
+  leftLengthOne : (naturalLimbs leftValue).length = 1
+  rightLengthOne : (naturalLimbs rightValue).length = 1
+  highBaseNoOverflow :
+    ¬ unsignedSumHighBase (naturalFirstLimbWords leftValue).2
+      (naturalFirstLimbWords rightValue).2 <
+        (naturalFirstLimbWords leftValue).2
+  highCarryNoOverflow :
+    ¬ unsignedSumHigh (naturalFirstLimbWords leftValue).1
+        (naturalFirstLimbWords leftValue).2
+        (naturalFirstLimbWords rightValue).1
+        (naturalFirstLimbWords rightValue).2 <
+      unsignedSumCarry (naturalFirstLimbWords leftValue).1
+        (naturalFirstLimbWords rightValue).1
+  valueEq : leftValue + rightValue =
+    naturalWordsValue
+      (unsignedSumLow (naturalFirstLimbWords leftValue).1
+        (naturalFirstLimbWords rightValue).1)
+      (unsignedSumHigh (naturalFirstLimbWords leftValue).1
+        (naturalFirstLimbWords leftValue).2
+        (naturalFirstLimbWords rightValue).1
+        (naturalFirstLimbWords rightValue).2)
 
 /-- Canonical heap-Natural admissions turn the generated result-count test
 into the complete pure one-limb arithmetic fact above. -/
@@ -3217,10 +3228,17 @@ theorem checkedNaturalAddResultCount_eq_one_facts
   exact {
     countOne := by simpa [count] using countOne
     carryZero := by simpa [carry] using carryZero
-    limbWitnesses := ⟨leftLimb, rightLimb, leftLimbs, rightLimbs,
-      by simpa [leftLimbWords, rightLimbWords] using highBaseNoOverflow,
-      by simpa [leftLimbWords, rightLimbWords] using highCarryNoOverflow,
-      by simpa [leftLimbWords, rightLimbWords] using valueEq⟩ }
+    leftLengthOne
+    rightLengthOne
+    highBaseNoOverflow := by
+      simpa [naturalFirstLimbWords, leftLimbs, rightLimbs, leftLimbWords,
+        rightLimbWords] using highBaseNoOverflow
+    highCarryNoOverflow := by
+      simpa [naturalFirstLimbWords, leftLimbs, rightLimbs, leftLimbWords,
+        rightLimbWords] using highCarryNoOverflow
+    valueEq := by
+      simpa [naturalFirstLimbWords, leftLimbs, rightLimbs, leftLimbWords,
+        rightLimbWords] using valueEq }
 
 /-- Factored Talos program for the checked operand-count maximum. -/
 def checkedMaxCountProgram : Wasm.Program := [
@@ -6327,6 +6345,24 @@ structure NaturalAddPrefixInstallation
   validator : NaturalValidatorInstallation sourceModule module magnitude
   carry : NaturalSumCarryInstallation sourceModule module magnitude
 
+/-- Static installation facts for the scalar `naturalSum` helper used by the
+checked one-limb branch.  Its `makeNatural` dependency remains an explicit
+producer boundary: the installed sum helper proves the scalar arithmetic,
+while the constructor execution supplies the concrete allocation transition. -/
+structure NaturalSumInstallation
+    (sourceModule : Fir.Wasm.Module) (module : Wasm.Module) where
+  targetFunction : Wasm.Function
+  index : Nat
+  makeNaturalIndex : Nat
+  adapted : FirTalos.function sourceModule
+    Fir.Wasm.Emit.ResidentNumeric.naturalSumFunction = .ok targetFunction
+  makeNaturalFound : FirTalos.callIndex? sourceModule
+    (.declaration Fir.Wasm.Emit.ResidentNumeric.makeNaturalName) =
+      some makeNaturalIndex
+  notImport : module.imports[index]? = none
+  installed : module.funcs[index - module.imports.length]? =
+    some targetFunction
+
 /-- The bundled validator accepts one canonical W6 Natural admission in the
 unchanged concrete store.  Its complete helper cone is recovered from the
 shared installation graph rather than repeated at each checked caller. -/
@@ -8955,6 +8991,7 @@ structure CheckedNatAddPrefixExecution {host : Type}
   afterCount : Wasm.Locals
   afterCarry : Wasm.Locals
   afterResultCount : Wasm.Locals
+  scratchValid : initial.validIndex 15
   leftLocal : initial.get 0 = some (.i32 leftWord)
   rightLocal : initial.get 1 = some (.i32 rightWord)
   leftFlavorSet :
@@ -9134,6 +9171,7 @@ theorem exists_of_runs
     afterCount
     afterCarry
     afterResultCount
+    scratchValid
     leftLocal
     rightLocal
     leftFlavorSet := by simpa using leftFlavorSet
@@ -9370,6 +9408,85 @@ theorem validIndex
           index := by
     simpa [Wasm.Locals.validIndex] using afterCarryValid
   exact preserve execution.resultCountSet resultCountInputValid
+
+/-- The four scalar result slots of the one-limb producer can always be
+materialized from a well-formed checked-prefix execution.  This factors the
+administrative local-frame proof away from Natural arithmetic and helper
+semantics. -/
+theorem exists_oneLimbLocalSets
+    (execution : CheckedNatAddPrefixExecution env module store initial
+      validateNaturalIndex magnitudeCountIndex sumCarryIndex leftWord
+      rightWord leftCount rightCount carry tail)
+    (leftLow leftHigh rightLow rightHigh : UInt32) :
+    ∃ afterLeftLow afterLeftHigh afterRightLow afterRightHigh : Wasm.Locals,
+      ({ execution.afterResultCount with values := .i32 leftLow :: tail }).set?
+          11 (.i32 leftLow) = some afterLeftLow ∧
+      ({ afterLeftLow with values := .i32 leftHigh :: tail }).set? 12
+          (.i32 leftHigh) = some afterLeftHigh ∧
+      ({ afterLeftHigh with values := .i32 rightLow :: tail }).set? 13
+          (.i32 rightLow) = some afterRightLow ∧
+      ({ afterRightLow with values := .i32 rightHigh :: tail }).set? 14
+          (.i32 rightHigh) = some afterRightHigh := by
+  have preserveValid
+      {before after : Wasm.Locals} {index : Nat} {value : Wasm.Value}
+      (updated : before.set? index value = some after)
+      {requested : Nat} (valid : before.validIndex requested) :
+      after.validIndex requested := by
+    have lengths := FirTalos.Correctness.locals_lengths_of_set? updated
+    unfold Wasm.Locals.validIndex at valid ⊢
+    omega
+  have inputValid (locals : Wasm.Locals) (values : List Wasm.Value)
+      {requested : Nat} (valid : locals.validIndex requested) :
+      ({ locals with values } : Wasm.Locals).validIndex requested := by
+    simpa [Wasm.Locals.validIndex] using valid
+  have lowerValid (locals : Wasm.Locals) {smaller larger : Nat}
+      (le : smaller ≤ larger) (valid : locals.validIndex larger) :
+      locals.validIndex smaller := by
+    unfold Wasm.Locals.validIndex at valid ⊢
+    omega
+  have initialFourteen : initial.validIndex 14 :=
+    lowerValid initial (by omega) execution.scratchValid
+  have finalFourteen := execution.validIndex initialFourteen
+  have leftEleven :
+      ({ execution.afterResultCount with values := .i32 leftLow :: tail } :
+        Wasm.Locals).validIndex 11 :=
+    inputValid execution.afterResultCount (.i32 leftLow :: tail)
+      (lowerValid execution.afterResultCount (by omega) finalFourteen)
+  obtain ⟨afterLeftLow, leftLowSet⟩ :=
+    FirTalos.Correctness.locals_set?_exists
+      (value := .i32 leftLow) leftEleven
+  have afterLeftFourteen := preserveValid leftLowSet
+    (inputValid execution.afterResultCount (.i32 leftLow :: tail)
+      finalFourteen)
+  have leftTwelve :
+      ({ afterLeftLow with values := .i32 leftHigh :: tail } :
+        Wasm.Locals).validIndex 12 :=
+    inputValid afterLeftLow (.i32 leftHigh :: tail)
+      (lowerValid afterLeftLow (by omega) afterLeftFourteen)
+  obtain ⟨afterLeftHigh, leftHighSet⟩ :=
+    FirTalos.Correctness.locals_set?_exists
+      (value := .i32 leftHigh) leftTwelve
+  have afterLeftHighFourteen := preserveValid leftHighSet
+    (inputValid afterLeftLow (.i32 leftHigh :: tail) afterLeftFourteen)
+  have rightThirteen :
+      ({ afterLeftHigh with values := .i32 rightLow :: tail } :
+        Wasm.Locals).validIndex 13 :=
+    inputValid afterLeftHigh (.i32 rightLow :: tail)
+      (lowerValid afterLeftHigh (by omega) afterLeftHighFourteen)
+  obtain ⟨afterRightLow, rightLowSet⟩ :=
+    FirTalos.Correctness.locals_set?_exists
+      (value := .i32 rightLow) rightThirteen
+  have afterRightLowFourteen := preserveValid rightLowSet
+    (inputValid afterLeftHigh (.i32 rightLow :: tail) afterLeftHighFourteen)
+  have rightFourteen :
+      ({ afterRightLow with values := .i32 rightHigh :: tail } :
+        Wasm.Locals).validIndex 14 :=
+    inputValid afterRightLow (.i32 rightHigh :: tail) afterRightLowFourteen
+  obtain ⟨afterRightHigh, rightHighSet⟩ :=
+    FirTalos.Correctness.locals_set?_exists
+      (value := .i32 rightHigh) rightFourteen
+  exact ⟨afterLeftLow, afterLeftHigh, afterRightLow, afterRightHigh,
+    leftLowSet, leftHighSet, rightLowSet, rightHighSet⟩
 
 /-- A packaged prefix execution composes with any continuation beginning in
 its exact final local state. -/
@@ -11245,6 +11362,174 @@ theorem wp_checkedNatAddFallbackProgram_one_of_concreteAllocation
     memoryRelation, referenceEq, wordsEq,
     wp_checkedNatAddFallbackProgram_one execution resultCountOne
       (by simpa [checkedOneLimbResultProgram] using oneCorrect)⟩
+
+/-- Installed closure of the checked one-limb path from canonical operand
+admissions.  The theorem constructs all four magnitude reads and local writes,
+derives the scalar guards and exact sum internally, and leaves only the real
+`makeNatural` allocation execution as its producer boundary. -/
+theorem NaturalSumInstallation.wp_checkedNatAddFallbackProgram_one_of_installedAdmissions
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    (installation : NaturalAddPrefixInstallation sourceModule module)
+    (sumInstallation : NaturalSumInstallation sourceModule module)
+    {store resultStore : Wasm.Store host} {initial : Wasm.Locals}
+    {left right : Word32} {leftValue rightValue : Nat}
+    {leftHeader rightHeader : Header}
+    {before after : MemoryState} {witness : RefinementWitness}
+    {runtime : Fir.LeanIR.Impure.RuntimeState}
+    {address : Word32} {tail : List Wasm.Value}
+    {allocateIndex writeSumIndex : Nat}
+    (execution : CheckedNatAddPrefixExecution env module store initial
+      installation.validator.index
+      installation.magnitude.counts.magnitudeCountIndex
+      installation.carry.index (UInt32.ofNat left.value)
+      (UInt32.ofNat right.value) leftHeader.aux1 rightHeader.aux1
+      (checkedNaturalAddCarry leftHeader rightHeader leftValue rightValue) tail)
+    (resultCountOne : execution.resultCount = 1)
+    (leftRelated : NaturalObjectRel before left leftValue leftHeader)
+    (leftAdmission : NaturalValidatorAdmission before left leftValue leftHeader)
+    (rightRelated : NaturalObjectRel before right rightValue rightHeader)
+    (rightAdmission : NaturalValidatorAdmission before right rightValue
+      rightHeader)
+    (valid : before.FrontierInvariant)
+    (memoryRelated : ResidentMemoryRel before store.mem)
+    (heapRelated : LiveHeapRel before witness runtime)
+    (allocated : allocateNatural before (leftValue + rightValue) =
+      .ok (after, address))
+    (afterMemoryRelated : ResidentMemoryRel after resultStore.mem)
+    (makeNaturalRun : Wasm.TerminatesWith env module
+      sumInstallation.makeNaturalIndex store
+      [.i32 (unsignedSumHigh (naturalFirstLimbWords leftValue).1
+        (naturalFirstLimbWords leftValue).2
+        (naturalFirstLimbWords rightValue).1
+        (naturalFirstLimbWords rightValue).2),
+       .i32 (unsignedSumLow (naturalFirstLimbWords leftValue).1
+        (naturalFirstLimbWords rightValue).1)]
+      (fun final values =>
+        final = resultStore ∧
+          values = [.i32 (UInt32.ofNat address.value)])) :
+    ∃ nextWitness reference,
+      witness.Extends nextWitness ∧
+        ClosureAllocationsPersistent witness nextWitness ∧
+        LiveHeapRel after nextWitness
+          (Fir.LeanIR.Impure.literal runtime
+            (.nat (leftValue + rightValue))).1 ∧
+        ResidentMemoryRel after resultStore.mem ∧
+        (Fir.LeanIR.Impure.literal runtime
+          (.nat (leftValue + rightValue))).2 = .object reference ∧
+        Wasm.wp module
+          (checkedNatAddFallbackProgram installation.validator.index
+            installation.magnitude.counts.magnitudeCountIndex
+            installation.carry.index
+            installation.magnitude.low.magnitudeIndex
+            installation.magnitude.high.magnitudeIndex sumInstallation.index
+            allocateIndex writeSumIndex)
+          (TypedNaturalReturnPost nextWitness address reference resultStore
+            tail)
+          store { initial with values := tail } env := by
+  have resultCountEq : execution.resultCount =
+      checkedNaturalAddResultCount leftHeader rightHeader leftValue
+        rightValue := by
+    simpa [checkedNaturalAddResultCount, checkedNaturalAddCount] using
+      execution.resultCount_eq_ofNat
+  have checkedOne : checkedNaturalAddResultCount leftHeader rightHeader
+      leftValue rightValue = 1 := resultCountEq.symm.trans resultCountOne
+  have facts := checkedNaturalAddResultCount_eq_one_facts leftAdmission
+    rightAdmission checkedOne
+  let leftWords := naturalFirstLimbWords leftValue
+  let rightWords := naturalFirstLimbWords rightValue
+  have leftAt :
+      (paddedLimbViewWords 1 (naturalLimbs leftValue))[0]? =
+        some leftWords := by
+    obtain ⟨leftLimb, leftLimbs⟩ :=
+      List.length_eq_one_iff.mp facts.leftLengthOne
+    simp [paddedLimbViewWords, padLimbWords, leftWords,
+      naturalFirstLimbWords, leftLimbs]
+  have rightAt :
+      (paddedLimbViewWords 1 (naturalLimbs rightValue))[0]? =
+        some rightWords := by
+    obtain ⟨rightLimb, rightLimbs⟩ :=
+      List.length_eq_one_iff.mp facts.rightLengthOne
+    simp [paddedLimbViewWords, padLimbWords, rightWords,
+      naturalFirstLimbWords, rightLimbs]
+  have leftFits : (naturalLimbs leftValue).length ≤ 1 := by
+    exact facts.leftLengthOne.le
+  have rightFits : (naturalLimbs rightValue).length ≤ 1 := by
+    exact facts.rightLengthOne.le
+  have leftLowRun : ∀ callTail,
+      Wasm.TerminatesWith env module
+        installation.magnitude.low.magnitudeIndex store
+        ([.i32 0, .i32 0, .i32 (UInt32.ofNat left.value)] ++ callTail)
+        (fun final values =>
+          final = store ∧ values = .i32 leftWords.1 :: callTail) := by
+    intro callTail
+    simpa [leftWords, limbWordPart] using
+      installation.magnitude.low.terminatesWith_paddedLimbViewWord_of_memoryRel
+        (env := env) (tail := callTail) (commonCount := 1)
+        (limbs := naturalLimbs leftValue) (index := (0 : UInt32))
+        (paddedWord := leftWords) leftRelated
+        (NaturalValidatorAdmission.canonicalNaturalLimbView leftAdmission)
+        valid memoryRelated leftFits (by norm_num) leftAt
+  have leftHighRun : ∀ callTail,
+      Wasm.TerminatesWith env module
+        installation.magnitude.high.magnitudeIndex store
+        ([.i32 0, .i32 0, .i32 (UInt32.ofNat left.value)] ++ callTail)
+        (fun final values =>
+          final = store ∧ values = .i32 leftWords.2 :: callTail) := by
+    intro callTail
+    simpa [leftWords, limbWordPart] using
+      installation.magnitude.high.terminatesWith_paddedLimbViewWord_of_memoryRel
+        (env := env) (tail := callTail) (commonCount := 1)
+        (limbs := naturalLimbs leftValue) (index := (0 : UInt32))
+        (paddedWord := leftWords) leftRelated
+        (NaturalValidatorAdmission.canonicalNaturalLimbView leftAdmission)
+        valid memoryRelated leftFits (by norm_num) leftAt
+  have rightLowRun : ∀ callTail,
+      Wasm.TerminatesWith env module
+        installation.magnitude.low.magnitudeIndex store
+        ([.i32 0, .i32 0, .i32 (UInt32.ofNat right.value)] ++ callTail)
+        (fun final values =>
+          final = store ∧ values = .i32 rightWords.1 :: callTail) := by
+    intro callTail
+    simpa [rightWords, limbWordPart] using
+      installation.magnitude.low.terminatesWith_paddedLimbViewWord_of_memoryRel
+        (env := env) (tail := callTail) (commonCount := 1)
+        (limbs := naturalLimbs rightValue) (index := (0 : UInt32))
+        (paddedWord := rightWords) rightRelated
+        (NaturalValidatorAdmission.canonicalNaturalLimbView rightAdmission)
+        valid memoryRelated rightFits (by norm_num) rightAt
+  have rightHighRun : ∀ callTail,
+      Wasm.TerminatesWith env module
+        installation.magnitude.high.magnitudeIndex store
+        ([.i32 0, .i32 0, .i32 (UInt32.ofNat right.value)] ++ callTail)
+        (fun final values =>
+          final = store ∧ values = .i32 rightWords.2 :: callTail) := by
+    intro callTail
+    simpa [rightWords, limbWordPart] using
+      installation.magnitude.high.terminatesWith_paddedLimbViewWord_of_memoryRel
+        (env := env) (tail := callTail) (commonCount := 1)
+        (limbs := naturalLimbs rightValue) (index := (0 : UInt32))
+        (paddedWord := rightWords) rightRelated
+        (NaturalValidatorAdmission.canonicalNaturalLimbView rightAdmission)
+        valid memoryRelated rightFits (by norm_num) rightAt
+  obtain ⟨afterLeftLow, afterLeftHigh, afterRightLow, afterRightHigh,
+      leftLowSet, leftHighSet, rightLowSet, rightHighSet⟩ :=
+    execution.exists_oneLimbLocalSets leftWords.1 leftWords.2 rightWords.1
+      rightWords.2
+  obtain ⟨nextWitness, reference, extension, closurePersistence,
+      heapRelation, memoryRelation, referenceEq, _, correct⟩ :=
+    wp_checkedNatAddFallbackProgram_one_of_concreteAllocation execution
+      resultCountOne leftLowSet leftHighSet rightLowSet rightHighSet
+      leftLowRun leftHighRun rightLowRun rightHighRun sumInstallation.adapted
+      sumInstallation.makeNaturalFound sumInstallation.notImport
+      sumInstallation.installed
+      (by simpa [leftWords, rightWords] using facts.highBaseNoOverflow)
+      (by simpa [leftWords, rightWords] using facts.highCarryNoOverflow)
+      (by simpa [leftWords, rightWords] using facts.valueEq)
+      heapRelated allocated afterMemoryRelated
+      (by simpa [leftWords, rightWords] using makeNaturalRun)
+  exact ⟨nextWitness, reference, extension, closurePersistence,
+    heapRelation, memoryRelation, referenceEq, correct⟩
 
 /-- Source suffix of the checked multi-limb branch after allocation and limb
 writing have established the result in `raw`. -/
