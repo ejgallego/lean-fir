@@ -46,8 +46,8 @@
     "tiers": [
       {
         "id": "source-lcnf",
-        "minimumCases": 675,
-        "minimumComparisons": 675,
+        "minimumCases": 676,
+        "minimumComparisons": 676,
         "requiredBackends": [
           "lcnf",
           "native"
@@ -66,8 +66,8 @@
       },
       {
         "id": "wasm-v8",
-        "minimumCases": 675,
-        "minimumComparisons": 1350,
+        "minimumCases": 676,
+        "minimumComparisons": 1352,
         "requiredBackends": [
           "lcnf",
           "native",
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 684,
-      "minimumTierCases": 1359,
-      "minimumComparisons": 2034
+      "minimumUniqueCases": 685,
+      "minimumTierCases": 1361,
+      "minimumComparisons": 2037
     },
     "machine": {
-      "minimumCases": 684,
-      "minimumInterpreterSteps": 8299,
+      "minimumCases": 685,
+      "minimumInterpreterSteps": 8481,
       "requiredStaticForms": [
         "box",
         "cases",
@@ -531,13 +531,23 @@
       },
       {
         "tier": "source-lcnf",
+        "tag": "cached-mutual-tail",
+        "minimumCases": 1
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "cached-mutual-tail-transfer",
+        "minimumCases": 1
+      },
+      {
+        "tier": "source-lcnf",
         "tag": "cached-nontail-retain",
         "minimumCases": 1
       },
       {
         "tier": "source-lcnf",
         "tag": "cached-recursion-transfer",
-        "minimumCases": 2
+        "minimumCases": 3
       },
       {
         "tier": "source-lcnf",
@@ -593,6 +603,11 @@
         "tier": "source-lcnf",
         "tag": "copy-on-write",
         "minimumCases": 22
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "cross-declaration-call",
+        "minimumCases": 1
       },
       {
         "tier": "source-lcnf",
@@ -677,7 +692,7 @@
       {
         "tier": "source-lcnf",
         "tag": "loop-carried-owner",
-        "minimumCases": 2
+        "minimumCases": 3
       },
       {
         "tier": "source-lcnf",
@@ -698,6 +713,11 @@
         "tier": "source-lcnf",
         "tag": "mutation",
         "minimumCases": 32
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "mutual-recursion",
+        "minimumCases": 1
       },
       {
         "tier": "source-lcnf",
@@ -1036,13 +1056,23 @@
       },
       {
         "tier": "wasm-v8",
+        "tag": "cached-mutual-tail",
+        "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "cached-mutual-tail-transfer",
+        "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
         "tag": "cached-nontail-retain",
         "minimumCases": 1
       },
       {
         "tier": "wasm-v8",
         "tag": "cached-recursion-transfer",
-        "minimumCases": 2
+        "minimumCases": 3
       },
       {
         "tier": "wasm-v8",
@@ -1088,6 +1118,11 @@
         "tier": "wasm-v8",
         "tag": "control-flow",
         "minimumCases": 12
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "cross-declaration-call",
+        "minimumCases": 1
       },
       {
         "tier": "wasm-v8",
@@ -1152,7 +1187,7 @@
       {
         "tier": "wasm-v8",
         "tag": "loop-carried-owner",
-        "minimumCases": 2
+        "minimumCases": 3
       },
       {
         "tier": "wasm-v8",
@@ -1173,6 +1208,11 @@
         "tier": "wasm-v8",
         "tag": "mutation",
         "minimumCases": 32
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "mutual-recursion",
+        "minimumCases": 1
       },
       {
         "tier": "wasm-v8",
@@ -2478,6 +2518,20 @@
       },
       {
         "tier": "source-lcnf",
+        "name": "tail-ownership-cached-string-mutual-tail",
+        "allTags": [
+          "cached-mutual-tail-transfer",
+          "cached-recursion-transfer",
+          "cross-declaration-call",
+          "mutual-recursion",
+          "object-update",
+          "tail-control",
+          "tail-ownership"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "source-lcnf",
         "name": "tail-ownership-cached-string-nontail-allocation",
         "allTags": [
           "cached-nontail-retain",
@@ -2517,14 +2571,14 @@
       },
       {
         "tier": "source-lcnf",
-        "name": "tail-ownership-cached-string-shape-pair",
+        "name": "tail-ownership-cached-string-shape-triad",
         "allTags": [
           "cached-recursion-transfer",
           "loop-carried-owner",
           "outside-alias",
           "repeated-child-alias"
         ],
-        "minimumCases": 2
+        "minimumCases": 3
       },
       {
         "tier": "source-lcnf",
@@ -3654,6 +3708,20 @@
       },
       {
         "tier": "wasm-v8",
+        "name": "tail-ownership-cached-string-mutual-tail",
+        "allTags": [
+          "cached-mutual-tail-transfer",
+          "cached-recursion-transfer",
+          "cross-declaration-call",
+          "mutual-recursion",
+          "object-update",
+          "tail-control",
+          "tail-ownership"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
         "name": "tail-ownership-cached-string-nontail-allocation",
         "allTags": [
           "cached-nontail-retain",
@@ -3693,14 +3761,14 @@
       },
       {
         "tier": "wasm-v8",
-        "name": "tail-ownership-cached-string-shape-pair",
+        "name": "tail-ownership-cached-string-shape-triad",
         "allTags": [
           "cached-recursion-transfer",
           "loop-carried-owner",
           "outside-alias",
           "repeated-child-alias"
         ],
-        "minimumCases": 2
+        "minimumCases": 3
       },
       {
         "tier": "wasm-v8",

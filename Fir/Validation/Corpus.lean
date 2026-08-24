@@ -2670,6 +2670,53 @@ def cachedSharedStringDagAcrossNonTail
   let second := cachedSharedStringOwner
   (outside, result, second)
 
+/-!
+Transfer the same repeated-child state through two mutually recursive
+functions. Each call is tail-position, but no call targets the current
+declaration, isolating cross-declaration tail ownership from S17's direct
+self-tail update and S18's retained non-tail unwind.
+-/
+mutual
+  @[noinline]
+  def mutualTailCachedStringA :
+      Nat → TailCachedStringState → String
+    | 0, state =>
+        if state.choosePrimary then state.primary else state.secondary
+    | remaining + 1, state =>
+        mutualTailCachedStringB remaining {
+          primary := state.secondary
+          secondary := state.primary
+          choosePrimary := !state.choosePrimary
+        }
+
+  @[noinline]
+  def mutualTailCachedStringB :
+      Nat → TailCachedStringState → String
+    | 0, state =>
+        if state.choosePrimary then state.primary else state.secondary
+    | remaining + 1, state =>
+        mutualTailCachedStringA remaining {
+          primary := state.secondary
+          secondary := state.primary
+          choosePrimary := !state.choosePrimary
+        }
+end
+
+@[noinline]
+def cachedSharedStringDagAcrossMutualTail
+    (steps : Nat) : String × String × CachedSharedStringOwner :=
+  let cached := cachedSharedStringOwner
+  let aliases := makeTransientCachedStringAliases cached
+  let outside := aliases.left
+  let selected := mutualTailCachedStringA steps {
+    primary := aliases.right
+    secondary := aliases.ignored
+    choosePrimary := true
+  }
+  let result := String.Internal.append selected "!"
+  let second := cachedSharedStringOwner
+  (outside, result, second)
+
 /--
 Use a captured ByteArray for the final time before passing its outside alias to
 an ordered effect. The post-effect read observes the updated result.
@@ -4323,6 +4370,24 @@ private def cachedSharedStringDagNonTailThreeFormTrace : Array String :=
     "cases", "oproj", "jump", "fap", "extern", "cases", "inc", "return", "dec",
     "return", "dec", "fap", "lit", "return", "fap", "extern", "inc", "ctor",
     "inc", "ctor", "return"]
+
+private def cachedSharedStringDagMutualTailThreeFormTrace : Array String :=
+  #["fap", "fap", "fap", "lit", "return", "fap", "lit", "return", "inc", "inc",
+    "ctor", "return", "inc", "return", "fap", "fap", "inc", "fap", "oproj", "oproj",
+    "join", "isShared", "cases", "inc", "inc", "dec", "jump", "inc", "join", "cases",
+    "ctor", "jump", "return", "return", "oproj", "oproj", "oproj", "lit", "inc", "inc",
+    "ctor", "sset", "fap", "lit", "fap", "extern", "cases", "oproj", "oproj", "sproj",
+    "join", "isShared", "cases", "jump", "lit", "fap", "extern", "join", "cases", "jump",
+    "join", "cases", "oset", "oset", "jump", "sset", "fap", "lit", "fap", "extern",
+    "cases", "oproj", "oproj", "sproj", "join", "isShared", "cases", "jump", "lit", "fap",
+    "extern", "join", "cases", "lit", "jump", "join", "cases", "oset", "oset", "jump",
+    "sset", "fap", "lit", "fap", "extern", "cases", "oproj", "oproj", "sproj", "join",
+    "isShared", "cases", "jump", "lit", "fap", "extern", "join", "cases", "jump", "join",
+    "cases", "oset", "oset", "jump", "sset", "fap", "lit", "fap", "extern", "cases",
+    "sproj", "cases", "oproj", "inc", "dec", "return", "dec", "return", "dec", "return",
+    "dec", "return", "fap", "lit", "return", "fap", "extern", "inc", "ctor", "inc",
+    "ctor", "return"]
+
 
 private def cachedSharedUInt8ArrayDagReuseSkippedFormTrace : Array String :=
   #["fap", "fap", "fap", "lit", "return", "fap", "lit", "fap", "lit", "fap",
@@ -6284,6 +6349,68 @@ private def preConversionCases : Array Case := #[
         ``String.decEq, ``String.decEq, ``String.Internal.append]
     provenance := firProvenance
       "Retain three repeated-child owners across non-tail recursion and reconcile them during unwind" },
+  { id := "cached-shared-string-dag-mutual-tail-three"
+    entry := ``Source.cachedSharedStringDagAcrossMutualTail
+    dependencies :=
+      #[``Source.cachedSharedStringOwner,
+        ``Source.makeTransientCachedStringAliases,
+        ``Source.mutualTailCachedStringA,
+        ``Source.mutualTailCachedStringB]
+    args := #[.nat 3]
+    argSchemas := #[.nat]
+    resultSchema := cachedSharedStringDagAcrossCatchSchema
+    native := fun _ => cachedSharedStringDagAcrossCatchDatum
+      (Source.cachedSharedStringDagAcrossMutualTail 3)
+    tags := #["stress", "ownership", "persistent", "cache", "string",
+      "cached-recursion-transfer", "cached-mutual-tail",
+      "cached-mutual-tail-transfer",
+      "repeated-child-alias", "outside-alias", "tail-control",
+      "tail-ownership", "mutual-recursion", "cross-declaration-call",
+      "loop-carried-owner",
+      "release-fidelity", "multiplicity", "copy-on-write", "external",
+      "constructor", "object", "heap", "alias", "shared",
+      "repeated-alias", "alias-preservation", "shared-dag", "cache-miss",
+      "cache-hit", "repeated-call", "initialization", "mixed-layout",
+      "scalar-field", "tail-state", "object-update", "recursive-release",
+      "release"]
+    requiredLcnfForms :=
+      #["cases", "ctor", "dec", "extern", "fap", "inc", "isShared", "join",
+        "jump", "lit", "oproj", "oset", "return", "sproj", "sset"]
+    requiredExecutedLcnfForms :=
+      #["cases", "ctor", "dec", "extern", "fap", "inc", "isShared", "join",
+        "jump", "lit", "oproj", "oset", "return", "sproj", "sset"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "cases", minimum := 16, maximum := some 16 },
+        { form := "ctor", minimum := 5, maximum := some 5 },
+        { form := "dec", minimum := 5, maximum := some 5 },
+        { form := "extern", minimum := 8, maximum := some 8 },
+        { form := "fap", minimum := 20, maximum := some 20 },
+        { form := "inc", minimum := 12, maximum := some 12 },
+        { form := "isShared", minimum := 4, maximum := some 4 },
+        { form := "join", minimum := 11, maximum := some 11 },
+        { form := "jump", minimum := 11, maximum := some 11 },
+        { form := "lit", minimum := 12, maximum := some 12 },
+        { form := "oproj", minimum := 12, maximum := some 12 },
+        { form := "oset", minimum := 6, maximum := some 6 },
+        { form := "return", minimum := 12, maximum := some 12 },
+        { form := "sproj", minimum := 4, maximum := some 4 },
+        { form := "sset", minimum := 4, maximum := some 4 }]
+    requiredExecutedLcnfFormTrace :=
+      some cachedSharedStringDagMutualTailThreeFormTrace
+    requiredAdministrativeStepKinds := cachedHeapOwnerAdministrativeKinds
+    requiredExternals :=
+      #[``Nat.decEq, ``Nat.sub, ``String.Internal.append]
+    requiredExecutedExternals :=
+      #[``Nat.decEq, ``Nat.sub, ``String.Internal.append]
+    requiredExecutedExternalCounts :=
+      #[{ external := ``Nat.decEq, minimum := 4, maximum := some 4 },
+        { external := ``Nat.sub, minimum := 3, maximum := some 3 },
+        { external := ``String.Internal.append, minimum := 1, maximum := some 1 }]
+    requiredExecutedExternalTrace :=
+      some #[``Nat.decEq, ``Nat.sub, ``Nat.decEq, ``Nat.sub,
+        ``Nat.decEq, ``Nat.sub, ``Nat.decEq, ``String.Internal.append]
+    provenance := firProvenance
+      "Transfer a repeated-child owner through three cross-declaration mutual tail calls before append and cache reuse" },
   { id := "cached-shared-uint8-array-dag-reuse-skipped"
     entry := ``Source.cachedSharedUInt8ArrayDagReuse
     dependencies := #[``Source.cachedSharedUInt8ArrayOwner]

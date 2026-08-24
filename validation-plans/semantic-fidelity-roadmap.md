@@ -751,6 +751,39 @@ results, 1,430 products opened under strace, 8,617 source-machine steps, and
 all 200 tag and 295 conjunctive-domain floors with zero findings; the full
 3,172-job Talos cone also passes.
 
+### S19/B3-E3: cached ownership through mutual tail calls
+
+S19 completes the compact B3 recursion-shape family without changing its
+observation. Two noinline declarations alternately transfer S17's mixed
+repeated-child state in tail position. The wrapper retains the same outside
+alias, appends through the returned survivor, and rereads the nullary cache.
+This isolates cross-declaration tail ownership from S17's direct self-tail
+loop and S18's retained non-tail unwind.
+
+The three-call mutual path executes 182 interpreter transitions and 142 LCNF
+forms. Its constructor, increment, sharing-test, object/scalar update,
+projection, external, and control counts exactly match S17's three-step
+self-tail path; only `dec` changes from six to five. Generated native C
+confirms this is the compiler's counter-ownership convention: direct
+self-tail lowering decrements the current `Nat` inside its loop, while mutual
+callers retain responsibility and decrement the child counter after the
+callee returns. The cached String aggregate still executes six in-place
+object updates, four sharing checks, twelve increments, and five decrements.
+The complete form/external traces and counts are required.
+
+State: promoted candidate on `validation/closure-ownership-fixtures` from
+current main checkpoint `ff399c49`. Tracked Lean Beam update, sync, and save
+pass with zero diagnostics and save-ready source hash `a6a9d9e2a8b89647`.
+The tracked S17/S18/S19 native/LCNF/V8 comparison passes all nine edges with
+zero findings and opens all six Wasm products under strace. Coverage requires
+the direct-self-tail, retained-non-tail, and mutual-tail shape triad in both
+source and real-V8 tiers. Clean detached `make check` passes 716 source cases,
+2,148 three-way results, 1,432 products opened under strace, 725 aggregate
+unique cases, 2,157 equal policy comparisons, 8,799 source-machine steps, all
+208 tag and 297 conjunctive-domain floors, and zero findings. The detached
+3,178-job Talos cone also passes; tracked full validation and Talos gates
+follow promotion.
+
 ## Portfolio cadence
 
 1. Execute S4/B1 tail-call ownership as the memory/control bridge.
