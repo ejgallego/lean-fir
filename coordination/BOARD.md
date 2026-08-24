@@ -204,6 +204,21 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `FIR-BUG-impure-none-array-mkempty-validation-external` and
   `FIR-BUG-impure-none-byte-array-mk-validation-external` retain the two
   deferred source-constructor validation boundaries without a workaround.
+- Independent cached-effect-release fixture integration: test-fixtures
+  functional head `fc00f80d` is accepted through clean tracked head
+  `a7df11d2` on exact base `c0f464bd`. A transient three-field owner repeats
+  one cached String child, releases its ignored alias before an ordered Nat
+  effect/suspension, preserves two survivors, and then compares skipped versus
+  post-resume append paths before reading the nullary cache again. Exact traces
+  pin one `isShared`, one `dec`, four projections, eleven increments, exact
+  cache miss/hit transitions, and effect-before-mutation order. Six
+  tier-specific conjunctive floors prevent broad tag-count admission. The
+  focused post-rebase native/LCNF/V8 cone passes 6/6 with all semantic-Wasm
+  products opened; repository coverage reaches 719 unique cases, 2,139/2,139
+  comparisons, 8,110 machine steps, all 186 tag and 277 domain floors, and all
+  3,172 Talos jobs. This is fixture, observation, telemetry, and coverage-policy
+  work only; it changes no interpreter, proof, generator, runtime, concrete
+  layout, ABI, helper, or artifact contract. Bug cards: none.
 - Independent consumer refresh: the Verso HTML source pin and package are
   accepted at `4ee28dd6` and `c88e4a54`. The package compiles clean Verso
   commit `970b071b73adc6e68c6de00bc183460f76d97731`, exact
