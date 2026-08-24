@@ -38,9 +38,9 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   in `W7-W6-20260822-001`. The accepted post-pass does not yet reduce the
   all-target lowering time and makes no runtime-speed claim.
 - Current early-lowering candidate: W7's tested candidate base remains
-  `6c1eca68`; current local main is `6ec3e526` after the independent fixture,
-  coordination-refresh, and `Nat.shiftRight` caller stacks. W7 functional
-  commit `262ca200` and tracked head
+  `6c1eca68`; current accepted code head is `be006055` after the independent
+  fixture, coordination-refresh, `Nat.shiftRight` caller, and checked-Nat
+  proof stacks. W7 functional commit `262ca200` and tracked head
   `7f1178c9` select the exact retained
   declaration array before closure dispatch lowering while leaving generic
   opaque ingress unchanged. The exact combined repository gate passes 717
@@ -183,6 +183,26 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   helper signature, semantic ABI, concrete layout, ownership contract, or
   shared runtime contract changed. W6 proof adaptation is queued on the final
   rebased head in `W72-W6-20260824-002`.
+- Independent checked Nat-add proof integration: W6 functional head
+  `b9f96699` is accepted through clean tracked head `be006055` on exact base
+  `e367c3ce`. `NaturalValidatorAdmission` strengthens the concrete live-Nat
+  refinement with the canonical reserved-header, top-limb, ownership, and
+  promoted-versus-big invariants already enforced by the resident validator;
+  allocation establishes it and the complete concrete ownership, mutation,
+  reuse, framing, persistence, and fault surface preserves it. This fixes
+  `FIR-BUG-wasm-none-natural-validator-refinement-admission` without a trusted
+  caller premise. The installed validation/count/carry prefix now composes
+  with both the scalar one-limb producer and allocator/writer multi-limb
+  producer behind the actual computed result-count split. Both establish
+  `CheckedNaturalAddPost`, retaining the extended concrete heap and memory,
+  witness/closure persistence, exact semantic Natural, and typed returned Wasm
+  word. Lean Beam and the 3,123-job focused cone pass; `make check` passes 721
+  unique cases and 2,145/2,145 comparisons; all 3,172 Talos jobs pass. This
+  changes no source semantics, generated body, helper signature, semantic ABI,
+  concrete layout, ownership behavior, or emitter. The next proof slice lifts
+  this unified checked heap/heap fallback through the explicit outer
+  representation dispatcher and actual adapted `natAddFunction`; it must not
+  be mistaken for that complete public function theorem yet.
 - Independent constructor integration: W7-1's sparse initialization is
   accepted at `64866288`. Constructor helpers now overwrite the eight header
   words and low object-slot words directly, while zeroing exactly the
