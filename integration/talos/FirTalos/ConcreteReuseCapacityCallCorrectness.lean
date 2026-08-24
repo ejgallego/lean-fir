@@ -1319,9 +1319,10 @@ theorem ReuseCapacityCodeSimulation.callLetOfSelectedClosureDispatch
         compileClosureDispatch context decl.fvarId closureId callResultKind
           argumentCode argumentKinds)
     (candidatesEq :
-      context.program.decls.toList.flatMap (fun target =>
-        compileClosureCandidatesForTarget context.program decl.fvarId closureId
-          callResultKind argumentCode argumentKinds target) =
+      (context.closureCandidates?.getD context.program.decls).toList.flatMap
+          (fun target =>
+            compileClosureCandidatesForTarget context.program decl.fvarId
+              closureId callResultKind argumentCode argumentKinds target) =
         (before ++ selected :: suffix).map (·.source))
     (closureFound :
       findFVar? (functionBindings sourceFunction) closureId =

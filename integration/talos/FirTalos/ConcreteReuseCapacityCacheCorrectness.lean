@@ -1182,11 +1182,12 @@ theorem LazyCacheGeneratedEnvironment.initializers_of_lower
     (lowered : Fir.Wasm.lower program = .ok source) :
     source.initializers = Fir.Wasm.cachedDeclarationNames program := by
   unfold Fir.Wasm.lower at lowered
-  dsimp only at lowered
+  unfold Fir.Wasm.lowerWithClosureTargetFilter at lowered
+  simp only [Option.map] at lowered
   generalize functionsEq :
       program.decls.filterMapM
-          (Fir.Wasm.lowerDecl program
-            (Fir.Wasm.cachedDeclarationNames program)) =
+          (Fir.Wasm.lowerDeclWithClosureCandidates program
+            (Fir.Wasm.cachedDeclarationNames program) none) =
         functionsResult at lowered
   cases functionsResult with
   | error error =>
@@ -6616,6 +6617,14 @@ structure SaturatedClosureCallSite
   resultCompiled :
     Fir.Wasm.getLocal context decl.fvarId =
       .ok (.localGet decl.fvarId, resultKind)
+  /-- A restricted candidate table contains only declarations from the source
+  program. W7 obtains this static fact from filtering `program.decls`; the
+  generic path is the identity selection. -/
+  selectedTargetsFromProgram :
+    ∀ {candidate},
+      candidate ∈
+          (context.closureCandidates?.getD context.program.decls).toList →
+        candidate ∈ context.program.decls.toList
 
 /--
 Source and static resolution of one *exactly saturated* internal closure
@@ -6669,6 +6678,14 @@ structure SaturatedClosureCallResolution
   bodyEq : target.value = .code calleeCode
   parametersBound :
     bindParams target.params (captures ++ site.semanticArgs) = .ok calleeEnv
+  /-- The declaration reached by this source closure is present in the
+  compiler-selected matcher table. This is the exact per-step consequence of
+  closed ingress: the initial transferred graph contains no Lean closures,
+  final-LCNF `pap` is the only source closure allocator, and neither the host
+  nor transferred data can inject an opaque closure. -/
+  closedIngressTarget :
+    target ∈
+      (context.closureCandidates?.getD context.program.decls).toList
 
 /-- Successful source argument evaluation preserves the saturated call site's
 argument arity.  This is the source-semantic counterpart of
@@ -7870,10 +7887,11 @@ theorem SaturatedClosureCallResolution.candidateSource_eq_of_identity
         targetModule.wasmModule hosts.spec initial site.closureId closureIndex
         address)}
     (candidatesEq :
-      context.program.decls.toList.flatMap (fun target =>
-        Fir.Wasm.compileClosureCandidatesForTarget context.program decl.fvarId
-          site.closureId site.resultKind site.argumentCode site.argumentKinds
-          target) = candidates.map (·.source))
+      (context.closureCandidates?.getD context.program.decls).toList.flatMap
+          (fun target =>
+            Fir.Wasm.compileClosureCandidatesForTarget context.program
+              decl.fvarId site.closureId site.resultKind site.argumentCode
+              site.argumentKinds target) = candidates.map (·.source))
     (candidateMem : candidate ∈ candidates)
     (identity :
       (resolution.function == candidate.function &&
@@ -7889,10 +7907,11 @@ theorem SaturatedClosureCallResolution.candidateSource_eq_of_identity
         [.call (.declaration resolution.function), .localSet decl.fvarId]) := by
   have sourceMem :
       candidate.source ∈
-        context.program.decls.toList.flatMap (fun target =>
-          Fir.Wasm.compileClosureCandidatesForTarget context.program decl.fvarId
-            site.closureId site.resultKind site.argumentCode site.argumentKinds
-            target) := by
+        (context.closureCandidates?.getD context.program.decls).toList.flatMap
+          (fun target =>
+            Fir.Wasm.compileClosureCandidatesForTarget context.program
+              decl.fvarId site.closureId site.resultKind site.argumentCode
+              site.argumentKinds target) := by
     rw [candidatesEq]
     exact List.mem_map.mpr ⟨candidate, candidateMem, rfl⟩
   obtain ⟨target, targetMem, generatedMem⟩ := List.mem_flatMap.mp sourceMem
@@ -7949,9 +7968,11 @@ theorem SaturatedClosureCallResolution.candidateSource_eq_of_identity
         have contextNamesUnique : context.program.NamesUnique := by
           rw [spec.contextProgram]
           exact spec.programNamesUnique
+        have targetProgramMem : target ∈ context.program.decls.toList :=
+          site.selectedTargetsFromProgram targetMem
         have targetEq : target = resolution.target :=
-          declaration_eq_of_programNamesUnique contextNamesUnique targetMem
-            resolvedTargetMem targetNameEq
+          declaration_eq_of_programNamesUnique contextNamesUnique
+            targetProgramMem resolvedTargetMem targetNameEq
         subst target
         have parameterKindsEq :
             targetParameterKinds = resolution.parameterKinds := by
@@ -8022,7 +8043,7 @@ theorem SaturatedClosureCallResolution.candidateBody_of_identity
         targetModule.wasmModule hosts.spec initial site.closureId closureIndex
         address)}
     (candidatesEq :
-      context.program.decls.toList.flatMap (fun target =>
+      (context.closureCandidates?.getD context.program.decls).toList.flatMap (fun target =>
         Fir.Wasm.compileClosureCandidatesForTarget context.program decl.fvarId
           site.closureId site.resultKind site.argumentCode site.argumentKinds
           target) = candidates.map (·.source))
@@ -8125,7 +8146,7 @@ theorem SaturatedClosureCallResolution.candidateArguments_of_identity
       locals.get closureIndex =
         some (.i32 (UInt32.ofNat address.value)))
     (candidatesEq :
-      context.program.decls.toList.flatMap (fun target =>
+      (context.closureCandidates?.getD context.program.decls).toList.flatMap (fun target =>
         Fir.Wasm.compileClosureCandidatesForTarget context.program decl.fvarId
           site.closureId site.resultKind site.argumentCode site.argumentKinds
           target) = candidates.map (·.source))
@@ -8194,7 +8215,7 @@ theorem SaturatedClosureCallResolution.containsCandidateIdentity
       (ClosureCandidateCase sourceModule sourceFunction labels module spec
         initial site.closureId closureIndex address))
     (candidatesEq :
-      context.program.decls.toList.flatMap (fun target =>
+      (context.closureCandidates?.getD context.program.decls).toList.flatMap (fun target =>
         Fir.Wasm.compileClosureCandidatesForTarget context.program decl.fvarId
           site.closureId
           site.resultKind site.argumentCode site.argumentKinds target) =
@@ -8205,17 +8226,17 @@ theorem SaturatedClosureCallResolution.containsCandidateIdentity
         resolution.captures.size == candidate.fixed) = true := by
   obtain ⟨source, sourceMem, matcherEq⟩ :=
     resolution.candidateSource_exists site
-  have targetMem : resolution.target ∈ context.program.decls.toList := by
-    obtain ⟨index, indexLt, targetAt, _⟩ :=
-      (Array.find?_eq_some_iff_getElem.mp resolution.targetFound).2
-    have found : context.program.decls[index] ∈ context.program.decls :=
-      Array.getElem_mem indexLt
-    simpa [targetAt] using found
+  have targetMem :
+      resolution.target ∈
+        (context.closureCandidates?.getD context.program.decls).toList :=
+    resolution.closedIngressTarget
   have generatedMem :
-      source ∈ context.program.decls.toList.flatMap (fun target =>
-        Fir.Wasm.compileClosureCandidatesForTarget context.program decl.fvarId
-          site.closureId
-          site.resultKind site.argumentCode site.argumentKinds target) :=
+      source ∈
+        (context.closureCandidates?.getD context.program.decls).toList.flatMap
+          (fun target =>
+            Fir.Wasm.compileClosureCandidatesForTarget context.program
+              decl.fvarId site.closureId site.resultKind site.argumentCode
+              site.argumentKinds target) :=
     List.mem_flatMap.mpr ⟨resolution.target, targetMem, sourceMem⟩
   rw [candidatesEq] at generatedMem
   obtain ⟨candidate, candidateMem, candidateSourceEq⟩ :=
@@ -8335,7 +8356,7 @@ theorem
       (ClosureCandidateCase sourceModule sourceFunction labels module spec
         initial site.closureId closureIndex address))
     (candidatesEq :
-      context.program.decls.toList.flatMap (fun target =>
+      (context.closureCandidates?.getD context.program.decls).toList.flatMap (fun target =>
         Fir.Wasm.compileClosureCandidatesForTarget context.program decl.fvarId
           site.closureId
           site.resultKind site.argumentCode site.argumentKinds target) =
@@ -8459,11 +8480,11 @@ def SaturatedClosureDispatchSelectionInduction
                 (resultWitness : RefinementWitness)
                 (physicalArgs : List Wasm.Value) (physical : Wasm.Value),
               DeclarationContextsCoherent context calleeContext ∧
-                context.program.decls.toList.flatMap (fun target =>
-                  compileClosureCandidatesForTarget context.program decl.fvarId
-                    site.closureId
-                    site.resultKind site.argumentCode site.argumentKinds
-                    target) =
+                (context.closureCandidates?.getD
+                    context.program.decls).toList.flatMap (fun target =>
+                  compileClosureCandidatesForTarget context.program
+                    decl.fvarId site.closureId site.resultKind
+                    site.argumentCode site.argumentKinds target) =
                   (before ++ selected :: suffix).map (·.source) ∧
                 locals.get closureIndex =
                     some (.i32 (UInt32.ofNat address.value)) ∧
@@ -8545,7 +8566,7 @@ def SaturatedClosureCandidateAdapterResolver
     ∃ candidates : List
         (ClosureCandidateAdapterCase sourceModule callerFunction labels
           targetModule.wasmModule hosts.spec site.closureId),
-      context.program.decls.toList.flatMap (fun target =>
+      (context.closureCandidates?.getD context.program.decls).toList.flatMap (fun target =>
           compileClosureCandidatesForTarget context.program decl.fvarId
             site.closureId site.resultKind site.argumentCode
             site.argumentKinds target) =
@@ -8555,12 +8576,13 @@ def SaturatedClosureCandidateAdapterResolver
 the matcher identity written by `compileClosureCandidateAt`. -/
 private theorem compilerClosureCandidate_matcher
     {program : Fir.LeanIR.ImpureProgram}
+    {targets : Array (LCNF.Decl .impure)}
     {declId closureId : FVarId}
     {resultKind : AbiKind}
     {argumentCode : List Fir.Wasm.Instruction}
     {argumentKinds : Array AbiKind}
     {candidate : List Fir.Wasm.Instruction × List Fir.Wasm.Instruction}
-    (member : candidate ∈ program.decls.toList.flatMap (fun target =>
+    (member : candidate ∈ targets.toList.flatMap (fun target =>
       compileClosureCandidatesForTarget program declId closureId resultKind
         argumentCode argumentKinds target)) :
     ∃ function arity fixed,
@@ -8691,14 +8713,19 @@ theorem ConcreteSupportedFunction.saturatedClosureCandidateAdapterResolver
     SaturatedClosureCandidateAdapterResolver context sourceModule
       sourceFunction labels target hosts := by
   intro decl sourceEnv site targetDispatch dispatchAdapted
-  let sources := context.program.decls.toList.flatMap (fun target =>
-    compileClosureCandidatesForTarget context.program decl.fvarId
-      site.closureId site.resultKind site.argumentCode site.argumentKinds
-      target)
+  let sources :=
+    (context.closureCandidates?.getD context.program.decls).toList.flatMap
+      (fun target =>
+        compileClosureCandidatesForTarget context.program decl.fvarId
+          site.closureId site.resultKind site.argumentCode site.argumentKinds
+          target)
   have dispatchEq :
       compileClosureDispatch context decl.fvarId site.closureId
           site.resultKind site.argumentCode site.argumentKinds =
-        compileClosureCandidateChain sources ++ [.localGet decl.fvarId] := rfl
+        compileClosureCandidateChain sources ++ [.localGet decl.fvarId] := by
+    unfold compileClosureDispatch
+    cases selected : context.closureCandidates? <;>
+      simp [sources, selected, Option.getD]
   rw [dispatchEq] at dispatchAdapted
   obtain ⟨targetChain, _targetResult, chainAdapted, _resultAdapted,
       _targetDispatchEq⟩ := instructions_append_eq_ok dispatchAdapted
@@ -8907,10 +8934,11 @@ def SaturatedClosureCandidateResolutionInduction
                 (ClosureCandidateCase sourceModule callerFunction labels
                   targetModule.wasmModule hosts.spec initial site.closureId
                   closureIndex address),
-                  context.program.decls.toList.flatMap (fun target =>
-                      compileClosureCandidatesForTarget context.program decl.fvarId
-                        site.closureId site.resultKind site.argumentCode
-                        site.argumentKinds target) =
+                  (context.closureCandidates?.getD
+                      context.program.decls).toList.flatMap (fun target =>
+                    compileClosureCandidatesForTarget context.program
+                      decl.fvarId site.closureId site.resultKind
+                      site.argumentCode site.argumentKinds target) =
                     candidates.map (·.source) ∧
                 ∀ (candidate :
                     ClosureCandidateCase sourceModule callerFunction labels
@@ -11191,6 +11219,7 @@ theorem LoweredInternalDeclaration.exists_of_lowerDecl
       sourceCode sourceFunction) := by
   have lowerDeclEq := lowered
   unfold Fir.Wasm.lowerDecl at lowered
+  unfold Fir.Wasm.lowerDeclWithClosureCandidates at lowered
   rw [bodyEq] at lowered
   cases paramsResult : Fir.Wasm.addDeclarationParams program declaration with
   | error error =>
@@ -11311,6 +11340,7 @@ theorem lowerDecl_some_of_code
   | some sourceFunction => exact ⟨sourceFunction, rfl⟩
   | none =>
       unfold Fir.Wasm.lowerDecl at lowered
+      unfold Fir.Wasm.lowerDeclWithClosureCandidates at lowered
       rw [bodyEq] at lowered
       cases paramsResult : Fir.Wasm.addDeclarationParams program declaration with
       | error error =>
@@ -11361,11 +11391,12 @@ theorem LoweredInternalDeclaration.functions_of_lower
           (Fir.Wasm.cachedDeclarationNames program)) =
       .ok source.functions := by
   unfold Fir.Wasm.lower at lowered
-  dsimp only at lowered
+  unfold Fir.Wasm.lowerWithClosureTargetFilter at lowered
+  simp only [Option.map] at lowered
   generalize functionsEq :
       program.decls.filterMapM
-          (Fir.Wasm.lowerDecl program
-            (Fir.Wasm.cachedDeclarationNames program)) =
+          (Fir.Wasm.lowerDeclWithClosureCandidates program
+            (Fir.Wasm.cachedDeclarationNames program) none) =
         functionsResult at lowered
   cases functionsResult with
   | error error => contradiction
@@ -11391,7 +11422,12 @@ theorem LoweredInternalDeclaration.functions_of_lower
         | ok externals =>
             simp only [pure, Except.pure, Except.ok.injEq] at lowered
             subst source
-            simpa using functionsEq
+            change
+              program.decls.filterMapM
+                  (Fir.Wasm.lowerDeclWithClosureCandidates program
+                    (Fir.Wasm.cachedDeclarationNames program) none) =
+                .ok functions
+            exact functionsEq
       · simp [operations] at lowered
 
 /--
@@ -12847,7 +12883,8 @@ theorem LoweredInternalDeclaration.functionNamesNodup
   intro declaration sourceFunction selected
   cases valueEq : declaration.value with
   | extern metadata =>
-      simp [Fir.Wasm.lowerDecl, valueEq, pure, Except.pure] at selected
+      simp [Fir.Wasm.lowerDecl, Fir.Wasm.lowerDeclWithClosureCandidates,
+        valueEq, pure, Except.pure] at selected
   | code sourceCode =>
       obtain ⟨row⟩ :=
         LoweredInternalDeclaration.exists_of_lowerDecl valueEq selected
@@ -12940,11 +12977,12 @@ theorem LoweredInternalDeclaration.imports_of_lower
           Except Fir.Wasm.CompileError (Array Fir.Wasm.Import)) =
             Except.ok externalImports := by
   unfold Fir.Wasm.lower at lowered
-  dsimp only at lowered
+  unfold Fir.Wasm.lowerWithClosureTargetFilter at lowered
+  simp only [Option.map] at lowered
   generalize functionsEq :
       program.decls.filterMapM
-          (Fir.Wasm.lowerDecl program
-            (Fir.Wasm.cachedDeclarationNames program)) =
+          (Fir.Wasm.lowerDeclWithClosureCandidates program
+            (Fir.Wasm.cachedDeclarationNames program) none) =
         functionsResult at lowered
   cases functionsResult with
   | error error => contradiction

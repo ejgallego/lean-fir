@@ -431,9 +431,10 @@ theorem instructions_compileClosureDispatch
       (ClosureCandidateCase sourceModule sourceFunction labels module spec
         initial closureId closureIndex address))
     (candidatesEq :
-      context.program.decls.toList.flatMap (fun target =>
-        compileClosureCandidatesForTarget context.program declId closureId resultKind
-          argumentCode argumentKinds target) =
+      (context.closureCandidates?.getD context.program.decls).toList.flatMap
+          (fun target =>
+            compileClosureCandidatesForTarget context.program declId closureId
+              resultKind argumentCode argumentKinds target) =
         candidates.map (·.source))
     (closureFound :
       findFVar? (functionBindings sourceFunction) closureId =
@@ -446,16 +447,18 @@ theorem instructions_compileClosureDispatch
           argumentCode argumentKinds) =
       .ok (resolvedClosureCandidateChain candidates ++
         [.localGet resultIndex]) := by
-  unfold compileClosureDispatch
-  rw [candidatesEq, FirTalos.Correctness.instructions_append,
-    instructions_compileClosureCandidateChain candidates closureFound]
-  have found :
-      findFVar?
-          (sourceFunction.params.toList ++ sourceFunction.locals.toList)
-          declId =
-        some resultIndex := by
-    simpa [functionBindings] using resultFound
-  simp [instructions, instruction, found]
+  cases selected : context.closureCandidates? <;>
+    simp only [compileClosureDispatch, selected, Option.getD] at candidatesEq ⊢
+  all_goals
+    rw [candidatesEq, FirTalos.Correctness.instructions_append,
+      instructions_compileClosureCandidateChain candidates closureFound]
+    have found :
+        findFVar?
+            (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+            declId =
+          some resultIndex := by
+      simpa [functionBindings] using resultFound
+    simp [instructions, instruction, found]
 
 /-- A generated capture/argument prefix leaves the physical arguments on the
 operand stack in Wasm call order and otherwise preserves the concrete state.
@@ -914,9 +917,10 @@ theorem compileClosureDispatch_correct_of_selected
     (rest : Wasm.Program)
     (Q : Wasm.Assertion Host)
     (candidatesEq :
-      context.program.decls.toList.flatMap (fun target =>
-        compileClosureCandidatesForTarget context.program declId closureId resultKind
-          argumentCode argumentKinds target) =
+      (context.closureCandidates?.getD context.program.decls).toList.flatMap
+          (fun target =>
+            compileClosureCandidatesForTarget context.program declId closureId
+              resultKind argumentCode argumentKinds target) =
         (before ++ selected :: suffix).map (·.source))
     (closureFound :
       findFVar? (functionBindings sourceFunction) closureId =
