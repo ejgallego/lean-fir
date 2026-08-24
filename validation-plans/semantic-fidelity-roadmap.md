@@ -715,8 +715,8 @@ six `dec`, and four `isShared` forms. Its exact external trace alternates four
 paths, so later lowering cannot satisfy the coverage claim with an optimized
 scalar-only or non-tail substitute.
 
-State: ready through rebased functional head `abbae13a` on exact current-main
-base `e367c3ce` in `validation/closure-ownership-fixtures`. The detached and promoted
+State: ready through rebased functional head `49a39129` on exact current-main
+base `e793990f` in `validation/closure-ownership-fixtures`. The detached and promoted
 native/LCNF/V8 probes pass all six comparisons and open all four Wasm products
 under strace. The clean full corpus has 714 source cases, 723 aggregate unique
 cases, 2,151 equal policy comparisons, 8,565 machine steps, 192 satisfied tag
