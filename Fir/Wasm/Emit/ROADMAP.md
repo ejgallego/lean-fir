@@ -493,6 +493,39 @@ improve. Exact compressed output and the flat 9,237,304-byte frontier remain
 unchanged. W6 proof review of the tagged-pair and word-width branches remains
 the separate acceptance boundary.
 
+### G1q. Inline the profiled Nat and trusted Array caller paths (generation-ready)
+
+The next exact lean-zip profile identified four generic resident boundaries:
+`Nat.add`, `Nat.mod`, `Nat.land`, and trusted `Array.set`. FIR now applies the
+same caller/cold-helper split used by Lean 4.32's inline C API. Tagged Nat pairs
+compute addition, remainder, and bitwise AND in the caller; addition overflow
+and every heap/mixed pair reconstruct the original helper arguments and enter
+the complete arbitrary-precision fallback. Remainder by tagged zero returns
+the dividend, matching `Nat.mod n 0`. Trusted `Array.set` mutates only an
+exclusive refcount-one array, decrements the replaced object, and sends
+persistent/shared inputs through the complete copy fallback. Checked-mode
+`Array.set` lowering and all public helpers remain unchanged.
+
+The implementation is a generic resident-linker rewrite and contains no
+lean-zip declaration names. Zero-import artifact probes execute each rewritten
+Nat caller's tagged and heap/overflow arms, plus exclusive and shared trusted
+Array callers. The exact release package retains 769 captured declarations,
+630 source functions, 830 resident helpers, 504 final functions, and zero
+imports. The complete module grows from 407,516 to 454,918 bytes (+11.63%) and
+the frontier from 728,808 to 849,251 bytes; this is the deliberate code-size
+cost of applying the upstream inline convention at every eligible caller.
+
+Two checked artifact-bound profiles move `fir_big_ext_Nat_add`,
+`fir_ext_Nat_mod`, `fir_ext_Array_set`, and `fir_ext_Nat_land` from a combined
+18.23% median Wasm-self share to zero samples in both candidates. Eight
+diagnostics-off AB/BA process pairs on the 256-KiB seeded-random level-6
+workload move the median of per-process medians from 79.46 ms (MAD 0.69) to
+54.20 ms (MAD 1.05), a 31.8% reduction; the paired median is -24.44 ms and all
+eight pairs improve. Exact compressed output, levels 1 through 10, the
+persistent-cache/scratch-rewind contract, and deterministic publication remain
+unchanged. W6 proof review of the three tagged Nat branches and the trusted
+exclusive/shared Array split remains a separate acceptance boundary.
+
 ### G2. Separate production and diagnostic adapter costs (accepted)
 
 Finish the pending Illuminate selection-player request with an actually

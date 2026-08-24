@@ -378,6 +378,26 @@ constructor-result bridge, the combined ratcheted package is 728,808 frontier
 bytes and 407,516 complete bytes. Closure counts, exact compressed output, zero
 imports, and the flat 9,237,304-byte frontier remain unchanged.
 
+The following runtime-hotspot batch extends that upstream caller/cold-helper
+split to `Nat.add`, `Nat.mod`, `Nat.land`, and trusted `Array.set`. Immediate
+Nat pairs stay in the compiled caller, while overflow and heap/mixed values use
+the unchanged arbitrary-precision helpers. Exclusive trusted arrays replace
+their element in place and decrement the old object; shared or persistent
+arrays use the complete copy fallback. This is generic FIR lowering rather
+than a specialization of `Zip.Native.Deflate.lzMatchP`.
+
+Two exact-release profiles remove all samples from the four old helper
+boundaries, whose baseline median shares summed to 18.23% of Wasm self time.
+Eight diagnostics-off AB/BA fresh-process pairs on the seeded-random 256-KiB,
+level-6 workload move the median of process medians from 79.46 ms (MAD 0.69)
+to 54.20 ms (MAD 1.05); the paired median is -24.44 ms and 8/8 pairs improve.
+The complete zero-import module grows from 407,516 to 454,918 bytes (+11.63%)
+and the frontier from 728,808 to 849,251 bytes. The closure counts remain 769
+captured declarations, 630 retained source functions, 830 resident helpers,
+and 504 final functions. All ten compression levels, native/Wasm differential
+checks, deterministic packaging, and persistent-cache/scratch reclamation
+remain exact.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not
