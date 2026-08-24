@@ -58,10 +58,10 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `ConcreteClosureDispatch.instructions_compileClosureDispatch` remains
   hard-coded to all declarations. Request `W7-W6-20260823-008` pins equivalent
   pre-constructor functional commit `108ddeda`; the accepted constructor bridge
-  and later fixture/runtime stacks change no premise or signature. W6 has
-  separately produced the outer Natural-add dispatcher candidate and must
-  publish its rebased handoff before starting this closure proof. Integration will rebase
-  and validate the pair together, then land
+  and later fixture/runtime stacks change no premise or signature. W6's
+  independent installed Natural-add checkpoint is accepted through `69aff0c7`.
+  W6 has claimed the closure proof in `W7-W6-20260823-008`; integration will
+  first rebase W7 onto current main, then validate and land
   the generation/proof pair atomically, then regenerate prettyM and lean-zip
   consumer contracts separately. No helper signature, concrete layout,
   semantic ABI, ownership contract, or generic lowering contract changes.
@@ -234,6 +234,25 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   this unified checked heap/heap fallback through the explicit outer
   representation dispatcher and actual adapted `natAddFunction`; it must not
   be mistaken for that complete public function theorem yet.
+- Independent installed Nat-add proof integration: W6 functional head
+  `4331050c` is accepted through clean tracked head `69aff0c7` on exact base
+  `445e4428`. `ResidentPrimitives.wp_immediateNaturalPairDispatch_fallback`
+  factors the exact false branch of the shared low-bit representation test.
+  `NaturalAddInstallation` binds every callee in the adapted resident body to
+  the checked-prefix, sum, allocator, and writer installations, while
+  `CheckedNaturalAddProducerResources` packages the actual scalar-constructor
+  or multi-limb allocation resources chosen by the computed result count.
+  `NaturalAddInstallation.terminatesWith_heap_of_admissions` therefore proves
+  that the installed public function terminates for two canonical heap
+  Naturals with their exact semantic sum and typed Wasm word, restores the
+  caller tail, and preserves heap/memory refinement, witness extension, and
+  closure-allocation persistence. It does not overclaim the independent
+  immediate/mixed representation arms. Lean Beam and the 3,123-job focused
+  cone pass; `make check` passes 724 unique cases and 2,154/2,154 comparisons;
+  all 3,172 W6 Talos jobs pass on the runtime-hotspot base. No source semantics,
+  generated body, helper signature, ABI, layout, ownership behavior, or emitter
+  changed. Bug cards: none. W6's next claimed slice is the selected-declaration
+  closure proof in `W7-W6-20260823-008`.
 - Independent constructor integration: W7-1's sparse initialization is
   accepted at `64866288`. Constructor helpers now overwrite the eight header
   words and low object-slot words directly, while zeroing exactly the
