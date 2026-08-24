@@ -2870,6 +2870,32 @@ def TypedNaturalReturnPost (witness : RefinementWitness) (word : Word32)
         .Return store (.i32 (UInt32.ofNat word.value) :: tail) ∧
       ValueRel witness .tobject (.word32 word) (.object reference)
 
+/-- Operation-level semantic postcondition shared by both checked Natural-add
+producers.  It deliberately hides the producer's physical representation while
+retaining the complete refinement boundary: the resulting concrete heap and
+memory, an extending witness, the exact semantic Nat value/reference, and the
+typed returned word.  This is an ordinary existential simulation post, not a
+certificate supplied by the compiler. -/
+def CheckedNaturalAddPost
+    (witness : RefinementWitness)
+    (runtime : Fir.LeanIR.Impure.RuntimeState)
+    (value : Nat) (tail : List Wasm.Value) : Wasm.Assertion host :=
+  fun continuation =>
+    ∃ (resultState : MemoryState)
+      (nextWitness : RefinementWitness)
+      (word : Word32)
+      (reference : Fir.LeanIR.Impure.ObjectRef)
+      (finalStore : Wasm.Store host),
+      witness.Extends nextWitness ∧
+        ClosureAllocationsPersistent witness nextWitness ∧
+        LiveHeapRel resultState nextWitness
+          (Fir.LeanIR.Impure.literal runtime (.nat value)).1 ∧
+        ResidentMemoryRel resultState finalStore.mem ∧
+        (Fir.LeanIR.Impure.literal runtime (.nat value)).2 =
+          .object reference ∧
+        TypedNaturalReturnPost nextWitness word reference finalStore tail
+          continuation
+
 /-- A related Nat word crosses the typed, scratch-free return suffix with its
 exact bits, store, memory, and caller stack tail unchanged.  This theorem is
 the admissible boundary for checked result producers: an arbitrary `i32`
@@ -11530,6 +11556,146 @@ theorem NaturalSumInstallation.wp_checkedNatAddFallbackProgram_one_of_installedA
       (by simpa [leftWords, rightWords] using makeNaturalRun)
   exact ⟨nextWitness, reference, extension, closurePersistence,
     heapRelation, memoryRelation, referenceEq, correct⟩
+
+/-- Installed checked heap/heap Natural addition through either concrete
+producer branch.  The result-count guard chooses between the scalar
+`makeNatural` path and the arbitrary-precision allocator/writer path; both are
+hidden behind the same exact semantic Nat postcondition.  Branch-specific
+premises expose real producer executions and allocation resources rather than
+compiler-provided certificates. -/
+theorem NaturalSumWriterInstallation.wp_checkedNatAddFallbackProgram_of_installedAdmissions
+    {host : Type} {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {env : Wasm.HostEnv host}
+    (installation : NaturalAddPrefixInstallation sourceModule module)
+    (sumInstallation : NaturalSumInstallation sourceModule module)
+    (writer : NaturalSumWriterInstallation sourceModule module
+      installation.magnitude)
+    (allocator : NaturalObjectAllocatorInstallation sourceModule module)
+    {store : Wasm.Store host} {before : MemoryState}
+    {initial : Wasm.Locals}
+    {left right : Word32} {leftValue rightValue : Nat}
+    {leftHeader rightHeader : Header}
+    {witness : RefinementWitness}
+    {runtime : Fir.LeanIR.Impure.RuntimeState} {tail : List Wasm.Value}
+    (leftRelated : NaturalObjectRel before left leftValue leftHeader)
+    (leftAdmission : NaturalValidatorAdmission before left leftValue leftHeader)
+    (rightRelated : NaturalObjectRel before right rightValue rightHeader)
+    (rightAdmission : NaturalValidatorAdmission before right rightValue
+      rightHeader)
+    (valid : before.FrontierInvariant)
+    (allocatorRelated : ResidentAllocatorRel before store
+      allocator.frontierIndex)
+    (heapRelated : LiveHeapRel before witness runtime)
+    (scratchValid : initial.validIndex 17)
+    (leftLocal : initial.get 0 =
+      some (.i32 (UInt32.ofNat left.value)))
+    (rightLocal : initial.get 1 =
+      some (.i32 (UInt32.ofNat right.value)))
+    (oneProducer :
+      checkedNaturalAddResultCount leftHeader rightHeader leftValue rightValue =
+          1 →
+        ∃ after address resultStore,
+          allocateNatural before (leftValue + rightValue) =
+              .ok (after, address) ∧
+            ResidentMemoryRel after resultStore.mem ∧
+            Wasm.TerminatesWith env module sumInstallation.makeNaturalIndex store
+              [.i32 (unsignedSumHigh
+                (naturalFirstLimbWords leftValue).1
+                (naturalFirstLimbWords leftValue).2
+                (naturalFirstLimbWords rightValue).1
+                (naturalFirstLimbWords rightValue).2),
+               .i32 (unsignedSumLow
+                (naturalFirstLimbWords leftValue).1
+                (naturalFirstLimbWords rightValue).1)]
+              (fun final values =>
+                final = resultStore ∧
+                  values = [.i32 (UInt32.ofNat address.value)]))
+    (multiProducer :
+      checkedNaturalAddResultCount leftHeader rightHeader leftValue rightValue ≠
+          1 →
+        ∃ allocated result,
+          (checkedNaturalAddCount leftHeader rightHeader).toNat +
+              (checkedNaturalAddCarry leftHeader rightHeader leftValue
+                rightValue).toNat < 536870908 ∧
+            before.allocateObject .natural
+              (target.semanticSlotBytes *
+                ((checkedNaturalAddCount leftHeader rightHeader).toNat +
+                  (checkedNaturalAddCarry leftHeader rightHeader leftValue
+                    rightValue).toNat)) false
+              bigNaturalMarker
+                (UInt32.ofNat
+                  ((checkedNaturalAddCount leftHeader rightHeader).toNat +
+                    (checkedNaturalAddCarry leftHeader rightHeader leftValue
+                      rightValue).toNat)) 0 0 = .ok (allocated, result) ∧
+            allocated.heapCursor < wordModulus ∧
+            (allocated.heapCursor - 1) / wasmPageBytes + 1 ≤
+              store.memoryCap module 0) :
+    Wasm.wp module
+      (checkedNatAddFallbackProgram installation.validator.index
+        installation.magnitude.counts.magnitudeCountIndex
+        installation.carry.index
+        installation.magnitude.low.magnitudeIndex
+        installation.magnitude.high.magnitudeIndex sumInstallation.index
+        allocator.objectIndex writer.index)
+      (CheckedNaturalAddPost witness runtime (leftValue + rightValue) tail)
+      store { initial with values := tail } env := by
+  have prefixScratchValid : initial.validIndex 15 := by
+    unfold Wasm.Locals.validIndex at scratchValid ⊢
+    omega
+  obtain ⟨execution⟩ :=
+    installation.exists_checkedExecution_of_admissions
+      (env := env) (tail := tail) leftLocal rightLocal prefixScratchValid
+      allocatorRelated.toResidentMemoryRel valid leftRelated leftAdmission
+      rightRelated rightAdmission
+  have executionResultCountEq : execution.resultCount =
+      checkedNaturalAddResultCount leftHeader rightHeader leftValue rightValue := by
+    simpa [checkedNaturalAddResultCount, checkedNaturalAddCount,
+      checkedNaturalAddCarry] using
+      execution.resultCount_eq_ofNat
+  by_cases one :
+      checkedNaturalAddResultCount leftHeader rightHeader leftValue rightValue = 1
+  · obtain ⟨after, address, resultStore, allocated, afterMemoryRelated,
+        makeNaturalRun⟩ := oneProducer one
+    have executionOne : execution.resultCount = 1 :=
+      executionResultCountEq.trans one
+    obtain ⟨nextWitness, reference, extension, closurePersistence,
+        nextHeapRelated, nextMemoryRelated, referenceEq, correct⟩ :=
+      sumInstallation.wp_checkedNatAddFallbackProgram_one_of_installedAdmissions
+        installation execution executionOne leftRelated leftAdmission
+        rightRelated rightAdmission valid allocatorRelated.toResidentMemoryRel
+        heapRelated allocated afterMemoryRelated makeNaturalRun
+    apply Wasm.wp.conseq (h := correct)
+    intro continuation typedPost
+    exact ⟨after, nextWitness, address, reference, resultStore, extension,
+      closurePersistence, nextHeapRelated, nextMemoryRelated, referenceEq,
+      typedPost⟩
+  · obtain ⟨allocated, result, resultCountFits, allocation, strictEnd,
+        withinCap⟩ := multiProducer one
+    obtain ⟨writerStore, resultState, extension, closurePersistence,
+        nextHeapRelated, nextMemoryRelated, correct⟩ :=
+      writer.wp_checkedNatAddFallbackProgram_multi_of_installedAdmissions
+        installation allocator (naturalSumIndex := sumInstallation.index)
+        leftRelated leftAdmission rightRelated rightAdmission valid
+        allocatorRelated one resultCountFits allocation strictEnd withinCap
+        heapRelated scratchValid leftLocal rightLocal
+    have large : Fir.LeanIR.Impure.maxTaggedPayload <
+        leftValue + rightValue := by
+      have leftLarge := leftAdmission.heapBacked
+      omega
+    have literalEq := semanticLiteral_natural_heap_eq runtime
+      (leftValue + rightValue) large
+    apply Wasm.wp.conseq (h := correct)
+    intro continuation typedPost
+    refine ⟨resultState,
+      witness.bindNatural runtime.nextLocation result (leftValue + rightValue),
+      result, .heap runtime.nextLocation,
+      completedAddStore writerStore (UInt32.ofNat result.value)
+        (checkedNaturalAddCount leftHeader rightHeader).toNat
+        (checkedNaturalAddCarry leftHeader rightHeader leftValue rightValue),
+      extension, closurePersistence, ?_, nextMemoryRelated, ?_, typedPost⟩
+    · rw [literalEq]
+      exact nextHeapRelated
+    · rw [literalEq]
 
 /-- Source suffix of the checked multi-limb branch after allocation and limb
 writing have established the result in `raw`. -/
