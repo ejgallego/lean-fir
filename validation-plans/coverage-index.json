@@ -46,8 +46,8 @@
     "tiers": [
       {
         "id": "source-lcnf",
-        "minimumCases": 670,
-        "minimumComparisons": 670,
+        "minimumCases": 672,
+        "minimumComparisons": 672,
         "requiredBackends": [
           "lcnf",
           "native"
@@ -66,8 +66,8 @@
       },
       {
         "id": "wasm-v8",
-        "minimumCases": 670,
-        "minimumComparisons": 1340,
+        "minimumCases": 672,
+        "minimumComparisons": 1344,
         "requiredBackends": [
           "lcnf",
           "native",
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 679,
-      "minimumTierCases": 1349,
-      "minimumComparisons": 2019
+      "minimumUniqueCases": 681,
+      "minimumTierCases": 1353,
+      "minimumComparisons": 2025
     },
     "machine": {
-      "minimumCases": 679,
-      "minimumInterpreterSteps": 7632,
+      "minimumCases": 681,
+      "minimumInterpreterSteps": 7812,
       "requiredStaticForms": [
         "box",
         "cases",
@@ -517,6 +517,11 @@
       {
         "tier": "source-lcnf",
         "tag": "cached-array-dag",
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "cached-catch-release",
         "minimumCases": 2
       },
       {
@@ -987,6 +992,11 @@
       {
         "tier": "wasm-v8",
         "tag": "cached-array-dag",
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "cached-catch-release",
         "minimumCases": 2
       },
       {
@@ -1474,6 +1484,47 @@
           "shared-dag"
         ],
         "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "cache-catch-release-caught",
+        "allTags": [
+          "aggregate-release",
+          "cache",
+          "cached-catch-release",
+          "caught-error",
+          "recursive-release",
+          "repeated-child-alias",
+          "try-catch"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "cache-catch-release-pair",
+        "allTags": [
+          "alias-preservation",
+          "cache",
+          "cached-catch-release",
+          "except",
+          "repeated-child-alias",
+          "shared-dag",
+          "try-catch"
+        ],
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "cache-catch-release-success",
+        "allTags": [
+          "cache",
+          "cached-catch-release",
+          "path-exclusion",
+          "separate-release",
+          "success-path",
+          "try-catch"
+        ],
+        "minimumCases": 1
       },
       {
         "tier": "source-lcnf",
@@ -2543,6 +2594,47 @@
           "shared-dag"
         ],
         "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "cache-catch-release-caught",
+        "allTags": [
+          "aggregate-release",
+          "cache",
+          "cached-catch-release",
+          "caught-error",
+          "recursive-release",
+          "repeated-child-alias",
+          "try-catch"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "cache-catch-release-pair",
+        "allTags": [
+          "alias-preservation",
+          "cache",
+          "cached-catch-release",
+          "except",
+          "repeated-child-alias",
+          "shared-dag",
+          "try-catch"
+        ],
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "cache-catch-release-success",
+        "allTags": [
+          "cache",
+          "cached-catch-release",
+          "path-exclusion",
+          "separate-release",
+          "success-path",
+          "try-catch"
+        ],
+        "minimumCases": 1
       },
       {
         "tier": "wasm-v8",

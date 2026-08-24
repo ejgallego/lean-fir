@@ -2556,6 +2556,44 @@ def cachedSharedStringDagAcrossEffect
   let second := cachedSharedStringOwner
   (outside, marker, result, second)
 
+/-!
+Carry one cached String survivor across a caught `Except` error while the
+ignored error payload owns two more aliases of the same repeated child.
+The success path avoids constructing and recursively releasing that payload.
+-/
+structure CachedStringAliasError where
+  first : String
+  second : String
+  marker : Nat
+
+@[noinline]
+def cachedStringAliasAttempt
+    (throwing : Bool) (success first second : String) :
+    Except CachedStringAliasError String :=
+  if throwing then
+    .error { first, second, marker := 17 }
+  else
+    .ok success
+
+@[noinline]
+def recoverCachedStringAlias
+    (fallback : String) (attempt : Except CachedStringAliasError String) : String :=
+  match attempt.tryCatch (fun _ => .ok fallback) with
+  | .ok value => value
+  | .error _ => fallback
+
+@[noinline]
+def cachedSharedStringDagAcrossCatch
+    (throwing : Bool) : String × String × CachedSharedStringOwner :=
+  let cached := cachedSharedStringOwner
+  let aliases := makeTransientCachedStringAliases cached
+  let outside := aliases.left
+  let attempt := cachedStringAliasAttempt throwing aliases.right aliases.ignored aliases.right
+  let selected := recoverCachedStringAlias outside attempt
+  let result := String.Internal.append selected "!"
+  let second := cachedSharedStringOwner
+  (outside, result, second)
+
 /--
 Use a captured ByteArray for the final time before passing its outside alias to
 an ordered effect. The post-effect read observes the updated result.
@@ -3017,6 +3055,13 @@ private def cachedSharedStringDagAcrossEffectDatum
       .ctor "Prod.mk" 0 #[.string value.2.2.1,
         cachedSharedStringOwnerDatum value.2.2.2]]]
 
+private def cachedSharedStringDagAcrossCatchDatum
+    (value : String × String × Source.CachedSharedStringOwner) :
+    ValidationDatum :=
+  .ctor "Prod.mk" 0 #[.string value.1,
+    .ctor "Prod.mk" 0 #[.string value.2.1,
+      cachedSharedStringOwnerDatum value.2.2]]
+
 private def cachedSharedUInt8ArrayOwnerDatum
     (value : Source.CachedSharedUInt8ArrayOwner) : ValidationDatum :=
   .ctor "CachedSharedUInt8ArrayOwner.mk" 0
@@ -3284,6 +3329,10 @@ private def cachedSharedStringDagAcrossEffectSchema : ValidationSchema :=
   .ctor "Prod.mk" 0 #[.string,
     .ctor "Prod.mk" 0 #[.nat,
       .ctor "Prod.mk" 0 #[.string, cachedSharedStringOwnerSchema]]]
+
+private def cachedSharedStringDagAcrossCatchSchema : ValidationSchema :=
+  .ctor "Prod.mk" 0 #[.string,
+    .ctor "Prod.mk" 0 #[.string, cachedSharedStringOwnerSchema]]
 
 private def cachedSharedUInt8ArrayOwnerSchema : ValidationSchema :=
   .ctor "CachedSharedUInt8ArrayOwner.mk" 0
@@ -4130,6 +4179,24 @@ private def cachedSharedStringDagEffectTakenFormTrace : Array String :=
     "fap", "lit", "fap", "extern", "return", "join", "cases", "fap", "lit",
     "return", "inc", "fap", "extern", "jump", "inc", "ctor", "inc", "ctor",
     "inc", "ctor", "return"]
+
+private def cachedSharedStringDagCatchSuccessFormTrace : Array String :=
+  #["fap", "fap", "fap", "lit", "return", "fap", "lit", "return", "inc", "inc",
+    "ctor", "return", "inc", "return", "fap", "fap", "inc", "fap", "oproj",
+    "oproj", "join", "isShared", "cases", "inc", "inc", "dec", "jump", "inc",
+    "join", "cases", "ctor", "jump", "return", "return", "oproj", "oproj",
+    "oproj", "inc", "inc", "fap", "cases", "dec", "dec", "ctor", "return",
+    "fap", "cases", "oproj", "inc", "return", "dec", "fap", "lit", "return",
+    "fap", "extern", "inc", "ctor", "inc", "ctor", "return"]
+
+private def cachedSharedStringDagCatchErrorFormTrace : Array String :=
+  #["fap", "fap", "fap", "lit", "return", "fap", "lit", "return", "inc", "inc",
+    "ctor", "return", "inc", "return", "fap", "fap", "inc", "fap", "oproj",
+    "oproj", "join", "isShared", "cases", "inc", "inc", "dec", "jump", "inc",
+    "join", "cases", "ctor", "jump", "return", "return", "oproj", "oproj",
+    "oproj", "inc", "inc", "fap", "cases", "dec", "lit", "ctor", "ctor",
+    "return", "fap", "cases", "inc", "return", "dec", "fap", "lit", "return",
+    "fap", "extern", "inc", "ctor", "inc", "ctor", "return"]
 
 private def cachedSharedUInt8ArrayDagReuseSkippedFormTrace : Array String :=
   #["fap", "fap", "fap", "lit", "return", "fap", "lit", "fap", "lit", "fap",
@@ -5815,6 +5882,107 @@ private def preConversionCases : Array Case := #[
       resultSchema := some .nat }]
     provenance := firProvenance
       "Release one transient alias of a cached String DAG before an ordered effect, append through one survivor, and reuse the cache" },
+  { id := "cached-shared-string-dag-catch-success"
+    entry := ``Source.cachedSharedStringDagAcrossCatch
+    dependencies :=
+      #[``Source.cachedSharedStringOwner,
+        ``Source.makeTransientCachedStringAliases,
+        ``Source.cachedStringAliasAttempt,
+        ``Source.recoverCachedStringAlias]
+    args := #[.bool false]
+    argSchemas := #[.bool]
+    resultSchema := cachedSharedStringDagAcrossCatchSchema
+    native := fun _ => cachedSharedStringDagAcrossCatchDatum
+      (Source.cachedSharedStringDagAcrossCatch false)
+    tags := #["stress", "ownership", "persistent", "cache", "nullary-cache",
+      "recursive-persistence", "constructor", "object", "heap", "string",
+      "large-nat", "repeated-call", "cache-miss", "cache-hit", "initialization",
+      "alias", "shared", "repeated-alias", "repeated-child-alias",
+      "outside-alias", "alias-preservation", "shared-dag", "except",
+      "try-catch", "success-path", "transient-owner", "cached-catch-release",
+      "separate-release", "path-exclusion", "release-fidelity",
+      "copy-on-write", "mutation", "external"]
+    requiredLcnfForms :=
+      #["cases", "ctor", "dec", "extern", "fap", "inc", "isShared", "join",
+        "jump", "lit", "oproj", "oset", "return"]
+    requiredExecutedLcnfForms :=
+      #["cases", "ctor", "dec", "extern", "fap", "inc", "isShared", "join",
+        "jump", "lit", "oproj", "return"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "cases", minimum := 4, maximum := some 4 },
+        { form := "ctor", minimum := 5, maximum := some 5 },
+        { form := "dec", minimum := 4, maximum := some 4 },
+        { form := "extern", minimum := 1, maximum := some 1 },
+        { form := "fap", minimum := 11, maximum := some 11 },
+        { form := "inc", minimum := 12, maximum := some 12 },
+        { form := "isShared", minimum := 1, maximum := some 1 },
+        { form := "join", minimum := 2, maximum := some 2 },
+        { form := "jump", minimum := 2, maximum := some 2 },
+        { form := "lit", minimum := 3, maximum := some 3 },
+        { form := "oproj", minimum := 6, maximum := some 6 },
+        { form := "oset", minimum := 0, maximum := some 0 },
+        { form := "return", minimum := 10, maximum := some 10 }]
+    requiredExecutedLcnfFormTrace :=
+      some cachedSharedStringDagCatchSuccessFormTrace
+    requiredAdministrativeStepKinds := cachedHeapOwnerAdministrativeKinds
+    requiredExternals := #[``String.Internal.append]
+    requiredExecutedExternals := #[``String.Internal.append]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.append]
+    requiredExecutedExternalTrace := some #[``String.Internal.append]
+    provenance := firProvenance
+      "Take the successful cached-alias path, append through the selected survivor, and reuse the cache" },
+  { id := "cached-shared-string-dag-catch-error"
+    entry := ``Source.cachedSharedStringDagAcrossCatch
+    dependencies :=
+      #[``Source.cachedSharedStringOwner,
+        ``Source.makeTransientCachedStringAliases,
+        ``Source.cachedStringAliasAttempt,
+        ``Source.recoverCachedStringAlias]
+    args := #[.bool true]
+    argSchemas := #[.bool]
+    resultSchema := cachedSharedStringDagAcrossCatchSchema
+    native := fun _ => cachedSharedStringDagAcrossCatchDatum
+      (Source.cachedSharedStringDagAcrossCatch true)
+    tags := #["stress", "ownership", "persistent", "cache", "nullary-cache",
+      "recursive-persistence", "constructor", "object", "heap", "string",
+      "large-nat", "repeated-call", "cache-miss", "cache-hit", "initialization",
+      "alias", "shared", "repeated-alias", "repeated-child-alias",
+      "outside-alias", "alias-preservation", "shared-dag", "except",
+      "try-catch", "caught-error", "transient-owner", "recursive-release",
+      "aggregate-release", "cached-catch-release", "alias-multiplicity-three",
+      "release", "release-fidelity",
+      "copy-on-write", "mutation", "external"]
+    requiredLcnfForms :=
+      #["cases", "ctor", "dec", "extern", "fap", "inc", "isShared", "join",
+        "jump", "lit", "oproj", "oset", "return"]
+    requiredExecutedLcnfForms :=
+      #["cases", "ctor", "dec", "extern", "fap", "inc", "isShared", "join",
+        "jump", "lit", "oproj", "return"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "cases", minimum := 4, maximum := some 4 },
+        { form := "ctor", minimum := 6, maximum := some 6 },
+        { form := "dec", minimum := 3, maximum := some 3 },
+        { form := "extern", minimum := 1, maximum := some 1 },
+        { form := "fap", minimum := 11, maximum := some 11 },
+        { form := "inc", minimum := 12, maximum := some 12 },
+        { form := "isShared", minimum := 1, maximum := some 1 },
+        { form := "join", minimum := 2, maximum := some 2 },
+        { form := "jump", minimum := 2, maximum := some 2 },
+        { form := "lit", minimum := 4, maximum := some 4 },
+        { form := "oproj", minimum := 5, maximum := some 5 },
+        { form := "oset", minimum := 0, maximum := some 0 },
+        { form := "return", minimum := 10, maximum := some 10 }]
+    requiredExecutedLcnfFormTrace :=
+      some cachedSharedStringDagCatchErrorFormTrace
+    requiredAdministrativeStepKinds := cachedHeapOwnerAdministrativeKinds
+    requiredExternals := #[``String.Internal.append]
+    requiredExecutedExternals := #[``String.Internal.append]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.append]
+    requiredExecutedExternalTrace := some #[``String.Internal.append]
+    provenance := firProvenance
+      "Catch and discard a two-alias cached String error payload, reuse the retained survivor, append, and reread the cache" },
   { id := "cached-shared-uint8-array-dag-reuse-skipped"
     entry := ``Source.cachedSharedUInt8ArrayDagReuse
     dependencies := #[``Source.cachedSharedUInt8ArrayOwner]
