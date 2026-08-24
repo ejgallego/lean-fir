@@ -37,8 +37,10 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `W7-W6-20260822-002`; the prior release refinement remains independently open
   in `W7-W6-20260822-001`. The accepted post-pass does not yet reduce the
   all-target lowering time and makes no runtime-speed claim.
-- Current early-lowering candidate: local main is `6c1eca68`; W7 functional
-  commit `262ca200` and tracked head `7f1178c9` select the exact retained
+- Current early-lowering candidate: W7's tested candidate base remains
+  `6c1eca68`; current local main is `6331e285` after two independent
+  fixture-only stacks. W7 functional commit `262ca200` and tracked head
+  `7f1178c9` select the exact retained
   declaration array before closure dispatch lowering while leaving generic
   opaque ingress unchanged. The exact combined repository gate passes 717
   unique cases and 2,133/2,133 comparisons. Talos builds 3,171 of 3,172
@@ -46,7 +48,8 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `ConcreteClosureDispatch.instructions_compileClosureDispatch` remains
   hard-coded to all declarations. Request `W7-W6-20260823-008` pins equivalent
   pre-constructor functional commit `108ddeda`; the accepted constructor bridge
-  changes no premise or signature. Integration will validate and land
+  and later fixture stacks change no premise or signature. Integration will
+  rebase and validate the pair together, then land
   the generation/proof pair atomically, then regenerate prettyM and lean-zip
   consumer contracts separately. No helper signature, concrete layout,
   semantic ABI, ownership contract, or generic lowering contract changes.
