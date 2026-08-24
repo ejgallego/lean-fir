@@ -38,9 +38,10 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   in `W7-W6-20260822-001`. The accepted post-pass does not yet reduce the
   all-target lowering time and makes no runtime-speed claim.
 - Current early-lowering candidate: W7's tested candidate base remains
-  `6c1eca68`; current accepted code head is `be006055` after the independent
-  fixture, coordination-refresh, `Nat.shiftRight` caller, and checked-Nat
-  proof stacks. W7 functional commit `262ca200` and tracked head
+  `6c1eca68`; current accepted code head is `35e02e76` after the independent
+  fixture, coordination-refresh, `Nat.shiftRight` caller, checked-Nat proof,
+  and self-tail-fidelity stacks. W7 functional commit `262ca200` and tracked
+  head
   `7f1178c9` select the exact retained
   declaration array before closure dispatch lowering while leaving generic
   opaque ingress unchanged. The exact combined repository gate passes 717
@@ -279,6 +280,24 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   Talos jobs. This is fixture, observation, telemetry, and coverage-policy work
   only; it changes no `Except` semantics, interpreter, proof, generator,
   runtime, layout, ABI, helper, or artifact contract. Bug cards: none.
+- Independent cached self-tail fixture integration: test-fixtures functional
+  head `49a39129` is accepted through clean tracked head `35e02e76` on exact
+  base `e793990f`. Both cases retain an outside alias and a cached aggregate
+  with two references to the same String child, carry the survivor through
+  zero or three self-tail state transfers, append through the returned value,
+  and reread the nullary cache. The zero-tail trace executes exactly 92 steps
+  with no object-set or `Nat.sub`; the three-tail trace executes exactly 183
+  steps with six object sets, four scalar sets, twelve object projections,
+  four scalar projections, six decrements, and four `isShared` tests. The
+  rebased gate passes 714 source native/LCNF cases, 2,142 three-way results,
+  1,428/1,428 semantic-Wasm products and native witnesses, 723 unique cases,
+  2,151/2,151 policy comparisons, 8,565 machine steps, all 192 tag and 289
+  conjunctive-domain floors, and all 3,172 Talos jobs. This is fixture,
+  observation, exact telemetry, coverage-policy, and roadmap work only; it
+  changes no self-tail lowering, recursive release, interpreter, proof,
+  generator, concrete layout, runtime, ABI, helper, or artifact contract.
+  Bug cards: none. S18 non-tail unwind dominance is the fixture lane's
+  independent follow-up after this acceptance.
 - Independent consumer refresh: the Verso HTML source pin and package are
   accepted at `4ee28dd6` and `c88e4a54`. The package compiles clean Verso
   commit `970b071b73adc6e68c6de00bc183460f76d97731`, exact
