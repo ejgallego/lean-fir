@@ -15,11 +15,12 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Active integration lease
 
-- Milestone: `W7-CLOSED-CLOSURE-DISPATCH`, generation linked/accepted; early
-  lowering and its proof-visible premise queued for W6 review.
-- Integration owner: `wasm-gen`, accepting the opt-in finite closure-target
-  package boundary while W6 continues its independent checked-Nat and release
-  refinements.
+- Milestone: `W7-CLOSED-CLOSURE-CONSUMERS`; the early lowering and its W6
+  refinement are linked/accepted, and prettyM/lean-zip consumer ratchets are
+  the remaining publication step.
+- Integration owner: `wasm-gen`, regenerating consumer contracts from the
+  accepted finite closure-target package boundary while W6 returns to its
+  independent proof backlog.
 - Lean-zip performance lane: `lean-zip-perf` is the narrow successor to the
   existing W7-2 optimization role, using `perf/lean-zip-loop` in
   `.worktrees/lean-zip-perf`. It profiles one immutable accepted package,
@@ -45,26 +46,31 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `W7-W6-20260822-002`; the prior release refinement remains independently open
   in `W7-W6-20260822-001`. The accepted post-pass does not yet reduce the
   all-target lowering time and makes no runtime-speed claim.
-- Current early-lowering candidate: W7's tested candidate base is
-  `d113b550`; current accepted code before this board synthesis is `3414c41c`
-  after the independent checked-Nat, fixture, and runtime-hotspot stacks. W7
-  functional commit `5064d7cb` and clean tracked head `a0e7d161` select the
-  exact retained declaration array before closure dispatch lowering while leaving generic
-  opaque ingress unchanged. On that exact branch, `make check` passes 723
-  unique cases and 2,151/2,151 comparisons; the complete deterministic W7
-  artifact gate passes and regenerates byte-identical 79,002-byte plain and
-  82,370-byte styled prettyM modules. Talos builds 3,171 of 3,172 targets;
-  only W6-owned
-  `ConcreteClosureDispatch.instructions_compileClosureDispatch` remains
-  hard-coded to all declarations. Request `W7-W6-20260823-008` pins equivalent
-  pre-constructor functional commit `108ddeda`; the accepted constructor bridge
-  and later fixture/runtime stacks change no premise or signature. W6's
-  independent installed Natural-add checkpoint is accepted through `69aff0c7`.
-  W6 has claimed the closure proof in `W7-W6-20260823-008`; integration will
-  first rebase W7 onto current main, then validate and land
-  the generation/proof pair atomically, then regenerate prettyM and lean-zip
-  consumer contracts separately. No helper signature, concrete layout,
-  semantic ABI, ownership contract, or generic lowering contract changes.
+- Accepted early-lowering generation/proof pair: W7 functional head
+  `df721ad6`, proof-visible production surface `94108ba0`, and W6 functional
+  proof `75b33caf` are accepted through clean tracked proof head `d12704d4`;
+  current W7 lane status is `a2e1ccf2`. Closed packages select the exact
+  retained declaration array before closure-dispatch lowering. The generic
+  `none` path and ordinary `lower`/`lowerDecl` entry points still use every
+  program declaration. W6 proves both admission facts required by restricted
+  lowering: every selected declaration belongs to the source program, and the
+  declaration reached by the current closed-ingress closure belongs to the
+  selected table. The proofs unfold the actual production traversal rather
+  than a duplicate model. Forced elaboration exposed and fixed
+  `FIR-BUG-wasm-none-selected-lowering-proof-surface`; the permanent regression
+  rebuilds all three affected proof modules directly. `make check` passes 724
+  unique cases and 2,154/2,154 comparisons; the complete deterministic W7
+  artifact gate passes; the forced W6 cone passes 3,118 jobs and all 3,172
+  Talos targets pass. On the exact accepted runtime stack, plain prettyM is
+  80,100 bytes with SHA-256
+  `503fdfcb1c69986d0ad0b125bd0adfbed6d690c05e950250c1bcf8dd7a0afa1a`,
+  and styled prettyM is 83,468 bytes with SHA-256
+  `9bd9a8745b2da2cf15e67a28d6ad908d6d8ffc854dd52d159b19c95dea575ce8`;
+  each is exactly 1,897 bytes smaller than its all-target current-runtime
+  counterpart and retains 314 final functions. No helper signature, concrete
+  layout, semantic ABI, ownership contract, or generic lowering contract
+  changed. Consumer package contracts and canonical pointers have not yet
+  advanced.
 - Independent integration maintenance: the provider-neutral external-tooling
   CI contract is accepted at `88ca108e`. `make tooling-check` now fails closed
   outside the supported Node 22/24 LTS matrix, retains the exact pinned
