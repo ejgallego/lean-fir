@@ -46,10 +46,10 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   in `W7-W6-20260822-001`. The accepted post-pass does not yet reduce the
   all-target lowering time and makes no runtime-speed claim.
 - Current early-lowering candidate: W7's tested candidate base is
-  `d113b550`; current accepted code head is `81e708b4` after the independent
-  checked-Nat, self-tail, and non-tail-fidelity stacks. W7 functional commit
-  `5064d7cb` and clean tracked head `a0e7d161` select the exact retained
-  declaration array before closure dispatch lowering while leaving generic
+  `d113b550`; current accepted code before this board synthesis is `3414c41c`
+  after the independent checked-Nat, fixture, and runtime-hotspot stacks. W7
+  functional commit `5064d7cb` and clean tracked head `a0e7d161` select the
+  exact retained declaration array before closure dispatch lowering while leaving generic
   opaque ingress unchanged. On that exact branch, `make check` passes 723
   unique cases and 2,151/2,151 comparisons; the complete deterministic W7
   artifact gate passes and regenerates byte-identical 79,002-byte plain and
@@ -58,9 +58,9 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `ConcreteClosureDispatch.instructions_compileClosureDispatch` remains
   hard-coded to all declarations. Request `W7-W6-20260823-008` pins equivalent
   pre-constructor functional commit `108ddeda`; the accepted constructor bridge
-  and later fixture stacks change no premise or signature. W6 has separately
-  produced the outer Natural-add dispatcher candidate and must publish its
-  rebased handoff before starting this closure proof. Integration will rebase
+  and later fixture/runtime stacks change no premise or signature. W6 has
+  separately produced the outer Natural-add dispatcher candidate and must
+  publish its rebased handoff before starting this closure proof. Integration will rebase
   and validate the pair together, then land
   the generation/proof pair atomically, then regenerate prettyM and lean-zip
   consumer contracts separately. No helper signature, concrete layout,
@@ -194,6 +194,26 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   helper signature, semantic ABI, concrete layout, ownership contract, or
   shared runtime contract changed. W6 proof adaptation is queued on the final
   rebased head in `W72-W6-20260824-002`.
+- Independent runtime-hotspot integration: W7-2 functional head `90238432` is
+  replayed without conflicts as `571bc5aa` on exact integration base
+  `88b8e60d`, followed by the reviewed lean-zip ratchet `127e0b23` and evidence
+  head `3414c41c`. Generic call-site rewrites keep tagged `Nat.add`, `Nat.mod`,
+  and `Nat.land` pairs allocation-free; overflow and every mixed/heap case
+  reconstruct the original stack and enter the unchanged complete helper.
+  Trusted exclusive `Array.set` replaces and releases the old element in
+  place, while persistent/shared Arrays retain the checked copy fallback.
+  Public checked helpers, resident signatures, concrete layout, ownership ABI,
+  arbitrary-precision behavior, and source semantics are unchanged; no
+  lean-zip declaration name appears in the implementation. Dedicated
+  zero-import Wasm fixtures cover immediate and fallback Nat branches plus
+  unique/shared Array branches. Integration `make check` passes 724 unique
+  cases and 2,154/2,154 comparisons; all 3,178 Talos targets and the complete
+  deterministic artifact gate pass. The exact source-lane lean-zip preview has
+  504 final functions, zero imports, is 454,918 bytes, and has SHA-256
+  `4d64964ae5ab68d1c5352f037d392add796af8f6c96f9ec77a4a27bf0a297852`.
+  Eight balanced level-6 pairs improve 8/8, from a 79.46 ms median to 54.20 ms
+  (31.8%), while the module grows 11.63%; both tradeoffs remain explicit.
+  W6 proof review is separate in `W72-W6-20260824-003`. Bug cards: none.
 - Independent checked Nat-add proof integration: W6 functional head
   `b9f96699` is accepted through clean tracked head `be006055` on exact base
   `e367c3ce`. `NaturalValidatorAdmission` strengthens the concrete live-Nat
