@@ -38,8 +38,9 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   in `W7-W6-20260822-001`. The accepted post-pass does not yet reduce the
   all-target lowering time and makes no runtime-speed claim.
 - Current early-lowering candidate: W7's tested candidate base remains
-  `6c1eca68`; current local main is `6331e285` after two independent
-  fixture-only stacks. W7 functional commit `262ca200` and tracked head
+  `6c1eca68`; current local main is `6ec3e526` after the independent fixture,
+  coordination-refresh, and `Nat.shiftRight` caller stacks. W7 functional
+  commit `262ca200` and tracked head
   `7f1178c9` select the exact retained
   declaration array before closure dispatch lowering while leaving generic
   opaque ingress unchanged. The exact combined repository gate passes 717
@@ -161,6 +162,27 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   directionally favorable in 6/8 with a -3.94 ms paired median, not a stable
   workload claim. W6's separate caller proof audit is open in
   `W72-W6-20260823-004`.
+- Independent Nat shift integration: W7-2's upstream-shaped
+  `Nat.shiftRight` caller branch is accepted at `6ec3e526` on exact base
+  `9f53aca1`. Two tagged operands are unboxed at the compiled call site;
+  counts below 32 use `i32.shr_u`, while counts at least 32 return tagged zero
+  before Wasm can apply its modulo-32 count semantics. Every mixed or heap
+  pair enters the unchanged complete `fir_ext_Nat_shiftRight` fallback. A
+  durable zero-import resident artifact executes an actually rewritten caller
+  at counts 0, 1, 30, 31, 32, and 33 with the maximum immediate payload,
+  checking exact tagged result words and a flat frontier; the four multi-limb
+  corpus cases retain cold-fallback coverage. The exact lean-zip package has
+  769 captured declarations, 630 source functions, 830 resident helpers, 504
+  final functions, zero imports, and a 407,516-byte complete module with
+  SHA-256
+  `afa4b51dd1e2cbe2e8ddaacc9326c7f0c40ed4b6f29d14ff171f504fdaf90cd6`.
+  Eight balanced experiment pairs improve 8/8 with a -9.5% median and a flat
+  9,237,304-byte frontier; this remains workload evidence rather than a
+  universal timing claim. Integration independently repeated `make check`,
+  all 3,172 Talos jobs, and the complete deterministic W7 artifact gate. No
+  helper signature, semantic ABI, concrete layout, ownership contract, or
+  shared runtime contract changed. W6 proof adaptation is queued on the final
+  rebased head in `W72-W6-20260824-002`.
 - Independent constructor integration: W7-1's sparse initialization is
   accepted at `64866288`. Constructor helpers now overwrite the eight header
   words and low object-slot words directly, while zeroing exactly the
