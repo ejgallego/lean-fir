@@ -512,6 +512,68 @@ theorem wp_immediateNaturalPairDispatch
   · funext continuation
     cases continuation <;> rfl
 
+/-- Once the physical pair test is known false, the common dispatcher selects
+the fallback and restores the caller's operand tail at the control boundary.
+The proof is operation-independent and complements
+`wp_immediateNaturalPairDispatch`; semantic clients need only establish the
+exact zero result of their representation's low-bit test. -/
+theorem wp_immediateNaturalPairDispatch_fallback
+    {module : Wasm.Module} {env : Wasm.HostEnv α}
+    {Q : Wasm.Assertion α} {store : Wasm.Store α} {locals : Wasm.Locals}
+    {leftIndex rightIndex : Nat} {leftWord rightWord : Word32}
+    {tail : List Wasm.Value} {immediate fallback rest : Wasm.Program}
+    (leftLocal : locals.get leftIndex =
+      some (.i32 (UInt32.ofNat leftWord.value)))
+    (rightLocal : locals.get rightIndex =
+      some (.i32 (UInt32.ofNat rightWord.value)))
+    (pairTestZero :
+      (UInt32.ofNat leftWord.value &&& 1) &&&
+          (UInt32.ofNat rightWord.value &&& 1) = 0)
+    (fallbackCorrect : Wasm.wp module fallback
+      (fun continuation => match continuation with
+        | .Fallthrough nextStore nextLocals =>
+            Wasm.wp module rest Q nextStore
+              { nextLocals with values := tail } env
+        | .Break 0 nextStore nextLocals =>
+            Wasm.wp module rest Q nextStore
+              { nextLocals with values := tail } env
+        | .Break (level + 1) nextStore nextLocals =>
+            Q (.Break level nextStore nextLocals)
+        | other => Q other)
+      store { locals with values := tail } env) :
+    Wasm.wp module
+      (immediateNaturalPairDispatch leftIndex rightIndex immediate fallback ++
+        rest) Q store { locals with values := tail } env := by
+  have leftLocal' : ({ locals with values := tail } : Wasm.Locals).get
+      leftIndex = some (.i32 (UInt32.ofNat leftWord.value)) := by
+    simpa using leftLocal
+  have rightLocal' : ({ locals with values :=
+      (Wasm.Value.i32 (1 &&& UInt32.ofNat leftWord.value) :: tail) } :
+      Wasm.Locals).get rightIndex =
+        some (.i32 (UInt32.ofNat rightWord.value)) := by
+    simpa using rightLocal
+  unfold immediateNaturalPairDispatch
+  rw [List.append_assoc]
+  simp only [immediateNaturalPairTest, List.cons_append, List.nil_append,
+    Wasm.wp_localGet_cons, leftLocal', Wasm.wp_const_cons, Wasm.wp_and_cons,
+    rightLocal']
+  have selected :
+      (1 &&& UInt32.ofNat rightWord.value) &&&
+          (1 &&& UInt32.ofNat leftWord.value) = 0 := by
+    have reordered :
+        (1 &&& UInt32.ofNat rightWord.value) &&&
+            (1 &&& UInt32.ofNat leftWord.value) =
+          (UInt32.ofNat leftWord.value &&& 1) &&&
+            (UInt32.ofNat rightWord.value &&& 1) := by
+      bv_decide
+    rw [reordered, pairTestZero]
+  rw [selected]
+  apply Wasm.wp_iff_cons (c := (0 : UInt32)) (vs := tail) rfl
+  convert fallbackCorrect using 1
+  · simp
+  · funext continuation
+    cases continuation <;> rfl
+
 end ResidentPrimitives
 
 end FirTalos.Concrete
