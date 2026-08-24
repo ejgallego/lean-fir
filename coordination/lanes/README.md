@@ -14,6 +14,7 @@ the schema below here before integration.
 | File | Owner | Branch |
 |---|---|---|
 | `wasm-gen.md` | wasm-gen | `wasm/generation` |
+| `lean-zip-perf.md` | lean-zip-perf | `perf/lean-zip-loop` |
 | `wasm-proof.md` | wasm-proof | `wasm/talos-runtime` |
 | `lcnf-proof.md` | lcnf-proof | `proof/simpcase` |
 | `test-fixtures.md` | test-fixtures | `validation/closure-ownership-fixtures` |
@@ -21,6 +22,11 @@ the schema below here before integration.
 The integration owner may create the initial records for a milestone. After
 that bootstrap, each owner edits only its own file. Mailbox updates are normal
 commits on the lane branch; agents never edit `coordination/BOARD.md`.
+
+`lean-zip-perf` is the narrowly scoped successor to the W7-2 optimization
+role. It runs one lean-zip experiment at a time and records a tracked handoff
+only for a measured winner. `wasm-gen` retains stable generator ownership and
+grants any required W7 implementation-file lease explicitly.
 
 ## Record schema
 

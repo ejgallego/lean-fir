@@ -20,6 +20,14 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 - Integration owner: `wasm-gen`, accepting the opt-in finite closure-target
   package boundary while W6 continues its independent checked-Nat and release
   refinements.
+- Lean-zip performance lane: `lean-zip-perf` is the narrow successor to the
+  existing W7-2 optimization role, using `perf/lean-zip-loop` in
+  `.worktrees/lean-zip-perf`. It profiles one immutable accepted package,
+  tests one candidate at a time, discards losers after focused evidence, and
+  hands only a measured winner to `wasm-gen` for the complete gate and
+  integration. It owns lean-zip-specific benchmark and package evidence;
+  shared W7 implementation files require an explicit non-overlapping lease.
+  Only accepted winners open W6 refinement requests. No shared contract changes.
 - Current checkpoint: W7's generic implementation is accepted at `e05cbc80`,
   lean-zip package ratchets at `d97fb643`, and tracked handoff at `ee1f3e2d`.
   Data-only package boundaries collect the exact targets allocated by

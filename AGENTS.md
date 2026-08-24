@@ -12,6 +12,9 @@ These rules apply to every agent and worktree in this repository.
   `.worktrees/wasm-talos`.
 - W7 resident-runtime generation work uses branch `wasm/generation` in
   `.worktrees/wasm-generation`.
+- Lean-zip performance work uses branch `perf/lean-zip-loop` in
+  `.worktrees/lean-zip-perf`. This is the existing W7-2 optimization role under
+  a narrower name; it is not a second general generation lane.
 - Before editing, run `git status --short --branch` and confirm that the branch
   and worktree match the assigned track.
 - Keep `.lake`, `.beam`, and `.deps` local to each worktree. Do not symlink or
@@ -42,6 +45,11 @@ These rules apply to every agent and worktree in this repository.
   `integration/talos/artifact/`, and W7-specific bug cards. W7 supplies
   executable helpers and acceptance artifacts; it does not claim their W6
   refinement theorems.
+- The lean-zip performance lane owns lean-zip-specific benchmarks, package
+  ratchets, and performance evidence under `integration/lean-zip/`. Manifests
+  remain integration-owned. The lane has no standing ownership of
+  `Fir/Wasm/Emit/`; before an experiment edits a W7-owned implementation file,
+  `wasm-gen` grants a narrow non-overlapping file lease in the local mailbox.
 - The integration owner controls `Fir/LeanIR/Phase.lean`,
   `Fir/LeanIR/Runtime.lean`, `Fir/LeanIR/Interpreter.lean`,
   `Fir/LeanIR/PassCorrectness.lean`, shared examples, root umbrella modules,
@@ -128,6 +136,21 @@ A helper being generation-ready is deliberately distinct from its refinement
 theorem. Contract or signature changes return the helper to the contract queue;
 they do not silently invalidate proof work.
 
+## Lean-zip optimization loop
+
+The `lean-zip-perf` lane runs one experiment at a time from an immutable
+accepted package:
+
+1. profile and select one measured hotspot;
+2. implement one bounded candidate;
+3. run focused lean-zip differentials and balanced benchmarks;
+4. discard a loser, or hand a repeatable performance or size winner to
+   `wasm-gen` for the complete W7 gate and integration.
+
+`wasm-gen` remains the stable generation and integration owner. Experimental
+candidates do not open W6 proof requests. Only a winner accepted for generation
+integration creates its corresponding W6 refinement request.
+
 ## Integration cadence
 
 - Commit small, coherent, tested vertical slices.
@@ -148,6 +171,10 @@ they do not silently invalidate proof work.
   run in that worktree.
 - W7 artifact slices also run `bash integration/talos/artifact/check.sh`.
   Browser checks run through that script when `FIR_BROWSER` is set.
+- During the lean-zip optimization loop, a candidate may use focused
+  differentials and balanced benchmarks. A losing experiment may be discarded
+  without the full repository gates; a winner becomes a W7 artifact slice and
+  must pass every applicable check above before handoff.
 - Lean source edits use the repository's Lean Beam workflow during iteration;
   `lake build` remains the final dependency-cone check.
 - A failing proof, invariant, or differential test that may expose a semantic
