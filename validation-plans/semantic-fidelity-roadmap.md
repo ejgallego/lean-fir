@@ -771,18 +771,19 @@ callee returns. The cached String aggregate still executes six in-place
 object updates, four sharing checks, twelve increments, and five decrements.
 The complete form/external traces and counts are required.
 
-State: promoted candidate on `validation/closure-ownership-fixtures` from
-current main checkpoint `ff399c49`. Tracked Lean Beam update, sync, and save
-pass with zero diagnostics and save-ready source hash `a6a9d9e2a8b89647`.
-The tracked S17/S18/S19 native/LCNF/V8 comparison passes all nine edges with
-zero findings and opens all six Wasm products under strace. Coverage requires
-the direct-self-tail, retained-non-tail, and mutual-tail shape triad in both
-source and real-V8 tiers. Clean detached `make check` passes 716 source cases,
-2,148 three-way results, 1,432 products opened under strace, 725 aggregate
-unique cases, 2,157 equal policy comparisons, 8,799 source-machine steps, all
-208 tag and 297 conjunctive-domain floors, and zero findings. The detached
-3,178-job Talos cone also passes; tracked full validation and Talos gates
-follow promotion.
+State: ready for integration on `validation/closure-ownership-fixtures` from
+exact main checkpoint `a3eca661`, with functional head `1aeecb43`. Tracked
+post-rebase Lean Beam update, sync, and save pass with zero diagnostics and
+save-ready source hash `a6a9d9e2a8b89647`. The tracked S17/S18/S19 focused
+native/LCNF/V8 comparison passes all nine edges with zero findings and opens
+all six Wasm products under strace. Coverage requires the direct-self-tail,
+retained-non-tail, and mutual-tail shape triad in both source and real-V8
+tiers. Clean tracked `make check` passes 716 source cases, 2,148 three-way
+results, 1,432 products opened under strace, 725 aggregate unique cases, 2,157
+equal policy comparisons, 8,799 source-machine steps (8,959 including the
+direct-machine tier), all 208 tag and 297 conjunctive-domain floors, and zero
+findings. Tracked `make talos-setup` pins Talos `0e05edbc`; the complete
+3,172-job `make talos-check` cone also passes.
 
 ## Portfolio cadence
 
