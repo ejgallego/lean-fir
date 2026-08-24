@@ -1,4 +1,5 @@
 import Fir.Wasm.Emit.ResidentBigNumeric
+import Fir.Wasm.Emit.ResidentCallSite
 
 namespace Fir.Wasm.Emit.ResidentNatShift
 
@@ -22,6 +23,7 @@ inductive LinkError where
   | incompatibleExternal
   | incompatibleMemory
   | invalidOutput (error : SymbolicError)
+  | callSite (error : ResidentCallSite.Error)
 deriving Inhabited, Repr
 
 private def u32 (value : Nat) : UInt32 := UInt32.ofNat value
@@ -59,6 +61,10 @@ private def sourceIndexLocal : FVarId := ⟨`sourceIndex⟩
 private def scaledLocal : FVarId := ⟨`scaled⟩
 private def log2Loop : FVarId := ⟨`natLog2Loop⟩
 private def shiftWriteLoop : FVarId := ⟨`natShiftRightWriteLoop⟩
+private def inlineValueLocal : FVarId := ⟨`inlineNatShiftRightValue⟩
+private def inlineCountParamLocal : FVarId := ⟨`inlineNatShiftRightCountParam⟩
+private def inlineCountLocal : FVarId := ⟨`inlineNatShiftRightCount⟩
+private def inlineResultLocal : FVarId := ⟨`inlineNatShiftRightResult⟩
 
 private def retypeNatural : List Instruction := [
   .localSet rawLocal,
@@ -348,6 +354,82 @@ def log2Function : Function := {
     .localGet resultHighLocal,
     .call (.declaration ResidentNumeric.makeNaturalName)] ++ retypeNatural }
 
+private def boxImmediateRaw : List Instruction := [
+  .i64ExtendI32U .uint64,
+  .i64Const .uint64 1,
+  .i64Shl,
+  .i64Const .uint64 1,
+  .i64Or,
+  .i32WrapI64 .tagged]
+
+/--
+Upstream's `lean_nat_shiftr` is a static-inline two-scalar test around the
+arbitrary-precision `lean_nat_big_shiftr` fallback. The Wasm32 branch uses a
+32-bit word-width guard because Wasm resident object addresses and immediate
+Nat payloads occupy the 32-bit Lean object lane.
+-/
+private def shiftRightCallSiteRewrite : ResidentCallSite.Rewrite := {
+  target := .declaration declaration
+  locals := #[(inlineValueLocal, .tobject),
+    (inlineCountParamLocal, .tobject), (inlineCountLocal, .uint32),
+    (inlineResultLocal, .tobject)]
+  body := [
+    .localSet inlineCountParamLocal,
+    .localSet inlineValueLocal,
+    .localGet inlineValueLocal,
+    .i32Const .uint32 1,
+    .i32And,
+    .localGet inlineCountParamLocal,
+    .i32Const .uint32 1,
+    .i32And,
+    .i32And,
+    .ifElse [
+      .localGet inlineCountParamLocal,
+      .i32Const .uint32 1,
+      .i32ShrU,
+      .localSet inlineCountLocal,
+      .localGet inlineCountLocal,
+      .i32Const .uint32 32,
+      .i32LtU,
+      .ifElse
+        ([.localGet inlineValueLocal,
+          .i32Const .uint32 1,
+          .i32ShrU,
+          .localGet inlineCountLocal,
+          .i32ShrU] ++ boxImmediateRaw ++
+          [.localSet inlineResultLocal])
+        [.i32Const .tobject 1,
+          .localSet inlineResultLocal]
+    ] [
+      .localGet inlineValueLocal,
+      .localGet inlineCountParamLocal,
+      .call (.declaration helperName),
+      .localSet inlineResultLocal],
+    .localGet inlineResultLocal]
+}
+
+def callSiteRewrites : Array ResidentCallSite.Rewrite := #[
+  shiftRightCallSiteRewrite]
+
+#guard shiftRightCallSiteRewrite.locals == #[(inlineValueLocal, .tobject),
+  (inlineCountParamLocal, .tobject), (inlineCountLocal, .uint32),
+  (inlineResultLocal, .tobject)]
+
+private partial def containsInstruction (needle : Instruction) :
+    Instruction → Bool
+  | .block _ body | .loop _ body => body.any (containsInstruction needle)
+  | .ifElse thenBody elseBody =>
+      thenBody.any (containsInstruction needle) ||
+        elseBody.any (containsInstruction needle)
+  | instruction => instruction == needle
+
+#guard shiftRightCallSiteRewrite.body.any
+  (containsInstruction (.i32Const .uint32 32))
+#guard shiftRightCallSiteRewrite.body.any
+  (containsInstruction (.i32WrapI64 .tagged))
+#guard shiftRightCallSiteRewrite.body.any
+  (containsInstruction (.call (.declaration helperName)))
+
 private partial def rewriteInstruction : Instruction → Instruction
   | .call (.declaration candidate) =>
       if candidate == declaration then .call (.declaration helperName)
@@ -402,7 +484,11 @@ def internalizeAvailable (module : Module) (validate : Bool := true) :
     unless imports[0]!.signature == {
         params := #[.tobject], results := #[.tobject] } do
       throw .incompatibleExternal
-  let linkedFunctions := module.functions.map fun candidate =>
+  let callerRewrites := if needsShiftRight then callSiteRewrites else #[]
+  let callerRewritten ← module.functions.mapM fun candidate =>
+    ResidentCallSite.rewriteFunction callerRewrites candidate
+      |>.mapError LinkError.callSite
+  let linkedFunctions := callerRewritten.map fun candidate =>
     { candidate with body := candidate.body.map rewriteInstruction }
   let functions := if needsShiftRight then linkedFunctions.push function
     else linkedFunctions

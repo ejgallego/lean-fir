@@ -1024,6 +1024,22 @@ private def log2ExampleImport : Import := {
     params := #[LCNF.ImpureType.tobject]
     result := LCNF.ImpureType.tobject } }
 
+private def shiftRightCallerName : Name := `fir_example_Nat_shiftRightCaller
+
+/-- A real compiled caller retained by the resident artifact so the linker
+call-site rewrite is exercised by an external engine rather than only inspected
+as symbolic instructions. -/
+private def shiftRightCallerFunction : Function := {
+  name := shiftRightCallerName
+  params := #[(leftParam, .tobject), (rightParam, .tobject)]
+  results := #[.tobject]
+  locals := #[]
+  body := [
+    .localGet leftParam,
+    .localGet rightParam,
+    .call (.declaration ResidentNatShift.declaration),
+    .ret] }
+
 def residentExampleModule : Except String Module := do
   let module ← ResidentBigNumeric.residentExampleModule
   let module ← ResidentReferenceCount.internalizeIncrements module
@@ -1032,7 +1048,9 @@ def residentExampleModule : Except String Module := do
     |>.mapError fun error => s!"releases: {repr error}"
   let module := { module with
     imports := module.imports ++ externalDeclarations.map exampleImport ++
-      #[exampleImport ResidentNatShift.declaration, log2ExampleImport] }
+      #[exampleImport ResidentNatShift.declaration, log2ExampleImport]
+    functions := module.functions.push shiftRightCallerFunction
+    exports := Fir.Wasm.addUnique module.exports shiftRightCallerName }
   let module ← internalizeAvailable module
     |>.mapError fun error => s!"Nat arithmetic: {repr error}"
   ResidentNatShift.internalizeAvailable module
@@ -1045,19 +1063,31 @@ def manifest : Json := Json.mkObj [
   ("result", "tobject"),
   ("closureDispatch", Json.arr #[]),
   ("closureDescriptors", Json.arr #[]),
-  ("entries", Json.arr <| ((externalDeclarations.push ResidentNatShift.declaration).map
-      fun declaration =>
-    Json.mkObj [
-      ("entry", externalName declaration |>.toString),
-      ("params", Json.arr #["tobject", "tobject"]),
-      ("result", "tobject")]) |>.push <| Json.mkObj [
-        ("entry", ResidentNatShift.log2HelperName.toString),
-        ("params", Json.arr #["tobject"]),
-        ("result", "tobject")]),
+  ("entries", Json.arr <|
+    (((externalDeclarations.push ResidentNatShift.declaration).map
+        fun declaration =>
+      Json.mkObj [
+        ("entry", externalName declaration |>.toString),
+        ("params", Json.arr #["tobject", "tobject"]),
+        ("result", "tobject")]) |>.push <| Json.mkObj [
+          ("entry", ResidentNatShift.log2HelperName.toString),
+          ("params", Json.arr #["tobject"]),
+          ("result", "tobject")]) |>.push <| Json.mkObj [
+            ("entry", shiftRightCallerName.toString),
+            ("params", Json.arr #["tobject", "tobject"]),
+            ("result", "tobject")]),
   ("imports", Json.arr #[]),
   ("numericLimbBits", 64),
   ("walkerControl", "structured-loop"),
   ("status", "generation-only; W6 generic Nat contract proofs pending")]
+
+#guard match residentExampleModule with
+  | .ok module =>
+      match module.functions.find? (·.name == shiftRightCallerName) with
+      | some caller =>
+          caller.locals.size == 4 && caller.body != shiftRightCallerFunction.body
+      | none => false
+  | .error _ => false
 
 #guard match residentExampleModule with
   | .ok module => module.imports.isEmpty && module.runtimeOperations.isEmpty &&

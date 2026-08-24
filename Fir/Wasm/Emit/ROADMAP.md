@@ -461,6 +461,38 @@ all pass. These are exact code-shape and size results, not a runtime-speed
 claim. The future W6 resident-constructor implementation proof should target
 this scratch-free suffix; no stable concrete contract changed.
 
+### G1p. Inline the upstream `Nat.shiftRight` scalar branch (generation-ready)
+
+Upstream `lean_nat_shiftr` tests both Nat operands in its static-inline wrapper.
+Two immediate operands are unboxed and shifted directly; a count at least the
+machine word width returns zero, while any heap operand enters the complete
+arbitrary-precision fallback. FIR now reproduces that split at compiled call
+sites. The Wasm32 arm guards `count < 32` before `i32.shr_u`, avoiding Wasm's
+modulo-32 shift-count behavior. `fir_ext_Nat_shiftRight` remains unchanged and
+available for promoted, multi-limb, mixed, malformed, and public-helper calls.
+
+A durable zero-import resident Nat artifact probe covers an actual rewritten
+caller at counts 0, 1, 30, 31, 32, and 33 using the maximum immediate payload
+and exact tagged result words. The native/LCNF/V8 corpus retains its four
+multi-limb input/count cases, so both the caller arm and cold fallback have
+real-engine evidence. The exact lean-zip closure and final inventory remain
+769 captured declarations, 630 source functions, 830 resident helpers, 504
+final functions, and zero imports. The frontier grows from 724,108 to 730,514
+bytes and the complete module from 406,574 to 407,831 bytes (+0.31%) in the
+isolated before/after experiment. Rebased after the scratch-free constructor
+bridge, the combined ratcheted package is 728,808 frontier bytes and 407,516
+complete bytes.
+
+Two checked exact-release profiles move `fir_ext_Nat_shiftRight` from 290/320
+self samples and a 5.86% median Wasm-self share to zero samples in both
+candidates. The helper remains in the final artifact for heap fallbacks rather
+than being optimized away. Eight diagnostics-off AB/BA process pairs move the
+median of per-process medians from 175.34 ms (MAD 1.59) to 158.61 ms (MAD
+0.55), a 9.5% reduction; the paired median is -17.04 ms and all eight pairs
+improve. Exact compressed output and the flat 9,237,304-byte frontier remain
+unchanged. W6 proof review of the tagged-pair and word-width branches remains
+the separate acceptance boundary.
+
 ### G2. Separate production and diagnostic adapter costs (accepted)
 
 Finish the pending Illuminate selection-player request with an actually

@@ -67,6 +67,8 @@ export async function checkResidentNatArithmetic({ bytes, manifest }) {
   const frontier = exported(instance, "fir_heap_frontier");
   const shiftLeft = exported(instance, "fir_ext_Nat_shiftLeft");
   const shiftRight = exported(instance, "fir_ext_Nat_shiftRight");
+  const shiftRightCaller = exported(instance,
+    "fir_example_Nat_shiftRightCaller");
   const log2 = exported(instance, "fir_ext_Nat_log2");
   const apply = (operation, left, right) => naturalValue(host,
     operation(naturalInput(host, left), naturalInput(host, right)));
@@ -184,6 +186,24 @@ export async function checkResidentNatArithmetic({ bytes, manifest }) {
 
   const shiftValue = (1n << 521n) + (1n << 320n) +
     (1n << 129n) + 0x1234_5678_9abcn;
+  const maxImmediatePayload = 0x7fff_ffffn;
+  const maxImmediateInput = naturalInput(host, maxImmediatePayload);
+  assert.equal(host.classify(maxImmediateInput), "immediate");
+  assert.equal(maxImmediateInput >>> 0, 0xffff_ffff,
+    "maximum immediate Nat did not use the exact tagged word");
+  const immediateShiftFrontier = frontier() >>> 0;
+  for (const count of [0n, 1n, 30n, 31n, 32n, 33n]) {
+    const countInput = naturalInput(host, count);
+    assert.equal(host.classify(countInput), "immediate");
+    const actualWord = shiftRightCaller(maxImmediateInput, countInput) >>> 0;
+    const expectedPayload = count < 32n ? maxImmediatePayload >> count : 0n;
+    const expectedWord = Number(BigInt.asUintN(32,
+      (expectedPayload << 1n) | 1n));
+    assert.equal(actualWord, expectedWord,
+      `rewritten Nat.shiftRight caller raw word mismatch at count ${count}`);
+  }
+  assert.equal(frontier() >>> 0, immediateShiftFrontier,
+    "rewritten Nat.shiftRight immediate caller allocated");
   for (const [value, count] of [
     [0n, 65n],
     [1n, 0n],

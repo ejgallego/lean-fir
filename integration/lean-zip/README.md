@@ -356,6 +356,28 @@ from 697,558 to 724,108 bytes and the complete module from 396,588 to 406,574
 bytes (+2.52%). Exact compressed output and the flat 9,237,304-byte frontier
 remain unchanged.
 
+`Nat.shiftRight` now follows upstream's caller/cold-helper split as well. When
+both operands are tagged Nats, the compiled caller unboxes them and performs a
+direct Wasm32 shift. Counts at least 32 return tagged zero before reaching
+`i32.shr_u`; this guard is required because core Wasm otherwise reduces the
+count modulo 32. Any promoted, multi-limb, mixed, or malformed operand still
+enters the unchanged `fir_ext_Nat_shiftRight` helper.
+
+A durable zero-import resident Nat artifact probe passes an actual rewritten
+caller at counts 0, 1, 30, 31, 32, and 33 using the maximum tagged payload and
+exact raw result words, while the repository V8 corpus retains its four
+multi-limb fallback cases. Two checked exact-release profiles move the helper
+from 290/320 self samples and a 5.86% median Wasm-self share to no samples in
+either candidate profile; the helper remains present for cold heap fallbacks.
+Eight diagnostics-off AB/BA process pairs move the median of per-process
+medians from 175.34 ms (MAD 1.59) to 158.61 ms (MAD 0.55), a 9.5% reduction;
+the paired median is -17.04 ms and 8/8 pairs improve. The frontier grows from
+724,108 to 730,514 bytes and the complete module from 406,574 to 407,831 bytes
+(+0.31%) in the isolated experiment. After rebasing on the scratch-free
+constructor-result bridge, the combined ratcheted package is 728,808 frontier
+bytes and 407,516 complete bytes. Closure counts, exact compressed output, zero
+imports, and the flat 9,237,304-byte frontier remain unchanged.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not
