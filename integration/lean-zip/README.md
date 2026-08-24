@@ -398,6 +398,25 @@ and 504 final functions. All ten compression levels, native/Wasm differential
 checks, deterministic packaging, and persistent-cache/scratch reclamation
 remain exact.
 
+The typed-Nat follow-up moves `Nat.decLt`, saturating `Nat.sub`, and the
+non-overflowing arm of `Nat.mul` into those compiled callers. Each rewrite now
+registers its full semantic FIR signature, including distinctions such as
+`tobject`, `tagged`, `uint8`, and `usize`; the resident linker rejects missing,
+duplicate, or signature-incompatible registrations before rewriting, and the
+ordinary symbolic validator still checks every replacement body at its actual
+caller stack boundary. Heap, mixed, and multiplication-overflow cases retain
+the complete arbitrary-precision helpers.
+
+Eight order-balanced fresh-process pairs against the preceding hotspot package
+all improve on the seeded-random 256-KiB level-6 workload. The reported median
+of process medians moves from 64.12 ms to 52.55 ms, with a -11.16 ms paired
+median (about 18%). Two exact-release profiles remove the former `Nat.decLt`,
+`Nat.sub`, and `Nat.mul` helper frames, whose preceding median shares were
+4.48%, 4.12%, and 3.34%. The complete zero-import module grows from 454,918
+to 478,669 bytes and the frontier from 849,251 to 918,680 bytes. Exact output,
+all ten compression levels, and the flat 9,228,136-byte post-rewind frontier
+remain unchanged.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not

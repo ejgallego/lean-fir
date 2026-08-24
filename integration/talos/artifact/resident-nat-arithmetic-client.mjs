@@ -70,8 +70,11 @@ export async function checkResidentNatArithmetic({ bytes, manifest }) {
   const shiftRightCaller = exported(instance,
     "fir_example_Nat_shiftRightCaller");
   const addCaller = exported(instance, "fir_example_Nat_addCaller");
+  const subCaller = exported(instance, "fir_example_Nat_subCaller");
+  const decLtCaller = exported(instance, "fir_example_Nat_decLtCaller");
   const landCaller = exported(instance, "fir_example_Nat_landCaller");
   const modCaller = exported(instance, "fir_example_Nat_modCaller");
+  const mulCaller = exported(instance, "fir_example_Nat_mulCaller");
   const log2 = exported(instance, "fir_ext_Nat_log2");
   const apply = (operation, left, right) => naturalValue(host,
     operation(naturalInput(host, left), naturalInput(host, right)));
@@ -100,6 +103,47 @@ export async function checkResidentNatArithmetic({ bytes, manifest }) {
     "rewritten Nat.add overflow did not retain the heap fallback");
   assert.equal(naturalValue(host, promotedAdd), 0x8000_0000n,
     "rewritten Nat.add overflow fallback mismatch");
+
+  const arithmeticCallerFrontier = frontier() >>> 0;
+  for (const [left, right] of [
+    [0n, 0n],
+    [0n, 1n],
+    [52n, 17n],
+    [0x7fff_ffffn, 0x7fff_fffen],
+  ]) {
+    const leftInput = naturalInput(host, left);
+    const rightInput = naturalInput(host, right);
+    assert.equal(naturalValue(host, subCaller(leftInput, rightInput)),
+      left < right ? 0n : left - right,
+      `rewritten Nat.sub caller mismatch: ${left} - ${right}`);
+    assert.equal(decLtCaller(leftInput, rightInput), left < right ? 1 : 0,
+      `rewritten Nat.decLt caller mismatch: ${left} < ${right}`);
+  }
+  for (const [left, right] of [
+    [0n, 0x7fff_ffffn],
+    [1n, 0x7fff_ffffn],
+    [46340n, 46340n],
+  ]) {
+    const result = mulCaller(naturalInput(host, left), naturalInput(host, right));
+    assert.equal(host.classify(result), "immediate",
+      `rewritten Nat.mul caller promoted ${left} * ${right}`);
+    assert.equal(naturalValue(host, result), left * right,
+      `rewritten Nat.mul caller mismatch: ${left} * ${right}`);
+  }
+  assert.equal(frontier() >>> 0, arithmeticCallerFrontier,
+    "rewritten Nat.sub/decLt/mul immediate callers allocated");
+  assert.equal(apply(subCaller, (1n << 130n) + 9n, 1n << 129n),
+    (1n << 130n) - (1n << 129n) + 9n,
+    "rewritten Nat.sub heap fallback mismatch");
+  assert.equal(decLtCaller(naturalInput(host, 1n << 129n),
+    naturalInput(host, 1n << 130n)), 1,
+  "rewritten Nat.decLt heap fallback mismatch");
+  const promotedMul = mulCaller(naturalInput(host, 46341n),
+    naturalInput(host, 46341n));
+  assert.notEqual(host.classify(promotedMul), "immediate",
+    "rewritten Nat.mul overflow did not retain the heap fallback");
+  assert.equal(naturalValue(host, promotedMul), 46341n * 46341n,
+    "rewritten Nat.mul overflow fallback mismatch");
 
   const bitCallerFrontier = frontier() >>> 0;
   for (const [left, right] of [

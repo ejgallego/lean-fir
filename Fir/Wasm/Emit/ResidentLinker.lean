@@ -370,6 +370,9 @@ private def applyPersistentPlan (steps : Array Step) (module : Module) :
     match rewrite.target with
     | .declaration declaration => externalDeclarations.contains declaration
     | .runtime _ => false
+  ResidentCallSite.validateRewrites callSiteRewrites module
+    |>.mapError fun error =>
+      .manifest s!"invalid typed resident call-site rewrite: {repr error}"
   let plan : RewritePlan := { callRewrites, callSiteRewrites }
   let newFunctions := planned.functions.extract prefixSize planned.functions.size
   let rewrittenFunctions ← module.functions.mapM (rewriteFunctionBatch plan)

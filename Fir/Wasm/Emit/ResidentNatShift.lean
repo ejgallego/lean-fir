@@ -370,6 +370,7 @@ Nat payloads occupy the 32-bit Lean object lane.
 -/
 private def shiftRightCallSiteRewrite : ResidentCallSite.Rewrite := {
   target := .declaration declaration
+  signature := { params := #[.tobject, .tobject], results := #[.tobject] }
   locals := #[(inlineValueLocal, .tobject),
     (inlineCountParamLocal, .tobject), (inlineCountLocal, .uint32),
     (inlineResultLocal, .tobject)]
@@ -485,8 +486,8 @@ def internalizeAvailable (module : Module) (validate : Bool := true) :
         params := #[.tobject], results := #[.tobject] } do
       throw .incompatibleExternal
   let callerRewrites := if needsShiftRight then callSiteRewrites else #[]
-  let callerRewritten ← module.functions.mapM fun candidate =>
-    ResidentCallSite.rewriteFunction callerRewrites candidate
+  let callerRewritten ←
+    ResidentCallSite.rewriteModuleFunctions callerRewrites module
       |>.mapError LinkError.callSite
   let linkedFunctions := callerRewritten.map fun candidate =>
     { candidate with body := candidate.body.map rewriteInstruction }

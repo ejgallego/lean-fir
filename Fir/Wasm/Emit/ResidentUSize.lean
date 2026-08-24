@@ -338,6 +338,7 @@ private partial def instructionUsesMemory : Instruction → Bool
 
 private def ofNatCallSiteRewrite : ResidentCallSite.Rewrite := {
   target := .declaration `USize.ofNat
+  signature := { params := #[.tobject], results := #[.usize] }
   locals := #[(inlineOfNatLocal, .tobject),
     (inlineOfNatResultLocal, .usize)]
   body := [
@@ -359,6 +360,7 @@ private def ofNatCallSiteRewrite : ResidentCallSite.Rewrite := {
 
 private def toNatCallSiteRewrite : ResidentCallSite.Rewrite := {
   target := .declaration `USize.toNat
+  signature := { params := #[.usize], results := #[.tobject] }
   locals := #[(inlineToNatLocal, .usize),
     (inlineToNatResultLocal, .tobject)]
   body := [
@@ -474,8 +476,8 @@ def internalizeAvailable (module : Module) (validate : Bool := true) :
     match rewrite.target with
     | .declaration declaration => present.contains declaration
     | .runtime _ => false
-  let callerRewritten ← module.functions.mapM fun function =>
-    ResidentCallSite.rewriteFunction callerRewrites function
+  let callerRewritten ←
+    ResidentCallSite.rewriteModuleFunctions callerRewrites module
       |>.mapError LinkError.callSite
   let linkedFunctions := callerRewritten.map fun function =>
     { function with body := function.body.map (rewriteInstruction present) }

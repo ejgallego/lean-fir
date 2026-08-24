@@ -1252,6 +1252,9 @@ def setFunction : Function := setFunctionFor .checked .checked
 
 private def trustedSetCallSiteRewrite : ResidentCallSite.Rewrite := {
   target := .declaration `Array.set
+  signature := {
+    params := #[.erased, .object, .tobject, .tobject, .erased]
+    results := #[.object] }
   locals := #[(inlineSetErasedLocal, .erased),
     (inlineSetArrayLocal, .object), (inlineSetIndexParamLocal, .tobject),
     (inlineSetValueLocal, .tobject), (inlineSetIndexLocal, .uint32),
@@ -1705,8 +1708,8 @@ private def internalizeSelected (module : Module) (declarations : Array Name)
         | .declaration declaration => declarations.contains declaration
         | .runtime _ => false
     | _, _ => #[]
-  let callerRewritten ← module.functions.mapM fun function =>
-    ResidentCallSite.rewriteFunction callerRewrites function
+  let callerRewritten ←
+    ResidentCallSite.rewriteModuleFunctions callerRewrites module
       |>.mapError LinkError.callSite
   let linkedFunctions := callerRewritten.map fun function =>
     { function with body := function.body.map (rewriteInstruction declarations) }

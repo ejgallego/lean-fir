@@ -240,7 +240,7 @@ assert.deepEqual(functionOrigins, {
   "resident-helper": expectedClosure.releaseResidentHelpers,
 });
 assert.deepEqual(functionExports, [
-  { name: "fir_heap_frontier", index: 17 },
+  { name: "fir_heap_frontier", index: 18 },
   { name: "fir_heap_alloc", index: 21 },
   { name: "fir_heap_rewind", index: 499 },
   { name: "fir_heap_set_frontier", index: 500 },
