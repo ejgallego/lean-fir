@@ -219,6 +219,21 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   3,172 Talos jobs. This is fixture, observation, telemetry, and coverage-policy
   work only; it changes no interpreter, proof, generator, runtime, concrete
   layout, ABI, helper, or artifact contract. Bug cards: none.
+- Independent cached-catch-release fixture integration: test-fixtures
+  functional head `86857ebf` is accepted through clean tracked head
+  `75dd23c7` on exact base `67bfb3d0`. Both paths retain a cached String
+  survivor and reread the nullary cache after append. The success path avoids
+  the error aggregate and releases unused aliases separately; the caught path
+  constructs and discards an `Except` error whose payload owns two aliases of
+  the same repeated child, exercising recursive aggregate release across
+  `Except.tryCatch`. Exact 90-step traces distinguish five constructors, four
+  decrements, and six projections on success from six constructors, three
+  decrements, and five projections on error. The complete gate passes 721
+  unique cases, 2,145/2,145 comparisons, 8,290 machine steps, all 188 tag and
+  283 domain floors, 1,424/1,424 semantic-Wasm products opened, and all 3,172
+  Talos jobs. This is fixture, observation, telemetry, and coverage-policy work
+  only; it changes no `Except` semantics, interpreter, proof, generator,
+  runtime, layout, ABI, helper, or artifact contract. Bug cards: none.
 - Independent consumer refresh: the Verso HTML source pin and package are
   accepted at `4ee28dd6` and `c88e4a54`. The package compiles clean Verso
   commit `970b071b73adc6e68c6de00bc183460f76d97731`, exact
