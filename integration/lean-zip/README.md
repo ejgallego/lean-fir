@@ -417,6 +417,16 @@ to 478,669 bytes and the frontier from 849,251 to 918,680 bytes. Exact output,
 all ten compression levels, and the flat 9,228,136-byte post-rewind frontier
 remain unchanged.
 
+An immediate-`Nat.decLe` caller rewrite was evaluated on top of this package
+and rejected. It removed the sampled `fir_big_ext_Nat_decLe` frame, but eight
+order-balanced fresh-process pairs were neutral: the baseline and candidate
+medians were 45.24 ms and 45.36 ms, the paired median was +0.45 ms, and only
+4/8 pairs improved. The candidate also grew the complete module by 9,640 bytes
+and the frontier by 29,075 bytes. This negative result keeps target selection
+at the representative workload boundary: the next investigation is the
+dominant `Zip.Native.Deflate.lzMatchP` body and its ownership traffic, not
+further unprofiled comparison inlining.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not
