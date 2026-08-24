@@ -802,6 +802,24 @@ theorem limbSum_spec
   norm_num [UInt32.size] at lowValue highValue ⊢
   omega
 
+/-- The two-word `naturalSum` primitive is the zero-incoming-carry instance
+of the arbitrary-precision limb step.  If that limb step has no outgoing
+carry, both overflow guards in the generated scalar helper are false. -/
+theorem unsignedSum_eq_limbSum_zero
+    (leftLow leftHigh rightLow rightHigh : UInt32) :
+    unsignedSumLow leftLow rightLow =
+        limbSumLow leftLow rightLow 0 ∧
+      unsignedSumHigh leftLow leftHigh rightLow rightHigh =
+        limbSumHigh leftLow leftHigh rightLow rightHigh 0 ∧
+      (limbSumCarryOut leftLow leftHigh rightLow rightHigh 0 = 0 →
+        ¬ unsignedSumHighBase leftHigh rightHigh < leftHigh ∧
+        ¬ unsignedSumHigh leftLow leftHigh rightLow rightHigh <
+          unsignedSumCarry leftLow rightLow) := by
+  simp only [unsignedSumLow, unsignedSumHigh, unsignedSumCarry,
+    unsignedSumHighBase, limbSumLow, limbSumHigh, limbSumMiddleCarry,
+    limbSumCarryOut, wordAddWithCarry, wordAddCarryOut]
+  bv_decide
+
 /-! ### One installed scan-loop arithmetic step -/
 
 /-- Commutativity of wrapped wasm32 addition.  `UInt32` intentionally does
@@ -3016,6 +3034,193 @@ theorem checkedNaturalAddCount_toNat_of_admissions
         (naturalLimbs rightValue).length := by
   rw [checkedNaturalAddCount, checkedMaxCountWord_toNat,
     ← leftAdmission.limbCount, ← rightAdmission.limbCount]
+
+/-- A positive count plus a carry bit can encode the machine word one only
+as the exact mathematical pair `(1, 0)`.  The proof explicitly excludes the
+single possible wasm32 wrap point. -/
+theorem uint32_count_carry_eq_one
+    (count carry : UInt32) (carryBit : carry = 0 ∨ carry = 1)
+    (positive : 0 < count.toNat)
+    (one : UInt32.ofNat (count.toNat + carry.toNat) = 1) :
+    count.toNat = 1 ∧ carry = 0 := by
+  rcases carryBit with rfl | rfl
+  · have countEq : count = 1 := by
+      simpa only [UInt32.toNat_zero, Nat.add_zero, UInt32.ofNat_toNat] using one
+    exact ⟨congrArg UInt32.toNat countEq, rfl⟩
+  · have countLt : count.toNat < 4294967296 := by
+      simpa [UInt32.size] using count.toNat_lt
+    have decoded := congrArg UInt32.toNat one
+    norm_num [UInt32.toNat_ofNat, UInt32.size] at decoded
+    by_cases sumLt : count.toNat + 1 < 4294967296
+    · rw [Nat.mod_eq_of_lt sumLt] at decoded
+      omega
+    · have sumEq : count.toNat + 1 = 4294967296 := by omega
+      rw [sumEq, Nat.mod_self] at decoded
+      contradiction
+
+/-- Pure semantic content of selecting the checked one-limb result branch.
+
+Besides forcing a one-limb common count and zero final carry, the fact records
+the exact canonical operand limbs, both scalar overflow guards, and the Nat
+denoted by the low/high pair passed to `naturalSum`. -/
+structure CheckedNaturalAddOneLimbFacts
+    (leftValue rightValue : Nat) (leftHeader rightHeader : Header) : Prop where
+  countOne :
+    (checkedNaturalAddCount leftHeader rightHeader).toNat = 1
+  carryZero :
+    checkedNaturalAddCarry leftHeader rightHeader leftValue rightValue = 0
+  limbWitnesses : ∃ leftLimb rightLimb : UInt64,
+    naturalLimbs leftValue = [leftLimb] ∧
+    naturalLimbs rightValue = [rightLimb] ∧
+    ¬ unsignedSumHighBase (limbWordsOfUInt64 leftLimb).2
+        (limbWordsOfUInt64 rightLimb).2 < (limbWordsOfUInt64 leftLimb).2 ∧
+    ¬ unsignedSumHigh (limbWordsOfUInt64 leftLimb).1
+          (limbWordsOfUInt64 leftLimb).2
+          (limbWordsOfUInt64 rightLimb).1
+          (limbWordsOfUInt64 rightLimb).2 <
+        unsignedSumCarry (limbWordsOfUInt64 leftLimb).1
+          (limbWordsOfUInt64 rightLimb).1 ∧
+    leftValue + rightValue =
+      naturalWordsValue
+        (unsignedSumLow (limbWordsOfUInt64 leftLimb).1
+          (limbWordsOfUInt64 rightLimb).1)
+        (unsignedSumHigh (limbWordsOfUInt64 leftLimb).1
+          (limbWordsOfUInt64 leftLimb).2
+          (limbWordsOfUInt64 rightLimb).1
+          (limbWordsOfUInt64 rightLimb).2)
+
+/-- Canonical heap-Natural admissions turn the generated result-count test
+into the complete pure one-limb arithmetic fact above. -/
+theorem checkedNaturalAddResultCount_eq_one_facts
+    {state : MemoryState} {left right : Word32}
+    {leftValue rightValue : Nat} {leftHeader rightHeader : Header}
+    (leftAdmission : NaturalValidatorAdmission state left leftValue leftHeader)
+    (rightAdmission : NaturalValidatorAdmission state right rightValue
+      rightHeader)
+    (one :
+      checkedNaturalAddResultCount leftHeader rightHeader leftValue rightValue =
+        1) :
+    CheckedNaturalAddOneLimbFacts leftValue rightValue leftHeader
+      rightHeader := by
+  let count := checkedNaturalAddCount leftHeader rightHeader
+  let carry := checkedNaturalAddCarry leftHeader rightHeader leftValue
+    rightValue
+  let leftWords := paddedNaturalLimbWords count.toNat leftValue
+  let rightWords := paddedNaturalLimbWords count.toNat rightValue
+  have exactCount : count.toNat = max (naturalLimbs leftValue).length
+      (naturalLimbs rightValue).length := by
+    simpa [count] using
+      checkedNaturalAddCount_toNat_of_admissions leftAdmission rightAdmission
+  have leftFits : (naturalLimbs leftValue).length ≤ count.toNat := by
+    rw [exactCount]
+    exact Nat.le_max_left _ _
+  have rightFits : (naturalLimbs rightValue).length ≤ count.toNat := by
+    rw [exactCount]
+    exact Nat.le_max_right _ _
+  have leftLength : leftWords.length = count.toNat := by
+    exact paddedNaturalLimbWords_length leftFits
+  have rightLength : rightWords.length = count.toNat := by
+    exact paddedNaturalLimbWords_length rightFits
+  have carryBit : carry = 0 ∨ carry = 1 := by
+    have pureCarry :=
+      (addLimbWords_spec leftWords rightWords 0
+        (by rw [leftLength, rightLength]) (Or.inl rfl)).2
+    simpa [carry, checkedNaturalAddCarry, leftWords, rightWords] using pureCarry
+  have countPositive : 0 < count.toNat := by
+    have leftPositive : 0 < (naturalLimbs leftValue).length := by
+      cases limbsEq : naturalLimbs leftValue with
+      | nil => exact False.elim (naturalLimbs_ne_nil leftValue limbsEq)
+      | cons _ _ => simp
+    omega
+  obtain ⟨countOne, carryZero⟩ :=
+    uint32_count_carry_eq_one count carry carryBit countPositive (by
+      simpa [checkedNaturalAddResultCount, count, carry] using one)
+  have leftLengthLeOne : (naturalLimbs leftValue).length ≤ 1 := by
+    calc
+      _ ≤ count.toNat := leftFits
+      _ = 1 := countOne
+  have leftLengthOne : (naturalLimbs leftValue).length = 1 := by
+    have leftPositive : 0 < (naturalLimbs leftValue).length := by
+      cases limbsEq : naturalLimbs leftValue with
+      | nil => exact False.elim (naturalLimbs_ne_nil leftValue limbsEq)
+      | cons _ _ => simp
+    omega
+  have rightLengthOne : (naturalLimbs rightValue).length = 1 := by
+    have rightLengthLeOne : (naturalLimbs rightValue).length ≤ 1 := by
+      calc
+        _ ≤ count.toNat := rightFits
+        _ = 1 := countOne
+    have rightPositive : 0 < (naturalLimbs rightValue).length := by
+      cases limbsEq : naturalLimbs rightValue with
+      | nil => exact False.elim (naturalLimbs_ne_nil rightValue limbsEq)
+      | cons _ _ => simp
+    omega
+  obtain ⟨leftLimb, leftLimbs⟩ :=
+    List.length_eq_one_iff.mp leftLengthOne
+  obtain ⟨rightLimb, rightLimbs⟩ :=
+    List.length_eq_one_iff.mp rightLengthOne
+  let leftLimbWords := limbWordsOfUInt64 leftLimb
+  let rightLimbWords := limbWordsOfUInt64 rightLimb
+  have leftWordsEq : leftWords = [leftLimbWords] := by
+    simp [leftWords, countOne, paddedNaturalLimbWords, padLimbWords,
+      leftLimbs, leftLimbWords]
+  have rightWordsEq : rightWords = [rightLimbWords] := by
+    simp [rightWords, countOne, paddedNaturalLimbWords, padLimbWords,
+      rightLimbs, rightLimbWords]
+  have limbCarryZero :
+      limbSumCarryOut leftLimbWords.1 leftLimbWords.2 rightLimbWords.1
+        rightLimbWords.2 0 = 0 := by
+    change (addLimbWords leftWords rightWords 0).2 = 0 at carryZero
+    rw [leftWordsEq, rightWordsEq] at carryZero
+    simpa [addLimbWords] using carryZero
+  have bridges := unsignedSum_eq_limbSum_zero leftLimbWords.1
+    leftLimbWords.2 rightLimbWords.1 rightLimbWords.2
+  obtain ⟨highBaseNoOverflow, highCarryNoOverflow⟩ :=
+    bridges.2.2 limbCarryZero
+  have leftValueEq :
+      naturalWordsValue leftLimbWords.1 leftLimbWords.2 = leftValue := by
+    have represented := naturalLimbs_value leftValue
+    rw [leftLimbs] at represented
+    calc
+      naturalWordsValue leftLimbWords.1 leftLimbWords.2 =
+          limbWordsValue leftLimbWords := rfl
+      _ = leftLimb.toNat := by
+        simpa [leftLimbWords] using limbWordsValue_ofUInt64 leftLimb
+      _ = leftValue := by simpa [naturalLimbsValue] using represented
+  have rightValueEq :
+      naturalWordsValue rightLimbWords.1 rightLimbWords.2 = rightValue := by
+    have represented := naturalLimbs_value rightValue
+    rw [rightLimbs] at represented
+    calc
+      naturalWordsValue rightLimbWords.1 rightLimbWords.2 =
+          limbWordsValue rightLimbWords := rfl
+      _ = rightLimb.toNat := by
+        simpa [rightLimbWords] using limbWordsValue_ofUInt64 rightLimb
+      _ = rightValue := by simpa [naturalLimbsValue] using represented
+  have stepValue :=
+    (limbSum_spec leftLimbWords.1 leftLimbWords.2 rightLimbWords.1
+      rightLimbWords.2 0 (Or.inl rfl)).1
+  rw [limbCarryZero] at stepValue
+  simp only [UInt32.toNat_zero, Nat.mul_zero, Nat.add_zero] at stepValue
+  rw [leftValueEq, rightValueEq] at stepValue
+  have valueEq : leftValue + rightValue =
+      naturalWordsValue
+        (unsignedSumLow leftLimbWords.1 rightLimbWords.1)
+        (unsignedSumHigh leftLimbWords.1 leftLimbWords.2
+          rightLimbWords.1 rightLimbWords.2) := by
+    calc
+      _ = naturalWordsValue
+          (limbSumLow leftLimbWords.1 rightLimbWords.1 0)
+          (limbSumHigh leftLimbWords.1 leftLimbWords.2
+            rightLimbWords.1 rightLimbWords.2 0) := stepValue.symm
+      _ = _ := by rw [bridges.1, bridges.2.1]
+  exact {
+    countOne := by simpa [count] using countOne
+    carryZero := by simpa [carry] using carryZero
+    limbWitnesses := ⟨leftLimb, rightLimb, leftLimbs, rightLimbs,
+      by simpa [leftLimbWords, rightLimbWords] using highBaseNoOverflow,
+      by simpa [leftLimbWords, rightLimbWords] using highCarryNoOverflow,
+      by simpa [leftLimbWords, rightLimbWords] using valueEq⟩ }
 
 /-- Factored Talos program for the checked operand-count maximum. -/
 def checkedMaxCountProgram : Wasm.Program := [
