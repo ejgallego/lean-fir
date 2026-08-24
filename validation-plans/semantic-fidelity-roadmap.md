@@ -715,13 +715,41 @@ six `dec`, and four `isShared` forms. Its exact external trace alternates four
 paths, so later lowering cannot satisfy the coverage claim with an optimized
 scalar-only or non-tail substitute.
 
-State: ready through rebased functional head `49a39129` on exact current-main
-base `e793990f` in `validation/closure-ownership-fixtures`. The detached and promoted
-native/LCNF/V8 probes pass all six comparisons and open all four Wasm products
-under strace. The clean full corpus has 714 source cases, 723 aggregate unique
+State: accepted on main through functional head `49a39129`, tested containing
+head `35e02e76`, and integration checkpoint `d113b550`; the exact proof base
+was `e793990f`. The detached and promoted native/LCNF/V8 probes pass all six
+comparisons and open all four Wasm products under strace. The clean full corpus
+has 714 source cases, 723 aggregate unique
 cases, 2,151 equal policy comparisons, 8,565 machine steps, 192 satisfied tag
 floors, 289 satisfied conjunctive domains, and zero findings. The 3,172-job
 Talos dependency cone also passes.
+
+### S18/B3-E3: retained owners through non-tail unwind
+
+S18 holds each mixed repeated-child state live across the next recursive call,
+then passes the older owner and returned child to a noinline reconciler during
+unwind. The reconciler compares the returned String with the older state's
+selected alias and returns the same value, so native Lean observes exactly
+S17's outside alias, appended survivor, and cache reread. This isolates
+recursive lifetime shape rather than changing the result.
+
+The three-step non-tail path has 212 interpreter transitions. Retaining every
+older state prevents the unique in-place updates seen in S17: it executes eight
+`ctor`, twenty-one `inc`, eleven `dec`, and zero `oset`, versus five,
+twelve, six, and six respectively in the three-step tail case. Three
+`String.decEq` calls occur only during unwind, after the four recursive
+`Nat.decEq` checks and three `Nat.sub` calls. The complete 163-form trace,
+all external counts and order, and the zero-object-update obligation are
+required.
+
+State: promoted candidate on `validation/closure-ownership-fixtures` from
+accepted main checkpoint `d113b550`. The detached strict native/LCNF and
+native/LCNF/V8 probes pass with zero findings, and both Wasm products are
+opened under strace. Detached clean `make check` passes all 715 source cases,
+2,145 three-way results, 1,430 products opened under strace, 8,617
+source-machine steps, and all 200 tag and 295 conjunctive-domain floors with
+zero findings; the full 3,178-job Talos cone also passes. Tracked Beam,
+focused differential, full validation, and Talos gates follow promotion.
 
 ## Portfolio cadence
 
