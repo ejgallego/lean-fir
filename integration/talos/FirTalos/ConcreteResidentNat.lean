@@ -2984,6 +2984,39 @@ theorem checkedMaxCountWord_toNat (leftCount rightCount : UInt32) :
       Nat.le_of_not_gt lessNat
     simp [checkedMaxCountWord, less, Nat.max_eq_left rightLe]
 
+/-- Pure count selected by the checked heap/heap `Nat.add` prefix. -/
+def checkedNaturalAddCount (leftHeader rightHeader : Header) : UInt32 :=
+  checkedMaxCountWord leftHeader.aux1 rightHeader.aux1
+
+/-- Pure carry returned by the checked heap/heap `Nat.add` scan. -/
+def checkedNaturalAddCarry (leftHeader rightHeader : Header)
+    (leftValue rightValue : Nat) : UInt32 :=
+  let count := checkedNaturalAddCount leftHeader rightHeader
+  (addLimbWords
+    (paddedNaturalLimbWords count.toNat leftValue)
+    (paddedNaturalLimbWords count.toNat rightValue) 0).2
+
+/-- Machine result-count word installed by the checked heap/heap prefix. -/
+def checkedNaturalAddResultCount (leftHeader rightHeader : Header)
+    (leftValue rightValue : Nat) : UInt32 :=
+  UInt32.ofNat
+    ((checkedNaturalAddCount leftHeader rightHeader).toNat +
+      (checkedNaturalAddCarry leftHeader rightHeader leftValue rightValue).toNat)
+
+/-- Canonical validator admissions identify the pure checked count with the
+maximum mathematical limb length. -/
+theorem checkedNaturalAddCount_toNat_of_admissions
+    {state : MemoryState} {left right : Word32}
+    {leftValue rightValue : Nat} {leftHeader rightHeader : Header}
+    (leftAdmission : NaturalValidatorAdmission state left leftValue leftHeader)
+    (rightAdmission : NaturalValidatorAdmission state right rightValue
+      rightHeader) :
+    (checkedNaturalAddCount leftHeader rightHeader).toNat =
+      max (naturalLimbs leftValue).length
+        (naturalLimbs rightValue).length := by
+  rw [checkedNaturalAddCount, checkedMaxCountWord_toNat,
+    ← leftAdmission.limbCount, ← rightAdmission.limbCount]
+
 /-- Factored Talos program for the checked operand-count maximum. -/
 def checkedMaxCountProgram : Wasm.Program := [
   .localGet 7, .localGet 8, .ltU,
@@ -10419,6 +10452,121 @@ theorem NaturalSumWriterInstallation.wp_checkedNatAddFallbackProgram_multi_of_ad
     memoryRelation,
     wp_checkedNatAddFallbackProgram_multi execution resultCountNotOne
       multiCorrect⟩
+
+/-- Installed checked heap/heap Natural addition, through the complete
+multi-limb fallback branch.
+
+The prefix installation constructs validation, exact operand counts, the
+carry scan, and all administrative local writes.  Consequently callers state
+only the semantic branch guard and the allocator/live-heap resources needed
+by the mutating producer; no helper trace or scalar plumbing equality remains
+at this boundary. -/
+theorem NaturalSumWriterInstallation.wp_checkedNatAddFallbackProgram_multi_of_installedAdmissions
+    {host : Type} {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {env : Wasm.HostEnv host}
+    (installation : NaturalAddPrefixInstallation sourceModule module)
+    (writer : NaturalSumWriterInstallation sourceModule module
+      installation.magnitude)
+    (allocator : NaturalObjectAllocatorInstallation sourceModule module)
+    {naturalSumIndex : Nat}
+    {store : Wasm.Store host} {before allocated : MemoryState}
+    {initial : Wasm.Locals}
+    {left right result : Word32} {leftValue rightValue : Nat}
+    {leftHeader rightHeader : Header}
+    {witness : RefinementWitness}
+    {runtime : Fir.LeanIR.Impure.RuntimeState} {tail : List Wasm.Value}
+    (leftRelated : NaturalObjectRel before left leftValue leftHeader)
+    (leftAdmission : NaturalValidatorAdmission before left leftValue leftHeader)
+    (rightRelated : NaturalObjectRel before right rightValue rightHeader)
+    (rightAdmission : NaturalValidatorAdmission before right rightValue
+      rightHeader)
+    (valid : before.FrontierInvariant)
+    (allocatorRelated : ResidentAllocatorRel before store
+      allocator.frontierIndex)
+    (resultCountNotOne :
+      checkedNaturalAddResultCount leftHeader rightHeader leftValue rightValue ≠
+        1)
+    (resultCountFits :
+      (checkedNaturalAddCount leftHeader rightHeader).toNat +
+        (checkedNaturalAddCarry leftHeader rightHeader leftValue
+          rightValue).toNat < 536870908)
+    (allocation : before.allocateObject .natural
+      (target.semanticSlotBytes *
+        ((checkedNaturalAddCount leftHeader rightHeader).toNat +
+          (checkedNaturalAddCarry leftHeader rightHeader leftValue
+            rightValue).toNat)) false
+      bigNaturalMarker
+        (UInt32.ofNat
+          ((checkedNaturalAddCount leftHeader rightHeader).toNat +
+            (checkedNaturalAddCarry leftHeader rightHeader leftValue
+              rightValue).toNat)) 0 0 = .ok (allocated, result))
+    (strictEnd : allocated.heapCursor < wordModulus)
+    (withinCap : (allocated.heapCursor - 1) / wasmPageBytes + 1 ≤
+      store.memoryCap module 0)
+    (heapRelated : LiveHeapRel before witness runtime)
+    (scratchValid : initial.validIndex 17)
+    (leftLocal : initial.get 0 =
+      some (.i32 (UInt32.ofNat left.value)))
+    (rightLocal : initial.get 1 =
+      some (.i32 (UInt32.ofNat right.value))) :
+    let count := checkedNaturalAddCount leftHeader rightHeader
+    let leftWords := paddedNaturalLimbWords count.toNat leftValue
+    let rightWords := paddedNaturalLimbWords count.toNat rightValue
+    let sum := addLimbWords leftWords rightWords 0
+    let nextWitness := witness.bindNatural runtime.nextLocation result
+      (leftValue + rightValue)
+    ∃ writerStore heap,
+      witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
+      LiveHeapRel heap nextWitness
+        (semanticNaturalResult runtime (leftValue + rightValue)) ∧
+      ResidentMemoryRel heap
+        (completedAddStore writerStore (UInt32.ofNat result.value)
+          count.toNat sum.2).mem ∧
+      Wasm.wp module
+        (checkedNatAddFallbackProgram installation.validator.index
+          installation.magnitude.counts.magnitudeCountIndex
+          installation.carry.index
+          installation.magnitude.low.magnitudeIndex
+          installation.magnitude.high.magnitudeIndex naturalSumIndex
+          allocator.objectIndex writer.index)
+        (TypedNaturalReturnPost nextWitness result
+          (.heap runtime.nextLocation)
+          (completedAddStore writerStore (UInt32.ofNat result.value)
+            count.toNat sum.2) tail)
+        store { initial with values := tail } env := by
+  let count := checkedNaturalAddCount leftHeader rightHeader
+  let carry := checkedNaturalAddCarry leftHeader rightHeader leftValue
+    rightValue
+  have prefixScratchValid : initial.validIndex 15 := by
+    unfold Wasm.Locals.validIndex at scratchValid ⊢
+    omega
+  obtain ⟨execution⟩ :=
+    installation.exists_checkedExecution_of_admissions
+      (env := env) (tail := tail) leftLocal rightLocal
+      prefixScratchValid allocatorRelated.toResidentMemoryRel valid
+      leftRelated leftAdmission rightRelated rightAdmission
+  have exactCount : count.toNat = max (naturalLimbs leftValue).length
+      (naturalLimbs rightValue).length := by
+    simpa [count] using
+      checkedNaturalAddCount_toNat_of_admissions leftAdmission rightAdmission
+  have resultCountEq : execution.resultCount = UInt32.ofNat
+      (count.toNat +
+        (addLimbWords
+          (paddedNaturalLimbWords count.toNat leftValue)
+          (paddedNaturalLimbWords count.toNat rightValue) 0).2.toNat) := by
+    simpa [count, carry, checkedNaturalAddCount, checkedNaturalAddCarry] using
+      execution.resultCount_eq_ofNat
+  have executionResultCountNotOne : execution.resultCount ≠ 1 := by
+    rw [resultCountEq]
+    simpa [checkedNaturalAddResultCount, checkedNaturalAddCarry,
+      checkedNaturalAddCount, count, carry] using resultCountNotOne
+  simpa [count, carry, checkedNaturalAddCount, checkedNaturalAddCarry] using
+    (writer.wp_checkedNatAddFallbackProgram_multi_of_admissions allocator
+      execution leftRelated leftAdmission rightRelated rightAdmission valid
+      allocatorRelated (by rfl) exactCount (by rfl) resultCountEq
+      executionResultCountNotOne resultCountFits allocation strictEnd
+      withinCap heapRelated scratchValid)
 
 /-- Complete checked one-limb result path, including the typed return suffix. -/
 def checkedOneLimbResultProgram (magnitudeLowIndex magnitudeHighIndex
