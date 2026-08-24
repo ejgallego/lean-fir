@@ -37,21 +37,23 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `W7-W6-20260822-002`; the prior release refinement remains independently open
   in `W7-W6-20260822-001`. The accepted post-pass does not yet reduce the
   all-target lowering time and makes no runtime-speed claim.
-- Current early-lowering candidate: W7's tested candidate base remains
-  `6c1eca68`; current accepted code head is `35e02e76` after the independent
-  fixture, coordination-refresh, `Nat.shiftRight` caller, checked-Nat proof,
-  and self-tail-fidelity stacks. W7 functional commit `262ca200` and tracked
-  head
-  `7f1178c9` select the exact retained
+- Current early-lowering candidate: W7's tested candidate base is
+  `d113b550`; current accepted code head is `81e708b4` after the independent
+  checked-Nat, self-tail, and non-tail-fidelity stacks. W7 functional commit
+  `5064d7cb` and clean tracked head `a0e7d161` select the exact retained
   declaration array before closure dispatch lowering while leaving generic
-  opaque ingress unchanged. The exact combined repository gate passes 717
-  unique cases and 2,133/2,133 comparisons. Talos builds 3,171 of 3,172
-  targets; only W6-owned
+  opaque ingress unchanged. On that exact branch, `make check` passes 723
+  unique cases and 2,151/2,151 comparisons; the complete deterministic W7
+  artifact gate passes and regenerates byte-identical 79,002-byte plain and
+  82,370-byte styled prettyM modules. Talos builds 3,171 of 3,172 targets;
+  only W6-owned
   `ConcreteClosureDispatch.instructions_compileClosureDispatch` remains
   hard-coded to all declarations. Request `W7-W6-20260823-008` pins equivalent
   pre-constructor functional commit `108ddeda`; the accepted constructor bridge
-  and later fixture stacks change no premise or signature. Integration will
-  rebase and validate the pair together, then land
+  and later fixture stacks change no premise or signature. W6 has separately
+  produced the outer Natural-add dispatcher candidate and must publish its
+  rebased handoff before starting this closure proof. Integration will rebase
+  and validate the pair together, then land
   the generation/proof pair atomically, then regenerate prettyM and lean-zip
   consumer contracts separately. No helper signature, concrete layout,
   semantic ABI, ownership contract, or generic lowering contract changes.
@@ -298,6 +300,20 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   generator, concrete layout, runtime, ABI, helper, or artifact contract.
   Bug cards: none. S18 non-tail unwind dominance is the fixture lane's
   independent follow-up after this acceptance.
+- Independent cached non-tail fixture integration: test-fixtures functional
+  head `322fa030` is accepted through clean tracked head `81e708b4` on exact
+  base `d113b550`. S18 retains every repeated-child String owner across a
+  non-tail recursive call and reconciles the returned child with the older
+  state during unwind, preserving S17's native observation while changing its
+  ownership shape from five constructors, twelve increments, six decrements,
+  and six object updates to eight constructors, twenty-one increments, eleven
+  decrements, and zero object updates. Its complete trace is 212 steps and 163
+  forms with exact ordered external telemetry. The gate passes 715 source
+  cases, 2,145/2,145 three-way results, 1,430/1,430 semantic-Wasm products and
+  native witnesses, 724 unique cases, 2,154/2,154 policy comparisons, 8,777
+  machine steps, all 200 tag and 295 conjunctive-domain floors, and all 3,172
+  Talos jobs. This changes no interpreter, proof, generator, runtime, layout,
+  ABI, helper, or artifact contract. Bug cards: none.
 - Independent consumer refresh: the Verso HTML source pin and package are
   accepted at `4ee28dd6` and `c88e4a54`. The package compiles clean Verso
   commit `970b071b73adc6e68c6de00bc183460f76d97731`, exact
