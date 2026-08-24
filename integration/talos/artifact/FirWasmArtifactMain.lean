@@ -111,6 +111,20 @@ def emitResidentArrays (path : System.FilePath) : IO Unit := do
     Fir.Wasm.Emit.ResidentArray.manifest.compress
   IO.println s!"resident-arrays: wrote {bytes.size} bytes to {path} and {manifestPath}"
 
+def emitResidentTrustedArrays (path : System.FilePath) : IO Unit := do
+  let module ← IO.ofExcept <|
+    Fir.Wasm.Emit.ResidentArray.residentTrustedExampleModule
+  let bytes ← IO.ofExcept <| (Fir.Wasm.Emit.encode module).mapError fun error =>
+    s!"trusted resident array encoding failed: {repr error}"
+  if let some parent := path.parent then
+    IO.FS.createDirAll parent
+  IO.FS.writeBinFile path bytes
+  let manifestPath : System.FilePath := path.toString ++ ".json"
+  IO.FS.writeFile manifestPath
+    Fir.Wasm.Emit.ResidentArray.manifest.compress
+  IO.println
+    s!"resident-arrays-trusted: wrote {bytes.size} bytes to {path} and {manifestPath}"
+
 def emitResidentByteArrays (path : System.FilePath) : IO Unit := do
   let module ← IO.ofExcept <|
     Fir.Wasm.Emit.ResidentByteArray.residentExampleModule
@@ -442,6 +456,7 @@ def usage : String :=
     "       fir-wasm-artifact resident-memory-surface <output.wasm>\n" ++
     "       fir-wasm-artifact resident-allocator <output.wasm>\n" ++
     "       fir-wasm-artifact resident-arrays <output.wasm>\n" ++
+    "       fir-wasm-artifact resident-arrays-trusted <output.wasm>\n" ++
     "       fir-wasm-artifact resident-byte-arrays <output.wasm>\n" ++
     "       fir-wasm-artifact resident-fixed-width <output.wasm>\n" ++
     "       fir-wasm-artifact resident-float <output.wasm>\n" ++
@@ -489,6 +504,9 @@ def main (args : List String) : IO UInt32 := do
         return 0
     | ["resident-arrays", output] =>
         emitResidentArrays output
+        return 0
+    | ["resident-arrays-trusted", output] =>
+        emitResidentTrustedArrays output
         return 0
     | ["resident-byte-arrays", output] =>
         emitResidentByteArrays output

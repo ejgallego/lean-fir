@@ -1,3 +1,4 @@
+import Fir.Wasm.Emit.ResidentCallSite
 import Fir.Wasm.Emit.ResidentNumeric
 import Fir.Wasm.Emit.ResidentReferenceCount
 import Fir.Wasm.Emit.ResidentRelease
@@ -30,6 +31,7 @@ inductive LinkError where
   | incompatibleExternal (name : Name)
   | incompatibleMemory
   | invalidOutput (error : SymbolicError)
+  | callSite (error : ResidentCallSite.Error)
   deriving Inhabited, Repr
 
 private def u32 (value : Nat) : UInt32 := UInt32.ofNat value
@@ -104,6 +106,15 @@ private def savedScratchLocal : FVarId := ⟨`savedScratch⟩
 private def objectResultLocal : FVarId := ⟨`objectResult⟩
 private def taggedResultLocal : FVarId := ⟨`taggedResult⟩
 private def tobjectResultLocal : FVarId := ⟨`tobjectResult⟩
+private def inlineSetErasedLocal : FVarId := ⟨`_fir_inline_Array_set_erased⟩
+private def inlineSetArrayLocal : FVarId := ⟨`_fir_inline_Array_set_array⟩
+private def inlineSetIndexParamLocal : FVarId :=
+  ⟨`_fir_inline_Array_set_index_param⟩
+private def inlineSetValueLocal : FVarId := ⟨`_fir_inline_Array_set_value⟩
+private def inlineSetIndexLocal : FVarId := ⟨`_fir_inline_Array_set_index⟩
+private def inlineSetCursorLocal : FVarId := ⟨`_fir_inline_Array_set_cursor⟩
+private def inlineSetElementLocal : FVarId := ⟨`_fir_inline_Array_set_element⟩
+private def inlineSetResultLocal : FVarId := ⟨`_fir_inline_Array_set_result⟩
 
 private def copyLoopLabel : FVarId := ⟨`copyLoop⟩
 private def retainedCopyLoopLabel : FVarId := ⟨`retainedCopyLoop⟩
@@ -1239,6 +1250,66 @@ private def setFunctionFor (inputValidation : InputValidation)
 
 def setFunction : Function := setFunctionFor .checked .checked
 
+private def trustedSetCallSiteRewrite : ResidentCallSite.Rewrite := {
+  target := .declaration `Array.set
+  locals := #[(inlineSetErasedLocal, .erased),
+    (inlineSetArrayLocal, .object), (inlineSetIndexParamLocal, .tobject),
+    (inlineSetValueLocal, .tobject), (inlineSetIndexLocal, .uint32),
+    (inlineSetCursorLocal, .uint32), (inlineSetElementLocal, .tobject),
+    (inlineSetResultLocal, .object)]
+  body := [
+    .localSet inlineSetErasedLocal,
+    .localSet inlineSetValueLocal,
+    .localSet inlineSetIndexParamLocal,
+    .localSet inlineSetArrayLocal,
+    .localSet inlineSetErasedLocal,
+    .localGet inlineSetArrayLocal,
+    .i32Load .uint32 (u32 headerRefCountOffset),
+    .i32Const .uint32 1,
+    .i32Eq,
+    .ifElse
+      (decodeTrustedNaturalIndex inlineSetIndexParamLocal inlineSetIndexLocal ++
+        elementAddressFor inlineSetArrayLocal inlineSetIndexLocal
+          inlineSetCursorLocal ++ [
+        .localGet inlineSetCursorLocal,
+        .i32Load .tobject 0,
+        .localSet inlineSetElementLocal,
+        .localGet inlineSetCursorLocal,
+        .localGet inlineSetValueLocal,
+        .i32Store .tobject 0,
+        .localGet inlineSetElementLocal,
+        .i32Const .uint32 1,
+        .call (.declaration ResidentRelease.decrementOnceName),
+        .localGet inlineSetArrayLocal,
+        .localSet inlineSetResultLocal])
+      [.localGet inlineSetErasedLocal,
+        .localGet inlineSetArrayLocal,
+        .localGet inlineSetIndexParamLocal,
+        .localGet inlineSetValueLocal,
+        .localGet inlineSetErasedLocal,
+        .call (.declaration (externalName `Array.set)),
+        .localSet inlineSetResultLocal],
+    .localGet inlineSetResultLocal] }
+
+/-- Typed final-LCNF callers mirror upstream's inline exclusive update. Shared
+and persistent arrays retain the complete copy-on-write helper. -/
+def trustedCallSiteRewrites : Array ResidentCallSite.Rewrite := #[
+  trustedSetCallSiteRewrite]
+
+private partial def callSiteContains (needle : Instruction) :
+    Instruction → Bool
+  | .block _ body | .loop _ body => body.any (callSiteContains needle)
+  | .ifElse thenBody elseBody =>
+      thenBody.any (callSiteContains needle) ||
+        elseBody.any (callSiteContains needle)
+  | instruction => instruction == needle
+
+#guard trustedSetCallSiteRewrite.locals.size == 8
+#guard trustedSetCallSiteRewrite.body.any
+  (callSiteContains (.i32Load .uint32 (u32 headerRefCountOffset)))
+#guard trustedSetCallSiteRewrite.body.any
+  (callSiteContains (.call (.declaration (externalName `Array.set))))
+
 private def decodeSetBangIndex : List Instruction := [
   .localGet indexParam,
   .call (.declaration ResidentNumeric.validateNaturalName),
@@ -1627,7 +1698,17 @@ private def internalizeSelected (module : Module) (declarations : Array Name)
       throw (.incompatibleExternal declaration)
     unless imports[0]!.signature == signature do
       throw (.incompatibleExternal declaration)
-  let linkedFunctions := module.functions.map fun function =>
+  let callerRewrites := match callValidation.input,
+      callValidation.proofIndex with
+    | .trusted, .trusted => trustedCallSiteRewrites.filter fun rewrite =>
+        match rewrite.target with
+        | .declaration declaration => declarations.contains declaration
+        | .runtime _ => false
+    | _, _ => #[]
+  let callerRewritten ← module.functions.mapM fun function =>
+    ResidentCallSite.rewriteFunction callerRewrites function
+      |>.mapError LinkError.callSite
+  let linkedFunctions := callerRewritten.map fun function =>
     { function with body := function.body.map (rewriteInstruction declarations) }
   let selectedFunctions := (functionsFor callValidation).filter fun function =>
     selectedHelperNames.contains function.name
@@ -1704,6 +1785,23 @@ private def exampleReleaseFunction : Function := {
     .call (.runtime exampleReleaseOperation),
     .ret] }
 
+def setCallerName : Name := `fir_example_Array_setCaller
+
+private def setCallerFunction : Function := {
+  name := setCallerName
+  params := #[(erasedParam, .erased), (arrayParam, .object),
+    (indexParam, .tobject), (valueParam, .tobject), (proofParam, .erased)]
+  results := #[.object]
+  locals := #[]
+  body := [
+    .localGet erasedParam,
+    .localGet arrayParam,
+    .localGet indexParam,
+    .localGet valueParam,
+    .localGet proofParam,
+    .call (.declaration `Array.set),
+    .ret] }
+
 private def exampleExternalTypes (declaration : Name) : ExternalTypes :=
   let erased := LCNF.ImpureType.erased
   let object := LCNF.ImpureType.object
@@ -1762,7 +1860,9 @@ private def residentExampleInput : Except String Module := do
     |>.mapError fun error => s!"array releases: {repr error}"
   let module : Module := {
     releases with
-    imports := releases.imports ++ exampleDeclarations.map exampleExternalImport }
+    imports := releases.imports ++ exampleDeclarations.map exampleExternalImport
+    functions := releases.functions.push setCallerFunction
+    exports := Fir.Wasm.addUnique releases.exports setCallerName }
   pure module
 
 /-- Closed checked/public probe for the resident Array surface. -/
@@ -1807,6 +1907,14 @@ def manifest : Json :=
       module.memory == some ResidentRuntime.residentMemory &&
       (Fir.Wasm.validateModule module |>.isOk) &&
       (Fir.Wasm.Emit.encode module |>.isOk)
+  | .error _ => false
+
+#guard match residentTrustedExampleModule with
+  | .ok module =>
+      match module.functions.find? (·.name == setCallerName) with
+      | some caller => caller.locals.size == 8 &&
+          caller.body != setCallerFunction.body
+      | none => false
   | .error _ => false
 
 end Fir.Wasm.Emit.ResidentArray

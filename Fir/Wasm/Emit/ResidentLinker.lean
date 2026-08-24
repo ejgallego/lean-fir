@@ -301,6 +301,10 @@ private def rewriteProbeLabel (index : Nat) : FVarId :=
   ⟨Name.mkSimple s!"_fir_resident_link_rewrite_probe_{index}"⟩
 
 private def callSiteRewritesForStep : Step → Array ResidentCallSite.Rewrite
+  | .bigNumeric => ResidentBigNumeric.callSiteRewrites
+  | .natArithmeticAvailable => ResidentNatArithmetic.callSiteRewrites
+  | .arraysTrustedStrict
+  | .arraysTrustedAvailable => ResidentArray.trustedCallSiteRewrites
   | .natShiftAvailable => ResidentNatShift.callSiteRewrites
   | .usizeAvailable => ResidentUSize.callSiteRewrites
   | _ => #[]

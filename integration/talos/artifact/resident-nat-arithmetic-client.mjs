@@ -69,11 +69,73 @@ export async function checkResidentNatArithmetic({ bytes, manifest }) {
   const shiftRight = exported(instance, "fir_ext_Nat_shiftRight");
   const shiftRightCaller = exported(instance,
     "fir_example_Nat_shiftRightCaller");
+  const addCaller = exported(instance, "fir_example_Nat_addCaller");
+  const landCaller = exported(instance, "fir_example_Nat_landCaller");
+  const modCaller = exported(instance, "fir_example_Nat_modCaller");
   const log2 = exported(instance, "fir_ext_Nat_log2");
   const apply = (operation, left, right) => naturalValue(host,
     operation(naturalInput(host, left), naturalInput(host, right)));
   const applyUnary = (operation, value) => naturalValue(host,
     operation(naturalInput(host, value)));
+
+  const immediateCallerFrontier = frontier() >>> 0;
+  for (const [left, right] of [
+    [0n, 0n],
+    [1n, 2n],
+    [0x3fff_ffffn, 0x4000_0000n],
+  ]) {
+    const leftInput = naturalInput(host, left);
+    const rightInput = naturalInput(host, right);
+    const result = addCaller(leftInput, rightInput);
+    assert.equal(host.classify(result), "immediate",
+      `rewritten Nat.add caller promoted ${left} + ${right}`);
+    assert.equal(naturalValue(host, result), left + right,
+      `rewritten Nat.add caller mismatch: ${left} + ${right}`);
+  }
+  assert.equal(frontier() >>> 0, immediateCallerFrontier,
+    "rewritten Nat.add immediate callers allocated");
+  const promotedAdd = addCaller(naturalInput(host, 0x7fff_ffffn),
+    naturalInput(host, 1n));
+  assert.notEqual(host.classify(promotedAdd), "immediate",
+    "rewritten Nat.add overflow did not retain the heap fallback");
+  assert.equal(naturalValue(host, promotedAdd), 0x8000_0000n,
+    "rewritten Nat.add overflow fallback mismatch");
+
+  const bitCallerFrontier = frontier() >>> 0;
+  for (const [left, right] of [
+    [0n, 0n],
+    [0x7fff_ffffn, 0x5555_5555n],
+    [0x7654_3210n, 0x00ff_00ffn],
+  ]) {
+    const leftInput = naturalInput(host, left);
+    const rightInput = naturalInput(host, right);
+    assert.equal(naturalValue(host, landCaller(leftInput, rightInput)),
+      left & right, `rewritten Nat.land caller mismatch: ${left} & ${right}`);
+  }
+  for (const [left, right] of [
+    [0n, 0n],
+    [17n, 0n],
+    [17n, 5n],
+    [0x7fff_ffffn, 65521n],
+  ]) {
+    const leftInput = naturalInput(host, left);
+    const rightInput = naturalInput(host, right);
+    assert.equal(naturalValue(host, modCaller(leftInput, rightInput)),
+      right === 0n ? left : left % right,
+      `rewritten Nat.mod caller mismatch: ${left} % ${right}`);
+  }
+  assert.equal(frontier() >>> 0, bitCallerFrontier,
+    "rewritten Nat.land/mod immediate callers allocated");
+  const heapLandLeft = (1n << 130n) + 0x1234_5678n;
+  const heapLandRight = (1n << 129n) + 0xffffn;
+  assert.equal(apply(landCaller, heapLandLeft, heapLandRight),
+    heapLandLeft & heapLandRight,
+    "rewritten Nat.land heap fallback mismatch");
+  const heapModLeft = (1n << 193n) + 12345n;
+  const heapModRight = (1n << 65n) + 17n;
+  assert.equal(apply(modCaller, heapModLeft, heapModRight),
+    heapModLeft % heapModRight,
+    "rewritten Nat.mod heap fallback mismatch");
 
   assert.equal(apply(mul, 0n, 0n), 0n);
   const immediateMulFrontier = frontier() >>> 0;

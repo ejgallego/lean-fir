@@ -1,4 +1,5 @@
 import Fir.Wasm.Emit.ResidentBigNumeric
+import Fir.Wasm.Emit.ResidentCallSite
 import Fir.Wasm.Emit.ResidentNatShift
 import Fir.Wasm.Emit.ResidentReferenceCount
 import Fir.Wasm.Emit.ResidentRelease
@@ -28,6 +29,7 @@ inductive LinkError where
   | incompatibleExternal (name : Name)
   | incompatibleMemory
   | invalidOutput (error : SymbolicError)
+  | callSite (error : ResidentCallSite.Error)
   deriving Inhabited, Repr
 
 private def u32 (value : Nat) : UInt32 := UInt32.ofNat value
@@ -76,6 +78,13 @@ private def raw64Local : FVarId := ⟨`raw64⟩
 private def savedScratchLocal : FVarId := ⟨`savedScratch⟩
 private def objectResultLocal : FVarId := ⟨`objectResult⟩
 private def resultLocal : FVarId := ⟨`resultValue⟩
+private def inlineLeftLocal : FVarId := ⟨`_fir_inline_Nat_binary_left⟩
+private def inlineRightLocal : FVarId := ⟨`_fir_inline_Nat_binary_right⟩
+private def inlineLeftPayloadLocal : FVarId :=
+  ⟨`_fir_inline_Nat_binary_left_payload⟩
+private def inlineRightPayloadLocal : FVarId :=
+  ⟨`_fir_inline_Nat_binary_right_payload⟩
+private def inlineResultLocal : FVarId := ⟨`_fir_inline_Nat_binary_result⟩
 private def temporaryLocal : FVarId := ⟨`temporary⟩
 private def addendLocal : FVarId := ⟨`addend⟩
 private def multiplierLocal : FVarId := ⟨`multiplier⟩
@@ -908,6 +917,92 @@ def modFunction : Function := {
   body := ResidentBigNumeric.withImmediateNaturalPair leftParam rightParam
     immediateMod checkedModFallback }
 
+private def retypeTaggedWord : List Instruction := [
+  .i64ExtendI32U .uint64,
+  .i32WrapI64 .tagged]
+
+private def boxImmediatePayload : List Instruction := [
+  .i64ExtendI32U .uint64,
+  .i64Const .uint64 1,
+  .i64Shl,
+  .i64Const .uint64 1,
+  .i64Or,
+  .i32WrapI64 .tagged]
+
+private def binaryImmediateTest : List Instruction := [
+  .localGet inlineLeftLocal,
+  .i32Const .uint32 1,
+  .i32And,
+  .localGet inlineRightLocal,
+  .i32Const .uint32 1,
+  .i32And,
+  .i32And]
+
+private def binaryFallback (helper : Name) : List Instruction := [
+  .localGet inlineLeftLocal,
+  .localGet inlineRightLocal,
+  .call (.declaration helper),
+  .localSet inlineResultLocal]
+
+private def binaryPrefix : List Instruction := [
+  .localSet inlineRightLocal,
+  .localSet inlineLeftLocal]
+
+private def landCallSiteRewrite : ResidentCallSite.Rewrite := {
+  target := .declaration `Nat.land
+  locals := #[(inlineLeftLocal, .tobject), (inlineRightLocal, .tobject),
+    (inlineResultLocal, .tobject)]
+  body := binaryPrefix ++ binaryImmediateTest ++ [
+    .ifElse
+      ([.localGet inlineLeftLocal,
+        .localGet inlineRightLocal,
+        .i32And] ++ retypeTaggedWord ++ [
+        .localSet inlineResultLocal])
+      (binaryFallback (externalName `Nat.land)),
+    .localGet inlineResultLocal] }
+
+private def modCallSiteRewrite : ResidentCallSite.Rewrite := {
+  target := .declaration `Nat.mod
+  locals := #[(inlineLeftLocal, .tobject), (inlineRightLocal, .tobject),
+    (inlineLeftPayloadLocal, .uint32), (inlineRightPayloadLocal, .uint32),
+    (inlineResultLocal, .tobject)]
+  body := binaryPrefix ++ binaryImmediateTest ++ [
+    .ifElse
+      (ResidentBigNumeric.immediateNaturalPayload inlineRightLocal ++ [
+        .localSet inlineRightPayloadLocal,
+        .localGet inlineRightPayloadLocal,
+        .i32Eqz,
+        .ifElse
+          [.localGet inlineLeftLocal,
+            .localSet inlineResultLocal]
+          (ResidentBigNumeric.immediateNaturalPayload inlineLeftLocal ++ [
+            .localSet inlineLeftPayloadLocal,
+            .localGet inlineLeftPayloadLocal,
+            .localGet inlineRightPayloadLocal,
+            .i32RemU] ++ boxImmediatePayload ++ [
+            .localSet inlineResultLocal])])
+      (binaryFallback (externalName `Nat.mod)),
+    .localGet inlineResultLocal] }
+
+/-- Upstream-shaped scalar gates for the profiled Nat bitwise/remainder
+operations. Heap-backed pairs retain the complete resident helpers. -/
+def callSiteRewrites : Array ResidentCallSite.Rewrite := #[
+  landCallSiteRewrite,
+  modCallSiteRewrite]
+
+private partial def callSiteContains (needle : Instruction) :
+    Instruction → Bool
+  | .block _ body | .loop _ body => body.any (callSiteContains needle)
+  | .ifElse thenBody elseBody =>
+      thenBody.any (callSiteContains needle) ||
+        elseBody.any (callSiteContains needle)
+  | instruction => instruction == needle
+
+#guard landCallSiteRewrite.locals.size == 3
+#guard modCallSiteRewrite.locals.size == 5
+#guard landCallSiteRewrite.body.any (callSiteContains .i32And)
+#guard modCallSiteRewrite.body.any (callSiteContains .i32RemU)
+
 def externalFunctions : Array Function := #[
   mulFunction, powFunction, landFunction, lorFunction, divFunction, modFunction,
   shiftLeftFunction]
@@ -985,7 +1080,14 @@ def internalizeAvailable (module : Module) (validate : Bool := true) :
         module.functions.any (·.name == function.name) ||
         module.exports.contains function.name then
       throw (.reservedDeclaration function.name)
-  let functions := module.functions.map fun function =>
+  let callerRewrites := callSiteRewrites.filter fun rewrite =>
+    match rewrite.target with
+    | .declaration declaration => present.contains declaration
+    | .runtime _ => false
+  let callerRewritten ← module.functions.mapM fun function =>
+    ResidentCallSite.rewriteFunction callerRewrites function
+      |>.mapError LinkError.callSite
+  let functions := callerRewritten.map fun function =>
     { function with body := function.body.map rewriteInstruction }
   let functions := functions ++ selectedInternalFunctions ++ selectedExternalFunctions
   let result : Module := {
@@ -1025,6 +1127,8 @@ private def log2ExampleImport : Import := {
     result := LCNF.ImpureType.tobject } }
 
 private def shiftRightCallerName : Name := `fir_example_Nat_shiftRightCaller
+private def landCallerName : Name := `fir_example_Nat_landCaller
+private def modCallerName : Name := `fir_example_Nat_modCaller
 
 /-- A real compiled caller retained by the resident artifact so the linker
 call-site rewrite is exercised by an external engine rather than only inspected
@@ -1040,6 +1144,23 @@ private def shiftRightCallerFunction : Function := {
     .call (.declaration ResidentNatShift.declaration),
     .ret] }
 
+private def binaryCallerFunction (name declaration : Name) : Function := {
+  name
+  params := #[(leftParam, .tobject), (rightParam, .tobject)]
+  results := #[.tobject]
+  locals := #[]
+  body := [
+    .localGet leftParam,
+    .localGet rightParam,
+    .call (.declaration declaration),
+    .ret] }
+
+private def landCallerFunction : Function :=
+  binaryCallerFunction landCallerName `Nat.land
+
+private def modCallerFunction : Function :=
+  binaryCallerFunction modCallerName `Nat.mod
+
 def residentExampleModule : Except String Module := do
   let module ← ResidentBigNumeric.residentExampleModule
   let module ← ResidentReferenceCount.internalizeIncrements module
@@ -1049,12 +1170,38 @@ def residentExampleModule : Except String Module := do
   let module := { module with
     imports := module.imports ++ externalDeclarations.map exampleImport ++
       #[exampleImport ResidentNatShift.declaration, log2ExampleImport]
-    functions := module.functions.push shiftRightCallerFunction
-    exports := Fir.Wasm.addUnique module.exports shiftRightCallerName }
+    functions := module.functions ++ #[shiftRightCallerFunction,
+      landCallerFunction, modCallerFunction]
+    exports := (#[shiftRightCallerName, landCallerName, modCallerName]).foldl
+      Fir.Wasm.addUnique module.exports }
   let module ← internalizeAvailable module
     |>.mapError fun error => s!"Nat arithmetic: {repr error}"
   ResidentNatShift.internalizeAvailable module
     |>.mapError fun error => s!"Nat shift: {repr error}"
+
+private def manifestEntries : Array Json :=
+  let entries := (externalDeclarations.push ResidentNatShift.declaration).map
+    fun declaration => Json.mkObj [
+      ("entry", externalName declaration |>.toString),
+      ("params", Json.arr #["tobject", "tobject"]),
+      ("result", "tobject")]
+  entries ++ #[
+    Json.mkObj [
+      ("entry", ResidentNatShift.log2HelperName.toString),
+      ("params", Json.arr #["tobject"]),
+      ("result", "tobject")],
+    Json.mkObj [
+      ("entry", shiftRightCallerName.toString),
+      ("params", Json.arr #["tobject", "tobject"]),
+      ("result", "tobject")],
+    Json.mkObj [
+      ("entry", landCallerName.toString),
+      ("params", Json.arr #["tobject", "tobject"]),
+      ("result", "tobject")],
+    Json.mkObj [
+      ("entry", modCallerName.toString),
+      ("params", Json.arr #["tobject", "tobject"]),
+      ("result", "tobject")]]
 
 def manifest : Json := Json.mkObj [
   ("sourceEntry", `Nat.mul |>.toString),
@@ -1063,19 +1210,7 @@ def manifest : Json := Json.mkObj [
   ("result", "tobject"),
   ("closureDispatch", Json.arr #[]),
   ("closureDescriptors", Json.arr #[]),
-  ("entries", Json.arr <|
-    (((externalDeclarations.push ResidentNatShift.declaration).map
-        fun declaration =>
-      Json.mkObj [
-        ("entry", externalName declaration |>.toString),
-        ("params", Json.arr #["tobject", "tobject"]),
-        ("result", "tobject")]) |>.push <| Json.mkObj [
-          ("entry", ResidentNatShift.log2HelperName.toString),
-          ("params", Json.arr #["tobject"]),
-          ("result", "tobject")]) |>.push <| Json.mkObj [
-            ("entry", shiftRightCallerName.toString),
-            ("params", Json.arr #["tobject", "tobject"]),
-            ("result", "tobject")]),
+  ("entries", Json.arr manifestEntries),
   ("imports", Json.arr #[]),
   ("numericLimbBits", 64),
   ("walkerControl", "structured-loop"),
@@ -1087,6 +1222,17 @@ def manifest : Json := Json.mkObj [
       | some caller =>
           caller.locals.size == 4 && caller.body != shiftRightCallerFunction.body
       | none => false
+  | .error _ => false
+
+#guard match residentExampleModule with
+  | .ok module =>
+      match module.functions.find? (·.name == landCallerName),
+          module.functions.find? (·.name == modCallerName) with
+      | some landCaller, some modCaller =>
+          landCaller.locals.size == 3 && modCaller.locals.size == 5 &&
+            landCaller.body != landCallerFunction.body &&
+            modCaller.body != modCallerFunction.body
+      | _, _ => false
   | .error _ => false
 
 #guard match residentExampleModule with

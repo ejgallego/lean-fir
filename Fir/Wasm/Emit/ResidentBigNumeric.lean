@@ -1,3 +1,4 @@
+import Fir.Wasm.Emit.ResidentCallSite
 import Fir.Wasm.Emit.ResidentNumeric
 
 namespace Fir.Wasm.Emit.ResidentBigNumeric
@@ -28,6 +29,7 @@ inductive LinkError where
   | reservedDeclaration (name : Name)
   | incompatibleMemory
   | invalidOutput (error : SymbolicError)
+  | callSite (error : ResidentCallSite.Error)
   deriving Inhabited, Repr
 
 private def u32 (value : Nat) : UInt32 := UInt32.ofNat value
@@ -57,6 +59,10 @@ private def addressLocal : FVarId := ⟨`address⟩
 private def rawLocal : FVarId := ⟨`raw⟩
 private def savedScratchLocal : FVarId := ⟨`savedScratch⟩
 private def objectResultLocal : FVarId := ⟨`objectResult⟩
+private def inlineAddLeftLocal : FVarId := ⟨`_fir_inline_Nat_add_left⟩
+private def inlineAddRightLocal : FVarId := ⟨`_fir_inline_Nat_add_right⟩
+private def inlineAddPayloadLocal : FVarId := ⟨`_fir_inline_Nat_add_payload⟩
+private def inlineAddResultLocal : FVarId := ⟨`_fir_inline_Nat_add_result⟩
 private def decisionResultLocal : FVarId := ⟨`decisionResult⟩
 private def leftLowLocal : FVarId := ⟨`leftLowValue⟩
 private def leftHighLocal : FVarId := ⟨`leftHighValue⟩
@@ -1375,6 +1381,75 @@ def withImmediateNaturalPair (left right : FVarId)
     (immediate fallback : List Instruction) : List Instruction :=
   bothImmediateNaturals left right ++ [.ifElse immediate fallback]
 
+private def boxImmediatePayload (payload : FVarId) : List Instruction := [
+  .localGet payload,
+  .i64ExtendI32U .uint64,
+  .i64Const .uint64 1,
+  .i64Shl,
+  .i64Const .uint64 1,
+  .i64Or,
+  .i32WrapI64 .tagged]
+
+private def natAddCallSiteBody (fallback : Name) : List Instruction := [
+  .localSet inlineAddRightLocal,
+  .localSet inlineAddLeftLocal,
+  .localGet inlineAddLeftLocal,
+  .i32Const .uint32 1,
+  .i32And,
+  .localGet inlineAddRightLocal,
+  .i32Const .uint32 1,
+  .i32And,
+  .i32And,
+  .ifElse
+    (immediateNaturalPayload inlineAddLeftLocal ++
+      immediateNaturalPayload inlineAddRightLocal ++ [
+        .i32Add,
+        .localSet inlineAddPayloadLocal,
+        .localGet inlineAddPayloadLocal,
+        .i32Const .uint32 2147483648,
+        .i32LtU,
+        .ifElse
+          (boxImmediatePayload inlineAddPayloadLocal ++ [
+            .localSet inlineAddResultLocal])
+          [.localGet inlineAddLeftLocal,
+            .localGet inlineAddRightLocal,
+            .call (.declaration fallback),
+            .localSet inlineAddResultLocal]])
+    [.localGet inlineAddLeftLocal,
+      .localGet inlineAddRightLocal,
+      .call (.declaration fallback),
+      .localSet inlineAddResultLocal],
+  .localGet inlineAddResultLocal]
+
+private def natAddCallSiteRewriteFor (target fallback : Name) :
+    ResidentCallSite.Rewrite := {
+  target := .declaration target
+  locals := #[(inlineAddLeftLocal, .tobject),
+    (inlineAddRightLocal, .tobject), (inlineAddPayloadLocal, .uint32),
+    (inlineAddResultLocal, .tobject)]
+  body := natAddCallSiteBody fallback }
+
+/-- Mirror upstream `lean_nat_add` at original typed callers. Sums which no
+longer fit the wasm32 tagged payload retain the complete resident helper. -/
+def callSiteRewrites : Array ResidentCallSite.Rewrite := #[
+  natAddCallSiteRewriteFor `Nat.add (externalName `Nat.add)]
+
+private def internalCallSiteRewrites : Array ResidentCallSite.Rewrite := #[
+  natAddCallSiteRewriteFor (ResidentNumeric.externalName `Nat.add)
+    (externalName `Nat.add)]
+
+private partial def callSiteContains (needle : Instruction) :
+    Instruction → Bool
+  | .block _ body | .loop _ body => body.any (callSiteContains needle)
+  | .ifElse thenBody elseBody =>
+      thenBody.any (callSiteContains needle) ||
+        elseBody.any (callSiteContains needle)
+  | instruction => instruction == needle
+
+#guard callSiteRewrites[0]!.locals.size == 4
+#guard callSiteRewrites[0]!.body.any
+  (callSiteContains (.i32Const .uint32 2147483648))
+
 /-- Decode two immediate Nat payloads and reuse the existing bounded natural
 sum constructor.  That constructor returns an immediate when the sum fits and
 the canonical promoted representation when it crosses the wasm32 immediate
@@ -1959,10 +2034,13 @@ def internalize (module : Module) (validate : Bool := true) : Except LinkError M
         module.functions.any (·.name == name) ||
         module.exports.contains name then
       throw (.reservedDeclaration name)
+  let callerRewritten ← module.functions.mapM fun function =>
+    ResidentCallSite.rewriteFunction internalCallSiteRewrites function
+      |>.mapError LinkError.callSite
   let result : Module := {
     module with
     functions :=
-      module.functions.map rewriteFunction ++ internalFunctions ++ externalFunctions
+      callerRewritten.map rewriteFunction ++ internalFunctions ++ externalFunctions
     exports := helperNames.foldl Fir.Wasm.addUnique module.exports }
   if validate then
     match Fir.Wasm.validateModule result with
@@ -1970,8 +2048,24 @@ def internalize (module : Module) (validate : Bool := true) : Except LinkError M
     | .error error => throw (.invalidOutput error)
   else return result
 
+private def natAddCallerName : Name := `fir_example_Nat_addCaller
+
+private def natAddCallerFunction : Function := {
+  name := natAddCallerName
+  params := #[(leftParam, .tobject), (rightParam, .tobject)]
+  results := #[.tobject]
+  locals := #[]
+  body := [
+    .localGet leftParam,
+    .localGet rightParam,
+    .call (.declaration (ResidentNumeric.externalName `Nat.add)),
+    .ret] }
+
 def residentExampleModule : Except String Module := do
-  let module ← ResidentNumeric.residentExampleModule
+  let numeric ← ResidentNumeric.residentExampleModule
+  let module := { numeric with
+    functions := numeric.functions.push natAddCallerFunction
+    exports := Fir.Wasm.addUnique numeric.exports natAddCallerName }
   internalize module
     |>.mapError fun error => s!"big numeric: {repr error}"
 
@@ -1997,6 +2091,14 @@ def manifest : Json :=
       module.memory == some ResidentRuntime.residentMemory &&
       (Fir.Wasm.validateModule module |>.isOk) &&
       (Fir.Wasm.Emit.encode module |>.isOk)
+  | .error _ => false
+
+#guard match residentExampleModule with
+  | .ok module =>
+      match module.functions.find? (·.name == natAddCallerName) with
+      | some caller => caller.locals.size == 4 &&
+          caller.body != natAddCallerFunction.body
+      | none => false
   | .error _ => false
 
 end Fir.Wasm.Emit.ResidentBigNumeric

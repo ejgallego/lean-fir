@@ -36,6 +36,10 @@ lake exe fir-wasm-artifact resident-allocator _build/resident-allocator.wasm
 node run-resident-allocator.mjs _build/resident-allocator.wasm
 lake exe fir-wasm-artifact resident-arrays _build/resident-arrays.wasm
 node run-resident-arrays.mjs _build/resident-arrays.wasm
+lake exe fir-wasm-artifact resident-arrays-trusted \
+  _build/resident-arrays-trusted.wasm
+node run-resident-trusted-array-set.mjs \
+  _build/resident-arrays-trusted.wasm
 lake exe fir-wasm-artifact resident-byte-arrays \
   _build/resident-byte-arrays.wasm
 node run-resident-byte-array.mjs _build/resident-byte-arrays.wasm

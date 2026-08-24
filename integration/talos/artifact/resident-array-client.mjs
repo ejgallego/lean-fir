@@ -666,6 +666,52 @@ export async function checkResidentArrays(bytes) {
   return "PASS zero-import resident arrays";
 }
 
+/** Check the typed caller-local Array.set exclusive arm and shared fallback. */
+export async function checkResidentTrustedArraySet(bytes) {
+  const module = await WebAssembly.compile(bytes);
+  equal(WebAssembly.Module.imports(module).length, 0,
+    "trusted resident array module retained an import");
+  const { exports } = await WebAssembly.instantiate(module, {});
+  const replicate = exports.fir_ext_Array_replicate;
+  const setCaller = exports.fir_example_Array_setCaller;
+  const release = exports.resident_array_release;
+  equal(typeof replicate, "function", "trusted Array.replicate export");
+  equal(typeof setCaller, "function", "trusted Array.set caller export");
+  equal(typeof release, "function", "trusted Array release export");
+
+  const unique = replicate(0, immediateNatural(3), immediateNatural(10));
+  const frontier = exports.fir_heap_frontier();
+  const uniqueResult = setCaller(
+    0, unique, immediateNatural(1), immediateNatural(21), 0);
+  equal(uniqueResult, unique,
+    "rewritten Array.set caller did not reuse an exclusive array");
+  equal(exports.fir_heap_frontier(), frontier,
+    "rewritten Array.set exclusive caller allocated");
+  equal(arrayState(exports.memory, unique).words.join(","),
+    [10, 21, 10].map(immediateNatural).join(","),
+    "rewritten Array.set exclusive caller elements");
+
+  const shared = replicate(0, immediateNatural(3), immediateNatural(30));
+  new DataView(exports.memory.buffer).setUint32(shared + 8, 2, true);
+  const sharedResult = setCaller(
+    0, shared, immediateNatural(2), immediateNatural(41), 0);
+  expect(sharedResult !== shared,
+    "rewritten Array.set caller mutated a shared array");
+  equal(arrayState(exports.memory, shared).refCount, 1,
+    "rewritten Array.set shared fallback did not consume one reference");
+  equal(arrayState(exports.memory, shared).words.join(","),
+    [30, 30, 30].map(immediateNatural).join(","),
+    "rewritten Array.set shared fallback mutated an alias");
+  equal(arrayState(exports.memory, sharedResult).words.join(","),
+    [30, 30, 41].map(immediateNatural).join(","),
+    "rewritten Array.set shared fallback result");
+
+  release(unique);
+  release(shared);
+  release(sharedResult);
+  return "PASS zero-import trusted Array.set caller fast path";
+}
+
 export async function checkFetchedResidentArrays(url) {
   const response = await fetch(url);
   expect(response.ok, `failed to fetch ${url}: HTTP ${response.status}`);
