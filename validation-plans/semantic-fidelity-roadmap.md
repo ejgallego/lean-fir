@@ -742,14 +742,14 @@ twelve, six, and six respectively in the three-step tail case. Three
 all external counts and order, and the zero-object-update obligation are
 required.
 
-State: promoted candidate on `validation/closure-ownership-fixtures` from
-accepted main checkpoint `d113b550`. The detached strict native/LCNF and
-native/LCNF/V8 probes pass with zero findings, and both Wasm products are
-opened under strace. Detached clean `make check` passes all 715 source cases,
-2,145 three-way results, 1,430 products opened under strace, 8,617
-source-machine steps, and all 200 tag and 295 conjunctive-domain floors with
-zero findings; the full 3,178-job Talos cone also passes. Tracked Beam,
-focused differential, full validation, and Talos gates follow promotion.
+State: ready through functional head `322fa030` on accepted main base
+`d113b550`. Tracked Lean Beam update, sync, and save pass with zero diagnostics
+and a save-ready checkpoint. The focused S17/S18 native/LCNF/V8 comparison
+passes all six edges with zero findings and opens all four Wasm products under
+strace. Clean tracked `make check` passes all 715 source cases, 2,145 three-way
+results, 1,430 products opened under strace, 8,617 source-machine steps, and
+all 200 tag and 295 conjunctive-domain floors with zero findings; the full
+3,172-job Talos cone also passes.
 
 ## Portfolio cadence
 
