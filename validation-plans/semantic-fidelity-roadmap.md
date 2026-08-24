@@ -715,10 +715,13 @@ six `dec`, and four `isShared` forms. Its exact external trace alternates four
 paths, so later lowering cannot satisfy the coverage claim with an optimized
 scalar-only or non-tail substitute.
 
-State: active on `validation/closure-ownership-fixtures`; the detached
-native/LCNF/V8 dominance probe passes all six comparisons and opens all four
-Wasm products under strace. Clean full-corpus and Talos gates remain before the
-fixture-only handoff.
+State: ready through functional head `0a91e283` on
+`validation/closure-ownership-fixtures`. The detached and promoted
+native/LCNF/V8 probes pass all six comparisons and open all four Wasm products
+under strace. The clean full corpus has 714 source cases, 723 aggregate unique
+cases, 2,151 equal policy comparisons, 8,565 machine steps, 192 satisfied tag
+floors, 289 satisfied conjunctive domains, and zero findings. The 3,172-job
+Talos dependency cone also passes.
 
 ## Portfolio cadence
 
