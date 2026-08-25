@@ -937,6 +937,22 @@ def closureOwnedCaptureIndices (index : Nat) : List Fir.Wasm.AbiKind →
       else
         closureOwnedCaptureIndices (index + 1) rest
 
+/-- The emitter's indexed descriptor filter selects the same physical capture
+list used by the semantic ownership relation. -/
+theorem descriptorOwnedFieldsFrom_eq
+    (kinds : List Fir.Wasm.AbiKind) (index : Nat) :
+    (kinds.zipIdx index).flatMap (fun (kind, position) =>
+      if kind.isObjectField then
+        Fir.Wasm.Emit.ResidentRelease.releaseChild position
+      else []) =
+    (closureOwnedCaptureIndices index kinds).flatMap
+      Fir.Wasm.Emit.ResidentRelease.releaseChild := by
+  induction kinds generalizing index with
+  | nil => simp [closureOwnedCaptureIndices]
+  | cons kind kinds ih =>
+      cases found : kind.isObjectField <;>
+        simp [closureOwnedCaptureIndices, found, ih]
+
 /-- A successful checked object-like closure capture exposes its raw low
 word.  Canonical padding remains part of the checked read. -/
 theorem readClosureCapture_word_of_eq_ok
@@ -1782,6 +1798,55 @@ theorem instructions_lastReferenceReleaseBody
     lastGenerated releaseHeaderFound, ownedAdapted]
   rfl
 
+/-- Computation-level form of local equality dispatch.  This exposes exact
+adapter failure and success while keeping the proof independent of the size
+of either branch. -/
+theorem instructions_localEqDispatch_eq
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {sourceLocal : Lean.FVarId} {targetLocal : Nat} {code : UInt32}
+    {thenSource elseSource : List Fir.Wasm.Instruction}
+    (localFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceLocal = some targetLocal) :
+    FirTalos.instructions sourceModule sourceFunction []
+      [.localGet sourceLocal, .i32Const .uint32 code, .i32Eq,
+        .ifElse thenSource elseSource] = (do
+      let thenTarget ← FirTalos.instructions sourceModule sourceFunction []
+        thenSource
+      let elseTarget ← FirTalos.instructions sourceModule sourceFunction []
+        elseSource
+      pure [.localGet targetLocal, .const code, .eq,
+        .iff 0 0 thenTarget elseTarget]) := by
+  cases thenAdapted : FirTalos.instructions sourceModule sourceFunction []
+      thenSource <;>
+    cases elseAdapted : FirTalos.instructions sourceModule sourceFunction []
+      elseSource <;>
+    simp [FirTalos.instructions, FirTalos.instruction, localFound,
+      thenAdapted, elseAdapted, Bind.bind, Except.bind, pure, Except.pure]
+
+/-- A resolved local equality test adapts compositionally from its two
+branches.  Object-kind, closure-descriptor, and capture-count dispatch all
+share this four-instruction boundary. -/
+theorem instructions_localEqDispatch
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {sourceLocal : Lean.FVarId} {targetLocal : Nat} {code : UInt32}
+    {thenSource elseSource : List Fir.Wasm.Instruction}
+    {thenTarget elseTarget : Wasm.Program}
+    (localFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceLocal = some targetLocal)
+    (thenAdapted : FirTalos.instructions sourceModule sourceFunction []
+      thenSource = .ok thenTarget)
+    (elseAdapted : FirTalos.instructions sourceModule sourceFunction []
+      elseSource = .ok elseTarget) :
+    FirTalos.instructions sourceModule sourceFunction []
+      [.localGet sourceLocal, .i32Const .uint32 code, .i32Eq,
+        .ifElse thenSource elseSource] = .ok [
+      .localGet targetLocal, .const code, .eq,
+      .iff 0 0 thenTarget elseTarget] := by
+  rw [instructions_localEqDispatch_eq localFound, thenAdapted, elseAdapted]
+  rfl
+
 /-- A source object-kind test adapts compositionally from its two branches.
 This is the common adapter boundary for constructor, closure, and opaque
 dispatch in the resident release helper. -/
@@ -1802,30 +1867,15 @@ theorem instructions_kindDispatch
         .ifElse thenSource elseSource] = .ok [
       .localGet kindIndex, .const kindCode, .eq,
       .iff 0 0 thenTarget elseTarget] := by
-  have kindAdapted := FirTalos.Correctness.instruction_localGet
-    (sourceModule := sourceModule) kindFound
-  have codeAdapted : FirTalos.instruction sourceModule sourceFunction []
-      (.i32Const .uint32 kindCode) = .ok (.const kindCode) := by
-    simp [FirTalos.instruction, pure, Except.pure]
-  have equalityAdapted : FirTalos.instruction sourceModule sourceFunction []
-      .i32Eq = .ok .eq := by
-    simp [FirTalos.instruction, pure, Except.pure]
-  have branchAdapted := FirTalos.Correctness.instruction_ifElse
-    thenAdapted elseAdapted
-  simp only [FirTalos.instructions, kindAdapted, codeAdapted,
-    equalityAdapted, branchAdapted, Bind.bind, Except.bind, pure,
-    Except.pure]
+  exact instructions_localEqDispatch kindFound thenAdapted elseAdapted
 
-/-- Successful adaptation of the three object-kind branches determines the
-exact resident owned-object dispatcher.  Generation supplies the symbolic
-kind local and closure descriptor body; no body-shape certificate is exposed
-to clients. -/
-theorem instructions_ownedReleaseBody
+/-- Computation-level adaptation of the generated three-way owned dispatcher.
+Exact success and failure are inherited from the three branch adaptations. -/
+theorem instructions_ownedReleaseBody_eq
     {sourceModule : Fir.Wasm.Module}
     {descriptors : Array (Array Fir.Wasm.AbiKind)}
     {sourceFunction : Fir.Wasm.Function}
     {closureSource ownedSource : List Fir.Wasm.Instruction}
-    {constructorTarget closureTarget opaqueTarget : Wasm.Program}
     (generated :
       Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
         .ok sourceFunction)
@@ -1834,16 +1884,15 @@ theorem instructions_ownedReleaseBody
           descriptors.toList 0 = .ok closureSource)
     (ownedGenerated :
       Fir.Wasm.Emit.ResidentRelease.ownedReleaseBody descriptors =
-        .ok ownedSource)
-    (constructorAdapted : FirTalos.instructions sourceModule sourceFunction []
-      Fir.Wasm.Emit.ResidentRelease.constructorReleaseBody =
-        .ok constructorTarget)
-    (closureAdapted : FirTalos.instructions sourceModule sourceFunction []
-      closureSource = .ok closureTarget)
-    (opaqueAdapted : FirTalos.instructions sourceModule sourceFunction []
-      Fir.Wasm.Emit.ResidentRelease.opaqueReleaseBody = .ok opaqueTarget) :
-    FirTalos.instructions sourceModule sourceFunction [] ownedSource =
-      .ok (ownedReleaseProgram constructorTarget closureTarget opaqueTarget) := by
+        .ok ownedSource) :
+    FirTalos.instructions sourceModule sourceFunction [] ownedSource = (do
+      let constructorTarget ← FirTalos.instructions sourceModule sourceFunction
+        [] Fir.Wasm.Emit.ResidentRelease.constructorReleaseBody
+      let closureTarget ← FirTalos.instructions sourceModule sourceFunction
+        [] closureSource
+      let opaqueTarget ← FirTalos.instructions sourceModule sourceFunction
+        [] Fir.Wasm.Emit.ResidentRelease.opaqueReleaseBody
+      pure (ownedReleaseProgram constructorTarget closureTarget opaqueTarget)) := by
   have kindFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList)
       sourceFunction.locals[1]!.1 = some kindIndex := by
@@ -1876,19 +1925,78 @@ theorem instructions_ownedReleaseBody
         rw [closureGenerated] at ownedGenerated
         simpa [Fir.Wasm.Emit.ResidentRelease.equalsConst] using
           ownedGenerated.symm
+  have opaqueEq := instructions_localEqDispatch_eq
+    (sourceModule := sourceModule)
+    (code := ObjectKind.opaque.code)
+    (thenSource := Fir.Wasm.Emit.ResidentRelease.opaqueReleaseBody)
+    (elseSource := [.ret]) kindFound
+  have closureEq := instructions_localEqDispatch_eq
+    (sourceModule := sourceModule)
+    (code := ObjectKind.closure.code) (thenSource := closureSource)
+    (elseSource :=
+      [.localGet sourceFunction.locals[1]!.1,
+        .i32Const .uint32 ObjectKind.opaque.code,
+        .i32Eq,
+        .ifElse Fir.Wasm.Emit.ResidentRelease.opaqueReleaseBody [.ret]])
+    kindFound
+  have constructorEq := instructions_localEqDispatch_eq
+    (sourceModule := sourceModule)
+    (code := ObjectKind.constructor.code)
+    (thenSource := Fir.Wasm.Emit.ResidentRelease.constructorReleaseBody)
+    (elseSource :=
+      [.localGet sourceFunction.locals[1]!.1,
+        .i32Const .uint32 ObjectKind.closure.code,
+        .i32Eq,
+        .ifElse closureSource
+          ([.localGet sourceFunction.locals[1]!.1,
+            .i32Const .uint32 ObjectKind.opaque.code,
+            .i32Eq,
+            .ifElse Fir.Wasm.Emit.ResidentRelease.opaqueReleaseBody
+              [.ret]])]) kindFound
   have returnAdapted : FirTalos.instructions sourceModule sourceFunction
       [] [.ret] = .ok [.ret] := by
     simp [FirTalos.instructions, FirTalos.instruction, Bind.bind,
       Except.bind, pure, Except.pure]
-  have opaqueDispatch := instructions_kindDispatch
-    (kindCode := ObjectKind.opaque.code) kindFound opaqueAdapted returnAdapted
-  have closureDispatch := instructions_kindDispatch
-    (kindCode := ObjectKind.closure.code) kindFound closureAdapted opaqueDispatch
-  have constructorDispatch := instructions_kindDispatch
-    (kindCode := ObjectKind.constructor.code) kindFound constructorAdapted
-      closureDispatch
-  rw [sourceShape]
-  simpa [ownedReleaseProgram] using constructorDispatch
+  rw [sourceShape, constructorEq, closureEq, opaqueEq, returnAdapted]
+  cases constructorAdapted : FirTalos.instructions sourceModule sourceFunction
+      [] Fir.Wasm.Emit.ResidentRelease.constructorReleaseBody <;>
+    cases closureAdapted : FirTalos.instructions sourceModule sourceFunction
+      [] closureSource <;>
+    cases opaqueAdapted : FirTalos.instructions sourceModule sourceFunction
+      [] Fir.Wasm.Emit.ResidentRelease.opaqueReleaseBody <;>
+    simp [ownedReleaseProgram, Bind.bind, Except.bind, pure, Except.pure]
+
+/-- Successful adaptation of the three object-kind branches determines the
+exact resident owned-object dispatcher.  Generation supplies the symbolic
+kind local and closure descriptor body; no body-shape certificate is exposed
+to clients. -/
+theorem instructions_ownedReleaseBody
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function}
+    {closureSource ownedSource : List Fir.Wasm.Instruction}
+    {constructorTarget closureTarget opaqueTarget : Wasm.Program}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction)
+    (closureGenerated :
+      Fir.Wasm.Emit.ResidentRelease.descriptorReleaseBody
+          descriptors.toList 0 = .ok closureSource)
+    (ownedGenerated :
+      Fir.Wasm.Emit.ResidentRelease.ownedReleaseBody descriptors =
+        .ok ownedSource)
+    (constructorAdapted : FirTalos.instructions sourceModule sourceFunction []
+      Fir.Wasm.Emit.ResidentRelease.constructorReleaseBody =
+        .ok constructorTarget)
+    (closureAdapted : FirTalos.instructions sourceModule sourceFunction []
+      closureSource = .ok closureTarget)
+    (opaqueAdapted : FirTalos.instructions sourceModule sourceFunction []
+      Fir.Wasm.Emit.ResidentRelease.opaqueReleaseBody = .ok opaqueTarget) :
+    FirTalos.instructions sourceModule sourceFunction [] ownedSource =
+      .ok (ownedReleaseProgram constructorTarget closureTarget opaqueTarget) := by
+  rw [instructions_ownedReleaseBody_eq generated closureGenerated
+    ownedGenerated, constructorAdapted, closureAdapted, opaqueAdapted]
+  rfl
 
 /-- One generated owned-child release adapts to the exact recursive call.
 The generated function fixes the address local while installation resolves
@@ -2073,6 +2181,59 @@ theorem instructions_constructorReleaseBody
   simp only [FirTalos.instructions, limitAdapted, countAdapted, lessAdapted,
     branchAdapted, Bind.bind, Except.bind, pure, Except.pure]
   rfl
+
+/-- Generated direct child releases adapt homomorphically over any physical
+index list.  Closure descriptors reuse this theorem after filtering their
+object-valued captures. -/
+theorem instructions_releaseChildren
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function} {decrementIndex : Nat}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction)
+    (selfFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentRelease.decrementOnceName) =
+        some decrementIndex)
+    (indices : List Nat) :
+    FirTalos.instructions sourceModule sourceFunction []
+      (indices.flatMap Fir.Wasm.Emit.ResidentRelease.releaseChild) =
+        .ok (releaseChildrenProgram decrementIndex indices) := by
+  induction indices with
+  | nil =>
+      simp [releaseChildrenProgram, FirTalos.instructions, pure, Except.pure]
+  | cons index indices ih =>
+      simp only [List.flatMap_cons]
+      rw [FirTalos.Correctness.instructions_append_of_success
+        (instructions_releaseChild
+          (sourceModule := sourceModule) (index := index) generated selfFound)
+        ih]
+      rfl
+
+/-- Generated object-valued descriptor fields adapt to the exact filtered
+child chain used by the closure semantic proof. -/
+theorem instructions_descriptorOwnedFields
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function} {decrementIndex : Nat}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction)
+    (selfFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentRelease.decrementOnceName) =
+        some decrementIndex)
+    (descriptor : Array Fir.Wasm.AbiKind) :
+    FirTalos.instructions sourceModule sourceFunction []
+      (Fir.Wasm.Emit.ResidentRelease.descriptorOwnedFields descriptor) =
+      .ok (releaseChildrenProgram decrementIndex
+        (closureOwnedCaptureIndices 0 descriptor.toList)) := by
+  rw [show Fir.Wasm.Emit.ResidentRelease.descriptorOwnedFields descriptor =
+      (closureOwnedCaptureIndices 0 descriptor.toList).flatMap
+        Fir.Wasm.Emit.ResidentRelease.releaseChild by
+    unfold Fir.Wasm.Emit.ResidentRelease.descriptorOwnedFields
+    exact descriptorOwnedFieldsFrom_eq descriptor.toList 0]
+  exact instructions_releaseChildren
+    (sourceModule := sourceModule) generated selfFound _
 
 /-- The production persistent-object branch adapts to the exact program used
 by its execution proof.  Generation determines both the symbolic local table
@@ -3526,6 +3687,274 @@ def closureDescriptorReleaseProgram (decrementIndex : Nat) :
           [.unreachable]]
         (closureDescriptorReleaseProgram decrementIndex descriptors
           (ordinal + 1))]
+
+/-- The generated descriptor chain adapts to its exact recursive target.
+Successful generation discharges the checked-word bounds at every node, and
+the recursive child calls retain the installed decrement index. -/
+theorem instructions_descriptorReleaseBody
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function} {decrementIndex : Nat}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction)
+    (selfFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentRelease.decrementOnceName) =
+        some decrementIndex)
+    (table : List (Array Fir.Wasm.AbiKind)) (ordinal : Nat)
+    {sourceBody : List Fir.Wasm.Instruction}
+    (bodyGenerated : Fir.Wasm.Emit.ResidentRelease.descriptorReleaseBody
+      table ordinal = .ok sourceBody) :
+    FirTalos.instructions sourceModule sourceFunction [] sourceBody =
+      .ok (closureDescriptorReleaseProgram decrementIndex table ordinal) := by
+  induction table generalizing ordinal sourceBody with
+  | nil =>
+      simp [Fir.Wasm.Emit.ResidentRelease.descriptorReleaseBody,
+        pure, Except.pure] at bodyGenerated
+      subst sourceBody
+      simp [closureDescriptorReleaseProgram, FirTalos.instructions,
+        FirTalos.instruction, Bind.bind, Except.bind, pure, Except.pure]
+  | cons descriptor table ih =>
+      have descriptorFound : FirTalos.findFVar?
+          (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+          sourceFunction.locals[4]!.1 = some descriptorIndex := by
+        simpa [descriptorIndex] using
+          generatedDecrementOnceFunction_localFound generated (4 : Fin 10)
+      have captureCountFound : FirTalos.findFVar?
+          (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+          sourceFunction.locals[3]!.1 = some captureCountIndex := by
+        simpa [captureCountIndex] using
+          generatedDecrementOnceFunction_localFound generated (3 : Fin 10)
+      unfold Fir.Wasm.Emit.ResidentRelease.descriptorReleaseBody at bodyGenerated
+      cases ordinalGenerated : Fir.Wasm.Emit.ResidentRelease.checkedWord ordinal with
+      | error error =>
+          rw [ordinalGenerated] at bodyGenerated
+          contradiction
+      | ok ordinalWord =>
+        cases countGenerated :
+            Fir.Wasm.Emit.ResidentRelease.checkedWord descriptor.size with
+        | error error =>
+            rw [ordinalGenerated, countGenerated] at bodyGenerated
+            contradiction
+        | ok countWord =>
+          cases restGenerated :
+              Fir.Wasm.Emit.ResidentRelease.descriptorReleaseBody table
+                (ordinal + 1) with
+          | error error =>
+              rw [ordinalGenerated, countGenerated, restGenerated]
+                at bodyGenerated
+              contradiction
+          | ok restSource =>
+            rw [ordinalGenerated, countGenerated, restGenerated]
+              at bodyGenerated
+            simp only [Bind.bind, Except.bind, pure, Except.pure,
+              Except.ok.injEq] at bodyGenerated
+            have ordinalWordEq : ordinalWord =
+                Fir.Wasm.Emit.ResidentRelease.u32 ordinal := by
+              unfold Fir.Wasm.Emit.ResidentRelease.checkedWord
+                at ordinalGenerated
+              split at ordinalGenerated <;>
+                simp_all [pure, Except.pure]
+            subst ordinalWord
+            have countWordEq : countWord =
+                Fir.Wasm.Emit.ResidentRelease.u32 descriptor.size := by
+              unfold Fir.Wasm.Emit.ResidentRelease.checkedWord
+                at countGenerated
+              split at countGenerated <;>
+                simp_all [pure, Except.pure]
+            subst countWord
+            have sourceShape : sourceBody = [
+                .localGet sourceFunction.locals[4]!.1,
+                .i32Const .uint32
+                  (Fir.Wasm.Emit.ResidentRelease.u32 ordinal),
+                .i32Eq,
+                .ifElse [
+                  .localGet sourceFunction.locals[3]!.1,
+                  .i32Const .uint32
+                    (Fir.Wasm.Emit.ResidentRelease.u32 descriptor.size),
+                  .i32Eq,
+                  .ifElse
+                    (Fir.Wasm.Emit.ResidentRelease.descriptorOwnedFields
+                      descriptor ++ [.ret])
+                    [.unreachable]] restSource] := by
+              have generatedEq := generated
+              unfold Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction
+                at generatedEq
+              split at generatedEq
+              · contradiction
+              · simp only [Bind.bind, Except.bind] at generatedEq
+                split at generatedEq
+                · contradiction
+                · simp only [pure, Except.pure, Except.ok.injEq]
+                    at generatedEq
+                  subst sourceFunction
+                  simpa [Fir.Wasm.Emit.ResidentRelease.equalsConst] using
+                    bodyGenerated.symm
+            have fieldsAdapted := instructions_descriptorOwnedFields
+              (sourceModule := sourceModule) generated selfFound descriptor
+            have returnAdapted : FirTalos.instructions sourceModule
+                sourceFunction [] [.ret] = .ok [.ret] := by
+              simp [FirTalos.instructions, FirTalos.instruction, Bind.bind,
+                Except.bind, pure, Except.pure]
+            have fieldsReturned :=
+              FirTalos.Correctness.instructions_append_of_success
+                fieldsAdapted returnAdapted
+            have trapAdapted : FirTalos.instructions sourceModule
+                sourceFunction [] [.unreachable] = .ok [.unreachable] := by
+              simp [FirTalos.instructions, FirTalos.instruction, Bind.bind,
+                Except.bind, pure, Except.pure]
+            have countDispatch := instructions_localEqDispatch
+              (code := Fir.Wasm.Emit.ResidentRelease.u32 descriptor.size)
+              captureCountFound fieldsReturned trapAdapted
+            have restAdapted := ih (ordinal + 1) restGenerated
+            have descriptorDispatch := instructions_localEqDispatch
+              (code := Fir.Wasm.Emit.ResidentRelease.u32 ordinal)
+              descriptorFound countDispatch restAdapted
+            rw [sourceShape]
+            simpa [Fir.Wasm.Emit.ResidentRelease.equalsConst,
+              Fir.Wasm.Emit.ResidentRelease.u32,
+              closureDescriptorReleaseProgram] using descriptorDispatch
+
+/-- Installed production provenance through exact constructor and closure
+arms.  Only the opaque target remains existential, matching the currently
+open shared adapter branch-depth bug for the nested Array loop. -/
+theorem DecrementOnceInstallation.body_constructorClosure
+    {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    (installation :
+      DecrementOnceInstallation sourceModule module descriptors) :
+    ∃ opaqueTarget,
+      installation.targetFunction.body =
+        decrementOnceProgram persistentReleaseProgram
+            (lastReferenceProgram installation.releaseHeaderIndex
+              (ownedReleaseProgram
+                (constructorReleaseProgram installation.index)
+                (closureDescriptorReleaseProgram installation.index
+                  descriptors.toList 0)
+                opaqueTarget)) ++
+          FirTalos.functionTerminal sourceModule
+            installation.sourceFunction := by
+  obtain ⟨decrementSource, decrementGenerated, sourceBody⟩ :=
+    Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction_body_of_ok
+      installation.generated
+  have decrementSuccess := decrementGenerated
+  unfold Fir.Wasm.Emit.ResidentRelease.decrementOnceBody at decrementSuccess
+  cases alignedGenerated :
+      Fir.Wasm.Emit.ResidentRelease.alignedReleaseBody descriptors with
+  | error error =>
+      rw [alignedGenerated] at decrementSuccess
+      contradiction
+  | ok alignedSource =>
+    have alignedSuccess := alignedGenerated
+    unfold Fir.Wasm.Emit.ResidentRelease.alignedReleaseBody at alignedSuccess
+    cases liveGenerated :
+        Fir.Wasm.Emit.ResidentRelease.liveReleaseBody descriptors with
+    | error error =>
+        rw [liveGenerated] at alignedSuccess
+        contradiction
+    | ok liveSource =>
+      have liveSuccess := liveGenerated
+      unfold Fir.Wasm.Emit.ResidentRelease.liveReleaseBody at liveSuccess
+      cases ordinaryGenerated :
+          Fir.Wasm.Emit.ResidentRelease.ordinaryReleaseBody descriptors with
+      | error error =>
+          rw [ordinaryGenerated] at liveSuccess
+          contradiction
+      | ok ordinarySource =>
+        have ordinarySuccess := ordinaryGenerated
+        unfold Fir.Wasm.Emit.ResidentRelease.ordinaryReleaseBody
+          at ordinarySuccess
+        cases lastGenerated :
+            Fir.Wasm.Emit.ResidentRelease.lastReferenceReleaseBody descriptors with
+        | error error =>
+            rw [lastGenerated] at ordinarySuccess
+            contradiction
+        | ok lastSource =>
+          have lastSuccess := lastGenerated
+          unfold Fir.Wasm.Emit.ResidentRelease.lastReferenceReleaseBody
+            at lastSuccess
+          cases ownedGenerated :
+              Fir.Wasm.Emit.ResidentRelease.ownedReleaseBody descriptors with
+          | error error =>
+              rw [ownedGenerated] at lastSuccess
+              contradiction
+          | ok ownedSource =>
+            have ownedSuccess := ownedGenerated
+            unfold Fir.Wasm.Emit.ResidentRelease.ownedReleaseBody at ownedSuccess
+            cases closureGenerated :
+                Fir.Wasm.Emit.ResidentRelease.descriptorReleaseBody
+                  descriptors.toList 0 with
+            | error error =>
+                rw [closureGenerated] at ownedSuccess
+                contradiction
+            | ok closureSource =>
+              obtain ⟨targetBody, targetBodyAdapted, targetBodyEq⟩ :=
+                FirTalos.Correctness.function_preserves_body
+                  installation.adapted
+              rw [sourceBody] at targetBodyAdapted
+              have adapterEq := instructions_decrementOnceBody_eq
+                (sourceModule := sourceModule) installation.generated
+                  lastGenerated ordinaryGenerated liveGenerated alignedGenerated
+                  decrementGenerated
+              rw [targetBodyAdapted] at adapterEq
+              have lastAdapterEq := instructions_lastReferenceReleaseBody_eq
+                (sourceModule := sourceModule) installation.generated
+                  ownedGenerated lastGenerated installation.releaseHeaderFound
+              rw [lastAdapterEq] at adapterEq
+              have ownedAdapterEq := instructions_ownedReleaseBody_eq
+                (sourceModule := sourceModule) installation.generated
+                  closureGenerated ownedGenerated
+              have constructorAdapted := instructions_constructorReleaseBody
+                (sourceModule := sourceModule) installation.generated
+                  installation.selfFound
+              have closureAdapted := instructions_descriptorReleaseBody
+                (sourceModule := sourceModule) installation.generated
+                  installation.selfFound descriptors.toList 0 closureGenerated
+              rw [ownedAdapterEq, constructorAdapted, closureAdapted]
+                at adapterEq
+              cases opaqueAdapted : FirTalos.instructions sourceModule
+                  installation.sourceFunction []
+                    Fir.Wasm.Emit.ResidentRelease.opaqueReleaseBody with
+              | error error =>
+                  rw [opaqueAdapted] at adapterEq
+                  contradiction
+              | ok opaqueTarget =>
+                  rw [opaqueAdapted] at adapterEq
+                  simp only [Bind.bind, Except.bind, pure, Except.pure,
+                    Except.ok.injEq] at adapterEq
+                  exact ⟨opaqueTarget, targetBodyEq.trans
+                    (congrArg (fun body => body ++
+                      FirTalos.functionTerminal sourceModule
+                        installation.sourceFunction) adapterEq)⟩
+
+/-- Lift exact constructor/closure branch proofs to the actual installed body.
+The remaining opaque branch is quantified because neither constructor nor
+closure execution selects it. -/
+theorem DecrementOnceInstallation.wp_body_of_constructorClosure
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {store : Wasm.Store host} {locals : Wasm.Locals}
+    {Q : Wasm.Assertion host}
+    (installation :
+      DecrementOnceInstallation sourceModule module descriptors)
+    (noFallthrough : ∀ nextStore nextLocals,
+      ¬ Q (.Fallthrough nextStore nextLocals))
+    (coreWP : ∀ opaqueTarget,
+      Wasm.wp module
+        (decrementOnceProgram persistentReleaseProgram
+          (lastReferenceProgram installation.releaseHeaderIndex
+            (ownedReleaseProgram
+              (constructorReleaseProgram installation.index)
+              (closureDescriptorReleaseProgram installation.index
+                descriptors.toList 0)
+              opaqueTarget)))
+        Q store locals env) :
+    Wasm.wp module installation.targetFunction.body Q store locals env := by
+  obtain ⟨opaqueTarget, bodyEq⟩ := installation.body_constructorClosure
+  rw [bodyEq]
+  exact FirTalos.Correctness.Wasm.wp_append_of_no_fallthrough
+    noFallthrough (coreWP opaqueTarget)
 
 /-- Selecting an in-range static closure descriptor executes exactly its
 filtered child-release chain.  This factors the common descriptor admission
