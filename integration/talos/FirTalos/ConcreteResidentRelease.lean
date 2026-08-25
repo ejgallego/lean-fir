@@ -4067,6 +4067,57 @@ theorem DecrementOnceInstallation.terminatesWith_of_success_wp
     params, results]
   exact ⟨result, success⟩
 
+/-- Choose one successful result of a fuel-free call and repackage fuel
+monotonicity as an exact fixed-result specification.  This is the bridge from
+simulation-style relational posts to the sequential store threading used by
+recursive ownership folds. -/
+theorem terminatesWith_exists_exact
+    {host : Type} {env : Wasm.HostEnv host} {module : Wasm.Module}
+    {index : Nat} {initial : Wasm.Store host} {args : List Wasm.Value}
+    {P : Wasm.Store host → List Wasm.Value → Prop}
+    (called : Wasm.TerminatesWith env module index initial args P) :
+    ∃ final values,
+      P final values ∧
+        Wasm.TerminatesWith env module index initial args
+          (fun final' values' => final' = final ∧ values' = values) := by
+  obtain ⟨bound, runs⟩ := called
+  obtain ⟨values, final, run, post⟩ := runs bound (Nat.le_refl bound)
+  exact ⟨final, values, post,
+    Wasm.TerminatesWith.of_run bound values final run ⟨rfl, rfl⟩⟩
+
+/-- Select the concrete result and final resident store from a relational
+installed decrement call.  No determinism certificate is added: the fixed
+specification follows from the successful run already contained in
+`TerminatesWith` and Talos's proved fuel monotonicity. -/
+theorem DecrementOnceInstallation.exists_success_of_terminatesWith
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {state : MemoryState} {witness : RefinementWitness}
+    {nextRuntime : Fir.LeanIR.Impure.RuntimeState}
+    {address : Word32} {check : Bool} {fuel : Nat}
+    {store : Wasm.Store host}
+    (installation :
+      DecrementOnceInstallation sourceModule module descriptors)
+    (checkWord : UInt32) (tail : List Wasm.Value)
+    (called : Wasm.TerminatesWith env module installation.index store
+      ([.i32 checkWord, .i32 (UInt32.ofNat address.value)] ++ tail)
+      (fun final values =>
+        (∃ result,
+          DecrementOnceSuccess fuel state witness nextRuntime address check
+            result final) ∧
+        values = tail)) :
+    ∃ result final,
+      DecrementOnceSuccess fuel state witness nextRuntime address check result
+          final ∧
+        Wasm.TerminatesWith env module installation.index store
+          ([.i32 checkWord, .i32 (UInt32.ofNat address.value)] ++ tail)
+          (fun final' values => final' = final ∧ values = tail) := by
+  obtain ⟨final, values, post, exact⟩ := terminatesWith_exists_exact called
+  obtain ⟨⟨result, success⟩, valuesEq⟩ := post
+  subst values
+  exact ⟨result, final, success, exact⟩
+
 /-- Selecting an in-range static closure descriptor executes exactly its
 filtered child-release chain.  This factors the common descriptor admission
 proof away from the heap simulation: the caller supplies only the immutable
