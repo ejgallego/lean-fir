@@ -4251,6 +4251,38 @@ theorem LiveCellRel.terminatesWith_releaseHeaderFunction
   simp [FirTalos.Correctness.FunctionBodyPost, targetFunction',
     releaseHeaderTargetFunction, Wasm.Function.numParams]
 
+/-- The exact header-release refinement specialized to the callee recorded in
+one coherent decrement-helper installation. -/
+theorem LiveCellRel.terminatesWith_installedReleaseHeader
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : Fir.LeanIR.Impure.HeapCell}
+    (installation :
+      DecrementOnceInstallation sourceModule module descriptors)
+    (cellRelated : LiveCellRel state witness address cell)
+    (valid : state.FrontierInvariant)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (exactHeader : CanonicalLiveHeaderRel state address) :
+    ∃ header result,
+      state.readLiveHeader address = .ok header ∧
+      writeLiveHeader state address header.forRelease = .ok result ∧
+      result.FrontierInvariant ∧
+      DeadCellRel result address ∧
+      ResidentMemoryRel result
+        (releaseHeaderStore store (UInt32.ofNat address.value)).mem ∧
+      Wasm.TerminatesWith env module installation.releaseHeaderIndex store
+        [.i32 (UInt32.ofNat address.value)]
+        (fun final values =>
+          final = releaseHeaderStore store (UInt32.ofNat address.value) ∧
+            values = []) :=
+  LiveCellRel.terminatesWith_releaseHeaderFunction
+    installation.releaseHeaderAdapted installation.releaseHeaderNotImport
+    installation.releaseHeaderInstalled cellRelated valid memoryRelated
+    exactHeader
+
 /-- The resident helper's early ordinary decrement is a semantic ownership
 step, not merely a successful store.  Starting from the shared W6 heap
 simulation, its exact physical update remains related to the result of both
