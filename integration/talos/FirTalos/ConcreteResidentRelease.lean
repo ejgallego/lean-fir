@@ -121,6 +121,12 @@ def countedLocals (object check flags descriptor refCount : UInt32) :
     .i32 0]
   values := [] }
 
+/-- Concrete entry frame of the one-parameter `fir_release_header` helper. -/
+def releaseHeaderEntry (object : UInt32) : Wasm.Locals := {
+  params := [.i32 object]
+  locals := []
+  values := [] }
+
 /-- The exact common-header invariant required when resident Wasm preserves
 raw lanes that the decoded W6 host may otherwise canonicalize on rewrite.
 This is state, not compiler evidence: clients establish it once for an
@@ -191,6 +197,54 @@ def decrementAboveOneProgram : Wasm.Program := [
   .sub,
   .store32 (UInt32.ofNat headerRefCountOffset),
   .ret]
+
+/-- Exact Talos body of W7's nonrecursive header-release helper.  The
+allocation-size lane is intentionally retained while kind, ownership flags,
+reference count, and auxiliary metadata are cleared. -/
+def releaseHeaderProgram : Wasm.Program := [
+  .localGet 0,
+  .const ObjectKind.freed.code,
+  .store32 (UInt32.ofNat headerKindOffset),
+  .localGet 0,
+  .const 0,
+  .store32 (UInt32.ofNat headerFlagsOffset),
+  .localGet 0,
+  .const 0,
+  .store32 (UInt32.ofNat headerRefCountOffset),
+  .localGet 0,
+  .const 0,
+  .store32 (UInt32.ofNat headerAux0Offset),
+  .localGet 0,
+  .const 0,
+  .store32 (UInt32.ofNat headerAux1Offset),
+  .localGet 0,
+  .const 0,
+  .store32 (UInt32.ofNat headerAux2Offset),
+  .localGet 0,
+  .const 0,
+  .store32 (UInt32.ofNat headerAux3Offset),
+  .ret]
+
+/-- Physical memory produced by the seven resident header-release stores. -/
+def releaseHeaderMemory (memory : Wasm.Mem) (object : UInt32) : Wasm.Mem :=
+  let memory := memory.write32
+    (object + UInt32.ofNat headerKindOffset) ObjectKind.freed.code
+  let memory := memory.write32
+    (object + UInt32.ofNat headerFlagsOffset) 0
+  let memory := memory.write32
+    (object + UInt32.ofNat headerRefCountOffset) 0
+  let memory := memory.write32
+    (object + UInt32.ofNat headerAux0Offset) 0
+  let memory := memory.write32
+    (object + UInt32.ofNat headerAux1Offset) 0
+  let memory := memory.write32
+    (object + UInt32.ofNat headerAux2Offset) 0
+  memory.write32 (object + UInt32.ofNat headerAux3Offset) 0
+
+/-- Store-level spelling of `releaseHeaderMemory`. -/
+def releaseHeaderStore (store : Wasm.Store host) (object : UInt32) :
+    Wasm.Store host :=
+  { store with mem := releaseHeaderMemory store.mem object }
 
 /-- Ordinary release control flow.  The count-zero and last-reference paths
 remain explicit but opaque: the hot theorem below proves they are not entered. -/
@@ -285,6 +339,39 @@ def decrementOnceProgram (persistent lastReference : Wasm.Program) :
       .eq,
       .iff 0 0 (alignedReleaseProgram persistent lastReference)
         [.unreachable]]]]
+
+/-- The concrete `fir_release_header` body performs exactly its seven checked
+word stores and returns no values.  A single full-header bound discharges all
+seven accesses and remains stable because stores do not change memory pages. -/
+theorem wp_releaseHeaderProgram
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {object : UInt32}
+    (headerInBounds :
+      object.toNat + headerBytes ≤ store.mem.pages * wasmPageBytes)
+    (returned : Q (.Return (releaseHeaderStore store object) [])) :
+    Wasm.wp module releaseHeaderProgram Q store
+      (releaseHeaderEntry object) env := by
+  have addressFound : (releaseHeaderEntry object).get 0 =
+      some (.i32 object) := by rfl
+  unfold releaseHeaderProgram
+  apply ResidentMemoryRel.wp_store32_const_of_inBounds addressFound
+    (by simp [headerBytes, headerKindOffset] at headerInBounds ⊢; omega)
+  apply ResidentMemoryRel.wp_store32_const_of_inBounds addressFound
+    (by simp [headerBytes, headerFlagsOffset] at headerInBounds ⊢; omega)
+  apply ResidentMemoryRel.wp_store32_const_of_inBounds addressFound
+    (by simp [headerBytes, headerRefCountOffset] at headerInBounds ⊢; omega)
+  apply ResidentMemoryRel.wp_store32_const_of_inBounds addressFound
+    (by simp [headerBytes, headerAux0Offset] at headerInBounds ⊢; omega)
+  apply ResidentMemoryRel.wp_store32_const_of_inBounds addressFound
+    (by simp [headerBytes, headerAux1Offset] at headerInBounds ⊢; omega)
+  apply ResidentMemoryRel.wp_store32_const_of_inBounds addressFound
+    (by simp [headerBytes, headerAux2Offset] at headerInBounds ⊢; omega)
+  apply ResidentMemoryRel.wp_store32_const_of_inBounds addressFound
+    (by simpa [headerBytes, headerAux3Offset] using headerInBounds)
+  simp only [Wasm.wp_ret_cons]
+  simpa [releaseHeaderStore, releaseHeaderMemory,
+    ResidentMemoryRel.write32Store] using returned
 
 /-- Postcondition for branch proofs that deliberately terminate the current
 function.  It excludes fallthrough and structured breaks, while treating a
@@ -476,6 +563,54 @@ theorem wp_liveReleaseProgram_underflow
   rw [if_pos (by decide : (1 : UInt32) ≠ 0)]
   simpa only [List.take_zero, List.drop_zero, List.nil_append,
     Wasm.wp_unreachable_cons, TerminalPost] using trapped
+
+/-- An ordinary live header with reference count one selects exactly the
+caller-supplied last-reference body.  The common probe and count load are
+discharged here; recursive ownership reasoning starts from the counted frame. -/
+theorem wp_liveReleaseProgram_lastReference
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {object check flags descriptor refCount : UInt32}
+    {persistent lastReference : Wasm.Program}
+    (aux3InBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux3Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (aux3Read : store.mem.read32
+      (object + UInt32.ofNat headerAux3Offset) = descriptor)
+    (ordinary : flags &&& persistentFlag ≠ persistentFlag)
+    (refCountInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerRefCountOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (refCountRead : store.mem.read32
+      (object + UInt32.ofNat headerRefCountOffset) = refCount)
+    (one : refCount = 1)
+    (lastBody : Wasm.wp module lastReference (TerminalPost Q) store
+      (countedLocals object check flags descriptor refCount) env) :
+    Wasm.wp module (liveReleaseProgram persistent lastReference) Q store
+      (liveEntry object check flags) env := by
+  have countedRefCount (values : List Wasm.Value) :
+      ({ countedLocals object check flags descriptor refCount with values } :
+        Wasm.Locals).get refCountIndex = some (.i32 refCount) := by rfl
+  have nonzero : refCount ≠ 0 := by
+    rw [one]
+    decide
+  have notAboveOne : ¬(1 : UInt32) < refCount := by
+    rw [one]
+    decide
+  apply wp_liveReleaseProgram_ordinary aux3InBounds aux3Read ordinary
+    refCountInBounds refCountRead
+  simp only [Wasm.wp_localGet_cons, countedRefCount, Wasm.wp_const_cons,
+    Wasm.wp_eq_cons, if_neg nonzero]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_const_cons, Wasm.wp_localGet_cons, countedRefCount,
+    Wasm.wp_ltU_cons, if_neg notAboveOne]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  apply Wasm.wp.conseq _ lastBody
+  intro continuation terminal
+  cases continuation <;> simp_all [TerminalPost]
 
 /-- An ordinary persistent allocation returns without changing memory.  The
 only nontrivial subcase in W7's branch is the promoted-Nat encoding, excluded
@@ -1079,6 +1214,48 @@ theorem wp_decrementOnceProgram_underflow
     refCountInBounds refCountRead zero
   simpa [TerminalPost] using trapped
 
+/-- Complete entry theorem for the ordinary last-reference branch.  All
+public admission and common-header checks are factored away; the remaining
+obligation is the exact last-reference program from the counted frame. -/
+theorem wp_decrementOnceProgram_lastReference
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {object check flags descriptor refCount : UInt32}
+    {persistent lastReference : Wasm.Program}
+    (taggedClear : (1 : UInt32) &&& object = 0)
+    (objectNonzero : object ≠ 0)
+    (alignmentClear :
+      UInt32.ofNat (target.heapAlignment - 1) &&& object = 0)
+    (flagsInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerFlagsOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (flagsRead : store.mem.read32
+      (object + UInt32.ofNat headerFlagsOffset) = flags)
+    (liveSet : liveFlag &&& flags = liveFlag)
+    (aux3InBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux3Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (aux3Read : store.mem.read32
+      (object + UInt32.ofNat headerAux3Offset) = descriptor)
+    (ordinary : flags &&& persistentFlag ≠ persistentFlag)
+    (refCountInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerRefCountOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (refCountRead : store.mem.read32
+      (object + UInt32.ofNat headerRefCountOffset) = refCount)
+    (one : refCount = 1)
+    (lastBody : Wasm.wp module lastReference (TerminalPost Q) store
+      (countedLocals object check flags descriptor refCount) env) :
+    Wasm.wp module (decrementOnceProgram persistent lastReference) Q store
+      (decrementEntry object check) env := by
+  apply wp_decrementOnceProgram_live taggedClear objectNonzero alignmentClear
+    flagsInBounds flagsRead liveSet
+  apply wp_liveReleaseProgram_lastReference aux3InBounds aux3Read ordinary
+    refCountInBounds refCountRead one
+  apply Wasm.wp.conseq _ lastBody
+  intro continuation terminal
+  cases continuation <;> simp_all [TerminalPost]
+
 /-- Adjacent checked W6 word stores refine the corresponding Talos stores.
 Unlike the allocator specialization, this statement carries no global or
 frontier premise and is therefore suitable for nonallocating helpers. -/
@@ -1349,6 +1526,191 @@ theorem ResidentMemoryRel.writeHeaderRefCount
     rw [← readAfterRef 28 header.aux3 (by decide) (by decide) aux3Read,
       ResidentMemoryRel.write32_read32_self]
   simpa [memoryEq] using full
+
+/-- Skipping the retained allocation-size lane is extensionally equivalent to
+rewriting the complete canonical released header.  Exactness of the old
+header supplies the skipped word; the preceding three stores are disjoint
+from that lane. -/
+theorem releaseHeaderMemory_eq_writeUInt32sMemory
+    {heap : MemoryState} {memory : Wasm.Mem} {address : Word32}
+    {header : Header}
+    (related : ResidentMemoryRel heap memory)
+    (exact : Header.ExactWords heap.memory address header)
+    (headerInBounds : address.value + headerBytes ≤ heap.memory.size) :
+    releaseHeaderMemory memory (UInt32.ofNat address.value) =
+      ResidentMemoryRel.writeUInt32sMemory memory
+        (UInt32.ofNat address.value) header.forRelease.words := by
+  let object := UInt32.ofNat address.value
+  have allocation := residentHeaderWord related exact headerInBounds
+    (index := 3) (word := header.allocationBytes) (by simp [Header.words])
+  have allocationRead : memory.read32
+      (object + UInt32.ofNat headerAllocationBytesOffset) =
+        header.allocationBytes := by
+    change memory.read32 (UInt32.ofNat address.value + 12) =
+      header.allocationBytes
+    simpa using allocation.2
+  have headerFits : address.value + headerBytes ≤ UInt32.size :=
+    Nat.le_trans headerInBounds related.size_le
+  have addressOffsetToNat (offset : Nat)
+      (fits : address.value + offset < UInt32.size) :
+      (object + UInt32.ofNat offset).toNat = address.value + offset := by
+    dsimp [object]
+    rw [← UInt32.ofNat_add, UInt32.toNat_ofNat_of_lt' fits]
+  have addressOffsetFits (offset : Nat) (bound : offset < headerBytes) :
+      address.value + offset < UInt32.size := by
+    omega
+  let beforeAllocation :=
+    ((memory.write32
+        (object + UInt32.ofNat headerKindOffset) ObjectKind.freed.code).write32
+        (object + UInt32.ofNat headerFlagsOffset) 0).write32
+        (object + UInt32.ofNat headerRefCountOffset) 0
+  have beforeAllocationRead : beforeAllocation.read32
+      (object + UInt32.ofNat headerAllocationBytesOffset) =
+        header.allocationBytes := by
+    dsimp [beforeAllocation]
+    rw [ResidentMemoryRel.read32_write32_disjoint]
+    · rw [ResidentMemoryRel.read32_write32_disjoint]
+      · rw [ResidentMemoryRel.read32_write32_disjoint]
+        · exact allocationRead
+        · left
+          rw [addressOffsetToNat headerKindOffset
+              (addressOffsetFits headerKindOffset (by decide)),
+            addressOffsetToNat headerAllocationBytesOffset
+              (addressOffsetFits headerAllocationBytesOffset (by decide))]
+          simp [headerKindOffset, headerAllocationBytesOffset]
+      · left
+        rw [addressOffsetToNat headerFlagsOffset
+            (addressOffsetFits headerFlagsOffset (by decide)),
+          addressOffsetToNat headerAllocationBytesOffset
+            (addressOffsetFits headerAllocationBytesOffset (by decide))]
+        simp [headerFlagsOffset, headerAllocationBytesOffset]
+    · left
+      rw [addressOffsetToNat headerRefCountOffset
+          (addressOffsetFits headerRefCountOffset (by decide)),
+        addressOffsetToNat headerAllocationBytesOffset
+          (addressOffsetFits headerAllocationBytesOffset (by decide))]
+      simp [headerRefCountOffset, headerAllocationBytesOffset]
+  have step8 : (4 : UInt32) + 4 = UInt32.ofNat 8 := by decide
+  have step12 : UInt32.ofNat 8 + 4 = UInt32.ofNat 12 := by decide
+  have step16 : UInt32.ofNat 12 + 4 = UInt32.ofNat 16 := by decide
+  have step20 : UInt32.ofNat 16 + 4 = UInt32.ofNat 20 := by decide
+  have step24 : UInt32.ofNat 20 + 4 = UInt32.ofNat 24 := by decide
+  have step28 : UInt32.ofNat 24 + 4 = UInt32.ofNat 28 := by decide
+  have beforeAllocationEq :
+      ((memory.write32 (UInt32.ofNat address.value) ObjectKind.freed.code).write32
+          (UInt32.ofNat address.value + 4) 0).write32
+          (UInt32.ofNat address.value + UInt32.ofNat 8) 0 =
+        beforeAllocation := by
+    simp [beforeAllocation, object, headerKindOffset, headerFlagsOffset,
+      headerRefCountOffset]
+  let afterAllocation (current : Wasm.Mem) :=
+    (((current.write32
+      (object + UInt32.ofNat headerAux0Offset) 0).write32
+      (object + UInt32.ofNat headerAux1Offset) 0).write32
+      (object + UInt32.ofNat headerAux2Offset) 0).write32
+      (object + UInt32.ofNat headerAux3Offset) 0
+  have releaseShape :
+      releaseHeaderMemory memory object = afterAllocation beforeAllocation := by
+    rfl
+  have fullShape :
+      ResidentMemoryRel.writeUInt32sMemory memory object
+          header.forRelease.words =
+        afterAllocation (beforeAllocation.write32
+          (object + UInt32.ofNat headerAllocationBytesOffset)
+          header.allocationBytes) := by
+    simp only [Header.words, Header.forRelease, Header.flags,
+      Bool.false_eq_true, ↓reduceIte,
+      ResidentMemoryRel.writeUInt32sMemory]
+    rw [show object + 4 + 4 = object + UInt32.ofNat 8 by
+      rw [UInt32.add_assoc, step8]]
+    rw [show object + UInt32.ofNat 8 + 4 = object + UInt32.ofNat 12 by
+      rw [UInt32.add_assoc, step12]]
+    rw [show object + UInt32.ofNat 12 + 4 = object + UInt32.ofNat 16 by
+      rw [UInt32.add_assoc, step16]]
+    rw [show object + UInt32.ofNat 16 + 4 = object + UInt32.ofNat 20 by
+      rw [UInt32.add_assoc, step20]]
+    rw [show object + UInt32.ofNat 20 + 4 = object + UInt32.ofNat 24 by
+      rw [UInt32.add_assoc, step24]]
+    rw [show object + UInt32.ofNat 24 + 4 = object + UInt32.ofNat 28 by
+      rw [UInt32.add_assoc, step28]]
+    rw [show UInt32.ofNat 0 = 0 by decide]
+    rw [beforeAllocationEq]
+    rfl
+  rw [releaseShape, fullShape, ← beforeAllocationRead,
+    ResidentMemoryRel.write32_read32_self]
+
+/-- W6's canonical released-header write and W7's seven resident stores
+produce related memories. -/
+theorem ResidentMemoryRel.releaseHeader
+    {heap : MemoryState} {memory : Wasm.Mem}
+    (related : ResidentMemoryRel heap memory)
+    {address : Word32} {header : Header} {result : LinearMemory}
+    (exact : Header.ExactWords heap.memory address header)
+    (headerInBounds : address.value + headerBytes ≤ heap.memory.size)
+    (written : header.forRelease.write heap.memory address = .ok result) :
+    ResidentMemoryRel { heap with memory := result }
+      (releaseHeaderMemory memory (UInt32.ofNat address.value)) := by
+  have full := writeUInt32sMemoryRel related
+    (values := header.forRelease.words)
+    (by simpa [Header.words, headerBytes] using headerInBounds)
+    written
+  rw [releaseHeaderMemory_eq_writeUInt32sMemory related exact headerInBounds]
+  exact full
+
+/-- The resident header helper implements W6's canonical release transition.
+The resulting concrete allocation is a proved dead cell, its memory remains
+related to the exact seven-store target state, and the target body returns
+normally with no values. -/
+theorem LiveCellRel.releaseHeaderProgram_refines
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : Fir.LeanIR.Impure.HeapCell}
+    (cellRelated : LiveCellRel state witness address cell)
+    (valid : state.FrontierInvariant)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (exactHeader : CanonicalLiveHeaderRel state address) :
+    ∃ header result,
+      state.readLiveHeader address = .ok header ∧
+      writeLiveHeader state address header.forRelease = .ok result ∧
+      result.FrontierInvariant ∧
+      DeadCellRel result address ∧
+      ResidentMemoryRel result
+        (releaseHeaderStore store (UInt32.ofNat address.value)).mem ∧
+      Wasm.wp module releaseHeaderProgram
+        (fun continuation => continuation =
+          .Return (releaseHeaderStore store (UInt32.ofNat address.value)) [])
+        store (releaseHeaderEntry (UInt32.ofNat address.value)) env := by
+  obtain ⟨header, headerRead, _, _, _, _⟩ := cellRelated.ownershipHeader
+  have exact := exactHeader header headerRead
+  have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
+    Nat.le_trans cellRelated.headerOwned valid.cursorInBounds
+  obtain ⟨result, memory, operation, resultEq, headerWrite, finalValid,
+      dead⟩ :=
+    Fir.Wasm.Concrete.releaseHeader valid headerRead cellRelated.headerOwned
+  have finalMemory : ResidentMemoryRel result
+      (releaseHeaderStore store (UInt32.ofNat address.value)).mem := by
+    rw [resultEq]
+    simpa [releaseHeaderStore] using
+      ResidentMemoryRel.releaseHeader memoryRelated exact headerInBounds
+        headerWrite
+  have addressToNat : (UInt32.ofNat address.value).toNat = address.value :=
+    UInt32.toNat_ofNat_of_lt' (by
+      simpa [UInt32.size, wordModulus] using address.isLt)
+  have targetHeaderInBounds :
+      (UInt32.ofNat address.value).toNat + headerBytes ≤
+        store.mem.pages * wasmPageBytes := by
+    rw [addressToNat, ← memoryRelated.size_eq]
+    exact headerInBounds
+  have physicalExecution :
+      Wasm.wp module releaseHeaderProgram
+        (fun continuation => continuation =
+          .Return (releaseHeaderStore store (UInt32.ofNat address.value)) [])
+        store (releaseHeaderEntry (UInt32.ofNat address.value)) env := by
+    apply wp_releaseHeaderProgram targetHeaderInBounds
+    rfl
+  exact ⟨header, result, headerRead, operation, finalValid, dead,
+    finalMemory, physicalExecution⟩
 
 /-- The resident helper's early ordinary decrement is a semantic ownership
 step, not merely a successful store.  Starting from the shared W6 heap
