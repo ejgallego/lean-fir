@@ -4870,19 +4870,13 @@ theorem wp_persistentReleaseProgram_notPromoted
     simpa only [List.take_zero, List.drop_zero, List.nil_append,
       Wasm.wp_ret_cons, markerValues] using returned
 
-/-- The live-object dispatcher selects W7's persistent branch, after retaining
-the same terminal-header probe used by the ordinary path. -/
-theorem wp_liveReleaseProgram_persistent
+/-- The distinguished persistent Natural header executes the checked no-op
+gate.  With the checked public calling convention it returns exactly as an
+immediate tagged word does, without changing resident memory. -/
+theorem wp_persistentReleaseProgram_promoted
     {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
     {Q : Wasm.Assertion host} {store : Wasm.Store host}
     {object check flags descriptor kind marker : UInt32}
-    {lastReference : Wasm.Program}
-    (aux3InBounds :
-      ¬(object.toNat + (UInt32.ofNat headerAux3Offset).toNat + 4 >
-        store.mem.pages * wasmPageBytes))
-    (aux3Read : store.mem.read32
-      (object + UInt32.ofNat headerAux3Offset) = descriptor)
-    (persistent : flags &&& persistentFlag = persistentFlag)
     (kindInBounds :
       ¬(object.toNat + (UInt32.ofNat headerKindOffset).toNat + 4 >
         store.mem.pages * wasmPageBytes))
@@ -4893,9 +4887,94 @@ theorem wp_liveReleaseProgram_persistent
         store.mem.pages * wasmPageBytes))
     (markerRead : store.mem.read32
       (object + UInt32.ofNat headerAux0Offset) = marker)
-    (notPromoted :
-      kind ≠ ObjectKind.natural.code ∨ marker ≠ promotedTagMarker)
+    (kindNatural : kind = ObjectKind.natural.code)
+    (markerPromoted : marker = promotedTagMarker)
+    (checked : check ≠ 0)
     (returned : Q (.Return store [])) :
+    Wasm.wp module persistentReleaseProgram Q store
+      (probedLocals object check flags descriptor) env := by
+  have probedAddress (values : List Wasm.Value) :
+      ({ probedLocals object check flags descriptor with values } :
+        Wasm.Locals).get addressIndex = some (.i32 object) := by rfl
+  have kindSet (values : List Wasm.Value) :
+      ({ probedLocals object check flags descriptor with
+          values := .i32 kind :: values } : Wasm.Locals).set?
+            kindIndex (.i32 kind) =
+        some { persistentKindLocals object check flags descriptor kind with
+          values := .i32 kind :: values } := by rfl
+  have probedValues :
+      (probedLocals object check flags descriptor).values = [] := by rfl
+  have kindAddress (values : List Wasm.Value) :
+      ({ persistentKindLocals object check flags descriptor kind with values } :
+        Wasm.Locals).get addressIndex = some (.i32 object) := by rfl
+  have markerSet (values : List Wasm.Value) :
+      ({ persistentKindLocals object check flags descriptor kind with
+          values := .i32 marker :: values } : Wasm.Locals).set?
+            markerIndex (.i32 marker) =
+        some { persistentMarkerLocals object check flags descriptor kind marker with
+          values := .i32 marker :: values } := by rfl
+  have markerAddress (values : List Wasm.Value) :
+      ({ persistentMarkerLocals object check flags descriptor kind marker with
+          values } : Wasm.Locals).get addressIndex = some (.i32 object) := by rfl
+  have markerKind (values : List Wasm.Value) :
+      ({ persistentMarkerLocals object check flags descriptor kind marker with
+          values } : Wasm.Locals).get kindIndex = some (.i32 kind) := by rfl
+  have markerCheck (values : List Wasm.Value) :
+      ({ persistentMarkerLocals object check flags descriptor kind marker with
+          values } : Wasm.Locals).get checkIndex = some (.i32 check) := by rfl
+  have markerValues :
+      (persistentMarkerLocals object check flags descriptor kind marker).values =
+        [] := by rfl
+  have kindInBounds' :
+      ¬(object.toNat + (UInt32.ofNat headerKindOffset).toNat + 4 >
+        store.mem.pages * 65536) := by
+    simpa [wasmPageBytes] using kindInBounds
+  have markerInBounds' :
+      ¬(object.toNat + (UInt32.ofNat headerAux0Offset).toNat + 4 >
+        store.mem.pages * 65536) := by
+    simpa [wasmPageBytes] using markerInBounds
+  unfold persistentReleaseProgram
+  simp only [Wasm.wp_localGet_cons, probedAddress, Wasm.wp_load32_cons]
+  rw [if_neg kindInBounds', kindRead]
+  simp only [Wasm.wp_localSet_cons, kindSet, probedValues,
+    Wasm.wp_localGet_cons, kindAddress, Wasm.wp_load32_cons]
+  rw [if_neg markerInBounds', markerRead]
+  simp only [markerSet, markerKind, Wasm.wp_const_cons, Wasm.wp_eq_cons]
+  rw [if_pos kindNatural]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_pos (by decide : (1 : UInt32) ≠ 0)]
+  simp only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_localGet_cons, markerAddress, Wasm.wp_load32_cons]
+  rw [if_neg markerInBounds', markerRead]
+  simp only [Wasm.wp_const_cons, Wasm.wp_eq_cons]
+  rw [if_pos markerPromoted]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_pos (by decide : (1 : UInt32) ≠ 0)]
+  unfold checkedNoopProgram
+  simp only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_localGet_cons, markerCheck]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_pos checked]
+  simpa only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_ret_cons, markerValues] using returned
+
+/-- The common live dispatcher selects its persistent arm.  The proof of the
+selected arm is supplied independently, so ordinary persistent allocations
+and promoted tagged Naturals share one full-header admission proof. -/
+theorem wp_liveReleaseProgram_persistent_of_wp
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {object check flags descriptor : UInt32}
+    {lastReference : Wasm.Program}
+    (aux3InBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux3Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (aux3Read : store.mem.read32
+      (object + UInt32.ofNat headerAux3Offset) = descriptor)
+    (persistent : flags &&& persistentFlag = persistentFlag)
+    (persistentBody : Wasm.wp module persistentReleaseProgram
+      (TerminalPost Q) store
+      (probedLocals object check flags descriptor) env) :
     Wasm.wp module
       (liveReleaseProgram persistentReleaseProgram lastReference) Q store
       (liveEntry object check flags) env := by
@@ -4938,9 +5017,76 @@ theorem wp_liveReleaseProgram_persistent
   simp only [if_true]
   apply Wasm.wp_iff_cons rfl
   rw [if_pos (by decide : (1 : UInt32) ≠ 0)]
+  apply Wasm.wp.conseq _ persistentBody
+  intro continuation terminal
+  cases continuation <;> simp_all [TerminalPost]
+
+/-- The live-object dispatcher selects W7's persistent branch, after retaining
+the same terminal-header probe used by the ordinary path. -/
+theorem wp_liveReleaseProgram_persistent
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {object check flags descriptor kind marker : UInt32}
+    {lastReference : Wasm.Program}
+    (aux3InBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux3Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (aux3Read : store.mem.read32
+      (object + UInt32.ofNat headerAux3Offset) = descriptor)
+    (persistent : flags &&& persistentFlag = persistentFlag)
+    (kindInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerKindOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (kindRead : store.mem.read32
+      (object + UInt32.ofNat headerKindOffset) = kind)
+    (markerInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux0Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (markerRead : store.mem.read32
+      (object + UInt32.ofNat headerAux0Offset) = marker)
+    (notPromoted :
+      kind ≠ ObjectKind.natural.code ∨ marker ≠ promotedTagMarker)
+    (returned : Q (.Return store [])) :
+    Wasm.wp module
+      (liveReleaseProgram persistentReleaseProgram lastReference) Q store
+      (liveEntry object check flags) env := by
+  apply wp_liveReleaseProgram_persistent_of_wp aux3InBounds aux3Read persistent
   apply wp_persistentReleaseProgram_notPromoted kindInBounds kindRead
     markerInBounds markerRead notPromoted
   exact returned
+
+/-- Persistent live dispatch for the concrete promoted-tag header. -/
+theorem wp_liveReleaseProgram_promoted
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {object check flags descriptor kind marker : UInt32}
+    {lastReference : Wasm.Program}
+    (aux3InBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux3Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (aux3Read : store.mem.read32
+      (object + UInt32.ofNat headerAux3Offset) = descriptor)
+    (persistent : flags &&& persistentFlag = persistentFlag)
+    (kindInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerKindOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (kindRead : store.mem.read32
+      (object + UInt32.ofNat headerKindOffset) = kind)
+    (markerInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux0Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (markerRead : store.mem.read32
+      (object + UInt32.ofNat headerAux0Offset) = marker)
+    (kindNatural : kind = ObjectKind.natural.code)
+    (markerPromoted : marker = promotedTagMarker)
+    (checked : check ≠ 0)
+    (returned : Q (.Return store [])) :
+    Wasm.wp module
+      (liveReleaseProgram persistentReleaseProgram lastReference) Q store
+      (liveEntry object check flags) env := by
+  apply wp_liveReleaseProgram_persistent_of_wp aux3InBounds aux3Read persistent
+  exact wp_persistentReleaseProgram_promoted kindInBounds kindRead
+    markerInBounds markerRead kindNatural markerPromoted checked returned
 
 /-- Reusable entry theorem for every well-formed live heap object.  It
 discharges the tagged/null/alignment gates and the raw-flags liveness check,
@@ -5103,6 +5249,54 @@ theorem wp_decrementOnceProgram_persistent
     alignmentClear flagsInBounds flagsRead liveSet _ returned
   apply wp_liveReleaseProgram_persistent aux3InBounds aux3Read persistent
     kindInBounds kindRead markerInBounds markerRead notPromoted
+  rfl
+
+/-- Complete checked public entry for the heap representation of a promoted
+tagged Natural.  The common live-header admission reaches the distinguished
+persistent arm, whose checked gate returns without a write. -/
+theorem wp_decrementOnceProgram_promoted
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {object check flags descriptor kind marker : UInt32}
+    {lastReference : Wasm.Program}
+    (taggedClear : (1 : UInt32) &&& object = 0)
+    (objectNonzero : object ≠ 0)
+    (alignmentClear :
+      UInt32.ofNat (target.heapAlignment - 1) &&& object = 0)
+    (flagsInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerFlagsOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (flagsRead : store.mem.read32
+      (object + UInt32.ofNat headerFlagsOffset) = flags)
+    (liveSet : liveFlag &&& flags = liveFlag)
+    (aux3InBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux3Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (aux3Read : store.mem.read32
+      (object + UInt32.ofNat headerAux3Offset) = descriptor)
+    (persistent : flags &&& persistentFlag = persistentFlag)
+    (kindInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerKindOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (kindRead : store.mem.read32
+      (object + UInt32.ofNat headerKindOffset) = kind)
+    (markerInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux0Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (markerRead : store.mem.read32
+      (object + UInt32.ofNat headerAux0Offset) = marker)
+    (kindNatural : kind = ObjectKind.natural.code)
+    (markerPromoted : marker = promotedTagMarker)
+    (checked : check ≠ 0)
+    (returned : Q (.Return store [])) :
+    Wasm.wp module
+      (decrementOnceProgram persistentReleaseProgram lastReference) Q store
+      (decrementEntry object check) env := by
+  apply wp_decrementOnceProgram_live_return taggedClear objectNonzero
+    alignmentClear flagsInBounds flagsRead liveSet _ returned
+  apply wp_liveReleaseProgram_promoted aux3InBounds aux3Read persistent
+    kindInBounds kindRead markerInBounds markerRead kindNatural markerPromoted
+    checked
   rfl
 
 /-- A tagged immediate reaches the public helper's checked no-op gate before
@@ -5752,6 +5946,87 @@ theorem LiveHeaderResidentFacts.ofRelations
     aux2Read := aux2.2
     aux3InBounds := aux3.1
     aux3Read := aux3.2 }
+
+/-- Installed checked release of a promoted tagged Natural is an exact no-op
+once its raw common header is admitted.  Unlike semantic heap locations,
+promoted tags live only in the witness promotion map, so this theorem states
+their canonical-header requirement explicitly. -/
+theorem LiveHeapRel.terminatesWith_installedDecrementPromoted
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : Fir.LeanIR.Impure.RuntimeState}
+    {payload : UInt64} {address : Word32}
+    (installation : DecrementOnceInstallation sourceModule module
+      witness.closureDescriptors)
+    (related : LiveHeapRel state witness runtime)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (promotedFound : witness.promotedTags.Contains payload address)
+    (canonical : CanonicalLiveHeaderRel state address)
+    (tail : List Wasm.Value) :
+    Wasm.TerminatesWith env module installation.index store
+      ([.i32 1, .i32 (UInt32.ofNat address.value)] ++ tail)
+      (fun final values => final = store ∧ values = tail) := by
+  have promoted := related.promoted payload address promotedFound
+  obtain ⟨header, headerRead, headerKind, headerPersistent, _refCount,
+      marker, _extent, _payloadFits⟩ := promoted.header
+  obtain ⟨heap, _rawRead, headerLive, headerMinimum, _headerAligned,
+      headerExtent⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts state address header
+      headerRead
+  have headerInBounds : address.value + headerBytes ≤ state.memory.size := by
+    omega
+  have entry := LiveHeaderResidentFacts.ofRelations memoryRelated
+    (canonical header headerRead) headerInBounds heap headerLive
+  have physicalPersistent :
+      header.flags &&& persistentFlag = persistentFlag := by
+    simpa [Header.flags, headerPersistent, headerLive, persistentFlag] using
+      (show (3 : UInt32) &&& 1 = 1 by decide)
+  have physicalKind : header.kind.code = ObjectKind.natural.code := by
+    rw [headerKind]
+  apply installation.terminatesWith_of_decrementOnceProgram_return_wp
+    (UInt32.ofNat address.value) 1 tail
+  intro lastTarget
+  apply wp_decrementOnceProgram_promoted entry.taggedClear entry.objectNonzero
+    entry.alignmentClear entry.flagsInBounds entry.flagsRead entry.liveSet
+    entry.aux3InBounds entry.aux3Read physicalPersistent entry.kindInBounds
+    entry.kindRead entry.aux0InBounds entry.aux0Read physicalKind marker
+    (by decide)
+  rfl
+
+/-- Uniform installed no-op theorem for both representations of a semantic
+tagged Natural.  Immediate words use the low-bit gate; promoted words use the
+canonical resident header supplied for the promotion map. -/
+theorem LiveHeapRel.terminatesWith_installedDecrementTagged
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : Fir.LeanIR.Impure.RuntimeState}
+    {payload : UInt64} {word : Word32}
+    (installation : DecrementOnceInstallation sourceModule module
+      witness.closureDescriptors)
+    (related : LiveHeapRel state witness runtime)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (tagged : TaggedReferenceRel witness word payload)
+    (canonicalPromoted : ∀ {payload address},
+      witness.promotedTags.Contains payload address →
+        CanonicalLiveHeaderRel state address)
+    (tail : List Wasm.Value) :
+    Wasm.TerminatesWith env module installation.index store
+      ([.i32 1, .i32 (UInt32.ofNat word.value)] ++ tail)
+      (fun final values => final = store ∧ values = tail) := by
+  cases tagged with
+  | immediate payload fits =>
+      apply installation.terminatesWith_checkedTagged _ tail
+      simp [Word32.encodeImmediate]
+      bv_decide
+  | promoted found =>
+      exact
+        FirTalos.Concrete.ResidentRelease.LiveHeapRel.terminatesWith_installedDecrementPromoted
+          installation related memoryRelated found (canonicalPromoted found)
+          tail
 
 /-- A semantically nonrecursive cell has one of the four resident leaf header
 kinds.  This packages the representation inversion needed by all leaf release
