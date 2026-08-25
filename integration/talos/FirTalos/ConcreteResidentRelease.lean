@@ -357,6 +357,65 @@ theorem adaptedReleaseHeaderFunction_eq
     Fir.Wasm.Emit.ResidentRelease.releaseHeaderFunction, FirTalos.abiKind,
     Fir.Wasm.AbiKind.valueType, FirTalos.valueType] using adapted.symm
 
+/-- Successful generation fixes the physical signature of the public
+one-step decrement helper.  This is derived from the production generator;
+callers do not supply a separately copied function shape. -/
+theorem generatedDecrementOnceFunction_signature
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction) :
+    sourceFunction.params.toList.map (FirTalos.abiKind ∘ Prod.snd) =
+        [.i32, .i32] ∧
+      sourceFunction.locals.toList.map (FirTalos.abiKind ∘ Prod.snd) =
+        List.replicate 10 .i32 ∧
+      sourceFunction.results.toList.map FirTalos.abiKind = [] := by
+  unfold Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction at generated
+  split at generated
+  · change Except.error
+      (Fir.Wasm.Emit.ResidentRelease.LinkError.descriptorOverflow
+        descriptors.size) = .ok sourceFunction at generated
+    contradiction
+  · simp only [Bind.bind, Except.bind] at generated
+    split at generated
+    · contradiction
+    · simp only [pure, Except.pure, Except.ok.injEq] at generated
+      constructor
+      · simpa [FirTalos.abiKind, FirTalos.valueType,
+          Fir.Wasm.AbiKind.valueType, Function.comp_def] using
+          congrArg (fun f : Fir.Wasm.Function =>
+            f.params.toList.map (FirTalos.abiKind ∘ Prod.snd)) generated.symm
+      constructor
+      · simpa [FirTalos.abiKind, FirTalos.valueType,
+          Fir.Wasm.AbiKind.valueType, Function.comp_def] using
+          congrArg (fun f : Fir.Wasm.Function =>
+            f.locals.toList.map (FirTalos.abiKind ∘ Prod.snd)) generated.symm
+      · simpa using congrArg (fun f : Fir.Wasm.Function =>
+          f.results.toList.map FirTalos.abiKind) generated.symm
+
+/-- The Talos adapter preserves the production decrement helper's exact
+two-parameter, ten-local, result-free physical signature. -/
+theorem adaptedDecrementOnceFunction_signature
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetFunction : Wasm.Function}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction)
+    (adapted : FirTalos.function sourceModule sourceFunction =
+      .ok targetFunction) :
+    targetFunction.params = [.i32, .i32] ∧
+      targetFunction.locals = List.replicate 10 .i32 ∧
+      targetFunction.results = [] := by
+  obtain ⟨params, locals, results⟩ :=
+    FirTalos.Correctness.function_preserves_signature adapted
+  obtain ⟨sourceParams, sourceLocals, sourceResults⟩ :=
+    generatedDecrementOnceFunction_signature generated
+  exact ⟨params.trans sourceParams, locals.trans sourceLocals,
+    results.trans sourceResults⟩
+
 /-- Physical memory produced by the seven resident header-release stores. -/
 def releaseHeaderMemory (memory : Wasm.Mem) (object : UInt32) : Wasm.Mem :=
   let memory := memory.write32
@@ -1300,6 +1359,30 @@ def decrementEntry (object check : UInt32) : Wasm.Locals := {
   params := [.i32 object, .i32 check]
   locals := List.replicate 10 (.i32 0)
   values := [] }
+
+/-- Calling the successfully generated and adapted decrement helper with the
+physical Wasm argument stack constructs exactly the canonical proof frame.
+The public call convention places the last source argument at the stack head,
+so Talos reverses `[check, object]` into parameter order. -/
+theorem adaptedDecrementOnceFunction_entry
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetFunction : Wasm.Function}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction)
+    (adapted : FirTalos.function sourceModule sourceFunction =
+      .ok targetFunction)
+    (object check : UInt32) (tail : List Wasm.Value) :
+    targetFunction.toLocals
+        (([Wasm.Value.i32 check, Wasm.Value.i32 object] ++ tail).take
+          targetFunction.numParams).reverse =
+      decrementEntry object check := by
+  obtain ⟨params, locals, _results⟩ :=
+    adaptedDecrementOnceFunction_signature generated adapted
+  simp [Wasm.Function.toLocals, Wasm.Function.numParams, params, locals,
+    decrementEntry, Wasm.ValueType.zero]
 
 /-- Checked no-op/trap gate shared by tagged and erased inputs. -/
 def checkedNoopProgram : Wasm.Program := [
