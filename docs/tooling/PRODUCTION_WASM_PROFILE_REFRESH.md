@@ -1,9 +1,10 @@
 # Production Wasm profile refresh
 
 Status: checked diagnostic evidence collected on 2026-08-22 from the accepted
-FIR `ee1f3e2d` prettyM and lean-zip packages. This refresh replaces unbound or
-legacy-schema profiles for current prioritization. It does not retroactively
-make the historical controls in
+FIR `ee1f3e2d` prettyM and lean-zip packages, followed by exact final-package
+evidence for the accepted prettyM constructor work on 2026-08-25. This refresh
+replaces unbound or legacy-schema profiles for current prioritization. It does
+not retroactively make the historical controls in
 [`WASM_CALLER_ATTRIBUTION.md`](WASM_CALLER_ATTRIBUTION.md) comparable with the
 new artifacts.
 
@@ -155,6 +156,80 @@ is therefore prettyM constructor allocation once W7 publishes a clean immutable
 package; shared decrement, Array writes, and numeric helpers remain separate
 questions rather than being attributed to this ByteArray slice.
 
+## prettyM constructor follow-up
+
+W7 subsequently published the clean immutable package at FIR
+`cf3f7cb88506d9a282a444e5757b0e48acc296ee`. Its zero-import Wasm module is
+83,996 bytes with SHA-256
+`fc61301d946b1596ad08c9b20d51d2e1f68d60ca0c04b0f9d56e298c2ec6408d`;
+the 126,117-byte exact-function sidecar has SHA-256
+`ff31d65ff0d9daddfe96b47ef1f9116b8777c98eea26fc816e232d4871e72cd2`
+and names 314 final functions. Package checksums, smoke, styled output, and the
+sidecar verifier passed immediately before profiling.
+
+The capture reused the byte-identical 4,543-byte grouped-document driver and
+95-byte input from the constructor experiment. One checked first call, three
+warmups, 256 prepared and profiled calls, and both styled decodes retain the
+same 513-byte text SHA-256 `ba9f4575...25b` and 1,026-event SHA-256
+`4f1eedf4...c36` in every phase of all four fresh instances. The raw evidence
+is retained under the tooling worktree at
+`.deps/experiments/pretty-constructor-final/`; its `SHA256SUMS` hashes to
+`951232d4bd22b6f02fa550fdc439e4da27cbf9d9df960bc0f3154ce15dec81b3`.
+The v3 aggregate itself hashes to
+`2552a18af8dd70ac5a7f2b8d966f32369701113528c570d7ee8cdd899f193307`.
+
+All four v2 captures are `checked-diagnostic`, and the aggregate is
+`comparable-diagnostic` with no limitations. Node `v24.19.0`, V8
+`13.6.233.17-node.51`, Linux x64, and the 500-microsecond requested sampling
+interval match the earlier refresh.
+
+| Run | Steady window | Wasm self samples | Host samples |
+| ---: | ---: | ---: | ---: |
+| 1 | 257.37 ms | 174 | 61 |
+| 2 | 301.25 ms | 166 | 77 |
+| 3 | 221.47 ms | 143 | 60 |
+| 4 | 280.65 ms | 195 | 57 |
+
+The accepted work has a deterministic size result. The first two rows below
+are dirty, isolated W7 experiment source views; the final row is the clean
+publication. Cross-artifact sampled shares remain diagnostic rather than a
+timing comparison.
+
+| Package | Wasm bytes | Final functions | Constructor-helper body bytes | Median allocation share |
+| --- | ---: | ---: | ---: | ---: |
+| exact experiment baseline `b4babe10...811` | 87,513 | 308 | 6,567 | 43.66% |
+| sparse initialization `47dd699a...9c8` | 85,418 | 314 | 5,002 | 45.06% |
+| clean final `fc61301d...08d` | 83,996 | 314 | 3,852 | 45.65% |
+
+Relative to the exact experiment baseline, the final module is 3,517 bytes
+(4.02%) smaller and the constructor-helper bodies are 2,715 bytes (41.3%)
+smaller. Scratch-free constructor returns account for another 1,150 helper-body
+bytes beyond sparse initialization. This is a clear code-size win even though
+the selected closure contains six more final functions.
+
+Allocation remains the leading sampled family in the final package: its four
+runs span 37.93--52.45% with median 45.65% and MAD 5.44 percentage points.
+Reference counting has median 18.78%, while retained Lean source functions have
+median 14.09% with a much wider 4.58-point MAD. The leading final functions are:
+
+| Function | Median Wasm-self share | MAD | Median rank |
+| --- | ---: | ---: | ---: |
+| specialized `Std.Format.be`/`prettyM` worker | 10.46% | 2.78% | 2.5 |
+| `fir_alloc_ctor_10` | 10.33% | 2.96% | 3 |
+| `fir_heap_alloc` | 8.96% | 0.76% | 2.5 |
+| `fir_alloc_ctor_17` | 8.51% | 0.39% | 3 |
+| `fir_dec_once` | 7.33% | 0.63% | 5.5 |
+| `fir_alloc_ctor_9` | 6.90% | 1.58% | 5.5 |
+
+Immediate-caller evidence keeps the sampled constructors local to the real
+pretty-printer path: the specialized worker supplies a median 64.1% of
+`fir_alloc_ctor_10`, 53.6% of `fir_alloc_ctor_17`, and all sampled
+`fir_alloc_ctor_9`, `_12`, and `_16` self time. The optimization removed
+unnecessary initialization and scratch-result code, but it does not remove the
+semantic constructor allocations made by this workload. No runtime-speed claim
+is warranted; a further allocation experiment should target call count,
+consolidation, or representation rather than more zero-fill removal.
+
 ## Tooling assessment and refresh policy
 
 No tooling source change was required. The existing collector, workload
@@ -164,9 +239,10 @@ cross-artifact comparison command remains unjustified by this slice: lean-zip
 already owns its semantic comparator, and prettyM has no second eligible
 current artifact in this campaign.
 
-When W7 accepts a new package, capture it as a separate candidate with the
-same workload module, receipt identities, Node/V8 version, sampling interval,
-and semantic observations. Never redirect an old evidence record through a
-moving `*-current` symlink. Use order-balanced, unprofiled client measurements
-for elapsed claims; use these profiles only to explain final-function and
-caller movement.
+The final constructor package demonstrates the intended refresh protocol: each
+package is captured separately with the same workload module, semantic
+endpoint, Node/V8 version, sampling interval, and observations, while its
+receipt binds the changed package dependencies. Never redirect an old evidence
+record through a moving `*-current` symlink. Use order-balanced, unprofiled
+client measurements for elapsed claims; use these profiles only to explain
+final-function and caller movement.

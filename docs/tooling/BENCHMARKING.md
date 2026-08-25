@@ -83,12 +83,14 @@ exact-release caller aggregation, and ordered one-pass
 [instruction-origin generation](WASM_PROVENANCE_COST.md) are established
 surfaces rather than open roadmap items.
 
-1. The trusted closed-ByteArray candidate is evaluated: fresh lean-zip evidence
-   confirms that `fir_byte_array_validate` is absent from both the final module
-   and sampled execution. Treat that hotspot as closed. The next queued
-   exact-caller evaluation is W7's prettyM constructor-allocation candidate,
-   after W7 publishes its immutable package and receipt identities; route any
-   changed runtime contract to W6 through the existing lane protocol.
+1. The trusted closed-ByteArray and prettyM constructor candidates are
+   evaluated. Fresh lean-zip evidence confirms that
+   `fir_byte_array_validate` is absent from both the final module and sampled
+   execution. The clean prettyM package is 4.02% smaller than its exact
+   experimental baseline and its constructor-helper bodies are 41.3% smaller,
+   while allocation remains the leading sampled family; this is a code-size win
+   without a runtime-speed claim. Route the next client-selected runtime
+   candidate, and any changed runtime contract, through W7 and W6 respectively.
 2. Let each client register its representative workload and report consumer in
    the VIR catalog; FIR supplies artifact identities and profile/probe outputs.
 3. Replace retained legacy raw profiles with collector-produced bound evidence
