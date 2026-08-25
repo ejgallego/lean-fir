@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-generic-inhabited-fallback-trap
-status: confirmed
+status: fixed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: d8b18978322de05a8f3dba51ef03cf5461676c17
@@ -9,7 +9,7 @@ pass: none
 discovered-by: runtime-audit
 first-seen: 2026-08-25
 reproduction: Fir/Wasm/Emit/ResidentFallback.lean
-regression: integration/talos/artifact/resident-fallback-client.mjs
+regression: integration/talos/artifact/FirWasmSourceExample.lean
 ---
 
 # Summary
@@ -99,8 +99,19 @@ none
 
 ## Resolution and regression
 
-Unresolved. Prefer compiling or reusing the real Lean definition. If that is
-not yet supported, split the semantically valid `panicCore` behavior from the
-inhabited instance and make the generic linker reject the latter. Add a native
-versus emitted-Wasm reachable-entry differential before marking the repair
-generation-ready.
+The generic source-internalization path now discovers and compiles the real
+`instInhabitedOfMonad._redArg` final-LCNF body. Closure admission queries the
+same fixed-capture candidates as executable lowering, so the dictionary's
+valid underapplication is admitted rather than forcing an external boundary.
+
+`ResidentFallback` retains only `panicCore`; its standalone zero-import client
+asserts exactly that fail-closed policy. The reachable
+`inhabitedMonadDefaultProbe` keeps generic dictionary construction across a
+`@[nospecialize]` boundary and returns `42` in native Lean, FIR's LCNF
+interpreter, and the zero-import Wasm artifact. The concrete source-product
+gate executes and deterministically byte-compares that artifact with the rest
+of the compiler-produced corpus.
+
+The probe deliberately uses `UInt32` state. The separately recorded
+`FIR-BUG-impure-none-uint64-box-tagged` concerns FIR's incorrect small
+`UInt64` boxing representation and is not a reason to restore this trap.

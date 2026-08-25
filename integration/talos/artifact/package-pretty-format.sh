@@ -367,7 +367,7 @@ const build = {
       taggedSegments: true,
     },
   },
-  runtime: "Self-contained Wasm-resident allocator/raw stores/constructors/immediate Naturals/closure allocations/setters/tag mutation/reference increments/recursive releases/delete/lazy-cache publication/arbitrary-precision Nat+Int/UTF-8 String operations/String literals/fail-closed fallbacks",
+  runtime: "Self-contained Wasm-resident allocator/raw stores/constructors/immediate Naturals/closure allocations/setters/tag mutation/reference increments/recursive releases/delete/lazy-cache publication/arbitrary-precision Nat+Int/UTF-8 String operations/String literals/source-compiled generic declarations/fail-closed panic policy",
   test: "node smoke.mjs",
 };
 fs.writeFileSync(

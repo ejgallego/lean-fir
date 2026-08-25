@@ -72,9 +72,9 @@ private def prettyRuntimeImports : Array String := #[
   "String.utf8ByteSize",
   "Nat.decLt",
   "Nat.decLe",
-  "panicCore",
   "String.Internal.extract",
-  "String.Internal.next"]
+  "String.Internal.next",
+  "panicCore"]
 
 run_cmd do
   let artifact ← liftCoreM <| withoutModifyingEnv <|

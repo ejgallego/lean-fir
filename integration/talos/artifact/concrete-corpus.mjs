@@ -66,6 +66,7 @@ export const EXPECTED_CONCRETE_FAULTS = Object.freeze([
 export const CONCRETE_SOURCE_PROBES = Object.freeze([
   "source-float32-id",
   "source-float64-id",
+  "source-inhabited-monad-default",
   "source-nat",
   "source-nat-list-case",
   "source-pretty-format",

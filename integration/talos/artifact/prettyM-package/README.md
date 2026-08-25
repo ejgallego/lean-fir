@@ -183,10 +183,10 @@ resident for canonical immediate, promoted one-limb, and arbitrary multi-limb
 values, including signed representation transitions and carry/borrow across
 limbs. Their six limb walkers use structured Wasm loops, keeping native call
 stack usage independent of the magnitude. All eight UTF-8 String operations
-reachable from `prettyM` and its four String literals are resident as well. The
-two failure-only
-panic/inhabited fallbacks are resident unconditional traps, preserving the
-previous fail-closed behavior without a host import.
+reachable from `prettyM` and its four String literals are resident as well.
+The failure-only `panicCore` policy is a resident unconditional trap. The
+generic `instInhabitedOfMonad._redArg` declaration is no longer a fallback:
+the package compiles its real Lean body into the source closure.
 
 The smoke clients prepare ordinary Lean values directly in the exported
 memory, advance the monotone resident frontier, decode the raw trace graph, and

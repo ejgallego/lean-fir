@@ -102,7 +102,7 @@ const partialApplicationHelperCount = ({ manifest }) => {
 };
 
 // The styled closed boundary uses the compiler-selected source `pap` target
-// set.  Keep this exact ratchet separate from the preceding incremental
+// set. Keep this exact ratchet separate from the preceding incremental
 // runtime-internalization artifacts, which deliberately retain the full
 // generic dispatch table until the boundary is closed.
 const expectedStyledClosedClosureDispatch = [
@@ -158,11 +158,11 @@ assert.equal(operationCount(residentProjections, "objectProj"), 0,
   "resident-projection prettyM retained semantic object projections");
 assert.equal(operationCount(residentProjections, "scalarProj"), 0,
   "resident-projection prettyM retained semantic scalar projections");
-assert.equal(operationCount(residentProjections, "closureProj"), 101,
+assert.equal(operationCount(residentProjections, "closureProj"), 104,
   "resident-projection prettyM closure-projection inventory changed");
 assert.equal(operationCount(residentClosures, "closureProj"), 0,
   "resident-closure prettyM retained semantic closure projections");
-assert.equal(operationCount(residentClosures, "closureMatches"), 105,
+assert.equal(operationCount(residentClosures, "closureMatches"), 116,
   "resident-closure prettyM closure-match inventory changed");
 assert.equal(operationCount(residentMatches, "closureMatches"), 0,
   "resident-match prettyM retained semantic closure matches");
@@ -180,7 +180,7 @@ assert.equal(operationCount(residentNaturals, "naturalLiteral"), 0,
   "resident-Natural prettyM retained supported natural literals");
 assert.equal(operationCount(residentNaturals, "stringLiteral"), 4,
   "resident-Natural prettyM moved strings across the host boundary");
-assert.equal(operationCount(residentNaturals, "partialApply"), 131,
+assert.equal(operationCount(residentNaturals, "partialApply"), 133,
   "resident-Natural prettyM partial-application inventory changed");
 assert.equal(operationCount(residentPartialApplications, "partialApply"), 0,
   "resident partial-application prettyM retained closure allocations");
@@ -245,9 +245,9 @@ assert.equal(
   "resident-projection prettyM descriptor and Wasm imports disagree",
 );
 assert.equal(
-  functionImportCount(residentClosures) + 101,
+  functionImportCount(residentClosures) + 104,
   functionImportCount(residentProjections),
-  "resident-closure prettyM did not remove exactly 101 function imports",
+  "resident-closure prettyM did not remove exactly 104 function imports",
 );
 assert.equal(
   residentClosures.manifest.imports.length,
@@ -255,9 +255,9 @@ assert.equal(
   "resident-closure prettyM descriptor and Wasm imports disagree",
 );
 assert.equal(
-  functionImportCount(residentMatches) + 105,
+  functionImportCount(residentMatches) + 116,
   functionImportCount(residentClosures),
-  "resident-match prettyM did not remove exactly 105 function imports",
+  "resident-match prettyM did not remove exactly 116 function imports",
 );
 assert.equal(
   residentMatches.manifest.imports.length,
@@ -295,11 +295,11 @@ assert.equal(
   "resident-Natural prettyM descriptor and Wasm imports disagree",
 );
 assert.equal(
-  functionImportCount(residentPartialApplications) + 131,
+  functionImportCount(residentPartialApplications) + 133,
   functionImportCount(residentNaturals),
-  "resident closure allocation did not remove exactly 131 function imports",
+  "resident closure allocation did not remove exactly 133 function imports",
 );
-assert.equal(functionImportCount(residentPartialApplications), 65,
+assert.equal(functionImportCount(residentPartialApplications), 64,
   "resident partial-application prettyM frontier changed");
 assert.equal(
   residentPartialApplications.manifest.imports.length,
@@ -311,7 +311,7 @@ assert.equal(
   functionImportCount(residentPartialApplications),
   "resident setters did not remove exactly 11 function imports",
 );
-assert.equal(functionImportCount(residentSetters), 54,
+assert.equal(functionImportCount(residentSetters), 53,
   "resident setter prettyM frontier changed");
 assert.equal(
   residentSetters.manifest.imports.length,
@@ -323,7 +323,7 @@ assert.equal(
   functionImportCount(residentSetters),
   "resident increments did not remove exactly four function imports",
 );
-assert.equal(functionImportCount(residentIncrements), 50,
+assert.equal(functionImportCount(residentIncrements), 49,
   "resident increment prettyM frontier changed");
 assert.equal(
   residentIncrements.manifest.imports.length,
@@ -335,21 +335,21 @@ assert.equal(
   functionImportCount(residentIncrements),
   "resident releases did not remove exactly six function imports",
 );
-assert.equal(functionImportCount(residentReleases), 44,
+assert.equal(functionImportCount(residentReleases), 43,
   "resident release prettyM frontier changed");
 assert.equal(
   residentReleases.manifest.imports.length,
   functionImportCount(residentReleases),
   "resident release prettyM descriptor and Wasm imports disagree",
 );
-assert.equal(functionImportCount(styledReleases), 46,
+assert.equal(functionImportCount(styledReleases), 45,
   "resident styled release prettyM frontier changed");
 assert.equal(
   functionImportCount(styledTagSetters) + 1,
   functionImportCount(styledReleases),
   "resident styled tag setters did not remove exactly one function import",
 );
-assert.equal(functionImportCount(styledTagSetters), 45,
+assert.equal(functionImportCount(styledTagSetters), 44,
   "resident styled tag-setter prettyM frontier changed");
 assert.equal(
   styledTagSetters.manifest.imports.length,
@@ -361,7 +361,7 @@ assert.equal(
   functionImportCount(residentReleases),
   "resident cache did not remove exactly 20 function imports",
 );
-assert.equal(functionImportCount(residentCache), 24,
+assert.equal(functionImportCount(residentCache), 23,
   "resident cache prettyM frontier changed");
 assert.equal(
   residentCache.manifest.imports.length,
@@ -373,7 +373,7 @@ assert.equal(
   functionImportCount(styledTagSetters),
   "resident styled cache did not remove exactly 21 function imports",
 );
-assert.equal(functionImportCount(styledCache), 24,
+assert.equal(functionImportCount(styledCache), 23,
   "resident styled cache prettyM frontier changed");
 assert.equal(
   styledCache.manifest.imports.length,
@@ -385,7 +385,7 @@ assert.equal(
   functionImportCount(residentCache),
   "resident numeric helpers did not remove exactly ten function imports",
 );
-assert.equal(functionImportCount(residentNumeric), 14,
+assert.equal(functionImportCount(residentNumeric), 13,
   "resident numeric prettyM frontier changed");
 assert.equal(
   residentNumeric.manifest.imports.length,
@@ -397,7 +397,7 @@ assert.equal(
   functionImportCount(styledCache),
   "resident styled numeric helpers did not remove exactly ten function imports",
 );
-assert.equal(functionImportCount(styledNumeric), 14,
+assert.equal(functionImportCount(styledNumeric), 13,
   "resident styled numeric prettyM frontier changed");
 assert.equal(
   styledNumeric.manifest.imports.length,
@@ -409,7 +409,7 @@ assert.equal(
   functionImportCount(residentNumeric),
   "arbitrary-precision numeric linking changed the function-import frontier",
 );
-assert.equal(functionImportCount(residentBigNumeric), 14,
+assert.equal(functionImportCount(residentBigNumeric), 13,
   "resident arbitrary-precision numeric prettyM frontier changed");
 assert.equal(
   residentBigNumeric.manifest.imports.length,
@@ -421,7 +421,7 @@ assert.equal(
   functionImportCount(styledNumeric),
   "styled arbitrary-precision numeric linking changed the function-import frontier",
 );
-assert.equal(functionImportCount(styledBigNumeric), 14,
+assert.equal(functionImportCount(styledBigNumeric), 13,
   "resident styled arbitrary-precision numeric prettyM frontier changed");
 assert.equal(
   styledBigNumeric.manifest.imports.length,
@@ -433,7 +433,7 @@ assert.equal(
   functionImportCount(residentBigNumeric),
   "resident String closure did not remove exactly twelve function imports",
 );
-assert.equal(functionImportCount(residentString), 2,
+assert.equal(functionImportCount(residentString), 1,
   "resident String prettyM frontier changed");
 assert.equal(
   residentString.manifest.imports.length,
@@ -445,7 +445,7 @@ assert.equal(
   functionImportCount(styledBigNumeric),
   "resident styled String closure did not remove exactly twelve function imports",
 );
-assert.equal(functionImportCount(styledString), 2,
+assert.equal(functionImportCount(styledString), 1,
   "resident styled String prettyM frontier changed");
 assert.equal(
   styledString.manifest.imports.length,
@@ -453,18 +453,18 @@ assert.equal(
   "resident styled String descriptor and Wasm imports disagree",
 );
 assert.equal(
-  functionImportCount(residentClosed) + 2,
+  functionImportCount(residentClosed) + 1,
   functionImportCount(residentString),
-  "resident fallback closure did not remove exactly two function imports",
+  "resident fallback closure did not remove exactly one function import",
 );
 assert.equal(functionImportCount(residentClosed), 0,
   "closed resident prettyM retained function imports");
 assert.equal(residentClosed.manifest.imports.length, 0,
   "closed resident prettyM descriptor retained imports");
 assert.equal(
-  functionImportCount(styledClosed) + 2,
+  functionImportCount(styledClosed) + 1,
   functionImportCount(styledString),
-  "resident styled fallback closure did not remove exactly two function imports",
+  "resident styled fallback closure did not remove exactly one function import",
 );
 assert.equal(functionImportCount(styledClosed), 0,
   "closed resident styled prettyM retained function imports");
@@ -786,7 +786,6 @@ for (const [artifact, label] of [
 ]) {
   for (const name of [
     "fir_ext_panicCore",
-    "fir_ext_instInhabitedOfMonad__redArg",
   ]) {
     assert.ok(artifact.exports.some((entry) =>
       entry.name === name && entry.kind === "function"),
@@ -1012,7 +1011,7 @@ console.log(
   `styled constructor-tag write, lazy-cache publication, one-limb ` +
   `resident Nat/Int operations, arbitrary-precision Nat/Int operations, ` +
   `then UTF-8 String operations/literals and ` +
-  `fail-closed fallback traps ` +
+  `fail-closed panic fallback ` +
   `(${functionImportCount(baseline)} → ${functionImportCount(getTagResident)} → ` +
   `${functionImportCount(residentRuntime)} → ` +
   `${functionImportCount(residentProjections)} → ` +

@@ -47,6 +47,14 @@ export const CONCRETE_SOURCE_EXPECTATIONS = Object.freeze({
     result: "float",
     expected: scalar("float", 0x7ff123456789abcdn),
   }),
+  "source-inhabited-monad-default": Object.freeze({
+    mode: "invocation",
+    fixture: "source-inhabited-monad-default",
+    sourceEntry: "Fir.Wasm.Emit.SourceFixture.inhabitedMonadDefaultProbe",
+    params: Object.freeze([]),
+    result: "uint32",
+    expected: scalar("uint32", 42),
+  }),
   "source-nat": Object.freeze({
     mode: "invocation",
     fixture: "Fir.Validation.Corpus.Source.litNat",

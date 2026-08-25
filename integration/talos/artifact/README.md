@@ -728,13 +728,18 @@ without changing final LCNF or closure metadata. The remaining imports are the
 two unreachable panic/inhabited fallbacks. The text audit is now
 `351 → 350 → 349 → 341 → 254 → 177 → 177 → 154 → 152 → 65 → 54 → 50 → 44 → 24 → 14 → 2`.
 
-The final checkpoint replaces those two failure-only declarations with
-exported resident functions whose bodies are unconditional Wasm traps. This
-preserves their fail-closed behavior while removing the last host dependency.
-Standalone and linked Node/Chrome checks assert both traps, zero imports, and
-unchanged final LCNF and closure metadata. Plain and styled artifacts therefore
-advance from 2 to 0 function imports. The complete text audit is
+The original final checkpoint replaced those two failure-only declarations
+with exported resident traps, removing the last host dependency. Plain and
+styled artifacts therefore advanced from 2 to 0 function imports. The text
+audit was
 `351 → 350 → 349 → 341 → 254 → 177 → 177 → 154 → 152 → 65 → 54 → 50 → 44 → 24 → 14 → 2 → 0`.
+
+The generic inhabited declaration has since left that fallback surface.
+Source capture compiles the real `instInhabitedOfMonad._redArg` body, while
+the resident fallback module retains only the semantically failure-only
+`panicCore` trap. A reachable native/LCNF/zero-import-Wasm probe exercises the
+generic dictionary path; the standalone fallback check now asserts exactly
+one resident panic policy.
 
 For a reproducible handoff to another agent, `package-pretty-format.sh`
 uses the native `fir-prettyM-artifact` generator to elaborate the styled facade
@@ -866,6 +871,7 @@ as external LCNF declarations. Recursive source internalization leaves 20
 actual declaration-level runtime primitives. The manifest contains more
 imports because semantic heap, closure, and call operations receive distinct
 metadata-bearing import identities; those are instances of the frozen
-semantic runtime ABI, not additional source helpers. The unreachable panic
-and weak-inhabited fallbacks are resident traps and are asserted absent from
-every successful execution trace.
+semantic runtime ABI, not additional source helpers. The unreachable
+`panicCore` path is a resident trap and is asserted absent from every
+successful execution trace. The generic monadic inhabited helper is ordinary
+source-compiled Lean code, not a failure policy.

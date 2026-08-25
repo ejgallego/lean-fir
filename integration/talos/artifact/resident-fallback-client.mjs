@@ -6,7 +6,6 @@ import { instantiateModuleArtifact } from "./module-client.mjs";
 
 const HELPERS = [
   ["fir_ext_panicCore", [0, 0, 0]],
-  ["fir_ext_instInhabitedOfMonad__redArg", [0, 0]],
 ];
 
 function expectTrap(action, label) {
@@ -46,7 +45,7 @@ export async function checkResidentFallbacks({ bytes, manifest }) {
       `missing resident fallback export ${name}`);
     expectTrap(() => helper(...args), name);
   }
-  return "PASS zero-import Wasm-resident fail-closed prettyM fallbacks";
+  return "PASS zero-import Wasm-resident fail-closed panic policy";
 }
 
 export async function checkFetchedResidentFallbacks(artifactUrl) {

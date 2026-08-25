@@ -18,6 +18,33 @@ def classifyNatList (values : List Nat) : UInt64 :=
   | [] => 0
   | _ :: _ => 1
 
+/-- A deliberately observable `pure` implementation for the generic
+`Inhabited (m α)` source-compilation regression below. -/
+abbrev InhabitedProbeM (α : Type) := UInt32 → α × UInt32
+
+instance : Monad InhabitedProbeM where
+  pure value state := (value, state + 1)
+  bind action next state :=
+    let (value, state) := action state
+    next value state
+
+/-- Read a default through its dictionary so constructing the generic monadic
+dictionary remains observable to final-LCNF capture. -/
+@[noinline, nospecialize] def readGenericDefault {β : Type} [Inhabited β] : β :=
+  default
+
+/-- Keep the generic monadic `Inhabited` dictionary construction across the
+final-LCNF module boundary. Its real implementation passes through
+`instInhabitedOfMonad._redArg`; replacing that declaration by the historical
+resident trap makes the probe fail in Wasm. -/
+@[noinline, nospecialize] def genericMonadDefault {m : Type → Type} [Monad m]
+    {α : Type} [Inhabited α] : m α :=
+  readGenericDefault
+
+def inhabitedMonadDefaultProbe : UInt32 :=
+  let action : InhabitedProbeM PUnit := genericMonadDefault
+  (action 41).2
+
 #fir_wasm_pretty_facade prettyFormatRaw
 
 def prettyFormatSource : Std.Format :=
@@ -196,6 +223,58 @@ end Fir.Wasm.Emit.SourceFixture
   to "_build/source-nat-list-case.wasm"
 
 run_cmd do
+  unless Fir.Wasm.Emit.SourceFixture.inhabitedMonadDefaultProbe == 42 do
+    throwError "native inhabited-monad default probe changed"
+  let source ← liftCoreM <|
+    Fir.Wasm.Emit.Source.compileEntrySeparatelyInternalized
+      ``Fir.Wasm.Emit.SourceFixture.inhabitedMonadDefaultProbe
+      Fir.Wasm.Emit.ResidentLinker.closedApplicationRetainedExternalNames
+  let some inhabited := source.program.findDecl? `instInhabitedOfMonad._redArg
+    | throwError "inhabited-monad default probe lost its generic source declaration: {repr <|
+        source.program.decls.map (·.name)}"
+  match inhabited.value with
+  | .code _ => pure ()
+  | .extern _ =>
+      throwError "inhabited-monad default probe retained the historical external fallback"
+  let validationCase : Fir.Validation.Corpus.Case := {
+    id := "inhabited-monad-default-source"
+    entry := ``Fir.Wasm.Emit.SourceFixture.inhabitedMonadDefaultProbe
+    resultSchema := .bits 32
+    native := fun _ => .bits 32 42
+    requiredExecutedLcnfForms := #[] }
+  let lcnfResult := Fir.Validation.Lcnf.execute validationCase source
+  unless lcnfResult.outcome == .success {
+      termination := .returned (.bits 32 42) } do
+    throwError "LCNF inhabited-monad default probe failed: {repr lcnfResult.outcome}"
+  let moduleArtifact ← match ← liftCoreM <|
+      Fir.Wasm.Emit.Source.compileModuleArtifact source with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "failed to lower inhabited-monad default probe: {repr error}"
+  let linked ← match Fir.Wasm.Emit.ResidentLinker.linkArtifact
+      (Fir.Wasm.Emit.ResidentLinker.closedApplicationAvailablePolicy
+        moduleArtifact.module
+        #[``Fir.Wasm.Emit.SourceFixture.inhabitedMonadDefaultProbe])
+      moduleArtifact with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "failed to close inhabited-monad default probe: {repr error}"
+  unless linked.module.imports.isEmpty do
+    throwError "inhabited-monad default probe retained imports: {repr <|
+      linked.module.imports.filterMap (·.declaration?)}"
+  unless linked.module.exports.contains
+      ``Fir.Wasm.Emit.SourceFixture.inhabitedMonadDefaultProbe do
+    throwError "inhabited-monad default probe lost its source export"
+  let artifact ← match linked.withInvocation
+      "source-inhabited-monad-default"
+      ``Fir.Wasm.Emit.SourceFixture.inhabitedMonadDefaultProbe
+      ``Fir.Wasm.Emit.SourceFixture.inhabitedMonadDefaultProbe #[] with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "failed to attach inhabited-monad default invocation: {repr error}"
+  artifact.write "_build/source-inhabited-monad-default.wasm"
+
+run_cmd do
   let (runtime, args) ← match Fir.Wasm.Emit.SourceFixture.prettyFormatInvocation with
     | .ok invocation => pure invocation
     | .error error => throwError "failed to construct Format runtime: {repr error}"
@@ -206,7 +285,7 @@ run_cmd do
     | .error error => throwError "failed to compile Format facade: {repr error}"
   -- The direct concrete-state facade retains these compiler-generated closure
   -- targets and descriptor shapes without rewriting their final-LCNF kinds.
-  unless moduleArtifact.module.closureDispatch.size == 42 &&
+  unless moduleArtifact.module.closureDispatch.size == 43 &&
       moduleArtifact.module.closureDispatch ==
         Fir.Wasm.collectClosureDispatch moduleArtifact.module.runtimeOperations do
     throwError "compiler Format closure-dispatch inventory changed ({moduleArtifact.module.closureDispatch.size}): {repr moduleArtifact.module.closureDispatch}"
@@ -309,7 +388,7 @@ run_cmd do
       Fir.Wasm.Emit.ResidentRuntime.supportsClosureProjection
   let expectedClosureCoordinates :=
     Fir.Wasm.Emit.ResidentRuntime.prettyFormatSourceClosureProjectionCoordinates
-  unless closureProjections.size == 101 &&
+  unless closureProjections.size == 104 &&
       closureProjections.all (fun operation =>
         (Fir.Wasm.Emit.ResidentRuntime.closureProjectionCoordinate? operation).any
           expectedClosureCoordinates.contains) &&
@@ -356,8 +435,8 @@ run_cmd do
       throwError "failed to write resident closure-projection Format module: {repr error}"
   let closureMatches := residentClosureArtifact.module.runtimeOperations.filter
     Fir.Wasm.Emit.ResidentRuntime.isClosureMatch
-  unless closureMatches.size == 105 do
-    throwError "resident Format closure-match inventory changed"
+  unless closureMatches.size == 116 do
+    throwError "resident Format closure-match inventory changed: {closureMatches.size}"
   let residentMatchArtifact ← match
       Fir.Wasm.Emit.ResidentPrettyFormat.internalizeClosureMatches
         residentClosureArtifact with
@@ -477,8 +556,8 @@ run_cmd do
   let partialApplications :=
     residentNaturalArtifact.module.runtimeOperations.filter
       Fir.Wasm.Emit.ResidentClosureAllocation.isPartialApplication
-  unless partialApplications.size == 131 do
-    throwError "resident Format partial-application inventory changed"
+  unless partialApplications.size == 133 do
+    throwError "resident Format partial-application inventory changed: {partialApplications.size}"
   let residentPartialApplicationArtifact ← match
       Fir.Wasm.Emit.ResidentPrettyFormat.internalizePartialApplications
         residentNaturalArtifact with
@@ -486,10 +565,10 @@ run_cmd do
     | .error error =>
         throwError
           "failed to compile resident partial-application Format facade: {repr error}"
-  unless residentPartialApplicationArtifact.module.imports.size == 65 &&
+  unless residentPartialApplicationArtifact.module.imports.size == 64 &&
       residentPartialApplicationArtifact.module.runtimeOperations.all fun operation =>
         !Fir.Wasm.Emit.ResidentClosureAllocation.isPartialApplication operation do
-    throwError "resident Format partial-application frontier changed"
+    throwError "resident Format partial-application frontier changed: {residentPartialApplicationArtifact.module.imports.size} imports"
   unless residentPartialApplicationArtifact.module.imports.size +
       partialApplications.size == residentNaturalArtifact.module.imports.size do
     throwError "resident Format partial-application import accounting changed"
@@ -524,10 +603,10 @@ run_cmd do
     | .ok artifact => pure artifact
     | .error error =>
         throwError "failed to compile resident setter Format facade: {repr error}"
-  unless residentSetterArtifact.module.imports.size == 54 &&
+  unless residentSetterArtifact.module.imports.size == 53 &&
       residentSetterArtifact.module.runtimeOperations.all fun operation =>
         !Fir.Wasm.Emit.ResidentMutation.isSetter operation do
-    throwError "resident Format setter frontier changed"
+    throwError "resident Format setter frontier changed: {residentSetterArtifact.module.imports.size} imports"
   unless residentSetterArtifact.module.imports.size + setters.size ==
       residentPartialApplicationArtifact.module.imports.size do
     throwError "resident Format setter import accounting changed"
@@ -556,7 +635,7 @@ run_cmd do
     | .ok artifact => pure artifact
     | .error error =>
         throwError "failed to compile resident increment Format facade: {repr error}"
-  unless residentIncrementArtifact.module.imports.size == 50 &&
+  unless residentIncrementArtifact.module.imports.size == 49 &&
       residentIncrementArtifact.module.runtimeOperations.all fun operation =>
         !Fir.Wasm.Emit.ResidentReferenceCount.isIncrement operation do
     throwError "resident Format increment frontier changed"
@@ -587,7 +666,7 @@ run_cmd do
     | .ok artifact => pure artifact
     | .error error =>
         throwError "failed to compile resident release Format facade: {repr error}"
-  unless residentReleaseArtifact.module.imports.size == 44 &&
+  unless residentReleaseArtifact.module.imports.size == 43 &&
       residentReleaseArtifact.module.runtimeOperations.all fun operation =>
         !Fir.Wasm.Emit.ResidentRelease.isRelease operation do
     throwError "resident Format recursive-release frontier changed"
@@ -621,7 +700,7 @@ run_cmd do
     | .ok artifact => pure artifact
     | .error error =>
         throwError "failed to compile resident cache Format facade: {repr error}"
-  unless residentCacheArtifact.module.imports.size == 24 &&
+  unless residentCacheArtifact.module.imports.size == 23 &&
       residentCacheArtifact.module.runtimeOperations.all fun operation =>
         !Fir.Wasm.Emit.ResidentCache.isCacheSet operation do
     throwError "resident Format lazy-cache frontier changed"
@@ -648,7 +727,7 @@ run_cmd do
     | .ok artifact => pure artifact
     | .error error =>
         throwError "failed to compile resident numeric Format facade: {repr error}"
-  unless residentNumericArtifact.module.imports.size == 14 do
+  unless residentNumericArtifact.module.imports.size == 13 do
     throwError "resident Format numeric frontier changed"
   unless Fir.Wasm.Emit.ResidentNumeric.externalHelperNames.all
       residentNumericArtifact.module.exports.contains do
@@ -672,7 +751,7 @@ run_cmd do
     | .error error =>
         throwError
           "failed to compile arbitrary-precision numeric Format facade: {repr error}"
-  unless residentBigNumericArtifact.module.imports.size == 14 do
+  unless residentBigNumericArtifact.module.imports.size == 13 do
     throwError "resident Format arbitrary-precision numeric frontier changed"
   unless Fir.Wasm.Emit.ResidentBigNumeric.externalHelperNames.all
       residentBigNumericArtifact.module.exports.contains do
@@ -697,7 +776,7 @@ run_cmd do
     | .ok artifact => pure artifact
     | .error error =>
         throwError "failed to compile resident String Format facade: {repr error}"
-  unless residentStringOperationsArtifact.module.imports.size == 6 do
+  unless residentStringOperationsArtifact.module.imports.size == 5 do
     throwError "resident Format String-operation frontier changed"
   let residentStringArtifact ← match
       Fir.Wasm.Emit.ResidentPrettyFormat.internalizeStringLiterals
@@ -705,7 +784,7 @@ run_cmd do
     | .ok artifact => pure artifact
     | .error error =>
         throwError "failed to compile resident String-literal facade: {repr error}"
-  unless residentStringArtifact.module.imports.size == 2 do
+  unless residentStringArtifact.module.imports.size == 1 do
     throwError "resident Format String frontier changed"
   unless Fir.Wasm.Emit.ResidentString.externalHelperNames.all
       residentStringArtifact.module.exports.contains do

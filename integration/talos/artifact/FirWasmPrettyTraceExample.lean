@@ -71,7 +71,7 @@ run_cmd do
   unless Fir.Wasm.Emit.ResidentAllocator.helperNames.all
       constructorArtifact.module.exports.contains do
     throwError "resident styled Format module lost allocator exports"
-  unless constructorArtifact.module.imports.size == 201 &&
+  unless constructorArtifact.module.imports.size == 202 &&
       constructorArtifact.module.runtimeOperations.all fun operation =>
         !Fir.Wasm.Emit.ResidentConstructor.isConstructor operation do
     throwError "resident styled Format constructor frontier changed"
@@ -90,7 +90,7 @@ run_cmd do
     | .ok artifact => pure artifact
     | .error error =>
         throwError "failed to compile resident styled Natural facade: {repr error}"
-  unless naturalArtifact.module.imports.size == 197 &&
+  unless naturalArtifact.module.imports.size == 198 &&
       naturalArtifact.module.runtimeOperations.all fun operation =>
         !Fir.Wasm.Emit.ResidentLiteral.isImmediateNatural operation do
     throwError "resident styled Format Natural frontier changed"
@@ -109,7 +109,7 @@ run_cmd do
       throwError "failed to write resident styled Natural module: {repr error}"
   let partialApplications := naturalArtifact.module.runtimeOperations.filter
     Fir.Wasm.Emit.ResidentClosureAllocation.isPartialApplication
-  unless partialApplications.size == 131 do
+  unless partialApplications.size == 133 do
     throwError "resident styled Format partial-application inventory changed"
   let partialApplicationArtifact ← match
       Fir.Wasm.Emit.ResidentPrettyFormat.internalizePartialApplications
@@ -118,7 +118,7 @@ run_cmd do
     | .error error =>
         throwError
           "failed to compile resident styled partial applications: {repr error}"
-  unless partialApplicationArtifact.module.imports.size == 66 &&
+  unless partialApplicationArtifact.module.imports.size == 65 &&
       partialApplicationArtifact.module.runtimeOperations.all fun operation =>
         !Fir.Wasm.Emit.ResidentClosureAllocation.isPartialApplication operation do
     throwError "resident styled Format partial-application frontier changed"
@@ -155,7 +155,7 @@ run_cmd do
     | .ok artifact => pure artifact
     | .error error =>
         throwError "failed to compile resident styled setters: {repr error}"
-  unless setterArtifact.module.imports.size == 56 &&
+  unless setterArtifact.module.imports.size == 55 &&
       setterArtifact.module.runtimeOperations.all fun operation =>
         !Fir.Wasm.Emit.ResidentMutation.isSetter operation do
     throwError "resident styled Format setter frontier changed"
@@ -185,7 +185,7 @@ run_cmd do
     | .ok artifact => pure artifact
     | .error error =>
         throwError "failed to compile resident styled increments: {repr error}"
-  unless incrementArtifact.module.imports.size == 52 &&
+  unless incrementArtifact.module.imports.size == 51 &&
       incrementArtifact.module.runtimeOperations.all fun operation =>
         !Fir.Wasm.Emit.ResidentReferenceCount.isIncrement operation do
     throwError "resident styled Format increment frontier changed"
@@ -216,7 +216,7 @@ run_cmd do
     | .ok artifact => pure artifact
     | .error error =>
         throwError "failed to compile resident styled releases: {repr error}"
-  unless releaseArtifact.module.imports.size == 46 &&
+  unless releaseArtifact.module.imports.size == 45 &&
       releaseArtifact.module.runtimeOperations.all fun operation =>
         !Fir.Wasm.Emit.ResidentRelease.isRelease operation do
     throwError "resident styled Format recursive-release frontier changed"
@@ -246,7 +246,7 @@ run_cmd do
     | .ok artifact => pure artifact
     | .error error =>
         throwError "failed to compile resident styled tag setter: {repr error}"
-  unless tagSetterArtifact.module.imports.size == 45 &&
+  unless tagSetterArtifact.module.imports.size == 44 &&
       tagSetterArtifact.module.runtimeOperations.all fun operation =>
         !Fir.Wasm.Emit.ResidentMutation.isTagSetter operation do
     throwError "resident styled Format tag-setter frontier changed"
@@ -276,7 +276,7 @@ run_cmd do
     | .ok artifact => pure artifact
     | .error error =>
         throwError "failed to compile resident styled cache: {repr error}"
-  unless cacheArtifact.module.imports.size == 24 &&
+  unless cacheArtifact.module.imports.size == 23 &&
       cacheArtifact.module.runtimeOperations.all fun operation =>
         !Fir.Wasm.Emit.ResidentCache.isCacheSet operation do
     throwError "resident styled Format lazy-cache frontier changed"
@@ -302,7 +302,7 @@ run_cmd do
     | .ok artifact => pure artifact
     | .error error =>
         throwError "failed to compile resident styled numeric module: {repr error}"
-  unless numericArtifact.module.imports.size == 14 do
+  unless numericArtifact.module.imports.size == 13 do
     throwError "resident styled Format numeric frontier changed"
   unless Fir.Wasm.Emit.ResidentNumeric.externalHelperNames.all
       numericArtifact.module.exports.contains do
@@ -324,7 +324,7 @@ run_cmd do
     | .error error =>
         throwError
           "failed to compile arbitrary-precision resident styled numeric module: {repr error}"
-  unless bigNumericArtifact.module.imports.size == 14 do
+  unless bigNumericArtifact.module.imports.size == 13 do
     throwError "resident styled arbitrary-precision numeric frontier changed"
   unless Fir.Wasm.Emit.ResidentBigNumeric.externalHelperNames.all
       bigNumericArtifact.module.exports.contains do
@@ -349,7 +349,7 @@ run_cmd do
     | .ok artifact => pure artifact
     | .error error =>
         throwError "failed to compile resident styled String module: {repr error}"
-  unless stringOperationsArtifact.module.imports.size == 6 do
+  unless stringOperationsArtifact.module.imports.size == 5 do
     throwError "resident styled String-operation frontier changed"
   let stringArtifact ← match
       Fir.Wasm.Emit.ResidentPrettyFormat.internalizeStringLiterals
@@ -357,7 +357,7 @@ run_cmd do
     | .ok artifact => pure artifact
     | .error error =>
         throwError "failed to compile resident styled String literals: {repr error}"
-  unless stringArtifact.module.imports.size == 2 do
+  unless stringArtifact.module.imports.size == 1 do
     throwError "resident styled String frontier changed"
   unless Fir.Wasm.Emit.ResidentString.externalHelperNames.all
       stringArtifact.module.exports.contains do
