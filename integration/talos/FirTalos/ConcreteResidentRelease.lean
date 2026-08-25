@@ -318,6 +318,44 @@ def releaseHeaderProgram : Wasm.Program := [
   .store32 (UInt32.ofNat headerAux3Offset),
   .ret]
 
+/-- The public W7 header-release helper adapts to the exact Talos program
+used by the concrete-runtime proof. -/
+theorem instructions_releaseHeaderFunction
+    {sourceModule : Fir.Wasm.Module} :
+    FirTalos.instructions sourceModule
+      Fir.Wasm.Emit.ResidentRelease.releaseHeaderFunction []
+      Fir.Wasm.Emit.ResidentRelease.releaseHeaderFunction.body =
+        .ok releaseHeaderProgram := by
+  simp [Fir.Wasm.Emit.ResidentRelease.releaseHeaderFunction,
+    releaseHeaderProgram, FirTalos.instructions, FirTalos.instruction,
+    FirTalos.findFVar?, Bind.bind, Except.bind, pure, Except.pure]
+  native_decide
+
+/-- Canonical adapted target shape of W7's public header-release helper. -/
+def releaseHeaderTargetFunction (suffix : Wasm.Program) : Wasm.Function := {
+  params := [.i32]
+  locals := []
+  results := []
+  body := releaseHeaderProgram ++ suffix }
+
+/-- Successful adaptation installs the verified header-release body followed
+only by the adapter's standard unreachable-marker suffix, if one is needed. -/
+theorem adaptedReleaseHeaderFunction_eq
+    {sourceModule : Fir.Wasm.Module} {targetFunction : Wasm.Function}
+    (adapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentRelease.releaseHeaderFunction =
+        .ok targetFunction) :
+    targetFunction = releaseHeaderTargetFunction
+      (FirTalos.functionTerminal sourceModule
+        Fir.Wasm.Emit.ResidentRelease.releaseHeaderFunction) := by
+  unfold FirTalos.function at adapted
+  rw [instructions_releaseHeaderFunction] at adapted
+  simp only [Bind.bind, Except.bind, pure, Except.pure,
+    Except.ok.injEq] at adapted
+  simpa [releaseHeaderTargetFunction,
+    Fir.Wasm.Emit.ResidentRelease.releaseHeaderFunction, FirTalos.abiKind,
+    Fir.Wasm.AbiKind.valueType, FirTalos.valueType] using adapted.symm
+
 /-- Physical memory produced by the seven resident header-release stores. -/
 def releaseHeaderMemory (memory : Wasm.Mem) (object : UInt32) : Wasm.Mem :=
   let memory := memory.write32
@@ -3088,6 +3126,83 @@ theorem LiveCellRel.releaseHeaderProgram_refines
     rfl
   exact ⟨header, result, headerRead, operation, finalValid, dead,
     finalMemory, physicalExecution⟩
+
+/-- The actual adapted `fir_release_header` function implements the same W6
+transition as the verified Talos body.  This call-level theorem is the
+production callee supplied to recursive `fir_dec_once` proofs. -/
+theorem LiveCellRel.terminatesWith_releaseHeaderFunction
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {targetFunction : Wasm.Function} {functionIndex : Nat}
+    {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : Fir.LeanIR.Impure.HeapCell}
+    (adapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentRelease.releaseHeaderFunction =
+        .ok targetFunction)
+    (notImport : module.imports[functionIndex]? = none)
+    (found : module.funcs[functionIndex - module.imports.length]? =
+      some targetFunction)
+    (cellRelated : LiveCellRel state witness address cell)
+    (valid : state.FrontierInvariant)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (exactHeader : CanonicalLiveHeaderRel state address) :
+    ∃ header result,
+      state.readLiveHeader address = .ok header ∧
+      writeLiveHeader state address header.forRelease = .ok result ∧
+      result.FrontierInvariant ∧
+      DeadCellRel result address ∧
+      ResidentMemoryRel result
+        (releaseHeaderStore store (UInt32.ofNat address.value)).mem ∧
+      Wasm.TerminatesWith env module functionIndex store
+        [.i32 (UInt32.ofNat address.value)]
+        (fun final values =>
+          final = releaseHeaderStore store (UInt32.ofNat address.value) ∧
+            values = []) := by
+  obtain ⟨header, result, headerRead, operation, finalValid, dead,
+      finalMemory, coreWP⟩ :=
+    LiveCellRel.releaseHeaderProgram_refines cellRelated valid memoryRelated
+      exactHeader
+  refine ⟨header, result, headerRead, operation, finalValid, dead,
+    finalMemory, ?_⟩
+  have targetShape := adaptedReleaseHeaderFunction_eq adapted
+  rw [targetShape] at found
+  let suffix := FirTalos.functionTerminal sourceModule
+    Fir.Wasm.Emit.ResidentRelease.releaseHeaderFunction
+  let targetFunction' := releaseHeaderTargetFunction suffix
+  refine FirTalos.Correctness.terminatesWith_of_wp_body_at
+    (function := targetFunction')
+    (Post := fun final values =>
+      final = releaseHeaderStore store (UInt32.ofNat address.value) ∧
+        values = [])
+    notImport (by simpa [targetFunction', suffix] using found) ?_
+  have coreWP' : Wasm.wp module releaseHeaderProgram
+      (fun continuation => continuation =
+        .Return (releaseHeaderStore store
+          (UInt32.ofNat address.value)) [])
+      store
+      (targetFunction'.toLocals
+        (([.i32 (UInt32.ofNat address.value)] : List Wasm.Value).take
+          targetFunction'.numParams).reverse) env := by
+    simpa [targetFunction', releaseHeaderTargetFunction,
+      releaseHeaderEntry, Wasm.Function.toLocals,
+      Wasm.Function.numParams] using coreWP
+  have physicalWP : Wasm.wp module targetFunction'.body
+      (fun continuation => continuation =
+        .Return (releaseHeaderStore store
+          (UInt32.ofNat address.value)) [])
+      store
+      (targetFunction'.toLocals
+        (([.i32 (UInt32.ofNat address.value)] : List Wasm.Value).take
+          targetFunction'.numParams).reverse) env := by
+    change Wasm.wp module (releaseHeaderProgram ++ suffix) _ _ _ _
+    exact FirTalos.Correctness.Wasm.wp_append_of_no_fallthrough
+      (by intros; simp) coreWP'
+  apply Wasm.wp.conseq _ physicalWP
+  intro completion completed
+  subst completion
+  simp [FirTalos.Correctness.FunctionBodyPost, targetFunction',
+    releaseHeaderTargetFunction, Wasm.Function.numParams]
 
 /-- The resident helper's early ordinary decrement is a semantic ownership
 step, not merely a successful store.  Starting from the shared W6 heap
