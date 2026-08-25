@@ -316,6 +316,113 @@ def ownedReleaseProgram (constructorBody closureBody opaqueBody : Wasm.Program) 
       .eq,
       .iff 0 0 opaqueBody [.ret]]]]
 
+/-- One recursively owned payload release.  The child word is loaded from the
+parent payload and passed to `fir_dec_once` with physical check word one. -/
+def releaseChildProgram (decrementIndex index : Nat) : Wasm.Program := [
+  .localGet addressIndex,
+  .load32 (UInt32.ofNat
+    (headerBytes + target.semanticSlotBytes * index)),
+  .const 1,
+  .call decrementIndex]
+
+/-- Direct sequential traversal used by closure descriptors and by the
+selected-field core of constructor release. -/
+def releaseChildrenProgram (decrementIndex : Nat) : List Nat → Wasm.Program
+  | [] => []
+  | index :: rest =>
+      releaseChildProgram decrementIndex index ++
+        releaseChildrenProgram decrementIndex rest
+
+/-- Fuel-free semantic call chain for direct child traversal.  Each later
+payload read is stated in the store produced by the preceding child release;
+this is the exact framing obligation later discharged by the heap relation. -/
+inductive ReleaseChildrenRun
+    {host : Type} (env : Wasm.HostEnv host) (module : Wasm.Module)
+    (decrementIndex : Nat) (object : UInt32) :
+    List Nat → Wasm.Store host → Wasm.Store host → Prop where
+  | nil (store : Wasm.Store host) :
+      ReleaseChildrenRun env module decrementIndex object [] store store
+  | cons {index : Nat} {indices : List Nat}
+      {initial middle final : Wasm.Store host} {child : UInt32}
+      (inBounds :
+        ¬(object.toNat +
+          (UInt32.ofNat
+            (headerBytes + target.semanticSlotBytes * index)).toNat + 4 >
+          initial.mem.pages * wasmPageBytes))
+      (read : initial.mem.read32
+        (object + UInt32.ofNat
+          (headerBytes + target.semanticSlotBytes * index)) = child)
+      (call : Wasm.TerminatesWith env module decrementIndex initial
+        [.i32 1, .i32 child]
+        (fun next values => next = middle ∧ values = []))
+      (tail : ReleaseChildrenRun env module decrementIndex object
+        indices middle final) :
+      ReleaseChildrenRun env module decrementIndex object
+        (index :: indices) initial final
+
+/-- Per-index guard used by the fixed-width constructor release frontier. -/
+def guardedReleaseChildProgram
+    (decrementIndex countLocal index : Nat) : Wasm.Program := [
+  .const (UInt32.ofNat index),
+  .localGet countLocal,
+  .ltU,
+  .iff 0 0 (releaseChildProgram decrementIndex index) []]
+
+/-- Guarded traversal of a finite physical index frontier. -/
+def guardedReleaseChildrenProgram
+    (decrementIndex countLocal : Nat) : List Nat → Wasm.Program
+  | [] => []
+  | index :: rest =>
+      guardedReleaseChildProgram decrementIndex countLocal index ++
+        guardedReleaseChildrenProgram decrementIndex countLocal rest
+
+/-- Exact fixed-frontier constructor-owned release body. -/
+def constructorReleaseProgram (decrementIndex : Nat) : Wasm.Program := [
+  .const (UInt32.ofNat
+    Fir.Wasm.Emit.ResidentRelease.constructorFieldLimit),
+  .localGet countIndex,
+  .ltU,
+  .iff 0 0 [.unreachable]
+    (guardedReleaseChildrenProgram decrementIndex countIndex
+      (List.range Fir.Wasm.Emit.ResidentRelease.constructorFieldLimit) ++
+      [.ret])]
+
+/-- Store-indexed execution evidence for a guarded child frontier.  Taken
+entries carry the same exact load/call contract as direct descriptor fields;
+skipped entries preserve the current store. -/
+inductive GuardedReleaseChildrenRun
+    {host : Type} (env : Wasm.HostEnv host) (module : Wasm.Module)
+    (decrementIndex : Nat) (object count : UInt32) :
+    List Nat → Wasm.Store host → Wasm.Store host → Prop where
+  | nil (store : Wasm.Store host) :
+      GuardedReleaseChildrenRun env module decrementIndex object count
+        [] store store
+  | skip {index : Nat} {indices : List Nat}
+      {initial final : Wasm.Store host}
+      (notTaken : ¬(UInt32.ofNat index < count))
+      (tail : GuardedReleaseChildrenRun env module decrementIndex object count
+        indices initial final) :
+      GuardedReleaseChildrenRun env module decrementIndex object count
+        (index :: indices) initial final
+  | take {index : Nat} {indices : List Nat}
+      {initial middle final : Wasm.Store host} {child : UInt32}
+      (taken : UInt32.ofNat index < count)
+      (inBounds :
+        ¬(object.toNat +
+          (UInt32.ofNat
+            (headerBytes + target.semanticSlotBytes * index)).toNat + 4 >
+          initial.mem.pages * wasmPageBytes))
+      (read : initial.mem.read32
+        (object + UInt32.ofNat
+          (headerBytes + target.semanticSlotBytes * index)) = child)
+      (call : Wasm.TerminatesWith env module decrementIndex initial
+        [.i32 1, .i32 child]
+        (fun next values => next = middle ∧ values = []))
+      (tail : GuardedReleaseChildrenRun env module decrementIndex object count
+        indices middle final) :
+      GuardedReleaseChildrenRun env module decrementIndex object count
+        (index :: indices) initial final
+
 /-- Ordinary release control flow.  The count-zero and last-reference paths
 remain explicit but opaque: the hot theorem below proves they are not entered. -/
 def ordinaryReleaseProgram (lastReference : Wasm.Program) : Wasm.Program := [
@@ -409,6 +516,15 @@ def decrementOnceProgram (persistent lastReference : Wasm.Program) :
       .eq,
       .iff 0 0 (alignedReleaseProgram persistent lastReference)
         [.unreachable]]]]
+
+/-- Postcondition for branch proofs that deliberately terminate the current
+function.  It excludes fallthrough and structured breaks, while treating a
+normal return and a trap uniformly through the caller's assertion. -/
+def TerminalPost {host : Type} (Q : Wasm.Assertion host) :
+    Wasm.Assertion host
+  | continuation@(.Return _ _) => Q continuation
+  | continuation@(.Trap _ _) => Q continuation
+  | _ => False
 
 /-- The concrete `fir_release_header` body performs exactly its seven checked
 word stores and returns no values.  A single full-header bound discharges all
@@ -594,6 +710,195 @@ theorem wp_ownedReleaseProgram_leaf
   simpa only [List.take_zero, List.drop_zero, List.nil_append,
     Wasm.wp_ret_cons, ownedEntry] using returned
 
+/-- A semantic child-call chain executes the corresponding direct Wasm
+payload traversal and preserves the parent frame for an arbitrary suffix. -/
+theorem ReleaseChildrenRun.wp
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {initial final : Wasm.Store host}
+    {object check flags descriptor refCount kind marker count
+      captureCount : UInt32}
+    {decrementIndex : Nat} {indices : List Nat} {rest : Wasm.Program}
+    (runs : ReleaseChildrenRun env module decrementIndex object
+      indices initial final)
+    (continued : Wasm.wp module rest Q final
+      (ownedEntry object check flags descriptor refCount kind marker count
+        captureCount) env) :
+    Wasm.wp module (releaseChildrenProgram decrementIndex indices ++ rest) Q
+      initial
+      (ownedEntry object check flags descriptor refCount kind marker count
+        captureCount) env := by
+  induction runs with
+  | nil store =>
+      simpa [releaseChildrenProgram] using continued
+  | @cons index indices initial middle final child inBounds read call tail ih =>
+      have addressFound (values : List Wasm.Value) :
+          ({ ownedEntry object check flags descriptor refCount kind marker count
+              captureCount with values } : Wasm.Locals).get addressIndex =
+            some (.i32 object) := by rfl
+      have inBounds' :
+          ¬(object.toNat +
+            (UInt32.ofNat
+              (headerBytes + target.semanticSlotBytes * index)).toNat + 4 >
+            initial.mem.pages * 65536) := by
+        simpa [wasmPageBytes] using inBounds
+      simp only [releaseChildrenProgram, releaseChildProgram,
+        List.cons_append, List.nil_append,
+        Wasm.wp_localGet_cons, addressFound, Wasm.wp_load32_cons]
+      rw [if_neg inBounds', read]
+      simp only [Wasm.wp_const_cons]
+      apply Wasm.wp_call_tw call
+      intro next values completed
+      rcases completed with ⟨rfl, rfl⟩
+      exact ih continued
+
+/-- Execute the finite guarded child frontier from its store-indexed call
+chain, preserving the parent frame and composing with an arbitrary suffix. -/
+theorem GuardedReleaseChildrenRun.wp
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {initial final : Wasm.Store host}
+    {object check flags descriptor refCount kind marker count
+      captureCount : UInt32}
+    {decrementIndex : Nat} {indices : List Nat} {rest : Wasm.Program}
+    (runs : GuardedReleaseChildrenRun env module decrementIndex object count
+      indices initial final)
+    (continued : Wasm.wp module rest Q final
+      (ownedEntry object check flags descriptor refCount kind marker count
+        captureCount) env) :
+    Wasm.wp module
+      (guardedReleaseChildrenProgram decrementIndex countIndex indices ++ rest)
+      Q initial
+      (ownedEntry object check flags descriptor refCount kind marker count
+        captureCount) env := by
+  induction runs with
+  | nil store =>
+      simpa [guardedReleaseChildrenProgram] using continued
+  | @skip index indices initial final notTaken tail ih =>
+      have countFound (values : List Wasm.Value) :
+          ({ ownedEntry object check flags descriptor refCount kind marker count
+              captureCount with values } : Wasm.Locals).get countIndex =
+            some (.i32 count) := by rfl
+      simp only [guardedReleaseChildrenProgram, guardedReleaseChildProgram,
+        List.cons_append, List.nil_append, Wasm.wp_const_cons,
+        Wasm.wp_localGet_cons, countFound, Wasm.wp_ltU_cons, if_neg notTaken]
+      apply Wasm.wp_iff_cons rfl
+      rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+      simpa only [Wasm.wp_nil, List.take_zero, List.drop_zero, List.nil_append] using
+        ih continued
+  | @take index indices initial middle final child taken inBounds read call tail ih =>
+      have countFound (values : List Wasm.Value) :
+          ({ ownedEntry object check flags descriptor refCount kind marker count
+              captureCount with values } : Wasm.Locals).get countIndex =
+            some (.i32 count) := by rfl
+      have addressFound (values : List Wasm.Value) :
+          ({ ownedEntry object check flags descriptor refCount kind marker count
+              captureCount with values } : Wasm.Locals).get addressIndex =
+            some (.i32 object) := by rfl
+      have inBounds' :
+          ¬(object.toNat +
+            (UInt32.ofNat
+              (headerBytes + target.semanticSlotBytes * index)).toNat + 4 >
+            initial.mem.pages * 65536) := by
+        simpa [wasmPageBytes] using inBounds
+      simp only [guardedReleaseChildrenProgram, guardedReleaseChildProgram,
+        List.cons_append, List.nil_append, Wasm.wp_const_cons,
+        Wasm.wp_localGet_cons, countFound, Wasm.wp_ltU_cons, if_pos taken]
+      apply Wasm.wp_iff_cons rfl
+      rw [if_pos (by decide : (1 : UInt32) ≠ 0)]
+      simp only [List.take_zero, List.drop_zero, List.nil_append,
+        releaseChildProgram, Wasm.wp_localGet_cons,
+        addressFound, Wasm.wp_load32_cons]
+      rw [if_neg inBounds', read]
+      simp only [Wasm.wp_const_cons]
+      apply Wasm.wp_call_tw call
+      intro next values completed
+      rcases completed with ⟨rfl, rfl⟩
+      simpa only [Wasm.wp_nil] using ih continued
+
+/-- A bounded constructor frontier takes the nontrapping arm, executes its
+guarded child chain, and returns the chain's exact final store. -/
+theorem wp_constructorReleaseProgram
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {initial final : Wasm.Store host}
+    {object check flags descriptor refCount kind marker count
+      captureCount : UInt32}
+    {decrementIndex : Nat}
+    (withinLimit :
+      ¬(UInt32.ofNat
+        Fir.Wasm.Emit.ResidentRelease.constructorFieldLimit < count))
+    (runs : GuardedReleaseChildrenRun env module decrementIndex object count
+      (List.range Fir.Wasm.Emit.ResidentRelease.constructorFieldLimit)
+      initial final)
+    (returned : Q (.Return final [])) :
+    Wasm.wp module (constructorReleaseProgram decrementIndex) Q initial
+      (ownedEntry object check flags descriptor refCount kind marker count
+        captureCount) env := by
+  have countFound (values : List Wasm.Value) :
+      ({ ownedEntry object check flags descriptor refCount kind marker count
+          captureCount with values } : Wasm.Locals).get countIndex =
+        some (.i32 count) := by rfl
+  unfold constructorReleaseProgram
+  simp only [Wasm.wp_const_cons, Wasm.wp_localGet_cons, countFound,
+    Wasm.wp_ltU_cons, if_neg withinLimit]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  apply runs.wp
+  simpa only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_ret_cons, ownedEntry] using returned
+
+/-- A constructor header selects exactly the supplied constructor body; the
+closure and opaque branches remain unreachable. -/
+theorem wp_ownedReleaseProgram_constructor
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {object check flags descriptor refCount kind marker count
+      captureCount : UInt32}
+    {constructorBody closureBody opaqueBody : Wasm.Program}
+    (constructorKind : kind = ObjectKind.constructor.code)
+    (constructorWP : Wasm.wp module constructorBody (TerminalPost Q) store
+      (ownedEntry object check flags descriptor refCount kind marker count
+        captureCount) env) :
+    Wasm.wp module
+      (ownedReleaseProgram constructorBody closureBody opaqueBody) Q store
+      (ownedEntry object check flags descriptor refCount kind marker count
+        captureCount) env := by
+  have kindFound (values : List Wasm.Value) :
+      ({ ownedEntry object check flags descriptor refCount kind marker count
+          captureCount with values } : Wasm.Locals).get kindIndex =
+        some (.i32 kind) := by rfl
+  unfold ownedReleaseProgram
+  simp only [Wasm.wp_localGet_cons, kindFound, Wasm.wp_const_cons,
+    Wasm.wp_eq_cons, if_pos constructorKind]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_pos (by decide : (1 : UInt32) ≠ 0)]
+  apply Wasm.wp.conseq _ constructorWP
+  intro continuation terminal
+  cases continuation <;> simp_all [TerminalPost]
+
+/-- Constructor dispatch composed with the fixed-frontier child-release
+implementation. -/
+theorem wp_ownedReleaseProgram_constructorRelease
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {initial final : Wasm.Store host}
+    {object check flags descriptor refCount kind marker count
+      captureCount : UInt32}
+    {decrementIndex : Nat} {closureBody opaqueBody : Wasm.Program}
+    (constructorKind : kind = ObjectKind.constructor.code)
+    (withinLimit :
+      ¬(UInt32.ofNat
+        Fir.Wasm.Emit.ResidentRelease.constructorFieldLimit < count))
+    (runs : GuardedReleaseChildrenRun env module decrementIndex object count
+      (List.range Fir.Wasm.Emit.ResidentRelease.constructorFieldLimit)
+      initial final)
+    (returned : Q (.Return final [])) :
+    Wasm.wp module
+      (ownedReleaseProgram (constructorReleaseProgram decrementIndex)
+        closureBody opaqueBody) Q initial
+      (ownedEntry object check flags descriptor refCount kind marker count
+        captureCount) env := by
+  apply wp_ownedReleaseProgram_constructor constructorKind
+  apply wp_constructorReleaseProgram withinLimit runs
+  simpa [TerminalPost] using returned
+
 /-- The complete last-reference body for a nonrecursive representation loads
 its dispatch metadata, releases the header, and then returns without invoking
 any recursive suffix. -/
@@ -638,15 +943,6 @@ theorem wp_lastReferenceProgram_leaf
   apply wp_lastReferenceProgram kindInBounds kindRead markerInBounds markerRead
     countInBounds countRead captureInBounds captureRead releaseRun
   exact wp_ownedReleaseProgram_leaf notConstructor notClosure notOpaque returned
-
-/-- Postcondition for branch proofs that deliberately terminate the current
-function.  It excludes fallthrough and structured breaks, while treating a
-normal return and a trap uniformly through the caller's assertion. -/
-def TerminalPost {host : Type} (Q : Wasm.Assertion host) :
-    Wasm.Assertion host
-  | continuation@(.Return _ _) => Q continuation
-  | continuation@(.Trap _ _) => Q continuation
-  | _ => False
 
 /-- Common resident-release prefix for an ordinary live object.  It validates
 the complete header, selects the nonpersistent arm, loads the reference count,
@@ -1522,6 +1818,73 @@ theorem wp_decrementOnceProgram_lastReference
   intro continuation terminal
   cases continuation <;> simp_all [TerminalPost]
 
+/-- Branch-independent composition of public decrement admission, the
+count-one prefix, metadata loads, and the header-release call.  Recursive
+representation proofs start only at the fully populated owned frame. -/
+theorem wp_decrementOnceProgram_owned
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store releasedStore : Wasm.Store host}
+    {object check flags descriptor refCount kind marker count
+      captureCount : UInt32}
+    {releaseHeaderIndex : Nat} {owned : Wasm.Program}
+    (taggedClear : (1 : UInt32) &&& object = 0)
+    (objectNonzero : object ≠ 0)
+    (alignmentClear :
+      UInt32.ofNat (target.heapAlignment - 1) &&& object = 0)
+    (flagsInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerFlagsOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (flagsRead : store.mem.read32
+      (object + UInt32.ofNat headerFlagsOffset) = flags)
+    (liveSet : liveFlag &&& flags = liveFlag)
+    (aux3InBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux3Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (aux3Read : store.mem.read32
+      (object + UInt32.ofNat headerAux3Offset) = descriptor)
+    (ordinary : flags &&& persistentFlag ≠ persistentFlag)
+    (refCountInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerRefCountOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (refCountRead : store.mem.read32
+      (object + UInt32.ofNat headerRefCountOffset) = refCount)
+    (one : refCount = 1)
+    (kindInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerKindOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (kindRead : store.mem.read32
+      (object + UInt32.ofNat headerKindOffset) = kind)
+    (markerInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux0Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (markerRead : store.mem.read32
+      (object + UInt32.ofNat headerAux0Offset) = marker)
+    (countInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux1Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (countRead : store.mem.read32
+      (object + UInt32.ofNat headerAux1Offset) = count)
+    (captureInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux2Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (captureRead : store.mem.read32
+      (object + UInt32.ofNat headerAux2Offset) = captureCount)
+    (releaseRun : Wasm.TerminatesWith env module releaseHeaderIndex store
+      [.i32 object]
+      (fun final values => final = releasedStore ∧ values = []))
+    (ownedBody : Wasm.wp module owned (TerminalPost Q) releasedStore
+      (ownedEntry object check flags descriptor refCount kind marker count
+        captureCount) env) :
+    Wasm.wp module
+      (decrementOnceProgram persistentReleaseProgram
+        (lastReferenceProgram releaseHeaderIndex owned))
+      Q store (decrementEntry object check) env := by
+  apply wp_decrementOnceProgram_lastReference taggedClear objectNonzero
+    alignmentClear flagsInBounds flagsRead liveSet aux3InBounds aux3Read ordinary
+    refCountInBounds refCountRead one
+  exact wp_lastReferenceProgram kindInBounds kindRead markerInBounds markerRead
+    countInBounds countRead captureInBounds captureRead releaseRun ownedBody
+
 /-- Full `fir_dec_once` control flow for a nonrecursive count-one allocation.
 The only call is the already-proved header release; none of the three
 recursive object-kind bodies is entered. -/
@@ -1586,12 +1949,11 @@ theorem wp_decrementOnceProgram_leaf
         (lastReferenceProgram releaseHeaderIndex
           (ownedReleaseProgram constructorBody closureBody opaqueBody)))
       Q store (decrementEntry object check) env := by
-  apply wp_decrementOnceProgram_lastReference taggedClear objectNonzero
+  apply wp_decrementOnceProgram_owned taggedClear objectNonzero
     alignmentClear flagsInBounds flagsRead liveSet aux3InBounds aux3Read ordinary
-    refCountInBounds refCountRead one
-  apply wp_lastReferenceProgram_leaf kindInBounds kindRead markerInBounds
+    refCountInBounds refCountRead one kindInBounds kindRead markerInBounds
     markerRead countInBounds countRead captureInBounds captureRead releaseRun
-    notConstructor notClosure notOpaque
+  apply wp_ownedReleaseProgram_leaf notConstructor notClosure notOpaque
   simpa [TerminalPost] using returned
 
 /-- Adjacent checked W6 word stores refine the corresponding Talos stores.
