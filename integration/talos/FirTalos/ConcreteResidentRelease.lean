@@ -1252,6 +1252,23 @@ def ResidentOwnershipStep
         [.i32 1, .i32 (UInt32.ofNat word.value)]
         (fun next results => next = middleStore ∧ results = [])
 
+/-- Common successful outcome of one fuel-indexed decrement across the
+concrete heap and resident Wasm memory.  Constructor, closure, and Array
+admission theorems differ only in how they establish this relation; the
+installed call boundary can therefore be proved once. -/
+def DecrementOnceSuccess
+    {host : Type} (fuel : Nat) (state : MemoryState)
+    (witness : RefinementWitness)
+    (nextRuntime : Fir.LeanIR.Impure.RuntimeState)
+    (address : Word32) (check : Bool)
+    (result : MemoryState) (finalStore : Wasm.Store host) : Prop :=
+  decrementReferenceOnceFuel fuel state address check
+      witness.closureDescriptors = .ok result ∧
+    LiveHeapRel result witness nextRuntime ∧
+    ResidentMemoryRel result finalStore.mem ∧
+    CanonicalMappedHeadersRel result witness ∧
+    MappedPayloadFrameTransport state result witness
+
 /-- Paired source/concrete/resident induction for a direct owned-child list.
 The parent payload lanes are read from `source`; `sourceFrame` proves that all
 earlier recursive ownership steps preserve them until each lazy Wasm load.
@@ -3955,6 +3972,46 @@ theorem DecrementOnceInstallation.wp_body_of_constructorClosure
   rw [bodyEq]
   exact FirTalos.Correctness.Wasm.wp_append_of_no_fallthrough
     noFallthrough (coreWP opaqueTarget)
+
+/-- Turn a relational return proof for the installed decrement body into the
+public, fuel-free call predicate.  The generated helper has no result lanes,
+so the caller tail is preserved while the final store remains related to an
+existential concrete result. -/
+theorem DecrementOnceInstallation.terminatesWith_of_success_wp
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {state : MemoryState} {witness : RefinementWitness}
+    {nextRuntime : Fir.LeanIR.Impure.RuntimeState}
+    {address : Word32} {check : Bool} {fuel : Nat}
+    {store : Wasm.Store host}
+    (installation :
+      DecrementOnceInstallation sourceModule module descriptors)
+    (checkWord : UInt32) (tail : List Wasm.Value)
+    (bodyWP : Wasm.wp module installation.targetFunction.body
+      (fun continuation =>
+        ∃ result finalStore,
+          DecrementOnceSuccess fuel state witness nextRuntime address check
+              result finalStore ∧
+            continuation = .Return finalStore [])
+      store (decrementEntry (UInt32.ofNat address.value) checkWord) env) :
+    Wasm.TerminatesWith env module installation.index store
+      ([.i32 checkWord, .i32 (UInt32.ofNat address.value)] ++ tail)
+      (fun final values =>
+        (∃ result,
+          DecrementOnceSuccess fuel state witness nextRuntime address check
+            result final) ∧
+        values = tail) := by
+  apply FirTalos.Correctness.terminatesWith_of_wp_body_at
+    installation.notImport installation.installed
+  rw [installation.entry (UInt32.ofNat address.value) checkWord tail]
+  apply Wasm.wp.conseq _ bodyWP
+  intro continuation completed
+  obtain ⟨result, finalStore, success, rfl⟩ := completed
+  obtain ⟨params, _locals, results⟩ := installation.signature
+  simp [FirTalos.Correctness.FunctionBodyPost, Wasm.Function.numParams,
+    params, results]
+  exact ⟨result, success⟩
 
 /-- Selecting an in-range static closure descriptor executes exactly its
 filtered child-release chain.  This factors the common descriptor admission
@@ -6713,6 +6770,160 @@ theorem LiveHeapRel.decrementOnceProgram_closureDescriptor_refines
   · exact childRuns
   · rfl
 
+/-- Lift count-one constructor refinement through the exact production
+installation.  The postcondition is deliberately relational: it records the
+concrete result and every invariant needed by the next recursive decrement,
+without choosing a final store outside the Wasm execution. -/
+theorem LiveHeapRel.wp_installedDecrementConstructor
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime nextRuntime : Fir.LeanIR.Impure.RuntimeState}
+    {location : Fir.LeanIR.Impure.Location} {address : Word32}
+    {cell : Fir.LeanIR.Impure.HeapCell}
+    {info : Lean.Compiler.LCNF.CtorInfo}
+    {fieldKinds : Array Fir.Wasm.AbiKind}
+    {semantic : Fir.LeanIR.Impure.ConstructorObject} {header : Header}
+    {fuel : Nat}
+    (installation : DecrementOnceInstallation sourceModule module
+      witness.closureDescriptors)
+    (related : LiveHeapRel state witness runtime)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (canonicalHeaders : CanonicalMappedHeadersRel state witness)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : Fir.LeanIR.Impure.findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (ordinary : cell.persistent = false) (one : cell.rc = 1)
+    (descriptor : witness.descriptors.lookup? address =
+      some (.constructor info fieldKinds))
+    (objectEq : cell.object = .ctor semantic)
+    (objectRelated :
+      ConstructorObjectRel state witness address info fieldKinds semantic)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (headerKind : header.kind = .constructor)
+    (refCount : header.refCount.toNat = cell.rc)
+    (persistent : header.persistent = cell.persistent)
+    (withinLimit : info.size ≤
+      Fir.Wasm.Emit.ResidentRelease.constructorFieldLimit)
+    (check : Bool) (checkWord : UInt32)
+    (semanticOperation :
+      Fir.LeanIR.Impure.decLocationFuel (fuel + 1) runtime location =
+        .ok nextRuntime)
+    (step : ResidentOwnershipStep env module installation.index fuel witness)
+    (releaseRun : Wasm.TerminatesWith env module
+      installation.releaseHeaderIndex store
+      [.i32 (UInt32.ofNat address.value)]
+      (fun final values =>
+        final = releaseHeaderStore store (UInt32.ofNat address.value) ∧
+          values = [])) :
+    Wasm.wp module installation.targetFunction.body
+      (fun continuation =>
+        ∃ result finalStore,
+          DecrementOnceSuccess (fuel + 1) state witness nextRuntime address
+              check result finalStore ∧
+            continuation = .Return finalStore [])
+      store (decrementEntry (UInt32.ofNat address.value) checkWord) env := by
+  apply installation.wp_body_of_constructorClosure
+  · intros
+    simp
+  · intro opaqueTarget
+    obtain ⟨result, finalStore, concreteOperation, finalRelated, finalMemory,
+        finalCanonical, finalFrame, execution⟩ :=
+      LiveHeapRel.decrementOnceProgram_constructor_refines
+        (decrementIndex := installation.index)
+        (releaseHeaderIndex := installation.releaseHeaderIndex)
+        (closureBody := closureDescriptorReleaseProgram installation.index
+          witness.closureDescriptors.toList 0)
+        (opaqueBody := opaqueTarget) related memoryRelated canonicalHeaders
+          mapped found live ordinary one descriptor objectEq objectRelated
+          headerRead headerKind refCount persistent withinLimit check checkWord
+          semanticOperation step releaseRun
+    apply Wasm.wp.conseq _ execution
+    intro continuation returned
+    subst continuation
+    exact ⟨result, finalStore,
+      ⟨concreteOperation, finalRelated, finalMemory, finalCanonical,
+        finalFrame⟩, rfl⟩
+
+/-- Lift count-one closure refinement through the same installed production
+body.  The descriptor table used by generation is definitionally the table in
+the refinement witness, so no body certificate or table-coherence premise is
+needed. -/
+theorem LiveHeapRel.wp_installedDecrementClosure
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime nextRuntime : Fir.LeanIR.Impure.RuntimeState}
+    {location : Fir.LeanIR.Impure.Location} {address : Word32}
+    {cell : Fir.LeanIR.Impure.HeapCell}
+    {function : Lean.Name} {arity : Nat}
+    {captureKinds : Array Fir.Wasm.AbiKind}
+    {captures : Array Fir.LeanIR.Impure.Value} {header : Header}
+    {fuel : Nat}
+    (installation : DecrementOnceInstallation sourceModule module
+      witness.closureDescriptors)
+    (related : LiveHeapRel state witness runtime)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (canonicalHeaders : CanonicalMappedHeadersRel state witness)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : Fir.LeanIR.Impure.findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (ordinary : cell.persistent = false) (one : cell.rc = 1)
+    (objectEq : cell.object = .closure function arity captures)
+    (objectRelated : ClosureObjectRel state witness witness.closureDispatch
+      witness.closureDescriptors address function arity captureKinds captures)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (headerKind : header.kind = .closure)
+    (descriptorLookup : witness.closureDescriptors.lookup? header.aux3 =
+      some captureKinds)
+    (descriptorTableFits :
+      witness.closureDescriptors.size < UInt32.size)
+    (fixedCount : header.aux2.toNat = captures.size)
+    (extent : closureCaptureAddress address.value captures.size ≤
+      state.heapCursor)
+    (refCount : header.refCount.toNat = cell.rc)
+    (persistent : header.persistent = cell.persistent)
+    (check : Bool) (checkWord : UInt32)
+    (semanticOperation :
+      Fir.LeanIR.Impure.decLocationFuel (fuel + 1) runtime location =
+        .ok nextRuntime)
+    (step : ResidentOwnershipStep env module installation.index fuel witness)
+    (releaseRun : Wasm.TerminatesWith env module
+      installation.releaseHeaderIndex store
+      [.i32 (UInt32.ofNat address.value)]
+      (fun final values =>
+        final = releaseHeaderStore store (UInt32.ofNat address.value) ∧
+          values = [])) :
+    Wasm.wp module installation.targetFunction.body
+      (fun continuation =>
+        ∃ result finalStore,
+          DecrementOnceSuccess (fuel + 1) state witness nextRuntime address
+              check result finalStore ∧
+            continuation = .Return finalStore [])
+      store (decrementEntry (UInt32.ofNat address.value) checkWord) env := by
+  apply installation.wp_body_of_constructorClosure
+  · intros
+    simp
+  · intro opaqueTarget
+    obtain ⟨result, finalStore, concreteOperation, finalRelated, finalMemory,
+        finalCanonical, finalFrame, execution⟩ :=
+      LiveHeapRel.decrementOnceProgram_closureDescriptor_refines
+        (decrementIndex := installation.index)
+        (releaseHeaderIndex := installation.releaseHeaderIndex)
+        (constructorBody := constructorReleaseProgram installation.index)
+        (opaqueBody := opaqueTarget) related memoryRelated canonicalHeaders
+          mapped found live ordinary one objectEq objectRelated headerRead
+          headerKind descriptorLookup descriptorTableFits fixedCount extent
+          refCount persistent check checkWord semanticOperation step releaseRun
+    apply Wasm.wp.conseq _ execution
+    intro continuation returned
+    subst continuation
+    exact ⟨result, finalStore,
+      ⟨concreteOperation, finalRelated, finalMemory, finalCanonical,
+        finalFrame⟩, rfl⟩
+
 /-- Complete fuel-indexed three-semantics refinement for a count-one resident
 generic Array.  Only the logical live prefix participates in recursive
 ownership; retained spare capacity is preserved solely by the mapped-payload
@@ -7462,6 +7673,130 @@ theorem LiveHeapRel.terminatesWith_installedDecrementAboveOne
       object checkWord tail coreWP
   exact ⟨header, result, nextRuntime, headerRead, concreteOperation,
     semanticOperation, finalRelated, canonicalAfter, finalMemory, called⟩
+
+/-- Public installed-call refinement for a count-one constructor.  Every
+returned resident store is related to the concrete and semantic decrement
+outcome, and the caller operand tail is unchanged. -/
+theorem LiveHeapRel.terminatesWith_installedDecrementConstructor
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime nextRuntime : Fir.LeanIR.Impure.RuntimeState}
+    {location : Fir.LeanIR.Impure.Location} {address : Word32}
+    {cell : Fir.LeanIR.Impure.HeapCell}
+    {info : Lean.Compiler.LCNF.CtorInfo}
+    {fieldKinds : Array Fir.Wasm.AbiKind}
+    {semantic : Fir.LeanIR.Impure.ConstructorObject} {header : Header}
+    {fuel : Nat}
+    (installation : DecrementOnceInstallation sourceModule module
+      witness.closureDescriptors)
+    (related : LiveHeapRel state witness runtime)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (canonicalHeaders : CanonicalMappedHeadersRel state witness)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : Fir.LeanIR.Impure.findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (ordinary : cell.persistent = false) (one : cell.rc = 1)
+    (descriptor : witness.descriptors.lookup? address =
+      some (.constructor info fieldKinds))
+    (objectEq : cell.object = .ctor semantic)
+    (objectRelated :
+      ConstructorObjectRel state witness address info fieldKinds semantic)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (headerKind : header.kind = .constructor)
+    (refCount : header.refCount.toNat = cell.rc)
+    (persistent : header.persistent = cell.persistent)
+    (withinLimit : info.size ≤
+      Fir.Wasm.Emit.ResidentRelease.constructorFieldLimit)
+    (check : Bool) (checkWord : UInt32)
+    (semanticOperation :
+      Fir.LeanIR.Impure.decLocationFuel (fuel + 1) runtime location =
+        .ok nextRuntime)
+    (step : ResidentOwnershipStep env module installation.index fuel witness)
+    (releaseRun : Wasm.TerminatesWith env module
+      installation.releaseHeaderIndex store
+      [.i32 (UInt32.ofNat address.value)]
+      (fun final values =>
+        final = releaseHeaderStore store (UInt32.ofNat address.value) ∧
+          values = []))
+    (tail : List Wasm.Value) :
+    Wasm.TerminatesWith env module installation.index store
+      ([.i32 checkWord, .i32 (UInt32.ofNat address.value)] ++ tail)
+      (fun final values =>
+        (∃ result,
+          DecrementOnceSuccess (fuel + 1) state witness nextRuntime address
+            check result final) ∧
+        values = tail) := by
+  apply installation.terminatesWith_of_success_wp checkWord tail
+  exact LiveHeapRel.wp_installedDecrementConstructor installation related
+    memoryRelated canonicalHeaders mapped found live ordinary one descriptor
+    objectEq objectRelated headerRead headerKind refCount persistent
+    withinLimit check checkWord semanticOperation step releaseRun
+
+/-- Public installed-call refinement for a count-one closure.  Static
+descriptor admission and recursive capture release are hidden behind the same
+relational postcondition used by constructors. -/
+theorem LiveHeapRel.terminatesWith_installedDecrementClosure
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime nextRuntime : Fir.LeanIR.Impure.RuntimeState}
+    {location : Fir.LeanIR.Impure.Location} {address : Word32}
+    {cell : Fir.LeanIR.Impure.HeapCell}
+    {function : Lean.Name} {arity : Nat}
+    {captureKinds : Array Fir.Wasm.AbiKind}
+    {captures : Array Fir.LeanIR.Impure.Value} {header : Header}
+    {fuel : Nat}
+    (installation : DecrementOnceInstallation sourceModule module
+      witness.closureDescriptors)
+    (related : LiveHeapRel state witness runtime)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (canonicalHeaders : CanonicalMappedHeadersRel state witness)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : Fir.LeanIR.Impure.findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (ordinary : cell.persistent = false) (one : cell.rc = 1)
+    (objectEq : cell.object = .closure function arity captures)
+    (objectRelated : ClosureObjectRel state witness witness.closureDispatch
+      witness.closureDescriptors address function arity captureKinds captures)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (headerKind : header.kind = .closure)
+    (descriptorLookup : witness.closureDescriptors.lookup? header.aux3 =
+      some captureKinds)
+    (descriptorTableFits :
+      witness.closureDescriptors.size < UInt32.size)
+    (fixedCount : header.aux2.toNat = captures.size)
+    (extent : closureCaptureAddress address.value captures.size ≤
+      state.heapCursor)
+    (refCount : header.refCount.toNat = cell.rc)
+    (persistent : header.persistent = cell.persistent)
+    (check : Bool) (checkWord : UInt32)
+    (semanticOperation :
+      Fir.LeanIR.Impure.decLocationFuel (fuel + 1) runtime location =
+        .ok nextRuntime)
+    (step : ResidentOwnershipStep env module installation.index fuel witness)
+    (releaseRun : Wasm.TerminatesWith env module
+      installation.releaseHeaderIndex store
+      [.i32 (UInt32.ofNat address.value)]
+      (fun final values =>
+        final = releaseHeaderStore store (UInt32.ofNat address.value) ∧
+          values = []))
+    (tail : List Wasm.Value) :
+    Wasm.TerminatesWith env module installation.index store
+      ([.i32 checkWord, .i32 (UInt32.ofNat address.value)] ++ tail)
+      (fun final values =>
+        (∃ result,
+          DecrementOnceSuccess (fuel + 1) state witness nextRuntime address
+            check result final) ∧
+        values = tail) := by
+  apply installation.terminatesWith_of_success_wp checkWord tail
+  exact LiveHeapRel.wp_installedDecrementClosure installation related
+    memoryRelated canonicalHeaders mapped found live ordinary one objectEq
+    objectRelated headerRead headerKind descriptorLookup descriptorTableFits
+    fixedCount extent refCount persistent check checkWord semanticOperation
+    step releaseRun
 
 end ResidentRelease
 
