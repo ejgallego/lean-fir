@@ -173,6 +173,20 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   this is accepted for upstream fidelity and smaller code with no runtime-speed
   claim. No public behavior, signature, ABI/layout, ownership rule, or source
   semantics changed.
+- Accepted final prettyM constructor profile evidence: tooling head `5888ba7b`
+  documents the clean immutable zero-import package at FIR `cf3f7cb8`, with
+  83,996-byte Wasm SHA-256
+  `fc61301d946b1596ad08c9b20d51d2e1f68d60ca0c04b0f9d56e298c2ec6408d`.
+  Against the exact experimental baseline, the final module is 3,517 bytes
+  (4.02%) smaller and constructor-helper bodies are 2,715 bytes (41.3%)
+  smaller. Four checked diagnostic captures still identify allocation as the
+  leading sampled family, at 45.65% median Wasm-self share, but do not support
+  a runtime-speed claim. Future constructor work must target semantic
+  allocation count, consolidation, or representation rather than further
+  zero-fill removal. The documentation-only replay on current main passes
+  `git diff --check` and the complete repository gate at 726 unique cases and
+  2,160/2,160 equal comparisons; no generator, runtime, proof, ABI, layout,
+  ownership, or artifact contract changed.
 - Independent coordination integration: immutable operational-mailbox
   checkpoints are accepted at `ba9ba1cd` for thread
   `W72-W7-20260825-004`. A checkpoint is selected only from one clean
