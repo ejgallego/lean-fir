@@ -423,6 +423,124 @@ inductive GuardedReleaseChildrenRun
       GuardedReleaseChildrenRun env module decrementIndex object count
         (index :: indices) initial final
 
+/-- Direct child-call evidence embeds into guarded traversal when every named
+index is below the physical count. -/
+theorem ReleaseChildrenRun.toGuarded
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {decrementIndex : Nat} {object count : UInt32}
+    {indices : List Nat} {initial final : Wasm.Store host}
+    (runs : ReleaseChildrenRun env module decrementIndex object
+      indices initial final)
+    (taken : ∀ index ∈ indices, UInt32.ofNat index < count) :
+    GuardedReleaseChildrenRun env module decrementIndex object count
+      indices initial final := by
+  induction runs with
+  | nil store => exact .nil store
+  | @cons index indices initial middle final child inBounds read call tail ih =>
+      apply GuardedReleaseChildrenRun.take (taken index (by simp))
+        inBounds read call
+      exact ih (by
+        intro next member
+        exact taken next (by simp [member]))
+
+/-- A list of uniformly out-of-range indices forms a store-preserving guarded
+suffix. -/
+theorem GuardedReleaseChildrenRun.skipAll
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {decrementIndex : Nat} {object count : UInt32}
+    (indices : List Nat) (store : Wasm.Store host)
+    (notTaken : ∀ index ∈ indices, ¬(UInt32.ofNat index < count)) :
+    GuardedReleaseChildrenRun env module decrementIndex object count
+      indices store store := by
+  induction indices with
+  | nil => exact .nil store
+  | cons index indices ih =>
+      apply GuardedReleaseChildrenRun.skip (notTaken index (by simp))
+      exact ih (by
+        intro next member
+        exact notTaken next (by simp [member]))
+
+/-- Guarded child-call chains compose at their exact intermediate store. -/
+theorem GuardedReleaseChildrenRun.append
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {decrementIndex : Nat} {object count : UInt32}
+    {left right : List Nat} {initial middle final : Wasm.Store host}
+    (leftRun : GuardedReleaseChildrenRun env module decrementIndex object count
+      left initial middle)
+    (rightRun : GuardedReleaseChildrenRun env module decrementIndex object count
+      right middle final) :
+    GuardedReleaseChildrenRun env module decrementIndex object count
+      (left ++ right) initial final := by
+  induction leftRun with
+  | nil store => simpa using rightRun
+  | skip notTaken tail ih =>
+      exact .skip notTaken (ih rightRun)
+  | take taken inBounds read call tail ih =>
+      exact .take taken inBounds read call (ih rightRun)
+
+/-- Complete the fixed constructor frontier from exact evidence for its live
+fields.  Indices below `fieldCount` execute recursive decrements; every
+remaining physical slot up to W7's limit is skipped without touching the
+store. -/
+theorem ReleaseChildrenRun.completeConstructorFrontier
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {decrementIndex fieldCount : Nat} {object count : UInt32}
+    {initial final : Wasm.Store host}
+    (runs : ReleaseChildrenRun env module decrementIndex object
+      (List.range fieldCount) initial final)
+    (fieldCountFits : fieldCount < UInt32.size)
+    (withinLimit :
+      fieldCount ≤ Fir.Wasm.Emit.ResidentRelease.constructorFieldLimit)
+    (countEq : count = UInt32.ofNat fieldCount) :
+    GuardedReleaseChildrenRun env module decrementIndex object count
+      (List.range Fir.Wasm.Emit.ResidentRelease.constructorFieldLimit)
+      initial final := by
+  have active :
+      GuardedReleaseChildrenRun env module decrementIndex object count
+        (List.range fieldCount) initial final :=
+    runs.toGuarded (by
+      intro index member
+      have indexLt : index < fieldCount := List.mem_range.mp member
+      rw [UInt32.lt_iff_toNat_lt,
+        UInt32.toNat_ofNat_of_lt' (indexLt.trans fieldCountFits), countEq,
+        UInt32.toNat_ofNat_of_lt' fieldCountFits]
+      exact indexLt)
+  let remaining :=
+    List.map (fun offset => fieldCount + offset)
+      (List.range
+        (Fir.Wasm.Emit.ResidentRelease.constructorFieldLimit - fieldCount))
+  have skipped :
+      GuardedReleaseChildrenRun env module decrementIndex object count
+        remaining final final :=
+    GuardedReleaseChildrenRun.skipAll remaining final (by
+      intro index member below
+      rcases List.mem_map.mp member with ⟨offset, offsetMember, rfl⟩
+      have offsetLt :
+          offset <
+            Fir.Wasm.Emit.ResidentRelease.constructorFieldLimit - fieldCount :=
+        List.mem_range.mp offsetMember
+      have indexLt :
+          fieldCount + offset <
+            Fir.Wasm.Emit.ResidentRelease.constructorFieldLimit := by
+        omega
+      have indexFits : fieldCount + offset < UInt32.size :=
+        indexLt.trans (by decide)
+      rw [countEq, UInt32.lt_iff_toNat_lt,
+        UInt32.toNat_ofNat_of_lt' indexFits,
+        UInt32.toNat_ofNat_of_lt' fieldCountFits] at below
+      omega)
+  have combined := active.append skipped
+  have frontierEq :
+      List.range Fir.Wasm.Emit.ResidentRelease.constructorFieldLimit =
+        List.range fieldCount ++ remaining := by
+    rw [show Fir.Wasm.Emit.ResidentRelease.constructorFieldLimit =
+      fieldCount +
+        (Fir.Wasm.Emit.ResidentRelease.constructorFieldLimit - fieldCount) by
+          omega,
+      List.range_add]
+  rw [frontierEq]
+  exact combined
+
 /-- Ordinary release control flow.  The count-zero and last-reference paths
 remain explicit but opaque: the hot theorem below proves they are not entered. -/
 def ordinaryReleaseProgram (lastReference : Wasm.Program) : Wasm.Program := [
@@ -845,6 +963,34 @@ theorem wp_constructorReleaseProgram
   simpa only [List.take_zero, List.drop_zero, List.nil_append,
     Wasm.wp_ret_cons, ownedEntry] using returned
 
+/-- Execute the fixed constructor body from recursive-call evidence for only
+the semantically live fields.  The theorem derives both the outer limit check
+and the skipped physical suffix from the exact field count. -/
+theorem wp_constructorReleaseProgram_of_children
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {initial final : Wasm.Store host}
+    {object check flags descriptor refCount kind marker count
+      captureCount : UInt32}
+    {decrementIndex fieldCount : Nat}
+    (runs : ReleaseChildrenRun env module decrementIndex object
+      (List.range fieldCount) initial final)
+    (fieldCountFits : fieldCount < UInt32.size)
+    (withinLimit :
+      fieldCount ≤ Fir.Wasm.Emit.ResidentRelease.constructorFieldLimit)
+    (countEq : count = UInt32.ofNat fieldCount)
+    (returned : Q (.Return final [])) :
+    Wasm.wp module (constructorReleaseProgram decrementIndex) Q initial
+      (ownedEntry object check flags descriptor refCount kind marker count
+        captureCount) env := by
+  apply wp_constructorReleaseProgram
+  · intro tooMany
+    rw [countEq, UInt32.lt_iff_toNat_lt,
+      UInt32.toNat_ofNat_of_lt' (by decide),
+      UInt32.toNat_ofNat_of_lt' fieldCountFits] at tooMany
+    omega
+  · exact runs.completeConstructorFrontier fieldCountFits withinLimit countEq
+  · exact returned
+
 /-- A constructor header selects exactly the supplied constructor body; the
 closure and opaque branches remain unreachable. -/
 theorem wp_ownedReleaseProgram_constructor
@@ -897,6 +1043,34 @@ theorem wp_ownedReleaseProgram_constructorRelease
         captureCount) env := by
   apply wp_ownedReleaseProgram_constructor constructorKind
   apply wp_constructorReleaseProgram withinLimit runs
+  simpa [TerminalPost] using returned
+
+/-- Constructor dispatch from evidence for exactly the semantic fields.  This
+is the target-level recursive interface consumed by the heap refinement: it
+does not expose W7's padded 32-slot traversal. -/
+theorem wp_ownedReleaseProgram_constructorRelease_of_children
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {initial final : Wasm.Store host}
+    {object check flags descriptor refCount kind marker count
+      captureCount : UInt32}
+    {decrementIndex fieldCount : Nat}
+    {closureBody opaqueBody : Wasm.Program}
+    (constructorKind : kind = ObjectKind.constructor.code)
+    (runs : ReleaseChildrenRun env module decrementIndex object
+      (List.range fieldCount) initial final)
+    (fieldCountFits : fieldCount < UInt32.size)
+    (withinLimit :
+      fieldCount ≤ Fir.Wasm.Emit.ResidentRelease.constructorFieldLimit)
+    (countEq : count = UInt32.ofNat fieldCount)
+    (returned : Q (.Return final [])) :
+    Wasm.wp module
+      (ownedReleaseProgram (constructorReleaseProgram decrementIndex)
+        closureBody opaqueBody) Q initial
+      (ownedEntry object check flags descriptor refCount kind marker count
+        captureCount) env := by
+  apply wp_ownedReleaseProgram_constructor constructorKind
+  apply wp_constructorReleaseProgram_of_children runs fieldCountFits withinLimit
+    countEq
   simpa [TerminalPost] using returned
 
 /-- The complete last-reference body for a nonrecursive representation loads
