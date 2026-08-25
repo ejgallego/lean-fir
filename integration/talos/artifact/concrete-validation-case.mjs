@@ -90,6 +90,10 @@ export const CONCRETE_VALIDATION_BLOCKED_CASES = Object.freeze([
   "repeated-captured-byte-array-returned",
   "returned-byte-array-closure-shared-mutation",
   "returned-byte-array-closure-unique-mutation",
+  // The transferred initial graph contains the ByteArray that crosses the
+  // mutually recursive tail calls; the concrete product does not yet admit
+  // ByteArray values even though the semantic Wasm product executes it.
+  "shared-byte-array-mutual-tail-three",
   "tail-byte-owner-shared-retain",
   "tail-byte-owner-unique-transfer",
 ]);
