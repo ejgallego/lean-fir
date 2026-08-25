@@ -145,6 +145,22 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   Lean Beam, the 54-job linker cone, `make check`, all 3,172 Talos jobs, the
   complete artifact gate, and stored/Level-1/raw lean-zip checks pass. W6
   review continues independently in `W72-W6-20260826-001`.
+- Accepted exhaustive resident fast-path policy: W7 functional head
+  `b2989c88` is linked through clean tracked handoff `6d0808ec`. Every current
+  resident `Step` is now explicitly classified as reviewed out-of-line or
+  inline/cold; there is no wildcard, so a new step cannot compile until it is
+  reviewed. The six current inline/cold families additionally carry erased
+  proofs that their typed rewrite registries are nonempty, preventing a
+  provider from silently dropping its required caller path. Helper bodies and
+  signatures, checked fallbacks, generated calls, imports/exports, the W6
+  concrete representation, ownership, and observable semantics are unchanged.
+  Lean Beam and the 54-job linker cone pass; `make check` remains green at 726
+  unique cases and 2,160/2,160 comparisons; all 3,172 Talos jobs, the complete
+  deterministic artifact gate, and stored/Level-1 lean-zip package checks pass.
+  PrettyM remains 83,904/87,318 bytes and Level-1 lean-zip remains 198,424
+  bytes with SHA-256 `107ebbba4d1d431a2dd8f0ac64ec1195e8bfcbb407bca5a95e6772b40c8e24e3`.
+  Compact upstream-aligned object representation is recorded as parked,
+  measurement-gated W6/W7 layout research rather than introduced here.
 - Accepted wide ByteArray push integration: W7 functional head `158914b8`,
   exact package ratchet `3e0eef61`, and clean tracked handoff `ba24e66e` are
   accepted. The exclusive-reuse `ByteArray.pushUInt64LE` path now mirrors
