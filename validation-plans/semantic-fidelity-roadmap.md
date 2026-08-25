@@ -17,7 +17,7 @@ exception text, or allocator identity.
 
 ## Current accepted checkpoint
 
-`main` at `cf3f7cb8` contains S19 and the complete bounded recursion-shape
+`main` at `051a70e0` contains S19 and the complete bounded recursion-shape
 family: direct self-tail transfer, retained non-tail unwind, and
 cross-declaration mutual-tail transfer over the same cached repeated-child
 String observation. The accepted executable checkpoint contains 716 source
@@ -29,7 +29,7 @@ and administrative kinds, 208 semantic-tag floors, and 297 conjunctive-domain
 floors, with zero findings.
 
 S20 is prepared on `validation/closure-ownership-fixtures` at functional head
-`2b357bf9`, based on exact accepted `main` at `cf3f7cb8`. It carries a
+`6c383b94`, based on exact accepted `main` at `051a70e0`. It carries a
 runner-supplied `ByteArray` through mutual tail calls while retaining an
 independent alias, then uses copy-on-write mutation to expose ownership
 mistakes. Its tracked native/LCNF/V8 and Talos gates are green; it changes no
@@ -836,7 +836,7 @@ through the runner preserves isolation while testing the same ownership
 question.
 
 State: prepared on `validation/closure-ownership-fixtures` at functional head
-`2b357bf9`, replayed from exact accepted base `cf3f7cb8`, and ready for
+`6c383b94`, replayed from exact accepted base `051a70e0`, and ready for
 integration. Tracked Lean Beam update, sync, and save pass with zero
 diagnostics and save-ready source hash `09f0835253553c66`. The focused
 native/LCNF/V8 run passes all three edges and opens both Wasm products under
