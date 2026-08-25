@@ -1,5 +1,6 @@
 import LeanZipFir.Compile
 import Lean.Elab.Command
+import Lean.Compiler.LCNF.PrettyPrinter
 
 open Lean Elab Command
 
@@ -19,17 +20,42 @@ private def importNameArrayJson (imports : Array Fir.Wasm.Import) : Json :=
 set_option maxHeartbeats 0 in
 run_cmd do
   IO.FS.createDirAll "_build"
-  let baseResult ← liftCoreM LeanZipFir.Compile.compileRawBase
+  let startedAt ← IO.monoMsNow
+  let source ← liftCoreM LeanZipFir.Compile.captureRaw
+  let capturedAt ← IO.monoMsNow
+  let environment ← liftCoreM getEnv
+  let localizedExterns := source.program.decls.filter fun declaration =>
+    isExtern environment declaration.name &&
+      !source.externalNames.contains declaration.name
+  unless localizedExterns.isEmpty do
+    throwError "raw capture localized native extern fallbacks: {localizedExterns.map (·.name)}"
+  let externalSpecializations := source.externalNames.filter fun name =>
+    !(Fir.Wasm.Emit.CompilerPrivate.specializationCallerCandidates name).isEmpty
+  unless externalSpecializations.isEmpty do
+    throwError "raw capture retained generated specializations: {externalSpecializations}"
+  let unsupported := source.program.decls.filter fun declaration =>
+    !Fir.Wasm.supportedDecl source.program declaration
+  let unsupportedText ← unsupported.mapM fun declaration => do
+    let formatted ← liftCoreM <|
+      Lean.Compiler.LCNF.ppDecl' declaration .impure
+    pure s!"{formatted.pretty}\n"
+  IO.FS.writeFile "_build/raw-unsupported.lcnf"
+    (String.intercalate "\n" unsupportedText.toList)
+  unless unsupported.isEmpty do
+    throwError "raw capture retained unsupported declarations: {unsupported.map (·.name)}; see _build/raw-unsupported.lcnf"
+  let baseResult ← liftCoreM <| LeanZipFir.Compile.compileRawCaptured source
+  let loweredAt ← IO.monoMsNow
   let base ← match baseResult with
     | .ok artifact => pure artifact
     | .error error => throwError "failed to compile raw source: {repr error}"
-  match ← base.write "_build/lean-zip-raw-base.wasm" with
-  | .ok () => pure ()
-  | .error error => throwError "failed to write raw base module: {repr error}"
-  let linkedResult ← liftCoreM LeanZipFir.Compile.compileRaw
+  let linkedResult := LeanZipFir.Compile.linkRawArtifact base
   let linked ← match linkedResult with
     | .ok artifact => pure artifact
     | .error error => throwError "failed to link raw runtime: {repr error}"
+  let linkedAt ← IO.monoMsNow
+  match ← base.write "_build/lean-zip-raw-base.wasm" with
+  | .ok () => pure ()
+  | .error error => throwError "failed to write raw base module: {repr error}"
   match ← linked.write "_build/lean-zip-raw-frontier.wasm" with
   | .error error => throwError "failed to write resident raw frontier: {repr error}"
   | .ok () =>
@@ -53,9 +79,10 @@ run_cmd do
           linked.source.program
       let inventory := Json.mkObj [
         ("entry", LeanZipFir.Compile.rawEntry.toString),
-        ("capturedDeclarations", linked.source.program.decls.size),
-        ("reviewedExternalsBeforeLink", linked.source.externalNames.size),
-        ("externals", nameArrayJson linked.source.externalNames),
+        ("capturedDeclarations", source.program.decls.size),
+        ("reviewedExternalsBeforeLink", source.externalNames.size),
+        ("externals", nameArrayJson source.externalNames),
+        ("unsupportedDeclarations", nameArrayJson (unsupported.map (·.name))),
         ("functions", nameArrayJson functionNames),
         ("publicFunctions", nameArrayJson linked.module.exports),
         ("publicSignatures", Json.arr <| linked.module.functions.filterMap fun function =>
@@ -67,7 +94,11 @@ run_cmd do
         ("residentHelpers", nameArrayJson residentHelpers),
         ("residentGlobals", linked.module.globals.size),
         ("frontierImports", importNameArrayJson linked.module.imports),
-        ("runtimeOperations", linked.module.runtimeOperations.size)]
+        ("runtimeOperations", linked.module.runtimeOperations.size),
+        ("captureMs", capturedAt - startedAt),
+        ("lowerMs", loweredAt - capturedAt),
+        ("linkMs", linkedAt - loweredAt)]
       IO.FS.writeFile "_build/lean-zip-raw.inventory.json"
         (inventory.pretty ++ "\n")
-      logInfo m!"wrote {linked.bytes.size} raw frontier bytes with {frontierImports.size} math imports, {retainedSourceFunctions.size} source functions, and {residentHelpers.size} resident helpers"
+      IO.FS.writeFile "_build/raw-probe.json" (inventory.pretty ++ "\n")
+      logInfo m!"wrote {linked.bytes.size} raw frontier bytes with {frontierImports.size} math imports, {retainedSourceFunctions.size} source functions, and {residentHelpers.size} resident helpers from one capture/lower pass (capture {capturedAt - startedAt}ms, lower {loweredAt - capturedAt}ms, link {linkedAt - loweredAt}ms)"

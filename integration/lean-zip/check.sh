@@ -10,6 +10,8 @@ fir_root="$(cd "$directory/../.." && pwd)"
 export LEAN_ZIP_ROOT ZIP_COMMON_ROOT
 
 node --test export-raw-package.test.mjs
+node --check package-raw.mjs
+node --check check-raw-determinism.mjs
 FIR_ALLOW_DIRTY_PACKAGE="${FIR_ALLOW_DIRTY_PACKAGE:-1}" node package.mjs
 
 if [[ -n "${FIR_BROWSER:-}" ]]; then

@@ -80,6 +80,41 @@ produced by `node package-raw.mjs` under `_build/lean-zip-raw-packages/`.
 Their atomic canonical pointers end in `-current`. Every package is checksummed
 and can run `node smoke.mjs` without the FIR or lean-zip source trees.
 
+Ordinary raw publication is intentionally single-pass: one final-LCNF capture
+and lowering produces an immutable base artifact, resident linking derives the
+frontier from that value, and the external runtime closes the module once. The
+result JSON reports monotonic `prepareMs`, `generateMs`,
+`verifyAndPublishMs`, and `totalMs` intervals. It does not include timings in
+`BUILD.json`, so package identity remains deterministic.
+
+Run the slower, explicitly opt-in source-diagnostic and byte-for-byte repeat
+generation gate with:
+
+```sh
+node check-raw-determinism.mjs
+```
+
+That command additionally runs `ProbeRaw.lean`, generates the complete module
+twice, and compares the frontier, final module, descriptor, libm runtime, and
+function sidecar. Its default preview lives under the current worktree's
+ignored `.deps/previews/`; it never advances the canonical package pointer.
+
+On exact FIR base `b52710d2`, the former ordinary topology measured 165.226s:
+1.093s preparation, 48.394s probe, 55.732s first complete generation, 58.598s
+repeat generation, and 1.409s verification/publication. The single-pass
+candidate measured 45.974s: 0.988s preparation, 43.565s generation, and
+1.421s verification/publication. This is a 72.2% build-latency reduction
+(3.59x throughput), not a generated-Wasm runtime claim. The explicit
+diagnostic/determinism mode remains available and measured 142.824s.
+
+Selecting the first and only captured artifact exposed
+`FIR-BUG-wasm-none-repeated-final-capture-code-shape`: the former redundant
+second capture had a different optimized shape despite an identical source,
+function, call, ABI, import, and ownership inventory. The deterministic
+single-capture release is 366,826 bytes, 375 bytes smaller than that historical
+second-capture release, and passes the complete 50-way native/Wasm/inflate
+differential plus scratch-reclamation checks.
+
 Catalog consumers should use the fail-closed fresh-output entry rather than
 the direct-use aliases above:
 

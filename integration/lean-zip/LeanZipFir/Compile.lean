@@ -87,16 +87,37 @@ def compileLevel1 : CoreM (Except Fir.Wasm.Emit.Source.CompileError
         artifact.module #[level1Entry])
       artifact
 
-private def compileRawUnprepared : CoreM (Except Fir.Wasm.Emit.Source.CompileError
+/-!
+The raw package needs both the source-only module and the resident-linked
+frontier. Keep the captured/lowered artifact as an immutable value so callers
+can serialize the base and derive the linked module without capturing and
+lowering the same source closure twice.
+-/
+def compileRawCaptured (source : Fir.Validation.Lcnf.Artifact) :
+    CoreM (Except Fir.Wasm.Emit.Source.CompileError
     Fir.Wasm.Emit.Source.ModuleArtifact) := do
-  let source ← captureRaw
   Fir.Wasm.Emit.Source.compileClosedClosureModuleArtifact source
+
+/-- Link the reviewed raw resident frontier from an already lowered source
+artifact. `ModuleArtifact` is immutable; the returned artifact contains a new
+module and byte array while `artifact` remains the exact base image. -/
+def linkRawArtifact (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :
+    Except Fir.Wasm.Emit.Source.CompileError
+      Fir.Wasm.Emit.Source.ModuleArtifact :=
+  Fir.Wasm.Emit.ResidentLinker.linkArtifact
+    { Fir.Wasm.Emit.ResidentLinker.closedApplicationAvailablePolicy
+        artifact.module #[rawEntry] with
+      allowedExternalImports :=
+        some Fir.Wasm.Emit.ExternalRuntime.mathDeclarations
+      requireZeroImports := false }
+    artifact
 
 /-- Lower the complete dispatcher closure with its finite source-allocated
 closure targets before resident linking. -/
 def compileRawBase : CoreM (Except Fir.Wasm.Emit.Source.CompileError
     Fir.Wasm.Emit.Source.ModuleArtifact) := do
-  compileRawUnprepared
+  let source ← captureRaw
+  compileRawCaptured source
 
 /-- Resident frontier for production levels 1 through 10. Compiler lazy caches
 remain lazy; resident cache publication advances the rewind floor only when an
@@ -104,14 +125,7 @@ object cache is first populated. Exact Float conversion/logarithm externals
 remain for the separately linked standard math runtime. -/
 def compileRaw : CoreM (Except Fir.Wasm.Emit.Source.CompileError
     Fir.Wasm.Emit.Source.ModuleArtifact) := do
-  let result ← compileRawUnprepared
-  return result.bind <|
-    fun artifact => Fir.Wasm.Emit.ResidentLinker.linkArtifact
-      { Fir.Wasm.Emit.ResidentLinker.closedApplicationAvailablePolicy
-          artifact.module #[rawEntry] with
-        allowedExternalImports :=
-          some Fir.Wasm.Emit.ExternalRuntime.mathDeclarations
-        requireZeroImports := false }
-      artifact
+  let result ← compileRawBase
+  return result.bind linkRawArtifact
 
 end LeanZipFir.Compile

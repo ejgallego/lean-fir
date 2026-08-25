@@ -14,6 +14,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 
 import { LEAN_ZIP_BYTE_ARRAY_LAYOUT_VERSION } from
@@ -71,6 +72,16 @@ const outputNames = [
   "lean-zip-raw.wasm.json",
   "smoke.mjs",
 ];
+const packageStartedAt = performance.now();
+const packageArguments = process.argv.slice(2);
+assert(packageArguments.length <= 1 &&
+  packageArguments.every((argument) => argument === "--check-determinism"),
+"usage: node package-raw.mjs [--check-determinism]");
+const checkDeterminism = packageArguments[0] === "--check-determinism";
+
+function elapsedMs(start, end) {
+  return Math.round((end - start) * 1000) / 1000;
+}
 
 function run(command, args, options = {}) {
   return execFileSync(command, args, {
@@ -169,25 +180,33 @@ const lakeArguments = [
 ];
 run("lake", [...lakeArguments, "build", "LeanZipFir.Compile",
   "leanZipFirOracle"], { capture: false });
-run("lake", ["--keep-toolchain", "env", "lean", "ProbeRaw.lean"],
-  { capture: false });
+const configuredAt = performance.now();
+if (checkDeterminism) {
+  run("lake", ["--keep-toolchain", "env", "lean", "ProbeRaw.lean"],
+    { capture: false });
+}
+const probedAt = performance.now();
 const { frontierImports } = generateCompleteRaw();
-const firstWasm = readFileSync(wasmStem);
-const firstFrontierWasm = readFileSync(frontierStem);
-const firstDescriptor = readFileSync(`${wasmStem}.json`);
-const firstExternalLibm = readFileSync(externalLibmStem);
-const firstFunctionSidecar = readFileSync(functionSidecarStem);
-generateCompleteRaw();
-assert.deepEqual(readFileSync(wasmStem), firstWasm,
-  "repeated complete raw generation was not deterministic");
-assert.deepEqual(readFileSync(frontierStem), firstFrontierWasm,
-  "repeated raw frontier generation was not deterministic");
-assert.deepEqual(readFileSync(`${wasmStem}.json`), firstDescriptor,
-  "repeated raw descriptor generation was not deterministic");
-assert.deepEqual(readFileSync(externalLibmStem), firstExternalLibm,
-  "repeated standard libm runtime generation was not deterministic");
-assert.deepEqual(readFileSync(functionSidecarStem), firstFunctionSidecar,
-  "repeated final function-sidecar generation was not deterministic");
+const generatedAt = performance.now();
+if (checkDeterminism) {
+  const firstWasm = readFileSync(wasmStem);
+  const firstFrontierWasm = readFileSync(frontierStem);
+  const firstDescriptor = readFileSync(`${wasmStem}.json`);
+  const firstExternalLibm = readFileSync(externalLibmStem);
+  const firstFunctionSidecar = readFileSync(functionSidecarStem);
+  generateCompleteRaw();
+  assert.deepEqual(readFileSync(wasmStem), firstWasm,
+    "repeated complete raw generation was not deterministic");
+  assert.deepEqual(readFileSync(frontierStem), firstFrontierWasm,
+    "repeated raw frontier generation was not deterministic");
+  assert.deepEqual(readFileSync(`${wasmStem}.json`), firstDescriptor,
+    "repeated raw descriptor generation was not deterministic");
+  assert.deepEqual(readFileSync(externalLibmStem), firstExternalLibm,
+    "repeated standard libm runtime generation was not deterministic");
+  assert.deepEqual(readFileSync(functionSidecarStem), firstFunctionSidecar,
+    "repeated final function-sidecar generation was not deterministic");
+}
+const determinismCheckedAt = performance.now();
 run(process.execPath, [join(directory, "raw-smoke.mjs")], { capture: false });
 
 const wasm = readFileSync(wasmStem);
@@ -282,6 +301,7 @@ for (const [field, expected] of Object.entries(expectedClosure)) {
   assert.equal(actual, expected, `raw ${field} changed`);
 }
 assert.equal(inventory.runtimeOperations, 0);
+assert.deepEqual(inventory.unsupportedDeclarations, []);
 assert.equal(descriptor.entry, "Zip.Wasm.compressRaw");
 assert.deepEqual(descriptor.params, ["object", "uint8"]);
 assert.equal(descriptor.result, "object");
@@ -485,6 +505,7 @@ if (existsSync(destination)) {
   renameSync(staging, destination);
 }
 if (previewDirectory === null) publishCurrent(destination);
+const packagedAt = performance.now();
 console.log(JSON.stringify({
   ok: true,
   preview: previewDirectory !== null,
@@ -504,4 +525,15 @@ console.log(JSON.stringify({
   memoryImports: 0,
   sourceFunctions: inventory.sourceFunctions.length,
   residentHelpers: inventory.residentHelpers.length,
+  validationMode: checkDeterminism ? "determinism" : "ordinary",
+  buildTimings: {
+    prepareMs: elapsedMs(packageStartedAt, configuredAt),
+    probeMs: checkDeterminism ? elapsedMs(configuredAt, probedAt) : 0,
+    generateMs: elapsedMs(probedAt, generatedAt),
+    determinismMs: checkDeterminism
+      ? elapsedMs(generatedAt, determinismCheckedAt)
+      : 0,
+    verifyAndPublishMs: elapsedMs(determinismCheckedAt, packagedAt),
+    totalMs: elapsedMs(packageStartedAt, packagedAt),
+  },
 }));
