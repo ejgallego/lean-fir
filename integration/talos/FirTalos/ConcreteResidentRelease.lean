@@ -1510,6 +1510,134 @@ theorem ReleaseChildrenRun.wp
       rcases completed with ⟨rfl, rfl⟩
       exact ih continued
 
+/-- Exact target spelling of W7's closure-descriptor decision chain.  The
+ordinal parameter is the physical descriptor id assigned to the head of the
+remaining table.  A selected descriptor checks its capture count before
+releasing precisely the object-valued capture lanes; a missing descriptor or
+count mismatch traps. -/
+def closureDescriptorReleaseProgram (decrementIndex : Nat) :
+    List (Array Fir.Wasm.AbiKind) → Nat → Wasm.Program
+  | [], _ => [.unreachable]
+  | descriptor :: descriptors, ordinal => [
+      .localGet descriptorIndex,
+      .const (UInt32.ofNat ordinal),
+      .eq,
+      .iff 0 0 [
+        .localGet captureCountIndex,
+        .const (UInt32.ofNat descriptor.size),
+        .eq,
+        .iff 0 0
+          (releaseChildrenProgram decrementIndex
+              (closureOwnedCaptureIndices 0 descriptor.toList) ++ [.ret])
+          [.unreachable]]
+        (closureDescriptorReleaseProgram decrementIndex descriptors
+          (ordinal + 1))]
+
+/-- Selecting an in-range static closure descriptor executes exactly its
+filtered child-release chain.  This factors the common descriptor admission
+proof away from the heap simulation: the caller supplies only the immutable
+table lookup, the two physical header words, and the recursive child calls. -/
+theorem wp_closureDescriptorReleaseProgram_of_getElem?
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {initial final : Wasm.Store host}
+    {object check flags descriptorWord refCount kind marker count
+      captureCount : UInt32}
+    {decrementIndex ordinal position : Nat}
+    {descriptors : List (Array Fir.Wasm.AbiKind)}
+    {captureKinds : Array Fir.Wasm.AbiKind}
+    (found : descriptors[position]? = some captureKinds)
+    (descriptorFits : ordinal + descriptors.length < UInt32.size)
+    (descriptorEq :
+      descriptorWord = UInt32.ofNat (ordinal + position))
+    (captureCountEq :
+      captureCount = UInt32.ofNat captureKinds.size)
+    (runs : ReleaseChildrenRun env module decrementIndex object
+      (closureOwnedCaptureIndices 0 captureKinds.toList) initial final)
+    (returned : Q (.Return final [])) :
+    Wasm.wp module
+      (closureDescriptorReleaseProgram decrementIndex descriptors ordinal)
+      (TerminalPost Q) initial
+      (ownedEntry object check flags descriptorWord refCount kind marker count
+        captureCount) env := by
+  induction descriptors generalizing ordinal position initial with
+  | nil => simp at found
+  | cons head descriptors ih =>
+      cases position with
+      | zero =>
+          simp only [List.getElem?_cons_zero, Option.some.injEq] at found
+          subst head
+          have descriptorFound (values : List Wasm.Value) :
+              ({ ownedEntry object check flags descriptorWord refCount kind marker
+                  count captureCount with values } : Wasm.Locals).get
+                    descriptorIndex = some (.i32 descriptorWord) := by
+            rfl
+          have captureCountFound (values : List Wasm.Value) :
+              ({ ownedEntry object check flags descriptorWord refCount kind marker
+                  count captureCount with values } : Wasm.Locals).get
+                    captureCountIndex = some (.i32 captureCount) := by
+            rfl
+          have descriptorSelected :
+              descriptorWord = UInt32.ofNat ordinal := by
+            simpa using descriptorEq
+          unfold closureDescriptorReleaseProgram
+          simp only [Wasm.wp_localGet_cons, descriptorFound,
+            Wasm.wp_const_cons, Wasm.wp_eq_cons,
+            if_pos descriptorSelected]
+          apply Wasm.wp_iff_cons rfl
+          rw [if_pos (by decide : (1 : UInt32) ≠ 0)]
+          simp only [Wasm.wp_localGet_cons, captureCountFound,
+            Wasm.wp_const_cons, Wasm.wp_eq_cons,
+            if_pos captureCountEq]
+          apply Wasm.wp_iff_cons rfl
+          rw [if_pos (by decide : (1 : UInt32) ≠ 0)]
+          apply runs.wp
+          simp only [Wasm.wp_ret_cons]
+          exact returned
+      | succ position =>
+          have tailFound : descriptors[position]? = some captureKinds := by
+            simpa using found
+          have positionLt : position < descriptors.length := by
+            by_contra outOfBounds
+            have missing : descriptors[position]? = none := by
+              simp_all
+            rw [missing] at tailFound
+            contradiction
+          have ordinalFits : ordinal < UInt32.size := by
+            simp at descriptorFits
+            omega
+          have selectedFits :
+              ordinal + (position + 1) < UInt32.size := by
+            simp at descriptorFits
+            omega
+          have headNotSelected :
+              descriptorWord ≠ UInt32.ofNat ordinal := by
+            rw [descriptorEq]
+            intro equal
+            have equalNat := congrArg UInt32.toNat equal
+            rw [UInt32.toNat_ofNat_of_lt' selectedFits,
+              UInt32.toNat_ofNat_of_lt' ordinalFits] at equalNat
+            omega
+          have descriptorFound (values : List Wasm.Value) :
+              ({ ownedEntry object check flags descriptorWord refCount kind marker
+                  count captureCount with values } : Wasm.Locals).get
+                    descriptorIndex = some (.i32 descriptorWord) := by
+            rfl
+          unfold closureDescriptorReleaseProgram
+          simp only [Wasm.wp_localGet_cons, descriptorFound,
+            Wasm.wp_const_cons, Wasm.wp_eq_cons, if_neg headNotSelected]
+          apply Wasm.wp_iff_cons rfl
+          rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+          have tailWP := ih (ordinal := ordinal + 1) tailFound
+            (by simp at descriptorFits ⊢; omega)
+            (by
+              rw [show ordinal + 1 + position =
+                ordinal + (position + 1) by omega]
+              exact descriptorEq)
+            runs
+          apply Wasm.wp.conseq _ tailWP
+          intro continuation completed
+          cases continuation <;> simp_all [TerminalPost]
+
 /-- Execute the finite guarded child frontier from its store-indexed call
 chain, preserving the parent frame and composing with an arbitrary suffix. -/
 theorem GuardedReleaseChildrenRun.wp
@@ -4002,6 +4130,92 @@ theorem LiveHeapRel.decrementOnceProgram_closure_refines
       releaseRun ownedExecution
   exact ⟨result, finalStore, concreteOperation, finalRelated, finalMemory,
     finalCanonical, finalFrame, physicalExecution⟩
+
+/-- The count-one closure theorem specialized to the generated descriptor
+table.  Unlike the factoring theorem above, this statement has no opaque
+closure-body premise: a successful concrete descriptor lookup and the W7
+table-size admission gate determine the exact resident decision chain. -/
+theorem LiveHeapRel.decrementOnceProgram_closureDescriptor_refines
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime nextRuntime : Fir.LeanIR.Impure.RuntimeState}
+    {location : Fir.LeanIR.Impure.Location} {address : Word32}
+    {cell : Fir.LeanIR.Impure.HeapCell}
+    {function : Lean.Name} {arity : Nat}
+    {captureKinds : Array Fir.Wasm.AbiKind}
+    {captures : Array Fir.LeanIR.Impure.Value} {header : Header}
+    {fuel decrementIndex releaseHeaderIndex : Nat}
+    {constructorBody opaqueBody : Wasm.Program}
+    (related : LiveHeapRel state witness runtime)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (canonicalHeaders : CanonicalMappedHeadersRel state witness)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : Fir.LeanIR.Impure.findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (ordinary : cell.persistent = false) (one : cell.rc = 1)
+    (objectEq : cell.object = .closure function arity captures)
+    (objectRelated : ClosureObjectRel state witness witness.closureDispatch
+      witness.closureDescriptors address function arity captureKinds captures)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (headerKind : header.kind = .closure)
+    (descriptorLookup : witness.closureDescriptors.lookup? header.aux3 =
+      some captureKinds)
+    (descriptorTableFits :
+      witness.closureDescriptors.size < UInt32.size)
+    (fixedCount : header.aux2.toNat = captures.size)
+    (extent : closureCaptureAddress address.value captures.size ≤
+      state.heapCursor)
+    (refCount : header.refCount.toNat = cell.rc)
+    (persistent : header.persistent = cell.persistent)
+    (check : Bool) (checkWord : UInt32)
+    (semanticOperation :
+      Fir.LeanIR.Impure.decLocationFuel (fuel + 1) runtime location =
+        .ok nextRuntime)
+    (step : ResidentOwnershipStep env module decrementIndex fuel witness)
+    (releaseRun : Wasm.TerminatesWith env module releaseHeaderIndex store
+      [.i32 (UInt32.ofNat address.value)]
+      (fun final values =>
+        final = releaseHeaderStore store (UInt32.ofNat address.value) ∧
+          values = [])) :
+    ∃ result finalStore,
+      decrementReferenceOnceFuel (fuel + 1) state address check
+          witness.closureDescriptors = .ok result ∧
+      LiveHeapRel result witness nextRuntime ∧
+      ResidentMemoryRel result finalStore.mem ∧
+      CanonicalMappedHeadersRel result witness ∧
+      MappedPayloadFrameTransport state result witness ∧
+      Wasm.wp module
+        (decrementOnceProgram persistentReleaseProgram
+          (lastReferenceProgram releaseHeaderIndex
+            (ownedReleaseProgram constructorBody
+              (closureDescriptorReleaseProgram decrementIndex
+                witness.closureDescriptors.toList 0)
+              opaqueBody)))
+        (fun continuation => continuation = .Return finalStore []) store
+        (decrementEntry (UInt32.ofNat address.value) checkWord) env := by
+  apply FirTalos.Concrete.ResidentRelease.LiveHeapRel.decrementOnceProgram_closure_refines
+    related memoryRelated
+    canonicalHeaders mapped found live ordinary one objectEq objectRelated
+    headerRead headerKind descriptorLookup fixedCount extent refCount persistent
+    check checkWord semanticOperation step releaseRun
+  intro releasedStore finalStore childRuns
+  have foundList :
+      witness.closureDescriptors.toList[header.aux3.toNat]? =
+        some captureKinds := by
+    simpa [ClosureDescriptorTable.lookup?] using descriptorLookup
+  have captureKindsFits : captureKinds.size < UInt32.size := by
+    rw [objectRelated.captureKindsSize, ← fixedCount]
+    exact UInt32.toNat_lt_size header.aux2
+  apply wp_closureDescriptorReleaseProgram_of_getElem? foundList
+  · simpa using descriptorTableFits
+  · apply UInt32.toNat.inj
+    simp
+  · apply UInt32.toNat.inj
+    rw [fixedCount, UInt32.toNat_ofNat_of_lt' captureKindsFits,
+      objectRelated.captureKindsSize]
+  · exact childRuns
+  · rfl
 
 /-- Complete three-semantics refinement for a nonrecursive count-one object.
 The W6 concrete runtime and FIR semantics both replace the live cell by its
