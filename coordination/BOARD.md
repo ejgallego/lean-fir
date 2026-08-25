@@ -106,6 +106,20 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `ad76031185f4bbef644066bb944f214500f70a2bcc9bf191bf311504b978339d`;
   and raw lean-zip, 367,176 bytes, SHA-256
   `63426392249011cf27cf2fc56fcb1caeb6ffd7f84101da24d2f8fbfe7e0efd59`.
+- Independent coordination integration: immutable operational-mailbox
+  checkpoints are accepted at `ba9ba1cd` for thread
+  `W72-W7-20260825-004`. A checkpoint is selected only from one clean
+  `update`, `handoff`, or `completion` event that contains a complete 40- or
+  64-character head, concrete worktree, branch, and base. The validator never
+  synthesizes an integration target from fields inherited across messages;
+  abbreviated heads remain progress metadata. `make mailbox-list` and its JSON
+  form expose the exact checkpoint event and object. Integration verifies that
+  exact object against current `main`; the named producer branch may continue
+  separately under a successor thread. Non-fast-forward checkpoints are
+  rebased in dependency order, and cleanup remains separately authorized.
+  All 26 focused protocol tests and the live 59-thread/197-message mailbox
+  pass. No daemon, tag namespace, database, generated board state, or lock
+  service was added.
 - Accepted S20 ByteArray mutual-tail fidelity: functional head `a3029a5a` is
   linked through clean tracked handoff `bfeb41d1`, directly on W7 proof-surface
   base `5cb4ab0d`. A runner-supplied ByteArray and repeated aliases cross three
