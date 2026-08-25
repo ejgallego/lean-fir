@@ -4,6 +4,7 @@ import FirTalos.ConcreteResidentAllocator
 import FirTalos.ConcreteResidentMemory
 import FirTalos.Correctness.Adapter
 import FirTalos.Correctness.Function
+import Interpreter.Wasm.Wp.Loop
 import Interpreter.Wasm.Wp.Tactic
 
 namespace FirTalos.Concrete
@@ -958,6 +959,8 @@ inductive ReleaseChildrenRun
           (UInt32.ofNat
             (headerBytes + target.semanticSlotBytes * index)).toNat + 4 >
           initial.mem.pages * wasmPageBytes))
+      (memoryBound :
+        initial.mem.pages * wasmPageBytes ≤ UInt32.size)
       (read : initial.mem.read32
         (object + UInt32.ofNat
           (headerBytes + target.semanticSlotBytes * index)) = child)
@@ -1081,7 +1084,9 @@ theorem OwnershipValuesRel.releaseChildrenRun_refines
               · simp only [List.foldlM_cons, Bind.bind, Except.bind]
                 rw [concreteHead]
                 exact concreteTail
-              · exact .cons residentHead.1 residentHead.2 targetCall tailRun
+              · exact ReleaseChildrenRun.cons residentHead.1
+                  (by rw [← memoryRelated.size_eq]; exact memoryRelated.size_le)
+                  residentHead.2 targetCall tailRun
 
 /-- Per-index guard used by the fixed-width constructor release frontier. -/
 def guardedReleaseChildProgram
@@ -1159,7 +1164,7 @@ theorem ReleaseChildrenRun.toGuarded
       indices initial final := by
   induction runs with
   | nil store => exact .nil store
-  | @cons index indices initial middle final child inBounds read call tail ih =>
+  | @cons index indices initial middle final child inBounds _ read call tail ih =>
       apply GuardedReleaseChildrenRun.take (taken index (by simp))
         inBounds read call
       exact ih (by
@@ -1571,7 +1576,7 @@ theorem ReleaseChildrenRun.wp
   induction runs with
   | nil store =>
       simpa [releaseChildrenProgram] using continued
-  | @cons index indices initial middle final child inBounds read call tail ih =>
+  | @cons index indices initial middle final child inBounds _ read call tail ih =>
       have addressFound (values : List Wasm.Value) :
           ({ ownedEntry object check flags descriptor refCount kind marker count
               captureCount with values } : Wasm.Locals).get addressIndex =
@@ -1591,6 +1596,386 @@ theorem ReleaseChildrenRun.wp
       intro next values completed
       rcases completed with ⟨rfl, rfl⟩
       exact ih continued
+
+/-- Loop body used by W7 to release the live prefix of a resident generic
+Array.  The cursor advances in semantic-slot units while the logical index is
+used only for the unsigned termination test. -/
+def arrayReleaseLoopBody (decrementIndex : Nat) : Wasm.Program := [
+  .localGet arrayIndex,
+  .localGet countIndex,
+  .ltU,
+  .iff 0 0 [
+    .localGet arrayCursorIndex,
+    .load32 0,
+    .const 1,
+    .call decrementIndex,
+    .localGet arrayCursorIndex,
+    .const (UInt32.ofNat target.semanticSlotBytes),
+    .add,
+    .localSet arrayCursorIndex,
+    .localGet arrayIndex,
+    .const 1,
+    .add,
+    .localSet arrayIndex,
+    .br 1] []]
+
+/-- Exact target spelling of W7's resident generic-Array release loop. -/
+def arrayReleaseProgram (decrementIndex : Nat) : Wasm.Program := [
+  .localGet addressIndex,
+  .const (UInt32.ofNat headerBytes),
+  .add,
+  .localSet arrayCursorIndex,
+  .const 0,
+  .localSet arrayIndex,
+  .loop 0 0 (arrayReleaseLoopBody decrementIndex),
+  .ret]
+
+/-- Exact marker dispatcher for ordinary opaque objects versus resident
+generic Arrays. -/
+def opaqueReleaseProgram (decrementIndex : Nat) : Wasm.Program := [
+  .localGet markerIndex,
+  .const residentArrayMarker,
+  .eq,
+  .iff 0 0 (arrayReleaseProgram decrementIndex) [.ret]]
+
+/-- Owned-dispatch frame with the two resident Array loop locals populated. -/
+def arrayReleaseLocals
+    (object check flags descriptor refCount kind marker count captureCount
+      cursor index : UInt32) : Wasm.Locals := {
+  params := [.i32 object, .i32 check]
+  locals := [
+    .i32 object,
+    .i32 kind,
+    .i32 count,
+    .i32 captureCount,
+    .i32 descriptor,
+    .i32 refCount,
+    .i32 flags,
+    .i32 marker,
+    .i32 cursor,
+    .i32 index]
+  values := [] }
+
+/-- Physical cursor of logical Array slot `index`.  Keeping this address
+formula shared by the loop invariant and `ReleaseChildrenRun` makes the lazy
+payload read line up definitionally with the recursive ownership relation. -/
+def arrayReleaseCursor (object : UInt32) (index : Nat) : UInt32 :=
+  object + UInt32.ofNat
+    (headerBytes + target.semanticSlotBytes * index)
+
+@[simp] theorem arrayReleaseCursor_zero (object : UInt32) :
+    arrayReleaseCursor object 0 = object + UInt32.ofNat headerBytes := by
+  simp [arrayReleaseCursor]
+
+theorem arrayReleaseCursor_succ (object : UInt32) (index : Nat) :
+    arrayReleaseCursor object index +
+        UInt32.ofNat target.semanticSlotBytes =
+      arrayReleaseCursor object (index + 1) := by
+  simp [arrayReleaseCursor, Nat.mul_succ, UInt32.ofNat_add,
+    UInt32.add_assoc]
+
+/-- The Array loop falls through exactly when its logical index has reached
+the cached live count. -/
+theorem wp_arrayReleaseLoopBody_exit
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {object check flags descriptor refCount kind marker count captureCount
+      cursor index : UInt32} {decrementIndex : Nat}
+    (notTaken : ¬(index < count))
+    (continued : Q (.Fallthrough store
+      (arrayReleaseLocals object check flags descriptor refCount kind marker
+        count captureCount cursor index))) :
+    Wasm.wp module (arrayReleaseLoopBody decrementIndex) Q store
+      (arrayReleaseLocals object check flags descriptor refCount kind marker
+        count captureCount cursor index) env := by
+  have indexFound (values : List Wasm.Value) :
+      ({ arrayReleaseLocals object check flags descriptor refCount kind marker
+          count captureCount cursor index with values } : Wasm.Locals).get
+            arrayIndex = some (.i32 index) := by rfl
+  have countFound (values : List Wasm.Value) :
+      ({ arrayReleaseLocals object check flags descriptor refCount kind marker
+          count captureCount cursor index with values } : Wasm.Locals).get
+            countIndex = some (.i32 count) := by rfl
+  unfold arrayReleaseLoopBody
+  simp only [Wasm.wp_localGet_cons, indexFound, countFound,
+    Wasm.wp_ltU_cons, if_neg notTaken]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simpa only [Wasm.wp_nil, List.take_zero, List.drop_zero,
+    List.nil_append] using continued
+
+/-- One live Array iteration performs the exact lazy load and recursive child
+call, advances both cursor and index, and takes the loop back-edge. -/
+theorem wp_arrayReleaseLoopBody_continue
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {initial middle : Wasm.Store host}
+    {object check flags descriptor refCount kind marker count captureCount
+      cursor index child : UInt32} {decrementIndex : Nat}
+    (taken : index < count)
+    (inBounds :
+      ¬(cursor.toNat + 4 > initial.mem.pages * wasmPageBytes))
+    (read : initial.mem.read32 cursor = child)
+    (call : Wasm.TerminatesWith env module decrementIndex initial
+      [.i32 1, .i32 child]
+      (fun next values => next = middle ∧ values = []))
+    (continued : Q (.Break 0 middle
+      (arrayReleaseLocals object check flags descriptor refCount kind marker
+        count captureCount
+        (cursor + UInt32.ofNat target.semanticSlotBytes) (index + 1)))) :
+    Wasm.wp module (arrayReleaseLoopBody decrementIndex) Q initial
+      (arrayReleaseLocals object check flags descriptor refCount kind marker
+        count captureCount cursor index) env := by
+  have indexFound (values : List Wasm.Value) :
+      ({ arrayReleaseLocals object check flags descriptor refCount kind marker
+          count captureCount cursor index with values } : Wasm.Locals).get
+            arrayIndex = some (.i32 index) := by rfl
+  have countFound (values : List Wasm.Value) :
+      ({ arrayReleaseLocals object check flags descriptor refCount kind marker
+          count captureCount cursor index with values } : Wasm.Locals).get
+            countIndex = some (.i32 count) := by rfl
+  have cursorFound (values : List Wasm.Value) :
+      ({ arrayReleaseLocals object check flags descriptor refCount kind marker
+          count captureCount cursor index with values } : Wasm.Locals).get
+            arrayCursorIndex = some (.i32 cursor) := by rfl
+  have cursorSet (values : List Wasm.Value) :
+      ({ arrayReleaseLocals object check flags descriptor refCount kind marker
+          count captureCount cursor index with
+          values := .i32 (cursor + UInt32.ofNat target.semanticSlotBytes) ::
+            values } : Wasm.Locals).set? arrayCursorIndex
+              (.i32 (cursor + UInt32.ofNat target.semanticSlotBytes)) =
+        some { arrayReleaseLocals object check flags descriptor refCount kind
+          marker count captureCount
+            (cursor + UInt32.ofNat target.semanticSlotBytes) index with
+          values := .i32 (cursor + UInt32.ofNat target.semanticSlotBytes) ::
+            values } := by rfl
+  have nextCursorIndexFound (values : List Wasm.Value) :
+      ({ arrayReleaseLocals object check flags descriptor refCount kind marker
+          count captureCount
+            (cursor + UInt32.ofNat target.semanticSlotBytes) index with
+          values } : Wasm.Locals).get arrayIndex = some (.i32 index) := by rfl
+  have indexSet (values : List Wasm.Value) :
+      ({ arrayReleaseLocals object check flags descriptor refCount kind marker
+          count captureCount
+            (cursor + UInt32.ofNat target.semanticSlotBytes) index with
+          values := .i32 (index + 1) :: values } : Wasm.Locals).set?
+            arrayIndex (.i32 (index + 1)) =
+        some { arrayReleaseLocals object check flags descriptor refCount kind
+          marker count captureCount
+            (cursor + UInt32.ofNat target.semanticSlotBytes) (index + 1) with
+          values := .i32 (index + 1) :: values } := by rfl
+  have cursorAdd :
+      UInt32.ofNat target.semanticSlotBytes + cursor =
+        cursor + UInt32.ofNat target.semanticSlotBytes :=
+    UInt32.add_comm _ _
+  have indexAdd : (1 : UInt32) + index = index + 1 :=
+    UInt32.add_comm _ _
+  unfold arrayReleaseLoopBody
+  simp only [Wasm.wp_localGet_cons, indexFound, countFound,
+    Wasm.wp_ltU_cons, if_pos taken]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_pos (by decide : (1 : UInt32) ≠ 0)]
+  simp only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_localGet_cons, cursorFound, Wasm.wp_load32_cons]
+  rw [if_neg (by simpa [wasmPageBytes] using inBounds)]
+  rw [show cursor + 0 = cursor by simp, read]
+  simp only [Wasm.wp_const_cons]
+  apply Wasm.wp_call_tw call
+  intro next values completed
+  rcases completed with ⟨rfl, rfl⟩
+  simp only [Wasm.wp_localGet_cons, cursorFound, Wasm.wp_const_cons,
+    Wasm.wp_add_cons, cursorAdd, Wasm.wp_localSet_cons, cursorSet,
+    nextCursorIndexFound, indexAdd, indexSet, Wasm.wp_br_cons]
+  simpa [arrayReleaseLocals, UInt32.add_comm] using continued
+
+/-- Semantic loop invariant for resident Array release.  `index` records the
+already released prefix and `remaining` owns exactly the still-live suffix;
+the final store is fixed by the fuel-free recursive child-call relation. -/
+def arrayReleaseLoopInvariant
+    {host : Type} (env : Wasm.HostEnv host) (module : Wasm.Module)
+    (decrementIndex : Nat) (object check flags descriptor refCount kind marker
+      captureCount : UInt32) (logicalSize : Nat) (final : Wasm.Store host) :
+    Wasm.AssertionF host :=
+  fun current locals =>
+    ∃ index remaining,
+      index + remaining = logicalSize ∧
+      locals = arrayReleaseLocals object check flags descriptor refCount kind
+        marker (UInt32.ofNat logicalSize) captureCount
+        (arrayReleaseCursor object index) (UInt32.ofNat index) ∧
+      ReleaseChildrenRun env module decrementIndex object
+        (List.range' index remaining) current final
+
+/-- Natural variant read from the Array loop's logical-index local. -/
+def arrayReleaseLoopMeasure (logicalSize : Nat) :
+    Wasm.Store host → Wasm.Locals → Nat :=
+  fun _ locals =>
+    match locals.get arrayIndex with
+    | some (.i32 index) => logicalSize - index.toNat
+    | _ => 0
+
+/-- The installed Array loop executes exactly a `ReleaseChildrenRun` over its
+logical live prefix.  Termination follows from the decreasing
+`logicalSize - index` variant; spare capacity is absent from the invariant. -/
+theorem wp_arrayReleaseLoop_of_run
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {initial final : Wasm.Store host}
+    {object check flags descriptor refCount kind marker captureCount : UInt32}
+    {logicalSize decrementIndex : Nat} {rest : Wasm.Program}
+    (logicalSizeFits : logicalSize < UInt32.size)
+    (runs : ReleaseChildrenRun env module decrementIndex object
+      (List.range logicalSize) initial final)
+    (continued : Wasm.wp module rest Q final
+      (arrayReleaseLocals object check flags descriptor refCount kind marker
+        (UInt32.ofNat logicalSize) captureCount
+        (arrayReleaseCursor object logicalSize) (UInt32.ofNat logicalSize)) env) :
+    Wasm.wp module
+      (.loop 0 0 (arrayReleaseLoopBody decrementIndex) :: rest) Q initial
+      (arrayReleaseLocals object check flags descriptor refCount kind marker
+        (UInt32.ofNat logicalSize) captureCount
+        (arrayReleaseCursor object 0) 0) env := by
+  apply Wasm.wp_loop_cons
+    (Inv := arrayReleaseLoopInvariant env module decrementIndex object check
+      flags descriptor refCount kind marker captureCount logicalSize final)
+    (μ := arrayReleaseLoopMeasure logicalSize)
+  · refine ⟨0, logicalSize, by omega, rfl, ?_⟩
+    simpa [List.range_eq_range'] using runs
+  · rintro current locals ⟨index, remaining, total, rfl, remainingRun⟩
+    cases remaining with
+    | zero =>
+        have indexEq : index = logicalSize := by omega
+        subst index
+        have emptyRun :
+            ReleaseChildrenRun env module decrementIndex object [] current
+              final := by
+          simpa using remainingRun
+        cases emptyRun with
+        | nil _ =>
+            apply wp_arrayReleaseLoopBody_exit
+            · exact Nat.lt_irrefl _
+            · simpa [arrayReleaseLocals] using continued
+    | succ remaining =>
+        have indexLt : index < logicalSize := by omega
+        have indexFits : index < UInt32.size :=
+          indexLt.trans logicalSizeFits
+        have nextFits : index + 1 < UInt32.size := by omega
+        have taken :
+            UInt32.ofNat index < UInt32.ofNat logicalSize := by
+          rw [UInt32.lt_iff_toNat_lt,
+            UInt32.toNat_ofNat_of_lt' indexFits,
+            UInt32.toNat_ofNat_of_lt' logicalSizeFits]
+          exact indexLt
+        rw [List.range'_succ] at remainingRun
+        cases remainingRun with
+        | @cons _ _ _ middle _ child inBounds memoryBound read call tail =>
+            have indexWordNext :
+                UInt32.ofNat index + 1 = UInt32.ofNat (index + 1) := by
+              change UInt32.ofNat index + UInt32.ofNat 1 = _
+              rw [← UInt32.ofNat_add]
+            have cursorNoWrap :
+                object.toNat +
+                    (UInt32.ofNat
+                      (headerBytes + target.semanticSlotBytes * index)).toNat <
+                  UInt32.size := by
+              omega
+            have cursorInBounds :
+                ¬((arrayReleaseCursor object index).toNat + 4 >
+                  current.mem.pages * wasmPageBytes) := by
+              rw [arrayReleaseCursor, UInt32.toNat_add,
+                Nat.mod_eq_of_lt cursorNoWrap]
+              exact inBounds
+            apply wp_arrayReleaseLoopBody_continue taken
+              cursorInBounds
+              (by simpa [arrayReleaseCursor] using read) call
+            refine ⟨?_, ?_⟩
+            · refine ⟨index + 1, remaining, by omega, ?_, tail⟩
+              rw [arrayReleaseCursor_succ, indexWordNext]
+              simp [arrayReleaseLocals]
+            · change
+                logicalSize - (UInt32.ofNat index + 1).toNat <
+                  logicalSize - (UInt32.ofNat index).toNat
+              rw [indexWordNext,
+                UInt32.toNat_ofNat_of_lt' nextFits,
+                UInt32.toNat_ofNat_of_lt' indexFits]
+              omega
+
+/-- Complete resident Array body: initialize the live-prefix cursor and
+logical index, execute the decreasing release loop, then return. -/
+theorem wp_arrayReleaseProgram_of_run
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {initial final : Wasm.Store host}
+    {object check flags descriptor refCount kind marker captureCount : UInt32}
+    {logicalSize decrementIndex : Nat}
+    (logicalSizeFits : logicalSize < UInt32.size)
+    (runs : ReleaseChildrenRun env module decrementIndex object
+      (List.range logicalSize) initial final)
+    (returned : Q (.Return final [])) :
+    Wasm.wp module (arrayReleaseProgram decrementIndex) Q initial
+      (ownedEntry object check flags descriptor refCount kind marker
+        (UInt32.ofNat logicalSize) captureCount) env := by
+  have addressFound (values : List Wasm.Value) :
+      ({ ownedEntry object check flags descriptor refCount kind marker
+          (UInt32.ofNat logicalSize) captureCount with values } :
+        Wasm.Locals).get addressIndex = some (.i32 object) := by rfl
+  have baseAdd :
+      UInt32.ofNat headerBytes + object = arrayReleaseCursor object 0 := by
+    rw [arrayReleaseCursor_zero, UInt32.add_comm]
+  have cursorSet (values : List Wasm.Value) :
+      ({ ownedEntry object check flags descriptor refCount kind marker
+          (UInt32.ofNat logicalSize) captureCount with
+          values := .i32 (arrayReleaseCursor object 0) :: values } :
+        Wasm.Locals).set? arrayCursorIndex
+          (.i32 (arrayReleaseCursor object 0)) =
+        some { arrayReleaseLocals object check flags descriptor refCount kind
+          marker (UInt32.ofNat logicalSize) captureCount
+            (arrayReleaseCursor object 0) 0 with
+          values := .i32 (arrayReleaseCursor object 0) :: values } := by rfl
+  have indexSet (values : List Wasm.Value) :
+      ({ arrayReleaseLocals object check flags descriptor refCount kind marker
+          (UInt32.ofNat logicalSize) captureCount
+            (arrayReleaseCursor object 0) 0 with
+          values := .i32 0 :: values } : Wasm.Locals).set? arrayIndex (.i32 0) =
+        some { arrayReleaseLocals object check flags descriptor refCount kind
+          marker (UInt32.ofNat logicalSize) captureCount
+            (arrayReleaseCursor object 0) 0 with
+          values := .i32 0 :: values } := by rfl
+  unfold arrayReleaseProgram
+  simp only [Wasm.wp_localGet_cons, addressFound, Wasm.wp_const_cons,
+    Wasm.wp_add_cons, baseAdd, Wasm.wp_localSet_cons, cursorSet, indexSet]
+  apply wp_arrayReleaseLoop_of_run logicalSizeFits runs
+  simpa only [Wasm.wp_ret_cons, arrayReleaseLocals] using returned
+
+/-- Exact opaque-object dispatcher theorem for a resident generic Array. -/
+theorem wp_opaqueReleaseProgram_array
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {initial final : Wasm.Store host}
+    {object check flags descriptor refCount kind captureCount : UInt32}
+    {logicalSize decrementIndex : Nat}
+    (logicalSizeFits : logicalSize < UInt32.size)
+    (runs : ReleaseChildrenRun env module decrementIndex object
+      (List.range logicalSize) initial final)
+    (returned : Q (.Return final [])) :
+    Wasm.wp module (opaqueReleaseProgram decrementIndex) Q initial
+      (ownedEntry object check flags descriptor refCount kind
+        residentArrayMarker (UInt32.ofNat logicalSize) captureCount) env := by
+  have markerFound (values : List Wasm.Value) :
+      ({ ownedEntry object check flags descriptor refCount kind
+          residentArrayMarker (UInt32.ofNat logicalSize) captureCount with
+          values } : Wasm.Locals).get markerIndex =
+        some (.i32 residentArrayMarker) := by rfl
+  unfold opaqueReleaseProgram
+  simp only [Wasm.wp_localGet_cons, markerFound, Wasm.wp_const_cons,
+    Wasm.wp_eq_cons]
+  apply Wasm.wp_iff_cons rfl
+  simp only [if_true]
+  rw [if_pos (by decide : (1 : UInt32) ≠ 0)]
+  apply Wasm.wp.conseq _
+    (wp_arrayReleaseProgram_of_run
+      (Q := TerminalPost (fun continuation =>
+        continuation = .Return final []))
+      (check := check) (flags := flags) (descriptor := descriptor)
+      (refCount := refCount) (kind := kind) (marker := residentArrayMarker)
+      (captureCount := captureCount) logicalSizeFits runs (by rfl))
+  intro continuation terminal
+  cases continuation <;> simp_all [TerminalPost]
 
 /-- Exact target spelling of W7's closure-descriptor decision chain.  The
 ordinal parameter is the physical descriptor id assigned to the head of the
@@ -4538,6 +4923,73 @@ theorem LiveHeapRel.decrementOnceProgram_array_refines
       releaseRun ownedExecution
   exact ⟨result, finalStore, concreteOperation, finalRelated, finalMemory,
     finalCanonical, finalFrame, physicalExecution⟩
+
+/-- Exact resident-Array specialization.  The generic opaque-body premise is
+discharged by the verified decreasing Array loop, leaving no caller-supplied
+execution certificate for this object family. -/
+theorem LiveHeapRel.decrementOnceProgram_array_exact_refines
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime nextRuntime : Fir.LeanIR.Impure.RuntimeState}
+    {location : Fir.LeanIR.Impure.Location} {address : Word32}
+    {cell : Fir.LeanIR.Impure.HeapCell}
+    {elements : Array Fir.LeanIR.Impure.Value} {capacity : Nat}
+    {header : Header}
+    {fuel decrementIndex releaseHeaderIndex : Nat}
+    {constructorBody closureBody : Wasm.Program}
+    (related : LiveHeapRel state witness runtime)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (canonicalHeaders : CanonicalMappedHeadersRel state witness)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : Fir.LeanIR.Impure.findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (ordinary : cell.persistent = false) (one : cell.rc = 1)
+    (descriptor : witness.descriptors.lookup? address = some (.array capacity))
+    (objectEq : cell.object = .array elements capacity)
+    (objectRelated :
+      ResidentArrayObjectRel state witness address elements capacity header)
+    (refCount : header.refCount.toNat = cell.rc)
+    (persistent : header.persistent = cell.persistent)
+    (check : Bool) (checkWord : UInt32)
+    (semanticOperation :
+      Fir.LeanIR.Impure.decLocationFuel (fuel + 1) runtime location =
+        .ok nextRuntime)
+    (step : ResidentOwnershipStep env module decrementIndex fuel witness)
+    (releaseRun : Wasm.TerminatesWith env module releaseHeaderIndex store
+      [.i32 (UInt32.ofNat address.value)]
+      (fun final values =>
+        final = releaseHeaderStore store (UInt32.ofNat address.value) ∧
+          values = [])) :
+    ∃ result finalStore,
+      decrementReferenceOnceFuel (fuel + 1) state address check
+          witness.closureDescriptors = .ok result ∧
+      LiveHeapRel result witness nextRuntime ∧
+      ResidentMemoryRel result finalStore.mem ∧
+      CanonicalMappedHeadersRel result witness ∧
+      MappedPayloadFrameTransport state result witness ∧
+      Wasm.wp module
+        (decrementOnceProgram persistentReleaseProgram
+          (lastReferenceProgram releaseHeaderIndex
+            (ownedReleaseProgram constructorBody closureBody
+              (opaqueReleaseProgram decrementIndex))))
+        (fun continuation => continuation = .Return finalStore []) store
+        (decrementEntry (UInt32.ofNat address.value) checkWord) env := by
+  apply FirTalos.Concrete.ResidentRelease.LiveHeapRel.decrementOnceProgram_array_refines
+    related memoryRelated
+    canonicalHeaders mapped found live ordinary one descriptor objectEq
+    objectRelated refCount persistent check checkWord semanticOperation step
+    releaseRun
+  intro releasedStore finalStore childRuns
+  have logicalSizeFits : elements.size < UInt32.size := by
+    rw [← objectRelated.logicalSize]
+    exact UInt32.toNat_lt_size header.aux1
+  have countEq : header.aux1 = UInt32.ofNat elements.size := by
+    apply UInt32.toNat.inj
+    rw [objectRelated.logicalSize,
+      UInt32.toNat_ofNat_of_lt' logicalSizeFits]
+  rw [objectRelated.marker, countEq]
+  exact wp_opaqueReleaseProgram_array logicalSizeFits childRuns (by rfl)
 
 /-- Complete three-semantics refinement for a nonrecursive count-one object.
 The W6 concrete runtime and FIR semantics both replace the live cell by its
