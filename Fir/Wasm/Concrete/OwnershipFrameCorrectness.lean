@@ -575,6 +575,27 @@ theorem MemoryState.AllocationFrame.readUInt32
   rw [show address.value + offset + 3 = address.value + (offset + 3) by omega]
   rw [frame.readByte (offset + 3) (by omega)]
 
+/-- Framing a complete allocation preserves the exact raw common-header
+words, including flag bits intentionally forgotten by `Header.read`. -/
+theorem Header.ExactWords.allocationFrame
+    {before after : MemoryState} {address : Word32} {bytes : Nat}
+    {header : Header}
+    (exact : Header.ExactWords before.memory address header)
+    (frame : before.AllocationFrame after address bytes)
+    (minimum : headerBytes ≤ bytes) :
+    Header.ExactWords after.memory address header := by
+  refine ⟨?_⟩
+  intro index word wordAt
+  have indexLt := (List.getElem?_eq_some_iff.mp wordAt).1
+  have owned : 4 * index + 4 ≤ bytes := by
+    have withinHeader : 4 * index + 4 ≤ headerBytes := by
+      simp [Header.words] at indexLt
+      simp [headerBytes]
+      omega
+    omega
+  rw [frame.readUInt32 owned]
+  exact exact.wordAt index word wordAt
+
 theorem MemoryState.AllocationFrame.readWord32
     {before after : MemoryState} {address : Word32} {bytes offset : Nat}
     (frame : before.AllocationFrame after address bytes)

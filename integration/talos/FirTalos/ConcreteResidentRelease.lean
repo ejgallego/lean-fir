@@ -154,6 +154,66 @@ def CanonicalLiveHeaderRel (state : MemoryState) (address : Word32) : Prop :=
   ∀ header, state.readLiveHeader address = .ok header →
     Header.ExactWords state.memory address header
 
+/-- Global raw-header admission for every semantic location tracked by the
+refinement witness.  Dead locations satisfy the live-header clause
+vacuously; if a later transition observes a mapped address as live, all eight
+physical header words must be canonical. -/
+def CanonicalMappedHeadersRel
+    (state : MemoryState) (witness : RefinementWitness) : Prop :=
+  ∀ {location address},
+    witness.locations.lookup? location = some address →
+    CanonicalLiveHeaderRel state address
+
+/-- A full-header ownership write preserves global raw-header admission.  The
+target obtains exact words from the write itself; descriptor disjointness
+frames every other mapped allocation. -/
+theorem CanonicalMappedHeadersRel.ofHeaderWrite
+    {before after : MemoryState} {witness : RefinementWitness}
+    {runtime : Fir.LeanIR.Impure.RuntimeState}
+    {targetAddress : Word32} {targetDescriptor : AllocationDescriptor}
+    {oldHeader updatedHeader : Header} {memory : LinearMemory}
+    (canonical : CanonicalMappedHeadersRel before witness)
+    (related : LiveHeapRel before witness runtime)
+    (targetFound :
+      witness.descriptors.lookup? targetAddress = some targetDescriptor)
+    (oldRead : Header.read before.memory targetAddress = .ok oldHeader)
+    (resultEq : after = { before with memory })
+    (headerInBounds :
+      targetAddress.value + headerBytes ≤ before.memory.size)
+    (written : updatedHeader.write before.memory targetAddress = .ok memory) :
+    CanonicalMappedHeadersRel after witness := by
+  intro location address mapped header headerRead
+  obtain ⟨cell, _, cellRelated⟩ :=
+    related.concreteToSemantic location address mapped
+  obtain ⟨descriptor, descriptorFound⟩ := cellRelated.descriptor
+  by_cases different : targetAddress.value ≠ address.value
+  · obtain ⟨otherHeader, otherRead, minimum, _, _⟩ :=
+      related.descriptorRegion address descriptor descriptorFound
+    have frame := related.allocationFrame_of_headerWrite_other targetFound
+      descriptorFound different oldRead otherRead resultEq headerInBounds written
+    have beforeRead : before.readLiveHeader address = .ok header := by
+      rw [frame.readLiveHeader minimum] at headerRead
+      exact headerRead
+    exact (canonical mapped header beforeRead).allocationFrame frame minimum
+  · have sameValue : targetAddress.value = address.value := by omega
+    have sameAddress : targetAddress = address := by
+      cases targetAddress
+      cases address
+      simp_all
+    subst address
+    obtain ⟨_, decodedRead, _, _, _, _⟩ :=
+      MemoryState.PrefixExtension.readLiveHeader_facts after targetAddress header
+        headerRead
+    have updatedRead : Header.read after.memory targetAddress = .ok updatedHeader := by
+      rw [resultEq]
+      exact Header.read_of_write_eq_ok before.memory memory targetAddress
+        updatedHeader headerInBounds written
+    have headerEq : header = updatedHeader :=
+      Except.ok.inj (decodedRead.symm.trans updatedRead)
+    subst header
+    rw [resultEq]
+    exact Header.ExactWords.ofWrite_eq_ok headerInBounds written
+
 /-- Branch-independent physical facts for entering resident release on one
 canonical live heap header.  Packaging these once keeps the semantic branch
 proofs focused on ownership behavior rather than bit-level address gates. -/
@@ -2710,7 +2770,7 @@ theorem LiveHeapRel.decrementOnceProgram_aboveOne_refines
     {persistentProgram lastReference : Wasm.Program}
     (related : LiveHeapRel state witness runtime)
     (memoryRelated : ResidentMemoryRel state store.mem)
-    (exactHeader : CanonicalLiveHeaderRel state address)
+    (canonicalHeaders : CanonicalMappedHeadersRel state witness)
     (mapped : witness.locations.lookup? location = some address)
     (found : Fir.LeanIR.Impure.findCell? runtime.heap location = some cell)
     (live : cell.live = true)
@@ -2726,7 +2786,7 @@ theorem LiveHeapRel.decrementOnceProgram_aboveOne_refines
       Fir.LeanIR.Impure.decValueOnce runtime (.object (.heap location)) check =
         .ok nextRuntime ∧
       LiveHeapRel result witness nextRuntime ∧
-      CanonicalLiveHeaderRel result address ∧
+      CanonicalMappedHeadersRel result witness ∧
       ResidentMemoryRel result finalStore.mem ∧
       Wasm.wp module
         (decrementOnceProgram persistentProgram lastReference)
@@ -2741,16 +2801,16 @@ theorem LiveHeapRel.decrementOnceProgram_aboveOne_refines
   have targetRelated := cellRelation.live_of_eq_true live
   obtain ⟨header, headerRead, _, notPromoted, persistent,
       refCount⟩ := targetRelated.ownershipHeader
-  have exact := exactHeader header headerRead
+  have exact := canonicalHeaders mapped header headerRead
   have headerOrdinary : header.persistent = false := persistent.trans ordinary
   have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
     Nat.le_trans targetRelated.headerOwned related.frontier.cursorInBounds
   let nextCount := UInt32.ofNat (cell.rc - 1)
   obtain ⟨result, updatedHeader, memory, writeOperation, updatedEq, resultEq,
-      headerWrite, _, headerAfter⟩ :=
+      headerWrite, _, _⟩ :=
     writeReferenceCount_header related.frontier headerRead
       targetRelated.headerOwned nextCount
-  obtain ⟨heap, _, headerLive, _, _, _⟩ :=
+  obtain ⟨heap, rawHeader, headerLive, _, _, _⟩ :=
     MemoryState.PrefixExtension.readLiveHeader_facts state address header
       headerRead
   have refCountNe : header.refCount ≠ 0 := by
@@ -2805,15 +2865,10 @@ theorem LiveHeapRel.decrementOnceProgram_aboveOne_refines
     simpa using
       FirTalos.Concrete.ResidentRelease.ResidentMemoryRel.writeHeaderRefCount
         memoryRelated exact headerInBounds headerWrite'
-  have exactAfter : Header.ExactWords memory address updatedHeader :=
-    Header.ExactWords.ofWrite_eq_ok headerInBounds headerWrite
-  have canonicalAfter : CanonicalLiveHeaderRel result address := by
-    intro candidate candidateRead
-    have candidateEq : candidate = updatedHeader :=
-      Except.ok.inj (candidateRead.symm.trans headerAfter)
-    subst candidate
-    rw [resultEq]
-    exact exactAfter
+  obtain ⟨descriptor, descriptorFound⟩ := targetRelated.descriptor
+  have canonicalAfter : CanonicalMappedHeadersRel result witness :=
+    canonicalHeaders.ofHeaderWrite related descriptorFound rawHeader resultEq
+      headerInBounds headerWrite
   have entry := LiveHeaderResidentFacts.ofRelations memoryRelated exact
     headerInBounds heap headerLive
   have physicalOrdinary : header.flags &&& persistentFlag ≠ persistentFlag := by
@@ -2855,7 +2910,7 @@ theorem LiveHeapRel.decrementOnceProgram_leaf_refines
     {constructorBody closureBody opaqueBody : Wasm.Program}
     (related : LiveHeapRel state witness runtime)
     (memoryRelated : ResidentMemoryRel state store.mem)
-    (exactHeader : CanonicalLiveHeaderRel state address)
+    (canonicalHeaders : CanonicalMappedHeadersRel state witness)
     (mapped : witness.locations.lookup? location = some address)
     (found : Fir.LeanIR.Impure.findCell? runtime.heap location = some cell)
     (live : cell.live = true)
@@ -2875,6 +2930,7 @@ theorem LiveHeapRel.decrementOnceProgram_leaf_refines
       Fir.LeanIR.Impure.decValueOnce runtime (.object (.heap location)) check =
         .ok nextRuntime ∧
       LiveHeapRel result witness nextRuntime ∧
+      CanonicalMappedHeadersRel result witness ∧
       DeadCellRel result address ∧
       ResidentMemoryRel result finalStore.mem ∧
       Wasm.wp module
@@ -2901,7 +2957,7 @@ theorem LiveHeapRel.decrementOnceProgram_leaf_refines
   have releasedEqResult : released = result :=
     Except.ok.inj (concreteRelease.symm.trans concreteOperation)
   subst result
-  have exact := exactHeader header headerRead
+  have exact := canonicalHeaders mapped header headerRead
   have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
     Nat.le_trans targetRelated.headerOwned related.frontier.cursorInBounds
   have finalMemory : ResidentMemoryRel released
@@ -2910,9 +2966,13 @@ theorem LiveHeapRel.decrementOnceProgram_leaf_refines
     simpa [releaseHeaderStore] using
       ResidentMemoryRel.releaseHeader memoryRelated exact headerInBounds
         headerWrite
-  obtain ⟨heap, _, headerLive, _, _, _⟩ :=
+  obtain ⟨descriptor, descriptorFound⟩ := targetRelated.descriptor
+  obtain ⟨heap, rawHeader, headerLive, _, _, _⟩ :=
     MemoryState.PrefixExtension.readLiveHeader_facts state address header
       headerRead
+  have canonicalAfter : CanonicalMappedHeadersRel released witness :=
+    canonicalHeaders.ofHeaderWrite related descriptorFound rawHeader releasedEq
+      headerInBounds headerWrite
   have entry := LiveHeaderResidentFacts.ofRelations memoryRelated exact
     headerInBounds heap headerLive
   obtain ⟨ownershipHeader, ownershipRead, _, _, headerPersistentRel,
@@ -2953,7 +3013,8 @@ theorem LiveHeapRel.decrementOnceProgram_leaf_refines
       releaseRun notConstructor notClosure notOpaque
     rfl
   exact ⟨header, released, nextRuntime, headerRead, concreteOperation,
-    semanticOperation, finalRelated, dead, finalMemory, physicalExecution⟩
+    semanticOperation, finalRelated, canonicalAfter, dead, finalMemory,
+    physicalExecution⟩
 
 /-- A represented live ordinary zero-count cell reaches the same ownership
 fault in the concrete host and FIR semantics, while resident Wasm traps before
@@ -2969,7 +3030,7 @@ theorem LiveHeapRel.decrementOnceProgram_underflow_refines
     {persistentProgram lastReference : Wasm.Program}
     (related : LiveHeapRel state witness runtime)
     (memoryRelated : ResidentMemoryRel state store.mem)
-    (exactHeader : CanonicalLiveHeaderRel state address)
+    (canonicalHeaders : CanonicalMappedHeadersRel state witness)
     (mapped : witness.locations.lookup? location = some address)
     (found : Fir.LeanIR.Impure.findCell? runtime.heap location = some cell)
     (live : cell.live = true)
@@ -2993,7 +3054,7 @@ theorem LiveHeapRel.decrementOnceProgram_underflow_refines
   have targetRelated := cellRelation.live_of_eq_true live
   obtain ⟨header, headerRead, _, _, headerPersistentRel,
       headerRefCountRel⟩ := targetRelated.ownershipHeader
-  have exact := exactHeader header headerRead
+  have exact := canonicalHeaders mapped header headerRead
   have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
     Nat.le_trans targetRelated.headerOwned related.frontier.cursorInBounds
   obtain ⟨heap, _, headerLive, _, _, _⟩ :=
@@ -3050,7 +3111,7 @@ theorem LiveHeapRel.decrementOnceProgram_persistent_refines
     {lastReference : Wasm.Program}
     (related : LiveHeapRel state witness runtime)
     (memoryRelated : ResidentMemoryRel state store.mem)
-    (exactHeader : CanonicalLiveHeaderRel state address)
+    (canonicalHeaders : CanonicalMappedHeadersRel state witness)
     (mapped : witness.locations.lookup? location = some address)
     (found : Fir.LeanIR.Impure.findCell? runtime.heap location = some cell)
     (live : cell.live = true)
@@ -3060,7 +3121,7 @@ theorem LiveHeapRel.decrementOnceProgram_persistent_refines
       Fir.LeanIR.Impure.decValueOnce runtime (.object (.heap location)) check =
         .ok runtime ∧
       LiveHeapRel state witness runtime ∧
-      CanonicalLiveHeaderRel state address ∧
+      CanonicalMappedHeadersRel state witness ∧
       ResidentMemoryRel state store.mem ∧
       Wasm.wp module
         (decrementOnceProgram persistentReleaseProgram lastReference)
@@ -3076,7 +3137,7 @@ theorem LiveHeapRel.decrementOnceProgram_persistent_refines
     targetRelated.ownershipHeader
   have headerPersistent : header.persistent = true :=
     headerPersistentRel.trans persistent
-  have exact := exactHeader header headerRead
+  have exact := canonicalHeaders mapped header headerRead
   have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
     Nat.le_trans targetRelated.headerOwned related.frontier.cursorInBounds
   obtain ⟨heap, _, headerLive, _, _, _⟩ :=
@@ -3132,7 +3193,7 @@ theorem LiveHeapRel.decrementOnceProgram_persistent_refines
       physicalPersistent entry.kindInBounds entry.kindRead entry.aux0InBounds
       entry.aux0Read physicalNotPromoted
     rfl
-  exact ⟨concreteOperation, semanticOperation, related, exactHeader,
+  exact ⟨concreteOperation, semanticOperation, related, canonicalHeaders,
     memoryRelated, physicalExecution⟩
 
 end ResidentRelease
