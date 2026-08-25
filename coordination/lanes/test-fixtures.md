@@ -6,9 +6,9 @@ owner: test-fixtures
 branch: validation/closure-ownership-fixtures
 worktree: .worktrees/validation-closure-ownership-fixtures
 state: ready
-base: 051a70e0ccf8289cb1262c1c39b4587b7279bd29 on main
-functional-head: 6c383b947816da40b5e16af6c7d64f639affd2f4
-contract-base: 051a70e0ccf8289cb1262c1c39b4587b7279bd29 on main; S19 and its direct-self-tail, retained-non-tail, and mutual-tail recursion-shape family are accepted. S20 consumes the linked native/LCNF/V8 validation surface and changes no shared protocol, interpreter, runtime, proof, generation, concrete-layout, or artifact contract
+base: 5cb4ab0d05234d79b68f901adcb1d0929092c71f on main
+functional-head: a3029a5a6d102b7d1ff83013b1b9fe040be8720d
+contract-base: 5cb4ab0d05234d79b68f901adcb1d0929092c71f on main; S19 and its direct-self-tail, retained-non-tail, and mutual-tail recursion-shape family are accepted, and W7's production release-header surface is proof-visible without changing generated Wasm. S20 consumes the linked native/LCNF/V8 validation surface and changes no shared protocol, interpreter, runtime, proof, generation, concrete-layout, or artifact contract
 clean-at-update: true
 slice: S20/B3-A2 carries a runner-supplied ByteArray and repeated aliases through three alternating noinline mutual tail calls, retains an independent outside alias, and makes ownership errors observable with post-call copy-on-write mutation; exact 118-step and 100-form traces are required
 files: Fir/Validation/Corpus.lean; validation-plans/coverage-index.json; validation-plans/semantic-fidelity-roadmap.md; coordination/lanes/test-fixtures.md
