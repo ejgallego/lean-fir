@@ -698,6 +698,121 @@ theorem wp_decrementOnceProgram_persistent
     kindInBounds kindRead markerInBounds markerRead notPromoted
   rfl
 
+/-- A tagged immediate reaches the public helper's checked no-op gate before
+any address arithmetic or memory access. -/
+theorem wp_decrementOnceProgram_tagged
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {object check : UInt32} {persistent lastReference : Wasm.Program}
+    (tagged : (1 : UInt32) &&& object ≠ 0)
+    (terminal :
+      if check ≠ 0 then Q (.Return store [])
+      else Q (.Trap store "unreachable")) :
+    Wasm.wp module (decrementOnceProgram persistent lastReference) Q store
+      (decrementEntry object check) env := by
+  have entryObject (values : List Wasm.Value) :
+      ({ decrementEntry object check with values } : Wasm.Locals).get
+        objectIndex = some (.i32 object) := by rfl
+  have entryCheck (values : List Wasm.Value) :
+      ({ decrementEntry object check with values } : Wasm.Locals).get
+        checkIndex = some (.i32 check) := by rfl
+  have entryValues : (decrementEntry object check).values = [] := by rfl
+  unfold decrementOnceProgram
+  simp only [Wasm.wp_localGet_cons, entryObject, Wasm.wp_const_cons,
+    Wasm.wp_and_cons]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_pos tagged]
+  unfold checkedNoopProgram
+  simp only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_localGet_cons, entryCheck]
+  by_cases checked : check ≠ 0
+  · apply Wasm.wp_iff_cons rfl
+    rw [if_pos checked]
+    simpa only [List.take_zero, List.drop_zero, List.nil_append,
+      Wasm.wp_ret_cons, entryValues, if_pos checked] using terminal
+  · apply Wasm.wp_iff_cons rfl
+    rw [if_neg checked]
+    simpa only [List.take_zero, List.drop_zero, List.nil_append,
+      Wasm.wp_unreachable_cons, if_neg checked] using terminal
+
+/-- The erased physical zero sentinel uses the same checked no-op gate, after
+the tagged test has rejected it.  It likewise performs no memory access. -/
+theorem wp_decrementOnceProgram_sentinel
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {check : UInt32} {persistent lastReference : Wasm.Program}
+    (terminal :
+      if check ≠ 0 then Q (.Return store [])
+      else Q (.Trap store "unreachable")) :
+    Wasm.wp module (decrementOnceProgram persistent lastReference) Q store
+      (decrementEntry 0 check) env := by
+  have entryObject (values : List Wasm.Value) :
+      ({ decrementEntry 0 check with values } : Wasm.Locals).get
+        objectIndex = some (.i32 0) := by rfl
+  have entryCheck (values : List Wasm.Value) :
+      ({ decrementEntry 0 check with values } : Wasm.Locals).get
+        checkIndex = some (.i32 check) := by rfl
+  have entryValues : (decrementEntry 0 check).values = [] := by rfl
+  unfold decrementOnceProgram
+  simp only [Wasm.wp_localGet_cons, entryObject, Wasm.wp_const_cons,
+    Wasm.wp_and_cons]
+  rw [show (1 : UInt32) &&& 0 = 0 by decide]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_localGet_cons, entryObject, Wasm.wp_const_cons, Wasm.wp_eq_cons,
+    if_true]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_pos (by decide : (1 : UInt32) ≠ 0)]
+  unfold checkedNoopProgram
+  simp only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_localGet_cons, entryCheck]
+  by_cases checked : check ≠ 0
+  · apply Wasm.wp_iff_cons rfl
+    rw [if_pos checked]
+    simpa only [List.take_zero, List.drop_zero, List.nil_append,
+      Wasm.wp_ret_cons, entryValues, if_pos checked] using terminal
+  · apply Wasm.wp_iff_cons rfl
+    rw [if_neg checked]
+    simpa only [List.take_zero, List.drop_zero, List.nil_append,
+      Wasm.wp_unreachable_cons, if_neg checked] using terminal
+
+/-- A nonzero untagged but misaligned word traps at admission, before W7 loads
+the flags lane. -/
+theorem wp_decrementOnceProgram_misaligned
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {object check : UInt32} {persistent lastReference : Wasm.Program}
+    (taggedClear : (1 : UInt32) &&& object = 0)
+    (objectNonzero : object ≠ 0)
+    (misaligned :
+      UInt32.ofNat (target.heapAlignment - 1) &&& object ≠ 0)
+    (trapped : Q (.Trap store "unreachable")) :
+    Wasm.wp module (decrementOnceProgram persistent lastReference) Q store
+      (decrementEntry object check) env := by
+  have entryObject (values : List Wasm.Value) :
+      ({ decrementEntry object check with values } : Wasm.Locals).get
+        objectIndex = some (.i32 object) := by rfl
+  unfold decrementOnceProgram
+  simp only [Wasm.wp_localGet_cons, entryObject, Wasm.wp_const_cons,
+    Wasm.wp_and_cons]
+  rw [taggedClear]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_localGet_cons, entryObject, Wasm.wp_const_cons, Wasm.wp_eq_cons]
+  rw [if_neg objectNonzero]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_localGet_cons, entryObject, Wasm.wp_const_cons, Wasm.wp_and_cons]
+  simp only [Wasm.wp_eq_cons]
+  rw [if_neg misaligned]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simpa only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_unreachable_cons] using trapped
+
 /-- The complete public `fir_dec_once` hot path reaches the same exact
 single-store result.  This includes the tagged/null/alignment gates, raw flags
 load, and liveness test that precede the live-arm theorem above. -/
