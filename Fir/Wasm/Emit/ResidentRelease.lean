@@ -64,7 +64,12 @@ private def equalsConst (kind : AbiKind) (value : UInt32) :
 private def checkedNoop : List Instruction :=
   [.localGet checkParam, .ifElse [.ret] [.unreachable]]
 
-private def releaseHeaderFunction : Function := {
+/--
+The production header-release helper installed by `internalizeReleases`.
+This definition is public so the concrete-runtime proof can unfold the exact
+generated callee rather than duplicate its body.
+-/
+def releaseHeaderFunction : Function := {
   name := releaseHeaderName
   params := #[(addressLocal, .uint32)]
   results := #[]
