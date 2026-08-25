@@ -127,6 +127,25 @@ def releaseHeaderEntry (object : UInt32) : Wasm.Locals := {
   locals := []
   values := [] }
 
+/-- Last-reference frame after loading all four lanes used by object-kind
+dispatch and recursive child release.  Zero arguments describe the successive
+intermediate frames before each lane is populated. -/
+def ownedEntry (object check flags descriptor refCount kind marker count
+    captureCount : UInt32) : Wasm.Locals := {
+  params := [.i32 object, .i32 check]
+  locals := [
+    .i32 object,
+    .i32 kind,
+    .i32 count,
+    .i32 captureCount,
+    .i32 descriptor,
+    .i32 refCount,
+    .i32 flags,
+    .i32 marker,
+    .i32 0,
+    .i32 0]
+  values := [] }
+
 /-- The exact common-header invariant required when resident Wasm preserves
 raw lanes that the decoded W6 host may otherwise canonicalize on rewrite.
 This is state, not compiler evidence: clients establish it once for an
@@ -245,6 +264,25 @@ def releaseHeaderMemory (memory : Wasm.Mem) (object : UInt32) : Wasm.Mem :=
 def releaseHeaderStore (store : Wasm.Store host) (object : UInt32) :
     Wasm.Store host :=
   { store with mem := releaseHeaderMemory store.mem object }
+
+/-- Exact common prefix of W7's last-reference branch.  Descriptor-dependent
+owned-field traversal remains the supplied suffix. -/
+def lastReferenceProgram (releaseHeaderIndex : Nat) (owned : Wasm.Program) :
+    Wasm.Program := [
+  .localGet addressIndex,
+  .load32 (UInt32.ofNat headerKindOffset),
+  .localSet kindIndex,
+  .localGet addressIndex,
+  .load32 (UInt32.ofNat headerAux0Offset),
+  .localSet markerIndex,
+  .localGet addressIndex,
+  .load32 (UInt32.ofNat headerAux1Offset),
+  .localSet countIndex,
+  .localGet addressIndex,
+  .load32 (UInt32.ofNat headerAux2Offset),
+  .localSet captureCountIndex,
+  .localGet addressIndex,
+  .call releaseHeaderIndex] ++ owned
 
 /-- Ordinary release control flow.  The count-zero and last-reference paths
 remain explicit but opaque: the hot theorem below proves they are not entered. -/
@@ -372,6 +410,119 @@ theorem wp_releaseHeaderProgram
   simp only [Wasm.wp_ret_cons]
   simpa [releaseHeaderStore, releaseHeaderMemory,
     ResidentMemoryRel.write32Store] using returned
+
+/-- Execute the common last-reference prefix through the release-header call.
+The callee contract names its exact successor store; object-kind-specific
+proofs continue from the fully populated owned-dispatch frame. -/
+theorem wp_lastReferenceProgram
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store releasedStore : Wasm.Store host}
+    {object check flags descriptor refCount kind marker count
+      captureCount : UInt32}
+    {releaseHeaderIndex : Nat} {owned : Wasm.Program}
+    (kindInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerKindOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (kindRead : store.mem.read32
+      (object + UInt32.ofNat headerKindOffset) = kind)
+    (markerInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux0Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (markerRead : store.mem.read32
+      (object + UInt32.ofNat headerAux0Offset) = marker)
+    (countInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux1Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (countRead : store.mem.read32
+      (object + UInt32.ofNat headerAux1Offset) = count)
+    (captureInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux2Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (captureRead : store.mem.read32
+      (object + UInt32.ofNat headerAux2Offset) = captureCount)
+    (releaseRun : Wasm.TerminatesWith env module releaseHeaderIndex store
+      [.i32 object]
+      (fun final values => final = releasedStore ∧ values = []))
+    (ownedBody : Wasm.wp module owned Q releasedStore
+      (ownedEntry object check flags descriptor refCount kind marker count
+        captureCount) env) :
+    Wasm.wp module (lastReferenceProgram releaseHeaderIndex owned) Q store
+      (countedLocals object check flags descriptor refCount) env := by
+  have countedAddress (values : List Wasm.Value) :
+      ({ countedLocals object check flags descriptor refCount with values } :
+        Wasm.Locals).get addressIndex = some (.i32 object) := by rfl
+  have kindSet (values : List Wasm.Value) :
+      ({ countedLocals object check flags descriptor refCount with
+          values := .i32 kind :: values } : Wasm.Locals).set?
+            kindIndex (.i32 kind) =
+        some { ownedEntry object check flags descriptor refCount kind 0 0 0 with
+          values := .i32 kind :: values } := by rfl
+  have kindAddress (values : List Wasm.Value) :
+      ({ ownedEntry object check flags descriptor refCount kind 0 0 0 with
+          values } : Wasm.Locals).get addressIndex = some (.i32 object) := by
+    rfl
+  have markerSet (values : List Wasm.Value) :
+      ({ ownedEntry object check flags descriptor refCount kind 0 0 0 with
+          values := .i32 marker :: values } : Wasm.Locals).set?
+            markerIndex (.i32 marker) =
+        some { ownedEntry object check flags descriptor refCount kind marker 0 0 with
+          values := .i32 marker :: values } := by rfl
+  have markerAddress (values : List Wasm.Value) :
+      ({ ownedEntry object check flags descriptor refCount kind marker 0 0 with
+          values } : Wasm.Locals).get addressIndex = some (.i32 object) := by
+    rfl
+  have countSet (values : List Wasm.Value) :
+      ({ ownedEntry object check flags descriptor refCount kind marker 0 0 with
+          values := .i32 count :: values } : Wasm.Locals).set?
+            countIndex (.i32 count) =
+        some { ownedEntry object check flags descriptor refCount kind marker count 0 with
+          values := .i32 count :: values } := by rfl
+  have countAddress (values : List Wasm.Value) :
+      ({ ownedEntry object check flags descriptor refCount kind marker count 0 with
+          values } : Wasm.Locals).get addressIndex = some (.i32 object) := by
+    rfl
+  have captureSet (values : List Wasm.Value) :
+      ({ ownedEntry object check flags descriptor refCount kind marker count 0 with
+          values := .i32 captureCount :: values } : Wasm.Locals).set?
+            captureCountIndex (.i32 captureCount) =
+        some { ownedEntry object check flags descriptor refCount kind marker count
+          captureCount with values := .i32 captureCount :: values } := by rfl
+  have captureAddress (values : List Wasm.Value) :
+      ({ ownedEntry object check flags descriptor refCount kind marker count
+          captureCount with values } : Wasm.Locals).get addressIndex =
+        some (.i32 object) := by rfl
+  have kindInBounds' :
+      ¬(object.toNat + (UInt32.ofNat headerKindOffset).toNat + 4 >
+        store.mem.pages * 65536) := by
+    simpa [wasmPageBytes] using kindInBounds
+  have markerInBounds' :
+      ¬(object.toNat + (UInt32.ofNat headerAux0Offset).toNat + 4 >
+        store.mem.pages * 65536) := by
+    simpa [wasmPageBytes] using markerInBounds
+  have countInBounds' :
+      ¬(object.toNat + (UInt32.ofNat headerAux1Offset).toNat + 4 >
+        store.mem.pages * 65536) := by
+    simpa [wasmPageBytes] using countInBounds
+  have captureInBounds' :
+      ¬(object.toNat + (UInt32.ofNat headerAux2Offset).toNat + 4 >
+        store.mem.pages * 65536) := by
+    simpa [wasmPageBytes] using captureInBounds
+  unfold lastReferenceProgram
+  simp only [List.cons_append, List.nil_append, Wasm.wp_localGet_cons,
+    countedAddress, Wasm.wp_load32_cons]
+  rw [if_neg kindInBounds', kindRead]
+  simp only [Wasm.wp_localSet_cons, kindSet,
+    Wasm.wp_localGet_cons, kindAddress, Wasm.wp_load32_cons]
+  rw [if_neg markerInBounds', markerRead]
+  simp only [markerSet, markerAddress]
+  rw [if_neg countInBounds', countRead]
+  simp only [countSet, countAddress]
+  rw [if_neg captureInBounds', captureRead]
+  simp only [captureSet, captureAddress]
+  apply Wasm.wp_call_tw releaseRun
+  intro final values completed
+  rcases completed with ⟨rfl, rfl⟩
+  exact ownedBody
 
 /-- Postcondition for branch proofs that deliberately terminate the current
 function.  It excludes fallthrough and structured breaks, while treating a
