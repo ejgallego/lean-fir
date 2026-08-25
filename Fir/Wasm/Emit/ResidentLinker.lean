@@ -301,6 +301,7 @@ private def rewriteProbeLabel (index : Nat) : FVarId :=
   ⟨Name.mkSimple s!"_fir_resident_link_rewrite_probe_{index}"⟩
 
 private def callSiteRewritesForStep : Step → Array ResidentCallSite.Rewrite
+  | .getTag => ResidentRuntime.callSiteRewrites
   | .bigNumeric => ResidentBigNumeric.callSiteRewrites
   | .natArithmeticAvailable => ResidentNatArithmetic.callSiteRewrites
   | .arraysTrustedStrict
@@ -369,7 +370,7 @@ private def applyPersistentPlan (steps : Array Step) (module : Module) :
   let callSiteRewrites := steps.flatMap callSiteRewritesForStep |>.filter fun rewrite =>
     match rewrite.target with
     | .declaration declaration => externalDeclarations.contains declaration
-    | .runtime _ => false
+    | .runtime operation => module.runtimeOperations.contains operation
   ResidentCallSite.validateRewrites callSiteRewrites module
     |>.mapError fun error =>
       .manifest s!"invalid typed resident call-site rewrite: {repr error}"

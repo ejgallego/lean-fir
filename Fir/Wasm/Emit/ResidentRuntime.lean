@@ -1,5 +1,6 @@
 import Fir.Wasm.Concrete.Runtime
 import Fir.Wasm.Emit.Binary
+import Fir.Wasm.Emit.ResidentCallSite
 
 namespace Fir.Wasm.Emit.ResidentRuntime
 
@@ -23,6 +24,12 @@ def resultLocal : FVarId := ⟨`result⟩
 def sharedLocal : FVarId := ⟨`shared⟩
 
 def closureRefCountLocal : FVarId := ⟨`closureRefCount⟩
+
+private def inlineGetTagObjectLocal : FVarId :=
+  ⟨`_fir_inline_getTag_object⟩
+
+private def inlineGetTagResultLocal : FVarId :=
+  ⟨`_fir_inline_getTag_result⟩
 
 private def offset (value : Nat) : UInt32 := UInt32.ofNat value
 
@@ -108,6 +115,61 @@ def getTagFunction : Function := {
       .localGet resultLocal,
       .ret] }
 
+private def getTagCallSiteBody : List Instruction := [
+  .localSet inlineGetTagObjectLocal,
+  .localGet inlineGetTagObjectLocal,
+  .i32Const .uint32 1,
+  .i32And,
+  .ifElse
+    [.localGet inlineGetTagObjectLocal,
+      .i32Const .uint32 1,
+      .i32ShrU,
+      .localSet inlineGetTagResultLocal]
+    [.localGet inlineGetTagObjectLocal,
+      .i32Load .uint32 (offset headerKindOffset),
+      .i32Const .uint32 ObjectKind.constructor.code,
+      .i32Eq,
+      .ifElse
+        [.localGet inlineGetTagObjectLocal,
+          .i32Load .uint32 (offset headerAux0Offset),
+          .localSet inlineGetTagResultLocal]
+        [.localGet inlineGetTagObjectLocal,
+          .call (.runtime .getTag),
+          .localSet inlineGetTagResultLocal]],
+  .localGet inlineGetTagResultLocal]
+
+/--
+Lean's `lean_obj_tag` is a static-inline scalar/heap split. Typed final-LCNF
+case sites have the corresponding W6 representation premise, so reproduce the
+same immediate and ordinary-constructor mainline in the caller while retaining
+the complete checked resident helper for promoted tags and uncommon inputs.
+-/
+private def getTagCallSiteRewrite : ResidentCallSite.Rewrite := {
+  target := .runtime .getTag
+  signature := { params := #[.tobject], results := #[.uint32] }
+  locals := #[(inlineGetTagObjectLocal, .tobject),
+    (inlineGetTagResultLocal, .uint32)]
+  body := getTagCallSiteBody }
+
+/-- Typed call-site rules required when the resident `.getTag` step is linked. -/
+def callSiteRewrites : Array ResidentCallSite.Rewrite :=
+  #[getTagCallSiteRewrite]
+
+private partial def instructionCallsGetTag : Instruction → Bool
+  | .call (.runtime .getTag) => true
+  | .block _ body | .loop _ body => body.any instructionCallsGetTag
+  | .ifElse thenBody elseBody =>
+      thenBody.any instructionCallsGetTag || elseBody.any instructionCallsGetTag
+  | _ => false
+
+#guard callSiteRewrites.size == 1
+#guard getTagCallSiteRewrite.target == .runtime .getTag
+#guard getTagCallSiteRewrite.signature ==
+  { params := #[.tobject], results := #[.uint32] : Signature }
+#guard getTagCallSiteRewrite.locals ==
+  #[(inlineGetTagObjectLocal, .tobject), (inlineGetTagResultLocal, .uint32)]
+#guard getTagCallSiteRewrite.body.any instructionCallsGetTag
+
 def residentMemory : MemoryDecl := {
   pagesMin := 1
   exportName := some "memory" }
@@ -189,6 +251,7 @@ inductive LinkError where
   | missingClosureApplicationGlobals
   | closureMetadataOverflow (value : Nat)
   | projectionOffsetOverflow (value : Nat)
+  | callSite (error : ResidentCallSite.Error)
   | incompatibleMemory
   | invalidOutput (error : SymbolicError)
   deriving Inhabited, Repr
@@ -469,7 +532,15 @@ private def internalizeOperation (operation : RuntimeOp) (name : Name)
   validateOutput validate (← internalizeOperationUnchecked operation name function module)
 
 def internalizeGetTag (module : Module) (validate : Bool := true) : Except LinkError Module :=
-  internalizeOperation .getTag getTagName getTagFunction module validate
+  do
+    let functions ←
+      ResidentCallSite.rewriteModuleFunctions callSiteRewrites module
+        |>.mapError LinkError.callSite
+    internalizeOperation .getTag getTagName getTagFunction
+      { module with
+        functions
+        runtimeOperations := Fir.Wasm.collectRuntimeOps functions }
+      validate
 
 def internalizeIsShared (module : Module) (validate : Bool := true) : Except LinkError Module :=
   internalizeOperation .isShared isSharedName isSharedFunction module validate

@@ -581,6 +581,34 @@ of normalized Wasm self samples because the whole workload also moves; the
 exact function view above, rather than the noisy share, establishes removal of
 the targeted scratch traffic.
 
+The next generic slice aligns final-LCNF constructor discrimination with
+upstream `lean_obj_tag`. Typed `.getTag` callers now test the immediate bit and
+read an ordinary constructor's `aux0` tag directly; non-constructor heap
+families retain the complete checked `fir_getTag` call. The standalone helper
+is unchanged at 111 bytes and remains out of line with 53 static cold callers.
+Its checked null, alignment, liveness, kind, persistence, and promoted-tag
+behavior therefore remains available at the runtime boundary.
+
+Exact one-call/two-call V8 trace subtraction on a 256-byte steady invocation
+reduces dynamic `fir_getTag` calls from 37,810 to zero. The original calls
+returned tag one 37,076 times and tag zero 734 times, confirming the profiled
+List/constructor common path rather than a client-specific value pattern. Four
+fresh exact-artifact profiles contain no `fir_getTag` self samples and retain
+the same leading workload functions without a replacement resident hotspot.
+
+The caller-local path is an intentional code-size tradeoff. The complete
+zero-import module grows from 359,760 to 366,313 bytes and the frontier from
+818,241 to 830,433 bytes, while the 500 final functions, 630 source functions,
+830 resident helpers, imports, exports, output bytes, and flat 9,237,304-byte
+frontier remain unchanged. The same rewrite grows the reviewed Level-1
+complete module from 193,150 to 198,424 bytes without changing its base module,
+declaration/helper inventories, imports, or exports. Two independent
+diagnostics-off campaigns of 32
+order-balanced fresh-process pairs give a combined -0.350 ms paired median,
+median ratio 0.990802 (about -0.92%), and 43/64 wins. Both invocation-order
+buckets improve. Treat this as a modest generic runtime win, not an algorithmic
+compression improvement.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not
