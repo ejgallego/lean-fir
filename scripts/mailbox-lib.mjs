@@ -7,6 +7,7 @@ const messageIdPattern = /^[A-Z][A-Z0-9]*-[A-Z][A-Z0-9]*-[0-9]{8}-[0-9]{3}$/;
 const addressPattern = /^[a-z][a-z0-9-]*\/(?:\*|[a-z][a-z0-9-]*)$/;
 const timestampPattern = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|([+-])(\d{2}):(\d{2}))$/;
 const hashPattern = /^[0-9a-fA-F]{7,64}$/;
+const completeHashPattern = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/;
 const worktreePattern = /^\.worktrees\/[a-z0-9][a-z0-9._-]*$/;
 const ignoredMetadataNames = new Set(["README.md"]);
 
@@ -310,6 +311,26 @@ function latestField(chain, field) {
   return null;
 }
 
+function integrationCheckpoint(chain) {
+  for (let index = chain.length - 1; index >= 0; index -= 1) {
+    const header = chain[index].header;
+    if (!["update", "handoff", "completion"].includes(header.kind)) continue;
+    if (!completeHashPattern.test(header.head ?? "")) continue;
+    if (header["worktree-state"] !== "clean") continue;
+    if (!header.worktree || header.worktree === "none") continue;
+    if (!header.branch || !header.base) continue;
+    return {
+      messageId: header["message-id"],
+      head: header.head,
+      worktree: header.worktree,
+      branch: header.branch,
+      base: header.base,
+      publication: header.publication ?? null,
+    };
+  }
+  return null;
+}
+
 function inheritedOwner(message, request, byId) {
   const seen = new Set();
   let current = message;
@@ -513,6 +534,7 @@ export function validateMessages(messages) {
       head: latestField(chain, "head"),
       worktreeState: latestField(chain, "worktree-state"),
       publication: latestField(chain, "publication"),
+      integrationCheckpoint: integrationCheckpoint(chain),
       parentThread: request.header["parent-thread"] || null,
       dependsOn: dependencies(request.header),
     });

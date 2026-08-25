@@ -76,10 +76,14 @@ These rules apply to every agent and worktree in this repository.
 - The integration owner may also own a feature lane when that lane is waiting
   at the shared-contract boundary. The lease does not grant permission to edit
   files owned by another lane.
-- Lane owners publish status by committing their own mailbox file on their own
-  branch. The integration owner resolves the actual handoff head from the
-  named branch, so a mailbox never attempts to contain the hash of the commit
-  that contains itself.
+- Lane owners publish status by committing their own tracked mailbox file on
+  their own branch. A clean canonical ignored-mailbox event may pin the exact
+  containing handoff commit as its complete `integrationCheckpoint`; the
+  integration owner consumes that object even if the producer continues on a
+  separately named successor branch. Without such an event, the owner resolves
+  the containing status commit from the named branch and the branch remains
+  frozen through landing. The tracked mailbox never attempts to contain the
+  hash of the commit that contains itself.
 - The integration owner synthesizes accepted mailbox updates into
   `coordination/BOARD.md`, validates candidate stacks, and alone fast-forwards
   `main`. No coordination daemon or generated state is required.
@@ -196,6 +200,7 @@ The worktree must be clean at handoff.
 
 For a parallel milestone, commit the same information in the lane's assigned
 `coordination/lanes/*.md` mailbox. `functional-head` identifies the last code
-or proof commit; the integration owner obtains the containing status commit
-from the branch named in the mailbox. A `ready` mailbox with
-`clean-at-update: false` is invalid.
+or proof commit. The integration owner obtains the containing status commit
+from an exact clean ignored-mailbox `integrationCheckpoint` when present, or
+from the frozen branch named in the tracked mailbox otherwise. A `ready`
+mailbox with `clean-at-update: false` is invalid.

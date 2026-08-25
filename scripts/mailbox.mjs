@@ -88,6 +88,12 @@ function list(result, options) {
       ["publication", thread.publication],
     ].filter(([, value]) => value).map(([name, value]) => `${name}=${value}`);
     if (lane.length > 0) console.log(`  lane: ${lane.join(" ")}`);
+    if (thread.integrationCheckpoint) {
+      const checkpoint = thread.integrationCheckpoint;
+      console.log(`  integration checkpoint: message=${checkpoint.messageId} ` +
+        `head=${checkpoint.head} worktree=${checkpoint.worktree} ` +
+        `branch=${checkpoint.branch} base=${checkpoint.base}`);
+    }
     if (thread.parentThread) console.log(`  parent: ${thread.parentThread}`);
     if (thread.dependsOn.length > 0) console.log(`  depends on: ${thread.dependsOn.join(", ")}`);
   }

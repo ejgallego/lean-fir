@@ -104,7 +104,7 @@ test("validates and summarizes a complete cross-project lifecycle", async () => 
         worktree: ".worktrees/wasm-generation",
         branch: "wasm/generation",
         base: "515bf40",
-        head: "abc1234",
+        head: "abcdef0123456789abcdef0123456789abcdef01",
         "worktree-state": "clean",
         publication: "local-only",
         disposition: "ready-for-review",
@@ -138,13 +138,60 @@ test("validates and summarizes a complete cross-project lifecycle", async () => 
       worktree: ".worktrees/wasm-generation",
       branch: "wasm/generation",
       base: "515bf40",
-      head: "abc1234",
+      head: "abcdef0123456789abcdef0123456789abcdef01",
       worktreeState: "clean",
       publication: "local-only",
+      integrationCheckpoint: {
+        messageId: "FIR-ROOT-20260813-002",
+        head: "abcdef0123456789abcdef0123456789abcdef01",
+        worktree: ".worktrees/wasm-generation",
+        branch: "wasm/generation",
+        base: "515bf40",
+        publication: "local-only",
+      },
       parentThread: null,
       dependsOn: [],
     }]);
   });
+});
+
+test("integration checkpoints use one exact clean event without inherited fields", () => {
+  const thread = "ROOT-FIR-20260813-001";
+  const request = parseMessage(message({ id: thread }), `${thread}.md`);
+  const claim = parseMessage(message({
+    id: "FIR-ROOT-20260813-001",
+    thread,
+    reply: thread,
+    time: "2026-08-13T15:00:00+02:00",
+    from: "fir/wasm-gen",
+    to: "lean-zip/root",
+    kind: "acknowledgement",
+    state: "claimed",
+    fields: {
+      owner: "fir/wasm-gen",
+      worktree: ".worktrees/wasm-generation",
+      branch: "wasm/generation",
+      base: "515bf40",
+    },
+  }), "FIR-ROOT-20260813-001.md");
+  const splitMetadata = parseMessage(message({
+    id: "FIR-ROOT-20260813-002",
+    thread,
+    reply: "FIR-ROOT-20260813-001",
+    time: "2026-08-13T16:00:00+02:00",
+    from: "fir/wasm-gen",
+    to: "lean-zip/root",
+    kind: "update",
+    state: "in-progress",
+    fields: {
+      head: "def4567def4567def4567def4567def4567def45",
+      worktree: ".worktrees/wasm-generation",
+      "worktree-state": "clean",
+    },
+  }), "FIR-ROOT-20260813-002.md");
+  const result = validateMessages([request, claim, splitMetadata]);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.threads[0].integrationCheckpoint, null);
 });
 
 test("rejects work before a required acknowledgement", () => {
@@ -623,6 +670,24 @@ test("CLI lists active threads and hides terminal threads by default", async () 
         publication: "local-only",
       },
     }));
+    await put(mailbox, "FIR-ROOT-20260813-002", message({
+      id: "FIR-ROOT-20260813-002",
+      thread: open,
+      reply: "FIR-ROOT-20260813-001",
+      time: "2026-08-13T14:45:00+02:00",
+      from: "fir/wasm-gen",
+      to: "lean-zip/root",
+      kind: "update",
+      state: "in-progress",
+      fields: {
+        worktree: ".worktrees/wasm-generation",
+        branch: "fix/active-request",
+        base: "abc1234",
+        head: "abcdef0123456789abcdef0123456789abcdef01",
+        "worktree-state": "clean",
+        publication: "local-only",
+      },
+    }));
     await writeFile(join(mailbox, "README.md"), "# Local mailbox\n");
     await put(mailbox, closed, message({
       id: closed,
@@ -647,7 +712,10 @@ test("CLI lists active threads and hides terminal threads by default", async () 
     });
     assert.equal(listed.status, 0, listed.stderr);
     assert.match(listed.stdout, /active request/);
-    assert.match(listed.stdout, /lane: branch=fix\/active-request base=abc1234 publication=local-only/);
+    assert.match(listed.stdout,
+      /lane: .*branch=fix\/active-request .*base=abc1234 .*publication=local-only/);
+    assert.match(listed.stdout,
+      /integration checkpoint: message=FIR-ROOT-20260813-002 head=abcdef0123456789abcdef0123456789abcdef01/);
     assert.match(listed.stdout, /parent: ROOT-FIR-20260812-001/);
     assert.match(listed.stdout, /depends on: ROOT-FIR-20260812-002, ROOT-FIR-20260812-003/);
     assert.doesNotMatch(listed.stdout, /closed request/);
@@ -658,7 +726,9 @@ test("CLI lists active threads and hides terminal threads by default", async () 
     assert.equal(all.status, 0, all.stderr);
     const payload = JSON.parse(all.stdout);
     assert.deepEqual(payload.ignoredFiles, ["README.md"]);
-    assert.deepEqual(payload.threads.map((thread) => thread.state), ["claimed", "cancelled"]);
+    assert.deepEqual(payload.threads.map((thread) => thread.state), ["in-progress", "cancelled"]);
+    assert.equal(payload.threads[0].integrationCheckpoint.messageId,
+      "FIR-ROOT-20260813-002");
     assert.deepEqual(payload.threads[0].dependsOn, ["ROOT-FIR-20260812-002", "ROOT-FIR-20260812-003"]);
   });
 });

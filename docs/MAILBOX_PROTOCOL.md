@@ -145,7 +145,8 @@ The following operational fields are optional:
 - `worktree`: project-relative `.worktrees/<slug>` or `none`;
 - `branch`: the implementation branch;
 - `base` and `head`: abbreviated or full 7--64 character hexadecimal Git
-  object IDs;
+  object IDs. An integration checkpoint requires a complete 40- or 64-character
+  `head`; abbreviated heads remain ordinary progress metadata;
 - `worktree-state`: `clean` or `dirty` (omit it when `worktree` is `none`);
 - `publication`: `local-only`, `pushed`, `draft-pr`, or `published`;
 - `disposition`: one of the durable outcomes defined below;
@@ -312,6 +313,47 @@ deleting a branch. Those remain explicit maintainer actions. Public PR bodies
 must not include local mailbox paths, worktree names, command transcripts, or
 routine coordination notes.
 
+## Immutable Integration Checkpoints
+
+A clean `update`, `handoff`, or `completion` may pin the exact Git object that
+an integration owner should consume. The same immutable event must contain all
+of these fields:
+
+- a complete 40- or 64-character `head`;
+- a concrete project-relative `worktree`;
+- `worktree-state: clean`;
+- `branch` and `base`; and
+- optionally, `publication`.
+
+The validator exposes that event atomically as the thread's
+`integrationCheckpoint`. It never constructs a checkpoint by inheriting a
+head from one event and cleanliness, branch, or worktree from another. The
+human-readable list prints the checkpoint's message ID and exact head; the JSON
+view exposes the same object. Abbreviated heads and partial metadata remain
+useful progress reports but are not integration targets.
+
+The integration owner consumes the event's exact head, not the current tip of
+its named branch. Before landing, verify that the object resolves to a commit
+and is a descendant of current `main`, then fast-forward that object:
+
+```sh
+git cat-file -e <complete-head>^{commit}
+git merge-base --is-ancestor main <complete-head>
+git merge --ff-only <complete-head>
+```
+
+No tag is required: the immutable message and complete object ID already pin
+the checkpoint. The producer may immediately continue from that object on a
+separately named successor branch and opens a new thread whose request names
+the still-open integration thread in `depends-on`. It does not append successor
+work to the pinned integration thread.
+
+If another landing makes the pinned object non-fast-forwardable, integration
+stops. The producer rebases the checkpoint and then its successor in order and
+sends a new immutable checkpoint event. Landing or rejection completes the
+integration thread with an explicit disposition. Worktree or branch cleanup
+still requires separate maintainer authorization.
+
 ## Durability And Cleanup
 
 Before closure, the completion or closure message identifies the durable home
@@ -347,11 +389,12 @@ List active threads:
 make mailbox-list
 ```
 
-The human-readable list includes the latest recorded lane checkpoint
-(worktree, branch, base/head, cleanliness, and publication) when present.
-JSON output contains the protocol marker, resolved mailbox path, ignored
-filenames, and the same thread summaries. A summary is an index into the
-immutable event files, not a replacement for their message bodies.
+The human-readable list includes latest operational lane metadata and, when
+present, the atomically selected immutable integration checkpoint. JSON output
+contains the protocol marker, resolved mailbox path, ignored filenames, and
+the same thread summaries including `integrationCheckpoint`. A summary is an
+index into the immutable event files, not a replacement for their message
+bodies.
 
 Include terminal threads or emit JSON:
 

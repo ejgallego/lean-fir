@@ -51,9 +51,13 @@ next:
 ```
 
 `functional-head` is the last code, proof, fixture, or artifact commit. It is
-not the mailbox commit itself. Integration resolves the containing handoff
-head with `git rev-parse <branch>` and verifies that the worktree is clean.
-This avoids an impossible self-referential commit hash.
+not the tracked mailbox commit itself. A canonical ignored mailbox event may
+pin the containing handoff commit as its complete, clean
+`integrationCheckpoint`; integration consumes that exact object even if the
+producer has moved to a separately named successor branch. When no such event
+exists, integration falls back to `git rev-parse <branch>`, verifies that the
+worktree is clean, and requires the branch to remain frozen through landing.
+Both paths avoid an impossible self-referential hash in this tracked record.
 
 Use `waiting` when another lane must act first. Use `blocked` only for an
 actual impasse, not an ordinary dependency. Use `ready` only after all checks
@@ -67,6 +71,8 @@ The integration owner reads a mailbox directly from its branch, for example:
 git show wasm/talos-runtime:coordination/lanes/wasm-proof.md
 ```
 
-The owner validates the reported head and checks, updates the portable board,
-and lands only the green dependency-ordered slice. There is intentionally no
-script, lock service, or generated coordination database.
+The owner validates the exact ignored-mailbox checkpoint when present (or the
+legacy branch tip otherwise), checks fast-forward ancestry against current
+`main`, updates the portable board, and lands only the green dependency-ordered
+slice. There is intentionally no lock service or generated coordination
+database.
