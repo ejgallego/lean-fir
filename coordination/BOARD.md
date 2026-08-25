@@ -309,6 +309,23 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   executable artifact changed. W6 continues with closure-descriptor dispatch;
   `FIR-BUG-wasm-none-adapter-if-branch-depth` remains the separate Array-loop
   provenance blocker.
+- Accepted closure-descriptor release adapter checkpoint: W6 functional head
+  `c9a5917c` (original `ffc26250`) is linked through exact clean tracked
+  handoff `41c6f4db`, rebased onto the accepted fixed-width i64 generation
+  stack without changing executable code. The proof shows the production
+  descriptor filter computes `closureOwnedCaptureIndices`, adapts recursive
+  release of exactly those owned captures, and identifies the installed
+  decrement body with exact constructor and closure targets. Only the
+  opaque/Array target remains existential, and
+  `wp_body_of_constructorClosure` lifts semantic proofs through the real
+  installed body. Lean Beam refresh/save reports zero diagnostics with source
+  hash `83b50b3a83d1cd23`; the 3,079-job focused cone, `git diff --check`,
+  `make check` at 726 cases and 2,160/2,160 equal comparisons, and all 3,172
+  Talos jobs pass. No shared contract, emitter, helper signature, ABI/layout,
+  symbolic Wasm surface, ownership rule, or executable artifact changed. W6
+  continues through the installed semantic/public-call boundary;
+  `FIR-BUG-wasm-none-adapter-if-branch-depth` remains the independent exact
+  Array-loop provenance blocker.
 - Accepted recursive resident release proof checkpoint: W6 functional head
   `1fa01d24` is linked through exact clean tracked handoff `97312f4f`, rebased
   on accepted W7 and coordination base `9bc79b26`. Admission distinguishes
