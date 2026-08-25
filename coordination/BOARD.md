@@ -16,13 +16,13 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 ## Active integration lease
 
 - Milestone: `W7-CONSUMER-RATCHETS-AND-PROOF-CONVERGENCE`; selected-closure
-  lowering, typed Nat caller paths, S19 ownership fidelity, and the production
-  decrement proof surface are accepted. Exact prettyM/lean-zip publication is
-  complete; convergence with the active W6 release and caller-path proofs is
-  the remaining milestone step.
-- Integration owner: `wasm-gen`, keeping the generation lane and published
-  consumer contracts stable while W6 binds its decrement proof to the
-  production helper and reviews accepted caller paths.
+  lowering, typed Nat caller paths, S20 ByteArray mutual-tail fidelity, and
+  both production release proof surfaces are accepted. Exact prettyM/lean-zip
+  publication is complete; convergence with the active W6 release and
+  caller-path proofs is the remaining milestone step.
+- Integration owner: `wasm-gen`, serializing the independent S20, LCNF proof,
+  and W6 release handoffs while keeping generation and consumer contracts
+  stable.
 - Lean-zip performance lane: `lean-zip-perf` is the narrow successor to the
   existing W7-2 optimization role, using `perf/lean-zip-loop` in
   `.worktrees/lean-zip-perf`. It profiles one immutable accepted package,
@@ -102,6 +102,22 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `3623bb8496127bb9115cdef57949019a268432d4f9c4ca7344e425e3944e84ed`.
   The complete deterministic prettyM and lean-zip gates, Node smoke, Chrome,
   checksum, cache/scratch ownership, and umbrella repository checks pass.
+- Accepted S20 ByteArray mutual-tail fidelity: functional head `a3029a5a` is
+  linked through clean tracked handoff `bfeb41d1`, directly on W7 proof-surface
+  base `5cb4ab0d`. A runner-supplied ByteArray and repeated aliases cross three
+  alternating noinline mutual tail calls while an outside alias remains live;
+  post-call copy-on-write mutation distinguishes correct ownership. Native
+  Lean, final-LCNF interpretation, and V8 agree. The accepted policy now covers
+  726 unique cases, 2,160/2,160 comparisons, 9,077 machine steps, 210 tag
+  floors, and 299 domain floors; all 3,172 Talos jobs pass. No shared semantic,
+  proof, generator, runtime, ABI, layout, or artifact contract changed.
+- Current production release proof surfaces: `decrementOnceFunction` is public
+  at `0f351de8`; `releaseHeaderFunction` is public at `056b25a4`, with tracked
+  W7 handoff `5cb4ab0d`. Both are the exact definitions installed by
+  `internalizeReleases`; neither body nor generated Wasm changed. The complete
+  deterministic artifact gate republishes byte-identical styled prettyM at
+  83,996 bytes and SHA-256
+  `fc61301d946b1596ad08c9b20d51d2e1f68d60ca0c04b0f9d56e298c2ec6408d`.
 - Independent integration maintenance: the provider-neutral external-tooling
   CI contract is accepted at `88ca108e`. `make tooling-check` now fails closed
   outside the supported Node 22/24 LTS matrix, retains the exact pinned
