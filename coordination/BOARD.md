@@ -130,8 +130,8 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   2,160/2,160 comparisons, all 3,172 Talos jobs, the complete deterministic W7
   artifact gate, package differentials/reclamation/smoke, and Chrome pass. W6's
   active decrement proof work is disjoint. The trusted `Array.set!` scalar
-  index-dispatch successor is claimed in `W72-W7-20260825-007` and begins only
-  after rebasing onto this accepted main checkpoint.
+  index-dispatch successor from `W72-W7-20260825-007` is accepted below after
+  rebasing onto the later proof and single-pass checkpoints.
 - Accepted single-pass lean-zip publication: W7 functional head `de2ee5bb` and
   clean tracked handoff `acbaa384` are accepted from operational checkpoint
   `FIR-VIR-20260825-002`. Ordinary raw publication now captures and lowers the
@@ -153,6 +153,26 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   capture can select a different optimized body shape despite an identical
   semantic/ABI/import/function inventory. The package no longer depends on
   that ordering; generic capture reproducibility remains a separate follow-up.
+- Accepted upstream trusted `Array.set!` alignment: W7 functional head
+  `32ac281e` is linked through exact clean tracked handoff `155f3db7` and
+  operational checkpoint `W7-W72-20260825-016`, after the installed decrement
+  proof landing. Checked/public callers retain full arbitrary-width Natural
+  validation. Trusted final-LCNF callers now match upstream `lean_array_set`:
+  test the immediate tag, unbox scalar indices directly, and treat every heap
+  Natural as out of bounds, which is exact for a wasm32-resident Array. The
+  common failure path still consumes the replacement and returns the original
+  Array; unique reuse and shared copy-on-write are unchanged. Direct
+  zero-import cases cover scalar in/out-of-bounds, heap Nat, unique/shared, and
+  replacement release. The helper shrinks from 407 to 377 bytes; the complete
+  zero-import lean-zip module is 366,796 bytes with SHA-256
+  `7bd29a5a617d238ff8f3edbc037368ea4c5bb7fa2f4694955b5e3da3ed7fa048`,
+  501 functions, 630 source functions, and 830 resident helpers. Lean Beam,
+  `make check`, all 3,172 Talos jobs, the complete W7 artifact gate, explicit
+  byte determinism, raw differentials, ownership/rewind, and canonical package
+  smoke pass. The prior paired timing was neutral (+0.17ms, 14/32 wins), so
+  this is accepted for upstream fidelity and smaller code with no runtime-speed
+  claim. No public behavior, signature, ABI/layout, ownership rule, or source
+  semantics changed.
 - Independent coordination integration: immutable operational-mailbox
   checkpoints are accepted at `ba9ba1cd` for thread
   `W72-W7-20260825-004`. A checkpoint is selected only from one clean
