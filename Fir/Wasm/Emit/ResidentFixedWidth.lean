@@ -32,10 +32,7 @@ private def proofParam : FVarId := ⟨`proof⟩
 private def leftParam : FVarId := ⟨`left⟩
 private def rightParam : FVarId := ⟨`right⟩
 private def raw64Local : FVarId := ⟨`raw64⟩
-private def savedScratchLocal : FVarId := ⟨`savedScratch⟩
 private def uint32ResultLocal : FVarId := ⟨`uint32Result⟩
-private def uint64ResultLocal : FVarId := ⟨`uint64Result⟩
-private def usizeResultLocal : FVarId := ⟨`usizeResult⟩
 private def countLocal : FVarId := ⟨`count⟩
 
 def externalDeclarations : Array Name := #[
@@ -112,26 +109,15 @@ private def retypeI32Result (result : AbiKind) : List Instruction := [
   .i32WrapI64 result,
   .ret]
 
-private def retypeRaw64 (result : AbiKind) (resultLocal : FVarId) :
-    List Instruction := [
-  .localSet raw64Local,
-  .i32Const .uint32 0,
-  .i64Load .uint64 0,
-  .localSet savedScratchLocal,
-  .i32Const .uint32 0,
-  .localGet raw64Local,
-  .i64Store .uint64 0,
-  .i32Const .uint32 0,
-  .i64Load result 0,
-  .localSet resultLocal,
-  .i32Const .uint32 0,
-  .localGet savedScratchLocal,
-  .i64Store .uint64 0,
-  .localGet resultLocal,
-  .ret]
-
-private def i64ResultLocal (kind : AbiKind) : FVarId :=
-  if kind == .usize then usizeResultLocal else uint64ResultLocal
+/-- Preserve the physical i64 lane while assigning its checked semantic kind.
+The float lane is only a validation-level bridge; Binaryen erases the paired
+reinterpret operations. -/
+private def retypeI64Result (result : AbiKind) : List Instruction :=
+  if result == .uint64 then [.ret]
+  else [
+    .f64ReinterpretI64 .float,
+    .i64ReinterpretF64 result,
+    .ret]
 
 private def retypedI32Function (declaration : Name) (params : Array (FVarId × AbiKind))
     (result : AbiKind) (body : List Instruction) : Function := {
@@ -142,15 +128,12 @@ private def retypedI32Function (declaration : Name) (params : Array (FVarId × A
     body := body ++ retypeI32Result result }
 
 private def retypedI64Function (declaration : Name) (params : Array (FVarId × AbiKind))
-    (result : AbiKind) (body : List Instruction) : Function :=
-  let resultLocal := i64ResultLocal result
-  {
+    (result : AbiKind) (body : List Instruction) : Function := {
     name := externalName declaration
     params
     results := #[result]
-    locals := #[(raw64Local, .uint64), (savedScratchLocal, .uint64),
-      (resultLocal, result)]
-    body := body ++ retypeRaw64 result resultLocal }
+    locals := #[]
+    body := body ++ retypeI64Result result }
 
 private def ofNat32Function (declaration : Name) (result : AbiKind)
     (mask : UInt32) : Function :=
@@ -511,7 +494,7 @@ def uint64CtzFastFunction : Function :=
 
 /-- Lean specifies `a % 0 = a`, while core Wasm remainder traps at zero. -/
 def uint64ModFunction : Function :=
-  retypedI64Function `UInt64.mod
+  { (retypedI64Function `UInt64.mod
     #[(leftParam, .uint64), (rightParam, .uint64)] .uint64 [
     .localGet rightParam,
     .i64Eqz,
@@ -522,7 +505,8 @@ def uint64ModFunction : Function :=
         .localGet rightParam,
         .i64RemU,
         .localSet raw64Local],
-    .localGet raw64Local]
+    .localGet raw64Local]) with
+    locals := #[(raw64Local, .uint64)] }
 
 def functions : Array Function := #[
   uint8OfBitVecFunction,
@@ -911,15 +895,32 @@ private def usesTypedI32ResultBridge (function : Function) : Bool :=
         function.body.any (instructionContains (.i32WrapI64 result))
     else true
 
+private def usesTypedI64ResultBridge (function : Function) : Bool :=
+  if function.results.size != 1 then true
+  else
+    match function.results[0]! with
+    | .uint64 => !function.body.any instructionContainsMemory
+    | .usize =>
+        if function.name == externalName `UInt64.toUSize then
+          !function.body.any instructionContainsMemory &&
+            function.body.any
+              (instructionContains (.f64ReinterpretI64 .float)) &&
+            function.body.any
+              (instructionContains (.i64ReinterpretF64 .usize))
+        else true
+    | _ => true
+
 #guard !functions.any functionContainsLoop
 #guard !ResidentUSize.functions.any functionContainsLoop
 #guard functions.all usesTypedI32ResultBridge
-#guard uint64AddFunction.body.any
-  (instructionContains (.i64Load .uint64 0))
-#guard uint64AddFunction.body.any
-  (instructionContains (.i64Store .uint64 0))
+#guard functions.all usesTypedI64ResultBridge
+#guard !uint64AddFunction.body.any instructionContainsMemory
+#guard !uint64AddFunction.body.any
+  (instructionContains (.f64ReinterpretI64 .float))
 #guard uint64ToUSizeFunction.body.any
-  (instructionContains (.i64Load .usize 0))
+  (instructionContains (.f64ReinterpretI64 .float))
+#guard uint64ToUSizeFunction.body.any
+  (instructionContains (.i64ReinterpretF64 .usize))
 #guard uint32Log2ClzFunction.body.any (instructionContains .i32Clz)
 #guard uint32MulFunction.body.any (instructionContains .i32Mul)
 #guard uint64MulFunction.body.any (instructionContains .i64Mul)

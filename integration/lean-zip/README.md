@@ -485,7 +485,7 @@ Fixed-width i32 results now preserve their physical lane through the typed
 address zero to change semantic ABI kind. This provider-level path covers the
 UInt8, UInt16, and UInt32 result families, including Boolean decisions and
 object/tagged conversions. The i64 retype path is deliberately unchanged and
-retains its scratch save/restore sequence.
+retains its scratch save/restore sequence at this checkpoint.
 
 In the exact level-6 release, `Zip.Native.Deflate.lzMatchP` shrinks from 36,982
 to 31,706 bytes and from 18,123 to 15,869 instructions. Its memory operations
@@ -548,6 +548,38 @@ rewind frontier. It is accepted for upstream fidelity and smaller code shape,
 not as an elapsed-time win: the prior 32-pair experiment measured a +0.17 ms
 paired median (+0.44%) with 14/32 improving pairs, below the benchmark's
 resolution for a helper contributing about one percent of sampled execution.
+
+The fixed-width i64 successor removes the remaining private scratch-memory
+retype. Same-kind `UInt64` results now return directly. `UInt64.toUSize`, whose
+physical i64 lane is unchanged but whose semantic ABI kind differs, crosses a
+typed `i64 -> f64 -> i64` reinterpret pair that Binaryen erases. This mirrors
+Lean's native scalar convention without changing any declaration signature,
+layout, ownership rule, validation path, or observable bits.
+
+On the exact post-`Array.set!` package, this reduces
+`Zip.Native.Deflate.chooseSplitsHeuristicPUPacked` from 9,542 to 6,634 bytes
+and from 4,699 to 3,410 instructions. Its 220 `i64.load` and 220 `i64.store`
+sites fall to the 26 loads and 26 stores belonging to real data access; total
+memory operations fall from 464 to 76 and direct calls from 282 to 265. The
+complete zero-import module decreases from 366,796 to 359,760 bytes and from
+501 to 500 functions. The captured and pre-optimization inventories remain
+unchanged; final optimization also makes
+`Zip.Native.BitWriter.dropBytesU` dead. The same generic change reduces the
+Level-1 package from 193,694 to 193,150 bytes; the 12,418-byte stored package
+is byte-identical.
+
+Two independent diagnostics-off campaigns of 32 order-balanced fresh-process
+pairs preserve the exact output and flat 9,237,304-byte frontier. Their paired
+medians are respectively -0.495 ms (-1.22%, 21/32 wins) and -0.443 ms (-1.21%,
+20/32 wins). Across all 64 pairs the paired median is -0.477 ms (-1.22%), with
+41/64 wins; both execution-order buckets improve. Three of four 16-pair blocks
+improve, while the first block is +0.509 ms, so this is a modest workload win
+with observed host drift rather than a larger throughput claim. Four fresh
+exact-artifact profiles retain the same top-five hotspot ranking and introduce
+no replacement hotspot. `chooseSplitsHeuristicPUPacked` remains about 9--10%
+of normalized Wasm self samples because the whole workload also moves; the
+exact function view above, rather than the noisy share, establishes removal of
+the targeted scratch traffic.
 
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
