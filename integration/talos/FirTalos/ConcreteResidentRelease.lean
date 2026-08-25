@@ -2367,6 +2367,85 @@ theorem DecrementOnceInstallation.body
                   FirTalos.functionTerminal sourceModule
                     installation.sourceFunction) adapterEq)⟩
 
+/-- Lift a branch proof for every possible adapted last-reference fragment to
+the actual installed production body.  Successful installation chooses that
+fragment and appends only the standard terminal suffix; callers need neither
+name the choice nor carry a body-shape certificate. -/
+theorem DecrementOnceInstallation.wp_body_of_decrementOnceProgram
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {store : Wasm.Store host} {locals : Wasm.Locals}
+    {Q : Wasm.Assertion host}
+    (installation :
+      DecrementOnceInstallation sourceModule module descriptors)
+    (noFallthrough : ∀ nextStore nextLocals,
+      ¬ Q (.Fallthrough nextStore nextLocals))
+    (coreWP : ∀ lastTarget,
+      Wasm.wp module
+        (decrementOnceProgram persistentReleaseProgram lastTarget)
+        Q store locals env) :
+    Wasm.wp module installation.targetFunction.body Q store locals env := by
+  obtain ⟨lastTarget, bodyEq⟩ := installation.body
+  rw [bodyEq]
+  exact FirTalos.Correctness.Wasm.wp_append_of_no_fallthrough
+    noFallthrough (coreWP lastTarget)
+
+/-- Lift branch-independent return proofs directly to the installed public
+call.  This composes production-body recovery, suffix irrelevance, and the
+Wasm calling convention once for all early-return ownership cases. -/
+theorem DecrementOnceInstallation.terminatesWith_of_decrementOnceProgram_return_wp
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {store final : Wasm.Store host}
+    (installation :
+      DecrementOnceInstallation sourceModule module descriptors)
+    (object check : UInt32) (tail : List Wasm.Value)
+    (coreWP : ∀ lastTarget,
+      Wasm.wp module
+        (decrementOnceProgram persistentReleaseProgram lastTarget)
+        (fun continuation => continuation = .Return final [])
+        store (decrementEntry object check) env) :
+    Wasm.TerminatesWith env module installation.index store
+      ([Wasm.Value.i32 check, Wasm.Value.i32 object] ++ tail)
+      (fun final' values => final' = final ∧ values = tail) := by
+  apply installation.terminatesWith_of_return_wp object check tail
+  apply installation.wp_body_of_decrementOnceProgram
+    (by intros; simp)
+  exact coreWP
+
+/-- A body-level trap proof for the installed helper is also an exact
+fuel-independent statement about its public call.  This is the exceptional
+counterpart of `terminatesWith_of_return_wp`: it retains the final store and
+trap message that Talos's success-only `TerminatesWith` cannot express. -/
+theorem DecrementOnceInstallation.run_eq_trap_of_body_wp
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {store final : Wasm.Store host} {message : String}
+    (installation :
+      DecrementOnceInstallation sourceModule module descriptors)
+    (object check : UInt32) (tail : List Wasm.Value)
+    (bodyWP : Wasm.wp module installation.targetFunction.body
+      (fun continuation => continuation = .Trap final message)
+      store (decrementEntry object check) env) :
+    ∃ bound, ∀ fuel ≥ bound,
+      Wasm.run fuel module installation.index store
+        ([Wasm.Value.i32 check, Wasm.Value.i32 object] ++ tail) env =
+          .Trap final message := by
+  unfold Wasm.wp at bodyWP
+  obtain ⟨bound, bodyWP⟩ := bodyWP
+  refine ⟨bound, ?_⟩
+  intro fuel enoughFuel
+  have trapped := bodyWP fuel enoughFuel
+  rw [Wasm.run_eq installation.notImport]
+  simp only [installation.installed]
+  rw [installation.entry object check tail]
+  cases execution : Wasm.exec fuel module store
+      (decrementEntry object check) installation.targetFunction.body env <;>
+    simp_all
+
 /-- Postcondition for branch proofs that deliberately terminate the current
 function.  It excludes fallthrough and structured breaks, while treating a
 normal return and a trap uniformly through the caller's assertion. -/
@@ -6329,6 +6408,118 @@ theorem LiveHeapRel.decrementOnceProgram_persistent_refines
   exact ⟨concreteOperation, semanticOperation, related, canonicalHeaders,
     memoryRelated, physicalExecution⟩
 
+/-- Underflow is an exact exceptional refinement of the installed production
+call.  Both source semantics reject the zero reference count, while every
+sufficiently fueled Wasm execution traps before changing the store. -/
+theorem LiveHeapRel.run_installedDecrementUnderflow
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : Fir.LeanIR.Impure.RuntimeState}
+    {location : Fir.LeanIR.Impure.Location} {address : Word32}
+    {cell : Fir.LeanIR.Impure.HeapCell}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    (installation :
+      DecrementOnceInstallation sourceModule module descriptors)
+    (related : LiveHeapRel state witness runtime)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (canonicalHeaders : CanonicalMappedHeadersRel state witness)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : Fir.LeanIR.Impure.findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (ordinary : cell.persistent = false)
+    (zero : cell.rc = 0) (check : Bool) (checkWord : UInt32)
+    (tail : List Wasm.Value) :
+    ∃ header,
+      state.readLiveHeader address = .ok header ∧
+      decrementReferenceOnce state address check descriptors =
+        .error (.sourceAddress (.referenceCountUnderflow address)) ∧
+      Fir.LeanIR.Impure.decValueOnce runtime (.object (.heap location)) check =
+        .error (.referenceCountUnderflow location) ∧
+      ∃ bound, ∀ fuel ≥ bound,
+        Wasm.run fuel module installation.index store
+          ([.i32 checkWord, .i32 (UInt32.ofNat address.value)] ++ tail) env =
+            .Trap store "unreachable" := by
+  obtain ⟨header, headerRead, concreteOperation, semanticOperation, _⟩ :=
+    LiveHeapRel.decrementOnceProgram_underflow_refines
+      (module := module) (env := env) (descriptors := descriptors)
+      (persistentProgram := persistentReleaseProgram) (lastReference := [])
+      related memoryRelated canonicalHeaders mapped found live ordinary zero
+        check checkWord
+  have coreWP : ∀ lastTarget,
+      Wasm.wp module
+        (decrementOnceProgram persistentReleaseProgram lastTarget)
+        (fun continuation => continuation = .Trap store "unreachable") store
+        (decrementEntry (UInt32.ofNat address.value) checkWord) env := by
+    intro lastTarget
+    obtain ⟨_, _, _, _, execution⟩ :=
+      LiveHeapRel.decrementOnceProgram_underflow_refines
+        (module := module) (env := env) (descriptors := descriptors)
+        (persistentProgram := persistentReleaseProgram)
+        (lastReference := lastTarget) related memoryRelated canonicalHeaders
+          mapped found live ordinary zero check checkWord
+    exact execution
+  have bodyWP := installation.wp_body_of_decrementOnceProgram
+    (Q := fun continuation => continuation = .Trap store "unreachable")
+    (by intros; simp) coreWP
+  have trapped := installation.run_eq_trap_of_body_wp
+    (UInt32.ofNat address.value) checkWord tail bodyWP
+  exact ⟨header, headerRead, concreteOperation, semanticOperation, trapped⟩
+
+/-- The installed production helper preserves every layer of the simulation
+when it sees a persistent allocation.  The public call returns normally with
+no values and preserves the caller's operand tail without touching memory. -/
+theorem LiveHeapRel.terminatesWith_installedDecrementPersistent
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : Fir.LeanIR.Impure.RuntimeState}
+    {location : Fir.LeanIR.Impure.Location} {address : Word32}
+    {cell : Fir.LeanIR.Impure.HeapCell}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    (installation :
+      DecrementOnceInstallation sourceModule module descriptors)
+    (related : LiveHeapRel state witness runtime)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (canonicalHeaders : CanonicalMappedHeadersRel state witness)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : Fir.LeanIR.Impure.findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (persistent : cell.persistent = true)
+    (check : Bool) (checkWord : UInt32) (tail : List Wasm.Value) :
+    decrementReferenceOnce state address check descriptors = .ok state ∧
+      Fir.LeanIR.Impure.decValueOnce runtime (.object (.heap location)) check =
+        .ok runtime ∧
+      LiveHeapRel state witness runtime ∧
+      CanonicalMappedHeadersRel state witness ∧
+      ResidentMemoryRel state store.mem ∧
+      Wasm.TerminatesWith env module installation.index store
+        ([.i32 checkWord, .i32 (UInt32.ofNat address.value)] ++ tail)
+        (fun final values => final = store ∧ values = tail) := by
+  obtain ⟨concreteOperation, semanticOperation, finalRelated,
+      canonicalAfter, finalMemory, _⟩ :=
+    LiveHeapRel.decrementOnceProgram_persistent_refines
+      (module := module) (env := env) (descriptors := descriptors)
+      (lastReference := []) related memoryRelated canonicalHeaders mapped found
+        live persistent check checkWord
+  have coreWP : ∀ lastTarget,
+      Wasm.wp module
+        (decrementOnceProgram persistentReleaseProgram lastTarget)
+        (fun continuation => continuation = .Return store []) store
+        (decrementEntry (UInt32.ofNat address.value) checkWord) env := by
+    intro lastTarget
+    exact (LiveHeapRel.decrementOnceProgram_persistent_refines
+      (module := module) (env := env) (descriptors := descriptors)
+      (lastReference := lastTarget) related memoryRelated canonicalHeaders
+        mapped found live persistent check checkWord).2.2.2.2.2
+  have called :=
+    installation.terminatesWith_of_decrementOnceProgram_return_wp
+      (UInt32.ofNat address.value) checkWord tail coreWP
+  exact ⟨concreteOperation, semanticOperation, finalRelated,
+    canonicalAfter, finalMemory, called⟩
+
 /-- First installed production-call refinement theorem.  For an ordinary
 represented object with more than one owner, the public generated helper call
 performs the same single decrement in concrete memory and FIR ownership
@@ -6370,26 +6561,32 @@ theorem LiveHeapRel.terminatesWith_installedDecrementAboveOne
         ([.i32 checkWord, .i32 object] ++ tail)
         (fun final values => final = finalStore ∧ values = tail) := by
   dsimp only
-  obtain ⟨lastTarget, bodyEq⟩ := installation.body
   obtain ⟨header, result, nextRuntime, headerRead, concreteOperation,
-      semanticOperation, finalRelated, canonicalAfter, finalMemory, coreWP⟩ :=
+      semanticOperation, finalRelated, canonicalAfter, finalMemory, _⟩ :=
     FirTalos.Concrete.ResidentRelease.LiveHeapRel.decrementOnceProgram_aboveOne_refines
-      related (descriptors := descriptors)
+      (module := module) (env := env) related (descriptors := descriptors)
       (persistentProgram := persistentReleaseProgram)
-      (lastReference := lastTarget) memoryRelated canonicalHeaders mapped found
+      (lastReference := []) memoryRelated canonicalHeaders mapped found
         live ordinary oneLt check checkWord
   let object := UInt32.ofNat address.value
   let nextCount := UInt32.ofNat (cell.rc - 1)
   let finalStore := ResidentMemoryRel.write32Store store
     (object + UInt32.ofNat headerRefCountOffset) nextCount
-  have bodyWP : Wasm.wp module installation.targetFunction.body
+  have coreWP : ∀ lastTarget, Wasm.wp module
+      (decrementOnceProgram persistentReleaseProgram lastTarget)
       (fun continuation => continuation = .Return finalStore []) store
       (decrementEntry object checkWord) env := by
-    rw [bodyEq]
-    exact FirTalos.Correctness.Wasm.wp_append_of_no_fallthrough
-      (by intros; simp) coreWP
-  have called := installation.terminatesWith_of_return_wp
-    object checkWord tail bodyWP
+    intro lastTarget
+    obtain ⟨_, _, _, _, _, _, _, _, _, execution⟩ :=
+      FirTalos.Concrete.ResidentRelease.LiveHeapRel.decrementOnceProgram_aboveOne_refines
+        (module := module) (env := env) related (descriptors := descriptors)
+        (persistentProgram := persistentReleaseProgram)
+        (lastReference := lastTarget) memoryRelated canonicalHeaders mapped
+          found live ordinary oneLt check checkWord
+    exact execution
+  have called :=
+    installation.terminatesWith_of_decrementOnceProgram_return_wp
+      object checkWord tail coreWP
   exact ⟨header, result, nextRuntime, headerRead, concreteOperation,
     semanticOperation, finalRelated, canonicalAfter, finalMemory, called⟩
 
