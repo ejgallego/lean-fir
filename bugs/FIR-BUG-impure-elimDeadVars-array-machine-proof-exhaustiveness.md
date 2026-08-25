@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-impure-elimDeadVars-array-machine-proof-exhaustiveness
-status: candidate
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: b3c0e83a0dfa5a0401829ce1b251282d47fbec03
@@ -9,7 +9,7 @@ pass: elimDeadVars
 discovered-by: proof
 first-seen: 2026-08-25
 reproduction: Fir/LeanIR/Passes/ElimDeadMachineRel.lean
-regression: none
+regression: Fir/LeanIR/Passes/ElimDeadMachineRel.lean
 ---
 
 # Summary
@@ -81,7 +81,7 @@ structural, but the ownership-bearing Array branches must use the accepted
 
 ## Workaround
 
-none
+none. The machine proof now handles the Array alternative directly.
 
 ## Upstream tracking
 
@@ -89,6 +89,14 @@ none
 
 ## Resolution and regression
 
-unresolved. The permanent regression should force direct elaboration of
-`Fir.LeanIR.Passes.ElimDeadMachineRel` after runtime object variants change,
-then rebuild `Fir.LeanIR.Passes.ElimDeadExamples` as its dependency cone.
+The proof repair adds the missing Array alternative to all thirteen exhaustive
+matches. Closure-only, boxed-only, constructor-only, reset, and reuse helpers
+follow their existing rejection paths for Array objects; no ownership-bearing
+Array is classified as root-free or removed from `HeapObject.ownedValues`.
+
+Lean Beam accepts and checkpoints `ElimDeadMachineRel` with zero errors. Forced
+Lake builds of `+Fir.LeanIR.Passes.ElimDeadMachineRel` and
+`+Fir.LeanIR.Passes.ElimDeadExamples` pass, followed by the full `make check`
+repository gate. Forcing the machine module remains the regression procedure
+that prevents a stale compiled artifact from hiding future object-variant
+exhaustiveness failures.

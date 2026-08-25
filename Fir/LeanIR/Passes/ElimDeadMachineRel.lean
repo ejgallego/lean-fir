@@ -3681,7 +3681,7 @@ theorem takeClosureApplication_expectedClosure
   cases object : cell.object with
   | closure name arity fixed =>
       exact (notClosure name arity fixed object).elim
-  | ctor | boxed | string | natural | integer | byteArray | «opaque» =>
+  | ctor | boxed | array | string | natural | integer | byteArray | «opaque» =>
       simpa [Bind.bind, Except.bind, object] using
         (throwEq (α := RuntimeState × Name × Nat × Array Value))
 
@@ -8858,6 +8858,7 @@ theorem getConstructor_shape_of_ok
                   exact ⟨rfl, liveShape.1, liveShape.2, objectEq⟩
               | closure name arity fixed => simp [objectEq] at effect
               | boxed type value => simp [objectEq] at effect
+              | array elements => simp [objectEq] at effect
               | string value => simp [objectEq] at effect
               | natural value => simp [objectEq] at effect
               | integer value => simp [objectEq] at effect
@@ -8949,6 +8950,8 @@ theorem HeapOwnershipBelowFrontier.unboxResult
               | ctor constructor =>
                   simp [objectEq] at effect
               | closure name arity fixed =>
+                  simp [objectEq] at effect
+              | array elements =>
                   simp [objectEq] at effect
               | string value =>
                   simp [objectEq] at effect
@@ -9394,6 +9397,7 @@ theorem takeClosureApplication_nextLocation_eq_of_ok
       cases objectEq : cell.object with
       | ctor object => simp [objectEq] at effect
       | boxed type value => simp [objectEq] at effect
+      | array elements => simp [objectEq] at effect
       | string value => simp [objectEq] at effect
       | natural value => simp [objectEq] at effect
       | integer value => simp [objectEq] at effect
@@ -9898,6 +9902,7 @@ theorem HeapOwnershipBelowFrontier.takeClosureApplication
       cases objectEq : cell.object with
       | ctor object => simp [objectEq] at effect
       | boxed type value => simp [objectEq] at effect
+      | array elements => simp [objectEq] at effect
       | string value => simp [objectEq] at effect
       | natural value => simp [objectEq] at effect
       | integer value => simp [objectEq] at effect
@@ -10562,6 +10567,8 @@ theorem reset_findCell_eq_of_unreachable_of_ok
             simp at effect
         | boxed type value =>
             simp at effect
+        | array elements =>
+            simp at effect
         | string value =>
             simp at effect
         | natural value =>
@@ -10964,6 +10971,7 @@ theorem reset_nextLocation_eq_of_ok
                                   (setCell_nextLocation_eq_of_ok setEq)
                 | closure fixed => simp at effect
                 | boxed type value => simp at effect
+                | array elements => simp at effect
                 | string value => simp at effect
                 | natural value => simp at effect
                 | integer value => simp at effect
@@ -11086,6 +11094,7 @@ theorem HeapOwnershipBelowFrontier.reset
                                 parentWellFormed.releaseResetFields foldEq
                 | closure fixed => simp at effect
                 | boxed type value => simp at effect
+                | array elements => simp at effect
                 | string value => simp at effect
                 | natural value => simp at effect
                 | integer value => simp at effect
@@ -11175,6 +11184,7 @@ theorem reset_tokenBelowFrontier
                               simp at member
                 | closure fixed => simp at effect
                 | boxed type value => simp at effect
+                | array elements => simp at effect
                 | string value => simp at effect
                 | natural value => simp at effect
                 | integer value => simp at effect
@@ -11252,6 +11262,7 @@ theorem reset_reuseSome_location_eq_of_ok
                           (Value.reuseToken.inj tokenEq)).symm
         | closure fixed => simp at effect
         | boxed type value => simp at effect
+        | array elements => simp at effect
         | string value => simp at effect
         | natural value => simp at effect
         | integer value => simp at effect
@@ -11297,6 +11308,7 @@ theorem reuseSome_nextLocation_eq_of_ok
                 exact setCell_nextLocation_eq_of_ok setEq
         | closure fixed => simp at effect
         | boxed type value => simp at effect
+        | array elements => simp at effect
         | string value => simp at effect
         | natural value => simp at effect
         | integer value => simp at effect
@@ -11339,6 +11351,7 @@ theorem reuseSome_value_eq_of_ok
                 exact valueEq.symm
         | closure fixed => simp at effect
         | boxed type value => simp at effect
+        | array elements => simp at effect
         | string value => simp at effect
         | natural value => simp at effect
         | integer value => simp at effect
@@ -11408,6 +11421,7 @@ theorem HeapOwnershipBelowFrontier.reuseSome
                 exact nextWellFormed
         | closure fixed => simp at effect
         | boxed type value => simp at effect
+        | array elements => simp at effect
         | string value => simp at effect
         | natural value => simp at effect
         | integer value => simp at effect
