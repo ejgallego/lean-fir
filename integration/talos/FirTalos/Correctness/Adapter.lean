@@ -51,6 +51,80 @@ theorem function_preserves_body
       subst target
       exact ⟨targetBody, rfl, rfl⟩
 
+/-- Adapting a concatenated source program is the sequential composition of
+adapting its two parts.  This exposes the adapter's list homomorphism without
+duplicating its recursive implementation in downstream proofs. -/
+theorem instructions_append
+    (sourceModule : Fir.Wasm.Module) (source : Fir.Wasm.Function)
+    (labels : List FVarId) (left right : List Fir.Wasm.Instruction) :
+    instructions sourceModule source labels (left ++ right) = (do
+      let targetLeft ← instructions sourceModule source labels left
+      let targetRight ← instructions sourceModule source labels right
+      pure (targetLeft ++ targetRight)) := by
+  induction left with
+  | nil => simp [instructions]
+  | cons head tail ih =>
+      simp only [List.cons_append, instructions]
+      rw [ih]
+      cases instruction sourceModule source labels head <;>
+        cases instructions sourceModule source labels tail <;>
+          cases instructions sourceModule source labels right <;> rfl
+
+/-- Successful adaptations of two source fragments compose pointwise. -/
+theorem instructions_append_of_success
+    {sourceModule : Fir.Wasm.Module} {source : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {left right : List Fir.Wasm.Instruction}
+    {targetLeft targetRight : Wasm.Program}
+    (leftAdapted :
+      instructions sourceModule source labels left = .ok targetLeft)
+    (rightAdapted :
+      instructions sourceModule source labels right = .ok targetRight) :
+    instructions sourceModule source labels (left ++ right) =
+      .ok (targetLeft ++ targetRight) := by
+  rw [instructions_append, leftAdapted, rightAdapted]
+  rfl
+
+/-- Adaptation of a symbolic conditional is determined by adaptation of its
+two branches under the unchanged label context. -/
+theorem instruction_ifElse
+    {sourceModule : Fir.Wasm.Module} {source : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {thenSource elseSource : List Fir.Wasm.Instruction}
+    {thenTarget elseTarget : Wasm.Program}
+    (thenAdapted :
+      instructions sourceModule source labels thenSource = .ok thenTarget)
+    (elseAdapted :
+      instructions sourceModule source labels elseSource = .ok elseTarget) :
+    instruction sourceModule source labels (.ifElse thenSource elseSource) =
+      .ok (.iff 0 0 thenTarget elseTarget) := by
+  simp [instruction, thenAdapted, elseAdapted, Bind.bind, Except.bind,
+    pure, Except.pure]
+
+/-- Adaptation of a symbolic block is determined by adaptation of its body
+under the extended label context. -/
+theorem instruction_block
+    {sourceModule : Fir.Wasm.Module} {source : Fir.Wasm.Function}
+    {labels : List FVarId} {label : FVarId}
+    {sourceBody : List Fir.Wasm.Instruction} {targetBody : Wasm.Program}
+    (bodyAdapted : instructions sourceModule source (label :: labels)
+      sourceBody = .ok targetBody) :
+    instruction sourceModule source labels (.block label sourceBody) =
+      .ok (.block 0 0 targetBody) := by
+  simp [instruction, bodyAdapted, Bind.bind, Except.bind, pure, Except.pure]
+
+/-- Adaptation of a symbolic loop is determined by adaptation of its body
+under the extended label context. -/
+theorem instruction_loop
+    {sourceModule : Fir.Wasm.Module} {source : Fir.Wasm.Function}
+    {labels : List FVarId} {label : FVarId}
+    {sourceBody : List Fir.Wasm.Instruction} {targetBody : Wasm.Program}
+    (bodyAdapted : instructions sourceModule source (label :: labels)
+      sourceBody = .ok targetBody) :
+    instruction sourceModule source labels (.loop label sourceBody) =
+      .ok (.loop 0 0 targetBody) := by
+  simp [instruction, bodyAdapted, Bind.bind, Except.bind, pure, Except.pure]
+
 /-- A resolved source local becomes the same positional Talos local. -/
 theorem instruction_localGet
     {sourceModule : Fir.Wasm.Module} {source : Fir.Wasm.Function}

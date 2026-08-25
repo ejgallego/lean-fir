@@ -803,28 +803,6 @@ theorem wp_stringLiteral_let
   exact continued
 
 /--
-The terminating Talos adapter distributes over symbolic instruction
-concatenation. This is the sequence equation needed to connect each local W4
-rule to the recursively compiled continuation.
--/
-theorem instructions_append
-    (sourceModule : Fir.Wasm.Module) (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId)
-    (left right : List Fir.Wasm.Instruction) :
-    instructions sourceModule sourceFunction labels (left ++ right) =
-      (do
-        let targetLeft ←
-          instructions sourceModule sourceFunction labels left
-        let targetRight ←
-          instructions sourceModule sourceFunction labels right
-        return targetLeft ++ targetRight) := by
-  induction left with
-  | nil =>
-      simp [instructions]
-  | cons head tail ih =>
-      simp [instructions, ih]
-
-/--
 A successfully resolved symbolic `local.get` sequence adapts pointwise to the
 numeric sequence consumed by `wp_localGets`, at any surrounding label depth.
 -/
