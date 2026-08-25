@@ -427,6 +427,24 @@ at the representative workload boundary: the next investigation is the
 dominant `Zip.Native.Deflate.lzMatchP` body and its ownership traffic, not
 further unprofiled comparison inlining.
 
+An upstream-shaped checked-increment factoring experiment was also rejected
+for this performance lane. It let each compiler-generated one-reference
+wrapper classify tagged immediates and sent heap references to the complete
+shared `fir_inc_once` implementation. This consolidated duplicated heap logic:
+the raw frontier fell from 918,680 to 820,724 bytes (-10.7%) and the final
+zero-import module from 478,669 to 414,781 bytes (-13.3%). The final function
+count rose from 504 to 505 because the 103-byte cold helper remained alongside
+the 15-byte `fir_inc_0` wrapper.
+
+Two artifact-bound screening profiles moved `fir_inc_0` from a 2.70% median
+Wasm-self share to 0.16%; `fir_inc_once` contributed another 0.16%. However,
+thirty-two order-balanced fresh-process pairs were elapsed-time neutral:
+baseline and candidate medians were 40.77 ms and 40.70 ms, the paired median
+was +0.05 ms, and exactly 16/32 pairs improved. Exact compressed output and the
+flat 9,237,304-byte frontier were unchanged. The emitter change was therefore
+discarded under the lane's representative-performance acceptance rule; its
+code-size result remains evidence for a future size-oriented policy.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not
