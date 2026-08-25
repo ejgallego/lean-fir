@@ -75,34 +75,37 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   layout, semantic ABI, ownership contract, or generic lowering contract
   changed. Consumer package contracts and canonical pointers have not yet
   advanced.
-- Current generation/convergence checkpoint: the mandatory typed resident
-  call-site signature registry and tagged `Nat.decLt`, saturating `Nat.sub`,
-  and nonoverflowing `Nat.mul` caller paths are accepted at `72eaf6f3`, with
-  the durable rejected `Nat.decLe` experiment at `04f6d1d1`. Every rewrite
-  fails closed on missing, duplicate, or signature-incompatible registration;
-  heap, mixed, and overflow cases retain the complete arbitrary-precision
-  helpers. Eight balanced level-6 pairs improve 8/8 from 64.12 ms to 52.55 ms
-  (about 18%) while the exact zero-import module grows from 454,918 to 478,669
-  bytes. The separate checked-increment factoring experiment is rejected at
-  `3531014a`: it shrank the candidate module to 414,781 bytes but was elapsed-
-  time neutral at 40.77 ms versus 40.70 ms, paired median +0.05 ms, with
-  16/32 wins. No emitter change remains. W7 exposes the unchanged production
-  `decrementOnceFunction` itself at `0f351de8`, definitionally tying W6 to the
-  helper installed by `internalizeReleases` without a copied body or trusted
-  certificate. Lean Beam, the 54-job emitter/linker cone, `make check` at 725
-  unique cases and 2,157/2,157 comparisons, and all 3,172 Talos jobs pass.
-  Current W7 tracked state is `27936d0f`. Exact consumer ratchets are accepted
-  at `00c69878` and `9813e9c8`. The clean-current zero-import packages are:
+- Current generation/convergence checkpoint: W7-2's fixed-width i32 result
+  retyping winner is accepted at integrated functional head `40456cf4`
+  (original `499d41a0`), with exact consumer ratchets at `3fb8f4eb`.
+  UInt8/UInt16/UInt32 results, Boolean decisions, and object/tagged conversions
+  preserve their physical lane through `i64.extend_i32_u` / `i32.wrap_i64`
+  instead of borrowing linear-memory address zero. The i64 path, helper
+  signatures, validation/masks, ABI, layouts, ownership, symbolic surface,
+  and source/pre-optimization inventories are unchanged. Thirty-two balanced
+  level-6 pairs move from 41.50 ms to 39.07 ms, paired median -2.15 ms (-5.3%)
+  with 21/32 wins. Exact output and the flat 9,237,304-byte frontier remain
+  unchanged. Complete raw Wasm decreases from 414,753 to 367,176 bytes and
+  from 504 to 501 final functions; `lzMatchP` decreases from 36,982 to 31,706
+  bytes, 18,123 to 15,869 instructions, and 1,056 to 272 memory operations.
+  Lean Beam, the 54-job emitter/linker cone, `make check` at 726 cases and
+  2,160/2,160 comparisons, and all 3,172 Talos jobs pass. The exhaustive W7
+  artifact evidence passes deterministic prettyM generation, Node/package and
+  ownership checks, 717 native/LCNF/V8 cases and 2,151/2,151 comparisons, the
+  concrete audit at 654 executed plus 63 exact ByteArray blockers, and Chrome
+  Worker/Fetch. Acceptance repairs `afe1ba12` and `a528ac47` keep selected
+  closure and concrete blocker inventories exact; bug cards
+  `FIR-BUG-wasm-none-exhaustive-pretty-closed-dispatch-ratchet` and
+  `FIR-BUG-wasm-none-mutual-tail-byte-array-blocker-ratchet` are fixed with no
+  semantic mismatch. The clean-current module-owned zero-import packages are:
   styled prettyM, 83,996 bytes, SHA-256
   `fc61301d946b1596ad08c9b20d51d2e1f68d60ca0c04b0f9d56e298c2ec6408d`;
-  stored lean-zip, 12,678 bytes, SHA-256
-  `ea2172a2fcce26cdc292deb9a97fc70789bb85786dace69864e838877096052a`;
-  Level-1 lean-zip, 195,273 bytes, SHA-256
-  `b124270a8b38e4f43d85df08a3e4970d6c8b94e5b5b86f3a8f39f591693260e7`;
-  and raw lean-zip, 414,753 bytes, SHA-256
-  `3623bb8496127bb9115cdef57949019a268432d4f9c4ca7344e425e3944e84ed`.
-  The complete deterministic prettyM and lean-zip gates, Node smoke, Chrome,
-  checksum, cache/scratch ownership, and umbrella repository checks pass.
+  stored lean-zip, 12,418 bytes, SHA-256
+  `3343c2d1c2656c19ceac6c19a6c7cca0162f96e6d28929999f70dba465e6a8f0`;
+  Level-1 lean-zip, 193,661 bytes, SHA-256
+  `ad76031185f4bbef644066bb944f214500f70a2bcc9bf191bf311504b978339d`;
+  and raw lean-zip, 367,176 bytes, SHA-256
+  `63426392249011cf27cf2fc56fcb1caeb6ffd7f84101da24d2f8fbfe7e0efd59`.
 - Accepted S20 ByteArray mutual-tail fidelity: functional head `a3029a5a` is
   linked through clean tracked handoff `bfeb41d1`, directly on W7 proof-surface
   base `5cb4ab0d`. A runner-supplied ByteArray and repeated aliases cross three
