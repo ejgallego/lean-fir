@@ -286,10 +286,19 @@ def decrementOnceProgram (persistent lastReference : Wasm.Program) :
       .iff 0 0 (alignedReleaseProgram persistent lastReference)
         [.unreachable]]]]
 
-/-- The early ordinary shared-reference arm probes the terminal header word,
-loads only flags and the reference count, writes exactly `refCount - 1`, and
-returns.  Neither cold branch is interpreted. -/
-theorem wp_liveReleaseProgram_aboveOne
+/-- Postcondition for branch proofs that deliberately terminate the current
+function.  It excludes fallthrough and structured breaks, while treating a
+normal return and a trap uniformly through the caller's assertion. -/
+def TerminalPost {host : Type} (Q : Wasm.Assertion host) :
+    Wasm.Assertion host
+  | continuation@(.Return _ _) => Q continuation
+  | continuation@(.Trap _ _) => Q continuation
+  | _ => False
+
+/-- Common resident-release prefix for an ordinary live object.  It validates
+the complete header, selects the nonpersistent arm, loads the reference count,
+and exposes the exact counted frame to the branch-specific proof. -/
+theorem wp_liveReleaseProgram_ordinary
     {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
     {Q : Wasm.Assertion host} {store : Wasm.Store host}
     {object check flags descriptor refCount : UInt32}
@@ -305,11 +314,16 @@ theorem wp_liveReleaseProgram_aboveOne
         store.mem.pages * wasmPageBytes))
     (refCountRead : store.mem.read32
       (object + UInt32.ofNat headerRefCountOffset) = refCount)
-    (nonzero : refCount ≠ 0)
-    (oneLt : (1 : UInt32) < refCount)
-    (returned : Q (.Return
-      (ResidentMemoryRel.write32Store store
-        (object + UInt32.ofNat headerRefCountOffset) (refCount - 1)) [])) :
+    (countBody : Wasm.wp module [
+      .localGet refCountIndex,
+      .const 0,
+      .eq,
+      .iff 0 0 [.unreachable] [
+        .const 1,
+        .localGet refCountIndex,
+        .ltU,
+        .iff 0 0 decrementAboveOneProgram lastReference]] (TerminalPost Q) store
+          (countedLocals object check flags descriptor refCount) env) :
     Wasm.wp module (liveReleaseProgram persistent lastReference) Q store
       (liveEntry object check flags) env := by
   have entryAddress (values : List Wasm.Value) :
@@ -336,12 +350,6 @@ theorem wp_liveReleaseProgram_aboveOne
           values := .i32 refCount :: values } := by rfl
   have probedValues :
       (probedLocals object check flags descriptor).values = [] := by rfl
-  have countedAddress (values : List Wasm.Value) :
-      ({ countedLocals object check flags descriptor refCount with values } :
-        Wasm.Locals).get addressIndex = some (.i32 object) := by rfl
-  have countedRefCount (values : List Wasm.Value) :
-      ({ countedLocals object check flags descriptor refCount with values } :
-        Wasm.Locals).get refCountIndex = some (.i32 refCount) := by rfl
   have aux3InBounds' :
       ¬(object.toNat + (UInt32.ofNat headerAux3Offset).toNat + 4 >
         store.mem.pages * 65536) := by
@@ -375,16 +383,48 @@ theorem wp_liveReleaseProgram_aboveOne
     Wasm.wp_load32_cons]
   rw [if_neg refCountInBounds', refCountRead]
   simp only [Wasm.wp_localSet_cons, refCountSet, probedValues]
-  change Wasm.wp module [
-    .localGet refCountIndex,
-    .const 0,
-    .eq,
-    .iff 0 0 [.unreachable] [
-      .const 1,
-      .localGet refCountIndex,
-      .ltU,
-      .iff 0 0 decrementAboveOneProgram lastReference]] _ store
-        (countedLocals object check flags descriptor refCount) env
+  apply Wasm.wp.conseq _ countBody
+  intro continuation terminal
+  cases continuation <;> simp_all [TerminalPost]
+
+/-- The early ordinary shared-reference arm probes the terminal header word,
+loads only flags and the reference count, writes exactly `refCount - 1`, and
+returns.  Neither cold branch is interpreted. -/
+theorem wp_liveReleaseProgram_aboveOne
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {object check flags descriptor refCount : UInt32}
+    {persistent lastReference : Wasm.Program}
+    (aux3InBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux3Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (aux3Read : store.mem.read32
+      (object + UInt32.ofNat headerAux3Offset) = descriptor)
+    (ordinary : flags &&& persistentFlag ≠ persistentFlag)
+    (refCountInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerRefCountOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (refCountRead : store.mem.read32
+      (object + UInt32.ofNat headerRefCountOffset) = refCount)
+    (nonzero : refCount ≠ 0)
+    (oneLt : (1 : UInt32) < refCount)
+    (returned : Q (.Return
+      (ResidentMemoryRel.write32Store store
+        (object + UInt32.ofNat headerRefCountOffset) (refCount - 1)) [])) :
+    Wasm.wp module (liveReleaseProgram persistent lastReference) Q store
+      (liveEntry object check flags) env := by
+  have countedAddress (values : List Wasm.Value) :
+      ({ countedLocals object check flags descriptor refCount with values } :
+        Wasm.Locals).get addressIndex = some (.i32 object) := by rfl
+  have countedRefCount (values : List Wasm.Value) :
+      ({ countedLocals object check flags descriptor refCount with values } :
+        Wasm.Locals).get refCountIndex = some (.i32 refCount) := by rfl
+  have refCountInBounds' :
+      ¬(object.toNat + (UInt32.ofNat headerRefCountOffset).toNat + 4 >
+        store.mem.pages * 65536) := by
+    simpa [wasmPageBytes] using refCountInBounds
+  apply wp_liveReleaseProgram_ordinary aux3InBounds aux3Read ordinary
+    refCountInBounds refCountRead
   simp only [Wasm.wp_localGet_cons, countedRefCount, Wasm.wp_const_cons,
     Wasm.wp_eq_cons, if_neg nonzero]
   apply Wasm.wp_iff_cons rfl
@@ -398,8 +438,44 @@ theorem wp_liveReleaseProgram_aboveOne
   simp only [List.take_zero, List.drop_zero, List.nil_append,
     Wasm.wp_localGet_cons, countedAddress, countedRefCount, Wasm.wp_const_cons,
     Wasm.wp_sub_cons, Wasm.wp_store32_cons, refCountInBounds',
-    Wasm.wp_ret_cons]
+    Wasm.wp_ret_cons, TerminalPost]
   exact returned
+
+/-- An ordinary live header whose physical reference count is zero follows
+the resident helper's explicit underflow trap, without entering either the
+shared-decrement or last-reference body. -/
+theorem wp_liveReleaseProgram_underflow
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {object check flags descriptor refCount : UInt32}
+    {persistent lastReference : Wasm.Program}
+    (aux3InBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux3Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (aux3Read : store.mem.read32
+      (object + UInt32.ofNat headerAux3Offset) = descriptor)
+    (ordinary : flags &&& persistentFlag ≠ persistentFlag)
+    (refCountInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerRefCountOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (refCountRead : store.mem.read32
+      (object + UInt32.ofNat headerRefCountOffset) = refCount)
+    (zero : refCount = 0)
+    (trapped : Q (.Trap store "unreachable")) :
+    Wasm.wp module (liveReleaseProgram persistent lastReference) Q store
+      (liveEntry object check flags) env := by
+  have countedRefCount (values : List Wasm.Value) :
+      ({ countedLocals object check flags descriptor refCount with values } :
+        Wasm.Locals).get refCountIndex = some (.i32 refCount) := by rfl
+  apply wp_liveReleaseProgram_ordinary aux3InBounds aux3Read ordinary
+    refCountInBounds refCountRead
+  simp only [Wasm.wp_localGet_cons, countedRefCount, Wasm.wp_const_cons,
+    Wasm.wp_eq_cons]
+  rw [if_pos zero]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_pos (by decide : (1 : UInt32) ≠ 0)]
+  simpa only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_unreachable_cons, TerminalPost] using trapped
 
 /-- An ordinary persistent allocation returns without changing memory.  The
 only nontrivial subcase in W7's branch is the promoted-Nat encoding, excluded
@@ -567,11 +643,11 @@ theorem wp_liveReleaseProgram_persistent
 
 /-- Reusable entry theorem for every well-formed live heap object.  It
 discharges the tagged/null/alignment gates and the raw-flags liveness check,
-then hands the exact live-object frame to a branch-specific proof. -/
-theorem wp_decrementOnceProgram_live_return
+then hands the exact live-object frame and caller postcondition to a
+branch-specific proof. -/
+theorem wp_decrementOnceProgram_live
     {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
     {Q : Wasm.Assertion host} {store : Wasm.Store host}
-    {resultStore : Wasm.Store host} {results : List Wasm.Value}
     {object check flags : UInt32}
     {persistent lastReference : Wasm.Program}
     (taggedClear : (1 : UInt32) &&& object = 0)
@@ -585,10 +661,8 @@ theorem wp_decrementOnceProgram_live_return
       (object + UInt32.ofNat headerFlagsOffset) = flags)
     (liveSet : liveFlag &&& flags = liveFlag)
     (liveBody : Wasm.wp module
-      (liveReleaseProgram persistent lastReference)
-      (fun continuation => continuation = .Return resultStore results) store
-      (liveEntry object check flags) env)
-    (returned : Q (.Return resultStore results)) :
+      (liveReleaseProgram persistent lastReference) (TerminalPost Q) store
+      (liveEntry object check flags) env) :
     Wasm.wp module (decrementOnceProgram persistent lastReference) Q store
       (decrementEntry object check) env := by
   have entryObject (values : List Wasm.Value) :
@@ -650,8 +724,40 @@ theorem wp_decrementOnceProgram_live_return
   rw [if_pos (by decide : (1 : UInt32) ≠ 0)]
   apply Wasm.wp.conseq _ liveBody
   intro continuation terminal
+  cases continuation <;> simp_all [TerminalPost]
+
+/-- Terminal-return specialization of the common live-entry theorem.  Most
+semantic refinements expose an exact final store first and then discharge the
+caller's postcondition at that result. -/
+theorem wp_decrementOnceProgram_live_return
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {resultStore : Wasm.Store host} {results : List Wasm.Value}
+    {object check flags : UInt32}
+    {persistent lastReference : Wasm.Program}
+    (taggedClear : (1 : UInt32) &&& object = 0)
+    (objectNonzero : object ≠ 0)
+    (alignmentClear :
+      UInt32.ofNat (target.heapAlignment - 1) &&& object = 0)
+    (flagsInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerFlagsOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (flagsRead : store.mem.read32
+      (object + UInt32.ofNat headerFlagsOffset) = flags)
+    (liveSet : liveFlag &&& flags = liveFlag)
+    (liveBody : Wasm.wp module
+      (liveReleaseProgram persistent lastReference)
+      (fun continuation => continuation = .Return resultStore results) store
+      (liveEntry object check flags) env)
+    (returned : Q (.Return resultStore results)) :
+    Wasm.wp module (decrementOnceProgram persistent lastReference) Q store
+      (decrementEntry object check) env := by
+  apply wp_decrementOnceProgram_live taggedClear objectNonzero alignmentClear
+    flagsInBounds flagsRead liveSet
+  apply Wasm.wp.conseq _ liveBody
+  intro continuation terminal
   subst continuation
-  exact returned
+  simpa [TerminalPost] using returned
 
 /-- Complete function-entry execution for a represented persistent allocation.
 It is an exact no-op on the resident memory and returns normally. -/
@@ -813,6 +919,85 @@ theorem wp_decrementOnceProgram_misaligned
   simpa only [List.take_zero, List.drop_zero, List.nil_append,
     Wasm.wp_unreachable_cons] using trapped
 
+/-- A well-addressed but nonlive header traps at the liveness gate after the
+single flags load.  No terminal-header probe or ownership branch is entered. -/
+theorem wp_decrementOnceProgram_notLive
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {object check flags : UInt32}
+    {persistent lastReference : Wasm.Program}
+    (taggedClear : (1 : UInt32) &&& object = 0)
+    (objectNonzero : object ≠ 0)
+    (alignmentClear :
+      UInt32.ofNat (target.heapAlignment - 1) &&& object = 0)
+    (flagsInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerFlagsOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (flagsRead : store.mem.read32
+      (object + UInt32.ofNat headerFlagsOffset) = flags)
+    (notLive : liveFlag &&& flags ≠ liveFlag)
+    (trapped : Q (.Trap store "unreachable")) :
+    Wasm.wp module (decrementOnceProgram persistent lastReference) Q store
+      (decrementEntry object check) env := by
+  have entryObject (values : List Wasm.Value) :
+      ({ decrementEntry object check with values } : Wasm.Locals).get
+        objectIndex = some (.i32 object) := by rfl
+  have addressSet (values : List Wasm.Value) :
+      ({ decrementEntry object check with
+          values := .i32 object :: values } : Wasm.Locals).set?
+            addressIndex (.i32 object) =
+        some { liveEntry object check 0 with
+          values := .i32 object :: values } := by rfl
+  have entryValues : (decrementEntry object check).values = [] := by rfl
+  have zeroFlagsAddressBare :
+      ({ params := (liveEntry object check 0).params
+         locals := (liveEntry object check 0).locals } : Wasm.Locals).get
+        addressIndex = some (.i32 object) := by rfl
+  have flagsSet (values : List Wasm.Value) :
+      ({ liveEntry object check 0 with
+          values := .i32 flags :: values } : Wasm.Locals).set?
+            flagsIndex (.i32 flags) =
+        some { liveEntry object check flags with
+          values := .i32 flags :: values } := by rfl
+  have liveFlagsBare :
+      ({ params := (liveEntry object check flags).params
+         locals := (liveEntry object check flags).locals } : Wasm.Locals).get
+        flagsIndex = some (.i32 flags) := by rfl
+  have flagsInBounds' :
+      ¬(object.toNat + (UInt32.ofNat headerFlagsOffset).toNat + 4 >
+        store.mem.pages * 65536) := by
+    simpa [wasmPageBytes] using flagsInBounds
+  unfold decrementOnceProgram
+  simp only [Wasm.wp_localGet_cons, entryObject, Wasm.wp_const_cons,
+    Wasm.wp_and_cons]
+  rw [taggedClear]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_localGet_cons, entryObject, Wasm.wp_const_cons, Wasm.wp_eq_cons]
+  rw [if_neg objectNonzero]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_localGet_cons, entryObject, Wasm.wp_const_cons, Wasm.wp_and_cons]
+  rw [alignmentClear]
+  simp only [Wasm.wp_eq_cons, if_true]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_pos (by decide : (1 : UInt32) ≠ 0)]
+  unfold alignedReleaseProgram
+  simp only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_localGet_cons, entryObject, Wasm.wp_const_cons, Wasm.wp_add_cons,
+    UInt32.zero_add, Wasm.wp_localSet_cons, addressSet, entryValues,
+    zeroFlagsAddressBare, Wasm.wp_load32_cons]
+  rw [if_neg flagsInBounds', flagsRead]
+  simp only [flagsSet, liveFlagsBare, Wasm.wp_const_cons, Wasm.wp_and_cons,
+    Wasm.wp_eq_cons]
+  rw [if_neg notLive]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simpa only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_unreachable_cons] using trapped
+
 /-- The complete public `fir_dec_once` hot path reaches the same exact
 single-store result.  This includes the tagged/null/alignment gates, raw flags
 load, and liveness test that precede the live-arm theorem above. -/
@@ -854,6 +1039,45 @@ theorem wp_decrementOnceProgram_aboveOne
   apply wp_liveReleaseProgram_aboveOne aux3InBounds aux3Read ordinary
     refCountInBounds refCountRead nonzero oneLt
   rfl
+
+/-- Complete entry-to-trap execution for an ordinary live object whose
+physical reference count is already zero.  The helper detects the malformed
+ownership state before entering the last-reference body. -/
+theorem wp_decrementOnceProgram_underflow
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {object check flags descriptor refCount : UInt32}
+    {persistent lastReference : Wasm.Program}
+    (taggedClear : (1 : UInt32) &&& object = 0)
+    (objectNonzero : object ≠ 0)
+    (alignmentClear :
+      UInt32.ofNat (target.heapAlignment - 1) &&& object = 0)
+    (flagsInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerFlagsOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (flagsRead : store.mem.read32
+      (object + UInt32.ofNat headerFlagsOffset) = flags)
+    (liveSet : liveFlag &&& flags = liveFlag)
+    (aux3InBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux3Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (aux3Read : store.mem.read32
+      (object + UInt32.ofNat headerAux3Offset) = descriptor)
+    (ordinary : flags &&& persistentFlag ≠ persistentFlag)
+    (refCountInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerRefCountOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (refCountRead : store.mem.read32
+      (object + UInt32.ofNat headerRefCountOffset) = refCount)
+    (zero : refCount = 0)
+    (trapped : Q (.Trap store "unreachable")) :
+    Wasm.wp module (decrementOnceProgram persistent lastReference) Q store
+      (decrementEntry object check) env := by
+  apply wp_decrementOnceProgram_live taggedClear objectNonzero alignmentClear
+    flagsInBounds flagsRead liveSet
+  apply wp_liveReleaseProgram_underflow aux3InBounds aux3Read ordinary
+    refCountInBounds refCountRead zero
+  simpa [TerminalPost] using trapped
 
 /-- Adjacent checked W6 word stores refine the corresponding Talos stores.
 Unlike the allocator specialization, this statement carries no global or
@@ -1270,6 +1494,86 @@ theorem LiveHeapRel.decrementOnceProgram_aboveOne_refines
     simp [nextCountEq]
   exact ⟨header, result, nextRuntime, headerRead, concreteOperation,
     semanticOperation, finalRelated, canonicalAfter, finalMemory,
+    physicalExecution⟩
+
+/-- A represented live ordinary zero-count cell reaches the same ownership
+fault in the concrete host and FIR semantics, while resident Wasm traps before
+any write or recursive release. -/
+theorem LiveHeapRel.decrementOnceProgram_underflow_refines
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : Fir.LeanIR.Impure.RuntimeState}
+    {location : Fir.LeanIR.Impure.Location} {address : Word32}
+    {cell : Fir.LeanIR.Impure.HeapCell}
+    {descriptors : ClosureDescriptorTable}
+    {persistentProgram lastReference : Wasm.Program}
+    (related : LiveHeapRel state witness runtime)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (exactHeader : CanonicalLiveHeaderRel state address)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : Fir.LeanIR.Impure.findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (ordinary : cell.persistent = false)
+    (zero : cell.rc = 0) (check : Bool) (checkWord : UInt32) :
+    ∃ header,
+      state.readLiveHeader address = .ok header ∧
+      decrementReferenceOnce state address check descriptors =
+        .error (.sourceAddress (.referenceCountUnderflow address)) ∧
+      Fir.LeanIR.Impure.decValueOnce runtime (.object (.heap location)) check =
+        .error (.referenceCountUnderflow location) ∧
+      Wasm.wp module
+        (decrementOnceProgram persistentProgram lastReference)
+        (fun continuation => continuation = .Trap store "unreachable") store
+        (decrementEntry (UInt32.ofNat address.value) checkWord) env := by
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  obtain ⟨header, headerRead, _, _, headerPersistentRel,
+      headerRefCountRel⟩ := targetRelated.ownershipHeader
+  have exact := exactHeader header headerRead
+  have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
+    Nat.le_trans targetRelated.headerOwned related.frontier.cursorInBounds
+  obtain ⟨heap, _, headerLive, _, _, _⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts state address header
+      headerRead
+  have entry := LiveHeaderResidentFacts.ofRelations memoryRelated exact
+    headerInBounds heap headerLive
+  have headerOrdinary : header.persistent = false :=
+    headerPersistentRel.trans ordinary
+  have physicalOrdinary :
+      header.flags &&& persistentFlag ≠ persistentFlag := by
+    cases liveValue : header.live
+    · simp [Header.flags, headerOrdinary, liveValue, persistentFlag]
+    · simp [Header.flags, headerOrdinary, liveValue, persistentFlag]
+      decide
+  have physicalZero : header.refCount = 0 := by
+    apply UInt32.toNat.inj
+    simpa [zero] using headerRefCountRel
+  have concreteOperation :=
+    targetRelated.decrementReferenceOnce_underflow_eq ordinary zero check
+      descriptors
+  have semanticFuel :=
+    targetRelated.decLocationFuel_underflow_eq ordinary zero runtime location
+      found runtime.heap.length
+  have semanticOperation :
+      Fir.LeanIR.Impure.decValueOnce runtime (.object (.heap location)) check =
+        .error (.referenceCountUnderflow location) := by
+    simpa [Fir.LeanIR.Impure.decValueOnce,
+      Fir.LeanIR.Impure.decLocation] using semanticFuel
+  have physicalExecution :
+      Wasm.wp module (decrementOnceProgram persistentProgram lastReference)
+        (fun continuation => continuation = .Trap store "unreachable") store
+        (decrementEntry (UInt32.ofNat address.value) checkWord) env := by
+    apply wp_decrementOnceProgram_underflow entry.taggedClear
+      entry.objectNonzero entry.alignmentClear entry.flagsInBounds
+      entry.flagsRead entry.liveSet entry.aux3InBounds entry.aux3Read
+      physicalOrdinary entry.refCountInBounds entry.refCountRead physicalZero
+    rfl
+  exact ⟨header, headerRead, concreteOperation, semanticOperation,
     physicalExecution⟩
 
 /-- A represented persistent allocation is an exact no-op in all three
