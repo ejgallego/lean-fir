@@ -69,6 +69,41 @@ def probedLocals (object check flags descriptor : UInt32) : Wasm.Locals := {
     .i32 0]
   values := [] }
 
+/-- Persistent arm after loading the concrete object-kind lane. -/
+def persistentKindLocals
+    (object check flags descriptor kind : UInt32) : Wasm.Locals := {
+  params := [.i32 object, .i32 check]
+  locals := [
+    .i32 object,
+    .i32 kind,
+    .i32 0,
+    .i32 0,
+    .i32 descriptor,
+    .i32 0,
+    .i32 flags,
+    .i32 0,
+    .i32 0,
+    .i32 0]
+  values := [] }
+
+/-- Persistent arm after loading both physical lanes used to distinguish a
+promoted tagged natural from an ordinary persistent allocation. -/
+def persistentMarkerLocals
+    (object check flags descriptor kind marker : UInt32) : Wasm.Locals := {
+  params := [.i32 object, .i32 check]
+  locals := [
+    .i32 object,
+    .i32 kind,
+    .i32 0,
+    .i32 0,
+    .i32 descriptor,
+    .i32 0,
+    .i32 flags,
+    .i32 marker,
+    .i32 0,
+    .i32 0]
+  values := [] }
+
 /-- Ordinary-arm frame after the reference count has been loaded. -/
 def countedLocals (object check flags descriptor refCount : UInt32) :
     Wasm.Locals := {
@@ -93,6 +128,54 @@ allocation and preserve it across verified resident transitions. -/
 def CanonicalLiveHeaderRel (state : MemoryState) (address : Word32) : Prop :=
   ∀ header, state.readLiveHeader address = .ok header →
     Header.ExactWords state.memory address header
+
+/-- Branch-independent physical facts for entering resident release on one
+canonical live heap header.  Packaging these once keeps the semantic branch
+proofs focused on ownership behavior rather than bit-level address gates. -/
+structure LiveHeaderResidentFacts
+    (memory : Wasm.Mem) (address : Word32) (header : Header) : Prop where
+  taggedClear :
+    (1 : UInt32) &&& UInt32.ofNat address.value = 0
+  objectNonzero : UInt32.ofNat address.value ≠ 0
+  alignmentClear :
+    UInt32.ofNat (target.heapAlignment - 1) &&&
+      UInt32.ofNat address.value = 0
+  flagsInBounds :
+    ¬((UInt32.ofNat address.value).toNat +
+      (UInt32.ofNat headerFlagsOffset).toNat + 4 >
+      memory.pages * wasmPageBytes)
+  flagsRead : memory.read32
+    (UInt32.ofNat address.value + UInt32.ofNat headerFlagsOffset) =
+      header.flags
+  liveSet : liveFlag &&& header.flags = liveFlag
+  kindInBounds :
+    ¬((UInt32.ofNat address.value).toNat +
+      (UInt32.ofNat headerKindOffset).toNat + 4 >
+      memory.pages * wasmPageBytes)
+  kindRead : memory.read32
+    (UInt32.ofNat address.value + UInt32.ofNat headerKindOffset) =
+      header.kind.code
+  refCountInBounds :
+    ¬((UInt32.ofNat address.value).toNat +
+      (UInt32.ofNat headerRefCountOffset).toNat + 4 >
+      memory.pages * wasmPageBytes)
+  refCountRead : memory.read32
+    (UInt32.ofNat address.value + UInt32.ofNat headerRefCountOffset) =
+      header.refCount
+  aux0InBounds :
+    ¬((UInt32.ofNat address.value).toNat +
+      (UInt32.ofNat headerAux0Offset).toNat + 4 >
+      memory.pages * wasmPageBytes)
+  aux0Read : memory.read32
+    (UInt32.ofNat address.value + UInt32.ofNat headerAux0Offset) =
+      header.aux0
+  aux3InBounds :
+    ¬((UInt32.ofNat address.value).toNat +
+      (UInt32.ofNat headerAux3Offset).toNat + 4 >
+      memory.pages * wasmPageBytes)
+  aux3Read : memory.read32
+    (UInt32.ofNat address.value + UInt32.ofNat headerAux3Offset) =
+      header.aux3
 
 /-- Exact Talos spelling of W7's full-header terminal-word probe. -/
 def probeCompleteHeaderProgram : Wasm.Program := [
@@ -145,6 +228,26 @@ def decrementEntry (object check : UInt32) : Wasm.Locals := {
 def checkedNoopProgram : Wasm.Program := [
   .localGet checkIndex,
   .iff 0 0 [.ret] [.unreachable]]
+
+/-- Exact Talos spelling of W7's persistent-object branch.  Ordinary
+persistent objects return unchanged; the distinguished promoted-Nat encoding
+retains the checked tagged-value behavior. -/
+def persistentReleaseProgram : Wasm.Program := [
+  .localGet addressIndex,
+  .load32 (UInt32.ofNat headerKindOffset),
+  .localSet kindIndex,
+  .localGet addressIndex,
+  .load32 (UInt32.ofNat headerAux0Offset),
+  .localSet markerIndex,
+  .localGet kindIndex,
+  .const ObjectKind.natural.code,
+  .eq,
+  .iff 0 0 [
+    .localGet addressIndex,
+    .load32 (UInt32.ofNat headerAux0Offset),
+    .const promotedTagMarker,
+    .eq,
+    .iff 0 0 checkedNoopProgram [.ret]] [.ret]]
 
 /-- Exact target spelling of the aligned live-object dispatch. -/
 def alignedReleaseProgram (persistent lastReference : Wasm.Program) :
@@ -298,13 +401,178 @@ theorem wp_liveReleaseProgram_aboveOne
     Wasm.wp_ret_cons]
   exact returned
 
-/-- The complete public `fir_dec_once` hot path reaches the same exact
-single-store result.  This includes the tagged/null/alignment gates, raw flags
-load, and liveness test that precede the live-arm theorem above. -/
-theorem wp_decrementOnceProgram_aboveOne
+/-- An ordinary persistent allocation returns without changing memory.  The
+only nontrivial subcase in W7's branch is the promoted-Nat encoding, excluded
+here by its two exact physical discriminator lanes. -/
+theorem wp_persistentReleaseProgram_notPromoted
     {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
     {Q : Wasm.Assertion host} {store : Wasm.Store host}
-    {object check flags descriptor refCount : UInt32}
+    {object check flags descriptor kind marker : UInt32}
+    (kindInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerKindOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (kindRead : store.mem.read32
+      (object + UInt32.ofNat headerKindOffset) = kind)
+    (markerInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux0Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (markerRead : store.mem.read32
+      (object + UInt32.ofNat headerAux0Offset) = marker)
+    (notPromoted :
+      kind ≠ ObjectKind.natural.code ∨ marker ≠ promotedTagMarker)
+    (returned : Q (.Return store [])) :
+    Wasm.wp module persistentReleaseProgram Q store
+      (probedLocals object check flags descriptor) env := by
+  have probedAddress (values : List Wasm.Value) :
+      ({ probedLocals object check flags descriptor with values } :
+        Wasm.Locals).get addressIndex = some (.i32 object) := by rfl
+  have kindSet (values : List Wasm.Value) :
+      ({ probedLocals object check flags descriptor with
+          values := .i32 kind :: values } : Wasm.Locals).set?
+            kindIndex (.i32 kind) =
+        some { persistentKindLocals object check flags descriptor kind with
+          values := .i32 kind :: values } := by rfl
+  have probedValues :
+      (probedLocals object check flags descriptor).values = [] := by rfl
+  have kindAddress (values : List Wasm.Value) :
+      ({ persistentKindLocals object check flags descriptor kind with values } :
+        Wasm.Locals).get addressIndex = some (.i32 object) := by rfl
+  have markerSet (values : List Wasm.Value) :
+      ({ persistentKindLocals object check flags descriptor kind with
+          values := .i32 marker :: values } : Wasm.Locals).set?
+            markerIndex (.i32 marker) =
+        some { persistentMarkerLocals object check flags descriptor kind marker with
+          values := .i32 marker :: values } := by rfl
+  have kindValues :
+      (persistentKindLocals object check flags descriptor kind).values = [] := by
+    rfl
+  have markerAddress (values : List Wasm.Value) :
+      ({ persistentMarkerLocals object check flags descriptor kind marker with values } :
+        Wasm.Locals).get addressIndex = some (.i32 object) := by rfl
+  have markerKind (values : List Wasm.Value) :
+      ({ persistentMarkerLocals object check flags descriptor kind marker with values } :
+        Wasm.Locals).get kindIndex = some (.i32 kind) := by rfl
+  have markerValues :
+      (persistentMarkerLocals object check flags descriptor kind marker).values = [] := by
+    rfl
+  have kindInBounds' :
+      ¬(object.toNat + (UInt32.ofNat headerKindOffset).toNat + 4 >
+        store.mem.pages * 65536) := by
+    simpa [wasmPageBytes] using kindInBounds
+  have markerInBounds' :
+      ¬(object.toNat + (UInt32.ofNat headerAux0Offset).toNat + 4 >
+        store.mem.pages * 65536) := by
+    simpa [wasmPageBytes] using markerInBounds
+  unfold persistentReleaseProgram
+  simp only [Wasm.wp_localGet_cons, probedAddress, Wasm.wp_load32_cons]
+  rw [if_neg kindInBounds', kindRead]
+  simp only [Wasm.wp_localSet_cons, kindSet, probedValues,
+    Wasm.wp_localGet_cons, kindAddress, Wasm.wp_load32_cons]
+  rw [if_neg markerInBounds', markerRead]
+  simp only [markerSet, markerKind, Wasm.wp_const_cons, Wasm.wp_eq_cons]
+  by_cases kindNatural : kind = ObjectKind.natural.code
+  · rw [if_pos kindNatural]
+    apply Wasm.wp_iff_cons rfl
+    rw [if_pos (by decide : (1 : UInt32) ≠ 0)]
+    simp only [List.take_zero, List.drop_zero, List.nil_append,
+      Wasm.wp_localGet_cons, markerAddress, Wasm.wp_load32_cons]
+    rw [if_neg markerInBounds', markerRead]
+    simp only [Wasm.wp_const_cons, Wasm.wp_eq_cons]
+    have markerNot : marker ≠ promotedTagMarker := by
+      rcases notPromoted with kindNot | markerNot
+      · exact False.elim (kindNot kindNatural)
+      · exact markerNot
+    rw [if_neg markerNot]
+    apply Wasm.wp_iff_cons rfl
+    rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+    simpa only [List.take_zero, List.drop_zero, List.nil_append,
+      Wasm.wp_ret_cons, markerValues] using returned
+  · rw [if_neg kindNatural]
+    apply Wasm.wp_iff_cons rfl
+    rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+    simpa only [List.take_zero, List.drop_zero, List.nil_append,
+      Wasm.wp_ret_cons, markerValues] using returned
+
+/-- The live-object dispatcher selects W7's persistent branch, after retaining
+the same terminal-header probe used by the ordinary path. -/
+theorem wp_liveReleaseProgram_persistent
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {object check flags descriptor kind marker : UInt32}
+    {lastReference : Wasm.Program}
+    (aux3InBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux3Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (aux3Read : store.mem.read32
+      (object + UInt32.ofNat headerAux3Offset) = descriptor)
+    (persistent : flags &&& persistentFlag = persistentFlag)
+    (kindInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerKindOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (kindRead : store.mem.read32
+      (object + UInt32.ofNat headerKindOffset) = kind)
+    (markerInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux0Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (markerRead : store.mem.read32
+      (object + UInt32.ofNat headerAux0Offset) = marker)
+    (notPromoted :
+      kind ≠ ObjectKind.natural.code ∨ marker ≠ promotedTagMarker)
+    (returned : Q (.Return store [])) :
+    Wasm.wp module
+      (liveReleaseProgram persistentReleaseProgram lastReference) Q store
+      (liveEntry object check flags) env := by
+  have entryAddress (values : List Wasm.Value) :
+      ({ liveEntry object check flags with values } : Wasm.Locals).get
+          addressIndex = some (.i32 object) := by rfl
+  have descriptorSet (values : List Wasm.Value) :
+      ({ liveEntry object check flags with
+          values := .i32 descriptor :: values } : Wasm.Locals).set?
+            descriptorIndex (.i32 descriptor) =
+        some { probedLocals object check flags descriptor with
+          values := .i32 descriptor :: values } := by rfl
+  have entryValues : (liveEntry object check flags).values = [] := by rfl
+  have probedFlags (values : List Wasm.Value) :
+      ({ probedLocals object check flags descriptor with values } :
+        Wasm.Locals).get flagsIndex = some (.i32 flags) := by rfl
+  have aux3InBounds' :
+      ¬(object.toNat + (UInt32.ofNat headerAux3Offset).toNat + 4 >
+        store.mem.pages * 65536) := by
+    simpa [wasmPageBytes] using aux3InBounds
+  have persistent' : persistentFlag &&& flags = persistentFlag := by
+    simpa [UInt32.and_comm] using persistent
+  unfold liveReleaseProgram probeCompleteHeaderProgram
+  simp only [List.cons_append, List.nil_append, Wasm.wp_localGet_cons,
+    entryAddress, Wasm.wp_load32_cons]
+  rw [if_neg aux3InBounds', aux3Read]
+  simp only [Wasm.wp_localSet_cons, descriptorSet, entryValues]
+  change Wasm.wp module [
+    .localGet flagsIndex,
+    .const persistentFlag,
+    .and,
+    .const persistentFlag,
+    .eq,
+    .iff 0 0 persistentReleaseProgram
+      (ordinaryReleaseProgram lastReference)] Q store
+        (probedLocals object check flags descriptor) env
+  simp only [Wasm.wp_localGet_cons, probedFlags, Wasm.wp_const_cons,
+    Wasm.wp_and_cons, Wasm.wp_eq_cons]
+  rw [persistent']
+  simp only [if_true]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_pos (by decide : (1 : UInt32) ≠ 0)]
+  apply wp_persistentReleaseProgram_notPromoted kindInBounds kindRead
+    markerInBounds markerRead notPromoted
+  exact returned
+
+/-- Reusable entry theorem for every well-formed live heap object.  It
+discharges the tagged/null/alignment gates and the raw-flags liveness check,
+then hands the exact live-object frame to a branch-specific proof. -/
+theorem wp_decrementOnceProgram_live_return
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {resultStore : Wasm.Store host} {results : List Wasm.Value}
+    {object check flags : UInt32}
     {persistent lastReference : Wasm.Program}
     (taggedClear : (1 : UInt32) &&& object = 0)
     (objectNonzero : object ≠ 0)
@@ -316,22 +584,11 @@ theorem wp_decrementOnceProgram_aboveOne
     (flagsRead : store.mem.read32
       (object + UInt32.ofNat headerFlagsOffset) = flags)
     (liveSet : liveFlag &&& flags = liveFlag)
-    (aux3InBounds :
-      ¬(object.toNat + (UInt32.ofNat headerAux3Offset).toNat + 4 >
-        store.mem.pages * wasmPageBytes))
-    (aux3Read : store.mem.read32
-      (object + UInt32.ofNat headerAux3Offset) = descriptor)
-    (ordinary : flags &&& persistentFlag ≠ persistentFlag)
-    (refCountInBounds :
-      ¬(object.toNat + (UInt32.ofNat headerRefCountOffset).toNat + 4 >
-        store.mem.pages * wasmPageBytes))
-    (refCountRead : store.mem.read32
-      (object + UInt32.ofNat headerRefCountOffset) = refCount)
-    (nonzero : refCount ≠ 0)
-    (oneLt : (1 : UInt32) < refCount)
-    (returned : Q (.Return
-      (ResidentMemoryRel.write32Store store
-        (object + UInt32.ofNat headerRefCountOffset) (refCount - 1)) [])) :
+    (liveBody : Wasm.wp module
+      (liveReleaseProgram persistent lastReference)
+      (fun continuation => continuation = .Return resultStore results) store
+      (liveEntry object check flags) env)
+    (returned : Q (.Return resultStore results)) :
     Wasm.wp module (decrementOnceProgram persistent lastReference) Q store
       (decrementEntry object check) env := by
   have entryObject (values : List Wasm.Value) :
@@ -391,9 +648,97 @@ theorem wp_decrementOnceProgram_aboveOne
   simp only [Wasm.wp_eq_cons, if_true]
   apply Wasm.wp_iff_cons rfl
   rw [if_pos (by decide : (1 : UInt32) ≠ 0)]
+  apply Wasm.wp.conseq _ liveBody
+  intro continuation terminal
+  subst continuation
+  exact returned
+
+/-- Complete function-entry execution for a represented persistent allocation.
+It is an exact no-op on the resident memory and returns normally. -/
+theorem wp_decrementOnceProgram_persistent
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {object check flags descriptor kind marker : UInt32}
+    {lastReference : Wasm.Program}
+    (taggedClear : (1 : UInt32) &&& object = 0)
+    (objectNonzero : object ≠ 0)
+    (alignmentClear :
+      UInt32.ofNat (target.heapAlignment - 1) &&& object = 0)
+    (flagsInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerFlagsOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (flagsRead : store.mem.read32
+      (object + UInt32.ofNat headerFlagsOffset) = flags)
+    (liveSet : liveFlag &&& flags = liveFlag)
+    (aux3InBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux3Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (aux3Read : store.mem.read32
+      (object + UInt32.ofNat headerAux3Offset) = descriptor)
+    (persistent : flags &&& persistentFlag = persistentFlag)
+    (kindInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerKindOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (kindRead : store.mem.read32
+      (object + UInt32.ofNat headerKindOffset) = kind)
+    (markerInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux0Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (markerRead : store.mem.read32
+      (object + UInt32.ofNat headerAux0Offset) = marker)
+    (notPromoted :
+      kind ≠ ObjectKind.natural.code ∨ marker ≠ promotedTagMarker)
+    (returned : Q (.Return store [])) :
+    Wasm.wp module
+      (decrementOnceProgram persistentReleaseProgram lastReference) Q store
+      (decrementEntry object check) env := by
+  apply wp_decrementOnceProgram_live_return taggedClear objectNonzero
+    alignmentClear flagsInBounds flagsRead liveSet _ returned
+  apply wp_liveReleaseProgram_persistent aux3InBounds aux3Read persistent
+    kindInBounds kindRead markerInBounds markerRead notPromoted
+  rfl
+
+/-- The complete public `fir_dec_once` hot path reaches the same exact
+single-store result.  This includes the tagged/null/alignment gates, raw flags
+load, and liveness test that precede the live-arm theorem above. -/
+theorem wp_decrementOnceProgram_aboveOne
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {object check flags descriptor refCount : UInt32}
+    {persistent lastReference : Wasm.Program}
+    (taggedClear : (1 : UInt32) &&& object = 0)
+    (objectNonzero : object ≠ 0)
+    (alignmentClear :
+      UInt32.ofNat (target.heapAlignment - 1) &&& object = 0)
+    (flagsInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerFlagsOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (flagsRead : store.mem.read32
+      (object + UInt32.ofNat headerFlagsOffset) = flags)
+    (liveSet : liveFlag &&& flags = liveFlag)
+    (aux3InBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux3Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (aux3Read : store.mem.read32
+      (object + UInt32.ofNat headerAux3Offset) = descriptor)
+    (ordinary : flags &&& persistentFlag ≠ persistentFlag)
+    (refCountInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerRefCountOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (refCountRead : store.mem.read32
+      (object + UInt32.ofNat headerRefCountOffset) = refCount)
+    (nonzero : refCount ≠ 0)
+    (oneLt : (1 : UInt32) < refCount)
+    (returned : Q (.Return
+      (ResidentMemoryRel.write32Store store
+        (object + UInt32.ofNat headerRefCountOffset) (refCount - 1)) [])) :
+    Wasm.wp module (decrementOnceProgram persistent lastReference) Q store
+      (decrementEntry object check) env := by
+  apply wp_decrementOnceProgram_live_return taggedClear objectNonzero
+    alignmentClear flagsInBounds flagsRead liveSet _ returned
   apply wp_liveReleaseProgram_aboveOne aux3InBounds aux3Read ordinary
     refCountInBounds refCountRead nonzero oneLt
-  simpa using returned
+  rfl
 
 /-- Adjacent checked W6 word stores refine the corresponding Talos stores.
 Unlike the allocator specialization, this statement carries no global or
@@ -467,6 +812,80 @@ theorem residentHeaderWord
   · rw [← UInt32.ofNat_add]
     rw [concreteRead] at transported
     simpa using transported.symm
+
+/-- A represented live heap header supplies every common resident-release
+entry fact.  No ownership branch choice is made here. -/
+theorem LiveHeaderResidentFacts.ofRelations
+    {state : MemoryState} {memory : Wasm.Mem} {address : Word32}
+    {header : Header}
+    (related : ResidentMemoryRel state memory)
+    (exact : Header.ExactWords state.memory address header)
+    (headerInBounds : address.value + headerBytes ≤ state.memory.size)
+    (heap : address.classify = .heap)
+    (live : header.live = true) :
+    LiveHeaderResidentFacts memory address header := by
+  have kind := residentHeaderWord related exact headerInBounds
+    (index := 0) (word := header.kind.code) (by simp [Header.words])
+  have flags := residentHeaderWord related exact headerInBounds
+    (index := 1) (word := header.flags) (by simp [Header.words])
+  have refCount := residentHeaderWord related exact headerInBounds
+    (index := 2) (word := header.refCount) (by simp [Header.words])
+  have aux0 := residentHeaderWord related exact headerInBounds
+    (index := 4) (word := header.aux0) (by simp [Header.words])
+  have aux3 := residentHeaderWord related exact headerInBounds
+    (index := 7) (word := header.aux3) (by simp [Header.words])
+  have addressFits : address.value < UInt32.size := by
+    simpa [UInt32.size, wordModulus] using address.isLt
+  have addressNonzero : address.value ≠ 0 := by
+    intro zero
+    simp [Word32.classify, zero] at heap
+  have objectNonzero : UInt32.ofNat address.value ≠ 0 := by
+    intro zero
+    have zeroNat := congrArg UInt32.toNat zero
+    rw [UInt32.toNat_ofNat_of_lt' addressFits] at zeroNat
+    simp at zeroNat
+    exact addressNonzero zeroNat
+  have addressAligned : address.value % target.heapAlignment = 0 := by
+    unfold Word32.classify at heap
+    split at heap <;> try contradiction
+    split at heap <;> try contradiction
+    split at heap <;> try contradiction
+    assumption
+  have objectLowBit : UInt32.ofNat address.value &&& 1 = 0 := by
+    have aligned8 : address.value % 8 = 0 := by
+      simpa [target] using addressAligned
+    have even : address.value % 2 = 0 := by omega
+    apply UInt32.toNat_inj.mp
+    simpa [Nat.and_one_is_mod] using even
+  have taggedClear : (1 : UInt32) &&& UInt32.ofNat address.value = 0 := by
+    simpa [UInt32.and_comm] using objectLowBit
+  have objectAligned : UInt32.ofNat address.value &&& 7 = 0 :=
+    ResidentAllocator.alignedWord_of_mod8 addressFits (by
+      simpa [target] using addressAligned)
+  have alignmentClear :
+      UInt32.ofNat (target.heapAlignment - 1) &&&
+          UInt32.ofNat address.value = 0 := by
+    simpa [target, UInt32.and_comm] using objectAligned
+  have liveSet : liveFlag &&& header.flags = liveFlag := by
+    have trueCase : (2 : UInt32) &&& 3 = 2 := by decide
+    cases persistent : header.persistent
+    · simp [Header.flags, live, liveFlag, persistent]
+    · simpa [Header.flags, live, liveFlag, persistent] using trueCase
+  exact {
+    taggedClear
+    objectNonzero
+    alignmentClear
+    flagsInBounds := flags.1
+    flagsRead := flags.2
+    liveSet
+    kindInBounds := kind.1
+    kindRead := kind.2
+    refCountInBounds := refCount.1
+    refCountRead := refCount.2
+    aux0InBounds := aux0.1
+    aux0Read := aux0.2
+    aux3InBounds := aux3.1
+    aux3Read := aux3.2 }
 
 /-- A logical common-header rewrite that changes only the reference-count
 field has the same resident-memory effect as W7's single hot-path store. -/
@@ -713,46 +1132,8 @@ theorem LiveHeapRel.decrementOnceProgram_aboveOne_refines
     subst candidate
     rw [resultEq]
     exact exactAfter
-  have aux3 := residentHeaderWord memoryRelated exact headerInBounds
-    (index := 7) (word := header.aux3) (by simp [Header.words])
-  have flagsWord := residentHeaderWord memoryRelated exact headerInBounds
-    (index := 1) (word := header.flags) (by simp [Header.words])
-  have refCountWord := residentHeaderWord memoryRelated exact headerInBounds
-    (index := 2) (word := header.refCount) (by simp [Header.words])
-  have addressFits : address.value < UInt32.size := by
-    simpa [UInt32.size, wordModulus] using address.isLt
-  have addressNonzero : address.value ≠ 0 := by
-    intro zero
-    simp [Word32.classify, zero] at heap
-  have objectNonzero : UInt32.ofNat address.value ≠ 0 := by
-    intro zero
-    have zeroNat := congrArg UInt32.toNat zero
-    rw [UInt32.toNat_ofNat_of_lt' addressFits] at zeroNat
-    simp at zeroNat
-    exact addressNonzero zeroNat
-  have addressAligned : address.value % target.heapAlignment = 0 := by
-    unfold Word32.classify at heap
-    split at heap <;> try contradiction
-    split at heap <;> try contradiction
-    split at heap <;> try contradiction
-    assumption
-  have objectLowBit : UInt32.ofNat address.value &&& 1 = 0 := by
-    have aligned8 : address.value % 8 = 0 := by
-      simpa [target] using addressAligned
-    have even : address.value % 2 = 0 := by omega
-    apply UInt32.toNat_inj.mp
-    simpa [Nat.and_one_is_mod] using even
-  have taggedClear : (1 : UInt32) &&& UInt32.ofNat address.value = 0 := by
-    simpa [UInt32.and_comm] using objectLowBit
-  have objectAligned : UInt32.ofNat address.value &&& 7 = 0 :=
-    ResidentAllocator.alignedWord_of_mod8 addressFits (by
-      simpa [target] using addressAligned)
-  have alignmentClear :
-      UInt32.ofNat (target.heapAlignment - 1) &&&
-          UInt32.ofNat address.value = 0 := by
-    simpa [target, UInt32.and_comm] using objectAligned
-  have physicalLive : liveFlag &&& header.flags = liveFlag := by
-    simp [Header.flags, headerOrdinary, headerLive, liveFlag]
+  have entry := LiveHeaderResidentFacts.ofRelations memoryRelated exact
+    headerInBounds heap headerLive
   have physicalOrdinary : header.flags &&& persistentFlag ≠ persistentFlag := by
     cases liveValue : header.live
     · simp [Header.flags, headerOrdinary, liveValue, persistentFlag]
@@ -766,13 +1147,115 @@ theorem LiveHeapRel.decrementOnceProgram_aboveOne_refines
               (UInt32.ofNat address.value +
                 UInt32.ofNat headerRefCountOffset) nextCount) []) store
         (decrementEntry (UInt32.ofNat address.value) checkWord) env := by
-    apply wp_decrementOnceProgram_aboveOne taggedClear objectNonzero
-      alignmentClear flagsWord.1 flagsWord.2 physicalLive aux3.1 aux3.2
-      physicalOrdinary refCountWord.1 refCountWord.2 refCountNe physicalOneLt
+    apply wp_decrementOnceProgram_aboveOne entry.taggedClear
+      entry.objectNonzero entry.alignmentClear entry.flagsInBounds
+      entry.flagsRead entry.liveSet entry.aux3InBounds entry.aux3Read
+      physicalOrdinary entry.refCountInBounds entry.refCountRead refCountNe
+      physicalOneLt
     simp [nextCountEq]
   exact ⟨header, result, nextRuntime, headerRead, concreteOperation,
     semanticOperation, finalRelated, canonicalAfter, finalMemory,
     physicalExecution⟩
+
+/-- A represented persistent allocation is an exact no-op in all three
+semantics: the concrete host, FIR ownership semantics, and resident Wasm.
+The result preserves the heap simulation and the canonical-header invariant
+without a memory write. -/
+theorem LiveHeapRel.decrementOnceProgram_persistent_refines
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : Fir.LeanIR.Impure.RuntimeState}
+    {location : Fir.LeanIR.Impure.Location} {address : Word32}
+    {cell : Fir.LeanIR.Impure.HeapCell}
+    {descriptors : ClosureDescriptorTable}
+    {lastReference : Wasm.Program}
+    (related : LiveHeapRel state witness runtime)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (exactHeader : CanonicalLiveHeaderRel state address)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : Fir.LeanIR.Impure.findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (persistent : cell.persistent = true)
+    (check : Bool) (checkWord : UInt32) :
+    decrementReferenceOnce state address check descriptors = .ok state ∧
+      Fir.LeanIR.Impure.decValueOnce runtime (.object (.heap location)) check =
+        .ok runtime ∧
+      LiveHeapRel state witness runtime ∧
+      CanonicalLiveHeaderRel state address ∧
+      ResidentMemoryRel state store.mem ∧
+      Wasm.wp module
+        (decrementOnceProgram persistentReleaseProgram lastReference)
+        (fun continuation => continuation = .Return store []) store
+        (decrementEntry (UInt32.ofNat address.value) checkWord) env := by
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  obtain ⟨header, headerRead, _, notPromoted, headerPersistentRel, _⟩ :=
+    targetRelated.ownershipHeader
+  have headerPersistent : header.persistent = true :=
+    headerPersistentRel.trans persistent
+  have exact := exactHeader header headerRead
+  have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
+    Nat.le_trans targetRelated.headerOwned related.frontier.cursorInBounds
+  obtain ⟨heap, _, headerLive, _, _, _⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts state address header
+      headerRead
+  have entry := LiveHeaderResidentFacts.ofRelations memoryRelated exact
+    headerInBounds heap headerLive
+  have physicalPersistent :
+      header.flags &&& persistentFlag = persistentFlag := by
+    have trueCase : (3 : UInt32) &&& 1 = 1 := by decide
+    cases liveValue : header.live
+    · simp [Header.flags, headerPersistent, liveValue, persistentFlag]
+    · simpa [Header.flags, headerPersistent, liveValue, persistentFlag] using
+        trueCase
+  have physicalNotPromoted :
+      header.kind.code ≠ ObjectKind.natural.code ∨
+        header.aux0 ≠ promotedTagMarker := by
+    by_cases kindNatural : header.kind = .natural
+    · right
+      intro marker
+      have promoted : header.isPromotedTag = true := by
+        have naturalEq : (ObjectKind.natural == ObjectKind.natural) = true := by
+          decide
+        simpa [Header.isPromotedTag, kindNatural, headerPersistent, marker]
+          using naturalEq
+      rw [promoted] at notPromoted
+      contradiction
+    · left
+      intro kindCode
+      apply kindNatural
+      cases kindValue : header.kind <;>
+        simp_all [ObjectKind.code]
+  have concreteOperation :
+      decrementReferenceOnce state address check descriptors = .ok state := by
+    unfold decrementReferenceOnce
+    exact targetRelated.decrementReferenceOnceFuel_persistent_eq persistent _
+      check descriptors
+  have semanticOperation :
+      Fir.LeanIR.Impure.decValueOnce runtime (.object (.heap location)) check =
+        .ok runtime := by
+    have semanticFuel := targetRelated.decLocationFuel_persistent_eq persistent
+      runtime location found runtime.heap.length
+    simpa [Fir.LeanIR.Impure.decValueOnce,
+      Fir.LeanIR.Impure.decLocation] using semanticFuel
+  have physicalExecution :
+      Wasm.wp module
+        (decrementOnceProgram persistentReleaseProgram lastReference)
+        (fun continuation => continuation = .Return store []) store
+        (decrementEntry (UInt32.ofNat address.value) checkWord) env := by
+    apply wp_decrementOnceProgram_persistent entry.taggedClear
+      entry.objectNonzero entry.alignmentClear entry.flagsInBounds
+      entry.flagsRead entry.liveSet entry.aux3InBounds entry.aux3Read
+      physicalPersistent entry.kindInBounds entry.kindRead entry.aux0InBounds
+      entry.aux0Read physicalNotPromoted
+    rfl
+  exact ⟨concreteOperation, semanticOperation, related, exactHeader,
+    memoryRelated, physicalExecution⟩
 
 end ResidentRelease
 
