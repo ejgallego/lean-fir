@@ -209,6 +209,19 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   2,160/2,160 comparisons, all 3,172 Talos jobs, and the complete deterministic
   W7 artifact gate pass. W6 owns the rebased proof continuation in thread
   `W6-W7-20260825-009`; no W6-owned file changed in this landing.
+- Accepted installed decrement branch refinements: W6 functional head
+  `6318ec66` is linked through exact clean tracked handoff `69c27314` and
+  supersedes pre-rebase checkpoint `04fa8770`. The production-installed helper
+  now refines the ordinary shared-count update, persistent no-op, and exact
+  zero-count underflow trap through a reusable body-success/trap lifting
+  boundary derived from successful generation, adaptation, and installation.
+  The descriptor-dependent branch remains the actual production body followed
+  only by the standard terminal suffix; no body certificate or trusted premise
+  was introduced. Lean Beam, the 3,079-job focused cone, `make check` at 726
+  cases and 2,160/2,160 comparisons, and all 3,172 Talos jobs pass. No emitter,
+  source semantics, helper signature, ABI, layout, ownership behavior, or
+  executable artifact changed. W6 next lifts the exact last-reference object
+  dispatcher and joins the exhaustive installed helper simulation.
 - Accepted recursive resident release proof checkpoint: W6 functional head
   `1fa01d24` is linked through exact clean tracked handoff `97312f4f`, rebased
   on accepted W7 and coordination base `9bc79b26`. Admission distinguishes
