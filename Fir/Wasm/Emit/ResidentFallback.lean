@@ -9,8 +9,6 @@ open Lean.Compiler
 private def panicErasedParam : FVarId := ⟨`panicErased⟩
 private def panicMessageParam : FVarId := ⟨`panicMessage⟩
 private def panicDefaultParam : FVarId := ⟨`panicDefault⟩
-private def inhabitedMonadParam : FVarId := ⟨`inhabitedMonad⟩
-private def inhabitedDefaultParam : FVarId := ⟨`inhabitedDefault⟩
 
 inductive LinkError where
   | invalidInput (error : SymbolicError)
@@ -21,15 +19,11 @@ inductive LinkError where
   deriving Inhabited, Repr
 
 /--
-The two final declarations in the Lean 4.33 `prettyM` closure are failure
-fallbacks. The accepted pretty-printer corpus never reaches either declaration;
-keeping their resident definitions as unconditional traps preserves the
-fail-closed behavior of the temporary JavaScript handlers while closing the
-module's function-import surface.
+The resident panic policy closes `panicCore` with a Wasm trap. Ordinary Lean
+declarations, including `instInhabitedOfMonad._redArg`, must instead be
+compiled from their real source bodies.
 -/
-def externalDeclarations : Array Name := #[
-  `panicCore,
-  `instInhabitedOfMonad._redArg]
+def externalDeclarations : Array Name := #[`panicCore]
 
 def externalName (declaration : Name) : Name :=
   ResidentNumeric.externalName declaration
@@ -41,10 +35,6 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
     some {
       params := #[.erased, .tobject, .object]
       results := #[.tobject] }
-  else if declaration == `instInhabitedOfMonad._redArg then
-    some {
-      params := #[.object, .tobject]
-      results := #[.tobject] }
   else
     none
 
@@ -55,10 +45,6 @@ private def externalTypes? (declaration : Name) : Option ExternalTypes :=
   if declaration == `panicCore then
     some {
       params := #[erased, tobject, object]
-      result := tobject }
-  else if declaration == `instInhabitedOfMonad._redArg then
-    some {
-      params := #[object, tobject]
       result := tobject }
   else
     none
@@ -73,16 +59,7 @@ def panicFunction : Function := {
   locals := #[]
   body := [.unreachable] }
 
-def inhabitedFunction : Function := {
-  name := externalName `instInhabitedOfMonad._redArg
-  params := #[
-    (inhabitedMonadParam, .object),
-    (inhabitedDefaultParam, .tobject)]
-  results := #[.tobject]
-  locals := #[]
-  body := [.unreachable] }
-
-def functions : Array Function := #[panicFunction, inhabitedFunction]
+def functions : Array Function := #[panicFunction]
 
 private partial def rewriteInstruction (declarations : Array Name) :
     Instruction → Instruction
@@ -142,14 +119,14 @@ private def internalizeSelected (module : Module) (declarations : Array Name)
     | .error error => throw (.invalidOutput error)
   else return result
 
-/-- Internalize the complete historical fallback pair, rejecting omissions. -/
+/-- Internalize the explicit resident panic policy, rejecting omissions. -/
 def internalize (module : Module) (validate : Bool := true) : Except LinkError Module :=
   internalizeSelected module externalDeclarations validate
 
 /--
-Install exactly the fail-closed fallbacks retained by a captured closure. The
-strict `internalize` entry above continues to require the complete historical
-prettyM pair; generic closed applications use this capability-sensitive entry.
+Install the fail-closed panic operation retained by a captured closure. The
+strict `internalize` entry above requires `panicCore`; generic closed
+applications use this capability-sensitive entry.
 -/
 def internalizeAvailable (module : Module) (validate : Bool := true) :
     Except LinkError Module := do
@@ -217,16 +194,6 @@ private def singleExampleModule (declaration : Name) : Module := {
       module.imports.isEmpty &&
       module.functions.map (·.name) == #[externalName `panicCore] &&
       module.exports == #[externalName `panicCore] &&
-      (Fir.Wasm.validateModule module |>.isOk)
-  | .error _ => false
-
-#guard match internalizeAvailable
-    (singleExampleModule `instInhabitedOfMonad._redArg) with
-  | .ok module =>
-      module.imports.isEmpty &&
-      module.functions.map (·.name) ==
-        #[externalName `instInhabitedOfMonad._redArg] &&
-      module.exports == #[externalName `instInhabitedOfMonad._redArg] &&
       (Fir.Wasm.validateModule module |>.isOk)
   | .error _ => false
 

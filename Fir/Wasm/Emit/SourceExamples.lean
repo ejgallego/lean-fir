@@ -74,8 +74,7 @@ private def prettyRuntimeImports : Array String := #[
   "Nat.decLe",
   "panicCore",
   "String.Internal.extract",
-  "String.Internal.next",
-  Fir.Wasm.Emit.PrettyFormat.weakMonadInhabitedName]
+  "String.Internal.next"]
 
 run_cmd do
   let artifact ← liftCoreM <| withoutModifyingEnv <|
@@ -92,7 +91,7 @@ run_cmd do
   unless artifact.externalNames.size == 23 do
     throwError "raw Format helper inventory changed size:\n{repr artifact.externalNames}"
   for required in #["String.Internal.append", "Nat.add", "panicCore",
-      Fir.Wasm.Emit.PrettyFormat.weakMonadInhabitedName] do
+      "instInhabitedOfMonad._redArg"] do
     unless artifact.externalNames.any fun name => name.toString == required do
       throwError "raw Format helper inventory lost {required}"
   let unsupported := program.decls.filter fun decl => !Fir.Wasm.supportedDecl program decl
@@ -114,8 +113,15 @@ run_cmd do
     | .ok artifact => pure artifact
     | .error error => throwError "internalized Format facade did not compile: {repr error}"
   unless artifact.source.externalNames.map (fun name => name.toString) ==
-      #[Fir.Wasm.Emit.PrettyFormat.weakMonadInhabitedName] do
+      #[Fir.Wasm.Emit.PrettyFormat.retainedPanicCoreName] do
     throwError "internalized Format facade retained unexpected declarations:\n{repr artifact.source.externalNames}"
+  let some inhabited := artifact.source.program.findDecl?
+      `instInhabitedOfMonad._redArg
+    | throwError "internalized Format facade lost the inhabited-monad declaration"
+  match inhabited.value with
+  | .code _ => pure ()
+  | .extern _ =>
+      throwError "internalized Format facade retained an inhabited-monad import"
   let declarationImports := artifact.module.imports.filterMap (·.declaration?)
   unless declarationImports.map (fun name => name.toString) == prettyRuntimeImports do
     throwError "internalized Format facade retained declaration imports: {repr declarationImports}"
