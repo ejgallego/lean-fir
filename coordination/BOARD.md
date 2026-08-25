@@ -130,6 +130,21 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   passed before handoff; a redundant clean-client rebuild after rebase was
   stopped in lean-zip's proof-only dependency cone after no FIR failure.
   W6 contract review continues independently in `W72-W6-20260825-001`.
+- Accepted typed `getTag` caller path: W7-2 functional head `3f7f324a`
+  and clean tracked handoff `5e5dbf7a` are accepted. Typed `.tobject ->
+  .uint32` callers now reproduce upstream `lean_obj_tag`: tagged immediate
+  constructors shift their scalar word, ordinary heap constructors read
+  `aux0`, and every other heap family retains the unchanged checked
+  `fir_getTag` helper as a cold fallback. Exact steady tracing reduces dynamic
+  helper calls from 37,810 to zero. Two 32-pair order-balanced campaigns give
+  a combined median ratio of 0.990802 (about -0.92%) with 43/64 wins and both
+  invocation orders improving. The deliberate code-size tradeoff grows raw
+  complete Wasm from 359,760 to 366,313 bytes and Level-1 from 193,150 to
+  198,424 bytes; imports, exports, declaration/helper inventories, output,
+  ABI/layout, ownership, and the checked helper contract remain unchanged.
+  Lean Beam, the 54-job linker cone, `make check`, all 3,172 Talos jobs, the
+  complete artifact gate, and stored/Level-1/raw lean-zip checks pass. W6
+  review continues independently in `W72-W6-20260826-001`.
 - Accepted wide ByteArray push integration: W7 functional head `158914b8`,
   exact package ratchet `3e0eef61`, and clean tracked handoff `ba24e66e` are
   accepted. The exclusive-reuse `ByteArray.pushUInt64LE` path now mirrors
