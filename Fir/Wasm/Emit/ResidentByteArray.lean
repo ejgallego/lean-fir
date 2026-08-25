@@ -919,6 +919,29 @@ private def appendWideBytes (object loopLabel : FVarId) : List Instruction :=
       .localSet appendCountLocal,
       .br loopLabel]])]
 
+private def hasEightByteSlack (capacity : FVarId) : List Instruction := [
+  .localGet capacity,
+  .localGet sizeLocal,
+  .i32Sub,
+  .i32Const .uint32 8,
+  .i32LtU]
+
+/-
+Match the native wide-push fast path after `prepareAppend` has established
+exclusive reuse.  An eight-byte store may write beyond the new logical size
+when fewer than eight bytes are appended, but only into allocated capacity
+slack; subsequent logical extension overwrites that slack before exposing it.
+Tight-capacity inputs retain the byte-wise reference path.
+-/
+private def appendWideBytesForReuse (object loopLabel capacity : FVarId) :
+    List Instruction :=
+  hasEightByteSlack capacity ++ [
+    .ifElse
+      (appendWideBytes object loopLabel)
+      (appendByteAddress object ++ [
+        .localGet wideValueLocal,
+        .i64Store .uint64 0])]
+
 private def decodeAppendCount (validation : ProofIndexValidation) :
     List Instruction :=
   (match validation with
@@ -948,7 +971,8 @@ private def pushUInt64LEFunctionFor (inputValidation : InputValidation)
     .localSet wideValueLocal] ++ prepareAppend inputValidation ++ [
     .localGet reuseLocal,
     .ifElse
-      (appendWideBytes destinationParam appendLoopLabel ++ [
+      (appendWideBytesForReuse destinationParam appendLoopLabel
+          capacityLocal ++ [
         .localGet destinationParam,
         .i32Const .uint32 0,
         .i32Add,
@@ -1204,6 +1228,20 @@ private def trustedProofIndexedFunctions : Array Function := #[
   decodeUSizeOffset .trusted 1
 #guard (pushUInt64LEFunctionFor .trusted .trusted).body.take 3 ==
   decodeAppendCount .trusted
+
+private partial def instructionContains (target : Instruction) :
+    Instruction → Bool
+  | instruction@(.block _ body) | instruction@(.loop _ body) =>
+      instruction == target || body.any (instructionContains target)
+  | instruction@(.ifElse thenBody elseBody) =>
+      instruction == target || thenBody.any (instructionContains target) ||
+        elseBody.any (instructionContains target)
+  | instruction => instruction == target
+
+#guard (pushUInt64LEFunctionFor .trusted .trusted).body.any
+  (instructionContains (.i64Store .uint64 0))
+#guard (pushUInt64LEFunctionFor .trusted .trusted).body.any
+  (instructionContains (.i32Store8 .uint8 0))
 
 private def expectedSignature? (declaration : Name) : Option Signature :=
   if declaration == `ByteArray.copySlice then

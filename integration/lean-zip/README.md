@@ -476,6 +476,27 @@ the predicted code-shape movement; `lzMatchP` remains the dominant caller at
 about 51% of Wasm self time rather than shifting the removed scratch traffic
 into another helper.
 
+The resident `ByteArray.pushUInt64LE` helper now also mirrors Lean's native
+wide-push reuse path. After the ordinary capacity and uniqueness checks, an
+exclusive buffer with at least eight bytes of remaining capacity receives one
+unaligned `i64.store`; counts below eight may write into private capacity slack,
+which a later logical extension overwrites before exposing it. Exact-capacity,
+growth, and shared inputs retain the byte-wise path, so copy-on-write and the
+public logical size are unchanged. Focused resident tests cover counts 0--8,
+tight and slack capacity, shared and growing inputs, and subsequent pushes that
+overwrite every speculative slack byte.
+
+This adds one branch and 25 bytes to the complete module (367,176 to 367,201)
+while leaving the 501-function, zero-import closure unchanged. Four comparable
+exact-artifact profiles move `fir_ext_ByteArray_pushUInt64LE` from a 3.04% to a
+2.51% median share of Wasm self samples. Thirty-two diagnostics-off AB/BA
+fresh-process pairs preserve the exact compressed digest and flat frontier:
+median exported-entry time moves from 38.27 ms (MAD 1.37) to 38.01 ms (MAD
+1.88), with a -0.143 ms paired median (-0.37%) and 19/32 improving pairs. Both
+round halves and both execution orders have negative paired medians, so the
+small improvement is accepted without treating it as a larger performance
+claim.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not
