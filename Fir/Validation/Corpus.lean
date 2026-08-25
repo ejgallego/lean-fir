@@ -300,6 +300,15 @@ def optionBoolValue : Option Bool → Bool
 def someUInt64 (value : UInt64) : Option UInt64 :=
   some value
 
+/-- Force a scalar through a generic boxed-object call. The compiler-generated
+caller releases the temporary box with unchecked `dec[ref]` after the call. -/
+@[noinline, nospecialize]
+def discardGeneric {α : Type} (_value : α) : Bool :=
+  false
+
+def discardBoxedUInt64 (value : UInt64) : UInt64 :=
+  if discardGeneric value then 0 else value
+
 def okFloat (value : Float) : Except String Float :=
   .ok value
 
@@ -3849,6 +3858,16 @@ private def intOfNatFormTrace : Array String :=
 private def externalCallFormTrace : Array String :=
   #["fap", "extern", "return"]
 
+private def boxedUInt64ReleaseFormCounts : Array ExecutedFormCountRequirement :=
+  #[{ form := "box", minimum := 1, maximum := some 1 },
+    { form := "fap", minimum := 1, maximum := some 1 },
+    { form := "lit", minimum := 1, maximum := some 1 },
+    { form := "return", minimum := 2, maximum := some 2 },
+    { form := "dec", minimum := 1, maximum := some 1 }]
+
+private def boxedUInt64ReleaseFormTrace : Array String :=
+  #["box", "fap", "lit", "return", "dec", "return"]
+
 private def exactNatBinaryExternalCase
     (id : String) (entry : Lean.Name) (operation : Nat → Nat → Nat)
     (external : Lean.Name) (left right : Nat) (tags : Array String)
@@ -5327,6 +5346,34 @@ private def preConversionCases : Array Case := #[
     requiredExecutedLcnfForms := #["box", "ctor", "return"]
     provenance := firProvenance
       "Construct Option.some with a heap-boxed maximal UInt64 payload" },
+  { id := "generic-discard-boxed-uint64-small"
+    entry := ``Source.discardBoxedUInt64
+    dependencies := #[``Source.discardGeneric]
+    args := #[.bits 64 41]
+    argSchemas := #[.bits 64]
+    resultSchema := .bits 64
+    native := fun _ => .bits 64 (Source.discardBoxedUInt64 41)
+    tags := #["quick", "scalar", "generic", "boxed", "uint64", "heap", "ownership"]
+    requiredLcnfForms := #["box", "dec", "fap", "lit", "return"]
+    requiredExecutedLcnfForms := #["box", "dec", "fap", "lit", "return"]
+    requiredExecutedLcnfFormCounts := boxedUInt64ReleaseFormCounts
+    requiredExecutedLcnfFormTrace := some boxedUInt64ReleaseFormTrace
+    provenance := firProvenance
+      "Release a compiler-generated small boxed UInt64 through an owned generic argument" },
+  { id := "generic-discard-boxed-uint64-max"
+    entry := ``Source.discardBoxedUInt64
+    dependencies := #[``Source.discardGeneric]
+    args := #[.bits 64 0xffffffffffffffff]
+    argSchemas := #[.bits 64]
+    resultSchema := .bits 64
+    native := fun _ => .bits 64 (Source.discardBoxedUInt64 0xffffffffffffffff)
+    tags := #["stress", "scalar", "generic", "boxed", "uint64", "heap", "ownership"]
+    requiredLcnfForms := #["box", "dec", "fap", "lit", "return"]
+    requiredExecutedLcnfForms := #["box", "dec", "fap", "lit", "return"]
+    requiredExecutedLcnfFormCounts := boxedUInt64ReleaseFormCounts
+    requiredExecutedLcnfFormTrace := some boxedUInt64ReleaseFormTrace
+    provenance := firProvenance
+      "Release a compiler-generated maximal boxed UInt64 through an owned generic argument" },
   { id := "generic-except-float-build"
     entry := ``Source.okFloat
     args := #[float64Datum genericContainerFloat]

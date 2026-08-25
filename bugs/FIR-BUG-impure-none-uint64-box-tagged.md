@@ -9,7 +9,7 @@ pass: none
 discovered-by: differential-test
 first-seen: 2026-08-26
 reproduction: Fir/LeanIR/Runtime.lean
-regression: none
+regression: Fir/Validation/Corpus.lean
 ---
 
 # Summary
@@ -88,6 +88,12 @@ none
 
 ## Resolution and regression
 
-Unresolved. Add native/LCNF/Wasm probes for small and maximal `UInt64`, then
-align the semantic, concrete, and resident representations with upstream
-`lean_box_uint64`/`lean_unbox_uint64`.
+The integration contract candidate makes semantic UInt64 boxes heap-only and
+adds `generic-discard-boxed-uint64-small` plus
+`generic-discard-boxed-uint64-max`. Both compile the real source declaration to
+the exact `box; fap; dec[ref]; return` ownership path, pin every executed form
+and count, and agree between native Lean and the LCNF interpreter.
+
+The bug remains confirmed until the W7 resident helper, external-engine
+regression, and W6 concrete refinement are adapted to the same upstream
+`lean_box_uint64`/`lean_unbox_uint64` representation.

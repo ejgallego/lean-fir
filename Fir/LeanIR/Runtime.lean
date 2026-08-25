@@ -723,15 +723,19 @@ def scalarFromType (type : Expr) (payload : UInt64) : Except RuntimeFault Value 
 /--
 Whether final-LCNF `box` may use Lean's tagged immediate representation.
 
-Float32 and Float boxes are always heap objects: compiler-generated boxed
-wrappers release them with unchecked `dec[ref]`. Integer and `USize` boxes
-retain the payload-size split.
+Float32, Float, and UInt64 boxes are always heap objects: their type-specific
+upstream boxing primitives allocate constructors, and compiler-generated boxed
+wrappers may release them with unchecked `dec[ref]`. The remaining integer and
+`USize` boxes retain the existing target-model payload-size split.
 -/
 def boxUsesTaggedRepresentation (type : Expr) (payload : UInt64) : Bool :=
-  !(type == LCNF.ImpureType.float32 || type == LCNF.ImpureType.float) &&
+  !(type == LCNF.ImpureType.float32 || type == LCNF.ImpureType.float ||
+      type == LCNF.ImpureType.uint64) &&
     decide (payload.toNat ≤ maxTaggedPayload)
 
 #guard boxUsesTaggedRepresentation LCNF.ImpureType.uint32 0xdeadbeef
+#guard !boxUsesTaggedRepresentation LCNF.ImpureType.uint64 0
+#guard !boxUsesTaggedRepresentation LCNF.ImpureType.uint64 41
 #guard !boxUsesTaggedRepresentation LCNF.ImpureType.uint64 0xffffffffffffffff
 #guard !boxUsesTaggedRepresentation LCNF.ImpureType.float32 0
 #guard !boxUsesTaggedRepresentation LCNF.ImpureType.float 0
@@ -764,6 +768,20 @@ def unbox (runtime : RuntimeState) (type : Expr) (value : Value) : Except Runtim
       let .boxed _ value := cell.object | throw .expectedScalar
       return value
   | _ => .error .expectedObject
+
+private def uint64BoxGuard : Bool :=
+  match box {} LCNF.ImpureType.uint64 (.scalar (.uint64 41)),
+      box {} LCNF.ImpureType.uint64 (.scalar (.uint64 0xffffffffffffffff)) with
+  | .ok (smallRuntime, .object (.heap smallLocation)),
+      .ok (largeRuntime, .object (.heap largeLocation)) =>
+      match unbox smallRuntime LCNF.ImpureType.uint64 (.object (.heap smallLocation)),
+          unbox largeRuntime LCNF.ImpureType.uint64 (.object (.heap largeLocation)) with
+      | .ok (.scalar (.uint64 41)),
+          .ok (.scalar (.uint64 0xffffffffffffffff)) => true
+      | _, _ => false
+  | _, _ => false
+
+#guard uint64BoxGuard
 
 def isShared (runtime : RuntimeState) (value : Value) : Except RuntimeFault Value :=
   match value with
