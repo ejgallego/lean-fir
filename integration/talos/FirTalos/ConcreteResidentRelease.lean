@@ -1782,6 +1782,298 @@ theorem instructions_lastReferenceReleaseBody
     lastGenerated releaseHeaderFound, ownedAdapted]
   rfl
 
+/-- A source object-kind test adapts compositionally from its two branches.
+This is the common adapter boundary for constructor, closure, and opaque
+dispatch in the resident release helper. -/
+theorem instructions_kindDispatch
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {kindLocal : Lean.FVarId} {kindCode : UInt32}
+    {thenSource elseSource : List Fir.Wasm.Instruction}
+    {thenTarget elseTarget : Wasm.Program}
+    (kindFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      kindLocal = some kindIndex)
+    (thenAdapted : FirTalos.instructions sourceModule sourceFunction []
+      thenSource = .ok thenTarget)
+    (elseAdapted : FirTalos.instructions sourceModule sourceFunction []
+      elseSource = .ok elseTarget) :
+    FirTalos.instructions sourceModule sourceFunction []
+      [.localGet kindLocal, .i32Const .uint32 kindCode, .i32Eq,
+        .ifElse thenSource elseSource] = .ok [
+      .localGet kindIndex, .const kindCode, .eq,
+      .iff 0 0 thenTarget elseTarget] := by
+  have kindAdapted := FirTalos.Correctness.instruction_localGet
+    (sourceModule := sourceModule) kindFound
+  have codeAdapted : FirTalos.instruction sourceModule sourceFunction []
+      (.i32Const .uint32 kindCode) = .ok (.const kindCode) := by
+    simp [FirTalos.instruction, pure, Except.pure]
+  have equalityAdapted : FirTalos.instruction sourceModule sourceFunction []
+      .i32Eq = .ok .eq := by
+    simp [FirTalos.instruction, pure, Except.pure]
+  have branchAdapted := FirTalos.Correctness.instruction_ifElse
+    thenAdapted elseAdapted
+  simp only [FirTalos.instructions, kindAdapted, codeAdapted,
+    equalityAdapted, branchAdapted, Bind.bind, Except.bind, pure,
+    Except.pure]
+
+/-- Successful adaptation of the three object-kind branches determines the
+exact resident owned-object dispatcher.  Generation supplies the symbolic
+kind local and closure descriptor body; no body-shape certificate is exposed
+to clients. -/
+theorem instructions_ownedReleaseBody
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function}
+    {closureSource ownedSource : List Fir.Wasm.Instruction}
+    {constructorTarget closureTarget opaqueTarget : Wasm.Program}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction)
+    (closureGenerated :
+      Fir.Wasm.Emit.ResidentRelease.descriptorReleaseBody
+          descriptors.toList 0 = .ok closureSource)
+    (ownedGenerated :
+      Fir.Wasm.Emit.ResidentRelease.ownedReleaseBody descriptors =
+        .ok ownedSource)
+    (constructorAdapted : FirTalos.instructions sourceModule sourceFunction []
+      Fir.Wasm.Emit.ResidentRelease.constructorReleaseBody =
+        .ok constructorTarget)
+    (closureAdapted : FirTalos.instructions sourceModule sourceFunction []
+      closureSource = .ok closureTarget)
+    (opaqueAdapted : FirTalos.instructions sourceModule sourceFunction []
+      Fir.Wasm.Emit.ResidentRelease.opaqueReleaseBody = .ok opaqueTarget) :
+    FirTalos.instructions sourceModule sourceFunction [] ownedSource =
+      .ok (ownedReleaseProgram constructorTarget closureTarget opaqueTarget) := by
+  have kindFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[1]!.1 = some kindIndex := by
+    simpa [kindIndex] using
+      generatedDecrementOnceFunction_localFound generated (1 : Fin 10)
+  have sourceShape : ownedSource =
+      [.localGet sourceFunction.locals[1]!.1,
+        .i32Const .uint32 ObjectKind.constructor.code,
+        .i32Eq,
+        .ifElse Fir.Wasm.Emit.ResidentRelease.constructorReleaseBody
+          ([.localGet sourceFunction.locals[1]!.1,
+            .i32Const .uint32 ObjectKind.closure.code,
+            .i32Eq,
+            .ifElse closureSource
+              ([.localGet sourceFunction.locals[1]!.1,
+                .i32Const .uint32 ObjectKind.opaque.code,
+                .i32Eq,
+                .ifElse Fir.Wasm.Emit.ResidentRelease.opaqueReleaseBody
+                  [.ret]])])] := by
+    have generatedEq := generated
+    unfold Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction at generatedEq
+    split at generatedEq
+    · contradiction
+    · simp only [Bind.bind, Except.bind] at generatedEq
+      split at generatedEq
+      · contradiction
+      · simp only [pure, Except.pure, Except.ok.injEq] at generatedEq
+        subst sourceFunction
+        unfold Fir.Wasm.Emit.ResidentRelease.ownedReleaseBody at ownedGenerated
+        rw [closureGenerated] at ownedGenerated
+        simpa [Fir.Wasm.Emit.ResidentRelease.equalsConst] using
+          ownedGenerated.symm
+  have returnAdapted : FirTalos.instructions sourceModule sourceFunction
+      [] [.ret] = .ok [.ret] := by
+    simp [FirTalos.instructions, FirTalos.instruction, Bind.bind,
+      Except.bind, pure, Except.pure]
+  have opaqueDispatch := instructions_kindDispatch
+    (kindCode := ObjectKind.opaque.code) kindFound opaqueAdapted returnAdapted
+  have closureDispatch := instructions_kindDispatch
+    (kindCode := ObjectKind.closure.code) kindFound closureAdapted opaqueDispatch
+  have constructorDispatch := instructions_kindDispatch
+    (kindCode := ObjectKind.constructor.code) kindFound constructorAdapted
+      closureDispatch
+  rw [sourceShape]
+  simpa [ownedReleaseProgram] using constructorDispatch
+
+/-- One generated owned-child release adapts to the exact recursive call.
+The generated function fixes the address local while installation resolves
+the recursive declaration to its concrete module index. -/
+theorem instructions_releaseChild
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function} {decrementIndex index : Nat}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction)
+    (selfFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentRelease.decrementOnceName) =
+        some decrementIndex) :
+    FirTalos.instructions sourceModule sourceFunction []
+      (Fir.Wasm.Emit.ResidentRelease.releaseChild index) =
+        .ok (releaseChildProgram decrementIndex index) := by
+  have addressFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[0]!.1 = some addressIndex := by
+    simpa [addressIndex] using
+      generatedDecrementOnceFunction_localFound generated (0 : Fin 10)
+  have sourceShape : Fir.Wasm.Emit.ResidentRelease.releaseChild index =
+      [.localGet sourceFunction.locals[0]!.1,
+        .i32Load .tobject
+          (Fir.Wasm.Emit.ResidentRelease.u32
+            (headerBytes + target.semanticSlotBytes * index)),
+        .i32Const .uint32 1,
+        .call (.declaration
+          Fir.Wasm.Emit.ResidentRelease.decrementOnceName)] := by
+    have generatedEq := generated
+    unfold Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction at generatedEq
+    split at generatedEq
+    · contradiction
+    · simp only [Bind.bind, Except.bind] at generatedEq
+      split at generatedEq
+      · contradiction
+      · simp only [pure, Except.pure, Except.ok.injEq] at generatedEq
+        subst sourceFunction
+        rfl
+  rw [sourceShape]
+  simp [releaseChildProgram, Fir.Wasm.Emit.ResidentRelease.u32,
+    FirTalos.instructions, FirTalos.instruction, addressFound, selfFound,
+    Bind.bind, Except.bind, pure, Except.pure]
+
+/-- One generated constructor-frontier guard adapts compositionally from its
+recursive child release. -/
+theorem instructions_guardedReleaseChild
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function} {decrementIndex index : Nat}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction)
+    (selfFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentRelease.decrementOnceName) =
+        some decrementIndex) :
+    FirTalos.instructions sourceModule sourceFunction []
+      [.i32Const .uint32 (Fir.Wasm.Emit.ResidentRelease.u32 index),
+        .localGet sourceFunction.locals[2]!.1,
+        .i32LtU,
+        .ifElse (Fir.Wasm.Emit.ResidentRelease.releaseChild index) []] =
+      .ok (guardedReleaseChildProgram decrementIndex countIndex index) := by
+  have countFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[2]!.1 = some countIndex := by
+    simpa [countIndex] using
+      generatedDecrementOnceFunction_localFound generated (2 : Fin 10)
+  have childAdapted := instructions_releaseChild
+    (sourceModule := sourceModule) (index := index) generated selfFound
+  have emptyAdapted : FirTalos.instructions sourceModule sourceFunction
+      [] [] = .ok [] := by
+    simp [FirTalos.instructions, pure, Except.pure]
+  have branchAdapted := FirTalos.Correctness.instruction_ifElse
+    childAdapted emptyAdapted
+  simp [guardedReleaseChildProgram, Fir.Wasm.Emit.ResidentRelease.u32,
+    FirTalos.instructions, FirTalos.instruction, countFound, branchAdapted,
+    Bind.bind, Except.bind, pure, Except.pure]
+
+/-- Generated guarded child releases adapt homomorphically over any physical
+field frontier. -/
+theorem instructions_guardedReleaseChildren
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function} {decrementIndex : Nat}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction)
+    (selfFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentRelease.decrementOnceName) =
+        some decrementIndex)
+    (indices : List Nat) :
+    FirTalos.instructions sourceModule sourceFunction []
+      (indices.flatMap fun index =>
+        [.i32Const .uint32 (Fir.Wasm.Emit.ResidentRelease.u32 index),
+          .localGet sourceFunction.locals[2]!.1,
+          .i32LtU,
+          .ifElse (Fir.Wasm.Emit.ResidentRelease.releaseChild index) []]) =
+      .ok (guardedReleaseChildrenProgram decrementIndex countIndex indices) := by
+  induction indices with
+  | nil =>
+      simp [guardedReleaseChildrenProgram, FirTalos.instructions,
+        pure, Except.pure]
+  | cons index indices ih =>
+      simp only [List.flatMap_cons]
+      rw [FirTalos.Correctness.instructions_append_of_success
+        (instructions_guardedReleaseChild
+          (sourceModule := sourceModule) (index := index) generated selfFound)
+        ih]
+      rfl
+
+/-- The generated fixed constructor frontier adapts to the exact target body
+used by the constructor ownership proof. -/
+theorem instructions_constructorReleaseBody
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function} {decrementIndex : Nat}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction)
+    (selfFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentRelease.decrementOnceName) =
+        some decrementIndex) :
+    FirTalos.instructions sourceModule sourceFunction []
+      Fir.Wasm.Emit.ResidentRelease.constructorReleaseBody =
+        .ok (constructorReleaseProgram decrementIndex) := by
+  have countFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[2]!.1 = some countIndex := by
+    simpa [countIndex] using
+      generatedDecrementOnceFunction_localFound generated (2 : Fin 10)
+  have sourceShape : Fir.Wasm.Emit.ResidentRelease.constructorReleaseBody =
+      [.i32Const .uint32 (Fir.Wasm.Emit.ResidentRelease.u32
+          Fir.Wasm.Emit.ResidentRelease.constructorFieldLimit),
+        .localGet sourceFunction.locals[2]!.1,
+        .i32LtU,
+        .ifElse [.unreachable]
+          (((List.range Fir.Wasm.Emit.ResidentRelease.constructorFieldLimit).flatMap
+            fun index =>
+              [.i32Const .uint32 (Fir.Wasm.Emit.ResidentRelease.u32 index),
+                .localGet sourceFunction.locals[2]!.1,
+                .i32LtU,
+                .ifElse (Fir.Wasm.Emit.ResidentRelease.releaseChild index) []]) ++
+            [.ret])] := by
+    have generatedEq := generated
+    unfold Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction at generatedEq
+    split at generatedEq
+    · contradiction
+    · simp only [Bind.bind, Except.bind] at generatedEq
+      split at generatedEq
+      · contradiction
+      · simp only [pure, Except.pure, Except.ok.injEq] at generatedEq
+        subst sourceFunction
+        rfl
+  have fieldsAdapted := instructions_guardedReleaseChildren
+    (sourceModule := sourceModule) generated selfFound
+      (List.range Fir.Wasm.Emit.ResidentRelease.constructorFieldLimit)
+  have returnAdapted : FirTalos.instructions sourceModule sourceFunction
+      [] [.ret] = .ok [.ret] := by
+    simp [FirTalos.instructions, FirTalos.instruction, Bind.bind,
+      Except.bind, pure, Except.pure]
+  have fieldsReturned := FirTalos.Correctness.instructions_append_of_success
+    fieldsAdapted returnAdapted
+  have trapAdapted : FirTalos.instructions sourceModule sourceFunction
+      [] [.unreachable] = .ok [.unreachable] := by
+    simp [FirTalos.instructions, FirTalos.instruction, Bind.bind,
+      Except.bind, pure, Except.pure]
+  have branchAdapted := FirTalos.Correctness.instruction_ifElse
+    trapAdapted fieldsReturned
+  rw [sourceShape]
+  have limitAdapted : FirTalos.instruction sourceModule sourceFunction []
+      (.i32Const .uint32 (Fir.Wasm.Emit.ResidentRelease.u32
+        Fir.Wasm.Emit.ResidentRelease.constructorFieldLimit)) =
+      .ok (.const (Fir.Wasm.Emit.ResidentRelease.u32
+        Fir.Wasm.Emit.ResidentRelease.constructorFieldLimit)) := by
+    simp [FirTalos.instruction, pure, Except.pure]
+  have countAdapted := FirTalos.Correctness.instruction_localGet
+    (sourceModule := sourceModule) countFound
+  have lessAdapted : FirTalos.instruction sourceModule sourceFunction []
+      .i32LtU = .ok .ltU := by
+    simp [FirTalos.instruction, pure, Except.pure]
+  simp only [FirTalos.instructions, limitAdapted, countAdapted, lessAdapted,
+    branchAdapted, Bind.bind, Except.bind, pure, Except.pure]
+  rfl
+
 /-- The production persistent-object branch adapts to the exact program used
 by its execution proof.  Generation determines both the symbolic local table
 and the embedded checked-no-op fragment. -/
