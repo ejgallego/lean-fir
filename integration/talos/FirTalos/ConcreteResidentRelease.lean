@@ -5184,6 +5184,44 @@ theorem wp_decrementOnceProgram_sentinel
     simpa only [List.take_zero, List.drop_zero, List.nil_append,
       Wasm.wp_unreachable_cons, if_neg checked] using terminal
 
+/-- Installed checked decrement of the physical erased sentinel is an exact
+no-op.  This is the non-heap child case used by ownership folds. -/
+theorem DecrementOnceInstallation.terminatesWith_checkedSentinel
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {store : Wasm.Store host}
+    (installation :
+      DecrementOnceInstallation sourceModule module descriptors)
+    (tail : List Wasm.Value) :
+    Wasm.TerminatesWith env module installation.index store
+      ([.i32 1, .i32 0] ++ tail)
+      (fun final values => final = store ∧ values = tail) := by
+  apply installation.terminatesWith_of_decrementOnceProgram_return_wp 0 1 tail
+  intro lastTarget
+  apply wp_decrementOnceProgram_sentinel
+  simp
+
+/-- Installed checked decrement of a low-bit tagged word is likewise an
+exact no-op, before any resident memory access. -/
+theorem DecrementOnceInstallation.terminatesWith_checkedTagged
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {store : Wasm.Store host} {object : UInt32}
+    (installation :
+      DecrementOnceInstallation sourceModule module descriptors)
+    (tagged : (1 : UInt32) &&& object ≠ 0)
+    (tail : List Wasm.Value) :
+    Wasm.TerminatesWith env module installation.index store
+      ([.i32 1, .i32 object] ++ tail)
+      (fun final values => final = store ∧ values = tail) := by
+  apply installation.terminatesWith_of_decrementOnceProgram_return_wp
+    object 1 tail
+  intro lastTarget
+  apply wp_decrementOnceProgram_tagged tagged
+  simp
+
 /-- A nonzero untagged but misaligned word traps at admission, before W7 loads
 the flags lane. -/
 theorem wp_decrementOnceProgram_misaligned
