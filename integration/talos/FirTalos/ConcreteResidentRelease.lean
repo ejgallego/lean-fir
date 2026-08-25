@@ -194,6 +194,20 @@ structure LiveHeaderResidentFacts
   aux0Read : memory.read32
     (UInt32.ofNat address.value + UInt32.ofNat headerAux0Offset) =
       header.aux0
+  aux1InBounds :
+    ¬((UInt32.ofNat address.value).toNat +
+      (UInt32.ofNat headerAux1Offset).toNat + 4 >
+      memory.pages * wasmPageBytes)
+  aux1Read : memory.read32
+    (UInt32.ofNat address.value + UInt32.ofNat headerAux1Offset) =
+      header.aux1
+  aux2InBounds :
+    ¬((UInt32.ofNat address.value).toNat +
+      (UInt32.ofNat headerAux2Offset).toNat + 4 >
+      memory.pages * wasmPageBytes)
+  aux2Read : memory.read32
+    (UInt32.ofNat address.value + UInt32.ofNat headerAux2Offset) =
+      header.aux2
   aux3InBounds :
     ¬((UInt32.ofNat address.value).toNat +
       (UInt32.ofNat headerAux3Offset).toNat + 4 >
@@ -283,6 +297,24 @@ def lastReferenceProgram (releaseHeaderIndex : Nat) (owned : Wasm.Program) :
   .localSet captureCountIndex,
   .localGet addressIndex,
   .call releaseHeaderIndex] ++ owned
+
+/-- Exact object-kind dispatcher used after the last-reference header has
+already been released.  Recursive constructor, closure, and opaque traversal
+remain explicit parameters; every other live representation is a leaf. -/
+def ownedReleaseProgram (constructorBody closureBody opaqueBody : Wasm.Program) :
+    Wasm.Program := [
+  .localGet kindIndex,
+  .const ObjectKind.constructor.code,
+  .eq,
+  .iff 0 0 constructorBody [
+    .localGet kindIndex,
+    .const ObjectKind.closure.code,
+    .eq,
+    .iff 0 0 closureBody [
+      .localGet kindIndex,
+      .const ObjectKind.opaque.code,
+      .eq,
+      .iff 0 0 opaqueBody [.ret]]]]
 
 /-- Ordinary release control flow.  The count-zero and last-reference paths
 remain explicit but opaque: the hot theorem below proves they are not entered. -/
@@ -523,6 +555,89 @@ theorem wp_lastReferenceProgram
   intro final values completed
   rcases completed with ⟨rfl, rfl⟩
   exact ownedBody
+
+/-- Nonrecursive object kinds return immediately after header release.  The
+proof is independent of all three recursively owned suffixes. -/
+theorem wp_ownedReleaseProgram_leaf
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {object check flags descriptor refCount kind marker count
+      captureCount : UInt32}
+    {constructorBody closureBody opaqueBody : Wasm.Program}
+    (notConstructor : kind ≠ ObjectKind.constructor.code)
+    (notClosure : kind ≠ ObjectKind.closure.code)
+    (notOpaque : kind ≠ ObjectKind.opaque.code)
+    (returned : Q (.Return store [])) :
+    Wasm.wp module
+      (ownedReleaseProgram constructorBody closureBody opaqueBody) Q store
+      (ownedEntry object check flags descriptor refCount kind marker count
+        captureCount) env := by
+  have kindFound (values : List Wasm.Value) :
+      ({ ownedEntry object check flags descriptor refCount kind marker count
+          captureCount with values } : Wasm.Locals).get kindIndex =
+        some (.i32 kind) := by rfl
+  unfold ownedReleaseProgram
+  simp only [Wasm.wp_localGet_cons, kindFound, Wasm.wp_const_cons,
+    Wasm.wp_eq_cons, if_neg notConstructor]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_localGet_cons, kindFound, Wasm.wp_const_cons, Wasm.wp_eq_cons,
+    if_neg notClosure]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_localGet_cons, kindFound, Wasm.wp_const_cons, Wasm.wp_eq_cons,
+    if_neg notOpaque]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simpa only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_ret_cons, ownedEntry] using returned
+
+/-- The complete last-reference body for a nonrecursive representation loads
+its dispatch metadata, releases the header, and then returns without invoking
+any recursive suffix. -/
+theorem wp_lastReferenceProgram_leaf
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store releasedStore : Wasm.Store host}
+    {object check flags descriptor refCount kind marker count
+      captureCount : UInt32}
+    {releaseHeaderIndex : Nat}
+    {constructorBody closureBody opaqueBody : Wasm.Program}
+    (kindInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerKindOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (kindRead : store.mem.read32
+      (object + UInt32.ofNat headerKindOffset) = kind)
+    (markerInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux0Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (markerRead : store.mem.read32
+      (object + UInt32.ofNat headerAux0Offset) = marker)
+    (countInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux1Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (countRead : store.mem.read32
+      (object + UInt32.ofNat headerAux1Offset) = count)
+    (captureInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux2Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (captureRead : store.mem.read32
+      (object + UInt32.ofNat headerAux2Offset) = captureCount)
+    (releaseRun : Wasm.TerminatesWith env module releaseHeaderIndex store
+      [.i32 object]
+      (fun final values => final = releasedStore ∧ values = []))
+    (notConstructor : kind ≠ ObjectKind.constructor.code)
+    (notClosure : kind ≠ ObjectKind.closure.code)
+    (notOpaque : kind ≠ ObjectKind.opaque.code)
+    (returned : Q (.Return releasedStore [])) :
+    Wasm.wp module
+      (lastReferenceProgram releaseHeaderIndex
+        (ownedReleaseProgram constructorBody closureBody opaqueBody))
+      Q store (countedLocals object check flags descriptor refCount) env := by
+  apply wp_lastReferenceProgram kindInBounds kindRead markerInBounds markerRead
+    countInBounds countRead captureInBounds captureRead releaseRun
+  exact wp_ownedReleaseProgram_leaf notConstructor notClosure notOpaque returned
 
 /-- Postcondition for branch proofs that deliberately terminate the current
 function.  It excludes fallthrough and structured breaks, while treating a
@@ -1407,6 +1522,78 @@ theorem wp_decrementOnceProgram_lastReference
   intro continuation terminal
   cases continuation <;> simp_all [TerminalPost]
 
+/-- Full `fir_dec_once` control flow for a nonrecursive count-one allocation.
+The only call is the already-proved header release; none of the three
+recursive object-kind bodies is entered. -/
+theorem wp_decrementOnceProgram_leaf
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store releasedStore : Wasm.Store host}
+    {object check flags descriptor refCount kind marker count
+      captureCount : UInt32}
+    {releaseHeaderIndex : Nat}
+    {constructorBody closureBody opaqueBody : Wasm.Program}
+    (taggedClear : (1 : UInt32) &&& object = 0)
+    (objectNonzero : object ≠ 0)
+    (alignmentClear :
+      UInt32.ofNat (target.heapAlignment - 1) &&& object = 0)
+    (flagsInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerFlagsOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (flagsRead : store.mem.read32
+      (object + UInt32.ofNat headerFlagsOffset) = flags)
+    (liveSet : liveFlag &&& flags = liveFlag)
+    (aux3InBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux3Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (aux3Read : store.mem.read32
+      (object + UInt32.ofNat headerAux3Offset) = descriptor)
+    (ordinary : flags &&& persistentFlag ≠ persistentFlag)
+    (refCountInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerRefCountOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (refCountRead : store.mem.read32
+      (object + UInt32.ofNat headerRefCountOffset) = refCount)
+    (one : refCount = 1)
+    (kindInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerKindOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (kindRead : store.mem.read32
+      (object + UInt32.ofNat headerKindOffset) = kind)
+    (markerInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux0Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (markerRead : store.mem.read32
+      (object + UInt32.ofNat headerAux0Offset) = marker)
+    (countInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux1Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (countRead : store.mem.read32
+      (object + UInt32.ofNat headerAux1Offset) = count)
+    (captureInBounds :
+      ¬(object.toNat + (UInt32.ofNat headerAux2Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (captureRead : store.mem.read32
+      (object + UInt32.ofNat headerAux2Offset) = captureCount)
+    (releaseRun : Wasm.TerminatesWith env module releaseHeaderIndex store
+      [.i32 object]
+      (fun final values => final = releasedStore ∧ values = []))
+    (notConstructor : kind ≠ ObjectKind.constructor.code)
+    (notClosure : kind ≠ ObjectKind.closure.code)
+    (notOpaque : kind ≠ ObjectKind.opaque.code)
+    (returned : Q (.Return releasedStore [])) :
+    Wasm.wp module
+      (decrementOnceProgram persistentReleaseProgram
+        (lastReferenceProgram releaseHeaderIndex
+          (ownedReleaseProgram constructorBody closureBody opaqueBody)))
+      Q store (decrementEntry object check) env := by
+  apply wp_decrementOnceProgram_lastReference taggedClear objectNonzero
+    alignmentClear flagsInBounds flagsRead liveSet aux3InBounds aux3Read ordinary
+    refCountInBounds refCountRead one
+  apply wp_lastReferenceProgram_leaf kindInBounds kindRead markerInBounds
+    markerRead countInBounds countRead captureInBounds captureRead releaseRun
+    notConstructor notClosure notOpaque
+  simpa [TerminalPost] using returned
+
 /-- Adjacent checked W6 word stores refine the corresponding Talos stores.
 Unlike the allocator specialization, this statement carries no global or
 frontier premise and is therefore suitable for nonallocating helpers. -/
@@ -1499,6 +1686,10 @@ theorem LiveHeaderResidentFacts.ofRelations
     (index := 2) (word := header.refCount) (by simp [Header.words])
   have aux0 := residentHeaderWord related exact headerInBounds
     (index := 4) (word := header.aux0) (by simp [Header.words])
+  have aux1 := residentHeaderWord related exact headerInBounds
+    (index := 5) (word := header.aux1) (by simp [Header.words])
+  have aux2 := residentHeaderWord related exact headerInBounds
+    (index := 6) (word := header.aux2) (by simp [Header.words])
   have aux3 := residentHeaderWord related exact headerInBounds
     (index := 7) (word := header.aux3) (by simp [Header.words])
   have addressFits : address.value < UInt32.size := by
@@ -1551,8 +1742,111 @@ theorem LiveHeaderResidentFacts.ofRelations
     refCountRead := refCount.2
     aux0InBounds := aux0.1
     aux0Read := aux0.2
+    aux1InBounds := aux1.1
+    aux1Read := aux1.2
+    aux2InBounds := aux2.1
+    aux2Read := aux2.2
     aux3InBounds := aux3.1
     aux3Read := aux3.2 }
+
+/-- A semantically nonrecursive cell has one of the four resident leaf header
+kinds.  This packages the representation inversion needed by all leaf release
+proofs, independently of target control flow. -/
+theorem LiveCellRel.nonrecursiveHeaderKind
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : Fir.LeanIR.Impure.HeapCell}
+    (related : LiveCellRel state witness address cell)
+    (leafCell : NonrecursiveCell cell)
+    {header : Header}
+    (headerRead : state.readLiveHeader address = .ok header) :
+    header.kind = .boxed ∨ header.kind = .natural ∨
+      header.kind = .string ∨ header.kind = .integer := by
+  cases related with
+  | constructor descriptor objectEq objectRelated relatedRead headerKind
+        refCount persistent live =>
+      rcases leafCell with ((boxedCell | naturalCell) | stringCell) | integerCell
+      · obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
+        rw [objectEq] at boxedEq
+        contradiction
+      · obtain ⟨value, naturalEq⟩ := naturalCell
+        rw [objectEq] at naturalEq
+        contradiction
+      · obtain ⟨value, stringEq⟩ := stringCell
+        rw [objectEq] at stringEq
+        contradiction
+      · obtain ⟨value, integerEq⟩ := integerCell
+        rw [objectEq] at integerEq
+        contradiction
+  | @boxed kind scalar actualHeader _ descriptor objectEq objectRelated refCount
+        persistent live =>
+      have headerEq : header = actualHeader :=
+        Except.ok.inj (headerRead.symm.trans objectRelated.headerRead)
+      subst header
+      exact .inl objectRelated.headerKind
+  | @natural value actualHeader _ descriptor objectEq objectRelated refCount
+        persistent live =>
+      have headerEq : header = actualHeader :=
+        Except.ok.inj (headerRead.symm.trans objectRelated.headerRead)
+      subst header
+      exact .inr (.inl objectRelated.headerKind)
+  | @integer value actualHeader _ descriptor objectEq objectRelated refCount
+        persistent live =>
+      have headerEq : header = actualHeader :=
+        Except.ok.inj (headerRead.symm.trans objectRelated.headerRead)
+      subst header
+      exact .inr (.inr (.inr objectRelated.headerKind))
+  | @string value actualHeader _ descriptor objectEq objectRelated refCount
+        persistent live =>
+      have headerEq : header = actualHeader :=
+        Except.ok.inj (headerRead.symm.trans objectRelated.headerRead)
+      subst header
+      exact .inr (.inr (.inl objectRelated.headerKind))
+  | @array elements capacity actualHeader _ descriptor objectEq objectRelated
+        refCount persistent live =>
+      rcases leafCell with ((boxedCell | naturalCell) | stringCell) | integerCell
+      · obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
+        rw [objectEq] at boxedEq
+        contradiction
+      · obtain ⟨value, naturalEq⟩ := naturalCell
+        rw [objectEq] at naturalEq
+        contradiction
+      · obtain ⟨value, stringEq⟩ := stringCell
+        rw [objectEq] at stringEq
+        contradiction
+      · obtain ⟨value, integerEq⟩ := integerCell
+        rw [objectEq] at integerEq
+        contradiction
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
+      rcases leafCell with ((boxedCell | naturalCell) | stringCell) | integerCell
+      · obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
+        rw [closureEq] at boxedEq
+        contradiction
+      · obtain ⟨value, naturalEq⟩ := naturalCell
+        rw [closureEq] at naturalEq
+        contradiction
+      · obtain ⟨value, stringEq⟩ := stringCell
+        rw [closureEq] at stringEq
+        contradiction
+      · obtain ⟨value, integerEq⟩ := integerCell
+        rw [closureEq] at integerEq
+        contradiction
+
+/-- Target-level discriminator facts obtained from the semantic leaf-kind
+inversion. -/
+theorem LiveCellRel.nonrecursiveHeaderCode
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : Fir.LeanIR.Impure.HeapCell}
+    (related : LiveCellRel state witness address cell)
+    (leafCell : NonrecursiveCell cell)
+    {header : Header}
+    (headerRead : state.readLiveHeader address = .ok header) :
+    header.kind.code ≠ ObjectKind.constructor.code ∧
+      header.kind.code ≠ ObjectKind.closure.code ∧
+      header.kind.code ≠ ObjectKind.opaque.code := by
+  rcases FirTalos.Concrete.ResidentRelease.LiveCellRel.nonrecursiveHeaderKind
+      related leafCell headerRead with
+    kind | kind | kind | kind <;> simp [kind, ObjectKind.code]
 
 /-- A logical common-header rewrite that changes only the reference-count
 field has the same resident-memory effect as W7's single hot-path store. -/
@@ -2008,6 +2302,122 @@ theorem LiveHeapRel.decrementOnceProgram_aboveOne_refines
   exact ⟨header, result, nextRuntime, headerRead, concreteOperation,
     semanticOperation, finalRelated, canonicalAfter, finalMemory,
     physicalExecution⟩
+
+/-- Complete three-semantics refinement for a nonrecursive count-one object.
+The W6 concrete runtime and FIR semantics both replace the live cell by its
+dead form; resident Wasm performs the exact released-header call and returns
+without entering constructor, closure, or opaque recursion. -/
+theorem LiveHeapRel.decrementOnceProgram_leaf_refines
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : Fir.LeanIR.Impure.RuntimeState}
+    {location : Fir.LeanIR.Impure.Location} {address : Word32}
+    {cell : Fir.LeanIR.Impure.HeapCell}
+    {descriptors : ClosureDescriptorTable}
+    {releaseHeaderIndex : Nat}
+    {constructorBody closureBody opaqueBody : Wasm.Program}
+    (related : LiveHeapRel state witness runtime)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (exactHeader : CanonicalLiveHeaderRel state address)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : Fir.LeanIR.Impure.findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (leafCell : NonrecursiveCell cell)
+    (ordinary : cell.persistent = false)
+    (one : cell.rc = 1) (check : Bool) (checkWord : UInt32)
+    (releaseRun : Wasm.TerminatesWith env module releaseHeaderIndex store
+      [.i32 (UInt32.ofNat address.value)]
+      (fun final values =>
+        final = releaseHeaderStore store (UInt32.ofNat address.value) ∧
+          values = [])) :
+    let object := UInt32.ofNat address.value
+    let finalStore := releaseHeaderStore store object
+    ∃ header result nextRuntime,
+      state.readLiveHeader address = .ok header ∧
+      decrementReferenceOnce state address check descriptors = .ok result ∧
+      Fir.LeanIR.Impure.decValueOnce runtime (.object (.heap location)) check =
+        .ok nextRuntime ∧
+      LiveHeapRel result witness nextRuntime ∧
+      DeadCellRel result address ∧
+      ResidentMemoryRel result finalStore.mem ∧
+      Wasm.wp module
+        (decrementOnceProgram persistentReleaseProgram
+          (lastReferenceProgram releaseHeaderIndex
+            (ownedReleaseProgram constructorBody closureBody opaqueBody)))
+        (fun continuation => continuation = .Return finalStore []) store
+        (decrementEntry object checkWord) env := by
+  dsimp only
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  obtain ⟨released, header, releasedMemory, concreteRelease, headerRead,
+      releasedEq, headerWrite, releasedValid, dead⟩ :=
+    targetRelated.decrementReferenceOnce_leaf_one
+      (descriptors := descriptors) leafCell related.frontier ordinary one check
+  obtain ⟨result, nextRuntime, concreteOperation, semanticOperation,
+      finalRelated⟩ :=
+    related.decrementReferenceOnce_refines_leaf_one
+      (descriptors := descriptors) mapped found live leafCell ordinary one check
+  have releasedEqResult : released = result :=
+    Except.ok.inj (concreteRelease.symm.trans concreteOperation)
+  subst result
+  have exact := exactHeader header headerRead
+  have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
+    Nat.le_trans targetRelated.headerOwned related.frontier.cursorInBounds
+  have finalMemory : ResidentMemoryRel released
+      (releaseHeaderStore store (UInt32.ofNat address.value)).mem := by
+    rw [releasedEq]
+    simpa [releaseHeaderStore] using
+      ResidentMemoryRel.releaseHeader memoryRelated exact headerInBounds
+        headerWrite
+  obtain ⟨heap, _, headerLive, _, _, _⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts state address header
+      headerRead
+  have entry := LiveHeaderResidentFacts.ofRelations memoryRelated exact
+    headerInBounds heap headerLive
+  obtain ⟨ownershipHeader, ownershipRead, _, _, headerPersistentRel,
+      headerRefCountRel⟩ :=
+    targetRelated.ownershipHeader
+  have ownershipHeaderEq : ownershipHeader = header :=
+    Except.ok.inj (ownershipRead.symm.trans headerRead)
+  subst ownershipHeader
+  have headerOrdinary : header.persistent = false :=
+    headerPersistentRel.trans ordinary
+  have physicalOrdinary :
+      header.flags &&& persistentFlag ≠ persistentFlag := by
+    cases liveValue : header.live
+    · simp [Header.flags, headerOrdinary, liveValue, persistentFlag]
+    · simp [Header.flags, headerOrdinary, liveValue, persistentFlag]
+      decide
+  have physicalOne : header.refCount = 1 := by
+    apply UInt32.toNat.inj
+    simpa [one] using headerRefCountRel
+  obtain ⟨notConstructor, notClosure, notOpaque⟩ :=
+    FirTalos.Concrete.ResidentRelease.LiveCellRel.nonrecursiveHeaderCode
+      targetRelated leafCell headerRead
+  have physicalExecution :
+      Wasm.wp module
+        (decrementOnceProgram persistentReleaseProgram
+          (lastReferenceProgram releaseHeaderIndex
+            (ownedReleaseProgram constructorBody closureBody opaqueBody)))
+        (fun continuation => continuation =
+          .Return (releaseHeaderStore store
+            (UInt32.ofNat address.value)) []) store
+        (decrementEntry (UInt32.ofNat address.value) checkWord) env := by
+    apply wp_decrementOnceProgram_leaf entry.taggedClear entry.objectNonzero
+      entry.alignmentClear entry.flagsInBounds entry.flagsRead entry.liveSet
+      entry.aux3InBounds entry.aux3Read physicalOrdinary
+      entry.refCountInBounds entry.refCountRead physicalOne
+      entry.kindInBounds entry.kindRead entry.aux0InBounds entry.aux0Read
+      entry.aux1InBounds entry.aux1Read entry.aux2InBounds entry.aux2Read
+      releaseRun notConstructor notClosure notOpaque
+    rfl
+  exact ⟨header, released, nextRuntime, headerRead, concreteOperation,
+    semanticOperation, finalRelated, dead, finalMemory, physicalExecution⟩
 
 /-- A represented live ordinary zero-count cell reaches the same ownership
 fault in the concrete host and FIR semantics, while resident Wasm traps before
