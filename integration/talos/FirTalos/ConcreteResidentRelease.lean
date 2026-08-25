@@ -394,6 +394,138 @@ theorem generatedDecrementOnceFunction_signature
       · simpa using congrArg (fun f : Fir.Wasm.Function =>
           f.results.toList.map FirTalos.abiKind) generated.symm
 
+/-- Every generated decrement parameter resolves at its declared positional
+index.  Stating this over `Fin` makes the fact reusable by all exact staged
+body adaptations without exposing W7's private symbolic names. -/
+theorem generatedDecrementOnceFunction_parameterFound
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction)
+    (index : Fin 2) :
+    FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.params[index]!.1 = some index := by
+  unfold Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction at generated
+  split at generated
+  · contradiction
+  · simp only [Bind.bind, Except.bind] at generated
+    split at generated
+    · contradiction
+    · simp only [pure, Except.pure, Except.ok.injEq] at generated
+      subst sourceFunction
+      fin_cases index <;> rfl
+
+/-- Every generated decrement local resolves immediately after the two
+parameters.  This is the complete production-local map used by exact adapter
+proofs, derived from generation rather than copied as a premise. -/
+theorem generatedDecrementOnceFunction_localFound
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction)
+    (index : Fin 10) :
+    FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[index]!.1 = some ((index : Nat) + 2) := by
+  unfold Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction at generated
+  split at generated
+  · contradiction
+  · simp only [Bind.bind, Except.bind] at generated
+    split at generated
+    · contradiction
+    · simp only [pure, Except.pure, Except.ok.injEq] at generated
+      subst sourceFunction
+      fin_cases index <;> rfl
+
+/-- W7's terminal-word header probe adapts exactly to the Talos hot-path
+prefix used by the resident-memory proof. -/
+theorem instructions_probeCompleteHeader
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction) :
+    FirTalos.instructions sourceModule sourceFunction []
+      Fir.Wasm.Emit.ResidentRelease.probeCompleteHeader =
+        .ok probeCompleteHeaderProgram := by
+  have addressFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[0]!.1 = some addressIndex := by
+    simpa [addressIndex] using
+      generatedDecrementOnceFunction_localFound generated (0 : Fin 10)
+  have descriptorFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[4]!.1 = some descriptorIndex := by
+    simpa [descriptorIndex] using
+      generatedDecrementOnceFunction_localFound generated (4 : Fin 10)
+  have sourceShape : Fir.Wasm.Emit.ResidentRelease.probeCompleteHeader = [
+      .localGet sourceFunction.locals[0]!.1,
+      .i32Load .uint32
+        (Fir.Wasm.Emit.ResidentRelease.u32 headerAux3Offset),
+      .localSet sourceFunction.locals[4]!.1] := by
+    unfold Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction at generated
+    split at generated
+    · contradiction
+    · simp only [Bind.bind, Except.bind] at generated
+      split at generated
+      · contradiction
+      · simp only [pure, Except.pure, Except.ok.injEq] at generated
+        subst sourceFunction
+        rfl
+  rw [sourceShape]
+  simp [probeCompleteHeaderProgram, Fir.Wasm.Emit.ResidentRelease.u32,
+    FirTalos.instructions, FirTalos.instruction, addressFound,
+    descriptorFound, Bind.bind, Except.bind, pure, Except.pure]
+
+/-- W7's shared-reference decrement-and-return branch adapts exactly to the
+Talos store program whose execution and refinement are already proved. -/
+theorem instructions_decrementAboveOneBody
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction) :
+    FirTalos.instructions sourceModule sourceFunction []
+      Fir.Wasm.Emit.ResidentRelease.decrementAboveOneBody =
+        .ok decrementAboveOneProgram := by
+  have addressFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[0]!.1 = some addressIndex := by
+    simpa [addressIndex] using
+      generatedDecrementOnceFunction_localFound generated (0 : Fin 10)
+  have refCountFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[5]!.1 = some refCountIndex := by
+    simpa [refCountIndex] using
+      generatedDecrementOnceFunction_localFound generated (5 : Fin 10)
+  have sourceShape :
+      Fir.Wasm.Emit.ResidentRelease.decrementAboveOneBody = [
+        .localGet sourceFunction.locals[0]!.1,
+        .localGet sourceFunction.locals[5]!.1,
+        .i32Const .uint32 1,
+        .i32Sub,
+        .i32Store .uint32
+          (Fir.Wasm.Emit.ResidentRelease.u32 headerRefCountOffset),
+        .ret] := by
+    unfold Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction at generated
+    split at generated
+    · contradiction
+    · simp only [Bind.bind, Except.bind] at generated
+      split at generated
+      · contradiction
+      · simp only [pure, Except.pure, Except.ok.injEq] at generated
+        subst sourceFunction
+        rfl
+  rw [sourceShape]
+  simp [decrementAboveOneProgram, Fir.Wasm.Emit.ResidentRelease.u32,
+    FirTalos.instructions, FirTalos.instruction, addressFound, refCountFound,
+    Bind.bind, Except.bind, pure, Except.pure]
+
 /-- The Talos adapter preserves the production decrement helper's exact
 two-parameter, ten-local, result-free physical signature. -/
 theorem adaptedDecrementOnceFunction_signature
@@ -1475,6 +1607,41 @@ def checkedNoopProgram : Wasm.Program := [
   .localGet checkIndex,
   .iff 0 0 [.ret] [.unreachable]]
 
+/-- The checked no-op fragment in the production decrement body adapts
+exactly.  Its symbolic parameter is recovered from the generated function,
+so this theorem neither exposes private emitter identifiers nor accepts a
+caller-supplied body shape. -/
+theorem instructions_checkedNoop
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction) :
+    FirTalos.instructions sourceModule sourceFunction []
+      Fir.Wasm.Emit.ResidentRelease.checkedNoop =
+        .ok checkedNoopProgram := by
+  have checkFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.params[1]!.1 = some checkIndex := by
+    simpa [checkIndex] using
+      generatedDecrementOnceFunction_parameterFound generated (1 : Fin 2)
+  have checkedShape : Fir.Wasm.Emit.ResidentRelease.checkedNoop =
+      [.localGet sourceFunction.params[1]!.1,
+        .ifElse [.ret] [.unreachable]] := by
+    unfold Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction at generated
+    split at generated
+    · contradiction
+    · simp only [Bind.bind, Except.bind] at generated
+      split at generated
+      · contradiction
+      · simp only [pure, Except.pure, Except.ok.injEq] at generated
+        subst sourceFunction
+        rfl
+  rw [checkedShape]
+  simp [checkedNoopProgram, FirTalos.instructions, FirTalos.instruction,
+    checkFound, Bind.bind, Except.bind, pure, Except.pure]
+
 /-- Exact Talos spelling of W7's persistent-object branch.  Ordinary
 persistent objects return unchanged; the distinguished promoted-Nat encoding
 retains the checked tagged-value behavior. -/
@@ -1495,6 +1662,316 @@ def persistentReleaseProgram : Wasm.Program := [
     .eq,
     .iff 0 0 checkedNoopProgram [.ret]] [.ret]]
 
+/-- The production persistent-object branch adapts to the exact program used
+by its execution proof.  Generation determines both the symbolic local table
+and the embedded checked-no-op fragment. -/
+theorem instructions_persistentReleaseBody
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction) :
+    FirTalos.instructions sourceModule sourceFunction []
+      Fir.Wasm.Emit.ResidentRelease.persistentReleaseBody =
+        .ok persistentReleaseProgram := by
+  have addressFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[0]!.1 = some addressIndex := by
+    simpa [addressIndex] using
+      generatedDecrementOnceFunction_localFound generated (0 : Fin 10)
+  have kindFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[1]!.1 = some kindIndex := by
+    simpa [kindIndex] using
+      generatedDecrementOnceFunction_localFound generated (1 : Fin 10)
+  have markerFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[7]!.1 = some markerIndex := by
+    simpa [markerIndex] using
+      generatedDecrementOnceFunction_localFound generated (7 : Fin 10)
+  have sourceShape :
+      Fir.Wasm.Emit.ResidentRelease.persistentReleaseBody = [
+        .localGet sourceFunction.locals[0]!.1,
+        .i32Load .uint32
+          (Fir.Wasm.Emit.ResidentRelease.u32 headerKindOffset),
+        .localSet sourceFunction.locals[1]!.1,
+        .localGet sourceFunction.locals[0]!.1,
+        .i32Load .uint32
+          (Fir.Wasm.Emit.ResidentRelease.u32 headerAux0Offset),
+        .localSet sourceFunction.locals[7]!.1,
+        .localGet sourceFunction.locals[1]!.1,
+        .i32Const .uint32 ObjectKind.natural.code,
+        .i32Eq,
+        .ifElse [
+          .localGet sourceFunction.locals[0]!.1,
+          .i32Load .uint32
+            (Fir.Wasm.Emit.ResidentRelease.u32 headerAux0Offset),
+          .i32Const .uint32 promotedTagMarker,
+          .i32Eq,
+          .ifElse Fir.Wasm.Emit.ResidentRelease.checkedNoop [.ret]]
+          [.ret]] := by
+    unfold Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction at generated
+    split at generated
+    · contradiction
+    · simp only [Bind.bind, Except.bind] at generated
+      split at generated
+      · contradiction
+      · simp only [pure, Except.pure, Except.ok.injEq] at generated
+        subst sourceFunction
+        rfl
+  rw [sourceShape]
+  simp [persistentReleaseProgram, Fir.Wasm.Emit.ResidentRelease.u32,
+    FirTalos.instructions, FirTalos.instruction, addressFound, kindFound,
+    markerFound, instructions_checkedNoop generated, Bind.bind, Except.bind,
+    pure, Except.pure]
+
+/-- Once the descriptor-dependent last-reference fragment adapts, W7's
+ordinary-reference dispatcher adapts compositionally around it.  In
+particular, the verified shared-reference store is the exact hot branch of
+the resulting production program. -/
+theorem instructions_ordinaryReleaseBody
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function}
+    {lastSource ordinarySource : List Fir.Wasm.Instruction}
+    {lastTarget : Wasm.Program}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction)
+    (lastGenerated :
+      Fir.Wasm.Emit.ResidentRelease.lastReferenceReleaseBody descriptors =
+        .ok lastSource)
+    (ordinaryGenerated :
+      Fir.Wasm.Emit.ResidentRelease.ordinaryReleaseBody descriptors =
+        .ok ordinarySource)
+    (lastAdapted :
+      FirTalos.instructions sourceModule sourceFunction [] lastSource =
+        .ok lastTarget) :
+    FirTalos.instructions sourceModule sourceFunction [] ordinarySource =
+      .ok (ordinaryReleaseProgram lastTarget) := by
+  have addressFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[0]!.1 = some addressIndex := by
+    simpa [addressIndex] using
+      generatedDecrementOnceFunction_localFound generated (0 : Fin 10)
+  have refCountFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[5]!.1 = some refCountIndex := by
+    simpa [refCountIndex] using
+      generatedDecrementOnceFunction_localFound generated (5 : Fin 10)
+  have sourceShape : ordinarySource = [
+      .localGet sourceFunction.locals[0]!.1,
+      .i32Load .uint32
+        (Fir.Wasm.Emit.ResidentRelease.u32 headerRefCountOffset),
+      .localSet sourceFunction.locals[5]!.1,
+      .localGet sourceFunction.locals[5]!.1,
+      .i32Const .uint32 0,
+      .i32Eq,
+      .ifElse [.unreachable] [
+        .i32Const .uint32 1,
+        .localGet sourceFunction.locals[5]!.1,
+        .i32LtU,
+        .ifElse Fir.Wasm.Emit.ResidentRelease.decrementAboveOneBody
+          lastSource]] := by
+    unfold Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction at generated
+    split at generated
+    · contradiction
+    · simp only [Bind.bind, Except.bind] at generated
+      split at generated
+      · contradiction
+      · simp only [pure, Except.pure, Except.ok.injEq] at generated
+        subst sourceFunction
+        unfold Fir.Wasm.Emit.ResidentRelease.ordinaryReleaseBody at ordinaryGenerated
+        rw [lastGenerated] at ordinaryGenerated
+        simpa [Fir.Wasm.Emit.ResidentRelease.equalsConst] using
+          (Except.ok.inj ordinaryGenerated).symm
+  rw [sourceShape]
+  simp [ordinaryReleaseProgram, Fir.Wasm.Emit.ResidentRelease.u32,
+    FirTalos.instructions, FirTalos.instruction, addressFound, refCountFound,
+    instructions_decrementAboveOneBody generated, lastAdapted, Bind.bind,
+    Except.bind, pure, Except.pure]
+
+/-- Computation-level form of `instructions_ordinaryReleaseBody`: adapting
+the ordinary dispatcher fails or succeeds exactly with its cold
+last-reference arm, and otherwise only wraps that target program. -/
+theorem instructions_ordinaryReleaseBody_eq
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function}
+    {lastSource ordinarySource : List Fir.Wasm.Instruction}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction)
+    (lastGenerated :
+      Fir.Wasm.Emit.ResidentRelease.lastReferenceReleaseBody descriptors =
+        .ok lastSource)
+    (ordinaryGenerated :
+      Fir.Wasm.Emit.ResidentRelease.ordinaryReleaseBody descriptors =
+        .ok ordinarySource) :
+    FirTalos.instructions sourceModule sourceFunction [] ordinarySource = (do
+      let lastTarget ←
+        FirTalos.instructions sourceModule sourceFunction [] lastSource
+      pure (ordinaryReleaseProgram lastTarget)) := by
+  have addressFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[0]!.1 = some addressIndex := by
+    simpa [addressIndex] using
+      generatedDecrementOnceFunction_localFound generated (0 : Fin 10)
+  have refCountFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[5]!.1 = some refCountIndex := by
+    simpa [refCountIndex] using
+      generatedDecrementOnceFunction_localFound generated (5 : Fin 10)
+  have sourceShape : ordinarySource = [
+      .localGet sourceFunction.locals[0]!.1,
+      .i32Load .uint32
+        (Fir.Wasm.Emit.ResidentRelease.u32 headerRefCountOffset),
+      .localSet sourceFunction.locals[5]!.1,
+      .localGet sourceFunction.locals[5]!.1,
+      .i32Const .uint32 0,
+      .i32Eq,
+      .ifElse [.unreachable] [
+        .i32Const .uint32 1,
+        .localGet sourceFunction.locals[5]!.1,
+        .i32LtU,
+        .ifElse Fir.Wasm.Emit.ResidentRelease.decrementAboveOneBody
+          lastSource]] := by
+    unfold Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction at generated
+    split at generated
+    · contradiction
+    · simp only [Bind.bind, Except.bind] at generated
+      split at generated
+      · contradiction
+      · simp only [pure, Except.pure, Except.ok.injEq] at generated
+        subst sourceFunction
+        unfold Fir.Wasm.Emit.ResidentRelease.ordinaryReleaseBody at ordinaryGenerated
+        rw [lastGenerated] at ordinaryGenerated
+        simpa [Fir.Wasm.Emit.ResidentRelease.equalsConst] using
+          (Except.ok.inj ordinaryGenerated).symm
+  rw [sourceShape]
+  cases lastAdapted :
+      FirTalos.instructions sourceModule sourceFunction [] lastSource <;>
+    simp [ordinaryReleaseProgram, Fir.Wasm.Emit.ResidentRelease.u32,
+      FirTalos.instructions, FirTalos.instruction, addressFound,
+      refCountFound, instructions_decrementAboveOneBody generated,
+      lastAdapted, Bind.bind, Except.bind, pure, Except.pure]
+
+/-- The live-object dispatcher adapts compositionally once its ordinary
+branch has been adapted.  The exact header probe and persistent branch are
+discharged by their production lemmas. -/
+theorem instructions_liveReleaseBody
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function}
+    {ordinarySource liveSource : List Fir.Wasm.Instruction}
+    {lastTarget : Wasm.Program}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction)
+    (ordinaryGenerated :
+      Fir.Wasm.Emit.ResidentRelease.ordinaryReleaseBody descriptors =
+        .ok ordinarySource)
+    (liveGenerated :
+      Fir.Wasm.Emit.ResidentRelease.liveReleaseBody descriptors =
+        .ok liveSource)
+    (ordinaryAdapted :
+      FirTalos.instructions sourceModule sourceFunction [] ordinarySource =
+        .ok (ordinaryReleaseProgram lastTarget)) :
+    FirTalos.instructions sourceModule sourceFunction [] liveSource =
+      .ok (liveReleaseProgram persistentReleaseProgram lastTarget) := by
+  have flagsFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[6]!.1 = some flagsIndex := by
+    simpa [flagsIndex] using
+      generatedDecrementOnceFunction_localFound generated (6 : Fin 10)
+  have sourceShape : liveSource =
+      Fir.Wasm.Emit.ResidentRelease.probeCompleteHeader ++ [
+        .localGet sourceFunction.locals[6]!.1,
+        .i32Const .uint32 persistentFlag,
+        .i32And,
+        .i32Const .uint32 persistentFlag,
+        .i32Eq,
+        .ifElse Fir.Wasm.Emit.ResidentRelease.persistentReleaseBody
+          ordinarySource] := by
+    unfold Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction at generated
+    split at generated
+    · contradiction
+    · simp only [Bind.bind, Except.bind] at generated
+      split at generated
+      · contradiction
+      · simp only [pure, Except.pure, Except.ok.injEq] at generated
+        subst sourceFunction
+        unfold Fir.Wasm.Emit.ResidentRelease.liveReleaseBody at liveGenerated
+        rw [ordinaryGenerated] at liveGenerated
+        simpa [Fir.Wasm.Emit.ResidentRelease.equalsConst] using
+          (Except.ok.inj liveGenerated).symm
+  rw [sourceShape, FirTalos.Correctness.instructions_append]
+  simp [liveReleaseProgram, FirTalos.instructions, FirTalos.instruction,
+    flagsFound, instructions_probeCompleteHeader generated,
+    instructions_persistentReleaseBody generated, ordinaryAdapted,
+    Bind.bind, Except.bind, pure, Except.pure]
+
+/-- Computation-level live-dispatch composition: every adapter failure below
+this point comes from the last-reference arm, and a successful arm is wrapped
+in the exact live program. -/
+theorem instructions_liveReleaseBody_eq
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function}
+    {lastSource ordinarySource liveSource : List Fir.Wasm.Instruction}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction)
+    (lastGenerated :
+      Fir.Wasm.Emit.ResidentRelease.lastReferenceReleaseBody descriptors =
+        .ok lastSource)
+    (ordinaryGenerated :
+      Fir.Wasm.Emit.ResidentRelease.ordinaryReleaseBody descriptors =
+        .ok ordinarySource)
+    (liveGenerated :
+      Fir.Wasm.Emit.ResidentRelease.liveReleaseBody descriptors =
+        .ok liveSource) :
+    FirTalos.instructions sourceModule sourceFunction [] liveSource = (do
+      let lastTarget ←
+        FirTalos.instructions sourceModule sourceFunction [] lastSource
+      pure (liveReleaseProgram persistentReleaseProgram lastTarget)) := by
+  have flagsFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[6]!.1 = some flagsIndex := by
+    simpa [flagsIndex] using
+      generatedDecrementOnceFunction_localFound generated (6 : Fin 10)
+  have sourceShape : liveSource =
+      Fir.Wasm.Emit.ResidentRelease.probeCompleteHeader ++ [
+        .localGet sourceFunction.locals[6]!.1,
+        .i32Const .uint32 persistentFlag,
+        .i32And,
+        .i32Const .uint32 persistentFlag,
+        .i32Eq,
+        .ifElse Fir.Wasm.Emit.ResidentRelease.persistentReleaseBody
+          ordinarySource] := by
+    unfold Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction at generated
+    split at generated
+    · contradiction
+    · simp only [Bind.bind, Except.bind] at generated
+      split at generated
+      · contradiction
+      · simp only [pure, Except.pure, Except.ok.injEq] at generated
+        subst sourceFunction
+        unfold Fir.Wasm.Emit.ResidentRelease.liveReleaseBody at liveGenerated
+        rw [ordinaryGenerated] at liveGenerated
+        simpa [Fir.Wasm.Emit.ResidentRelease.equalsConst] using
+          (Except.ok.inj liveGenerated).symm
+  rw [sourceShape, FirTalos.Correctness.instructions_append]
+  rw [instructions_probeCompleteHeader generated]
+  cases lastAdapted :
+      FirTalos.instructions sourceModule sourceFunction [] lastSource <;>
+    simp [liveReleaseProgram, FirTalos.instructions, FirTalos.instruction,
+      flagsFound, instructions_persistentReleaseBody generated,
+      instructions_ordinaryReleaseBody_eq generated lastGenerated
+        ordinaryGenerated,
+      lastAdapted, Bind.bind, Except.bind, pure, Except.pure]
+
 /-- Exact target spelling of the aligned live-object dispatch. -/
 def alignedReleaseProgram (persistent lastReference : Wasm.Program) :
     Wasm.Program := [
@@ -1511,6 +1988,154 @@ def alignedReleaseProgram (persistent lastReference : Wasm.Program) :
   .const liveFlag,
   .eq,
   .iff 0 0 (liveReleaseProgram persistent lastReference) [.unreachable]]
+
+/-- The alignment/live-header prefix adapts exactly around an already adapted
+live-object dispatcher. -/
+theorem instructions_alignedReleaseBody
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function}
+    {liveSource alignedSource : List Fir.Wasm.Instruction}
+    {lastTarget : Wasm.Program}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction)
+    (liveGenerated :
+      Fir.Wasm.Emit.ResidentRelease.liveReleaseBody descriptors =
+        .ok liveSource)
+    (alignedGenerated :
+      Fir.Wasm.Emit.ResidentRelease.alignedReleaseBody descriptors =
+        .ok alignedSource)
+    (liveAdapted :
+      FirTalos.instructions sourceModule sourceFunction [] liveSource =
+        .ok (liveReleaseProgram persistentReleaseProgram lastTarget)) :
+    FirTalos.instructions sourceModule sourceFunction [] alignedSource =
+      .ok (alignedReleaseProgram persistentReleaseProgram lastTarget) := by
+  have objectFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.params[0]!.1 = some objectIndex := by
+    simpa [objectIndex] using
+      generatedDecrementOnceFunction_parameterFound generated (0 : Fin 2)
+  have addressFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[0]!.1 = some addressIndex := by
+    simpa [addressIndex] using
+      generatedDecrementOnceFunction_localFound generated (0 : Fin 10)
+  have flagsFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[6]!.1 = some flagsIndex := by
+    simpa [flagsIndex] using
+      generatedDecrementOnceFunction_localFound generated (6 : Fin 10)
+  have sourceShape : alignedSource = [
+      .localGet sourceFunction.params[0]!.1,
+      .i32Const .uint32 0,
+      .i32Add,
+      .localSet sourceFunction.locals[0]!.1,
+      .localGet sourceFunction.locals[0]!.1,
+      .i32Load .uint32
+        (Fir.Wasm.Emit.ResidentRelease.u32 headerFlagsOffset),
+      .localSet sourceFunction.locals[6]!.1,
+      .localGet sourceFunction.locals[6]!.1,
+      .i32Const .uint32 liveFlag,
+      .i32And,
+      .i32Const .uint32 liveFlag,
+      .i32Eq,
+      .ifElse liveSource [.unreachable]] := by
+    unfold Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction at generated
+    split at generated
+    · contradiction
+    · simp only [Bind.bind, Except.bind] at generated
+      split at generated
+      · contradiction
+      · simp only [pure, Except.pure, Except.ok.injEq] at generated
+        subst sourceFunction
+        unfold Fir.Wasm.Emit.ResidentRelease.alignedReleaseBody at alignedGenerated
+        rw [liveGenerated] at alignedGenerated
+        simpa [Fir.Wasm.Emit.ResidentRelease.equalsConst] using
+          (Except.ok.inj alignedGenerated).symm
+  rw [sourceShape]
+  simp [alignedReleaseProgram, Fir.Wasm.Emit.ResidentRelease.u32,
+    FirTalos.instructions, FirTalos.instruction, objectFound, addressFound,
+    flagsFound, liveAdapted, Bind.bind, Except.bind, pure, Except.pure]
+
+/-- Computation-level alignment composition, retaining the last-reference
+adapter result as the sole fallible subcomputation. -/
+theorem instructions_alignedReleaseBody_eq
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function}
+    {lastSource ordinarySource liveSource alignedSource :
+      List Fir.Wasm.Instruction}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction)
+    (lastGenerated :
+      Fir.Wasm.Emit.ResidentRelease.lastReferenceReleaseBody descriptors =
+        .ok lastSource)
+    (ordinaryGenerated :
+      Fir.Wasm.Emit.ResidentRelease.ordinaryReleaseBody descriptors =
+        .ok ordinarySource)
+    (liveGenerated :
+      Fir.Wasm.Emit.ResidentRelease.liveReleaseBody descriptors =
+        .ok liveSource)
+    (alignedGenerated :
+      Fir.Wasm.Emit.ResidentRelease.alignedReleaseBody descriptors =
+        .ok alignedSource) :
+    FirTalos.instructions sourceModule sourceFunction [] alignedSource = (do
+      let lastTarget ←
+        FirTalos.instructions sourceModule sourceFunction [] lastSource
+      pure (alignedReleaseProgram persistentReleaseProgram lastTarget)) := by
+  have objectFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.params[0]!.1 = some objectIndex := by
+    simpa [objectIndex] using
+      generatedDecrementOnceFunction_parameterFound generated (0 : Fin 2)
+  have addressFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[0]!.1 = some addressIndex := by
+    simpa [addressIndex] using
+      generatedDecrementOnceFunction_localFound generated (0 : Fin 10)
+  have flagsFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[6]!.1 = some flagsIndex := by
+    simpa [flagsIndex] using
+      generatedDecrementOnceFunction_localFound generated (6 : Fin 10)
+  have sourceShape : alignedSource = [
+      .localGet sourceFunction.params[0]!.1,
+      .i32Const .uint32 0,
+      .i32Add,
+      .localSet sourceFunction.locals[0]!.1,
+      .localGet sourceFunction.locals[0]!.1,
+      .i32Load .uint32
+        (Fir.Wasm.Emit.ResidentRelease.u32 headerFlagsOffset),
+      .localSet sourceFunction.locals[6]!.1,
+      .localGet sourceFunction.locals[6]!.1,
+      .i32Const .uint32 liveFlag,
+      .i32And,
+      .i32Const .uint32 liveFlag,
+      .i32Eq,
+      .ifElse liveSource [.unreachable]] := by
+    unfold Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction at generated
+    split at generated
+    · contradiction
+    · simp only [Bind.bind, Except.bind] at generated
+      split at generated
+      · contradiction
+      · simp only [pure, Except.pure, Except.ok.injEq] at generated
+        subst sourceFunction
+        unfold Fir.Wasm.Emit.ResidentRelease.alignedReleaseBody at alignedGenerated
+        rw [liveGenerated] at alignedGenerated
+        simpa [Fir.Wasm.Emit.ResidentRelease.equalsConst] using
+          (Except.ok.inj alignedGenerated).symm
+  rw [sourceShape]
+  cases lastAdapted :
+      FirTalos.instructions sourceModule sourceFunction [] lastSource <;>
+    simp [alignedReleaseProgram, Fir.Wasm.Emit.ResidentRelease.u32,
+      FirTalos.instructions, FirTalos.instruction, objectFound, addressFound,
+      flagsFound,
+      instructions_liveReleaseBody_eq generated lastGenerated
+        ordinaryGenerated liveGenerated,
+      lastAdapted, Bind.bind, Except.bind, pure, Except.pure]
 
 /-- Exact target control flow of `fir_dec_once`, parameterized only by the
 cold programs that the shared-reference theorem does not enter. -/
@@ -1531,6 +2156,216 @@ def decrementOnceProgram (persistent lastReference : Wasm.Program) :
       .eq,
       .iff 0 0 (alignedReleaseProgram persistent lastReference)
         [.unreachable]]]]
+
+/-- The public decrement body adapts exactly once its aligned live-object arm
+has been adapted.  Together with the staged lemmas above, this exposes the
+whole production target around only the descriptor-dependent cold branch. -/
+theorem instructions_decrementOnceBody
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function}
+    {alignedSource decrementSource : List Fir.Wasm.Instruction}
+    {lastTarget : Wasm.Program}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction)
+    (alignedGenerated :
+      Fir.Wasm.Emit.ResidentRelease.alignedReleaseBody descriptors =
+        .ok alignedSource)
+    (decrementGenerated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceBody descriptors =
+        .ok decrementSource)
+    (alignedAdapted :
+      FirTalos.instructions sourceModule sourceFunction [] alignedSource =
+        .ok (alignedReleaseProgram persistentReleaseProgram lastTarget)) :
+    FirTalos.instructions sourceModule sourceFunction [] decrementSource =
+      .ok (decrementOnceProgram persistentReleaseProgram lastTarget) := by
+  have objectFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.params[0]!.1 = some objectIndex := by
+    simpa [objectIndex] using
+      generatedDecrementOnceFunction_parameterFound generated (0 : Fin 2)
+  have sourceShape : decrementSource = [
+      .localGet sourceFunction.params[0]!.1,
+      .i32Const .uint32 1,
+      .i32And,
+      .ifElse Fir.Wasm.Emit.ResidentRelease.checkedNoop [
+        .localGet sourceFunction.params[0]!.1,
+        .i32Const .tobject 0,
+        .i32Eq,
+        .ifElse Fir.Wasm.Emit.ResidentRelease.checkedNoop [
+          .localGet sourceFunction.params[0]!.1,
+          .i32Const .uint32
+            (Fir.Wasm.Emit.ResidentRelease.u32 (target.heapAlignment - 1)),
+          .i32And,
+          .i32Const .uint32 0,
+          .i32Eq,
+          .ifElse alignedSource [.unreachable]]]] := by
+    unfold Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction at generated
+    split at generated
+    · contradiction
+    · simp only [Bind.bind, Except.bind] at generated
+      split at generated
+      · contradiction
+      · simp only [pure, Except.pure, Except.ok.injEq] at generated
+        subst sourceFunction
+        unfold Fir.Wasm.Emit.ResidentRelease.decrementOnceBody at decrementGenerated
+        rw [alignedGenerated] at decrementGenerated
+        simpa [Fir.Wasm.Emit.ResidentRelease.equalsConst] using
+          (Except.ok.inj decrementGenerated).symm
+  rw [sourceShape]
+  simp [decrementOnceProgram, Fir.Wasm.Emit.ResidentRelease.u32,
+    FirTalos.instructions, FirTalos.instruction, objectFound,
+    instructions_checkedNoop generated, alignedAdapted, Bind.bind,
+    Except.bind, pure, Except.pure]
+
+/-- Exact computation-level adapter boundary for the production decrement
+body.  The adapter result is completely determined by the real
+last-reference source fragment; all surrounding hot-path control flow is
+proved to be the canonical `decrementOnceProgram`. -/
+theorem instructions_decrementOnceBody_eq
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function}
+    {lastSource ordinarySource liveSource alignedSource decrementSource :
+      List Fir.Wasm.Instruction}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction)
+    (lastGenerated :
+      Fir.Wasm.Emit.ResidentRelease.lastReferenceReleaseBody descriptors =
+        .ok lastSource)
+    (ordinaryGenerated :
+      Fir.Wasm.Emit.ResidentRelease.ordinaryReleaseBody descriptors =
+        .ok ordinarySource)
+    (liveGenerated :
+      Fir.Wasm.Emit.ResidentRelease.liveReleaseBody descriptors =
+        .ok liveSource)
+    (alignedGenerated :
+      Fir.Wasm.Emit.ResidentRelease.alignedReleaseBody descriptors =
+        .ok alignedSource)
+    (decrementGenerated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceBody descriptors =
+        .ok decrementSource) :
+    FirTalos.instructions sourceModule sourceFunction [] decrementSource = (do
+      let lastTarget ←
+        FirTalos.instructions sourceModule sourceFunction [] lastSource
+      pure (decrementOnceProgram persistentReleaseProgram lastTarget)) := by
+  have objectFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.params[0]!.1 = some objectIndex := by
+    simpa [objectIndex] using
+      generatedDecrementOnceFunction_parameterFound generated (0 : Fin 2)
+  have sourceShape : decrementSource = [
+      .localGet sourceFunction.params[0]!.1,
+      .i32Const .uint32 1,
+      .i32And,
+      .ifElse Fir.Wasm.Emit.ResidentRelease.checkedNoop [
+        .localGet sourceFunction.params[0]!.1,
+        .i32Const .tobject 0,
+        .i32Eq,
+        .ifElse Fir.Wasm.Emit.ResidentRelease.checkedNoop [
+          .localGet sourceFunction.params[0]!.1,
+          .i32Const .uint32
+            (Fir.Wasm.Emit.ResidentRelease.u32 (target.heapAlignment - 1)),
+          .i32And,
+          .i32Const .uint32 0,
+          .i32Eq,
+          .ifElse alignedSource [.unreachable]]]] := by
+    unfold Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction at generated
+    split at generated
+    · contradiction
+    · simp only [Bind.bind, Except.bind] at generated
+      split at generated
+      · contradiction
+      · simp only [pure, Except.pure, Except.ok.injEq] at generated
+        subst sourceFunction
+        unfold Fir.Wasm.Emit.ResidentRelease.decrementOnceBody at decrementGenerated
+        rw [alignedGenerated] at decrementGenerated
+        simpa [Fir.Wasm.Emit.ResidentRelease.equalsConst] using
+          (Except.ok.inj decrementGenerated).symm
+  rw [sourceShape]
+  cases lastAdapted :
+      FirTalos.instructions sourceModule sourceFunction [] lastSource <;>
+    simp [decrementOnceProgram, Fir.Wasm.Emit.ResidentRelease.u32,
+      FirTalos.instructions, FirTalos.instruction, objectFound,
+      instructions_checkedNoop generated,
+      instructions_alignedReleaseBody_eq generated lastGenerated
+        ordinaryGenerated liveGenerated alignedGenerated,
+      lastAdapted, Bind.bind, Except.bind, pure, Except.pure]
+
+/-- The installed production helper has exactly the verified decrement
+control flow, followed only by the adapter's standard terminal suffix.  The
+remaining existential is the adapter result of W7's real descriptor-dependent
+last-reference fragment; it is recovered from successful whole-function
+adaptation, not supplied as a certificate. -/
+theorem DecrementOnceInstallation.body
+    {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    (installation :
+      DecrementOnceInstallation sourceModule module descriptors) :
+    ∃ lastTarget,
+      installation.targetFunction.body =
+        decrementOnceProgram persistentReleaseProgram lastTarget ++
+          FirTalos.functionTerminal sourceModule
+            installation.sourceFunction := by
+  obtain ⟨decrementSource, decrementGenerated, sourceBody⟩ :=
+    Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction_body_of_ok
+      installation.generated
+  have decrementSuccess := decrementGenerated
+  unfold Fir.Wasm.Emit.ResidentRelease.decrementOnceBody at decrementSuccess
+  cases alignedGenerated :
+      Fir.Wasm.Emit.ResidentRelease.alignedReleaseBody descriptors with
+  | error error =>
+      rw [alignedGenerated] at decrementSuccess
+      contradiction
+  | ok alignedSource =>
+    have alignedSuccess := alignedGenerated
+    unfold Fir.Wasm.Emit.ResidentRelease.alignedReleaseBody at alignedSuccess
+    cases liveGenerated :
+        Fir.Wasm.Emit.ResidentRelease.liveReleaseBody descriptors with
+    | error error =>
+        rw [liveGenerated] at alignedSuccess
+        contradiction
+    | ok liveSource =>
+      have liveSuccess := liveGenerated
+      unfold Fir.Wasm.Emit.ResidentRelease.liveReleaseBody at liveSuccess
+      cases ordinaryGenerated :
+          Fir.Wasm.Emit.ResidentRelease.ordinaryReleaseBody descriptors with
+      | error error =>
+          rw [ordinaryGenerated] at liveSuccess
+          contradiction
+      | ok ordinarySource =>
+        have ordinarySuccess := ordinaryGenerated
+        unfold Fir.Wasm.Emit.ResidentRelease.ordinaryReleaseBody at ordinarySuccess
+        cases lastGenerated :
+            Fir.Wasm.Emit.ResidentRelease.lastReferenceReleaseBody descriptors with
+        | error error =>
+            rw [lastGenerated] at ordinarySuccess
+            contradiction
+        | ok lastSource =>
+          obtain ⟨targetBody, targetBodyAdapted, targetBodyEq⟩ :=
+            FirTalos.Correctness.function_preserves_body
+              installation.adapted
+          rw [sourceBody] at targetBodyAdapted
+          have adapterEq := instructions_decrementOnceBody_eq
+            (sourceModule := sourceModule) installation.generated
+              lastGenerated ordinaryGenerated liveGenerated alignedGenerated
+              decrementGenerated
+          rw [targetBodyAdapted] at adapterEq
+          cases lastAdapted : FirTalos.instructions sourceModule
+              installation.sourceFunction [] lastSource with
+          | error error =>
+              rw [lastAdapted] at adapterEq
+              contradiction
+          | ok lastTarget =>
+              rw [lastAdapted] at adapterEq
+              simp only [Bind.bind, Except.bind, pure, Except.pure,
+                Except.ok.injEq] at adapterEq
+              exact ⟨lastTarget, targetBodyEq.trans
+                (congrArg (fun body => body ++
+                  FirTalos.functionTerminal sourceModule
+                    installation.sourceFunction) adapterEq)⟩
 
 /-- Postcondition for branch proofs that deliberately terminate the current
 function.  It excludes fallthrough and structured breaks, while treating a
@@ -5493,6 +6328,70 @@ theorem LiveHeapRel.decrementOnceProgram_persistent_refines
     rfl
   exact ⟨concreteOperation, semanticOperation, related, canonicalHeaders,
     memoryRelated, physicalExecution⟩
+
+/-- First installed production-call refinement theorem.  For an ordinary
+represented object with more than one owner, the public generated helper call
+performs the same single decrement in concrete memory and FIR ownership
+semantics, preserves the heap relation, returns no values, and leaves the
+caller's operand tail unchanged. -/
+theorem LiveHeapRel.terminatesWith_installedDecrementAboveOne
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : Fir.LeanIR.Impure.RuntimeState}
+    {location : Fir.LeanIR.Impure.Location} {address : Word32}
+    {cell : Fir.LeanIR.Impure.HeapCell}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    (installation :
+      DecrementOnceInstallation sourceModule module descriptors)
+    (related : LiveHeapRel state witness runtime)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (canonicalHeaders : CanonicalMappedHeadersRel state witness)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : Fir.LeanIR.Impure.findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (ordinary : cell.persistent = false)
+    (oneLt : 1 < cell.rc) (check : Bool) (checkWord : UInt32)
+    (tail : List Wasm.Value) :
+    let object := UInt32.ofNat address.value
+    let nextCount := UInt32.ofNat (cell.rc - 1)
+    let finalStore := ResidentMemoryRel.write32Store store
+      (object + UInt32.ofNat headerRefCountOffset) nextCount
+    ∃ header result nextRuntime,
+      state.readLiveHeader address = .ok header ∧
+      decrementReferenceOnce state address check descriptors = .ok result ∧
+      Fir.LeanIR.Impure.decValueOnce runtime (.object (.heap location)) check =
+        .ok nextRuntime ∧
+      LiveHeapRel result witness nextRuntime ∧
+      CanonicalMappedHeadersRel result witness ∧
+      ResidentMemoryRel result finalStore.mem ∧
+      Wasm.TerminatesWith env module installation.index store
+        ([.i32 checkWord, .i32 object] ++ tail)
+        (fun final values => final = finalStore ∧ values = tail) := by
+  dsimp only
+  obtain ⟨lastTarget, bodyEq⟩ := installation.body
+  obtain ⟨header, result, nextRuntime, headerRead, concreteOperation,
+      semanticOperation, finalRelated, canonicalAfter, finalMemory, coreWP⟩ :=
+    FirTalos.Concrete.ResidentRelease.LiveHeapRel.decrementOnceProgram_aboveOne_refines
+      related (descriptors := descriptors)
+      (persistentProgram := persistentReleaseProgram)
+      (lastReference := lastTarget) memoryRelated canonicalHeaders mapped found
+        live ordinary oneLt check checkWord
+  let object := UInt32.ofNat address.value
+  let nextCount := UInt32.ofNat (cell.rc - 1)
+  let finalStore := ResidentMemoryRel.write32Store store
+    (object + UInt32.ofNat headerRefCountOffset) nextCount
+  have bodyWP : Wasm.wp module installation.targetFunction.body
+      (fun continuation => continuation = .Return finalStore []) store
+      (decrementEntry object checkWord) env := by
+    rw [bodyEq]
+    exact FirTalos.Correctness.Wasm.wp_append_of_no_fallthrough
+      (by intros; simp) coreWP
+  have called := installation.terminatesWith_of_return_wp
+    object checkWord tail bodyWP
+  exact ⟨header, result, nextRuntime, headerRead, concreteOperation,
+    semanticOperation, finalRelated, canonicalAfter, finalMemory, called⟩
 
 end ResidentRelease
 
