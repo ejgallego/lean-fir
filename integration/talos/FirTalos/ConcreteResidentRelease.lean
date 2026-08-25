@@ -416,6 +416,50 @@ theorem adaptedDecrementOnceFunction_signature
   exact ⟨params.trans sourceParams, locals.trans sourceLocals,
     results.trans sourceResults⟩
 
+/-- Static compiler, adapter, and module-installation evidence for the public
+resident decrement helper and its header-release callee.  This record only
+identifies the production functions and call indices; the refinement theorem
+supplies their runtime semantics separately. -/
+structure DecrementOnceInstallation
+    (sourceModule : Fir.Wasm.Module) (module : Wasm.Module)
+    (descriptors : Array (Array Fir.Wasm.AbiKind)) where
+  sourceFunction : Fir.Wasm.Function
+  targetFunction : Wasm.Function
+  index : Nat
+  releaseHeaderTarget : Wasm.Function
+  releaseHeaderIndex : Nat
+  generated :
+    Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+      .ok sourceFunction
+  adapted : FirTalos.function sourceModule sourceFunction = .ok targetFunction
+  selfFound : FirTalos.callIndex? sourceModule
+    (.declaration Fir.Wasm.Emit.ResidentRelease.decrementOnceName) = some index
+  notImport : module.imports[index]? = none
+  installed : module.funcs[index - module.imports.length]? =
+    some targetFunction
+  releaseHeaderAdapted : FirTalos.function sourceModule
+    Fir.Wasm.Emit.ResidentRelease.releaseHeaderFunction =
+      .ok releaseHeaderTarget
+  releaseHeaderFound : FirTalos.callIndex? sourceModule
+    (.declaration Fir.Wasm.Emit.ResidentRelease.releaseHeaderName) =
+      some releaseHeaderIndex
+  releaseHeaderNotImport : module.imports[releaseHeaderIndex]? = none
+  releaseHeaderInstalled :
+    module.funcs[releaseHeaderIndex - module.imports.length]? =
+      some releaseHeaderTarget
+
+/-- The installed decrement target has the production physical signature. -/
+theorem DecrementOnceInstallation.signature
+    {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    (installation :
+      DecrementOnceInstallation sourceModule module descriptors) :
+    installation.targetFunction.params = [.i32, .i32] ∧
+      installation.targetFunction.locals = List.replicate 10 .i32 ∧
+      installation.targetFunction.results = [] :=
+  adaptedDecrementOnceFunction_signature installation.generated
+    installation.adapted
+
 /-- Physical memory produced by the seven resident header-release stores. -/
 def releaseHeaderMemory (memory : Wasm.Mem) (object : UInt32) : Wasm.Mem :=
   let memory := memory.write32
@@ -1383,6 +1427,21 @@ theorem adaptedDecrementOnceFunction_entry
     adaptedDecrementOnceFunction_signature generated adapted
   simp [Wasm.Function.toLocals, Wasm.Function.numParams, params, locals,
     decrementEntry, Wasm.ValueType.zero]
+
+/-- Entry-frame specialization for a decrement helper identified by one
+coherent production installation. -/
+theorem DecrementOnceInstallation.entry
+    {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    (installation :
+      DecrementOnceInstallation sourceModule module descriptors)
+    (object check : UInt32) (tail : List Wasm.Value) :
+    installation.targetFunction.toLocals
+        (([Wasm.Value.i32 check, Wasm.Value.i32 object] ++ tail).take
+          installation.targetFunction.numParams).reverse =
+      decrementEntry object check :=
+  adaptedDecrementOnceFunction_entry installation.generated
+    installation.adapted object check tail
 
 /-- Checked no-op/trap gate shared by tagged and erased inputs. -/
 def checkedNoopProgram : Wasm.Program := [
