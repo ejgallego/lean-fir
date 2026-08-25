@@ -1313,7 +1313,20 @@ private partial def callSiteContains (needle : Instruction) :
 #guard trustedSetCallSiteRewrite.body.any
   (callSiteContains (.call (.declaration (externalName `Array.set))))
 
-private def decodeSetBangIndex : List Instruction := [
+private def setBangOutOfBounds : List Instruction := [
+  .localGet valueParam,
+  .i32Const .uint32 1,
+  .call (.declaration ResidentRelease.decrementOnceName),
+  .localGet arrayParam,
+  .ret]
+
+private def checkSetBangBounds : List Instruction := [
+  .localGet indexLocal,
+  .localGet sizeLocal,
+  .i32LtU,
+  .ifElse [] setBangOutOfBounds]
+
+private def decodeCheckedSetBangIndex : List Instruction := [
   .localGet indexParam,
   .call (.declaration ResidentNumeric.validateNaturalName),
   .localGet indexParam,
@@ -1325,21 +1338,26 @@ private def decodeSetBangIndex : List Instruction := [
   .ifElse [
     .localGet indexParam,
     .call (.declaration ResidentNumeric.naturalLowName),
-    .localSet indexLocal] [
-    .localGet valueParam,
-    .i32Const .uint32 1,
-    .call (.declaration ResidentRelease.decrementOnceName),
-    .localGet arrayParam,
-    .ret],
-  .localGet indexLocal,
-  .localGet sizeLocal,
-  .i32LtU,
-  .ifElse [] [
-    .localGet valueParam,
-    .i32Const .uint32 1,
-    .call (.declaration ResidentRelease.decrementOnceName),
-    .localGet arrayParam,
-    .ret]]
+    .localSet indexLocal]
+    setBangOutOfBounds] ++ checkSetBangBounds
+
+/-- Upstream `lean_array_set` checks the scalar tag before unboxing a `Nat`.
+Typed final-LCNF callers may skip the full resident-natural validator, but
+`Array.set!` still treats heap naturals and scalar indices beyond the array as
+out of bounds. -/
+private def decodeTrustedSetBangIndex : List Instruction := [
+  .localGet indexParam,
+  .i32Const .uint32 1,
+  .i32And,
+  .ifElse
+    (decodeTrustedNaturalIndex indexParam indexLocal ++ checkSetBangBounds)
+    setBangOutOfBounds]
+
+private def decodeSetBangIndexFor (validation : InputValidation) :
+    List Instruction :=
+  match validation with
+  | .checked => decodeCheckedSetBangIndex
+  | .trusted => decodeTrustedSetBangIndex
 
 private def setBangFunctionFor (validation : InputValidation) : Function := {
   name := externalName `Array.set!
@@ -1349,7 +1367,7 @@ private def setBangFunctionFor (validation : InputValidation) : Function := {
   locals := setLocals.push (indexHighLocal, .uint32)
   body := validateArrayInput validation arrayParam ++
     captureInputAddress validation ++
-    loadSize arrayParam ++ decodeSetBangIndex ++
+    loadSize arrayParam ++ decodeSetBangIndexFor validation ++
     replaceAtDecodedIndexBody validation }
 
 def setBangFunction : Function := setBangFunctionFor .checked
@@ -1497,6 +1515,13 @@ private def trustedMutationFunctions : Array Function := #[
   decodeProofUSizeIndex .trusted indexParam indexLocal
 #guard (ugetFunctionFor .trusted .trusted).body.take 3 ==
   decodeProofUSizeIndex .trusted indexParam indexLocal
+
+#guard (setBangFunctionFor .checked).body.any callsProofIndexDecoder
+#guard !(setBangFunctionFor .trusted).body.any callsProofIndexDecoder
+#guard containsSequence decodeCheckedSetBangIndex
+  (setBangFunctionFor .checked).body
+#guard containsSequence decodeTrustedSetBangIndex
+  (setBangFunctionFor .trusted).body
 
 private def fillElementsBody : List Instruction := [
   .localGet addressLocal,

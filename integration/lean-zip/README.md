@@ -532,6 +532,23 @@ round halves and both execution orders have negative paired medians, so the
 small improvement is accepted without treating it as a larger performance
 claim.
 
+Trusted `Array.set!` now follows upstream `lean_array_set` at its Nat-index
+boundary. The checked/public helper still validates the full arbitrary-width
+Natural representation. A typed final-LCNF caller instead tests the immediate
+tag, unboxes only a scalar index, and treats every heap Natural as out of
+bounds; no wasm32-resident Array can have a heap-Nat-sized valid index. Scalar
+in-bounds and out-of-bounds cases, heap-Nat rejection, unique reuse, shared
+copy-on-write, and replacement release have direct zero-import coverage.
+
+This alignment removes `fir_numeric_validate_natural` from the trusted
+helper's direct callees and reduces that helper from 407 to 377 bytes. The
+single-pass complete module decreases from 366,826 to 366,796 bytes while
+retaining 501 functions, zero imports, exact compressed output, and the flat
+rewind frontier. It is accepted for upstream fidelity and smaller code shape,
+not as an elapsed-time win: the prior 32-pair experiment measured a +0.17 ms
+paired median (+0.44%) with 14/32 improving pairs, below the benchmark's
+resolution for a helper contributing about one percent of sampled execution.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not

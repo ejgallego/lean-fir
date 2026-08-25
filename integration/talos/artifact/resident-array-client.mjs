@@ -674,9 +674,11 @@ export async function checkResidentTrustedArraySet(bytes) {
   const { exports } = await WebAssembly.instantiate(module, {});
   const replicate = exports.fir_ext_Array_replicate;
   const setCaller = exports.fir_example_Array_setCaller;
+  const setBang = exports["fir_ext_Array_set!"];
   const release = exports.resident_array_release;
   equal(typeof replicate, "function", "trusted Array.replicate export");
   equal(typeof setCaller, "function", "trusted Array.set caller export");
+  equal(typeof setBang, "function", "trusted Array.set! export");
   equal(typeof release, "function", "trusted Array release export");
 
   const unique = replicate(0, immediateNatural(3), immediateNatural(10));
@@ -706,10 +708,50 @@ export async function checkResidentTrustedArraySet(bytes) {
     [30, 30, 41].map(immediateNatural).join(","),
     "rewritten Array.set shared fallback result");
 
+  const setBangUnique = replicate(
+    0, immediateNatural(3), immediateNatural(50));
+  equal(setBang(0, setBangUnique, immediateNatural(1), immediateNatural(61)),
+    setBangUnique, "trusted Array.set! scalar update identity");
+  equal(arrayState(exports.memory, setBangUnique).words.join(","),
+    [50, 61, 50].map(immediateNatural).join(","),
+    "trusted Array.set! scalar update result");
+
+  const scalarDiscarded = allocateOwnedOpaque(exports);
+  equal(setBang(0, setBangUnique, immediateNatural(3), scalarDiscarded),
+    setBangUnique, "trusted Array.set! scalar out-of-bounds identity");
+  equal(heapObjectState(exports.memory, scalarDiscarded).kind, KIND_FREED,
+    "trusted Array.set! scalar out-of-bounds replacement release");
+
+  const heapIndex = exports.fir_numeric_allocate_one_limb(5, 2, 1, 1, 0, 0, 1);
+  const heapDiscarded = allocateOwnedOpaque(exports);
+  equal(setBang(0, setBangUnique, heapIndex, heapDiscarded), setBangUnique,
+    "trusted Array.set! heap Nat out-of-bounds identity");
+  equal(heapObjectState(exports.memory, heapDiscarded).kind, KIND_FREED,
+    "trusted Array.set! heap Nat out-of-bounds replacement release");
+
+  const setBangShared = replicate(
+    0, immediateNatural(2), immediateNatural(70));
+  new DataView(exports.memory.buffer).setUint32(setBangShared + 8, 2, true);
+  const setBangSharedResult = setBang(
+    0, setBangShared, immediateNatural(0), immediateNatural(81));
+  expect(setBangSharedResult !== setBangShared,
+    "trusted Array.set! scalar update reused shared input");
+  equal(arrayState(exports.memory, setBangShared).refCount, 1,
+    "trusted Array.set! shared input consumption");
+  equal(arrayState(exports.memory, setBangShared).words.join(","),
+    [70, 70].map(immediateNatural).join(","),
+    "trusted Array.set! shared alias");
+  equal(arrayState(exports.memory, setBangSharedResult).words.join(","),
+    [81, 70].map(immediateNatural).join(","),
+    "trusted Array.set! shared copy");
+
   release(unique);
   release(shared);
   release(sharedResult);
-  return "PASS zero-import trusted Array.set caller fast path";
+  release(setBangUnique);
+  release(setBangShared);
+  release(setBangSharedResult);
+  return "PASS zero-import trusted Array.set/Array.set! upstream paths";
 }
 
 export async function checkFetchedResidentArrays(url) {
