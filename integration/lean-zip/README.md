@@ -462,6 +462,11 @@ module from 414,753 to 367,176 bytes. Final DCE/inlining removes
 `Zip.Native.Deflate.goodMatch`, leaving 501 final functions without changing
 the captured or pre-optimization inventories.
 
+The shared provider improvement also reduces the stored-control package from
+12,678 to 12,418 bytes and the Level-1 package from 195,273 to 193,661 bytes.
+Their captured declarations, closure targets, source functions, resident
+helpers, imports, and exports remain unchanged.
+
 Thirty-two diagnostics-off AB/BA fresh-process pairs preserve the exact output
 digest and flat 9,237,304-byte frontier while moving median exported-entry time
 from 41.50 ms (MAD 1.79) to 39.07 ms (MAD 2.19). The paired median is -2.15 ms
