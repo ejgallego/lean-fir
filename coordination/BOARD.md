@@ -16,10 +16,11 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 ## Active integration lease
 
 - Milestone: `W7-CONSUMER-RATCHETS-AND-PROOF-CONVERGENCE`; selected-closure
-  lowering, typed Nat caller paths, S20 ByteArray mutual-tail fidelity, and
-  both production release proof surfaces are accepted. Exact prettyM/lean-zip
-  publication is complete; convergence with the active W6 release and
-  caller-path proofs is the remaining milestone step.
+  lowering, typed Nat caller paths, S20 ByteArray mutual-tail fidelity, the
+  ElimDead Array proof recovery, and both production release proof surfaces
+  are accepted. Exact prettyM/lean-zip publication is complete; convergence
+  with the active W6 release and caller-path proofs is the remaining milestone
+  step.
 - Integration owner: `wasm-gen`, serializing the independent S20, LCNF proof,
   and W6 release handoffs while keeping generation and consumer contracts
   stable.
@@ -111,6 +112,16 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   726 unique cases, 2,160/2,160 comparisons, 9,077 machine steps, 210 tag
   floors, and 299 domain floors; all 3,172 Talos jobs pass. No shared semantic,
   proof, generator, runtime, ABI, layout, or artifact contract changed.
+- Accepted ElimDead Array proof recovery: functional head `76f099fd` is linked
+  through the clean tracked LCNF handoff at `98125a85`. All thirteen newly
+  exhaustive Array alternatives are discharged in the existing machine
+  relation without weakening the accepted Array ownership semantics. The
+  focused 34-job Lean cone and complete repository gate pass at 726 unique
+  cases, 2,160/2,160 comparisons, 9,077 machine steps, all 210 tag and 299
+  domain floors, zero findings, 196 active bug cards, and exactly one
+  registered trusted axiom. Bug card
+  `FIR-BUG-impure-elimDeadVars-array-machine-proof-exhaustiveness` is fixed;
+  no shared contract changed.
 - Current production release proof surfaces: `decrementOnceFunction` is public
   at `0f351de8`; `releaseHeaderFunction` is public at `056b25a4`, with tracked
   W7 handoff `5cb4ab0d`. Both are the exact definitions installed by
