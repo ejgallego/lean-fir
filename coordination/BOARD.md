@@ -17,10 +17,11 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 - Milestone: `W7-CONSUMER-RATCHETS-AND-PROOF-CONVERGENCE`; selected-closure
   lowering, typed Nat caller paths, S20 ByteArray mutual-tail fidelity, the
-  ElimDead Array proof recovery, and both production release proof surfaces
-  are accepted. Exact prettyM/lean-zip publication is complete; convergence
-  with the active W6 release and caller-path proofs is the remaining milestone
-  step.
+  ElimDead Array proof recovery, both production release proof surfaces, and
+  W6's complete recursive resident release refinement are accepted. Exact
+  prettyM/lean-zip publication is complete; convergence with the remaining
+  caller-path proofs and the separately queued Talos structured-control repair
+  is the remaining milestone step.
 - Integration owner: `wasm-gen`, serializing the independent S20, LCNF proof,
   and W6 release handoffs while keeping generation and consumer contracts
   stable.
@@ -146,6 +147,24 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   deterministic artifact gate republishes byte-identical styled prettyM at
   83,996 bytes and SHA-256
   `fc61301d946b1596ad08c9b20d51d2e1f68d60ca0c04b0f9d56e298c2ec6408d`.
+- Accepted recursive resident release proof checkpoint: W6 functional head
+  `1fa01d24` is linked through exact clean tracked handoff `97312f4f`, rebased
+  on accepted W7 and coordination base `9bc79b26`. Admission distinguishes
+  tagged, erased, persistent, shared-count, underflow, and last-reference
+  paths before unsafe memory access. The exact production release-header call
+  refines canonical header release; recursive constructor fields, closure
+  captures selected by the production descriptor chain, and the logical live
+  prefix of generic Arrays preserve the live-heap relation and resident
+  memory. Array spare capacity is excluded from the ownership invariant. Lean
+  Beam reports zero diagnostics; the forced 3,079-job release cone,
+  `git diff --check`, `make check` at 726 cases and 2,160/2,160 comparisons,
+  and all 3,172 Talos jobs pass. No source semantics, executable helper,
+  signature, ABI, layout, ownership rule, symbolic Wasm surface, or generated
+  artifact changed. `FIR-BUG-wasm-none-adapter-if-branch-depth` remains open:
+  production binary emission correctly uses `br 1`, while the Talos proof
+  adapter still omits anonymous `if` depth. The exact Array theorem is
+  binary-faithful without claiming generic adapter provenance for that
+  back-edge; repairing the shared adapter is a separate milestone.
 - Independent integration maintenance: the provider-neutral external-tooling
   CI contract is accepted at `88ca108e`. `make tooling-check` now fails closed
   outside the supported Node 22/24 LTS matrix, retains the exact pinned
