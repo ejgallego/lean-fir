@@ -254,6 +254,8 @@ needed to compose payload frames. -/
 structure MappedPayloadFrameTransport
     (before after : MemoryState) (witness : RefinementWitness) : Prop where
   capacity : MappedHeaderCapacityTransport before after witness
+  cursor : after.heapCursor = before.heapCursor
+  memorySize : after.memory.size = before.memory.size
   readByte : ∀ address location header,
     witness.locations.lookup? location = some address →
     Header.read before.memory address = .ok header →
@@ -265,7 +267,7 @@ structure MappedPayloadFrameTransport
 theorem MappedPayloadFrameTransport.refl
     (state : MemoryState) (witness : RefinementWitness) :
     MappedPayloadFrameTransport state state witness := by
-  exact ⟨MappedHeaderCapacityTransport.refl state witness,
+  exact ⟨MappedHeaderCapacityTransport.refl state witness, rfl, rfl,
     by intros; rfl⟩
 
 theorem MappedPayloadFrameTransport.trans
@@ -273,7 +275,9 @@ theorem MappedPayloadFrameTransport.trans
     (firstSecond : MappedPayloadFrameTransport first second witness)
     (secondThird : MappedPayloadFrameTransport second third witness) :
     MappedPayloadFrameTransport first third witness := by
-  refine ⟨firstSecond.capacity.trans secondThird.capacity, ?_⟩
+  refine ⟨firstSecond.capacity.trans secondThird.capacity,
+    secondThird.cursor.trans firstSecond.cursor,
+    secondThird.memorySize.trans firstSecond.memorySize, ?_⟩
   intro address location header mapped headerRead owned offset afterHeader beforeEnd
   obtain ⟨middleHeader, middleRead, sameExtent, middleOwned⟩ :=
     firstSecond.capacity address location header mapped headerRead owned
@@ -305,7 +309,11 @@ theorem LiveHeapRel.mappedPayloadFrame_of_headerWrite
       updatedHeader.allocationBytes = oldHeader.allocationBytes) :
     MappedPayloadFrameTransport before after witness := by
   refine ⟨related.mappedHeaderCapacity_of_headerWrite targetFound oldRead resultEq
-    headerInBounds written sameExtent, ?_⟩
+    headerInBounds written sameExtent, ?_, ?_, ?_⟩
+  · rw [resultEq]
+  · rw [resultEq]
+    exact Header.write_preserves_size before.memory memory targetAddress
+      updatedHeader headerInBounds written
   intro address location header mapped headerRead owned offset afterHeader beforeEnd
   obtain ⟨cell, _, cellRelated⟩ :=
     related.concreteToSemantic location address mapped
@@ -351,6 +359,22 @@ theorem MappedPayloadFrameTransport.readUInt32
   rw [show address.value + offset + 3 = address.value + (offset + 3) by omega]
   rw [frame.readByte address location header mapped headerRead owned (offset + 3)
     (by omega) (by omega)]
+
+/-- Payload framing transports the checked mathematical wasm32 word decoder,
+not merely its raw `UInt32` lane. -/
+theorem MappedPayloadFrameTransport.readWord32
+    {before after : MemoryState} {witness : RefinementWitness}
+    (frame : MappedPayloadFrameTransport before after witness)
+    {address : Word32} {location : Location} {header : Header}
+    (mapped : witness.locations.lookup? location = some address)
+    (headerRead : Header.read before.memory address = .ok header)
+    (owned : address.value + headerBytes ≤ before.heapCursor)
+    (offset : Nat) (afterHeader : headerBytes ≤ offset)
+    (beforeEnd : offset + 4 ≤ header.allocationBytes.toNat) :
+    after.memory.readWord32 (address.value + offset) =
+      before.memory.readWord32 (address.value + offset) := by
+  unfold LinearMemory.readWord32
+  rw [frame.readUInt32 mapped headerRead owned offset afterHeader beforeEnd]
 
 /-- Ordered ownership release composes the stronger mapped-payload frame
 whenever each recursive heap child supplies one.  Tagged and erased slots are

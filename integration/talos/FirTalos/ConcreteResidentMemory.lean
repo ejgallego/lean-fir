@@ -513,6 +513,36 @@ theorem readUInt32_eq_read32
     related.byte_eq (address + 2) h2, related.byte_eq (address + 3) h3]
   bv_decide
 
+/-- A successful W6 mathematical-word read exposes the same exact i32 lane
+to resident Wasm.  This packages the checked `Word32` reconstruction so
+ownership traversals can reason directly about their child argument. -/
+theorem readWord32_eq_read32
+    {heap : MemoryState} {memory : Wasm.Mem}
+    (related : ResidentMemoryRel heap memory)
+    {address : Nat} {word : Word32}
+    (inBounds : address + 3 < heap.memory.size)
+    (read : heap.memory.readWord32 address = .ok word) :
+    memory.read32 (UInt32.ofNat address) = UInt32.ofNat word.value := by
+  unfold LinearMemory.readWord32 at read
+  rw [related.readUInt32_eq_read32 inBounds] at read
+  simp only [bind, Except.bind] at read
+  cases recovered :
+      Word32.ofNat? (memory.read32 (UInt32.ofNat address)).toNat with
+  | none => simp [recovered] at read
+  | some actual =>
+      simp only [recovered, pure, Except.pure] at read
+      have actualEq := Except.ok.inj read
+      subst actual
+      unfold Word32.ofNat? at recovered
+      split at recovered
+      · have sameWord := Option.some.inj recovered
+        have valueEq := congrArg Word32.value sameWord
+        apply UInt32.toNat.inj
+        rw [UInt32.toNat_ofNat_of_lt' (by
+          simpa [wordModulus] using word.isLt)]
+        exact valueEq
+      · simp at recovered
+
 /-- One Wasm `i32.store` and W6's checked 32-bit store preserve the common
 memory relation.  This is the byte-level frame theorem used by allocator,
 header, field, cache, and scratch-slot proofs. -/

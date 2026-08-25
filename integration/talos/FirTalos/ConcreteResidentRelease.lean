@@ -393,6 +393,72 @@ def releaseChildrenProgram (decrementIndex : Nat) : List Nat → Wasm.Program
       releaseChildProgram decrementIndex index ++
         releaseChildrenProgram decrementIndex rest
 
+/-- Exact source-state payload reads paired with the physical indices visited
+by resident ownership release.  The retained-allocation and memory bounds are
+recorded at each lane so the relation applies uniformly to constructor
+fields, selected closure captures, and the live prefix of resident Arrays. -/
+inductive OwnedPayloadWordsRel (state : MemoryState) (object : Word32)
+    (header : Header) : List Nat → List Word32 → Prop where
+  | nil : OwnedPayloadWordsRel state object header [] []
+  | cons {index : Nat} {indices : List Nat} {word : Word32}
+      {words : List Word32}
+      (within :
+        headerBytes + target.semanticSlotBytes * index + 4 ≤
+          header.allocationBytes.toNat)
+      (inBounds :
+        object.value + headerBytes + target.semanticSlotBytes * index + 3 <
+          state.memory.size)
+      (read : state.memory.readWord32
+        (object.value + headerBytes + target.semanticSlotBytes * index) =
+          .ok word)
+      (tail : OwnedPayloadWordsRel state object header indices words) :
+      OwnedPayloadWordsRel state object header
+        (index :: indices) (word :: words)
+
+/-- A mapped-payload frame plus the current resident-memory relation exposes
+an original owned word as the exact lazy `i32.load` result in the current
+Wasm store.  This is the key bridge that allows earlier recursive releases
+to modify headers while later parent payload lanes are loaded on demand. -/
+theorem MappedPayloadFrameTransport.residentRead32
+    {source current : MemoryState} {witness : RefinementWitness}
+    (frame : MappedPayloadFrameTransport source current witness)
+    {memory : Wasm.Mem} (memoryRelated : ResidentMemoryRel current memory)
+    {location : Fir.LeanIR.Impure.Location} {object : Word32}
+    {header : Header} {offset : Nat} {word : Word32}
+    (mapped : witness.locations.lookup? location = some object)
+    (headerRead : Header.read source.memory object = .ok header)
+    (headerOwned : object.value + headerBytes ≤ source.heapCursor)
+    (afterHeader : headerBytes ≤ offset)
+    (within : offset + 4 ≤ header.allocationBytes.toNat)
+    (sourceInBounds : object.value + offset + 3 < source.memory.size)
+    (sourceRead : source.memory.readWord32 (object.value + offset) = .ok word) :
+    ¬((UInt32.ofNat object.value).toNat +
+        (UInt32.ofNat offset).toNat + 4 > memory.pages * wasmPageBytes) ∧
+      memory.read32
+        (UInt32.ofNat object.value + UInt32.ofNat offset) =
+          UInt32.ofNat word.value := by
+  have currentInBounds :
+      object.value + offset + 3 < current.memory.size := by
+    rw [frame.memorySize]
+    exact sourceInBounds
+  have currentRead :
+      current.memory.readWord32 (object.value + offset) = .ok word := by
+    rw [frame.readWord32 mapped headerRead headerOwned offset afterHeader within]
+    exact sourceRead
+  have residentRead :=
+    memoryRelated.readWord32_eq_read32 currentInBounds currentRead
+  have objectFits : object.value < UInt32.size := by
+    simpa [wordModulus] using object.isLt
+  have offsetFits : offset < UInt32.size := by
+    have addressFits : object.value + offset + 3 < UInt32.size :=
+      Nat.lt_of_lt_of_le currentInBounds memoryRelated.size_le
+    omega
+  constructor
+  · rw [UInt32.toNat_ofNat_of_lt' objectFits,
+      UInt32.toNat_ofNat_of_lt' offsetFits, ← memoryRelated.size_eq]
+    omega
+  · simpa [UInt32.ofNat_add] using residentRead
+
 /-- Fuel-free semantic call chain for direct child traversal.  Each later
 payload read is stated in the store produced by the preceding child release;
 this is the exact framing obligation later discharged by the heap relation. -/
@@ -419,6 +485,111 @@ inductive ReleaseChildrenRun
         indices middle final) :
       ReleaseChildrenRun env module decrementIndex object
         (index :: indices) initial final
+
+/-- Paired source/concrete/resident induction for a direct owned-child list.
+The parent payload lanes are read from `source`; `sourceFrame` proves that all
+earlier recursive ownership steps preserve them until each lazy Wasm load.
+The abstract `step` premise is precisely the smaller recursive theorem needed
+later by the full `fir_dec_once` fuel induction, including tagged and erased
+no-op calls as well as mapped heap children. -/
+theorem OwnershipValuesRel.releaseChildrenRun_refines
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {decrementIndex fuel : Nat}
+    {source current : MemoryState} {witness : RefinementWitness}
+    {runtime finalRuntime : Fir.LeanIR.Impure.RuntimeState}
+    {location : Fir.LeanIR.Impure.Location} {object : Word32}
+    {header : Header} {indices : List Nat} {words : List Word32}
+    {values : List Fir.LeanIR.Impure.Value}
+    {initial : Wasm.Store host}
+    (ownership : OwnershipValuesRel witness words values)
+    (payload : OwnedPayloadWordsRel source object header indices words)
+    (mapped : witness.locations.lookup? location = some object)
+    (headerRead : Header.read source.memory object = .ok header)
+    (headerOwned : object.value + headerBytes ≤ source.heapCursor)
+    (heap : LiveHeapRel current witness runtime)
+    (memoryRelated : ResidentMemoryRel current initial.mem)
+    (canonicalHeaders : CanonicalMappedHeadersRel current witness)
+    (sourceFrame : MappedPayloadFrameTransport source current witness)
+    (step : ∀ {before : MemoryState} {beforeStore : Wasm.Store host}
+        {semantic nextSemantic : Fir.LeanIR.Impure.RuntimeState}
+        {word : Word32} {value : Fir.LeanIR.Impure.Value},
+      OwnershipValueRel witness word value →
+      LiveHeapRel before witness semantic →
+      ResidentMemoryRel before beforeStore.mem →
+      CanonicalMappedHeadersRel before witness →
+      (match value with
+      | .object (.heap child) =>
+          Fir.LeanIR.Impure.decLocationFuel fuel semantic child
+      | _ => .ok semantic) = .ok nextSemantic →
+      ∃ after middleStore,
+        decrementReferenceOnceFuel fuel before word true
+            witness.closureDescriptors = .ok after ∧
+        LiveHeapRel after witness nextSemantic ∧
+        ResidentMemoryRel after middleStore.mem ∧
+        CanonicalMappedHeadersRel after witness ∧
+        MappedPayloadFrameTransport before after witness ∧
+        Wasm.TerminatesWith env module decrementIndex beforeStore
+          [.i32 1, .i32 (UInt32.ofNat word.value)]
+          (fun next results => next = middleStore ∧ results = []))
+    (semanticOperation :
+      values.foldlM (init := runtime) (fun next value =>
+        match value with
+        | .object (.heap child) =>
+            Fir.LeanIR.Impure.decLocationFuel fuel next child
+        | _ => .ok next) = .ok finalRuntime) :
+    ∃ finalState finalStore,
+      words.foldlM (init := current) (fun next word =>
+        decrementReferenceOnceFuel fuel next word true
+          witness.closureDescriptors) = .ok finalState ∧
+      LiveHeapRel finalState witness finalRuntime ∧
+      ResidentMemoryRel finalState finalStore.mem ∧
+      CanonicalMappedHeadersRel finalState witness ∧
+      MappedPayloadFrameTransport source finalState witness ∧
+      ReleaseChildrenRun env module decrementIndex
+        (UInt32.ofNat object.value) indices initial finalStore := by
+  induction ownership generalizing indices current initial runtime finalRuntime with
+  | nil =>
+      cases payload
+      simp only [List.foldlM_nil] at semanticOperation ⊢
+      have runtimeEq := Except.ok.inj semanticOperation
+      subst finalRuntime
+      exact ⟨current, initial, rfl, heap, memoryRelated, canonicalHeaders,
+        sourceFrame, .nil initial⟩
+  | @cons word value words values head tail ih =>
+      cases payload with
+      | @cons index indices _ _ within sourceInBounds sourceRead payloadTail =>
+          simp only [List.foldlM_cons, Bind.bind, Except.bind]
+            at semanticOperation
+          cases headSemantic :
+              (match value with
+              | .object (.heap child) =>
+                  Fir.LeanIR.Impure.decLocationFuel fuel runtime child
+              | _ => .ok runtime) with
+          | error fault =>
+              rw [headSemantic] at semanticOperation
+              contradiction
+          | ok nextRuntime =>
+              rw [headSemantic] at semanticOperation
+              obtain ⟨nextState, middleStore, concreteHead, nextHeap,
+                  nextMemory, nextCanonical, stepFrame, targetCall⟩ :=
+                step head heap memoryRelated canonicalHeaders headSemantic
+              obtain ⟨finalState, finalStore, concreteTail, finalHeap,
+                  finalMemory, finalCanonical, finalFrame, tailRun⟩ :=
+                ih payloadTail nextHeap nextMemory nextCanonical
+                  (sourceFrame.trans stepFrame) semanticOperation
+              have residentHead :=
+                FirTalos.Concrete.ResidentRelease.MappedPayloadFrameTransport.residentRead32
+                sourceFrame memoryRelated mapped headerRead headerOwned
+                (offset := headerBytes + target.semanticSlotBytes * index)
+                (by omega) within
+                (by simpa [Nat.add_assoc] using sourceInBounds)
+                (by simpa [Nat.add_assoc] using sourceRead)
+              refine ⟨finalState, finalStore, ?_, finalHeap, finalMemory,
+                finalCanonical, finalFrame, ?_⟩
+              · simp only [List.foldlM_cons, Bind.bind, Except.bind]
+                rw [concreteHead]
+                exact concreteTail
+              · exact .cons residentHead.1 residentHead.2 targetCall tailRun
 
 /-- Per-index guard used by the fixed-width constructor release frontier. -/
 def guardedReleaseChildProgram
