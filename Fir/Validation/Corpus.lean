@@ -2717,6 +2717,51 @@ def cachedSharedStringDagAcrossMutualTail
   let second := cachedSharedStringOwner
   (outside, result, second)
 
+/-!
+Transfer two aliases of the same ByteArray through mutually recursive tail
+calls, then mutate the selected survivor while an outside alias remains live.
+The mutation must therefore preserve the outside alias through copy-on-write.
+-/
+structure MutualTailByteArrayState where
+  primary : ByteArray
+  secondary : ByteArray
+  choosePrimary : Bool
+
+mutual
+  @[noinline]
+  def mutualTailByteArrayA : Nat → MutualTailByteArrayState → ByteArray
+    | 0, state =>
+        if state.choosePrimary then state.primary else state.secondary
+    | remaining + 1, state =>
+        mutualTailByteArrayB remaining {
+          primary := state.secondary
+          secondary := state.primary
+          choosePrimary := !state.choosePrimary
+        }
+
+  @[noinline]
+  def mutualTailByteArrayB : Nat → MutualTailByteArrayState → ByteArray
+    | 0, state =>
+        if state.choosePrimary then state.primary else state.secondary
+    | remaining + 1, state =>
+        mutualTailByteArrayA remaining {
+          primary := state.secondary
+          secondary := state.primary
+          choosePrimary := !state.choosePrimary
+        }
+end
+
+@[noinline]
+def sharedByteArrayAcrossMutualTail
+    (steps : Nat) (source : ByteArray) : ByteArray × ByteArray :=
+  let selected := mutualTailByteArrayA steps {
+    primary := source
+    secondary := source
+    choosePrimary := true
+  }
+  let result := selected.set! 2 42
+  (source, result)
+
 /--
 Use a captured ByteArray for the final time before passing its outside alias to
 an ordered effect. The post-effect read observes the updated result.
@@ -4388,6 +4433,19 @@ private def cachedSharedStringDagMutualTailThreeFormTrace : Array String :=
     "dec", "return", "fap", "lit", "return", "fap", "extern", "inc", "ctor", "inc",
     "ctor", "return"]
 
+private def sharedByteArrayMutualTailThreeFormTrace : Array String :=
+  #["lit", "inc", "ctor", "sset", "fap", "lit", "fap", "extern", "cases",
+    "oproj", "oproj", "sproj", "join", "isShared", "cases", "jump", "lit",
+    "fap", "extern", "join", "cases", "jump", "join", "cases", "oset", "oset",
+    "jump", "sset", "fap", "lit", "fap", "extern", "cases", "oproj", "oproj",
+    "sproj", "join", "isShared", "cases", "jump", "lit", "fap", "extern",
+    "join", "cases", "lit", "jump", "join", "cases", "oset", "oset", "jump",
+    "sset", "fap", "lit", "fap", "extern", "cases", "oproj", "oproj", "sproj",
+    "join", "isShared", "cases", "jump", "lit", "fap", "extern", "join",
+    "cases", "jump", "join", "cases", "oset", "oset", "jump", "sset", "fap",
+    "lit", "fap", "extern", "cases", "sproj", "cases", "oproj", "inc", "dec",
+    "return", "dec", "return", "dec", "return", "dec", "return", "lit", "lit",
+    "fap", "extern", "ctor", "return"]
 
 private def cachedSharedUInt8ArrayDagReuseSkippedFormTrace : Array String :=
   #["fap", "fap", "fap", "lit", "return", "fap", "lit", "fap", "lit", "fap",
@@ -6411,6 +6469,57 @@ private def preConversionCases : Array Case := #[
         ``Nat.decEq, ``Nat.sub, ``Nat.decEq, ``String.Internal.append]
     provenance := firProvenance
       "Transfer a repeated-child owner through three cross-declaration mutual tail calls before append and cache reuse" },
+  { id := "shared-byte-array-mutual-tail-three"
+    entry := ``Source.sharedByteArrayAcrossMutualTail
+    dependencies :=
+      #[``Source.mutualTailByteArrayA, ``Source.mutualTailByteArrayB]
+    args := #[.nat 3, byteArrayDatum mixedLayoutBytes]
+    argSchemas := #[.nat, .bytes]
+    resultSchema := byteArrayPairSchema
+    native := fun _ => byteArrayPairDatum
+      (Source.sharedByteArrayAcrossMutualTail 3 mixedLayoutBytes)
+    tags := #["stress", "ownership", "bytearray", "bytes", "heap", "alias",
+      "shared", "repeated-alias", "outside-alias", "alias-preservation",
+      "copy-on-write", "mutation", "external", "tail-control", "tail-ownership",
+      "mutual-bytearray-tail", "mutual-recursion", "cross-declaration-call",
+      "loop-carried-owner",
+      "release-fidelity", "recursive-release", "release"]
+    requiredLcnfForms :=
+      #["cases", "ctor", "dec", "extern", "fap", "inc", "isShared", "join",
+        "jump", "lit", "oproj", "oset", "return", "sproj", "sset"]
+    requiredExecutedLcnfForms :=
+      #["cases", "ctor", "dec", "extern", "fap", "inc", "isShared", "join",
+        "jump", "lit", "oproj", "oset", "return", "sproj", "sset"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "cases", minimum := 14, maximum := some 14 },
+        { form := "ctor", minimum := 2, maximum := some 2 },
+        { form := "dec", minimum := 4, maximum := some 4 },
+        { form := "extern", minimum := 8, maximum := some 8 },
+        { form := "fap", minimum := 12, maximum := some 12 },
+        { form := "inc", minimum := 2, maximum := some 2 },
+        { form := "isShared", minimum := 3, maximum := some 3 },
+        { form := "join", minimum := 9, maximum := some 9 },
+        { form := "jump", minimum := 9, maximum := some 9 },
+        { form := "lit", minimum := 11, maximum := some 11 },
+        { form := "oproj", minimum := 7, maximum := some 7 },
+        { form := "oset", minimum := 6, maximum := some 6 },
+        { form := "return", minimum := 5, maximum := some 5 },
+        { form := "sproj", minimum := 4, maximum := some 4 },
+        { form := "sset", minimum := 4, maximum := some 4 }]
+    requiredExecutedLcnfFormTrace := some sharedByteArrayMutualTailThreeFormTrace
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:yield-bind", "admin:yield-done"]
+    requiredExternals := #[``ByteArray.set!, ``Nat.decEq, ``Nat.sub]
+    requiredExecutedExternals := #[``ByteArray.set!, ``Nat.decEq, ``Nat.sub]
+    requiredExecutedExternalCounts :=
+      #[{ external := ``ByteArray.set!, minimum := 1, maximum := some 1 },
+        { external := ``Nat.decEq, minimum := 4, maximum := some 4 },
+        { external := ``Nat.sub, minimum := 3, maximum := some 3 }]
+    requiredExecutedExternalTrace := some
+      #[``Nat.decEq, ``Nat.sub, ``Nat.decEq, ``Nat.sub, ``Nat.decEq, ``Nat.sub,
+        ``Nat.decEq, ``ByteArray.set!]
+    provenance := firProvenance
+      "Transfer two ByteArray aliases through three mutual tail calls before copy-on-write mutation while preserving an outside alias" },
   { id := "cached-shared-uint8-array-dag-reuse-skipped"
     entry := ``Source.cachedSharedUInt8ArrayDagReuse
     dependencies := #[``Source.cachedSharedUInt8ArrayOwner]
