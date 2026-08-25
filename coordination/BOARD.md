@@ -187,6 +187,22 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `git diff --check` and the complete repository gate at 726 unique cases and
   2,160/2,160 equal comparisons; no generator, runtime, proof, ABI, layout,
   ownership, or artifact contract changed.
+- Accepted resident Wasm runtime audit: tooling head `0b4700b0` documents the
+  semantic-operation, resident-linker, concrete-proof, external-engine,
+  production-closure, allocation, and exact-profile surfaces without changing
+  implementation or contracts. The audit confirms that current complete
+  packages are explicit, fail-closed, module-memory-owned, and zero-import,
+  while recording `FIR-BUG-wasm-none-generic-inhabited-fallback-trap`: a
+  reachable generic fallback can currently substitute an unreachable body for
+  Lean's inhabited-monad `pure default`. No accepted package corpus reaches
+  that declaration. It also distinguishes reference-count ownership from
+  storage reclamation: scratch rewind or instance disposal, not decrement
+  alone, reclaims the bump arena. The first implementation follow-up is an
+  honest generic fallback, followed by isolated trusted ByteArray and expanded
+  trusted Array executable coverage. `git diff --check`, bug-card validation,
+  the 21 tooling unit tests, and `make check` at 726 cases and 2,160/2,160
+  equal comparisons pass; the optional external tooling gate was unavailable
+  only because its fresh worktree had no private pinned Binaryen installation.
 - Independent coordination integration: immutable operational-mailbox
   checkpoints are accepted at `ba9ba1cd` for thread
   `W72-W7-20260825-004`. A checkpoint is selected only from one clean
@@ -256,6 +272,21 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   source semantics, helper signature, ABI, layout, ownership behavior, or
   executable artifact changed. W6 next lifts the exact last-reference object
   dispatcher and joins the exhaustive installed helper simulation.
+- Accepted owned-dispatch constructor adapter checkpoint: W6 functional head
+  `dde52107` (original `2cf613c7`) is linked through exact clean tracked
+  handoff `1a3ab137`, rebased without semantic change onto current main. The
+  proof exposes the production last-reference header-release prefix, factors
+  constructor, closure, and opaque dispatch through the generated kind tests,
+  resolves recursive child releases to the installed `fir_dec_once`, and
+  adapts the exact generated 32-field constructor body to
+  `constructorReleaseProgram`. Lean Beam refresh/save reports zero diagnostics
+  with source hash `0067d7d345ff3767`; the 3,079-job focused cone,
+  `git diff --check`, `make check` at 726 unique cases and 2,160/2,160 equal
+  comparisons, and all 3,172 Talos jobs pass. No source semantics, emitter,
+  helper signature, ABI, layout, symbolic Wasm surface, ownership rule, or
+  executable artifact changed. W6 continues with closure-descriptor dispatch;
+  `FIR-BUG-wasm-none-adapter-if-branch-depth` remains the separate Array-loop
+  provenance blocker.
 - Accepted recursive resident release proof checkpoint: W6 functional head
   `1fa01d24` is linked through exact clean tracked handoff `97312f4f`, rebased
   on accepted W7 and coordination base `9bc79b26`. Admission distinguishes
