@@ -1443,6 +1443,33 @@ theorem DecrementOnceInstallation.entry
   adaptedDecrementOnceFunction_entry installation.generated
     installation.adapted object check tail
 
+/-- Lift an exact body-level return proof for the production decrement helper
+to its installed public call.  The helper has no result lanes, so the caller's
+operand tail is preserved exactly. -/
+theorem DecrementOnceInstallation.terminatesWith_of_return_wp
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {store final : Wasm.Store host}
+    (installation :
+      DecrementOnceInstallation sourceModule module descriptors)
+    (object check : UInt32) (tail : List Wasm.Value)
+    (bodyWP : Wasm.wp module installation.targetFunction.body
+      (fun continuation => continuation = .Return final [])
+      store (decrementEntry object check) env) :
+    Wasm.TerminatesWith env module installation.index store
+      ([Wasm.Value.i32 check, Wasm.Value.i32 object] ++ tail)
+      (fun final' values => final' = final ∧ values = tail) := by
+  apply FirTalos.Correctness.terminatesWith_of_wp_body_at
+    installation.notImport installation.installed
+  rw [installation.entry object check tail]
+  apply Wasm.wp.conseq _ bodyWP
+  intro completion completed
+  subst completion
+  obtain ⟨params, _locals, results⟩ := installation.signature
+  simp [FirTalos.Correctness.FunctionBodyPost, Wasm.Function.numParams,
+    params, results]
+
 /-- Checked no-op/trap gate shared by tagged and erased inputs. -/
 def checkedNoopProgram : Wasm.Program := [
   .localGet checkIndex,
