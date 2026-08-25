@@ -130,15 +130,13 @@ def supportedClosureCall (program : Fir.LeanIR.ImpureProgram)
   | some closureKind, some argKinds =>
       if args.isEmpty then closureKind.refines declared
       else closureKind.isObjectLike && program.decls.any fun target =>
-        match declarationParameterKinds? program target,
-            effectiveDeclarationResultKind? target with
-        | some paramKinds, some resultKind =>
+        match declarationParameterKinds? program target with
+        | some paramKinds =>
             argKinds.size <= paramKinds.size &&
-              let fixed := paramKinds.size - argKinds.size
-              fixed < paramKinds.size &&
-                kindsLeanCompatible argKinds (paramKinds.extract fixed paramKinds.size) &&
-                resultKind.leanCompatible declared
-        | _, _ => false
+              (List.range (paramKinds.size - argKinds.size + 1)).any fun fixed =>
+                (compileClosureCandidateAt closureId closureId declared [] argKinds
+                  target paramKinds fixed).isSome
+        | none => false
   | _, _ => false
 
 def supportedLetDeclKind? (program : Fir.LeanIR.ImpureProgram)

@@ -339,9 +339,9 @@ object-family closure boundary. -/
 def scalarClosureApplyDecl : LCNF.Decl .impure :=
   decl `scalarClosureApply
     #[param c objType, param x LCNF.ImpureType.uint32,
-      param y LCNF.ImpureType.tobject, param z LCNF.ImpureType.uint32]
+      param y LCNF.ImpureType.tobject]
     LCNF.ImpureType.uint32 (.code <|
-      .let (letDecl r taggedType (.fvar c #[.fvar x, .fvar y])) (.return z))
+      .let (letDecl r taggedType (.fvar c #[.fvar x, .fvar y])) (.return x))
 
 def scalarClosureCallProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[objectFamilyClosureTargetDecl, scalarClosureApplyDecl] }
@@ -401,6 +401,45 @@ def abiClosureUnderApplyProgram : Fir.LeanIR.ImpureProgram :=
       .return r)] }
 
 #guard supportedProgram abiClosureUnderApplyProgram
+
+/--
+Lean dictionary projection loses the local `pap` shape even though closed
+dispatch still enumerates the exact target. Executable declaration admission
+must accept the emitter's underapplication candidate; the stronger
+`supportedProgram` proof gate continues to reject the unknown local
+provenance until its closed-ingress theorem supplies that fact.
+-/
+def dictionaryPureTarget : Name := `dictionaryPureTarget
+
+def dictionaryPureTargetDecl : LCNF.Decl .impure :=
+  decl dictionaryPureTarget #[
+    param erasedCapture LCNF.ImpureType.erased,
+    param x LCNF.ImpureType.tobject,
+    param y objType] objType (.code (.return y))
+
+def dictionaryPureApplyDecl : LCNF.Decl .impure :=
+  decl `dictionaryPureApply #[
+    param underClosure LCNF.ImpureType.tobject,
+    param erasedArgument LCNF.ImpureType.erased,
+    param x LCNF.ImpureType.tobject]
+    LCNF.ImpureType.tobject (.code <|
+      .let (letDecl r LCNF.ImpureType.tobject
+        (.fvar underClosure #[.fvar erasedArgument, .fvar x])) <|
+      .return r)
+
+def dictionaryPureUnderApplyProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[dictionaryPureTargetDecl, dictionaryPureApplyDecl] }
+
+#guard dictionaryPureUnderApplyProgram.decls.all
+  (supportedDecl dictionaryPureUnderApplyProgram)
+
+#guard !supportedProgram dictionaryPureUnderApplyProgram
+
+#guard match lowerSupported dictionaryPureUnderApplyProgram with
+  | .ok module =>
+      module.runtimeOperations.contains
+        (.partialApply dictionaryPureTarget 3 2 #[.erased, .tobject] .tobject)
+  | .error _ => false
 
 def abiClosureOversaturatedProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[abiClosureFirstDecl, decl `main #[] LCNF.ImpureType.tobject (.code <|
