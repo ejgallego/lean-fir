@@ -291,7 +291,12 @@ private def alignedReleaseBody
     equalsConst .uint32 liveFlag ++
     [.ifElse live [.unreachable]])
 
-private def decrementOnceFunction
+/--
+Build the production nonrecursive decrement helper installed by
+`internalizeReleases`. This definition is public so the concrete-runtime proof
+can unfold the exact generated function rather than duplicate its body.
+-/
+def decrementOnceFunction
     (descriptors : Array (Array AbiKind)) :
     Except LinkError Function := do
   if UInt32.size ≤ descriptors.size then
