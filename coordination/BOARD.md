@@ -15,12 +15,13 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Active integration lease
 
-- Milestone: `W7-CLOSED-CLOSURE-CONSUMERS`; the early lowering and its W6
-  refinement are linked/accepted, and prettyM/lean-zip consumer ratchets are
-  the remaining publication step.
-- Integration owner: `wasm-gen`, regenerating consumer contracts from the
-  accepted finite closure-target package boundary while W6 returns to its
-  independent proof backlog.
+- Milestone: `W7-CONSUMER-RATCHETS-AND-PROOF-CONVERGENCE`; selected-closure
+  lowering, typed Nat caller paths, S19 ownership fidelity, and the production
+  decrement proof surface are accepted. Exact prettyM/lean-zip publication
+  and convergence with the active W6 release proof are the remaining steps.
+- Integration owner: `wasm-gen`, regenerating consumer contracts from exact
+  accepted `main`, keeping the generation lane stable while W6 binds its
+  decrement proof to the production helper and reviews accepted caller paths.
 - Lean-zip performance lane: `lean-zip-perf` is the narrow successor to the
   existing W7-2 optimization role, using `perf/lean-zip-loop` in
   `.worktrees/lean-zip-perf`. It profiles one immutable accepted package,
@@ -29,8 +30,9 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   integration. It owns lean-zip-specific benchmark and package evidence;
   shared W7 implementation files require an explicit non-overlapping lease.
   Only accepted winners open W6 refinement requests. No shared contract changes.
-- Current checkpoint: W7's generic implementation is accepted at `e05cbc80`,
-  lean-zip package ratchets at `d97fb643`, and tracked handoff at `ee1f3e2d`.
+- Earlier closed-package publication checkpoint: W7's generic implementation
+  is accepted at `e05cbc80`, lean-zip package ratchets at `d97fb643`, and
+  tracked handoff at `ee1f3e2d`.
   Data-only package boundaries collect the exact targets allocated by
   final-LCNF `pap` nodes and remove other generated matcher branches after
   lowering; opaque host closure ingress retains the all-target path. W6
@@ -71,6 +73,24 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   layout, semantic ABI, ownership contract, or generic lowering contract
   changed. Consumer package contracts and canonical pointers have not yet
   advanced.
+- Current generation/convergence checkpoint: the mandatory typed resident
+  call-site signature registry and tagged `Nat.decLt`, saturating `Nat.sub`,
+  and nonoverflowing `Nat.mul` caller paths are accepted at `72eaf6f3`, with
+  the durable rejected `Nat.decLe` experiment at `04f6d1d1`. Every rewrite
+  fails closed on missing, duplicate, or signature-incompatible registration;
+  heap, mixed, and overflow cases retain the complete arbitrary-precision
+  helpers. Eight balanced level-6 pairs improve 8/8 from 64.12 ms to 52.55 ms
+  (about 18%) while the exact zero-import module grows from 454,918 to 478,669
+  bytes. The separate checked-increment factoring experiment is rejected at
+  `3531014a`: it shrank the candidate module to 414,781 bytes but was elapsed-
+  time neutral at 40.77 ms versus 40.70 ms, paired median +0.05 ms, with
+  16/32 wins. No emitter change remains. W7 exposes the unchanged production
+  `decrementOnceFunction` itself at `0f351de8`, definitionally tying W6 to the
+  helper installed by `internalizeReleases` without a copied body or trusted
+  certificate. Lean Beam, the 54-job emitter/linker cone, `make check` at 725
+  unique cases and 2,157/2,157 comparisons, and all 3,172 Talos jobs pass.
+  Current W7 tracked state is `b3c0e83a`; consumer package pointers remain the
+  next generation action.
 - Independent integration maintenance: the provider-neutral external-tooling
   CI contract is accepted at `88ca108e`. `make tooling-check` now fails closed
   outside the supported Node 22/24 LTS matrix, retains the exact pinned
@@ -367,6 +387,19 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   machine steps, all 200 tag and 295 conjunctive-domain floors, and all 3,172
   Talos jobs. This changes no interpreter, proof, generator, runtime, layout,
   ABI, helper, or artifact contract. Bug cards: none.
+- Independent cached mutual-tail fixture integration: test-fixtures functional
+  head `8c8b052c` is accepted through clean tracked head `413b0cdf` on exact
+  base `04f6d1d1`. S19 transfers S17's repeated-child cached String state
+  through alternating noinline declarations in tail position while preserving
+  the outside alias, append result, and cache reread. Its exact cross-
+  declaration trace has 182 interpreter steps, 142 executed LCNF forms, 20
+  applications, 12 increments, five decrements, six object updates, and four
+  sharing checks. Together S17, S18, and S19 cover direct self-tail, retained
+  non-tail unwind, and mutual-tail ownership shapes. The complete gate passes
+  725 unique cases, 2,157/2,157 comparisons, 8,959 machine steps, and all
+  3,172 Talos jobs. This is fixture, observation, telemetry, and coverage-
+  policy work only; it changes no interpreter, proof, generator, runtime,
+  layout, ABI, helper, or artifact contract. Bug cards: none.
 - Independent consumer refresh: the Verso HTML source pin and package are
   accepted at `4ee28dd6` and `c88e4a54`. The package compiles clean Verso
   commit `970b071b73adc6e68c6de00bc183460f76d97731`, exact
