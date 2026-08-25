@@ -19,9 +19,10 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   lowering, typed Nat caller paths, S20 ByteArray mutual-tail fidelity, the
   ElimDead Array proof recovery, both production release proof surfaces, and
   W6's complete recursive resident release refinement are accepted. Exact
-  prettyM/lean-zip publication is complete; convergence with the remaining
-  caller-path proofs and the separately queued Talos structured-control repair
-  is the remaining milestone step.
+  prettyM/lean-zip publication and the lean-zip single-pass export repair are
+  complete; convergence with the remaining caller-path proofs and the
+  separately queued Talos structured-control repair is the remaining
+  milestone step.
 - Integration owner: `wasm-gen`, serializing the independent S20, LCNF proof,
   and W6 release handoffs while keeping generation and consumer contracts
   stable.
@@ -131,6 +132,27 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   active decrement proof work is disjoint. The trusted `Array.set!` scalar
   index-dispatch successor is claimed in `W72-W7-20260825-007` and begins only
   after rebasing onto this accepted main checkpoint.
+- Accepted single-pass lean-zip publication: W7 functional head `de2ee5bb` and
+  clean tracked handoff `acbaa384` are accepted from operational checkpoint
+  `FIR-VIR-20260825-002`. Ordinary raw publication now captures and lowers the
+  final-LCNF closure once, serializes the source-only base, and derives the
+  resident-linked frontier from that same immutable `ModuleArtifact`; a
+  separately named opt-in gate retains the diagnostic probe and byte-identical
+  repeat generation. Source checks, exact closure/function ratchets, zero final
+  imports, ABI/layout, ownership/reclamation, checksums, smoke, and fresh-output
+  publication remain unchanged. On exact base `b52710d2`, ordinary generation
+  fell from 165.226s to 45.974s (72.2%, 3.59x build throughput); the independent
+  clean-producer catalog export measured 43.407s. This is build latency, not a
+  generated-runtime performance claim. The selected zero-import module is
+  366,826 bytes with SHA-256
+  `d08fc73e1da024a8c03d1034a6becf4568c31aa4a95505cf4fc43b5169fa0c18`,
+  501 final functions, 630 source functions, and 830 resident helpers. The
+  complete W7, Talos, Chrome, determinism, differential, scratch-rewind, and
+  clean-output gates pass. The ratchet exposed
+  `FIR-BUG-wasm-none-repeated-final-capture-code-shape`: repeated same-process
+  capture can select a different optimized body shape despite an identical
+  semantic/ABI/import/function inventory. The package no longer depends on
+  that ordering; generic capture reproducibility remains a separate follow-up.
 - Independent coordination integration: immutable operational-mailbox
   checkpoints are accepted at `ba9ba1cd` for thread
   `W72-W7-20260825-004`. A checkpoint is selected only from one clean
