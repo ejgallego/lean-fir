@@ -679,6 +679,24 @@ relocations. Resume when profiling again identifies cold construction of
 eligible ground graphs as a leading cost; do not opt a production package in
 before that gate.
 
+### Compact upstream-aligned object representation
+
+FIR's current 32-byte self-describing W6 header remains the checked executable
+and proof baseline. Caller-local paths such as `getTag` can follow upstream
+Lean's static-inline behavior without changing that representation; they are
+not evidence that a layout migration is already justified.
+
+When allocation, frontier growth, or cache locality again dominates a real
+package profile, evaluate a compact production representation aligned with
+Lean's optimized object headers. Require before/after allocation counts,
+frontier bytes, binary size, and external-engine timing on at least prettyM and
+lean-zip. Any accepted design must preserve tags, boxing, uniqueness,
+recursive release, persistent caches, and malformed-boundary behavior through
+one explicit concrete-layout contract. Treat the W6 relation and proofs, W7
+allocator/encoders/reclamation, browser adapters, and package layouts as one
+coordinated migration; do not introduce a second unproved production layout or
+a client-specific compact encoding.
+
 ### Linker and build-time optimization
 
 The accepted linear capture/lowering improvements remain the baseline. The

@@ -300,15 +300,85 @@ private def rewriteProbeName : Name := `_fir_resident_link_rewrite_probe
 private def rewriteProbeLabel (index : Nat) : FVarId :=
   ⟨Name.mkSimple s!"_fir_resident_link_rewrite_probe_{index}"⟩
 
-private def callSiteRewritesForStep : Step → Array ResidentCallSite.Rewrite
-  | .getTag => ResidentRuntime.callSiteRewrites
-  | .bigNumeric => ResidentBigNumeric.callSiteRewrites
-  | .natArithmeticAvailable => ResidentNatArithmetic.callSiteRewrites
+/-- An inline/cold helper family must publish at least one typed caller rewrite.
+
+Keeping the witness beside the array prevents a provider from silently
+emptying a required fast-path registry. -/
+private structure RequiredCallSiteRewrites where
+  rewrites : Array ResidentCallSite.Rewrite
+  nonempty : 0 < rewrites.size
+
+/-- Every resident step makes an explicit call-site implementation decision.
+
+`reviewedOutOfLine` means the helper call is intentionally the production
+path. `inlineCold` mirrors an upstream static-inline mainline while retaining
+the complete helper as its cold path. -/
+private inductive CallSitePolicy where
+  | reviewedOutOfLine
+  | inlineCold (required : RequiredCallSiteRewrites)
+
+/-- Total classification is the compile-time coverage gate. Adding a new
+`Step` cannot compile until it is classified, and an `inlineCold` family
+cannot compile with an empty rewrite registry. -/
+private def callSitePolicyForStep : Step → CallSitePolicy
+  | .getTag => .inlineCold {
+      rewrites := ResidentRuntime.callSiteRewrites
+      nonempty := by native_decide }
+  | .bigNumeric => .inlineCold {
+      rewrites := ResidentBigNumeric.callSiteRewrites
+      nonempty := by native_decide }
+  | .natArithmeticAvailable => .inlineCold {
+      rewrites := ResidentNatArithmetic.callSiteRewrites
+      nonempty := by native_decide }
   | .arraysTrustedStrict
-  | .arraysTrustedAvailable => ResidentArray.trustedCallSiteRewrites
-  | .natShiftAvailable => ResidentNatShift.callSiteRewrites
-  | .usizeAvailable => ResidentUSize.callSiteRewrites
-  | _ => #[]
+  | .arraysTrustedAvailable => .inlineCold {
+      rewrites := ResidentArray.trustedCallSiteRewrites
+      nonempty := by native_decide }
+  | .natShiftAvailable => .inlineCold {
+      rewrites := ResidentNatShift.callSiteRewrites
+      nonempty := by native_decide }
+  | .usizeAvailable => .inlineCold {
+      rewrites := ResidentUSize.callSiteRewrites
+      nonempty := by native_decide }
+  | .isShared
+  | .readProjections
+  | .closureProjections
+  | .closureMatches
+  | .allocator
+  | .constructors
+  | .immediateNaturals
+  | .partialApplications
+  | .setters
+  | .increments
+  | .releases
+  | .tagSetters
+  | .cacheSets
+  | .scalarBoxesAvailable
+  | .numericStrict
+  | .numericAvailable
+  | .fixedWidthAvailable
+  | .stringOperations
+  | .stringOperationsAvailable
+  | .stringLiterals
+  | .fallbacks
+  | .fallbacksAvailable
+  | .floatStrict
+  | .floatAvailable
+  | .arraysStrict
+  | .arraysAvailable
+  | .byteArraysAvailable
+  | .byteArraysTrustedAvailable
+  | .natModStrict
+  | .natModAvailable
+  | .platformAvailable
+  | .directSelfTailCallsRequired
+  | .directSelfTailCallsAvailable => .reviewedOutOfLine
+
+private def callSiteRewritesForStep (step : Step) :
+    Array ResidentCallSite.Rewrite :=
+  match callSitePolicyForStep step with
+  | .reviewedOutOfLine => #[]
+  | .inlineCold required => required.rewrites
 
 /--
 Run a contiguous group of helper-family installers against one persistent
