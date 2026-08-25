@@ -1655,12 +1655,132 @@ def persistentReleaseProgram : Wasm.Program := [
   .localGet kindIndex,
   .const ObjectKind.natural.code,
   .eq,
-  .iff 0 0 [
-    .localGet addressIndex,
-    .load32 (UInt32.ofNat headerAux0Offset),
-    .const promotedTagMarker,
-    .eq,
-    .iff 0 0 checkedNoopProgram [.ret]] [.ret]]
+    .iff 0 0 [
+      .localGet addressIndex,
+      .load32 (UInt32.ofNat headerAux0Offset),
+      .const promotedTagMarker,
+      .eq,
+      .iff 0 0 checkedNoopProgram [.ret]] [.ret]]
+
+/-- Computation-level adaptation of W7's production last-reference prefix.
+The symbolic header-release call resolves to the recorded module index, and
+all remaining success or failure is exactly that of the descriptor-dependent
+owned-object dispatcher. -/
+theorem instructions_lastReferenceReleaseBody_eq
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function}
+    {ownedSource lastSource : List Fir.Wasm.Instruction}
+    {releaseHeaderIndex : Nat}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction)
+    (ownedGenerated :
+      Fir.Wasm.Emit.ResidentRelease.ownedReleaseBody descriptors =
+        .ok ownedSource)
+    (lastGenerated :
+      Fir.Wasm.Emit.ResidentRelease.lastReferenceReleaseBody descriptors =
+        .ok lastSource)
+    (releaseHeaderFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentRelease.releaseHeaderName) =
+        some releaseHeaderIndex) :
+    FirTalos.instructions sourceModule sourceFunction [] lastSource = (do
+      let ownedTarget ←
+        FirTalos.instructions sourceModule sourceFunction [] ownedSource
+      pure (lastReferenceProgram releaseHeaderIndex ownedTarget)) := by
+  have addressFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[0]!.1 = some addressIndex := by
+    simpa [addressIndex] using
+      generatedDecrementOnceFunction_localFound generated (0 : Fin 10)
+  have kindFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[1]!.1 = some kindIndex := by
+    simpa [kindIndex] using
+      generatedDecrementOnceFunction_localFound generated (1 : Fin 10)
+  have countFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[2]!.1 = some countIndex := by
+    simpa [countIndex] using
+      generatedDecrementOnceFunction_localFound generated (2 : Fin 10)
+  have captureCountFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[3]!.1 = some captureCountIndex := by
+    simpa [captureCountIndex] using
+      generatedDecrementOnceFunction_localFound generated (3 : Fin 10)
+  have markerFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[7]!.1 = some markerIndex := by
+    simpa [markerIndex] using
+      generatedDecrementOnceFunction_localFound generated (7 : Fin 10)
+  have sourceShape : lastSource = [
+      .localGet sourceFunction.locals[0]!.1,
+      .i32Load .uint32
+        (Fir.Wasm.Emit.ResidentRelease.u32 headerKindOffset),
+      .localSet sourceFunction.locals[1]!.1,
+      .localGet sourceFunction.locals[0]!.1,
+      .i32Load .uint32
+        (Fir.Wasm.Emit.ResidentRelease.u32 headerAux0Offset),
+      .localSet sourceFunction.locals[7]!.1,
+      .localGet sourceFunction.locals[0]!.1,
+      .i32Load .uint32
+        (Fir.Wasm.Emit.ResidentRelease.u32 headerAux1Offset),
+      .localSet sourceFunction.locals[2]!.1,
+      .localGet sourceFunction.locals[0]!.1,
+      .i32Load .uint32
+        (Fir.Wasm.Emit.ResidentRelease.u32 headerAux2Offset),
+      .localSet sourceFunction.locals[3]!.1,
+      .localGet sourceFunction.locals[0]!.1,
+      .call (.declaration
+        Fir.Wasm.Emit.ResidentRelease.releaseHeaderName)] ++ ownedSource := by
+    have generatedEq := generated
+    unfold Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction at generatedEq
+    split at generatedEq
+    · contradiction
+    · simp only [Bind.bind, Except.bind] at generatedEq
+      split at generatedEq
+      · contradiction
+      · simp only [pure, Except.pure, Except.ok.injEq] at generatedEq
+        subst sourceFunction
+        unfold Fir.Wasm.Emit.ResidentRelease.lastReferenceReleaseBody at lastGenerated
+        rw [ownedGenerated] at lastGenerated
+        simpa using lastGenerated.symm
+  rw [sourceShape, FirTalos.Correctness.instructions_append]
+  cases ownedAdapted :
+      FirTalos.instructions sourceModule sourceFunction [] ownedSource <;>
+    simp [lastReferenceProgram, Fir.Wasm.Emit.ResidentRelease.u32,
+      FirTalos.instructions, FirTalos.instruction, addressFound, kindFound,
+      countFound, captureCountFound, markerFound, releaseHeaderFound,
+      Bind.bind, Except.bind, pure, Except.pure]
+
+/-- Successful owned-dispatch adaptation specializes the computation-level
+last-reference boundary to the exact Talos prefix used by semantic proofs. -/
+theorem instructions_lastReferenceReleaseBody
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function}
+    {ownedSource lastSource : List Fir.Wasm.Instruction}
+    {ownedTarget : Wasm.Program} {releaseHeaderIndex : Nat}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction)
+    (ownedGenerated :
+      Fir.Wasm.Emit.ResidentRelease.ownedReleaseBody descriptors =
+        .ok ownedSource)
+    (lastGenerated :
+      Fir.Wasm.Emit.ResidentRelease.lastReferenceReleaseBody descriptors =
+        .ok lastSource)
+    (releaseHeaderFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentRelease.releaseHeaderName) =
+        some releaseHeaderIndex)
+    (ownedAdapted :
+      FirTalos.instructions sourceModule sourceFunction [] ownedSource =
+        .ok ownedTarget) :
+    FirTalos.instructions sourceModule sourceFunction [] lastSource =
+      .ok (lastReferenceProgram releaseHeaderIndex ownedTarget) := by
+  rw [instructions_lastReferenceReleaseBody_eq generated ownedGenerated
+    lastGenerated releaseHeaderFound, ownedAdapted]
+  rfl
 
 /-- The production persistent-object branch adapts to the exact program used
 by its execution proof.  Generation determines both the symbolic local table
@@ -2294,19 +2414,20 @@ theorem instructions_decrementOnceBody_eq
         ordinaryGenerated liveGenerated alignedGenerated,
       lastAdapted, Bind.bind, Except.bind, pure, Except.pure]
 
-/-- The installed production helper has exactly the verified decrement
-control flow, followed only by the adapter's standard terminal suffix.  The
-remaining existential is the adapter result of W7's real descriptor-dependent
-last-reference fragment; it is recovered from successful whole-function
-adaptation, not supplied as a certificate. -/
-theorem DecrementOnceInstallation.body
+/-- Successful production installation determines the last-reference branch
+all the way through the concrete header-release index.  Only the generated
+owned-object dispatcher remains existential; it is the adapter result of the
+actual descriptor-dependent source fragment, not a caller certificate. -/
+theorem DecrementOnceInstallation.body_lastReference
     {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
     {descriptors : Array (Array Fir.Wasm.AbiKind)}
     (installation :
       DecrementOnceInstallation sourceModule module descriptors) :
-    ∃ lastTarget,
+    ∃ ownedTarget,
       installation.targetFunction.body =
-        decrementOnceProgram persistentReleaseProgram lastTarget ++
+        decrementOnceProgram persistentReleaseProgram
+            (lastReferenceProgram installation.releaseHeaderIndex
+              ownedTarget) ++
           FirTalos.functionTerminal sourceModule
             installation.sourceFunction := by
   obtain ⟨decrementSource, decrementGenerated, sourceBody⟩ :=
@@ -2344,28 +2465,59 @@ theorem DecrementOnceInstallation.body
             rw [lastGenerated] at ordinarySuccess
             contradiction
         | ok lastSource =>
-          obtain ⟨targetBody, targetBodyAdapted, targetBodyEq⟩ :=
-            FirTalos.Correctness.function_preserves_body
-              installation.adapted
-          rw [sourceBody] at targetBodyAdapted
-          have adapterEq := instructions_decrementOnceBody_eq
-            (sourceModule := sourceModule) installation.generated
-              lastGenerated ordinaryGenerated liveGenerated alignedGenerated
-              decrementGenerated
-          rw [targetBodyAdapted] at adapterEq
-          cases lastAdapted : FirTalos.instructions sourceModule
-              installation.sourceFunction [] lastSource with
+          have lastSuccess := lastGenerated
+          unfold Fir.Wasm.Emit.ResidentRelease.lastReferenceReleaseBody at lastSuccess
+          cases ownedGenerated :
+              Fir.Wasm.Emit.ResidentRelease.ownedReleaseBody descriptors with
           | error error =>
-              rw [lastAdapted] at adapterEq
+              rw [ownedGenerated] at lastSuccess
               contradiction
-          | ok lastTarget =>
-              rw [lastAdapted] at adapterEq
-              simp only [Bind.bind, Except.bind, pure, Except.pure,
-                Except.ok.injEq] at adapterEq
-              exact ⟨lastTarget, targetBodyEq.trans
-                (congrArg (fun body => body ++
-                  FirTalos.functionTerminal sourceModule
-                    installation.sourceFunction) adapterEq)⟩
+          | ok ownedSource =>
+            obtain ⟨targetBody, targetBodyAdapted, targetBodyEq⟩ :=
+              FirTalos.Correctness.function_preserves_body
+                installation.adapted
+            rw [sourceBody] at targetBodyAdapted
+            have adapterEq := instructions_decrementOnceBody_eq
+              (sourceModule := sourceModule) installation.generated
+                lastGenerated ordinaryGenerated liveGenerated alignedGenerated
+                decrementGenerated
+            rw [targetBodyAdapted] at adapterEq
+            have lastAdapterEq := instructions_lastReferenceReleaseBody_eq
+              (sourceModule := sourceModule) installation.generated
+                ownedGenerated lastGenerated installation.releaseHeaderFound
+            rw [lastAdapterEq] at adapterEq
+            cases ownedAdapted : FirTalos.instructions sourceModule
+                installation.sourceFunction [] ownedSource with
+            | error error =>
+                rw [ownedAdapted] at adapterEq
+                contradiction
+            | ok ownedTarget =>
+                rw [ownedAdapted] at adapterEq
+                simp only [Bind.bind, Except.bind, pure, Except.pure,
+                  Except.ok.injEq] at adapterEq
+                exact ⟨ownedTarget, targetBodyEq.trans
+                  (congrArg (fun body => body ++
+                    FirTalos.functionTerminal sourceModule
+                      installation.sourceFunction) adapterEq)⟩
+
+/-- The installed production helper has exactly the verified decrement
+control flow, followed only by the adapter's standard terminal suffix.  The
+remaining existential is the adapter result of W7's real descriptor-dependent
+last-reference fragment; it is recovered from successful whole-function
+adaptation, not supplied as a certificate. -/
+theorem DecrementOnceInstallation.body
+    {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    (installation :
+      DecrementOnceInstallation sourceModule module descriptors) :
+    ∃ lastTarget,
+      installation.targetFunction.body =
+        decrementOnceProgram persistentReleaseProgram lastTarget ++
+          FirTalos.functionTerminal sourceModule
+            installation.sourceFunction := by
+  obtain ⟨ownedTarget, bodyEq⟩ := installation.body_lastReference
+  exact ⟨lastReferenceProgram installation.releaseHeaderIndex ownedTarget,
+    bodyEq⟩
 
 /-- Lift a branch proof for every possible adapted last-reference fragment to
 the actual installed production body.  Successful installation chooses that
