@@ -31,16 +31,11 @@ private def valueParam : FVarId := ⟨`value⟩
 private def proofParam : FVarId := ⟨`proof⟩
 private def leftParam : FVarId := ⟨`left⟩
 private def rightParam : FVarId := ⟨`right⟩
-private def rawLocal : FVarId := ⟨`raw⟩
 private def raw64Local : FVarId := ⟨`raw64⟩
 private def savedScratchLocal : FVarId := ⟨`savedScratch⟩
-private def uint8ResultLocal : FVarId := ⟨`uint8Result⟩
-private def uint16ResultLocal : FVarId := ⟨`uint16Result⟩
 private def uint32ResultLocal : FVarId := ⟨`uint32Result⟩
 private def uint64ResultLocal : FVarId := ⟨`uint64Result⟩
 private def usizeResultLocal : FVarId := ⟨`usizeResult⟩
-private def objectResultLocal : FVarId := ⟨`objectResult⟩
-private def taggedResultLocal : FVarId := ⟨`taggedResult⟩
 private def countLocal : FVarId := ⟨`count⟩
 
 def externalDeclarations : Array Name := #[
@@ -111,22 +106,10 @@ def externalName (declaration : Name) : Name :=
 
 def helperNames : Array Name := externalDeclarations.map externalName
 
-private def retypeRaw (result : AbiKind) (resultLocal : FVarId) :
-    List Instruction := [
-  .localSet rawLocal,
-  .i32Const .uint32 0,
-  .i64Load .uint64 0,
-  .localSet savedScratchLocal,
-  .i32Const .uint32 0,
-  .localGet rawLocal,
-  .i32Store .uint32 0,
-  .i32Const .uint32 0,
-  .i32Load result 0,
-  .localSet resultLocal,
-  .i32Const .uint32 0,
-  .localGet savedScratchLocal,
-  .i64Store .uint64 0,
-  .localGet resultLocal,
+/-- Preserve the physical i32 lane while assigning its checked semantic kind. -/
+private def retypeI32Result (result : AbiKind) : List Instruction := [
+  .i64ExtendI32U .uint64,
+  .i32WrapI64 result,
   .ret]
 
 private def retypeRaw64 (result : AbiKind) (resultLocal : FVarId) :
@@ -147,26 +130,16 @@ private def retypeRaw64 (result : AbiKind) (resultLocal : FVarId) :
   .localGet resultLocal,
   .ret]
 
-private def i32ResultLocal (kind : AbiKind) : FVarId :=
-  if kind == .uint8 then uint8ResultLocal
-  else if kind == .uint16 then uint16ResultLocal
-  else if kind == .tagged then taggedResultLocal
-  else if kind == .tobject then objectResultLocal
-  else uint32ResultLocal
-
 private def i64ResultLocal (kind : AbiKind) : FVarId :=
   if kind == .usize then usizeResultLocal else uint64ResultLocal
 
 private def retypedI32Function (declaration : Name) (params : Array (FVarId × AbiKind))
-    (result : AbiKind) (body : List Instruction) : Function :=
-  let resultLocal := i32ResultLocal result
-  {
+    (result : AbiKind) (body : List Instruction) : Function := {
     name := externalName declaration
     params
     results := #[result]
-    locals := #[(rawLocal, .uint32), (savedScratchLocal, .uint64),
-      (resultLocal, result)]
-    body := body ++ retypeRaw result resultLocal }
+    locals := #[]
+    body := body ++ retypeI32Result result }
 
 private def retypedI64Function (declaration : Name) (params : Array (FVarId × AbiKind))
     (result : AbiKind) (body : List Instruction) : Function :=
@@ -372,8 +345,7 @@ def uint32Log2ClzFunction : Function := {
         .i32Sub,
         .localSet countLocal],
     .localGet countLocal]) with
-    locals := #[(rawLocal, .uint32), (countLocal, .uint32),
-      (savedScratchLocal, .uint64), (uint32ResultLocal, .uint32)] }
+    locals := #[(countLocal, .uint32)] }
 
 def uint32ToNatFunction : Function :=
   toNat32Function `UInt32.toNat .uint32 .tobject
@@ -917,8 +889,37 @@ private partial def instructionContainsLoop : Instruction → Bool
 private def functionContainsLoop (function : Function) : Bool :=
   function.body.any instructionContainsLoop
 
+private partial def instructionContainsMemory : Instruction → Bool
+  | .i32Load .. | .i64Load .. | .i32Store .. | .i64Store .. => true
+  | .block _ body | .loop _ body => body.any instructionContainsMemory
+  | .ifElse thenBody elseBody =>
+      thenBody.any instructionContainsMemory ||
+        elseBody.any instructionContainsMemory
+  | _ => false
+
+private def isI32ResultKind : AbiKind → Bool
+  | .uint8 | .uint16 | .uint32 | .tagged | .tobject => true
+  | _ => false
+
+private def usesTypedI32ResultBridge (function : Function) : Bool :=
+  if function.results.size != 1 then true
+  else
+    let result := function.results[0]!
+    if isI32ResultKind result then
+      !function.body.any instructionContainsMemory &&
+        function.body.any (instructionContains (.i64ExtendI32U .uint64)) &&
+        function.body.any (instructionContains (.i32WrapI64 result))
+    else true
+
 #guard !functions.any functionContainsLoop
 #guard !ResidentUSize.functions.any functionContainsLoop
+#guard functions.all usesTypedI32ResultBridge
+#guard uint64AddFunction.body.any
+  (instructionContains (.i64Load .uint64 0))
+#guard uint64AddFunction.body.any
+  (instructionContains (.i64Store .uint64 0))
+#guard uint64ToUSizeFunction.body.any
+  (instructionContains (.i64Load .usize 0))
 #guard uint32Log2ClzFunction.body.any (instructionContains .i32Clz)
 #guard uint32MulFunction.body.any (instructionContains .i32Mul)
 #guard uint64MulFunction.body.any (instructionContains .i64Mul)

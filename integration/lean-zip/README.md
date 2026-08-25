@@ -445,6 +445,32 @@ flat 9,237,304-byte frontier were unchanged. The emitter change was therefore
 discarded under the lane's representative-performance acceptance rule; its
 code-size result remains evidence for a future size-oriented policy.
 
+Fixed-width i32 results now preserve their physical lane through the typed
+`i64.extend_i32_u` / `i32.wrap_i64` bridge instead of borrowing linear-memory
+address zero to change semantic ABI kind. This provider-level path covers the
+UInt8, UInt16, and UInt32 result families, including Boolean decisions and
+object/tagged conversions. The i64 retype path is deliberately unchanged and
+retains its scratch save/restore sequence.
+
+In the exact level-6 release, `Zip.Native.Deflate.lzMatchP` shrinks from 36,982
+to 31,706 bytes and from 18,123 to 15,869 instructions. Its memory operations
+fall from 1,056 to 272: all 205 fixed-width i64 scratch loads and stores
+disappear, while the nine unrelated i64 loads and nine stores remain. The
+frontier decreases from 820,883 to 818,855 bytes and the complete zero-import
+module from 414,753 to 367,176 bytes. Final DCE/inlining removes
+`fir_ext_UInt32_toNat`, `Zip.Native.Deflate.niceLen`, and
+`Zip.Native.Deflate.goodMatch`, leaving 501 final functions without changing
+the captured or pre-optimization inventories.
+
+Thirty-two diagnostics-off AB/BA fresh-process pairs preserve the exact output
+digest and flat 9,237,304-byte frontier while moving median exported-entry time
+from 41.50 ms (MAD 1.79) to 39.07 ms (MAD 2.19). The paired median is -2.15 ms
+(-5.3%) and 21/32 pairs improve; the two order halves independently have
+-1.96 ms and -2.15 ms paired medians. Two exact-artifact profiles reproduce
+the predicted code-shape movement; `lzMatchP` remains the dominant caller at
+about 51% of Wasm self time rather than shifting the removed scratch traffic
+into another helper.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not
