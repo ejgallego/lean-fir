@@ -108,6 +108,28 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `ad76031185f4bbef644066bb944f214500f70a2bcc9bf191bf311504b978339d`;
   and raw lean-zip, 367,176 bytes, SHA-256
   `63426392249011cf27cf2fc56fcb1caeb6ffd7f84101da24d2f8fbfe7e0efd59`.
+- Accepted fixed-width i64 result retyping: W7-2 functional head `64415a96`
+  (original `2abea9ce`) is linked through exact clean tracked handoff
+  `b2a79f0d`. Same-kind `UInt64` results now return on their physical i64 lane;
+  `UInt64.toUSize` uses a typed i64/f64 reinterpret bridge, and `UInt64.mod`
+  retains only its semantic raw-operand local. This removes 194 scratch
+  load/store pairs from the profiled worker while leaving all public helper
+  signatures, masks and validation, ABI/layout, ownership, source entry, and
+  resident-helper inventory unchanged. Two independent 32-pair diagnostics-off
+  campaigns produce a combined paired median of -0.477453 ms, median ratio
+  0.987829 (about -1.22%), and 41/64 wins. Complete lean-zip Wasm shrinks from
+  366,796 to 359,760 bytes and from 501 to 500 functions; package SHA-256 is
+  `5be5d7e64a41b7bf29da2f1c0516b2db32e6c8c2f3689be2ba0c81e4ea8eb`.
+  `chooseSplitsHeuristicPUPacked` shrinks from 9,542 to 6,634 bytes, from
+  4,699 to 3,410 instructions, and from 220/220 to 26/26 i64 loads/stores.
+  Lean Beam reports zero diagnostics with source hash `b68a3a33a72d420c`;
+  the 54-job linker cone, `make check` at 726 cases and 2,160/2,160 equal
+  comparisons, all 3,178 Talos jobs, and the complete deterministic W7
+  artifact/V8/concrete/ownership gate pass on the rebased stack. The exact
+  candidate's stored, Level-1, raw, determinism, smoke, and reclamation gates
+  passed before handoff; a redundant clean-client rebuild after rebase was
+  stopped in lean-zip's proof-only dependency cone after no FIR failure.
+  W6 contract review continues independently in `W72-W6-20260825-001`.
 - Accepted wide ByteArray push integration: W7 functional head `158914b8`,
   exact package ratchet `3e0eef61`, and clean tracked handoff `ba24e66e` are
   accepted. The exclusive-reuse `ByteArray.pushUInt64LE` path now mirrors
