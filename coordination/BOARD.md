@@ -17,11 +17,12 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 - Milestone: `W7-CONSUMER-RATCHETS-AND-PROOF-CONVERGENCE`; selected-closure
   lowering, typed Nat caller paths, S19 ownership fidelity, and the production
-  decrement proof surface are accepted. Exact prettyM/lean-zip publication
-  and convergence with the active W6 release proof are the remaining steps.
-- Integration owner: `wasm-gen`, regenerating consumer contracts from exact
-  accepted `main`, keeping the generation lane stable while W6 binds its
-  decrement proof to the production helper and reviews accepted caller paths.
+  decrement proof surface are accepted. Exact prettyM/lean-zip publication is
+  complete; convergence with the active W6 release and caller-path proofs is
+  the remaining milestone step.
+- Integration owner: `wasm-gen`, keeping the generation lane and published
+  consumer contracts stable while W6 binds its decrement proof to the
+  production helper and reviews accepted caller paths.
 - Lean-zip performance lane: `lean-zip-perf` is the narrow successor to the
   existing W7-2 optimization role, using `perf/lean-zip-loop` in
   `.worktrees/lean-zip-perf`. It profiles one immutable accepted package,
@@ -89,8 +90,18 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   helper installed by `internalizeReleases` without a copied body or trusted
   certificate. Lean Beam, the 54-job emitter/linker cone, `make check` at 725
   unique cases and 2,157/2,157 comparisons, and all 3,172 Talos jobs pass.
-  Current W7 tracked state is `b3c0e83a`; consumer package pointers remain the
-  next generation action.
+  Current W7 tracked state is `27936d0f`. Exact consumer ratchets are accepted
+  at `00c69878` and `9813e9c8`. The clean-current zero-import packages are:
+  styled prettyM, 83,996 bytes, SHA-256
+  `fc61301d946b1596ad08c9b20d51d2e1f68d60ca0c04b0f9d56e298c2ec6408d`;
+  stored lean-zip, 12,678 bytes, SHA-256
+  `ea2172a2fcce26cdc292deb9a97fc70789bb85786dace69864e838877096052a`;
+  Level-1 lean-zip, 195,273 bytes, SHA-256
+  `b124270a8b38e4f43d85df08a3e4970d6c8b94e5b5b86f3a8f39f591693260e7`;
+  and raw lean-zip, 414,753 bytes, SHA-256
+  `3623bb8496127bb9115cdef57949019a268432d4f9c4ca7344e425e3944e84ed`.
+  The complete deterministic prettyM and lean-zip gates, Node smoke, Chrome,
+  checksum, cache/scratch ownership, and umbrella repository checks pass.
 - Independent integration maintenance: the provider-neutral external-tooling
   CI contract is accepted at `88ca108e`. `make tooling-check` now fails closed
   outside the supported Node 22/24 LTS matrix, retains the exact pinned
