@@ -17,7 +17,7 @@ exception text, or allocator identity.
 
 ## Current accepted checkpoint
 
-`main` at `413b0cdf` contains S19 and the complete bounded recursion-shape
+`main` at `cf3f7cb8` contains S19 and the complete bounded recursion-shape
 family: direct self-tail transfer, retained non-tail unwind, and
 cross-declaration mutual-tail transfer over the same cached repeated-child
 String observation. The accepted executable checkpoint contains 716 source
@@ -28,17 +28,18 @@ strace. The two machine-covered tiers execute 8,959 steps, all required forms
 and administrative kinds, 208 semantic-tag floors, and 297 conjunctive-domain
 floors, with zero findings.
 
-S20 is the active next slice. Its detached candidate carries a runner-supplied
-`ByteArray` through mutual tail calls while retaining an independent alias,
-then uses copy-on-write mutation to expose ownership mistakes. The candidate
-is fully probed but is not a prepared or handed-off slice until it is replayed
-and committed from the exact accepted `main` checkpoint.
+S20 is prepared on `validation/closure-ownership-fixtures` at functional head
+`2b357bf9`, based on exact accepted `main` at `cf3f7cb8`. It carries a
+runner-supplied `ByteArray` through mutual tail calls while retaining an
+independent alias, then uses copy-on-write mutation to expose ownership
+mistakes. Its tracked native/LCNF/V8 and Talos gates are green; it changes no
+shared contract and is ready for integration.
 
 ## Portfolio
 
 | Track | State | Scope | Immediate move |
 | --- | --- | --- | --- |
-| A Memory fidelity | active, primary through S19 | Allocation, retain/release, alias topology, mutation, copy-on-write, reuse, and persistence | Promote S20's non-String mutual-tail/copy-on-write candidate, then select the next undominated lifetime interaction |
+| A Memory fidelity | prepared through S20 | Allocation, retain/release, alias topology, mutation, copy-on-write, reuse, and persistence | Integrate S20's non-String mutual-tail/copy-on-write case, then select the next undominated lifetime interaction |
 | B Calls and control | active through B3 | Application shapes, tail calls, recursion, branch topology, and depth behavior | Preserve the landed bounded recursion triad; schedule one source-generated B2 application shape after S20 |
 | C Effects and termination | active at linked boundaries | Ordered external effects, caught-error ownership, output, exceptions, runtime faults, exits, and controlled divergence | Maintain the linked effect/caught-error baselines; do not add uncaught failure or termination fixtures before the shared source-error contract lands |
 | D Floating semantics | contract-blocked | Bit-exact entry/result transport, arithmetic, comparison, conversion, NaNs, infinities, subnormals, and signed zero | Resolve `FIR-BUG-wasm-none-float-runtime-gap` in the shared runtime before execution fixtures |
@@ -118,8 +119,8 @@ near-synonym drift:
 | M0 Mixed closure baseline | landed | `mixed-closure-capture-once` and `mixed-closure-capture-twice` pin 36 and 62 interpreter transitions and pass the native/LCNF/V8 triangle | Maintain the landed baseline while later slices reuse its mixed capture shape |
 | M1 Ownership coverage ledger | active | Existing coverage distinguishes unique/shared, copy-on-write, recursive release, and closure multiplicity | Add lifetime-operation, alias-shape, and observation-strength domains with each fixture slice |
 | M2 Closure/capture ownership | landed | S2, S3a, and S3b are on `main`; S3b adds ByteArray and allocated constructor/String ignore-versus-read pairs with repeated captures and outside aliases, pinning 24/30 and 36/44 transitions | Add another capture topology only when a new heap kind or boundary produces a distinct execution signature |
-| M3 Tail-call ownership (A/B bridge) | landed through S19 | S4 distinguishes unique transfer from shared retention; S17--S19 add self-tail, non-tail unwind, and mutual-tail ownership over one cached repeated-child observation | Promote S20 to vary the payload and copy-on-write observation without changing the mutual-call boundary |
-| M4 Allocation and reuse | active through S19 | Constructor, String, ByteArray, Array, reset/reuse, growth, cache persistence, and copy-on-write fixtures provide the base | Use S20 to connect a non-String payload, repeated alias, mutual call, and post-call mutation |
+| M3 Tail-call ownership (A/B bridge) | prepared through S20 | S4 distinguishes unique transfer from shared retention; S17--S19 add self-tail, non-tail unwind, and mutual-tail ownership over one cached repeated-child observation; S20 adds a validated ByteArray/copy-on-write witness | Integrate S20 without changing the mutual-call boundary, then preserve the bounded recursion family |
+| M4 Allocation and reuse | prepared through S20 | Constructor, String, ByteArray, Array, reset/reuse, growth, cache persistence, and copy-on-write fixtures provide the base; S20 connects a non-String payload, repeated alias, mutual call, and post-call mutation | Integrate S20, then select the smallest undominated lifetime interaction |
 | M5 Recursive release | landed through S5c | S5c adds one `del` on both growth paths and released-leaf reuse only on the unique-owner path to the landed S5a/S5b release matrix | Select the smallest undominated lifetime interaction outside the covered replacement/release matrix |
 | M6 Nonlocal control | landed through S6 | The fixture-only final-use/retained-use closure pair around the linked `recordByteArray` effect passes native/LCNF/V8 with exact 39/54-step traces | Add caught exceptions only after their shared protocol is accepted by all participating backends |
 | M7 Escaping closure ownership | landed | S7 returns a closure-bearing owner across a noinline maker, then distinguishes unique transfer from a retained outside alias during mutation with exact 27/29-step traces | Maintain the landed returned-closure baseline while B2 selects its next application shape |
@@ -834,23 +835,24 @@ was discarded without weakening that regression. Supplying the `ByteArray`
 through the runner preserves isolation while testing the same ownership
 question.
 
-State: active next slice, with a validated detached candidate that must be
-replayed and committed from exact accepted `main` before it becomes prepared.
-Lean Beam update, sync, and save pass with zero diagnostics and save-ready
-source hash `09f0835253553c66`. The focused native/LCNF/V8 run passes all three
-edges and opens both Wasm products under strace. The detached full
-`make check` passes 717 source cases, 1,434 V8 products opened under strace,
-726 aggregate unique cases, 2,160 equal policy comparisons, 8,917
-source-machine steps (9,077 with the direct-machine tier), all 210 tag and 299
-conjunctive-domain floors, and zero findings. Talos is pinned to `0e05edbc`,
-and all 3,178 jobs pass. No bug card is required because no semantic
+State: prepared on `validation/closure-ownership-fixtures` at functional head
+`2b357bf9`, replayed from exact accepted base `cf3f7cb8`, and ready for
+integration. Tracked Lean Beam update, sync, and save pass with zero
+diagnostics and save-ready source hash `09f0835253553c66`. The focused
+native/LCNF/V8 run passes all three edges and opens both Wasm products under
+strace. Clean tracked `make check` passes 717 source cases, 2,151 three-way
+results, 1,434 products opened under strace, 726 aggregate unique cases, 2,160
+equal policy comparisons, 8,917 source-machine steps (9,077 with the
+direct-machine tier), all 210 tag and 299 conjunctive-domain floors, and zero
+findings. Talos is pinned to `0e05edbc`, and the complete 3,172-job
+`make talos-check` cone passes. No bug card is required because no semantic
 discrepancy was found.
 
 ## Current execution queue
 
-1. Replay S20 on exact accepted `main`, preserve its detached execution
-   signature, run the complete native/LCNF/V8 and Talos gates, and land it as a
-   small fixture-only slice.
+1. Integrate prepared S20 from `validation/closure-ownership-fixtures`, then
+   advance the accepted coverage checkpoint without changing a shared
+   contract.
 2. If the shared source-error contract has landed, select one compact
    ownership case crossing an exception or failure boundary. Otherwise leave
    that track parked rather than approximating termination with returned data.
