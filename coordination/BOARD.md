@@ -107,6 +107,30 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `ad76031185f4bbef644066bb944f214500f70a2bcc9bf191bf311504b978339d`;
   and raw lean-zip, 367,176 bytes, SHA-256
   `63426392249011cf27cf2fc56fcb1caeb6ffd7f84101da24d2f8fbfe7e0efd59`.
+- Accepted wide ByteArray push integration: W7 functional head `158914b8`,
+  exact package ratchet `3e0eef61`, and clean tracked handoff `ba24e66e` are
+  accepted. The exclusive-reuse `ByteArray.pushUInt64LE` path now mirrors
+  Lean's native wide push with one unaligned `i64.store` when physical capacity
+  has at least eight bytes of slack; tight-capacity, shared, growth, zero-count,
+  and later-overwrite paths retain their existing behavior. No helper
+  signature, public checked behavior, ABI/layout, ownership contract, symbolic
+  instruction surface, import frontier, or W6-owned file changed. Thirty-two
+  diagnostics-off AB/BA pairs measured a modest -0.143ms paired median (-0.37%,
+  19/32 wins), while exact-artifact sampled helper self share fell from 3.04%
+  to 2.51%; this is a targeted helper win, not a broad workload-speed claim.
+  The clean module-owned zero-import packages are stored lean-zip at 12,418
+  bytes and SHA-256
+  `3343c2d1c2656c19ceac6c19a6c7cca0162f96e6d28929999f70dba465e6a8f0`,
+  Level-1 at 193,694 bytes and SHA-256
+  `d10bb3960160639a44cb4555529dfe86c38de39cfaf82fa9585b5b68113cc123`,
+  and raw levels 1--10 at 367,201 bytes and SHA-256
+  `58abc76b8269b6aec529cc317b0cf71adf3f350ac1fadf328955b6131e5528b3`.
+  Lean Beam, the 54-job linker cone, `make check` at 726 cases and
+  2,160/2,160 comparisons, all 3,172 Talos jobs, the complete deterministic W7
+  artifact gate, package differentials/reclamation/smoke, and Chrome pass. W6's
+  active decrement proof work is disjoint. The trusted `Array.set!` scalar
+  index-dispatch successor is claimed in `W72-W7-20260825-007` and begins only
+  after rebasing onto this accepted main checkpoint.
 - Independent coordination integration: immutable operational-mailbox
   checkpoints are accepted at `ba9ba1cd` for thread
   `W72-W7-20260825-004`. A checkpoint is selected only from one clean
