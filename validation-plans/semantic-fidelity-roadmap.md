@@ -15,16 +15,35 @@ use the same heap layout. The adjacent tracks likewise compare portable Lean
 observations, not backend accidents such as native stack addresses, JavaScript
 exception text, or allocator identity.
 
+## Current accepted checkpoint
+
+`main` at `413b0cdf` contains S19 and the complete bounded recursion-shape
+family: direct self-tail transfer, retained non-tail unwind, and
+cross-declaration mutual-tail transfer over the same cached repeated-child
+String observation. The accepted executable checkpoint contains 716 source
+cases, 725 aggregate unique cases, 1,441 tier cases, and 2,157 equal policy
+comparisons. Native Lean, final-LCNF interpretation, and real V8 agree on all
+2,148 source-backed results; all 1,432 generated V8 products were opened under
+strace. The two machine-covered tiers execute 8,959 steps, all required forms
+and administrative kinds, 208 semantic-tag floors, and 297 conjunctive-domain
+floors, with zero findings.
+
+S20 is the active next slice. Its detached candidate carries a runner-supplied
+`ByteArray` through mutual tail calls while retaining an independent alias,
+then uses copy-on-write mutation to expose ownership mistakes. The candidate
+is fully probed but is not a prepared or handed-off slice until it is replayed
+and committed from the exact accepted `main` checkpoint.
+
 ## Portfolio
 
 | Track | State | Scope | Immediate move |
 | --- | --- | --- | --- |
-| A Memory fidelity | active, primary | Allocation, retain/release, alias topology, mutation, copy-on-write, reuse, and persistence | Carry the S8 aggregate-lifetime checkpoint forward, then select the next undominated lifetime interaction |
-| B Calls and control | active through A/B bridge | Application shapes, tail calls, recursion, branch topology, and depth behavior | Schedule B2 application shapes while preserving S4/B1 |
-| C Effects and termination | landed through S6 | Ordered external effects, output, caught/uncaught exceptions, runtime faults, exits, and controlled divergence | Maintain the S6 ownership baseline; queue caught exceptions only after the shared source-error contract is accepted by all participating backends |
+| A Memory fidelity | active, primary through S19 | Allocation, retain/release, alias topology, mutation, copy-on-write, reuse, and persistence | Promote S20's non-String mutual-tail/copy-on-write candidate, then select the next undominated lifetime interaction |
+| B Calls and control | active through B3 | Application shapes, tail calls, recursion, branch topology, and depth behavior | Preserve the landed bounded recursion triad; schedule one source-generated B2 application shape after S20 |
+| C Effects and termination | active at linked boundaries | Ordered external effects, caught-error ownership, output, exceptions, runtime faults, exits, and controlled divergence | Maintain the linked effect/caught-error baselines; do not add uncaught failure or termination fixtures before the shared source-error contract lands |
 | D Floating semantics | contract-blocked | Bit-exact entry/result transport, arithmetic, comparison, conversion, NaNs, infinities, subnormals, and signed zero | Resolve `FIR-BUG-wasm-none-float-runtime-gap` in the shared runtime before execution fixtures |
-| E Aggregates, erasure, and initialization | active through S8 | Inductive shapes, erased fields, polymorphic dictionaries, arrays, constants, caches, and initialization order | Maintain the proof-erased `Option ByteArray` ownership pair, then choose one different aggregate shape only if it adds a new execution signature |
-| X Evidence and real-engine promotion | continuous | Exact traces/counts, semantic domains, native attestations, retained products, and V8 execution | Promote a representative pair from every eligible track |
+| E Aggregates, erasure, and initialization | active through S19 | Inductive shapes, erased fields, polymorphic dictionaries, arrays, constants, caches, and initialization order | Preserve the landed aggregate/Array/cache cases; treat general initializer order and repeated resident invocation as distinct future gaps |
+| X Evidence and real-engine promotion | continuous | Exact traces/counts, semantic domains, native attestations, retained products, and V8 execution | Keep every eligible admitted case in the native/LCNF/V8 triangle and retain product provenance |
 
 Memory remains the default source of new fixture slices. The other tracks enter
 the queue when they close a structurally different blind spot, not to construct
@@ -32,11 +51,12 @@ another exhaustive scalar matrix.
 
 ## Coverage gap snapshot
 
-At the current 659-case source checkpoint, case counts are concentrated in
-scalar and pure-external behavior: 413 cases are tagged `scalar`, 302 `signed`,
-311 `external`, and 146 `arithmetic`. In contrast, only 29 are tagged
-`constructor`, 12 `control-flow`, five `effect`, five `recursion`, three
-`tail-control`, two `tail-ownership`, and one `polymorphism`. The two float-tagged cases preserve
+At the accepted 716-case source checkpoint, case counts remain concentrated in
+scalar and pure-external behavior: 415 cases are tagged `scalar`, 302 `signed`,
+331 `external`, and 146 `arithmetic`. The structurally richer families have
+grown but remain much smaller: 54 cases are tagged `constructor`, 12
+`control-flow`, 13 `effect`, six `recursion`, six `tail-control`, five
+`tail-ownership`, and three `polymorphism`. The two float-tagged cases preserve
 captured `Float32`/`Float` words but return non-floating observations; they do
 not validate floating computation.
 
@@ -45,8 +65,9 @@ runtime faults, and divergence, but the native and V8 source adapters currently
 produce only returned observations. Overapplication is covered by two
 direct-machine cases rather than a source-generated native/LCNF/V8 triangle,
 and `reset`/`reuse` execution is likewise confined to the direct-machine tier.
-These are portfolio gaps even though all current instruction-form, tag, and
-conjunctive-domain floors are green.
+General initialization order and repeated resident invocation also remain
+shallower than cached heap ownership. These are portfolio gaps even though all
+current instruction-form, tag, and conjunctive-domain floors are green.
 
 ## Executable plan map
 
@@ -59,7 +80,7 @@ conjunctive-domain floors are green.
 | `coverage-index.json` | Cross-tier regression ratchet | Exact tier, aggregate, machine, tag, and conjunctive-domain floors |
 
 The `-scalars` suffix on the V8 plan and its provider/adapter files is
-historical: the plan currently selects all 657 eligible cases, not a scalar
+historical: the plan currently selects all 716 eligible cases, not a scalar
 subset. Rename those root-wired assets through the integration owner rather
 than creating a second semantically identical plan in this lane.
 
@@ -76,7 +97,7 @@ Every admitted slice updates its executable ratchets atomically:
 5. Do not add a policy floor for a contract-blocked track until the contract
    and its first witness case land together.
 
-The initial domain vocabulary for the next slices is fixed here to prevent
+The established and next-slice domain vocabulary is fixed here to prevent
 near-synonym drift:
 
 | Slice | Distinguishing tags | Required initial domains |
@@ -88,6 +109,7 @@ near-synonym drift:
 | B2 | `application-shape` plus `nullary`, `underapplication`, `overapplication`, or `returned-closure` | One domain per admitted application shape |
 | C1 | `effect`, `ordered-effect`, `call-boundary`, `alias-across-effect` | `effect-call-order`, `effect-alias-retention` |
 | E1 | `aggregate-erasure`, `proof-erasure`, and the release/retain boundary around construction, case selection, and projection | `aggregate-erasure-released-before-application` and `aggregate-erasure-retained-across-application` |
+| S20 | `mutual-bytearray-tail`, `mutual-recursion`, `cross-declaration-call`, `outside-alias`, `copy-on-write`, and `tail-ownership` | `tail-ownership-bytearray-mutual-cow` |
 
 ## Track A: memory-fidelity progress
 
@@ -95,14 +117,14 @@ near-synonym drift:
 | --- | --- | --- | --- |
 | M0 Mixed closure baseline | landed | `mixed-closure-capture-once` and `mixed-closure-capture-twice` pin 36 and 62 interpreter transitions and pass the native/LCNF/V8 triangle | Maintain the landed baseline while later slices reuse its mixed capture shape |
 | M1 Ownership coverage ledger | active | Existing coverage distinguishes unique/shared, copy-on-write, recursive release, and closure multiplicity | Add lifetime-operation, alias-shape, and observation-strength domains with each fixture slice |
-| M2 Closure/capture ownership | landed | S2, S3a, and S3b are on `main`; S3b adds ByteArray and allocated constructor/String ignore-versus-read pairs with repeated captures and outside aliases, pinning 24/30 and 36/44 transitions | Carry the landed alias shapes into S4 tail-call ownership |
-| M3 Tail-call ownership (A/B bridge) | landed | `local-tail` supplies the control baseline; S4 adds a nested ByteArray owner whose unique path executes three in-place outer updates while its outside-aliased path allocates once and then reuses twice, with exact 121/126-step traces | Maintain the landed pair while S5 varies recursive release/reuse |
-| M4 Allocation and reuse | active through S5 | Constructor, String, ByteArray, reset/reuse, growth, and copy-on-write fixtures already provide a base | Use the first S5 pair to distinguish post-release constructor reuse from shared-path allocation |
+| M2 Closure/capture ownership | landed | S2, S3a, and S3b are on `main`; S3b adds ByteArray and allocated constructor/String ignore-versus-read pairs with repeated captures and outside aliases, pinning 24/30 and 36/44 transitions | Add another capture topology only when a new heap kind or boundary produces a distinct execution signature |
+| M3 Tail-call ownership (A/B bridge) | landed through S19 | S4 distinguishes unique transfer from shared retention; S17--S19 add self-tail, non-tail unwind, and mutual-tail ownership over one cached repeated-child observation | Promote S20 to vary the payload and copy-on-write observation without changing the mutual-call boundary |
+| M4 Allocation and reuse | active through S19 | Constructor, String, ByteArray, Array, reset/reuse, growth, cache persistence, and copy-on-write fixtures provide the base | Use S20 to connect a non-String payload, repeated alias, mutual call, and post-call mutation |
 | M5 Recursive release | landed through S5c | S5c adds one `del` on both growth paths and released-leaf reuse only on the unique-owner path to the landed S5a/S5b release matrix | Select the smallest undominated lifetime interaction outside the covered replacement/release matrix |
 | M6 Nonlocal control | landed through S6 | The fixture-only final-use/retained-use closure pair around the linked `recordByteArray` effect passes native/LCNF/V8 with exact 39/54-step traces | Add caught exceptions only after their shared protocol is accepted by all participating backends |
 | M7 Escaping closure ownership | landed | S7 returns a closure-bearing owner across a noinline maker, then distinguishes unique transfer from a retained outside alias during mutation with exact 27/29-step traces | Maintain the landed returned-closure baseline while B2 selects its next application shape |
-| M8 Aggregate erasure ownership | landed through S8 | A proof-erased outer owner contains `Option ByteArray`; releasing it before closure application is distinguished from retaining the whole owner through application and observing it afterward by exact 37/48-step traces | Maintain the landed baseline; select a different shape only when it adds a new execution signature |
-| M9 Real-engine promotion | continuous | Scalar closures, the complete zero/one/two/three-use matrix, returned/consumed/ignored/read capture topology, and the S8 aggregate-erasure pair run through native/LCNF/V8 | Promote at least one representative pair per ownership domain whenever W7 support is linked |
+| M8 Aggregate erasure ownership | landed through S11 | S8 covers proof-erased `Option ByteArray`; S9 adds explicit dictionary traffic; S11 adds a repeated-child `Array ByteArray` DAG with observable copy-on-write | Select a different aggregate shape only when it adds a new execution signature |
+| M9 Real-engine promotion | continuous | Every eligible accepted source case, including the complete closure-use matrix, capture topology, aggregate/Array ownership, effects, and the S17--S19 recursion family, runs through native/LCNF/V8 | Preserve complete promotion and product provenance with every admitted slice |
 
 States are `queued`, `active`, `prepared`, `landed`, `parked`, or
 `contract-blocked`. A prepared slice is committed and locally validated but
@@ -648,8 +670,9 @@ head `84ef07e9` changes no shared contract.
 
 ### S11/A-E1: repeated-child Array copy-on-write
 
-State: `ready` through functional head `13a8998f`; changes no shared semantic
-contract and remains independent of the S10 panic-observation bridge.
+State: landed on `main` through functional head `13a8998f` and acceptance
+checkpoint `6d835059`; changes no shared semantic contract and remains
+independent of the S10 panic-observation bridge.
 
 This slice intersects generic Array ownership with a repeated heap-child DAG.
 One runner-materialized input owner contains an outside `ByteArray` alias and
@@ -742,14 +765,15 @@ twelve, six, and six respectively in the three-step tail case. Three
 all external counts and order, and the zero-object-update obligation are
 required.
 
-State: ready through functional head `322fa030` on accepted main base
-`d113b550`. Tracked Lean Beam update, sync, and save pass with zero diagnostics
-and a save-ready checkpoint. The focused S17/S18 native/LCNF/V8 comparison
-passes all six edges with zero findings and opens all four Wasm products under
-strace. Clean tracked `make check` passes all 715 source cases, 2,145 three-way
-results, 1,430 products opened under strace, 8,617 source-machine steps, and
-all 200 tag and 295 conjunctive-domain floors with zero findings; the full
-3,172-job Talos cone also passes.
+State: accepted on `main` through functional head `322fa030` and integration
+checkpoint `88b8e60d`, from accepted base `d113b550`. Tracked Lean Beam update,
+sync, and save pass with zero diagnostics and a save-ready checkpoint. The
+focused S17/S18 native/LCNF/V8 comparison passes all six edges with zero
+findings and opens all four Wasm products under strace. Clean tracked
+`make check` passes all 715 source cases, 2,145 three-way results, 1,430
+products opened under strace, 8,617 source-machine steps, and all 200 tag and
+295 conjunctive-domain floors with zero findings; the full 3,172-job Talos cone
+also passes.
 
 ### S19/B3-E3: cached ownership through mutual tail calls
 
@@ -771,31 +795,75 @@ callee returns. The cached String aggregate still executes six in-place
 object updates, four sharing checks, twelve increments, and five decrements.
 The complete form/external traces and counts are required.
 
-State: ready for integration on `validation/closure-ownership-fixtures` from
-exact main checkpoint `04f6d1d1`, with functional head `8c8b052c`. Tracked
-post-rebase Lean Beam update, sync, and save pass with zero diagnostics and
-save-ready source hash `a6a9d9e2a8b89647`. The tracked S17/S18/S19 focused
-native/LCNF/V8 comparison passes all nine edges with zero findings and opens
-all six Wasm products under strace. Coverage requires the direct-self-tail,
-retained-non-tail, and mutual-tail shape triad in both source and real-V8
-tiers. Clean tracked `make check` passes 716 source cases, 2,148 three-way
-results, 1,432 products opened under strace, 725 aggregate unique cases, 2,157
-equal policy comparisons, 8,799 source-machine steps (8,959 including the
-direct-machine tier), all 208 tag and 297 conjunctive-domain floors, and zero
-findings. Tracked `make talos-setup` pins Talos `0e05edbc`; the complete
-3,172-job `make talos-check` cone also passes.
+State: accepted on `main` at containing checkpoint `413b0cdf`, from exact base
+`04f6d1d1`, with functional head `8c8b052c`. Tracked post-rebase Lean Beam
+update, sync, and save pass with zero diagnostics and save-ready source hash
+`a6a9d9e2a8b89647`. The tracked S17/S18/S19 focused native/LCNF/V8 comparison
+passes all nine edges with zero findings and opens all six Wasm products under
+strace. Coverage requires the direct-self-tail, retained-non-tail, and
+mutual-tail shape triad in both source and real-V8 tiers. Clean tracked
+`make check` passes 716 source cases, 2,148 three-way results, 1,432 products
+opened under strace, 725 aggregate unique cases, 2,157 equal policy
+comparisons, 8,799 source-machine steps (8,959 including the direct-machine
+tier), all 208 tag and 297 conjunctive-domain floors, and zero findings.
+Tracked `make talos-setup` pins Talos `0e05edbc`; the complete 3,172-job
+`make talos-check` cone also passes.
 
-## Portfolio cadence
+### S20/B3-A2: ByteArray ownership through mutual tail calls
 
-1. Execute S4/B1 tail-call ownership as the memory/control bridge.
-2. Extend capture topology only when a new heap kind or boundary adds distinct
-   ownership signal.
-3. Take one compact C1 ordered-effect slice and one E1 aggregate/erasure slice
-   before returning to S5 recursive release and reuse.
-4. Queue D0 and C2 as shared contracts, but do not overlap the integration,
-   W6, or W7 implementation work while they are unresolved.
-5. Promote at least one pair from each executable track to real V8 and add a
-   conjunctive coverage domain for the precise semantic intersection claimed.
+S20 applies the B3 mutual-tail shape to a non-String owned payload with a
+copy-on-write observation. The runner supplies one `ByteArray`; the wrapper
+retains an independent outside alias while two aliases to the same object move
+through three alternating noinline tail calls. After the calls,
+`ByteArray.set!` mutates the selected returned alias. Native Lean must observe
+the outside alias unchanged as `[0, 127, 128, 255]` and the result as
+`[0, 127, 42, 255]`.
+
+The detached candidate executes 118 interpreter transitions and 100 LCNF
+forms: 12 applications, two increments, four decrements, three sharing tests,
+six object updates, four scalar updates, and eight externals. The external
+trace contains four `Nat.decEq` calls, three `Nat.sub` calls, then
+`ByteArray.set!`; the complete form and external traces and counts are
+required. This makes call-boundary ownership, loop-carried repeated aliases,
+an independently retained alias, and post-call copy-on-write jointly
+observable.
+
+Selection note: the first probe used a cached generic `Array UInt8`, but its
+new module initializer changed an existing fixture's exact startup trace. It
+was discarded without weakening that regression. Supplying the `ByteArray`
+through the runner preserves isolation while testing the same ownership
+question.
+
+State: active next slice, with a validated detached candidate that must be
+replayed and committed from exact accepted `main` before it becomes prepared.
+Lean Beam update, sync, and save pass with zero diagnostics and save-ready
+source hash `09f0835253553c66`. The focused native/LCNF/V8 run passes all three
+edges and opens both Wasm products under strace. The detached full
+`make check` passes 717 source cases, 1,434 V8 products opened under strace,
+726 aggregate unique cases, 2,160 equal policy comparisons, 8,917
+source-machine steps (9,077 with the direct-machine tier), all 210 tag and 299
+conjunctive-domain floors, and zero findings. Talos is pinned to `0e05edbc`,
+and all 3,178 jobs pass. No bug card is required because no semantic
+discrepancy was found.
+
+## Current execution queue
+
+1. Replay S20 on exact accepted `main`, preserve its detached execution
+   signature, run the complete native/LCNF/V8 and Talos gates, and land it as a
+   small fixture-only slice.
+2. If the shared source-error contract has landed, select one compact
+   ownership case crossing an exception or failure boundary. Otherwise leave
+   that track parked rather than approximating termination with returned data.
+3. Schedule one undominated B2 source-level application shape carrying a heap
+   owner. Prefer underapplication followed by saturation or overapplication,
+   because returned closures already have a landed ownership baseline.
+4. Treat general initialization order and repeated resident invocation as the
+   next E3 boundary, coordinated with W7 executability and W6 refinement; do
+   not extend the cached scalar matrix merely to raise counts.
+5. Keep floating execution blocked behind
+   `FIR-BUG-wasm-none-float-runtime-gap`. Continue promoting every eligible
+   admitted case to real V8 and recording a discrepancy card before any
+   accommodation.
 
 Fixed-width integer boundaries, Nat/Int arithmetic and conversions, pure
 numeric externals, Unicode string operations, and the scalar ABI are maintenance
