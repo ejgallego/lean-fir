@@ -609,6 +609,213 @@ theorem ConstructorObjectRel.readOwnedPayloadWords
   rw [indicesEq] at payload
   exact ⟨words, wordsRead, ownership, payload⟩
 
+/-- Physical capture indices selected by the closure ownership filter. -/
+def closureOwnedCaptureIndices (index : Nat) : List Fir.Wasm.AbiKind →
+    List Nat
+  | [] => []
+  | kind :: rest =>
+      if kind.isObjectField then
+        index :: closureOwnedCaptureIndices (index + 1) rest
+      else
+        closureOwnedCaptureIndices (index + 1) rest
+
+/-- A successful checked object-like closure capture exposes its raw low
+word.  Canonical padding remains part of the checked read. -/
+theorem readClosureCapture_word_of_eq_ok
+    {memory : LinearMemory} {address : Nat} {kind : Fir.Wasm.AbiKind}
+    {word : Word32} (admissible : kind.isObjectField = true)
+    (operation :
+      memory.readClosureCapture address kind = .ok (.word32 word)) :
+    memory.readWord32 address = .ok word := by
+  cases kind <;> simp [Fir.Wasm.AbiKind.isObjectField] at admissible
+  all_goals
+    unfold LinearMemory.readClosureCapture at operation
+    simp only [Fir.Wasm.AbiKind.valueType] at operation
+    cases rawRead : memory.readWord32 address with
+    | error failure =>
+        rw [rawRead] at operation
+        contradiction
+    | ok actual =>
+        rw [rawRead] at operation
+        simp only [Bind.bind, Except.bind] at operation
+        cases paddingRead : memory.readUInt32 (address + 4) with
+        | error failure =>
+            rw [paddingRead] at operation
+            contradiction
+        | ok padding =>
+            rw [paddingRead] at operation
+            by_cases zero : padding = 0
+            · subst padding
+              simp only [beq_self_eq_true, ↓reduceIte,
+                pure, Except.pure] at operation
+              have actualEq := Except.ok.inj operation
+              cases actualEq
+              rfl
+            · simp [zero] at operation
+
+/-- Descriptor-filtered closure decoding retains the exact physical payload
+indices consumed by W7.  Scalar captures advance the physical slot without
+adding a recursive child. -/
+theorem readClosureOwnedReferences_payload
+    {state : MemoryState} {address : Word32} {header : Header}
+    {index captureCount : Nat} {kinds : List Fir.Wasm.AbiKind}
+    {words : List Word32}
+    (operation : readClosureOwnedReferences state address index kinds =
+      .ok words)
+    (fits : index + kinds.length ≤ captureCount)
+    (allocationFits :
+      headerBytes + target.semanticSlotBytes * captureCount ≤
+        header.allocationBytes.toNat)
+    (extent :
+      closureCaptureAddress address.value captureCount ≤ state.heapCursor)
+    (valid : state.FrontierInvariant) :
+    OwnedPayloadWordsRel state address header
+      (closureOwnedCaptureIndices index kinds) words := by
+  induction kinds generalizing index words with
+  | nil =>
+      simp only [readClosureOwnedReferences] at operation
+      have wordsEq := Except.ok.inj operation
+      subst words
+      exact .nil
+  | cons kind rest ih =>
+      simp only [List.length_cons] at fits
+      unfold readClosureOwnedReferences at operation
+      by_cases admissible : kind.isObjectField = true
+      · rw [if_pos admissible] at operation
+        cases captureRead : state.memory.readClosureCapture
+            (closureCaptureAddress address.value index) kind with
+        | error failure =>
+            rw [captureRead] at operation
+            contradiction
+        | ok lane =>
+            simp only [liftMemory, captureRead, Bind.bind, Except.bind]
+              at operation
+            cases lane with
+            | word32 word =>
+                cases tailRead : readClosureOwnedReferences state address
+                    (index + 1) rest with
+                | error failure =>
+                    rw [tailRead] at operation
+                    contradiction
+                | ok tailWords =>
+                    rw [tailRead] at operation
+                    have wordsEq := Except.ok.inj operation
+                    subst words
+                    have rawRead := readClosureCapture_word_of_eq_ok
+                      admissible captureRead
+                    have tailPayload := ih tailRead (by omega)
+                    have currentLt : index < captureCount := by omega
+                    have within :
+                        headerBytes + target.semanticSlotBytes * index + 4 ≤
+                          header.allocationBytes.toNat := by
+                      have allocationFits' := allocationFits
+                      simp [target] at allocationFits' ⊢
+                      omega
+                    have inBounds :
+                        address.value + headerBytes +
+                              target.semanticSlotBytes * index + 3 <
+                            state.memory.size := by
+                      have cursorInBounds := valid.cursorInBounds
+                      have extent' := extent
+                      simp [closureCaptureAddress, target] at extent' ⊢
+                      omega
+                    simp only [closureOwnedCaptureIndices, admissible,
+                      if_true]
+                    exact .cons within inBounds
+                      (by simpa [closureCaptureAddress] using rawRead)
+                      tailPayload
+            | word64 value | float32Bits value | float64Bits value =>
+                simp at operation
+      · have rejected : kind.isObjectField = false := by
+          cases found : kind.isObjectField <;> simp_all
+        rw [if_neg (by simpa using rejected)] at operation
+        simpa [closureOwnedCaptureIndices, rejected] using
+          ih operation (by omega)
+
+/-- A related closure's public ownership decoder supplies the filtered
+semantic captures and the exact physical indices consumed by W7. -/
+theorem ClosureObjectRel.readOwnedPayloadWords
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {function : Lean.Name} {arity : Nat}
+    {captureKinds : Array Fir.Wasm.AbiKind}
+    {captures : Array Fir.LeanIR.Impure.Value} {header : Header}
+    (related : ClosureObjectRel state witness witness.closureDispatch
+      witness.closureDescriptors address function arity captureKinds captures)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (headerKind : header.kind = .closure)
+    (fixedCount : header.aux2.toNat = captures.size)
+    (extent : closureCaptureAddress address.value captures.size ≤
+      state.heapCursor)
+    (valid : state.FrontierInvariant) :
+    ∃ words,
+      readClosureOwnedReferences state address 0 captureKinds.toList =
+        .ok words ∧
+      OwnershipValuesRel witness words
+        (closureOwnedValues captureKinds.toList captures.toList) ∧
+      OwnedPayloadWordsRel state address header
+        (closureOwnedCaptureIndices 0 captureKinds.toList) words := by
+  obtain ⟨words, wordsRead, ownership⟩ :=
+    related.readClosureOwnedReferences
+  obtain ⟨metadata, metadataRead, _, _, _, _⟩ := related.metadata
+  have heap :=
+    (MemoryState.PrefixExtension.readLiveHeader_facts state address header
+      headerRead).1
+  have closureHeaderSuccess : ∃ decoded,
+      readClosureHeader state address = .ok decoded := by
+    cases result : readClosureHeader state address with
+    | error failure =>
+        unfold readClosureMetadata at metadataRead
+        simp only [result, Bind.bind, Except.bind] at metadataRead
+        contradiction
+    | ok decoded => exact ⟨decoded, rfl⟩
+  obtain ⟨decoded, decodedRead⟩ := closureHeaderSuccess
+  have decodedEq : decoded = header := by
+    have check := decodedRead
+    unfold readClosureHeader at check
+    simp only [heap, if_true] at check
+    rw [headerRead] at check
+    simp only [liftMemory, Bind.bind, Except.bind] at check
+    split at check <;> split at check
+    · simpa using (Except.ok.inj check).symm
+    · contradiction
+    · contradiction
+    · contradiction
+  subst decoded
+  have kindCheck : (header.kind == ObjectKind.closure) = true := by
+    rw [headerKind]
+    decide
+  have requiredFits :
+      align8 (headerBytes +
+        target.semanticSlotBytes * header.aux2.toNat) ≤
+          header.allocationBytes.toNat := by
+    have check := decodedRead
+    unfold readClosureHeader at check
+    simp only [heap, if_true] at check
+    rw [headerRead] at check
+    simp only [liftMemory, Bind.bind, Except.bind] at check
+    rw [kindCheck] at check
+    simp only [if_true] at check
+    split at check
+    · rename_i validCheck
+      have validProp : header.aux2.toNat < header.aux1.toNat ∧
+          align8 (headerBytes +
+            target.semanticSlotBytes * header.aux2.toNat) ≤
+              header.allocationBytes.toNat := by
+        simpa using validCheck
+      exact validProp.2
+    · contradiction
+  have allocationFits :
+      headerBytes + target.semanticSlotBytes * captures.size ≤
+        header.allocationBytes.toNat := by
+    rw [← fixedCount]
+    exact Nat.le_trans (align8_ge _) requiredFits
+  have captureKindsSize : captureKinds.toList.length = captures.size := by
+    simpa using related.captureKindsSize
+  have payload := readClosureOwnedReferences_payload wordsRead
+    (captureCount := captures.size) (by simp [captureKindsSize])
+    allocationFits extent valid
+  exact ⟨words, wordsRead, ownership, payload⟩
+
 /-- A mapped-payload frame plus the current resident-memory relation exposes
 an original owned word as the exact lazy `i32.load` result in the current
 Wasm store.  This is the key bridge that allows earlier recursive releases
@@ -1451,6 +1658,41 @@ theorem wp_ownedReleaseProgram_constructor
   apply Wasm.wp_iff_cons rfl
   rw [if_pos (by decide : (1 : UInt32) ≠ 0)]
   apply Wasm.wp.conseq _ constructorWP
+  intro continuation terminal
+  cases continuation <;> simp_all [TerminalPost]
+
+/-- A closure header skips the constructor arm and selects exactly the
+supplied descriptor-dispatch body. -/
+theorem wp_ownedReleaseProgram_closure
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {object check flags descriptor refCount kind marker count
+      captureCount : UInt32}
+    {constructorBody closureBody opaqueBody : Wasm.Program}
+    (notConstructor : kind ≠ ObjectKind.constructor.code)
+    (closureKind : kind = ObjectKind.closure.code)
+    (closureWP : Wasm.wp module closureBody (TerminalPost Q) store
+      (ownedEntry object check flags descriptor refCount kind marker count
+        captureCount) env) :
+    Wasm.wp module
+      (ownedReleaseProgram constructorBody closureBody opaqueBody) Q store
+      (ownedEntry object check flags descriptor refCount kind marker count
+        captureCount) env := by
+  have kindFound (values : List Wasm.Value) :
+      ({ ownedEntry object check flags descriptor refCount kind marker count
+          captureCount with values } : Wasm.Locals).get kindIndex =
+        some (.i32 kind) := by rfl
+  unfold ownedReleaseProgram
+  simp only [Wasm.wp_localGet_cons, kindFound, Wasm.wp_const_cons,
+    Wasm.wp_eq_cons, if_neg notConstructor]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_localGet_cons, kindFound, Wasm.wp_const_cons, Wasm.wp_eq_cons,
+    if_pos closureKind]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_pos (by decide : (1 : UInt32) ≠ 0)]
+  apply Wasm.wp.conseq _ closureWP
   intro continuation terminal
   cases continuation <;> simp_all [TerminalPost]
 
@@ -3536,6 +3778,219 @@ theorem LiveHeapRel.decrementOnceProgram_constructor_refines
           (lastReferenceProgram releaseHeaderIndex
             (ownedReleaseProgram (constructorReleaseProgram decrementIndex)
               closureBody opaqueBody)))
+        (fun continuation => continuation = .Return finalStore []) store
+        (decrementEntry (UInt32.ofNat address.value) checkWord) env := by
+    apply wp_decrementOnceProgram_owned entry.taggedClear entry.objectNonzero
+      entry.alignmentClear entry.flagsInBounds entry.flagsRead entry.liveSet
+      entry.aux3InBounds entry.aux3Read physicalOrdinary
+      entry.refCountInBounds entry.refCountRead physicalOne
+      entry.kindInBounds entry.kindRead entry.aux0InBounds entry.aux0Read
+      entry.aux1InBounds entry.aux1Read entry.aux2InBounds entry.aux2Read
+      releaseRun ownedExecution
+  exact ⟨result, finalStore, concreteOperation, finalRelated, finalMemory,
+    finalCanonical, finalFrame, physicalExecution⟩
+
+/-- Complete fuel-indexed three-semantics refinement for a count-one closure.
+The static descriptor filters scalar captures before the shared ownership
+fold; the remaining physical indices are released in source order. -/
+theorem LiveHeapRel.decrementOnceProgram_closure_refines
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime nextRuntime : Fir.LeanIR.Impure.RuntimeState}
+    {location : Fir.LeanIR.Impure.Location} {address : Word32}
+    {cell : Fir.LeanIR.Impure.HeapCell}
+    {function : Lean.Name} {arity : Nat}
+    {captureKinds : Array Fir.Wasm.AbiKind}
+    {captures : Array Fir.LeanIR.Impure.Value} {header : Header}
+    {fuel decrementIndex releaseHeaderIndex : Nat}
+    {constructorBody closureBody opaqueBody : Wasm.Program}
+    (related : LiveHeapRel state witness runtime)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (canonicalHeaders : CanonicalMappedHeadersRel state witness)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : Fir.LeanIR.Impure.findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (ordinary : cell.persistent = false) (one : cell.rc = 1)
+    (objectEq : cell.object = .closure function arity captures)
+    (objectRelated : ClosureObjectRel state witness witness.closureDispatch
+      witness.closureDescriptors address function arity captureKinds captures)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (headerKind : header.kind = .closure)
+    (descriptorLookup : witness.closureDescriptors.lookup? header.aux3 =
+      some captureKinds)
+    (fixedCount : header.aux2.toNat = captures.size)
+    (extent : closureCaptureAddress address.value captures.size ≤
+      state.heapCursor)
+    (refCount : header.refCount.toNat = cell.rc)
+    (persistent : header.persistent = cell.persistent)
+    (check : Bool) (checkWord : UInt32)
+    (semanticOperation :
+      Fir.LeanIR.Impure.decLocationFuel (fuel + 1) runtime location =
+        .ok nextRuntime)
+    (step : ResidentOwnershipStep env module decrementIndex fuel witness)
+    (releaseRun : Wasm.TerminatesWith env module releaseHeaderIndex store
+      [.i32 (UInt32.ofNat address.value)]
+      (fun final values =>
+        final = releaseHeaderStore store (UInt32.ofNat address.value) ∧
+          values = []))
+    (closureBodyCorrect : ∀ {releasedStore finalStore : Wasm.Store host},
+      ReleaseChildrenRun env module decrementIndex
+          (UInt32.ofNat address.value)
+          (closureOwnedCaptureIndices 0 captureKinds.toList)
+          releasedStore finalStore →
+      Wasm.wp module closureBody
+        (TerminalPost (fun continuation =>
+          continuation = .Return finalStore [])) releasedStore
+        (ownedEntry (UInt32.ofNat address.value) checkWord header.flags
+          header.aux3 header.refCount header.kind.code header.aux0
+          header.aux1 header.aux2) env) :
+    ∃ result finalStore,
+      decrementReferenceOnceFuel (fuel + 1) state address check
+          witness.closureDescriptors = .ok result ∧
+      LiveHeapRel result witness nextRuntime ∧
+      ResidentMemoryRel result finalStore.mem ∧
+      CanonicalMappedHeadersRel result witness ∧
+      MappedPayloadFrameTransport state result witness ∧
+      Wasm.wp module
+        (decrementOnceProgram persistentReleaseProgram
+          (lastReferenceProgram releaseHeaderIndex
+            (ownedReleaseProgram constructorBody closureBody opaqueBody)))
+        (fun continuation => continuation = .Return finalStore []) store
+        (decrementEntry (UInt32.ofNat address.value) checkWord) env := by
+  obtain ⟨words, ownedRead, ownershipRelated, payloadRelated⟩ :=
+    ClosureObjectRel.readOwnedPayloadWords objectRelated headerRead headerKind
+      fixedCount extent related.frontier
+  let localClosure : ClosureCellRel state witness address cell :=
+    .closure objectEq objectRelated headerRead headerKind descriptorLookup
+      fixedCount extent refCount persistent live
+  obtain ⟨released, memory, releasedOperation, releasedEq, headerWrite,
+      finalValid, deadRelated⟩ :=
+    releaseHeader related.frontier headerRead localClosure.headerOwned
+  obtain ⟨addressHeap, rawRead, headerLive, _, _, _⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts state address header
+      headerRead
+  have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
+    Nat.le_trans localClosure.headerOwned related.frontier.cursorInBounds
+  let replacement : Fir.LeanIR.Impure.HeapCell :=
+    { cell with rc := 0, live := false }
+  have targetAfter : CellRel released witness address replacement :=
+    .dead (by simp [replacement]) (by simp [replacement])
+      ⟨.closure function arity captureKinds, objectRelated.descriptor⟩
+      deadRelated
+  obtain ⟨parentRuntime, parentSemantic, parentRelated⟩ :=
+    related.setCell_of_headerWrite mapped found objectRelated.descriptor rawRead
+      releasedEq headerInBounds headerWrite rfl finalValid targetAfter
+  have parentPayloadFrame :=
+    related.mappedPayloadFrame_of_headerWrite objectRelated.descriptor rawRead
+      releasedEq headerInBounds headerWrite rfl
+  have exact := canonicalHeaders mapped header headerRead
+  have releasedMemory : ResidentMemoryRel released
+      (releaseHeaderStore store (UInt32.ofNat address.value)).mem := by
+    rw [releasedEq]
+    simpa [releaseHeaderStore] using
+      ResidentMemoryRel.releaseHeader memoryRelated exact headerInBounds
+        headerWrite
+  have releasedCanonical : CanonicalMappedHeadersRel released witness :=
+    canonicalHeaders.ofHeaderWrite related objectRelated.descriptor rawRead
+      releasedEq headerInBounds headerWrite
+  let releaseChild : Fir.LeanIR.Impure.RuntimeState →
+      Fir.LeanIR.Impure.Value →
+      Except Fir.LeanIR.Impure.RuntimeFault
+        Fir.LeanIR.Impure.RuntimeState := fun next value =>
+    match value with
+    | .object (.heap child) =>
+        Fir.LeanIR.Impure.decLocationFuel fuel next child
+    | _ => .ok next
+  have nonzero : cell.rc ≠ 0 := by omega
+  have notAboveOne : ¬1 < cell.rc := by omega
+  have semanticFoldArray :
+      Array.foldlM releaseChild parentRuntime captures = .ok nextRuntime := by
+    simp only [Fir.LeanIR.Impure.decLocationFuel,
+      Fir.LeanIR.Impure.getLiveCell, found, live, ↓reduceIte,
+      Bind.bind, Except.bind] at semanticOperation
+    rw [if_neg (by simp [ordinary])] at semanticOperation
+    rw [if_neg nonzero, if_neg notAboveOne] at semanticOperation
+    rw [parentSemantic] at semanticOperation
+    rw [objectEq] at semanticOperation
+    change Array.foldlM releaseChild parentRuntime captures =
+      .ok nextRuntime at semanticOperation
+    exact semanticOperation
+  have semanticFoldList :
+      captures.toList.foldlM (init := parentRuntime) releaseChild =
+        .ok nextRuntime := by
+    simpa only [Array.foldlM_toList] using semanticFoldArray
+  have semanticOwnedFoldList :
+      (closureOwnedValues captureKinds.toList captures.toList).foldlM
+          (init := parentRuntime) releaseChild = .ok nextRuntime := by
+    have foldEq :=
+      objectRelated.foldlM_closureOwnedValues fuel parentRuntime
+    unfold releaseChild
+    exact foldEq.symm.trans semanticFoldList
+  obtain ⟨result, finalStore, concreteFold, finalRelated, finalMemory,
+      finalCanonical, finalFrame, childRuns⟩ :=
+    OwnershipValuesRel.releaseChildrenRun_refines ownershipRelated
+      payloadRelated mapped rawRead localClosure.headerOwned parentRelated
+      releasedMemory releasedCanonical parentPayloadFrame step
+      semanticOwnedFoldList
+  have headerOrdinary : header.persistent = false :=
+    persistent.trans ordinary
+  have notPromoted : header.isPromotedTag = false := by
+    have different :
+        (ObjectKind.closure == ObjectKind.natural) = false := by decide
+    simp [Header.isPromotedTag, headerKind, headerOrdinary, different]
+  have headerNonzero : header.refCount ≠ 0 := by
+    intro zero
+    rw [zero] at refCount
+    simp at refCount
+    omega
+  have ownedReadWithDescriptors :
+      readOwnedReferences state address header witness.closureDescriptors =
+        .ok words := by
+    simpa [readOwnedReferences, headerKind, descriptorLookup,
+      objectRelated.captureKindsSize, fixedCount] using ownedRead
+  have concreteOperation :
+      decrementReferenceOnceFuel (fuel + 1) state address check
+        witness.closureDescriptors = .ok result := by
+    simp only [decrementReferenceOnceFuel]
+    rw [addressHeap, headerRead]
+    simp only [Bind.bind, Except.bind, liftMemory]
+    rw [if_neg (by simp [notPromoted])]
+    rw [if_neg (by simp [headerOrdinary])]
+    rw [if_neg (by simpa using headerNonzero)]
+    rw [refCount, if_neg notAboveOne]
+    rw [ownedReadWithDescriptors, releasedOperation]
+    exact concreteFold
+  have physicalOne : header.refCount = 1 := by
+    apply UInt32.toNat.inj
+    simpa [one] using refCount
+  have physicalOrdinary :
+      header.flags &&& persistentFlag ≠ persistentFlag := by
+    cases liveValue : header.live
+    · simp [Header.flags, headerOrdinary, liveValue, persistentFlag]
+    · simp [Header.flags, headerOrdinary, liveValue, persistentFlag]
+      decide
+  have entry := LiveHeaderResidentFacts.ofRelations memoryRelated exact
+    headerInBounds addressHeap headerLive
+  have ownedExecution :
+      Wasm.wp module
+        (ownedReleaseProgram constructorBody closureBody opaqueBody)
+        (TerminalPost (fun continuation =>
+          continuation = .Return finalStore []))
+        (releaseHeaderStore store (UInt32.ofNat address.value))
+        (ownedEntry (UInt32.ofNat address.value) checkWord header.flags
+          header.aux3 header.refCount header.kind.code header.aux0
+          header.aux1 header.aux2) env := by
+    apply wp_ownedReleaseProgram_closure
+      (by simp [headerKind]; decide) (by simp [headerKind])
+    apply Wasm.wp.conseq _ (closureBodyCorrect childRuns)
+    intro continuation terminal
+    cases continuation <;> simp_all [TerminalPost]
+  have physicalExecution :
+      Wasm.wp module
+        (decrementOnceProgram persistentReleaseProgram
+          (lastReferenceProgram releaseHeaderIndex
+            (ownedReleaseProgram constructorBody closureBody opaqueBody)))
         (fun continuation => continuation = .Return finalStore []) store
         (decrementEntry (UInt32.ofNat address.value) checkWord) env := by
     apply wp_decrementOnceProgram_owned entry.taggedClear entry.objectNonzero
