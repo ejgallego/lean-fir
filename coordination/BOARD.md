@@ -326,6 +326,21 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   continues through the installed semantic/public-call boundary;
   `FIR-BUG-wasm-none-adapter-if-branch-depth` remains the independent exact
   Array-loop provenance blocker.
+- Accepted installed constructor/closure decrement refinement: W6 functional
+  head `ed6c4da8` (original `85a7d68d`) is linked through exact clean tracked
+  handoff `1c8bf39a`, on the accepted closure-underapplication admission
+  stack. Count-one constructor and closure release now lift through the actual
+  installed public `fir_dec_once` call. Their common `DecrementOnceSuccess`
+  postcondition preserves concrete decrement success, live-heap and resident
+  memory refinement, canonical headers, mapped-payload framing, and the
+  caller's operand tail. No certificate or trusted premise was introduced.
+  Lean Beam refresh/save reports zero diagnostics with source hash
+  `280b8451ff239e2c`; the 3,079-job focused cone, `git diff --check`,
+  `make check` at 726 cases and 2,160/2,160 equal comparisons, and all 3,172
+  Talos jobs pass. No semantic contract, emitter, helper signature, ABI/layout,
+  symbolic Wasm surface, ownership rule, or executable behavior changed.
+  Exact Array-loop adapter provenance remains separately blocked by
+  `FIR-BUG-wasm-none-adapter-if-branch-depth`.
 - Accepted recursive resident release proof checkpoint: W6 functional head
   `1fa01d24` is linked through exact clean tracked handoff `97312f4f`, rebased
   on accepted W7 and coordination base `9bc79b26`. Admission distinguishes
