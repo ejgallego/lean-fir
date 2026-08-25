@@ -31,9 +31,9 @@ inductive LinkError where
   | invalidOutput (error : SymbolicError)
   deriving Inhabited, Repr
 
-private def u32 (value : Nat) : UInt32 := UInt32.ofNat value
+def u32 (value : Nat) : UInt32 := UInt32.ofNat value
 
-private def checkedWord (value : Nat) : Except LinkError UInt32 :=
+def checkedWord (value : Nat) : Except LinkError UInt32 :=
   if value < UInt32.size then
     pure (u32 value)
   else
@@ -57,11 +57,20 @@ not a replacement for a future unbounded release loop instruction.
 -/
 def constructorFieldLimit : Nat := 32
 
-private def equalsConst (kind : AbiKind) (value : UInt32) :
+/-!
+The definitions in this section form the reduction-visible proof surface for
+the exact production decrement body.  They are compositional views of the
+actual emitter implementation, not an independent certificate or alternate
+body generator.  `decrementOnceFunction` consumes `decrementOnceBody`, which
+in turn consumes these exact staged builders.
+-/
+@[expose] section
+
+def equalsConst (kind : AbiKind) (value : UInt32) :
     List Instruction :=
   [.i32Const kind value, .i32Eq]
 
-private def checkedNoop : List Instruction :=
+def checkedNoop : List Instruction :=
   [.localGet checkParam, .ifElse [.ret] [.unreachable]]
 
 /--
@@ -98,20 +107,20 @@ def releaseHeaderFunction : Function := {
     .i32Store .uint32 (u32 headerAux3Offset),
     .ret] }
 
-private def releaseChild (index : Nat) : List Instruction :=
+def releaseChild (index : Nat) : List Instruction :=
   [.localGet addressLocal,
     .i32Load .tobject (u32 (headerBytes + target.semanticSlotBytes * index)),
     .i32Const .uint32 1,
     .call (.declaration decrementOnceName)]
 
-private def releaseConstructorFields : List Instruction :=
+def releaseConstructorFields : List Instruction :=
   (List.range constructorFieldLimit).flatMap fun index =>
     [.i32Const .uint32 (u32 index),
       .localGet countLocal,
       .i32LtU,
       .ifElse (releaseChild index) []]
 
-private def constructorReleaseBody : List Instruction :=
+def constructorReleaseBody : List Instruction :=
   [.i32Const .uint32 (u32 constructorFieldLimit),
     .localGet countLocal,
     .i32LtU,
@@ -119,7 +128,7 @@ private def constructorReleaseBody : List Instruction :=
       [.unreachable]
       (releaseConstructorFields ++ [.ret])]
 
-private def arrayReleaseBody : List Instruction := [
+def arrayReleaseBody : List Instruction := [
   .localGet addressLocal,
   .i32Const .uint32 (u32 headerBytes),
   .i32Add,
@@ -146,21 +155,20 @@ private def arrayReleaseBody : List Instruction := [
       .br arrayReleaseLoop] []],
   .ret]
 
-private def opaqueReleaseBody : List Instruction :=
+def opaqueReleaseBody : List Instruction :=
   [.localGet markerLocal] ++
   equalsConst .uint32 ResidentContainerLayout.arrayMarker ++
   [.ifElse arrayReleaseBody [.ret]]
 
-private def descriptorOwnedFields (descriptor : Array AbiKind) :
+def descriptorOwnedFields (descriptor : Array AbiKind) :
     List Instruction :=
   descriptor.toList.zipIdx.flatMap fun (kind, index) =>
     if kind.isObjectField then releaseChild index else []
 
-private partial def descriptorReleaseBody
-    (descriptors : Array (Array AbiKind)) (index : Nat) :
-    Except LinkError (List Instruction) := do
-  if h : index < descriptors.size then
-    let descriptor := descriptors[index]
+def descriptorReleaseBody :
+    List (Array AbiKind) → Nat → Except LinkError (List Instruction)
+  | [], _ => pure [.unreachable]
+  | descriptor :: descriptors, index => do
     let descriptorIndex ← checkedWord index
     let captureCount ← checkedWord descriptor.size
     let rest ← descriptorReleaseBody descriptors (index + 1)
@@ -174,12 +182,10 @@ private partial def descriptorReleaseBody
             (descriptorOwnedFields descriptor ++ [.ret])
             [.unreachable]])
         rest])
-  else
-    return [.unreachable]
 
-private def ownedReleaseBody (descriptors : Array (Array AbiKind)) :
+def ownedReleaseBody (descriptors : Array (Array AbiKind)) :
     Except LinkError (List Instruction) := do
-  let closureBody ← descriptorReleaseBody descriptors 0
+  let closureBody ← descriptorReleaseBody descriptors.toList 0
   return (
     [.localGet kindLocal] ++
     equalsConst .uint32 ObjectKind.constructor.code ++
@@ -192,7 +198,7 @@ private def ownedReleaseBody (descriptors : Array (Array AbiKind)) :
             equalsConst .uint32 ObjectKind.opaque.code ++
             [.ifElse opaqueReleaseBody [.ret]])])])
 
-private def decrementAboveOneBody : List Instruction :=
+def decrementAboveOneBody : List Instruction :=
   [.localGet addressLocal,
     .localGet refCountLocal,
     .i32Const .uint32 1,
@@ -206,12 +212,12 @@ full-header memory-boundary check. It also caches the closure descriptor for
 the cold last-reference path. The ordinary shared-reference path deliberately
 does not interpret object kind or auxiliary metadata.
 -/
-private def probeCompleteHeader : List Instruction :=
+def probeCompleteHeader : List Instruction :=
   [.localGet addressLocal,
     .i32Load .uint32 (u32 headerAux3Offset),
     .localSet descriptorLocal]
 
-private def lastReferenceReleaseBody
+def lastReferenceReleaseBody
     (descriptors : Array (Array AbiKind)) :
     Except LinkError (List Instruction) := do
   let owned ← ownedReleaseBody descriptors
@@ -231,7 +237,7 @@ private def lastReferenceReleaseBody
       .localGet addressLocal,
       .call (.declaration releaseHeaderName)] ++ owned)
 
-private def ordinaryReleaseBody
+def ordinaryReleaseBody
     (descriptors : Array (Array AbiKind)) :
     Except LinkError (List Instruction) := do
   let lastReference ← lastReferenceReleaseBody descriptors
@@ -250,7 +256,7 @@ private def ordinaryReleaseBody
           decrementAboveOneBody
           lastReference])])
 
-private def persistentReleaseBody : List Instruction :=
+def persistentReleaseBody : List Instruction :=
   [.localGet addressLocal,
     .i32Load .uint32 (u32 headerKindOffset),
     .localSet kindLocal,
@@ -266,7 +272,7 @@ private def persistentReleaseBody : List Instruction :=
       [.ifElse checkedNoop [.ret]])
     [.ret]]
 
-private def liveReleaseBody
+def liveReleaseBody
     (descriptors : Array (Array AbiKind)) :
     Except LinkError (List Instruction) := do
   let ordinary ← ordinaryReleaseBody descriptors
@@ -278,7 +284,7 @@ private def liveReleaseBody
     equalsConst .uint32 persistentFlag ++
     [.ifElse persistentReleaseBody ordinary])
 
-private def alignedReleaseBody
+def alignedReleaseBody
     (descriptors : Array (Array AbiKind)) :
     Except LinkError (List Instruction) := do
   let live ← liveReleaseBody descriptors
@@ -297,6 +303,31 @@ private def alignedReleaseBody
     [.ifElse live [.unreachable]])
 
 /--
+Build the exact instruction body installed as `fir_dec_once`.  This is the
+public proof surface for production decrement control flow: it is assembled by
+the same staged builders as the executable emitter and remains parameterized by
+the supplied closure-descriptor table.
+-/
+def decrementOnceBody
+    (descriptors : Array (Array AbiKind)) :
+    Except LinkError (List Instruction) := do
+  let aligned ← alignedReleaseBody descriptors
+  return [.localGet objectParam,
+      .i32Const .uint32 1,
+      .i32And,
+      .ifElse
+        checkedNoop
+        ([.localGet objectParam] ++
+          equalsConst .tobject 0 ++
+          [.ifElse
+            checkedNoop
+            ([.localGet objectParam,
+              .i32Const .uint32 (u32 (target.heapAlignment - 1)),
+              .i32And] ++
+              equalsConst .uint32 0 ++
+              [.ifElse aligned [.unreachable]])])]
+
+/--
 Build the production nonrecursive decrement helper installed by
 `internalizeReleases`. This definition is public so the concrete-runtime proof
 can unfold the exact generated function rather than duplicate its body.
@@ -306,7 +337,7 @@ def decrementOnceFunction
     Except LinkError Function := do
   if UInt32.size ≤ descriptors.size then
     throw (.descriptorOverflow descriptors.size)
-  let aligned ← alignedReleaseBody descriptors
+  let body ← decrementOnceBody descriptors
   return {
     name := decrementOnceName
     params := #[(objectParam, .tobject), (checkParam, .uint32)]
@@ -322,21 +353,30 @@ def decrementOnceFunction
       (markerLocal, .uint32),
       (arrayCursorLocal, .uint32),
       (arrayIndexLocal, .uint32)]
-    body :=
-      [.localGet objectParam,
-        .i32Const .uint32 1,
-        .i32And,
-        .ifElse
-          checkedNoop
-          ([.localGet objectParam] ++
-            equalsConst .tobject 0 ++
-            [.ifElse
-              checkedNoop
-              ([.localGet objectParam,
-                .i32Const .uint32 (u32 (target.heapAlignment - 1)),
-                .i32And] ++
-                equalsConst .uint32 0 ++
-                [.ifElse aligned [.unreachable]])])] }
+    body }
+
+/--
+Successful production generation uses exactly `decrementOnceBody`; no caller
+supplies or certifies an independent instruction list.
+-/
+theorem decrementOnceFunction_body_of_ok
+    {descriptors : Array (Array AbiKind)} {function : Function}
+    (generated : decrementOnceFunction descriptors = .ok function) :
+    ∃ body, decrementOnceBody descriptors = .ok body ∧
+      function.body = body := by
+  unfold decrementOnceFunction at generated
+  split at generated
+  · cases generated
+  · cases bodyGenerated : decrementOnceBody descriptors with
+    | error error =>
+      rw [bodyGenerated] at generated
+      cases generated
+    | ok body =>
+      rw [bodyGenerated] at generated
+      exact ⟨body, rfl,
+        (congrArg Function.body (Except.ok.inj generated)).symm⟩
+
+end
 
 private def decrementOnceCall (check : Bool) : List Instruction :=
   [.localGet objectParam,
@@ -588,6 +628,11 @@ def manifest : Json :=
       .i32Load .uint32 (u32 headerRefCountOffset),
       .localSet refCountLocal]
   | .error _ => false
+
+#guard match decrementOnceBody exampleDescriptors,
+    decrementOnceFunction exampleDescriptors with
+  | .ok body, .ok function => function.body == body
+  | _, _ => false
 
 #guard match decrementWrapper 0 1 true with
   | .ok function => function.body == checkedDecrementCalls
