@@ -101,6 +101,39 @@ const partialApplicationHelperCount = ({ manifest }) => {
   return seen.size;
 };
 
+// The styled closed boundary uses the compiler-selected source `pap` target
+// set.  Keep this exact ratchet separate from the preceding incremental
+// runtime-internalization artifacts, which deliberately retain the full
+// generic dispatch table until the boundary is closed.
+const expectedStyledClosedClosureDispatch = [
+  "Fir.Wasm.Emit.SourceFixture.prettyFormatTraceRawMonad._lam_3",
+  "Fir.Wasm.Emit.SourceFixture.prettyFormatTraceRawMonad._lam_10",
+  "Fir.Wasm.Emit.SourceFixture.prettyFormatTraceRawMonad._lam_9",
+  "Fir.Wasm.Emit.SourceFixture.prettyFormatTraceRawMonad._lam_7",
+  "Fir.Wasm.Emit.SourceFixture.prettyFormatTraceRawMonad._lam_8._boxed",
+  "Fir.Wasm.Emit.SourceFixture.prettyFormatTraceRawMonad._lam_6",
+  "Fir.Wasm.Emit.SourceFixture.prettyFormatTraceRawMonad._lam_5",
+  "Fir.Wasm.Emit.SourceFixture.prettyFormatTraceRawMonad._lam_4",
+  "Fir.Wasm.Emit.SourceFixture.prettyFormatTraceRawMonad._lam_2",
+  "Fir.Wasm.Emit.SourceFixture.prettyFormatTraceRawMonad._lam_1",
+  "Fir.Wasm.Emit.SourceFixture.prettyFormatTraceRawMonad._lam_0",
+];
+const expectedStyledClosedClosureDescriptors = [
+  ["erased", "erased", "object"],
+  ["erased", "erased", "object", "object"],
+  ["object"],
+  ["object", "erased", "erased", "object"],
+  ["object", "erased", "erased", "object", "object"],
+  ["object", "object"],
+  ["object", "object", "tobject"],
+  ["tobject"],
+  ["tobject", "tobject"],
+  ["erased", "tobject"],
+  ["erased", "erased", "tobject"],
+  ["erased", "erased", "tobject", "object"],
+  [],
+];
+
 assert.equal(operationCount(baseline, "getTag"), 1,
   "baseline prettyM must expose exactly one semantic getTag import");
 assert.equal(operationCount(baseline, "isShared"), 1,
@@ -664,13 +697,20 @@ assert.deepStrictEqual(
 );
 assert.deepStrictEqual(
   styledClosed.manifest.closureDispatch,
-  styledString.manifest.closureDispatch,
-  "resident styled fallback linking changed the closure-dispatch table",
+  expectedStyledClosedClosureDispatch,
+  "closed resident styled dispatch no longer matches its source pap targets",
 );
 assert.deepStrictEqual(
   styledClosed.manifest.closureDescriptors,
-  styledString.manifest.closureDescriptors,
-  "resident styled fallback linking changed the closure-descriptor table",
+  expectedStyledClosedClosureDescriptors,
+  "closed resident styled descriptor table changed",
+);
+assert.ok(
+  styledClosed.manifest.closureDispatch.length <
+    styledString.manifest.closureDispatch.length &&
+    styledClosed.manifest.closureDispatch.every((target) =>
+      styledString.manifest.closureDispatch.includes(target)),
+  "closed resident styled dispatch is not a strict subset of the generic table",
 );
 for (const [artifact, count, label] of [
   [residentCache, 20, "resident cache"],
