@@ -83,7 +83,7 @@ manifest.capabilities = {
     methods: ["createPlayer", "dispatch", "dispatchTick", "disposePlayer", "replayTrace"],
   },
   inputLayout: {
-    version: "lean-4.32-Illuminate.Animation.SelectionAnimation/v4",
+    version: "lean-4.33-Illuminate.Animation.SelectionAnimation/v4",
     projection: "fps, totalFrames, segment bounds, and steps only",
     excluded: ["segment.sync", "segment.pmap", "segment.params"],
   },

@@ -1,6 +1,6 @@
 # FIR-native lean-zip bring-up
 
-This integration compiles the real Lean 4.32-compatible entries
+This integration compiles the real Lean 4.33 entries
 
 ```lean
 Zip.Wasm.compressStored : ByteArray → ByteArray
