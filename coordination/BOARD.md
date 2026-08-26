@@ -24,9 +24,12 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   complete; convergence with the remaining caller-path proofs, including W6's
   resident Array provenance consumer after rebasing, is the remaining
   milestone step.
-- Integration owner: `wasm-gen`, serializing the independent S20, LCNF proof,
-  and W6 release handoffs while keeping generation and consumer contracts
-  stable.
+- Integration owner: `root`, taking over the serial landing lease from
+  accepted main `777c4ec4`. `wasm-gen` is released back to the W7-1 generation
+  lane. The immediate inherited queue is W7-2's rebased bounded `Nat.land`
+  checkpoint, its dependent USize range-fact successor, and tooling's measured
+  check-throughput checkpoints; none authorizes integration work on the W7-1
+  branch.
 - Accepted heap-only USize convergence: the semantic contract and source
   fixtures at `1db0b79d`, W7 resident implementation at `9c896a1d`, LCNF
   ElimDead adaptation at `d78d128c`, and W6 functional proof head `0360367a`
