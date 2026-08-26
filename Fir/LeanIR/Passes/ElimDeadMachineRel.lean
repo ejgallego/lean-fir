@@ -13981,6 +13981,18 @@ structure LedgerShadowRuntimeRel (rho : AddressRenaming)
   runtime : ShadowRuntimeRel rho left right leftExtra rightExtra
   ledger : TargetAllocationLedger rho right.nextLocation
 
+/-- Proof-relevant lifecycle provenance for one historically allocated
+source-only location.  The strict source-frontier bound is the missing fact
+needed to transport source-only ownership through a later paired allocation:
+it distinguishes the old source allocation from the next fresh paired slot
+without requiring the old cell to remain live or even present. -/
+structure AllocatedSourceOnlyLedgerShadowRuntimeRelAt
+    (rho : AddressRenaming) (left right : RuntimeState)
+    (leftExtra rightExtra : List Value) (location : Location) : Type where
+  runtime : LedgerShadowRuntimeRel rho left right leftExtra rightExtra
+  sourceOnly : SourceOnlyUnderTargetLedger runtime.ledger location
+  sourceBounded : location < left.nextLocation
+
 /-- The current source allocation frontier is outside every owner recorded
 in the target allocation ledger. This is the allocation-lifecycle fact used
 when the compiler emits a source-only heap object at the next fresh address. -/
@@ -14015,6 +14027,25 @@ theorem LedgerShadowRuntimeRel.sourceOnly_of_pairedAllocation
   exact related.ledger.sourceOnly_of_pairedAllocation
     nextLedger extension mapping sourceOnly different
 
+/-- Allocation-history form of paired-allocation transport.  A strict bound
+carried from the original one-sided allocation is sufficient; unlike the
+older heap-witness wrapper, this remains applicable after reset, reuse, or
+deletion has rewritten the selected source cell. -/
+theorem LedgerShadowRuntimeRel.sourceOnly_of_pairedAllocation_of_bounded
+    (related : LedgerShadowRuntimeRel rho left right leftExtra rightExtra)
+    (nextLedger :
+      TargetAllocationLedger larger (right.nextLocation + 1))
+    (extension : RenamingExtends rho larger)
+    (mapping :
+      larger.forward left.nextLocation = some right.nextLocation)
+    (sourceOnly :
+      SourceOnlyUnderTargetLedger related.ledger location)
+    (sourceBounded : location < left.nextLocation) :
+    SourceOnlyUnderTargetLedger nextLedger location := by
+  exact related.ledger.sourceOnly_of_pairedAllocation
+    nextLedger extension mapping sourceOnly
+      (Nat.ne_of_lt sourceBounded).symm
+
 /-- Preserve source-only provenance through an arbitrary related operation
 whose target allocation frontier is unchanged. This covers reset, writes, and
 concrete-token reuse even when their proof result exposes a stronger hidden
@@ -14043,6 +14074,27 @@ theorem LedgerShadowRuntimeRel.sourceOnly_of_sameTargetFrontierExtension
     Option.some.inj nextMapped
   intro selected
   exact sourceOnly rightLocation oldBounded (ownerEq.trans selected)
+
+/-- Transport the complete allocated/source-only lifecycle capability through
+an operation that does not advance the target frontier.  The target proof is
+generic over hidden renaming extensions; the source-side monotonicity premise
+is exactly what preserves the historical allocation bound. -/
+def AllocatedSourceOnlyLedgerShadowRuntimeRelAt.sameTargetFrontierExtension
+    (provenance : AllocatedSourceOnlyLedgerShadowRuntimeRelAt
+      rho left right leftExtra rightExtra location)
+    (next : LedgerShadowRuntimeRel larger nextLeft nextRight
+      nextLeftExtra nextRightExtra)
+    (extension : RenamingExtends rho larger)
+    (targetFrontier : nextRight.nextLocation = right.nextLocation)
+    (sourceFrontier : left.nextLocation ≤ nextLeft.nextLocation) :
+    AllocatedSourceOnlyLedgerShadowRuntimeRelAt larger
+      nextLeft nextRight nextLeftExtra nextRightExtra location where
+  runtime := next
+  sourceOnly :=
+    provenance.runtime.sourceOnly_of_sameTargetFrontierExtension
+      next extension targetFrontier provenance.sourceOnly
+  sourceBounded :=
+    Nat.lt_of_lt_of_le provenance.sourceBounded sourceFrontier
 
 /-- Empty runtimes start with the empty renaming and empty allocation
 ledger. -/
@@ -14121,6 +14173,27 @@ theorem LedgerResetBothResult.sourceOnly
     result.runtime (RenamingExtends.refl rho)
     (reset_nextLocation_eq_of_ok result.targetEffect) sourceOnly
 
+/-- Retained reset transports the complete allocated/source-only lifecycle
+capability. Both semantic reset effects preserve their allocation frontiers,
+so neither side loses the historical source-prefix bound. -/
+def LedgerResetBothResult.allocatedSourceOnly
+    (provenance : AllocatedSourceOnlyLedgerShadowRuntimeRelAt rho
+      left right leftExtra rightExtra location)
+    (result :
+      LedgerResetBothResult rho left right leftResult leftExtra rightExtra
+        count leftObject rightObject leftToken)
+    (sourceEffect :
+      reset left count leftObject = .ok (leftResult, leftToken)) :
+    AllocatedSourceOnlyLedgerShadowRuntimeRelAt rho
+      leftResult result.rightResult
+      (leftToken :: leftExtra) (result.rightToken :: rightExtra)
+      location := by
+  apply provenance.sameTargetFrontierExtension
+      result.runtime (RenamingExtends.refl rho)
+      (reset_nextLocation_eq_of_ok result.targetEffect)
+  rw [reset_nextLocation_eq_of_ok sourceEffect]
+  exact Nat.le_refl _
+
 /-- A deleted source-only allocation preserves the target ledger exactly. -/
 def LedgerShadowRuntimeRel.allocLeftGarbage
     (related : LedgerShadowRuntimeRel rho left right
@@ -14130,6 +14203,20 @@ def LedgerShadowRuntimeRel.allocLeftGarbage
       leftExtra rightExtra where
   runtime := related.runtime.allocLeftGarbage object persistent
   ledger := related.ledger
+
+/-- Mint the lifecycle capability at the original one-sided allocation.  Its
+location is the incoming source frontier, it remains outside the unchanged
+target ledger, and allocation advances the source frontier past it. -/
+def LedgerShadowRuntimeRel.allocLeftGarbageSourceOnly
+    (related : LedgerShadowRuntimeRel rho left right
+      leftExtra rightExtra)
+    (object : HeapObject) (persistent : Bool) :
+    AllocatedSourceOnlyLedgerShadowRuntimeRelAt rho
+      (alloc left object persistent).1 right leftExtra rightExtra
+      left.nextLocation where
+  runtime := related.allocLeftGarbage object persistent
+  sourceOnly := related.sourceOnly_nextLocation
+  sourceBounded := by simp [alloc]
 
 /-- Proof-relevant result of one paired allocation. The larger renaming is
 selected together with its relation and ledger evidence. -/
@@ -14217,6 +14304,63 @@ theorem LedgerAllocBothResult.sourceOnly_of_found
     related.sourceOnly_of_pairedAllocation
       allocated.runtime.ledger allocated.extension mapping
       sourceOnly found
+
+/-- Transport a lifecycle capability through the paired allocation selected
+by the concrete runtime proof.  No current heap lookup is needed: the carried
+strict bound already proves that the historical source-only location differs
+from the new paired source slot. -/
+def AllocatedSourceOnlyLedgerShadowRuntimeRelAt.pairedAllocation
+    (provenance : AllocatedSourceOnlyLedgerShadowRuntimeRelAt
+      rho left right leftExtra rightExtra location)
+    (allocated : LedgerAllocBothResult rho left right leftExtra rightExtra
+      leftObject rightObject persistent) :
+    AllocatedSourceOnlyLedgerShadowRuntimeRelAt allocated.larger
+      (alloc left leftObject persistent).1
+      (alloc right rightObject persistent).1
+      (.object (alloc left leftObject persistent).2 :: leftExtra)
+      (.object (alloc right rightObject persistent).2 :: rightExtra)
+      location where
+  runtime := allocated.runtime
+  sourceOnly := by
+    have mapping :
+        allocated.larger.forward left.nextLocation =
+          some right.nextLocation := by
+      have mappedValue :
+          ValueRel allocated.larger
+            (.object (.heap left.nextLocation))
+            (.object (.heap right.nextLocation)) := by
+        simpa [alloc] using allocated.values
+      cases mappedValue with
+      | heap mapping => exact mapping
+    simpa [alloc] using
+      provenance.runtime.sourceOnly_of_pairedAllocation_of_bounded
+        allocated.runtime.ledger allocated.extension mapping
+        provenance.sourceOnly provenance.sourceBounded
+  sourceBounded := by
+    simpa [alloc] using
+      Nat.lt_trans provenance.sourceBounded
+        (Nat.lt_succ_self left.nextLocation)
+
+/-- The common one-sided-then-paired allocation lifecycle in one reusable
+composition.  This is the provenance path used when a deleted allocation is
+followed by any retained heap allocation. -/
+def LedgerShadowRuntimeRel.allocLeftGarbageThenPairedSourceOnly
+    (related : LedgerShadowRuntimeRel rho left right
+      leftExtra rightExtra)
+    (garbage : HeapObject) (garbagePersistent : Bool)
+    (allocated : LedgerAllocBothResult rho
+      (alloc left garbage garbagePersistent).1 right leftExtra rightExtra
+      leftObject rightObject persistent) :
+    AllocatedSourceOnlyLedgerShadowRuntimeRelAt allocated.larger
+      (alloc (alloc left garbage garbagePersistent).1
+        leftObject persistent).1
+      (alloc right rightObject persistent).1
+      (.object (alloc (alloc left garbage garbagePersistent).1
+        leftObject persistent).2 :: leftExtra)
+      (.object (alloc right rightObject persistent).2 :: rightExtra)
+      left.nextLocation :=
+  (related.allocLeftGarbageSourceOnly garbage garbagePersistent)
+    |>.pairedAllocation allocated
 
 /-- A paired allocation transports an existing hereditary source closure when
 the old closure excludes the fresh source frontier. That single premise both
@@ -14822,6 +14966,31 @@ theorem LedgerReuseSomeBothResult.sourceOnly
   related.sourceOnly_of_sameTargetFrontierExtension
     result.runtime result.extension
     (reuseSome_nextLocation_eq_of_ok result.rightEffect) sourceOnly
+
+/-- Concrete-token reuse likewise preserves the complete lifecycle carrier,
+including across the hidden renaming extension selected by the relational
+reuse theorem. -/
+def LedgerReuseSomeBothResult.allocatedSourceOnly
+    (provenance : AllocatedSourceOnlyLedgerShadowRuntimeRelAt rho
+      left right
+      (leftArguments.toList ++ leftExtra)
+      (rightArguments.toList ++ rightExtra) location)
+    (result :
+      LedgerReuseSomeBothResult rho left right leftResult
+        leftExtra rightExtra leftLocation rightLocation info updateHeader
+        leftArguments rightArguments leftValue)
+    (sourceEffect :
+      reuse left (.reuseToken (some leftLocation)) info updateHeader
+        leftArguments = .ok (leftResult, leftValue)) :
+    AllocatedSourceOnlyLedgerShadowRuntimeRelAt result.larger
+      leftResult result.rightResult
+      (leftValue :: leftExtra) (result.rightValue :: rightExtra)
+      location := by
+  apply provenance.sameTargetFrontierExtension
+      result.runtime result.extension
+      (reuseSome_nextLocation_eq_of_ok result.rightEffect)
+  rw [reuseSome_nextLocation_eq_of_ok sourceEffect]
+  exact Nat.le_refl _
 
 /-- Proof-relevant result of evaluating one literal on both related
 runtimes. Immediate literals retain the current renaming and ledger;
@@ -20224,6 +20393,20 @@ def SourceOnlyLedgerBinderReadyReachableMachineRelatedAt
       SourceOnlyUnderTargetLedger ledger location ∧
         BinderReadyReachableMachineRelated fuel rho source target
 
+/-- Lifecycle-strengthened machine carrier.  In addition to the exact target
+ledger and structural compiler relation, it remembers that the selected
+source-only location belongs to the historical source allocation prefix.
+That bound is what makes the capability stable across later paired target
+allocations. -/
+def AllocatedSourceOnlyLedgerBinderReadyReachableMachineRelatedAt
+    (fuel : Nat) (source target : MachineState)
+    (location : Location) : Prop :=
+  ∃ rho,
+    ∃ ledger : TargetAllocationLedger rho target.runtime.nextLocation,
+      SourceOnlyUnderTargetLedger ledger location ∧
+        location < source.runtime.nextLocation ∧
+          BinderReadyReachableMachineRelated fuel rho source target
+
 /-- Forget the selected source-only capability while retaining its exact
 ledger and hereditary compiler relation. -/
 theorem SourceOnlyLedgerBinderReadyReachableMachineRelatedAt.related
@@ -20232,6 +20415,43 @@ theorem SourceOnlyLedgerBinderReadyReachableMachineRelatedAt.related
     SomeLedgerBinderReadyReachableMachineRelated fuel source target := by
   rcases related with ⟨rho, ledger, _sourceOnly, structural⟩
   exact ⟨rho, ledger, structural⟩
+
+/-- Forget the historical source-allocation bound while retaining the exact
+source-only operation capability. -/
+theorem
+    AllocatedSourceOnlyLedgerBinderReadyReachableMachineRelatedAt.sourceOnlyRelated
+    (related : AllocatedSourceOnlyLedgerBinderReadyReachableMachineRelatedAt
+      fuel source target location) :
+    SourceOnlyLedgerBinderReadyReachableMachineRelatedAt
+      fuel source target location := by
+  rcases related with
+    ⟨rho, ledger, sourceOnly, _sourceBounded, structural⟩
+  exact ⟨rho, ledger, sourceOnly, structural⟩
+
+/-- Assemble the lifecycle-strengthened machine carrier from ordinary exact
+program/control/frame evidence and a runtime capability minted and transported
+by the allocation lifecycle API. -/
+theorem
+    AllocatedSourceOnlyLedgerShadowRuntimeRelAt.binderReadyMachineRelated
+    (provenance : AllocatedSourceOnlyLedgerShadowRuntimeRelAt rho
+      source.runtime target.runtime
+      (sourceControlRoots ++ sourceFrameRoots)
+      (targetControlRoots ++ targetFrameRoots) location)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      source.program target.program)
+    (control : BinderReadyReachableControlRelated fuel rho
+      source.env source.joins source.control
+      target.env target.joins target.control
+      sourceControlRoots targetControlRoots)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      source.frames target.frames sourceFrameRoots targetFrameRoots) :
+    AllocatedSourceOnlyLedgerBinderReadyReachableMachineRelatedAt
+      fuel source target location := by
+  exact ⟨rho, provenance.runtime.ledger, provenance.sourceOnly,
+    provenance.sourceBounded,
+    sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots,
+    programs, control, frames, provenance.runtime.runtime⟩
 
 /-- A deleted operation becomes ledger-ready directly from an aligned
 source-only capability. This is the historical-heap-safe bridge: it requires
@@ -20314,6 +20534,37 @@ theorem
             ExactShadowCodeRuntimeReadyAt.letDeleted
               decision removed⟩
           joins env)
+
+/-- A deleted operation may consume the lifecycle-strengthened carrier
+directly.  The operation needs only source-only ownership at this node; the
+historical bound remains available to the surrounding execution invariant for
+subsequent allocations. -/
+theorem
+    DeletedLedgerLetLocalReadyAt.ledgerMachineReadyAt_of_allocatedSourceOnly
+    (operation : DeletedLedgerLetLocalReadyAt source)
+    (targetControl : target.control = .code targetCode)
+    (targetNotSame : ∀ targetContinuation,
+      targetCode ≠ .let operation.declaration targetContinuation)
+    (related : AllocatedSourceOnlyLedgerBinderReadyReachableMachineRelatedAt
+      fuel source target operation.location) :
+    LedgerBinderReadyReachableMachineReadyAt fuel source target :=
+  operation.ledgerMachineReadyAt_of_sourceOnly targetControl targetNotSame
+    related.sourceOnlyRelated
+
+/-- Source-owned form of the lifecycle-strengthened deleted-operation
+bridge. -/
+theorem
+    DeletedLedgerLetLocalReadyAt.ledgerMachineReadyAt_of_allocatedSourceOnly_withOwnership
+    (operation : DeletedLedgerLetLocalReadyAt source)
+    (targetControl : target.control = .code targetCode)
+    (targetNotSame : ∀ targetContinuation,
+      targetCode ≠ .let operation.declaration targetContinuation)
+    (sourceOwnership : SourceMachineOwnershipBelowFrontier source)
+    (related : AllocatedSourceOnlyLedgerBinderReadyReachableMachineRelatedAt
+      fuel source target operation.location) :
+    LedgerBinderReadyReachableMachineReadyAt fuel source target :=
+  operation.ledgerMachineReadyAt_of_sourceOnly_withOwnership
+    targetControl targetNotSame sourceOwnership related.sourceOnlyRelated
 
 /-- Target-side prefix evidence for one generic deleted-ledger operation.
 The active target code and proof-relevant binding map are existential because
