@@ -1030,6 +1030,12 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   30. W7-2's trusted direct `ByteArray.size` result and exact lean-zip package
       ratchet land as `5ae0af6f` and `6137c051`; the independent W6 typed-result
       bridge review remains open.
+  31. W7's checked resident decrement callers and heap-only UInt64 consumer
+      land through tracked generation handoff `99241038`, followed by W6's
+      exact installed-Array refinement `c437f186`, generic checked-caller
+      theorem `eacfc3aa`, and clean proof handoff `9c37ba66`. The proof stack
+      changes only W6-owned Talos sources and follows the already-green W7
+      artifact stack atomically.
 - Serialization rule: while the integration owner is validating one rebased
   candidate, other lanes may continue on their branches but do not
   fast-forward `main`. This prevents proof-only commits from repeatedly
@@ -5901,8 +5907,11 @@ identities.
   improve 16/16 with a -6.38% paired median, while all heap-reference counts,
   outputs, flat frontier, zero-import packages, repository checks, 3,172
   Talos jobs, and the deterministic artifact gates remain exact. Helper name,
-  signature, body, layout, ABI, and ownership are unchanged. W6 proof thread
-  `W7-W6-20260826-016` remains independent.
+  signature, body, layout, ABI, and ownership are unchanged. W6 functional
+  heads `c437f186` and `eacfc3aa` prove the exact installed Array path and the
+  generic checked caller split; clean handoff `9c37ba66` is linked/accepted.
+  The proof reuses the existing `fir_dec_once` theorem and covers well-formed
+  `.tobject` values while preserving the direct heap-only `.object` path.
 
 - `W6-W7-DIRECT-NAT-RESULT` is linked/accepted through W7 functional head
   `04d54c38`, ratchet `c7d38522`, and tracked handoff `3f4f7f2a`, followed
