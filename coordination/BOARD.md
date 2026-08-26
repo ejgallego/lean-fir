@@ -5943,6 +5943,19 @@ identities.
   automaton; the negative two-cell regression remains proof-only and changes
   no interpreter or compiler semantics.
 
+- LCNF's source-only allocation lifecycle is linked/accepted through
+  functional head `b6a86e52` and clean tracked handoff `7fa5855f`, based
+  directly on `main` at `fcd623cb`. A one-sided source allocation now mints
+  durable source-only provenance; unchanged target frontiers, retained
+  reset/reuse, and later paired allocations transport it while the strict
+  source-frontier bound distinguishes the historical location from the next
+  source allocation without requiring a current heap-cell witness. The
+  carrier lifts to hereditary machine correspondence and direct
+  deleted-operation readiness. Lean Beam reports zero diagnostics, the forced
+  34-job importer cone and complete root gate pass at 728 unique cases and
+  2,166/2,166 comparisons, and no shared semantic, runtime, generator, ABI,
+  layout, or ownership contract changed.
+
 - The seven-family scalar-boxing audit is accepted at `e1f712f8`.  The first
   isolated repair admits Lean-generated exact `UInt16 → tagged` and
   `UInt64 → object` boxes using upstream's own boxed-type mapping while
