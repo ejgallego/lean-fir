@@ -4,14 +4,14 @@
     {
       "id": "source-lcnf",
       "kind": "source-compiled",
-      "matrix": "../_build/validation/matrix.json",
+      "matrix": "../_build/validation-v8/matrix.json",
       "pairs": [
         {
           "reference": "native",
           "candidate": "lcnf"
         }
       ],
-      "machineCoverage": "../_build/validation/lcnf/coverage.json"
+      "machineCoverage": "../_build/validation-v8/lcnf/coverage.json"
     },
     {
       "id": "direct-lcnf-machine",

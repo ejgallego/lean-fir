@@ -10,7 +10,7 @@ export LAKE_CACHE_DIR LAKE_ARTIFACT_CACHE LAKE_RESTORE_ARTIFACTS
 
 FIR_BINARYEN_DIR ?= $(CURDIR)/.deps/lcnf-c-wasm/emsdk/upstream/bin
 
-.PHONY: build examples scalar-surface-check inspect validate validate-direct-lcnf validate-v8 validate-native-oracle-attestations validate-coverage-index bug-cards trusted-assumptions no-placeholders mailbox-check mailbox-list mailbox-deliver mailbox-test tooling-unit-check tooling-check check beam talos-setup talos-check clean
+.PHONY: build examples scalar-surface-check inspect validate-harness validate validate-direct-lcnf validate-v8 validate-source-from-v8 validate-native-oracle-attestations validate-coverage-index bug-cards trusted-assumptions no-placeholders mailbox-check mailbox-list mailbox-deliver mailbox-test tooling-unit-check tooling-check check beam talos-setup talos-check clean
 
 build:
 	lake build
@@ -28,10 +28,13 @@ scalar-surface-check:
 inspect:
 	lake lean Inspect
 
-validate:
+validate-harness:
 	python3 scripts/test_validate_interpreters.py
+	python3 scripts/test_validation_reuse.py
 	node scripts/test_wasm_bit_exact_float_transport.mjs
 	node scripts/test_wasm_validation_externals.mjs
+
+validate: validate-harness
 	python3 scripts/validate_interpreters.py --plan validation-plans/native-lcnf.json
 	python3 scripts/validate_interpreters.py --verify-matrix _build/validation/matrix.json
 
@@ -49,6 +52,11 @@ validate-v8:
 	python3 scripts/validate_interpreters.py \
 		--verify-matrix _build/validation-v8/matrix.json
 
+validate-source-from-v8: validate-v8
+	python3 scripts/verify_validation_reuse.py \
+		--receipt _build/validation-v8/evidence-receipt.json \
+		--plan validation-plans/native-lcnf.json
+
 validate-native-oracle-attestations: validate-v8
 	python3 scripts/record_backend_comparisons.py \
 		--evidence-receipt _build/validation-v8/evidence-receipt.json \
@@ -58,7 +66,7 @@ validate-native-oracle-attestations: validate-v8
 		_build/validation-comparison-attestations/attestations.json \
 		--policy validation-plans/native-oracle-attestations.json
 
-validate-coverage-index: validate validate-direct-lcnf validate-native-oracle-attestations
+validate-coverage-index: validate-harness validate-source-from-v8 validate-direct-lcnf validate-native-oracle-attestations
 	python3 scripts/validation_coverage_index.py \
 		--plan validation-plans/coverage-index.json \
 		--out _build/validation-coverage/index.json
