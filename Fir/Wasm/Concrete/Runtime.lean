@@ -184,7 +184,7 @@ def BoxedScalarKind.semanticType : BoxedScalarKind → Lean.Expr
   | .uint64 => LCNF.ImpureType.uint64
   | .usize => LCNF.ImpureType.usize
 
-/-- Whether the upstream type-specific boxing API admits Lean's tagged object
+/-- Whether the upstream type-specific boxing API permits Lean's tagged object
 representation. `UInt64` is the sole integer scalar kind whose generic box and
 unbox primitives always use an ordinary heap constructor. -/
 def BoxedScalarKind.allowsTaggedRepresentation : BoxedScalarKind → Bool

@@ -339,7 +339,7 @@ def readBoxedUInt64Small : Except ConcreteError BoxedScalar := do
   | .ok (.uint64 value) => value == 42
   | _ => false
 
-/- Conversely, a physical tagged word is not admitted as a `UInt64` box. -/
+/- Conversely, a physical tagged word is not accepted as a `UInt64` box. -/
 #guard match readBoxedScalar MemoryState.initial .uint64
     (Word32.encodeImmediate 42 (by decide)) with
   | .error (.source .expectedScalar) => true
