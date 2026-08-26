@@ -27,12 +27,22 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 - Integration owner: `wasm-gen`, serializing the independent S20, LCNF proof,
   and W6 release handoffs while keeping generation and consumer contracts
   stable.
-- Scoped generation/integration lease: `SCALAR-BOX-RESULT-KIND-ADMISSION` is
-  owned by `wasm-gen` on `integration/scalar-box-result-kind` from base
-  `e1f712f8`.  The shared contract derives exact boxed result annotations from
-  upstream `Lean.Expr.boxed`, preserves the generic `tobject` path, and admits
-  no unrelated object-family kind.  The shared checker slice is green through
-  all 3,180 Talos jobs; dependent resident aliases remain a W7-only successor.
+- Accepted scalar-box result-kind lease: shared contract head `29aff571`
+  derives exact boxed result annotations from upstream `Lean.Expr.boxed`,
+  preserves the generic `tobject` path, and admits no unrelated object-family
+  kind. W7 functional head `bf4c9f4f` is linked through clean tracked handoff
+  `3953370c`: `fir_box_uint16_tagged` and `fir_box_uint64_object` are exact
+  aliases derived from the already-reviewed generic bodies by retagging only
+  symbolic object-family result metadata. The physical Wasm instructions,
+  generic helper implementations, concrete layout, ownership, and ABI are
+  unchanged. Lean Beam, 728 unique repository cases and 2,166/2,166
+  comparisons, all 3,174 Talos jobs, and the complete deterministic W7
+  artifact gate pass. The zero-import resident fixture is 2,789 bytes with
+  SHA-256
+  `0a41bb1b5d4f6facdcee75ff3a23af42e932757226b4aeac378ba3ee18a4b357`;
+  its Node client exhaustively checks all 65,536 UInt16 values and seven
+  UInt64 boundaries through both generic and exact exports. The scoped lease
+  is released; W6's small alias-refinement bridge is an independent follow-up.
 - Lean-zip performance lane: `lean-zip-perf` is the narrow successor to the
   existing W7-2 optimization role, using `perf/lean-zip-loop` in
   `.worktrees/lean-zip-perf`. It profiles one immutable accepted package,
@@ -6660,7 +6670,7 @@ validation work continues; their historical handoff text remains unchanged.
 
 | ID | Producer | Consumers | Status | Standalone commit | Effect |
 |---|---|---|---|---|---|
-| `SCALAR-BOX-RESULT-KIND-ADMISSION` | integration/W7 | W7 resident linker; W6 proof cone | ready | `29aff571`; bug card `FIR-BUG-wasm-none-boxed-scalar-result-kind-drift` remains open for the W7 aliases | Uses upstream `Lean.Expr.boxed` as the authoritative exact result-kind mapping.  The checker accepts the generic `tobject` spelling or exactly upstream's annotation, so generated `UInt16 → tagged` and `UInt64 → object` adapters lower while `UInt16 → object` and `UInt64 → tagged` remain rejected.  Generic lowering, semantic ABI, layouts, ownership, helper bodies, and previously admitted code are unchanged.  Lean Beam, the complete root gate, and all 3,180 Talos jobs pass without a W6 proof edit. |
+| `SCALAR-BOX-RESULT-KIND-ADMISSION` | integration/W7 | W6 exact-alias proof bridge | released | contract `29aff571`; W7 functional `bf4c9f4f`; tracked handoff `3953370c`; bug `FIR-BUG-wasm-none-boxed-scalar-result-kind-drift` fixed | Uses upstream `Lean.Expr.boxed` as the authoritative exact result-kind mapping. The checker accepts generic `tobject` or exactly upstream's annotation, so generated `UInt16 → tagged` and `UInt64 → object` adapters lower while converse malformed forms remain rejected. W7 supplies exact aliases over unchanged generic helper bodies. Generic lowering, physical Wasm, semantic ABI, layouts, ownership, and existing helpers are unchanged; the complete root, Talos, and deterministic artifact gates pass. |
 | `WASM-DYNAMIC-CLOSURE-UNDERAPPLICATION-ADMISSION` | integration/W7 | W7 source internalization, W6 compiler-correctness regression cone | released | isolated contract `e1629a90` | Makes executable declaration admission query the emitter's existing `compileClosureCandidateAt` decision at every possible fixed-capture position, including underapplication through a dictionary-projected closure. The emitter itself is unchanged, and the stronger `supportedProgram` proof gate continues to require `closureFlowSafeProgram`, so unknown local provenance is not silently added to W6's theorem domain. This unblocks source-compiling Lean's real `instInhabitedOfMonad._redArg`; the complete W6 Talos cone remains green without proof edits. No instruction, runtime helper, ABI, layout, ownership rule, or emitted body changes for previously accepted programs. |
 | `UINT64-BOXING-UPSTREAM-ALIGNMENT` | integration/W7 | semantic LCNF runtime, W6 concrete layout/proofs, W7 resident scalar boxing, validation fixtures | released | semantic stack `7648a933` through `9046caf3`; LCNF proof `5eb82447`; W6 functional `5854171c`; W6 handoff `c09cbb87`; W7 functional `af7d10a8`; W7 handoff `99241038`; bug card `FIR-BUG-impure-none-uint64-box-tagged` fixed | Aligns FIR with upstream Lean's target representation: `UInt64` is always an ordinary 40-byte heap box and tagged `UInt64` decoding fails, while `UInt8`, `UInt16`, `UInt32`, and `USize` retain their existing payload-bounded policies. The semantic contract, LCNF proof, concrete refinement, resident helper, and executable artifact are linked/accepted without changing layout constants, resident-helper signatures, symbolic Wasm, or semantic ABI signatures. The stable resident helper is generation-ready; its later implementation-to-concrete theorem is tracked separately. |
 | `W7-PRODUCTION-DECREMENT-PROOF-SURFACE` | W7 | W6 resident-release proof | released | functional `f35913d4`; tracked handoff `4a390625`; operational checkpoint `W7-W6-20260825-008` | Makes the exact production decrement body and its staged control composition reduction-visible and production-consumed. The successful-generation theorem connects `decrementOnceFunction` to that body, and descriptor dispatch becomes structurally recursive without changing its emitted instruction chain. Helper signature, locals, layout, ABI, ownership, installation order, and generated bytes are unchanged. W6 rebases its Talos-only proof stack and consumes this surface; the separate anonymous-`if` adapter-depth contract is resolved by `WASM-TALOS-ANONYMOUS-CONTROL-DEPTH`. |
