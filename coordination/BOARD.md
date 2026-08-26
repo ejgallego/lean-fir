@@ -24,12 +24,13 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   complete; convergence with the remaining caller-path proofs, including W6's
   resident Array provenance consumer after rebasing, is the remaining
   milestone step.
-- Integration owner: `root`, holding the serial landing lease from current
-  accepted main `1a6f5061`. `wasm-gen` is released back to the W7-1 generation
-  lane. The immediate inherited queue is W7-2's rebased bounded `Nat.land`
-  checkpoint, its dependent USize range-fact successor, and tooling's measured
-  check-throughput checkpoints; none authorizes integration work on the W7-1
-  branch.
+- Integration owner: `root`, holding the serial landing lease through accepted
+  integration head `d79ca362`. `wasm-gen` remains released to the W7-1
+  generation lane. The inherited cleanup, check-throughput, mailbox-routing,
+  bounded `Nat.land`, USize range-fact, and exact consumer-ratchet stack is now
+  integrated. Tooling's later bounded-parallelism successors remain parked on
+  their feature branches and require a fresh rebase/review request; they have
+  not advanced `main` and grant no ownership of W7 implementation files.
 - Accepted Lean 4.32 operational-residue cleanup: W7 functional head
   `66c325df` is linked through exact clean status checkpoint `1a6f5061`.
   Active LLVM SelectionAnimation/v4 metadata now records Lean 4.33, the
@@ -40,6 +41,52 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   Emscripten smoke, and 12-job wire cone all pass. No data layout, adapter API,
   ownership rule, export, helper, symbolic Wasm surface, or semantic contract
   changed.
+- Accepted serial check-throughput foundation: documentation baseline
+  `f9bae4a0`, exact validation-receipt reuse `07350388`, artifact-receipt reuse
+  `76f94076`, direct artifact-generator barrier `fd6c0b51`, and exact Talos
+  build attestation `f77b5885` are linked in that order. The artifact gate
+  fails closed on stale evidence, replaces 71 repeated `lake exe` entries with
+  one reviewed build barrier, and reuses only a complete source/tool/output
+  bound Talos receipt. Its measured serial median falls from 105.70 seconds to
+  31.21 seconds. `make check` passes 730 cases and 2,172/2,172 comparisons,
+  `make talos-check` passes all 3,174 jobs, and the complete artifact gate
+  retains 721 V8 cases, 658 executable plus 63 exact ByteArray-blocked concrete
+  products, 44/44 readiness artifacts, and 16/16 sources. This is tooling-only:
+  no semantics, ABI, runtime, proof, or generated-code contract changed.
+- Accepted default mailbox-to-Codex routing: exact clean checkpoint `0a9992ad`
+  maps stable lane addresses to current session UUIDs. Every durable delivery
+  now attempts recipient-route notification by default; `--no-notify` is the
+  explicit escape hatch and `--notify-session` is the direct override. Missing
+  or stale routes and queue failures remain visible warnings after delivery and
+  never roll back the authoritative event. The focused 38-test protocol suite
+  and `make check` at 721 V8 cases and 2,172/2,172 aggregate comparisons pass.
+- Accepted bounded `Nat.land` result refinement: functional head `17b1bf0d`,
+  reviewed evidence `b53fb3bd`, and integration-owned package ratchet
+  `f84baffb` preserve `left &&& right <= right` when the right operand is known
+  tagged. Exactly 52 result releases disappear across 34 eligible calls while
+  two coarse-right sites remain checked. The zero-import raw module is 366,523
+  bytes with SHA-256
+  `1a225c0d074cef5cbaa1f49a498e469d9037d5ffa05910ce62dc67a9a0a20eec`;
+  the pre-runtime frontier is 831,513 bytes. Lean Beam, `make check`, all 3,174
+  Talos jobs, the complete W7 artifact gate, 50 raw differential comparisons,
+  and persistent-cache/scratch reclamation pass. No canonical package pointer
+  moved and no runtime-speed claim is accepted.
+- Accepted USize tagged-Nat range transfer: functional head `bcd856e3`,
+  reviewed evidence/checkpoint `5b07b233`, and integration-owned exact package
+  ratchet `d79ca362` introduce `ValueFact.fitsTaggedNat` independently of
+  `AbiKind`. A tagged `Nat` passed through `USize.ofNat` retains the bound as a
+  scalar fact and `USize.toNat` consumes it to recover a tagged result. Exactly
+  114 `ByteArray.size` round-trip releases disappear; all 266 coarse, unknown,
+  multiply assigned, malformed, or non-local cases remain checked. The
+  zero-import raw module is 365,682 bytes with SHA-256
+  `3780a49aaf5027c3ca33aa055e9575ef0c5e0fa1a15573a02fffb916515dce22`;
+  its pre-runtime frontier is 830,857 bytes and its 207,268-byte final-function
+  sidecar has SHA-256
+  `bca109406ddad95ecbd6d1a58db84d2b0122e75b31840dbac26e197e3eb284a9`.
+  Lean Beam, `make check`, all 3,174 Talos jobs, the complete artifact gate, 50
+  raw differential comparisons, zero-import inspection, checksum/package
+  smoke, and flat scratch-rewind ownership pass. No canonical package pointer
+  moved; the directional performance screen remains non-headline evidence.
 - Accepted heap-only USize convergence: the semantic contract and source
   fixtures at `1db0b79d`, W7 resident implementation at `9c896a1d`, LCNF
   ElimDead adaptation at `d78d128c`, and W6 functional proof head `0360367a`
