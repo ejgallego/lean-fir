@@ -7574,85 +7574,6 @@ theorem TargetLiveHeapBindingPrefix.sourceOnly_of_owners_ne
     SourceOnlyUnderTargetLedger ledger sourceOnly :=
   (bindings.mappedOwnerPrefix env).sourceOnly_of_owners_ne different ledger
 
-/-- Program-independent target interface for a live returned heap binding
-when the allocated target prefix contains exactly one location.  The binder,
-location, and numeric frontier are explicit parameters so reset/reuse clients
-need not name a concrete target state or heap. -/
-structure TargetSingletonLiveReturnAt
-    (target : MachineState) (binder : FVarId)
-    (rightLocation rightFrontier : Location) : Prop where
-  control : target.control = .code (.return binder)
-  liveRead :
-    lookup target.env binder = some (.object (.heap rightLocation))
-  frontier : target.runtime.nextLocation = rightFrontier
-  rightBounded : rightLocation < rightFrontier
-  singleton : ∀ location, location < rightFrontier →
-    location = rightLocation
-
-/-- The unique returned live binding covers a singleton allocated prefix.
-This packages the focused shape as an instance of the arbitrary compiler-live
-binding interface; address mapping is derived later from `EnvRelOn`. -/
-def TargetSingletonLiveReturnAt.liveHeapBindingPrefix
-    (shape : TargetSingletonLiveReturnAt target binder
-      rightLocation rightFrontier)
-    (binderUsed : used.contains binder = true)
-    (sourceRead :
-      lookup sourceEnv binder = some (.object (.heap sourceOwner))) :
-    TargetLiveHeapBindingPrefix used sourceEnv target.env
-      target.runtime.nextLocation where
-  sourceOwner := fun _ => sourceOwner
-  binder := fun _ => binder
-  binderUsed := by
-    intro _location _bounded
-    exact binderUsed
-  sourceRead := by
-    intro _location _bounded
-    exact sourceRead
-  targetRead := by
-    intro location bounded
-    have prefixBounded : location < rightFrontier := by
-      simpa [shape.frontier] using bounded
-    have locationEq : location = rightLocation :=
-      shape.singleton location prefixBounded
-    subst location
-    exact shape.liveRead
-
-/-- A mapped owner of the unique live target address supplies owner witnesses
-for the whole singleton prefix. This is the adapter from the focused fixture
-to the arbitrary-prefix allocation interface. -/
-def TargetSingletonLiveReturnAt.mappedOwnerPrefix
-    (shape : TargetSingletonLiveReturnAt target binder
-      rightLocation rightFrontier)
-    (mapping : rho.forward sourceOwner = some rightLocation) :
-    TargetMappedOwnerPrefix rho target.runtime.nextLocation where
-  sourceOwner := fun _ => sourceOwner
-  forwardMapped := by
-    intro location bounded
-    have prefixBounded : location < rightFrontier := by
-      simpa [shape.frontier] using bounded
-    have locationEq : location = rightLocation :=
-      shape.singleton location prefixBounded
-    subst location
-    exact mapping
-
-/-- A mapped source owner for the singleton target prefix excludes every
-distinct source location from the exact target allocation ledger.  This is
-the generic allocation-provenance calculation previously repeated by the
-retained-prefix reset/reuse fixture. -/
-theorem TargetSingletonLiveReturnAt.sourceOnly_of_mapping_ne
-    (shape : TargetSingletonLiveReturnAt target binder
-      rightLocation rightFrontier)
-    (mapping : rho.forward sourceOwner = some rightLocation)
-    (different : sourceOwner ≠ sourceOnly)
-    (ledger :
-      TargetAllocationLedger rho target.runtime.nextLocation) :
-    SourceOnlyUnderTargetLedger ledger sourceOnly := by
-  exact (shape.mappedOwnerPrefix mapping).sourceOnly_of_owners_ne
-    (by
-      intro _location _bounded
-      exact different)
-    ledger
-
 /-- An environment local names a source heap allocation that is outside the
 target owner ledger. The address is retained as proof-relevant data so later
 reset/write/reuse edges can select it without rediscovering allocation order. -/
@@ -8915,17 +8836,17 @@ theorem HeapOwnershipBelowFrontier.unboxResult
   | object reference =>
       cases reference with
       | tagged payload =>
-          have scalarRead :
-              scalarFromType type payload = .ok result := by
-            simpa [unbox] using effect
-          rcases scalarFromType_ok_eq_immediate scalarRead with
-            ⟨scalar, resultEq⟩ | ⟨word, resultEq⟩
-          · subst result
-            intro location member
-            simp at member
-          · subst result
-            intro location member
-            simp at member
+          by_cases uint64 : type == LCNF.ImpureType.uint64
+          · simp [unbox, uint64] at effect
+          · have scalarRead :
+                scalarFromType type payload = .ok result := by
+              simpa [unbox, uint64] using effect
+            rcases scalarFromType_ok_eq_immediate scalarRead with
+              ⟨scalar, resultEq⟩ | ⟨word, resultEq⟩
+            · subst result
+              simp [HeapLocationsBelowFrontier]
+            · subst result
+              simp [HeapLocationsBelowFrontier]
       | heap parent =>
           unfold unbox at effect
           simp only [Bind.bind, Except.bind] at effect
@@ -20413,70 +20334,90 @@ theorem DeletedLedgerLetLocalReadyAt.ledgerMachineReadyAt_withOwnership
               decision removed⟩
           joins env)
 
-/-- Source-side premises for deleting one operation against a singleton live
-target prefix: the retained binder identifies the unique mapped source owner,
-which is distinct from the operation's source-only allocation. -/
-structure SingletonLivePrefixDeletedLedgerOperationAt
-    (state : MachineState) (retainedBinder : FVarId)
-    (retainedSourceOwner : Location) where
+/-- Active target control covers an arbitrary allocated heap prefix through a
+client-selected family of live binders.  The target frontier may contain any
+number of locations and the residual code need not be a return. -/
+structure TargetLiveHeapPrefixControlAt
+    (binder : Location → FVarId) (target : MachineState)
+    (targetCode : LCNF.Code .impure) : Prop where
+  control : target.control = .code targetCode
+  binderUsed : ∀ {used}, CodeCovered used targetCode →
+    ∀ rightLocation, rightLocation < target.runtime.nextLocation →
+      used.contains (binder rightLocation) = true
+  targetRead : ∀ rightLocation,
+    rightLocation < target.runtime.nextLocation →
+      lookup target.env (binder rightLocation) =
+        some (.object (.heap rightLocation))
+
+/-- Source-side operation readiness for an arbitrary live target prefix.  The
+binder and source-owner functions are parameters, so one interface covers
+singleton fixtures and multi-location compiler residuals uniformly. -/
+structure DeletedLedgerLiveHeapPrefixOperationAt
+    (state : MachineState) (binder : Location → FVarId)
+    (sourceOwner : Location → Location) where
   operation : DeletedLedgerLetLocalReadyAt state
-  retainedRead : lookup state.env retainedBinder =
-    some (.object (.heap retainedSourceOwner))
-  ownerNe : retainedSourceOwner ≠ operation.location
+  sourceRead : ∀ rightLocation,
+    lookup state.env (binder rightLocation) =
+      some (.object (.heap (sourceOwner rightLocation)))
+  ownerNe : ∀ rightLocation,
+    sourceOwner rightLocation ≠ operation.location
 
-/-- Proposition-valued source-plan interface hiding the proof-relevant local
-operation package. -/
-def SingletonLivePrefixDeletedLedgerReady
-    (retainedBinder : FVarId) (retainedSourceOwner : Location)
+/-- Proposition-valued source-plan interface for an arbitrary live prefix. -/
+def DeletedLedgerLiveHeapPrefixReady
+    (binder : Location → FVarId) (sourceOwner : Location → Location)
     (state : MachineState) : Prop :=
-  Nonempty (SingletonLivePrefixDeletedLedgerOperationAt
-    state retainedBinder retainedSourceOwner)
+  Nonempty (DeletedLedgerLiveHeapPrefixOperationAt
+    state binder sourceOwner)
 
-/-- Generic singleton-prefix specialization of ledger operation readiness. -/
-theorem SingletonLivePrefixDeletedLedgerOperationAt.ledgerMachineReadyAt
-    (readiness : SingletonLivePrefixDeletedLedgerOperationAt
-      source retainedBinder retainedSourceOwner)
-    (targetShape : TargetSingletonLiveReturnAt target retainedBinder
-      rightLocation rightFrontier)
+/-- Combine source live-owner bindings with arbitrary target residual-control
+coverage to obtain the exact target-ledger premise for a deleted operation. -/
+theorem DeletedLedgerLiveHeapPrefixOperationAt.targetPrefix
+    (readiness : DeletedLedgerLiveHeapPrefixOperationAt
+      source binder sourceOwner)
+    (targetShape : TargetLiveHeapPrefixControlAt binder target targetCode)
+    (targetNotSame : ∀ targetContinuation,
+      targetCode ≠ .let readiness.operation.declaration targetContinuation) :
+    DeletedLedgerTargetLiveHeapPrefixAt readiness.operation target := by
+  refine ⟨targetCode, targetShape.control, ?_, targetNotSame⟩
+  intro used covered
+  refine ⟨{
+    sourceOwner := sourceOwner
+    binder := binder
+    binderUsed := targetShape.binderUsed covered
+    sourceRead := fun rightLocation _bounded =>
+      readiness.sourceRead rightLocation
+    targetRead := targetShape.targetRead
+  }, ?_⟩
+  intro rightLocation _bounded
+  exact readiness.ownerNe rightLocation
+
+/-- Generic arbitrary-prefix specialization of ledger operation readiness. -/
+theorem DeletedLedgerLiveHeapPrefixOperationAt.ledgerMachineReadyAt
+    (readiness : DeletedLedgerLiveHeapPrefixOperationAt
+      source binder sourceOwner)
+    (targetShape : TargetLiveHeapPrefixControlAt binder target targetCode)
+    (targetNotSame : ∀ targetContinuation,
+      targetCode ≠ .let readiness.operation.declaration targetContinuation)
     (related : SomeLedgerBinderReadyReachableMachineRelated
       fuel source target) :
-    LedgerBinderReadyReachableMachineReadyAt fuel source target := by
-  apply readiness.operation.ledgerMachineReadyAt
-      (target := target) (related := related)
-  refine ⟨.return retainedBinder, targetShape.control, ?_, ?_⟩
-  · intro used covered
-    cases covered with
-    | ret binderUsed =>
-        refine ⟨targetShape.liveHeapBindingPrefix
-          binderUsed readiness.retainedRead, ?_⟩
-        intro rightLocation bounded
-        exact readiness.ownerNe
-  · intro targetContinuation
-    simp
+    LedgerBinderReadyReachableMachineReadyAt fuel source target :=
+  readiness.operation.ledgerMachineReadyAt
+    (readiness.targetPrefix targetShape targetNotSame) related
 
-/-- Source-owned singleton-prefix specialization. -/
-theorem SingletonLivePrefixDeletedLedgerOperationAt.ledgerMachineReadyAt_withOwnership
-    (readiness : SingletonLivePrefixDeletedLedgerOperationAt
-      source retainedBinder retainedSourceOwner)
-    (targetShape : TargetSingletonLiveReturnAt target retainedBinder
-      rightLocation rightFrontier)
+/-- Source-owned arbitrary-prefix specialization. -/
+theorem DeletedLedgerLiveHeapPrefixOperationAt.ledgerMachineReadyAt_withOwnership
+    (readiness : DeletedLedgerLiveHeapPrefixOperationAt
+      source binder sourceOwner)
+    (targetShape : TargetLiveHeapPrefixControlAt binder target targetCode)
+    (targetNotSame : ∀ targetContinuation,
+      targetCode ≠ .let readiness.operation.declaration targetContinuation)
     (sourceOwnership : SourceMachineOwnershipBelowFrontier source)
     (related : SomeLedgerBinderReadyReachableMachineRelated
       fuel source target) :
-    LedgerBinderReadyReachableMachineReadyAt fuel source target := by
-  apply readiness.operation.ledgerMachineReadyAt_withOwnership
-      (target := target) (sourceOwnership := sourceOwnership)
-      (related := related)
-  refine ⟨.return retainedBinder, targetShape.control, ?_, ?_⟩
-  · intro used covered
-    cases covered with
-    | ret binderUsed =>
-        refine ⟨targetShape.liveHeapBindingPrefix
-          binderUsed readiness.retainedRead, ?_⟩
-        intro rightLocation bounded
-        exact readiness.ownerNe
-  · intro targetContinuation
-    simp
+    LedgerBinderReadyReachableMachineReadyAt fuel source target :=
+  readiness.operation.ledgerMachineReadyAt_withOwnership
+    (readiness.targetPrefix targetShape targetNotSame)
+    sourceOwnership related
 
 /-- Hereditary source-execution certificate parameterized by two local
 readiness interfaces. Ordinary states carry a target-independent source
