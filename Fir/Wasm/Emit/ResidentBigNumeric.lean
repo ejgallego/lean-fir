@@ -1474,6 +1474,13 @@ private def natSubCallSiteRewriteFor (target fallback : Name) :
   signature := { params := #[.tobject, .tobject], results := #[.tobject] }
   locals := #[(inlineSubLeftLocal, .tobject),
     (inlineSubRightLocal, .tobject), (inlineSubResultLocal, .tobject)]
+  /- `Nat.sub left right ≤ left`. A tagged left operand therefore bounds the
+  result by the complete immediate payload range, independently of the right
+  representation. Preserve that fact on the caller-local result so later
+  ownership lowering can erase its checked release. -/
+  conditionalResultRefinement? := some {
+    argumentKinds := #[some .tagged, none]
+    kind := .tagged }
   body := natSubCallSiteBody fallback }
 
 private def natDecLtCallSiteBody (fallback : Name) : List Instruction := [

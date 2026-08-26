@@ -258,6 +258,7 @@ private def applySteps (validate : Bool) (steps : List Step) (module : Module) :
 private structure RewritePlan where
   callRewrites : Std.HashMap CallTarget (List Instruction) := {}
   callSiteRewrites : Array ResidentCallSite.Rewrite := #[]
+  specializeReleases : Bool := false
   deriving Inhabited
 
 mutual
@@ -280,6 +281,11 @@ end
 
 private def rewriteFunctionBatch (plan : RewritePlan) (function : Function) :
     Except Source.CompileError Function := do
+  let function := ResidentCallSite.refineFunctionLocals
+    plan.callSiteRewrites function
+  let function := if plan.specializeReleases then
+      ResidentRelease.specializeCheckedDecrementFunction function
+    else function
   let function ← ResidentCallSite.reserveLocals plan.callSiteRewrites function
     |>.mapError fun error =>
       .manifest s!"failed to reserve resident call-site locals: {repr error}"
@@ -380,6 +386,14 @@ private def callSiteRewritesForStep (step : Step) :
   | .reviewedOutOfLine => #[]
   | .inlineCold required => required.rewrites
 
+private def availableCallSiteRewrites (steps : Array Step) (module : Module) :
+    Array ResidentCallSite.Rewrite :=
+  let externalDeclarations := module.imports.filterMap (·.declaration?)
+  steps.flatMap callSiteRewritesForStep |>.filter fun rewrite =>
+    match rewrite.target with
+    | .declaration declaration => externalDeclarations.contains declaration
+    | .runtime operation => module.runtimeOperations.contains operation
+
 /--
 Run a contiguous group of helper-family installers against one persistent
 planning view. Source bodies are replaced by headers and one synthetic call
@@ -437,14 +451,14 @@ private def applyPersistentPlan (steps : Array Step) (module : Module) :
       throw (.manifest s!"resident plan {repr steps} changed a rewrite probe label")
     unless body == [.call target] do
       callRewrites := callRewrites.insert target body
-  let callSiteRewrites := steps.flatMap callSiteRewritesForStep |>.filter fun rewrite =>
-    match rewrite.target with
-    | .declaration declaration => externalDeclarations.contains declaration
-    | .runtime operation => module.runtimeOperations.contains operation
+  let callSiteRewrites := availableCallSiteRewrites steps module
   ResidentCallSite.validateRewrites callSiteRewrites module
     |>.mapError fun error =>
       .manifest s!"invalid typed resident call-site rewrite: {repr error}"
-  let plan : RewritePlan := { callRewrites, callSiteRewrites }
+  let plan : RewritePlan := {
+    callRewrites
+    callSiteRewrites
+    specializeReleases := steps.contains .releases }
   let newFunctions := planned.functions.extract prefixSize planned.functions.size
   let rewrittenFunctions ← module.functions.mapM (rewriteFunctionBatch plan)
   let functions := rewrittenFunctions ++ newFunctions
@@ -506,6 +520,26 @@ def linkModule (policy : Policy) (module : Module) :
   | .ok () => pure ()
   | .error error =>
       throw (.manifest s!"resident linker received an invalid module: {repr error}")
+  /-
+  Propagate every reviewed call-result fact while all original declarations
+  and runtime releases are still present. Persistent planning may materialize
+  releases before a later helper family (for example big-numeric operations)
+  is installed; delaying propagation until that family would lose the exact
+  local kind at the earlier ownership boundary.
+  -/
+  let callSiteRewrites := availableCallSiteRewrites policy.steps module
+  ResidentCallSite.validateRewrites callSiteRewrites module
+    |>.mapError fun error =>
+      .manifest s!"invalid typed resident call-site rewrite: {repr error}"
+  let module := {
+    module with
+    functions := module.functions.map
+      (ResidentCallSite.refineFunctionLocals callSiteRewrites) }
+  match Fir.Wasm.validateModule module with
+  | .ok () => pure ()
+  | .error error =>
+      throw (.manifest
+        s!"resident call-result refinement produced an invalid module: {repr error}")
   let module ← if policy.validateEachStep then
       applySteps true policy.steps.toList module
     else do
