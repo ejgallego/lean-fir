@@ -413,6 +413,53 @@ def checkedDecrementLocal (value : FVarId) : List Instruction :=
       .i32Const .uint32 1,
       .call (.declaration decrementOnceName)]
 
+/-
+Preserve the object-family precision already present on symbolic function
+locals before release operations are collapsed into shared `tobject`
+wrappers. A checked decrement of a definite tagged immediate is a no-op. A
+definite heap object can use the existing unchecked operation; only a genuine
+`tobject` keeps the checked wrapper.
+
+Production lowering emits the release operand as the immediately preceding
+`localGet`. Other stack shapes remain unchanged and retain the complete
+runtime operation rather than being guessed from physical `i32` shape.
+-/
+private partial def specializeCheckedDecrementInstructions
+    (locals : LocalKinds) : List Instruction → List Instruction
+  | [] => []
+  | .localGet value ::
+      .call (.runtime (.dec amount true objectFields?)) :: rest =>
+      match findLocalKind? locals value with
+      | some .tagged => specializeCheckedDecrementInstructions locals rest
+      | some .object =>
+          .localGet value ::
+            .call (.runtime (.dec amount false objectFields?)) ::
+              specializeCheckedDecrementInstructions locals rest
+      | _ =>
+          .localGet value ::
+            .call (.runtime (.dec amount true objectFields?)) ::
+              specializeCheckedDecrementInstructions locals rest
+  | instruction :: rest =>
+      let instruction := match instruction with
+        | .block label body =>
+            .block label (specializeCheckedDecrementInstructions locals body)
+        | .loop label body =>
+            .loop label (specializeCheckedDecrementInstructions locals body)
+        | .ifElse thenBody elseBody =>
+            .ifElse
+              (specializeCheckedDecrementInstructions locals thenBody)
+              (specializeCheckedDecrementInstructions locals elseBody)
+        | instruction => instruction
+      instruction :: specializeCheckedDecrementInstructions locals rest
+
+/-- Specialize only compiler-shaped checked decrement sites using their exact
+symbolic local kind. This is deliberately independent of declaration names and
+physical Wasm indices. -/
+def specializeCheckedDecrementFunction (function : Function) : Function :=
+  { function with
+    body := specializeCheckedDecrementInstructions
+      (function.params.toList ++ function.locals.toList) function.body }
+
 private def checkedDecrementCalls (calls : List Instruction) :
     List Instruction :=
   checkedDecrementLocalCalls objectParam calls
@@ -502,6 +549,8 @@ private partial def rewriteInstruction
       | none => .call (.runtime candidate)
   | .block label body =>
       .block label (body.map (rewriteInstruction rewrites))
+  | .loop label body =>
+      .loop label (body.map (rewriteInstruction rewrites))
   | .ifElse thenBody elseBody =>
       .ifElse
         (thenBody.map (rewriteInstruction rewrites))
@@ -530,7 +579,20 @@ def internalizeReleases (module : Module) (validate : Bool := true) :
     | .error error => throw (.invalidInput error)
   unless module.memory == some ResidentRuntime.residentMemory do
     throw .incompatibleMemory
-  let operations := module.runtimeOperations.filter isRelease
+  let specializedFunctions :=
+    module.functions.map specializeCheckedDecrementFunction
+  let encounteredOperations :=
+    (Fir.Wasm.collectRuntimeOps specializedFunctions).filter isRelease
+  /-
+  Preserve the input module's reviewed first-use order for surviving release
+  operations. Specialization may introduce an unchecked variant that was not
+  previously present; append only such genuinely new operations in their new
+  first-use order.
+  -/
+  let operations := encounteredOperations.foldl
+    (init := module.runtimeOperations.filter fun operation =>
+      isRelease operation && encounteredOperations.contains operation)
+    Fir.Wasm.addUnique
   let rewrites := operations.toList.zipIdx.map fun (operation, ordinal) =>
     (operation, releaseName ordinal)
   let reservedNames :=
@@ -541,7 +603,7 @@ def internalizeReleases (module : Module) (validate : Bool := true) :
   let wrappers ← operations.toList.zipIdx.mapM fun (operation, ordinal) =>
     operationFunction ordinal operation
   let functions :=
-    (module.functions.map (rewriteFunction rewrites)) ++
+    (specializedFunctions.map (rewriteFunction rewrites)) ++
       #[releaseHeaderFunction, decrementOnce] ++ wrappers.toArray
   let runtimeOperations := Fir.Wasm.collectRuntimeOps functions
   let externalImports := module.imports.filter (·.operation?.isNone)
@@ -577,6 +639,49 @@ def exampleCheckedCaller : Function := {
     .localGet objectParam,
     .call (.runtime exampleOperations[0]!),
     .ret] }
+
+def examplePreciseObjectCheckedCaller : Function := {
+  name := `resident_dec_checked_object
+  params := #[(objectParam, .object)]
+  results := #[]
+  locals := #[]
+  body := [
+    .localGet objectParam,
+    .call (.runtime (.dec 1 true none)),
+    .ret] }
+
+def examplePreciseTaggedCheckedCaller : Function := {
+  name := `resident_dec_checked_tagged
+  params := #[(objectParam, .tagged)]
+  results := #[]
+  locals := #[]
+  body := [
+    .block ⟨`nested⟩ [
+      .loop ⟨`nestedLoop⟩ [
+        .localGet objectParam,
+        .call (.runtime (.dec 1 true (some 2)))]],
+    .ret] }
+
+def exampleSpecializationModule : Module := {
+  imports := #[Fir.Wasm.runtimeImport 0 (.dec 1 true none)]
+  functions := #[
+    examplePreciseObjectCheckedCaller,
+    { examplePreciseTaggedCheckedCaller with
+      body := [
+        .localGet objectParam,
+        .call (.runtime (.dec 1 true none)),
+        .ret] }]
+  exports := #[
+    examplePreciseObjectCheckedCaller.name,
+    examplePreciseTaggedCheckedCaller.name]
+  initializers := #[]
+  runtimeOperations := #[.dec 1 true none]
+  closureDescriptors := exampleDescriptors
+  memory := some ResidentRuntime.residentMemory }
+
+def residentSpecializationExample : Except String Module :=
+  internalizeReleases exampleSpecializationModule
+    |>.mapError fun error => s!"release specialization: {repr error}"
 
 def exampleUncheckedCaller : Function := {
   name := `resident_dec_unchecked
@@ -657,6 +762,39 @@ def manifest : Json :=
 
 #guard checkedDecrementLocal objectParam == checkedDecrementCalls
   (decrementOnceCall true)
+
+#guard (specializeCheckedDecrementFunction exampleCheckedCaller).body ==
+  exampleCheckedCaller.body
+
+#guard (specializeCheckedDecrementFunction
+    examplePreciseObjectCheckedCaller).body == [
+  .localGet objectParam,
+  .call (.runtime (.dec 1 false none)),
+  .ret]
+
+#guard (specializeCheckedDecrementFunction
+    examplePreciseTaggedCheckedCaller).body == [
+  .block ⟨`nested⟩ [.loop ⟨`nestedLoop⟩ []],
+  .ret]
+
+#guard match residentSpecializationExample with
+  | .ok module =>
+      module.imports.isEmpty &&
+      module.runtimeOperations.isEmpty &&
+      (module.functions.find? (fun function =>
+        function.name == examplePreciseObjectCheckedCaller.name)).any
+          (fun function => function.body == [
+            .localGet objectParam,
+            .call (.declaration (releaseName 0)),
+            .ret]) &&
+      (module.functions.find? (fun function =>
+        function.name == examplePreciseTaggedCheckedCaller.name)).any
+          (fun function => function.body == [.ret]) &&
+      (module.functions.find? (fun function =>
+        function.name == releaseName 0)).any
+          (fun function => function.body ==
+            decrementOnceCall false ++ [.ret])
+  | .error _ => false
 
 #guard match decrementWrapper 1 1 false with
   | .ok function => function.body == decrementOnceCall false ++ [.ret]

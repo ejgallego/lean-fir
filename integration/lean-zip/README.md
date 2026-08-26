@@ -693,6 +693,26 @@ releases using representation/ownership facts, or use an explicit generic
 profile-guided placement mechanism; neither static body size nor a global
 inliner threshold is justified by this evidence.
 
+The first representation-aware release slice preserves the exact ABI kind of
+compiler locals through resident release linking. A one-capture census of the
+raw closure found 4,865 static decrement sites: 4,526 `tobject`, 337 `object`,
+and two `tagged`. Of these, 45 checked `object` sites can select the existing
+unchecked decrement operation and the two checked `tagged` sites are proven
+no-ops. All mixed `tobject` sites remain checked. The transformation is generic,
+matches only the compiler-produced adjacent `localGet`/decrement shape, and
+recurses through blocks, loops, and branches; every other instruction sequence
+is retained unchanged.
+
+The resulting zero-import raw module is 367,442 bytes versus the preceding
+367,634-byte package and retains 500 functions, 225 Lean-source functions, 275
+resident helpers, the public exports, output bytes, and the flat ownership
+frontier. Its 50-way native/Wasm/inflate differential and persistent-cache plus
+scratch-reclamation checks pass. Sixteen order-balanced fresh-process pairs are
+neutral (paired median ratio 1.0074, 7/16 improving), so this slice makes no
+runtime-performance claim. The comparison also crosses the already documented
+final-LCNF recapture code-shape boundary; only same-capture evidence could
+attribute such a small timing change to this rewrite.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not
