@@ -886,10 +886,11 @@ theorem ConcreteRuntimeRel.boxScalar
       ValueRel nextWitness .tobject (.word32 word) sourceValue ∧
       box runtime scalar.kind.semanticType scalar.semanticValue =
         .ok (nextRuntime, sourceValue) := by
-  by_cases tagged : scalar.payload.toNat ≤ maxTaggedPayload
+  by_cases tagged : scalar.kind.allowsTaggedRepresentation = true ∧
+      scalar.payload.toNat ≤ maxTaggedPayload
   · have encoded : encodeTagged concrete.heap scalar.payload =
         .ok (result, word) := by
-      rw [← boxScalar_of_tagged concrete.heap scalar tagged]
+      rw [← boxScalar_of_tagged concrete.heap scalar tagged.1 tagged.2]
       exact boxed
     obtain ⟨nextWitness, extension, closureAllocationsPersistent, heapRelated,
         valueRelated⟩ :=
@@ -897,17 +898,15 @@ theorem ConcreteRuntimeRel.boxScalar
         scalar.payload word related.heap encoded
     refine ⟨runtime, .object (.tagged scalar.payload), nextWitness,
       extension, closureAllocationsPersistent, ?_, valueRelated,
-      semanticBox_tagged_eq runtime scalar tagged⟩
+      semanticBox_tagged_eq runtime scalar tagged.1 tagged.2⟩
     exact {
       heap := heapRelated
       globals := related.globals.witnessExtension extension
       world := related.world
       trace := related.trace.witnessExtension extension }
-  · have large : maxTaggedPayload < scalar.payload.toNat :=
-      Nat.lt_of_not_ge tagged
-    have allocated : allocateBoxedScalar concrete.heap scalar =
+  · have allocated : allocateBoxedScalar concrete.heap scalar =
         .ok (result, word) := by
-      rw [← boxScalar_of_heap concrete.heap scalar large]
+      rw [← boxScalar_of_not_tagged concrete.heap scalar tagged]
       exact boxed
     obtain ⟨_, objectAllocation, _, _⟩ :=
       allocateBoxedScalar_decompose concrete.heap result scalar word allocated
@@ -937,8 +936,8 @@ theorem ConcreteRuntimeRel.boxScalar
       witness.bindBoxed_extends runtime.nextLocation word scalar.kind
         locationFresh descriptorFresh
     obtain ⟨semanticStep, heapRelated, valueRelated⟩ :=
-      boxScalar_heap_liveHeapRel concrete.heap result witness runtime scalar word
-        related.heap large boxed
+      boxScalar_notTagged_liveHeapRel concrete.heap result witness runtime scalar
+        word related.heap tagged boxed
     refine ⟨semanticBoxResult runtime scalar,
       .object (.heap runtime.nextLocation), nextWitness, extension,
       ClosureAllocationsPersistent.bindBoxed witness runtime.nextLocation word
@@ -987,7 +986,7 @@ theorem ConcreteRuntimeRel.boxScalarAtResultKind
         have sizeLe : UInt8.size ≤ maxTaggedPayload + 1 := by native_decide
         change value.toNat ≤ maxTaggedPayload
         omega
-      have canonical := semanticBox_tagged_eq runtime (.uint8 value) tagged
+      have canonical := semanticBox_tagged_eq runtime (.uint8 value) rfl tagged
       rw [canonical] at semanticStep
       simp only [Except.ok.injEq, Prod.mk.injEq] at semanticStep
       rcases semanticStep with ⟨runtimeEq, sourceValueEq⟩
@@ -2270,8 +2269,12 @@ theorem unboxStep_of_refines
           Word32.ofUInt32_ofNat_value, concreteRead], valueEq, ?_⟩
       exact physicalOfLane_related valueRelated
   | tagged taggedRelated =>
+      have allowed :=
+        BoxedScalarKind.allowsTaggedRepresentation_of_unbox_tagged_eq_ok
+          runtime kind _ sourceValue unboxed
       obtain ⟨actualRead, semantic, valueRelated⟩ :=
         runtimeRelated.heap.readBoxedScalar_tagged_refines taggedRelated kind
+          allowed
       rw [concreteRead] at actualRead
       have scalarEq : scalar = BoxedScalar.ofPayload kind _ :=
         Except.ok.inj actualRead

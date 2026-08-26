@@ -174,18 +174,17 @@ theorem HeaderCapacityTransport.boxScalar
     (valid : state.FrontierInvariant)
     (boxed : boxScalar state scalar = .ok (result, word)) :
     HeaderCapacityTransport state result witness := by
-  by_cases tagged : scalar.payload.toNat ≤ maxTaggedPayload
+  by_cases tagged : scalar.kind.allowsTaggedRepresentation = true ∧
+      scalar.payload.toNat ≤ maxTaggedPayload
   · have encoded :
         encodeTagged state scalar.payload = .ok (result, word) := by
-      rw [← boxScalar_of_tagged state scalar tagged]
+      rw [← boxScalar_of_tagged state scalar tagged.1 tagged.2]
       exact boxed
     exact MappedHeaderCapacityTransport.encodeTagged state result witness
       scalar.payload word valid encoded
-  · have large : maxTaggedPayload < scalar.payload.toNat :=
-      Nat.lt_of_not_ge tagged
-    have allocated :
+  · have allocated :
         allocateBoxedScalar state scalar = .ok (result, word) := by
-      rw [← boxScalar_of_heap state scalar large]
+      rw [← boxScalar_of_not_tagged state scalar tagged]
       exact boxed
     exact .ofPrefixExtension witness
       (allocateBoxedScalar_prefixExtension state result scalar word valid

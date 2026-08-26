@@ -559,8 +559,9 @@ example
 
 /--
 The typed-unbox compatibility boundary is source-only. Tagged operands are
-polymorphic; heap operands expose the live semantic cell and stored scalar
-kind, never a concrete address or descriptor lookup.
+structurally polymorphic; the compiler law's successful-unbox premise rejects
+heap-only scalar kinds such as `UInt64`. Heap operands expose the live semantic
+cell and stored scalar kind, never a concrete address or descriptor lookup.
 -/
 example
     (runtime : RuntimeState) (kind : BoxedScalarKind) (payload : UInt64) :

@@ -6514,10 +6514,12 @@ theorem PhysicalValueRel.boxedScalar_of_kind
 /--
 Source-state compatibility for typed unboxing.
 
-Tagged objects are representation-polymorphic. A heap object is compatible
-when its live semantic box contains a scalar whose constructor agrees with
-the requested result kind. This judgment intentionally mentions no concrete
-word, descriptor map, memory read, or target execution witness.
+Tagged objects are structurally representation-polymorphic; the successful
+source-unbox premise separately excludes heap-only result kinds such as
+`UInt64`. A heap object is compatible when its live semantic box contains a
+scalar whose constructor agrees with the requested result kind. This judgment
+intentionally mentions no concrete word, descriptor map, memory read, or
+target execution witness.
 -/
 inductive SourceUnboxKindCompatible (runtime : RuntimeState)
     (kind : BoxedScalarKind) : Value → Prop where
@@ -6653,10 +6655,10 @@ inductive ReuseSupported (context : Fir.Wasm.Context)
 Source compatibility and the ordinary runtime relation reconstruct every
 representation-specific premise of checked concrete unboxing.
 
-For a tagged object, the concrete read is representation-polymorphic. For a
-heap object, the source scalar constructor identifies the same boxed kind as
-the live-cell relation, which recovers the frozen descriptor and checked
-linear-memory read.
+For a tagged object, semantic success derives the scalar-kind admission needed
+by the concrete reader. For a heap object, the source scalar constructor
+identifies the same boxed kind as the live-cell relation, which recovers the
+frozen descriptor and checked linear-memory read.
 -/
 theorem ConcreteRuntimeRel.unboxFacts_of_sourceCompatible
     {concrete : ConcreteRuntimeState}
@@ -6679,9 +6681,12 @@ theorem ConcreteRuntimeRel.unboxFacts_of_sourceCompatible
       cases referenceRelated with
       | tagged taggedRelated =>
           cases compatible
+          have allowed :=
+            BoxedScalarKind.allowsTaggedRepresentation_of_unbox_tagged_eq_ok
+              runtime kind _ sourceValue unboxed
           obtain ⟨concreteRead, semanticRead, _⟩ :=
             runtimeRelated.heap.readBoxedScalar_tagged_refines
-              taggedRelated kind
+              taggedRelated kind allowed
           exact ⟨BoxedScalar.ofPayload kind _, .tagged taggedRelated,
             concreteRead, Except.ok.inj (unboxed.symm.trans semanticRead)⟩
       | heap heapRelated =>
