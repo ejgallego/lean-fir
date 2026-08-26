@@ -77,7 +77,7 @@ export async function checkResidentNumeric({ bytes, manifest }) {
     WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length;
   assert.equal(importCount, manifest.imports.length,
     "resident numeric Wasm and manifest import counts must agree");
-  assert.ok(importCount === 0 || importCount === 14,
+  assert.ok(importCount === 0 || importCount === 13,
     `resident numeric test expects a standalone or linked checkpoint, got ${importCount} imports`);
 
   const intOfNat = exported(instance, "fir_ext_Int_ofNat");

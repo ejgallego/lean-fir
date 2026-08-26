@@ -121,7 +121,7 @@ export async function checkResidentBigNumeric({ bytes, manifest }) {
   const module = new WebAssembly.Module(bytes);
   assert.equal(WebAssembly.Module.imports(module).length, manifest.imports.length,
     "arbitrary-precision numeric Wasm and manifest import counts must agree");
-  assert.ok([0, 2, 14].includes(manifest.imports.length),
+  assert.ok([0, 1, 13].includes(manifest.imports.length),
     "arbitrary-precision numeric fixture must be standalone or a linked prettyM checkpoint");
 
   const intOfNat = exported(instance, "fir_big_ext_Int_ofNat");

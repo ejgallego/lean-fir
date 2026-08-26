@@ -99,7 +99,7 @@ export async function checkResidentString({
     WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length;
   assert.equal(importCount, manifest.imports.length,
     "resident String Wasm and manifest import counts must agree");
-  assert.ok(importCount === 0 || importCount === 2,
+  assert.ok(importCount === 0 || importCount === 1,
     `resident String test expects a standalone or linked checkpoint, got ${importCount} imports`);
 
   const append = exported(instance, "fir_ext_String_Internal_append");
