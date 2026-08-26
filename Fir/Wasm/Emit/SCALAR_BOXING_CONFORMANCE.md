@@ -93,6 +93,17 @@ converse malformed annotations.  Resident linking maps each exact operation
 to a signature-specific alias generated from the same physical helper-body
 factory as its generic operation.
 
+The probe is now permanent in
+`Fir/Wasm/Emit/ScalarBoxingExamples.lean`. It compiles fourteen real Lean
+entries: one generic polymorphic round trip and one compiler-generated
+`_boxed` closure wrapper for each family. Exact wrapper result kinds are read
+from `upstreamBoxResultKind?`, not repeated in the fixture. The five ready
+families must link with zero imports and zero runtime operations. `USize` and
+`Float32` are not skipped: each must retain exactly its matching box/unbox
+pair, so any accidental widening or unrelated residual operation fails the
+fixture. Their readiness flags become zero-frontier ratchets when the shared
+contract and resident helpers land.
+
 ## Findings and order
 
 1. Finish the already isolated heap-only `USize` contract stack, then add W7

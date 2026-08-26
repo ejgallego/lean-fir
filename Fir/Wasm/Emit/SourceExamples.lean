@@ -1,5 +1,6 @@
 import Fir.Validation.Corpus
 import Fir.Wasm.Emit.PrettyFormat
+import Fir.Wasm.Emit.ScalarBoxingExamples
 import Fir.Wasm.Emit.Source
 import Fir.Wasm.Emit.SourceClosedFixture
 import Fir.Wasm.PrettyFormat
