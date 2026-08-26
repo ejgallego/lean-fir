@@ -129,6 +129,38 @@ theorem CodeAdaptedWithSuffix.let_eq
       ⟨_, _restCompiled, restAdapted⟩
   · simp [List.append_assoc]
 
+/--
+Suffix-aware inversion of join-point introduction.  Entering the generated
+block exposes the compiled continuation under the new named label.  A branch
+out of that block resumes the compiled join body followed by the original
+physical suffix.
+-/
+theorem CodeAdaptedWithSuffix.jp_eq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : LabelContext}
+    {decl : Lean.Compiler.LCNF.FunDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {target : Wasm.Program}
+    (adapted :
+      CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+        (.jp decl continuation) target) :
+    let joinContext : Fir.Wasm.Context :=
+      { context with joins := (decl.fvarId, decl) :: context.joins }
+    ∃ targetEntry targetBody,
+      CodeAdapted joinContext sourceModule sourceFunction
+          (some decl.fvarId :: labels) continuation targetEntry ∧
+        CodeAdaptedWithSuffix joinContext sourceModule sourceFunction labels
+          decl.value targetBody ∧
+        target = .block 0 0 targetEntry :: targetBody := by
+  dsimp only
+  rcases adapted with ⟨targetCore, targetSuffix, coreAdapted, rfl⟩
+  obtain ⟨targetEntry, targetBody, entryAdapted, bodyAdapted, rfl⟩ :=
+    CodeAdapted.jp_eq coreAdapted
+  exact ⟨targetEntry, targetBody ++ targetSuffix, entryAdapted,
+    CodeAdapted.withSuffix bodyAdapted, by simp⟩
+
 theorem CodeAdaptedWithSuffix.incPersistent_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
@@ -586,6 +618,96 @@ theorem ConcreteStructuredCodeFocus.observes
       source.runtime.trace
     rw [related.targetStoreEq, related.sourceRuntimeEq]
     exact related.stateRelated.1.trace
+
+/--
+One source join-point introduction is matched by entering the one generated
+Wasm block.  The result exposes both halves of the protocol needed by the
+later hereditary label invariant: the active continuation is compiled under
+the named label, while the saved target frame resumes the separately compiled
+join body.
+-/
+theorem ConcreteStructuredCodeFocus.advance_joinIntroduction
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : LabelContext}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.FunDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.jp decl continuation) targetStore
+      targetLocals targetCode witness source target) :
+    let joinContext : Fir.Wasm.Context :=
+      { context with joins := (decl.fvarId, decl) :: context.joins }
+    ∃ sourceAfter targetAfter targetEntry targetBody,
+      executeStep externals source = .next sourceAfter ∧
+        FinitePath (StructuredWasmStep module hostEnv) 1 target targetAfter ∧
+        ConcreteStructuredCodeFocus joinContext sourceModule sourceFunction
+          (some decl.fvarId :: labels) sourceRuntime sourceEnv continuation
+          targetStore targetLocals targetEntry witness sourceAfter targetAfter ∧
+        CodeAdaptedWithSuffix joinContext sourceModule sourceFunction labels
+          decl.value targetBody ∧
+        sourceAfter.joins = (decl.fvarId, decl) :: source.joins ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames =
+          .label 0 targetLocals.values targetBody :: target.frames := by
+  dsimp only
+  obtain ⟨targetEntry, targetBody, entryAdapted, bodyAdapted, targetCodeEq⟩ :=
+    related.adapted.jp_eq
+  let sourceAfter : MachineState :=
+    { source with
+      joins := (decl.fvarId, decl) :: source.joins
+      control := .code continuation }
+  let targetAfter : StructuredWasmState Host :=
+    { target with
+      control := .running targetLocals targetEntry
+      frames := .label 0 targetLocals.values targetBody :: target.frames }
+  have sourceStep : executeStep externals source = .next sourceAfter := by
+    rcases source with ⟨program, control, env, joins, frames, runtime⟩
+    have controlEq := related.sourceControlEq
+    change control = .code (.jp decl continuation) at controlEq
+    subst control
+    rfl
+  have targetStep : StructuredWasmStep module hostEnv target targetAfter := by
+    rcases target with ⟨store, control, frames⟩
+    have controlEq := related.targetControlEq
+    change control = .running targetLocals targetCode at controlEq
+    subst control
+    rw [targetCodeEq]
+    convert
+      (StructuredWasmStep.enterBlock (module := module) (env := hostEnv)
+        (store := store) (locals := targetLocals) (body := targetEntry)
+        (rest := targetBody) (frames := frames)) using 1
+    simp [targetAfter]
+  have nextFocus :
+      ConcreteStructuredCodeFocus
+        { context with joins := (decl.fvarId, decl) :: context.joins }
+        sourceModule sourceFunction (some decl.fvarId :: labels) sourceRuntime
+        sourceEnv continuation targetStore targetLocals targetEntry witness
+        sourceAfter targetAfter := {
+    sourceProgramEq := by
+      simp [sourceAfter, related.sourceProgramEq]
+    sourceControlEq := by simp [sourceAfter]
+    sourceEnvEq := by simp [sourceAfter, related.sourceEnvEq]
+    sourceRuntimeEq := by simp [sourceAfter, related.sourceRuntimeEq]
+    targetStoreEq := by simp [targetAfter, related.targetStoreEq]
+    targetControlEq := by simp [targetAfter]
+    adapted := CodeAdapted.withEmptySuffix entryAdapted
+    stateRelated := related.stateRelated
+    frameAligned := related.frameAligned }
+  exact ⟨sourceAfter, targetAfter, targetEntry, targetBody, sourceStep,
+    .single targetStep, nextFocus, bodyAdapted, by simp [sourceAfter],
+    by simp [sourceAfter], by simp [targetAfter]⟩
 
 /-- A total-correctness weakest-precondition proof with an exact successful
 fallthrough postcondition already contains a finite Talos execution witness.

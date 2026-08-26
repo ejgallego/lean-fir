@@ -212,6 +212,105 @@ theorem CodeAdapted.let_eq
                             restAdapted, rfl, targetEq.symm⟩
 
 /--
+Inversion of production join-point introduction through both lowering stages.
+
+The continuation executes inside the newly emitted block and is therefore
+adapted with the named label in scope.  The join body is the code after that
+block; it is compiled with the same source join declaration but adapted at the
+outer physical label depth.  This asymmetry is the executable block/branch
+protocol used by the structured simulation.
+-/
+theorem CodeAdapted.jp_eq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : LabelContext}
+    {decl : LCNF.FunDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {target : Wasm.Program}
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.jp decl continuation) target) :
+    let joinContext : Fir.Wasm.Context :=
+      { context with joins := (decl.fvarId, decl) :: context.joins }
+    ∃ targetEntry targetBody,
+      CodeAdapted joinContext sourceModule sourceFunction
+          (some decl.fvarId :: labels) continuation targetEntry ∧
+        CodeAdapted joinContext sourceModule sourceFunction labels decl.value
+          targetBody ∧
+        target = .block 0 0 targetEntry :: targetBody := by
+  dsimp only
+  rcases adapted with ⟨symbolic, compiled, targetCompiled⟩
+  have core := Fir.Wasm.finishCompileResult_eq_ok_iff.mp compiled
+  rw [Fir.Wasm.compileCodeCore.eq_def] at core
+  simp only at core
+  let joinContext : Fir.Wasm.Context :=
+    { context with joins := (decl.fvarId, decl) :: context.joins }
+  cases entryCore : Fir.Wasm.compileCodeCore joinContext continuation with
+  | none =>
+      rw [entryCore] at core
+      cases core
+  | some entryResult =>
+      cases entryResult with
+      | error error =>
+          rw [entryCore] at core
+          cases core
+      | ok entryCode =>
+          rw [entryCore] at core
+          cases bodyCore : Fir.Wasm.compileCodeCore joinContext decl.value with
+          | none =>
+              rw [bodyCore] at core
+              cases core
+          | some bodyResult =>
+              cases bodyResult with
+              | error error =>
+                  rw [bodyCore] at core
+                  cases core
+              | ok bodyCode =>
+                  rw [bodyCore] at core
+                  injection core with symbolicEq
+                  injection symbolicEq with symbolicEq
+                  subst symbolic
+                  have entryCompiled :
+                      Fir.Wasm.compileCode joinContext continuation =
+                        .ok entryCode :=
+                    Fir.Wasm.finishCompileResult_eq_ok_iff.mpr entryCore
+                  have bodyCompiled :
+                      Fir.Wasm.compileCode joinContext decl.value =
+                        .ok bodyCode :=
+                    Fir.Wasm.finishCompileResult_eq_ok_iff.mpr bodyCore
+                  cases entryAdapted :
+                      instructions sourceModule sourceFunction
+                        (some decl.fvarId :: labels) entryCode with
+                  | error error =>
+                      simp [instructions, instruction, entryAdapted]
+                        at targetCompiled
+                      simp only [Bind.bind, Except.bind, Functor.map,
+                        Except.map, pure, Except.pure] at targetCompiled
+                      cases targetCompiled
+                  | ok targetEntry =>
+                      cases bodyAdapted :
+                          instructions sourceModule sourceFunction labels
+                            bodyCode with
+                      | error error =>
+                          simp [instructions, instruction, entryAdapted,
+                            bodyAdapted] at targetCompiled
+                          simp only [Bind.bind, Except.bind, Functor.map,
+                            Except.map, pure, Except.pure] at targetCompiled
+                          cases targetCompiled
+                      | ok targetBody =>
+                          have targetEq :
+                              .block 0 0 targetEntry :: targetBody = target := by
+                            simp [instructions, instruction, entryAdapted,
+                              bodyAdapted, Bind.bind, Except.bind, Functor.map,
+                              Except.map, pure, Except.pure] at targetCompiled
+                            exact targetCompiled
+                          exact ⟨targetEntry, targetBody,
+                            ⟨entryCode, entryCompiled, entryAdapted⟩,
+                            ⟨bodyCode, bodyCompiled, bodyAdapted⟩,
+                            targetEq.symm⟩
+
+/--
 Inversion of the real compiler at a persistent increment.
 
 Persistent ownership operations are erased by lowering, so successful
