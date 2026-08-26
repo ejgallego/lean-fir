@@ -194,3 +194,43 @@ the serial deduplicated candidate. Every round retained 730 unique cases,
 contract. Two full parallel evidence snapshots were independently verified as
 portable-equivalent. A final explicit `FIR_CHECK_JOBS=1 make check` compatibility
 run passed the same 730-case / 2,172-comparison gate in 90.02 seconds.
+
+## Bounded deterministic artifact production
+
+The artifact gate uses the same job bound for two narrowly independent pairs.
+Direct script use remains serial by default. With `FIR_CHECK_JOBS` greater than
+one, the first and second Float source artifacts are generated and executed in
+different filenames, and the first and second concrete artifact inventories
+are generated in different temporary roots. There are exactly two producers
+in either region. Lake builds, Lean oracle creation, byte comparisons,
+readiness aggregation, browser checks, checksums, and publication remain
+serial.
+
+The pair runner waits for both processes, records both statuses, and fails if
+either producer fails. Focused tests cover serial order, parallel completion,
+and failure propagation in both modes. An invalid bound fails before artifact
+work begins.
+
+Seven order-balanced ignored-only rounds of the complete `all` plus 19
+resident-artifact inventory measured serial wall samples of 2.79, 2.68, 2.74,
+2.71, 2.72, 2.81, and 3.04 seconds: median 2.74 and MAD 0.05. The two-root
+parallel samples were 1.41, 1.82, 1.35, 1.34, 1.30, 1.34, and 1.60 seconds:
+median 1.35 and MAD 0.05. All four roots in every round contained the same 126
+byte-identical files. This removes 1.39 seconds, or 50.7%, from that region.
+
+Seven order-balanced Float-source rounds measured serial wall samples of 3.87,
+3.73, 3.87, 3.72, 3.81, 3.83, and 4.10 seconds: median 3.83 and MAD 0.04. The
+parallel samples were 1.99, 2.00, 2.00, 1.99, 1.91, 2.11, and 2.47 seconds:
+median 2.00 and MAD 0.01. Every `.wasm`, manifest, final LCNF, function
+inventory, and oracle sidecar was byte-identical. This removes 1.83 seconds,
+or 47.8%, from that region. Together the two isolated regions remove 3.22
+seconds of measured serial critical-path work.
+
+Three complete parallel artifact gates passed in 29.33, 32.49, and 34.09
+seconds (median 32.49, MAD 1.60), including exact validation and Talos receipt
+reuse, deterministic comparisons, 44/44 readiness artifacts, and 16/16
+sources. These whole-gate samples were taken while other repository work was
+active and are noisier than the bounded phase measurements, so no additional
+whole-gate percentage claim is made. A complete explicit `FIR_CHECK_JOBS=1`
+fallback gate also passed; its 49.37-second wall time was visibly contaminated
+by concurrent host load and is retained as correctness evidence only.

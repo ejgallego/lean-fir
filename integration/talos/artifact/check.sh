@@ -6,8 +6,13 @@ root="$(cd "$here/../../.." && pwd)"
 mkdir -p "$here/_build/tmp"
 export TMPDIR="$here/_build/tmp"
 exhaustive_pretty="${FIR_PRETTYM_EXHAUSTIVE_CHECKPOINTS:-0}"
+artifact_jobs="${FIR_CHECK_JOBS:-1}"
 if [[ "$exhaustive_pretty" != 0 && "$exhaustive_pretty" != 1 ]]; then
   echo "FIR_PRETTYM_EXHAUSTIVE_CHECKPOINTS must be 0 or 1" >&2
+  exit 1
+fi
+if [[ ! "$artifact_jobs" =~ ^[1-9][0-9]*$ ]] || (( artifact_jobs > 64 )); then
+  echo "FIR_CHECK_JOBS must be an integer from 1 through 64" >&2
   exit 1
 fi
 if [[ -n "${FIR_BROWSER:-}" && "$exhaustive_pretty" != 1 ]]; then
@@ -17,8 +22,10 @@ fi
 first="$(mktemp -d)"
 second="$(mktemp -d)"
 trap 'rm -rf "$first" "$second"' EXIT
+source "$here/check-jobs.sh"
 
 cd "$here"
+./test-check-jobs.sh
 node --test "$root/integration/package-tools/immutable-package.test.mjs"
 node --test "$root/integration/package-tools/source-package.test.mjs"
 node --test "$root/integration/package-tools/verified-package.test.mjs"
@@ -78,14 +85,15 @@ cmp _build/resident-libm-complete.wasm \
   _build/resident-libm-complete-repeat.wasm
 node run-resident-libm.mjs _build/resident-libm-frontier.wasm \
   _build/resident-libm-complete.wasm
-"$float_source_generator" _build/source-float-conversions.wasm
-node run-source-float.mjs _build/source-float-conversions.wasm
-for suffix in wasm wasm.json wasm.lcnf wasm.inventory.json wasm.oracle.json; do
-  cp "_build/source-float-conversions.$suffix" \
-    "_build/source-float-conversions-first.$suffix"
-done
-"$float_source_generator" _build/source-float-conversions.wasm
-node run-source-float.mjs _build/source-float-conversions.wasm
+generate_float_source() {
+  local out="$1"
+  "$float_source_generator" "$out"
+  node run-source-float.mjs "$out"
+}
+
+fir_run_producer_pair "$artifact_jobs" generate_float_source \
+  _build/source-float-conversions-first.wasm \
+  _build/source-float-conversions.wasm
 for suffix in wasm wasm.json wasm.lcnf wasm.inventory.json wasm.oracle.json; do
   cmp "_build/source-float-conversions-first.$suffix" \
     "_build/source-float-conversions.$suffix"
@@ -565,137 +573,102 @@ if [[ -n "${FIR_BROWSER:-}" ]]; then
   ./browser-check.sh "$FIR_BROWSER"
   ./browser-validation-check.sh "$FIR_BROWSER"
 fi
-"$artifact_generator" all "$first"
-"$artifact_generator" all "$second"
-"$artifact_generator" resident-get-tag "$first/resident/get-tag.wasm"
-"$artifact_generator" resident-get-tag "$second/resident/get-tag.wasm"
+resident_determinism_artifacts=(
+  resident-get-tag:get-tag
+  resident-is-shared:is-shared
+  resident-read-projections:read-projections
+  resident-closure-projections:closure-projections
+  resident-closure-matches:closure-matches
+  resident-allocator:allocator
+  resident-closure-allocation:closure-allocation
+  resident-literals:literals
+  resident-setters:setters
+  resident-tag-setter:tag-setter
+  resident-increments:increments
+  resident-releases:releases
+  resident-cache:cache
+  resident-numeric:numeric
+  resident-big-numeric:big-numeric
+  resident-nat-arithmetic:nat-arithmetic
+  resident-platform:platform
+  resident-string:string
+  resident-fallbacks:fallbacks
+)
+
+generate_determinism_root() {
+  local out="$1"
+  local artifact
+  local generator_mode
+  local artifact_name
+  "$artifact_generator" all "$out"
+  for artifact in "${resident_determinism_artifacts[@]}"; do
+    generator_mode="${artifact%%:*}"
+    artifact_name="${artifact#*:}"
+    "$artifact_generator" "$generator_mode" \
+      "$out/resident/$artifact_name.wasm"
+  done
+}
+
+fir_run_producer_pair "$artifact_jobs" generate_determinism_root \
+  "$first" "$second"
+
 cmp "$first/resident/get-tag.wasm" "$second/resident/get-tag.wasm"
 cmp "$first/resident/get-tag.wasm.json" "$second/resident/get-tag.wasm.json"
-"$artifact_generator" resident-is-shared "$first/resident/is-shared.wasm"
-"$artifact_generator" resident-is-shared "$second/resident/is-shared.wasm"
 cmp "$first/resident/is-shared.wasm" "$second/resident/is-shared.wasm"
 cmp "$first/resident/is-shared.wasm.json" "$second/resident/is-shared.wasm.json"
-"$artifact_generator" resident-read-projections \
-  "$first/resident/read-projections.wasm"
-"$artifact_generator" resident-read-projections \
-  "$second/resident/read-projections.wasm"
 cmp "$first/resident/read-projections.wasm" \
   "$second/resident/read-projections.wasm"
 cmp "$first/resident/read-projections.wasm.json" \
   "$second/resident/read-projections.wasm.json"
-"$artifact_generator" resident-closure-projections \
-  "$first/resident/closure-projections.wasm"
-"$artifact_generator" resident-closure-projections \
-  "$second/resident/closure-projections.wasm"
 cmp "$first/resident/closure-projections.wasm" \
   "$second/resident/closure-projections.wasm"
 cmp "$first/resident/closure-projections.wasm.json" \
   "$second/resident/closure-projections.wasm.json"
-"$artifact_generator" resident-closure-matches \
-  "$first/resident/closure-matches.wasm"
-"$artifact_generator" resident-closure-matches \
-  "$second/resident/closure-matches.wasm"
 cmp "$first/resident/closure-matches.wasm" \
   "$second/resident/closure-matches.wasm"
 cmp "$first/resident/closure-matches.wasm.json" \
   "$second/resident/closure-matches.wasm.json"
-"$artifact_generator" resident-allocator \
-  "$first/resident/allocator.wasm"
-"$artifact_generator" resident-allocator \
-  "$second/resident/allocator.wasm"
 cmp "$first/resident/allocator.wasm" "$second/resident/allocator.wasm"
 cmp "$first/resident/allocator.wasm.json" \
   "$second/resident/allocator.wasm.json"
-"$artifact_generator" resident-closure-allocation \
-  "$first/resident/closure-allocation.wasm"
-"$artifact_generator" resident-closure-allocation \
-  "$second/resident/closure-allocation.wasm"
 cmp "$first/resident/closure-allocation.wasm" \
   "$second/resident/closure-allocation.wasm"
 cmp "$first/resident/closure-allocation.wasm.json" \
   "$second/resident/closure-allocation.wasm.json"
-"$artifact_generator" resident-literals \
-  "$first/resident/literals.wasm"
-"$artifact_generator" resident-literals \
-  "$second/resident/literals.wasm"
 cmp "$first/resident/literals.wasm" "$second/resident/literals.wasm"
 cmp "$first/resident/literals.wasm.json" \
   "$second/resident/literals.wasm.json"
-"$artifact_generator" resident-setters \
-  "$first/resident/setters.wasm"
-"$artifact_generator" resident-setters \
-  "$second/resident/setters.wasm"
 cmp "$first/resident/setters.wasm" "$second/resident/setters.wasm"
 cmp "$first/resident/setters.wasm.json" \
   "$second/resident/setters.wasm.json"
-"$artifact_generator" resident-tag-setter \
-  "$first/resident/tag-setter.wasm"
-"$artifact_generator" resident-tag-setter \
-  "$second/resident/tag-setter.wasm"
 cmp "$first/resident/tag-setter.wasm" "$second/resident/tag-setter.wasm"
 cmp "$first/resident/tag-setter.wasm.json" \
   "$second/resident/tag-setter.wasm.json"
-"$artifact_generator" resident-increments \
-  "$first/resident/increments.wasm"
-"$artifact_generator" resident-increments \
-  "$second/resident/increments.wasm"
 cmp "$first/resident/increments.wasm" "$second/resident/increments.wasm"
 cmp "$first/resident/increments.wasm.json" \
   "$second/resident/increments.wasm.json"
-"$artifact_generator" resident-releases \
-  "$first/resident/releases.wasm"
-"$artifact_generator" resident-releases \
-  "$second/resident/releases.wasm"
 cmp "$first/resident/releases.wasm" "$second/resident/releases.wasm"
 cmp "$first/resident/releases.wasm.json" \
   "$second/resident/releases.wasm.json"
-"$artifact_generator" resident-cache \
-  "$first/resident/cache.wasm"
-"$artifact_generator" resident-cache \
-  "$second/resident/cache.wasm"
 cmp "$first/resident/cache.wasm" "$second/resident/cache.wasm"
 cmp "$first/resident/cache.wasm.json" \
   "$second/resident/cache.wasm.json"
-"$artifact_generator" resident-numeric \
-  "$first/resident/numeric.wasm"
-"$artifact_generator" resident-numeric \
-  "$second/resident/numeric.wasm"
 cmp "$first/resident/numeric.wasm" "$second/resident/numeric.wasm"
 cmp "$first/resident/numeric.wasm.json" \
   "$second/resident/numeric.wasm.json"
-"$artifact_generator" resident-big-numeric \
-  "$first/resident/big-numeric.wasm"
-"$artifact_generator" resident-big-numeric \
-  "$second/resident/big-numeric.wasm"
 cmp "$first/resident/big-numeric.wasm" "$second/resident/big-numeric.wasm"
 cmp "$first/resident/big-numeric.wasm.json" \
   "$second/resident/big-numeric.wasm.json"
-"$artifact_generator" resident-nat-arithmetic \
-  "$first/resident/nat-arithmetic.wasm"
-"$artifact_generator" resident-nat-arithmetic \
-  "$second/resident/nat-arithmetic.wasm"
 cmp "$first/resident/nat-arithmetic.wasm" \
   "$second/resident/nat-arithmetic.wasm"
 cmp "$first/resident/nat-arithmetic.wasm.json" \
   "$second/resident/nat-arithmetic.wasm.json"
-"$artifact_generator" resident-platform \
-  "$first/resident/platform.wasm"
-"$artifact_generator" resident-platform \
-  "$second/resident/platform.wasm"
 cmp "$first/resident/platform.wasm" "$second/resident/platform.wasm"
 cmp "$first/resident/platform.wasm.json" \
   "$second/resident/platform.wasm.json"
-"$artifact_generator" resident-string \
-  "$first/resident/string.wasm"
-"$artifact_generator" resident-string \
-  "$second/resident/string.wasm"
 cmp "$first/resident/string.wasm" "$second/resident/string.wasm"
 cmp "$first/resident/string.wasm.json" \
   "$second/resident/string.wasm.json"
-"$artifact_generator" resident-fallbacks \
-  "$first/resident/fallbacks.wasm"
-"$artifact_generator" resident-fallbacks \
-  "$second/resident/fallbacks.wasm"
 cmp "$first/resident/fallbacks.wasm" "$second/resident/fallbacks.wasm"
 cmp "$first/resident/fallbacks.wasm.json" \
   "$second/resident/fallbacks.wasm.json"
