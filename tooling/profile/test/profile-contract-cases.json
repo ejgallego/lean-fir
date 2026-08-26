@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "fir.sampled-profile-contract-cases/v1",
+  "cases": [
+    {
+      "id": "incomplete-symbolization",
+      "fixture": "profile",
+      "operation": {
+        "path": ["summary", "unresolvedWasmMicros"],
+        "value": 1
+      },
+      "expectError": "FIR profile summary contains unresolved Wasm self time"
+    },
+    {
+      "id": "lifecycle-policy-contradiction",
+      "fixture": "profile-lifecycle",
+      "operation": {
+        "path": ["moduleInstance"],
+        "value": "reused-across-cells"
+      },
+      "expectError": "profile collection lifecycle contradicts the FIR workload receipt"
+    },
+    {
+      "id": "aggregate-function-coverage",
+      "fixture": "aggregate",
+      "operation": {
+        "path": ["functions", 0, "perRun", 0, "selfSamples"],
+        "value": 99
+      },
+      "expectError": "FIR aggregate function 0 caller coverage is incomplete for run-1"
+    }
+  ]
+}

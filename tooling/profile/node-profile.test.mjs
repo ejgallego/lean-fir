@@ -17,6 +17,7 @@ import {
   runNodeProfile,
 } from "./node-profile-lib.mjs";
 import { profileAggregateSchema } from "./profile-aggregate-lib.mjs";
+import { validateProfileEvidenceContract } from "./profile-contract.mjs";
 
 const binaryen = process.env.FIR_BINARYEN_DIR;
 assert.equal(typeof binaryen, "string",
@@ -113,6 +114,14 @@ test("CLI profiles only checked steady work and binds immutable evidence",
         sha256(metadataBefore));
       assert.equal(evidence.rawProfile.sha256, sha256(rawBytes));
       assert.equal(rawBytes.at(-1), 10);
+      const contractClaims = validateProfileEvidenceContract(evidence);
+      assert.deepEqual(contractClaims.workloadReceipt, {
+        kind: "fir.profile-workload-receipt/v1",
+        id: "fir-tooling-wasm-loop",
+        sha256: evidence.workload.receipt.sha256,
+      });
+      assert.equal(contractClaims.symbolization.coverage,
+        "all-wasm-self-samples");
 
       const aggregatePath = join(directory, "aggregate.json");
       execFileSync(process.execPath, [

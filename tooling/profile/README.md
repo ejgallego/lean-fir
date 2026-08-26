@@ -172,3 +172,36 @@ empty Wasm windows, and output reuse. It does not
 rewrite, copy, or delete the caller-owned raw evidence. Sample shares are noisy
 diagnostic attribution and must not be presented as headline elapsed-time
 measurements.
+
+## Reusable source-contract validation
+
+[`profile-contract.mjs`](profile-contract.mjs) validates an intact
+`fir.sampled-profile/v2` packet or a replicated comparable
+`fir.sampled-profile-aggregate/v3` packet before deriving the small binding
+surface used by external report envelopes:
+
+```js
+import {
+  validateProfileLifecycle,
+  validateSampledProfileContract,
+} from "./profile-contract.mjs";
+
+const claims = validateSampledProfileContract(packet);
+validateProfileLifecycle(claims, collection.lifecycle);
+```
+
+The returned `fir.sampled-profile-claims/v1` object binds the exact Wasm and
+final-function sidecar hashes, recomputed comparability key, quality class,
+workload-receipt identity, instance policy, exact steady sampled-self-time
+basis, and complete Wasm symbolization. The validator rejects unresolved Wasm
+samples, approximate windows, receipt/policy drift, incomparable aggregates,
+and incomplete per-run function or caller coverage. It never flattens or
+rewrites the source packet.
+
+This is a synchronous Node tooling API because FIR comparability keys use the
+same canonical SHA-256 computation as profile generation. Browser reports may
+carry its JSON claims, but must derive them during a trusted staging or
+validation step rather than reasserting them in presentation code. The compact
+positive builders and portable data-only negative cases live under
+[`test/profile-contract-fixture.mjs`](test/profile-contract-fixture.mjs) and
+[`test/profile-contract-cases.json`](test/profile-contract-cases.json).

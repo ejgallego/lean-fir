@@ -26,6 +26,7 @@ unit-check: no-skips
 			tooling/worktree-temp-unit.test.mjs \
 			tooling/wasm/function-index-unit.test.mjs \
 			tooling/profile/node-profile-unit.test.mjs \
+			tooling/profile/profile-contract-unit.test.mjs \
 			tooling/profile/profile-aggregate-unit.test.mjs
 
 binaryen-check:
