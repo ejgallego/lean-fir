@@ -13,9 +13,10 @@ import re
 import shutil
 import subprocess
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Protocol
+from typing import Callable, Protocol, TypeVar
 
 
 PROTOCOL_VERSION = 3
@@ -58,6 +59,41 @@ RESERVED_PRODUCT_PATHS = {
 
 class ValidationError(RuntimeError):
     pass
+
+
+ParallelInput = TypeVar("ParallelInput")
+ParallelOutput = TypeVar("ParallelOutput")
+
+
+def validation_job_count(value: str | None = None) -> int:
+    raw = os.environ.get("FIR_CHECK_JOBS", "1") if value is None else value
+    if not raw.isascii() or not raw.isdigit():
+        raise ValidationError("FIR_CHECK_JOBS must be an integer from 1 through 64")
+    jobs = int(raw)
+    if not 1 <= jobs <= 64:
+        raise ValidationError("FIR_CHECK_JOBS must be an integer from 1 through 64")
+    return jobs
+
+
+def ordered_parallel_map(
+    function: Callable[[ParallelInput], ParallelOutput],
+    items: list[ParallelInput],
+    jobs: int | None = None,
+) -> list[ParallelOutput]:
+    """Run independent jobs concurrently while retaining canonical order."""
+    worker_count = validation_job_count() if jobs is None else jobs
+    if not 1 <= worker_count <= 64:
+        raise ValidationError("parallel validation jobs must be from 1 through 64")
+    if worker_count == 1 or len(items) < 2:
+        return [function(item) for item in items]
+    with ThreadPoolExecutor(max_workers=min(worker_count, len(items))) as executor:
+        futures = [executor.submit(function, item) for item in items]
+        try:
+            return [future.result() for future in futures]
+        except BaseException:
+            for future in futures:
+                future.cancel()
+            raise
 
 
 def validate_backend_name(name: object, context: str = "backend") -> str:

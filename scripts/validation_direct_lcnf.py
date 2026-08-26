@@ -15,6 +15,7 @@ from validation_harness import (
     ValidationFinding,
     ValidationTool,
     manifest_from_output,
+    ordered_parallel_map,
     records_from_output,
     resolve_lake_command,
     result_map,
@@ -106,43 +107,53 @@ class DirectLcnfExecutableAdapter:
             list(context.selected),
             tools=[self.tool],
         )
-        for case_id in context.selected:
+
+        def execute_case(case_id: str) -> tuple:
             command = [str(self.executable), "--case", case_id]
             completed = run(command, context.root)
-            backend_run.artifacts.extend(
-                write_process_artifacts(
-                    context.out_dir / case_id / self.name,
-                    completed,
-                    f"{case_id}/{self.name}",
-                )
+            artifacts = write_process_artifacts(
+                context.out_dir / case_id / self.name,
+                completed,
+                f"{case_id}/{self.name}",
             )
             if completed.returncode != 0:
-                backend_run.findings.append(
+                return (
+                    case_id,
+                    artifacts,
                     ValidationFinding(
                         "execution",
                         f"process exited {completed.returncode}",
                         self.name,
                         case_id,
-                    )
+                    ),
+                    None,
                 )
-                backend_run.blocked_cases.add(case_id)
-                continue
             case_results = result_map(
                 records_from_output(completed.stdout, command),
                 self.name,
             )
             if set(case_results) != {case_id}:
-                backend_run.findings.append(
+                return (
+                    case_id,
+                    artifacts,
                     ValidationFinding(
                         "execution",
                         f"backend returned {sorted(case_results)}",
                         self.name,
                         case_id,
-                    )
+                    ),
+                    None,
                 )
+            return case_id, artifacts, None, case_results[case_id]
+
+        executions = ordered_parallel_map(execute_case, list(context.selected))
+        for case_id, artifacts, finding, result in executions:
+            backend_run.artifacts.extend(artifacts)
+            if finding is not None:
+                backend_run.findings.append(finding)
                 backend_run.blocked_cases.add(case_id)
                 continue
-            backend_run.results[case_id] = case_results[case_id]
+            backend_run.results[case_id] = result
         self.verify_tool()
         return backend_run
 

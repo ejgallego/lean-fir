@@ -161,3 +161,36 @@ candidate median and 74.49 seconds or 70.5% below the original artifact
 baseline. Median user-plus-system CPU time fell from 38.93 to 35.53 seconds
 relative to the build-barrier candidate. All three rounds retained the exact
 validation, deterministic-artifact, and 44/44 readiness inventories.
+
+## Bounded native validation
+
+The root Makefile sets `FIR_CHECK_JOBS=8` by default; direct script consumers
+remain serial unless they opt in. The validation harness accepts only bounds
+from 1 through 64 and uses the pool solely for native and direct-native
+per-case executables. These processes do not write Lake state and already own
+disjoint case/backend output directories. LCNF, V8, product-provider, matrix,
+receipt, attestation, checksum, and publication phases remain serial.
+
+Workers return results to the coordinator in selected-case order, so canonical
+result and artifact inventories do not depend on completion order. An
+exception cancels queued work and propagates before matrix/receipt publication.
+Focused tests exercise the worker bound, out-of-order completion, invalid job
+counts, and failure propagation.
+
+A six-case mixed serial/eight-worker probe retained identical comparison and
+LCNF coverage bytes. FIR's evidence comparator classified the complete
+evidence as portable-equivalent: same run identity, semantic results, coverage,
+telemetry, findings, receipts, and comparisons. Exact evidence differed only
+in raw LCNF panic backtrace addresses, an existing ASLR-dependent artifact
+that also varies between serial runs.
+
+Three warm eight-worker `make check` samples were 60.52, 63.51, and 61.21
+seconds: median 61.21 seconds, MAD 0.69 seconds, and median utilization 1.34
+effective cores. This is 27.04 seconds or 30.6% below the serial deduplicated
+candidate median and 70.55 seconds or 53.5% below the original root-check
+baseline. Median user-plus-system CPU time was 85.53 seconds versus 83.63 for
+the serial deduplicated candidate. Every round retained 730 unique cases,
+2,172/2,172 equal comparisons, zero findings, and the same native-oracle
+contract. Two full parallel evidence snapshots were independently verified as
+portable-equivalent. A final explicit `FIR_CHECK_JOBS=1 make check` compatibility
+run passed the same 730-case / 2,172-comparison gate in 90.02 seconds.
