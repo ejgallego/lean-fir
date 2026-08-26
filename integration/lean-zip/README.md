@@ -713,6 +713,32 @@ runtime-performance claim. The comparison also crosses the already documented
 final-LCNF recapture code-shape boundary; only same-capture evidence could
 attribute such a small timing change to this rewrite.
 
+An exact copied-final-WAT operand probe then classified every dynamic
+`fir_release_0` argument without changing the release operation itself. The
+diagnostic reserved a disjoint counter region below the transferred heap,
+checked byte-identical compression and identical frontier observations against
+an uninstrumented reassembly, and retained the production module identity
+`9a23c8db...dac42a` as its source. On one warm steady 256-KiB seeded-random
+level-6 call, 11,187,065 of 11,196,054 wrapper arguments are tagged immediates
+(99.9197%) and 8,989 are heap references. Of 413 active final-Wasm call sites,
+374 observe only tagged values, 36 only heap references, and three observe both;
+the genuinely mixed sites are List/Huffman element projections and contribute
+only 1,883 calls (0.0168%). A second 100-call sweep over the five raw-smoke
+inputs, levels 1--10, and cold plus warm calls activates 924 sites but finds the
+same three mixed sites. Both diagnostics have zero erased-zero arguments.
+
+This is workload evidence, not permission to change the remaining `tobject`
+locals to `tagged`. Many hot operands are `Nat` values: they stay immediate for
+the measured input bounds but Lean permits their boxed representation. Removing
+their checked release therefore needs a proved range/provenance fact, not a
+profile-derived type. The final optimizer does expose two exact odd-constant
+release sites accounting for 262,002 steady calls (2.34%); eliminating such
+constants is semantically exact, but that bounded gain alone does not justify a
+new custom post-link publication stage. The next generic compiler experiment
+should test whether existing typed scalar/range information can survive to
+release sites, while retaining the three genuinely mixed projection sites and
+all unproved `Nat` paths.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not
