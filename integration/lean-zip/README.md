@@ -770,6 +770,31 @@ the documented recapture code-shape boundary. The exact accepted claims are
 the semantic range transfer, removed symbolic releases, smaller artifact, and
 green differential/ownership gates.
 
+`Nat.land` provides the next reviewed range transfer: `left &&& right ≤ right`.
+When the right operand is statically `tagged`, the result therefore fits the
+complete immediate payload range even if the left operand is heap-backed. The
+resident arbitrary-precision fallback constructs its bounded result through
+`fir_numeric_make_natural`, so the physical result is canonical tagged form as
+well. A provider guard retains that exact operand condition, and the external
+engine fixture covers the mixed heap-left/tagged-right fallback explicitly.
+
+The raw closure has 34 eligible `Nat.land` source call sites accounting for 52
+checked result releases; the two calls with a coarse right operand retain their
+two checks. The symbolic `fir_release_0` census consequently falls from 4,329
+to 4,277. Against the current Float32-integrated baseline, the pre-optimizer
+frontier falls from 831,806 to 831,513 bytes and the final zero-import module
+from 366,765 to 366,523 bytes. Its SHA-256 is
+`1a225c0d074cef5cbaa1f49a498e469d9037d5ffa05910ce62dc67a9a0a20eec`;
+all 50 native/Wasm/inflate comparisons and persistent-cache plus scratch
+reclamation checks pass unchanged.
+
+Sixteen fresh-process, order-balanced 256-KiB level-6 pairs gave a 0.9362
+paired median ratio with 10/16 improving, but high dispersion and materially
+different baseline-first and candidate-first buckets (0.8562 versus 0.9531).
+This separately captured screen is inconclusive and makes no attributable
+runtime-performance claim. The accepted evidence is the semantic bound, exact
+52-site ownership reduction, smaller artifact, and green differential gate.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not
