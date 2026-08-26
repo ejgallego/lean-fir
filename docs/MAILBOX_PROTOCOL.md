@@ -97,19 +97,31 @@ existing identity. A delivery lock serializes concurrent writers. The source
 draft is retained. A malformed draft or invalid transition never becomes a
 mailbox event.
 
-Codex CLI notification is deliberately optional:
+Before receiving messages, bind each stable mailbox address to the current
+Codex session. Prefer the exact UUID printed by `codex queue`; an exact name is
+accepted only when the local Codex session index resolves it uniquely:
 
 ```bash
-scripts/mailbox deliver .deps/mailbox-drafts/ROOT-FIR-20260813-001.md \
-  --notify-session fir-wasm-gen
+scripts/mailbox route bind fir/root \
+  019f6b4e-540b-77e3-b7e7-a47feb55e777
+scripts/mailbox route list
 ```
 
-After durable delivery, this runs `codex queue` against the session UUID or
-exact name with a short pointer to the message. Notification failure is a
-warning and does not undo delivery or make the command fail; the notification
-attempt is bounded to five seconds. The event file, not the Codex notification,
-is authoritative; a sleeping or unavailable lane reads its inbox when it next
-starts.
+Routes live in the ignored canonical mailbox, not in tracked coordination
+state. A route records both the exact UUID and its indexed name. This makes role
+changes such as `fir/root` moving to a Codex session named `wasm-gen` explicit
+without making that ephemeral name part of the portable protocol.
+
+By default, every successful `deliver` resolves the stable recipient and runs
+`codex queue` against its UUID with a short pointer to the authoritative event.
+A missing, malformed, duplicate, or renamed route produces a visible warning
+after delivery; so does a queue failure. Neither notification problem removes,
+rewrites, or invalidates the immutable event.
+
+Use `--no-notify` when circumstances require delivery without route lookup or
+queueing. `--notify-session <UUID or exact name>` directly overrides route
+lookup for one delivery. Notification attempts are bounded to five seconds.
+The event file, not the best-effort Codex notification, is authoritative.
 
 ## Header
 
@@ -406,12 +418,19 @@ Validate and atomically publish one complete draft:
 scripts/mailbox deliver .deps/mailbox-drafts/<message-id>.md
 ```
 
-Add `--notify-session <UUID or exact name>` only when a best-effort Codex
-doorbell is useful:
+Manage the canonical mailbox's local Codex routes:
 
 ```bash
-scripts/mailbox deliver .deps/mailbox-drafts/<message-id>.md \
-  --notify-session <UUID-or-exact-name>
+scripts/mailbox route bind <project/agent> <UUID-or-unique-exact-name>
+scripts/mailbox route list [--json]
+scripts/mailbox route unbind <project/agent>
+```
+
+Explicitly skip notification or override the resolved route for one delivery:
+
+```bash
+scripts/mailbox deliver <draft> --no-notify
+scripts/mailbox deliver <draft> --notify-session <UUID-or-exact-name>
 ```
 
 Validate all v1 messages and thread transitions:

@@ -8,10 +8,12 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  renameSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { resolve } from "node:path";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 
 export const mailboxProtocol = "agent-mailbox/v1";
 const messageIdPattern = /^[A-Z][A-Z0-9]*-[A-Z][A-Z0-9]*-[0-9]{8}-[0-9]{3}$/;
@@ -20,8 +22,13 @@ const timestampPattern = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\
 const hashPattern = /^[0-9a-fA-F]{7,64}$/;
 const completeHashPattern = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/;
 const worktreePattern = /^\.worktrees\/[a-z0-9][a-z0-9._-]*$/;
+const codexSessionIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const routeFileName = "codex-routes.json";
 const ignoredMetadataNames = new Set(["README.md"]);
+const reservedMetadataNames = new Set([routeFileName]);
 const reservedDirectoryNames = new Set(["tmp"]);
+
+export const codexRouteProtocol = "fir.mailbox.codex-routes/v1";
 
 const requiredFields = [
   "protocol",
@@ -152,6 +159,14 @@ export function primaryCheckout(cwd = process.cwd()) {
 
 export function resolveMailbox({ cwd = process.cwd(), mailbox } = {}) {
   return mailbox ? resolve(cwd, mailbox) : resolve(primaryCheckout(cwd), ".fir-mailbox");
+}
+
+export function defaultCodexSessionIndex() {
+  if (process.env.FIR_CODEX_SESSION_INDEX) {
+    return resolve(process.env.FIR_CODEX_SESSION_INDEX);
+  }
+  const codexHome = process.env.CODEX_HOME ?? join(homedir(), ".codex");
+  return resolve(codexHome, "session_index.jsonl");
 }
 
 export function parseMessage(source, file = "<message>") {
@@ -575,6 +590,7 @@ function loadMailbox(mailboxPath) {
       if (!reservedDirectoryNames.has(entry.name)) ignoredFiles.push(`${entry.name}/`);
       continue;
     }
+    if (reservedMetadataNames.has(entry.name)) continue;
     if (ignoredMetadataNames.has(entry.name)) {
       ignoredFiles.push(entry.name);
       continue;
@@ -614,6 +630,186 @@ export function inspectMailbox(mailboxPath) {
 
 function deliveryError(label, errors) {
   return new Error(`${label}:\n${errors.join("\n")}`);
+}
+
+function withExclusiveLock(lockPath, action) {
+  let lock;
+  try {
+    try {
+      lock = openSync(lockPath, "wx", 0o600);
+    } catch (error) {
+      if (error.code === "EEXIST") {
+        throw new Error(`another mailbox operation holds ${lockPath}`);
+      }
+      throw error;
+    }
+    return action();
+  } finally {
+    if (lock !== undefined) {
+      closeSync(lock);
+      if (existsSync(lockPath)) unlinkSync(lockPath);
+    }
+  }
+}
+
+function writeJsonAtomic(path, temporaryPath, prefix, value) {
+  const staging = resolve(temporaryPath, `${prefix}-${randomUUID()}.json`);
+  try {
+    writeFileSync(staging, `${JSON.stringify(value, null, 2)}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    });
+    renameSync(staging, path);
+  } finally {
+    if (existsSync(staging)) unlinkSync(staging);
+  }
+}
+
+function validateSessionName(name, label = "Codex session name") {
+  if (typeof name !== "string" || name.length === 0 || name.length > 256 || /[\x00-\x1f\x7f]/.test(name)) {
+    throw new Error(`${label} must be a nonempty printable string of at most 256 characters`);
+  }
+}
+
+function loadCodexSessionIndex(sessionIndexPath = defaultCodexSessionIndex()) {
+  if (!existsSync(sessionIndexPath)) {
+    throw new Error(`Codex session index does not exist: ${sessionIndexPath}`);
+  }
+  const latest = new Map();
+  const source = readFileSync(sessionIndexPath, "utf8");
+  for (const [index, line] of source.split("\n").entries()) {
+    if (!line.trim()) continue;
+    let record;
+    try {
+      record = JSON.parse(line);
+    } catch (error) {
+      throw new Error(`malformed Codex session index line ${index + 1}: ${error.message}`);
+    }
+    if (!codexSessionIdPattern.test(record.id ?? "")) {
+      throw new Error(`malformed Codex session index line ${index + 1}: invalid session ID`);
+    }
+    validateSessionName(record.thread_name,
+      `malformed Codex session index line ${index + 1} thread name`);
+    latest.set(record.id, {
+      sessionId: record.id,
+      sessionName: record.thread_name,
+      updatedAt: record.updated_at ?? null,
+    });
+  }
+  return [...latest.values()];
+}
+
+function validateRouteRegistry(registry) {
+  if (!registry || registry.schemaVersion !== codexRouteProtocol || !Array.isArray(registry.routes)) {
+    throw new Error(`route registry must use schema ${codexRouteProtocol}`);
+  }
+  const addresses = new Set();
+  for (const [index, route] of registry.routes.entries()) {
+    if (!route || !isMailboxAddress(route.address ?? "")) {
+      throw new Error(`malformed route ${index + 1}: invalid mailbox address`);
+    }
+    if (addresses.has(route.address)) {
+      throw new Error(`ambiguous route registry: duplicate address ${route.address}`);
+    }
+    addresses.add(route.address);
+    if (!codexSessionIdPattern.test(route.sessionId ?? "")) {
+      throw new Error(`malformed route ${route.address}: invalid Codex session ID`);
+    }
+    validateSessionName(route.sessionName, `malformed route ${route.address} session name`);
+  }
+  return registry;
+}
+
+export function readCodexRoutes(mailboxPath) {
+  const path = resolve(mailboxPath, routeFileName);
+  if (!existsSync(path)) return { schemaVersion: codexRouteProtocol, routes: [] };
+  let registry;
+  try {
+    registry = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    throw new Error(`malformed route registry ${path}: ${error.message}`);
+  }
+  return validateRouteRegistry(registry);
+}
+
+function selectCodexSession(selector, sessionIndexPath) {
+  validateSessionName(selector, "Codex session selector");
+  const sessions = loadCodexSessionIndex(sessionIndexPath);
+  if (codexSessionIdPattern.test(selector)) {
+    const selected = sessions.find(({ sessionId }) => sessionId === selector);
+    if (!selected) throw new Error(`Codex session ID is absent from the session index: ${selector}`);
+    return selected;
+  }
+  const matches = sessions.filter(({ sessionName }) => sessionName === selector);
+  if (matches.length === 0) {
+    throw new Error(`no Codex session is indexed with exact name ${JSON.stringify(selector)}`);
+  }
+  if (matches.length > 1) {
+    throw new Error(
+      `ambiguous Codex session name ${JSON.stringify(selector)}; use one exact UUID: ` +
+      matches.map(({ sessionId }) => sessionId).join(", "),
+    );
+  }
+  return matches[0];
+}
+
+export function bindCodexRoute(mailboxPath, address, selector, {
+  sessionIndexPath = defaultCodexSessionIndex(),
+} = {}) {
+  if (!isMailboxAddress(address)) throw new Error(`invalid mailbox address ${JSON.stringify(address)}`);
+  const selected = selectCodexSession(selector, sessionIndexPath);
+  mkdirSync(mailboxPath, { recursive: true, mode: 0o700 });
+  const temporaryPath = resolve(mailboxPath, "tmp");
+  mkdirSync(temporaryPath, { recursive: true, mode: 0o700 });
+  return withExclusiveLock(resolve(temporaryPath, "routes.lock"), () => {
+    const registry = readCodexRoutes(mailboxPath);
+    const route = {
+      address,
+      sessionId: selected.sessionId,
+      sessionName: selected.sessionName,
+    };
+    const routes = registry.routes.filter((item) => item.address !== address);
+    routes.push(route);
+    routes.sort((left, right) => left.address.localeCompare(right.address));
+    writeJsonAtomic(resolve(mailboxPath, routeFileName), temporaryPath,
+      "codex-routes", { schemaVersion: codexRouteProtocol, routes });
+    return route;
+  });
+}
+
+export function unbindCodexRoute(mailboxPath, address) {
+  if (!isMailboxAddress(address)) throw new Error(`invalid mailbox address ${JSON.stringify(address)}`);
+  const temporaryPath = resolve(mailboxPath, "tmp");
+  mkdirSync(temporaryPath, { recursive: true, mode: 0o700 });
+  return withExclusiveLock(resolve(temporaryPath, "routes.lock"), () => {
+    const registry = readCodexRoutes(mailboxPath);
+    const routes = registry.routes.filter((item) => item.address !== address);
+    if (routes.length === registry.routes.length) return false;
+    writeJsonAtomic(resolve(mailboxPath, routeFileName), temporaryPath,
+      "codex-routes", { schemaVersion: codexRouteProtocol, routes });
+    return true;
+  });
+}
+
+export function resolveCodexRoute(mailboxPath, address, {
+  sessionIndexPath = defaultCodexSessionIndex(),
+} = {}) {
+  const registry = readCodexRoutes(mailboxPath);
+  const route = registry.routes.find((item) => item.address === address);
+  if (!route) throw new Error(`missing Codex route for mailbox recipient ${address}`);
+  const indexed = loadCodexSessionIndex(sessionIndexPath)
+    .find(({ sessionId }) => sessionId === route.sessionId);
+  if (!indexed) {
+    throw new Error(`stale Codex route for ${address}: session ${route.sessionId} is absent from the index`);
+  }
+  if (indexed.sessionName !== route.sessionName) {
+    throw new Error(
+      `stale Codex route for ${address}: session ${route.sessionId} is now named ` +
+      `${JSON.stringify(indexed.sessionName)}, not ${JSON.stringify(route.sessionName)}`,
+    );
+  }
+  return route;
 }
 
 export function deliverMessage(mailboxPath, draftPath) {
@@ -681,14 +877,17 @@ export function deliverMessage(mailboxPath, draftPath) {
   }
 }
 
-export function notifyCodexSession(session, delivered, { run = spawnSync } = {}) {
+export function notifyCodexSession(session, delivered, {
+  run = spawnSync,
+  command = process.env.FIR_MAILBOX_CODEX ?? "codex",
+} = {}) {
   const message = [
     `FIR mailbox message ${delivered.messageId}`,
     `from ${delivered.from} to ${delivered.to}: ${delivered.subject}.`,
     `Run scripts/mailbox list and read ${delivered.messageId}.md; the mailbox event is authoritative.`,
   ].join(" ");
   const result = run(
-    "codex",
+    command,
     ["queue", "--thread", session, "--message", message],
     { encoding: "utf8", timeout: 5_000, killSignal: "SIGTERM" },
   );

@@ -1,17 +1,21 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
 import {
+  bindCodexRoute,
   deliverMessage,
   inspectMailbox,
   notifyCodexSession,
   parseMessage,
   primaryCheckout,
+  readCodexRoutes,
+  resolveCodexRoute,
   resolveMailbox,
+  unbindCodexRoute,
   validateMessages,
 } from "./mailbox-lib.mjs";
 
@@ -62,6 +66,42 @@ async function withMailbox(run) {
 
 async function put(mailbox, id, source) {
   await writeFile(join(mailbox, `${id}.md`), source);
+}
+
+const testSessionId = "019f6b4e-540b-77e3-b7e7-a47feb55e777";
+
+async function sessionIndex(root, records = [
+  { id: testSessionId, thread_name: "wasm-gen", updated_at: "2026-08-26T20:00:00Z" },
+]) {
+  const path = join(root, "session-index.jsonl");
+  await writeFile(path, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
+  return path;
+}
+
+async function fakeCodex(root) {
+  const path = join(root, "fake-codex.sh");
+  await writeFile(path, [
+    "#!/usr/bin/env bash",
+    "printf '%s\\n' \"$*\" >> \"$FIR_TEST_CODEX_LOG\"",
+    "if [[ \"${FIR_TEST_CODEX_FAIL:-0}\" == 1 ]]; then",
+    "  echo 'session unavailable' >&2",
+    "  exit 1",
+    "fi",
+    `echo 'Queued test message for thread ${testSessionId}.'`,
+    "",
+  ].join("\n"));
+  await chmod(path, 0o755);
+  return path;
+}
+
+function cliEnvironment({ index, codex, log, fail = false }) {
+  return {
+    ...process.env,
+    FIR_CODEX_SESSION_INDEX: index,
+    FIR_MAILBOX_CODEX: codex,
+    FIR_TEST_CODEX_LOG: log,
+    FIR_TEST_CODEX_FAIL: fail ? "1" : "0",
+  };
 }
 
 test("documentation message examples conform to the protocol", () => {
@@ -646,6 +686,73 @@ test("reports malformed messages and filename mismatches", async () => {
   });
 });
 
+test("atomically binds, resolves, lists, and unbinds exact Codex routes", async () => {
+  await withMailbox(async (mailbox, root) => {
+    const index = await sessionIndex(root);
+    const route = bindCodexRoute(mailbox, "fir/root", testSessionId,
+      { sessionIndexPath: index });
+    assert.deepEqual(route, {
+      address: "fir/root",
+      sessionId: testSessionId,
+      sessionName: "wasm-gen",
+    });
+    assert.deepEqual(resolveCodexRoute(mailbox, "fir/root",
+      { sessionIndexPath: index }), route);
+    assert.deepEqual(readCodexRoutes(mailbox).routes, [route]);
+    assert.deepEqual(inspectMailbox(mailbox).errors, []);
+    assert.deepEqual((await readdir(join(mailbox, "tmp"))), []);
+    assert.equal(unbindCodexRoute(mailbox, "fir/root"), true);
+    assert.equal(unbindCodexRoute(mailbox, "fir/root"), false);
+    assert.throws(() => resolveCodexRoute(mailbox, "fir/root",
+      { sessionIndexPath: index }), /missing Codex route/);
+  });
+});
+
+test("route validation rejects ambiguous names and malformed, duplicate, or stale routes", async () => {
+  await withMailbox(async (mailbox, root) => {
+    const secondId = "019ff651-dc7c-71f1-83b3-1e099fd09740";
+    const index = await sessionIndex(root, [
+      { id: testSessionId, thread_name: "wasm-gen" },
+      { id: secondId, thread_name: "wasm-gen" },
+    ]);
+    assert.throws(() => bindCodexRoute(mailbox, "fir/root", "wasm-gen",
+      { sessionIndexPath: index }), /ambiguous Codex session name/);
+
+    await writeFile(join(mailbox, "codex-routes.json"), "not json\n");
+    assert.throws(() => readCodexRoutes(mailbox), /malformed route registry/);
+
+    await writeFile(join(mailbox, "codex-routes.json"), JSON.stringify({
+      schemaVersion: "fir.mailbox.codex-routes/v1",
+      routes: [
+        { address: "fir/root", sessionId: testSessionId, sessionName: "wasm-gen" },
+        { address: "fir/root", sessionId: secondId, sessionName: "wasm-gen" },
+      ],
+    }));
+    assert.throws(() => readCodexRoutes(mailbox), /ambiguous route registry/);
+
+    await writeFile(join(mailbox, "codex-routes.json"), JSON.stringify({
+      schemaVersion: "fir.mailbox.codex-routes/v1",
+      routes: [
+        { address: "fir/root", sessionId: testSessionId, sessionName: "old-name" },
+      ],
+    }));
+    assert.throws(() => resolveCodexRoute(mailbox, "fir/root",
+      { sessionIndexPath: index }), /stale Codex route/);
+  });
+});
+
+test("route publication respects its exclusive lock", async () => {
+  await withMailbox(async (mailbox, root) => {
+    const index = await sessionIndex(root);
+    await mkdir(join(mailbox, "tmp"), { recursive: true });
+    await writeFile(join(mailbox, "tmp", "routes.lock"), "held\n");
+    assert.throws(() => bindCodexRoute(mailbox, "fir/root", testSessionId,
+      { sessionIndexPath: index }), /another mailbox operation holds/);
+    assert.equal(readFileSync(join(mailbox, "tmp", "routes.lock"), "utf8"), "held\n");
+    assert.deepEqual(readCodexRoutes(mailbox).routes, []);
+  });
+});
+
 test("atomically delivers a validated draft and preserves the draft", async () => {
   await withMailbox(async (mailbox, root) => {
     const id = "ROOT-FIR-20260813-001";
@@ -686,7 +793,7 @@ test("delivery does not remove another process's lock", async () => {
   });
 });
 
-test("Codex notification is best-effort and contains only a mailbox pointer", () => {
+test("Codex notification contains only an authoritative mailbox pointer", () => {
   const delivered = {
     messageId: "ROOT-FIR-20260813-001",
     from: "lean-zip/root",
@@ -718,19 +825,168 @@ test("Codex notification is best-effort and contains only a mailbox pointer", ()
   );
 });
 
-test("CLI delivers through the validated path", async () => {
+test("CLI delivery automatically resolves its recipient and queues", async () => {
   await withMailbox(async (mailbox, root) => {
     const id = "ROOT-FIR-20260813-001";
     const draft = join(root, "draft.md");
+    const index = await sessionIndex(root);
+    const codex = await fakeCodex(root);
+    const log = join(root, "codex.log");
     await writeFile(draft, message({ id }));
+    bindCodexRoute(mailbox, "fir/*", testSessionId,
+      { sessionIndexPath: index });
 
     const result = spawnSync(script, ["deliver", draft, "--mailbox", mailbox], {
       encoding: "utf8",
+      env: cliEnvironment({ index, codex, log }),
     });
 
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, new RegExp(`delivered ${id}`));
+    assert.match(result.stdout, /notified Codex session wasm-gen/);
+    assert.match(readFileSync(log, "utf8"),
+      new RegExp(`queue --thread ${testSessionId} --message`));
     assert.deepEqual(inspectMailbox(mailbox).errors, []);
+  });
+});
+
+test("CLI warns after delivery for a missing route and direct session overrides routing", async () => {
+  await withMailbox(async (mailbox, root) => {
+    const id = "ROOT-FIR-20260813-001";
+    const draft = join(root, "draft.md");
+    const index = await sessionIndex(root);
+    const codex = await fakeCodex(root);
+    const log = join(root, "codex.log");
+    await writeFile(draft, message({ id }));
+    const environment = cliEnvironment({ index, codex, log });
+
+    const missing = spawnSync(script, ["deliver", draft, "--mailbox", mailbox], {
+      encoding: "utf8",
+      env: environment,
+    });
+    assert.equal(missing.status, 0, missing.stderr);
+    assert.match(missing.stderr, /durably delivered.*missing Codex route/);
+    assert.equal((await readdir(mailbox)).includes(`${id}.md`), true);
+  });
+
+  await withMailbox(async (mailbox, root) => {
+    const id = "ROOT-FIR-20260813-001";
+    const draft = join(root, "draft.md");
+    const index = await sessionIndex(root);
+    const codex = await fakeCodex(root);
+    const log = join(root, "codex.log");
+    await writeFile(draft, message({ id }));
+    await writeFile(join(mailbox, "codex-routes.json"), JSON.stringify({
+      schemaVersion: "fir.mailbox.codex-routes/v1",
+      routes: [{
+        address: "fir/*",
+        sessionId: testSessionId,
+        sessionName: "former-name",
+      }],
+    }));
+    const stale = spawnSync(script, ["deliver", draft, "--mailbox", mailbox], {
+      encoding: "utf8",
+      env: cliEnvironment({ index, codex, log }),
+    });
+    assert.equal(stale.status, 0, stale.stderr);
+    assert.match(stale.stderr, /durably delivered.*stale Codex route/);
+    assert.equal((await readdir(mailbox)).includes(`${id}.md`), true);
+  });
+
+  await withMailbox(async (mailbox, root) => {
+    const id = "ROOT-FIR-20260813-001";
+    const draft = join(root, "draft.md");
+    const index = await sessionIndex(root);
+    const codex = await fakeCodex(root);
+    const log = join(root, "codex.log");
+    await writeFile(draft, message({ id }));
+    const environment = cliEnvironment({ index, codex, log });
+
+    bindCodexRoute(mailbox, "fir/*", testSessionId,
+      { sessionIndexPath: index });
+    await writeFile(join(mailbox, "codex-routes.json"), "malformed route\n");
+    const override = spawnSync(script, [
+      "deliver", draft, "--mailbox", mailbox,
+      "--notify-session", testSessionId,
+    ], { encoding: "utf8", env: environment });
+    assert.equal(override.status, 0, override.stderr);
+    assert.match(override.stdout, new RegExp(`notified Codex session ${testSessionId}`));
+    assert.match(readFileSync(log, "utf8"), new RegExp(`--thread ${testSessionId}`));
+    assert.equal((await readdir(mailbox)).includes(`${id}.md`), true);
+  });
+});
+
+test("CLI preserves successful delivery when queue notification fails", async () => {
+  await withMailbox(async (mailbox, root) => {
+    const id = "ROOT-FIR-20260813-001";
+    const draft = join(root, "draft.md");
+    const index = await sessionIndex(root);
+    const codex = await fakeCodex(root);
+    const log = join(root, "codex.log");
+    await writeFile(draft, message({ id }));
+    bindCodexRoute(mailbox, "fir/*", testSessionId,
+      { sessionIndexPath: index });
+
+    const failed = spawnSync(script, ["deliver", draft, "--mailbox", mailbox], {
+      encoding: "utf8",
+      env: cliEnvironment({ index, codex, log, fail: true }),
+    });
+    assert.equal(failed.status, 0, failed.stderr);
+    assert.match(failed.stderr, /durably delivered.*notification failed/);
+    assert.equal(readFileSync(join(mailbox, `${id}.md`), "utf8"), message({ id }));
+    assert.equal(readFileSync(log, "utf8").trim().split("\n").length, 1);
+  });
+});
+
+test("CLI no-notify escape hatch skips route lookup and queue invocation", async () => {
+  await withMailbox(async (mailbox, root) => {
+    const id = "ROOT-FIR-20260813-001";
+    const draft = join(root, "draft.md");
+    const index = await sessionIndex(root);
+    const codex = await fakeCodex(root);
+    const log = join(root, "codex.log");
+    await writeFile(draft, message({ id }));
+    await writeFile(join(mailbox, "codex-routes.json"), "malformed route\n");
+    const result = spawnSync(script, [
+      "deliver", draft, "--mailbox", mailbox, "--no-notify",
+    ], {
+      encoding: "utf8",
+      env: cliEnvironment({ index, codex, log }),
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /notification skipped/);
+    assert.equal((await readdir(mailbox)).includes(`${id}.md`), true);
+    assert.equal(readFileSync(join(mailbox, `${id}.md`), "utf8"), message({ id }));
+    assert.throws(() => readFileSync(log, "utf8"), /ENOENT/);
+  });
+});
+
+test("CLI exposes bind, list, and unbind routing operations", async () => {
+  await withMailbox(async (mailbox, root) => {
+    const index = await sessionIndex(root);
+    const environment = { ...process.env, FIR_CODEX_SESSION_INDEX: index };
+    const bound = spawnSync(script, [
+      "route", "bind", "fir/root", testSessionId, "--mailbox", mailbox,
+    ], { encoding: "utf8", env: environment });
+    assert.equal(bound.status, 0, bound.stderr);
+    assert.match(bound.stdout, /bound fir\/root -> wasm-gen/);
+
+    const listed = spawnSync(script,
+      ["route", "list", "--json", "--mailbox", mailbox],
+      { encoding: "utf8", env: environment });
+    assert.equal(listed.status, 0, listed.stderr);
+    assert.deepEqual(JSON.parse(listed.stdout).routes, [{
+      address: "fir/root",
+      sessionId: testSessionId,
+      sessionName: "wasm-gen",
+    }]);
+
+    const unbound = spawnSync(script,
+      ["route", "unbind", "fir/root", "--mailbox", mailbox],
+      { encoding: "utf8", env: environment });
+    assert.equal(unbound.status, 0, unbound.stderr);
+    assert.match(unbound.stdout, /unbound fir\/root/);
+    assert.deepEqual(readCodexRoutes(mailbox).routes, []);
   });
 });
 

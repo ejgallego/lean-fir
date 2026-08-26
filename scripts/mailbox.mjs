@@ -3,13 +3,17 @@
 import { existsSync } from "node:fs";
 
 import {
+  bindCodexRoute,
   deliverMessage,
   inspectMailbox,
   isMailboxAddress,
   mailboxProtocol,
   mailboxStates,
   notifyCodexSession,
+  readCodexRoutes,
+  resolveCodexRoute,
   resolveMailbox,
+  unbindCodexRoute,
 } from "./mailbox-lib.mjs";
 
 const defaultListStates = new Set(["open", "claimed", "in-progress", "blocked"]);
@@ -20,26 +24,39 @@ function usage(print = console.error) {
     "  scripts/mailbox list [--for ADDRESS] [--state STATE] " +
       "[--verbose|--json] [--all] [--mailbox PATH]",
     "  scripts/mailbox check [--mailbox PATH]",
-    "  scripts/mailbox deliver DRAFT [--notify-session SESSION] [--mailbox PATH]",
+    "  scripts/mailbox deliver DRAFT [--no-notify|--notify-session SESSION] " +
+      "[--mailbox PATH]",
+    "  scripts/mailbox route bind ADDRESS SESSION [--mailbox PATH]",
+    "  scripts/mailbox route unbind ADDRESS [--mailbox PATH]",
+    "  scripts/mailbox route list [--json] [--mailbox PATH]",
     "",
-    "list shows open, claimed, in-progress, and blocked threads by default.",
+    "deliver resolves the recipient route and queues by default; --no-notify skips it.",
   ].join("\n"));
 }
 
 function parseArgs(argv) {
-  const [command, ...rest] = argv;
-  if (!new Set(["check", "list", "deliver"]).has(command)) {
-    throw new Error("expected `check`, `list`, or `deliver`");
+  const [command, ...arguments_] = argv;
+  if (!new Set(["check", "list", "deliver", "route"]).has(command)) {
+    throw new Error("expected `check`, `list`, `deliver`, or `route`");
+  }
+  const rest = [...arguments_];
+  const routeAction = command === "route" ? rest.shift() : null;
+  if (command === "route" && !new Set(["bind", "unbind", "list"]).has(routeAction)) {
+    throw new Error("route expects `bind`, `unbind`, or `list`");
   }
   const options = {
     command,
+    routeAction,
     all: false,
     json: false,
     verbose: false,
     mailbox: null,
     draft: null,
+    noNotify: false,
     notifySession: null,
     address: null,
+    routeAddress: null,
+    routeSession: null,
     states: new Set(),
   };
   for (let index = 0; index < rest.length; index += 1) {
@@ -76,12 +93,20 @@ function parseArgs(argv) {
         throw new Error("`--notify-session` requires a session UUID or exact name");
       }
       index += 1;
+    } else if (argument === "--no-notify") {
+      options.noNotify = true;
     } else if (command === "deliver" && !options.draft) options.draft = argument;
+    else if (command === "route" && routeAction !== "list" && !options.routeAddress) {
+      options.routeAddress = argument;
+    } else if (command === "route" && routeAction === "bind" && !options.routeSession) {
+      options.routeSession = argument;
+    }
     else throw new Error(`unknown argument ${JSON.stringify(argument)}`);
   }
   const hasListOption = options.all || options.json || options.verbose ||
     options.address || options.states.size > 0;
-  if (command !== "list" && hasListOption) {
+  const routeList = command === "route" && routeAction === "list";
+  if (command !== "list" && !(routeList && options.json) && hasListOption) {
     throw new Error("`--all`, `--json`, `--verbose`, `--for`, and `--state` are list options");
   }
   if (options.all && options.states.size > 0) {
@@ -90,10 +115,22 @@ function parseArgs(argv) {
   if (options.json && options.verbose) {
     throw new Error("`--json` and `--verbose` cannot be combined");
   }
-  if (command !== "deliver" && options.notifySession) {
-    throw new Error("`--notify-session` is a deliver option");
+  if (command !== "deliver" && (options.notifySession || options.noNotify)) {
+    throw new Error("`--notify-session` and `--no-notify` are deliver options");
+  }
+  if (options.notifySession && options.noNotify) {
+    throw new Error("`--notify-session` and `--no-notify` cannot be combined");
   }
   if (command === "deliver" && !options.draft) throw new Error("deliver requires a draft path");
+  if (command === "route" && routeAction !== "list" && !options.routeAddress) {
+    throw new Error(`route ${routeAction} requires an address`);
+  }
+  if (options.routeAddress && !isMailboxAddress(options.routeAddress)) {
+    throw new Error(`invalid mailbox address ${JSON.stringify(options.routeAddress)}`);
+  }
+  if (command === "route" && routeAction === "bind" && !options.routeSession) {
+    throw new Error("route bind requires a session UUID or exact name");
+  }
   return options;
 }
 
@@ -195,20 +232,55 @@ if (argv.length === 1 && new Set(["help", "-h", "--help"]).has(argv[0])) {
 if (options) {
   try {
     const mailboxPath = resolveMailbox({ mailbox: options.mailbox });
-    if (options.command !== "deliver" && options.mailbox && !existsSync(mailboxPath)) {
+    const createsMailbox = options.command === "deliver" ||
+      (options.command === "route" && options.routeAction === "bind");
+    if (!createsMailbox && options.mailbox && !existsSync(mailboxPath)) {
       throw new Error(`mailbox does not exist: ${mailboxPath}`);
     }
     if (options.command === "deliver") {
       const delivered = deliverMessage(mailboxPath, options.draft);
       console.log(`delivered ${delivered.messageId} -> ${delivered.destination}`);
-      if (options.notifySession) {
-        const notification = notifyCodexSession(options.notifySession, delivered);
-        if (notification.ok) {
-          console.log(`notified Codex session ${options.notifySession}`);
-        } else {
-          console.warn(
-            `warning: durable delivery succeeded, but Codex notification failed: ${notification.detail}`,
+      if (options.noNotify) {
+        console.log(`Codex notification skipped for ${delivered.messageId}`);
+      } else {
+        let session = options.notifySession;
+        let label = session;
+        if (!session) {
+          try {
+            const route = resolveCodexRoute(mailboxPath, delivered.to);
+            session = route.sessionId;
+            label = `${route.sessionName} (${route.sessionId})`;
+          } catch (error) {
+            console.warn(
+              `warning: mailbox message ${delivered.messageId} is durably delivered, but ` +
+              `Codex route resolution failed: ${error.message}`,
+            );
+          }
+        }
+        if (session) {
+          const notification = notifyCodexSession(session, delivered);
+          if (notification.ok) console.log(`notified Codex session ${label}`);
+          else console.warn(
+            `warning: mailbox message ${delivered.messageId} is durably delivered, but ` +
+            `Codex notification failed: ${notification.detail}`,
           );
+        }
+      }
+    } else if (options.command === "route") {
+      if (options.routeAction === "bind") {
+        const route = bindCodexRoute(mailboxPath, options.routeAddress,
+          options.routeSession);
+        console.log(`bound ${route.address} -> ${route.sessionName} (${route.sessionId})`);
+      } else if (options.routeAction === "unbind") {
+        const removed = unbindCodexRoute(mailboxPath, options.routeAddress);
+        console.log(removed ? `unbound ${options.routeAddress}` :
+          `no route bound for ${options.routeAddress}`);
+      } else {
+        const registry = readCodexRoutes(mailboxPath);
+        if (options.json) console.log(JSON.stringify(registry, null, 2));
+        else if (registry.routes.length === 0) console.log("no Codex mailbox routes");
+        else for (const route of registry.routes) {
+          console.log(`${route.address} -> ${route.sessionName} (${route.sessionId})`);
         }
       }
     } else {

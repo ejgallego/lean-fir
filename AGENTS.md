@@ -96,9 +96,11 @@ These rules apply to every agent and worktree in this repository.
 - Follow `docs/MAILBOX_PROTOCOL.md`. A cross-project thread lives in the
   mailbox of the project that owns the requested code change.
 - Deliver new messages with `scripts/mailbox deliver /path/to/message.md`;
-  do not write directly into the canonical mailbox. `--notify-session <UUID
-  or exact name>` may add a best-effort `codex queue` notification after
-  durable delivery, but the mailbox event remains authoritative.
+  do not write directly into the canonical mailbox. Delivery resolves the
+  stable recipient through the ignored local route registry and automatically
+  invokes `codex queue` by default; manage mappings with
+  `scripts/mailbox route`. `--no-notify` skips the doorbell when needed, and
+  route or queue failures warn without changing authoritative delivery.
 - Read `scripts/mailbox list --for <lane-address>` and `git worktree list`
   before claiming a lane. A
   valid acknowledgement records the owner, project-relative worktree, branch,
