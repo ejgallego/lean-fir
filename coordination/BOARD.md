@@ -5975,8 +5975,27 @@ identities.
   `UInt64 → object` boxes using upstream's own boxed-type mapping while
   preserving generic `tobject` lowering and rejecting the converse malformed
   annotations.  Lean Beam, `make check` at 728 unique cases and 2,166/2,166
-  comparisons, and all 3,180 Talos jobs pass.  W7 next installs the two
-  physical-signature aliases without duplicating helper bodies.
+  comparisons, and all 3,180 Talos jobs pass. The matching physical-signature
+  aliases are accepted under the released scalar-box result-kind lease above.
+
+- W7's permanent seven-family source frontier is linked/accepted through
+  functional head `b766ebf4` and clean tracked handoff `90c833e2`, based
+  directly on `main` at `b8e847f9`. Fourteen real Lean entries exercise one
+  polymorphic round trip and one compiler-generated `_boxed` closure wrapper
+  for each of UInt8, UInt16, UInt32, UInt64, USize, Float32, and Float. Exact
+  wrapper result kinds are derived from the accepted upstream mapping rather
+  than duplicated in the fixture. UInt8, UInt16, UInt32, UInt64, and Float
+  must close to zero imports and zero residual runtime operations. USize and
+  Float32 are compiled rather than fenced and must retain exactly their own
+  box/unbox pair, so unrelated frontier drift fails immediately. Lean Beam,
+  the focused 59-job source cone, `make check` at 728 unique cases and
+  2,166/2,166 comparisons, all 3,174 Talos jobs, and the complete deterministic
+  W7 artifact gate pass. No helper signature, implementation, concrete layout,
+  physical representation, ABI, ownership, source semantic, or symbolic Wasm
+  contract changed. The next shared-contract/helper slices are USize followed
+  by Float32; accepting each turns its existing readiness flag into a
+  zero-frontier ratchet, after which W7 adds the external-engine fourteen-entry
+  closure gate.
 
 - W7's checked resident caller decrement gate is generation-ready through
   functional head `e8ca658b` and exact handoff `8f52e007`, integrated in the
