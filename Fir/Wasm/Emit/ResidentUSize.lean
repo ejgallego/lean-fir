@@ -341,6 +341,12 @@ private def ofNatCallSiteRewrite : ResidentCallSite.Rewrite := {
   signature := { params := #[.tobject], results := #[.usize] }
   locals := #[(inlineOfNatLocal, .tobject),
     (inlineOfNatResultLocal, .usize)]
+  /- A tagged Nat payload survives the modulo-2^64 conversion unchanged and
+  therefore remains within the tagged-Nat payload range as a scalar USize. -/
+  conditionalResultRefinement? := some {
+    argumentKinds := #[some .tagged]
+    kind := .usize
+    resultFact? := some .fitsTaggedNat }
   body := [
   .localSet inlineOfNatLocal,
   .localGet inlineOfNatLocal,
@@ -363,6 +369,12 @@ private def toNatCallSiteRewrite : ResidentCallSite.Rewrite := {
   signature := { params := #[.usize], results := #[.tobject] }
   locals := #[(inlineToNatLocal, .usize),
     (inlineToNatResultLocal, .tobject)]
+  /- Consume the range fact without narrowing the USize ABI itself. The direct
+  branch below constructs exactly the corresponding tagged Nat word. -/
+  conditionalResultRefinement? := some {
+    argumentKinds := #[none]
+    argumentFacts := #[some .fitsTaggedNat]
+    kind := .tagged }
   body := [
   .localSet inlineToNatLocal,
   .localGet inlineToNatLocal,
@@ -389,6 +401,14 @@ def callSiteRewrites : Array ResidentCallSite.Rewrite := #[
 
 #guard toNatCallSiteRewrite.locals == #[(inlineToNatLocal, .usize),
   (inlineToNatResultLocal, .tobject)]
+#guard ofNatCallSiteRewrite.conditionalResultRefinement? == some {
+  argumentKinds := #[some .tagged]
+  kind := .usize
+  resultFact? := some .fitsTaggedNat }
+#guard toNatCallSiteRewrite.conditionalResultRefinement? == some {
+  argumentKinds := #[none]
+  argumentFacts := #[some .fitsTaggedNat]
+  kind := .tagged }
 #guard toNatCallSiteRewrite.body == [
   .localSet inlineToNatLocal,
   .localGet inlineToNatLocal,

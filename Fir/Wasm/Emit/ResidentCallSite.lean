@@ -14,8 +14,15 @@ while these rules describe the caller-local state needed to reproduce the
 inline wrapper at a symbolic call site.
 -/
 
-/-- A compiler result-local refinement justified by the kinds of the original
-call operands.
+/-- A reviewed semantic value fact that can cross an ABI-preserving scalar
+operation without pretending that the scalar has a narrower ABI kind. -/
+inductive ValueFact where
+  /-- The operation's natural-number value fits Lean's tagged-Nat payload. -/
+  | fitsTaggedNat
+  deriving Inhabited, BEq, Repr
+
+/-- A compiler result-local refinement justified by the kinds and reviewed
+value facts of the original call operands.
 
 `argumentKinds` follows the target signature. `none` accepts any compiler
 local, while `some kind` requires an immediately preceding `localGet` whose
@@ -23,12 +30,20 @@ declared kind is exactly `kind`. A matching call must be followed immediately
 by the compiler's `localSet` for its result, and that local must have no other
 definition in the function.
 
+`argumentFacts` is either empty or follows the target signature in the same
+way. Facts are deliberately separate from `AbiKind`: for example, a `.usize`
+local can be known to fit the tagged-Nat payload without changing its scalar
+calling convention. `resultFact?` carries such a fact to a later reviewed
+call. A tagged result intrinsically carries `fitsTaggedNat`.
+
 The provider remains responsible for the semantic transfer rule. The generic
 machinery checks only that the operand conditions and result refinement agree
 with the target signature. -/
 structure ConditionalResultRefinement where
   argumentKinds : Array (Option AbiKind)
+  argumentFacts : Array (Option ValueFact) := #[]
   kind : AbiKind
+  resultFact? : Option ValueFact := none
   deriving Inhabited, BEq
 
 /-- One typed call replacement and the fresh locals it requires.
@@ -75,6 +90,9 @@ def validateRewrites (rewrites : Array Rewrite) (module : Module) :
     if let some refinement := rewrite.conditionalResultRefinement? then
       unless refinement.argumentKinds.size == signature.params.size do
         throw (.invalidConditionalRefinement index)
+      unless refinement.argumentFacts.isEmpty ||
+          refinement.argumentFacts.size == signature.params.size do
+        throw (.invalidConditionalRefinement index)
       let some ordinary := signature.results[0]? |
         throw (.invalidConditionalRefinement index)
       unless signature.results.size == 1 && refinement.kind.refines ordinary do
@@ -92,38 +110,67 @@ private partial def instructionCalls (target : CallTarget) : Instruction → Boo
         elseBody.any (instructionCalls target)
   | _ => false
 
-private def callArgumentsMatch (locals : LocalKinds)
-    (conditions : Array (Option AbiKind)) (instructions : Array Instruction)
+private abbrev LocalFacts := Array (FVarId × ValueFact)
+
+private def hasFact (facts : LocalFacts) (localId : FVarId)
+    (fact : ValueFact) : Bool :=
+  facts.any fun entry => entry.1.name == localId.name && entry.2 == fact
+
+private def addFact (facts : LocalFacts) (localId : FVarId)
+    (fact : ValueFact) : LocalFacts :=
+  if hasFact facts localId fact then facts else facts.push (localId, fact)
+
+private def intrinsicFacts (locals : LocalKinds) : LocalFacts :=
+  locals.foldl (init := #[]) fun facts entry =>
+    if entry.2 == .tagged then addFact facts entry.1 .fitsTaggedNat else facts
+
+private def factConditionAt (conditions : Array (Option ValueFact))
+    (index : Nat) : Option ValueFact :=
+  if conditions.isEmpty then none else conditions[index]?.join
+
+private def callArgumentsMatch (locals : LocalKinds) (facts : LocalFacts)
+    (refinement : ConditionalResultRefinement)
+    (instructions : Array Instruction)
     (callIndex : Nat) : Bool :=
-  if callIndex < conditions.size then false
+  if callIndex < refinement.argumentKinds.size then false
   else
-    let arguments := instructions.extract (callIndex - conditions.size) callIndex
-    arguments.size == conditions.size &&
-      (arguments.zip conditions).all fun pair =>
-        match pair.1, pair.2 with
-        | .localGet localId, some expected =>
-            findLocalKind? locals localId == some expected
-        | .localGet _, none => true
-        | _, _ => false
+    let arguments := instructions.extract
+      (callIndex - refinement.argumentKinds.size) callIndex
+    arguments.size == refinement.argumentKinds.size &&
+      arguments.zipIdx.all fun pair =>
+        match pair.1 with
+        | .localGet localId =>
+            let kindMatches := match refinement.argumentKinds[pair.2]? with
+              | some (some expected) =>
+                  findLocalKind? locals localId == some expected
+              | some none => true
+              | none => false
+            let factMatches := match
+                factConditionAt refinement.argumentFacts pair.2 with
+              | some expected => hasFact facts localId expected
+              | none => true
+            kindMatches && factMatches
+        | _ => false
 
 private partial def refinedResultLocals (target : CallTarget)
-    (locals : LocalKinds) (conditions : Array (Option AbiKind))
+    (locals : LocalKinds) (facts : LocalFacts)
+    (refinement : ConditionalResultRefinement)
     (instructions : List Instruction) : Array FVarId :=
   let instructions := instructions.toArray
   instructions.zipIdx.foldl (init := #[]) fun results pair =>
     match pair.1 with
     | .call actual =>
         if actual == target &&
-            callArgumentsMatch locals conditions instructions pair.2 then
+            callArgumentsMatch locals facts refinement instructions pair.2 then
           match instructions[pair.2 + 1]? with
           | some (.localSet result) => results.push result
           | _ => results
         else results
     | .block _ body | .loop _ body =>
-        results ++ refinedResultLocals target locals conditions body
+        results ++ refinedResultLocals target locals facts refinement body
     | .ifElse thenBody elseBody =>
-        results ++ refinedResultLocals target locals conditions thenBody ++
-          refinedResultLocals target locals conditions elseBody
+        results ++ refinedResultLocals target locals facts refinement thenBody ++
+          refinedResultLocals target locals facts refinement elseBody
     | _ => results
 
 private partial def assignedLocals : List Instruction → Array FVarId
@@ -138,15 +185,25 @@ private partial def assignedLocals : List Instruction → Array FVarId
 private def occurrenceCount (values : Array FVarId) (target : FVarId) : Nat :=
   (values.filter fun value => value.name == target.name).size
 
+private structure RefinementState where
+  function : Function
+  facts : LocalFacts
+
+private def refinementFact? (refinement : ConditionalResultRefinement) :
+    Option ValueFact :=
+  if refinement.kind == .tagged then some .fitsTaggedNat
+  else refinement.resultFact?
+
 private def refineFunctionLocalsOnce (rewrites : Array Rewrite)
-    (function : Function) : Function :=
+    (state : RefinementState) : RefinementState :=
+  let function := state.function
   let localKinds := function.params.toList ++ function.locals.toList
   let assignments := assignedLocals function.body
   let candidates := rewrites.filterMap fun rewrite =>
     rewrite.conditionalResultRefinement?.map fun refinement =>
       (refinement,
-        refinedResultLocals rewrite.target localKinds
-          refinement.argumentKinds function.body)
+        refinedResultLocals rewrite.target localKinds state.facts
+          refinement function.body)
   let locals := function.locals.map fun entry =>
     let applicable := candidates.filterMap fun candidate =>
       let count := occurrenceCount candidate.2 entry.1
@@ -158,7 +215,22 @@ private def refineFunctionLocalsOnce (rewrites : Array Rewrite)
     | some kind =>
         if applicable.all (· == kind) then (entry.1, kind) else entry
     | none => entry
-  { function with locals }
+  let function := { function with locals }
+  let facts := function.locals.foldl (init := state.facts) fun facts entry =>
+    let applicable := candidates.filter fun candidate =>
+      let count := occurrenceCount candidate.2 entry.1
+      count > 0 && count == occurrenceCount assignments entry.1
+    let produced := applicable.filterMap fun candidate =>
+      refinementFact? candidate.1
+    match produced[0]? with
+    | some fact =>
+        if produced.size == applicable.size && produced.all (· == fact) then
+          addFact facts entry.1 fact
+        else facts
+    | none => facts
+  { function, facts := intrinsicFacts
+      (function.params.toList ++ function.locals.toList) |>.foldl
+        (init := facts) fun facts entry => addFact facts entry.1 entry.2 }
 
 /-- Propagate reviewed representation/range facts from primitive operands to
 the compiler's single-assignment result locals. Iterate to a fixed point so a
@@ -166,13 +238,17 @@ chain of eligible primitive calls retains the fact without a declaration- or
 application-specific allowlist. -/
 def refineFunctionLocals (rewrites : Array Rewrite)
     (function : Function) : Function :=
-  let rec loop : Nat → Function → Function
-    | 0, function => function
-    | fuel + 1, function =>
-        let refined := refineFunctionLocalsOnce rewrites function
-        if refined.locals == function.locals then refined
+  let initial : RefinementState := {
+    function
+    facts := intrinsicFacts (function.params.toList ++ function.locals.toList) }
+  let rec loop : Nat → RefinementState → RefinementState
+    | 0, state => state
+    | fuel + 1, state =>
+        let refined := refineFunctionLocalsOnce rewrites state
+        if refined.function.locals == state.function.locals &&
+            refined.facts == state.facts then refined
         else loop fuel refined
-  loop function.locals.size function
+  (loop (function.locals.size * (rewrites.size + 1)) initial).function
 
 /-- Add only the rule locals needed by calls actually present in `function`. -/
 def reserveLocals (rewrites : Array Rewrite) (function : Function) :
@@ -307,6 +383,55 @@ private def exampleObjectChainFunction : Function := {
     exampleObjectChainFunction).locals ==
   #[(exampleResult, .tagged), (exampleResult2, .tagged)]
 
+private def exampleObjectToScalarTarget : CallTarget :=
+  .declaration `Example.objectToScalar
+
+private def exampleScalarToObjectTarget : CallTarget :=
+  .declaration `Example.scalarToObject
+
+private def exampleObjectToScalarRewrite : Rewrite := {
+  target := exampleObjectToScalarTarget
+  signature := { params := #[.tobject], results := #[.usize] }
+  conditionalResultRefinement? := some {
+    argumentKinds := #[some .tagged]
+    kind := .usize
+    resultFact? := some .fitsTaggedNat }
+  body := [.call exampleObjectToScalarTarget] }
+
+private def exampleScalarToObjectRewrite : Rewrite := {
+  target := exampleScalarToObjectTarget
+  signature := { params := #[.usize], results := #[.tobject] }
+  conditionalResultRefinement? := some {
+    argumentKinds := #[none]
+    argumentFacts := #[some .fitsTaggedNat]
+    kind := .tagged }
+  body := [.call exampleScalarToObjectTarget] }
+
+private def exampleFactChainFunction (argumentKind : AbiKind) : Function := {
+  name := `Example.factChainCaller
+  params := #[(exampleValue, argumentKind)]
+  results := #[.tobject]
+  locals := #[(exampleResult, .usize), (exampleResult2, .tobject)]
+  body := [
+    .localGet exampleValue,
+    .call exampleObjectToScalarTarget,
+    .localSet exampleResult,
+    .localGet exampleResult,
+    .call exampleScalarToObjectTarget,
+    .localSet exampleResult2,
+    .localGet exampleResult2,
+    .ret] }
+
+#guard (refineFunctionLocals
+    #[exampleObjectToScalarRewrite, exampleScalarToObjectRewrite]
+    (exampleFactChainFunction .tagged)).locals ==
+  #[(exampleResult, .usize), (exampleResult2, .tagged)]
+
+#guard (refineFunctionLocals
+    #[exampleObjectToScalarRewrite, exampleScalarToObjectRewrite]
+    (exampleFactChainFunction .tobject)).locals ==
+  #[(exampleResult, .usize), (exampleResult2, .tobject)]
+
 private def exampleMultiplyAssignedFunction : Function := {
   exampleObjectFunction .tagged with
   body := [
@@ -351,6 +476,16 @@ private def exampleObjectModule : Module := {
     exampleObjectRewrite with
     conditionalResultRefinement? := some {
       argumentKinds := #[some .uint32]
+      kind := .tagged }
+  }] exampleObjectModule with
+  | .error (.invalidConditionalRefinement 0) => true
+  | _ => false
+
+#guard match validateRewrites #[{
+    exampleObjectRewrite with
+    conditionalResultRefinement? := some {
+      argumentKinds := #[some .tagged]
+      argumentFacts := #[none, none]
       kind := .tagged }
   }] exampleObjectModule with
   | .error (.invalidConditionalRefinement 0) => true
