@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-impure-none-uint64-box-tagged
-status: confirmed
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: d8b18978322de05a8f3dba51ef03cf5461676c17
@@ -96,6 +96,20 @@ rejects tagged inputs at semantic `unbox UInt64`, and adds
 the exact `box; fap; dec[ref]; return` ownership path, pin every executed form
 and count, and agree between native Lean and the LCNF interpreter.
 
-The bug remains confirmed until the W7 resident helper, external-engine
-regression, and W6 concrete refinement are adapted to the same upstream
-`lean_box_uint64`/`lean_unbox_uint64` representation.
+The shared semantic contract, ElimDead relation, concrete runtime, and W6
+refinement stack landed through `45761d92`. W7 functional head `af7d10a8`
+removes the immediate and promoted branches from `fir_box_uint64`, makes every
+payload allocate the canonical 40-byte ordinary box, and makes
+`fir_unbox_uint64` reject tagged immediates and promoted tags. The temporary
+concrete JavaScript host follows the same rule.
+
+The standalone zero-import Wasm regression covers `0`, `1`, `2^31 - 1`,
+`2^31`, `2^63 - 1`, `2^63`, and `2^64 - 1`, checking exact headers, 40-byte
+frontier growth, and bit-exact round trips. It also checks that both obsolete
+tagged forms trap. The compiler-generated small and maximum probes pass across
+native Lean, LCNF, and V8. `make check` reports 2,166/2,166 equal comparisons,
+all 3,172 Talos jobs pass, and the deterministic artifact/concrete-readiness
+gate passes with module-owned memory and zero imports.
+
+`USize` remains a separate representation audit; it is not changed by this
+repair.
