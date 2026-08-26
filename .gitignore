@@ -4,6 +4,7 @@
 .beam/
 .lake/
 .lake_cache/
+.fir-lake-cache/
 .deps/
 .worktrees/
 build/
