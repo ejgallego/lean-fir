@@ -543,7 +543,10 @@ node test-concrete-initial-runtime.mjs
 node run-concrete-source-artifacts.mjs _build
 node call-concrete-pretty-format-invocation.mjs \
   _build/source-pretty-format-coverage.wasm
-make -C "$here/../../.." validate-v8
+python3 "$root/scripts/verify_validation_reuse.py" \
+  --receipt "$root/_build/validation-v8/evidence-receipt.json" \
+  --plan "$root/validation-plans/native-lcnf-v8-scalars.json" \
+  --rerun-v8-on-mismatch
 node check-concrete-validation-products.mjs \
   "$here/../../../_build/validation-v8"
 if [[ -n "${FIR_BROWSER:-}" ]]; then

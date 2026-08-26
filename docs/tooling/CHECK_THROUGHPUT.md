@@ -96,3 +96,22 @@ native/LCNF comparison SHA-256
 `d8be816dcaec16d2727d792807a4796edf50f881ad463e3116e99db0e5f2cd5c`
 and LCNF coverage SHA-256
 `278ef6698278fe48e70b94b05496ade4c5d595d157f82585d930d378fa912f14`.
+
+The artifact gate consumes the same verifier in an opt-in ensure mode. An
+exact current V8 receipt is reused; a missing or mismatched receipt triggers a
+full `make validate-v8` and a second verification. If the regenerated receipt
+still does not bind the current inputs, tools, build identities, corpus, case
+selection, and all three comparison pairs, the artifact gate fails. Unit tests
+cover the reuse, rerun-and-accept, and rerun-then-reject paths.
+
+Three warm complete artifact-gate samples with an exact reusable receipt were
+46.71, 45.65, and 45.95 seconds: median 45.95 seconds, MAD 0.30 seconds,
+and median utilization 0.98 effective cores. Against the serial baseline
+median of 105.70 seconds, this is a 59.75-second or 56.5% wall-time reduction.
+Median user-plus-system CPU time fell from 101.20 to 45.48 seconds. Every
+round verified 721 cases and all three requested pairs before reuse, retained
+the 658 executable / 63 ByteArray-blocked concrete validation inventory,
+passed all deterministic first/second artifact comparisons, and reported
+44/44 concrete-readiness artifacts and 16/16 sources. No parallelism is active
+in this candidate; the accepted attribution is removal of the artifact gate's
+third full V8-matrix execution.

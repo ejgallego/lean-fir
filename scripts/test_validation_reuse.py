@@ -7,12 +7,61 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import validation_harness as harness
 import verify_validation_reuse as reuse
 
 
 class ValidationReuseTests(unittest.TestCase):
+    def test_exact_receipt_does_not_rerun(self) -> None:
+        runner = mock.Mock()
+        matrix = {"selectedCases": ["a"]}
+        with mock.patch.object(
+            reuse, "verify_reusable_receipt", return_value=matrix
+        ):
+            observed, reran = reuse.ensure_reusable_receipt(
+                Path("receipt.json"), Path("plan.json"), runner
+            )
+        self.assertIs(observed, matrix)
+        self.assertFalse(reran)
+        runner.assert_not_called()
+
+    def test_stale_receipt_reruns_and_reverifies(self) -> None:
+        runner = mock.Mock()
+        matrix = {"selectedCases": ["a"]}
+        with mock.patch.object(
+            reuse,
+            "verify_reusable_receipt",
+            side_effect=[harness.ValidationError("stale"), matrix],
+        ) as verifier:
+            observed, reran = reuse.ensure_reusable_receipt(
+                Path("receipt.json"), Path("plan.json"), runner
+            )
+        self.assertIs(observed, matrix)
+        self.assertTrue(reran)
+        runner.assert_called_once_with()
+        self.assertEqual(verifier.call_count, 2)
+
+    def test_still_stale_after_rerun_fails(self) -> None:
+        runner = mock.Mock()
+        with mock.patch.object(
+            reuse,
+            "verify_reusable_receipt",
+            side_effect=[
+                harness.ValidationError("stale"),
+                harness.ValidationError("still stale"),
+            ],
+        ) as verifier:
+            with self.assertRaisesRegex(
+                harness.ValidationError, "still stale"
+            ):
+                reuse.ensure_reusable_receipt(
+                    Path("receipt.json"), Path("plan.json"), runner
+                )
+        runner.assert_called_once_with()
+        self.assertEqual(verifier.call_count, 2)
+
     def test_file_identity_fails_closed_on_content_and_symlink_drift(self) -> None:
         reuse.ROOT.joinpath(".deps").mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(dir=reuse.ROOT / ".deps") as directory:

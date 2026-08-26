@@ -7,8 +7,10 @@ import argparse
 import json
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
+from typing import Callable
 
 from validation_harness import (
     BuildContext,
@@ -231,20 +233,63 @@ def verify_reusable_receipt(
     return matrix
 
 
+def ensure_reusable_receipt(
+    receipt_path: Path,
+    plan_path: Path,
+    rerun: Callable[[], None],
+    root: Path = ROOT,
+) -> tuple[dict, bool]:
+    try:
+        return verify_reusable_receipt(receipt_path, plan_path, root), False
+    except ValidationError as error:
+        print(
+            f"validation receipt is not reusable ({error}); rerunning",
+            file=sys.stderr,
+        )
+    rerun()
+    return verify_reusable_receipt(receipt_path, plan_path, root), True
+
+
+def rerun_v8_validation(root: Path = ROOT) -> None:
+    try:
+        subprocess.run(
+            ["make", "-C", str(root), "validate-v8"],
+            check=True,
+        )
+    except subprocess.CalledProcessError as error:
+        raise ValidationError(
+            f"validation-v8 rerun failed with status {error.returncode}"
+        ) from error
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="verify exact FIR validation evidence for reuse"
     )
     parser.add_argument("--receipt", required=True, type=Path)
     parser.add_argument("--plan", required=True, type=Path)
+    parser.add_argument(
+        "--rerun-v8-on-mismatch",
+        action="store_true",
+        help="rerun make validate-v8, then reverify, when reuse fails",
+    )
     args = parser.parse_args(argv)
-    matrix = verify_reusable_receipt(args.receipt, args.plan)
+    reran = False
+    if args.rerun_v8_on_mismatch:
+        matrix, reran = ensure_reusable_receipt(
+            args.receipt,
+            args.plan,
+            rerun_v8_validation,
+        )
+    else:
+        matrix = verify_reusable_receipt(args.receipt, args.plan)
     pairs = {(item["reference"], item["candidate"]) for item in matrix["pairs"]}
     requested = validation_plan_from_config(args.plan).pairs
     print(
         f"verified reusable validation receipt {args.receipt}: "
         f"{len(matrix['selectedCases'])} cases, "
-        f"{len(requested)}/{len(pairs)} requested comparison pairs"
+        f"{len(requested)}/{len(pairs)} requested comparison pairs, "
+        f"execution={'rerun' if reran else 'reused'}"
     )
     return 0
 
