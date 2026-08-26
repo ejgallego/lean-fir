@@ -89,6 +89,22 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   diff check pass. This is a proof-interface refinement only: no runtime,
   interpreter, pass, target ledger, shared semantic contract, or Wasm surface
   changed. Heap-only USize adaptation remains a separate queued consumer.
+- Accepted representation-aware release specialization: W7 functional head
+  `734ed7c2` is linked through clean tracked handoff `dbb716c1`. Reviewed
+  conditional call-result facts now refine only compiler single-assignment
+  locals; the first provider uses `Nat.sub left right <= left` to retain a
+  tagged result when `left` is tagged. Compiler-shaped checked releases then
+  erase definite tagged values, select the existing unchecked operation for
+  definite heap objects, and leave mixed or unknown values checked. Runtime
+  frontier normalization before persistent planning fixes
+  `FIR-BUG-wasm-none-late-release-specialization-frontier`. The lean-zip
+  symbolic release census falls from 4,478 to 4,329 sites, while all unproved
+  sites remain conservative. Lean Beam, the 55-job focused cone, `make check`
+  at 728 unique cases and 2,166/2,166 comparisons, all 3,180 Talos jobs, and
+  the complete deterministic W7 artifact/concrete/browser gate pass. No
+  helper signature, semantic ABI, concrete layout, allocator, ownership
+  contract, public export, or canonical package pointer changed; W6 review is
+  an independent proof follow-up.
 - Lean-zip performance lane: `lean-zip-perf` is the narrow successor to the
   existing W7-2 optimization role, using `perf/lean-zip-loop` in
   `.worktrees/lean-zip-perf`. It profiles one immutable accepted package,
@@ -6741,7 +6757,7 @@ validation work continues; their historical handoff text remains unchanged.
 | Integration | integration owner | `upgrade/lean-4.33` | released | `LEAN-4.33-UPGRADE` landed at `476f001b`; the temporary lane may be retired after publication. | Moves the shared toolchain, compiler-source contracts, and versioned compact-Format package surface to Lean 4.33 without changing the semantic Wasm ABI, concrete layout, or resident-helper signatures. |
 | Lean pass proof | pass-proof owner | `proof/simpcase` | released | Clean tracked checkpoint `8788603c`, functional head `3d811853`, transports the accepted allocated source-only provenance through a monotone deleted let and exposes it from the semantic deleted-constructor matcher beside the exact ledger relation. | Proof-interface refinement only. Lean Beam, the focused 34-job cone, complete 728-case/2,166-comparison gate, and final diff check pass; no runtime, interpreter, pass, ledger, Wasm surface, or shared semantic contract changed. Heap-only USize adaptation remains queued under `W7-LCNF-20260826-021`. |
 | W6 runtime proof | W6 owner | `wasm/talos-runtime` | released | Tracked handoff `ecbfed6b`, functional head `99a3c03e`, preserves the production-selected callee result kind through precise internal direct-call entry and resumption. The temporary exact public-result equality premise is removed and the strict `object -> tobject` case is permanent. | W6 proof-side contract only; no shared semantic/runtime, ABI, layout, helper, symbolic Wasm, or W7 artifact change. Lean Beam, the 3,127-job forced cone, root gate, and all 3,174 Talos jobs pass. |
-| W7 generation | generation owner | `wasm/generation` | released | Tracked handoff `1d723b62`, functional head `1697038a`, on base `8a0e467f` internalizes bit-exact heap-only Float32 box/unbox and repairs the W7 Float marker to the accepted `Float32 = 6`, `Float = 7` inventory. Six of seven generic and generated `_boxed` families now close with zero imports and zero runtime operations; only USize remains. | Executable helper layout is generation-ready; W6 descriptor promotion/refinement is queued separately. No source semantic, symbolic Wasm, allocator, or ownership contract changed. |
+| W7 generation | generation owner | `wasm/generation` | released | Tracked handoff `dbb716c1`, functional head `734ed7c2`, propagates reviewed conditional result kinds, specializes exact compiler-shaped release operands, and refreshes the runtime frontier before persistent planning. The first transfer removes 102 proved tagged `Nat.sub` result releases in addition to 47 exact-representation sites; unproved sites remain checked. | Generation-only optimization over stable helpers. Full root, 3,180-job Talos, and deterministic artifact/concrete/browser gates pass. No helper signature, semantic ABI, concrete layout, allocator, ownership, public-export, or canonical-package contract changed. Heap-only USize remains the next shared-contract stack. |
 | Compiler-native Wasm | integration owner | `wasm/lcnf-c` | parked | Landed checkpoint `a4855402` adds a separately packaged C/Emscripten `Std.Format.prettyM` facade on top of the optimized final-LCNF-to-C route from `2760e3e0`. The browser adapter shares the compact `Format` request and exact `{text, events}` trace contract with W7's FIR-native facade while retaining a private bulk wire, verified Emscripten loader, full pinned Lean runtime, and independent package. The differential suite compares Unicode, grouping, nesting, tags, arbitrary-precision values, initial columns, malformed requests, repeated calls, and a one-MiB UTF-8 transfer through both engines | No shared semantic contract changed and the packages remain physically independent. The lane consumes `Std.Format.prettyM`, final impure LCNF, and Lean's C ABI without changing the symbolic Wasm, W6 concrete-runtime, or W7 resident-runtime surfaces. Resume with controlled sampled profiling of the facade wire and generated C before accepting a runtime optimization |
 | Validation | validation owner | `validation/float-corpus` | active | Clean coordination head `cfa17d81` retains the long 1,008-case native/LCNF calibration. Current-main validation covers 633 native/LCNF cases, 601 V8 cases, 642 unique cases, 1,844 comparisons, 5,750 interpreter transitions, 51 semantic-tag floors, and 142 conjunctive domains. | Test-fixtures may now rebase and admit the 32 scalar-closure cases. The long validation branch rebases separately; alias, termination, IO, and stream-capture contracts remain isolated. |
 
