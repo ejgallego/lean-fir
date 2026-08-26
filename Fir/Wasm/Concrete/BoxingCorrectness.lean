@@ -80,11 +80,13 @@ theorem MemoryState.FrontierInvariant.boxScalar_eq_ok_of_budget
       boxScalar state scalar = .ok (result, word) ∧
         result.AddressSpaceBudget
           (remainingBytes - boxScalarAllocationBytes) := by
-  by_cases tagged : scalar.payload.toNat ≤ maxTaggedPayload
+  by_cases tagged :
+      scalar.kind.allowsTaggedRepresentation = true ∧
+        scalar.payload.toNat ≤ maxTaggedPayload
   · have naturalCost :
         naturalAllocationBytes scalar.payload.toNat ≤
           boxScalarAllocationBytes := by
-      simp [naturalAllocationBytes, tagged, boxScalarAllocationBytes]
+      simp [naturalAllocationBytes, tagged.2, boxScalarAllocationBytes]
       split <;> omega
     have naturalFits :
         naturalAllocationBytes scalar.payload.toNat ≤ remainingBytes :=
@@ -94,15 +96,13 @@ theorem MemoryState.FrontierInvariant.boxScalar_eq_ok_of_budget
         naturalFits
     have encoded :
         encodeTagged state scalar.payload = .ok (result, word) := by
-      simpa [allocateNatural, tagged, UInt64.ofNat_toNat] using allocated
+      simpa [allocateNatural, tagged.2, UInt64.ofNat_toNat] using allocated
     have boxed : boxScalar state scalar = .ok (result, word) := by
-      rw [boxScalar_of_tagged state scalar tagged]
+      rw [boxScalar_of_tagged state scalar tagged.1 tagged.2]
       exact encoded
     refine ⟨result, word, boxed, resultBudget.weaken ?_⟩
     exact Nat.sub_le_sub_left naturalCost remainingBytes
-  · have heap : maxTaggedPayload < scalar.payload.toNat :=
-      Nat.lt_of_not_ge tagged
-    obtain ⟨middle, address, objectAllocation⟩ :=
+  · obtain ⟨middle, address, objectAllocation⟩ :=
       state.allocateObject_eq_ok_of_capacity .boxed
         target.semanticSlotBytes false scalar.kind.code
         (UInt32.ofNat scalar.kind.payloadBytes) 0 0 valid.cursorAligned
@@ -141,7 +141,7 @@ theorem MemoryState.FrontierInvariant.boxScalar_eq_ok_of_budget
       rw [payloadWrite]
       rfl
     have boxed : boxScalar state scalar = .ok (result, address) := by
-      rw [boxScalar_of_heap state scalar heap]
+      rw [boxScalar_of_not_tagged state scalar tagged]
       exact allocated
     have middleBudget :=
       budget.allocateObject valid.cursorAligned (by
@@ -327,41 +327,46 @@ def semanticBoxResult (runtime : RuntimeState) (scalar : BoxedScalar) : RuntimeS
   heap := (runtime.nextLocation, semanticBoxCell scalar) :: runtime.heap
   nextLocation := runtime.nextLocation + 1 }
 
-/-- Every scalar kind implemented by the concrete boxing runtime is an
-integer kind, so the shared semantic predicate reduces to the historical
-payload-size split. Floating boxes use a separate heap-only path. -/
+/-- The concrete scalar-kind policy is exactly the type-specific semantic
+boxing policy. `UInt64` is heap-only; all other concrete integer kinds retain
+the historical payload-size split. -/
 @[simp] theorem boxUsesTaggedRepresentation_boxedScalar (scalar : BoxedScalar) :
     boxUsesTaggedRepresentation scalar.kind.semanticType scalar.payload =
-      decide (scalar.payload.toNat ≤ maxTaggedPayload) := by
-  cases scalar <;> simp [boxUsesTaggedRepresentation, BoxedScalar.kind,
-    BoxedScalarKind.semanticType, BoxedScalar.payload,
-    Lean.Compiler.LCNF.ImpureType.uint8, Lean.Compiler.LCNF.ImpureType.uint16,
-    Lean.Compiler.LCNF.ImpureType.uint32, Lean.Compiler.LCNF.ImpureType.uint64,
-    Lean.Compiler.LCNF.ImpureType.usize, Lean.Compiler.LCNF.ImpureType.float32,
-    Lean.Compiler.LCNF.ImpureType.float] <;>
-    intro <;> constructor <;> native_decide
+      (scalar.kind.allowsTaggedRepresentation &&
+        decide (scalar.payload.toNat ≤ maxTaggedPayload)) := by
+  have guardEq :
+      Bool.not (scalar.kind.semanticType == Lean.Compiler.LCNF.ImpureType.float32 ||
+          scalar.kind.semanticType == Lean.Compiler.LCNF.ImpureType.float ||
+          scalar.kind.semanticType == Lean.Compiler.LCNF.ImpureType.uint64) =
+        scalar.kind.allowsTaggedRepresentation := by
+    cases scalar <;>
+      simp only [BoxedScalar.kind, BoxedScalarKind.semanticType,
+        BoxedScalarKind.allowsTaggedRepresentation]
+    all_goals
+      rename_i value
+      clear value
+      native_decide
+  unfold boxUsesTaggedRepresentation
+  rw [guardEq]
 
-/-- Concrete integer boxing sees the shared semantic box operation through
-the same payload-size split as before the float-only heap rule was added. -/
+/-- Concrete integer boxing sees the shared semantic operation through the
+same scalar-kind and payload-size split used by `boxScalar`. -/
 theorem semanticBox_split (runtime : RuntimeState) (scalar : BoxedScalar) :
     Fir.LeanIR.Impure.box runtime scalar.kind.semanticType scalar.semanticValue =
-      if scalar.payload.toNat ≤ maxTaggedPayload then
+      if scalar.kind.allowsTaggedRepresentation = true ∧
+          scalar.payload.toNat ≤ maxTaggedPayload then
         .ok (runtime, .object (.tagged scalar.payload))
       else
         .ok (semanticBoxResult runtime scalar,
           .object (.heap runtime.nextLocation)) := by
-  have nonfloating :
-      (scalar.kind.semanticType == Lean.Compiler.LCNF.ImpureType.float32) = false ∧
-      (scalar.kind.semanticType == Lean.Compiler.LCNF.ImpureType.float) = false := by
-    cases scalar <;> simp only [BoxedScalar.kind, BoxedScalarKind.semanticType] <;>
-      constructor <;> native_decide
-  rcases nonfloating with ⟨notF32, notF64⟩
+  have policy := boxUsesTaggedRepresentation_boxedScalar scalar
   cases scalar <;>
-    simp only [BoxedScalar.kind, BoxedScalarKind.semanticType] at notF32 notF64 <;>
-    simp [Fir.LeanIR.Impure.box, BoxedScalar.kind,
+    simp only [BoxedScalar.kind, BoxedScalarKind.semanticType,
+      BoxedScalar.semanticValue, BoxedScalar.payload,
+      BoxedScalarKind.allowsTaggedRepresentation] at policy ⊢ <;>
+    simp [Fir.LeanIR.Impure.box, policy, alloc, BoxedScalar.kind,
       BoxedScalarKind.semanticType, BoxedScalar.semanticValue,
-      BoxedScalar.payload, ScalarValue.rawBits, ScalarValue.toUInt64,
-      boxUsesTaggedRepresentation, notF32, notF64, alloc,
+      ScalarValue.rawBits, ScalarValue.toUInt64,
       semanticBoxResult, semanticBoxCell, Bind.bind, Except.bind,
       Pure.pure, Except.pure]
   all_goals
@@ -373,7 +378,17 @@ theorem semanticBox_heap_eq (runtime : RuntimeState) (scalar : BoxedScalar)
     Fir.LeanIR.Impure.box runtime scalar.kind.semanticType scalar.semanticValue =
       .ok (semanticBoxResult runtime scalar,
         .object (.heap runtime.nextLocation)) := by
-  rw [semanticBox_split, if_neg (Nat.not_le.mpr heap)]
+  rw [semanticBox_split]
+  simp [Nat.not_le.mpr heap]
+
+theorem semanticBox_heap_eq_of_tagged_disallowed
+    (runtime : RuntimeState) (scalar : BoxedScalar)
+    (disallowed : scalar.kind.allowsTaggedRepresentation = false) :
+    Fir.LeanIR.Impure.box runtime scalar.kind.semanticType scalar.semanticValue =
+      .ok (semanticBoxResult runtime scalar,
+        .object (.heap runtime.nextLocation)) := by
+  rw [semanticBox_split]
+  simp [disallowed]
 
 /-- Heap-backed boxing extends the complete concrete/semantic live-heap
 relation and relates the returned wasm32 address to the fresh semantic box. -/
@@ -651,13 +666,65 @@ theorem boxScalar_heap_liveHeapRel
     allocateBoxedScalar_liveHeapRel state result witness runtime scalar address
       related allocated⟩
 
+/-- A scalar kind excluded from the tagged ABI uses the same canonical heap
+allocation and refinement for every payload magnitude. -/
+theorem boxScalar_taggedDisallowed_liveHeapRel
+    (state result : MemoryState) (witness : RefinementWitness)
+    (runtime : RuntimeState) (scalar : BoxedScalar) (address : Word32)
+    (related : LiveHeapRel state witness runtime)
+    (disallowed : scalar.kind.allowsTaggedRepresentation = false)
+    (boxed : boxScalar state scalar = .ok (result, address)) :
+    Fir.LeanIR.Impure.box runtime scalar.kind.semanticType scalar.semanticValue =
+        .ok (semanticBoxResult runtime scalar,
+          .object (.heap runtime.nextLocation)) ∧
+      let nextWitness := witness.bindBoxed runtime.nextLocation address scalar.kind
+      LiveHeapRel result nextWitness (semanticBoxResult runtime scalar) ∧
+        ValueRel nextWitness .tobject (.word32 address)
+          (.object (.heap runtime.nextLocation)) := by
+  have allocated : allocateBoxedScalar state scalar = .ok (result, address) := by
+    rw [← boxScalar_of_tagged_disallowed state scalar disallowed]
+    exact boxed
+  exact ⟨semanticBox_heap_eq_of_tagged_disallowed runtime scalar disallowed,
+    allocateBoxedScalar_liveHeapRel state result witness runtime scalar address
+      related allocated⟩
+
+/-- The complement of the public tagged branch has one representation-neutral
+heap refinement. This factors the payload-too-large and kind-disallowed cases
+for compiler/runtime clients. -/
+theorem boxScalar_notTagged_liveHeapRel
+    (state result : MemoryState) (witness : RefinementWitness)
+    (runtime : RuntimeState) (scalar : BoxedScalar) (address : Word32)
+    (related : LiveHeapRel state witness runtime)
+    (notTagged : ¬ (scalar.kind.allowsTaggedRepresentation = true ∧
+      scalar.payload.toNat ≤ maxTaggedPayload))
+    (boxed : boxScalar state scalar = .ok (result, address)) :
+    Fir.LeanIR.Impure.box runtime scalar.kind.semanticType scalar.semanticValue =
+        .ok (semanticBoxResult runtime scalar,
+          .object (.heap runtime.nextLocation)) ∧
+      let nextWitness := witness.bindBoxed runtime.nextLocation address scalar.kind
+      LiveHeapRel result nextWitness (semanticBoxResult runtime scalar) ∧
+        ValueRel nextWitness .tobject (.word32 address)
+          (.object (.heap runtime.nextLocation)) := by
+  by_cases allowed : scalar.kind.allowsTaggedRepresentation = true
+  · have large : maxTaggedPayload < scalar.payload.toNat :=
+      Nat.lt_of_not_ge (fun small => notTagged ⟨allowed, small⟩)
+    exact boxScalar_heap_liveHeapRel state result witness runtime scalar address
+      related large boxed
+  · have disallowed : scalar.kind.allowsTaggedRepresentation = false := by
+      cases representation : scalar.kind.allowsTaggedRepresentation
+      · rfl
+      · simp [representation] at allowed
+    exact boxScalar_taggedDisallowed_liveHeapRel state result witness runtime
+      scalar address related disallowed boxed
+
 /-- Below FIR's 63-bit tagged limit, semantic boxing leaves the heap unchanged
 and returns the tagged payload for every supported integer scalar kind. -/
 theorem semanticBox_tagged_eq (runtime : RuntimeState) (scalar : BoxedScalar)
+    (allowed : scalar.kind.allowsTaggedRepresentation = true)
     (tagged : scalar.payload.toNat ≤ maxTaggedPayload) :
     Fir.LeanIR.Impure.box runtime scalar.kind.semanticType scalar.semanticValue =
       .ok (runtime, .object (.tagged scalar.payload)) := by
-  rw [semanticBox_split, if_pos tagged]
+  rw [semanticBox_split, if_pos ⟨allowed, tagged⟩]
 
 /-- The public concrete boxing operation and semantic boxing agree throughout
 the tagged range, whether wasm32 can use a direct immediate or must allocate a
@@ -666,6 +733,7 @@ theorem boxScalar_tagged_liveHeapRel
     (state result : MemoryState) (witness : RefinementWitness)
     (runtime : RuntimeState) (scalar : BoxedScalar) (word : Word32)
     (related : LiveHeapRel state witness runtime)
+    (allowed : scalar.kind.allowsTaggedRepresentation = true)
     (tagged : scalar.payload.toNat ≤ maxTaggedPayload)
     (boxed : boxScalar state scalar = .ok (result, word)) :
     Fir.LeanIR.Impure.box runtime scalar.kind.semanticType scalar.semanticValue =
@@ -675,11 +743,31 @@ theorem boxScalar_tagged_liveHeapRel
         ValueRel nextWitness .tobject (.word32 word)
           (.object (.tagged scalar.payload)) := by
   have encoded : encodeTagged state scalar.payload = .ok (result, word) := by
-    rw [← boxScalar_of_tagged state scalar tagged]
+    rw [← boxScalar_of_tagged state scalar allowed tagged]
     exact boxed
-  exact ⟨semanticBox_tagged_eq runtime scalar tagged,
+  exact ⟨semanticBox_tagged_eq runtime scalar allowed tagged,
     encodeTagged_liveHeapRel state result witness runtime scalar.payload word
       related encoded⟩
+
+/-- A successful semantic unbox of a tagged object statically excludes the
+heap-only `UInt64` result kind. -/
+theorem BoxedScalarKind.allowsTaggedRepresentation_of_unbox_tagged_eq_ok
+    (runtime : RuntimeState) (kind : BoxedScalarKind) (payload : UInt64)
+    (value : Value)
+    (unboxed : Fir.LeanIR.Impure.unbox runtime kind.semanticType
+      (.object (.tagged payload)) = .ok value) :
+    kind.allowsTaggedRepresentation = true := by
+  cases kind with
+  | uint8 | uint16 | uint32 | usize => rfl
+  | uint64 =>
+      have typeEq :
+          (BoxedScalarKind.uint64.semanticType ==
+            Lean.Compiler.LCNF.ImpureType.uint64) = true := by
+        native_decide
+      unfold Fir.LeanIR.Impure.unbox at unboxed
+      simp only at unboxed
+      rw [if_pos typeEq] at unboxed
+      contradiction
 
 /-- Direct immediates and persistent promoted naturals decode identically at
 the typed scalar boundary. -/
@@ -688,7 +776,8 @@ theorem LiveHeapRel.readBoxedScalar_tagged_refines
     {payload : UInt64} {word : Word32}
     (related : LiveHeapRel state witness runtime)
     (tagged : TaggedReferenceRel witness word payload)
-    (kind : BoxedScalarKind) :
+    (kind : BoxedScalarKind)
+    (allowed : kind.allowsTaggedRepresentation = true) :
     let scalar := BoxedScalar.ofPayload kind payload
     readBoxedScalar state kind word = .ok scalar ∧
       Fir.LeanIR.Impure.unbox runtime kind.semanticType
@@ -698,7 +787,15 @@ theorem LiveHeapRel.readBoxedScalar_tagged_refines
   have semantic : Fir.LeanIR.Impure.unbox runtime kind.semanticType
       (.object (.tagged payload)) =
         .ok (BoxedScalar.ofPayload kind payload).semanticValue := by
+    have typeNotUInt64 :
+        (kind.semanticType == Lean.Compiler.LCNF.ImpureType.uint64) = false := by
+      cases kind <;>
+        simp_all [BoxedScalarKind.allowsTaggedRepresentation,
+          BoxedScalarKind.semanticType] <;>
+        native_decide
     unfold Fir.LeanIR.Impure.unbox
+    simp only
+    rw [typeNotUInt64]
     exact scalarFromType_boxedScalarKind kind payload
   have valueRelated := BoxedScalar.valueRel witness
     (BoxedScalar.ofPayload kind payload)
@@ -707,7 +804,8 @@ theorem LiveHeapRel.readBoxedScalar_tagged_refines
   cases tagged with
   | immediate actualPayload fits =>
       unfold readBoxedScalar
-      simp [Word32.classify_encodeImmediate, Word32.decode_encodeImmediate]
+      simp [Word32.classify_encodeImmediate, Word32.decode_encodeImmediate,
+        allowed]
       rfl
   | promoted found =>
       have promoted := related.promoted payload word found
@@ -730,7 +828,7 @@ theorem LiveHeapRel.readBoxedScalar_tagged_refines
       rw [headerRead]
       simp only [Bind.bind, Except.bind, liftMemory]
       rw [if_neg (by simp [notBoxed])]
-      rw [if_pos (by simpa using isPromoted)]
+      rw [if_pos (by simpa [allowed] using isPromoted)]
       rw [promoted.decoded]
       rfl
 
@@ -805,16 +903,49 @@ theorem LiveHeapRel.readBoxedScalar_expectedScalar_refines
         (header.kind == ObjectKind.natural && header.persistent &&
           header.aux0 == promotedTagMarker) = false := by
       simpa [Header.isPromotedTag] using notPromoted
-    simp [promotedFalse]
-    rfl
+    by_cases allowed : kind.allowsTaggedRepresentation = true
+    · simp [allowed, promotedFalse]
+      rfl
+    · have disallowed : kind.allowsTaggedRepresentation = false := by
+        cases value : kind.allowsTaggedRepresentation
+        · rfl
+        · simp [value] at allowed
+      simp [disallowed]
+      rfl
   cases valueRelated with
   | tobject referenceRelated =>
       cases referenceRelated with
       | tagged taggedRelated =>
-          obtain ⟨_, semantic, _⟩ :=
-            related.readBoxedScalar_tagged_refines taggedRelated kind
-          rw [unboxFailed] at semantic
-          contradiction
+          by_cases allowed : kind.allowsTaggedRepresentation = true
+          · obtain ⟨_, semantic, _⟩ :=
+              related.readBoxedScalar_tagged_refines taggedRelated kind allowed
+            rw [unboxFailed] at semantic
+            contradiction
+          · have disallowed : kind.allowsTaggedRepresentation = false := by
+              cases value : kind.allowsTaggedRepresentation
+              · rfl
+              · simp [value] at allowed
+            cases taggedRelated with
+            | immediate actualPayload fits =>
+                unfold readBoxedScalar
+                simp [Word32.classify_encodeImmediate, disallowed]
+                rfl
+            | promoted found =>
+                have promoted := related.promoted _ _ found
+                obtain ⟨header, headerRead, headerKind, _, _, _, _, _⟩ :=
+                  promoted.header
+                have addressHeap :=
+                  (MemoryState.PrefixExtension.readLiveHeader_facts state word
+                    header headerRead).1
+                have notBoxed : (header.kind == ObjectKind.boxed) = false := by
+                  rw [headerKind]
+                  decide
+                unfold readBoxedScalar
+                rw [addressHeap]
+                simp only
+                rw [headerRead]
+                simp [Bind.bind, Except.bind, liftMemory, notBoxed, disallowed]
+                rfl
       | heap heapRelated =>
           cases heapRelated with
           | mapped mapped =>
