@@ -635,6 +635,39 @@ The same deterministic code-shape change grows the stored-block artifact from
 12,418 to 12,444 bytes and the Level-1 artifact from 198,424 to 199,468 bytes;
 their base modules and reviewed closure inventories remain unchanged.
 
+The remaining compiler-generated `fir_release_0` boundary is a distinct
+code-placement problem. On the exact 367,634-byte artifact above, a six-run
+bound V8 profile places its median normalized Wasm-self share at 1.61% and
+`fir_dec_once` at 1.46%. Exact copied-WAT instrumentation counts 11,196,054
+wrapper entries on one steady 256-KiB level-6 call. Only 8,989 enter
+`fir_dec_once`; 11,187,065 (99.92%) return from the scalar/erased-zero gate.
+The forwarded roots comprise 7,855 shared references, 1,050 terminal
+references, and 84 persistent references. Instrumentation preserves the exact
+compressed output and memory observations through first, warmup, eight steady
+calls, and all ten compression levels.
+
+The dynamic traffic is highly concentrated even though the final module has
+4,369 static calls across 149 functions. `Zip.Native.Deflate.lzMatchP`
+contributes 8,878,038 entries per call, `chainWalkPackedUBelow._redArg`
+1,197,396, and `tokenFreqsPTA` 1,048,426; together they account for 99.36%.
+The first function is 31,857 bytes, far beyond V8's default 5,000-node Wasm
+inlining budget. A diagnostic run with V8 Wasm inlining disabled widens the
+advantage of caller-local gates, confirming that ordinary engine inlining
+masks part, but not all, of this boundary cost.
+
+A copied-final-WAT ceiling inlined the checked gate at 4,347 of 4,369 sites.
+After applying the same final optimizer to both sides, it grows the module
+from 365,803 to 432,338 bytes (+18.2%). Thirty-two diagnostics-off AB/BA pairs
+improve in 29 rounds, with a 0.8733 paired median ratio (about 12.7% faster).
+That global shape is not accepted because its code-size cost is disproportionate.
+A second, explicitly diagnostic profile-guided ceiling gates only the three
+dominant functions: 599 sites, 374,918 bytes (+2.49%), 29/32 improving pairs,
+and a 0.8655 paired median ratio (about 13.5% faster). This establishes that
+the opportunity is concentrated; it is not permission to add a declaration
+allowlist or a lean-zip-specific rewrite. A production successor needs a
+generic hot-call-site/code-placement policy, or a source-level upstream-shaped
+candidate whose post-optimizer size is materially smaller.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not
