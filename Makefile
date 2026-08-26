@@ -78,14 +78,14 @@ trusted-assumptions:
 	python3 scripts/validate_trusted_assumptions.py
 
 mailbox-check:
-	node scripts/mailbox.mjs check
+	scripts/mailbox check
 
 mailbox-list:
-	node scripts/mailbox.mjs list
+	scripts/mailbox list
 
 mailbox-deliver:
 	@test -n "$(DRAFT)" || { echo "usage: make mailbox-deliver DRAFT=/path/to/message.md [NOTIFY_SESSION=session]"; exit 2; }
-	node scripts/mailbox.mjs deliver "$(DRAFT)" $(if $(NOTIFY_SESSION),--notify-session "$(NOTIFY_SESSION)")
+	scripts/mailbox deliver "$(DRAFT)" $(if $(NOTIFY_SESSION),--notify-session "$(NOTIFY_SESSION)")
 
 mailbox-test:
 	node --test scripts/mailbox.test.mjs

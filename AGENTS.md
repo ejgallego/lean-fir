@@ -95,11 +95,12 @@ These rules apply to every agent and worktree in this repository.
   create separate mailboxes.
 - Follow `docs/MAILBOX_PROTOCOL.md`. A cross-project thread lives in the
   mailbox of the project that owns the requested code change.
-- Deliver new messages with `make mailbox-deliver DRAFT=/path/to/message.md`;
-  do not write directly into the canonical mailbox. `NOTIFY_SESSION=<UUID or
-  exact name>` may add a best-effort `codex queue` notification after durable
-  delivery, but the mailbox event remains authoritative.
-- Read `make mailbox-list` and `git worktree list` before claiming a lane. A
+- Deliver new messages with `scripts/mailbox deliver /path/to/message.md`;
+  do not write directly into the canonical mailbox. `--notify-session <UUID
+  or exact name>` may add a best-effort `codex queue` notification after
+  durable delivery, but the mailbox event remains authoritative.
+- Read `scripts/mailbox list --for <lane-address>` and `git worktree list`
+  before claiming a lane. A
   valid acknowledgement records the owner, project-relative worktree, branch,
   base commit, write scope, and publication boundary.
 - The local event log complements rather than replaces the tracked

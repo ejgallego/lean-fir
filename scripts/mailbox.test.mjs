@@ -15,7 +15,7 @@ import {
   validateMessages,
 } from "./mailbox-lib.mjs";
 
-const script = resolve(import.meta.dirname, "mailbox.mjs");
+const script = resolve(import.meta.dirname, "mailbox");
 const scratchRoot = resolve(import.meta.dirname, "../.deps/mailbox-tests");
 
 function message({
@@ -724,11 +724,9 @@ test("CLI delivers through the validated path", async () => {
     const draft = join(root, "draft.md");
     await writeFile(draft, message({ id }));
 
-    const result = spawnSync(
-      process.execPath,
-      [script, "deliver", draft, "--mailbox", mailbox],
-      { encoding: "utf8" },
-    );
+    const result = spawnSync(script, ["deliver", draft, "--mailbox", mailbox], {
+      encoding: "utf8",
+    });
 
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, new RegExp(`delivered ${id}`));
@@ -736,7 +734,7 @@ test("CLI delivers through the validated path", async () => {
   });
 });
 
-test("CLI lists active threads and hides terminal threads by default", async () => {
+test("CLI lists actionable threads compactly and exposes explicit detail filters", async () => {
   await withMailbox(async (mailbox) => {
     const open = "ROOT-FIR-20260813-001";
     const closed = "ROOT-FIR-20260813-002";
@@ -799,27 +797,71 @@ test("CLI lists active threads and hides terminal threads by default", async () 
       state: "cancelled",
       fields: { disposition: "discarded" },
     }));
+    const completed = "ROOT-FIR-20260813-004";
+    await put(mailbox, completed, message({
+      id: completed,
+      time: "2026-08-13T15:10:00+02:00",
+      to: "fir/wasm-gen",
+      subject: "completed request awaiting closure",
+      fields: { "requires-ack": "false" },
+    }));
+    await put(mailbox, "FIR-ROOT-20260813-004", message({
+      id: "FIR-ROOT-20260813-004",
+      thread: completed,
+      reply: completed,
+      time: "2026-08-13T15:15:00+02:00",
+      from: "fir/wasm-gen",
+      to: "lean-zip/root",
+      kind: "completion",
+      state: "completed",
+      subject: "completed request awaiting closure",
+      fields: { disposition: "implemented" },
+    }));
 
-    const listed = spawnSync(process.execPath, [script, "list", "--mailbox", mailbox], {
+    const listed = spawnSync(script, ["list", "--mailbox", mailbox], {
       encoding: "utf8",
     });
     assert.equal(listed.status, 0, listed.stderr);
     assert.match(listed.stdout, /active request/);
-    assert.match(listed.stdout,
-      /lane: .*branch=fix\/active-request .*base=abc1234 .*publication=local-only/);
-    assert.match(listed.stdout,
-      /integration checkpoint: message=FIR-ROOT-20260813-002 head=abcdef0123456789abcdef0123456789abcdef01/);
-    assert.match(listed.stdout, /parent: ROOT-FIR-20260812-001/);
-    assert.match(listed.stdout, /depends on: ROOT-FIR-20260812-002, ROOT-FIR-20260812-003/);
+    assert.match(listed.stdout, /^in-progress .*active request$/m);
+    assert.doesNotMatch(listed.stdout, /lane:/);
+    assert.doesNotMatch(listed.stdout, /completed request awaiting closure/);
     assert.doesNotMatch(listed.stdout, /closed request/);
 
-    const all = spawnSync(process.execPath, [script, "list", "--mailbox", mailbox, "--all", "--json"], {
+    const verbose = spawnSync(script, ["list", "--mailbox", mailbox, "--verbose"], {
+      encoding: "utf8",
+    });
+    assert.equal(verbose.status, 0, verbose.stderr);
+    assert.match(verbose.stdout, /active request/);
+    assert.match(verbose.stdout,
+      /lane: .*branch=fix\/active-request .*base=abc1234 .*publication=local-only/);
+    assert.match(verbose.stdout,
+      /integration checkpoint: message=FIR-ROOT-20260813-002 head=abcdef0123456789abcdef0123456789abcdef01/);
+    assert.match(verbose.stdout, /parent: ROOT-FIR-20260812-001/);
+    assert.match(verbose.stdout, /depends on: ROOT-FIR-20260812-002, ROOT-FIR-20260812-003/);
+
+    const completedOnly = spawnSync(script,
+      [
+        "list", "--mailbox", mailbox, "--state", "completed",
+        "--for", "fir/wasm-gen", "--json",
+      ],
+      { encoding: "utf8" });
+    assert.equal(completedOnly.status, 0, completedOnly.stderr);
+    const completedPayload = JSON.parse(completedOnly.stdout);
+    assert.deepEqual(completedPayload.filter, {
+      states: ["completed"],
+      address: "fir/wasm-gen",
+    });
+    assert.deepEqual(completedPayload.threads.map((thread) => thread.state), ["completed"]);
+
+    const all = spawnSync(script, ["list", "--mailbox", mailbox, "--all", "--json"], {
       encoding: "utf8",
     });
     assert.equal(all.status, 0, all.stderr);
     const payload = JSON.parse(all.stdout);
     assert.deepEqual(payload.ignoredFiles, ["README.md"]);
-    assert.deepEqual(payload.threads.map((thread) => thread.state), ["in-progress", "cancelled"]);
+    assert.deepEqual(payload.threads.map((thread) => thread.state),
+      ["in-progress", "cancelled", "completed"]);
     assert.equal(payload.threads[0].integrationCheckpoint.messageId,
       "FIR-ROOT-20260813-002");
     assert.deepEqual(payload.threads[0].dependsOn, ["ROOT-FIR-20260812-002", "ROOT-FIR-20260812-003"]);
@@ -827,7 +869,7 @@ test("CLI lists active threads and hides terminal threads by default", async () 
 });
 
 test("CLI rejects a missing mailbox option value", () => {
-  const result = spawnSync(process.execPath, [script, "list", "--mailbox", "--all"], {
+  const result = spawnSync(script, ["list", "--mailbox", "--all"], {
     encoding: "utf8",
   });
   assert.equal(result.status, 2);
@@ -837,7 +879,7 @@ test("CLI rejects a missing mailbox option value", () => {
 test("CLI rejects a nonexistent explicit mailbox", async () => {
   await mkdir(scratchRoot, { recursive: true });
   const mailbox = join(scratchRoot, `missing-${process.pid}`);
-  const result = spawnSync(process.execPath, [script, "check", "--mailbox", mailbox], {
+  const result = spawnSync(script, ["check", "--mailbox", mailbox], {
     encoding: "utf8",
   });
   assert.equal(result.status, 1);

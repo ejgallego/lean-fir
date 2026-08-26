@@ -42,7 +42,7 @@ failure that the branch/worktree split does not already prevent.
 
 Agents read and write new operational messages only through the primary
 checkout's ignored `.fir-mailbox/`, using `docs/MAILBOX_PROTOCOL.md` and the
-validated `make mailbox-deliver` command. This avoids per-worktree message
+validated `scripts/mailbox deliver` command. This avoids per-worktree message
 forks and partially written events. The tracked
 `coordination/lanes/*.md` records remain the portable, committed handoff state;
 the local mailbox does not replace them.

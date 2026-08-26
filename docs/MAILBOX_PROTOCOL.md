@@ -25,8 +25,8 @@ mailbox rather than creating `.fir-mailbox/` below their current worktree. The
 repository commands resolve the primary checkout automatically:
 
 ```bash
-make mailbox-check
-make mailbox-list
+scripts/mailbox check
+scripts/mailbox list
 ```
 
 Use `--mailbox PATH` only for an explicit alternate or test mailbox.
@@ -86,7 +86,7 @@ Compose a complete draft under the current worktree's ignored `.deps/` state,
 then deliver it through the repository command:
 
 ```bash
-make mailbox-deliver DRAFT=.deps/mailbox-drafts/ROOT-FIR-20260813-001.md
+scripts/mailbox deliver .deps/mailbox-drafts/ROOT-FIR-20260813-001.md
 ```
 
 Do not write directly into the canonical mailbox. Delivery validates the
@@ -100,9 +100,8 @@ mailbox event.
 Codex CLI notification is deliberately optional:
 
 ```bash
-make mailbox-deliver \
-  DRAFT=.deps/mailbox-drafts/ROOT-FIR-20260813-001.md \
-  NOTIFY_SESSION=fir-wasm-gen
+scripts/mailbox deliver .deps/mailbox-drafts/ROOT-FIR-20260813-001.md \
+  --notify-session fir-wasm-gen
 ```
 
 After durable delivery, this runs `codex queue` against the session UUID or
@@ -404,50 +403,53 @@ state, and maintainer approval.
 Validate and atomically publish one complete draft:
 
 ```bash
-make mailbox-deliver DRAFT=.deps/mailbox-drafts/<message-id>.md
+scripts/mailbox deliver .deps/mailbox-drafts/<message-id>.md
 ```
 
-Add `NOTIFY_SESSION=<UUID or exact name>` only when a best-effort Codex
-doorbell is useful. Direct CLI use is equivalent:
+Add `--notify-session <UUID or exact name>` only when a best-effort Codex
+doorbell is useful:
 
 ```bash
-node scripts/mailbox.mjs deliver .deps/mailbox-drafts/<message-id>.md \
+scripts/mailbox deliver .deps/mailbox-drafts/<message-id>.md \
   --notify-session <UUID-or-exact-name>
 ```
 
 Validate all v1 messages and thread transitions:
 
 ```bash
-make mailbox-check
+scripts/mailbox check
 ```
 
 Run the focused protocol contract tests with `make mailbox-test`.
 
-List active threads:
+List actionable work (`open`, `claimed`, `in-progress`, or `blocked`):
 
 ```bash
-make mailbox-list
+scripts/mailbox list
 ```
 
-The human-readable list includes latest operational lane metadata and, when
-present, the atomically selected immutable integration checkpoint. JSON output
-contains the protocol marker, resolved mailbox path, ignored filenames, and
-the same thread summaries including `integrationCheckpoint`. A summary is an
-index into the immutable event files, not a replacement for their message
-bodies.
+The default human-readable list is one line per thread. Select work for one
+lane with `--for <address>`. Add `--verbose` for latest operational lane
+metadata and, when present, the atomically selected immutable integration
+checkpoint. JSON output contains the protocol marker, resolved mailbox path,
+active filter, ignored filenames, and the same thread summaries including
+`integrationCheckpoint`. A summary is an index into the immutable event files,
+not a replacement for their message bodies. Repeat `--state` to select more
+than one explicit state.
 
-Include terminal threads or emit JSON:
+Select completed work awaiting closure, include all history, or emit JSON:
 
 ```bash
-node scripts/mailbox.mjs list --all
-node scripts/mailbox.mjs list --json
+scripts/mailbox list --state completed
+scripts/mailbox list --all
+scripts/mailbox list --json
 ```
 
-Both commands work from the primary checkout or any linked worktree. For an
+These commands work from the primary checkout or any linked worktree. For an
 explicit mailbox:
 
 ```bash
-node scripts/mailbox.mjs check --mailbox /path/to/.fir-mailbox
+scripts/mailbox check --mailbox /path/to/.fir-mailbox
 ```
 
 Every Markdown file other than `README.md` is treated as a v1 message, so an

@@ -60,10 +60,17 @@ const kindStates = new Map([
   ["closure", new Set(["closed"])],
   ["cancellation", new Set(["cancelled"])],
 ]);
+export const mailboxStates = new Set(
+  [...kindStates.values()].flatMap((states) => [...states]),
+);
 const ownerKinds = new Set(["acknowledgement", "handoff"]);
 const dispositionKinds = new Set(["completion", "closure", "cancellation"]);
 const activeWorkStates = new Set(["in-progress", "blocked"]);
 export const terminalStates = new Set(["closed", "cancelled"]);
+
+export function isMailboxAddress(value) {
+  return addressPattern.test(value);
+}
 
 const worktreeStates = new Set(["clean", "dirty"]);
 const publications = new Set([
@@ -218,7 +225,7 @@ function validateHeader(message) {
     }
   }
   for (const field of ["from", "to"]) {
-    if (!addressPattern.test(header[field])) {
+    if (!isMailboxAddress(header[field])) {
       errors.push(issue(file, `\`${field}\` must be a project/agent address`));
     }
   }
@@ -250,7 +257,7 @@ function validateHeader(message) {
   if (dispositionKinds.has(header.kind) && !Object.hasOwn(header, "disposition")) {
     errors.push(issue(file, `kind \`${header.kind}\` requires a durable disposition`));
   }
-  if (header.owner && !addressPattern.test(header.owner)) {
+  if (header.owner && !isMailboxAddress(header.owner)) {
     errors.push(issue(file, "`owner` must be a project/agent address"));
   } else if (header.owner?.endsWith("/*")) {
     errors.push(issue(file, "`owner` must name a concrete agent, not a wildcard"));
@@ -678,7 +685,7 @@ export function notifyCodexSession(session, delivered, { run = spawnSync } = {})
   const message = [
     `FIR mailbox message ${delivered.messageId}`,
     `from ${delivered.from} to ${delivered.to}: ${delivered.subject}.`,
-    `Run make mailbox-list and read ${delivered.messageId}.md; the mailbox event is authoritative.`,
+    `Run scripts/mailbox list and read ${delivered.messageId}.md; the mailbox event is authoritative.`,
   ].join(" ");
   const result = run(
     "codex",
