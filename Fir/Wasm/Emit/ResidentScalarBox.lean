@@ -11,10 +11,11 @@ open Lean.Compiler
 # Wasm-resident small scalar boxing
 
 Lean's type-specific small-integer APIs use tagged objects for `UInt8`,
-`UInt16`, and `UInt32`, but `lean_box_uint64` always allocates an ordinary
-heap constructor. FIR preserves those source representations across its
-`wasm32-lean64` boundary. This helper family implements the exact operations
-needed by compiler-generated boxed wrappers without adding host imports.
+`UInt16`, and `UInt32`, but `lean_box_uint64` and `lean_box_usize` always
+allocate ordinary heap constructors. FIR preserves those source
+representations across its `wasm32-lean64` boundary. This helper family
+implements the exact operations needed by compiler-generated boxed wrappers
+without adding host imports.
 -/
 
 inductive LinkError where
@@ -48,10 +49,12 @@ def boxUInt16TaggedName : Name := `fir_box_uint16_tagged
 def boxUInt32Name : Name := `fir_box_uint32
 def boxUInt64Name : Name := `fir_box_uint64
 def boxUInt64ObjectName : Name := `fir_box_uint64_object
+def boxUSizeName : Name := `fir_box_usize
 def unboxUInt8Name : Name := `fir_unbox_uint8
 def unboxUInt16Name : Name := `fir_unbox_uint16
 def unboxUInt32Name : Name := `fir_unbox_uint32
 def unboxUInt64Name : Name := `fir_unbox_uint64
+def unboxUSizeName : Name := `fir_unbox_usize
 def uint32DecEqName : Name := `fir_ext_UInt32_decEq
 
 def externalDeclarations : Array Name := #[`UInt32.decEq]
@@ -59,7 +62,9 @@ def externalDeclarations : Array Name := #[`UInt32.decEq]
 def helperNames : Array Name :=
   #[boxUInt8Name, boxUInt16Name, boxUInt16TaggedName, boxUInt32Name,
     boxUInt64Name, boxUInt64ObjectName,
+    boxUSizeName,
     unboxUInt8Name, unboxUInt16Name, unboxUInt32Name, unboxUInt64Name,
+    unboxUSizeName,
     uint32DecEqName]
 
 private def equalsConst (kind : AbiKind) (value : UInt32) : List Instruction :=
@@ -346,6 +351,60 @@ def unboxUInt64Function : Function := {
     requireHeaderWord headerKindOffset ObjectKind.boxed.code ++
     heapUInt64Body }
 
+private def heapUSizeBoxBody : List Instruction :=
+  [.i32Const .uint32 40,
+    .call (.declaration ResidentAllocator.allocateName),
+    .localSet addressLocal] ++
+    storeAddress32 [.i32Const .uint32 ObjectKind.boxed.code]
+      headerKindOffset ++
+    storeAddress32 [.i32Const .uint32 liveFlag] headerFlagsOffset ++
+    storeAddress32 [.i32Const .uint32 1] headerRefCountOffset ++
+    storeAddress32 [.i32Const .uint32 40] headerAllocationBytesOffset ++
+    storeAddress32 [.i32Const .uint32 BoxedScalarKind.usize.code]
+      headerAux0Offset ++
+    storeAddress32 [.i32Const .uint32 8] headerAux1Offset ++
+    storeAddress32 [.i32Const .uint32 0] headerAux2Offset ++
+    storeAddress32 [.i32Const .uint32 0] headerAux3Offset ++
+    [.localGet addressLocal, .localGet valueParam,
+      .i64Store .usize (u32 headerBytes),
+      .localGet addressLocal,
+      .localSet rawLocal] ++
+    retypeRaw .tobject objectResultLocal
+
+/-- Upstream `lean_box_usize`: every payload uses an ordinary refcounted heap
+constructor, including values that fit the target's tagged-object payload. -/
+def boxUSizeFunction : Function := {
+  name := boxUSizeName
+  params := #[(valueParam, .usize)]
+  results := #[.tobject]
+  locals := #[(rawLocal, .uint32), (addressLocal, .uint32),
+    (savedScratchLocal, .uint32), (objectResultLocal, .tobject)]
+  body := heapUSizeBoxBody }
+
+private def heapUSizeBody : List Instruction :=
+  trapUnless ([.localGet objectParam, .i32Load .uint32 (u32 headerFlagsOffset),
+    .i32Const .uint32 liveFlag, .i32And] ++ equalsConst .uint32 liveFlag) ++
+  requireHeaderWord headerAllocationBytesOffset 40 ++
+  requireHeaderWord headerAux0Offset BoxedScalarKind.usize.code ++
+  requireHeaderWord headerAux1Offset 8 ++
+  requireHeaderWord headerAux2Offset 0 ++
+  requireHeaderWord headerAux3Offset 0 ++ [
+    .localGet objectParam,
+    .i64Load .usize (u32 headerBytes),
+    .ret]
+
+/-- Upstream `lean_unbox_usize`: accept only the ordinary heap constructor
+produced by `lean_box_usize`; tagged object words are invalid at this
+type-specific boundary. -/
+def unboxUSizeFunction : Function := {
+  name := unboxUSizeName
+  params := #[(objectParam, .tobject)]
+  results := #[.usize]
+  locals := #[]
+  body := requireHeapAddress ++
+    requireHeaderWord headerKindOffset ObjectKind.boxed.code ++
+    heapUSizeBody }
+
 /-- Upstream fixed-width equality is physical wasm32 equality. -/
 def uint32DecEqFunction : Function := {
   name := uint32DecEqName
@@ -366,10 +425,12 @@ private def runtimeName? : RuntimeOp → Option Name
   | .box .uint32 .tobject => some boxUInt32Name
   | .box .uint64 .tobject => some boxUInt64Name
   | .box .uint64 .object => some boxUInt64ObjectName
+  | .box .usize .tobject => some boxUSizeName
   | .unbox .uint8 => some unboxUInt8Name
   | .unbox .uint16 => some unboxUInt16Name
   | .unbox .uint32 => some unboxUInt32Name
   | .unbox .uint64 => some unboxUInt64Name
+  | .unbox .usize => some unboxUSizeName
   | _ => none
 
 private def runtimeFunction : RuntimeOp → Except LinkError Function
@@ -379,10 +440,12 @@ private def runtimeFunction : RuntimeOp → Except LinkError Function
   | .box .uint32 .tobject => pure boxUInt32Function
   | .box .uint64 .tobject => pure boxUInt64Function
   | .box .uint64 .object => pure boxUInt64ObjectFunction
+  | .box .usize .tobject => pure boxUSizeFunction
   | .unbox .uint8 => pure unboxUInt8Function
   | .unbox .uint16 => pure unboxUInt16Function
   | .unbox .uint32 => pure unboxUInt32Function
   | .unbox .uint64 => pure unboxUInt64Function
+  | .unbox .usize => pure unboxUSizeFunction
   | _ => throw .unsupportedOperation
 
 private structure Binding where
@@ -487,6 +550,7 @@ private def roundtripUInt32Name : Name := `resident_scalar_box_uint32_roundtrip
 private def roundtripUInt64Name : Name := `resident_scalar_box_uint64_roundtrip
 private def roundtripExactUInt64Name : Name :=
   `resident_scalar_box_uint64_exact_roundtrip
+private def roundtripUSizeName : Name := `resident_scalar_box_usize_roundtrip
 private def unboxUInt32ExampleName : Name := `resident_scalar_unbox_uint32
 
 private def exampleOperations : Array RuntimeOp := #[
@@ -499,7 +563,9 @@ private def exampleOperations : Array RuntimeOp := #[
   .box .uint32 .tobject,
   .box .uint64 .tobject,
   .unbox .uint64,
-  .box .uint64 .object]
+  .box .uint64 .object,
+  .box .usize .tobject,
+  .unbox .usize]
 
 private def roundtripFunction : Function := {
   name := roundtripName
@@ -556,6 +622,14 @@ private def roundtripExactUInt64Function : Function := {
   body := [.localGet valueParam, .call (.runtime exampleOperations[9]!),
     .call (.runtime exampleOperations[8]!), .ret] }
 
+private def roundtripUSizeFunction : Function := {
+  name := roundtripUSizeName
+  params := #[(valueParam, .usize)]
+  results := #[.usize]
+  locals := #[]
+  body := [.localGet valueParam, .call (.runtime exampleOperations[10]!),
+    .call (.runtime exampleOperations[11]!), .ret] }
+
 def exampleModule : Module := {
   imports := exampleOperations.mapIdx Fir.Wasm.runtimeImport ++ #[{
     key := .external `UInt32.decEq
@@ -568,10 +642,10 @@ def exampleModule : Module := {
   functions := #[roundtripFunction, unboxUInt32ExampleFunction,
     roundtripUInt16Function, roundtripExactUInt16Function,
     roundtripUInt32Function, roundtripUInt64Function,
-    roundtripExactUInt64Function]
+    roundtripExactUInt64Function, roundtripUSizeFunction]
   exports := #[roundtripName, roundtripUInt16Name, roundtripExactUInt16Name,
     roundtripUInt32Name, roundtripUInt64Name, roundtripExactUInt64Name,
-    unboxUInt32ExampleName]
+    roundtripUSizeName, unboxUInt32ExampleName]
   initializers := #[]
   runtimeOperations := exampleOperations
   memory := some ResidentRuntime.residentMemory }
@@ -612,7 +686,11 @@ def manifest : Json :=
       Json.mkObj [
         ("entry", roundtripExactUInt64Name.toString),
         ("params", Json.arr #["uint64"]),
-        ("result", "uint64")]]),
+        ("result", "uint64")],
+      Json.mkObj [
+        ("entry", roundtripUSizeName.toString),
+        ("params", Json.arr #["usize"]),
+        ("result", "usize")]]),
     ("helpers", Json.arr <| helperNames.map fun name => (name.toString : Json)),
     ("memory", "memory"),
     ("imports", Json.arr #[]),
@@ -624,7 +702,7 @@ def manifest : Json :=
   | .ok module =>
       module.imports.isEmpty && module.runtimeOperations.isEmpty &&
       module.functions.size ==
-        7 + helperNames.size + ResidentAllocator.helperNames.size &&
+        8 + helperNames.size + ResidentAllocator.helperNames.size &&
       helperNames.all module.exports.contains &&
       (Fir.Wasm.validateModule module).isOk && (Fir.Wasm.Emit.encode module).isOk
   | .error _ => false

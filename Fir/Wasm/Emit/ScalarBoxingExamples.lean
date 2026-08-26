@@ -74,7 +74,7 @@ def families : Array ScalarFamily := #[
     closureEntry := ``uint64ClosureEntry, generationReady := true },
   { label := "USize", type := LCNF.ImpureType.usize, scalar := .usize
     genericEntry := ``usizeEntry, rawEntry := ``rawUSize
-    closureEntry := ``usizeClosureEntry, generationReady := false },
+    closureEntry := ``usizeClosureEntry, generationReady := true },
   { label := "Float32", type := LCNF.ImpureType.float32, scalar := .float32
     genericEntry := ``float32Entry, rawEntry := ``rawFloat32
     closureEntry := ``float32ClosureEntry, generationReady := true },
@@ -83,8 +83,7 @@ def families : Array ScalarFamily := #[
     closureEntry := ``floatClosureEntry, generationReady := true }]
 
 #guard families.size == 7
-#guard (families.filter (!·.generationReady)).map (·.label) ==
-  #["USize"]
+#guard (families.filter (!·.generationReady)).isEmpty
 
 private def operationText (operations : Array RuntimeOp) : String :=
   (Json.arr <| operations.map fun operation =>

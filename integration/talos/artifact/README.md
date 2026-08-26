@@ -165,6 +165,17 @@ Float32 zero padding, exact frontier growth and rewind, malformed-layout traps,
 module-owned memory, and zero imports. This is the generation-ready executable
 surface; W6 proves the stable helper layout separately.
 
+The standalone resident scalar-box module closes compiler-generated generic
+and explicit-boxing wrappers for all seven final-LCNF scalar families with
+zero imports. In particular, `fir_box_usize` follows upstream
+`lean_box_usize`: even small values allocate a canonical 40-byte owned box,
+using concrete marker `USize = 5`, an eight-byte payload, and no tagged-object
+shortcut. `fir_unbox_usize` rejects tagged words, the wrong object kind,
+allocation or payload widths, and non-USize scalar markers. The smoke client
+checks exact payload bits through the complete 64-bit range, exact frontier
+growth, and the full helper/export inventory. W6 proves this stable helper
+against the heap-only USize contract independently.
+
 W7 also emits the first standalone Wasm-resident runtime slice. Its module
 defines and exports one-page memory, has no imports, and exports the raw
 `tobject → UInt32` helper `fir_getTag`. The browser-neutral smoke client writes

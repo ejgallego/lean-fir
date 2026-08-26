@@ -39,6 +39,16 @@ function checkBoxedUInt64(memory, address, payload) {
     "boxed UInt64 payload");
 }
 
+function checkBoxedUSize(memory, address, payload) {
+  const view = new DataView(memory.buffer);
+  const expectedHeader = [3, 2, 1, 40, 5, 8, 0, 0];
+  expectedHeader.forEach((value, index) =>
+    equal(view.getUint32(address + 4 * index, true), value,
+      `boxed USize header word ${index}`));
+  equal(view.getBigUint64(address + 32, true), payload,
+    "boxed USize payload");
+}
+
 function expectTrap(action, message) {
   let trapped = false;
   try {
@@ -64,6 +74,7 @@ export async function checkResidentScalarBox(bytes) {
     "resident_scalar_box_uint32_roundtrip",
     "resident_scalar_box_uint64_roundtrip",
     "resident_scalar_box_uint64_exact_roundtrip",
+    "resident_scalar_box_usize_roundtrip",
     "resident_scalar_unbox_uint32",
     "fir_box_uint8",
     "fir_box_uint16",
@@ -71,10 +82,12 @@ export async function checkResidentScalarBox(bytes) {
     "fir_box_uint32",
     "fir_box_uint64",
     "fir_box_uint64_object",
+    "fir_box_usize",
     "fir_unbox_uint8",
     "fir_unbox_uint16",
     "fir_unbox_uint32",
     "fir_unbox_uint64",
+    "fir_unbox_usize",
     "fir_ext_UInt32_decEq",
   ]) {
     equal(typeof exports[name], "function", `missing export ${name}`);
@@ -151,6 +164,30 @@ export async function checkResidentScalarBox(bytes) {
       `exact-result boxed UInt64 ${value} round trip grew the frontier incorrectly`);
   }
 
+  for (const value of [
+    0n,
+    1n,
+    0x7fffffffn,
+    0x80000000n,
+    0x7fffffffffffffffn,
+    0x8000000000000000n,
+    0xffffffffffffffffn,
+  ]) {
+    const before = exports.fir_heap_frontier() >>> 0;
+    const address = exports.fir_box_usize(value) >>> 0;
+    equal(address, before, `boxed USize ${value} used the wrong address`);
+    equal(exports.fir_heap_frontier() >>> 0, before + 40,
+      `boxed USize ${value} grew the frontier incorrectly`);
+    checkBoxedUSize(exports.memory, address, value);
+    equal(u64(exports.fir_unbox_usize(address)), value,
+      `boxed USize ${value} unboxed incorrectly`);
+    const roundtripBefore = exports.fir_heap_frontier() >>> 0;
+    equal(u64(exports.resident_scalar_box_usize_roundtrip(value)), value,
+      `boxed USize ${value} round trip failed`);
+    equal(exports.fir_heap_frontier() >>> 0, roundtripBefore + 40,
+      `boxed USize ${value} round trip grew the frontier incorrectly`);
+  }
+
   const view = new DataView(exports.memory.buffer);
   for (let value = 0; value <= 255; value += 1) {
     view.setUint32(0, 0xdecafbad, true);
@@ -190,8 +227,27 @@ export async function checkResidentScalarBox(bytes) {
     "tagged UInt64 input did not trap");
   expectTrap(() => exports.fir_unbox_uint64(exports.fir_box_uint32(0x80000000)),
     "promoted-tag UInt64 input did not trap");
+  expectTrap(() => exports.fir_unbox_usize(83),
+    "tagged USize input did not trap");
 
-  return "PASS zero-import resident scalar boxing";
+  const malformedKind = exports.fir_box_usize(41n) >>> 0;
+  view.setUint32(malformedKind, 5, true);
+  expectTrap(() => exports.fir_unbox_usize(malformedKind),
+    "USize box with the wrong object kind did not trap");
+  const malformedAllocation = exports.fir_box_usize(41n) >>> 0;
+  view.setUint32(malformedAllocation + 12, 32, true);
+  expectTrap(() => exports.fir_unbox_usize(malformedAllocation),
+    "USize box with the wrong allocation width did not trap");
+  const malformedMarker = exports.fir_box_usize(41n) >>> 0;
+  view.setUint32(malformedMarker + 16, 4, true);
+  expectTrap(() => exports.fir_unbox_usize(malformedMarker),
+    "USize box with the UInt64 marker did not trap");
+  const malformedPayloadWidth = exports.fir_box_usize(41n) >>> 0;
+  view.setUint32(malformedPayloadWidth + 20, 4, true);
+  expectTrap(() => exports.fir_unbox_usize(malformedPayloadWidth),
+    "USize box with the wrong payload width did not trap");
+
+  return "PASS zero-import resident scalar boxing for all seven families";
 }
 
 export async function checkFetchedResidentScalarBox(url) {
