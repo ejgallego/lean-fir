@@ -701,8 +701,16 @@ cmp "$first/resident/string.wasm.json" \
 cmp "$first/resident/fallbacks.wasm" "$second/resident/fallbacks.wasm"
 cmp "$first/resident/fallbacks.wasm.json" \
   "$second/resident/fallbacks.wasm.json"
-lake -d .. env lean --run ../FirWasmOracleMain.lean all "$first"
-lake -d .. env lean --run ../FirWasmOracleMain.lean all "$second"
+generate_oracle_root() {
+  local out="$1"
+  local oracle_tmp="$out/.oracle-tmp"
+  mkdir -p "$oracle_tmp"
+  TMPDIR="$oracle_tmp" lake -d .. env lean --run \
+    ../FirWasmOracleMain.lean all "$out"
+  rmdir "$oracle_tmp"
+}
+
+fir_run_producer_pair "$artifact_jobs" generate_oracle_root "$first" "$second"
 
 for manifest in "$first"/*.wasm.json; do
   name="$(basename "$manifest" .wasm.json)"

@@ -274,3 +274,20 @@ The exhaustive path currently fails in the unchanged
 under the same exhaustive environment reproduces the failure before this
 slice's isolation path is entered. It is reported as a separate W7 follow-up,
 not worked around by tooling.
+
+## Isolated oracle production
+
+The two live FIR oracle runs read the same built Lean modules but write
+expected observations into different artifact roots. Each run now also owns a
+private `TMPDIR`; `lake env` only supplies the read-only package environment,
+while `lean --run` places its transient compiler files in that private root.
+The same bounded pair helper waits for both statuses. All Wasm/manifest/oracle
+comparisons and readiness checks remain serial, and direct script use remains
+serial by default.
+
+Seven order-balanced rounds measured serial samples of 2.68, 2.22, 2.53, 3.12,
+2.55, 2.43, and 2.46 seconds: median 2.53 and MAD 0.10. Parallel samples were
+1.33, 1.21, 1.45, 1.53, 1.25, 1.32, and 1.56 seconds: median 1.33 and MAD
+0.12. All four 44-observation roots in every round were byte-identical. This
+removes 1.20 seconds, or 47.4%, from the oracle-production region without a
+concurrent Lake build or shared output path.
