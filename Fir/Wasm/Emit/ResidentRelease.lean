@@ -460,6 +460,19 @@ def specializeCheckedDecrementFunction (function : Function) : Function :=
     body := specializeCheckedDecrementInstructions
       (function.params.toList ++ function.locals.toList) function.body }
 
+/-- Specialize checked decrement operands across a module and refresh the
+runtime frontier immediately. Resident planning must call this before it
+inventories operations: specialization can select an unchecked decrement that
+was not present in the original module. -/
+def specializeCheckedDecrements (module : Module) : Module :=
+  let functions := module.functions.map specializeCheckedDecrementFunction
+  let runtimeOperations := Fir.Wasm.collectRuntimeOps functions
+  let externalImports := module.imports.filter (·.operation?.isNone)
+  { module with
+    functions
+    imports := runtimeOperations.mapIdx Fir.Wasm.runtimeImport ++ externalImports
+    runtimeOperations }
+
 private def checkedDecrementCalls (calls : List Instruction) :
     List Instruction :=
   checkedDecrementLocalCalls objectParam calls
@@ -579,10 +592,10 @@ def internalizeReleases (module : Module) (validate : Bool := true) :
     | .error error => throw (.invalidInput error)
   unless module.memory == some ResidentRuntime.residentMemory do
     throw .incompatibleMemory
-  let specializedFunctions :=
-    module.functions.map specializeCheckedDecrementFunction
+  let specialized := specializeCheckedDecrements module
+  let specializedFunctions := specialized.functions
   let encounteredOperations :=
-    (Fir.Wasm.collectRuntimeOps specializedFunctions).filter isRelease
+    specialized.runtimeOperations.filter isRelease
   /-
   Preserve the input module's reviewed first-use order for surviving release
   operations. Specialization may introduce an unchecked variant that was not
@@ -590,7 +603,7 @@ def internalizeReleases (module : Module) (validate : Bool := true) :
   first-use order.
   -/
   let operations := encounteredOperations.foldl
-    (init := module.runtimeOperations.filter fun operation =>
+    (init := specialized.runtimeOperations.filter fun operation =>
       isRelease operation && encounteredOperations.contains operation)
     Fir.Wasm.addUnique
   let rewrites := operations.toList.zipIdx.map fun (operation, ordinal) =>
@@ -606,12 +619,12 @@ def internalizeReleases (module : Module) (validate : Bool := true) :
     (specializedFunctions.map (rewriteFunction rewrites)) ++
       #[releaseHeaderFunction, decrementOnce] ++ wrappers.toArray
   let runtimeOperations := Fir.Wasm.collectRuntimeOps functions
-  let externalImports := module.imports.filter (·.operation?.isNone)
+  let externalImports := specialized.imports.filter (·.operation?.isNone)
   let imports := runtimeOperations.mapIdx Fir.Wasm.runtimeImport ++ externalImports
   let exports := rewrites.foldl (init := module.exports)
     fun exports (_, name) => Fir.Wasm.addUnique exports name
   let result := {
-    module with
+    specialized with
     imports
     functions
     exports

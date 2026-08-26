@@ -258,7 +258,6 @@ private def applySteps (validate : Bool) (steps : List Step) (module : Module) :
 private structure RewritePlan where
   callRewrites : Std.HashMap CallTarget (List Instruction) := {}
   callSiteRewrites : Array ResidentCallSite.Rewrite := #[]
-  specializeReleases : Bool := false
   deriving Inhabited
 
 mutual
@@ -283,9 +282,6 @@ private def rewriteFunctionBatch (plan : RewritePlan) (function : Function) :
     Except Source.CompileError Function := do
   let function := ResidentCallSite.refineFunctionLocals
     plan.callSiteRewrites function
-  let function := if plan.specializeReleases then
-      ResidentRelease.specializeCheckedDecrementFunction function
-    else function
   let function ← ResidentCallSite.reserveLocals plan.callSiteRewrites function
     |>.mapError fun error =>
       .manifest s!"failed to reserve resident call-site locals: {repr error}"
@@ -457,8 +453,7 @@ private def applyPersistentPlan (steps : Array Step) (module : Module) :
       .manifest s!"invalid typed resident call-site rewrite: {repr error}"
   let plan : RewritePlan := {
     callRewrites
-    callSiteRewrites
-    specializeReleases := steps.contains .releases }
+    callSiteRewrites }
   let newFunctions := planned.functions.extract prefixSize planned.functions.size
   let rewrittenFunctions ← module.functions.mapM (rewriteFunctionBatch plan)
   let functions := rewrittenFunctions ++ newFunctions
@@ -535,6 +530,14 @@ def linkModule (policy : Policy) (module : Module) :
     module with
     functions := module.functions.map
       (ResidentCallSite.refineFunctionLocals callSiteRewrites) }
+  /-
+  Operand specialization can introduce an unchecked decrement that was not in
+  the original operation inventory. Refresh the frontier before persistent
+  planning so the releases step sees and internalizes every selected form.
+  -/
+  let module := if policy.steps.contains .releases then
+      ResidentRelease.specializeCheckedDecrements module
+    else module
   match Fir.Wasm.validateModule module with
   | .ok () => pure ()
   | .error error =>
