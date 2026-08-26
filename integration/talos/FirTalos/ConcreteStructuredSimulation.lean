@@ -9107,7 +9107,7 @@ structure ConcreteStructuredDirectCallReadyFocus
     findFVar? (functionBindings callerFunction) decl.fvarId = some resultIndex
   resultKindAt :
     (functionBindings callerFunction)[resultIndex]?.map Prod.snd =
-      some site.resultKind
+      some site.calleeResultKind
   argumentsRelated :
     ConstructorArgumentsRelated witness site.argumentKinds.toList physicalArgs
       site.semanticArgs.toList
@@ -9408,7 +9408,7 @@ structure ConcreteStructuredDirectCallEntryFocus
     findFVar? (functionBindings callerFunction) decl.fvarId = some resultIndex
   resultKindAt :
     (functionBindings callerFunction)[resultIndex]?.map Prod.snd =
-      some site.resultKind
+      some site.calleeResultKind
   argumentsRelated :
     ConstructorArgumentsRelated witness site.argumentKinds.toList physicalArgs
       site.semanticArgs.toList
@@ -11184,7 +11184,7 @@ theorem ConcreteStructuredDirectCallEntryFocus.frameRel
     (tail : ConcreteStructuredFrameRel source.program sourceRuntime targetStore
       witness tailResult sourceFrames targetFrames) :
     ConcreteStructuredFrameRel source.program sourceRuntime targetStore witness
-      (some site.resultKind) source.frames target.frames := by
+      (some site.calleeResultKind) source.frames target.frames := by
   rw [entry.sourceFramesEq, entry.targetFramesEq]
   exact .direct
     (entry.calleeFocus.sourceProgramEq.trans row.contextProgram)
@@ -11480,11 +11480,12 @@ theorem ConcreteStructuredDirectCallEntryFocus.bindFrame_of_yield
       target.frames =
         .call 1 callerRemainder callerLocals
             (.localSet resultIndex :: targetRest) :: targetFrames)
-    (resultRefines : actualKind.refines site.resultKind = true) :
+    (resultRefines : actualKind.refines site.calleeResultKind = true) :
     ConcreteStructuredBindFrameFocus callerContext sourceModule callerFunction
       labels currentRuntime callerEnv sourceValue decl.fvarId continuation
       callerJoins sourceFrames currentStore callerLocals callerRemainder
-      targetRest targetFrames calleeLocals.values currentWitness site.resultKind
+      targetRest targetFrames calleeLocals.values currentWitness
+      site.calleeResultKind
       physical resultIndex source target := by
   have callerStateRelated :
       StateRelated callerFunction currentRuntime callerEnv currentStore
@@ -11571,11 +11572,12 @@ theorem
       target.frames =
         .call 1 callerRemainder callerLocals
             (.localSet resultIndex :: targetRest) :: targetFrames)
-    (resultRefines : actualKind.refines site.resultKind = true) :
+    (resultRefines : actualKind.refines site.calleeResultKind = true) :
     ConcreteStructuredBindFrameFocus callerContext sourceModule callerFunction
       labels currentRuntime callerEnv sourceValue decl.fvarId continuation
       callerJoins sourceFrames currentStore callerLocals callerRemainder
-      targetRest targetFrames calleeLocals.values currentWitness site.resultKind
+      targetRest targetFrames calleeLocals.values currentWitness
+      site.calleeResultKind
       physical resultIndex source target :=
   entry.bindFrame_of_yield yielded invariant.2 sourceFramesEq targetFramesEq
     resultRefines
@@ -15998,8 +16000,7 @@ theorem
       have bindFocus :=
         entry.bindFrame_of_yield_cacheFrame calleeYielded calleeInvariant
           sourceCallFramesEq targetCallFramesEq
-          (AbiKind.refines_trans calleeResultRefines
-            site.calleeResultRefines)
+          calleeResultRefines
       obtain ⟨sourceResumed, targetResumed, updated, resumedLocals,
           bindSourceStep, bindTargetPath, targetSet, resumedEq, resumedFocus,
           resumedSourceJoinsEq, resumedSourceFramesEq,
@@ -17699,11 +17700,11 @@ theorem ConcreteStructuredDirectCallEntryFocus.pushResourceStack
       sourceModule calleeFunction externals sourceRuntime sourceRuntime
       targetStore targetStore witness witness [] remainingBytes site.calleeEnv
       (row.targetFunction.toLocals physicalArgs) site.calleeResultKind
-      (some site.resultKind) source.frames target.frames := by
+      (some site.calleeResultKind) source.frames target.frames := by
   rw [entry.sourceFramesEq, entry.targetFramesEq]
   exact ⟨calleeScope,
     .direct callerResources.current rfl entry.continuationAdapted
-      entry.resultFound entry.resultKindAt site.calleeResultRefines
+      entry.resultFound entry.resultKindAt (by simp [AbiKind.refines])
       callerResources.suspended⟩
 
 theorem ConcreteStructuredDirectCallReadyFocus.advance_enter_stack
@@ -21252,7 +21253,7 @@ theorem ConcreteStructuredDirectCallReadyCoreRel.advance_enter
         targetAfter ∧
       ConcreteStructuredCodeCoreRel program calleeContext sourceModule
         calleeFunction externals [] sourceRuntime targetStore witness
-        site.calleeResultKind (some site.resultKind) [] remainingBytes
+        site.calleeResultKind (some site.calleeResultKind) [] remainingBytes
         sourceRuntime site.calleeEnv site.calleeCode targetStore
         (row.targetFunction.toLocals physicalArgs) row.targetFunction.body
         witness sourceAfter targetAfter ∧
@@ -21301,7 +21302,7 @@ theorem ConcreteStructuredDirectCallReadyCoreRel.advance_enter
         calleeFunction externals sourceRuntime sourceRuntime targetStore
         targetStore witness witness [] remainingBytes site.calleeEnv
         (row.targetFunction.toLocals physicalArgs) site.calleeResultKind
-        (some site.resultKind) sourceAfter.frames targetAfter.frames := by
+        (some site.calleeResultKind) sourceAfter.frames targetAfter.frames := by
     simpa [contextProgram] using pushedResources
   exact ⟨sourceAfter, targetAfter, sourceStep, targetPath,
     ⟨entry.calleeFocus, nextResources⟩, callerResources.current, entry⟩
@@ -21356,7 +21357,7 @@ theorem ConcreteStructuredDirectCallReadyCoreRel.advance_enter_of_step
         targetAfter ∧
       ConcreteStructuredCodeCoreRel program calleeContext sourceModule
         calleeFunction externals [] sourceRuntime targetStore witness
-        site.calleeResultKind (some site.resultKind) [] remainingBytes
+        site.calleeResultKind (some site.calleeResultKind) [] remainingBytes
         sourceRuntime site.calleeEnv site.calleeCode targetStore
         (row.targetFunction.toLocals physicalArgs) row.targetFunction.body
         witness sourceAfter targetAfter ∧
@@ -22785,7 +22786,7 @@ theorem ConcreteStructuredDirectCallReadyCoreRel.advance_global_of_step
       ConcreteStructuredCodeStepOutcome program calleeContext site.calleeCode
         sourceModule calleeFunction targetModule hosts calleeSpec externals []
         sourceRuntime targetStore witness site.calleeResultKind
-        (some site.resultKind) [] remainingBytes sourceAfter targetAfter :=
+        (some site.calleeResultKind) [] remainingBytes sourceAfter targetAfter :=
     .code rowAtProgram.contextCaches nextCore
   exact ⟨targetAfter, targetPath, nextOutcome.toGlobal⟩
 
@@ -22870,21 +22871,27 @@ theorem ConcreteStructuredDirectCallReadyCoreRel.advance_supportedGlobal_of_step
     ConcreteStructuredSupportedFrameStack.direct
       (callerEnv := callerEnv) (callerJoins := callerJoins)
       (callerLocals := storedCallerLocals)
-      (callerRemainder := callerRemainder) spec activeResult contextCaches
+      (callerRemainder := callerRemainder)
+      (calleeResult := site.calleeResultKind)
+      (kind := site.calleeResultKind) spec activeResult contextCaches
       entry.continuationAdapted entry.resultFound entry.resultKindAt
-      site.calleeResultRefines supported
+      (by simp [AbiKind.refines]) supported
   let pushedResources :=
     ConcreteStructuredSuspendedResourceStack.direct
       (callerEnv := callerEnv) (callerJoins := callerJoins)
       (callerLocals := storedCallerLocals)
-      (callerRemainder := callerRemainder) callerScope spec.contextProgram.symm
+      (callerRemainder := callerRemainder)
+      (calleeResult := site.calleeResultKind)
+      (kind := site.calleeResultKind) callerScope spec.contextProgram.symm
       entry.continuationAdapted entry.resultFound entry.resultKindAt
-      site.calleeResultRefines related.resources.suspended
+      (by simp [AbiKind.refines]) related.resources.suspended
   have pushedAgrees : pushedSupported.Agrees pushedResources := by
     exact ConcreteStructuredSupportedFrameStack.Agrees.direct
+      (calleeResult := site.calleeResultKind)
+      (kind := site.calleeResultKind)
       spec activeResult contextCaches callerScope spec.contextProgram.symm
       entry.continuationAdapted entry.resultFound entry.resultKindAt
-      site.calleeResultRefines supported related.resources.suspended agrees
+      (by simp [AbiKind.refines]) supported related.resources.suspended agrees
   obtain ⟨supportedAfter, agreesAfter⟩ :=
     pushedAgrees.reindex entry.sourceFramesEq entry.targetFramesEq
       nextCore.resources.suspended
@@ -22892,7 +22899,7 @@ theorem ConcreteStructuredDirectCallReadyCoreRel.advance_supportedGlobal_of_step
       ConcreteStructuredSupportedOutcome program calleeContext site.calleeCode
         sourceModule calleeFunction targetModule hosts calleeSpec externals []
         sourceRuntime targetStore witness site.calleeResultKind
-        (some site.resultKind) sourceAfter targetAfter :=
+        (some site.calleeResultKind) sourceAfter targetAfter :=
     .code rowAtProgram.contextCaches nextCore supportedAfter agreesAfter
   have calleeResultAt :
       calleeSpec.sourceResultKind = site.calleeResultKind := by
@@ -22900,7 +22907,8 @@ theorem ConcreteStructuredDirectCallReadyCoreRel.advance_supportedGlobal_of_step
     simpa [site.calleeResult] using rowAtProgram.sourceResultSelected.symm
   exact ⟨targetAfter, targetPath, calleeContext, site.calleeCode,
     calleeFunction, calleeSpec, [], sourceRuntime, targetStore, witness,
-    site.calleeResultKind, some site.resultKind, calleeResultAt, nextActive⟩
+    site.calleeResultKind, some site.calleeResultKind, calleeResultAt,
+    nextActive⟩
 
 /-- A poised exactly saturated closure call likewise enters its selected
 generated callee inside the unchanged module-wide relation.  The only dynamic

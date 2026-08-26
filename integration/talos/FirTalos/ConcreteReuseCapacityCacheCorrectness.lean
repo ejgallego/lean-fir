@@ -4979,7 +4979,7 @@ structure DirectInternalCallSite
     bindParams sourceDeclaration.params semanticArgs = .ok calleeEnv
   resultCompiled :
     Fir.Wasm.getLocal context decl.fvarId =
-      .ok (.localGet decl.fvarId, resultKind)
+      .ok (.localGet decl.fvarId, calleeResultKind)
 
 private theorem listMapM_length_of_ok_for_directCall
     {α β ε : Type} (items : List α) (action : α → Except ε β)
@@ -6061,7 +6061,7 @@ def DirectInternalCallDeclarationInduction
                       sourceRuntime nextRuntime site.calleeEnv site.calleeCode
                       targetFunction functionIndex initial afterCall
                       initialWitness resultWitness physicalArgs.reverse
-                      site.resultKind sourceValue physical stepCost
+                      site.calleeResultKind sourceValue physical stepCost
 
 /--
 Production compiler construction of the cache-aware direct-call law.
@@ -6141,7 +6141,7 @@ theorem DirectDeclarationCallImplementationWithCache.ofInternalCompiler
       refine
         ⟨calleeContext, calleeFunction, site.calleeEnv, site.calleeCode,
           targetFunction, functionIndex, targetArguments, afterCall, updated,
-          resultWitness, physicalArgs, site.resultKind, physical, contexts,
+          resultWitness, physicalArgs, site.calleeResultKind, physical, contexts,
           rfl, resultKindAt, assembled, callee, targetSet, ?_⟩
       simp [Fir.Wasm.reuseCapacityLetFacts?, site.valueEq]
 
@@ -15142,7 +15142,6 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_generated
           (nextStore := afterCall)
           (nextWitness := resultWitness)
           (physical := physical) resultFound
-      have callerResult := calleeResult.ofRefines site.calleeResultRefines
       have factsTransfer :
           reuseCapacityLetFacts? facts decl =
             some (eraseReuseCapacityFact facts decl.fvarId) := by
@@ -15150,7 +15149,7 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_generated
       obtain ⟨callStep, externalsPreserved, hostDescriptorsPreserved,
           witnessDescriptorsPreserved, producedTransfer, nextBaseInvariant⟩ :=
         invariant.1.1.ofDirectDeclarationCallExact stepFits sourceStep
-          resultFound resultKindAt assembled callerResult.declaration targetSet
+          resultFound resultKindAt assembled calleeResult.declaration targetSet
           factsTransfer
       rw [transfer] at producedTransfer
       have factsEq := Option.some.inj producedTransfer
@@ -15159,14 +15158,14 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_generated
           ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
             afterCall entryWitness resultWitness :=
         invariant.2.step
-          callerResult.declaration.capacityPreserving.witnessTransport
-          callerResult.declaration.closureAllocationsPersistent
-          callerResult.declaration.capacityPreserving.capacityTransport
-          callerResult.declaration.ordinaryTransport
-          callerResult.declaration.externalsPreserved
-          callerResult.declaration.toClosureTablesTransport
+          calleeResult.declaration.capacityPreserving.witnessTransport
+          calleeResult.declaration.closureAllocationsPersistent
+          calleeResult.declaration.capacityPreserving.capacityTransport
+          calleeResult.declaration.ordinaryTransport
+          calleeResult.declaration.externalsPreserved
+          calleeResult.declaration.toClosureTablesTransport
       have nextClosureTables : ClosureTablesAgree afterCall resultWitness :=
-        callerResult.declaration.toClosureTablesTransport.agree invariant.1.2.2
+        calleeResult.declaration.toClosureTablesTransport.agree invariant.1.2.2
       have continuationInvariant :
           ReuseCapacityEntryRelativeFrame
             (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
@@ -15180,7 +15179,7 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_generated
             stepCost + continuationCost + slack - stepCost =
               continuationCost + slack := by
           omega
-        refine ⟨⟨?_, callerResult.cacheTable, nextClosureTables⟩, nextEntry⟩
+        refine ⟨⟨?_, calleeResult.cacheTable, nextClosureTables⟩, nextEntry⟩
         simpa only [budgetEq] using nextBaseInvariant
       obtain ⟨resultStore, resultLocals, finalWitness, resultPhysical,
           continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
@@ -15948,7 +15947,6 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
           (nextStore := afterCall)
           (nextWitness := resultWitness)
           (physical := physical) resultFound
-      have callerResult := calleeResult.ofRefines site.calleeResultRefines
       have factsTransfer :
           reuseCapacityLetFacts? facts decl =
             some (eraseReuseCapacityFact facts decl.fvarId) := by
@@ -15956,7 +15954,7 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
       obtain ⟨callStep, externalsPreserved, hostDescriptorsPreserved,
           witnessDescriptorsPreserved, producedTransfer, nextBaseInvariant⟩ :=
         invariant.1.1.ofDirectDeclarationCallExact stepFits sourceStep
-          resultFound resultKindAt assembled callerResult.declaration targetSet
+          resultFound resultKindAt assembled calleeResult.declaration targetSet
           factsTransfer
       rw [transfer] at producedTransfer
       have factsEq := Option.some.inj producedTransfer
@@ -15965,14 +15963,14 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
           ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
             afterCall entryWitness resultWitness :=
         invariant.2.step
-          callerResult.declaration.capacityPreserving.witnessTransport
-          callerResult.declaration.closureAllocationsPersistent
-          callerResult.declaration.capacityPreserving.capacityTransport
-          callerResult.declaration.ordinaryTransport
-          callerResult.declaration.externalsPreserved
-          callerResult.declaration.toClosureTablesTransport
+          calleeResult.declaration.capacityPreserving.witnessTransport
+          calleeResult.declaration.closureAllocationsPersistent
+          calleeResult.declaration.capacityPreserving.capacityTransport
+          calleeResult.declaration.ordinaryTransport
+          calleeResult.declaration.externalsPreserved
+          calleeResult.declaration.toClosureTablesTransport
       have nextClosureTables : ClosureTablesAgree afterCall resultWitness :=
-        callerResult.declaration.toClosureTablesTransport.agree invariant.1.2.2
+        calleeResult.declaration.toClosureTablesTransport.agree invariant.1.2.2
       have continuationInvariant :
           ReuseCapacityEntryRelativeFrame
             (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
@@ -15986,7 +15984,7 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
             stepCost + continuationCost + slack - stepCost =
               continuationCost + slack := by
           omega
-        refine ⟨⟨?_, callerResult.cacheTable, nextClosureTables⟩, nextEntry⟩
+        refine ⟨⟨?_, calleeResult.cacheTable, nextClosureTables⟩, nextEntry⟩
         simpa only [budgetEq] using nextBaseInvariant
       obtain ⟨resultStore, resultLocals, finalWitness, resultPhysical,
           continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
@@ -17228,9 +17226,9 @@ theorem
     ⟨loweredRow.context, _, site.calleeEnv, site.calleeCode,
       generatedRow.targetFunction, generatedRow.targetFunctionIndex,
       targetArguments, afterCall, updated, resultWitness, physicalArgs,
-      site.resultKind, physical, loweredRow.contextsCoherent rfl rfl,
+      site.calleeResultKind, physical, loweredRow.contextsCoherent rfl rfl,
       rfl, resultKindAt, assembled,
-      calleeResult.ofRefines site.calleeResultRefines, targetSet, ?_⟩
+      calleeResult, targetSet, ?_⟩
   simp [Fir.Wasm.reuseCapacityLetFacts?, site.valueEq]
 
 /-- Certificate-free ownership-aware runtime law for saturated closure calls.

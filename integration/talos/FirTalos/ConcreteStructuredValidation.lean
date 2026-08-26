@@ -2690,16 +2690,15 @@ private theorem SaturatedClosureCallSite.resultCompiledForValidation
   exact compiledLetResult_of_nonNamed (program := program) valueKind nonNamed
     site.resultCompiled kindFound
 
-/-- Named-call validation retains the callee's precise result, whereas the
-current call-site contract stores the public destination kind.  When those
-kinds coincide, the call continuation extends exact local agreement.  The
-strict-refinement case is intentionally exposed as the next contract slice. -/
+/-- Named-call validation and production lowering both retain the callee's
+precise result kind in the destination local.  Public result compatibility is
+tracked independently by `calleeResultRefines`; it does not weaken exact local
+layout agreement. -/
 private theorem DirectInternalCallSite.resultCompiledForValidation
     {context : Fir.Wasm.Context}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {sourceEnv : Env}
-    (site : DirectInternalCallSite context decl sourceEnv)
-    (resultAligned : site.calleeResultKind = site.resultKind) :
+    (site : DirectInternalCallSite context decl sourceEnv) :
     ∀ {locals kind},
       Fir.Wasm.supportedLetDeclKind? context.program locals decl = some kind →
         Fir.Wasm.getLocal context decl.fvarId =
@@ -2721,9 +2720,39 @@ private theorem DirectInternalCallSite.resultCompiledForValidation
     simp [site.declarationFound, site.calleeResult, compatible]
   have kindEq : site.calleeResultKind = kind :=
     Except.ok.inj (siteEffective.symm.trans effective)
-  rw [resultAligned] at kindEq
   subst kind
   exact site.resultCompiled
+
+/-- Regression for the strict object-family case: when an internal callee's
+effective result is `object` but the source `let` is publicly annotated
+`tobject`, both executable validation and the compiler local row select the
+precise `object` lane.  In particular this case does not require the two kinds
+to be equal. -/
+theorem DirectInternalCallSite.strictObjectToTObjectValidationRegression
+    {context : Fir.Wasm.Context}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {sourceEnv : Env}
+    (site : DirectInternalCallSite context decl sourceEnv)
+    (calleeObject : site.calleeResultKind = .object)
+    (publicTObject : site.resultKind = .tobject)
+    {locals : Fir.Wasm.LocalKinds}
+    {kind : AbiKind}
+    (supported :
+      Fir.Wasm.supportedLetDeclKind? context.program locals decl = some kind) :
+    kind = .object ∧
+      Fir.Wasm.getLocal context decl.fvarId =
+        .ok (.localGet decl.fvarId, .object) ∧
+      site.calleeResultKind ≠ site.resultKind := by
+  have compiledAtKind := site.resultCompiledForValidation supported
+  have compiledAtObject :
+      Fir.Wasm.getLocal context decl.fvarId =
+        .ok (.localGet decl.fvarId, .object) := by
+    simpa [calleeObject] using site.resultCompiled
+  have kindEq : kind = .object := by
+    rw [compiledAtObject] at compiledAtKind
+    injection compiledAtKind with kindEq
+    exact congrArg Prod.snd kindEq.symm
+  exact ⟨kindEq, compiledAtObject, by simp [calleeObject, publicTObject]⟩
 
 /-- Any compiler/resource successor of a validated direct `let` continuation
 inherits the exact residual validator state, even when the concrete operation
@@ -2875,7 +2904,6 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_directCall_stage_of_step
       (.let decl continuation) targetStore targetLocals targetCode witness source
       target)
     (site : DirectInternalCallSite callerContext decl callerEnv)
-    (resultAligned : site.calleeResultKind = site.resultKind)
     (sourceStep : executeStep externals source = .next sourceAfter) :
     ∃ calleeContext calleeFunction,
       ∃ row : ConcreteGeneratedInternalDeclaration callerContext.program
@@ -2918,7 +2946,7 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_directCall_stage_of_step
         Fir.Wasm.getLocal callerContext decl.fvarId =
           .ok (.localGet decl.fvarId, kind) := by
     intro locals kind kindFound
-    apply site.resultCompiledForValidation resultAligned
+    apply site.resultCompiledForValidation
     simpa only [spec.contextProgram] using kindFound
   obtain ⟨_kind, _locals, _kindFound, _resultCompiled,
       continuationValidation⟩ :=
@@ -3002,7 +3030,7 @@ theorem
   have validatedCore :
       ConcreteStructuredValidatedCodeCoreRel program calleeContext sourceModule
         calleeFunction externals [] sourceRuntime targetStore witness
-        site.calleeResultKind (some site.resultKind) [] remainingBytes
+        site.calleeResultKind (some site.calleeResultKind) [] remainingBytes
         sourceRuntime site.calleeEnv site.calleeCode targetStore
         (row.targetFunction.toLocals physicalArgs) row.targetFunction.body
         witness sourceAfter targetAfter :=
@@ -3014,23 +3042,29 @@ theorem
     ConcreteStructuredValidatedFrameStack.direct
       (callerEnv := callerEnv) (callerJoins := callerJoins)
       (callerLocals := storedCallerLocals)
-      (callerRemainder := callerRemainder) spec related.activeResult
+      (callerRemainder := callerRemainder)
+      (calleeResult := site.calleeResultKind)
+      (kind := site.calleeResultKind) spec related.activeResult
       related.contextCaches entry.continuationAdapted entry.resultFound
-      entry.resultKindAt site.calleeResultRefines
+      entry.resultKindAt (by simp [AbiKind.refines])
       related.continuationValidation related.frames
   let pushedResources :=
     ConcreteStructuredSuspendedResourceStack.direct
       (callerEnv := callerEnv) (callerJoins := callerJoins)
       (callerLocals := storedCallerLocals)
-      (callerRemainder := callerRemainder) callerScope
+      (callerRemainder := callerRemainder)
+      (calleeResult := site.calleeResultKind)
+      (kind := site.calleeResultKind) callerScope
       spec.contextProgram.symm entry.continuationAdapted entry.resultFound
-      entry.resultKindAt site.calleeResultRefines
+      entry.resultKindAt (by simp [AbiKind.refines])
       related.core.resources.suspended
   have pushedAgrees : pushedFrames.supported.Agrees pushedResources := by
     exact ConcreteStructuredSupportedFrameStack.Agrees.direct
+      (calleeResult := site.calleeResultKind)
+      (kind := site.calleeResultKind)
       spec related.activeResult related.contextCaches callerScope
       spec.contextProgram.symm entry.continuationAdapted entry.resultFound
-      entry.resultKindAt site.calleeResultRefines related.frames.supported
+      entry.resultKindAt (by simp [AbiKind.refines]) related.frames.supported
       related.core.resources.suspended related.agrees
   obtain ⟨callerSpine, callerValidationAgrees⟩ :=
     related.validationAgrees
@@ -3042,20 +3076,20 @@ theorem
         (callerRemainder := callerRemainder) spec related.activeResult
         related.contextCaches callerScope spec.contextProgram.symm
         entry.continuationAdapted entry.resultFound entry.resultKindAt
-        site.calleeResultRefines related.continuationValidation
+        (by simp [AbiKind.refines]) related.continuationValidation
         callerValidationAgrees⟩
   obtain ⟨supportedAfter, agreesAfter⟩ := pushedAgrees.reindex
     entry.sourceFramesEq entry.targetFramesEq
     validatedCore.core.resources.suspended
   have validationAfter :
       ConcreteStructuredSuspendedValidation program site.calleeResultKind
-        (some site.resultKind) sourceAfter.frames := by
+        (some site.calleeResultKind) sourceAfter.frames := by
     rw [entry.sourceFramesEq]
     exact pushedFrames.validation
   have nextFrames :
       ConcreteStructuredValidatedFrameStack program sourceModule targetModule
-        hosts site.calleeResultKind (some site.resultKind) sourceAfter.frames
-        targetAfter.frames :=
+        hosts site.calleeResultKind (some site.calleeResultKind)
+        sourceAfter.frames targetAfter.frames :=
     ⟨supportedAfter, validationAfter⟩
   have nextValidationAgrees :
       ConcreteStructuredValidationAgrees agreesAfter validationAfter :=
@@ -3065,7 +3099,7 @@ theorem
       ConcreteStructuredValidatedCodeOutcome program calleeContext
         site.calleeCode sourceModule calleeFunction targetModule hosts
         calleeSpec externals [] sourceRuntime targetStore witness
-        site.calleeResultKind (some site.resultKind) [] remainingBytes
+        site.calleeResultKind (some site.calleeResultKind) [] remainingBytes
         sourceRuntime site.calleeEnv site.calleeCode targetStore
         (row.targetFunction.toLocals physicalArgs) row.targetFunction.body
         witness sourceAfter targetAfter :=

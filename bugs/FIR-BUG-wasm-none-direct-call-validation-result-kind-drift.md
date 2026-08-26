@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-direct-call-validation-result-kind-drift
-status: confirmed
+status: fixed
 classification: compiler
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: fcd623cbb96f5846b11fb89368f417d04bb9715f
@@ -9,7 +9,7 @@ pass: none
 discovered-by: invariant-check
 first-seen: 2026-08-26
 reproduction: integration/talos/FirTalos/ConcreteStructuredValidation.lean
-regression: none
+regression: integration/talos/FirTalos/ConcreteStructuredValidation.lean
 ---
 
 # Summary
@@ -69,9 +69,7 @@ proofs without weakening unrelated mutation contracts.
 
 ## Workaround
 
-The closed named-call staging theorem temporarily requires the explicit exact
-result equality.  This premise is visible in its public statement and is not
-inferred from compatibility.
+None.  The temporary exact-result equality premise has been removed.
 
 ## Upstream tracking
 
@@ -79,6 +77,14 @@ none
 
 ## Resolution and regression
 
-Unresolved.  The aligned validated relation and exact-result named-call
-staging theorem are the proof regression boundary.  A future fix must add a
-strict-refinement positive regression before this card is marked fixed.
+`DirectInternalCallSite.resultCompiled` now records the effective callee result
+kind selected by `refineNamedCallLocalKinds`, independently of the public
+source annotation.  Direct-call runtime, structured-frame, resource-stack,
+supported-stack, and validation-stack theorems retain that precise kind through
+callee entry and caller resumption; public compatibility remains available as
+`calleeResultRefines` at source-facing boundaries.
+
+`DirectInternalCallSite.strictObjectToTObjectValidationRegression` is the
+positive regression.  It proves that a call with an effective `object` result
+and public `tobject` annotation gives both the validator and compiler local row
+the precise `object` kind while the two source-facing kinds remain unequal.
