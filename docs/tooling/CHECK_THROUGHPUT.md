@@ -234,3 +234,43 @@ active and are noisier than the bounded phase measurements, so no additional
 whole-gate percentage claim is made. A complete explicit `FIR_CHECK_JOBS=1`
 fallback gate also passed; its 49.37-second wall time was visibly contaminated
 by concurrent host load and is retained as correctness evidence only.
+
+## Isolated source-artifact determinism
+
+Ordinary source generation elaborates fixture files that contain embedded
+`#fir_wasm_emit` commands. Even when the requested output paths differ, those
+commands write another 54 products to a relative `_build` directory. The gate
+therefore does not launch two source generators from the repository root.
+Instead, each producer receives a private working directory and private output
+root under the gate's existing temporary roots. Both use the same read-only
+Lake environment after the build barrier.
+
+Each producer emits 63 files: the 54 elaboration products plus the selected
+prettyM and PrettyTrace Wasm, manifests, final LCNF, instruction origins,
+function inventory, and final function sidecar. The gate compares the complete
+private directory trees serially and promotes one verified tree into canonical
+`_build` only after they agree. A producer failure or mismatch occurs before
+that promotion and before package publication. Exhaustive pretty/browser mode
+retains its existing serial source-generation path.
+
+Seven order-balanced ignored-only rounds measured serial source-tree samples
+of 11.89, 10.81, 11.32, 12.55, 10.96, 10.86, and 10.82 seconds: median 10.96
+and MAD 0.15. Parallel samples were 6.14, 5.58, 5.61, 6.42, 4.89, 5.58, and
+5.68 seconds: median 5.61 and MAD 0.07. Every serial and parallel tree was
+byte-identical in every round. This removes 5.35 seconds, or 48.8%, from the
+source-production region.
+
+Three contemporaneous complete-gate rounds measured serial samples of 31.14,
+30.20, and 30.84 seconds (median 30.84, MAD 0.30) and bounded samples of 26.51,
+22.33, and 22.99 seconds (median 22.99, MAD 0.66). This is a 7.85-second or
+25.5% end-to-end reduction for the cumulative Float, direct/resident, and
+source-artifact pairs. Every run retained exact validation and Talos receipt
+reuse, all deterministic comparisons, 44/44 readiness artifacts, and 16/16
+sources.
+
+The exhaustive path currently fails in the unchanged
+`FirWasmSourceExample.lean` resident-getTag checkpoint with
+`memoryInstructionWithoutMemory`. Running the parent checkpoint's exact script
+under the same exhaustive environment reproduces the failure before this
+slice's isolation path is entered. It is reported as a separate W7 follow-up,
+not worked around by tooling.

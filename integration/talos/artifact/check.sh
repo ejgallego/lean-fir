@@ -171,41 +171,68 @@ fi
 lake -d ../../.. build Fir.Wasm.Emit.SourceExamples Fir.Wasm.Emit.Command \
   Fir.Wasm.Emit.ResidentPrettyFormat fir-prettyM-artifact
 pretty_generator="$root/.lake/build/bin/fir-prettyM-artifact"
-generate_source_artifacts() {
-  if [[ "$exhaustive_pretty" == 1 ]]; then
-    FIR_PRETTYM_CHECKPOINTS=1 lake -d "$root" env lean \
-      "$here/FirWasmSourceExample.lean"
-    FIR_PRETTYM_CHECKPOINTS=1 lake -d "$root" env lean \
-      "$here/FirWasmPrettyTraceExample.lean"
-    env -u FIR_PRETTYM_CHECKPOINTS lake -d "$root" env "$pretty_generator" \
-      --instruction-origins \
-      "$here/_build/source-pretty-format-trace-resident-closed.origins.json" \
-      --function-inventory \
-      "$here/_build/source-pretty-format-trace-resident-closed.wasm.inventory.json" \
-      "$here/FirWasmPrettyTraceExample.lean" \
-      "$here/_build/source-pretty-format-trace-resident-closed.wasm"
-  else
+index_source_trace() {
+  local out="$1"
+  node "$root/tooling/wasm/function-index.mjs" direct \
+    --binaryen-dir "$root/.deps/lcnf-c-wasm/emsdk/upstream/bin" \
+    --wasm "$out/source-pretty-format-trace-resident-closed.wasm" \
+    --inventory \
+      "$out/source-pretty-format-trace-resident-closed.wasm.inventory.json" \
+    --output \
+      "$out/source-pretty-format-trace-resident-closed.wasm.functions.json"
+}
+
+generate_default_source_artifacts() {
+  local out="$1"
+  mkdir -p "$out/work"
+  out="$(cd "$out" && pwd)"
+  (
+    cd "$out/work"
     env -u FIR_PRETTYM_CHECKPOINTS lake -d "$root" env "$pretty_generator" \
       "$here/FirWasmSourceExample.lean" FirWasmSourceExample \
       Fir.Wasm.Emit.SourceFixture.prettyFormatRaw \
-      "$here/_build/source-pretty-format-resident-closed.wasm"
+      "$out/source-pretty-format-resident-closed.wasm"
     env -u FIR_PRETTYM_CHECKPOINTS lake -d "$root" env "$pretty_generator" \
       --instruction-origins \
-      "$here/_build/source-pretty-format-trace-resident-closed.origins.json" \
+      "$out/source-pretty-format-trace-resident-closed.origins.json" \
       --function-inventory \
-      "$here/_build/source-pretty-format-trace-resident-closed.wasm.inventory.json" \
+      "$out/source-pretty-format-trace-resident-closed.wasm.inventory.json" \
       "$here/FirWasmPrettyTraceExample.lean" \
-      "$here/_build/source-pretty-format-trace-resident-closed.wasm"
-  fi
-  node "$root/tooling/wasm/function-index.mjs" direct \
-    --binaryen-dir "$root/.deps/lcnf-c-wasm/emsdk/upstream/bin" \
-    --wasm "$here/_build/source-pretty-format-trace-resident-closed.wasm" \
-    --inventory \
-      "$here/_build/source-pretty-format-trace-resident-closed.wasm.inventory.json" \
-    --output \
-      "$here/_build/source-pretty-format-trace-resident-closed.wasm.functions.json"
+      "$out/source-pretty-format-trace-resident-closed.wasm"
+  )
+  index_source_trace "$out"
 }
-generate_source_artifacts
+
+generate_exhaustive_source_artifacts() {
+  FIR_PRETTYM_CHECKPOINTS=1 lake -d "$root" env lean \
+    "$here/FirWasmSourceExample.lean"
+  FIR_PRETTYM_CHECKPOINTS=1 lake -d "$root" env lean \
+    "$here/FirWasmPrettyTraceExample.lean"
+  env -u FIR_PRETTYM_CHECKPOINTS lake -d "$root" env "$pretty_generator" \
+    --instruction-origins \
+    "$here/_build/source-pretty-format-trace-resident-closed.origins.json" \
+    --function-inventory \
+    "$here/_build/source-pretty-format-trace-resident-closed.wasm.inventory.json" \
+    "$here/FirWasmPrettyTraceExample.lean" \
+    "$here/_build/source-pretty-format-trace-resident-closed.wasm"
+  index_source_trace "$here/_build"
+}
+
+if [[ "$exhaustive_pretty" == 1 ]]; then
+  generate_exhaustive_source_artifacts
+else
+  first_source_root="$first/source"
+  second_source_root="$second/source"
+  fir_run_producer_pair "$artifact_jobs" generate_default_source_artifacts \
+    "$first_source_root" "$second_source_root"
+  diff -qr "$first_source_root" "$second_source_root"
+  cp -a "$first_source_root/work/_build/." "$here/_build/"
+  for source_product in "$first_source_root"/*; do
+    if [[ -f "$source_product" ]]; then
+      cp "$source_product" "$here/_build/"
+    fi
+  done
+fi
 test -s _build/source-pretty-format-trace-resident-closed.origins.json
 test -s _build/source-pretty-format-trace-resident-closed.wasm.inventory.json
 test -s _build/source-pretty-format-trace-resident-closed.wasm.functions.json
@@ -273,7 +300,9 @@ for resident_pretty in "${resident_pretties[@]}"; do
     cp "_build/$resident_pretty.$suffix" "_build/$resident_pretty-first.$suffix"
   done
 done
-generate_source_artifacts
+if [[ "$exhaustive_pretty" == 1 ]]; then
+  generate_exhaustive_source_artifacts
+fi
 cmp _build/source-pretty-format-trace-resident-closed-first.origins.json \
   _build/source-pretty-format-trace-resident-closed.origins.json
 cmp _build/source-pretty-format-trace-resident-closed-first.wasm.inventory.json \
