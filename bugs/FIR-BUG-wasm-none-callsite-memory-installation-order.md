@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-callsite-memory-installation-order
-status: confirmed
+status: fixed
 classification: compiler
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: d8b18978322de05a8f3dba51ef03cf5461676c17
@@ -9,7 +9,7 @@ pass: none
 discovered-by: invariant-check
 first-seen: 2026-08-27
 reproduction: integration/talos/artifact/FirWasmSourceExample.lean
-regression: none
+regression: Fir/Wasm/Emit/ResidentRuntime.lean
 ---
 
 # Summary
@@ -87,5 +87,10 @@ none
 
 ## Resolution and regression
 
-unresolved
-
+`ResidentRuntime.internalizeOperationWithCallSiteRewrites` now validates the
+untouched input, applies the reviewed caller rewrite, installs its helper and
+module-owned memory as one unchecked intermediate transaction, and validates
+the completed output. The focused regression starts from a valid memoryless
+module containing one semantic `getTag` call, requires the import-free linked
+result to own and export resident memory, validates and encodes it, and checks
+that a separately invalid memoryless input is still rejected as `invalidInput`.

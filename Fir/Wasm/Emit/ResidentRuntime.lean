@@ -531,19 +531,83 @@ private def internalizeOperation (operation : RuntimeOp) (name : Name)
   validateInput validate module
   validateOutput validate (← internalizeOperationUnchecked operation name function module)
 
+/--
+Apply reviewed caller-local rewrites inside the same validated transaction that
+installs their resident helper and memory.
+
+The untouched source module is the input-validation boundary. A rewrite may
+legitimately introduce memory instructions while the selected resident helper
+is also responsible for adding module-owned memory, so the rewritten
+intermediate is deliberately not validated in isolation. The completed module
+remains the output-validation boundary.
+-/
+private def internalizeOperationWithCallSiteRewrites
+    (rewrites : Array ResidentCallSite.Rewrite) (operation : RuntimeOp)
+    (name : Name) (function : Function) (module : Module) (validate : Bool) :
+    Except LinkError Module := do
+  validateInput validate module
+  let functions ←
+    ResidentCallSite.rewriteModuleFunctions rewrites module
+      |>.mapError LinkError.callSite
+  let rewritten : Module := {
+    module with
+    functions
+    runtimeOperations := Fir.Wasm.collectRuntimeOps functions }
+  validateOutput validate
+    (← internalizeOperationUnchecked operation name function rewritten)
+
 def internalizeGetTag (module : Module) (validate : Bool := true) : Except LinkError Module :=
-  do
-    let functions ←
-      ResidentCallSite.rewriteModuleFunctions callSiteRewrites module
-        |>.mapError LinkError.callSite
-    internalizeOperation .getTag getTagName getTagFunction
-      { module with
-        functions
-        runtimeOperations := Fir.Wasm.collectRuntimeOps functions }
-      validate
+  internalizeOperationWithCallSiteRewrites callSiteRewrites .getTag getTagName
+    getTagFunction module validate
 
 def internalizeIsShared (module : Module) (validate : Bool := true) : Except LinkError Module :=
   internalizeOperation .isShared isSharedName isSharedFunction module validate
+
+private def getTagCallSiteProbeName : Name :=
+  `fir_example_getTagCallSite
+
+private def getTagCallSiteProbeFunction : Function := {
+  name := getTagCallSiteProbeName
+  params := #[(objectParam, .tobject)]
+  results := #[.uint32]
+  locals := #[]
+  body := [
+    .localGet objectParam,
+    .call (.runtime .getTag),
+    .ret] }
+
+/--
+Regression for `FIR-BUG-wasm-none-callsite-memory-installation-order`: the
+valid source module owns no memory, while the reviewed `getTag` caller rewrite
+introduces header loads whose resident transaction must install memory.
+-/
+private def getTagCallSiteProbeModule : Module := {
+  imports := #[Fir.Wasm.runtimeImport 0 .getTag]
+  functions := #[getTagCallSiteProbeFunction]
+  exports := #[getTagCallSiteProbeName]
+  initializers := #[]
+  runtimeOperations := #[.getTag]
+  memory := none }
+
+#guard getTagCallSiteProbeModule.memory.isNone
+#guard Fir.Wasm.validateModule getTagCallSiteProbeModule |>.isOk
+
+#guard match internalizeGetTag getTagCallSiteProbeModule with
+  | .ok module =>
+      module.imports.isEmpty &&
+      !module.runtimeOperations.contains .getTag &&
+      module.functions.size == 2 &&
+      module.exports.contains getTagName &&
+      (module.memory == some residentMemory) &&
+      (Fir.Wasm.validateModule module |>.isOk) &&
+      (Fir.Wasm.Emit.encode module |>.isOk)
+  | .error _ => false
+
+#guard match internalizeGetTag {
+    getTagCallSiteProbeModule with
+    dataSegments := #[{ offset := 0, bytes := #[0] }] } with
+  | .error (.invalidInput (.dataSegmentWithoutMemory 0)) => true
+  | _ => false
 
 /--
 Internalize every supported object and packed scalar projection through the
