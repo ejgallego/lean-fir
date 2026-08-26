@@ -1300,6 +1300,69 @@ structure ConcreteStructuredValidatedSaturatedCallReadyOutcome
   validationAgrees :
     ConcreteStructuredValidationAgrees agrees frames.validation
 
+/-- A closed staged lazy-cache call.  The branch-exact hit/miss admission is
+retained across the source-only invocation step, together with validation of
+the continuation and every suspended caller. -/
+structure ConcreteStructuredValidatedLazyCallReadyOutcome
+    (program : Fir.LeanIR.ImpureProgram)
+    (context : Fir.Wasm.Context)
+    (functionCode : Lean.Compiler.LCNF.Code .impure)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts)
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {declaration : Lean.Name}
+    {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
+    {resultKind : AbiKind}
+    (call : LazyCacheCallSupported context decl declaration sourceDeclaration
+      resultKind)
+    (generated : LazyCacheGeneratedEnvironment context sourceModule)
+    (externals : ExternalImpl)
+    (labels : LabelContext)
+    (entryRuntime : RuntimeState)
+    (entryStore : Wasm.Store Host)
+    (entryWitness : RefinementWitness)
+    (functionResult : AbiKind)
+    (callerExpectedResult : Option AbiKind)
+    (facts : ReuseCapacityFacts)
+    (remainingBytes : Nat)
+    (sourceRuntime : RuntimeState)
+    (callerEnv : Env)
+    (continuation : Lean.Compiler.LCNF.Code .impure)
+    (callerJoins : JoinEnv)
+    (sourceFrames : List Frame)
+    (targetStore : Wasm.Store Host)
+    (callerLocals : Wasm.Locals)
+    (targetRest : Wasm.Program)
+    (targetFrames : List StructuredWasmFrame)
+    (witness : RefinementWitness)
+    (cacheIndex declarationId cacheSetId resultIndex : Nat)
+    (source : MachineState)
+    (target : StructuredWasmState Host) : Prop where
+  activeResult : spec.sourceResultKind = functionResult
+  contextCaches :
+    context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program
+  path : ConcreteStructuredLazyReadyAdmission context sourceModule call
+    generated sourceRuntime
+  core : ConcreteStructuredLazyCallReadyCoreRel program context sourceModule
+    sourceFunction externals labels call generated entryRuntime entryStore
+    entryWitness functionResult callerExpectedResult facts remainingBytes
+    sourceRuntime callerEnv continuation callerJoins sourceFrames targetStore
+    callerLocals targetRest targetFrames witness cacheIndex declarationId
+    cacheSetId resultIndex source target
+  continuationValidation :
+    ConcreteStructuredAlignedValidationState program context functionResult
+      continuation
+  frames : ConcreteStructuredValidatedFrameStack program sourceModule
+    targetModule hosts functionResult callerExpectedResult sourceFrames
+    targetFrames
+  agrees : frames.supported.Agrees core.resources.suspended
+  validationAgrees :
+    ConcreteStructuredValidationAgrees agrees frames.validation
+
 /-- A closed post-call/pre-bind state.  The dynamic core retains the value
 that will be installed by `local.set`; the proof companion retains validation
 of that continuation and of the unchanged caller tail.  Lazy cache
@@ -1534,6 +1597,46 @@ inductive ConcreteStructuredValidatedCodeGlobalOutcome
         witness resultIndex source target) :
       ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
         targetModule hosts externals source target
+  | lazyReady
+      {context : Fir.Wasm.Context}
+      {functionCode : Lean.Compiler.LCNF.Code .impure}
+      {sourceFunction : Fir.Wasm.Function}
+      {spec : ConcreteSupportedFunction program context functionCode
+        sourceModule sourceFunction targetModule hosts}
+      {decl : Lean.Compiler.LCNF.LetDecl .impure}
+      {declaration : Lean.Name}
+      {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
+      {resultKind : AbiKind}
+      {call : LazyCacheCallSupported context decl declaration
+        sourceDeclaration resultKind}
+      {generated : LazyCacheGeneratedEnvironment context sourceModule}
+      {labels : LabelContext}
+      {entryRuntime sourceRuntime : RuntimeState}
+      {entryStore targetStore : Wasm.Store Host}
+      {entryWitness witness : RefinementWitness}
+      {functionResult : AbiKind}
+      {callerExpectedResult : Option AbiKind}
+      {facts : ReuseCapacityFacts}
+      {remainingBytes : Nat}
+      {callerEnv : Env}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      {callerJoins : JoinEnv}
+      {sourceFrames : List Frame}
+      {callerLocals : Wasm.Locals}
+      {targetRest : Wasm.Program}
+      {targetFrames : List StructuredWasmFrame}
+      {cacheIndex declarationId cacheSetId resultIndex : Nat}
+      {source : MachineState}
+      {target : StructuredWasmState Host}
+      (related : ConcreteStructuredValidatedLazyCallReadyOutcome program
+        context functionCode sourceModule sourceFunction targetModule hosts spec
+        call generated externals labels entryRuntime entryStore entryWitness
+        functionResult callerExpectedResult facts remainingBytes sourceRuntime
+        callerEnv continuation callerJoins sourceFrames targetStore callerLocals
+        targetRest targetFrames witness cacheIndex declarationId cacheSetId
+        resultIndex source target) :
+      ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
+        targetModule hosts externals source target
   | externalBind
       {context : Fir.Wasm.Context}
       {functionCode : Lean.Compiler.LCNF.Code .impure}
@@ -1745,6 +1848,57 @@ theorem
   .saturatedReady row related.sharedCapacity related.core
     related.contextCaches related.frames.supported related.agrees
 
+/-- Forget validation from a staged lazy call while retaining its exact
+hit/miss admission and generated cache protocol. -/
+theorem ConcreteStructuredValidatedLazyCallReadyOutcome.toSupportedOutcome
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {declaration : Lean.Name}
+    {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
+    {resultKind : AbiKind}
+    {call : LazyCacheCallSupported context decl declaration sourceDeclaration
+      resultKind}
+    {generated : LazyCacheGeneratedEnvironment context sourceModule}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {callerEnv : Env}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {callerLocals : Wasm.Locals}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {cacheIndex declarationId cacheSetId resultIndex : Nat}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedLazyCallReadyOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec call
+      generated externals labels entryRuntime entryStore entryWitness
+      functionResult callerExpectedResult facts remainingBytes sourceRuntime
+      callerEnv continuation callerJoins sourceFrames targetStore callerLocals
+      targetRest targetFrames witness cacheIndex declarationId cacheSetId
+      resultIndex source target) :
+    ConcreteStructuredSupportedOutcome program context functionCode sourceModule
+      sourceFunction targetModule hosts spec externals labels entryRuntime
+      entryStore entryWitness functionResult callerExpectedResult source target :=
+  .lazyReady related.path related.core related.contextCaches
+    related.frames.supported related.agrees
+
 /-- Forget validation from a post-call/pre-bind state without changing the
 dynamic external-bind protocol. -/
 theorem ConcreteStructuredValidatedExternalBindOutcome.toSupportedOutcome
@@ -1899,6 +2053,8 @@ theorem ConcreteStructuredValidatedCodeGlobalOutcome.toSupportedGlobal
   | directReady ready =>
       exact ready.toSupportedOutcome.toGlobal ready.activeResult
   | saturatedReady ready =>
+      exact ready.toSupportedOutcome.toGlobal ready.activeResult
+  | lazyReady ready =>
       exact ready.toSupportedOutcome.toGlobal ready.activeResult
   | externalBind bind =>
       exact bind.toSupportedOutcome.toGlobal bind.activeResult
@@ -2754,6 +2910,43 @@ theorem DirectInternalCallSite.strictObjectToTObjectValidationRegression
     exact congrArg Prod.snd kindEq.symm
   exact ⟨kindEq, compiledAtObject, by simp [calleeObject, publicTObject]⟩
 
+/-- Lazy named calls and executable validation retain the same effective
+declaration result kind.  The public `let` ABI remains only a compatibility
+boundary and need not equal that precise compiler-local kind. -/
+private theorem LazyCacheCallSupported.resultCompiledForValidation
+    {context : Fir.Wasm.Context}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {declaration : Lean.Name}
+    {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
+    {resultKind : AbiKind}
+    (call : LazyCacheCallSupported context decl declaration sourceDeclaration
+      resultKind) :
+    ∀ {locals kind},
+      Fir.Wasm.supportedLetDeclKind? context.program locals decl = some kind →
+        Fir.Wasm.getLocal context decl.fvarId =
+          .ok (.localGet decl.fvarId, kind) := by
+  rcases call with
+    ⟨valueEq, kindEq, targetEq, targetResultEq, resultRefines, _paramsEq,
+      resultCompiled⟩
+  rename_i declaredResultKind
+  intro locals kind supported
+  have effective := supportedLetDeclKind?_effectiveLetValueKind supported
+  have valueKind :
+      Fir.Wasm.letValueKind decl = .ok declaredResultKind := by
+    simp [Fir.Wasm.letValueKind, valueEq, kindEq]
+  have compatible :=
+    Fir.Wasm.AbiKind.leanCompatible_of_refines resultRefines
+  have callEffective :
+      Fir.Wasm.effectiveLetValueKind context.program decl = .ok resultKind := by
+    unfold Fir.Wasm.effectiveLetValueKind
+    rw [valueKind, valueEq]
+    simp only [Bind.bind, Except.bind, pure, Except.pure]
+    simp [targetEq, targetResultEq, compatible]
+  have selectedKindEq : resultKind = kind :=
+    Except.ok.inj (callEffective.symm.trans effective)
+  subst kind
+  exact resultCompiled
+
 /-- Any compiler/resource successor of a validated direct `let` continuation
 inherits the exact residual validator state, even when the concrete operation
 changes heap facts, remaining address-space budget, or refinement witness. -/
@@ -3351,6 +3544,328 @@ theorem
     ConcreteStructuredValidatedCodeGlobalOutcome.code calleeResultAt
       nextOutcome⟩
   omega
+
+/-- Stage a validated lazy-cache call while retaining the caller continuation
+validation across the source-only invocation step. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_lazy_stage_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {callerEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {declaration : Lean.Name}
+    {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
+    {resultKind : AbiKind}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec
+      externals labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime callerEnv
+      (.let decl continuation) targetStore targetLocals targetCode witness source
+      target)
+    (call : LazyCacheCallSupported context decl declaration sourceDeclaration
+      resultKind)
+    (generated : LazyCacheGeneratedEnvironment context sourceModule)
+    (path : ConcreteStructuredLazyReadyAdmission context sourceModule call
+      generated sourceRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ cacheIndex declarationId cacheSetId resultIndex targetRest,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 0
+          target target ∧
+        ConcreteStructuredValidatedLazyCallReadyOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec call
+          generated externals labels entryRuntime entryStore entryWitness
+          functionResult callerExpectedResult facts remainingBytes sourceRuntime
+          callerEnv continuation source.joins source.frames targetStore
+          targetLocals targetRest target.frames witness cacheIndex declarationId
+          cacheSetId resultIndex sourceAfter target ∧
+        compilerStructuredControlRank sourceAfter <
+          compilerStructuredControlRank source := by
+  have admitted :
+      ConcreteStructuredCodeStepAdmission context sourceModule externals
+        functionResult facts sourceRuntime callerEnv 0
+        (.let decl continuation) := by
+    cases path with
+    | hit sourceValue semanticFound =>
+        exact .lazyHit call generated semanticFound
+    | miss calleeCode internal resultClassified notObject notTObject
+        semanticEmpty =>
+        exact .lazyMiss internal generated resultClassified notObject notTObject
+          semanticEmpty
+  have pointwise := related.toPointwise admitted (by omega)
+  obtain ⟨cacheIndex, declarationId, cacheSetId, resultIndex, targetRest,
+      targetPath, ready, rank⟩ :=
+    pointwise.advance_lazy_stage_of_step call generated sourceStep
+  have resultCompiled : ∀ {locals kind},
+      Fir.Wasm.supportedLetDeclKind? program locals decl = some kind →
+        Fir.Wasm.getLocal context decl.fvarId =
+          .ok (.localGet decl.fvarId, kind) := by
+    intro locals kind kindFound
+    apply call.resultCompiledForValidation
+    simpa only [spec.contextProgram] using kindFound
+  obtain ⟨_kind, _locals, _kindFound, _resultCompiled,
+      continuationValidation⟩ :=
+    related.core.validation.letContinuation resultCompiled
+  exact ⟨cacheIndex, declarationId, cacheSetId, resultIndex, targetRest,
+    targetPath,
+    ⟨activeResult, related.contextCaches, path, ready,
+      continuationValidation, related.frames, related.agrees,
+      related.validationAgrees⟩,
+    rank⟩
+
+/-- A populated lazy slot reaches the validated common bind boundary without
+changing the caller's residual validation. -/
+theorem
+    ConcreteStructuredValidatedLazyCallReadyOutcome.advance_hit_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {declaration : Lean.Name}
+    {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
+    {resultKind : AbiKind}
+    {call : LazyCacheCallSupported context decl declaration sourceDeclaration
+      resultKind}
+    {generated : LazyCacheGeneratedEnvironment context sourceModule}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {callerEnv : Env}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {callerLocals : Wasm.Locals}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {cacheIndex declarationId cacheSetId resultIndex : Nat}
+    {sourceValue : Value}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedLazyCallReadyOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec call
+      generated externals labels entryRuntime entryStore entryWitness
+      functionResult callerExpectedResult facts remainingBytes sourceRuntime
+      callerEnv continuation callerJoins sourceFrames targetStore callerLocals
+      targetRest targetFrames witness cacheIndex declarationId cacheSetId
+      resultIndex source target)
+    (semanticFound :
+      findGlobal? sourceRuntime.globals declaration = some sourceValue)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ physical targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 4
+          target targetAfter ∧
+        ConcreteStructuredValidatedExternalBindOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec
+          externals labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes sourceRuntime callerEnv
+          sourceValue decl.fvarId continuation callerJoins sourceFrames
+          targetStore callerLocals callerLocals.values targetRest targetFrames
+          witness resultKind physical resultIndex sourceAfter targetAfter := by
+  obtain ⟨physical, targetAfter, targetPath, bindCore⟩ :=
+    related.core.advance_hit_of_step semanticFound sourceStep
+  have nextAgrees :
+      related.frames.supported.Agrees bindCore.resources.suspended := by
+    simpa using related.agrees
+  have nextValidationAgrees :
+      ConcreteStructuredValidationAgrees nextAgrees
+        related.frames.validation := by
+    obtain ⟨spine, aligned⟩ := related.validationAgrees
+    exact ⟨spine, aligned⟩
+  exact ⟨physical, targetAfter, targetPath,
+    ⟨related.activeResult, related.contextCaches, bindCore,
+      related.continuationValidation, related.frames, nextAgrees,
+      nextValidationAgrees⟩⟩
+
+/-- An empty lazy slot enters the generated initializer while preserving the
+validated caller continuation in the exact cache-publication frame. -/
+theorem
+    ConcreteStructuredValidatedLazyCallReadyOutcome.advance_miss_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {declaration : Lean.Name}
+    {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
+    {resultKind : AbiKind}
+    {call : LazyCacheCallSupported context decl declaration sourceDeclaration
+      resultKind}
+    {generated : LazyCacheGeneratedEnvironment context sourceModule}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {callerEnv : Env}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {callerLocals : Wasm.Locals}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {cacheIndex declarationId cacheSetId resultIndex : Nat}
+    {calleeCode : Lean.Compiler.LCNF.Code .impure}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedLazyCallReadyOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec call
+      generated externals labels entryRuntime entryStore entryWitness
+      functionResult callerExpectedResult facts remainingBytes sourceRuntime
+      callerEnv continuation callerJoins sourceFrames targetStore callerLocals
+      targetRest targetFrames witness cacheIndex declarationId cacheSetId
+      resultIndex source target)
+    (internal : LazyCacheInternalMissSupported context decl declaration
+      sourceDeclaration resultKind calleeCode)
+    (resultClassified :
+      Fir.Wasm.abiKind? sourceDeclaration.type = .ok (some resultKind))
+    (notObject : resultKind ≠ .object)
+    (notTObject : resultKind ≠ .tobject)
+    (semanticEmpty :
+      findGlobal? sourceRuntime.globals declaration = none)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3
+          target targetAfter ∧
+        ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
+          targetModule hosts externals sourceAfter targetAfter := by
+  obtain ⟨calleeContext, calleeFunction, row, targetAfter, targetPath,
+      nextCore, sourceFramesEq, targetFramesEq⟩ :=
+    related.core.advance_miss_of_step (functionCode := functionCode)
+      (targetModule := targetModule) (hosts := hosts) (spec := spec)
+      internal resultClassified notObject notTObject semanticEmpty
+      related.contextCaches sourceStep
+  let calleeSpec : ConcreteSupportedFunction program calleeContext calleeCode
+      sourceModule calleeFunction targetModule hosts :=
+    row.toSupportedFunctionOfFunction spec
+  have calleeResultAt : calleeSpec.sourceResultKind = resultKind := by
+    change row.sourceResultKind = resultKind
+    simpa [call.effectiveResult] using row.sourceResultSelected.symm
+  have validatedCore :
+      ConcreteStructuredValidatedCodeCoreRel program calleeContext sourceModule
+        calleeFunction externals [] sourceRuntime targetStore witness resultKind
+        (some resultKind) [] remainingBytes sourceRuntime [] calleeCode
+        targetStore (row.targetFunction.toLocals []) row.targetFunction.body
+        witness sourceAfter targetAfter :=
+    nextCore.withRootValidation calleeSpec calleeResultAt
+  let pushedFrames :=
+    ConcreteStructuredValidatedFrameStack.lazy
+      (declaration := declaration) (callerEnv := callerEnv)
+      (callerJoins := callerJoins) (callerLocals := callerLocals)
+      (cacheIndex := cacheIndex) (cacheSetId := cacheSetId)
+      (calleeResult := resultKind) (callerResult := functionResult)
+      (kind := resultKind) (tailResult := callerExpectedResult)
+      spec related.activeResult related.contextCaches
+      related.core.ready.continuationAdapted related.core.ready.resultFound
+      related.core.ready.resultKindAt related.core.ready.initializerFound
+      related.core.ready.signature related.core.ready.cacheSetCall notObject
+      notTObject (by cases resultKind <;> decide)
+      related.continuationValidation related.frames
+  let pushedResources :=
+    ConcreteStructuredSuspendedResourceStack.lazy
+      (declaration := declaration) (callerEnv := callerEnv)
+      (callerJoins := callerJoins) (callerLocals := callerLocals)
+      (cacheIndex := cacheIndex) (cacheSetId := cacheSetId)
+      (calleeResult := resultKind) (callerResult := functionResult)
+      (kind := resultKind) (tailResult := callerExpectedResult)
+      related.core.resources.current spec.contextProgram.symm
+      related.core.ready.continuationAdapted related.core.ready.resultFound
+      related.core.ready.resultKindAt related.core.ready.initializerFound
+      related.core.ready.signature related.core.ready.cacheSetCall notObject
+      notTObject (by cases resultKind <;> decide)
+      related.core.resources.suspended
+  have pushedAgrees : pushedFrames.supported.Agrees pushedResources := by
+    exact ConcreteStructuredSupportedFrameStack.Agrees.lazy
+      spec related.activeResult related.contextCaches
+      related.core.resources.current spec.contextProgram.symm
+      related.core.ready.continuationAdapted related.core.ready.resultFound
+      related.core.ready.resultKindAt related.core.ready.initializerFound
+      related.core.ready.signature related.core.ready.cacheSetCall notObject
+      notTObject (by cases resultKind <;> decide) related.frames.supported
+      related.core.resources.suspended related.agrees
+  obtain ⟨callerSpine, callerValidationAgrees⟩ :=
+    related.validationAgrees
+  have pushedValidationAgrees :
+      ConcreteStructuredValidationAgrees pushedAgrees
+        pushedFrames.validation :=
+    ⟨(functionResult, callerExpectedResult) :: callerSpine,
+      .lazy (callerJoins := callerJoins) (cacheIndex := cacheIndex)
+        (cacheSetId := cacheSetId) spec related.activeResult
+        related.contextCaches related.core.resources.current
+        spec.contextProgram.symm related.core.ready.continuationAdapted
+        related.core.ready.resultFound related.core.ready.resultKindAt
+        related.core.ready.initializerFound related.core.ready.signature
+        related.core.ready.cacheSetCall notObject notTObject
+        (by cases resultKind <;> decide) related.continuationValidation
+        callerValidationAgrees⟩
+  obtain ⟨supportedAfter, agreesAfter⟩ := pushedAgrees.reindex
+    sourceFramesEq targetFramesEq validatedCore.core.resources.suspended
+  have validationAfter :
+      ConcreteStructuredSuspendedValidation program resultKind
+        (some resultKind) sourceAfter.frames := by
+    rw [sourceFramesEq]
+    exact pushedFrames.validation
+  have nextFrames :
+      ConcreteStructuredValidatedFrameStack program sourceModule targetModule
+        hosts resultKind (some resultKind) sourceAfter.frames
+        targetAfter.frames :=
+    ⟨supportedAfter, validationAfter⟩
+  have nextValidationAgrees :
+      ConcreteStructuredValidationAgrees agreesAfter validationAfter :=
+    pushedValidationAgrees.reindex sourceFramesEq targetFramesEq agreesAfter
+      validationAfter
+  have nextOutcome :
+      ConcreteStructuredValidatedCodeOutcome program calleeContext calleeCode
+        sourceModule calleeFunction targetModule hosts calleeSpec externals []
+        sourceRuntime targetStore witness resultKind (some resultKind) []
+        remainingBytes sourceRuntime [] calleeCode targetStore
+        (row.targetFunction.toLocals []) row.targetFunction.body witness
+        sourceAfter targetAfter :=
+    ⟨row.contextCaches, validatedCore, nextFrames, agreesAfter,
+      nextValidationAgrees⟩
+  exact ⟨targetAfter, targetPath,
+    ConcreteStructuredValidatedCodeGlobalOutcome.code calleeResultAt
+      nextOutcome⟩
 
 /-- A validated return enters the closed yielded branch.  Current-node
 admission supplies only the compiled result kind; the concrete theorem derives
