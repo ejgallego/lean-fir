@@ -161,6 +161,205 @@ theorem CodeAdaptedWithSuffix.jp_eq
   exact ⟨targetEntry, targetBody ++ targetSuffix, entryAdapted,
     CodeAdapted.withSuffix bodyAdapted, by simp⟩
 
+/--
+The active function's structured-label stack.
+
+This relation is deliberately separate from the suspended call/resource
+stack.  It aligns the compiler join context, the adapter's mixed named and
+anonymous label context, and the concrete prefix of `StructuredWasmFrame`
+labels belonging to the currently executing function.
+
+`named` records the compiled join body saved by one active `.jp` block.
+`anonymous` records target-only case/conditional labels.  After a branch exits
+a named block, the source/compiler join declaration remains in lexical scope
+while its physical block label is gone; `inactive` represents exactly that
+state.  This is the reusable control invariant needed by general `.jmp`
+unwinding, rather than a per-jump execution certificate.
+-/
+inductive ConcreteStructuredActiveLabelRel
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function) :
+    Fir.Wasm.Context → LabelContext → List StructuredWasmFrame →
+      List StructuredWasmFrame → Prop where
+  | nil
+      (context : Fir.Wasm.Context)
+      (baseFrames : List StructuredWasmFrame) :
+      ConcreteStructuredActiveLabelRel sourceModule sourceFunction context []
+        baseFrames baseFrames
+  | anonymous
+      {context : Fir.Wasm.Context}
+      {labels : LabelContext}
+      {frames baseFrames : List StructuredWasmFrame}
+      {belowStack : List Wasm.Value}
+      {targetRest : Wasm.Program}
+      (tail : ConcreteStructuredActiveLabelRel sourceModule sourceFunction
+        context labels frames baseFrames) :
+      ConcreteStructuredActiveLabelRel sourceModule sourceFunction context
+        (none :: labels) (.label 0 belowStack targetRest :: frames) baseFrames
+  | named
+      {context : Fir.Wasm.Context}
+      {labels : LabelContext}
+      {frames baseFrames : List StructuredWasmFrame}
+      {decl : Lean.Compiler.LCNF.FunDecl .impure}
+      {belowStack : List Wasm.Value}
+      {targetBody : Wasm.Program}
+      (bodyAdapted : CodeAdaptedWithSuffix
+        { context with joins := (decl.fvarId, decl) :: context.joins }
+        sourceModule sourceFunction labels decl.value targetBody)
+      (tail : ConcreteStructuredActiveLabelRel sourceModule sourceFunction
+        context labels frames baseFrames) :
+      ConcreteStructuredActiveLabelRel sourceModule sourceFunction
+        { context with joins := (decl.fvarId, decl) :: context.joins }
+        (some decl.fvarId :: labels)
+        (.label 0 belowStack targetBody :: frames) baseFrames
+  | inactive
+      {context : Fir.Wasm.Context}
+      {labels : LabelContext}
+      {frames baseFrames : List StructuredWasmFrame}
+      {decl : Lean.Compiler.LCNF.FunDecl .impure}
+      (tail : ConcreteStructuredActiveLabelRel sourceModule sourceFunction
+        context labels frames baseFrames) :
+      ConcreteStructuredActiveLabelRel sourceModule sourceFunction
+        { context with joins := (decl.fvarId, decl) :: context.joins }
+        labels frames baseFrames
+
+/-- Entering a compiled named block turns an active-label tail into the exact
+successor relation exposed by `advance_joinIntroduction`. -/
+theorem ConcreteStructuredActiveLabelRel.enterNamed
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {context : Fir.Wasm.Context}
+    {labels : LabelContext}
+    {frames baseFrames : List StructuredWasmFrame}
+    {decl : Lean.Compiler.LCNF.FunDecl .impure}
+    {belowStack : List Wasm.Value}
+    {targetBody : Wasm.Program}
+    (bodyAdapted : CodeAdaptedWithSuffix
+      { context with joins := (decl.fvarId, decl) :: context.joins }
+      sourceModule sourceFunction labels decl.value targetBody)
+    (tail : ConcreteStructuredActiveLabelRel sourceModule sourceFunction
+      context labels frames baseFrames) :
+    ConcreteStructuredActiveLabelRel sourceModule sourceFunction
+      { context with joins := (decl.fvarId, decl) :: context.joins }
+      (some decl.fvarId :: labels)
+      (.label 0 belowStack targetBody :: frames) baseFrames :=
+  .named bodyAdapted tail
+
+/-- Once a branch consumes the named block, its declaration remains in the
+compiler context but no longer occupies a physical branch-depth slot. -/
+theorem ConcreteStructuredActiveLabelRel.afterNamed
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {context : Fir.Wasm.Context}
+    {labels : LabelContext}
+    {frames baseFrames : List StructuredWasmFrame}
+    {decl : Lean.Compiler.LCNF.FunDecl .impure}
+    (tail : ConcreteStructuredActiveLabelRel sourceModule sourceFunction
+      context labels frames baseFrames) :
+    ConcreteStructuredActiveLabelRel sourceModule sourceFunction
+      { context with joins := (decl.fvarId, decl) :: context.joins }
+      labels frames baseFrames :=
+  .inactive tail
+
+/--
+Resolving a symbolic FIR join label determines the exact structured-Wasm
+unwinding path.  Anonymous conditional labels and nonmatching named joins each
+consume one branch-depth slot; inactive lexical joins consume none.  The
+matching named block is exited in the final step, exposing precisely the join
+body saved when that block was entered.
+
+The successor relation deliberately retains the matched declaration as an
+inactive lexical join.  Thus this lemma describes both sides of the control
+transfer needed by `.jmp`: the physical label has gone, while the compiler
+context still contains the join whose body is now running.
+-/
+theorem ConcreteStructuredActiveLabelRel.unwindResolved
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {context : Fir.Wasm.Context}
+    {labels : LabelContext}
+    {frames baseFrames : List StructuredWasmFrame}
+    (related : ConcreteStructuredActiveLabelRel sourceModule sourceFunction
+      context labels frames baseFrames)
+    {label : Lean.FVarId}
+    {depth : Nat}
+    (found : findLabel? labels label = some depth)
+    {targetModule : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {store : Wasm.Store Host}
+    {locals : Wasm.Locals} :
+    ∃ (targetContext : Fir.Wasm.Context)
+        (targetLabels : LabelContext)
+        (targetFrames : List StructuredWasmFrame)
+        (decl : Lean.Compiler.LCNF.FunDecl .impure)
+        (belowStack : List Wasm.Value)
+        (targetBody : Wasm.Program),
+      decl.fvarId.name = label.name ∧
+      CodeAdaptedWithSuffix targetContext sourceModule sourceFunction
+        targetLabels decl.value targetBody ∧
+      ConcreteStructuredActiveLabelRel sourceModule sourceFunction
+        targetContext targetLabels targetFrames baseFrames ∧
+      FinitePath (StructuredWasmStep targetModule hostEnv) (depth + 1)
+        ⟨store, .breaking depth locals, frames⟩
+        ⟨store, .running { locals with values := belowStack } targetBody,
+          targetFrames⟩ := by
+  induction related generalizing depth with
+  | nil context baseFrames =>
+      simp [findLabel?] at found
+  | @anonymous context labels frames baseFrames belowStack targetRest tail ih =>
+      cases tailFound : findLabel? labels label with
+      | none =>
+          simp [findLabel?, tailFound] at found
+      | some tailDepth =>
+          have found' : some (tailDepth + 1) = some depth := by
+            simpa [findLabel?, tailFound] using found
+          have depthEq : tailDepth + 1 = depth := Option.some.inj found'
+          subst depth
+          obtain ⟨targetContext, targetLabels, targetFrames, decl,
+              targetBelowStack, targetBody, names, bodyAdapted, successor,
+              path⟩ := ih tailFound
+          exact ⟨targetContext, targetLabels, targetFrames, decl,
+            targetBelowStack, targetBody, names, bodyAdapted, successor, by
+              simpa [Nat.add_assoc] using
+                FinitePath.cons
+                  (StructuredWasmStep.breakLabelSucc
+                    (module := targetModule) (env := hostEnv)) path⟩
+  | @named context labels frames baseFrames decl belowStack targetBody
+      bodyAdapted tail ih =>
+      by_cases names : decl.fvarId.name = label.name
+      · have found' : some 0 = some depth := by
+          simpa [findLabel?, names] using found
+        have depthEq : 0 = depth := Option.some.inj found'
+        subst depth
+        exact ⟨{ context with
+            joins := (decl.fvarId, decl) :: context.joins }, labels, frames,
+          decl, belowStack, targetBody, names, bodyAdapted, .inactive tail, by
+            convert
+              FinitePath.single
+                (StructuredWasmStep.breakLabelZero
+                  (module := targetModule) (env := hostEnv)) using 1 <;>
+              simp⟩
+      · cases tailFound : findLabel? labels label with
+        | none =>
+            simp [findLabel?, names, tailFound] at found
+        | some tailDepth =>
+            have found' : some (tailDepth + 1) = some depth := by
+              simpa [findLabel?, names, tailFound] using found
+            have depthEq : tailDepth + 1 = depth := Option.some.inj found'
+            subst depth
+            obtain ⟨targetContext, targetLabels, targetFrames, targetDecl,
+                targetBelowStack, targetCode, targetNames, targetAdapted,
+                successor, path⟩ := ih tailFound
+            exact ⟨targetContext, targetLabels, targetFrames, targetDecl,
+              targetBelowStack, targetCode, targetNames, targetAdapted,
+              successor, by
+                simpa [Nat.add_assoc] using
+                  FinitePath.cons
+                    (StructuredWasmStep.breakLabelSucc
+                      (module := targetModule) (env := hostEnv)) path⟩
+  | @inactive context labels frames baseFrames decl tail ih =>
+      exact ih found
+
 theorem CodeAdaptedWithSuffix.incPersistent_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
