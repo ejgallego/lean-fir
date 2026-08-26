@@ -4295,21 +4295,23 @@ theorem ShadowRuntimeRel.unboxBoth_of_related
         (leftResult :: leftExtra) (rightResult :: rightExtra) := by
   cases objects with
   | tagged payload =>
-      have scalarRead : scalarFromType type payload = .ok leftResult := by
-        simpa [unbox] using sourceRead
-      have targetRead :
-          unbox right type (.object (.tagged payload)) = .ok leftResult := by
-        simpa [unbox] using scalarRead
-      rcases scalarFromType_ok_eq_immediate scalarRead with
-        ⟨scalar, resultEq⟩ | ⟨word, resultEq⟩
-      · subst leftResult
-        exact ⟨.scalar scalar, targetRead, .scalar scalar,
-          related.prependNonHeap (.scalar scalar)
-            (by intro location; simp) (by intro location; simp)⟩
-      · subst leftResult
-        exact ⟨.usize word, targetRead, .usize word,
-          related.prependNonHeap (.usize word)
-            (by intro location; simp) (by intro location; simp)⟩
+      by_cases uint64 : type == LCNF.ImpureType.uint64
+      · simp [unbox, uint64] at sourceRead
+      · have scalarRead : scalarFromType type payload = .ok leftResult := by
+          simpa [unbox, uint64] using sourceRead
+        have targetRead :
+            unbox right type (.object (.tagged payload)) = .ok leftResult := by
+          simpa [unbox, uint64] using scalarRead
+        rcases scalarFromType_ok_eq_immediate scalarRead with
+          ⟨scalar, resultEq⟩ | ⟨word, resultEq⟩
+        · subst leftResult
+          exact ⟨.scalar scalar, targetRead, .scalar scalar,
+            related.prependNonHeap (.scalar scalar)
+              (by intro location; simp) (by intro location; simp)⟩
+        · subst leftResult
+          exact ⟨.usize word, targetRead, .usize word,
+            related.prependNonHeap (.usize word)
+              (by intro location; simp) (by intro location; simp)⟩
   | usize value => simp [unbox] at sourceRead
   | scalar value => simp [unbox] at sourceRead
   | erased => simp [unbox] at sourceRead
