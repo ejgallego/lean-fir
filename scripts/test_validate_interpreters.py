@@ -412,6 +412,57 @@ def with_form_diagnostics(
 
 
 class HarnessTests(unittest.TestCase):
+    def test_evidence_reader_rechecks_content_and_rejects_symlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            evidence = root / "evidence"
+            evidence.mkdir()
+            artifact = evidence / "artifact"
+            artifact.write_bytes(b"accepted")
+            digest = core.sha256_bytes(b"accepted")
+            self.assertEqual(
+                core.verify_evidence_file(
+                    root, "evidence/artifact", digest, "fixture evidence"
+                ),
+                b"accepted",
+            )
+
+            artifact.write_bytes(b"changed")
+            with self.assertRaisesRegex(
+                core.ValidationError, "SHA-256 mismatch"
+            ):
+                core.verify_evidence_file(
+                    root, "evidence/artifact", digest, "fixture evidence"
+                )
+
+            artifact.unlink()
+            target = root / "target"
+            target.write_bytes(b"accepted")
+            artifact.symlink_to(target)
+            with self.assertRaisesRegex(
+                core.ValidationError, "evidence path contains a symlink"
+            ):
+                core.verify_evidence_file(
+                    root, "evidence/artifact", digest, "fixture evidence"
+                )
+
+            artifact.unlink()
+            real_parent = root / "real-parent"
+            real_parent.mkdir()
+            (real_parent / "artifact").write_bytes(b"accepted")
+            (evidence / "linked").symlink_to(
+                real_parent, target_is_directory=True
+            )
+            with self.assertRaisesRegex(
+                core.ValidationError, "evidence path contains a symlink"
+            ):
+                core.verify_evidence_file(
+                    root,
+                    "evidence/linked/artifact",
+                    digest,
+                    "fixture evidence",
+                )
+
     def test_generic_core_does_not_own_lcnf_execution_or_coverage(self) -> None:
         self.assertFalse(hasattr(core, "LcnfAdapter"))
         self.assertFalse(hasattr(core, "coverage_report"))

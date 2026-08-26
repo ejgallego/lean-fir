@@ -11,6 +11,7 @@ import os
 import posixpath
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
@@ -7059,23 +7060,94 @@ def verify_evidence_file(
 ) -> bytes:
     relative = checked_relative_posix_path(artifact_name, context)
     root = report_root.resolve()
-    path = root
-    for part in PurePosixPath(relative).parts:
-        path = path / part
-        if path.is_symlink():
-            raise ValidationError(f"{context}: evidence path contains a symlink")
-    resolved = path.resolve()
+    return _verify_evidence_file_at_root(
+        root, relative, expected_sha256, context
+    )
+
+
+def _verify_evidence_file_at_root(
+    root: Path,
+    relative: str,
+    expected_sha256: str,
+    context: str,
+) -> bytes:
+    """Verify one evidence file beneath an already-canonical report root."""
+    directory_flags = (
+        os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW
+    )
+    file_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+    root_descriptor = -1
+    directory_descriptor = -1
+    file_descriptor = -1
     try:
-        resolved.relative_to(root)
-    except ValueError as error:
-        raise ValidationError(f"{context}: evidence path escapes report root") from error
-    if not path.is_file():
-        raise ValidationError(f"{context}: evidence is not a regular file")
-    try:
-        content = path.read_bytes()
+        root_descriptor = os.open(root, directory_flags)
+        directory_descriptor = root_descriptor
+        parts = PurePosixPath(relative).parts
+        for part in parts[:-1]:
+            try:
+                child_descriptor = os.open(
+                    part,
+                    directory_flags,
+                    dir_fd=directory_descriptor,
+                )
+            except OSError as error:
+                try:
+                    mode = os.stat(
+                        part,
+                        dir_fd=directory_descriptor,
+                        follow_symlinks=False,
+                    ).st_mode
+                except OSError:
+                    mode = 0
+                if stat.S_ISLNK(mode):
+                    raise ValidationError(
+                        f"{context}: evidence path contains a symlink"
+                    ) from error
+                raise ValidationError(
+                    f"{context}: evidence is not a regular file"
+                ) from error
+            if directory_descriptor != root_descriptor:
+                close_file_descriptor(directory_descriptor)
+            directory_descriptor = child_descriptor
+        try:
+            file_descriptor = os.open(
+                parts[-1], file_flags, dir_fd=directory_descriptor
+            )
+        except OSError as error:
+            try:
+                mode = os.stat(
+                    parts[-1],
+                    dir_fd=directory_descriptor,
+                    follow_symlinks=False,
+                ).st_mode
+            except OSError:
+                mode = 0
+            if stat.S_ISLNK(mode):
+                raise ValidationError(
+                    f"{context}: evidence path contains a symlink"
+                ) from error
+            raise ValidationError(
+                f"{context}: evidence is not a regular file"
+            ) from error
+        if not stat.S_ISREG(os.fstat(file_descriptor).st_mode):
+            raise ValidationError(f"{context}: evidence is not a regular file")
+        descriptor = file_descriptor
+        file_descriptor = -1
+        with os.fdopen(descriptor, "rb") as source:
+            content = source.read()
         actual_sha256 = sha256_bytes(content)
     except OSError as error:
         raise ValidationError(f"{context}: cannot read evidence: {error}") from error
+    finally:
+        if file_descriptor >= 0:
+            close_file_descriptor(file_descriptor)
+        if (
+            directory_descriptor >= 0
+            and directory_descriptor != root_descriptor
+        ):
+            close_file_descriptor(directory_descriptor)
+        if root_descriptor >= 0:
+            close_file_descriptor(root_descriptor)
     if actual_sha256 != expected_sha256:
         raise ValidationError(
             f"{context}: SHA-256 mismatch "
@@ -7124,7 +7196,9 @@ def verify_matrix_artifact(
         or value["version"] != PROTOCOL_VERSION
     ):
         raise ValidationError("validation matrix has unsupported version")
-    report_root = path.parent if report_root is None else report_root
+    report_root = (
+        path.parent if report_root is None else report_root
+    ).resolve()
 
     selected_cases = value["selectedCases"]
     if (
@@ -7183,7 +7257,7 @@ def verify_matrix_artifact(
         expected_artifact = f"evidence/inputs/{digest}"
         if item["artifact"] != expected_artifact:
             raise ValidationError("validation input has noncanonical artifact path")
-        input_content = verify_evidence_file(
+        input_content = _verify_evidence_file_at_root(
             report_root,
             item["artifact"],
             digest,
@@ -7244,7 +7318,7 @@ def verify_matrix_artifact(
         expected_artifact = f"evidence/products/{digest}"
         if item["artifact"] != expected_artifact:
             raise ValidationError("validation product has noncanonical artifact path")
-        product_content = verify_evidence_file(
+        product_content = _verify_evidence_file_at_root(
             report_root,
             item["artifact"],
             digest,
@@ -7462,7 +7536,7 @@ def verify_matrix_artifact(
         expected_artifact = f"evidence/tools/{digest}"
         if item["artifact"] != expected_artifact:
             raise ValidationError("validation tool has noncanonical artifact path")
-        verify_evidence_file(
+        _verify_evidence_file_at_root(
             report_root,
             item["artifact"],
             digest,
@@ -7506,7 +7580,7 @@ def verify_matrix_artifact(
             raise ValidationError(
                 "validation build input has noncanonical artifact path"
             )
-        content = verify_evidence_file(
+        content = _verify_evidence_file_at_root(
             report_root,
             item["artifact"],
             digest,
@@ -7599,7 +7673,7 @@ def verify_matrix_artifact(
             raise ValidationError(
                 "validation artifact has noncanonical artifact path"
             )
-        content = verify_evidence_file(
+        content = _verify_evidence_file_at_root(
             report_root,
             item["artifact"],
             digest,
@@ -8962,7 +9036,7 @@ def verify_matrix_artifact(
         expected_artifact = f"evidence/comparisons/{digest}"
         if item["artifact"] != expected_artifact:
             raise ValidationError("validation comparison has noncanonical artifact path")
-        comparison_content = verify_evidence_file(
+        comparison_content = _verify_evidence_file_at_root(
             report_root,
             item["artifact"],
             digest,

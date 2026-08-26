@@ -291,3 +291,28 @@ Seven order-balanced rounds measured serial samples of 2.68, 2.22, 2.53, 3.12,
 0.12. All four 44-observation roots in every round were byte-identical. This
 removes 1.20 seconds, or 47.4%, from the oracle-production region without a
 concurrent Lake build or shared output path.
+
+## Descriptor-relative evidence verification
+
+The reusable validation receipt verifies 6,204 retained file occurrences.
+The original reader separately resolved the report root, walked every path
+component with `lstat`, resolved the complete path again, checked its type, and
+then reopened it for each occurrence. A cumulative profile attributed 4.60 of
+6.56 instrumented seconds to matrix verification, with 67,365 `stat` calls and
+46,133 `lstat` calls. Caching file contents was rejected because it could hide
+a mutation between two retained occurrences.
+
+The candidate resolves the report root once per matrix and opens each relative
+component from a directory descriptor with `O_NOFOLLOW`. It verifies the final
+descriptor is a regular file, reads and hashes it, and closes every descriptor
+before the next occurrence. This retains per-occurrence reads and digest checks
+while avoiding the pathname-check/reopen race and redundant path resolution.
+Leaf and parent symlinks still fail, and a content change between calls is
+observed rather than cached.
+
+Seven warm exact-receipt baseline samples were 3.48, 3.42, 3.39, 3.46, 3.42,
+3.50, and 3.60 seconds: median 3.46 and MAD 0.04. Candidate samples were 2.70,
+2.66, 2.74, 2.74, 2.78, 2.79, and 2.79 seconds: median 2.74 and MAD 0.04. This
+removes 0.72 seconds, or 20.8%, from receipt verification. Median user-plus-
+system time fell from 3.45 to 2.73 seconds. Every round verified the same 721
+cases and all three requested comparison pairs.
