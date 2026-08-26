@@ -57,6 +57,13 @@ module has no import or residual runtime operation for the pair.
 `.box .float .object` and `.unbox .float`.  No W7 helper or stable W6
 resident-box descriptor exists for `Float32`.
 
+The audit also found that the existing Float-only W7 helper stores marker `6`,
+while the executable concrete host's reviewed scalar layout reserves `6` for
+`Float32` and `7` for `Float`.  The standalone resident-float artifact did not
+exercise either box/unbox operation, so it could not detect the marker drift.
+This must be repaired together with the missing Float32 helper rather than
+assigning another W7-private code.
+
 ## Proof or differential evidence
 
 The otherwise identical `Float` generic identity links to zero imports and
@@ -86,7 +93,9 @@ none
 
 ## Resolution and regression
 
-Unresolved.  Add bit-exact values including signed zero, infinities, quiet and
-signaling NaNs, subnormals, and maximal payloads; check exact frontier growth,
-header words, invalid traps, generated `_boxed` ownership, Node/Chrome
-execution, zero imports, and zero residual runtime operations.
+Unresolved.  Align the two floating markers with the concrete-host inventory
+(`Float32 = 6`, `Float = 7`). Add bit-exact values including signed zero,
+infinities, quiet and signaling NaNs, subnormals, and maximal payloads; check
+exact frontier growth, canonical header words, invalid traps, generated
+`_boxed` ownership, Node/Chrome execution, zero imports, and zero residual
+runtime operations.
