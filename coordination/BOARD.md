@@ -105,6 +105,20 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   helper signature, semantic ABI, concrete layout, allocator, ownership
   contract, public export, or canonical package pointer changed; W6 review is
   an independent proof follow-up.
+- Accepted validated effect-step proof checkpoint: W6 functional head
+  `41ea9105` is linked through immutable clean tracked handoff `ea68ef0b`,
+  based directly on the accepted representation-aware release checkpoint.
+  Residual production validation now survives lazy-cache and pure external
+  calls; object-family returns are related through a source-only,
+  state-indexed semantic return-safety invariant; and the validated successor
+  theorems cover return, increment/decrement/delete, constructor-tag writes,
+  object-field writes, USize-field writes, and scalar-field writes. Lean Beam,
+  the focused post-rebase dependency cone, `make check` at 728 unique cases
+  and 2,166/2,166 comparisons, and all 3,174 Talos jobs pass. This is an
+  additive W6 proof-interface checkpoint: no shared semantics, runtime,
+  concrete layout, ABI, resident helper, symbolic Wasm, emitter, or W7
+  artifact changed. W6's newer module-dispatch work remains independent above
+  this immutable boundary.
 - Lean-zip performance lane: `lean-zip-perf` is the narrow successor to the
   existing W7-2 optimization role, using `perf/lean-zip-loop` in
   `.worktrees/lean-zip-perf`. It profiles one immutable accepted package,
