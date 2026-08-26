@@ -24,12 +24,22 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   complete; convergence with the remaining caller-path proofs, including W6's
   resident Array provenance consumer after rebasing, is the remaining
   milestone step.
-- Integration owner: `root`, taking over the serial landing lease from
-  accepted main `777c4ec4`. `wasm-gen` is released back to the W7-1 generation
+- Integration owner: `root`, holding the serial landing lease from current
+  accepted main `1a6f5061`. `wasm-gen` is released back to the W7-1 generation
   lane. The immediate inherited queue is W7-2's rebased bounded `Nat.land`
   checkpoint, its dependent USize range-fact successor, and tooling's measured
   check-throughput checkpoints; none authorizes integration work on the W7-1
   branch.
+- Accepted Lean 4.32 operational-residue cleanup: W7 functional head
+  `66c325df` is linked through exact clean status checkpoint `1a6f5061`.
+  Active LLVM SelectionAnimation/v4 metadata now records Lean 4.33, the
+  Emscripten adapter checks that toolchain, and the lean-zip README no longer
+  names the retired 4.32 compiler. Historical bug-card and milestone
+  provenance remains intact. `git diff --check`, `make check` at 730 unique
+  cases and 2,172/2,172 comparisons, and the immutable LLVM package/checksum,
+  Emscripten smoke, and 12-job wire cone all pass. No data layout, adapter API,
+  ownership rule, export, helper, symbolic Wasm surface, or semantic contract
+  changed.
 - Accepted heap-only USize convergence: the semantic contract and source
   fixtures at `1db0b79d`, W7 resident implementation at `9c896a1d`, LCNF
   ElimDead adaptation at `d78d128c`, and W6 functional proof head `0360367a`
