@@ -5882,6 +5882,22 @@ candidate hashes in the lane and contract tables remain historical provenance
 until their stacks land and must not be used as current feature-branch
 identities.
 
+- `ELIMDEAD-ARBITRARY-LIVE-PREFIX` is linked/accepted through functional head
+  `7fc463c2` and clean tracked handoff `f8998324`, based exactly on prior
+  `main` at `fc56e2ee`. Deleted-operation readiness now carries arbitrary
+  multi-location target live-heap prefixes, residual code, live binders, and
+  source owners instead of passing through a singleton retained-prefix
+  adapter. The proof fixtures share that interface and include a two-location
+  non-return residual case. The same forced cone exposed and repaired the
+  previously stale heap-only UInt64 unbox ownership consumer; bug card
+  `FIR-BUG-impure-elimDead-machine-uint64-unbox-effect` is fixed. No semantic,
+  concrete-runtime, resident-helper, ABI, layout, ownership, or generated-code
+  contract changed. Lean Beam, the forced 34-job importer cone, and complete
+  `make check` pass at 728 unique cases, 2,166/2,166 comparisons, and zero
+  findings. This proof-only landing precedes the queued heap-only USize
+  contract so that its later `ElimDeadRuntimeRel` adaptation starts from the
+  generalized interface.
+
 - `UINT64-BOXING-UPSTREAM-ALIGNMENT` is linked/accepted through semantic
   contract head `9046caf3`, LCNF proof head `5eb82447`, W6 functional head
   `5854171c` and exact handoff `c09cbb87`, followed by W7 functional head
@@ -6595,7 +6611,7 @@ validation work continues; their historical handoff text remains unchanged.
 | Lane | Owner handle | Branch | Status | Current slice | Contract impact |
 |---|---|---|---|---|---|
 | Integration | integration owner | `upgrade/lean-4.33` | released | `LEAN-4.33-UPGRADE` landed at `476f001b`; the temporary lane may be retired after publication. | Moves the shared toolchain, compiler-source contracts, and versioned compact-Format package surface to Lean 4.33 without changing the semantic Wasm ABI, concrete layout, or resident-helper signatures. |
-| Lean pass proof | pass-proof owner | `proof/simpcase` | released | Ready mailbox `5cae5958`, functional head `5c607e0e`, on accepted base `a25713a6` packages deleted reset/reuse as generic local ledger operations and derives ordinary/source-owned readiness from live-prefix premises. The retained-prefix fixture no longer uses a finite special-state classifier. | Changes no shared contract. The 34-job examples cone and full root gate pass; next generalize the target live-prefix derivation beyond the singleton adapter. |
+| Lean pass proof | pass-proof owner | `proof/simpcase` | released | Functional head `7fc463c2` and clean tracked handoff `f8998324`, based on `fc56e2ee`, generalize deleted reset/reuse readiness to arbitrary multi-location target live-heap prefixes and repair the stale heap-only UInt64 unbox consumer. | Changes no shared contract. Lean Beam, the forced 34-job cone, and complete root gate pass; next rebase after the queued USize contract and adapt its two exact tagged-unbox relation sites under `W7-LCNF-20260826-005`. |
 | W6 runtime proof | W6 owner | `wasm/talos-runtime` | released | Ready mailbox `c07eaf4b`, functional head `42fb2d5d`, on base `a6f4510e` makes production validation proof-visible and supplies the root plus residual join/local/case/sharing transition API. Next attach that state to active/suspended relations and repair return admission's compatibility direction. | Shared validator contract `72856600` replaces an opaque partial traversal with an extensionally equivalent total traversal; consumers rebase without code adaptation. Lean Beam, the 3,121-job focused cone, full root gate with 125 harness tests, 685 unique cases and 2,037 comparisons, and all 3,144 Talos jobs pass. |
 | W7 generation | generation owner | `wasm/generation` | released | Tracked handoff `04003bd6`, functional head `8cb9cd82`, on base `dc550aa8` lands the exact-source lean-zip catalog, immediate `Nat.add`, reusable binary immediate-Nat dispatch, and allocation-free immediate `Nat.mod`. | No shared contract changes. Generation is ready; W6 refinements remain queued in `W7-W6-20260814-007` and `W7-W6-20260814-008`. |
 | Compiler-native Wasm | integration owner | `wasm/lcnf-c` | parked | Landed checkpoint `a4855402` adds a separately packaged C/Emscripten `Std.Format.prettyM` facade on top of the optimized final-LCNF-to-C route from `2760e3e0`. The browser adapter shares the compact `Format` request and exact `{text, events}` trace contract with W7's FIR-native facade while retaining a private bulk wire, verified Emscripten loader, full pinned Lean runtime, and independent package. The differential suite compares Unicode, grouping, nesting, tags, arbitrary-precision values, initial columns, malformed requests, repeated calls, and a one-MiB UTF-8 transfer through both engines | No shared semantic contract changed and the packages remain physically independent. The lane consumes `Std.Format.prettyM`, final impure LCNF, and Lean's C ABI without changing the symbolic Wasm, W6 concrete-runtime, or W7 resident-runtime surfaces. Resume with controlled sampled profiling of the facade wire and generated C before accepting a runtime optimization |
