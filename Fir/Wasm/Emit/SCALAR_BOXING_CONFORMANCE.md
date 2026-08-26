@@ -33,7 +33,7 @@ compiler-emitted result-kind spelling.
 | `UInt32` | `tobject` | `lean_box_uint32`; tagged on Lean64 | semantic tag; direct wasm32 immediate or persistent promoted tag | box/unbox, zero-import | conformant for the named `wasm32-lean64` contract |
 | `UInt64` | `object` | `lean_box_uint64`; always ordinary heap | ordinary heap box | generic `tobject` and exact `object` boxes share one physical-body factory; both close with zero imports | generation conformant; generic helper contract-proved, alias proof pending |
 | `USize` | `tobject` | `lean_box_usize`; always ordinary heap | current main still uses the payload/tag split | no box/unbox helper | confirmed shared semantic gap plus W7 gap |
-| `Float32` | `object` | `lean_box_float32`; always ordinary heap | semantic box is heap-only; no stable W6 resident-box descriptor/refinement | no box/unbox helper | confirmed W7/W6 coverage gap |
+| `Float32` | `object` | `lean_box_float32`; always ordinary heap | semantic box is heap-only; W6 resident-box refinement pending | bit-exact heap box/unbox, zero-import | generation conformant; proof pending |
 | `Float` | `object` | `lean_box_float`; always ordinary heap | semantic box is heap-only; resident proof remains separate | box/unbox, zero-import | generation-ready; W6 theorem remains separate |
 
 The upstream C emitter selects the generic `lean_box` path only for `UInt8`
@@ -62,7 +62,7 @@ resident linker with `requireNoRuntimeOperations := true`.
 | `UInt32` | `tobject` | 0 |
 | `UInt64` | `tobject` | 0 |
 | `USize` | `tobject` | 2: box and unbox |
-| `Float32` | `object` | 2: box and unbox |
+| `Float32` | `object` | 0 |
 | `Float` | `object` | 0 |
 
 A second probe passed a monomorphic scalar identity as a first-class function,
@@ -97,12 +97,12 @@ The probe is now permanent in
 `Fir/Wasm/Emit/ScalarBoxingExamples.lean`. It compiles fourteen real Lean
 entries: one generic polymorphic round trip and one compiler-generated
 `_boxed` closure wrapper for each family. Exact wrapper result kinds are read
-from `upstreamBoxResultKind?`, not repeated in the fixture. The five ready
-families must link with zero imports and zero runtime operations. `USize` and
-`Float32` are not skipped: each must retain exactly its matching box/unbox
-pair, so any accidental widening or unrelated residual operation fails the
-fixture. Their readiness flags become zero-frontier ratchets when the shared
-contract and resident helpers land.
+from `upstreamBoxResultKind?`, not repeated in the fixture. The six ready
+families must link with zero imports and zero runtime operations. `USize` is
+not skipped: it must retain exactly its matching box/unbox pair, so any
+accidental widening or unrelated residual operation fails the fixture. Its
+readiness flag becomes a zero-frontier ratchet when the shared contract and
+resident helpers land.
 
 ## Findings and order
 
@@ -113,8 +113,10 @@ contract and resident helpers land.
    and `UInt64` uses upstream's mapping; physical-signature-compatible
    resident aliases share the generic helper-body factories.  W6 may later
    connect those aliases to the already proved physical helper contracts.
-3. Add heap-only, bit-exact `Float32` resident box/unbox support.  Promote its
-   layout marker through W6 rather than inventing a W7-private proof contract.
+3. **Generation complete.** Heap-only, bit-exact `Float32` resident box/unbox
+   support shares the concrete host's `Float32 = 6`, `Float = 7` marker
+   inventory. W6 still promotes this stable executable layout into its proved
+   resident-box descriptor table.
 4. Ratchet all seven generic paths and all seven generated `_boxed` paths in a
    source-generated external-engine fixture.  Require zero imports and zero
    runtime operations after linking.
@@ -128,7 +130,7 @@ contract and resident helpers land.
   is awaiting dependent W6/W7 completion.
 - `FIR-BUG-wasm-none-boxed-scalar-result-kind-drift`: confirmed admission and
   resident-alias gap for exact `UInt16`/`UInt64` adapters.
-- `FIR-BUG-wasm-none-float32-resident-boxing`: confirmed resident/proof
-  coverage gap.
+- `FIR-BUG-wasm-none-float32-resident-boxing`: generation fixed; W6 proof
+  follow-up remains.
 - `FIR-BUG-wasm-none-usize-target-width-contract`: confirmed, intentionally
   separate target-model issue.

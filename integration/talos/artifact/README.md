@@ -156,6 +156,15 @@ and a native Lean bit oracle; `check.sh` regenerates all five products twice and
 compares them byte-for-byte before running fast/slow, rounding, subnormal,
 overflow, arbitrary-Nat, and malformed-layout cases in V8.
 
+The standalone resident-Float module also closes heap-only boxing for both
+`Float32` and `Float`. Its integer-lane bit façades exercise signed zero,
+subnormals, finite maxima, infinities, and quiet/signaling NaNs without routing
+payloads through JavaScript arithmetic. The client checks the shared concrete
+marker inventory (`Float32 = 6`, `Float = 7`), canonical 40-byte headers,
+Float32 zero padding, exact frontier growth and rewind, malformed-layout traps,
+module-owned memory, and zero imports. This is the generation-ready executable
+surface; W6 proves the stable helper layout separately.
+
 W7 also emits the first standalone Wasm-resident runtime slice. Its module
 defines and exports one-page memory, has no imports, and exports the raw
 `tobject → UInt32` helper `fir_getTag`. The browser-neutral smoke client writes

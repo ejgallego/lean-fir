@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-float32-resident-boxing
-status: confirmed
+status: fixed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: d8b18978322de05a8f3dba51ef03cf5461676c17
@@ -9,7 +9,7 @@ pass: none
 discovered-by: source-closure-test
 first-seen: 2026-08-26
 reproduction: Fir/Wasm/Emit/ResidentFloat.lean
-regression: none
+regression: Fir/Wasm/Emit/ScalarBoxingExamples.lean
 ---
 
 # Summary
@@ -93,9 +93,18 @@ none
 
 ## Resolution and regression
 
-Unresolved.  Align the two floating markers with the concrete-host inventory
-(`Float32 = 6`, `Float = 7`). Add bit-exact values including signed zero,
-infinities, quiet and signaling NaNs, subnormals, and maximal payloads; check
-exact frontier growth, canonical header words, invalid traps, generated
-`_boxed` ownership, Node/Chrome execution, zero imports, and zero residual
-runtime operations.
+`ResidentFloat` now internalizes `.box/.unbox .float32` and aligns both
+floating markers with the concrete-host inventory (`Float32 = 6`,
+`Float = 7`). Both boxes allocate one canonical 40-byte owned object;
+Float32 zeroes the upper half of its semantic slot, and both checked unboxers
+validate the complete header before reinterpreting the stored bits.
+
+The permanent source fixture requires generic and compiler-generated
+`Float32` wrappers to link with zero imports and zero residual runtime
+operations. The standalone Node client passes binary32/binary64 signed zero,
+subnormal, finite maximum, infinity, quiet-NaN, and signaling-NaN payloads
+through integer-lane Wasm façades without a JavaScript numeric round trip. It
+also checks exact 40-byte frontier growth, rewind, header markers and widths,
+zero Float32 padding, and malformed-width/padding/marker traps. W6 promotion
+of the now-stable floating layout into its proved descriptor table remains a
+separate refinement checkpoint.

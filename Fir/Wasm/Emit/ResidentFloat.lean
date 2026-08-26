@@ -17,6 +17,10 @@ layer has landed independently. The exact scalar dependencies of
 source-compiled decimal construction live here; `ResidentFloatSource` captures
 Lean's own construction algorithm. Transcendental operations remain at the
 checked external-runtime frontier.
+
+The same module owns heap-only, bit-exact boxing for `Float32` and `Float`.
+Their header markers follow the concrete executable-host inventory, while the
+W6 refinement theorem remains a separate pipeline checkpoint.
 -/
 
 inductive LinkError where
@@ -48,10 +52,12 @@ private def savedScratchLocal : FVarId := ⟨`savedScratch⟩
 private def objectResultLocal : FVarId := ⟨`objectResult⟩
 private def uint8ResultLocal : FVarId := ⟨`uint8Result⟩
 
-/-- Private `boxed.aux0` marker for an eight-byte Float payload. W6 may later
-promote this marker into its proved scalar-box descriptor table. -/
-def floatBoxMarker : UInt32 := 6
+/-- `boxed.aux0` markers shared with the concrete executable-host inventory. -/
+def float32BoxMarker : UInt32 := 6
+def floatBoxMarker : UInt32 := 7
 
+def float32BoxName : Name := `fir_float32_box
+def float32UnboxName : Name := `fir_float32_unbox
 def boxName : Name := `fir_float_box
 def unboxName : Name := `fir_float_unbox
 
@@ -99,6 +105,26 @@ private def requireHeader (object : FVarId) (kind marker : UInt32) : List Instru
       .i32Load .uint32 (u32 headerAux0Offset)] ++
     equalsConst .uint32 marker ++
     [.ifElse [] [.unreachable]])
+
+private def requireHeaderWord (object : FVarId) (offset : Nat)
+    (value : UInt32) : List Instruction :=
+  [.localGet object,
+    .i32Load .uint32 (u32 offset)] ++
+  equalsConst .uint32 value ++
+  [.ifElse [] [.unreachable]]
+
+private def requireFloatingBoxHeader (object : FVarId) (marker : UInt32)
+    (payloadBytes : Nat) : List Instruction :=
+  let allocationBytes := align8 (headerBytes + target.semanticSlotBytes)
+  requireHeader object ObjectKind.boxed.code marker ++
+    requireHeaderWord object headerAllocationBytesOffset (u32 allocationBytes) ++
+    requireHeaderWord object headerAux1Offset (u32 payloadBytes) ++
+    requireHeaderWord object headerAux2Offset 0 ++
+    requireHeaderWord object headerAux3Offset 0 ++
+    if payloadBytes == 4 then
+      requireHeaderWord object (headerBytes + 4) 0
+    else
+      []
 
 private def store32 (kind : AbiKind) (value : List Instruction)
     (offset : Nat) : List Instruction :=
@@ -187,15 +213,61 @@ def boxFunction : Function :=
         .i64Store .uint64 (u32 headerBytes)] ++
       retypeAddress .object }
 
+/-- Upstream `lean_box_float32`: allocate one ordinary owned object and store
+the exact binary32 payload bits in the low half of its semantic slot. -/
+def float32BoxFunction : Function :=
+  let allocationBytes := align8 (headerBytes + target.semanticSlotBytes)
+  {
+    name := float32BoxName
+    params := #[(valueParam, .float32)]
+    results := #[.object]
+    locals := #[(addressLocal, .uint32), (savedScratchLocal, .uint32),
+      (objectResultLocal, .object)]
+    body :=
+      [.i32Const .uint32 (u32 allocationBytes),
+        .call (.declaration ResidentAllocator.allocateName),
+        .localSet addressLocal] ++
+      zeroAllocation allocationBytes ++
+      store32 .uint32 [.i32Const .uint32 ObjectKind.boxed.code]
+        headerKindOffset ++
+      store32 .uint32 [.i32Const .uint32 liveFlag]
+        headerFlagsOffset ++
+      store32 .uint32 [.i32Const .uint32 1]
+        headerRefCountOffset ++
+      store32 .uint32 [.i32Const .uint32 (u32 allocationBytes)]
+        headerAllocationBytesOffset ++
+      store32 .uint32 [.i32Const .uint32 float32BoxMarker]
+        headerAux0Offset ++
+      store32 .uint32 [.i32Const .uint32 4]
+        headerAux1Offset ++
+      [.localGet addressLocal,
+        .localGet valueParam,
+        .i32ReinterpretF32 .uint32,
+        .i32Store .uint32 (u32 headerBytes)] ++
+      retypeAddress .object }
+
 def unboxFunction : Function := {
   name := unboxName
   params := #[(objectParam, .tobject)]
   results := #[.float]
   locals := #[]
-  body := requireHeader objectParam ObjectKind.boxed.code floatBoxMarker ++ [
+  body := requireFloatingBoxHeader objectParam floatBoxMarker 8 ++ [
     .localGet objectParam,
     .i64Load .uint64 (u32 headerBytes),
     .f64ReinterpretI64 .float,
+    .ret] }
+
+/-- Upstream `lean_unbox_float32`: accept only the canonical Float32 heap
+layout and recover its exact binary32 payload bits. -/
+def float32UnboxFunction : Function := {
+  name := float32UnboxName
+  params := #[(objectParam, .tobject)]
+  results := #[.float32]
+  locals := #[]
+  body := requireFloatingBoxHeader objectParam float32BoxMarker 4 ++ [
+    .localGet objectParam,
+    .i32Load .uint32 (u32 headerBytes),
+    .f32ReinterpretI32 .float32,
     .ret] }
 
 def scalarProjectionFunction (width byteOffset : Nat) : Except LinkError Function := do
@@ -214,6 +286,8 @@ def scalarProjectionFunction (width byteOffset : Nat) : Except LinkError Functio
       .ret] }
 
 private def runtimeName? : RuntimeOp → Option Name
+  | .box .float32 .object => some float32BoxName
+  | .unbox .float32 => some float32UnboxName
   | .box .float .object => some boxName
   | .unbox .float => some unboxName
   | .scalarProj width byteOffset .float =>
@@ -222,6 +296,8 @@ private def runtimeName? : RuntimeOp → Option Name
 
 private def runtimeFunction (operation : RuntimeOp) : Except LinkError Function :=
   match operation with
+  | .box .float32 .object => pure float32BoxFunction
+  | .unbox .float32 => pure float32UnboxFunction
   | .box .float .object => pure boxFunction
   | .unbox .float => pure unboxFunction
   | .scalarProj width byteOffset .float => scalarProjectionFunction width byteOffset
@@ -584,14 +660,61 @@ private def bitUnaryProbes : Array Function := #[
   bitUnaryProbe `Float.floor,
   bitUnaryProbe `Float.round]
 
+private def float32BoxBitsRoundtripName : Name :=
+  `resident_float32_box_bits_roundtrip
+
+private def floatBoxBitsRoundtripName : Name :=
+  `resident_float_box_bits_roundtrip
+
+private def boxProbeOperations : Array RuntimeOp := #[
+  .box .float32 .object,
+  .unbox .float32,
+  .box .float .object,
+  .unbox .float]
+
+private def float32BoxBitsRoundtrip : Function := {
+  name := float32BoxBitsRoundtripName
+  params := #[(valueParam, .uint32)]
+  results := #[.uint32]
+  locals := #[]
+  body := [
+    .localGet valueParam,
+    .f32ReinterpretI32 .float32,
+    .call (.runtime boxProbeOperations[0]!),
+    .call (.runtime boxProbeOperations[1]!),
+    .i32ReinterpretF32 .uint32,
+    .ret] }
+
+private def floatBoxBitsRoundtrip : Function := {
+  name := floatBoxBitsRoundtripName
+  params := #[(valueParam, .uint64)]
+  results := #[.uint64]
+  locals := #[]
+  body := [
+    .localGet valueParam,
+    .f64ReinterpretI64 .float,
+    .call (.runtime boxProbeOperations[2]!),
+    .call (.runtime boxProbeOperations[3]!),
+    .i64ReinterpretF64 .uint64,
+    .ret] }
+
+private def boxBitProbes : Array Function := #[
+  float32BoxBitsRoundtrip,
+  floatBoxBitsRoundtrip]
+
 /-- Complete executable Float helper inventory used by the artifact gate. -/
 def residentExampleModule : Except String Module := do
   let numeric ← ResidentNumeric.residentExampleModule
+  let boxImports := boxProbeOperations.mapIdx fun index operation =>
+    Fir.Wasm.runtimeImport (numeric.runtimeOperations.size + index) operation
   let module : Module := {
     numeric with
-    imports := numeric.imports ++ externalDeclarations.map externalImport
-    functions := numeric.functions ++ bitUnaryProbes
-    exports := numeric.exports ++ bitUnaryProbes.map (·.name) }
+    imports := numeric.imports ++ boxImports ++
+      externalDeclarations.map externalImport
+    functions := numeric.functions ++ bitUnaryProbes ++ boxBitProbes
+    exports := numeric.exports ++ bitUnaryProbes.map (·.name) ++
+      boxBitProbes.map (·.name)
+    runtimeOperations := numeric.runtimeOperations ++ boxProbeOperations }
   internalize module |>.mapError fun error => s!"float: {repr error}"
 
 /-- Available linking must add only the helper requested by the source closure. -/
@@ -607,6 +730,19 @@ def manifest : Json :=
       Json.mkObj [
         ("sourceEntry", declaration.toString),
         ("entry", externalName declaration |>.toString)]),
+    ("boxEntries", Json.arr #[
+      Json.mkObj [
+        ("scalar", "float32"),
+        ("box", float32BoxName.toString),
+        ("unbox", float32UnboxName.toString),
+        ("bitRoundtrip", float32BoxBitsRoundtripName.toString),
+        ("marker", float32BoxMarker.toNat)],
+      Json.mkObj [
+        ("scalar", "float"),
+        ("box", boxName.toString),
+        ("unbox", unboxName.toString),
+        ("bitRoundtrip", floatBoxBitsRoundtripName.toString),
+        ("marker", floatBoxMarker.toNat)]]),
     ("imports", Json.arr #[]),
     ("scalarStrategy", "direct-core-wasm"),
     ("roundStrategy", "half-away-from-zero-floor-ceil"),
@@ -653,8 +789,13 @@ private partial def instructionContains (target : Instruction) : Instruction →
 #guard match residentExampleModule with
   | .ok module =>
       module.imports.isEmpty && module.runtimeOperations.isEmpty &&
-      externalDeclarations.all fun declaration =>
-        module.exports.contains (externalName declaration) &&
+      (externalDeclarations.all fun declaration =>
+        module.exports.contains (externalName declaration)) &&
+      module.exports.contains float32BoxName &&
+      module.exports.contains float32UnboxName &&
+      module.exports.contains boxName &&
+      module.exports.contains unboxName &&
+      boxBitProbes.all fun function => module.exports.contains function.name &&
       module.memory == some ResidentRuntime.residentMemory &&
       (Fir.Wasm.validateModule module).isOk && (Fir.Wasm.Emit.encode module).isOk
   | .error _ => false

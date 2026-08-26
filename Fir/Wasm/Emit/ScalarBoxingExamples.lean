@@ -77,14 +77,14 @@ def families : Array ScalarFamily := #[
     closureEntry := ``usizeClosureEntry, generationReady := false },
   { label := "Float32", type := LCNF.ImpureType.float32, scalar := .float32
     genericEntry := ``float32Entry, rawEntry := ``rawFloat32
-    closureEntry := ``float32ClosureEntry, generationReady := false },
+    closureEntry := ``float32ClosureEntry, generationReady := true },
   { label := "Float", type := LCNF.ImpureType.float, scalar := .float
     genericEntry := ``floatEntry, rawEntry := ``rawFloat
     closureEntry := ``floatClosureEntry, generationReady := true }]
 
 #guard families.size == 7
 #guard (families.filter (!·.generationReady)).map (·.label) ==
-  #["USize", "Float32"]
+  #["USize"]
 
 private def operationText (operations : Array RuntimeOp) : String :=
   (Json.arr <| operations.map fun operation =>
