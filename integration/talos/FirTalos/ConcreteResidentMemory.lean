@@ -42,6 +42,11 @@ def write32Store (store : Wasm.Store host) (address value : UInt32) :
     Wasm.Store host :=
   { store with mem := store.mem.write32 address value }
 
+/-- Compact store-level spelling of one physical doubleword update. -/
+def write64Store (store : Wasm.Store host) (address : UInt32)
+    (value : UInt64) : Wasm.Store host :=
+  { store with mem := store.mem.write64 address value }
+
 @[simp] theorem write32Store_mem
     (store : Wasm.Store host) (address value : UInt32) :
     (write32Store store address value).mem = store.mem.write32 address value := by
@@ -50,6 +55,16 @@ def write32Store (store : Wasm.Store host) (address value : UInt32) :
 @[simp] theorem write32Store_pages
     (store : Wasm.Store host) (address value : UInt32) :
     (write32Store store address value).mem.pages = store.mem.pages := by
+  rfl
+
+@[simp] theorem write64Store_mem
+    (store : Wasm.Store host) (address : UInt32) (value : UInt64) :
+    (write64Store store address value).mem = store.mem.write64 address value := by
+  rfl
+
+@[simp] theorem write64Store_pages
+    (store : Wasm.Store host) (address : UInt32) (value : UInt64) :
+    (write64Store store address value).mem.pages = store.mem.pages := by
   rfl
 
 /-- Adjacent little-endian word updates at the physical Wasm store level. -/
@@ -130,6 +145,39 @@ theorem wp_store32_localGet_of_inBounds
     simpa [Wasm.Locals.get] using valueFound
   simp only [valueFound']
   exact wp_store32_of_inBounds inBounds continued
+
+/-- Load an address and `i64` value from arbitrary locals, then execute one
+checked 64-bit store.  This is the doubleword counterpart of the generic
+resident object-writer rule above. -/
+theorem wp_store64_localGet_of_inBounds
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {locals : Wasm.Locals} {address offset : UInt32} {value : UInt64}
+    {addressIndex valueIndex : Nat} {tail : List Wasm.Value}
+    {rest : Wasm.Program}
+    (addressFound : locals.get addressIndex = some (.i32 address))
+    (valueFound : locals.get valueIndex = some (.i64 value))
+    (inBounds : address.toNat + offset.toNat + 8 ≤
+      store.mem.pages * wasmPageBytes)
+    (continued : Wasm.wp module rest Q
+      (write64Store store (address + offset) value)
+      { locals with values := tail } env) :
+    Wasm.wp module
+      (.localGet addressIndex :: .localGet valueIndex :: .store64 offset :: rest)
+      Q store { locals with values := tail } env := by
+  simp only [Wasm.wp_localGet_cons]
+  have addressFound' :
+      ({ locals with values := tail } : Wasm.Locals).get addressIndex =
+        some (.i32 address) := by
+    simpa [Wasm.Locals.get] using addressFound
+  simp only [addressFound']
+  have valueFound' :
+      ({ locals with values := .i32 address :: tail } : Wasm.Locals).get
+          valueIndex = some (.i64 value) := by
+    simpa [Wasm.Locals.get] using valueFound
+  simp only [valueFound', Wasm.wp_store64_cons]
+  rw [if_neg (Nat.not_lt.mpr (by simpa [wasmPageBytes] using inBounds))]
+  simpa [write64Store] using continued
 
 /-- Load an address local and store one constant word at a checked offset. -/
 theorem wp_store32_const_of_inBounds
@@ -513,6 +561,32 @@ theorem readUInt32_eq_read32
     related.byte_eq (address + 2) h2, related.byte_eq (address + 3) h3]
   bv_decide
 
+/-- A checked little-endian W6 doubleword read exposes the same exact `i64`
+lane to resident Wasm.  Keeping this transport at the byte relation boundary
+lets scalar, numeric, and closure helpers share one proof of the physical
+64-bit representation. -/
+theorem readUInt64_eq_read64
+    {heap : MemoryState} {memory : Wasm.Mem}
+    (related : ResidentMemoryRel heap memory)
+    {address : Nat} (inBounds : address + 7 < heap.memory.size) :
+    heap.memory.readUInt64 address =
+      .ok (memory.read64 (UInt32.ofNat address)) := by
+  have lowInBounds : address + 3 < heap.memory.size := by omega
+  have highInBounds : address + 4 + 3 < heap.memory.size := by omega
+  unfold LinearMemory.readUInt64
+  rw [related.readUInt32_eq_read32 lowInBounds,
+    related.readUInt32_eq_read32 highInBounds]
+  simp only [bind, Except.bind, pure, Except.pure]
+  congr 1
+  unfold Wasm.Mem.read64 Wasm.Mem.read32
+  rw [related.address_roundtrip inBounds,
+    related.address_roundtrip highInBounds]
+  have offset5 : address + 4 + 1 = address + 5 := by omega
+  have offset6 : address + 4 + 2 = address + 6 := by omega
+  have offset7 : address + 4 + 3 = address + 7 := by omega
+  rw [offset5, offset6, offset7]
+  bv_decide
+
 /-- A successful W6 mathematical-word read exposes the same exact i32 lane
 to resident Wasm.  This packages the checked `Word32` reconstruction so
 ownership traversals can reason directly about their child argument. -/
@@ -613,6 +687,75 @@ theorem writeUInt32
     simp [LinearMemory.readByte, otherInBounds, originalInBounds] at unchanged
     rw [unchanged]
     exact related.byte_eq other originalInBounds
+
+/-- One checked W6 64-bit write and one resident `i64.store` preserve the
+common memory relation.  The proof factors through the already-verified pair
+of adjacent 32-bit stores and then identifies that pair with Talos's canonical
+little-endian 64-bit update. -/
+theorem writeUInt64
+    {heap : MemoryState} {memory : Wasm.Mem}
+    (related : ResidentMemoryRel heap memory)
+    {address : Nat} {value : UInt64} {result : LinearMemory}
+    (inBounds : address + 7 < heap.memory.size)
+    (written : heap.memory.writeUInt64 address value = .ok result) :
+    ResidentMemoryRel { heap with memory := result }
+      (memory.write64 (UInt32.ofNat address) value) := by
+  obtain ⟨middle, lowWrite, middleSize, highWrite⟩ :=
+    LinearMemory.writeUInt64_decompose heap.memory result address value
+      inBounds written
+  have lowRelated := related.writeUInt32 (by omega) lowWrite
+  have highRelated := lowRelated.writeUInt32 (by
+    simpa [middleSize] using (show address + 4 + 3 < heap.memory.size by
+      omega)) highWrite
+  have addressRoundtrip : (UInt32.ofNat address).toNat = address :=
+    related.address_roundtrip inBounds
+  have highInBounds : address + 4 + 3 < heap.memory.size := by omega
+  have highAddressRoundtrip : (UInt32.ofNat (address + 4)).toNat = address + 4 :=
+    related.address_roundtrip (address := address + 4) (bytes := 3)
+      highInBounds
+  have physicalEq :
+      (memory.write32 (UInt32.ofNat address) value.toUInt32).write32
+          (UInt32.ofNat (address + 4))
+          (value >>> (32 : UInt64)).toUInt32 =
+        memory.write64 (UInt32.ofNat address) value := by
+    cases memory
+    simp only [Wasm.Mem.write32, Wasm.Mem.write64, addressRoundtrip,
+      highAddressRoundtrip]
+    congr 1
+    funext other
+    by_cases eq0 : other = address
+    · subst other
+      simp (config := { maxSteps := 4000000 }) [Nat.add_assoc]
+    by_cases eq1 : other = address + 1
+    · subst other
+      simp (config := { maxSteps := 4000000 }) [Nat.add_assoc]
+      bv_decide
+    by_cases eq2 : other = address + 2
+    · subst other
+      simp (config := { maxSteps := 4000000 }) [Nat.add_assoc]
+      bv_decide
+    by_cases eq3 : other = address + 3
+    · subst other
+      simp (config := { maxSteps := 4000000 }) [Nat.add_assoc]
+      bv_decide
+    by_cases eq4 : other = address + 4
+    · subst other
+      simp (config := { maxSteps := 4000000 })
+    by_cases eq5 : other = address + 5
+    · subst other
+      simp (config := { maxSteps := 4000000 }) [Nat.add_assoc]
+      bv_decide
+    by_cases eq6 : other = address + 6
+    · subst other
+      simp (config := { maxSteps := 4000000 }) [Nat.add_assoc]
+      bv_decide
+    by_cases eq7 : other = address + 7
+    · subst other
+      simp (config := { maxSteps := 4000000 }) [Nat.add_assoc]
+      bv_decide
+    simp [Nat.add_assoc, eq0, eq1, eq2, eq3, eq4, eq5, eq6, eq7]
+  rw [physicalEq] at highRelated
+  exact highRelated
 
 end ResidentMemoryRel
 

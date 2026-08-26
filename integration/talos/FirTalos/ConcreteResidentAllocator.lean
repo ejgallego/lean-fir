@@ -88,6 +88,44 @@ theorem writeUInt32
         (.inr (by simpa [roundtrip] using disjoint))
     _ = 0 := related.zeroAfterExtent other afterOld
 
+/-- An in-bounds paired W6/Talos doubleword store preserves the allocator
+frontier and the zero bytes beyond the current resident extent. -/
+theorem writeUInt64
+    {heap : MemoryState} {store : Wasm.Store host} {frontierIndex : Nat}
+    (related : ResidentAllocatorRel heap store frontierIndex)
+    {address : Nat} {value : UInt64} {result : LinearMemory}
+    (inBounds : address + 7 < heap.memory.size)
+    (written : heap.memory.writeUInt64 address value = .ok result) :
+    ResidentAllocatorRel { heap with memory := result }
+      { store with mem := store.mem.write64 (UInt32.ofNat address) value }
+      frontierIndex := by
+  have sizeEq := LinearMemory.size_of_writeUInt64_eq_ok heap.memory result
+    address value inBounds written
+  refine {
+    toResidentMemoryRel :=
+      related.toResidentMemoryRel.writeUInt64 inBounds written
+    frontierBase := related.frontierBase
+    frontierFits := related.frontierFits
+    frontier := by simpa using related.frontier
+    zeroAfterExtent := ?_ }
+  intro other afterExtent
+  have afterOld : heap.memory.size ≤ other := by
+    simpa [sizeEq] using afterExtent
+  have roundtrip : (UInt32.ofNat address).toNat = address :=
+    related.toResidentMemoryRel.address_roundtrip inBounds
+  have afterLane : address + 7 < other := by omega
+  simp only [Wasm.Mem.write64, roundtrip]
+  have ne0 : other ≠ address := by omega
+  have ne1 : other ≠ address + 1 := by omega
+  have ne2 : other ≠ address + 2 := by omega
+  have ne3 : other ≠ address + 3 := by omega
+  have ne4 : other ≠ address + 4 := by omega
+  have ne5 : other ≠ address + 5 := by omega
+  have ne6 : other ≠ address + 6 := by omega
+  have ne7 : other ≠ address + 7 := by omega
+  simp [ne0, ne1, ne2, ne3, ne4, ne5, ne6, ne7,
+    related.zeroAfterExtent other afterOld]
+
 /-- Page growth preserves the byte relation once arithmetic has identified
 the exact W6 successor extent.  Keeping the page calculation as an explicit
 premise separates generic memory reasoning from the allocator program's
