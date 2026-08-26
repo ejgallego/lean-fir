@@ -4310,6 +4310,22 @@ theorem ConcreteStructuredValidatedExternalCallReadyOutcome.advance_of_step
   exact ⟨targetAfter, targetPath,
     ConcreteStructuredValidatedCodeGlobalOutcome.externalBind bindValidated⟩
 
+/-- Source-semantic safety of the currently active return, stated solely over
+the source machine state and its active function result ABI.
+
+The predicate is vacuous away from a return node.  At a return it says exactly
+that the yielded source value has the representation promised by the active
+function boundary.  In particular, a physically polymorphic `.tobject` local
+returned as `.object` must denote a heap reference, while one returned as
+`.tagged` must denote a tagged reference.  It mentions no target module,
+physical lane, refinement witness, execution path, or compiler certificate. -/
+def ConcreteStructuredReturnValueSafeAt
+    (functionResult : AbiKind) (source : MachineState) : Prop :=
+  ∀ {result : Lean.FVarId} {sourceValue : Value},
+    source.control = .code (.return result) →
+      lookup source.env result = some sourceValue →
+        SemanticValueAtAbi functionResult sourceValue
+
 /-- A validated, source-semantically typed return enters the closed yielded
 branch without a separately supplied current-node admission object.
 
@@ -4408,6 +4424,56 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_return_of_semantic_step
       framesAfter, agreesAfter, validationAgreesAfter⟩
   exact ⟨targetAfter, targetPath,
     ConcreteStructuredValidatedCodeGlobalOutcome.returned returned⟩
+
+/-- State-indexed form of the validated return theorem.
+
+This is the interface used by a module-wide dispatcher: source typing supplies
+one invariant on the current machine state, while the structured compiler
+relation recovers the active environment and return variable. -/
+theorem
+    ConcreteStructuredValidatedCodeOutcome.advance_return_of_source_safe_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {result : Lean.FVarId}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.return result) targetStore targetLocals targetCode witness source target)
+    (sourceSafe : ConcreteStructuredReturnValueSafeAt functionResult source)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
+          targetModule hosts externals sourceAfter targetAfter := by
+  apply related.advance_return_of_semantic_step activeResult
+    (sourceStep := sourceStep)
+  intro sourceValue sourceLookup
+  apply sourceSafe related.core.core.focus.sourceControlEq
+  simpa only [related.core.core.focus.sourceEnvEq] using sourceLookup
 
 /-- A validated return enters the closed yielded branch.  Current-node
 admission supplies only the compiled result kind; the concrete theorem derives
@@ -6425,6 +6491,121 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_ordinaryDecrement_of_step
   exact related.advanceCode related.core.validation.decContinuation
     (pointwise.advance_ordinaryDecrement_of_step supported sourceStep)
 
+section ClosedValidatorDerivedOrdinaryOwnership
+
+variable
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {amount : Nat}
+    {check : Bool}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+
+/-- Closed ordinary increment with compiler admission reconstructed from the
+retained production validator.  The only additional premise is the genuine
+finite-wasm32 reference-count headroom condition. -/
+theorem
+    ConcreteStructuredValidatedCodeOutcome.advance_ordinaryIncrement_of_validated_step
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.inc objectId amount check false continuation) targetStore targetLocals
+      targetCode witness source target)
+    (fits : ∀ (sourceObject : Value) (location : Location) (cell : HeapCell),
+      lookupValue sourceEnv objectId = .ok sourceObject →
+        sourceObject = .object (.heap location) →
+          findCell? sourceRuntime.heap location = some cell →
+            cell.rc + amount < UInt32.size)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ nextRuntime targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter := by
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees⟩ :=
+    related.core.validation
+  obtain ⟨objectKind, objectCompiled, objectRefines⟩ :=
+    validated.incOrdinary_compiler agrees
+  obtain ⟨sourceObject, nextRuntime, objectLookup, updated⟩ :=
+    related.core.core.focus.incOrdinary_source_of_step sourceStep
+  let supported : OrdinaryIncrementEffectSupported context sourceRuntime
+      sourceEnv (.inc objectId amount check false continuation) continuation
+      nextRuntime :=
+    .inc sourceRuntime nextRuntime sourceEnv objectId amount check continuation
+      objectKind sourceObject objectCompiled objectRefines objectLookup updated
+      (fun location cell sourceObjectEq found =>
+        fits sourceObject location cell objectLookup sourceObjectEq found)
+  obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, next⟩ :=
+    related.advance_ordinaryIncrement_of_step supported sourceStep
+  exact ⟨nextRuntime, targetAfter, nextStore, nextTargetCode, targetPath, next⟩
+
+/-- Closed ordinary decrement with all current-node admission reconstructed
+from production validation and the successful source step.  Unlike increment,
+it needs no independent finite-width premise. -/
+theorem
+    ConcreteStructuredValidatedCodeOutcome.advance_ordinaryDecrement_of_validated_step
+    {objectFields? : Option Nat}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.dec objectId amount check false objectFields? continuation) targetStore
+      targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ nextRuntime targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter := by
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees⟩ :=
+    related.core.validation
+  obtain ⟨objectKind, objectCompiled, objectRefines⟩ :=
+    validated.decOrdinary_compiler agrees
+  obtain ⟨sourceObject, nextRuntime, objectLookup, updated⟩ :=
+    related.core.core.focus.decOrdinary_source_of_step sourceStep
+  let supported : OrdinaryDecrementEffectSupported context sourceRuntime
+      sourceEnv
+      (.dec objectId amount check false objectFields? continuation)
+      continuation nextRuntime :=
+    .dec sourceRuntime nextRuntime sourceEnv objectId amount check objectFields?
+      continuation objectKind sourceObject objectCompiled objectRefines
+      objectLookup updated
+  obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, next⟩ :=
+    related.advance_ordinaryDecrement_of_step supported sourceStep
+  exact ⟨nextRuntime, targetAfter, nextStore, nextTargetCode, targetPath, next⟩
+
+end ClosedValidatorDerivedOrdinaryOwnership
+
 /-- Object-field writes retain the residual state after their executable kind
 guards have succeeded. -/
 theorem ConcreteStructuredValidationFocus.osetContinuation
@@ -8111,6 +8292,64 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_ordinaryDelete_of_step
   exact related.advanceCode related.core.validation.delContinuation
     (pointwise.advance_ordinaryDelete_of_step supported sourceStep)
 
+/-- Closed explicit deletion with its compiler local and semantic transition
+reconstructed from retained validation and the successful source step. -/
+theorem
+    ConcreteStructuredValidatedCodeOutcome.advance_ordinaryDelete_of_validated_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.del objectId continuation) targetStore targetLocals targetCode witness
+      source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ nextRuntime targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter := by
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees⟩ :=
+    related.core.validation
+  have objectCompiled := validated.del_compiler agrees
+  obtain ⟨sourceObject, nextRuntime, objectLookup, updated⟩ :=
+    related.core.core.focus.del_source_of_step sourceStep
+  let supported : OrdinaryDeleteEffectSupported context sourceRuntime sourceEnv
+      (.del objectId continuation) continuation nextRuntime :=
+    .del sourceRuntime nextRuntime sourceEnv objectId continuation .object
+      sourceObject objectCompiled objectLookup updated
+  obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, next⟩ :=
+    related.advance_ordinaryDelete_of_step supported sourceStep
+  exact ⟨nextRuntime, targetAfter, nextStore, nextTargetCode, targetPath, next⟩
+
 section ClosedMutation
 
 variable
@@ -8165,6 +8404,43 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_constructorTag_of_step
     (ConcreteStructuredCodeStepAdmission.constructorTag supported) (by omega)
   exact related.advanceCode related.core.validation.setTagContinuation
     (pointwise.advance_constructorTag_of_step supported sourceStep)
+
+/-- Closed constructor-tag mutation with static width/local facts recovered
+from production validation and heap-shape facts recovered from the source
+step. -/
+theorem
+    ConcreteStructuredValidatedCodeOutcome.advance_constructorTag_of_validated_step
+    {objectId : Lean.FVarId} {tag : Nat}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.setTag objectId tag continuation) targetStore targetLocals targetCode
+      witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ resultRuntime targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes resultRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter := by
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees⟩ :=
+    related.core.validation
+  obtain ⟨tagFits, objectCompiled⟩ := validated.setTag_compiler agrees
+  obtain ⟨location, cell, semantic, resultRuntime, objectLookup, updated,
+      found, live, objectEq⟩ :=
+    related.core.core.focus.setTag_source_of_step sourceStep
+  let supported : ConstructorTagEffectSupported context sourceRuntime sourceEnv
+      (.setTag objectId tag continuation) continuation resultRuntime :=
+    .setTag sourceRuntime resultRuntime sourceEnv objectId tag continuation
+      location cell semantic objectCompiled objectLookup updated found live
+      objectEq tagFits
+  obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, next⟩ :=
+    related.advance_constructorTag_of_step supported sourceStep
+  exact ⟨resultRuntime, targetAfter, nextStore, nextTargetCode, targetPath, next⟩
 
 /-- Object-reference field mutation preserves closed validation across its
 exact generated three-step prefix. -/
@@ -8277,6 +8553,170 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_scalarField_of_step
     (ConcreteStructuredCodeStepAdmission.scalarField supported) (by omega)
   exact related.advanceCode related.core.validation.ssetContinuation
     (pointwise.advance_scalarField_of_step supported sourceStep)
+
+/-- Closed object-reference field mutation.  Production validation supplies
+the compiled operands, the successful source step supplies the live mutation,
+and `fieldTyped` is the sole source descriptor-typing boundary. -/
+theorem
+    ConcreteStructuredValidatedCodeOutcome.advance_objectFieldFVar_of_validated_step
+    {objectId fieldId : Lean.FVarId} {index : Nat}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.oset objectId index (.fvar fieldId) continuation) targetStore
+      targetLocals targetCode witness source target)
+    (fieldTyped : ConcreteObjectFieldFVarTyped context sourceEnv objectId
+      fieldId index)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ resultRuntime targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes resultRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter := by
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees⟩ :=
+    related.core.validation
+  obtain ⟨fieldKind, objectCompiled, fieldCompiled, fieldObjectKind⟩ :=
+    validated.oset_fvar_compiler agrees
+  obtain ⟨location, cell, semantic, field, resultRuntime, objectLookup,
+      fieldLookup, updated, found, live, objectEq, indexValid⟩ :=
+    related.core.core.focus.oset_fvar_source_of_step sourceStep
+  let supported : ObjectFieldFVarEffectSupported context sourceRuntime
+      sourceEnv (.oset objectId index (.fvar fieldId) continuation)
+      continuation resultRuntime :=
+    .oset sourceRuntime resultRuntime sourceEnv objectId fieldId index
+      continuation location cell semantic field fieldKind objectCompiled
+      fieldCompiled fieldObjectKind objectLookup fieldLookup updated found live
+      objectEq indexValid (fun objectRelated descriptorFound =>
+        fieldTyped fieldCompiled objectLookup objectRelated descriptorFound)
+  obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, next⟩ :=
+    related.advance_objectFieldFVar_of_step supported sourceStep
+  exact ⟨resultRuntime, targetAfter, nextStore, nextTargetCode, targetPath, next⟩
+
+/-- Closed erased object-field mutation.  The only non-validator premise is
+the source descriptor's erased-field alignment. -/
+theorem
+    ConcreteStructuredValidatedCodeOutcome.advance_objectFieldErased_of_validated_step
+    {objectId : Lean.FVarId} {index : Nat}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.oset objectId index .erased continuation) targetStore targetLocals
+      targetCode witness source target)
+    (fieldTyped : ConcreteObjectFieldKindAligned sourceEnv objectId index
+      .erased)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ resultRuntime targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes resultRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter := by
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees⟩ :=
+    related.core.validation
+  have objectCompiled := validated.oset_erased_compiler agrees
+  obtain ⟨location, cell, semantic, resultRuntime, objectLookup, updated,
+      found, live, objectEq, indexValid⟩ :=
+    related.core.core.focus.oset_erased_source_of_step sourceStep
+  let supported : ObjectFieldErasedEffectSupported context sourceRuntime
+      sourceEnv (.oset objectId index .erased continuation) continuation
+      resultRuntime :=
+    .oset sourceRuntime resultRuntime sourceEnv objectId index continuation
+      location cell semantic objectCompiled objectLookup updated found live
+      objectEq indexValid (fun objectRelated descriptorFound =>
+        fieldTyped objectLookup objectRelated descriptorFound)
+  obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, next⟩ :=
+    related.advance_objectFieldErased_of_step supported sourceStep
+  exact ⟨resultRuntime, targetAfter, nextStore, nextTargetCode, targetPath, next⟩
+
+/-- Closed `USize` field mutation is fully reconstructed from validation and
+one successful source step; no additional source layout premise is needed. -/
+theorem
+    ConcreteStructuredValidatedCodeOutcome.advance_usizeField_of_validated_step
+    {objectId fieldId : Lean.FVarId} {index : Nat}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.uset objectId index fieldId continuation) targetStore targetLocals
+      targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ resultRuntime targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes resultRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter := by
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees⟩ :=
+    related.core.validation
+  obtain ⟨objectCompiled, fieldCompiled⟩ := validated.uset_compiler agrees
+  obtain ⟨location, cell, semantic, field, resultRuntime, objectLookup,
+      fieldLookup, updated, found, live, objectEq, slotStart, slotEnd⟩ :=
+    related.core.core.focus.uset_source_of_step sourceStep
+  let supported : USizeFieldEffectSupported context sourceRuntime sourceEnv
+      (.uset objectId index fieldId continuation) continuation resultRuntime :=
+    .uset sourceRuntime resultRuntime sourceEnv objectId fieldId index
+      continuation location cell semantic field objectCompiled fieldCompiled
+      objectLookup fieldLookup updated found live objectEq slotStart slotEnd
+  obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, next⟩ :=
+    related.advance_usizeField_of_step supported sourceStep
+  exact ⟨resultRuntime, targetAfter, nextStore, nextTargetCode, targetPath, next⟩
+
+/-- Closed packed-scalar field mutation.  All compiler and dynamic operation
+facts are reconstructed; `fieldTyped` remains the explicit source/runtime
+descriptor-layout invariant. -/
+theorem
+    ConcreteStructuredValidatedCodeOutcome.advance_scalarField_of_validated_step
+    {objectId fieldId : Lean.FVarId} {slotIndex byteOffset : Nat}
+    {type : Lean.Expr}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.sset objectId slotIndex byteOffset fieldId type continuation) targetStore
+      targetLocals targetCode witness source target)
+    (fieldTyped : ConcreteScalarFieldMutationTyped context sourceRuntime
+      sourceEnv objectId fieldId slotIndex byteOffset)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ resultRuntime targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes resultRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter := by
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees⟩ :=
+    related.core.validation
+  obtain ⟨fieldKind, objectCompiled, fieldCompiled, _annotationFound,
+      _scalarSupported⟩ := validated.sset_compiler agrees
+  obtain ⟨location, cell, semantic, field, resultRuntime, objectLookup,
+      fieldLookup, updated, found, live, objectEq⟩ :=
+    related.core.core.focus.sset_source_of_step sourceStep
+  let supported : ScalarFieldEffectSupported context sourceRuntime sourceEnv
+      (.sset objectId slotIndex byteOffset fieldId type continuation)
+      continuation resultRuntime :=
+    .sset sourceRuntime resultRuntime sourceEnv objectId fieldId slotIndex
+      byteOffset type continuation location cell semantic field fieldKind
+      objectCompiled fieldCompiled objectLookup fieldLookup updated found live
+      objectEq (fun objectRelated descriptorFound =>
+        fieldTyped fieldCompiled objectLookup found live objectEq objectRelated
+          descriptorFound)
+  obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, next⟩ :=
+    related.advance_scalarField_of_step supported sourceStep
+  exact ⟨resultRuntime, targetAfter, nextStore, nextTargetCode, targetPath, next⟩
 
 end ClosedMutation
 
