@@ -78,9 +78,9 @@ theorem natSubFunction_locals_size :
 /-- The adapter maps the actual symbolic immediate arm to the exact Talos
 program used by the execution proof. -/
 theorem instructions_immediateSubSource
-    {sourceModule : Fir.Wasm.Module} :
+    {sourceModule : Fir.Wasm.Module} {labels : LabelContext} :
     FirTalos.instructions sourceModule
-      Fir.Wasm.Emit.ResidentBigNumeric.natSubFunction []
+      Fir.Wasm.Emit.ResidentBigNumeric.natSubFunction labels
       (immediateSubSource
         Fir.Wasm.Emit.ResidentBigNumeric.natSubFunction.params[0]!.1
         Fir.Wasm.Emit.ResidentBigNumeric.natSubFunction.params[1]!.1
@@ -140,7 +140,7 @@ theorem instructions_natSubFunctionBody_of_shape
             Fir.Wasm.Emit.ResidentBigNumeric.natSubFunction.locals[2]!.1)
           sourceFallback)
     (fallbackAdapted : FirTalos.instructions sourceModule
-      Fir.Wasm.Emit.ResidentBigNumeric.natSubFunction [] sourceFallback =
+      Fir.Wasm.Emit.ResidentBigNumeric.natSubFunction [none] sourceFallback =
         .ok targetFallback) :
     FirTalos.instructions sourceModule
       Fir.Wasm.Emit.ResidentBigNumeric.natSubFunction []
@@ -176,7 +176,7 @@ theorem adaptedNatSubFunction_body_of_shape
             Fir.Wasm.Emit.ResidentBigNumeric.natSubFunction.locals[2]!.1)
           sourceFallback)
     (fallbackAdapted : FirTalos.instructions sourceModule
-      Fir.Wasm.Emit.ResidentBigNumeric.natSubFunction [] sourceFallback =
+      Fir.Wasm.Emit.ResidentBigNumeric.natSubFunction [none] sourceFallback =
         .ok targetFallback) :
     targetFunction.body =
       ResidentPrimitives.immediateNaturalPairDispatch 0 1
@@ -432,7 +432,7 @@ theorem terminatesWith_natSubFunctionImmediate_of_adapted
             Fir.Wasm.Emit.ResidentBigNumeric.natSubFunction.locals[2]!.1)
           sourceFallback)
     (fallbackAdapted : FirTalos.instructions sourceModule
-      Fir.Wasm.Emit.ResidentBigNumeric.natSubFunction [] sourceFallback =
+      Fir.Wasm.Emit.ResidentBigNumeric.natSubFunction [none] sourceFallback =
         .ok targetFallback)
     (pair : ImmediateNaturalPairRel leftWord rightWord leftReference
       rightReference leftPayload rightPayload)

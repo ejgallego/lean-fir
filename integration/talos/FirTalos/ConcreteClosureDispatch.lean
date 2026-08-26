@@ -118,7 +118,7 @@ application or direct-call correctness. -/
 structure ClosureCandidateCase
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (module : Wasm.Module)
     (spec : Wasm.HostSpec Host)
     (initial : Wasm.Store Host)
@@ -140,6 +140,7 @@ structure ClosureCandidateCase
       .call (.runtime (.closureMatches function arity fixed))]
   bodyAdapted :
     instructions sourceModule sourceFunction labels source.2 = .ok targetBody
+  bodyLabelIndependent : programLabelIndependent source.2 = true
   matcherFound :
     callIndex? sourceModule
       (.runtime (.closureMatches function arity fixed)) = some matcherIndex
@@ -162,7 +163,7 @@ closure, rather than being an independent dynamic premise.
 theorem ClosureCandidateCase.matched_eq_of_refines
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {spec : Wasm.HostSpec Host}
     {initial : Wasm.Store Host}
@@ -271,7 +272,7 @@ candidate and every earlier candidate are consequences of runtime refinement.
 theorem closureCandidates_exists_first_match_of_refines
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {spec : Wasm.HostSpec Host}
     {initial : Wasm.Store Host}
@@ -319,15 +320,15 @@ theorem closureCandidates_exists_first_match_of_refines
 theorem ClosureCandidateCase.matcherAdapted
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {candidateLabels labels : LabelContext}
     {module : Wasm.Module}
     {spec : Wasm.HostSpec Host}
     {initial : Wasm.Store Host}
     {closureId : Lean.FVarId}
     {closureIndex : Nat}
     {address : Word32}
-    (candidate : ClosureCandidateCase sourceModule sourceFunction labels module
-      spec initial closureId closureIndex address)
+    (candidate : ClosureCandidateCase sourceModule sourceFunction
+      candidateLabels module spec initial closureId closureIndex address)
     (closureFound :
       findFVar? (functionBindings sourceFunction) closureId =
         some closureIndex) :
@@ -351,12 +352,32 @@ theorem ClosureCandidateCase.matcherAdapted
       Wasm.Instruction.call candidate.matcherIndex]
   rfl
 
+/-- A compiler-generated flat candidate body may be adapted at the concrete
+depth where its enclosing matcher chain places it. -/
+theorem ClosureCandidateCase.bodyAdaptedAt
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {candidateLabels labels : LabelContext}
+    {module : Wasm.Module}
+    {spec : Wasm.HostSpec Host}
+    {initial : Wasm.Store Host}
+    {closureId : Lean.FVarId}
+    {closureIndex : Nat}
+    {address : Word32}
+    (candidate : ClosureCandidateCase sourceModule sourceFunction
+      candidateLabels module spec initial closureId closureIndex address) :
+    instructions sourceModule sourceFunction labels candidate.source.2 =
+      .ok candidate.targetBody := by
+  rw [instructions_eq_of_labelIndependent candidate.bodyLabelIndependent
+    labels candidateLabels]
+  exact candidate.bodyAdapted
+
 /-- The exact numeric Talos branch chain corresponding to a list of resolved
 compiler candidates. -/
 def resolvedClosureCandidateChain
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {spec : Wasm.HostSpec Host}
     {initial : Wasm.Store Host}
@@ -376,7 +397,7 @@ candidate fold, including the final unreachable fallback. -/
 theorem instructions_compileClosureCandidateChain
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {candidateLabels labels : LabelContext}
     {module : Wasm.Module}
     {spec : Wasm.HostSpec Host}
     {initial : Wasm.Store Host}
@@ -384,15 +405,15 @@ theorem instructions_compileClosureCandidateChain
     {closureIndex : Nat}
     {address : Word32}
     (candidates : List
-      (ClosureCandidateCase sourceModule sourceFunction labels module spec
-        initial closureId closureIndex address))
+      (ClosureCandidateCase sourceModule sourceFunction candidateLabels module
+        spec initial closureId closureIndex address))
     (closureFound :
       findFVar? (functionBindings sourceFunction) closureId =
         some closureIndex) :
     instructions sourceModule sourceFunction labels
         (compileClosureCandidateChain (candidates.map (·.source))) =
       .ok (resolvedClosureCandidateChain candidates) := by
-  induction candidates with
+  induction candidates generalizing labels with
   | nil =>
       simp [compileClosureCandidateChain, resolvedClosureCandidateChain,
         instructions, instruction]
@@ -407,7 +428,7 @@ theorem instructions_compileClosureCandidateChain
         rfl]
       rw [FirTalos.Correctness.instructions_append,
         candidate.matcherAdapted closureFound]
-      simp [instructions, instruction, candidate.bodyAdapted, ih,
+      simp [instructions, instruction, candidate.bodyAdaptedAt, ih,
         resolvedClosureCandidateChain]
       rfl
 
@@ -417,7 +438,7 @@ theorem instructions_compileClosureDispatch
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {spec : Wasm.HostSpec Host}
     {initial : Wasm.Store Host}
@@ -738,7 +759,7 @@ one are unreachable and therefore need no body proof. -/
 theorem wp_resolvedClosureCandidateChain_of_selected
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {spec : Wasm.HostSpec Host}
@@ -841,7 +862,7 @@ suffix execute exactly once. -/
 theorem wp_compileClosureDispatch_of_selected
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {spec : Wasm.HostSpec Host}
@@ -892,7 +913,7 @@ theorem compileClosureDispatch_correct_of_selected
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {spec : Wasm.HostSpec Host}

@@ -21,7 +21,7 @@ theorem CodeAdapted.return_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {result : FVarId}
     {target : Wasm.Program}
     (localsAligned : LocalLayoutAligned context sourceFunction)
@@ -94,7 +94,7 @@ theorem CodeAdapted.let_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {decl : LCNF.LetDecl .impure}
     {continuation : LCNF.Code .impure}
     {target : Wasm.Program}
@@ -222,7 +222,7 @@ theorem CodeAdapted.incPersistent_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {objectId : FVarId}
     {amount : Nat}
     {check : Bool}
@@ -250,7 +250,7 @@ theorem CodeAdapted.decPersistent_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {objectId : FVarId}
     {amount : Nat}
     {check : Bool}
@@ -278,7 +278,7 @@ theorem CodeAdapted.defaultOnlyCases_selected
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {cases : LCNF.Cases .impure}
     {selected : LCNF.Code .impure}
     {target : Wasm.Program}
@@ -467,7 +467,7 @@ theorem CodeAdapted.cases_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {cases : LCNF.Cases .impure}
     {target : Wasm.Program}
     (adapted :
@@ -509,7 +509,7 @@ theorem CaseChainAdapted.nil_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {discr : FVarId}
     {fallback : List Fir.Wasm.Instruction}
     {target : Wasm.Program}
@@ -533,7 +533,7 @@ theorem CaseChainAdapted.default_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {discr : FVarId}
     {code : LCNF.Code .impure}
     {alts : List (LCNF.Alt .impure)}
@@ -565,7 +565,7 @@ theorem CaseChainAdapted.objectConstructor_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {discr : FVarId}
     {info : LCNF.CtorInfo}
     {code : LCNF.Code .impure}
@@ -579,9 +579,10 @@ theorem CaseChainAdapted.objectConstructor_eq
       CaseChainAdapted context sourceModule sourceFunction labels discr
         (.ctorAlt info code :: alts) fallback target) :
     ∃ thenTarget elseTarget discrIndex getTagIndex,
-      CodeAdapted context sourceModule sourceFunction labels code thenTarget ∧
-      CaseChainAdapted context sourceModule sourceFunction labels discr alts
-          fallback elseTarget ∧
+      CodeAdapted context sourceModule sourceFunction (none :: labels) code
+          thenTarget ∧
+      CaseChainAdapted context sourceModule sourceFunction (none :: labels)
+          discr alts fallback elseTarget ∧
       findFVar? (functionBindings sourceFunction) discr = some discrIndex ∧
       callIndex? sourceModule (.runtime .getTag) = some getTagIndex ∧
       target =
@@ -654,7 +655,7 @@ theorem CaseChainAdapted.objectConstructor_eq
                     Pure.pure, Except.pure] at targetCompiled
               | some getTagIndex =>
                   cases thenAdapted :
-                      instructions sourceModule sourceFunction labels
+                      instructions sourceModule sourceFunction (none :: labels)
                         thenBody with
                   | error error =>
                       simp [Fir.Wasm.caseTagTest, instructions, instruction,
@@ -662,7 +663,7 @@ theorem CaseChainAdapted.objectConstructor_eq
                         Except.bind, Pure.pure, Except.pure] at targetCompiled
                   | ok thenTarget =>
                       cases elseAdapted :
-                          instructions sourceModule sourceFunction labels
+                          instructions sourceModule sourceFunction (none :: labels)
                             elseBody with
                       | error error =>
                           simp [Fir.Wasm.caseTagTest, instructions, instruction,
@@ -691,7 +692,7 @@ theorem CaseChainAdapted.scalarUInt8Constructor_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {discr : FVarId}
     {info : LCNF.CtorInfo}
     {code : LCNF.Code .impure}
@@ -705,9 +706,10 @@ theorem CaseChainAdapted.scalarUInt8Constructor_eq
       CaseChainAdapted context sourceModule sourceFunction labels discr
         (.ctorAlt info code :: alts) fallback target) :
     ∃ thenTarget elseTarget discrIndex,
-      CodeAdapted context sourceModule sourceFunction labels code thenTarget ∧
-      CaseChainAdapted context sourceModule sourceFunction labels discr alts
-          fallback elseTarget ∧
+      CodeAdapted context sourceModule sourceFunction (none :: labels) code
+          thenTarget ∧
+      CaseChainAdapted context sourceModule sourceFunction (none :: labels)
+          discr alts fallback elseTarget ∧
       findFVar? (functionBindings sourceFunction) discr = some discrIndex ∧
       target =
         [.localGet discrIndex, .const (UInt32.ofNat info.cidx), .eq,
@@ -771,14 +773,15 @@ theorem CaseChainAdapted.scalarUInt8Constructor_eq
                 (sourceFunction.params.toList ++ sourceFunction.locals.toList)
                 discr = some discrIndex at discrFound
               cases thenAdapted :
-                  instructions sourceModule sourceFunction labels thenBody with
+                  instructions sourceModule sourceFunction (none :: labels)
+                    thenBody with
               | error error =>
                   simp [Fir.Wasm.caseTagTest, instructions, instruction,
                     discrFound, thenAdapted, Bind.bind, Except.bind,
                     Pure.pure, Except.pure] at targetCompiled
               | ok thenTarget =>
                   cases elseAdapted :
-                      instructions sourceModule sourceFunction labels
+                      instructions sourceModule sourceFunction (none :: labels)
                         elseBody with
                   | error error =>
                       simp [Fir.Wasm.caseTagTest, instructions, instruction,
@@ -802,7 +805,7 @@ source evaluation or a translation certificate.
 -/
 theorem CodeAdapted.singleObjectConstructorCases_eq
     {context : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
-    {sourceFunction : Fir.Wasm.Function} {labels : List FVarId}
+    {sourceFunction : Fir.Wasm.Function} {labels : LabelContext}
     {cases : LCNF.Cases .impure} {info : LCNF.CtorInfo}
     {selected : LCNF.Code .impure} {target : Wasm.Program}
     (altsEq : cases.alts.toList = [.ctorAlt info selected])
@@ -811,7 +814,7 @@ theorem CodeAdapted.singleObjectConstructorCases_eq
     (adapted : CodeAdapted context sourceModule sourceFunction labels
       (.cases cases) target) :
     ∃ selectedTarget discrIndex getTagIndex,
-      CodeAdapted context sourceModule sourceFunction labels selected
+      CodeAdapted context sourceModule sourceFunction (none :: labels) selected
           selectedTarget ∧
       findFVar? (functionBindings sourceFunction) cases.discr =
         some discrIndex ∧
@@ -867,7 +870,7 @@ theorem CodeAdapted.singleObjectConstructorCases_eq
                     Pure.pure, Except.pure] at targetCompiled
               | some getTagIndex =>
                   cases selectedAdapted :
-                      instructions sourceModule sourceFunction labels
+                      instructions sourceModule sourceFunction (none :: labels)
                         selectedCode with
                   | error error =>
                       simp [Fir.Wasm.caseTagTest, instructions, instruction,
@@ -890,7 +893,7 @@ nested test are recovered from the executable compiler and adapter.
 -/
 theorem CodeAdapted.twoObjectConstructorDefaultCases_eq
     {context : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
-    {sourceFunction : Fir.Wasm.Function} {labels : List FVarId}
+    {sourceFunction : Fir.Wasm.Function} {labels : LabelContext}
     {cases : LCNF.Cases .impure}
     {firstInfo secondInfo : LCNF.CtorInfo}
     {firstBranch secondBranch defaultBranch : LCNF.Code .impure}
@@ -904,11 +907,13 @@ theorem CodeAdapted.twoObjectConstructorDefaultCases_eq
     (adapted : CodeAdapted context sourceModule sourceFunction labels
       (.cases cases) target) :
     ∃ firstTarget secondTarget defaultTarget discrIndex getTagIndex,
-      CodeAdapted context sourceModule sourceFunction labels firstBranch
+      CodeAdapted context sourceModule sourceFunction (none :: labels) firstBranch
           firstTarget ∧
-      CodeAdapted context sourceModule sourceFunction labels secondBranch
+      CodeAdapted context sourceModule sourceFunction
+          (none :: none :: labels) secondBranch
           secondTarget ∧
-      CodeAdapted context sourceModule sourceFunction labels defaultBranch
+      CodeAdapted context sourceModule sourceFunction
+          (none :: none :: labels) defaultBranch
           defaultTarget ∧
       findFVar? (functionBindings sourceFunction) cases.discr =
         some discrIndex ∧
@@ -1008,7 +1013,7 @@ theorem CodeAdapted.twoObjectConstructorDefaultCases_eq
                               | some getTagIndex =>
                                   cases firstAdapted :
                                       instructions sourceModule sourceFunction
-                                        labels firstCode with
+                                        (none :: labels) firstCode with
                                   | error error =>
                                       simp [Fir.Wasm.caseTagTest,
                                         instructions, instruction, discrFound,
@@ -1018,7 +1023,9 @@ theorem CodeAdapted.twoObjectConstructorDefaultCases_eq
                                   | ok firstTarget =>
                                       cases secondAdapted :
                                           instructions sourceModule
-                                            sourceFunction labels secondCode with
+                                            sourceFunction
+                                              (none :: none :: labels)
+                                              secondCode with
                                       | error error =>
                                           simp [Fir.Wasm.caseTagTest,
                                             instructions, instruction,
@@ -1029,7 +1036,8 @@ theorem CodeAdapted.twoObjectConstructorDefaultCases_eq
                                       | ok secondTarget =>
                                           cases defaultAdapted :
                                               instructions sourceModule
-                                                sourceFunction labels
+                                                sourceFunction
+                                                (none :: none :: labels)
                                                 defaultCode with
                                           | error error =>
                                               simp [Fir.Wasm.caseTagTest,
@@ -1064,7 +1072,7 @@ theorem CodeAdapted.twoObjectConstructorDefaultCases_eq
 /-- Invert one successful adapter sequence step. -/
 theorem instructions_cons_eq_ok
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId} {head : Fir.Wasm.Instruction}
+    {labels : LabelContext} {head : Fir.Wasm.Instruction}
     {rest : List Fir.Wasm.Instruction} {target : Wasm.Program}
     (adapted :
       instructions sourceModule sourceFunction labels (head :: rest) =
@@ -1102,7 +1110,7 @@ append. The target split is the exact homomorphic split used by argument-prefix
 assembly; it contains no execution premise. -/
 theorem instructions_append_eq_ok
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {left right : List Fir.Wasm.Instruction} {target : Wasm.Program}
     (adapted :
       instructions sourceModule sourceFunction labels (left ++ right) =
@@ -1579,7 +1587,7 @@ theorem ConstructorArgsCompiled.ready
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {args : List (LCNF.Arg .impure)}
     {argumentCode : List Fir.Wasm.Instruction}
     {fieldKinds : List AbiKind}
@@ -1703,7 +1711,7 @@ theorem constructorArgsReady_of_compileArgs
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {args : Array (LCNF.Arg .impure)}
     {argumentCode : List Fir.Wasm.Instruction}
     {fieldKinds : Array AbiKind}
@@ -1753,7 +1761,7 @@ followed by one runtime call.
 -/
 theorem instructions_append_call_eq
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId} {argumentCode : List Fir.Wasm.Instruction}
+    {labels : LabelContext} {argumentCode : List Fir.Wasm.Instruction}
     {operation : RuntimeOp} {target : Wasm.Program}
     (adapted :
       instructions sourceModule sourceFunction labels
@@ -1801,7 +1809,7 @@ the resolver/compiler theorem using this lemma determines which case applies.
 -/
 theorem instructions_append_declaration_call_eq
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId} {argumentCode : List Fir.Wasm.Instruction}
+    {labels : LabelContext} {argumentCode : List Fir.Wasm.Instruction}
     {name : Lean.Name} {target : Wasm.Program}
     (adapted :
       instructions sourceModule sourceFunction labels
@@ -1850,7 +1858,7 @@ and runtime import slot used by the emitted target prefix.
 -/
 theorem instructions_localGets_call_eq
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId} {fvarIds : List FVarId}
+    {labels : LabelContext} {fvarIds : List FVarId}
     {operation : RuntimeOp} {target : Wasm.Program}
     (adapted :
       instructions sourceModule sourceFunction labels
@@ -1930,7 +1938,7 @@ theorem CodeAdapted.inc_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {objectId : FVarId}
     {amount : Nat}
     {check : Bool}
@@ -2037,7 +2045,7 @@ theorem CodeAdapted.dec_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {objectId : FVarId}
     {amount : Nat}
     {check : Bool}
@@ -2147,7 +2155,7 @@ theorem CodeAdapted.del_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {objectId : FVarId}
     {objectKind : AbiKind}
     {continuation : LCNF.Code .impure}
@@ -2249,7 +2257,7 @@ theorem CodeAdapted.setTag_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {objectId : FVarId}
     {tag : Nat}
     {continuation : LCNF.Code .impure}
@@ -2368,7 +2376,7 @@ theorem CodeAdapted.objectSetFVar_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {objectId fieldId : FVarId}
     {index : Nat}
     {fieldKind : AbiKind}
@@ -2492,7 +2500,7 @@ adaptation therefore determines only the object-local and import indices.
 theorem instructions_localGet_erased_call_eq
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {objectId : FVarId}
     {operation : RuntimeOp}
     {target : Wasm.Program}
@@ -2574,7 +2582,7 @@ theorem CodeAdapted.objectSetErased_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {objectId : FVarId}
     {index : Nat}
     {continuation : LCNF.Code .impure}
@@ -2680,7 +2688,7 @@ theorem CodeAdapted.usizeSet_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {objectId fieldId : FVarId}
     {index : Nat}
     {continuation : LCNF.Code .impure}
@@ -2802,7 +2810,7 @@ theorem CodeAdapted.scalarSet_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {objectId fieldId : FVarId}
     {slotIndex byteOffset : Nat}
     {type : Lean.Expr}
@@ -2931,7 +2939,7 @@ theorem CodeAdapted.naturalLiteralLet_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {decl : LCNF.LetDecl .impure}
     {continuation : LCNF.Code .impure}
     {value : Nat}
@@ -3008,7 +3016,7 @@ theorem CodeAdapted.stringLiteralLet_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {decl : LCNF.LetDecl .impure}
     {continuation : LCNF.Code .impure}
     {value : String}
@@ -3086,7 +3094,7 @@ theorem CodeAdapted.localRuntimeCallLet_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {decl : LCNF.LetDecl .impure}
     {continuation : LCNF.Code .impure}
     {sourceId : FVarId}
@@ -3150,7 +3158,7 @@ theorem CodeAdapted.objectProjectionLet_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {decl : LCNF.LetDecl .impure}
     {continuation : LCNF.Code .impure}
     {index : Nat}
@@ -3196,7 +3204,7 @@ theorem CodeAdapted.usizeProjectionLet_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {decl : LCNF.LetDecl .impure}
     {continuation : LCNF.Code .impure}
     {index : Nat}
@@ -3241,7 +3249,7 @@ theorem CodeAdapted.scalarProjectionLet_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {decl : LCNF.LetDecl .impure}
     {continuation : LCNF.Code .impure}
     {width offset : Nat}
@@ -3292,7 +3300,7 @@ theorem CodeAdapted.constructorLet_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {decl : LCNF.LetDecl .impure}
     {continuation : LCNF.Code .impure}
     {info : LCNF.CtorInfo}
@@ -3375,7 +3383,7 @@ theorem CodeAdapted.constructorFVarLet_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {decl : LCNF.LetDecl .impure}
     {continuation : LCNF.Code .impure}
     {info : LCNF.CtorInfo}
@@ -3459,7 +3467,7 @@ theorem CodeAdapted.naturalLiteralReturn_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {decl : LCNF.LetDecl .impure}
     {value : Nat}
     {target : Wasm.Program}
@@ -3513,7 +3521,7 @@ theorem CodeAdapted.stringLiteralReturn_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {decl : LCNF.LetDecl .impure}
     {value : String}
     {target : Wasm.Program}
@@ -3564,7 +3572,7 @@ theorem CodeAdapted.constructorReturn_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {decl : LCNF.LetDecl .impure}
     {info : LCNF.CtorInfo}
     {args : Array (LCNF.Arg .impure)}
@@ -3628,7 +3636,7 @@ theorem CodeAdapted.constructorFVarReturn_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {decl : LCNF.LetDecl .impure}
     {info : LCNF.CtorInfo}
     {args : Array (LCNF.Arg .impure)}
@@ -6264,7 +6272,7 @@ theorem compileLetValue_eq
 theorem instructions_eq
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {literal : LCNF.LitValue} {kind : AbiKind}
     (shape : ImmediateLiteralKind literal kind) :
     instructions sourceModule sourceFunction labels
@@ -7541,7 +7549,7 @@ def DirectLetRuntimeRefines
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List FVarId)
+    (labels : LabelContext)
     (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (Supported : LCNF.LetDecl .impure → Prop)
@@ -7595,7 +7603,7 @@ def DirectLetRuntimeRefinesWithCost
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List FVarId)
+    (labels : LabelContext)
     (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (Supported : LCNF.LetDecl .impure → Prop)
@@ -7651,7 +7659,7 @@ def ExternalLetRuntimeRefinesWithCost
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List FVarId)
+    (labels : LabelContext)
     (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (externals : ExternalImpl)
@@ -7780,7 +7788,7 @@ def ExternalLetRuntimeRefinesWithCostAndTransports
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List FVarId)
+    (labels : LabelContext)
     (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (externals : ExternalImpl)
@@ -7843,7 +7851,7 @@ theorem ExternalLetRuntimeRefinesWithCostAndTransports.runtimeRefines
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -7880,7 +7888,7 @@ theorem ExternalLetRuntimeRefinesWithCostAndTransports.or
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -7924,7 +7932,7 @@ theorem
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -7967,7 +7975,7 @@ theorem ExternalLetRuntimeRefinesWithCostAndTransports.mapInvariant
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -8122,7 +8130,7 @@ def EffectRuntimeRefines
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List FVarId)
+    (labels : LabelContext)
     (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (EffectSupported : EffectSupportedPredicate)
@@ -8204,7 +8212,7 @@ def EffectRuntimeRefinesWithTransports
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List FVarId)
+    (labels : LabelContext)
     (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (EffectSupported : EffectSupportedPredicate)
@@ -8244,7 +8252,7 @@ theorem EffectRuntimeRefinesWithTransports.runtimeRefines
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {Supported : EffectSupportedPredicate}
@@ -8270,7 +8278,7 @@ theorem EffectRuntimeRefinesWithTransports.or
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {left right : EffectSupportedPredicate}
@@ -8299,7 +8307,7 @@ theorem EffectRuntimeRefinesWithTransports.preservingExternalInvariant
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {Supported : EffectSupportedPredicate}
@@ -8332,7 +8340,7 @@ theorem EffectRuntimeRefinesWithTransports.mapInvariant
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {Supported : EffectSupportedPredicate}
@@ -8375,7 +8383,7 @@ theorem effectRuntimeRefines_noEffects
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {Invariant :
@@ -8399,7 +8407,7 @@ theorem EffectRuntimeRefines.or
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {left right : EffectSupportedPredicate}
@@ -8436,7 +8444,7 @@ theorem EffectRuntimeRefines.preservingExternalInvariant
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {Supported : EffectSupportedPredicate}
@@ -8473,7 +8481,7 @@ theorem EffectRuntimeRefines.mapInvariant
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {Supported : EffectSupportedPredicate}
@@ -8814,7 +8822,7 @@ theorem effectRuntimeRefinesWithTransports_persistentOwnership
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {Invariant :
@@ -8845,7 +8853,7 @@ theorem effectRuntimeRefines_persistentOwnership
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {Invariant :
@@ -8879,7 +8887,7 @@ theorem
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (OrdinaryIncrementEffectSupported context)
       (ConcreteBudgetedPureExternalFrame sourceFunction externals) := by
@@ -8950,7 +8958,7 @@ theorem
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (OrdinaryDecrementEffectSupported context)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) := by
@@ -9027,7 +9035,7 @@ theorem
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (OrdinaryDeleteEffectSupported context)
       (ConcreteBudgetedPureExternalFrame sourceFunction externals) := by
@@ -9095,7 +9103,7 @@ theorem
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (OrdinaryIncrementEffectSupported context)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) := by
@@ -9170,7 +9178,7 @@ theorem
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (OrdinaryDeleteEffectSupported context)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) := by
@@ -9246,7 +9254,7 @@ theorem
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ConstructorTagEffectSupported context)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) := by
@@ -9325,7 +9333,7 @@ theorem
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ObjectFieldFVarEffectSupported context)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) := by
@@ -9440,7 +9448,7 @@ theorem
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ObjectFieldErasedEffectSupported context)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) := by
@@ -9550,7 +9558,7 @@ theorem
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (USizeFieldEffectSupported context)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) := by
@@ -9631,7 +9639,7 @@ theorem
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ScalarFieldEffectSupported context)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) := by
@@ -9750,7 +9758,7 @@ theorem
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (OwnershipEffectSupported context)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) := by
@@ -9802,7 +9810,7 @@ theorem
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (OwnershipAndTagEffectSupported context)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) := by
@@ -9830,7 +9838,7 @@ theorem
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env
         (OwnershipTagAndObjectFVarEffectSupported context)
@@ -9859,7 +9867,7 @@ theorem
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ObjectFieldEffectSupported context)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) := by
@@ -9887,7 +9895,7 @@ theorem
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env
         (OwnershipTagAndObjectEffectSupported context)
@@ -9916,7 +9924,7 @@ theorem
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (FieldMutationEffectSupported context)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) := by
@@ -9944,7 +9952,7 @@ theorem
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env
         (OwnershipTagAndFieldMutationEffectSupported context)
@@ -9973,7 +9981,7 @@ theorem
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (AllFieldMutationEffectSupported context)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) := by
@@ -10001,7 +10009,7 @@ theorem
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env
         (OwnershipTagAndAllFieldMutationEffectSupported context)
@@ -10061,7 +10069,7 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainRefines
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId}
+    {labels : LabelContext}
     {sourceRuntime : RuntimeState}
     {sourceEnv : Env}
     {discr : FVarId}
@@ -10092,18 +10100,18 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainRefines
     (chainAdapted :
       CaseChainAdapted context sourceModule sourceFunction labels discr alts
         fallback chainTarget) :
-    ∃ selectedTarget,
-      CodeAdapted context sourceModule sourceFunction labels selected
+    ∃ selectedLabels selectedTarget,
+      CodeAdapted context sourceModule sourceFunction selectedLabels selected
           selectedTarget ∧
         ∀ (tail : List Wasm.Value) (Q : Wasm.Assertion Host),
           CaseResumptionStable target.wasmModule hosts.env tail Q →
-          CodeWP context sourceModule sourceFunction labels target.wasmModule
+          CodeWP context sourceModule sourceFunction selectedLabels target.wasmModule
               hosts.env sourceRuntime sourceEnv selected selectedTarget
               targetStore targetLocals witness tail Q →
             CaseChainWP context sourceModule sourceFunction labels
               target.wasmModule hosts.env sourceRuntime sourceEnv discr alts
               fallback chainTarget targetStore targetLocals witness tail Q := by
-  induction supported generalizing chainTarget selected with
+  induction supported generalizing labels chainTarget selected with
   | nil =>
       simp [chooseAlt, findCtorAlt, findDefaultAlt] at selection
   | default code =>
@@ -10121,7 +10129,7 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainRefines
         ⟨fallback, branchCompiled,
           CaseChainAdapted.nil_eq
             (CaseChainAdapted.default_eq chainAdapted)⟩
-      refine ⟨chainTarget, branchAdapted, ?_⟩
+      refine ⟨labels, chainTarget, branchAdapted, ?_⟩
       intro tail Q _stable continued
       exact ⟨chainAdapted, stateRelated, continued.2.2⟩
   | @ctor info alts code fits rest ih =>
@@ -10160,10 +10168,10 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainRefines
             simpa [chooseAlt, findCtorAlt, findDefaultAlt, hit] using selection
           exact branchEq.symm
         subst selected
-        refine ⟨thenTarget, thenAdapted, ?_⟩
+        refine ⟨none :: labels, thenTarget, thenAdapted, ?_⟩
         intro tail Q stable continued
         have continuedOnce :
-            CodeWP context sourceModule sourceFunction labels
+            CodeWP context sourceModule sourceFunction (none :: labels)
               target.wasmModule hosts.env sourceRuntime sourceEnv code
               thenTarget targetStore targetLocals witness tail
               (CaseResumePost target.wasmModule hosts.env [] Q tail) :=
@@ -10210,18 +10218,18 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainRefines
         have selectionRest : chooseAlt actualTag alts = some selected := by
           simpa [chooseAlt, findCtorAlt, findDefaultAlt, hit, reverseMiss]
             using selection
-        obtain ⟨selectedTarget, selectedAdapted, liftRest⟩ :=
+        obtain ⟨selectedLabels, selectedTarget, selectedAdapted, liftRest⟩ :=
           ih selectionRest fallbackCompiledRest elseAdapted
-        refine ⟨selectedTarget, selectedAdapted, ?_⟩
+        refine ⟨selectedLabels, selectedTarget, selectedAdapted, ?_⟩
         intro tail Q stable continued
         have continuedOnce :
-            CodeWP context sourceModule sourceFunction labels
+            CodeWP context sourceModule sourceFunction selectedLabels
               target.wasmModule hosts.env sourceRuntime sourceEnv selected
               selectedTarget targetStore targetLocals witness tail
               (CaseResumePost target.wasmModule hosts.env [] Q tail) :=
           continued.conseq stable
         have restChain :
-            CaseChainWP context sourceModule sourceFunction labels
+            CaseChainWP context sourceModule sourceFunction (none :: labels)
               target.wasmModule hosts.env sourceRuntime sourceEnv discr alts
               fallback elseTarget targetStore targetLocals witness tail
               (CaseResumePost target.wasmModule hosts.env [] Q tail) :=
@@ -10285,7 +10293,7 @@ theorem ConcreteSupportedFunction.scalarUInt8CaseChainRefines
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId}
+    {labels : LabelContext}
     {sourceRuntime : RuntimeState}
     {sourceEnv : Env}
     {discr : FVarId}
@@ -10315,18 +10323,18 @@ theorem ConcreteSupportedFunction.scalarUInt8CaseChainRefines
     (chainAdapted :
       CaseChainAdapted context sourceModule sourceFunction labels discr alts
         fallback chainTarget) :
-    ∃ selectedTarget,
-      CodeAdapted context sourceModule sourceFunction labels selected
+    ∃ selectedLabels selectedTarget,
+      CodeAdapted context sourceModule sourceFunction selectedLabels selected
           selectedTarget ∧
         ∀ (tail : List Wasm.Value) (Q : Wasm.Assertion Host),
           CaseResumptionStable target.wasmModule hosts.env tail Q →
-          CodeWP context sourceModule sourceFunction labels target.wasmModule
+          CodeWP context sourceModule sourceFunction selectedLabels target.wasmModule
               hosts.env sourceRuntime sourceEnv selected selectedTarget
               targetStore targetLocals witness tail Q →
             CaseChainWP context sourceModule sourceFunction labels
               target.wasmModule hosts.env sourceRuntime sourceEnv discr alts
               fallback chainTarget targetStore targetLocals witness tail Q := by
-  induction supported generalizing chainTarget selected with
+  induction supported generalizing labels chainTarget selected with
   | nil =>
       simp [chooseAlt, findCtorAlt, findDefaultAlt] at selection
   | default code =>
@@ -10344,7 +10352,7 @@ theorem ConcreteSupportedFunction.scalarUInt8CaseChainRefines
         ⟨fallback, branchCompiled,
           CaseChainAdapted.nil_eq
             (CaseChainAdapted.default_eq chainAdapted)⟩
-      refine ⟨chainTarget, branchAdapted, ?_⟩
+      refine ⟨labels, chainTarget, branchAdapted, ?_⟩
       intro tail Q _stable continued
       exact ⟨chainAdapted, stateRelated, continued.2.2⟩
   | @ctor info alts code fits rest ih =>
@@ -10369,10 +10377,10 @@ theorem ConcreteSupportedFunction.scalarUInt8CaseChainRefines
             simpa [chooseAlt, findCtorAlt, findDefaultAlt, hit] using selection
           exact branchEq.symm
         subst selected
-        refine ⟨thenTarget, thenAdapted, ?_⟩
+        refine ⟨none :: labels, thenTarget, thenAdapted, ?_⟩
         intro tail Q stable continued
         have continuedOnce :
-            CodeWP context sourceModule sourceFunction labels
+            CodeWP context sourceModule sourceFunction (none :: labels)
               target.wasmModule hosts.env sourceRuntime sourceEnv code
               thenTarget targetStore targetLocals witness tail
               (CaseResumePost target.wasmModule hosts.env [] Q tail) :=
@@ -10409,18 +10417,18 @@ theorem ConcreteSupportedFunction.scalarUInt8CaseChainRefines
         have selectionRest : chooseAlt actualTag alts = some selected := by
           simpa [chooseAlt, findCtorAlt, findDefaultAlt, hit, reverseMiss]
             using selection
-        obtain ⟨selectedTarget, selectedAdapted, liftRest⟩ :=
+        obtain ⟨selectedLabels, selectedTarget, selectedAdapted, liftRest⟩ :=
           ih selectionRest fallbackCompiledRest elseAdapted
-        refine ⟨selectedTarget, selectedAdapted, ?_⟩
+        refine ⟨selectedLabels, selectedTarget, selectedAdapted, ?_⟩
         intro tail Q stable continued
         have continuedOnce :
-            CodeWP context sourceModule sourceFunction labels
+            CodeWP context sourceModule sourceFunction selectedLabels
               target.wasmModule hosts.env sourceRuntime sourceEnv selected
               selectedTarget targetStore targetLocals witness tail
               (CaseResumePost target.wasmModule hosts.env [] Q tail) :=
           continued.conseq stable
         have restChain :
-            CaseChainWP context sourceModule sourceFunction labels
+            CaseChainWP context sourceModule sourceFunction (none :: labels)
               target.wasmModule hosts.env sourceRuntime sourceEnv discr alts
               fallback elseTarget targetStore targetLocals witness tail
               (CaseResumePost target.wasmModule hosts.env [] Q tail) :=
@@ -10469,7 +10477,7 @@ def CaseRuntimeRefines
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List FVarId)
+    (labels : LabelContext)
     (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (CaseSupported :
@@ -10489,13 +10497,13 @@ def CaseRuntimeRefines
         targetLocals witness →
       CodeAdapted context sourceModule sourceFunction labels (.cases cases)
         target →
-      ∃ selectedTarget,
-        CodeAdapted context sourceModule sourceFunction labels selected
+      ∃ selectedLabels selectedTarget,
+        CodeAdapted context sourceModule sourceFunction selectedLabels selected
             selectedTarget ∧
           SourceCaseResult sourceRuntime sourceEnv cases selected ∧
           ∀ (tail : List Wasm.Value) (Q : Wasm.Assertion Host),
             CaseResumptionStable module hostEnv tail Q →
-            CodeWP context sourceModule sourceFunction labels module hostEnv
+            CodeWP context sourceModule sourceFunction selectedLabels module hostEnv
                 sourceRuntime sourceEnv selected selectedTarget targetStore
                 targetLocals witness tail Q →
             CodeWP context sourceModule sourceFunction labels module hostEnv
@@ -10508,7 +10516,7 @@ theorem CaseRuntimeRefines.or
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {LeftSupported RightSupported :
@@ -10539,7 +10547,7 @@ theorem caseRuntimeRefines_defaultOnly
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} :
     CaseRuntimeRefines context sourceModule sourceFunction labels module hostEnv
@@ -10548,7 +10556,7 @@ theorem caseRuntimeRefines_defaultOnly
     witness supported sourceStep stateRelated adapted
   have selectedAdapted :=
     CodeAdapted.defaultOnlyCases_selected supported adapted
-  refine ⟨target, selectedAdapted, sourceStep, ?_⟩
+  refine ⟨labels, target, selectedAdapted, sourceStep, ?_⟩
   intro tail Q _stable continued
   exact ⟨adapted, stateRelated, continued.2.2⟩
 
@@ -10572,7 +10580,7 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_objectConstructorCases
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     CaseRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env
       (ObjectConstructorCasesSupported context) := by
@@ -10596,11 +10604,11 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_objectConstructorCases
     actualTagFits lookupFound tagged
   rcases CodeAdapted.cases_eq adapted with
     ⟨fallback, fallbackCompiled, chainAdapted⟩
-  obtain ⟨selectedTarget, selectedAdapted, liftChain⟩ :=
+  obtain ⟨selectedLabels, selectedTarget, selectedAdapted, liftChain⟩ :=
     spec.objectConstructorCaseChainRefines altsSupported modeEq discrCompiled
       chosen sourceLookup tagged actualFits stateRelated fallbackCompiled
       chainAdapted
-  refine ⟨selectedTarget, selectedAdapted,
+  refine ⟨selectedLabels, selectedTarget, selectedAdapted,
     ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩, ?_⟩
   intro tail Q stable continued
   apply codeWP_cases fallbackCompiled
@@ -10626,7 +10634,7 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_scalarUInt8Cases
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     CaseRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env
       (ScalarUInt8CasesSupported context) := by
@@ -10648,10 +10656,10 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_scalarUInt8Cases
         rfl
   rcases CodeAdapted.cases_eq adapted with
     ⟨fallback, fallbackCompiled, chainAdapted⟩
-  obtain ⟨selectedTarget, selectedAdapted, liftChain⟩ :=
+  obtain ⟨selectedLabels, selectedTarget, selectedAdapted, liftChain⟩ :=
     spec.scalarUInt8CaseChainRefines altsSupported modeEq discrCompiled
       chosen sourceLookup tagged stateRelated fallbackCompiled chainAdapted
-  refine ⟨selectedTarget, selectedAdapted,
+  refine ⟨selectedLabels, selectedTarget, selectedAdapted,
     ⟨sourceValue, actualTag, lookupFound, tagged, chosen⟩, ?_⟩
   intro tail Q stable continued
   apply codeWP_cases fallbackCompiled
@@ -10670,7 +10678,7 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_productionCases
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     CaseRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ProductionCasesSupported context) := by
   apply CaseRuntimeRefines.or caseRuntimeRefines_defaultOnly
@@ -10695,7 +10703,7 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_singleObjectConstructor
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     CaseRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env
       (SingleObjectConstructorCaseSupported context) := by
@@ -10752,19 +10760,21 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_singleObjectConstructor
     rw [altsEq]
     rfl
   have fallbackAdapted :
-      instructions sourceModule sourceFunction labels [.unreachable] =
+      instructions sourceModule sourceFunction (none :: labels)
+          [.unreachable] =
         .ok [.unreachable] := by
     simp [instructions, instruction, Bind.bind, Except.bind,
       Pure.pure, Except.pure]
   have emptyChain :
-      CaseChainAdapted context sourceModule sourceFunction labels cases.discr
-        [] [.unreachable] [.unreachable] :=
+      CaseChainAdapted context sourceModule sourceFunction (none :: labels)
+        cases.discr [] [.unreachable] [.unreachable] :=
     caseChainAdapted_nil fallbackAdapted
-  refine ⟨selectedTarget, selectedAdapted,
+  refine ⟨none :: labels, selectedTarget, selectedAdapted,
     ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩, ?_⟩
   intro tail Q stable continued
   have selectedResumed :
-      CodeWP context sourceModule sourceFunction labels target.wasmModule
+      CodeWP context sourceModule sourceFunction (none :: labels)
+        target.wasmModule
         hosts.env sourceRuntime sourceEnv selected selectedTarget targetStore
         targetLocals witness tail
         (CaseResumePost target.wasmModule hosts.env [] Q tail) :=
@@ -10829,7 +10839,7 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     CaseRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env
       (TwoObjectConstructorDefaultCasesSupported context) := by
@@ -10884,8 +10894,8 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
   rcases defaultAdapted with
     ⟨defaultSymbolic, defaultCompiled, defaultTargetCompiled⟩
   have defaultAdapted' :
-      CodeAdapted context sourceModule sourceFunction labels defaultBranch
-        defaultTarget :=
+      CodeAdapted context sourceModule sourceFunction
+        (none :: none :: labels) defaultBranch defaultTarget :=
     ⟨defaultSymbolic, defaultCompiled, defaultTargetCompiled⟩
   have fallbackCompiled :
       Fir.Wasm.compileCaseFallback context cases.alts.toList =
@@ -10900,13 +10910,15 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
     simp [Fir.Wasm.compileCaseFallbackWithM, Fir.Wasm.isDefaultAlt,
       defaultCompiled]
   have defaultChainAdapted :
-      CaseChainAdapted context sourceModule sourceFunction labels cases.discr
-        [.default defaultBranch] defaultSymbolic defaultTarget :=
+      CaseChainAdapted context sourceModule sourceFunction
+        (none :: none :: labels) cases.discr [.default defaultBranch]
+        defaultSymbolic defaultTarget :=
     caseChainAdapted_default
       (caseChainAdapted_nil defaultTargetCompiled)
   have secondChainAdapted :
-      CaseChainAdapted context sourceModule sourceFunction labels cases.discr
-        [.ctorAlt secondInfo secondBranch, .default defaultBranch]
+      CaseChainAdapted context sourceModule sourceFunction (none :: labels)
+        cases.discr [.ctorAlt secondInfo secondBranch,
+          .default defaultBranch]
         defaultSymbolic
         [.localGet discrIndex, .call getTagIndex,
           .const (UInt32.ofNat secondInfo.cidx), .eq,
@@ -10920,11 +10932,12 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
         simpa [chooseAlt, findCtorAlt, findDefaultAlt, firstHit] using chosen
       exact branchEq.symm
     subst selected
-    refine ⟨firstTarget, firstAdapted,
+    refine ⟨none :: labels, firstTarget, firstAdapted,
       ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩, ?_⟩
     intro tail Q stable continued
     have continuedOnce :
-        CodeWP context sourceModule sourceFunction labels target.wasmModule
+        CodeWP context sourceModule sourceFunction (none :: labels)
+          target.wasmModule
           hosts.env sourceRuntime sourceEnv firstBranch firstTarget targetStore
           targetLocals witness tail
           (CaseResumePost target.wasmModule hosts.env [] Q tail) :=
@@ -10989,17 +11002,19 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
             secondHit, different] using chosen
         exact branchEq.symm
       subst selected
-      refine ⟨secondTarget, secondAdapted,
+      refine ⟨none :: none :: labels, secondTarget, secondAdapted,
         ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩, ?_⟩
       intro tail Q stable continued
       have continuedOnce :
-          CodeWP context sourceModule sourceFunction labels target.wasmModule
+          CodeWP context sourceModule sourceFunction (none :: none :: labels)
+            target.wasmModule
             hosts.env sourceRuntime sourceEnv secondBranch secondTarget
             targetStore targetLocals witness tail
             (CaseResumePost target.wasmModule hosts.env [] Q tail) :=
         continued.conseq stable
       have continuedTwice :
-          CodeWP context sourceModule sourceFunction labels target.wasmModule
+          CodeWP context sourceModule sourceFunction (none :: none :: labels)
+            target.wasmModule
             hosts.env sourceRuntime sourceEnv secondBranch secondTarget
             targetStore targetLocals witness tail
             (CaseResumePost target.wasmModule hosts.env []
@@ -11014,7 +11029,7 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
             targetStore { targetLocals with values := tail } hosts.env := by
         simpa [secondHit] using continuedTwice.2.2
       have innerChain :
-          CaseChainWP context sourceModule sourceFunction labels
+          CaseChainWP context sourceModule sourceFunction (none :: labels)
             target.wasmModule hosts.env sourceRuntime sourceEnv cases.discr
             [.ctorAlt secondInfo secondBranch, .default defaultBranch]
             defaultSymbolic
@@ -11104,17 +11119,19 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
             secondHit, secondMiss'] using chosen
         exact branchEq.symm
       subst selected
-      refine ⟨defaultTarget, defaultAdapted',
+      refine ⟨none :: none :: labels, defaultTarget, defaultAdapted',
         ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩, ?_⟩
       intro tail Q stable continued
       have continuedOnce :
-          CodeWP context sourceModule sourceFunction labels target.wasmModule
+          CodeWP context sourceModule sourceFunction (none :: none :: labels)
+            target.wasmModule
             hosts.env sourceRuntime sourceEnv defaultBranch defaultTarget
             targetStore targetLocals witness tail
             (CaseResumePost target.wasmModule hosts.env [] Q tail) :=
         continued.conseq stable
       have continuedTwice :
-          CodeWP context sourceModule sourceFunction labels target.wasmModule
+          CodeWP context sourceModule sourceFunction (none :: none :: labels)
+            target.wasmModule
             hosts.env sourceRuntime sourceEnv defaultBranch defaultTarget
             targetStore targetLocals witness tail
             (CaseResumePost target.wasmModule hosts.env []
@@ -11129,7 +11146,7 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
             targetStore { targetLocals with values := tail } hosts.env := by
         simpa [secondHit] using continuedTwice.2.2
       have innerChain :
-          CaseChainWP context sourceModule sourceFunction labels
+          CaseChainWP context sourceModule sourceFunction (none :: labels)
             target.wasmModule hosts.env sourceRuntime sourceEnv cases.discr
             [.ctorAlt secondInfo secondBranch, .default defaultBranch]
             defaultSymbolic
@@ -11229,9 +11246,10 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    (externals : ExternalImpl) :
+    (externals : ExternalImpl)
+    {labels : LabelContext} :
     ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
-      sourceFunction [] target.wasmModule hosts.env externals
+      sourceFunction labels target.wasmModule hosts.env externals
       (PureIntegerExternalSupported context externals)
       (ConcreteBudgetedIntegerExternalFrame sourceFunction externals) := by
   intro sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
@@ -11475,13 +11493,15 @@ theorem ConcreteSupportedExport.externalLetRuntimeRefinesWithCost_pureInteger
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    (externals : ExternalImpl) :
-    ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
+    (externals : ExternalImpl)
+    {labels : LabelContext} :
+    ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env externals
       (PureIntegerExternalSupported context externals)
       (ConcreteBudgetedIntegerExternalFrame sourceFunction externals) :=
   ExternalLetRuntimeRefinesWithCostAndTransports.runtimeRefines
-    (spec.externalLetRuntimeRefinesWithCostAndTransports_pureInteger externals)
+    (spec.externalLetRuntimeRefinesWithCostAndTransports_pureInteger externals
+      (labels := labels))
 
 /--
 The production compiler, adapter, concrete resolver, and reusable
@@ -11503,9 +11523,10 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    (externals : ExternalImpl) :
+    (externals : ExternalImpl)
+    {labels : LabelContext} :
     ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
-      sourceFunction [] target.wasmModule hosts.env externals
+      sourceFunction labels target.wasmModule hosts.env externals
       (PureNaturalExternalSupported context externals)
       (ConcreteBudgetedNaturalExternalFrame sourceFunction externals) := by
   intro sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
@@ -11748,13 +11769,15 @@ theorem ConcreteSupportedExport.externalLetRuntimeRefinesWithCost_pureNatural
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    (externals : ExternalImpl) :
-    ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
+    (externals : ExternalImpl)
+    {labels : LabelContext} :
+    ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env externals
       (PureNaturalExternalSupported context externals)
       (ConcreteBudgetedNaturalExternalFrame sourceFunction externals) :=
   ExternalLetRuntimeRefinesWithCostAndTransports.runtimeRefines
-    (spec.externalLetRuntimeRefinesWithCostAndTransports_pureNatural externals)
+    (spec.externalLetRuntimeRefinesWithCostAndTransports_pureNatural externals
+      (labels := labels))
 
 /--
 Compiler-shaped correctness for the admitted pure scalar-result family,
@@ -11777,9 +11800,10 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    (externals : ExternalImpl) :
+    (externals : ExternalImpl)
+    {labels : LabelContext} :
     ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
-      sourceFunction [] target.wasmModule hosts.env externals
+      sourceFunction labels target.wasmModule hosts.env externals
       (PureScalarExternalSupported context externals)
       (ConcreteBudgetedScalarExternalFrame sourceFunction externals) := by
   intro sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
@@ -12015,13 +12039,15 @@ theorem ConcreteSupportedExport.externalLetRuntimeRefinesWithCost_pureScalar
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    (externals : ExternalImpl) :
-    ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
+    (externals : ExternalImpl)
+    {labels : LabelContext} :
+    ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env externals
       (PureScalarExternalSupported context externals)
       (ConcreteBudgetedScalarExternalFrame sourceFunction externals) :=
   ExternalLetRuntimeRefinesWithCostAndTransports.runtimeRefines
-    (spec.externalLetRuntimeRefinesWithCostAndTransports_pureScalar externals)
+    (spec.externalLetRuntimeRefinesWithCostAndTransports_pureScalar externals
+      (labels := labels))
 
 /-- Uniform runtime laws with the same resource invariant compose by source
 admission disjunction. This is the structural bridge for mixed direct-value
@@ -12031,7 +12057,7 @@ theorem DirectLetRuntimeRefines.or
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {Left Right : LCNF.LetDecl .impure → Prop}
@@ -12063,7 +12089,7 @@ theorem DirectLetRuntimeRefinesWithCost.or
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {Left Right : LCNF.LetDecl .impure → Prop}
@@ -12101,7 +12127,7 @@ theorem DirectLetRuntimeRefinesWithCost.preservingExternalInvariant
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {Supported : LCNF.LetDecl .impure → Prop}
@@ -12142,7 +12168,7 @@ theorem DirectLetRuntimeRefinesWithCost.preservingClosureDescriptorAgreement
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {Supported : LCNF.LetDecl .impure → Prop}
@@ -12179,7 +12205,7 @@ theorem ExternalLetRuntimeRefinesWithCost.or
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -12222,7 +12248,7 @@ theorem ExternalLetRuntimeRefinesWithCost.preservingExternalInvariant
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -12264,7 +12290,7 @@ theorem ExternalLetRuntimeRefinesWithCost.preservingClosureDescriptorAgreement
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -12303,7 +12329,7 @@ theorem ExternalLetRuntimeRefinesWithCost.mapInvariant
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -12461,7 +12487,7 @@ theorem directLetRuntimeRefines_localAlias
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     (localsAligned : LocalLayoutAligned context sourceFunction) :
@@ -12564,7 +12590,7 @@ theorem directLetRuntimeRefinesWithCost_localAlias
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     (localsAligned : LocalLayoutAligned context sourceFunction) :
@@ -12683,7 +12709,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_immediateLiteral
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ImmediateLiteralSupported context)
       (ConcreteLocalFrameAligned sourceFunction) := by
@@ -12740,7 +12766,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_immediateLiteral
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ImmediateLiteralSupported context)
       directLetAllocationCost
@@ -12809,7 +12835,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_naturalLiteral
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env (NaturalLiteralSupported context)
       directLetAllocationCost (ConcreteBudgetedLocalFrame sourceFunction) := by
@@ -12908,7 +12934,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_stringLiteral
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env (StringLiteralSupported context)
       directLetAllocationCost (ConcreteBudgetedLocalFrame sourceFunction) := by
@@ -13011,7 +13037,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_nonemptyConstructor
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env (NonemptyConstructorSupported context)
       directLetAllocationCost (ConcreteBudgetedLocalFrame sourceFunction) := by
@@ -13112,7 +13138,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_usizeProjection
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (USizeProjectionSupported context)
       (ConcreteLocalFrameAligned sourceFunction) := by
@@ -13195,7 +13221,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_usizeProjection
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env (USizeProjectionSupported context)
       directLetAllocationCost
@@ -13284,7 +13310,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_objectProjection
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ObjectProjectionSupported context)
       (ConcreteLocalFrameAligned sourceFunction) := by
@@ -13373,7 +13399,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_objectProjection
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ObjectProjectionSupported context)
       directLetAllocationCost
@@ -13471,7 +13497,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_scalarProjection
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ScalarProjectionSupported context)
       (ConcreteLocalFrameAligned sourceFunction) := by
@@ -13557,7 +13583,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_scalarProjection
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ScalarProjectionSupported context)
       directLetAllocationCost
@@ -13650,7 +13676,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_box
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env (BoxSupported context)
       directLetAllocationCost
@@ -13754,7 +13780,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_unbox
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env (UnboxSupported context)
       directLetAllocationCost
@@ -13847,7 +13873,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_isShared
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env (IsSharedSupported context)
       directLetAllocationCost
@@ -13936,7 +13962,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_reset
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     (externals : ExternalImpl)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ResetSupported context)
       directLetAllocationCost
@@ -14099,7 +14125,7 @@ theorem ConcreteSupportedFunction.reuseLetStep_of_capacity
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
     {facts : ReuseCapacityFacts}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {decl : LCNF.LetDecl .impure}
     {sourceRuntime nextRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -14445,7 +14471,7 @@ theorem ConcreteReuseCapacityOwnershipFrame.ofReplaceHeapEffectStep
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
     {code continuation : LCNF.Code .impure}
@@ -14504,7 +14530,7 @@ def ReuseCapacityDirectLetRuntimeRefinesWithCost
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List FVarId)
+    (labels : LabelContext)
     (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (Supported : ReuseCapacityFacts → LCNF.LetDecl .impure → Prop)
@@ -14557,7 +14583,7 @@ theorem ReuseCapacityDirectLetRuntimeRefinesWithCost.or
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {Left Right : ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
@@ -14593,7 +14619,7 @@ theorem ReuseCapacityDirectLetRuntimeRefinesWithCost.mapInvariant
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {Supported : ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
@@ -14644,7 +14670,7 @@ theorem
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {Supported : ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
@@ -14687,7 +14713,7 @@ theorem
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {Supported : ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
@@ -14736,7 +14762,7 @@ theorem ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
       (ReuseSupported context) directLetAllocationCost
@@ -14774,7 +14800,7 @@ theorem ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost_l
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
       (fun _ decl => LocalAliasSupported context decl)
@@ -14911,7 +14937,7 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
       (fun _ decl => ImmediateLiteralSupported context decl)
@@ -14999,7 +15025,7 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
       (fun _ decl => USizeProjectionSupported context decl)
@@ -15106,7 +15132,7 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
       (fun _ decl => ObjectProjectionSupported context decl)
@@ -15222,7 +15248,7 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
       (fun _ decl => ScalarProjectionSupported context decl)
@@ -15333,7 +15359,7 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
       (fun _ decl => BoxSupported context decl)
@@ -15462,7 +15488,7 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
       (fun _ decl => NaturalLiteralSupported context decl)
@@ -15591,7 +15617,7 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
       (fun _ decl => StringLiteralSupported context decl)
@@ -15724,7 +15750,7 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
       (fun _ decl => UnboxSupported context decl)
@@ -15835,7 +15861,7 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
       (fun _ decl => IsSharedSupported context decl)
@@ -15940,7 +15966,7 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
       (fun _ decl => NonemptyConstructorSupported context decl)
@@ -16629,7 +16655,7 @@ def ReuseCapacityExternalLetRuntimeRefinesWithCost
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List FVarId)
+    (labels : LabelContext)
     (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (externals : ExternalImpl)
@@ -16683,7 +16709,7 @@ theorem ReuseCapacityExternalLetRuntimeRefinesWithCost.mapInvariant
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -16742,7 +16768,7 @@ def ReuseCapacityCallLetRuntimeRefinesWithCost
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List FVarId)
+    (labels : LabelContext)
     (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (externals : ExternalImpl)
@@ -16796,7 +16822,7 @@ theorem ReuseCapacityCallLetRuntimeRefinesWithCost.mapInvariant
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -16847,7 +16873,7 @@ theorem ReuseCapacityCallLetRuntimeRefinesWithCost.or
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -16889,7 +16915,7 @@ theorem reuseCapacityCallLetRuntimeRefinesWithCost_noCalls
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -16919,7 +16945,7 @@ def ReuseCapacityLazyLetRuntimeRefinesWithCost
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List FVarId)
+    (labels : LabelContext)
     (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (externals : ExternalImpl)
@@ -16974,7 +17000,7 @@ theorem ReuseCapacityLazyLetRuntimeRefinesWithCost.mapInvariant
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -17024,7 +17050,7 @@ theorem reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -17051,7 +17077,7 @@ theorem ReuseCapacityDirectLetRuntimeRefinesWithCost.shiftBudget
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {Supported : ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
@@ -17091,7 +17117,7 @@ theorem ReuseCapacityExternalLetRuntimeRefinesWithCost.shiftBudget
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -17133,7 +17159,7 @@ theorem ReuseCapacityCallLetRuntimeRefinesWithCost.shiftBudget
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -17175,7 +17201,7 @@ theorem ReuseCapacityLazyLetRuntimeRefinesWithCost.shiftBudget
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -17217,7 +17243,7 @@ theorem EffectRuntimeRefines.shiftBudget
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {EffectSupported : EffectSupportedPredicate}
@@ -17252,7 +17278,7 @@ theorem
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -17305,7 +17331,7 @@ theorem
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -17373,7 +17399,7 @@ theorem reuseCapacityExternalLetRuntimeRefinesWithCost_noExternals
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -17411,7 +17437,7 @@ theorem
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId}
+    {labels : LabelContext}
     {Supported : ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
     {facts resultFacts : ReuseCapacityFacts}
     {sourceRuntime resultRuntime : RuntimeState}
@@ -17517,7 +17543,7 @@ theorem
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId}
+    {labels : LabelContext}
     {DirectSupported :
       ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
     {EffectSupported : EffectSupportedPredicate}
@@ -17645,7 +17671,7 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {DirectSupported :
       ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
@@ -17691,27 +17717,32 @@ theorem
           ReuseCapacityStateRelated frameFacts sourceFunction frameRuntime
             frameEnv frameStore frameLocals frameWitness)
     (directRuntimeRefines :
-      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction labels target.wasmModule hosts.env DirectSupported
-        directLetAllocationCost Frame)
+      ∀ innerLabels,
+        ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env DirectSupported
+          directLetAllocationCost Frame)
     (externalRuntimeRefines :
-      ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction labels target.wasmModule hosts.env externals
-        ExternalSupported Frame)
+      ∀ innerLabels,
+        ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env externals
+          ExternalSupported Frame)
     (callRuntimeRefines :
-      ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction labels target.wasmModule hosts.env externals
-        CallSupported Frame)
+      ∀ innerLabels,
+        ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env externals
+          CallSupported Frame)
     (lazyRuntimeRefines :
-      ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction labels target.wasmModule hosts.env externals
-        LazySupported Frame)
+      ∀ innerLabels,
+        ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env externals
+          LazySupported Frame)
     (caseRuntimeRefines :
-      CaseRuntimeRefines context sourceModule sourceFunction labels
-        target.wasmModule hosts.env CaseSupported)
+      ∀ innerLabels,
+        CaseRuntimeRefines context sourceModule sourceFunction innerLabels
+          target.wasmModule hosts.env CaseSupported)
     (effectRuntimeRefines :
-      ∀ facts,
-        EffectRuntimeRefines context sourceModule sourceFunction labels
+      ∀ innerLabels facts,
+        EffectRuntimeRefines context sourceModule sourceFunction innerLabels
           target.wasmModule hosts.env EffectSupported
           (Frame facts)) :
     ∃ resultStore resultLocals resultWitness resultKind physical,
@@ -17722,7 +17753,7 @@ theorem
           resultWitness ∧
         resultStore.host.failure? = none ∧
         PhysicalValueRel resultWitness resultKind physical resultValue := by
-  induction evaluation generalizing targetCode initial locals witness with
+  induction evaluation generalizing labels targetCode initial locals witness with
   | ret sourceLookup =>
       obtain ⟨kind, resultIndex, localCompiled, resultFound, kindAt,
           targetEq⟩ :=
@@ -17754,7 +17785,7 @@ theorem
           _externalsPreserved, _hostDescriptorsPreserved,
           _witnessDescriptorsPreserved, _directTransports, producedTransfer,
           nextInvariant⟩ :=
-        directRuntimeRefines supported stepFits invariant sourceStep
+        directRuntimeRefines labels supported stepFits invariant sourceStep
           valueCompiled valueAdapted resultFound
       rw [transfer] at producedTransfer
       have factsEq := Option.some.inj producedTransfer
@@ -17789,7 +17820,7 @@ theorem
       obtain ⟨nextStore, nextLocals, nextWitness, producedFacts, step,
           _externalsPreserved, _hostDescriptorsPreserved,
           _witnessDescriptorsPreserved, producedTransfer, nextInvariant⟩ :=
-        externalRuntimeRefines supported stepFits invariant sourceStep
+        externalRuntimeRefines labels supported stepFits invariant sourceStep
           valueCompiled valueAdapted resultFound
       rw [transfer] at producedTransfer
       have factsEq := Option.some.inj producedTransfer
@@ -17824,7 +17855,7 @@ theorem
       obtain ⟨nextStore, nextLocals, nextWitness, producedFacts, step,
           _externalsPreserved, _hostDescriptorsPreserved,
           _witnessDescriptorsPreserved, producedTransfer, nextInvariant⟩ :=
-        callRuntimeRefines supported stepFits invariant sourceStep valueCompiled
+        callRuntimeRefines labels supported stepFits invariant sourceStep valueCompiled
           valueAdapted resultFound
       rw [transfer] at producedTransfer
       have factsEq := Option.some.inj producedTransfer
@@ -17859,7 +17890,7 @@ theorem
       obtain ⟨nextStore, nextLocals, nextWitness, producedFacts, step,
           _externalsPreserved, _hostDescriptorsPreserved,
           _witnessDescriptorsPreserved, producedTransfer, nextInvariant⟩ :=
-        lazyRuntimeRefines supported stepFits invariant sourceStep valueCompiled
+        lazyRuntimeRefines labels supported stepFits invariant sourceStep valueCompiled
           valueAdapted resultFound
       rw [transfer] at producedTransfer
       have factsEq := Option.some.inj producedTransfer
@@ -17878,8 +17909,8 @@ theorem
           continuationWP,
         resultInvariant, failureClear, valueRelated⟩
   | caseOf supported sourceStep continued ih =>
-      obtain ⟨selectedTarget, selectedAdapted, _selected, lift⟩ :=
-        caseRuntimeRefines supported sourceStep
+      obtain ⟨selectedLabels, selectedTarget, selectedAdapted, _selected, lift⟩ :=
+        caseRuntimeRefines labels supported sourceStep
           (frameRelated invariant).stateRelated adapted
       obtain ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
           continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
@@ -17895,7 +17926,7 @@ theorem
   | effect supported sourceStep continued ih =>
       obtain ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
           _externalsPreserved, nextInvariant⟩ :=
-        effectRuntimeRefines _ supported sourceStep
+        effectRuntimeRefines labels _ supported sourceStep
           (frameRelated invariant).stateRelated invariant adapted
       obtain ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
           continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
@@ -17919,7 +17950,7 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {DirectSupported :
       ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
@@ -17966,27 +17997,32 @@ theorem
           ReuseCapacityStateRelated frameFacts sourceFunction frameRuntime
             frameEnv frameStore frameLocals frameWitness)
     (directRuntimeRefines :
-      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction labels target.wasmModule hosts.env DirectSupported
-        directLetAllocationCost Frame)
+      ∀ innerLabels,
+        ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env DirectSupported
+          directLetAllocationCost Frame)
     (externalRuntimeRefines :
-      ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction labels target.wasmModule hosts.env externals
-        ExternalSupported Frame)
+      ∀ innerLabels,
+        ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env externals
+          ExternalSupported Frame)
     (callRuntimeRefines :
-      ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction labels target.wasmModule hosts.env externals
-        CallSupported Frame)
+      ∀ innerLabels,
+        ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env externals
+          CallSupported Frame)
     (lazyRuntimeRefines :
-      ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction labels target.wasmModule hosts.env externals
-        LazySupported Frame)
+      ∀ innerLabels,
+        ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env externals
+          LazySupported Frame)
     (caseRuntimeRefines :
-      CaseRuntimeRefines context sourceModule sourceFunction labels
-        target.wasmModule hosts.env CaseSupported)
+      ∀ innerLabels,
+        CaseRuntimeRefines context sourceModule sourceFunction innerLabels
+          target.wasmModule hosts.env CaseSupported)
     (effectRuntimeRefines :
-      ∀ facts,
-        EffectRuntimeRefines context sourceModule sourceFunction labels
+      ∀ innerLabels facts,
+        EffectRuntimeRefines context sourceModule sourceFunction innerLabels
           target.wasmModule hosts.env EffectSupported (Frame facts)) :
     ∃ resultStore resultLocals resultWitness resultKind physical,
       CodeWP context sourceModule sourceFunction labels target.wasmModule
@@ -18014,12 +18050,22 @@ theorem
       targetWP, resultInvariant, failureClear, valueRelated⟩ :=
     codeWP_of_reuseCapacityBudgetedCodeEvaluates_exactReturn evaluation
       adapted localsAligned shiftedInvariant shiftedFrameRelated
-      (directRuntimeRefines.shiftBudget slack)
-      (externalRuntimeRefines.shiftBudget slack)
-      (callRuntimeRefines.shiftBudget slack)
-      (lazyRuntimeRefines.shiftBudget slack) caseRuntimeRefines
-      (fun facts =>
-        EffectRuntimeRefines.shiftBudget (effectRuntimeRefines facts) slack)
+      (fun innerLabels =>
+        ReuseCapacityDirectLetRuntimeRefinesWithCost.shiftBudget
+          (directRuntimeRefines innerLabels) slack)
+      (fun innerLabels =>
+        ReuseCapacityExternalLetRuntimeRefinesWithCost.shiftBudget
+          (externalRuntimeRefines innerLabels) slack)
+      (fun innerLabels =>
+        ReuseCapacityCallLetRuntimeRefinesWithCost.shiftBudget
+          (callRuntimeRefines innerLabels) slack)
+      (fun innerLabels =>
+        ReuseCapacityLazyLetRuntimeRefinesWithCost.shiftBudget
+          (lazyRuntimeRefines innerLabels) slack)
+      caseRuntimeRefines
+      (fun innerLabels facts =>
+        EffectRuntimeRefines.shiftBudget
+          (effectRuntimeRefines innerLabels facts) slack)
   have resultFrame :
       Frame resultFacts slack resultRuntime resultEnv resultStore resultLocals
         resultWitness := by
@@ -18044,7 +18090,7 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {DirectSupported :
       ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
@@ -18090,31 +18136,36 @@ theorem
           ReuseCapacityStateRelated frameFacts sourceFunction frameRuntime
             frameEnv frameStore frameLocals frameWitness)
     (directRuntimeRefines :
-      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction labels target.wasmModule hosts.env DirectSupported
-        directLetAllocationCost
-        (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness))
+      ∀ innerLabels,
+        ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env DirectSupported
+          directLetAllocationCost
+          (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness))
     (externalRuntimeRefines :
-      ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction labels target.wasmModule hosts.env externals
-        ExternalSupported
-        (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness))
+      ∀ innerLabels,
+        ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env externals
+          ExternalSupported
+          (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness))
     (callRuntimeRefines :
-      ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction labels target.wasmModule hosts.env externals
-        CallSupported
-        (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness))
+      ∀ innerLabels,
+        ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env externals
+          CallSupported
+          (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness))
     (lazyRuntimeRefines :
-      ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction labels target.wasmModule hosts.env externals
-        LazySupported
-        (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness))
+      ∀ innerLabels,
+        ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env externals
+          LazySupported
+          (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness))
     (caseRuntimeRefines :
-      CaseRuntimeRefines context sourceModule sourceFunction labels
-        target.wasmModule hosts.env CaseSupported)
+      ∀ innerLabels,
+        CaseRuntimeRefines context sourceModule sourceFunction innerLabels
+          target.wasmModule hosts.env CaseSupported)
     (effectRuntimeRefines :
-      ∀ facts,
-        EffectRuntimeRefines context sourceModule sourceFunction labels
+      ∀ innerLabels facts,
+        EffectRuntimeRefines context sourceModule sourceFunction innerLabels
           target.wasmModule hosts.env EffectSupported
           (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness
             facts)) :
@@ -18170,7 +18221,7 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {DirectSupported :
       ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
@@ -18217,31 +18268,36 @@ theorem
           ReuseCapacityStateRelated frameFacts sourceFunction frameRuntime
             frameEnv frameStore frameLocals frameWitness)
     (directRuntimeRefines :
-      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction labels target.wasmModule hosts.env DirectSupported
-        directLetAllocationCost
-        (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness))
+      ∀ innerLabels,
+        ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env DirectSupported
+          directLetAllocationCost
+          (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness))
     (externalRuntimeRefines :
-      ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction labels target.wasmModule hosts.env externals
-        ExternalSupported
-        (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness))
+      ∀ innerLabels,
+        ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env externals
+          ExternalSupported
+          (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness))
     (callRuntimeRefines :
-      ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction labels target.wasmModule hosts.env externals
-        CallSupported
-        (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness))
+      ∀ innerLabels,
+        ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env externals
+          CallSupported
+          (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness))
     (lazyRuntimeRefines :
-      ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction labels target.wasmModule hosts.env externals
-        LazySupported
-        (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness))
+      ∀ innerLabels,
+        ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env externals
+          LazySupported
+          (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness))
     (caseRuntimeRefines :
-      CaseRuntimeRefines context sourceModule sourceFunction labels
-        target.wasmModule hosts.env CaseSupported)
+      ∀ innerLabels,
+        CaseRuntimeRefines context sourceModule sourceFunction innerLabels
+          target.wasmModule hosts.env CaseSupported)
     (effectRuntimeRefines :
-      ∀ facts,
-        EffectRuntimeRefines context sourceModule sourceFunction labels
+      ∀ innerLabels facts,
+        EffectRuntimeRefines context sourceModule sourceFunction innerLabels
           target.wasmModule hosts.env EffectSupported
           (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness
             facts)) :
@@ -18298,7 +18354,7 @@ theorem ConcreteSupportedExport.codeWP_of_reuseCapacityCodeEvaluates_exactReturn
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId}
+    {labels : LabelContext}
     {facts resultFacts : ReuseCapacityFacts}
     {sourceRuntime resultRuntime : RuntimeState}
     {sourceEnv resultEnv : Env}
@@ -18346,7 +18402,7 @@ theorem
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId}
+    {labels : LabelContext}
     {Supported : ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
     {facts resultFacts : ReuseCapacityFacts}
     {sourceRuntime resultRuntime : RuntimeState}
@@ -18411,7 +18467,7 @@ theorem ConcreteSupportedExport.codeWP_of_reuseCapacityCodeEvaluates
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId}
+    {labels : LabelContext}
     {facts resultFacts : ReuseCapacityFacts}
     {sourceRuntime resultRuntime : RuntimeState}
     {sourceEnv resultEnv : Env}
@@ -18665,27 +18721,32 @@ theorem
           ReuseCapacityStateRelated frameFacts sourceFunction frameRuntime
             frameEnv frameStore frameLocals frameWitness)
     (directRuntimeRefines :
-      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction [] target.wasmModule hosts.env DirectSupported
-        directLetAllocationCost Frame)
+      ∀ innerLabels,
+        ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env DirectSupported
+          directLetAllocationCost Frame)
     (externalRuntimeRefines :
-      ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction [] target.wasmModule hosts.env externals ExternalSupported
-        Frame)
+      ∀ innerLabels,
+        ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env externals
+          ExternalSupported Frame)
     (callRuntimeRefines :
-      ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction [] target.wasmModule hosts.env externals CallSupported
-        Frame)
+      ∀ innerLabels,
+        ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env externals
+          CallSupported Frame)
     (lazyRuntimeRefines :
-      ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction [] target.wasmModule hosts.env externals LazySupported
-        Frame)
+      ∀ innerLabels,
+        ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env externals
+          LazySupported Frame)
     (caseRuntimeRefines :
-      CaseRuntimeRefines context sourceModule sourceFunction []
-        target.wasmModule hosts.env CaseSupported)
+      ∀ innerLabels,
+        CaseRuntimeRefines context sourceModule sourceFunction innerLabels
+          target.wasmModule hosts.env CaseSupported)
     (effectRuntimeRefines :
-      ∀ facts,
-        EffectRuntimeRefines context sourceModule sourceFunction []
+      ∀ innerLabels facts,
+        EffectRuntimeRefines context sourceModule sourceFunction innerLabels
           target.wasmModule hosts.env EffectSupported
           (Frame facts))
     (parameterCount :
@@ -18784,7 +18845,7 @@ theorem ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost_r
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
       (ReuseAliasSupported context) directLetAllocationCost
@@ -18880,7 +18941,7 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
       (ReuseReadOnlySupported context) directLetAllocationCost
@@ -19055,7 +19116,7 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
       (ReuseReadOnlyConstructorSupported context) directLetAllocationCost
@@ -19151,7 +19212,7 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
       (ReuseConstructorBoxSupported context) directLetAllocationCost
@@ -19249,7 +19310,7 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
       (ReuseBudgetedDirectSupported context) directLetAllocationCost
@@ -19304,7 +19365,7 @@ theorem
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
     (externals : ExternalImpl)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
       (ReuseBudgetedDirectSupported context) directLetAllocationCost
@@ -19346,7 +19407,7 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
       (ReuseBudgetedDirectSupported context) directLetAllocationCost
@@ -19388,7 +19449,7 @@ theorem
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
     (externals : ExternalImpl)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
       (ReuseBudgetedDirectSupported context) directLetAllocationCost
@@ -19476,7 +19537,7 @@ theorem
     (supportedExport :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (OrdinaryIncrementEffectSupported context)
       (ConcreteReuseCapacityFrame sourceFunction facts) := by
@@ -19535,7 +19596,7 @@ theorem
     (supportedExport :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
       labels target.wasmModule hosts.env
       (OrdinaryIncrementEffectSupported context)
@@ -19606,7 +19667,7 @@ theorem
     (supportedExport :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (OrdinaryIncrementEffectSupported context)
       (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
@@ -19632,7 +19693,7 @@ theorem
     (supportedExport :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
       labels target.wasmModule hosts.env
       (OrdinaryDecrementEffectSupported context)
@@ -19701,7 +19762,7 @@ theorem
     (supportedExport :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (OrdinaryDecrementEffectSupported context)
       (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
@@ -19727,7 +19788,7 @@ theorem
     (supportedExport :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
       labels target.wasmModule hosts.env
       (OrdinaryDeleteEffectSupported context)
@@ -19794,7 +19855,7 @@ theorem
     (supportedExport :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (OrdinaryDeleteEffectSupported context)
       (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
@@ -19822,7 +19883,7 @@ theorem
     (supportedExport :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
       labels target.wasmModule hosts.env
       (ConstructorTagEffectSupported context)
@@ -19879,7 +19940,7 @@ theorem
     (supportedExport :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ConstructorTagEffectSupported context)
       (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
@@ -19906,7 +19967,7 @@ theorem
     (supportedExport :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
       labels target.wasmModule hosts.env
       (ObjectFieldFVarEffectSupported context)
@@ -20000,7 +20061,7 @@ theorem
     (supportedExport :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ObjectFieldFVarEffectSupported context)
       (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
@@ -20026,7 +20087,7 @@ theorem
     (supportedExport :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
       labels target.wasmModule hosts.env
       (ObjectFieldErasedEffectSupported context)
@@ -20115,7 +20176,7 @@ theorem
     (supportedExport :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ObjectFieldErasedEffectSupported context)
       (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
@@ -20142,7 +20203,7 @@ theorem
     (supportedExport :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
       labels target.wasmModule hosts.env
       (USizeFieldEffectSupported context)
@@ -20201,7 +20262,7 @@ theorem
     (supportedExport :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (USizeFieldEffectSupported context)
       (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
@@ -20228,7 +20289,7 @@ theorem
     (supportedExport :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
       labels target.wasmModule hosts.env
       (ScalarFieldEffectSupported context)
@@ -20327,7 +20388,7 @@ theorem
     (supportedExport :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ScalarFieldEffectSupported context)
       (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
@@ -20358,7 +20419,7 @@ theorem
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env
       (ReuseOwnershipThroughDecrementEffectSupported context)
@@ -20384,7 +20445,7 @@ theorem ConcreteSupportedExport.effectRuntimeRefines_reuseOwnership
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (OwnershipEffectSupported context)
       (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
@@ -20414,7 +20475,7 @@ theorem ConcreteSupportedExport.effectRuntimeRefines_reuseOwnershipAndTag
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (OwnershipAndTagEffectSupported context)
       (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
@@ -20435,7 +20496,7 @@ theorem ConcreteSupportedExport.effectRuntimeRefines_objectField_reuseCapacityOw
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ObjectFieldEffectSupported context)
       (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
@@ -20460,7 +20521,7 @@ theorem
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env
         (OwnershipTagAndObjectEffectSupported context)
@@ -20483,7 +20544,7 @@ theorem
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (FieldMutationEffectSupported context)
       (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
@@ -20508,7 +20569,7 @@ theorem
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env
         (OwnershipTagAndFieldMutationEffectSupported context)
@@ -20534,7 +20595,7 @@ theorem
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (AllFieldMutationEffectSupported context)
       (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
@@ -20559,7 +20620,7 @@ theorem
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env
         (OwnershipTagAndAllFieldMutationEffectSupported context)
@@ -20590,7 +20651,7 @@ theorem
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     (externals : ExternalImpl)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env
         (OwnershipTagAndAllFieldMutationEffectSupported context)
@@ -20667,7 +20728,7 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
       labels target.wasmModule hosts.env
       (OwnershipTagAndAllFieldMutationEffectSupported context)
@@ -20715,7 +20776,7 @@ theorem
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
     (externals : ExternalImpl)
-    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    {labels : LabelContext} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
       labels target.wasmModule hosts.env
       (OwnershipTagAndAllFieldMutationEffectSupported context)
@@ -21245,12 +21306,13 @@ theorem
             callerTail) :=
   spec.correctReuseCapacityBudgetedCode evaluation invariant
     (fun invariant => invariant.1.1)
-    spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_ownership
-    reuseCapacityExternalLetRuntimeRefinesWithCost_noExternals
-    reuseCapacityCallLetRuntimeRefinesWithCost_noCalls
-    reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy
-    caseRuntimeRefines_defaultOnly
-    (fun _ => spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation)
+    (fun _ =>
+      spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_ownership)
+    (fun _ => reuseCapacityExternalLetRuntimeRefinesWithCost_noExternals)
+    (fun _ => reuseCapacityCallLetRuntimeRefinesWithCost_noCalls)
+    (fun _ => reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy)
+    (fun _ => caseRuntimeRefines_defaultOnly)
+    (fun _ _ => spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation)
     parameterCount
 
 /--
@@ -21309,12 +21371,13 @@ theorem
             callerTail) :=
   spec.correctReuseCapacityBudgetedCode evaluation invariant
     (fun invariant => invariant.1.1)
-    spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_ownership
-    reuseCapacityExternalLetRuntimeRefinesWithCost_noExternals
-    reuseCapacityCallLetRuntimeRefinesWithCost_noCalls
-    reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy
-    spec.caseRuntimeRefines_objectConstructorCases
-    (fun _ => spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation)
+    (fun _ =>
+      spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_ownership)
+    (fun _ => reuseCapacityExternalLetRuntimeRefinesWithCost_noExternals)
+    (fun _ => reuseCapacityCallLetRuntimeRefinesWithCost_noCalls)
+    (fun _ => reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy)
+    (fun _ => spec.caseRuntimeRefines_objectConstructorCases)
+    (fun _ _ => spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation)
     parameterCount
 
 /--
@@ -21374,12 +21437,13 @@ theorem
             callerTail) :=
   spec.correctReuseCapacityBudgetedCode evaluation invariant
     (fun invariant => invariant.1.1)
-    spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_ownership
-    reuseCapacityExternalLetRuntimeRefinesWithCost_noExternals
-    reuseCapacityCallLetRuntimeRefinesWithCost_noCalls
-    reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy
-    spec.caseRuntimeRefines_scalarUInt8Cases
-    (fun _ => spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation)
+    (fun _ =>
+      spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_ownership)
+    (fun _ => reuseCapacityExternalLetRuntimeRefinesWithCost_noExternals)
+    (fun _ => reuseCapacityCallLetRuntimeRefinesWithCost_noCalls)
+    (fun _ => reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy)
+    (fun _ => spec.caseRuntimeRefines_scalarUInt8Cases)
+    (fun _ _ => spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation)
     parameterCount
 
 /--
@@ -21434,7 +21498,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_budgetedDirect
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env (BudgetedDirectSupported context)
       directLetAllocationCost
@@ -21496,7 +21560,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_budgetedDirect_integerEx
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     (externals : ExternalImpl)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env (BudgetedDirectSupported context)
       directLetAllocationCost
@@ -21533,7 +21597,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_budgetedDirect_naturalEx
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     (externals : ExternalImpl)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env (BudgetedDirectSupported context)
       directLetAllocationCost
@@ -21573,7 +21637,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_budgetedDirect_scalarExt
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     (externals : ExternalImpl)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env (BudgetedDirectSupported context)
       directLetAllocationCost
@@ -21613,7 +21677,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_budgetedDirect_pureExter
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     (externals : ExternalImpl)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env (BudgetedDirectSupported context)
       directLetAllocationCost
@@ -21657,14 +21721,15 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    (externals : ExternalImpl) :
+    (externals : ExternalImpl)
+    {labels : LabelContext} :
     ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
-      sourceFunction [] target.wasmModule hosts.env externals
+      sourceFunction labels target.wasmModule hosts.env externals
       (PureExternalSupported context externals)
       (ConcreteBudgetedPureExternalFrame sourceFunction externals) := by
   have integerLaw :
       ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
-        sourceFunction [] target.wasmModule hosts.env externals
+        sourceFunction labels target.wasmModule hosts.env externals
         (PureIntegerExternalSupported context externals)
         (fun remainingBytes sourceRuntime sourceEnv targetStore targetLocals
             witness =>
@@ -21681,10 +21746,11 @@ theorem
             concrete externals ∧
           FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
             concrete externals)
-      (spec.externalLetRuntimeRefinesWithCostAndTransports_pureInteger externals)
+      (spec.externalLetRuntimeRefinesWithCostAndTransports_pureInteger externals
+        (labels := labels))
   have naturalLaw :
       ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
-        sourceFunction [] target.wasmModule hosts.env externals
+        sourceFunction labels target.wasmModule hosts.env externals
         (PureNaturalExternalSupported context externals)
         (fun remainingBytes sourceRuntime sourceEnv targetStore targetLocals
             witness =>
@@ -21699,10 +21765,11 @@ theorem
         concrete.IntegerResultRefines externals ∧
           FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
             concrete externals)
-      (spec.externalLetRuntimeRefinesWithCostAndTransports_pureNatural externals)
+      (spec.externalLetRuntimeRefinesWithCostAndTransports_pureNatural externals
+        (labels := labels))
   have scalarLaw :
       ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
-        sourceFunction [] target.wasmModule hosts.env externals
+        sourceFunction labels target.wasmModule hosts.env externals
         (PureScalarExternalSupported context externals)
         (fun remainingBytes sourceRuntime sourceEnv targetStore targetLocals
             witness =>
@@ -21717,10 +21784,11 @@ theorem
         concrete.IntegerResultRefines externals ∧
           FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
             concrete externals)
-      (spec.externalLetRuntimeRefinesWithCostAndTransports_pureScalar externals)
+      (spec.externalLetRuntimeRefinesWithCostAndTransports_pureScalar externals
+        (labels := labels))
   have integerLaw' :
       ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
-        sourceFunction [] target.wasmModule hosts.env externals
+        sourceFunction labels target.wasmModule hosts.env externals
         (PureIntegerExternalSupported context externals)
         (ConcreteBudgetedPureExternalFrame sourceFunction externals) := by
     apply
@@ -21733,7 +21801,7 @@ theorem
         invariant.2.1, invariant.2.2⟩
   have naturalLaw' :
       ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
-        sourceFunction [] target.wasmModule hosts.env externals
+        sourceFunction labels target.wasmModule hosts.env externals
         (PureNaturalExternalSupported context externals)
         (ConcreteBudgetedPureExternalFrame sourceFunction externals) := by
     apply
@@ -21746,7 +21814,7 @@ theorem
         invariant.1.2, invariant.2.2⟩
   have scalarLaw' :
       ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
-        sourceFunction [] target.wasmModule hosts.env externals
+        sourceFunction labels target.wasmModule hosts.env externals
         (PureScalarExternalSupported context externals)
         (ConcreteBudgetedPureExternalFrame sourceFunction externals) := by
     apply
@@ -21759,7 +21827,7 @@ theorem
         invariant.2.2, invariant.1.2⟩
   have naturalScalarLaw :
       ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
-        sourceFunction [] target.wasmModule hosts.env externals
+        sourceFunction labels target.wasmModule hosts.env externals
         (fun sourceRuntime sourceEnv decl continuation nextRuntime sourceValue
             stepCost =>
           PureNaturalExternalSupported context externals sourceRuntime sourceEnv
@@ -21770,7 +21838,7 @@ theorem
     ExternalLetRuntimeRefinesWithCostAndTransports.or naturalLaw' scalarLaw'
   have combinedLaw :
       ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
-        sourceFunction [] target.wasmModule hosts.env externals
+        sourceFunction labels target.wasmModule hosts.env externals
         (fun sourceRuntime sourceEnv decl continuation nextRuntime sourceValue
             stepCost =>
           PureIntegerExternalSupported context externals sourceRuntime sourceEnv
@@ -21791,7 +21859,7 @@ theorem
       integerLaw' naturalScalarLaw
   change
     ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
-      sourceFunction [] target.wasmModule hosts.env externals
+      sourceFunction labels target.wasmModule hosts.env externals
       (fun sourceRuntime sourceEnv decl continuation nextRuntime sourceValue
           stepCost =>
         PureIntegerExternalSupported context externals sourceRuntime sourceEnv
@@ -21817,13 +21885,15 @@ theorem ConcreteSupportedExport.externalLetRuntimeRefinesWithCost_pureExternal
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    (externals : ExternalImpl) :
-    ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
+    (externals : ExternalImpl)
+    {labels : LabelContext} :
+    ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env externals
       (PureExternalSupported context externals)
       (ConcreteBudgetedPureExternalFrame sourceFunction externals) :=
   ExternalLetRuntimeRefinesWithCostAndTransports.runtimeRefines
-    (spec.externalLetRuntimeRefinesWithCostAndTransports_pureExternal externals)
+    (spec.externalLetRuntimeRefinesWithCostAndTransports_pureExternal externals
+      (labels := labels))
 
 /--
 All proved pure external families implement the facts-indexed external
@@ -21847,13 +21917,15 @@ theorem
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    (externals : ExternalImpl) :
+    (externals : ExternalImpl)
+    {labels : LabelContext} :
     ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
-      sourceFunction [] target.wasmModule hosts.env externals
+      sourceFunction labels target.wasmModule hosts.env externals
       (PureExternalSupported context externals)
       (ConcreteReuseCapacityPureExternalFrame sourceFunction externals) :=
   ExternalLetRuntimeRefinesWithCostAndTransports.reuseCapacityPureExternal
-    (spec.externalLetRuntimeRefinesWithCostAndTransports_pureExternal externals)
+    (spec.externalLetRuntimeRefinesWithCostAndTransports_pureExternal externals
+      (labels := labels))
     (fun supported => supported.reuseCapacityLetFacts? _)
 
 /--
@@ -21873,15 +21945,16 @@ theorem
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    (externals : ExternalImpl) :
+    (externals : ExternalImpl)
+    {labels : LabelContext} :
     ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
-      sourceFunction [] target.wasmModule hosts.env externals
+      sourceFunction labels target.wasmModule hosts.env externals
       (PureExternalSupported context externals)
       (ConcreteReuseCapacityPureExternalOwnershipFrame sourceFunction
         externals) := by
   change
     ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
-      sourceFunction [] target.wasmModule hosts.env externals
+      sourceFunction labels target.wasmModule hosts.env externals
       (PureExternalSupported context externals)
       (fun facts remainingBytes sourceRuntime sourceEnv targetStore targetLocals
           witness =>
@@ -21893,7 +21966,7 @@ theorem
   exact
     ReuseCapacityExternalLetRuntimeRefinesWithCost.preservingClosureDescriptorAgreement
       (spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal
-        externals)
+        externals (labels := labels))
 
 /--
 First whole-export endpoint that combines authoritative reuse-capacity facts
@@ -21951,12 +22024,15 @@ theorem
             callerTail) :=
   spec.correctReuseCapacityBudgetedCode evaluation invariant
     (fun invariant => invariant.1.1)
-    (spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternal
-      externals)
-    (spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal externals)
-    reuseCapacityCallLetRuntimeRefinesWithCost_noCalls
-    reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy
-    caseRuntimeRefines_defaultOnly (fun _ => effectRuntimeRefines_noEffects)
+    (fun _ =>
+      spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternal
+        externals)
+    (fun _ =>
+      spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal externals)
+    (fun _ => reuseCapacityCallLetRuntimeRefinesWithCost_noCalls)
+    (fun _ => reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy)
+    (fun _ => caseRuntimeRefines_defaultOnly)
+    (fun _ _ => effectRuntimeRefines_noEffects)
     parameterCount
 
 /--
@@ -22009,13 +22085,15 @@ theorem
             callerTail) :=
   spec.correctReuseCapacityBudgetedCode evaluation invariant
     (fun invariant => invariant.1.1)
-    (spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternal
-      externals)
-    (spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal externals)
-    reuseCapacityCallLetRuntimeRefinesWithCost_noCalls
-    reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy
-    spec.caseRuntimeRefines_objectConstructorCases
-    (fun _ => effectRuntimeRefines_noEffects) parameterCount
+    (fun _ =>
+      spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternal
+        externals)
+    (fun _ =>
+      spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal externals)
+    (fun _ => reuseCapacityCallLetRuntimeRefinesWithCost_noCalls)
+    (fun _ => reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy)
+    (fun _ => spec.caseRuntimeRefines_objectConstructorCases)
+    (fun _ _ => effectRuntimeRefines_noEffects) parameterCount
 
 /--
 Facts-indexed whole-export correctness for normalized scalar-`UInt8` case
@@ -22067,13 +22145,15 @@ theorem
             callerTail) :=
   spec.correctReuseCapacityBudgetedCode evaluation invariant
     (fun invariant => invariant.1.1)
-    (spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternal
-      externals)
-    (spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal externals)
-    reuseCapacityCallLetRuntimeRefinesWithCost_noCalls
-    reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy
-    spec.caseRuntimeRefines_scalarUInt8Cases
-    (fun _ => effectRuntimeRefines_noEffects) parameterCount
+    (fun _ =>
+      spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternal
+        externals)
+    (fun _ =>
+      spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal externals)
+    (fun _ => reuseCapacityCallLetRuntimeRefinesWithCost_noCalls)
+    (fun _ => reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy)
+    (fun _ => spec.caseRuntimeRefines_scalarUInt8Cases)
+    (fun _ _ => effectRuntimeRefines_noEffects) parameterCount
 
 /--
 Whole-export partial correctness for arbitrary finite interleavings of all
@@ -22127,14 +22207,16 @@ theorem
             callerTail) :=
   spec.correctReuseCapacityBudgetedCode evaluation invariant
     (fun invariant => invariant.1.1.1)
-    (spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership
-      externals)
-    (spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternalOwnership
-      externals)
-    reuseCapacityCallLetRuntimeRefinesWithCost_noCalls
-    reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy
-    caseRuntimeRefines_defaultOnly
     (fun _ =>
+      spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership
+        externals)
+    (fun _ =>
+      spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternalOwnership
+        externals)
+    (fun _ => reuseCapacityCallLetRuntimeRefinesWithCost_noCalls)
+    (fun _ => reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy)
+    (fun _ => caseRuntimeRefines_defaultOnly)
+    (fun _ _ =>
       spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation_pureExternal
         externals)
     parameterCount
@@ -22191,14 +22273,16 @@ theorem
             callerTail) :=
   spec.correctReuseCapacityBudgetedCode evaluation invariant
     (fun invariant => invariant.1.1.1)
-    (spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership
-      externals)
-    (spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternalOwnership
-      externals)
-    reuseCapacityCallLetRuntimeRefinesWithCost_noCalls
-    reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy
-    spec.caseRuntimeRefines_objectConstructorCases
     (fun _ =>
+      spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership
+        externals)
+    (fun _ =>
+      spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternalOwnership
+        externals)
+    (fun _ => reuseCapacityCallLetRuntimeRefinesWithCost_noCalls)
+    (fun _ => reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy)
+    (fun _ => spec.caseRuntimeRefines_objectConstructorCases)
+    (fun _ _ =>
       spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation_pureExternal
         externals)
     parameterCount
@@ -22255,14 +22339,16 @@ theorem
             callerTail) :=
   spec.correctReuseCapacityBudgetedCode evaluation invariant
     (fun invariant => invariant.1.1.1)
-    (spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership
-      externals)
-    (spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternalOwnership
-      externals)
-    reuseCapacityCallLetRuntimeRefinesWithCost_noCalls
-    reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy
-    spec.caseRuntimeRefines_scalarUInt8Cases
     (fun _ =>
+      spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership
+        externals)
+    (fun _ =>
+      spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternalOwnership
+        externals)
+    (fun _ => reuseCapacityCallLetRuntimeRefinesWithCost_noCalls)
+    (fun _ => reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy)
+    (fun _ => spec.caseRuntimeRefines_scalarUInt8Cases)
+    (fun _ _ =>
       spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation_pureExternal
         externals)
     parameterCount
@@ -22285,7 +22371,7 @@ theorem
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     (externals : ExternalImpl)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env (BudgetedDirectSupported context)
       directLetAllocationCost
@@ -22322,7 +22408,7 @@ theorem
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     (externals : ExternalImpl)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env (OwnershipBudgetedDirectSupported context)
       directLetAllocationCost
@@ -22355,13 +22441,14 @@ theorem
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    (externals : ExternalImpl) :
-    ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
+    (externals : ExternalImpl)
+    {labels : LabelContext} :
+    ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env externals
       (PureExternalSupported context externals)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) := by
   change
-    ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
+    ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env externals
       (PureExternalSupported context externals)
       (fun remainingBytes sourceRuntime sourceEnv targetStore targetLocals
@@ -22402,7 +22489,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_readOnlyDirect
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ReadOnlyDirectSupported context)
       (ConcreteLocalFrameAligned sourceFunction) := by
@@ -22441,7 +22528,7 @@ theorem codeWP_of_directValueEvaluates_exactReturn
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceRuntime resultRuntime : RuntimeState}
@@ -22515,7 +22602,7 @@ theorem codeWP_of_directValueEvaluates
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceRuntime resultRuntime : RuntimeState}
@@ -22581,7 +22668,7 @@ theorem codeWP_of_directValueEvaluates_withCost_exactReturn
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceRuntime resultRuntime : RuntimeState}
@@ -22670,7 +22757,7 @@ theorem codeWP_of_directValueEvaluates_withCost
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceRuntime resultRuntime : RuntimeState}
@@ -22740,7 +22827,7 @@ theorem codeWP_of_budgetedSpineEvaluates_exactReturn
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -22868,7 +22955,7 @@ theorem codeWP_of_budgetedSpineEvaluates
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -22947,7 +23034,7 @@ theorem codeWP_of_budgetedCodeEvaluates_exactReturn
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -22984,17 +23071,21 @@ theorem codeWP_of_budgetedCodeEvaluates_exactReturn
     (invariant :
       Invariant requiredBytes sourceRuntime sourceEnv initial locals witness)
     (directRuntimeRefines :
-      DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
-        module hostEnv DirectSupported directCost Invariant)
+      ∀ innerLabels,
+        DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction
+          innerLabels module hostEnv DirectSupported directCost Invariant)
     (externalRuntimeRefines :
-      ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction
-        labels module hostEnv externals ExternalSupported Invariant)
+      ∀ innerLabels,
+        ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction
+          innerLabels module hostEnv externals ExternalSupported Invariant)
     (caseRuntimeRefines :
-      CaseRuntimeRefines context sourceModule sourceFunction labels module
-        hostEnv CaseSupported)
+      ∀ innerLabels,
+        CaseRuntimeRefines context sourceModule sourceFunction innerLabels module
+          hostEnv CaseSupported)
     (effectRuntimeRefines :
-      EffectRuntimeRefines context sourceModule sourceFunction labels module
-        hostEnv EffectSupported Invariant) :
+      ∀ innerLabels,
+        EffectRuntimeRefines context sourceModule sourceFunction innerLabels
+          module hostEnv EffectSupported Invariant) :
     ∃ resultStore resultWitness resultKind physical,
       CodeWP context sourceModule sourceFunction labels module hostEnv
           sourceRuntime sourceEnv sourceCode target initial locals witness []
@@ -23003,7 +23094,7 @@ theorem codeWP_of_budgetedCodeEvaluates_exactReturn
           resultRuntime ∧
         resultStore.host.failure? = none ∧
         PhysicalValueRel resultWitness resultKind physical resultValue := by
-  induction evaluation generalizing target initial locals witness with
+  induction evaluation generalizing labels target initial locals witness with
   | ret sourceLookup =>
       obtain ⟨kind, resultIndex, localCompiled, resultFound, kindAt,
           targetEq⟩ :=
@@ -23031,7 +23122,7 @@ theorem codeWP_of_budgetedCodeEvaluates_exactReturn
       obtain ⟨nextStore, nextLocals, nextWitness, step, _externalsPreserved,
           _hostDescriptorsPreserved, _witnessDescriptorsPreserved,
           nextInvariant⟩ :=
-        directRuntimeRefines supported stepFits invariant sourceStep stateRelated
+        directRuntimeRefines labels supported stepFits invariant sourceStep stateRelated
           valueCompiled valueAdapted resultFound
       have continuationInvariant :
           Invariant continuationCost letNextRuntime
@@ -23063,7 +23154,7 @@ theorem codeWP_of_budgetedCodeEvaluates_exactReturn
       obtain ⟨nextStore, nextLocals, nextWitness, step, _externalsPreserved,
           _hostDescriptorsPreserved, _witnessDescriptorsPreserved,
           nextInvariant⟩ :=
-        externalRuntimeRefines supported stepFits invariant sourceStep
+        externalRuntimeRefines labels supported stepFits invariant sourceStep
           stateRelated valueCompiled valueAdapted resultFound
       have continuationInvariant :
           Invariant continuationCost externalNextRuntime
@@ -23080,8 +23171,8 @@ theorem codeWP_of_budgetedCodeEvaluates_exactReturn
           continuationWP,
         resultRuntimeRelated, failureClear, valueRelated⟩
   | caseOf supported sourceStep continued ih =>
-      obtain ⟨selectedTarget, selectedAdapted, _selected, lift⟩ :=
-        caseRuntimeRefines supported sourceStep stateRelated adapted
+      obtain ⟨selectedLabels, selectedTarget, selectedAdapted, _selected, lift⟩ :=
+        caseRuntimeRefines labels supported sourceStep stateRelated adapted
       obtain ⟨resultStore, resultWitness, resultKind, physical,
           continuationWP, resultRuntimeRelated, failureClear,
           valueRelated⟩ :=
@@ -23097,7 +23188,7 @@ theorem codeWP_of_budgetedCodeEvaluates_exactReturn
   | effect supported sourceStep continued ih =>
       obtain ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
           _externalsPreserved, nextInvariant⟩ :=
-        effectRuntimeRefines supported sourceStep stateRelated invariant adapted
+        effectRuntimeRefines labels supported sourceStep stateRelated invariant adapted
       obtain ⟨resultStore, resultWitness, resultKind, physical,
           continuationWP, resultRuntimeRelated, failureClear,
           valueRelated⟩ :=
@@ -23119,7 +23210,7 @@ theorem codeWP_of_budgetedCodeEvaluates
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -23158,17 +23249,21 @@ theorem codeWP_of_budgetedCodeEvaluates
     (invariant :
       Invariant requiredBytes sourceRuntime sourceEnv initial locals witness)
     (directRuntimeRefines :
-      DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
-        module hostEnv DirectSupported directCost Invariant)
+      ∀ innerLabels,
+        DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction
+          innerLabels module hostEnv DirectSupported directCost Invariant)
     (externalRuntimeRefines :
-      ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction
-        labels module hostEnv externals ExternalSupported Invariant)
+      ∀ innerLabels,
+        ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction
+          innerLabels module hostEnv externals ExternalSupported Invariant)
     (caseRuntimeRefines :
-      CaseRuntimeRefines context sourceModule sourceFunction labels module
-        hostEnv CaseSupported)
+      ∀ innerLabels,
+        CaseRuntimeRefines context sourceModule sourceFunction innerLabels module
+          hostEnv CaseSupported)
     (effectRuntimeRefines :
-      EffectRuntimeRefines context sourceModule sourceFunction labels module
-        hostEnv EffectSupported Invariant)
+      ∀ innerLabels,
+        EffectRuntimeRefines context sourceModule sourceFunction innerLabels
+          module hostEnv EffectSupported Invariant)
     (parameterCount : parameters.length = targetFunction.numParams)
     (resultCount : targetFunction.results.length = 1) :
     ∃ resultStore resultWitness resultKind physical,
@@ -23331,17 +23426,23 @@ theorem ConcreteSupportedExport.correctBudgetedCode
       Invariant requiredBytes sourceRuntime sourceEnv initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness)
     (directRuntimeRefines :
-      DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction []
-        target.wasmModule hosts.env DirectSupported directCost Invariant)
+      ∀ innerLabels,
+        DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction
+          innerLabels target.wasmModule hosts.env DirectSupported directCost
+          Invariant)
     (externalRuntimeRefines :
-      ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
-        target.wasmModule hosts.env externals ExternalSupported Invariant)
+      ∀ innerLabels,
+        ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction
+          innerLabels target.wasmModule hosts.env externals ExternalSupported
+          Invariant)
     (caseRuntimeRefines :
-      CaseRuntimeRefines context sourceModule sourceFunction []
-        target.wasmModule hosts.env CaseSupported)
+      ∀ innerLabels,
+        CaseRuntimeRefines context sourceModule sourceFunction innerLabels
+          target.wasmModule hosts.env CaseSupported)
     (effectRuntimeRefines :
-      EffectRuntimeRefines context sourceModule sourceFunction []
-        target.wasmModule hosts.env EffectSupported Invariant)
+      ∀ innerLabels,
+        EffectRuntimeRefines context sourceModule sourceFunction innerLabels
+          target.wasmModule hosts.env EffectSupported Invariant)
     (parameterCount :
       parameters.length = spec.targetFunction.numParams) :
     ExecEvaluates externals
@@ -23437,7 +23538,8 @@ theorem ConcreteSupportedExport.correctBudgetedIntegerExternalSpine
       evaluation spec.bodyAdapted spec.localsAligned stateRelated
       ⟨⟨frameAligned, budget⟩, implementation⟩
       (spec.directLetRuntimeRefines_budgetedDirect_integerExternal externals)
-      (spec.externalLetRuntimeRefinesWithCost_pureInteger externals)
+      (spec.externalLetRuntimeRefinesWithCost_pureInteger externals
+        (labels := []))
   have targetTerminates :
       Wasm.TerminatesWith hosts.env target.wasmModule
         spec.targetFunctionIndex initial (parameters ++ callerTail)
@@ -23515,7 +23617,8 @@ theorem ConcreteSupportedExport.correctBudgetedNaturalExternalSpine
       evaluation spec.bodyAdapted spec.localsAligned stateRelated
       ⟨⟨frameAligned, budget⟩, implementation⟩
       (spec.directLetRuntimeRefines_budgetedDirect_naturalExternal externals)
-      (spec.externalLetRuntimeRefinesWithCost_pureNatural externals)
+      (spec.externalLetRuntimeRefinesWithCost_pureNatural externals
+        (labels := []))
   have targetTerminates :
       Wasm.TerminatesWith hosts.env target.wasmModule
         spec.targetFunctionIndex initial (parameters ++ callerTail)
@@ -23591,7 +23694,8 @@ theorem ConcreteSupportedExport.correctBudgetedScalarExternalSpine
       evaluation spec.bodyAdapted spec.localsAligned stateRelated
       ⟨⟨frameAligned, budget⟩, implementation⟩
       (spec.directLetRuntimeRefines_budgetedDirect_scalarExternal externals)
-      (spec.externalLetRuntimeRefinesWithCost_pureScalar externals)
+      (spec.externalLetRuntimeRefinesWithCost_pureScalar externals
+        (labels := []))
   have targetTerminates :
       Wasm.TerminatesWith hosts.env target.wasmModule
         spec.targetFunctionIndex initial (parameters ++ callerTail)
@@ -23757,9 +23861,9 @@ theorem ConcreteSupportedExport.correctBudgetedPureExternalDefaultCases
   exact spec.correctBudgetedCode evaluation stateRelated
     ⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
       scalarImplementation⟩
-    (spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
-    (spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
-    caseRuntimeRefines_defaultOnly effectRuntimeRefines_noEffects
+    (fun _ => spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
+    (fun _ => spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
+    (fun _ => caseRuntimeRefines_defaultOnly) (fun _ => effectRuntimeRefines_noEffects)
     parameterCount
 
 /--
@@ -23829,10 +23933,10 @@ theorem
   exact spec.correctBudgetedCode evaluation stateRelated
     ⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
       scalarImplementation⟩
-    (spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
-    (spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
-    caseRuntimeRefines_defaultOnly
-    effectRuntimeRefines_persistentOwnership parameterCount
+    (fun _ => spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
+    (fun _ => spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
+    (fun _ => caseRuntimeRefines_defaultOnly)
+    (fun _ => effectRuntimeRefines_persistentOwnership) parameterCount
 
 /--
 Concrete whole-export partial correctness for arbitrary interleaving of
@@ -23901,10 +24005,10 @@ theorem
   exact spec.correctBudgetedCode evaluation stateRelated
     ⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
       scalarImplementation⟩
-    (spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
-    (spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
-    caseRuntimeRefines_defaultOnly
-    (spec.effectRuntimeRefines_ordinaryIncrement (externals := externals))
+    (fun _ => spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
+    (fun _ => spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
+    (fun _ => caseRuntimeRefines_defaultOnly)
+    (fun _ => spec.effectRuntimeRefines_ordinaryIncrement (externals := externals))
     parameterCount
 
 /--
@@ -23976,10 +24080,10 @@ theorem
   exact spec.correctBudgetedCode evaluation stateRelated
     ⟨⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
       scalarImplementation⟩, descriptorAgreement⟩
-    (spec.directLetRuntimeRefines_budgetedDirect_ownership externals)
-    (spec.externalLetRuntimeRefinesWithCost_ownership externals)
-    caseRuntimeRefines_defaultOnly
-    (spec.effectRuntimeRefines_ordinaryDecrement (externals := externals))
+    (fun _ => spec.directLetRuntimeRefines_budgetedDirect_ownership externals)
+    (fun _ => spec.externalLetRuntimeRefinesWithCost_ownership externals)
+    (fun _ => caseRuntimeRefines_defaultOnly)
+    (fun _ => spec.effectRuntimeRefines_ordinaryDecrement (externals := externals))
     parameterCount
 
 /--
@@ -24049,10 +24153,10 @@ theorem
   exact spec.correctBudgetedCode evaluation stateRelated
     ⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
       scalarImplementation⟩
-    (spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
-    (spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
-    caseRuntimeRefines_defaultOnly
-    (spec.effectRuntimeRefines_ordinaryDelete (externals := externals))
+    (fun _ => spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
+    (fun _ => spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
+    (fun _ => caseRuntimeRefines_defaultOnly)
+    (fun _ => spec.effectRuntimeRefines_ordinaryDelete (externals := externals))
     parameterCount
 
 /--
@@ -24125,10 +24229,10 @@ theorem
   exact spec.correctBudgetedCode evaluation stateRelated
     ⟨⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
       scalarImplementation⟩, descriptorAgreement⟩
-    (spec.directLetRuntimeRefines_budgetedDirect_ownership externals)
-    (spec.externalLetRuntimeRefinesWithCost_ownership externals)
-    caseRuntimeRefines_defaultOnly
-    (spec.effectRuntimeRefines_ownership (externals := externals))
+    (fun _ => spec.directLetRuntimeRefines_budgetedDirect_ownership externals)
+    (fun _ => spec.externalLetRuntimeRefinesWithCost_ownership externals)
+    (fun _ => caseRuntimeRefines_defaultOnly)
+    (fun _ => spec.effectRuntimeRefines_ownership (externals := externals))
     parameterCount
 
 /--
@@ -24200,10 +24304,10 @@ theorem
   exact spec.correctBudgetedCode evaluation stateRelated
     ⟨⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
       scalarImplementation⟩, descriptorAgreement⟩
-    (spec.directLetRuntimeRefines_budgetedDirect_ownership externals)
-    (spec.externalLetRuntimeRefinesWithCost_ownership externals)
-    caseRuntimeRefines_defaultOnly
-    (spec.effectRuntimeRefines_ownershipAndTag (externals := externals))
+    (fun _ => spec.directLetRuntimeRefines_budgetedDirect_ownership externals)
+    (fun _ => spec.externalLetRuntimeRefinesWithCost_ownership externals)
+    (fun _ => caseRuntimeRefines_defaultOnly)
+    (fun _ => spec.effectRuntimeRefines_ownershipAndTag (externals := externals))
     parameterCount
 
 /--
@@ -24272,10 +24376,10 @@ theorem
   exact spec.correctBudgetedCode evaluation stateRelated
     ⟨⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
       scalarImplementation⟩, descriptorAgreement⟩
-    (spec.directLetRuntimeRefines_budgetedDirect_ownership externals)
-    (spec.externalLetRuntimeRefinesWithCost_ownership externals)
-    caseRuntimeRefines_defaultOnly
-    (spec.effectRuntimeRefines_ownershipTagAndObjectFVar
+    (fun _ => spec.directLetRuntimeRefines_budgetedDirect_ownership externals)
+    (fun _ => spec.externalLetRuntimeRefinesWithCost_ownership externals)
+    (fun _ => caseRuntimeRefines_defaultOnly)
+    (fun _ => spec.effectRuntimeRefines_ownershipTagAndObjectFVar
       (externals := externals))
     parameterCount
 
@@ -24345,10 +24449,10 @@ theorem
   exact spec.correctBudgetedCode evaluation stateRelated
     ⟨⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
       scalarImplementation⟩, descriptorAgreement⟩
-    (spec.directLetRuntimeRefines_budgetedDirect_ownership externals)
-    (spec.externalLetRuntimeRefinesWithCost_ownership externals)
-    caseRuntimeRefines_defaultOnly
-    (spec.effectRuntimeRefines_ownershipTagAndObject
+    (fun _ => spec.directLetRuntimeRefines_budgetedDirect_ownership externals)
+    (fun _ => spec.externalLetRuntimeRefinesWithCost_ownership externals)
+    (fun _ => caseRuntimeRefines_defaultOnly)
+    (fun _ => spec.effectRuntimeRefines_ownershipTagAndObject
       (externals := externals))
     parameterCount
 
@@ -24418,10 +24522,10 @@ theorem
   exact spec.correctBudgetedCode evaluation stateRelated
     ⟨⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
       scalarImplementation⟩, descriptorAgreement⟩
-    (spec.directLetRuntimeRefines_budgetedDirect_ownership externals)
-    (spec.externalLetRuntimeRefinesWithCost_ownership externals)
-    caseRuntimeRefines_defaultOnly
-    (spec.effectRuntimeRefines_ownershipTagAndFieldMutation
+    (fun _ => spec.directLetRuntimeRefines_budgetedDirect_ownership externals)
+    (fun _ => spec.externalLetRuntimeRefinesWithCost_ownership externals)
+    (fun _ => caseRuntimeRefines_defaultOnly)
+    (fun _ => spec.effectRuntimeRefines_ownershipTagAndFieldMutation
       (externals := externals))
     parameterCount
 
@@ -24491,10 +24595,10 @@ theorem
   exact spec.correctBudgetedCode evaluation stateRelated
     ⟨⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
       scalarImplementation⟩, descriptorAgreement⟩
-    (spec.directLetRuntimeRefines_budgetedDirect_ownership externals)
-    (spec.externalLetRuntimeRefinesWithCost_ownership externals)
-    caseRuntimeRefines_defaultOnly
-    (spec.effectRuntimeRefines_ownershipTagAndAllFieldMutation
+    (fun _ => spec.directLetRuntimeRefines_budgetedDirect_ownership externals)
+    (fun _ => spec.externalLetRuntimeRefinesWithCost_ownership externals)
+    (fun _ => caseRuntimeRefines_defaultOnly)
+    (fun _ => spec.effectRuntimeRefines_ownershipTagAndAllFieldMutation
       (externals := externals))
     parameterCount
 
@@ -24569,10 +24673,10 @@ theorem
   exact spec.correctBudgetedCode evaluation stateRelated
     ⟨⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
       scalarImplementation⟩, descriptorAgreement⟩
-    (spec.directLetRuntimeRefines_ownershipBudgetedDirect externals)
-    (spec.externalLetRuntimeRefinesWithCost_ownership externals)
-    caseRuntimeRefines_defaultOnly
-    (spec.effectRuntimeRefines_ownershipTagAndAllFieldMutation
+    (fun _ => spec.directLetRuntimeRefines_ownershipBudgetedDirect externals)
+    (fun _ => spec.externalLetRuntimeRefinesWithCost_ownership externals)
+    (fun _ => caseRuntimeRefines_defaultOnly)
+    (fun _ => spec.effectRuntimeRefines_ownershipTagAndAllFieldMutation
       (externals := externals))
     parameterCount
 
@@ -24643,10 +24747,10 @@ theorem
   exact spec.correctBudgetedCode evaluation stateRelated
     ⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
       scalarImplementation⟩
-    (spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
-    (spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
-    spec.caseRuntimeRefines_objectConstructorCases
-    effectRuntimeRefines_noEffects parameterCount
+    (fun _ => spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
+    (fun _ => spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
+    (fun _ => spec.caseRuntimeRefines_objectConstructorCases)
+    (fun _ => effectRuntimeRefines_noEffects) parameterCount
 
 /--
 Concrete whole-export partial correctness for arbitrary nesting of normalized
@@ -24715,9 +24819,9 @@ theorem
   exact spec.correctBudgetedCode evaluation stateRelated
     ⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
       scalarImplementation⟩
-    (spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
-    (spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
-    spec.caseRuntimeRefines_scalarUInt8Cases effectRuntimeRefines_noEffects
+    (fun _ => spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
+    (fun _ => spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
+    (fun _ => spec.caseRuntimeRefines_scalarUInt8Cases) (fun _ => effectRuntimeRefines_noEffects)
     parameterCount
 
 /--
@@ -24786,10 +24890,10 @@ theorem
   exact spec.correctBudgetedCode evaluation stateRelated
     ⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
       scalarImplementation⟩
-    (spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
-    (spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
-    spec.caseRuntimeRefines_singleObjectConstructor
-    effectRuntimeRefines_noEffects parameterCount
+    (fun _ => spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
+    (fun _ => spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
+    (fun _ => spec.caseRuntimeRefines_singleObjectConstructor)
+    (fun _ => effectRuntimeRefines_noEffects) parameterCount
 
 /--
 Concrete whole-export partial correctness for arbitrary nesting of ordered
@@ -24853,10 +24957,10 @@ theorem
   exact spec.correctBudgetedCode evaluation stateRelated
     ⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
       scalarImplementation⟩
-    (spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
-    (spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
-    spec.caseRuntimeRefines_twoObjectConstructorDefault
-    effectRuntimeRefines_noEffects parameterCount
+    (fun _ => spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
+    (fun _ => spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
+    (fun _ => spec.caseRuntimeRefines_twoObjectConstructorDefault)
+    (fun _ => effectRuntimeRefines_noEffects) parameterCount
 
 /--
 Whole-export partial correctness for the current budgeted direct-value

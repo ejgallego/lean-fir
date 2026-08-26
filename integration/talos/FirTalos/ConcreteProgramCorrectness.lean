@@ -14,7 +14,7 @@ physical validation suffix and yields the ordinary direct-call contract. -/
 theorem CodeWP.toConcreteTerminatesWith_of_exactReturnSuffix
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
     {code : LCNF.Code .impure} {function : Wasm.Function}
@@ -64,7 +64,7 @@ theorem CodeWP.exactReturn_unique
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceRuntime : RuntimeState}
@@ -111,7 +111,7 @@ theorem codeWP_return_to_exactBodyPost
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceRuntime : RuntimeState}
@@ -169,7 +169,7 @@ theorem codeWP_letValue
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceRuntime nextRuntime : RuntimeState}
@@ -217,7 +217,7 @@ theorem codeWP_cases
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceRuntime : RuntimeState}
@@ -250,7 +250,7 @@ def ConcreteCasesStepSimulates
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId)
+    (labels selectedLabels : LabelContext)
     (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (sourceRuntime : RuntimeState)
@@ -263,7 +263,7 @@ def ConcreteCasesStepSimulates
     (witness : RefinementWitness) : Prop :=
   SourceCaseResult sourceRuntime sourceEnv cases selected ∧
     ∀ (tail : List Wasm.Value) (Q : Wasm.Assertion Host),
-      CodeWP context sourceModule sourceFunction labels module hostEnv
+      CodeWP context sourceModule sourceFunction selectedLabels module hostEnv
           sourceRuntime sourceEnv selected selectedTarget targetStore
           targetLocals witness tail Q →
         CodeWP context sourceModule sourceFunction labels module hostEnv
@@ -275,7 +275,7 @@ theorem codeWP_caseOf
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels selectedLabels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceRuntime : RuntimeState}
@@ -290,10 +290,10 @@ theorem codeWP_caseOf
     {Q : Wasm.Assertion Host}
     (step :
       ConcreteCasesStepSimulates context sourceModule sourceFunction labels
-        module hostEnv sourceRuntime sourceEnv cases selected target
-        selectedTarget targetStore targetLocals witness)
+        selectedLabels module hostEnv sourceRuntime sourceEnv cases selected
+        target selectedTarget targetStore targetLocals witness)
     (continued :
-      CodeWP context sourceModule sourceFunction labels module hostEnv
+      CodeWP context sourceModule sourceFunction selectedLabels module hostEnv
         sourceRuntime sourceEnv selected selectedTarget targetStore targetLocals
         witness tail Q) :
     CodeWP context sourceModule sourceFunction labels module hostEnv
@@ -535,15 +535,15 @@ inductive ConcreteCodeSimulation
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId)
     (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (sourceExternals : ExternalImpl) :
-    RuntimeState → Env → LCNF.Code .impure → Wasm.Program →
+    LabelContext → RuntimeState → Env → LCNF.Code .impure → Wasm.Program →
       Wasm.Store Host → Wasm.Locals → RefinementWitness →
       RuntimeState → Value → AbiKind → Wasm.Store Host →
       RefinementWitness → Wasm.Value → Prop where
   | ret
+      {labels : LabelContext}
       (localCompiled :
         Fir.Wasm.getLocal context result = .ok (.localGet result, kind))
       (resultFound :
@@ -556,11 +556,11 @@ inductive ConcreteCodeSimulation
         StateRelated sourceFunction sourceRuntime sourceEnv targetStore
           targetLocals witness)
       (targetLookup : targetLocals.get resultIndex = some physical) :
-      ConcreteCodeSimulation context sourceModule sourceFunction labels module
-        hostEnv sourceExternals sourceRuntime sourceEnv (.return result)
+      ConcreteCodeSimulation context sourceModule sourceFunction module hostEnv sourceExternals labels sourceRuntime sourceEnv (.return result)
         [.localGet resultIndex, .ret] targetStore targetLocals witness
         sourceRuntime sourceValue kind targetStore witness physical
   | letValue
+      {labels : LabelContext}
       (valueCompiled :
         Fir.Wasm.compileLetValue context decl = .ok valueCode)
       (valueAdapted :
@@ -574,17 +574,16 @@ inductive ConcreteCodeSimulation
           sourceRuntime nextRuntime sourceEnv sourceValue targetStore nextStore
           targetLocals nextLocals resultIndex witness nextWitness)
       (continued :
-        ConcreteCodeSimulation context sourceModule sourceFunction labels
-          module hostEnv sourceExternals nextRuntime
+        ConcreteCodeSimulation context sourceModule sourceFunction module hostEnv sourceExternals labels nextRuntime
           (bind sourceEnv decl.fvarId sourceValue) continuation targetRest
           nextStore nextLocals nextWitness resultRuntime resultValue resultKind
           resultStore resultWitness physical) :
-      ConcreteCodeSimulation context sourceModule sourceFunction labels module
-        hostEnv sourceExternals sourceRuntime sourceEnv (.let decl continuation)
+      ConcreteCodeSimulation context sourceModule sourceFunction module hostEnv sourceExternals labels sourceRuntime sourceEnv (.let decl continuation)
         (targetValue ++ .localSet resultIndex :: targetRest)
         targetStore targetLocals witness resultRuntime resultValue resultKind
         resultStore resultWitness physical
   | callLet
+      {labels : LabelContext}
       (valueCompiled :
         Fir.Wasm.compileLetValue context decl = .ok valueCode)
       (valueAdapted :
@@ -599,17 +598,16 @@ inductive ConcreteCodeSimulation
           nextRuntime sourceEnv sourceValue targetStore nextStore targetLocals
           nextLocals resultIndex witness nextWitness)
       (continued :
-        ConcreteCodeSimulation context sourceModule sourceFunction labels
-          module hostEnv sourceExternals nextRuntime
+        ConcreteCodeSimulation context sourceModule sourceFunction module hostEnv sourceExternals labels nextRuntime
           (bind sourceEnv decl.fvarId sourceValue) continuation targetRest
           nextStore nextLocals nextWitness resultRuntime resultValue resultKind
           resultStore resultWitness physical) :
-      ConcreteCodeSimulation context sourceModule sourceFunction labels module
-        hostEnv sourceExternals sourceRuntime sourceEnv (.let decl continuation)
+      ConcreteCodeSimulation context sourceModule sourceFunction module hostEnv sourceExternals labels sourceRuntime sourceEnv (.let decl continuation)
         (targetValue ++ .localSet resultIndex :: targetRest)
         targetStore targetLocals witness resultRuntime resultValue resultKind
         resultStore resultWitness physical
   | externalLet
+      {labels : LabelContext}
       (valueCompiled :
         Fir.Wasm.compileLetValue context decl = .ok valueCode)
       (valueAdapted :
@@ -624,17 +622,16 @@ inductive ConcreteCodeSimulation
           nextRuntime sourceEnv sourceValue targetStore nextStore targetLocals
           nextLocals resultIndex witness nextWitness)
       (continued :
-        ConcreteCodeSimulation context sourceModule sourceFunction labels
-          module hostEnv sourceExternals nextRuntime
+        ConcreteCodeSimulation context sourceModule sourceFunction module hostEnv sourceExternals labels nextRuntime
           (bind sourceEnv decl.fvarId sourceValue) continuation targetRest
           nextStore nextLocals nextWitness resultRuntime resultValue resultKind
           resultStore resultWitness physical) :
-      ConcreteCodeSimulation context sourceModule sourceFunction labels module
-        hostEnv sourceExternals sourceRuntime sourceEnv (.let decl continuation)
+      ConcreteCodeSimulation context sourceModule sourceFunction module hostEnv sourceExternals labels sourceRuntime sourceEnv (.let decl continuation)
         (targetValue ++ .localSet resultIndex :: targetRest)
         targetStore targetLocals witness resultRuntime resultValue resultKind
         resultStore resultWitness physical
   | lazyLet
+      {labels : LabelContext}
       (path : LazyCachePath)
       (valueCompiled :
         Fir.Wasm.compileLetValue context decl = .ok valueCode)
@@ -650,44 +647,40 @@ inductive ConcreteCodeSimulation
           nextRuntime sourceEnv sourceValue targetStore nextStore targetLocals
           nextLocals resultIndex witness nextWitness)
       (continued :
-        ConcreteCodeSimulation context sourceModule sourceFunction labels
-          module hostEnv sourceExternals nextRuntime
+        ConcreteCodeSimulation context sourceModule sourceFunction module hostEnv sourceExternals labels nextRuntime
           (bind sourceEnv decl.fvarId sourceValue) continuation targetRest
           nextStore nextLocals nextWitness resultRuntime resultValue resultKind
           resultStore resultWitness physical) :
-      ConcreteCodeSimulation context sourceModule sourceFunction labels module
-        hostEnv sourceExternals sourceRuntime sourceEnv (.let decl continuation)
+      ConcreteCodeSimulation context sourceModule sourceFunction module hostEnv sourceExternals labels sourceRuntime sourceEnv (.let decl continuation)
         (targetValue ++ .localSet resultIndex :: targetRest)
         targetStore targetLocals witness resultRuntime resultValue resultKind
         resultStore resultWitness physical
   | caseOf
+      {labels selectedLabels : LabelContext}
       (target selectedTarget : Wasm.Program)
       (step :
         ConcreteCasesStepSimulates context sourceModule sourceFunction labels
-          module hostEnv sourceRuntime sourceEnv cases selected target
-          selectedTarget targetStore targetLocals witness)
+          selectedLabels module hostEnv sourceRuntime sourceEnv cases selected
+          target selectedTarget targetStore targetLocals witness)
       (continued :
-        ConcreteCodeSimulation context sourceModule sourceFunction labels
-          module hostEnv sourceExternals sourceRuntime sourceEnv selected
+        ConcreteCodeSimulation context sourceModule sourceFunction module hostEnv sourceExternals selectedLabels sourceRuntime sourceEnv selected
           selectedTarget targetStore targetLocals witness resultRuntime
           resultValue resultKind resultStore resultWitness physical) :
-      ConcreteCodeSimulation context sourceModule sourceFunction labels module
-        hostEnv sourceExternals sourceRuntime sourceEnv (.cases cases) target
+      ConcreteCodeSimulation context sourceModule sourceFunction module hostEnv sourceExternals labels sourceRuntime sourceEnv (.cases cases) target
         targetStore targetLocals witness resultRuntime resultValue resultKind
         resultStore resultWitness physical
   | effect
+      {labels : LabelContext}
       (target targetRest : Wasm.Program)
       (step :
         EffectStepSimulates context sourceModule sourceFunction labels module
           hostEnv sourceRuntime nextRuntime sourceEnv code continuation target
           targetRest targetStore nextStore targetLocals witness nextWitness)
       (continued :
-        ConcreteCodeSimulation context sourceModule sourceFunction labels
-          module hostEnv sourceExternals nextRuntime sourceEnv continuation
+        ConcreteCodeSimulation context sourceModule sourceFunction module hostEnv sourceExternals labels nextRuntime sourceEnv continuation
           targetRest nextStore targetLocals nextWitness resultRuntime
           resultValue resultKind resultStore resultWitness physical) :
-      ConcreteCodeSimulation context sourceModule sourceFunction labels module
-        hostEnv sourceExternals sourceRuntime sourceEnv code target targetStore
+      ConcreteCodeSimulation context sourceModule sourceFunction module hostEnv sourceExternals labels sourceRuntime sourceEnv code target targetStore
         targetLocals witness resultRuntime resultValue resultKind resultStore
         resultWitness physical
 
@@ -697,7 +690,7 @@ theorem ConcreteCodeSimulation.toCodeWP_exactReturn
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceExternals : ExternalImpl}
@@ -712,8 +705,7 @@ theorem ConcreteCodeSimulation.toCodeWP_exactReturn
     {resultKind : AbiKind}
     {physical : Wasm.Value}
     (simulation :
-      ConcreteCodeSimulation context sourceModule sourceFunction labels module
-        hostEnv sourceExternals sourceRuntime sourceEnv sourceCode target targetStore
+      ConcreteCodeSimulation context sourceModule sourceFunction module hostEnv sourceExternals labels sourceRuntime sourceEnv sourceCode target targetStore
         targetLocals witness resultRuntime resultValue resultKind resultStore
         resultWitness physical) :
     CodeWP context sourceModule sourceFunction labels module hostEnv
@@ -741,7 +733,7 @@ theorem ConcreteCodeSimulation.toCodeWP
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceExternals : ExternalImpl}
@@ -758,8 +750,7 @@ theorem ConcreteCodeSimulation.toCodeWP
     {targetFunction : Wasm.Function}
     {parameters callerTail : List Wasm.Value}
     (simulation :
-      ConcreteCodeSimulation context sourceModule sourceFunction labels module
-        hostEnv sourceExternals sourceRuntime sourceEnv sourceCode target
+      ConcreteCodeSimulation context sourceModule sourceFunction module hostEnv sourceExternals labels sourceRuntime sourceEnv sourceCode target
         targetStore targetLocals witness resultRuntime resultValue resultKind
         resultStore resultWitness physical)
     (parameterCount : parameters.length = targetFunction.numParams)
@@ -785,7 +776,7 @@ theorem ConcreteCodeSimulation.sourceResult
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceExternals : ExternalImpl}
@@ -800,8 +791,7 @@ theorem ConcreteCodeSimulation.sourceResult
     {resultKind : AbiKind}
     {physical : Wasm.Value}
     (simulation :
-      ConcreteCodeSimulation context sourceModule sourceFunction labels module
-        hostEnv sourceExternals sourceRuntime sourceEnv sourceCode target targetStore
+      ConcreteCodeSimulation context sourceModule sourceFunction module hostEnv sourceExternals labels sourceRuntime sourceEnv sourceCode target targetStore
         targetLocals witness resultRuntime resultValue resultKind resultStore
         resultWitness physical) :
     SourceCodeResult context sourceExternals sourceRuntime sourceEnv sourceCode
@@ -847,7 +837,7 @@ theorem ConcreteCodeSimulation.execEvaluates
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceExternals : ExternalImpl}
@@ -862,8 +852,7 @@ theorem ConcreteCodeSimulation.execEvaluates
     {resultKind : AbiKind}
     {physical : Wasm.Value}
     (simulation :
-      ConcreteCodeSimulation context sourceModule sourceFunction labels module
-        hostEnv sourceExternals sourceRuntime sourceEnv sourceCode target
+      ConcreteCodeSimulation context sourceModule sourceFunction module hostEnv sourceExternals labels sourceRuntime sourceEnv sourceCode target
         targetStore targetLocals witness resultRuntime resultValue resultKind
         resultStore resultWitness physical) :
     ExecEvaluates sourceExternals
@@ -877,7 +866,7 @@ theorem ConcreteCodeSimulation.runtimeRelated
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceExternals : ExternalImpl}
@@ -892,8 +881,7 @@ theorem ConcreteCodeSimulation.runtimeRelated
     {resultKind : AbiKind}
     {physical : Wasm.Value}
     (simulation :
-      ConcreteCodeSimulation context sourceModule sourceFunction labels module
-        hostEnv sourceExternals sourceRuntime sourceEnv sourceCode target targetStore
+      ConcreteCodeSimulation context sourceModule sourceFunction module hostEnv sourceExternals labels sourceRuntime sourceEnv sourceCode target targetStore
         targetLocals witness resultRuntime resultValue resultKind resultStore
         resultWitness physical) :
     ConcreteRuntimeRel resultStore.host.runtime resultWitness resultRuntime := by
@@ -919,7 +907,7 @@ theorem ConcreteCodeSimulation.failureClear
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceExternals : ExternalImpl}
@@ -934,8 +922,7 @@ theorem ConcreteCodeSimulation.failureClear
     {resultKind : AbiKind}
     {physical : Wasm.Value}
     (simulation :
-      ConcreteCodeSimulation context sourceModule sourceFunction labels module
-        hostEnv sourceExternals sourceRuntime sourceEnv sourceCode target targetStore
+      ConcreteCodeSimulation context sourceModule sourceFunction module hostEnv sourceExternals labels sourceRuntime sourceEnv sourceCode target targetStore
         targetLocals witness resultRuntime resultValue resultKind resultStore
         resultWitness physical) :
     resultStore.host.failure? = none := by
@@ -961,7 +948,7 @@ theorem ConcreteCodeSimulation.valueRelated
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceExternals : ExternalImpl}
@@ -976,8 +963,7 @@ theorem ConcreteCodeSimulation.valueRelated
     {resultKind : AbiKind}
     {physical : Wasm.Value}
     (simulation :
-      ConcreteCodeSimulation context sourceModule sourceFunction labels module
-        hostEnv sourceExternals sourceRuntime sourceEnv sourceCode target targetStore
+      ConcreteCodeSimulation context sourceModule sourceFunction module hostEnv sourceExternals labels sourceRuntime sourceEnv sourceCode target targetStore
         targetLocals witness resultRuntime resultValue resultKind resultStore
         resultWitness physical) :
     PhysicalValueRel resultWitness resultKind physical resultValue := by
@@ -1024,8 +1010,7 @@ theorem ConcreteCodeSimulation.toSuccessfulDeclaration
     {resultValue : Value}
     {physical : Wasm.Value}
     (simulation :
-      ConcreteCodeSimulation context sourceModule sourceFunction []
-        module hostEnv sourceExternals sourceRuntime sourceEnv sourceCode
+      ConcreteCodeSimulation context sourceModule sourceFunction module hostEnv sourceExternals [] sourceRuntime sourceEnv sourceCode
         targetBody initial
         (targetFunction.toLocals parameters.reverse) initialWitness resultRuntime
         resultValue resultKind resultStore resultWitness physical)
@@ -1072,8 +1057,7 @@ theorem ConcreteCodeSimulation.correct
     {resultValue : Value}
     {physical : Wasm.Value}
     (simulation :
-      ConcreteCodeSimulation context sourceModule sourceFunction []
-        module hostEnv sourceExternals sourceRuntime sourceEnv sourceCode
+      ConcreteCodeSimulation context sourceModule sourceFunction module hostEnv sourceExternals [] sourceRuntime sourceEnv sourceCode
         targetBody initial
         (targetFunction.toLocals parameters.reverse) initialWitness resultRuntime
         resultValue resultKind resultStore resultWitness physical)

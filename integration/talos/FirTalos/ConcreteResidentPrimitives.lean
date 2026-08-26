@@ -224,7 +224,7 @@ theorem wp_definedCallResultSet
 same Talos program used by the execution lemmas below. -/
 theorem instructions_immediateNaturalPayload
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {value : Lean.FVarId} {index : Nat}
+    {labels : LabelContext} {value : Lean.FVarId} {index : Nat}
     (found : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList) value =
         some index) :
@@ -240,7 +240,7 @@ trip.  This is a shape theorem only: the caller remains responsible for
 showing that the input word represents the claimed Lean object. -/
 theorem instructions_typedObjectWordRoundTripSource
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} :
+    {labels : LabelContext} :
     FirTalos.instructions sourceModule sourceFunction labels
       typedObjectWordRoundTripSource =
         .ok unsignedI32RoundTrip := by
@@ -273,7 +273,7 @@ theorem wp_unsignedI32RoundTrip
 successful adaptation of the emitter's common pair dispatcher. -/
 theorem instructions_withImmediateNaturalPair
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {left right : Lean.FVarId}
+    {labels : LabelContext} {left right : Lean.FVarId}
     {leftIndex rightIndex : Nat}
     {sourceImmediate sourceFallback : List Fir.Wasm.Instruction}
     {targetImmediate targetFallback : Wasm.Program}
@@ -284,10 +284,12 @@ theorem instructions_withImmediateNaturalPair
       (sourceFunction.params.toList ++ sourceFunction.locals.toList) right =
         some rightIndex)
     (immediateAdapted :
-      FirTalos.instructions sourceModule sourceFunction labels sourceImmediate =
+      FirTalos.instructions sourceModule sourceFunction (none :: labels)
+        sourceImmediate =
         .ok targetImmediate)
     (fallbackAdapted :
-      FirTalos.instructions sourceModule sourceFunction labels sourceFallback =
+      FirTalos.instructions sourceModule sourceFunction (none :: labels)
+        sourceFallback =
         .ok targetFallback) :
     FirTalos.instructions sourceModule sourceFunction labels
       (Fir.Wasm.Emit.ResidentBigNumeric.withImmediateNaturalPair left right

@@ -773,6 +773,7 @@ def allocateTargetFunction (frontierIndex : Nat)
   results := [.i32]
   body := allocateProgram frontierIndex ++ suffix }
 
+set_option maxRecDepth 2048 in
 /-- The symbolic allocator adapts exactly to the target body above.  This
 pins the proof to W7's public emitter definition while keeping its private
 identifier names out of the theorem statement. -/

@@ -39,7 +39,7 @@ def ReturnedObservation (runtime : RuntimeState) (value : Value) : Observation :
 theorem CodeWP.conseq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
     {code : Lean.Compiler.LCNF.Code .impure} {target : Wasm.Program}
@@ -137,7 +137,7 @@ theorem terminatesWith_of_wp_body_at
 theorem CodeWP.toTerminatesWithRelated
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
     {code : Lean.Compiler.LCNF.Code .impure} {function : Wasm.Function}
@@ -161,7 +161,7 @@ theorem CodeWP.toTerminatesWithRelated
 theorem CodeWP.toPartiallyMeetsRelated
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
     {code : Lean.Compiler.LCNF.Code .impure} {function : Wasm.Function}
@@ -202,7 +202,7 @@ def ExportPartiallyMeets (hostEnv : Wasm.HostEnv RuntimeHost)
 theorem CodeWP.toExportTerminatesWithRelated
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
     {code : Lean.Compiler.LCNF.Code .impure} {function : Wasm.Function}
@@ -226,7 +226,7 @@ theorem CodeWP.toExportTerminatesWithRelated
 theorem CodeWP.toExportPartiallyMeetsRelated
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
     {code : Lean.Compiler.LCNF.Code .impure} {function : Wasm.Function}
@@ -253,7 +253,7 @@ resolved export and the canonical successful source observation.
 theorem CodeWP.toExportTerminatesWithRelated_of_return
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost}
     {initialSourceRuntime resultSourceRuntime : RuntimeState} {sourceEnv : Env}
     {sourceValue : Value} {kind : AbiKind}

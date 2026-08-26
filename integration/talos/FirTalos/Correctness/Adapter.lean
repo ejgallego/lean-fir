@@ -1,8 +1,72 @@
 import FirTalos.Adapter
+import Fir.Wasm.Emit.Binary
 
 namespace FirTalos.Correctness
 
+/-- Flat instructions adapt identically at every structured-control depth. -/
+theorem instruction_eq_of_labelIndependent
+    {module : Fir.Wasm.Module} {function : Fir.Wasm.Function}
+    {source : Fir.Wasm.Instruction}
+    (independent : instructionLabelIndependent source = true)
+    (left right : LabelContext) :
+    instruction module function left source =
+      instruction module function right source := by
+  cases source <;> simp_all [instructionLabelIndependent, instruction]
+
+/-- Flat programs adapt identically at every structured-control depth. -/
+theorem instructions_eq_of_labelIndependent
+    {module : Fir.Wasm.Module} {function : Fir.Wasm.Function}
+    {body : List Fir.Wasm.Instruction}
+    (independent : programLabelIndependent body = true)
+    (left right : LabelContext) :
+    instructions module function left body =
+      instructions module function right body := by
+  induction body with
+  | nil => simp [instructions]
+  | cons source rest ih =>
+      simp only [programLabelIndependent, List.all_cons, Bool.and_eq_true]
+        at independent
+      simp only [instructions]
+      rw [instruction_eq_of_labelIndependent independent.1 left right,
+        ih independent.2]
+
 open Lean
+
+private def anonymousIfLoopLabel : FVarId := ⟨`anonymousIfLoop⟩
+
+private def anonymousIfLoopFunction : Fir.Wasm.Function := {
+  name := `anonymousIfLoopFunction
+  params := #[]
+  results := #[]
+  locals := #[]
+  body := [
+    .loop anonymousIfLoopLabel [
+      .i32Const .uint32 1,
+      .ifElse [.br anonymousIfLoopLabel] []],
+    .ret] }
+
+private def anonymousIfLoopModule : Fir.Wasm.Module := {
+  imports := #[]
+  functions := #[anonymousIfLoopFunction]
+  exports := #[anonymousIfLoopFunction.name]
+  initializers := #[]
+  runtimeOperations := #[] }
+
+/- The adapter and production encoder count the anonymous `if` frame at the
+same depth: a branch from the arm to the enclosing loop is `br 1`. -/
+#guard match
+    Fir.Wasm.Emit.encodeWithOrigins anonymousIfLoopModule,
+    function anonymousIfLoopModule anonymousIfLoopFunction with
+  | .ok encoded, .ok adapted =>
+      let branchOrigin? := encoded.origins.find? fun origin =>
+        origin.opcode == #[0x0c]
+      match branchOrigin? with
+      | some origin =>
+          encoded.bytes.data[origin.offset + 1]? == some 1 && match adapted.body with
+            | [.loop 0 0 [.const 1, .iff 0 0 [.br 1] []], .ret] => true
+            | _ => false
+      | none => false
+  | _, _ => false
 
 @[simp] theorem importDecl_params (sourceImport : Fir.Wasm.Import) :
     (importDecl sourceImport).params =
@@ -56,7 +120,7 @@ adapting its two parts.  This exposes the adapter's list homomorphism without
 duplicating its recursive implementation in downstream proofs. -/
 theorem instructions_append
     (sourceModule : Fir.Wasm.Module) (source : Fir.Wasm.Function)
-    (labels : List FVarId) (left right : List Fir.Wasm.Instruction) :
+    (labels : LabelContext) (left right : List Fir.Wasm.Instruction) :
     instructions sourceModule source labels (left ++ right) = (do
       let targetLeft ← instructions sourceModule source labels left
       let targetRight ← instructions sourceModule source labels right
@@ -73,7 +137,7 @@ theorem instructions_append
 /-- Successful adaptations of two source fragments compose pointwise. -/
 theorem instructions_append_of_success
     {sourceModule : Fir.Wasm.Module} {source : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {left right : List Fir.Wasm.Instruction}
     {targetLeft targetRight : Wasm.Program}
     (leftAdapted :
@@ -86,16 +150,16 @@ theorem instructions_append_of_success
   rfl
 
 /-- Adaptation of a symbolic conditional is determined by adaptation of its
-two branches under the unchanged label context. -/
+two branches under the anonymous label introduced by the Wasm `if`. -/
 theorem instruction_ifElse
     {sourceModule : Fir.Wasm.Module} {source : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {thenSource elseSource : List Fir.Wasm.Instruction}
     {thenTarget elseTarget : Wasm.Program}
     (thenAdapted :
-      instructions sourceModule source labels thenSource = .ok thenTarget)
+      instructions sourceModule source (none :: labels) thenSource = .ok thenTarget)
     (elseAdapted :
-      instructions sourceModule source labels elseSource = .ok elseTarget) :
+      instructions sourceModule source (none :: labels) elseSource = .ok elseTarget) :
     instruction sourceModule source labels (.ifElse thenSource elseSource) =
       .ok (.iff 0 0 thenTarget elseTarget) := by
   simp [instruction, thenAdapted, elseAdapted, Bind.bind, Except.bind,
@@ -105,9 +169,9 @@ theorem instruction_ifElse
 under the extended label context. -/
 theorem instruction_block
     {sourceModule : Fir.Wasm.Module} {source : Fir.Wasm.Function}
-    {labels : List FVarId} {label : FVarId}
+    {labels : LabelContext} {label : FVarId}
     {sourceBody : List Fir.Wasm.Instruction} {targetBody : Wasm.Program}
-    (bodyAdapted : instructions sourceModule source (label :: labels)
+    (bodyAdapted : instructions sourceModule source (some label :: labels)
       sourceBody = .ok targetBody) :
     instruction sourceModule source labels (.block label sourceBody) =
       .ok (.block 0 0 targetBody) := by
@@ -117,9 +181,9 @@ theorem instruction_block
 under the extended label context. -/
 theorem instruction_loop
     {sourceModule : Fir.Wasm.Module} {source : Fir.Wasm.Function}
-    {labels : List FVarId} {label : FVarId}
+    {labels : LabelContext} {label : FVarId}
     {sourceBody : List Fir.Wasm.Instruction} {targetBody : Wasm.Program}
-    (bodyAdapted : instructions sourceModule source (label :: labels)
+    (bodyAdapted : instructions sourceModule source (some label :: labels)
       sourceBody = .ok targetBody) :
     instruction sourceModule source labels (.loop label sourceBody) =
       .ok (.loop 0 0 targetBody) := by
@@ -128,46 +192,46 @@ theorem instruction_loop
 /-- A resolved source local becomes the same positional Talos local. -/
 theorem instruction_localGet
     {sourceModule : Fir.Wasm.Module} {source : Fir.Wasm.Function}
-    {fvarId : FVarId} {index : Nat}
+    {labels : LabelContext} {fvarId : FVarId} {index : Nat}
     (found : findFVar? (source.params.toList ++ source.locals.toList) fvarId = some index) :
-    instruction sourceModule source [] (.localGet fvarId) = .ok (.localGet index) := by
+    instruction sourceModule source labels (.localGet fvarId) = .ok (.localGet index) := by
   rw [instruction, found]
   rfl
 
 /-- A proved object-refined local read retains the same physical Talos local. -/
 theorem instruction_localGetObject
     {sourceModule : Fir.Wasm.Module} {source : Fir.Wasm.Function}
-    {fvarId : FVarId} {index : Nat}
+    {labels : LabelContext} {fvarId : FVarId} {index : Nat}
     (found : findFVar? (source.params.toList ++ source.locals.toList) fvarId = some index) :
-    instruction sourceModule source [] (.localGetObject fvarId) = .ok (.localGet index) := by
+    instruction sourceModule source labels (.localGetObject fvarId) = .ok (.localGet index) := by
   rw [instruction, found]
   rfl
 
 /-- A resolved source local assignment becomes the same positional Talos assignment. -/
 theorem instruction_localSet
     {sourceModule : Fir.Wasm.Module} {source : Fir.Wasm.Function}
-    {fvarId : FVarId} {index : Nat}
+    {labels : LabelContext} {fvarId : FVarId} {index : Nat}
     (found : findFVar? (source.params.toList ++ source.locals.toList) fvarId = some index) :
-    instruction sourceModule source [] (.localSet fvarId) = .ok (.localSet index) := by
+    instruction sourceModule source labels (.localSet fvarId) = .ok (.localSet index) := by
   rw [instruction, found]
   rfl
 
 @[simp] theorem instruction_globalGet
     (sourceModule : Fir.Wasm.Module) (source : Fir.Wasm.Function)
-    (labels : List FVarId) (index : Nat) (kind : Fir.Wasm.AbiKind) :
+    (labels : LabelContext) (index : Nat) (kind : Fir.Wasm.AbiKind) :
     instruction sourceModule source labels (.globalGet index kind) =
       .ok (.globalGet index) := by rw [instruction]; rfl
 
 @[simp] theorem instruction_globalSet
     (sourceModule : Fir.Wasm.Module) (source : Fir.Wasm.Function)
-    (labels : List FVarId) (index : Nat) (kind : Fir.Wasm.AbiKind) :
+    (labels : LabelContext) (index : Nat) (kind : Fir.Wasm.AbiKind) :
     instruction sourceModule source labels (.globalSet index kind) =
       .ok (.globalSet index) := by rw [instruction]; rfl
 
 /-- A resolved branch target becomes its de Bruijn label depth. -/
 theorem instruction_br
     {sourceModule : Fir.Wasm.Module} {source : Fir.Wasm.Function}
-    {labels : List FVarId} {label : FVarId} {index : Nat}
+    {labels : LabelContext} {label : FVarId} {index : Nat}
     (found : findLabel? labels label = some index) :
     instruction sourceModule source labels (.br label) = .ok (.br index) := by
   rw [instruction, found]
@@ -176,9 +240,9 @@ theorem instruction_br
 /-- A resolved symbolic call becomes the corresponding Talos function index. -/
 theorem instruction_call
     {sourceModule : Fir.Wasm.Module} {source : Fir.Wasm.Function}
-    {target : Fir.Wasm.CallTarget} {index : Nat}
+    {labels : LabelContext} {target : Fir.Wasm.CallTarget} {index : Nat}
     (found : callIndex? sourceModule target = some index) :
-    instruction sourceModule source [] (.call target) = .ok (.call index) := by
+    instruction sourceModule source labels (.call target) = .ok (.call index) := by
   rw [instruction, found]
   rfl
 

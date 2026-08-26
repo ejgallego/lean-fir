@@ -146,13 +146,15 @@ theorem instructions_makeNaturalSourceProgram
       List Fir.Wasm.Instruction}
     {targetLowOverflow targetHighNonzero targetBig : Wasm.Program}
     (lowAdapted : FirTalos.instructions sourceModule
-      Fir.Wasm.Emit.ResidentNumeric.makeNaturalFunction [] sourceLowOverflow =
+      Fir.Wasm.Emit.ResidentNumeric.makeNaturalFunction [none, none, none]
+        sourceLowOverflow =
         .ok targetLowOverflow)
     (highAdapted : FirTalos.instructions sourceModule
-      Fir.Wasm.Emit.ResidentNumeric.makeNaturalFunction [] sourceHighNonzero =
+      Fir.Wasm.Emit.ResidentNumeric.makeNaturalFunction [none, none]
+        sourceHighNonzero =
         .ok targetHighNonzero)
     (bigAdapted : FirTalos.instructions sourceModule
-      Fir.Wasm.Emit.ResidentNumeric.makeNaturalFunction [] sourceBig =
+      Fir.Wasm.Emit.ResidentNumeric.makeNaturalFunction [none] sourceBig =
         .ok targetBig) :
     FirTalos.instructions sourceModule
       Fir.Wasm.Emit.ResidentNumeric.makeNaturalFunction []
@@ -257,7 +259,7 @@ theorem makeNaturalTargetFunction_of_adapted
         some 1 := by decide
   unfold FirTalos.function at adapted
   cases lowAdapted : FirTalos.instructions sourceModule
-      Fir.Wasm.Emit.ResidentNumeric.makeNaturalFunction []
+      Fir.Wasm.Emit.ResidentNumeric.makeNaturalFunction [none, none, none]
       sourceLowOverflow with
   | error error =>
       rw [sourceShape] at adapted
@@ -266,7 +268,7 @@ theorem makeNaturalTargetFunction_of_adapted
         lowAdapted, Bind.bind, Except.bind, pure, Except.pure] at adapted
   | ok lowOverflow =>
       cases highAdapted : FirTalos.instructions sourceModule
-          Fir.Wasm.Emit.ResidentNumeric.makeNaturalFunction []
+          Fir.Wasm.Emit.ResidentNumeric.makeNaturalFunction [none, none]
           sourceHighNonzero with
       | error error =>
           rw [sourceShape] at adapted
@@ -276,7 +278,8 @@ theorem makeNaturalTargetFunction_of_adapted
             Except.pure] at adapted
       | ok highNonzero =>
           cases bigAdapted : FirTalos.instructions sourceModule
-              Fir.Wasm.Emit.ResidentNumeric.makeNaturalFunction [] sourceBig with
+              Fir.Wasm.Emit.ResidentNumeric.makeNaturalFunction [none]
+                sourceBig with
           | error error =>
               rw [sourceShape] at adapted
               simp [makeNaturalSourceProgram,
@@ -1103,7 +1106,7 @@ theorem sumCarryFromFunction_step_shape :
 /-- Successful helper lookup adapts W7's exact source step to the fixed Talos
 program used by `wp_sumCarryStepProgram`. -/
 theorem instructions_sumCarryStepSource
-    {sourceModule : Fir.Wasm.Module} {labels : List Lean.FVarId}
+    {sourceModule : Fir.Wasm.Module} {labels : LabelContext}
     {magnitudeLowIndex magnitudeHighIndex : Nat}
     (magnitudeLowFound : FirTalos.callIndex? sourceModule
       (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeLowName) =
@@ -1359,7 +1362,7 @@ def sumCarryLoopProgram (magnitudeLowIndex magnitudeHighIndex : Nat) :
 /-- The symbolic guard of the installed helper adapts to the fixed numeric
 local layout used by the loop proof. -/
 theorem instructions_sumCarryGuardSource
-    {sourceModule : Fir.Wasm.Module} {labels : List Lean.FVarId} :
+    {sourceModule : Fir.Wasm.Module} {labels : LabelContext} :
     FirTalos.instructions sourceModule
       Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction labels
       (sumCarryGuardSource
@@ -1377,11 +1380,11 @@ theorem instructions_sumCarryGuardSource
 /-- The symbolic increment and back-edge adapt to the fixed numeric local and
 label layout used by the loop proof. -/
 theorem instructions_sumCarryContinueSource
-    {sourceModule : Fir.Wasm.Module} {labels : List Lean.FVarId}
+    {sourceModule : Fir.Wasm.Module} {labels : LabelContext}
     {loopLabel : Lean.FVarId} :
     FirTalos.instructions sourceModule
       Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction
-      (loopLabel :: labels)
+      (some loopLabel :: labels)
       (sumCarryContinueSource
         Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.locals[6]!.1
         Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[6]!.1
@@ -1397,7 +1400,7 @@ theorem instructions_sumCarryContinueSource
 /-- Exact adaptation of the private loop body assembled from the separately
 proved guard, arithmetic step, and back-edge fragments. -/
 theorem instructions_sumCarryLoopBodySource
-    {sourceModule : Fir.Wasm.Module} {labels : List Lean.FVarId}
+    {sourceModule : Fir.Wasm.Module} {labels : LabelContext}
     {loopLabel : Lean.FVarId} {magnitudeLowIndex magnitudeHighIndex : Nat}
     (magnitudeLowFound : FirTalos.callIndex? sourceModule
       (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeLowName) =
@@ -1407,7 +1410,7 @@ theorem instructions_sumCarryLoopBodySource
         some magnitudeHighIndex) :
     FirTalos.instructions sourceModule
       Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction
-      (loopLabel :: labels)
+      (some loopLabel :: labels)
       (sumCarryGuardSource
           Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[4]!.1
           Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromFunction.params[5]!.1
@@ -2730,7 +2733,7 @@ def retypeRawObjectResultSource (raw saved result : Lean.FVarId) :
 /-- The adapter preserves the shared scratch-slot object retyping sequence. -/
 theorem instructions_retypeRawObjectResultSource
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {raw saved result : Lean.FVarId}
+    {labels : LabelContext} {raw saved result : Lean.FVarId}
     {rawIndex savedIndex resultIndex : Nat}
     (rawFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList) raw =
@@ -2851,7 +2854,7 @@ def typedNaturalReturnProgram : Wasm.Program :=
 operations and the explicit return. -/
 theorem instructions_typedNaturalReturnSource
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} :
+    {labels : LabelContext} :
     FirTalos.instructions sourceModule sourceFunction labels
       typedNaturalReturnSource = .ok typedNaturalReturnProgram := by
   simp [typedNaturalReturnSource, typedNaturalReturnProgram,
@@ -3720,7 +3723,7 @@ the exact fixed-local Talos program.  This pins malformed-input trapping to
 the two actual validator calls and leaves no unchecked source fragment before
 the result-count split. -/
 theorem instructions_checkedNatAddPrefixSource
-    {sourceModule : Fir.Wasm.Module}
+    {sourceModule : Fir.Wasm.Module} {labels : LabelContext}
     {validateNaturalIndex magnitudeCountIndex sumCarryIndex : Nat}
     (validateNaturalFound : FirTalos.callIndex? sourceModule
       (.declaration Fir.Wasm.Emit.ResidentBigNumeric.validateNaturalName) =
@@ -3732,7 +3735,7 @@ theorem instructions_checkedNatAddPrefixSource
       (.declaration Fir.Wasm.Emit.ResidentBigNumeric.sumCarryFromName) =
         some sumCarryIndex) :
     FirTalos.instructions sourceModule
-      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction []
+      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction labels
       (checkedNatAddPrefixSource
         Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[0]!.1
         Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[1]!.1
@@ -3930,7 +3933,7 @@ theorem natAddFunction_checkedOneLimb_shape :
 /-- Successful call-index resolution adapts the concrete one-limb source
 producer to its exact fixed-local Talos program. -/
 theorem instructions_checkedOneLimbProducerSource
-    {sourceModule : Fir.Wasm.Module}
+    {sourceModule : Fir.Wasm.Module} {labels : LabelContext}
     {magnitudeLowIndex magnitudeHighIndex naturalSumIndex : Nat}
     (magnitudeLowFound : FirTalos.callIndex? sourceModule
       (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeLowName) =
@@ -3942,7 +3945,7 @@ theorem instructions_checkedOneLimbProducerSource
       (.declaration Fir.Wasm.Emit.ResidentNumeric.naturalSumName) =
         some naturalSumIndex) :
     FirTalos.instructions sourceModule
-      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction []
+      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction labels
       (checkedOneLimbProducerSource
         Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[0]!.1
         Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[1]!.1
@@ -4070,7 +4073,7 @@ def checkedLocalLimbPartProgram
 of its surrounding function and label stack. -/
 theorem instructions_checkedLocalLimbPartSource
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {object index scaled value : Lean.FVarId}
     {objectIndex indexIndex scaledIndex valueIndex offset : Nat}
     (objectFound : FirTalos.findFVar?
@@ -4358,7 +4361,7 @@ def writeSumStepProgram (magnitudeLowIndex magnitudeHighIndex : Nat) :
 /-- The private shared `sumStep` adapts to its shifted numeric layout inside
 W7's `writeSumFromFunction`. -/
 theorem instructions_writeSumStepSource
-    {sourceModule : Fir.Wasm.Module} {labels : List Lean.FVarId}
+    {sourceModule : Fir.Wasm.Module} {labels : LabelContext}
     {magnitudeLowIndex magnitudeHighIndex : Nat}
     (magnitudeLowFound : FirTalos.callIndex? sourceModule
       (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeLowName) =
@@ -4623,7 +4626,7 @@ def writeSumLimbStoresSource : List Fir.Wasm.Instruction :=
 
 /-- Exact adaptation of the two private `writeSumFrom` payload stores. -/
 theorem instructions_writeSumLimbStoresSource
-    {sourceModule : Fir.Wasm.Module} {labels : List Lean.FVarId} :
+    {sourceModule : Fir.Wasm.Module} {labels : LabelContext} :
     FirTalos.instructions sourceModule
       Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction labels
       writeSumLimbStoresSource = .ok writeSumLimbStoresProgram := by
@@ -5071,7 +5074,7 @@ theorem writeSumFromFunction_loop_shape :
 
 /-- Exact adaptation of the writer's terminal guard. -/
 theorem instructions_writeSumGuardSource
-    {sourceModule : Fir.Wasm.Module} {labels : List Lean.FVarId} :
+    {sourceModule : Fir.Wasm.Module} {labels : LabelContext} :
     FirTalos.instructions sourceModule
       Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction labels
       (sumCarryGuardSource
@@ -5102,11 +5105,11 @@ theorem instructions_writeSumGuardSource
 
 /-- Exact adaptation of the writer's carry/index back-edge. -/
 theorem instructions_writeSumContinueSource
-    {sourceModule : Fir.Wasm.Module} {labels : List Lean.FVarId}
+    {sourceModule : Fir.Wasm.Module} {labels : LabelContext}
     {loopLabel : Lean.FVarId} :
     FirTalos.instructions sourceModule
       Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction
-      (loopLabel :: labels)
+      (some loopLabel :: labels)
       (sumCarryContinueSource
         Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.locals[6]!.1
         Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[7]!.1
@@ -5134,7 +5137,7 @@ theorem instructions_writeSumContinueSource
 
 /-- Exact adaptation of the complete private writer loop body. -/
 theorem instructions_writeSumLoopBodySource
-    {sourceModule : Fir.Wasm.Module} {labels : List Lean.FVarId}
+    {sourceModule : Fir.Wasm.Module} {labels : LabelContext}
     {loopLabel : Lean.FVarId} {magnitudeLowIndex magnitudeHighIndex : Nat}
     (magnitudeLowFound : FirTalos.callIndex? sourceModule
       (.declaration Fir.Wasm.Emit.ResidentBigNumeric.magnitudeLowName) =
@@ -5144,7 +5147,7 @@ theorem instructions_writeSumLoopBodySource
         some magnitudeHighIndex) :
     FirTalos.instructions sourceModule
       Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction
-      (loopLabel :: labels)
+      (some loopLabel :: labels)
       (sumCarryGuardSource
           Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[5]!.1
           Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromFunction.params[6]!.1
@@ -8790,7 +8793,8 @@ to its exact Talos program.  In particular, the result is obtained from the
 allocator and writer calls plus the two conditional stores; no arbitrary
 physical `i32` is introduced at the object-return boundary. -/
 theorem instructions_checkedMultiLimbProducerSource
-    {sourceModule : Fir.Wasm.Module} {allocateIndex writeSumIndex : Nat}
+    {sourceModule : Fir.Wasm.Module} {labels : LabelContext}
+    {allocateIndex writeSumIndex : Nat}
     (allocateFound : FirTalos.callIndex? sourceModule
       (.declaration Fir.Wasm.Emit.ResidentBigNumeric.allocateName) =
         some allocateIndex)
@@ -8798,7 +8802,7 @@ theorem instructions_checkedMultiLimbProducerSource
       (.declaration Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromName) =
         some writeSumIndex) :
     FirTalos.instructions sourceModule
-      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction []
+      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction labels
       (checkedMultiLimbProducerSource
         Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[0]!.1
         Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[1]!.1
@@ -8949,7 +8953,7 @@ theorem natAddFunction_checkedFallback_exact_shape :
 /-- Adapting the complete checked fallback preserves its named prefix,
 dispatch, and typed result producers exactly. -/
 theorem instructions_checkedNatAddFallbackSource
-    {sourceModule : Fir.Wasm.Module}
+    {sourceModule : Fir.Wasm.Module} {labels : LabelContext}
     {validateNaturalIndex magnitudeCountIndex sumCarryIndex magnitudeLowIndex
       magnitudeHighIndex naturalSumIndex allocateIndex writeSumIndex : Nat}
     (validateNaturalFound : FirTalos.callIndex? sourceModule
@@ -8977,23 +8981,24 @@ theorem instructions_checkedNatAddFallbackSource
       (.declaration Fir.Wasm.Emit.ResidentBigNumeric.writeSumFromName) =
         some writeSumIndex) :
     FirTalos.instructions sourceModule
-      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction []
+      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction labels
       checkedNatAddFallbackSource =
         .ok (checkedNatAddFallbackProgram validateNaturalIndex
           magnitudeCountIndex sumCarryIndex magnitudeLowIndex
           magnitudeHighIndex naturalSumIndex allocateIndex writeSumIndex) := by
   have prefixAdapted := instructions_checkedNatAddPrefixSource
-    validateNaturalFound magnitudeCountFound sumCarryFound
+    (labels := labels) validateNaturalFound magnitudeCountFound sumCarryFound
   have oneAdapted := instructions_checkedOneLimbProducerSource
-    magnitudeLowFound magnitudeHighFound naturalSumFound
+    (labels := none :: labels) magnitudeLowFound magnitudeHighFound
+      naturalSumFound
   have multiAdapted := instructions_checkedMultiLimbProducerSource
-    allocateFound writeSumFound
+    (labels := none :: labels) allocateFound writeSumFound
   have returnAdapted := instructions_typedNaturalReturnSource
     (sourceModule := sourceModule)
     (sourceFunction := Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction)
-    (labels := [])
+    (labels := none :: labels)
   have oneResultAdapted : FirTalos.instructions sourceModule
-      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction []
+      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction (none :: labels)
       (checkedOneLimbProducerSource
           Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[0]!.1
           Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[1]!.1
@@ -9009,7 +9014,7 @@ theorem instructions_checkedNatAddFallbackSource
     rw [FirTalos.Correctness.instructions_append, oneAdapted, returnAdapted]
     rfl
   have multiResultAdapted : FirTalos.instructions sourceModule
-      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction []
+      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction (none :: labels)
       (checkedMultiLimbProducerSource
           Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[0]!.1
           Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction.params[1]!.1
@@ -11912,7 +11917,7 @@ theorem natAddFunction_checkedMultiLimb_shape :
 /-- Adapter preservation for the multi-limb result suffix. -/
 theorem instructions_checkedAllocatedNaturalReturnSource
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {raw : Lean.FVarId} {rawIndex : Nat}
+    {labels : LabelContext} {raw : Lean.FVarId} {rawIndex : Nat}
     (rawFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList) raw =
         some rawIndex) :
@@ -12121,7 +12126,7 @@ theorem natAddFunction_locals_size :
 program used by its execution theorem. -/
 theorem instructions_immediateAddSource
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {left right : Lean.FVarId}
+    {labels : LabelContext} {left right : Lean.FVarId}
     {leftIndex rightIndex naturalSumIndex : Nat}
     (leftFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList) left =
@@ -12167,7 +12172,7 @@ theorem instructions_natAddFunctionBody_of_shape
       (.declaration Fir.Wasm.Emit.ResidentNumeric.naturalSumName) =
         some naturalSumIndex)
     (fallbackAdapted : FirTalos.instructions sourceModule
-      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction [] sourceFallback =
+      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction [none] sourceFallback =
         .ok targetFallback) :
     FirTalos.instructions sourceModule
       Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction []
@@ -12184,7 +12189,7 @@ theorem instructions_natAddFunctionBody_of_shape
         (sourceModule := sourceModule)
         (sourceFunction :=
           Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction)
-        (labels := []) (leftIndex := 0) (rightIndex := 1)
+        (labels := [none]) (leftIndex := 0) (rightIndex := 1)
         (naturalSumIndex := naturalSumIndex)
         (by decide) (by decide) naturalSumFound)
   · exact fallbackAdapted
@@ -12210,7 +12215,7 @@ theorem adaptedNatAddFunction_body_of_shape
       (.declaration Fir.Wasm.Emit.ResidentNumeric.naturalSumName) =
         some naturalSumIndex)
     (fallbackAdapted : FirTalos.instructions sourceModule
-      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction [] sourceFallback =
+      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction [none] sourceFallback =
         .ok targetFallback) :
     targetFunction.body =
       ResidentPrimitives.immediateNaturalPairDispatch 0 1
@@ -12263,7 +12268,8 @@ theorem instructions_natAddFunctionBody_exact
             writeSumIndex)) := by
   apply instructions_natAddFunctionBody_of_shape
     natAddFunction_checkedFallback_exact_shape naturalSumFound
-  exact instructions_checkedNatAddFallbackSource validateNaturalFound
+  exact instructions_checkedNatAddFallbackSource (labels := [none])
+    validateNaturalFound
     magnitudeCountFound sumCarryFound magnitudeLowFound magnitudeHighFound
     naturalSumFound allocateFound writeSumFound
 
@@ -12522,7 +12528,7 @@ theorem terminatesWith_natAddFunctionImmediate_of_adapted
       (.declaration Fir.Wasm.Emit.ResidentNumeric.naturalSumName) =
         some naturalSumIndex)
     (fallbackAdapted : FirTalos.instructions sourceModule
-      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction [] sourceFallback =
+      Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction [none] sourceFallback =
         .ok targetFallback)
     (naturalSumAdapted : FirTalos.function sourceModule
       Fir.Wasm.Emit.ResidentNumeric.naturalSumFunction =
@@ -12681,7 +12687,7 @@ theorem modFunction_immediate_shape :
 Talos program executed below. -/
 theorem instructions_immediateModSource
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {left right raw saved result : Lean.FVarId}
+    {labels : LabelContext} {left right raw saved result : Lean.FVarId}
     {leftIndex rightIndex rawIndex savedIndex resultIndex makeNaturalIndex : Nat}
     (leftFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList) left =
@@ -12746,7 +12752,7 @@ theorem instructions_modFunctionBody_of_shape
         some makeNaturalIndex)
     (fallbackAdapted :
       FirTalos.instructions sourceModule
-        Fir.Wasm.Emit.ResidentNatArithmetic.modFunction [] sourceFallback =
+        Fir.Wasm.Emit.ResidentNatArithmetic.modFunction [none] sourceFallback =
           .ok targetFallback) :
     FirTalos.instructions sourceModule
       Fir.Wasm.Emit.ResidentNatArithmetic.modFunction []
@@ -12792,7 +12798,7 @@ theorem adaptedModFunction_body_of_shape
         some makeNaturalIndex)
     (fallbackAdapted :
       FirTalos.instructions sourceModule
-        Fir.Wasm.Emit.ResidentNatArithmetic.modFunction [] sourceFallback =
+        Fir.Wasm.Emit.ResidentNatArithmetic.modFunction [none] sourceFallback =
           .ok targetFallback) :
     targetFunction.body =
       ResidentPrimitives.immediateNaturalPairDispatch 0 1
@@ -13015,7 +13021,7 @@ theorem terminatesWith_modFunctionImmediate_zero
         some makeNaturalIndex)
     (fallbackAdapted :
       FirTalos.instructions sourceModule
-        Fir.Wasm.Emit.ResidentNatArithmetic.modFunction [] sourceFallback =
+        Fir.Wasm.Emit.ResidentNatArithmetic.modFunction [none] sourceFallback =
           .ok targetFallback)
     (pair : ImmediateNaturalPairRel leftWord rightWord leftReference
       rightReference leftPayload rightPayload)
@@ -13101,7 +13107,7 @@ theorem terminatesWith_modFunctionImmediate_nonzero
         some makeNaturalIndex)
     (fallbackAdapted :
       FirTalos.instructions sourceModule
-        Fir.Wasm.Emit.ResidentNatArithmetic.modFunction [] sourceFallback =
+        Fir.Wasm.Emit.ResidentNatArithmetic.modFunction [none] sourceFallback =
           .ok targetFallback)
     (makeNaturalNotImport : module.imports[makeNaturalIndex]? = none)
     (makeNaturalAdapted : FirTalos.function sourceModule

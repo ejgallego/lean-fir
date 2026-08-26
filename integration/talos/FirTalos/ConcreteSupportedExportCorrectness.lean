@@ -944,8 +944,8 @@ theorem ConcreteSupportedExport.toSuccessfulDeclaration
     {resultValue : Value}
     {physical : Wasm.Value}
     (simulation :
-      ConcreteCodeSimulation context sourceModule sourceFunction []
-        target.wasmModule hosts.env sourceExternals sourceRuntime sourceEnv
+      ConcreteCodeSimulation context sourceModule sourceFunction
+        target.wasmModule hosts.env sourceExternals [] sourceRuntime sourceEnv
         sourceCode spec.targetBody initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness
         resultRuntime resultValue resultKind resultStore resultWitness physical)
@@ -985,8 +985,8 @@ theorem ConcreteSupportedExport.correct
     {resultValue : Value}
     {physical : Wasm.Value}
     (simulation :
-      ConcreteCodeSimulation context sourceModule sourceFunction []
-        target.wasmModule hosts.env sourceExternals sourceRuntime sourceEnv
+      ConcreteCodeSimulation context sourceModule sourceFunction
+        target.wasmModule hosts.env sourceExternals [] sourceRuntime sourceEnv
         sourceCode spec.targetBody initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness
         resultRuntime resultValue resultKind resultStore resultWitness physical)

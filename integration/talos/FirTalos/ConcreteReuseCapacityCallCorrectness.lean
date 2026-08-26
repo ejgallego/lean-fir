@@ -182,7 +182,7 @@ theorem CapacityPreservingSuccessfulDeclaration.ofSimulation
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {sourceExternals : ExternalImpl}
     {facts resultFacts : ReuseCapacityFacts}
     {sourceRuntime resultRuntime : RuntimeState}
@@ -200,8 +200,8 @@ theorem CapacityPreservingSuccessfulDeclaration.ofSimulation
         targetFunction functionIndex initial afterCall initialWitness
         resultWitness parameters resultKind resultValue physical)
     (simulation :
-      ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
-        module hostEnv sourceExternals facts sourceRuntime sourceEnv sourceCode
+      ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels facts sourceRuntime sourceEnv sourceCode
         targetBody initial targetLocals initialWitness resultFacts
         resultRuntime resultValue resultKind afterCall resultWitness physical) :
     CapacityPreservingSuccessfulDeclaration context sourceModule sourceFunction
@@ -772,7 +772,7 @@ def DirectDeclarationCallImplementation
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (callerFunction : Fir.Wasm.Function)
-    (labels : List FVarId)
+    (labels : LabelContext)
     (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (sourceExternals : ExternalImpl)
@@ -832,7 +832,7 @@ theorem DirectDeclarationCallImplementation.runtimeRefines
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceExternals : ExternalImpl}
@@ -874,7 +874,7 @@ theorem ReuseCapacityCallLetStepSimulates.ofSaturatedClosureDeclaration
     {calleeContext : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction calleeFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {sourceExternals : ExternalImpl}
@@ -982,7 +982,7 @@ theorem ReuseCapacityCallLetStepSimulates.ofSaturatedClosureDeclarationConsumed
     {calleeContext : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction calleeFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {sourceExternals : ExternalImpl}
@@ -1094,7 +1094,7 @@ theorem ReuseCapacityCallLetStepSimulates.ofUnderappliedClosure
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {sourceExternals : ExternalImpl}
@@ -1203,7 +1203,7 @@ theorem ReuseCapacityCodeSimulation.callLetOfDirectDeclaration
     {calleeContext : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction calleeFunction : Fir.Wasm.Function}
-    {labels : List FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {sourceExternals : ExternalImpl}
     {facts resultFacts : ReuseCapacityFacts}
     {decl : LCNF.LetDecl .impure} {continuation : LCNF.Code .impure}
@@ -1255,14 +1255,14 @@ theorem ReuseCapacityCodeSimulation.callLetOfDirectDeclaration
     (targetSet :
       locals.set? resultIndex callPhysical = some updated)
     (continued :
-      ReuseCapacityCodeSimulation context sourceModule callerFunction labels
-        module hostEnv sourceExternals
+      ReuseCapacityCodeSimulation context sourceModule callerFunction
+        module hostEnv sourceExternals labels
         (eraseReuseCapacityFact facts decl.fvarId) nextRuntime
         (bind sourceEnv decl.fvarId sourceValue) continuation targetRest
         afterCall updated callWitness resultFacts resultRuntime resultValue
         resultKind resultStore resultWitness physical) :
-    ReuseCapacityCodeSimulation context sourceModule callerFunction labels
-      module hostEnv sourceExternals facts sourceRuntime sourceEnv
+    ReuseCapacityCodeSimulation context sourceModule callerFunction
+        module hostEnv sourceExternals labels facts sourceRuntime sourceEnv
       (.let decl continuation)
       ((argumentTarget ++ [.call functionIndex]) ++
         .localSet resultIndex :: targetRest)
@@ -1280,7 +1280,7 @@ theorem ReuseCapacityCodeSimulation.callLetOfSelectedClosureDispatch
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {sourceExternals : ExternalImpl}
     {facts resultFacts : ReuseCapacityFacts}
@@ -1339,14 +1339,14 @@ theorem ReuseCapacityCodeSimulation.callLetOfSelectedClosureDispatch
         sourceRuntime nextRuntime sourceEnv sourceValue initial afterCall locals
         updated resultIndex initialWitness callWitness)
     (continued :
-      ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
-        module hostEnv sourceExternals
+      ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels
         (eraseReuseCapacityFact facts decl.fvarId) nextRuntime
         (bind sourceEnv decl.fvarId sourceValue) continuation targetRest
         afterCall updated callWitness resultFacts resultRuntime resultValue
         resultKind resultStore resultWitness physical) :
-    ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
-      module hostEnv sourceExternals facts sourceRuntime sourceEnv
+    ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels facts sourceRuntime sourceEnv
       (.let decl continuation)
       ((resolvedClosureCandidateChain (before ++ selected :: suffix) ++
           [.localGet resultIndex]) ++

@@ -2882,7 +2882,7 @@ theorem ReuseCapacityStateRelated.ofEffectStep
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
     {code continuation : LCNF.Code .impure}
@@ -2914,7 +2914,7 @@ theorem ReuseCapacityStateRelated.ofReplaceHeapEffectStep
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
     {code continuation : LCNF.Code .impure}
@@ -2944,7 +2944,7 @@ theorem ReuseCapacityStateRelated.ofReplaceHeapEffectResult
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
     {code continuation : LCNF.Code .impure}

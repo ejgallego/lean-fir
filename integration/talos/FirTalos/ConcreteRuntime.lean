@@ -7945,7 +7945,7 @@ W5's structural boundary while indexing both the target runtime and locals by
 the representation witness. -/
 def CodeWP (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module) (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId) (module : Wasm.Module)
+    (labels : LabelContext) (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (sourceRuntime : RuntimeState) (sourceEnv : Env)
     (code : Lean.Compiler.LCNF.Code .impure) (target : Wasm.Program)
@@ -7964,7 +7964,7 @@ Separate witnesses support later reset/reuse effects that change concrete
 representation metadata while preserving the source environment. -/
 def EffectStepSimulates (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module) (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId) (module : Wasm.Module)
+    (labels : LabelContext) (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (sourceRuntime nextRuntime : RuntimeState) (sourceEnv : Env)
     (code continuation : Lean.Compiler.LCNF.Code .impure)
@@ -7990,7 +7990,7 @@ effect followed by an already-composed continuation. -/
 theorem codeWP_effect
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
     {code continuation : Lean.Compiler.LCNF.Code .impure}
@@ -8042,7 +8042,7 @@ theorem CodeWP.conseq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceRuntime : RuntimeState}
@@ -8069,7 +8069,7 @@ theorem codeWP_return_to_exactControlPost
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceRuntime : RuntimeState}
@@ -8168,7 +8168,7 @@ fuel-free theorem consumed by `wp_directCall_let`. -/
 theorem CodeWP.toConcreteTerminatesWith
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
     {code : Lean.Compiler.LCNF.Code .impure} {function : Wasm.Function}
@@ -8193,7 +8193,7 @@ the suffix is unreachable on every verified execution. -/
 theorem CodeWP.toConcreteTerminatesWith_of_suffix
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
     {code : Lean.Compiler.LCNF.Code .impure} {function : Wasm.Function}
@@ -8279,7 +8279,7 @@ prefix. The operation-specific proof may grow the representation witness. -/
 theorem codeWP_callLet
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {externals : ExternalImpl}
     {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -8345,7 +8345,7 @@ an arbitrary already-composed continuation. -/
 theorem codeWP_externalLet
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {externals : ExternalImpl}
     {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -8433,7 +8433,7 @@ def LazyMissBodySimulates
 theorem codeWP_lazyLet
     {path : LazyCachePath} {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {externals : ExternalImpl}
     {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -8742,7 +8742,7 @@ theorem wp_effect_localGets
 theorem effectStepSimulates_unaryHost
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {code continuation : Lean.Compiler.LCNF.Code .impure}
@@ -8783,7 +8783,7 @@ theorem effectStepSimulates_unaryHost
 theorem effectStepSimulates_binaryHost
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {code continuation : Lean.Compiler.LCNF.Code .impure}
@@ -8829,7 +8829,7 @@ of an erased object-field write. -/
 theorem effectStepSimulates_localI32ConstHost
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {code continuation : Lean.Compiler.LCNF.Code .impure}
@@ -8881,7 +8881,7 @@ theorem effectStepSimulates_localI32ConstHost
 theorem effectStepSimulates_elided
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {sourceEnv : Env}
     {code continuation : Lean.Compiler.LCNF.Code .impure}
     {initial : Wasm.Store Host} {locals : Wasm.Locals}
@@ -8905,7 +8905,7 @@ returned frontier equation supports zero-cost budget transport. -/
 theorem effectStepSimulates_inc_with_capacity
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
@@ -8988,7 +8988,7 @@ theorem effectStepSimulates_inc_with_capacity
 theorem effectStepSimulates_inc
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
@@ -9038,7 +9038,7 @@ theorem effectStepSimulates_inc
 theorem effectStepSimulates_inc_persistent
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {sourceEnv : Env}
     {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
     {continuation : Lean.Compiler.LCNF.Code .impure}
@@ -9067,7 +9067,7 @@ nonzero unchecked tagged releases. -/
 theorem effectStepSimulates_dec_with_capacity
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
@@ -9151,7 +9151,7 @@ theorem effectStepSimulates_dec_with_capacity
 theorem effectStepSimulates_dec
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
@@ -9202,7 +9202,7 @@ theorem effectStepSimulates_dec
 theorem effectStepSimulates_dec_persistent
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {sourceEnv : Env}
     {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
     {objectFields? : Option Nat}
@@ -9231,7 +9231,7 @@ value relation. -/
 theorem effectStepSimulates_delete_with_capacity
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {objectId : Lean.FVarId} {objectKind : AbiKind}
@@ -9309,7 +9309,7 @@ theorem effectStepSimulates_delete_with_capacity
 theorem effectStepSimulates_delete
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {objectId : Lean.FVarId} {objectKind : AbiKind}
@@ -9355,7 +9355,7 @@ decoder obligations needed by the complete-heap refinement theorem. -/
 theorem effectStepSimulates_setTag_with_capacity
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {objectId : Lean.FVarId} {tag : Nat}
@@ -9438,7 +9438,7 @@ theorem effectStepSimulates_setTag_with_capacity
 theorem effectStepSimulates_setTag
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {objectId : Lean.FVarId} {tag : Nat}
@@ -9491,7 +9491,7 @@ the generated binary host-call prefix. -/
 theorem effectStepSimulates_objectSet_with_capacity
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {objectId fieldId : Lean.FVarId} {index : Nat}
@@ -9602,7 +9602,7 @@ theorem effectStepSimulates_objectSet_with_capacity
 theorem effectStepSimulates_objectSet
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {objectId fieldId : Lean.FVarId} {index : Nat}
@@ -9675,7 +9675,7 @@ generated local/constant host-call prefix. This closes the non-FVar branch of
 theorem effectStepSimulates_objectSet_erased_with_capacity
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {objectId : Lean.FVarId} {index : Nat}
@@ -9759,7 +9759,7 @@ theorem effectStepSimulates_objectSet_erased_with_capacity
 theorem effectStepSimulates_objectSet_erased
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {objectId : Lean.FVarId} {index : Nat}
@@ -9821,7 +9821,7 @@ generated binary host-call prefix. -/
 theorem effectStepSimulates_usizeSet_with_capacity
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {objectId fieldId : Lean.FVarId} {index : Nat}
@@ -9930,7 +9930,7 @@ theorem effectStepSimulates_usizeSet_with_capacity
 theorem effectStepSimulates_usizeSet
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {objectId fieldId : Lean.FVarId} {index : Nat}
@@ -9993,7 +9993,7 @@ preserves each retained field whose byte interval is disjoint. -/
 theorem effectStepSimulates_scalarSet_with_capacity
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {objectId fieldId : Lean.FVarId} {slotIndex byteOffset : Nat}
@@ -10260,7 +10260,7 @@ theorem effectStepSimulates_scalarSet_with_capacity
 theorem effectStepSimulates_scalarSet
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {objectId fieldId : Lean.FVarId} {slotIndex byteOffset : Nat}
@@ -11844,7 +11844,7 @@ reuse-token local write, and an arbitrary verified continuation. -/
 theorem codeWP_reset_let
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -11924,7 +11924,7 @@ write, and an arbitrary verified continuation. -/
 theorem codeWP_reuse_let
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -12022,7 +12022,7 @@ write, and an arbitrary verified continuation. -/
 theorem codeWP_box_let
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -12167,7 +12167,7 @@ compiler output, Talos adaptation, the concrete typed host, and continuation. -/
 theorem codeWP_unbox_let
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -12303,7 +12303,7 @@ lowerer and Talos adapter, followed by any already-composed continuation. -/
 theorem codeWP_isShared_let
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -12453,7 +12453,7 @@ lowerer and Talos adapter, followed by any already-composed continuation. -/
 theorem codeWP_objectProjection_let
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -12595,7 +12595,7 @@ theorem letStepSimulates_usizeProjection
 theorem codeWP_usizeProjection_let
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -12728,7 +12728,7 @@ theorem letStepSimulates_scalarProjection
 theorem codeWP_scalarProjection_let
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -12946,7 +12946,7 @@ arguments, including erased fields. -/
 theorem codeWP_constructorArgs_let
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -13032,7 +13032,7 @@ theorem codeWP_constructorArgs_let
 theorem codeWP_constructor_let
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -13201,7 +13201,7 @@ supported LCNF argument forms produced the physical capture lanes. -/
 theorem codeWP_partialApply_let
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -13349,7 +13349,7 @@ theorem letStepSimulates_naturalLiteral
 theorem codeWP_naturalLiteral_let
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -13470,7 +13470,7 @@ theorem letStepSimulates_stringLiteral
 theorem codeWP_stringLiteral_let
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -13712,7 +13712,7 @@ def CaseResumePost (module : Wasm.Module) (hostEnv : Wasm.HostEnv Host)
 adapter witness is paired with concrete runtime/local refinement and Talos WP. -/
 def CaseChainWP (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module) (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId) (module : Wasm.Module)
+    (labels : LabelContext) (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (sourceRuntime : RuntimeState) (sourceEnv : Env)
     (discr : Lean.FVarId) (alts : List (Lean.Compiler.LCNF.Alt .impure))
@@ -13734,7 +13734,7 @@ target locals. -/
 theorem caseChainWP_constructor
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
     {discr : Lean.FVarId} {info : Lean.Compiler.LCNF.CtorInfo}
@@ -13751,10 +13751,10 @@ theorem caseChainWP_constructor
     (fits : Fir.Wasm.constructorTagFitsI32 info = true)
     (thenAdapted :
       FirTalos.Correctness.CodeAdapted context sourceModule sourceFunction
-        labels code thenTarget)
+        (none :: labels) code thenTarget)
     (elseAdapted :
       FirTalos.Correctness.CaseChainAdapted context sourceModule sourceFunction
-        labels discr alts fallback elseTarget)
+        (none :: labels) discr alts fallback elseTarget)
     (discrFound :
       findFVar? (functionBindings sourceFunction) discr = some discrIndex)
     (discrKind :
@@ -13820,7 +13820,7 @@ needed.
 theorem caseChainWP_scalarUInt8_constructor
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
     {discr : Lean.FVarId} {info : Lean.Compiler.LCNF.CtorInfo}
@@ -13836,10 +13836,10 @@ theorem caseChainWP_scalarUInt8_constructor
     (fits : Fir.Wasm.constructorTagFitsUInt8 info = true)
     (thenAdapted :
       FirTalos.Correctness.CodeAdapted context sourceModule sourceFunction
-        labels code thenTarget)
+        (none :: labels) code thenTarget)
     (elseAdapted :
       FirTalos.Correctness.CaseChainAdapted context sourceModule sourceFunction
-        labels discr alts fallback elseTarget)
+        (none :: labels) discr alts fallback elseTarget)
     (discrFound :
       findFVar? (functionBindings sourceFunction) discr = some discrIndex)
     (discrKind :

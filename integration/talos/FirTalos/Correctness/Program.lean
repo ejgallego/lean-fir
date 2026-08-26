@@ -370,7 +370,7 @@ concrete test layout.
 def CasesStepSimulates
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module) (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId) (module : Wasm.Module)
+    (labels selectedLabels : LabelContext) (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv RuntimeHost)
     (sourceRuntime : RuntimeState) (sourceEnv : Env)
     (cases : LCNF.Cases .impure) (selected : LCNF.Code .impure)
@@ -379,7 +379,7 @@ def CasesStepSimulates
     (resultRuntime : RuntimeState) (resultValue : Value) (resultKind : AbiKind) :
     Prop :=
   SourceCaseResult sourceRuntime sourceEnv cases selected ∧
-    (CodeWP context sourceModule sourceFunction labels module hostEnv
+    (CodeWP context sourceModule sourceFunction selectedLabels module hostEnv
         sourceRuntime sourceEnv selected selectedTarget targetStore targetLocals
         [] (ReturnPost resultRuntime resultValue resultKind []) →
       CodeWP context sourceModule sourceFunction labels module hostEnv
@@ -394,13 +394,15 @@ and final `CodeWP` are shared by every supported program.
 -/
 inductive CodeSimulation
     (context : Fir.Wasm.Context)
-    (sourceModule : Fir.Wasm.Module) (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId) (module : Wasm.Module)
-    (hostEnv : Wasm.HostEnv RuntimeHost) :
-    RuntimeState → Env → LCNF.Code .impure → Wasm.Program →
+    (sourceModule : Fir.Wasm.Module) (sourceFunction : Fir.Wasm.Function) :
+    (labels : LabelContext) → (module : Wasm.Module) →
+      (hostEnv : Wasm.HostEnv RuntimeHost) →
+      RuntimeState → Env → LCNF.Code .impure → Wasm.Program →
       Wasm.Store RuntimeHost → Wasm.Locals → RuntimeState → Value → AbiKind →
       Prop where
   | ret
+      {labels : LabelContext} {module : Wasm.Module}
+      {hostEnv : Wasm.HostEnv RuntimeHost}
       (localCompiled :
         Fir.Wasm.getLocal context result = .ok (.localGet result, kind))
       (resultFound :
@@ -416,6 +418,8 @@ inductive CodeSimulation
         [.localGet resultIndex, .ret] targetStore targetLocals sourceRuntime
         sourceValue kind
   | letValue
+      {labels : LabelContext} {module : Wasm.Module}
+      {hostEnv : Wasm.HostEnv RuntimeHost}
       (valueCompiled : Fir.Wasm.compileLetValue context decl = .ok valueCode)
       (valueAdapted :
         instructions sourceModule sourceFunction labels valueCode =
@@ -436,18 +440,23 @@ inductive CodeSimulation
         (targetValue ++ .localSet resultIndex :: targetRest) targetStore
         targetLocals resultRuntime resultValue resultKind
   | caseOf
+      {labels selectedLabels : LabelContext} {module : Wasm.Module}
+      {hostEnv : Wasm.HostEnv RuntimeHost}
       (step :
-        CasesStepSimulates context sourceModule sourceFunction labels module
-          hostEnv sourceRuntime sourceEnv cases selected target selectedTarget
-          targetStore targetLocals resultRuntime resultValue resultKind)
+        CasesStepSimulates context sourceModule sourceFunction labels
+          selectedLabels module hostEnv sourceRuntime sourceEnv cases selected
+          target selectedTarget targetStore targetLocals resultRuntime
+          resultValue resultKind)
       (continued :
-        CodeSimulation context sourceModule sourceFunction labels module hostEnv
-          sourceRuntime sourceEnv selected selectedTarget targetStore targetLocals
-          resultRuntime resultValue resultKind) :
+        CodeSimulation context sourceModule sourceFunction selectedLabels module
+          hostEnv sourceRuntime sourceEnv selected selectedTarget targetStore
+          targetLocals resultRuntime resultValue resultKind) :
       CodeSimulation context sourceModule sourceFunction labels module hostEnv
         sourceRuntime sourceEnv (.cases cases) target targetStore targetLocals
         resultRuntime resultValue resultKind
   | effect
+      {labels : LabelContext} {module : Wasm.Module}
+      {hostEnv : Wasm.HostEnv RuntimeHost}
       (step :
         EffectStepSimulates context sourceModule sourceFunction labels module
           hostEnv sourceRuntime nextRuntime sourceEnv code continuation target
@@ -464,7 +473,7 @@ inductive CodeSimulation
 theorem CodeSimulation.toCodeWP
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost}
     {sourceRuntime resultRuntime : RuntimeState} {sourceEnv : Env}
     {code : LCNF.Code .impure} {target : Wasm.Program}
@@ -493,7 +502,7 @@ theorem CodeSimulation.toCodeWP
 theorem CodeSimulation.sourceEvaluates
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost}
     {sourceRuntime resultRuntime : RuntimeState} {sourceEnv : Env}
     {code : LCNF.Code .impure} {target : Wasm.Program}
@@ -514,7 +523,7 @@ theorem CodeSimulation.sourceEvaluates
 theorem CodeSimulation.execEvaluates
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost}
     {sourceRuntime resultRuntime : RuntimeState} {sourceEnv : Env}
     {code : LCNF.Code .impure} {target : Wasm.Program}

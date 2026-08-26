@@ -181,7 +181,7 @@ theorem conversionFunction_locals_size (kind : NatConversionKind) :
 /-- The adapter preserves the direct tagged decode exactly. -/
 theorem instructions_immediateSource
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {value : Lean.FVarId}
+    {labels : LabelContext} {value : Lean.FVarId}
     {valueIndex : Nat}
     (valueFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList) value =
@@ -197,7 +197,7 @@ explicit so later execution proofs can attach stable contracts to precisely
 the functions installed by the linker. -/
 theorem instructions_checkedSource
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {value raw : Lean.FVarId}
+    {labels : LabelContext} {value raw : Lean.FVarId}
     {valueIndex rawIndex validateIndex highIndex lowIndex : Nat}
     (valueFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList) value =
@@ -223,7 +223,7 @@ theorem instructions_checkedSource
 /-- The adapter preserves all operations in the 64-bit scratch cast. -/
 theorem instructions_retypeSource
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {raw saved result : Lean.FVarId}
+    {labels : LabelContext} {raw saved result : Lean.FVarId}
     {rawIndex savedIndex resultIndex : Nat}
     (rawFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList) raw =
@@ -261,7 +261,7 @@ theorem instructions_conversionFunctionBody_of_shape
               (conversionFunction kind).locals[1]!.1
               (conversionFunction kind).locals[2]!.1)])
     (fallbackAdapted : FirTalos.instructions sourceModule
-      (conversionFunction kind) [] sourceFallback = .ok targetFallback) :
+      (conversionFunction kind) [none] sourceFallback = .ok targetFallback) :
     FirTalos.instructions sourceModule (conversionFunction kind) []
       (conversionFunction kind).body =
         .ok (conversionProgram kind targetFallback) := by
@@ -287,11 +287,11 @@ theorem instructions_conversionFunctionBody_of_shape
       (conversionFunction kind).locals[2]!.1 = some (resultIndex kind) := by
     cases kind <;> decide
   have immediateAdapted := instructions_immediateSource
-    (sourceModule := sourceModule) (labels := []) valueFound
+    (sourceModule := sourceModule) (labels := [none]) valueFound
   have retypeAdapted := instructions_retypeSource
-    (sourceModule := sourceModule) (labels := []) rawFound savedFound resultFound
+    (sourceModule := sourceModule) (labels := [none]) rawFound savedFound resultFound
   have checkedAdapted : FirTalos.instructions sourceModule
-      (conversionFunction kind) []
+      (conversionFunction kind) [none]
       (sourceFallback ++ [
         .localGet (conversionFunction kind).locals[0]!.1] ++
         retypeSource
@@ -306,7 +306,7 @@ theorem instructions_conversionFunctionBody_of_shape
     simp [FirTalos.instructions, FirTalos.instruction, rawFound,
       retypeAdapted, Bind.bind, Except.bind, pure, Except.pure]
   have checkedAdapted' : FirTalos.instructions sourceModule
-      (conversionFunction kind) []
+      (conversionFunction kind) [none]
       (sourceFallback ++
         .localGet (conversionFunction kind).locals[0]!.1 ::
           retypeSource
@@ -343,7 +343,7 @@ theorem adaptedConversionFunction_body_of_shape
               (conversionFunction kind).locals[1]!.1
               (conversionFunction kind).locals[2]!.1)])
     (fallbackAdapted : FirTalos.instructions sourceModule
-      (conversionFunction kind) [] sourceFallback = .ok targetFallback) :
+      (conversionFunction kind) [none] sourceFallback = .ok targetFallback) :
     targetFunction.body = conversionProgram kind targetFallback ++
       FirTalos.functionTerminal sourceModule (conversionFunction kind) := by
   exact ResidentNat.adaptedFunction_body_of_exact adapted
@@ -664,7 +664,7 @@ theorem terminatesWith_conversionFunctionImmediate_of_adapted
               (conversionFunction kind).locals[1]!.1
               (conversionFunction kind).locals[2]!.1)])
     (fallbackAdapted : FirTalos.instructions sourceModule
-      (conversionFunction kind) [] sourceFallback = .ok targetFallback) :
+      (conversionFunction kind) [none] sourceFallback = .ok targetFallback) :
     Wasm.TerminatesWith env module functionIndex store
       (callArguments kind (UInt32.ofNat
         (Word32.encodeImmediate payload.toNat fits).value) ++ tail)
@@ -747,7 +747,7 @@ theorem terminatesWith_conversionFunctionChecked_of_adapted
       (conversionFunction kind).locals[0]!.1 = some (rawIndex kind) := by
     cases kind <;> decide
   have fallbackAdapted : FirTalos.instructions sourceModule
-      (conversionFunction kind) []
+      (conversionFunction kind) [none]
       (checkedSource
         (conversionFunction kind).params[0]!.1
         (conversionFunction kind).locals[0]!.1) =
@@ -1067,9 +1067,9 @@ theorem toNatFunction_locals_size :
 /-- The adapter preserves the complete direct arm instruction for
 instruction. -/
 theorem instructions_immediateSource
-    {sourceModule : Fir.Wasm.Module} :
+    {sourceModule : Fir.Wasm.Module} {labels : LabelContext} :
     FirTalos.instructions sourceModule
-      Fir.Wasm.Emit.ResidentUSize.toNatFunction []
+      Fir.Wasm.Emit.ResidentUSize.toNatFunction labels
       (immediateSource
         Fir.Wasm.Emit.ResidentUSize.toNatFunction.params[0]!.1) =
         .ok immediateProgram := by
@@ -1085,12 +1085,13 @@ theorem instructions_immediateSource
 /-- The adapter preserves the complete constructor arm, including its exact
 constructor target and mixed-width scratch sequence. -/
 theorem instructions_checkedSource
-    {sourceModule : Fir.Wasm.Module} {makeNaturalIndex : Nat}
+    {sourceModule : Fir.Wasm.Module} {labels : LabelContext}
+    {makeNaturalIndex : Nat}
     (makeNaturalFound : FirTalos.callIndex? sourceModule
       (.declaration Fir.Wasm.Emit.ResidentNumeric.makeNaturalName) =
         some makeNaturalIndex) :
     FirTalos.instructions sourceModule
-      Fir.Wasm.Emit.ResidentUSize.toNatFunction []
+      Fir.Wasm.Emit.ResidentUSize.toNatFunction labels
       (checkedSource
         Fir.Wasm.Emit.ResidentUSize.toNatFunction.params[0]!.1
         Fir.Wasm.Emit.ResidentUSize.toNatFunction.locals[0]!.1
@@ -1149,10 +1150,26 @@ theorem instructions_toNatFunctionBody
         Fir.Wasm.Emit.ResidentUSize.toNatFunction.locals.toList)
       Fir.Wasm.Emit.ResidentUSize.toNatFunction.params[0]!.1 = some 0 := by
     decide
+  have immediateAdapted : FirTalos.instructions sourceModule
+      Fir.Wasm.Emit.ResidentUSize.toNatFunction [none]
+      (immediateSource
+        Fir.Wasm.Emit.ResidentUSize.toNatFunction.params[0]!.1) =
+        .ok immediateProgram :=
+    instructions_immediateSource
+  have checkedAdapted : FirTalos.instructions sourceModule
+      Fir.Wasm.Emit.ResidentUSize.toNatFunction [none]
+      (checkedSource
+        Fir.Wasm.Emit.ResidentUSize.toNatFunction.params[0]!.1
+        Fir.Wasm.Emit.ResidentUSize.toNatFunction.locals[0]!.1
+        Fir.Wasm.Emit.ResidentUSize.toNatFunction.locals[1]!.1
+        Fir.Wasm.Emit.ResidentUSize.toNatFunction.locals[2]!.1
+        Fir.Wasm.Emit.ResidentUSize.toNatFunction.locals[3]!.1
+        Fir.Wasm.Emit.ResidentUSize.toNatFunction.locals[4]!.1) =
+        .ok (checkedProgram makeNaturalIndex) :=
+    instructions_checkedSource (labels := [none]) makeNaturalFound
   rw [toNatFunction_shape]
   simp [toNatProgram, FirTalos.instructions, FirTalos.instruction,
-    valueFound, instructions_immediateSource,
-    instructions_checkedSource makeNaturalFound, Bind.bind, Except.bind,
+    valueFound, immediateAdapted, checkedAdapted, Bind.bind, Except.bind,
     pure, Except.pure]
 
 /-- Successful adaptation installs the exposed program followed only by the

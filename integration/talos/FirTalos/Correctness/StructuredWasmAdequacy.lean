@@ -1361,7 +1361,7 @@ mutual
 Talos loops. -/
 theorem adapterInstruction_hasZeroLoopParams
     (module : Fir.Wasm.Module) (function : Fir.Wasm.Function)
-    (labels : List Lean.FVarId) (source : Fir.Wasm.Instruction)
+    (labels : LabelContext) (source : Fir.Wasm.Instruction)
     {target : Wasm.Instruction}
     (adapted : FirTalos.instruction module function labels source =
       .ok target) :
@@ -1369,7 +1369,7 @@ theorem adapterInstruction_hasZeroLoopParams
   cases source
   case block label body =>
       simp only [FirTalos.instruction] at adapted
-      cases bodyEq : FirTalos.instructions module function (label :: labels)
+      cases bodyEq : FirTalos.instructions module function (some label :: labels)
           body with
       | error error =>
           simp [bodyEq, Functor.map, Except.map] at adapted
@@ -1377,10 +1377,10 @@ theorem adapterInstruction_hasZeroLoopParams
           simp [bodyEq, Functor.map, Except.map] at adapted
           subst target
           exact adapterInstructions_hasZeroLoopParams module function
-            (label :: labels) body bodyEq
+            (some label :: labels) body bodyEq
   case loop label body =>
       simp only [FirTalos.instruction] at adapted
-      cases bodyEq : FirTalos.instructions module function (label :: labels)
+      cases bodyEq : FirTalos.instructions module function (some label :: labels)
           body with
       | error error =>
           simp [bodyEq, Functor.map, Except.map] at adapted
@@ -1388,14 +1388,16 @@ theorem adapterInstruction_hasZeroLoopParams
           simp [bodyEq, Functor.map, Except.map] at adapted
           subst target
           exact ⟨rfl, adapterInstructions_hasZeroLoopParams module function
-            (label :: labels) body bodyEq⟩
+            (some label :: labels) body bodyEq⟩
   case ifElse thenBody elseBody =>
       simp only [FirTalos.instruction] at adapted
-      cases thenEq : FirTalos.instructions module function labels thenBody with
+      cases thenEq : FirTalos.instructions module function (none :: labels)
+          thenBody with
       | error error =>
           simp [thenEq, Bind.bind, Except.bind] at adapted
       | ok targetThen =>
-          cases elseEq : FirTalos.instructions module function labels elseBody with
+          cases elseEq : FirTalos.instructions module function (none :: labels)
+              elseBody with
           | error error =>
               simp [thenEq, elseEq, Bind.bind, Except.bind, Functor.map,
                 Except.map] at adapted
@@ -1404,9 +1406,9 @@ theorem adapterInstruction_hasZeroLoopParams
                 Except.map, Pure.pure, Except.pure] at adapted
               subst target
               exact ⟨adapterInstructions_hasZeroLoopParams module function
-                  labels thenBody thenEq,
-                adapterInstructions_hasZeroLoopParams module function labels
-                  elseBody elseEq⟩
+                  (none :: labels) thenBody thenEq,
+                adapterInstructions_hasZeroLoopParams module function
+                  (none :: labels) elseBody elseEq⟩
   case localGet fvarId =>
       simp only [FirTalos.instruction] at adapted
       cases found : FirTalos.findFVar?
@@ -1467,7 +1469,7 @@ termination_by sizeOf source
 /-- The instruction-list adapter preserves the zero-parameter-loop shape. -/
 theorem adapterInstructions_hasZeroLoopParams
     (module : Fir.Wasm.Module) (function : Fir.Wasm.Function)
-    (labels : List Lean.FVarId) (body : List Fir.Wasm.Instruction)
+    (labels : LabelContext) (body : List Fir.Wasm.Instruction)
     {target : Wasm.Program}
     (adapted : FirTalos.instructions module function labels body = .ok target) :
     WasmProgramHasZeroLoopParams target := by

@@ -474,34 +474,34 @@ theorem abiCaseStateC_related :
   simpa [abiCaseEnvC, abiCaseStoreC, abiCaseDeclC, letDecl] using
     abiCaseCtorStep.2.2.1
 
-theorem abiCaseFalseBranch_adapted :
-    CodeAdapted abiCaseContext abiCaseSourceModule abiCaseSourceFunction []
+theorem abiCaseFalseBranch_adapted {labels : LabelContext} :
+    CodeAdapted abiCaseContext abiCaseSourceModule abiCaseSourceFunction labels
       abiCaseFalseCode [.call 2, .localSet 1, .localGet 1, .ret] := by
   have valueAdapted :
-      instructions abiCaseSourceModule abiCaseSourceFunction []
+      instructions abiCaseSourceModule abiCaseSourceFunction labels
           [.call (.runtime (.literal (.nat 0) .tobject))] =
         .ok [.call 2] := by
     simp [instructions, instruction, abiCaseLiteral0Call_found]
     rfl
   have returned :
-      CodeAdapted abiCaseContext abiCaseSourceModule abiCaseSourceFunction []
+      CodeAdapted abiCaseContext abiCaseSourceModule abiCaseSourceFunction labels
         (.return r) [.localGet 1, .ret] := codeAdapted_return
     (sourceModule := abiCaseSourceModule)
-    (sourceFunction := abiCaseSourceFunction) (labels := [])
+    (sourceFunction := abiCaseSourceFunction) (labels := labels)
     (resultIndex := 1) abiCaseGetR (by simpa [functionBindings] using abiCaseR_found)
   simpa [abiCaseFalseCode] using
     codeAdapted_let (resultIndex := 1) abiCaseCompileFalse valueAdapted
       (by simpa [functionBindings, abiCaseDeclFalse, letDecl] using abiCaseR_found)
       returned
 
-theorem abiCaseTrueBranch_simulation :
-    CodeSimulation abiCaseContext abiCaseSourceModule abiCaseSourceFunction []
+theorem abiCaseTrueBranch_simulation {labels : LabelContext} :
+    CodeSimulation abiCaseContext abiCaseSourceModule abiCaseSourceFunction labels
       abiCaseAdaptedModule.wasmModule abiCaseResolvedHosts.env
       {} abiCaseEnvC abiCaseTrueCode
       [.call 3, .localSet 2, .localGet 2, .ret]
       abiCaseStoreC abiCaseLocalsC {} abiCaseTrueValue .tobject := by
   have valueAdapted :
-      instructions abiCaseSourceModule abiCaseSourceFunction []
+      instructions abiCaseSourceModule abiCaseSourceFunction labels
           [.call (.runtime (.literal (.nat 1) .tobject))] =
         .ok [.call 3] := by
     simp [instructions, instruction, abiCaseLiteral1Call_found]
@@ -528,8 +528,8 @@ theorem abiCaseTrueBranch_simulation :
   simpa [abiCaseDeclTrue, letDecl, abiCaseTrueValue, literal,
     maxTaggedPayload, successfulHostStore, abiCaseStoreC] using step.2.2.1
 
-theorem abiCaseTrueBranch_codeWP :
-    CodeWP abiCaseContext abiCaseSourceModule abiCaseSourceFunction []
+theorem abiCaseTrueBranch_codeWP {labels : LabelContext} :
+    CodeWP abiCaseContext abiCaseSourceModule abiCaseSourceFunction labels
       abiCaseAdaptedModule.wasmModule abiCaseResolvedHosts.env
       {} abiCaseEnvC abiCaseTrueCode
       [.call 3, .localSet 2, .localGet 2, .ret]
@@ -540,7 +540,8 @@ theorem abiCaseTrueBranch_codeWP :
 /-- Path-sensitive transformer for the source-selected `Bool.true` branch. -/
 theorem abiCaseCasesStep :
     CasesStepSimulates abiCaseContext abiCaseSourceModule abiCaseSourceFunction
-      [] abiCaseAdaptedModule.wasmModule abiCaseResolvedHosts.env
+      [] [none, none] abiCaseAdaptedModule.wasmModule
+      abiCaseResolvedHosts.env
       {} abiCaseEnvC abiCaseCases abiCaseTrueCode
       [.localGet 0, .call 1, .const 0, .eq,
         .iff 0 0
@@ -562,7 +563,8 @@ theorem abiCaseCasesStep :
     let Q : Wasm.Assertion RuntimeHost :=
       ReturnPost {} abiCaseTrueValue .tobject []
     have trueBranch :
-        CodeWP abiCaseContext abiCaseSourceModule abiCaseSourceFunction []
+        CodeWP abiCaseContext abiCaseSourceModule abiCaseSourceFunction
+          [none, none]
           abiCaseAdaptedModule.wasmModule abiCaseResolvedHosts.env
           {} abiCaseEnvC abiCaseTrueCode
           [.call 3, .localSet 2, .localGet 2, .ret]
@@ -577,12 +579,14 @@ theorem abiCaseCasesStep :
       exact ⟨store, physical, rfl, runtimeEq, decoded⟩
     have fallbackAdapted :
         CaseChainAdapted abiCaseContext abiCaseSourceModule
-          abiCaseSourceFunction [] c [] [.unreachable] [.unreachable] := by
+          abiCaseSourceFunction [none, none] c [] [.unreachable]
+            [.unreachable] := by
       apply caseChainAdapted_nil
       simp [instructions, instruction]
       rfl
     have trueChain :
-        CaseChainWP abiCaseContext abiCaseSourceModule abiCaseSourceFunction []
+        CaseChainWP abiCaseContext abiCaseSourceModule abiCaseSourceFunction
+          [none]
           abiCaseAdaptedModule.wasmModule abiCaseResolvedHosts.env
           {} abiCaseEnvC c
           [.ctorAlt trueInfo abiCaseTrueCode] [.unreachable]

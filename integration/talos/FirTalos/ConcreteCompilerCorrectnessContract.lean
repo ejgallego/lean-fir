@@ -286,7 +286,7 @@ example
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceRuntime resultRuntime : RuntimeState}
@@ -339,7 +339,7 @@ example
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceRuntime middleRuntime resultRuntime : RuntimeState}
@@ -414,7 +414,7 @@ example
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ScalarProjectionSupported context)
       (ConcreteLocalFrameAligned sourceFunction) :=
@@ -476,7 +476,7 @@ example
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env (BoxSupported context)
       directLetAllocationCost
@@ -550,7 +550,7 @@ example
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     (externals : ExternalImpl)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ResetSupported context)
       directLetAllocationCost
@@ -595,7 +595,7 @@ example
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env (UnboxSupported context)
       directLetAllocationCost
@@ -618,7 +618,7 @@ example
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
       target.wasmModule hosts.env (IsSharedSupported context)
       directLetAllocationCost
@@ -641,7 +641,7 @@ example
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     DirectLetRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ImmediateLiteralSupported context)
       (ConcreteLocalFrameAligned sourceFunction) :=
@@ -1514,7 +1514,7 @@ example
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} :
     CaseRuntimeRefines context sourceModule sourceFunction labels module hostEnv
@@ -1554,7 +1554,7 @@ example
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {cases : LCNF.Cases .impure}
     {target : Wasm.Program}
     (adapted :
@@ -1580,7 +1580,7 @@ example
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     CaseRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env
       (ObjectConstructorCasesSupported context) :=
@@ -1603,7 +1603,7 @@ example
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     CaseRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env
       (ScalarUInt8CasesSupported context) :=
@@ -1625,7 +1625,7 @@ example
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     CaseRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env
       (SingleObjectConstructorCaseSupported context) :=
@@ -1647,7 +1647,7 @@ example
     (spec :
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     CaseRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env
       (TwoObjectConstructorDefaultCasesSupported context) :=
@@ -1662,7 +1662,7 @@ example
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {Invariant :
@@ -1679,7 +1679,7 @@ example
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {left right : EffectSupportedPredicate}
@@ -1716,7 +1716,7 @@ example
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (OrdinaryIncrementEffectSupported context)
       (ConcreteBudgetedPureExternalFrame sourceFunction externals) :=
@@ -1739,7 +1739,7 @@ example
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (OrdinaryDecrementEffectSupported context)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) :=
@@ -1762,7 +1762,7 @@ example
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (OrdinaryDeleteEffectSupported context)
       (ConcreteBudgetedPureExternalFrame sourceFunction externals) :=
@@ -1785,7 +1785,7 @@ example
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ConstructorTagEffectSupported context)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) :=
@@ -1809,7 +1809,7 @@ example
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ObjectFieldFVarEffectSupported context)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) :=
@@ -1833,7 +1833,7 @@ example
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ObjectFieldErasedEffectSupported context)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) :=
@@ -1855,7 +1855,7 @@ example
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ObjectFieldEffectSupported context)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) :=
@@ -1878,7 +1878,7 @@ example
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (USizeFieldEffectSupported context)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) :=
@@ -1900,7 +1900,7 @@ example
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (FieldMutationEffectSupported context)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) :=
@@ -1924,7 +1924,7 @@ example
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ScalarFieldEffectSupported context)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) :=
@@ -1947,7 +1947,7 @@ example
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (AllFieldMutationEffectSupported context)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) :=
@@ -1970,7 +1970,7 @@ example
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (OwnershipEffectSupported context)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) :=
@@ -1993,7 +1993,7 @@ example
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (OwnershipAndTagEffectSupported context)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) :=
@@ -2016,7 +2016,7 @@ example
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env
         (OwnershipTagAndObjectFVarEffectSupported context)
@@ -2040,7 +2040,7 @@ example
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env
         (OwnershipTagAndObjectEffectSupported context)
@@ -2064,7 +2064,7 @@ example
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env
         (OwnershipTagAndFieldMutationEffectSupported context)
@@ -2088,7 +2088,7 @@ example
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {externals : ExternalImpl}
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env
         (OwnershipTagAndAllFieldMutationEffectSupported context)
@@ -3946,7 +3946,7 @@ example
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     (externals : ExternalImpl)
-    {labels : List FVarId}
+    {labels : LabelContext}
     {entryRuntime : RuntimeState}
     {entryStore : Wasm.Store Host}
     {entryWitness : RefinementWitness} :
@@ -4008,7 +4008,7 @@ example
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
     (externals : ExternalImpl)
-    {labels : List FVarId}
+    {labels : LabelContext}
     {facts : ReuseCapacityFacts}
     {entryRuntime : RuntimeState}
     {entryStore : Wasm.Store Host}
@@ -4139,7 +4139,7 @@ example
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceExternals : ExternalImpl}
@@ -4170,7 +4170,7 @@ example
     {callerCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
     {exportName : String}
@@ -4199,7 +4199,7 @@ example
     {callerCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
     {exportName : String}
@@ -4417,7 +4417,7 @@ example
     {hosts : ResolvedHosts}
     (spec : ConcreteSupportedFunction program context sourceCode sourceModule
       sourceFunction target hosts)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     CaseRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env (ProductionCasesSupported context) :=
   spec.caseRuntimeRefines_productionCases
@@ -4430,7 +4430,7 @@ example
     {sourceCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
     {exportName : String}
@@ -4462,7 +4462,7 @@ example
     {callerCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
     {exportName : String}
@@ -4490,7 +4490,7 @@ example
     {callerCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
     {exportName : String}
@@ -4695,7 +4695,7 @@ separate call-site premises.
 example
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {spec : Wasm.HostSpec Host}
     {externals : ExternalImpl}
@@ -4763,7 +4763,7 @@ example
     {callerCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
     {sourceExternals : ExternalImpl}

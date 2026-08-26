@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-adapter-if-branch-depth
-status: confirmed
+status: fixed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: 86e0f74a
@@ -87,9 +87,14 @@ none
 
 ## Resolution and regression
 
-Unresolved.  Resolution requires retaining anonymous structured-control
-entries during adaptation and a regression that compares the exact nested
-loop/`if` branch depth.  A local adapter repair demonstrated that this context
-must also be threaded through `CodeAdapted`, case-chain decomposition, active
-structured states, and suspended frames: constructor-case proofs otherwise
-incorrectly reuse adaptation performed outside the enclosing `if`.
+The Talos adapter now uses `LabelContext = List (Option FVarId)`, matching the
+production encoder's control stack: blocks and loops contribute named entries,
+while `if` contributes an anonymous entry.  Branch lookup skips anonymous
+entries while counting them toward depth, so the minimal loop/`if` witness
+adapts and encodes its back-edge as `br 1` in both paths.
+
+The same context is threaded through `CodeAdapted`, case-chain decomposition,
+active structured states, suspended frames, and the reusable runtime-refinement
+relations.  The executable regression in
+`integration/talos/FirTalos/Correctness/Adapter.lean` compares the adapter with
+`Fir.Wasm.Emit.encodeWithOrigins` on the exact nested shape.

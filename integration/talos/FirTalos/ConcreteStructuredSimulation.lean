@@ -35,7 +35,7 @@ def CodeAdaptedWithSuffix
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (sourceCode : Lean.Compiler.LCNF.Code .impure)
     (targetCode : Wasm.Program) : Prop :=
   ∃ targetCore targetSuffix,
@@ -47,7 +47,7 @@ theorem CodeAdapted.withSuffix
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {sourceCode : Lean.Compiler.LCNF.Code .impure}
     {targetCore targetSuffix : Wasm.Program}
     (adapted :
@@ -61,7 +61,7 @@ theorem CodeAdapted.withEmptySuffix
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {sourceCode : Lean.Compiler.LCNF.Code .impure}
     {targetCode : Wasm.Program}
     (adapted :
@@ -77,7 +77,7 @@ theorem CodeAdaptedWithSuffix.return_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {result : Lean.FVarId}
     {target : Wasm.Program}
     (localsAligned : LocalLayoutAligned context sourceFunction)
@@ -103,7 +103,7 @@ theorem CodeAdaptedWithSuffix.let_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {target : Wasm.Program}
@@ -133,7 +133,7 @@ theorem CodeAdaptedWithSuffix.incPersistent_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {target : Wasm.Program}
@@ -150,7 +150,7 @@ theorem CodeAdaptedWithSuffix.decPersistent_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
     {objectFields? : Option Nat}
     {continuation : Lean.Compiler.LCNF.Code .impure}
@@ -166,7 +166,7 @@ theorem CodeAdaptedWithSuffix.decPersistent_eq
 
 theorem CodeAdaptedWithSuffix.inc_eq
     {context : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
-    {sourceFunction : Fir.Wasm.Function} {labels : List Lean.FVarId}
+    {sourceFunction : Fir.Wasm.Function} {labels : LabelContext}
     {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
     {objectKind : AbiKind}
     {continuation : Lean.Compiler.LCNF.Code .impure} {target : Wasm.Program}
@@ -193,7 +193,7 @@ theorem CodeAdaptedWithSuffix.inc_eq
 
 theorem CodeAdaptedWithSuffix.dec_eq
     {context : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
-    {sourceFunction : Fir.Wasm.Function} {labels : List Lean.FVarId}
+    {sourceFunction : Fir.Wasm.Function} {labels : LabelContext}
     {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
     {objectFields? : Option Nat} {objectKind : AbiKind}
     {continuation : Lean.Compiler.LCNF.Code .impure} {target : Wasm.Program}
@@ -221,7 +221,7 @@ theorem CodeAdaptedWithSuffix.dec_eq
 
 theorem CodeAdaptedWithSuffix.del_eq
     {context : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
-    {sourceFunction : Fir.Wasm.Function} {labels : List Lean.FVarId}
+    {sourceFunction : Fir.Wasm.Function} {labels : LabelContext}
     {objectId : Lean.FVarId} {objectKind : AbiKind}
     {continuation : Lean.Compiler.LCNF.Code .impure} {target : Wasm.Program}
     (localsAligned : LocalLayoutAligned context sourceFunction)
@@ -247,7 +247,7 @@ theorem CodeAdaptedWithSuffix.del_eq
 
 theorem CodeAdaptedWithSuffix.setTag_eq
     {context : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
-    {sourceFunction : Fir.Wasm.Function} {labels : List Lean.FVarId}
+    {sourceFunction : Fir.Wasm.Function} {labels : LabelContext}
     {objectId : Lean.FVarId} {tag : Nat}
     {continuation : Lean.Compiler.LCNF.Code .impure} {target : Wasm.Program}
     (localsAligned : LocalLayoutAligned context sourceFunction)
@@ -273,7 +273,7 @@ theorem CodeAdaptedWithSuffix.setTag_eq
 
 theorem CodeAdaptedWithSuffix.objectSetFVar_eq
     {context : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
-    {sourceFunction : Fir.Wasm.Function} {labels : List Lean.FVarId}
+    {sourceFunction : Fir.Wasm.Function} {labels : LabelContext}
     {objectId fieldId : Lean.FVarId} {index : Nat} {fieldKind : AbiKind}
     {continuation : Lean.Compiler.LCNF.Code .impure} {target : Wasm.Program}
     (localsAligned : LocalLayoutAligned context sourceFunction)
@@ -309,7 +309,7 @@ theorem CodeAdaptedWithSuffix.objectSetFVar_eq
 
 theorem CodeAdaptedWithSuffix.objectSetErased_eq
     {context : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
-    {sourceFunction : Fir.Wasm.Function} {labels : List Lean.FVarId}
+    {sourceFunction : Fir.Wasm.Function} {labels : LabelContext}
     {objectId : Lean.FVarId} {index : Nat}
     {continuation : Lean.Compiler.LCNF.Code .impure} {target : Wasm.Program}
     (localsAligned : LocalLayoutAligned context sourceFunction)
@@ -337,7 +337,7 @@ theorem CodeAdaptedWithSuffix.objectSetErased_eq
 
 theorem CodeAdaptedWithSuffix.usizeSet_eq
     {context : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
-    {sourceFunction : Fir.Wasm.Function} {labels : List Lean.FVarId}
+    {sourceFunction : Fir.Wasm.Function} {labels : LabelContext}
     {objectId fieldId : Lean.FVarId} {index : Nat}
     {continuation : Lean.Compiler.LCNF.Code .impure} {target : Wasm.Program}
     (localsAligned : LocalLayoutAligned context sourceFunction)
@@ -371,7 +371,7 @@ theorem CodeAdaptedWithSuffix.usizeSet_eq
 
 theorem CodeAdaptedWithSuffix.scalarSet_eq
     {context : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
-    {sourceFunction : Fir.Wasm.Function} {labels : List Lean.FVarId}
+    {sourceFunction : Fir.Wasm.Function} {labels : LabelContext}
     {objectId fieldId : Lean.FVarId} {slotIndex byteOffset : Nat}
     {type : Lean.Expr} {fieldKind : AbiKind}
     {continuation : Lean.Compiler.LCNF.Code .impure} {target : Wasm.Program}
@@ -411,7 +411,7 @@ theorem CodeAdaptedWithSuffix.defaultOnlyCases_selected
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {cases : Lean.Compiler.LCNF.Cases .impure}
     {selected : Lean.Compiler.LCNF.Code .impure}
     {target : Wasm.Program}
@@ -427,7 +427,7 @@ theorem CodeAdaptedWithSuffix.defaultOnlyCases_selected
 
 theorem CodeAdaptedWithSuffix.singleObjectConstructorCases_eq
     {context : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
-    {sourceFunction : Fir.Wasm.Function} {labels : List Lean.FVarId}
+    {sourceFunction : Fir.Wasm.Function} {labels : LabelContext}
     {cases : Lean.Compiler.LCNF.Cases .impure}
     {info : Lean.Compiler.LCNF.CtorInfo}
     {selected : Lean.Compiler.LCNF.Code .impure} {target : Wasm.Program}
@@ -437,7 +437,7 @@ theorem CodeAdaptedWithSuffix.singleObjectConstructorCases_eq
     (adapted : CodeAdaptedWithSuffix context sourceModule sourceFunction labels
       (.cases cases) target) :
     ∃ selectedTarget discrIndex getTagIndex targetSuffix,
-      CodeAdapted context sourceModule sourceFunction labels selected
+      CodeAdapted context sourceModule sourceFunction (none :: labels) selected
           selectedTarget ∧
       findFVar? (functionBindings sourceFunction) cases.discr =
         some discrIndex ∧
@@ -456,7 +456,7 @@ theorem CodeAdaptedWithSuffix.singleObjectConstructorCases_eq
 
 theorem CodeAdaptedWithSuffix.twoObjectConstructorDefaultCases_eq
     {context : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
-    {sourceFunction : Fir.Wasm.Function} {labels : List Lean.FVarId}
+    {sourceFunction : Fir.Wasm.Function} {labels : LabelContext}
     {cases : Lean.Compiler.LCNF.Cases .impure}
     {firstInfo secondInfo : Lean.Compiler.LCNF.CtorInfo}
     {firstBranch secondBranch defaultBranch :
@@ -472,11 +472,13 @@ theorem CodeAdaptedWithSuffix.twoObjectConstructorDefaultCases_eq
       (.cases cases) target) :
     ∃ firstTarget secondTarget defaultTarget discrIndex getTagIndex
         targetSuffix,
-      CodeAdapted context sourceModule sourceFunction labels firstBranch
+      CodeAdapted context sourceModule sourceFunction (none :: labels) firstBranch
           firstTarget ∧
-      CodeAdapted context sourceModule sourceFunction labels secondBranch
+      CodeAdapted context sourceModule sourceFunction (none :: none :: labels)
+          secondBranch
           secondTarget ∧
-      CodeAdapted context sourceModule sourceFunction labels defaultBranch
+      CodeAdapted context sourceModule sourceFunction (none :: none :: labels)
+          defaultBranch
           defaultTarget ∧
       findFVar? (functionBindings sourceFunction) cases.discr =
         some discrIndex ∧
@@ -503,7 +505,7 @@ theorem CodeAdaptedWithSuffix.cases_eq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {cases : Lean.Compiler.LCNF.Cases .impure}
     {target : Wasm.Program}
     (adapted : CodeAdaptedWithSuffix context sourceModule sourceFunction labels
@@ -527,7 +529,7 @@ structure ConcreteStructuredCodeFocus
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (sourceRuntime : RuntimeState)
     (sourceEnv : Env)
     (sourceCode : Lean.Compiler.LCNF.Code .impure)
@@ -560,7 +562,7 @@ theorem ConcreteStructuredCodeFocus.observes
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {sourceRuntime : RuntimeState}
     {sourceEnv : Env}
     {sourceCode : Lean.Compiler.LCNF.Code .impure}
@@ -934,7 +936,7 @@ theorem ImmediateLiteralSupported.structuredFlatProgram
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {valueCode : List Fir.Wasm.Instruction} {targetValue : Wasm.Program}
     {resultIndex : Nat}
@@ -998,7 +1000,7 @@ theorem ConstructorArgsCompiled.structuredFlatProgram
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {args : List (Lean.Compiler.LCNF.Arg .impure)}
     {argumentCode : List Fir.Wasm.Instruction}
     {fieldKinds : List AbiKind} {targetArguments : Wasm.Program}
@@ -1065,7 +1067,7 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {args : Array (Lean.Compiler.LCNF.Arg .impure)}
     {argumentCode : List Fir.Wasm.Instruction}
     {fieldKinds : Array AbiKind} {operation : RuntimeOp}
@@ -1106,7 +1108,7 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {name : Lean.Name} {declaration : Lean.Compiler.LCNF.Decl .impure}
     {args : Array (Lean.Compiler.LCNF.Arg .impure)}
     {argumentCode : List Fir.Wasm.Instruction}
@@ -1153,7 +1155,7 @@ theorem PureExternalSupported.structuredFlatProgram
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -1233,7 +1235,7 @@ target local read, regardless of the source local's numeric target index. -/
 theorem structuredWasmFlatProgram_localGet_of_instructions
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {fvarId : Lean.FVarId} {targetArguments : Wasm.Program}
     (adapted :
       instructions sourceModule sourceFunction labels [.localGet fvarId] =
@@ -1279,7 +1281,7 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId} {fvarId : Lean.FVarId}
+    {labels : LabelContext} {fvarId : Lean.FVarId}
     {operation : RuntimeOp} {targetValue : Wasm.Program} {resultIndex : Nat}
     (valueAdapted :
       instructions sourceModule sourceFunction labels
@@ -1315,7 +1317,7 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId} {fvarId : Lean.FVarId}
+    {labels : LabelContext} {fvarId : Lean.FVarId}
     {operation : RuntimeOp} {targetValue : Wasm.Program}
     (valueAdapted :
       instructions sourceModule sourceFunction labels
@@ -1347,7 +1349,7 @@ theorem ClosureCaptureRows.structuredFlatProgram_of_adapted
     {hosts : ResolvedHosts}
     (spec : ConcreteSupportedFunction program context sourceCode sourceModule
       sourceFunction targetModule hosts)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {closureId : Lean.FVarId} {function : Lean.Name}
     {arity fixed : Nat}
     {captures : Array Value} {captureKinds parameterKinds : Array AbiKind}
@@ -1458,7 +1460,7 @@ theorem SaturatedClosureCallResolution.argumentsStructuredFlatProgram
     {targetModule : AdaptedModule} {hosts : ResolvedHosts}
     (spec : ConcreteSupportedFunction program context sourceCode sourceModule
       sourceFunction targetModule hosts)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {witness : RefinementWitness} {application : ClosureApplication}
     {address : Word32} {captureKinds : Array AbiKind}
     {targetCode : Wasm.Program}
@@ -1504,7 +1506,7 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {fvarId : Lean.FVarId} {operation : RuntimeOp}
     {valueCode : List Fir.Wasm.Instruction}
@@ -1534,7 +1536,7 @@ theorem USizeProjectionSupported.structuredFlatProgram
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {valueCode : List Fir.Wasm.Instruction}
     {targetValue : Wasm.Program} {resultIndex : Nat}
@@ -1563,7 +1565,7 @@ theorem ObjectProjectionSupported.structuredFlatProgram
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {valueCode : List Fir.Wasm.Instruction}
     {targetValue : Wasm.Program} {resultIndex : Nat}
@@ -1592,7 +1594,7 @@ theorem ScalarProjectionSupported.structuredFlatProgram
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {valueCode : List Fir.Wasm.Instruction}
     {targetValue : Wasm.Program} {resultIndex : Nat}
@@ -1622,7 +1624,7 @@ theorem BoxSupported.structuredFlatProgram
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {valueCode : List Fir.Wasm.Instruction}
     {targetValue : Wasm.Program} {resultIndex : Nat}
@@ -1651,7 +1653,7 @@ theorem UnboxSupported.structuredFlatProgram
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {valueCode : List Fir.Wasm.Instruction}
     {targetValue : Wasm.Program} {resultIndex : Nat}
@@ -1680,7 +1682,7 @@ theorem IsSharedSupported.structuredFlatProgram
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {valueCode : List Fir.Wasm.Instruction}
     {targetValue : Wasm.Program} {resultIndex : Nat}
@@ -1709,7 +1711,7 @@ theorem ResetSupported.structuredFlatProgram
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {valueCode : List Fir.Wasm.Instruction}
     {targetValue : Wasm.Program} {resultIndex : Nat}
@@ -1739,7 +1741,7 @@ theorem NonemptyConstructorSupported.structuredFlatProgram
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {valueCode : List Fir.Wasm.Instruction}
     {targetValue : Wasm.Program} {resultIndex : Nat}
@@ -1781,7 +1783,7 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId} {fvarId : Lean.FVarId}
+    {labels : LabelContext} {fvarId : Lean.FVarId}
     {args : Array (Lean.Compiler.LCNF.Arg .impure)}
     {argumentCode : List Fir.Wasm.Instruction}
     {fieldKinds : Array AbiKind} {operation : RuntimeOp}
@@ -1826,7 +1828,7 @@ theorem ReuseSupported.structuredFlatProgram
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {facts : ReuseCapacityFacts} {labels : List Lean.FVarId}
+    {facts : ReuseCapacityFacts} {labels : LabelContext}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {valueCode : List Fir.Wasm.Instruction}
     {targetValue : Wasm.Program} {resultIndex : Nat}
@@ -1867,7 +1869,7 @@ theorem NaturalLiteralSupported.structuredFlatProgram
     {sourceCode : Lean.Compiler.LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {target : AdaptedModule}
+    {labels : LabelContext} {target : AdaptedModule}
     {hosts : ResolvedHosts}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {valueCode : List Fir.Wasm.Instruction} {targetValue : Wasm.Program}
@@ -1922,7 +1924,7 @@ theorem StringLiteralSupported.structuredFlatProgram
     {sourceCode : Lean.Compiler.LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {target : AdaptedModule}
+    {labels : LabelContext} {target : AdaptedModule}
     {hosts : ResolvedHosts}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {valueCode : List Fir.Wasm.Instruction} {targetValue : Wasm.Program}
@@ -1975,7 +1977,7 @@ theorem LocalAliasSupported.structuredFlatProgram
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {valueCode : List Fir.Wasm.Instruction} {targetValue : Wasm.Program}
     {resultIndex : Nat}
@@ -2029,7 +2031,7 @@ def ReuseCapacityDirectTargetFlat
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (module : Wasm.Module)
     (Supported :
       ReuseCapacityFacts → Lean.Compiler.LCNF.LetDecl .impure → Prop) : Prop :=
@@ -2050,7 +2052,7 @@ theorem ReuseCapacityDirectTargetFlat.or
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {Left Right :
       ReuseCapacityFacts → Lean.Compiler.LCNF.LetDecl .impure → Prop}
     (left : ReuseCapacityDirectTargetFlat context sourceModule sourceFunction
@@ -2070,7 +2072,7 @@ theorem reuseCapacityDirectTargetFlat_immediateLiteral
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module} :
+    {labels : LabelContext} {module : Wasm.Module} :
     ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
       module (fun _ decl => ImmediateLiteralSupported context decl) := by
   intro facts decl valueCode targetValue resultIndex supported valueCompiled
@@ -2082,7 +2084,7 @@ theorem reuseCapacityDirectTargetFlat_localAlias
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module} :
+    {labels : LabelContext} {module : Wasm.Module} :
     ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
       module (fun _ decl => LocalAliasSupported context decl) := by
   intro facts decl valueCode targetValue resultIndex supported valueCompiled
@@ -2100,7 +2102,7 @@ theorem ConcreteSupportedFunction.reuseCapacityDirectTargetFlat_naturalLiteral
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
       target.wasmModule
       (fun _ decl => NaturalLiteralSupported context decl) := by
@@ -2119,7 +2121,7 @@ theorem ConcreteSupportedFunction.reuseCapacityDirectTargetFlat_stringLiteral
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
       target.wasmModule
       (fun _ decl => StringLiteralSupported context decl) := by
@@ -2136,7 +2138,7 @@ theorem ConcreteSupportedFunction.reuseCapacityDirectTargetFlat_reuse
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
       target.wasmModule (ReuseSupported context) := by
   intro facts decl valueCode targetValue resultIndex supported valueCompiled
@@ -2152,7 +2154,7 @@ theorem ConcreteSupportedFunction.reuseCapacityDirectTargetFlat_usizeProjection
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
       target.wasmModule
       (fun _ decl => USizeProjectionSupported context decl) := by
@@ -2169,7 +2171,7 @@ theorem ConcreteSupportedFunction.reuseCapacityDirectTargetFlat_objectProjection
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
       target.wasmModule
       (fun _ decl => ObjectProjectionSupported context decl) := by
@@ -2186,7 +2188,7 @@ theorem ConcreteSupportedFunction.reuseCapacityDirectTargetFlat_scalarProjection
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
       target.wasmModule
       (fun _ decl => ScalarProjectionSupported context decl) := by
@@ -2203,7 +2205,7 @@ theorem ConcreteSupportedFunction.reuseCapacityDirectTargetFlat_unbox
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
       target.wasmModule (fun _ decl => UnboxSupported context decl) := by
   intro facts decl valueCode targetValue resultIndex supported valueCompiled
@@ -2219,7 +2221,7 @@ theorem ConcreteSupportedFunction.reuseCapacityDirectTargetFlat_isShared
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
       target.wasmModule (fun _ decl => IsSharedSupported context decl) := by
   intro facts decl valueCode targetValue resultIndex supported valueCompiled
@@ -2235,7 +2237,7 @@ theorem ConcreteSupportedFunction.reuseCapacityDirectTargetFlat_constructor
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
       target.wasmModule
       (fun _ decl => NonemptyConstructorSupported context decl) := by
@@ -2252,7 +2254,7 @@ theorem ConcreteSupportedFunction.reuseCapacityDirectTargetFlat_box
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
       target.wasmModule (fun _ decl => BoxSupported context decl) := by
   intro facts decl valueCode targetValue resultIndex supported valueCompiled
@@ -2271,7 +2273,7 @@ theorem
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId} :
+    {labels : LabelContext} :
     ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
       target.wasmModule (ReuseBudgetedDirectSupported context) := by
   unfold ReuseBudgetedDirectSupported ReuseConstructorBoxSupported
@@ -2600,7 +2602,7 @@ theorem ReuseCapacityEntryRelativeFrame.ofReplaceHeapEffectStep
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl} {facts : ReuseCapacityFacts}
     {remainingBytes : Nat}
@@ -2707,7 +2709,7 @@ theorem ConcreteStructuredCodeFocus.advance_flatLet
     {sourceFunction : Fir.Wasm.Function}
     {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {continuation : Lean.Compiler.LCNF.Code .impure}
@@ -2846,7 +2848,7 @@ theorem ConcreteStructuredCodeFocus.advance_flatExternalLet
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
     {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
@@ -3025,7 +3027,7 @@ theorem ConcreteStructuredCodeFocus.advance_return
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -3126,7 +3128,7 @@ theorem ConcreteStructuredCodeFocus.advance_return_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -3189,7 +3191,7 @@ theorem
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
     {DirectSupported :
@@ -3323,7 +3325,7 @@ theorem ConcreteSupportedFunction.reachesYield_reuseBudgetedDirect
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction targetModule hosts)
-    {labels : List Lean.FVarId} {externals : ExternalImpl}
+    {labels : LabelContext} {externals : ExternalImpl}
     {facts resultFacts : ReuseCapacityFacts}
     {sourceRuntime resultRuntime : RuntimeState}
     {sourceEnv resultEnv : Env}
@@ -4590,7 +4592,7 @@ structure ConcreteStructuredSaturatedBindFrameFocus
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (sourceRuntime : RuntimeState)
     (callerEnv : Env)
     (sourceValue : Value)
@@ -4647,7 +4649,7 @@ theorem ConcreteStructuredSaturatedBindFrameFocus.observes
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {sourceRuntime : RuntimeState}
     {callerEnv : Env}
     {sourceValue : Value}
@@ -4691,7 +4693,7 @@ theorem ConcreteStructuredSaturatedBindFrameFocus.advance
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -4811,7 +4813,7 @@ theorem ConcreteStructuredSaturatedBindFrameFocus.advance_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -4932,7 +4934,7 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainFinitePath
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
     {discr : Lean.FVarId} {alts : List (Lean.Compiler.LCNF.Alt .impure)}
     {fallback : List Fir.Wasm.Instruction} {chainTarget : Wasm.Program}
@@ -4958,8 +4960,8 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainFinitePath
       CaseChainAdapted context sourceModule sourceFunction labels discr alts
         fallback chainTarget) :
     ∃ selectedTarget testCount,
-      CodeAdaptedWithSuffix context sourceModule sourceFunction labels selected
-          selectedTarget ∧
+      CodeAdaptedWithSuffix context sourceModule sourceFunction
+          (List.replicate testCount none ++ labels) selected selectedTarget ∧
         FinitePath (StructuredWasmStep target.wasmModule hosts.env)
           (5 * testCount)
           ⟨targetStore, .running targetLocals
@@ -4970,7 +4972,7 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainFinitePath
             structuredWasmCaseLabels (targetLocals.values.drop 0)
                 targetSuffix testCount ++ frames⟩ ∧
         (testCount = 0 → alts = [.default selected]) := by
-  induction supported generalizing chainTarget targetSuffix selected frames with
+  induction supported generalizing labels chainTarget targetSuffix selected frames with
   | nil =>
       simp [chooseAlt, findCtorAlt, findDefaultAlt] at selection
   | default code =>
@@ -5048,7 +5050,8 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainFinitePath
               using selection
           exact branchEq.symm
         subst selected
-        refine ⟨thenTarget, 1, CodeAdapted.withEmptySuffix thenAdapted, ?_, ?_⟩
+        refine ⟨thenTarget, 1, ?_, ?_, ?_⟩
+        · simpa using CodeAdapted.withEmptySuffix thenAdapted
         rw [targetEq]
         simpa [structuredWasmCaseLabels] using
           structuredWasmObjectCaseHitPrefixFinitePath
@@ -5095,7 +5098,9 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainFinitePath
               (expectedTag := info.cidx) hit actualFits expectedFits
               targetLookup imported spec.hostsSatisfy inBounds
               getTagContracted parameterCount resultCount tagOperation
-        refine ⟨selectedTarget, testCount + 1, selectedAdapted, ?_, ?_⟩
+        refine ⟨selectedTarget, testCount + 1, ?_, ?_, ?_⟩
+        · simpa [List.replicate_succ_append, List.append_assoc] using
+            selectedAdapted
         simp only [List.append_nil] at tailPath
         simpa [caseLabel, Nat.mul_add, Nat.add_comm,
           structuredWasmCaseLabels_empty_then_outer] using
@@ -5116,7 +5121,7 @@ theorem ConcreteSupportedFunction.singleObjectConstructorCaseFinitePath
     {hosts : ResolvedHosts}
     (spec : ConcreteSupportedFunction program context sourceCode sourceModule
       sourceFunction target hosts)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {sourceRuntime : RuntimeState}
     {sourceEnv : Env}
     {cases : Lean.Compiler.LCNF.Cases .impure}
@@ -5134,7 +5139,7 @@ theorem ConcreteSupportedFunction.singleObjectConstructorCaseFinitePath
     (adapted : CodeAdaptedWithSuffix context sourceModule sourceFunction labels
       (.cases cases) targetCode) :
     ∃ selectedTarget targetSuffix,
-      CodeAdapted context sourceModule sourceFunction labels selected
+      CodeAdapted context sourceModule sourceFunction (none :: labels) selected
           selectedTarget ∧
         FinitePath (StructuredWasmStep target.wasmModule hosts.env) 5
           ⟨targetStore, .running targetLocals targetCode, frames⟩
@@ -5231,7 +5236,7 @@ theorem ConcreteSupportedFunction.scalarUInt8CaseChainFinitePath
     (spec :
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
     {discr : Lean.FVarId} {alts : List (Lean.Compiler.LCNF.Alt .impure)}
     {fallback : List Fir.Wasm.Instruction} {chainTarget : Wasm.Program}
@@ -5256,8 +5261,8 @@ theorem ConcreteSupportedFunction.scalarUInt8CaseChainFinitePath
       CaseChainAdapted context sourceModule sourceFunction labels discr alts
         fallback chainTarget) :
     ∃ selectedTarget testCount,
-      CodeAdaptedWithSuffix context sourceModule sourceFunction labels selected
-          selectedTarget ∧
+      CodeAdaptedWithSuffix context sourceModule sourceFunction
+          (List.replicate testCount none ++ labels) selected selectedTarget ∧
         FinitePath (StructuredWasmStep target.wasmModule hosts.env)
           (4 * testCount)
           ⟨targetStore, .running targetLocals
@@ -5268,7 +5273,7 @@ theorem ConcreteSupportedFunction.scalarUInt8CaseChainFinitePath
             structuredWasmCaseLabels (targetLocals.values.drop 0)
                 targetSuffix testCount ++ frames⟩ ∧
         (testCount = 0 → alts = [.default selected]) := by
-  induction supported generalizing chainTarget targetSuffix selected frames with
+  induction supported generalizing labels chainTarget targetSuffix selected frames with
   | nil =>
       simp [chooseAlt, findCtorAlt, findDefaultAlt] at selection
   | default code =>
@@ -5316,7 +5321,8 @@ theorem ConcreteSupportedFunction.scalarUInt8CaseChainFinitePath
               using selection
           exact branchEq.symm
         subst selected
-        refine ⟨thenTarget, 1, CodeAdapted.withEmptySuffix thenAdapted, ?_, ?_⟩
+        refine ⟨thenTarget, 1, ?_, ?_, ?_⟩
+        · simpa using CodeAdapted.withEmptySuffix thenAdapted
         rw [targetEq]
         simpa [structuredWasmCaseLabels] using
           structuredWasmScalarUInt8CaseHitPrefixFinitePath
@@ -5356,7 +5362,9 @@ theorem ConcreteSupportedFunction.scalarUInt8CaseChainFinitePath
               (elseTarget := elseTarget) (discrIndex := discrIndex)
               (actualTag := actualTag) (expectedTag := info.cidx) hit
               actualFits expectedFits localFound
-        refine ⟨selectedTarget, testCount + 1, selectedAdapted, ?_, ?_⟩
+        refine ⟨selectedTarget, testCount + 1, ?_, ?_, ?_⟩
+        · simpa [List.replicate_succ_append, List.append_assoc] using
+            selectedAdapted
         simp only [List.append_nil] at tailPath
         simpa [caseLabel, Nat.mul_add, Nat.add_comm,
           structuredWasmCaseLabels_empty_then_outer] using
@@ -5377,7 +5385,7 @@ theorem ConcreteSupportedFunction.objectConstructorCasesFinitePath
     {hosts : ResolvedHosts}
     (spec : ConcreteSupportedFunction program context sourceCode sourceModule
       sourceFunction target hosts)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {sourceRuntime : RuntimeState}
     {sourceEnv : Env}
     {cases : Lean.Compiler.LCNF.Cases .impure}
@@ -5395,8 +5403,8 @@ theorem ConcreteSupportedFunction.objectConstructorCasesFinitePath
     (adapted : CodeAdaptedWithSuffix context sourceModule sourceFunction labels
       (.cases cases) targetCode) :
     ∃ selectedTarget testCount targetSuffix,
-      CodeAdaptedWithSuffix context sourceModule sourceFunction labels selected
-          selectedTarget ∧
+      CodeAdaptedWithSuffix context sourceModule sourceFunction
+          (List.replicate testCount none ++ labels) selected selectedTarget ∧
         FinitePath (StructuredWasmStep target.wasmModule hosts.env)
           (5 * testCount)
           ⟨targetStore, .running targetLocals targetCode, frames⟩
@@ -5449,7 +5457,7 @@ theorem ConcreteSupportedFunction.scalarUInt8CasesFinitePath
     {hosts : ResolvedHosts}
     (spec : ConcreteSupportedFunction program context sourceCode sourceModule
       sourceFunction target hosts)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {sourceRuntime : RuntimeState}
     {sourceEnv : Env}
     {cases : Lean.Compiler.LCNF.Cases .impure}
@@ -5467,8 +5475,8 @@ theorem ConcreteSupportedFunction.scalarUInt8CasesFinitePath
     (adapted : CodeAdaptedWithSuffix context sourceModule sourceFunction labels
       (.cases cases) targetCode) :
     ∃ selectedTarget testCount targetSuffix,
-      CodeAdaptedWithSuffix context sourceModule sourceFunction labels selected
-          selectedTarget ∧
+      CodeAdaptedWithSuffix context sourceModule sourceFunction
+          (List.replicate testCount none ++ labels) selected selectedTarget ∧
         FinitePath (StructuredWasmStep target.wasmModule hosts.env)
           (4 * testCount)
           ⟨targetStore, .running targetLocals targetCode, frames⟩
@@ -5516,7 +5524,7 @@ theorem ConcreteStructuredCodeFocus.advance_lazyHit_of_compiler
     {functionCode : Lean.Compiler.LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {targetModule : AdaptedModule} {hosts : ResolvedHosts}
     (spec :
       ConcreteSupportedFunction program context functionCode sourceModule
@@ -5729,7 +5737,7 @@ structure ConcreteStructuredLazyCallReadyFocus
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {declaration : Lean.Name}
     {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
@@ -5821,7 +5829,7 @@ theorem ConcreteStructuredCodeFocus.advance_lazy_stage
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {sourceRuntime : RuntimeState}
     {callerEnv : Env}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -6053,7 +6061,7 @@ theorem SaturatedClosureCallResolution.argumentsStructuredFinitePath
     {targetModule : AdaptedModule} {hosts : ResolvedHosts}
     (spec : ConcreteSupportedFunction program context sourceCode sourceModule
       sourceFunction targetModule hosts)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {initial : Wasm.Store Host} {locals : Wasm.Locals}
     {witness : RefinementWitness} {application : ClosureApplication}
     {closureIndex : Nat} {address : Word32}
@@ -6269,7 +6277,7 @@ store; no execution witness is supplied by the caller. -/
 theorem ClosureCandidateCase.matcherFinitePath
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {spec : Wasm.HostSpec Host}
@@ -6354,7 +6362,7 @@ selected one are unreachable. -/
 theorem structuredWasmResolvedClosureCandidateChainSelectedPrefixFinitePath
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {spec : Wasm.HostSpec Host}
@@ -6523,7 +6531,7 @@ theorem
     (row : ConcreteGeneratedInternalDeclaration context.program
       resolution.target calleeContext resolution.calleeCode sourceModule
       calleeFunction targetModule)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {initial : Wasm.Store Host} {locals : Wasm.Locals}
     {witness : RefinementWitness} {application : ClosureApplication}
     {closureIndex : Nat} {address : Word32}
@@ -6660,7 +6668,7 @@ structure ConcreteStructuredSaturatedCallReadyFocus
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {callerEnv : Env}
     (site : SaturatedClosureCallSite context decl callerEnv)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (sourceRuntime : RuntimeState)
     (continuation : Lean.Compiler.LCNF.Code .impure)
     (callerJoins : JoinEnv)
@@ -6715,7 +6723,7 @@ theorem ConcreteStructuredSaturatedCallReadyFocus.observes
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {callerEnv : Env}
     {site : SaturatedClosureCallSite context decl callerEnv}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {sourceRuntime : RuntimeState}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
@@ -6758,7 +6766,7 @@ theorem ConcreteStructuredCodeFocus.advance_saturatedCall_stage
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {callerEnv : Env}
     (site : SaturatedClosureCallSite context decl callerEnv)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {sourceRuntime : RuntimeState}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {targetStore : Wasm.Store Host}
@@ -6863,7 +6871,7 @@ structure ConcreteStructuredSaturatedCallEntryFocus
     (row : ConcreteGeneratedInternalDeclaration callerContext.program
       resolution.target calleeContext resolution.calleeCode sourceModule
       calleeFunction targetModule)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (sourceRuntime : RuntimeState)
     (continuation : Lean.Compiler.LCNF.Code .impure)
     (callerJoins : JoinEnv)
@@ -6929,7 +6937,7 @@ theorem ConcreteStructuredSaturatedCallEntryFocus.observes
     {row : ConcreteGeneratedInternalDeclaration callerContext.program
       resolution.target calleeContext resolution.calleeCode sourceModule
       calleeFunction targetModule}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
     {sourceFrames : List Frame}
@@ -6977,7 +6985,7 @@ theorem ConcreteStructuredSaturatedCallReadyFocus.advance_enter
     (row : ConcreteGeneratedInternalDeclaration context.program
       resolution.target calleeContext resolution.calleeCode sourceModule
       calleeFunction targetModule)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
     {sourceFrames : List Frame}
@@ -7220,7 +7228,7 @@ theorem
     {row : ConcreteGeneratedInternalDeclaration callerContext.program
       resolution.target calleeContext resolution.calleeCode sourceModule
       calleeFunction targetModule}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
     {sourceFrames : List Frame}
@@ -7275,7 +7283,7 @@ theorem
     {row : ConcreteGeneratedInternalDeclaration callerContext.program
       resolution.target calleeContext resolution.calleeCode sourceModule
       calleeFunction targetModule}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
     {sourceFrames : List Frame}
@@ -7585,7 +7593,7 @@ structure ConcreteStructuredExternalCallReadyFocus
     (operation : ExternalOperation)
     (resolvedResultKind : AbiKind)
     (targetImport : Wasm.ImportDecl)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (continuation : Lean.Compiler.LCNF.Code .impure)
     (callerJoins : JoinEnv)
     (sourceFrames : List Frame)
@@ -7666,7 +7674,7 @@ theorem ConcreteStructuredExternalCallReadyFocus.observes
     {operation : ExternalOperation}
     {resolvedResultKind : AbiKind}
     {targetImport : Wasm.ImportDecl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
     {sourceFrames : List Frame}
@@ -7719,7 +7727,7 @@ theorem ConcreteStructuredCodeFocus.advance_external_stage
     {sourceValue : Value} {stepCost : Nat}
     (supported : PureExternalSupported context externals sourceRuntime sourceEnv
       decl continuation nextRuntime sourceValue stepCost)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {targetStore : Wasm.Store Host}
     {targetLocals : Wasm.Locals}
     {targetCode : Wasm.Program}
@@ -7920,7 +7928,7 @@ theorem ConcreteStructuredExternalCallReadyFocus.callEvidence_of_budget
     {operation : ExternalOperation}
     {resolvedResultKind : AbiKind}
     {targetImport : Wasm.ImportDecl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
     {sourceFrames : List Frame}
@@ -8339,7 +8347,7 @@ structure ConcreteStructuredExternalBindFocus
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (sourceRuntime : RuntimeState)
     (callerEnv : Env)
     (sourceValue : Value)
@@ -8389,7 +8397,7 @@ theorem ConcreteStructuredExternalBindFocus.observes
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {sourceRuntime : RuntimeState}
     {callerEnv : Env}
     {sourceValue : Value}
@@ -8445,7 +8453,7 @@ theorem ConcreteStructuredExternalCallReadyFocus.advance_call
     {operation : ExternalOperation}
     {resolvedResultKind : AbiKind}
     {targetImport : Wasm.ImportDecl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
     {sourceFrames : List Frame}
@@ -8651,7 +8659,7 @@ theorem ConcreteStructuredExternalCallReadyFocus.advance_call_of_budget
     {operation : ExternalOperation}
     {resolvedResultKind : AbiKind}
     {targetImport : Wasm.ImportDecl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
     {sourceFrames : List Frame}
@@ -8700,7 +8708,7 @@ theorem ConcreteStructuredExternalBindFocus.advance
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -8824,7 +8832,7 @@ theorem ConcreteStructuredExternalBindFocus.advance_with_frame
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -8901,7 +8909,7 @@ theorem ConcreteStructuredExternalCallReadyFocus.advance_call_bind_of_budget
     {operation : ExternalOperation}
     {resolvedResultKind : AbiKind}
     {targetImport : Wasm.ImportDecl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
     {sourceFrames : List Frame}
@@ -8986,7 +8994,7 @@ theorem ConcreteStructuredCodeFocus.advance_external_of_budget
     {sourceValue : Value} {stepCost remainingBytes : Nat}
     (supported : PureExternalSupported context externals sourceRuntime sourceEnv
       decl continuation nextRuntime sourceValue stepCost)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {targetStore : Wasm.Store Host}
     {targetLocals : Wasm.Locals}
     {targetCode : Wasm.Program}
@@ -9053,7 +9061,7 @@ structure ConcreteStructuredDirectCallReadyFocus
     (row : ConcreteGeneratedInternalDeclaration callerContext.program
       site.sourceDeclaration calleeContext site.calleeCode sourceModule
       calleeFunction targetModule)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (sourceRuntime : RuntimeState)
     (continuation : Lean.Compiler.LCNF.Code .impure)
     (callerJoins : JoinEnv)
@@ -9115,7 +9123,7 @@ theorem ConcreteStructuredDirectCallReadyFocus.observes
     {row : ConcreteGeneratedInternalDeclaration callerContext.program
       site.sourceDeclaration calleeContext site.calleeCode sourceModule
       calleeFunction targetModule}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {sourceRuntime : RuntimeState}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
@@ -9166,7 +9174,7 @@ theorem ConcreteStructuredCodeFocus.advance_directCall_stage
     (row : ConcreteGeneratedInternalDeclaration callerContext.program
       site.sourceDeclaration calleeContext site.calleeCode sourceModule
       calleeFunction targetModule)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {sourceRuntime : RuntimeState}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {targetStore : Wasm.Store Host}
@@ -9358,7 +9366,7 @@ structure ConcreteStructuredDirectCallEntryFocus
     (row : ConcreteGeneratedInternalDeclaration callerContext.program
       site.sourceDeclaration calleeContext site.calleeCode sourceModule
       calleeFunction targetModule)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (sourceRuntime : RuntimeState)
     (continuation : Lean.Compiler.LCNF.Code .impure)
     (callerJoins : JoinEnv)
@@ -9416,7 +9424,7 @@ theorem ConcreteStructuredDirectCallEntryFocus.observes
     {row : ConcreteGeneratedInternalDeclaration callerContext.program
       site.sourceDeclaration calleeContext site.calleeCode sourceModule
       calleeFunction targetModule}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {sourceRuntime : RuntimeState}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
@@ -9460,7 +9468,7 @@ theorem ConcreteStructuredDirectCallReadyFocus.advance_enter
     {row : ConcreteGeneratedInternalDeclaration callerContext.program
       site.sourceDeclaration calleeContext site.calleeCode sourceModule
       calleeFunction targetModule}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {sourceRuntime : RuntimeState}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
@@ -9687,7 +9695,7 @@ theorem
     {row : ConcreteGeneratedInternalDeclaration callerContext.program
       site.sourceDeclaration calleeContext site.calleeCode sourceModule
       calleeFunction targetModule}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime : RuntimeState}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
@@ -9731,7 +9739,7 @@ structure ConcreteStructuredBindFrameFocus
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (sourceRuntime : RuntimeState)
     (callerEnv : Env)
     (sourceValue : Value)
@@ -9783,7 +9791,7 @@ theorem ConcreteStructuredBindFrameFocus.observes
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {sourceRuntime : RuntimeState}
     {callerEnv : Env}
     {sourceValue : Value}
@@ -9981,7 +9989,7 @@ inductive ConcreteStructuredFrameRel
       {context : Fir.Wasm.Context}
       {sourceModule : Fir.Wasm.Module}
       {sourceFunction : Fir.Wasm.Function}
-      {labels : List Lean.FVarId}
+      {labels : LabelContext}
       {callerEnv : Env}
       {result : Lean.FVarId}
       {continuation : Lean.Compiler.LCNF.Code .impure}
@@ -10020,7 +10028,7 @@ inductive ConcreteStructuredFrameRel
       {context : Fir.Wasm.Context}
       {sourceModule : Fir.Wasm.Module}
       {sourceFunction : Fir.Wasm.Function}
-      {labels : List Lean.FVarId}
+      {labels : LabelContext}
       {callerEnv : Env}
       {result : Lean.FVarId}
       {continuation : Lean.Compiler.LCNF.Code .impure}
@@ -10065,7 +10073,7 @@ inductive ConcreteStructuredFrameRel
       {context : Fir.Wasm.Context}
       {sourceModule : Fir.Wasm.Module}
       {sourceFunction : Fir.Wasm.Function}
-      {labels : List Lean.FVarId}
+      {labels : LabelContext}
       {callerEnv : Env}
       {declaration : Lean.Name}
       {result : Lean.FVarId}
@@ -10722,7 +10730,7 @@ inductive ConcreteStructuredSuspendedResourceStack
       {context : Fir.Wasm.Context}
       {sourceModule : Fir.Wasm.Module}
       {sourceFunction : Fir.Wasm.Function}
-      {labels : List Lean.FVarId}
+      {labels : LabelContext}
       {facts : ReuseCapacityFacts}
       {remainingBytes : Nat}
       {callerEnv : Env}
@@ -10767,7 +10775,7 @@ inductive ConcreteStructuredSuspendedResourceStack
       {context : Fir.Wasm.Context}
       {sourceModule : Fir.Wasm.Module}
       {sourceFunction : Fir.Wasm.Function}
-      {labels : List Lean.FVarId}
+      {labels : LabelContext}
       {facts : ReuseCapacityFacts}
       {remainingBytes : Nat}
       {callerEnv : Env}
@@ -10821,7 +10829,7 @@ inductive ConcreteStructuredSuspendedResourceStack
       {context : Fir.Wasm.Context}
       {sourceModule : Fir.Wasm.Module}
       {sourceFunction : Fir.Wasm.Function}
-      {labels : List Lean.FVarId}
+      {labels : LabelContext}
       {facts : ReuseCapacityFacts}
       {remainingBytes : Nat}
       {callerEnv : Env}
@@ -11151,7 +11159,7 @@ theorem ConcreteStructuredDirectCallEntryFocus.frameRel
     {row : ConcreteGeneratedInternalDeclaration callerContext.program
       site.sourceDeclaration calleeContext site.calleeCode sourceModule
       calleeFunction targetModule}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {sourceRuntime : RuntimeState}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
@@ -11199,7 +11207,7 @@ theorem ConcreteStructuredSaturatedCallEntryFocus.frameRel
     {row : ConcreteGeneratedInternalDeclaration callerContext.program
       resolution.target calleeContext resolution.calleeCode sourceModule
       calleeFunction targetModule}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
     {sourceFrames : List Frame}
@@ -11246,7 +11254,7 @@ theorem ConcreteStructuredSaturatedCallEntryFocus.pushResourceStack
     {row : ConcreteGeneratedInternalDeclaration callerContext.program
       resolution.target calleeContext resolution.calleeCode sourceModule
       calleeFunction targetModule}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {callerEntryRuntime sourceRuntime : RuntimeState}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
@@ -11433,7 +11441,7 @@ theorem ConcreteStructuredDirectCallEntryFocus.bindFrame_of_yield
     {row : ConcreteGeneratedInternalDeclaration callerContext.program
       site.sourceDeclaration calleeContext site.calleeCode sourceModule
       calleeFunction targetModule}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime currentRuntime : RuntimeState}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
@@ -11520,7 +11528,7 @@ theorem
     {row : ConcreteGeneratedInternalDeclaration callerContext.program
       site.sourceDeclaration calleeContext site.calleeCode sourceModule
       calleeFunction targetModule}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime currentRuntime : RuntimeState}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
@@ -11581,7 +11589,7 @@ theorem ConcreteStructuredBindFrameFocus.advance
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -12461,7 +12469,7 @@ theorem ConcreteStructuredBindFrameFocus.advance_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -12521,7 +12529,7 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryIncrement
       ConcreteSupportedFunction program context functionCode sourceModule
         sourceFunction targetModule hosts)
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {facts : ReuseCapacityFacts} {remainingBytes : Nat}
     {sourceRuntime nextRuntime entryRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -12730,7 +12738,7 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryDecrement
       ConcreteSupportedFunction program context functionCode sourceModule
         sourceFunction targetModule hosts)
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {facts : ReuseCapacityFacts} {remainingBytes : Nat}
     {sourceRuntime nextRuntime entryRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -12941,7 +12949,7 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryDelete
       ConcreteSupportedFunction program context functionCode sourceModule
         sourceFunction targetModule hosts)
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {facts : ReuseCapacityFacts} {remainingBytes : Nat}
     {sourceRuntime nextRuntime entryRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -13148,7 +13156,7 @@ theorem ConcreteStructuredCodeFocus.advance_constructorTag
     (functionSpec :
       ConcreteSupportedFunction program context functionCode sourceModule
         sourceFunction targetModule hosts)
-    {externals : ExternalImpl} {labels : List Lean.FVarId}
+    {externals : ExternalImpl} {labels : LabelContext}
     {facts : ReuseCapacityFacts} {remainingBytes : Nat}
     {sourceRuntime nextRuntime entryRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -13353,7 +13361,7 @@ theorem ConcreteStructuredCodeFocus.advance_objectFieldFVar
     (functionSpec :
       ConcreteSupportedFunction program context functionCode sourceModule
         sourceFunction targetModule hosts)
-    {externals : ExternalImpl} {labels : List Lean.FVarId}
+    {externals : ExternalImpl} {labels : LabelContext}
     {facts : ReuseCapacityFacts} {remainingBytes : Nat}
     {sourceRuntime nextRuntime entryRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -13620,7 +13628,7 @@ theorem ConcreteStructuredCodeFocus.advance_objectFieldErased
     (functionSpec :
       ConcreteSupportedFunction program context functionCode sourceModule
         sourceFunction targetModule hosts)
-    {externals : ExternalImpl} {labels : List Lean.FVarId}
+    {externals : ExternalImpl} {labels : LabelContext}
     {facts : ReuseCapacityFacts} {remainingBytes : Nat}
     {sourceRuntime nextRuntime entryRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -13859,7 +13867,7 @@ theorem ConcreteStructuredCodeFocus.advance_usizeField
     (functionSpec :
       ConcreteSupportedFunction program context functionCode sourceModule
         sourceFunction targetModule hosts)
-    {externals : ExternalImpl} {labels : List Lean.FVarId}
+    {externals : ExternalImpl} {labels : LabelContext}
     {facts : ReuseCapacityFacts} {remainingBytes : Nat}
     {sourceRuntime nextRuntime entryRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -14097,7 +14105,7 @@ private theorem ConcreteStructuredCodeFocus.advance_scalarFieldOperation
     (functionSpec :
       ConcreteSupportedFunction program context functionCode sourceModule
         sourceFunction targetModule hosts)
-    {externals : ExternalImpl} {labels : List Lean.FVarId}
+    {externals : ExternalImpl} {labels : LabelContext}
     {facts : ReuseCapacityFacts} {remainingBytes : Nat}
     {sourceRuntime nextRuntime entryRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -14311,7 +14319,7 @@ theorem ConcreteStructuredCodeFocus.advance_scalarField
     (functionSpec :
       ConcreteSupportedFunction program context functionCode sourceModule
         sourceFunction targetModule hosts)
-    {externals : ExternalImpl} {labels : List Lean.FVarId}
+    {externals : ExternalImpl} {labels : LabelContext}
     {facts : ReuseCapacityFacts} {remainingBytes : Nat}
     {sourceRuntime nextRuntime entryRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -14613,6 +14621,7 @@ theorem
     {context : Fir.Wasm.Context}
     {functionCode code : Lean.Compiler.LCNF.Code .impure}
     {sourceFunction : Fir.Wasm.Function}
+    {labels : LabelContext}
     (functionSpec :
       ConcreteSupportedFunction program context functionCode sourceModule
         sourceFunction targetModule hosts)
@@ -14634,7 +14643,7 @@ theorem
         expectedResult facts sourceRuntime sourceEnv code resultFacts
         resultRuntime resultEnv resultValue requiredBytes)
     (related :
-      ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
         sourceRuntime sourceEnv code targetStore targetLocals targetCode witness
         source target)
     (sourceJoins : source.joins = [])
@@ -14667,7 +14676,7 @@ theorem
                 targetAfter.frames = target.frames := by
   induction evaluation generalizing functionCode sourceFunction
       targetStore targetLocals targetCode witness source target entryRuntime
-      entryStore entryWitness slack with
+      entryStore entryWitness labels slack with
   | ret sourceLookup resultCompiled resultRefines =>
       obtain ⟨kind, physical, sourceAfter, targetAfter, targetResultCompiled,
           sourceStep, targetPath, yielded, sourceAfterJoins, sourceFramesEq,
@@ -14705,7 +14714,7 @@ theorem
         rcases sourceStep with ⟨discrValue, tag, found, tagged, chosen⟩
         simp [sourceSelected, executeStep, coreStep, found, tagged, chosen]
       have selectedFocus :
-          ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+          ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
             sourceRuntime sourceEnv selected targetStore targetLocals targetCode
             witness sourceSelected target := {
         sourceProgramEq := by simp [sourceSelected, related.sourceProgramEq]
@@ -14854,7 +14863,8 @@ theorem
             targetLookup imported functionSpec.hostsSatisfy
             inBounds getTagContracted parameterCount resultCount tagOperation
       have selectedFocus :
-          ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+          ConcreteStructuredCodeFocus context sourceModule sourceFunction
+            (none :: labels)
             sourceRuntime sourceEnv selected targetStore
             { targetLocals with values := targetLocals.values } selectedTarget
             witness sourceSelected targetSelected := {
@@ -15034,9 +15044,10 @@ theorem
         subst targetCode
         rfl
       have finishCase
+          {selectedLabels : LabelContext}
           (selectedTarget : Wasm.Program)
           (selectedAdapted :
-            CodeAdapted context sourceModule sourceFunction [] selected
+            CodeAdapted context sourceModule sourceFunction selectedLabels selected
               selectedTarget)
           (testCount : Nat)
           (targetPrefix :
@@ -15080,7 +15091,8 @@ theorem
             structuredWasmCaseLabels (targetLocals.values.drop 0)
                 targetSuffix testCount ++ target.frames }
         have selectedFocus :
-            ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+            ConcreteStructuredCodeFocus context sourceModule sourceFunction
+              selectedLabels
               sourceRuntime sourceEnv selected targetStore
               { targetLocals with values := targetLocals.values }
               selectedTarget witness sourceSelected targetSelected := {
@@ -15396,7 +15408,8 @@ theorem
         subst targetCode
         simpa [targetSelected] using rawTargetPrefix
       have selectedFocus :
-          ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+          ConcreteStructuredCodeFocus context sourceModule sourceFunction
+            (List.replicate testCount none ++ labels)
             sourceRuntime sourceEnv selected targetStore
             { targetLocals with values := targetLocals.values } selectedTarget
             witness sourceSelected targetSelected := {
@@ -15536,7 +15549,8 @@ theorem
         subst targetCode
         simpa [targetSelected] using rawTargetPrefix
       have selectedFocus :
-          ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+          ConcreteStructuredCodeFocus context sourceModule sourceFunction
+            (List.replicate testCount none ++ labels)
             sourceRuntime sourceEnv selected targetStore
             { targetLocals with values := targetLocals.values } selectedTarget
             witness sourceSelected targetSelected := {
@@ -15628,7 +15642,7 @@ theorem
             rfl
           have nextFocus :
               ConcreteStructuredCodeFocus context sourceModule sourceFunction
-                [] sourceRuntime sourceEnv continuation targetStore targetLocals
+                labels sourceRuntime sourceEnv continuation targetStore targetLocals
                 targetCode witness sourceMiddle target := {
             sourceProgramEq := by
               simp [sourceMiddle, related.sourceProgramEq]
@@ -15670,7 +15684,7 @@ theorem
             rfl
           have nextFocus :
               ConcreteStructuredCodeFocus context sourceModule sourceFunction
-                [] sourceRuntime sourceEnv continuation targetStore targetLocals
+                labels sourceRuntime sourceEnv continuation targetStore targetLocals
                 targetCode witness sourceMiddle target := {
             sourceProgramEq := by
               simp [sourceMiddle, related.sourceProgramEq]
@@ -16141,7 +16155,7 @@ theorem
         Option.some.inj callFound
       subst functionIndex
       have dispatchAdapted :
-          instructions sourceModule sourceFunction []
+          instructions sourceModule sourceFunction labels
               (compileClosureDispatch context decl.fvarId site.closureId
                 site.resultKind site.argumentCode site.argumentKinds) =
             .ok
@@ -16247,7 +16261,7 @@ theorem
       have entry :
           ConcreteStructuredSaturatedCallEntryFocus context
             loweredRow.context sourceModule sourceFunction calleeFunction
-            targetModule site resolution generatedRow [] callRuntime
+            targetModule site resolution generatedRow labels callRuntime
             continuation source.joins source.frames selected.nextStore
             targetLocals targetLocals.values targetRest target.frames witness
             physicalArgs resultIndex before.length sourceEntry targetEntry := {
@@ -16552,7 +16566,7 @@ theorem
       obtain ⟨targetResultKind, cacheIndex, declarationId, cacheSetId,
           recoveredTargetResultEq, cacheEq, declarationCall, cacheSetCall,
           _valueCodeEq, targetValueEq⟩ :=
-        compileCachedLetValue_adapted_inv context sourceModule sourceFunction []
+        compileCachedLetValue_adapted_inv context sourceModule sourceFunction labels
           decl declaration sourceDeclaration _ valueCode targetValue valueEq
           kindEq targetEq paramsEq valueCompiled valueAdapted
       have targetKindEq : targetResultKind = resultKind :=
@@ -17096,7 +17110,7 @@ theorem
               (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
               callWitness from ⟨nextFrame, nextEntry⟩)
       have nextFocus :
-          ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+          ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
             nextRuntime (bind sourceEnv decl.fvarId sourceValue) continuation
             nextStore { nextLocals with values := targetLocals.values }
             targetRest callWitness sourceResumed targetResumed := {
@@ -17341,7 +17355,7 @@ theorem ConcreteStructuredCodeFocus.advance_defaultOnlyCase_ranked
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -17428,7 +17442,7 @@ theorem ConcreteStructuredCodeFocus.advance_saturatedCall_stage_ranked
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {callerEnv : Env}
     (site : SaturatedClosureCallSite context decl callerEnv)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {sourceRuntime : RuntimeState}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {targetStore : Wasm.Store Host}
@@ -17466,7 +17480,7 @@ theorem ConcreteStructuredCodeFocus.advance_incPersistent
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -17527,7 +17541,7 @@ theorem ConcreteStructuredCodeFocus.advance_decPersistent
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -17599,7 +17613,7 @@ theorem ConcreteStructuredDirectCallEntryFocus.calleeResource
     {row : ConcreteGeneratedInternalDeclaration callerContext.program
       site.sourceDeclaration calleeContext site.calleeCode sourceModule
       calleeFunction targetModule}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {sourceRuntime : RuntimeState}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
@@ -17648,7 +17662,7 @@ theorem ConcreteStructuredDirectCallEntryFocus.pushResourceStack
     {row : ConcreteGeneratedInternalDeclaration callerContext.program
       site.sourceDeclaration calleeContext site.calleeCode sourceModule
       calleeFunction targetModule}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {callerEntryRuntime sourceRuntime : RuntimeState}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
@@ -17705,7 +17719,7 @@ theorem ConcreteStructuredDirectCallReadyFocus.advance_enter_stack
     {row : ConcreteGeneratedInternalDeclaration callerContext.program
       site.sourceDeclaration calleeContext site.calleeCode sourceModule
       calleeFunction targetModule}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {sourceRuntime : RuntimeState}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
@@ -17767,7 +17781,7 @@ theorem ConcreteStructuredDirectCallReadyFocus.advance_enter_stack_resource
     {row : ConcreteGeneratedInternalDeclaration callerContext.program
       site.sourceDeclaration calleeContext site.calleeCode sourceModule
       calleeFunction targetModule}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {sourceRuntime : RuntimeState}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
@@ -17864,7 +17878,7 @@ theorem ConcreteStructuredCodeFocus.advance_directCall_stage_stack
     (row : ConcreteGeneratedInternalDeclaration callerContext.program
       site.sourceDeclaration calleeContext site.calleeCode sourceModule
       calleeFunction targetModule)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {sourceRuntime : RuntimeState}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {targetStore : Wasm.Store Host}
@@ -17914,7 +17928,7 @@ theorem ConcreteStructuredCodeFocus.advance_saturatedCall_stage_stack
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {callerEnv : Env}
     (site : SaturatedClosureCallSite context decl callerEnv)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {sourceRuntime : RuntimeState}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {targetStore : Wasm.Store Host}
@@ -17974,7 +17988,7 @@ theorem ConcreteStructuredSaturatedCallReadyFocus.advance_enter_stack
     (row : ConcreteGeneratedInternalDeclaration context.program
       resolution.target calleeContext resolution.calleeCode sourceModule
       calleeFunction targetModule)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
     {sourceFrames : List Frame}
@@ -18095,7 +18109,7 @@ theorem ConcreteStructuredSaturatedCallReadyFocus.advance_enter_stack_resource
     (row : ConcreteGeneratedInternalDeclaration context.program
       resolution.target calleeContext resolution.calleeCode sourceModule
       calleeFunction targetModule)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
     {sourceFrames : List Frame}
@@ -18194,7 +18208,7 @@ theorem ConcreteStructuredBindFrameFocus.advance_stack
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -18253,7 +18267,7 @@ theorem ConcreteStructuredBindFrameFocus.advance_stack_resource
     {context calleeContext : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction calleeFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -18336,7 +18350,7 @@ theorem ConcreteStructuredBindFrameFocus.advance_popResourceStack
     {context calleeContext : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction calleeFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -18442,7 +18456,7 @@ theorem ConcreteStructuredSaturatedBindFrameFocus.advance_stack
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -18501,7 +18515,7 @@ theorem ConcreteStructuredSaturatedBindFrameFocus.advance_stack_resource
     {context calleeContext : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction calleeFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -18587,7 +18601,7 @@ theorem ConcreteStructuredSaturatedBindFrameFocus.advance_popResourceStack
     {context calleeContext : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction calleeFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -19332,7 +19346,7 @@ structure ConcreteStructuredCodeCoreRel
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
     (externals : ExternalImpl)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (entryRuntime : RuntimeState)
     (entryStore : Wasm.Store Host)
     (entryWitness : RefinementWitness)
@@ -19375,7 +19389,7 @@ structure ConcreteStructuredDirectCallReadyCoreRel
       site.sourceDeclaration calleeContext site.calleeCode sourceModule
       calleeFunction targetModule)
     (externals : ExternalImpl)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (entryRuntime : RuntimeState)
     (entryStore : Wasm.Store Host)
     (entryWitness : RefinementWitness)
@@ -19420,7 +19434,7 @@ theorem ConcreteStructuredDirectCallReadyCoreRel.observes
       site.sourceDeclaration calleeContext site.calleeCode sourceModule
       calleeFunction targetModule}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -19464,7 +19478,7 @@ structure ConcreteStructuredSaturatedCallReadyCoreRel
     {callerEnv : Env}
     (site : SaturatedClosureCallSite context decl callerEnv)
     (externals : ExternalImpl)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (entryRuntime : RuntimeState)
     (entryStore : Wasm.Store Host)
     (entryWitness : RefinementWitness)
@@ -19503,7 +19517,7 @@ theorem ConcreteStructuredSaturatedCallReadyCoreRel.observes
     {callerEnv : Env}
     {site : SaturatedClosureCallSite context decl callerEnv}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -19541,7 +19555,7 @@ structure ConcreteStructuredLazyCallReadyCoreRel
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
     (externals : ExternalImpl)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {declaration : Lean.Name}
     {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
@@ -19650,7 +19664,7 @@ structure ConcreteStructuredExternalCallReadyCoreRel
     (operation : ExternalOperation)
     (resolvedResultKind : AbiKind)
     (targetImport : Wasm.ImportDecl)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (continuation : Lean.Compiler.LCNF.Code .impure)
     (callerJoins : JoinEnv)
     (sourceFrames : List Frame)
@@ -19700,7 +19714,7 @@ theorem ConcreteStructuredExternalCallReadyCoreRel.observes
     {operation : ExternalOperation}
     {resolvedResultKind : AbiKind}
     {targetImport : Wasm.ImportDecl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
     {sourceFrames : List Frame}
@@ -19742,7 +19756,7 @@ structure ConcreteStructuredExternalBindCoreRel
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
     (externals : ExternalImpl)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (entryRuntime : RuntimeState)
     (entryStore : Wasm.Store Host)
     (entryWitness : RefinementWitness)
@@ -19784,7 +19798,7 @@ theorem ConcreteStructuredExternalBindCoreRel.observes
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -19837,7 +19851,7 @@ theorem ConcreteStructuredExternalCallReadyCoreRel.advance_of_step
     {operation : ExternalOperation}
     {resolvedResultKind : AbiKind}
     {targetImport : Wasm.ImportDecl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
     {sourceFrames : List Frame}
@@ -19909,7 +19923,7 @@ theorem ConcreteStructuredExternalBindCoreRel.advance_of_step
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -19994,7 +20008,7 @@ theorem ConcreteStructuredLazyCallReadyCoreRel.advance_hit_of_step
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {declaration : Lean.Name}
     {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
@@ -20142,7 +20156,7 @@ theorem ConcreteStructuredLazyCallReadyCoreRel.advance_miss_of_step
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {declaration : Lean.Name}
     {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
@@ -20402,7 +20416,7 @@ structure ConcreteStructuredCodePointwiseRel
     (spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts)
     (externals : ExternalImpl)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (entryRuntime : RuntimeState)
     (entryStore : Wasm.Store Host)
     (entryWitness : RefinementWitness)
@@ -20452,7 +20466,7 @@ inductive ConcreteStructuredCodeStepOutcome
     (spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts)
     (externals : ExternalImpl)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (entryRuntime : RuntimeState)
     (entryStore : Wasm.Store Host)
     (entryWitness : RefinementWitness)
@@ -20462,6 +20476,7 @@ inductive ConcreteStructuredCodeStepOutcome
     (remainingBytes : Nat) :
     MachineState → StructuredWasmState Host → Prop where
   | code
+      {nextLabels : LabelContext}
       {nextFacts : ReuseCapacityFacts}
       {nextRemainingBytes : Nat}
       {sourceRuntime : RuntimeState}
@@ -20476,7 +20491,7 @@ inductive ConcreteStructuredCodeStepOutcome
       (contextCaches :
         context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
       (related : ConcreteStructuredCodeCoreRel program context sourceModule
-        sourceFunction externals labels entryRuntime entryStore entryWitness
+        sourceFunction externals nextLabels entryRuntime entryStore entryWitness
         functionResult callerExpectedResult nextFacts nextRemainingBytes
         sourceRuntime sourceEnv sourceCode targetStore targetLocals targetCode
         witness source target) :
@@ -20694,7 +20709,7 @@ theorem ConcreteStructuredCodePointwiseRel.core
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -20734,7 +20749,7 @@ theorem ConcreteStructuredCodeCoreRel.withAdmission
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -20826,7 +20841,7 @@ theorem ConcreteStructuredCodePointwiseRel.directCallRow
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -20879,7 +20894,7 @@ theorem ConcreteStructuredCodePointwiseRel.saturatedCallRow
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -20945,7 +20960,7 @@ theorem ConcreteStructuredCodeCoreRel.advance_directCall_stage
     (row : ConcreteGeneratedInternalDeclaration callerContext.program
       site.sourceDeclaration calleeContext site.calleeCode sourceModule
       calleeFunction targetModule)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -21006,7 +21021,7 @@ theorem ConcreteStructuredCodeCoreRel.advance_directCall_stage_ranked
     (row : ConcreteGeneratedInternalDeclaration callerContext.program
       site.sourceDeclaration calleeContext site.calleeCode sourceModule
       calleeFunction targetModule)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -21067,7 +21082,7 @@ theorem ConcreteStructuredCodeCoreRel.advance_saturatedCall_stage
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {callerEnv : Env}
     (site : SaturatedClosureCallSite context decl callerEnv)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -21122,7 +21137,7 @@ theorem ConcreteStructuredSaturatedCallReadyFocus.application_of_step
     {sourceRuntime : RuntimeState}
     {site : SaturatedClosureCallSite context decl callerEnv}
     (resolution : SaturatedClosureCallResolution context sourceRuntime site)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {callerJoins : JoinEnv}
     {sourceFrames : List Frame}
@@ -21204,7 +21219,7 @@ theorem ConcreteStructuredDirectCallReadyCoreRel.advance_enter
     {row : ConcreteGeneratedInternalDeclaration callerContext.program
       site.sourceDeclaration calleeContext site.calleeCode sourceModule
       calleeFunction targetModule}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -21308,7 +21323,7 @@ theorem ConcreteStructuredDirectCallReadyCoreRel.advance_enter_of_step
     {row : ConcreteGeneratedInternalDeclaration callerContext.program
       site.sourceDeclaration calleeContext site.calleeCode sourceModule
       calleeFunction targetModule}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -21388,7 +21403,7 @@ theorem ConcreteStructuredSaturatedCallReadyCoreRel.advance_enter
     (row : ConcreteGeneratedInternalDeclaration context.program
       resolution.target calleeContext resolution.calleeCode sourceModule
       calleeFunction targetModule)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime : RuntimeState}
     {entryStore : Wasm.Store Host}
     {entryWitness : RefinementWitness}
@@ -21527,7 +21542,7 @@ theorem ConcreteStructuredSaturatedCallReadyCoreRel.advance_enter_of_step
     (row : ConcreteGeneratedInternalDeclaration context.program
       resolution.target calleeContext resolution.calleeCode sourceModule
       calleeFunction targetModule)
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime : RuntimeState}
     {entryStore : Wasm.Store Host}
     {entryWitness : RefinementWitness}
@@ -21597,7 +21612,7 @@ theorem ConcreteStructuredBindFrameFocus.advance_popCore
     {context calleeContext : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction calleeFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -21662,7 +21677,7 @@ theorem ConcreteStructuredSaturatedBindFrameFocus.advance_popCore
     {context calleeContext : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction calleeFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -21729,7 +21744,7 @@ theorem ConcreteStructuredCodeCoreRel.observes
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -21762,7 +21777,7 @@ theorem ConcreteStructuredCodeCoreRel.stackRel
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -21829,7 +21844,7 @@ inductive ConcreteStructuredSupportedFrameStack
       {callerContext : Fir.Wasm.Context}
       {callerCode : Lean.Compiler.LCNF.Code .impure}
       {callerFunction : Fir.Wasm.Function}
-      {labels : List Lean.FVarId}
+      {labels : LabelContext}
       {callerEnv : Env}
       {result : Lean.FVarId}
       {continuation : Lean.Compiler.LCNF.Code .impure}
@@ -21868,7 +21883,7 @@ inductive ConcreteStructuredSupportedFrameStack
       {callerContext : Fir.Wasm.Context}
       {callerCode : Lean.Compiler.LCNF.Code .impure}
       {callerFunction : Fir.Wasm.Function}
-      {labels : List Lean.FVarId}
+      {labels : LabelContext}
       {callerEnv : Env}
       {result : Lean.FVarId}
       {continuation : Lean.Compiler.LCNF.Code .impure}
@@ -21913,7 +21928,7 @@ inductive ConcreteStructuredSupportedFrameStack
       {callerContext : Fir.Wasm.Context}
       {callerCode : Lean.Compiler.LCNF.Code .impure}
       {callerFunction : Fir.Wasm.Function}
-      {labels : List Lean.FVarId}
+      {labels : LabelContext}
       {callerEnv : Env}
       {declaration : Lean.Name}
       {result : Lean.FVarId}
@@ -22037,7 +22052,7 @@ inductive ConcreteStructuredSupportedFrameStack.Agrees
       {callerContext : Fir.Wasm.Context}
       {callerCode : Lean.Compiler.LCNF.Code .impure}
       {callerFunction : Fir.Wasm.Function}
-      {labels : List Lean.FVarId}
+      {labels : LabelContext}
       {facts : ReuseCapacityFacts}
       {remainingBytes : Nat}
       {callerEnv : Env}
@@ -22093,7 +22108,7 @@ inductive ConcreteStructuredSupportedFrameStack.Agrees
       {callerContext : Fir.Wasm.Context}
       {callerCode : Lean.Compiler.LCNF.Code .impure}
       {callerFunction : Fir.Wasm.Function}
-      {labels : List Lean.FVarId}
+      {labels : LabelContext}
       {facts : ReuseCapacityFacts}
       {remainingBytes : Nat}
       {callerEnv : Env}
@@ -22152,7 +22167,7 @@ inductive ConcreteStructuredSupportedFrameStack.Agrees
       {callerContext : Fir.Wasm.Context}
       {callerCode : Lean.Compiler.LCNF.Code .impure}
       {callerFunction : Fir.Wasm.Function}
-      {labels : List Lean.FVarId}
+      {labels : LabelContext}
       {facts : ReuseCapacityFacts}
       {remainingBytes : Nat}
       {callerEnv : Env}
@@ -22268,7 +22283,7 @@ inductive ConcreteStructuredSupportedOutcome
     (spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts)
     (externals : ExternalImpl)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (entryRuntime : RuntimeState)
     (entryStore : Wasm.Store Host)
     (entryWitness : RefinementWitness)
@@ -22276,12 +22291,13 @@ inductive ConcreteStructuredSupportedOutcome
     (callerExpectedResult : Option AbiKind) :
     MachineState → StructuredWasmState Host → Prop where
   | code
+      {nextLabels : LabelContext}
       {source target facts remainingBytes sourceRuntime sourceEnv sourceCode
         targetStore targetLocals targetCode witness}
       (contextCaches :
         context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
       (related : ConcreteStructuredCodeCoreRel program context sourceModule
-        sourceFunction externals labels entryRuntime entryStore entryWitness
+        sourceFunction externals nextLabels entryRuntime entryStore entryWitness
         functionResult callerExpectedResult facts remainingBytes sourceRuntime
         sourceEnv sourceCode targetStore targetLocals targetCode witness source
         target)
@@ -22528,7 +22544,7 @@ def ConcreteStructuredGlobalOutcome
       (sourceFunction : Fir.Wasm.Function)
       (spec : ConcreteSupportedFunction program context functionCode
         sourceModule sourceFunction targetModule hosts)
-      (labels : List Lean.FVarId)
+      (labels : LabelContext)
       (entryRuntime : RuntimeState)
       (entryStore : Wasm.Store Host)
       (entryWitness : RefinementWitness)
@@ -22561,7 +22577,7 @@ def ConcreteStructuredSupportedGlobalOutcome
       (sourceFunction : Fir.Wasm.Function)
       (spec : ConcreteSupportedFunction program context functionCode
         sourceModule sourceFunction targetModule hosts)
-      (labels : List Lean.FVarId)
+      (labels : LabelContext)
       (entryRuntime : RuntimeState)
       (entryStore : Wasm.Store Host)
       (entryWitness : RefinementWitness)
@@ -22586,7 +22602,7 @@ theorem ConcreteStructuredSupportedOutcome.toGlobal
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime : RuntimeState}
     {entryStore : Wasm.Store Host}
     {entryWitness : RefinementWitness}
@@ -22618,7 +22634,7 @@ theorem ConcreteStructuredCodeStepOutcome.toGlobal
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime : RuntimeState}
     {entryStore : Wasm.Store Host}
     {entryWitness : RefinementWitness}
@@ -22720,7 +22736,7 @@ theorem ConcreteStructuredDirectCallReadyCoreRel.advance_global_of_step
     {row : ConcreteGeneratedInternalDeclaration callerContext.program
       site.sourceDeclaration calleeContext site.calleeCode sourceModule
       calleeFunction targetModule}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -22793,7 +22809,7 @@ theorem ConcreteStructuredDirectCallReadyCoreRel.advance_supportedGlobal_of_step
     {row : ConcreteGeneratedInternalDeclaration callerContext.program
       site.sourceDeclaration calleeContext site.calleeCode sourceModule
       calleeFunction targetModule}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -22907,7 +22923,7 @@ theorem ConcreteStructuredSaturatedCallReadyCoreRel.advance_global_of_step
     {row : ConcreteGeneratedInternalDeclaration context.program
       resolution.target calleeContext resolution.calleeCode sourceModule
       calleeFunction targetModule}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime : RuntimeState}
     {entryStore : Wasm.Store Host}
     {entryWitness : RefinementWitness}
@@ -22990,7 +23006,7 @@ theorem ConcreteStructuredSaturatedCallReadyCoreRel.advance_supportedGlobal_of_s
     {row : ConcreteGeneratedInternalDeclaration context.program
       resolution.target calleeContext resolution.calleeCode sourceModule
       calleeFunction targetModule}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime : RuntimeState}
     {entryStore : Wasm.Store Host}
     {entryWitness : RefinementWitness}
@@ -23108,7 +23124,7 @@ theorem ConcreteStructuredLazyCallReadyCoreRel.advance_supportedGlobal_of_step
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {declaration : Lean.Name}
     {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
@@ -23817,7 +23833,7 @@ theorem ConcreteStructuredCodePointwiseRel.root
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {facts : ReuseCapacityFacts}
     {requiredBytes : Nat}
     {remainingBytes : Nat}
@@ -23973,7 +23989,7 @@ theorem ConcreteStructuredCodeFocus.defaultOnlyCaseResult_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {sourceRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -24030,7 +24046,7 @@ theorem ConcreteStructuredCodeFocus.caseResult_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {sourceRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -24095,7 +24111,7 @@ theorem ConcreteStructuredCodeFocus.directLetResult_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {facts : ReuseCapacityFacts}
     {sourceRuntime : RuntimeState}
@@ -24192,7 +24208,7 @@ theorem ConcreteStructuredCodePointwiseRel.advance_directLet
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime : RuntimeState}
     {entryStore : Wasm.Store Host}
     {entryWitness : RefinementWitness}
@@ -24314,7 +24330,7 @@ theorem ConcreteStructuredCodePointwiseRel.advance_directLet_of_step
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime : RuntimeState}
     {entryStore : Wasm.Store Host}
     {entryWitness : RefinementWitness}
@@ -24383,7 +24399,7 @@ theorem ConcreteStructuredCodePointwiseRel.advance_return
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime : RuntimeState}
     {entryStore : Wasm.Store Host}
     {entryWitness : RefinementWitness}
@@ -24484,7 +24500,7 @@ theorem ConcreteStructuredCodePointwiseRel.advance_defaultOnlyCase_of_step
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -24551,7 +24567,7 @@ theorem ConcreteStructuredCodePointwiseRel.advance_objectCases_of_step
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -24583,7 +24599,8 @@ theorem ConcreteStructuredCodePointwiseRel.advance_objectCases_of_step
           structuredWasmCaseLabels (targetLocals.values.drop 0) targetSuffix
               testCount ++ target.frames ∧
         ConcreteStructuredCodeCoreRel program context sourceModule
-          sourceFunction externals labels entryRuntime entryStore entryWitness
+          sourceFunction externals (List.replicate testCount none ++ labels)
+          entryRuntime entryStore entryWitness
           functionResult callerExpectedResult facts remainingBytes sourceRuntime
           sourceEnv selected targetStore
           { targetLocals with values := targetLocals.values } selectedTarget
@@ -24620,7 +24637,8 @@ theorem ConcreteStructuredCodePointwiseRel.advance_objectCases_of_step
     subst actualControl
     simpa [targetAfter] using rawTargetPrefix
   have nextFocus :
-      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction
+        (List.replicate testCount none ++ labels)
         sourceRuntime sourceEnv selected targetStore
         { targetLocals with values := targetLocals.values } selectedTarget
         witness sourceAfter targetAfter := {
@@ -24692,7 +24710,7 @@ theorem ConcreteStructuredCodePointwiseRel.advance_scalarUInt8Cases_of_step
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -24724,7 +24742,8 @@ theorem ConcreteStructuredCodePointwiseRel.advance_scalarUInt8Cases_of_step
           structuredWasmCaseLabels (targetLocals.values.drop 0) targetSuffix
               testCount ++ target.frames ∧
         ConcreteStructuredCodeCoreRel program context sourceModule
-          sourceFunction externals labels entryRuntime entryStore entryWitness
+          sourceFunction externals (List.replicate testCount none ++ labels)
+          entryRuntime entryStore entryWitness
           functionResult callerExpectedResult facts remainingBytes sourceRuntime
           sourceEnv selected targetStore
           { targetLocals with values := targetLocals.values } selectedTarget
@@ -24760,7 +24779,8 @@ theorem ConcreteStructuredCodePointwiseRel.advance_scalarUInt8Cases_of_step
     subst actualControl
     simpa [targetAfter] using rawTargetPrefix
   have nextFocus :
-      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction
+        (List.replicate testCount none ++ labels)
         sourceRuntime sourceEnv selected targetStore
         { targetLocals with values := targetLocals.values } selectedTarget
         witness sourceAfter targetAfter := {
@@ -24830,7 +24850,7 @@ theorem ConcreteStructuredCodePointwiseRel.advance_incPersistent_of_step
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -24893,7 +24913,7 @@ theorem ConcreteStructuredCodePointwiseRel.advance_decPersistent_of_step
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -24963,7 +24983,7 @@ theorem ConcreteStructuredCodePointwiseRel.advance_ordinaryIncrement_of_step
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime nextRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -25049,7 +25069,7 @@ theorem ConcreteStructuredCodePointwiseRel.advance_ordinaryDecrement_of_step
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime nextRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -25135,7 +25155,7 @@ theorem ConcreteStructuredCodePointwiseRel.advance_ordinaryDelete_of_step
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime nextRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -25220,7 +25240,7 @@ private theorem ConcreteStructuredCodePointwiseRel.advance_mutation_of_step
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime nextRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -25316,7 +25336,7 @@ variable
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime nextRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -25472,7 +25492,7 @@ theorem ConcreteStructuredCodePointwiseRel.advance_pureExternal_stage_of_step
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime nextRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -25548,7 +25568,7 @@ theorem ConcreteStructuredCodePointwiseRel.advance_lazy_stage_of_step
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -25617,7 +25637,7 @@ theorem ConcreteStructuredCodePointwiseRel.advance
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -25828,7 +25848,7 @@ theorem ConcreteStructuredCodePointwiseRel.advance_supportedGlobal
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -26210,7 +26230,7 @@ inductive ConcreteStructuredRunnableOutcome
     (spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts)
     (externals : ExternalImpl)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (entryRuntime : RuntimeState)
     (entryStore : Wasm.Store Host)
     (entryWitness : RefinementWitness)
@@ -26490,7 +26510,7 @@ theorem ConcreteStructuredRunnableOutcome.advance_supportedGlobal
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime : RuntimeState}
     {entryStore : Wasm.Store Host}
     {entryWitness : RefinementWitness}
@@ -26583,7 +26603,7 @@ theorem ConcreteStructuredRunnableOutcome.toSupportedGlobal
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime : RuntimeState}
     {entryStore : Wasm.Store Host}
     {entryWitness : RefinementWitness}
@@ -26639,7 +26659,7 @@ def ConcreteStructuredRunnableGlobalOutcome
       (sourceFunction : Fir.Wasm.Function)
       (spec : ConcreteSupportedFunction program context functionCode
         sourceModule sourceFunction targetModule hosts)
-      (labels : List Lean.FVarId)
+      (labels : LabelContext)
       (entryRuntime : RuntimeState)
       (entryStore : Wasm.Store Host)
       (entryWitness : RefinementWitness)
@@ -26666,7 +26686,7 @@ theorem ConcreteStructuredRunnableOutcome.toRunnableGlobal
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime : RuntimeState}
     {entryStore : Wasm.Store Host}
     {entryWitness : RefinementWitness}
@@ -26788,7 +26808,7 @@ theorem ConcreteStructuredCodePointwiseRel.advance_global
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}

@@ -88,12 +88,13 @@ theorem mulFunction_locals_size :
 /-- The adapter maps the actual symbolic immediate arm to the exact Talos
 program used by the execution proof. -/
 theorem instructions_immediateMulSource
-    {sourceModule : Fir.Wasm.Module} {makeNaturalIndex : Nat}
+    {sourceModule : Fir.Wasm.Module} {labels : LabelContext}
+    {makeNaturalIndex : Nat}
     (makeNaturalFound : FirTalos.callIndex? sourceModule
       (.declaration Fir.Wasm.Emit.ResidentNumeric.makeNaturalName) =
         some makeNaturalIndex) :
     FirTalos.instructions sourceModule
-      Fir.Wasm.Emit.ResidentNatArithmetic.mulFunction []
+      Fir.Wasm.Emit.ResidentNatArithmetic.mulFunction labels
       (immediateMulSource
         Fir.Wasm.Emit.ResidentNatArithmetic.mulFunction.params[0]!.1
         Fir.Wasm.Emit.ResidentNatArithmetic.mulFunction.params[1]!.1
@@ -180,7 +181,7 @@ theorem instructions_mulFunctionBody_of_shape
       (.declaration Fir.Wasm.Emit.ResidentNumeric.makeNaturalName) =
         some makeNaturalIndex)
     (fallbackAdapted : FirTalos.instructions sourceModule
-      Fir.Wasm.Emit.ResidentNatArithmetic.mulFunction [] sourceFallback =
+      Fir.Wasm.Emit.ResidentNatArithmetic.mulFunction [none] sourceFallback =
         .ok targetFallback) :
     FirTalos.instructions sourceModule
       Fir.Wasm.Emit.ResidentNatArithmetic.mulFunction []
@@ -192,7 +193,7 @@ theorem instructions_mulFunctionBody_of_shape
       (leftIndex := 0) (rightIndex := 1)
   · decide
   · decide
-  · exact instructions_immediateMulSource makeNaturalFound
+  · exact instructions_immediateMulSource (labels := [none]) makeNaturalFound
   · exact fallbackAdapted
 
 /-- Successful adaptation installs precisely the exposed dispatcher followed
@@ -222,7 +223,7 @@ theorem adaptedMulFunction_body_of_shape
       (.declaration Fir.Wasm.Emit.ResidentNumeric.makeNaturalName) =
         some makeNaturalIndex)
     (fallbackAdapted : FirTalos.instructions sourceModule
-      Fir.Wasm.Emit.ResidentNatArithmetic.mulFunction [] sourceFallback =
+      Fir.Wasm.Emit.ResidentNatArithmetic.mulFunction [none] sourceFallback =
         .ok targetFallback) :
     targetFunction.body =
       ResidentPrimitives.immediateNaturalPairDispatch 0 1
@@ -553,7 +554,7 @@ theorem terminatesWith_mulFunctionImmediate_of_adapted
       (.declaration Fir.Wasm.Emit.ResidentNumeric.makeNaturalName) =
         some makeNaturalIndex)
     (fallbackAdapted : FirTalos.instructions sourceModule
-      Fir.Wasm.Emit.ResidentNatArithmetic.mulFunction [] sourceFallback =
+      Fir.Wasm.Emit.ResidentNatArithmetic.mulFunction [none] sourceFallback =
         .ok targetFallback)
     (pair : ImmediateNaturalPairRel leftWord rightWord leftReference
       rightReference leftPayload rightPayload)
@@ -711,7 +712,7 @@ theorem terminatesWith_mulFunctionImmediate_tagged_of_adapted
       (.declaration Fir.Wasm.Emit.ResidentNumeric.makeNaturalName) =
         some makeNaturalIndex)
     (fallbackAdapted : FirTalos.instructions sourceModule
-      Fir.Wasm.Emit.ResidentNatArithmetic.mulFunction [] sourceFallback =
+      Fir.Wasm.Emit.ResidentNatArithmetic.mulFunction [none] sourceFallback =
         .ok targetFallback)
     (makeNaturalAdapted : FirTalos.function sourceModule
       Fir.Wasm.Emit.ResidentNumeric.makeNaturalFunction =

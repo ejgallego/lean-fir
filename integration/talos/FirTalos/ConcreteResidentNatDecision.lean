@@ -114,7 +114,7 @@ theorem decisionFunction_locals_size (kind : DecisionKind) :
 /-- Adapter preservation for the branch-local direct comparison. -/
 theorem instructions_immediateDecisionSource
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {kind : DecisionKind}
+    {labels : LabelContext} {kind : DecisionKind}
     {left right raw : Lean.FVarId} {leftIndex rightIndex rawIndex : Nat}
     (leftFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList) left =
@@ -137,7 +137,7 @@ theorem instructions_immediateDecisionSource
 /-- Adapter preservation for the common post-dispatch result suffix. -/
 theorem instructions_decisionResultSource
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {raw : Lean.FVarId} {rawIndex : Nat}
+    {labels : LabelContext} {raw : Lean.FVarId} {rawIndex : Nat}
     (rawFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList) raw =
         some rawIndex) :
@@ -165,12 +165,12 @@ theorem instructions_decisionFunctionBody_of_shape
         decisionResultSource
           (decisionFunction kind).locals[0]!.1)
     (fallbackAdapted : FirTalos.instructions sourceModule
-      (decisionFunction kind) [] sourceFallback = .ok targetFallback) :
+      (decisionFunction kind) [none] sourceFallback = .ok targetFallback) :
     FirTalos.instructions sourceModule (decisionFunction kind) []
       (decisionFunction kind).body = .ok (decisionProgram kind targetFallback) := by
   rw [shape, FirTalos.Correctness.instructions_append]
   have immediateAdapted : FirTalos.instructions sourceModule
-      (decisionFunction kind) []
+      (decisionFunction kind) [none]
       (immediateDecisionSource kind
         (decisionFunction kind).params[0]!.1
         (decisionFunction kind).params[1]!.1
@@ -227,7 +227,7 @@ theorem adaptedDecisionFunction_body_of_shape
         decisionResultSource
           (decisionFunction kind).locals[0]!.1)
     (fallbackAdapted : FirTalos.instructions sourceModule
-      (decisionFunction kind) [] sourceFallback = .ok targetFallback) :
+      (decisionFunction kind) [none] sourceFallback = .ok targetFallback) :
     targetFunction.body = decisionProgram kind targetFallback ++
       FirTalos.functionTerminal sourceModule (decisionFunction kind) := by
   exact ResidentNat.adaptedFunction_body_of_exact adapted
@@ -347,7 +347,7 @@ theorem terminatesWith_decisionFunctionImmediate_of_adapted
         decisionResultSource
           (decisionFunction kind).locals[0]!.1)
     (fallbackAdapted : FirTalos.instructions sourceModule
-      (decisionFunction kind) [] sourceFallback = .ok targetFallback)
+      (decisionFunction kind) [none] sourceFallback = .ok targetFallback)
     (pair : ImmediateNaturalPairRel leftWord rightWord leftReference
       rightReference leftPayload rightPayload) :
     Wasm.TerminatesWith env module functionIndex store

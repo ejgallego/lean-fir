@@ -263,17 +263,17 @@ inductive ReuseCapacityCodeSimulation
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List FVarId)
     (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (sourceExternals : ExternalImpl) :
-    ReuseCapacityFacts →
+    LabelContext → ReuseCapacityFacts →
       RuntimeState → Env → LCNF.Code .impure → Wasm.Program →
       Wasm.Store Host → Wasm.Locals → RefinementWitness →
       ReuseCapacityFacts →
       RuntimeState → Value → AbiKind → Wasm.Store Host →
       RefinementWitness → Wasm.Value → Prop where
   | ret
+      {labels : LabelContext}
       (safe :
         reuseCapacitySafeCode facts (.return result) = true)
       (localCompiled :
@@ -288,11 +288,12 @@ inductive ReuseCapacityCodeSimulation
         ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
           targetStore targetLocals witness)
       (targetLookup : targetLocals.get resultIndex = some physical) :
-      ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
-        module hostEnv sourceExternals facts sourceRuntime sourceEnv
+      ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels facts sourceRuntime sourceEnv
         (.return result) [.localGet resultIndex, .ret] targetStore targetLocals
         witness facts sourceRuntime sourceValue kind targetStore witness physical
   | letValue
+      {labels : LabelContext}
       (safe :
         reuseCapacitySafeCode facts (.let decl continuation) = true)
       (transfer :
@@ -311,18 +312,19 @@ inductive ReuseCapacityCodeSimulation
           sourceValue targetStore nextStore targetLocals nextLocals resultIndex
           witness nextWitness)
       (continued :
-        ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
-          module hostEnv sourceExternals nextFacts nextRuntime
+        ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels nextFacts nextRuntime
           (bind sourceEnv decl.fvarId sourceValue) continuation targetRest
           nextStore nextLocals nextWitness resultFacts resultRuntime resultValue
           resultKind resultStore resultWitness physical) :
-      ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
-        module hostEnv sourceExternals facts sourceRuntime sourceEnv
+      ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels facts sourceRuntime sourceEnv
         (.let decl continuation)
         (targetValue ++ .localSet resultIndex :: targetRest)
         targetStore targetLocals witness resultFacts resultRuntime resultValue
         resultKind resultStore resultWitness physical
   | callLet
+      {labels : LabelContext}
       (safe :
         reuseCapacitySafeCode facts (.let decl continuation) = true)
       (transfer :
@@ -341,18 +343,19 @@ inductive ReuseCapacityCodeSimulation
           sourceRuntime nextRuntime sourceEnv sourceValue targetStore nextStore
           targetLocals nextLocals resultIndex witness nextWitness)
       (continued :
-        ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
-          module hostEnv sourceExternals nextFacts nextRuntime
+        ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels nextFacts nextRuntime
           (bind sourceEnv decl.fvarId sourceValue) continuation targetRest
           nextStore nextLocals nextWitness resultFacts resultRuntime resultValue
           resultKind resultStore resultWitness physical) :
-      ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
-        module hostEnv sourceExternals facts sourceRuntime sourceEnv
+      ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels facts sourceRuntime sourceEnv
         (.let decl continuation)
         (targetValue ++ .localSet resultIndex :: targetRest)
         targetStore targetLocals witness resultFacts resultRuntime resultValue
         resultKind resultStore resultWitness physical
   | externalLet
+      {labels : LabelContext}
       (safe :
         reuseCapacitySafeCode facts (.let decl continuation) = true)
       (transfer :
@@ -372,18 +375,19 @@ inductive ReuseCapacityCodeSimulation
           targetStore nextStore targetLocals nextLocals resultIndex witness
           nextWitness)
       (continued :
-        ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
-          module hostEnv sourceExternals nextFacts nextRuntime
+        ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels nextFacts nextRuntime
           (bind sourceEnv decl.fvarId sourceValue) continuation targetRest
           nextStore nextLocals nextWitness resultFacts resultRuntime resultValue
           resultKind resultStore resultWitness physical) :
-      ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
-        module hostEnv sourceExternals facts sourceRuntime sourceEnv
+      ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels facts sourceRuntime sourceEnv
         (.let decl continuation)
         (targetValue ++ .localSet resultIndex :: targetRest)
         targetStore targetLocals witness resultFacts resultRuntime resultValue
         resultKind resultStore resultWitness physical
   | lazyLet
+      {labels : LabelContext}
       (path : LazyCachePath)
       (safe :
         reuseCapacitySafeCode facts (.let decl continuation) = true)
@@ -404,18 +408,19 @@ inductive ReuseCapacityCodeSimulation
           targetStore nextStore targetLocals nextLocals resultIndex witness
           nextWitness)
       (continued :
-        ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
-          module hostEnv sourceExternals nextFacts nextRuntime
+        ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels nextFacts nextRuntime
           (bind sourceEnv decl.fvarId sourceValue) continuation targetRest
           nextStore nextLocals nextWitness resultFacts resultRuntime resultValue
           resultKind resultStore resultWitness physical) :
-      ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
-        module hostEnv sourceExternals facts sourceRuntime sourceEnv
+      ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels facts sourceRuntime sourceEnv
         (.let decl continuation)
         (targetValue ++ .localSet resultIndex :: targetRest)
         targetStore targetLocals witness resultFacts resultRuntime resultValue
         resultKind resultStore resultWitness physical
   | caseOf
+      {labels selectedLabels : LabelContext}
       (safe :
         reuseCapacitySafeCode facts (.cases cases) = true)
       (target selectedTarget : Wasm.Program)
@@ -424,19 +429,21 @@ inductive ReuseCapacityCodeSimulation
           targetStore targetLocals witness)
       (step :
         ConcreteCasesStepSimulates context sourceModule sourceFunction labels
-          module hostEnv sourceRuntime sourceEnv cases selected target
-          selectedTarget targetStore targetLocals witness)
+          selectedLabels module hostEnv sourceRuntime sourceEnv cases selected
+          target selectedTarget targetStore targetLocals witness)
       (continued :
-        ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
-          module hostEnv sourceExternals facts sourceRuntime sourceEnv selected
+        ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals selectedLabels facts sourceRuntime
+          sourceEnv selected
           selectedTarget targetStore targetLocals witness resultFacts
           resultRuntime resultValue resultKind resultStore resultWitness
           physical) :
-      ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
-        module hostEnv sourceExternals facts sourceRuntime sourceEnv
+      ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels facts sourceRuntime sourceEnv
         (.cases cases) target targetStore targetLocals witness resultFacts
         resultRuntime resultValue resultKind resultStore resultWitness physical
   | effect
+      {labels : LabelContext}
       (safe : reuseCapacitySafeCode facts code = true)
       (target targetRest : Wasm.Program)
       (stateRelated :
@@ -451,12 +458,12 @@ inductive ReuseCapacityCodeSimulation
         HeaderCapacityTransport targetStore.host.runtime.heap
           nextStore.host.runtime.heap witness)
       (continued :
-        ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
-          module hostEnv sourceExternals facts nextRuntime sourceEnv continuation
+        ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels facts nextRuntime sourceEnv continuation
           targetRest nextStore targetLocals nextWitness resultFacts resultRuntime
           resultValue resultKind resultStore resultWitness physical) :
-      ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
-        module hostEnv sourceExternals facts sourceRuntime sourceEnv code target
+      ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels facts sourceRuntime sourceEnv code target
         targetStore targetLocals witness resultFacts resultRuntime resultValue
         resultKind resultStore resultWitness physical
 
@@ -465,7 +472,7 @@ theorem ReuseCapacityCodeSimulation.initialRelated
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {sourceExternals : ExternalImpl}
     {facts resultFacts : ReuseCapacityFacts}
     {sourceRuntime resultRuntime : RuntimeState} {sourceEnv : Env}
@@ -475,8 +482,8 @@ theorem ReuseCapacityCodeSimulation.initialRelated
     {witness resultWitness : RefinementWitness}
     {resultValue : Value} {resultKind : AbiKind} {physical : Wasm.Value}
     (simulation :
-      ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
-        module hostEnv sourceExternals facts sourceRuntime sourceEnv sourceCode
+      ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels facts sourceRuntime sourceEnv sourceCode
         target targetStore targetLocals witness resultFacts resultRuntime
         resultValue resultKind resultStore resultWitness physical) :
     ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
@@ -496,7 +503,7 @@ theorem ReuseCapacityCodeSimulation.returnNode
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {sourceExternals : ExternalImpl}
     {facts : ReuseCapacityFacts}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
@@ -515,8 +522,8 @@ theorem ReuseCapacityCodeSimulation.returnNode
       ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
         targetStore targetLocals witness)
     (targetLookup : targetLocals.get resultIndex = some physical) :
-    ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
-      module hostEnv sourceExternals facts sourceRuntime sourceEnv
+    ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels facts sourceRuntime sourceEnv
       (.return result) [.localGet resultIndex, .ret] targetStore targetLocals
       witness facts sourceRuntime sourceValue kind targetStore witness physical :=
   .ret (by simp [reuseCapacitySafeCode]) localCompiled resultFound kindAt
@@ -529,7 +536,7 @@ theorem ReuseCapacityCodeSimulation.caseOfContinuation
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId} {module : Wasm.Module}
+    {labels selectedLabels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {sourceExternals : ExternalImpl}
     {facts resultFacts : ReuseCapacityFacts}
     {sourceRuntime resultRuntime : RuntimeState} {sourceEnv : Env}
@@ -542,16 +549,17 @@ theorem ReuseCapacityCodeSimulation.caseOfContinuation
     (safe : reuseCapacitySafeCode facts (.cases cases) = true)
     (step :
       ConcreteCasesStepSimulates context sourceModule sourceFunction labels
-        module hostEnv sourceRuntime sourceEnv cases selected target
-        selectedTarget targetStore targetLocals witness)
+        selectedLabels module hostEnv sourceRuntime sourceEnv cases selected
+        target selectedTarget targetStore targetLocals witness)
     (continued :
-      ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
-        module hostEnv sourceExternals facts sourceRuntime sourceEnv selected
+      ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals selectedLabels facts sourceRuntime
+        sourceEnv selected
         selectedTarget targetStore targetLocals witness resultFacts
         resultRuntime resultValue resultKind resultStore resultWitness
         physical) :
-    ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
-      module hostEnv sourceExternals facts sourceRuntime sourceEnv
+    ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels facts sourceRuntime sourceEnv
       (.cases cases) target targetStore targetLocals witness resultFacts
       resultRuntime resultValue resultKind resultStore resultWitness physical :=
   .caseOf safe target selectedTarget continued.initialRelated step continued
@@ -563,7 +571,7 @@ theorem ReuseCapacityCodeSimulation.effectOfTransport
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {sourceExternals : ExternalImpl}
     {facts resultFacts : ReuseCapacityFacts}
     {sourceRuntime nextRuntime resultRuntime : RuntimeState}
@@ -589,13 +597,13 @@ theorem ReuseCapacityCodeSimulation.effectOfTransport
     (continued :
       ReuseCapacityStateRelated facts sourceFunction nextRuntime sourceEnv
           nextStore targetLocals nextWitness →
-        ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
-          module hostEnv sourceExternals facts nextRuntime sourceEnv
+        ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels facts nextRuntime sourceEnv
           continuation targetRest nextStore targetLocals nextWitness resultFacts
           resultRuntime resultValue resultKind resultStore resultWitness
           physical) :
-    ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
-      module hostEnv sourceExternals facts sourceRuntime sourceEnv code target
+    ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels facts sourceRuntime sourceEnv code target
       targetStore targetLocals witness resultFacts resultRuntime resultValue
       resultKind resultStore resultWitness physical :=
   .effect safe target targetRest related step witnessTransport
@@ -609,7 +617,7 @@ theorem ReuseCapacityCodeSimulation.erase
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {sourceExternals : ExternalImpl}
     {facts resultFacts : ReuseCapacityFacts}
     {sourceRuntime resultRuntime : RuntimeState} {sourceEnv : Env}
@@ -619,12 +627,11 @@ theorem ReuseCapacityCodeSimulation.erase
     {witness resultWitness : RefinementWitness}
     {resultValue : Value} {resultKind : AbiKind} {physical : Wasm.Value}
     (simulation :
-      ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
-        module hostEnv sourceExternals facts sourceRuntime sourceEnv sourceCode
+      ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels facts sourceRuntime sourceEnv sourceCode
         target targetStore targetLocals witness resultFacts resultRuntime
         resultValue resultKind resultStore resultWitness physical) :
-    ConcreteCodeSimulation context sourceModule sourceFunction labels module
-      hostEnv sourceExternals sourceRuntime sourceEnv sourceCode target
+    ConcreteCodeSimulation context sourceModule sourceFunction module hostEnv sourceExternals labels sourceRuntime sourceEnv sourceCode target
       targetStore targetLocals witness resultRuntime resultValue resultKind
       resultStore resultWitness physical := by
   induction simulation with
@@ -656,7 +663,7 @@ theorem ReuseCapacityCodeSimulation.finalRelated
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {sourceExternals : ExternalImpl}
     {facts resultFacts : ReuseCapacityFacts}
     {sourceRuntime resultRuntime : RuntimeState} {sourceEnv : Env}
@@ -666,8 +673,8 @@ theorem ReuseCapacityCodeSimulation.finalRelated
     {witness resultWitness : RefinementWitness}
     {resultValue : Value} {resultKind : AbiKind} {physical : Wasm.Value}
     (simulation :
-      ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
-        module hostEnv sourceExternals facts sourceRuntime sourceEnv sourceCode
+      ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels facts sourceRuntime sourceEnv sourceCode
         target targetStore targetLocals witness resultFacts resultRuntime
         resultValue resultKind resultStore resultWitness physical) :
     ∃ resultEnv resultLocals,
@@ -691,7 +698,7 @@ theorem ReuseCapacityCodeSimulation.frameTransport
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {sourceExternals : ExternalImpl}
     {facts resultFacts : ReuseCapacityFacts}
     {sourceRuntime resultRuntime : RuntimeState} {sourceEnv : Env}
@@ -701,8 +708,8 @@ theorem ReuseCapacityCodeSimulation.frameTransport
     {witness resultWitness : RefinementWitness}
     {resultValue : Value} {resultKind : AbiKind} {physical : Wasm.Value}
     (simulation :
-      ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
-        module hostEnv sourceExternals facts sourceRuntime sourceEnv sourceCode
+      ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels facts sourceRuntime sourceEnv sourceCode
         target targetStore targetLocals witness resultFacts resultRuntime
         resultValue resultKind resultStore resultWitness physical) :
     WitnessTransport witness resultWitness ∧
@@ -735,7 +742,7 @@ theorem ReuseCapacityCodeSimulation.toCodeWP
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {sourceExternals : ExternalImpl}
     {facts resultFacts : ReuseCapacityFacts}
     {sourceRuntime resultRuntime : RuntimeState} {sourceEnv : Env}
@@ -747,8 +754,8 @@ theorem ReuseCapacityCodeSimulation.toCodeWP
     {targetFunction : Wasm.Function}
     {parameters callerTail : List Wasm.Value}
     (simulation :
-      ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
-        module hostEnv sourceExternals facts sourceRuntime sourceEnv sourceCode
+      ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels facts sourceRuntime sourceEnv sourceCode
         target targetStore targetLocals witness resultFacts resultRuntime
         resultValue resultKind resultStore resultWitness physical)
     (parameterCount : parameters.length = targetFunction.numParams)

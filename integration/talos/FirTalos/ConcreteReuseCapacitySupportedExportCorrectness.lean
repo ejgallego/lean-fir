@@ -35,8 +35,8 @@ theorem ConcreteSupportedExport.toSuccessfulDeclarationOfReuseCapacity
     {resultValue : Value}
     {physical : Wasm.Value}
     (simulation :
-      ReuseCapacityCodeSimulation context sourceModule sourceFunction []
-        target.wasmModule hosts.env sourceExternals [] sourceRuntime sourceEnv
+      ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        target.wasmModule hosts.env sourceExternals [] [] sourceRuntime sourceEnv
         sourceCode spec.targetBody initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness
         resultFacts resultRuntime resultValue resultKind resultStore
@@ -76,8 +76,8 @@ theorem ConcreteSupportedExport.toCapacityPreservingSuccessfulDeclarationOfReuse
     {resultValue : Value}
     {physical : Wasm.Value}
     (simulation :
-      ReuseCapacityCodeSimulation context sourceModule sourceFunction []
-        target.wasmModule hosts.env sourceExternals [] sourceRuntime sourceEnv
+      ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        target.wasmModule hosts.env sourceExternals [] [] sourceRuntime sourceEnv
         sourceCode spec.targetBody initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness
         resultFacts resultRuntime resultValue resultKind resultStore
@@ -119,8 +119,8 @@ theorem ConcreteSupportedExport.correctOfReuseCapacity
     {resultValue : Value}
     {physical : Wasm.Value}
     (simulation :
-      ReuseCapacityCodeSimulation context sourceModule sourceFunction []
-        target.wasmModule hosts.env sourceExternals [] sourceRuntime sourceEnv
+      ReuseCapacityCodeSimulation context sourceModule sourceFunction
+        target.wasmModule hosts.env sourceExternals [] [] sourceRuntime sourceEnv
         sourceCode spec.targetBody initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness
         resultFacts resultRuntime resultValue resultKind resultStore

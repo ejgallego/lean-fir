@@ -74,7 +74,7 @@ structure ConcreteStructuredCompilerCurrentStepAdmission
       {sourceFunction : Fir.Wasm.Function}
       (spec : ConcreteSupportedFunction program context functionCode
         sourceModule sourceFunction targetModule hosts)
-      {labels : List Lean.FVarId}
+      {labels : LabelContext}
       {entryRuntime sourceRuntime : Fir.LeanIR.Impure.RuntimeState}
       {entryStore targetStore : Wasm.Store Host}
       {entryWitness witness : Fir.Wasm.Concrete.RefinementWitness}
@@ -117,7 +117,7 @@ structure ConcreteStructuredCurrentStepAddressSpaceSafety
       {sourceFunction : Fir.Wasm.Function}
       (spec : ConcreteSupportedFunction program context functionCode
         sourceModule sourceFunction targetModule hosts)
-      {labels : List Lean.FVarId}
+      {labels : LabelContext}
       {entryRuntime sourceRuntime : Fir.LeanIR.Impure.RuntimeState}
       {entryStore targetStore : Wasm.Store Host}
       {entryWitness witness : Fir.Wasm.Concrete.RefinementWitness}

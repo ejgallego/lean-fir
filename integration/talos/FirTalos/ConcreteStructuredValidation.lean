@@ -587,7 +587,7 @@ theorem ConcreteStructuredValidatedFrameStack.direct
     {callerContext : Fir.Wasm.Context}
     {callerCode : Lean.Compiler.LCNF.Code .impure}
     {callerFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {callerEnv : Env}
     {result : Lean.FVarId}
     {continuation : Lean.Compiler.LCNF.Code .impure}
@@ -635,7 +635,7 @@ theorem ConcreteStructuredValidatedFrameStack.saturated
     {callerContext : Fir.Wasm.Context}
     {callerCode : Lean.Compiler.LCNF.Code .impure}
     {callerFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {callerEnv : Env}
     {result : Lean.FVarId}
     {continuation : Lean.Compiler.LCNF.Code .impure}
@@ -689,7 +689,7 @@ theorem ConcreteStructuredValidatedFrameStack.lazy
     {callerContext : Fir.Wasm.Context}
     {callerCode : Lean.Compiler.LCNF.Code .impure}
     {callerFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {callerEnv : Env}
     {declaration : Lean.Name}
     {result : Lean.FVarId}
@@ -821,7 +821,7 @@ inductive ConcreteStructuredValidatedStackAgreement
       {callerContext : Fir.Wasm.Context}
       {callerCode : Lean.Compiler.LCNF.Code .impure}
       {callerFunction : Fir.Wasm.Function}
-      {labels : List Lean.FVarId}
+      {labels : LabelContext}
       {facts : ReuseCapacityFacts}
       {remainingBytes : Nat}
       {callerEnv : Env}
@@ -881,7 +881,7 @@ inductive ConcreteStructuredValidatedStackAgreement
       {callerContext : Fir.Wasm.Context}
       {callerCode : Lean.Compiler.LCNF.Code .impure}
       {callerFunction : Fir.Wasm.Function}
-      {labels : List Lean.FVarId}
+      {labels : LabelContext}
       {facts : ReuseCapacityFacts}
       {remainingBytes : Nat}
       {callerEnv : Env}
@@ -944,7 +944,7 @@ inductive ConcreteStructuredValidatedStackAgreement
       {callerContext : Fir.Wasm.Context}
       {callerCode : Lean.Compiler.LCNF.Code .impure}
       {callerFunction : Fir.Wasm.Function}
-      {labels : List Lean.FVarId}
+      {labels : LabelContext}
       {facts : ReuseCapacityFacts}
       {remainingBytes : Nat}
       {callerEnv : Env}
@@ -1094,7 +1094,7 @@ structure ConcreteStructuredValidatedCodeCoreRel
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
     (externals : ExternalImpl)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (entryRuntime : RuntimeState)
     (entryStore : Wasm.Store Host)
     (entryWitness : RefinementWitness)
@@ -1138,7 +1138,7 @@ structure ConcreteStructuredValidatedCodeOutcome
     (spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts)
     (externals : ExternalImpl)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (entryRuntime : RuntimeState)
     (entryStore : Wasm.Store Host)
     (entryWitness : RefinementWitness)
@@ -1190,7 +1190,7 @@ structure ConcreteStructuredValidatedDirectCallReadyOutcome
       site.sourceDeclaration calleeContext site.calleeCode sourceModule
       calleeFunction targetModule)
     (externals : ExternalImpl)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (entryRuntime : RuntimeState)
     (entryStore : Wasm.Store Host)
     (entryWitness : RefinementWitness)
@@ -1252,7 +1252,7 @@ structure ConcreteStructuredValidatedSaturatedCallReadyOutcome
       resolution.target calleeContext resolution.calleeCode sourceModule
       calleeFunction targetModule)
     (externals : ExternalImpl)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (entryRuntime : RuntimeState)
     (entryStore : Wasm.Store Host)
     (entryWitness : RefinementWitness)
@@ -1309,7 +1309,7 @@ structure ConcreteStructuredValidatedExternalBindOutcome
     (spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts)
     (externals : ExternalImpl)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (entryRuntime : RuntimeState)
     (entryStore : Wasm.Store Host)
     (entryWitness : RefinementWitness)
@@ -1367,7 +1367,7 @@ structure ConcreteStructuredValidatedReturnedOutcome
     (spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts)
     (externals : ExternalImpl)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (entryRuntime : RuntimeState)
     (entryStore : Wasm.Store Host)
     (entryWitness : RefinementWitness)
@@ -1425,7 +1425,7 @@ inductive ConcreteStructuredValidatedCodeGlobalOutcome
       {sourceFunction : Fir.Wasm.Function}
       {spec : ConcreteSupportedFunction program context functionCode
         sourceModule sourceFunction targetModule hosts}
-      {labels : List Lean.FVarId}
+      {labels : LabelContext}
       {entryRuntime sourceRuntime : RuntimeState}
       {entryStore targetStore : Wasm.Store Host}
       {entryWitness witness : RefinementWitness}
@@ -1459,7 +1459,7 @@ inductive ConcreteStructuredValidatedCodeGlobalOutcome
       {row : ConcreteGeneratedInternalDeclaration callerContext.program
         site.sourceDeclaration calleeContext site.calleeCode sourceModule
         calleeFunction targetModule}
-      {labels : List Lean.FVarId}
+      {labels : LabelContext}
       {entryRuntime sourceRuntime : RuntimeState}
       {entryStore targetStore : Wasm.Store Host}
       {entryWitness witness : RefinementWitness}
@@ -1501,7 +1501,7 @@ inductive ConcreteStructuredValidatedCodeGlobalOutcome
       {row : ConcreteGeneratedInternalDeclaration context.program
         resolution.target calleeContext resolution.calleeCode sourceModule
         calleeFunction targetModule}
-      {labels : List Lean.FVarId}
+      {labels : LabelContext}
       {entryRuntime : RuntimeState}
       {entryStore targetStore : Wasm.Store Host}
       {entryWitness witness : RefinementWitness}
@@ -1533,7 +1533,7 @@ inductive ConcreteStructuredValidatedCodeGlobalOutcome
       {sourceFunction : Fir.Wasm.Function}
       {spec : ConcreteSupportedFunction program context functionCode
         sourceModule sourceFunction targetModule hosts}
-      {labels : List Lean.FVarId}
+      {labels : LabelContext}
       {entryRuntime sourceRuntime : RuntimeState}
       {entryStore targetStore : Wasm.Store Host}
       {entryWitness witness : RefinementWitness}
@@ -1571,7 +1571,7 @@ inductive ConcreteStructuredValidatedCodeGlobalOutcome
       {sourceFunction : Fir.Wasm.Function}
       {spec : ConcreteSupportedFunction program context functionCode
         sourceModule sourceFunction targetModule hosts}
-      {labels : List Lean.FVarId}
+      {labels : LabelContext}
       {entryRuntime sourceRuntime : RuntimeState}
       {entryStore targetStore : Wasm.Store Host}
       {entryWitness witness : RefinementWitness}
@@ -1609,7 +1609,7 @@ theorem ConcreteStructuredValidatedCodeOutcome.toSupportedOutcome
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -1653,7 +1653,7 @@ theorem ConcreteStructuredValidatedDirectCallReadyOutcome.toSupportedOutcome
       site.sourceDeclaration calleeContext site.calleeCode sourceModule
       calleeFunction targetModule}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -1708,7 +1708,7 @@ theorem
       resolution.target calleeContext resolution.calleeCode sourceModule
       calleeFunction targetModule}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -1751,7 +1751,7 @@ theorem ConcreteStructuredValidatedExternalBindOutcome.toSupportedOutcome
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -1800,7 +1800,7 @@ theorem ConcreteStructuredValidatedReturnedOutcome.toSupportedOutcome
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -1841,7 +1841,7 @@ theorem ConcreteStructuredValidatedCodeOutcome.toPointwise
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -1914,7 +1914,7 @@ theorem ConcreteStructuredValidatedCodeOutcome.withSuccessor
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime nextRuntime : RuntimeState}
     {entryStore targetStore nextStore : Wasm.Store Host}
     {entryWitness witness nextWitness : RefinementWitness}
@@ -1974,7 +1974,7 @@ theorem ConcreteStructuredValidatedCodeOutcome.advanceCode
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime nextRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -2037,7 +2037,7 @@ theorem ConcreteStructuredValidatedCodeCoreRel.withSuccessor
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime : RuntimeState}
     {entryStore : Wasm.Store Host}
     {entryWitness : RefinementWitness}
@@ -2315,7 +2315,7 @@ theorem ConcreteStructuredCodeCoreRel.withRootValidation
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -2612,7 +2612,7 @@ theorem ConcreteStructuredValidatedCodeCoreRel.letSuccessor
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime nextRuntime : RuntimeState}
     {entryStore targetStore nextStore : Wasm.Store Host}
     {entryWitness witness nextWitness : RefinementWitness}
@@ -2662,7 +2662,7 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_directLet_of_step
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -2727,7 +2727,7 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_directCall_stage_of_step
     {externals : ExternalImpl}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {callerEnv : Env}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -2815,7 +2815,7 @@ theorem
       site.sourceDeclaration calleeContext site.calleeCode sourceModule
       calleeFunction targetModule}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -2957,7 +2957,7 @@ theorem
     {externals : ExternalImpl}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {callerEnv : Env}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -3053,7 +3053,7 @@ theorem
       resolution.target calleeContext resolution.calleeCode sourceModule
       calleeFunction targetModule}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -3195,7 +3195,7 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_return_of_step
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -3272,7 +3272,7 @@ theorem ConcreteStructuredValidatedReturnedOutcome.advance_bindCaller_of_step
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -3614,7 +3614,7 @@ theorem ConcreteStructuredValidatedReturnedOutcome.advance_lazyCache_of_step
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -4068,7 +4068,7 @@ theorem ConcreteStructuredValidatedExternalBindOutcome.advance_of_step
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -4305,7 +4305,7 @@ theorem ConcreteStructuredCodeFocus.decOrdinary_source_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {sourceRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -4362,7 +4362,7 @@ theorem ConcreteStructuredValidationFocus.admit_decOrdinary_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {joins : Fir.Wasm.JoinPoints}
     {locals : Fir.Wasm.LocalKinds}
@@ -4412,7 +4412,7 @@ theorem ConcreteStructuredAlignedValidationState.admit_decOrdinary_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {expectedResult : AbiKind}
     {facts : ReuseCapacityFacts}
@@ -4502,7 +4502,7 @@ theorem ConcreteStructuredCodeFocus.incOrdinary_source_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {sourceRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -4558,7 +4558,7 @@ theorem ConcreteStructuredValidationFocus.admit_incOrdinary_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {joins : Fir.Wasm.JoinPoints}
     {locals : Fir.Wasm.LocalKinds}
@@ -4612,7 +4612,7 @@ theorem ConcreteStructuredAlignedValidationState.admit_incOrdinary_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {expectedResult : AbiKind}
     {facts : ReuseCapacityFacts}
@@ -4763,7 +4763,7 @@ theorem ConcreteStructuredValidatedCodeCoreRel.incSuccessor
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime nextRuntime : RuntimeState}
     {entryStore targetStore nextStore : Wasm.Store Host}
     {entryWitness witness nextWitness : RefinementWitness}
@@ -4802,7 +4802,7 @@ theorem ConcreteStructuredValidatedCodeCoreRel.decSuccessor
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime nextRuntime : RuntimeState}
     {entryStore targetStore nextStore : Wasm.Store Host}
     {entryWitness witness nextWitness : RefinementWitness}
@@ -4845,7 +4845,7 @@ theorem ConcreteStructuredValidatedCodeCoreRel.advance_incPersistent_of_step
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -4913,7 +4913,7 @@ theorem ConcreteStructuredValidatedCodeCoreRel.advance_decPersistent_of_step
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -4990,7 +4990,7 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_incPersistent_of_step
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -5045,7 +5045,7 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_decPersistent_of_step
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -5102,7 +5102,7 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_ordinaryIncrement_of_step
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime nextRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -5155,7 +5155,7 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_ordinaryDecrement_of_step
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime nextRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -5456,7 +5456,7 @@ theorem ConcreteStructuredCodeFocus.setTag_source_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {sourceRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -5525,7 +5525,7 @@ theorem ConcreteStructuredValidationFocus.admit_setTag_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {joins : Fir.Wasm.JoinPoints}
     {locals : Fir.Wasm.LocalKinds}
@@ -5570,7 +5570,7 @@ theorem ConcreteStructuredAlignedValidationState.admit_setTag_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {expectedResult : AbiKind}
     {facts : ReuseCapacityFacts}
@@ -5751,7 +5751,7 @@ theorem ConcreteStructuredCodeFocus.oset_fvar_source_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {sourceRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -5827,7 +5827,7 @@ theorem ConcreteStructuredCodeFocus.oset_erased_source_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {sourceRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -5890,7 +5890,7 @@ theorem ConcreteStructuredValidationFocus.admit_oset_fvar_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {joins : Fir.Wasm.JoinPoints}
     {locals : Fir.Wasm.LocalKinds}
@@ -5942,7 +5942,7 @@ theorem ConcreteStructuredValidationFocus.admit_oset_erased_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {joins : Fir.Wasm.JoinPoints}
     {locals : Fir.Wasm.LocalKinds}
@@ -5991,7 +5991,7 @@ theorem ConcreteStructuredAlignedValidationState.admit_oset_fvar_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {expectedResult : AbiKind}
     {facts : ReuseCapacityFacts}
@@ -6028,7 +6028,7 @@ theorem ConcreteStructuredAlignedValidationState.admit_oset_erased_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {expectedResult : AbiKind}
     {facts : ReuseCapacityFacts}
@@ -6148,7 +6148,7 @@ theorem ConcreteStructuredCodeFocus.uset_source_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {sourceRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -6219,7 +6219,7 @@ theorem ConcreteStructuredValidationFocus.admit_uset_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {joins : Fir.Wasm.JoinPoints}
     {locals : Fir.Wasm.LocalKinds}
@@ -6265,7 +6265,7 @@ theorem ConcreteStructuredAlignedValidationState.admit_uset_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {expectedResult : AbiKind}
     {facts : ReuseCapacityFacts}
@@ -6423,7 +6423,7 @@ theorem ConcreteStructuredCodeFocus.sset_source_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {sourceRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -6495,7 +6495,7 @@ theorem ConcreteStructuredValidationFocus.admit_sset_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {joins : Fir.Wasm.JoinPoints}
     {locals : Fir.Wasm.LocalKinds}
@@ -6549,7 +6549,7 @@ theorem ConcreteStructuredAlignedValidationState.admit_sset_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {expectedResult : AbiKind}
     {facts : ReuseCapacityFacts}
@@ -6668,7 +6668,7 @@ theorem ConcreteStructuredCodeFocus.del_source_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {sourceRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -6718,7 +6718,7 @@ theorem ConcreteStructuredValidationFocus.admit_del_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {joins : Fir.Wasm.JoinPoints}
     {locals : Fir.Wasm.LocalKinds}
@@ -6761,7 +6761,7 @@ theorem ConcreteStructuredAlignedValidationState.admit_del_of_step
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {expectedResult : AbiKind}
     {facts : ReuseCapacityFacts}
@@ -6843,7 +6843,7 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_ordinaryDelete_of_step
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime nextRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -6895,7 +6895,7 @@ variable
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime nextRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -7339,7 +7339,7 @@ private theorem ConcreteStructuredValidatedCodeOutcome.withCaseSuccessor
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -7362,7 +7362,8 @@ private theorem ConcreteStructuredValidatedCodeOutcome.withCaseSuccessor
       callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
       (.cases cases) targetStore targetLocals targetCode witness source target)
     (nextCore : ConcreteStructuredCodeCoreRel program context sourceModule
-      sourceFunction externals labels entryRuntime entryStore entryWitness
+      sourceFunction externals (List.replicate testCount none ++ labels)
+      entryRuntime entryStore entryWitness
       functionResult callerExpectedResult facts remainingBytes sourceRuntime
       sourceEnv selected targetStore nextLocals selectedTarget witness
       sourceAfter targetAfter)
@@ -7373,7 +7374,8 @@ private theorem ConcreteStructuredValidatedCodeOutcome.withCaseSuccessor
       structuredWasmCaseLabels belowStack targetSuffix testCount ++
         target.frames) :
     ConcreteStructuredValidatedCodeOutcome program context functionCode
-      sourceModule sourceFunction targetModule hosts spec externals labels
+      sourceModule sourceFunction targetModule hosts spec externals
+      (List.replicate testCount none ++ labels)
       entryRuntime entryStore entryWitness functionResult callerExpectedResult
       facts remainingBytes sourceRuntime sourceEnv selected targetStore nextLocals
       selectedTarget witness sourceAfter targetAfter := by
@@ -7419,7 +7421,7 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_defaultOnlyCase_of_step
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -7478,7 +7480,7 @@ variable
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
     {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
@@ -7509,7 +7511,8 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_objectCases_of_step
       FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
           (5 * testCount) target targetAfter ∧
         ConcreteStructuredValidatedCodeOutcome program context functionCode
-          sourceModule sourceFunction targetModule hosts spec externals labels
+          sourceModule sourceFunction targetModule hosts spec externals
+          (List.replicate testCount none ++ labels)
           entryRuntime entryStore entryWitness functionResult
           callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
           selected targetStore
@@ -7553,7 +7556,8 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_scalarUInt8Cases_of_step
       FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
           (4 * testCount) target targetAfter ∧
         ConcreteStructuredValidatedCodeOutcome program context functionCode
-          sourceModule sourceFunction targetModule hosts spec externals labels
+          sourceModule sourceFunction targetModule hosts spec externals
+          (List.replicate testCount none ++ labels)
           entryRuntime entryStore entryWitness functionResult
           callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
           selected targetStore

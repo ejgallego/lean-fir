@@ -2635,7 +2635,7 @@ theorem BudgetedCapacityPreservingLazyStep.hit_of_compiledCache
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List FVarId)
+    (labels : LabelContext)
     (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (sourceExternals : ExternalImpl)
@@ -2755,7 +2755,7 @@ theorem BudgetedCapacityPreservingLazyStep.hit_of_compiledCacheTable
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List FVarId)
+    (labels : LabelContext)
     (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (sourceExternals : ExternalImpl)
@@ -4207,7 +4207,7 @@ initial` shortcut while retaining the candidate-chain interface. -/
 theorem ConcreteReuseCapacityCacheFrame.selectedClosureMatcher
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {spec : Wasm.HostSpec Host}
     {externals : ExternalImpl}
@@ -4298,7 +4298,7 @@ theorem
     ConcreteReuseCapacityCacheFrame.closureCandidates_exists_first_match
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {spec : Wasm.HostSpec Host}
     {externals : ExternalImpl}
@@ -4355,7 +4355,7 @@ theorem
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -4425,7 +4425,7 @@ theorem
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
     (externals : ExternalImpl)
-    {labels : List FVarId}
+    {labels : LabelContext}
     {entryRuntime : RuntimeState}
     {entryStore : Wasm.Store Host}
     {entryWitness : RefinementWitness} :
@@ -4457,7 +4457,7 @@ theorem
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -4567,11 +4567,12 @@ theorem
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
     (externals : ExternalImpl)
+    {labels : LabelContext}
     {entryRuntime : RuntimeState}
     {entryStore : Wasm.Store Host}
     {entryWitness : RefinementWitness} :
     ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
-      sourceFunction [] target.wasmModule hosts.env externals
+      sourceFunction labels target.wasmModule hosts.env externals
       (PureExternalSupported context externals)
       (ReuseCapacityEntryRelativeFrame
         (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
@@ -4596,7 +4597,7 @@ theorem
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
@@ -4663,7 +4664,7 @@ theorem
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
     (externals : ExternalImpl)
-    {labels : List FVarId}
+    {labels : LabelContext}
     {facts : ReuseCapacityFacts}
     {entryRuntime : RuntimeState}
     {entryStore : Wasm.Store Host}
@@ -4692,7 +4693,7 @@ def DirectDeclarationCallImplementationWithCache
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (callerFunction : Fir.Wasm.Function)
-    (labels : List FVarId)
+    (labels : LabelContext)
     (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (sourceExternals : ExternalImpl)
@@ -4756,7 +4757,7 @@ theorem DirectDeclarationCallImplementationWithCache.runtimeRefinesEntryRelative
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceExternals : ExternalImpl}
@@ -5473,7 +5474,7 @@ theorem codeWP_of_reuseCapacityDirectHereditaryReturn_withSlack
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {targetCode : Wasm.Program}
     {initial : Wasm.Store Host}
     {locals : Wasm.Locals}
@@ -5533,7 +5534,7 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_exactResult
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {DirectSupported :
       Fir.Wasm.Context → ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
@@ -5580,30 +5581,35 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_exactResult
           ReuseCapacityStateRelated frameFacts sourceFunction frameRuntime
             frameEnv frameStore frameLocals frameWitness)
     (directRuntimeRefines :
-      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction labels target.wasmModule hosts.env
-        (DirectSupported context) directLetAllocationCost Frame)
+      ∀ innerLabels,
+        ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env
+          (DirectSupported context) directLetAllocationCost Frame)
     (externalRuntimeRefines :
-      ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction labels target.wasmModule hosts.env externals
-        (ExternalSupported context) Frame)
+      ∀ innerLabels,
+        ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env externals
+          (ExternalSupported context) Frame)
     (callRuntimeRefines :
-      ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction labels target.wasmModule hosts.env externals
-        (ReuseCapacityDirectHereditaryCallSupported externals DirectSupported
-          ExternalSupported LazySupported CaseSupported EffectSupported
-          directLetAllocationCost context)
-        Frame)
+      ∀ innerLabels,
+        ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env externals
+          (ReuseCapacityDirectHereditaryCallSupported externals DirectSupported
+            ExternalSupported LazySupported CaseSupported EffectSupported
+            directLetAllocationCost context)
+          Frame)
     (lazyRuntimeRefines :
-      ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction labels target.wasmModule hosts.env externals
-        (LazySupported context) Frame)
+      ∀ innerLabels,
+        ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env externals
+          (LazySupported context) Frame)
     (caseRuntimeRefines :
-      CaseRuntimeRefines context sourceModule sourceFunction labels
-        target.wasmModule hosts.env (CaseSupported context))
+      ∀ innerLabels,
+        CaseRuntimeRefines context sourceModule sourceFunction innerLabels
+          target.wasmModule hosts.env (CaseSupported context))
     (effectRuntimeRefines :
-      ∀ facts,
-        EffectRuntimeRefines context sourceModule sourceFunction labels
+      ∀ innerLabels facts,
+        EffectRuntimeRefines context sourceModule sourceFunction innerLabels
           target.wasmModule hosts.env (EffectSupported context) (Frame facts)) :
     ∃ resultStore resultLocals resultWitness physical,
       CodeWP context sourceModule sourceFunction labels target.wasmModule
@@ -5613,7 +5619,7 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_exactResult
           resultWitness ∧
         resultStore.host.failure? = none ∧
         PhysicalValueRel resultWitness expectedResult physical resultValue := by
-  induction evaluation generalizing targetCode initial locals witness with
+  induction evaluation generalizing labels targetCode initial locals witness with
   | ret sourceLookup resultCompiled resultRefines =>
       exact codeWP_of_reuseCapacityDirectHereditaryReturn_withSlack
         (slack := 0) sourceLookup resultCompiled resultRefines adapted
@@ -5637,7 +5643,7 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_exactResult
           _externalsPreserved, _hostDescriptorsPreserved,
           _witnessDescriptorsPreserved, _directTransports, producedTransfer,
           nextInvariant⟩ :=
-        directRuntimeRefines supported stepFits invariant sourceStep
+        directRuntimeRefines labels supported stepFits invariant sourceStep
           valueCompiled valueAdapted resultFound
       rw [transfer] at producedTransfer
       have factsEq := Option.some.inj producedTransfer
@@ -5674,7 +5680,7 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_exactResult
       obtain ⟨nextStore, nextLocals, nextWitness, producedFacts, step,
           _externalsPreserved, _hostDescriptorsPreserved,
           _witnessDescriptorsPreserved, producedTransfer, nextInvariant⟩ :=
-        externalRuntimeRefines supported stepFits invariant sourceStep
+        externalRuntimeRefines labels supported stepFits invariant sourceStep
           valueCompiled valueAdapted resultFound
       rw [transfer] at producedTransfer
       have factsEq := Option.some.inj producedTransfer
@@ -5717,7 +5723,7 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_exactResult
       obtain ⟨nextStore, nextLocals, nextWitness, producedFacts, step,
           _externalsPreserved, _hostDescriptorsPreserved,
           _witnessDescriptorsPreserved, producedTransfer, nextInvariant⟩ :=
-        callRuntimeRefines (.intro site row callee) stepFits invariant sourceStep
+        callRuntimeRefines labels (.intro site row callee) stepFits invariant sourceStep
           valueCompiled valueAdapted resultFound
       rw [transfer] at producedTransfer
       have factsEq := Option.some.inj producedTransfer
@@ -5754,7 +5760,7 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_exactResult
       obtain ⟨nextStore, nextLocals, nextWitness, producedFacts, step,
           _externalsPreserved, _hostDescriptorsPreserved,
           _witnessDescriptorsPreserved, producedTransfer, nextInvariant⟩ :=
-        lazyRuntimeRefines supported stepFits invariant sourceStep valueCompiled
+        lazyRuntimeRefines labels supported stepFits invariant sourceStep valueCompiled
           valueAdapted resultFound
       rw [transfer] at producedTransfer
       have factsEq := Option.some.inj producedTransfer
@@ -5777,8 +5783,9 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_exactResult
   | @caseOf context sourceRuntime sourceEnv cases selected expectedResult facts
       resultFacts resultRuntime resultEnv resultValue requiredBytes supported
       sourceStep continued ih =>
-      obtain ⟨selectedTarget, selectedAdapted, _selected, lift⟩ :=
-        caseRuntimeRefines supported sourceStep
+      obtain ⟨selectedLabels, selectedTarget, selectedAdapted, _selected,
+          lift⟩ :=
+        caseRuntimeRefines labels supported sourceStep
           (frameRelated invariant).stateRelated adapted
       obtain ⟨resultStore, resultLocals, resultWitness, physical,
           continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
@@ -5798,7 +5805,7 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_exactResult
       requiredBytes supported sourceStep continued ih =>
       obtain ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
           _externalsPreserved, nextInvariant⟩ :=
-        effectRuntimeRefines _ supported sourceStep
+        effectRuntimeRefines labels _ supported sourceStep
           (frameRelated invariant).stateRelated invariant adapted
       obtain ⟨resultStore, resultLocals, resultWitness, physical,
           continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
@@ -5821,7 +5828,7 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_withSlack
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {externals : ExternalImpl}
     {DirectSupported :
       Fir.Wasm.Context → ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
@@ -5869,30 +5876,35 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_withSlack
           ReuseCapacityStateRelated frameFacts sourceFunction frameRuntime
             frameEnv frameStore frameLocals frameWitness)
     (directRuntimeRefines :
-      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction labels target.wasmModule hosts.env
-        (DirectSupported context) directLetAllocationCost Frame)
+      ∀ innerLabels,
+        ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env
+          (DirectSupported context) directLetAllocationCost Frame)
     (externalRuntimeRefines :
-      ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction labels target.wasmModule hosts.env externals
-        (ExternalSupported context) Frame)
+      ∀ innerLabels,
+        ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env externals
+          (ExternalSupported context) Frame)
     (callRuntimeRefines :
-      ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction labels target.wasmModule hosts.env externals
-        (ReuseCapacityDirectHereditaryCallSupported externals DirectSupported
-          ExternalSupported LazySupported CaseSupported EffectSupported
-          directLetAllocationCost context)
-        Frame)
+      ∀ innerLabels,
+        ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env externals
+          (ReuseCapacityDirectHereditaryCallSupported externals DirectSupported
+            ExternalSupported LazySupported CaseSupported EffectSupported
+            directLetAllocationCost context)
+          Frame)
     (lazyRuntimeRefines :
-      ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction labels target.wasmModule hosts.env externals
-        (LazySupported context) Frame)
+      ∀ innerLabels,
+        ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env externals
+          (LazySupported context) Frame)
     (caseRuntimeRefines :
-      CaseRuntimeRefines context sourceModule sourceFunction labels
-        target.wasmModule hosts.env (CaseSupported context))
+      ∀ innerLabels,
+        CaseRuntimeRefines context sourceModule sourceFunction innerLabels
+          target.wasmModule hosts.env (CaseSupported context))
     (effectRuntimeRefines :
-      ∀ facts,
-        EffectRuntimeRefines context sourceModule sourceFunction labels
+      ∀ innerLabels facts,
+        EffectRuntimeRefines context sourceModule sourceFunction innerLabels
           target.wasmModule hosts.env (EffectSupported context) (Frame facts)) :
     ∃ resultStore resultLocals resultWitness physical,
       CodeWP context sourceModule sourceFunction labels target.wasmModule
@@ -5920,12 +5932,22 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_withSlack
       resultInvariant, failureClear, valueRelated⟩ :=
     codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_exactResult evaluation
       adapted localsAligned shiftedInvariant shiftedFrameRelated
-      (directRuntimeRefines.shiftBudget slack)
-      (externalRuntimeRefines.shiftBudget slack)
-      (callRuntimeRefines.shiftBudget slack)
-      (lazyRuntimeRefines.shiftBudget slack) caseRuntimeRefines
-      (fun facts =>
-        EffectRuntimeRefines.shiftBudget (effectRuntimeRefines facts) slack)
+      (fun innerLabels =>
+        ReuseCapacityDirectLetRuntimeRefinesWithCost.shiftBudget
+          (directRuntimeRefines innerLabels) slack)
+      (fun innerLabels =>
+        ReuseCapacityExternalLetRuntimeRefinesWithCost.shiftBudget
+          (externalRuntimeRefines innerLabels) slack)
+      (fun innerLabels =>
+        ReuseCapacityCallLetRuntimeRefinesWithCost.shiftBudget
+          (callRuntimeRefines innerLabels) slack)
+      (fun innerLabels =>
+        ReuseCapacityLazyLetRuntimeRefinesWithCost.shiftBudget
+          (lazyRuntimeRefines innerLabels) slack)
+      caseRuntimeRefines
+      (fun innerLabels facts =>
+        EffectRuntimeRefines.shiftBudget
+          (effectRuntimeRefines innerLabels facts) slack)
   have resultFrame :
       Frame resultFacts slack resultRuntime resultEnv resultStore resultLocals
         resultWitness := by
@@ -6055,7 +6077,7 @@ theorem DirectDeclarationCallImplementationWithCache.ofInternalCompiler
     {callerCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
     {exportName : String}
@@ -6140,7 +6162,7 @@ theorem ConcreteReuseCapacityCacheFrame.ofSaturatedClosureDeclarationExact
     {calleeContext : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction calleeFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {sourceExternals : ExternalImpl}
@@ -6260,7 +6282,7 @@ theorem ConcreteReuseCapacityCacheFrame.ofSaturatedClosureDeclarationConsumed
     {calleeContext : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction calleeFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {sourceExternals : ExternalImpl}
@@ -6432,7 +6454,7 @@ def SaturatedClosureCallImplementationWithCache
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (callerFunction : Fir.Wasm.Function)
-    (labels : List FVarId)
+    (labels : LabelContext)
     (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (spec : Wasm.HostSpec Host)
@@ -6525,7 +6547,7 @@ theorem
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {spec : Wasm.HostSpec Host}
@@ -6886,7 +6908,7 @@ theorem ClosureArgumentAssembly.fixedProjection_of_adapted
     {hosts : ResolvedHosts}
     (spec : ConcreteSupportedFunction program context sourceCode sourceModule
       sourceFunction target hosts)
-    {labels : List FVarId}
+    {labels : LabelContext}
     {initial : Wasm.Store Host} {locals : Wasm.Locals}
     {witness : RefinementWitness} {application : ClosureApplication}
     {closureId : FVarId} {closureIndex : Nat} {address : Word32}
@@ -6948,7 +6970,7 @@ operand expected by the callee. -/
 theorem ClosureArgumentAssembly.fixedErased_of_adapted
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
     {initial : Wasm.Store Host} {locals : Wasm.Locals}
     {witness : RefinementWitness} {application : ClosureApplication}
@@ -7099,7 +7121,7 @@ theorem ClosureCaptureRows.assembly_of_adapted
     {hosts : ResolvedHosts}
     (spec : ConcreteSupportedFunction program context sourceCode sourceModule
       sourceFunction targetModule hosts)
-    {labels : List FVarId}
+    {labels : LabelContext}
     {initial : Wasm.Store Host} {locals : Wasm.Locals}
     {witness : RefinementWitness} {application : ClosureApplication}
     {closureId : FVarId} {closureIndex : Nat} {address : Word32}
@@ -7233,7 +7255,7 @@ theorem SaturatedClosureCallResolution.fixedFieldsAssembly
     {hosts : ResolvedHosts}
     (spec : ConcreteSupportedFunction program context sourceCode sourceModule
       sourceFunction targetModule hosts)
-    {labels : List FVarId}
+    {labels : LabelContext}
     {initial : Wasm.Store Host} {locals : Wasm.Locals}
     {witness : RefinementWitness} {application : ClosureApplication}
     {closureIndex : Nat} {address : Word32}
@@ -7288,7 +7310,7 @@ theorem SaturatedClosureCallResolution.argumentsAssembly
     {hosts : ResolvedHosts}
     (spec : ConcreteSupportedFunction program context sourceCode sourceModule
       sourceFunction targetModule hosts)
-    {labels : List FVarId}
+    {labels : LabelContext}
     {initial : Wasm.Store Host} {locals : Wasm.Locals}
     {witness : RefinementWitness} {application : ClosureApplication}
     {closureIndex : Nat} {address : Word32}
@@ -7876,7 +7898,7 @@ theorem SaturatedClosureCallResolution.candidateSource_eq_of_identity
     {hosts : ResolvedHosts}
     (spec : ConcreteSupportedFunction program context sourceCode sourceModule
       sourceFunction targetModule hosts)
-    {labels : List FVarId}
+    {labels : LabelContext}
     {initial : Wasm.Store Host}
     {closureIndex : Nat} {address : Word32}
     {candidate : ClosureCandidateCase sourceModule sourceFunction labels
@@ -8032,7 +8054,7 @@ theorem SaturatedClosureCallResolution.candidateBody_of_identity
     {hosts : ResolvedHosts}
     (spec : ConcreteSupportedFunction program context sourceCode sourceModule
       sourceFunction targetModule hosts)
-    {labels : List FVarId}
+    {labels : LabelContext}
     {initial : Wasm.Store Host}
     {closureIndex resultIndex : Nat} {address : Word32}
     {candidate : ClosureCandidateCase sourceModule sourceFunction labels
@@ -8126,7 +8148,7 @@ theorem SaturatedClosureCallResolution.candidateArguments_of_identity
     {hosts : ResolvedHosts}
     (spec : ConcreteSupportedFunction program context sourceCode sourceModule
       sourceFunction targetModule hosts)
-    {labels : List FVarId}
+    {labels : LabelContext}
     {initial : Wasm.Store Host} {locals : Wasm.Locals}
     {witness : RefinementWitness} {application : ClosureApplication}
     {closureIndex resultIndex : Nat} {address : Word32}
@@ -8202,7 +8224,7 @@ theorem SaturatedClosureCallResolution.containsCandidateIdentity
     {sourceRuntime : RuntimeState}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {spec : Wasm.HostSpec Host}
     {initial : Wasm.Store Host}
@@ -8328,7 +8350,7 @@ theorem
     {decl : LCNF.LetDecl .impure}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {spec : Wasm.HostSpec Host}
     {externals : ExternalImpl}
@@ -8431,7 +8453,7 @@ def SaturatedClosureDispatchSelectionInduction
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (callerFunction : Fir.Wasm.Function)
-    (labels : List FVarId)
+    (labels : LabelContext)
     (targetModule : AdaptedModule)
     (hosts : ResolvedHosts)
     (sourceExternals : ExternalImpl) : Prop :=
@@ -8514,7 +8536,7 @@ matcher result, or matcher execution in this package. -/
 structure ClosureCandidateAdapterCase
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List FVarId)
+    (labels : LabelContext)
     (module : Wasm.Module)
     (spec : Wasm.HostSpec Host)
     (closureId : FVarId) where
@@ -8531,6 +8553,7 @@ structure ClosureCandidateAdapterCase
       .call (.runtime (.closureMatches function arity fixed))]
   bodyAdapted :
     instructions sourceModule sourceFunction labels source.2 = .ok targetBody
+  bodyLabelIndependent : programLabelIndependent source.2 = true
   matcherFound :
     callIndex? sourceModule
       (.runtime (.closureMatches function arity fixed)) = some matcherIndex
@@ -8552,7 +8575,7 @@ def SaturatedClosureCandidateAdapterResolver
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (callerFunction : Fir.Wasm.Function)
-    (labels : List FVarId)
+    (labels : LabelContext)
     (targetModule : AdaptedModule)
     (hosts : ResolvedHosts) : Prop :=
   ∀ {decl : LCNF.LetDecl .impure}
@@ -8574,7 +8597,90 @@ def SaturatedClosureCandidateAdapterResolver
 
 /-- Every row in the compiler's complete closure-candidate enumeration has
 the matcher identity written by `compileClosureCandidateAt`. -/
-private theorem compilerClosureCandidate_matcher
+private theorem ConstructorArgsCompiled.programLabelIndependent
+    {context : Fir.Wasm.Context}
+    {args : List (LCNF.Arg .impure)}
+    {argumentCode : List Fir.Wasm.Instruction}
+    {argumentKinds : List AbiKind}
+    (compiled :
+      ConstructorArgsCompiled context args argumentCode argumentKinds) :
+    programLabelIndependent argumentCode = true := by
+  induction compiled with
+  | nil => rfl
+  | erased _ ih | fvar _ _ ih =>
+      exact ih
+
+private theorem programLabelIndependent_append
+    {left right : List Fir.Wasm.Instruction}
+    (leftIndependent : programLabelIndependent left = true)
+    (rightIndependent : programLabelIndependent right = true) :
+    programLabelIndependent (left ++ right) = true := by
+  simpa [programLabelIndependent] using
+    And.intro leftIndependent rightIndependent
+
+private theorem compileFixedClosureField_labelIndependent
+    (closureId : FVarId) (target : LCNF.Decl .impure)
+    (arity fixed : Nat) (kinds : Array AbiKind) (index : Nat) :
+    programLabelIndependent
+        (Fir.Wasm.compileFixedClosureField closureId target arity fixed kinds
+          index) = true := by
+  unfold Fir.Wasm.compileFixedClosureField
+  split <;> simp [programLabelIndependent, instructionLabelIndependent]
+
+private theorem compileFixedClosureFields_labelIndependent
+    (closureId : FVarId) (target : LCNF.Decl .impure)
+    (arity fixed : Nat) (kinds : Array AbiKind) :
+    programLabelIndependent
+        (Fir.Wasm.compileFixedClosureFields closureId target arity fixed
+          kinds) = true := by
+  rw [programLabelIndependent, List.all_eq_true]
+  intro instruction member
+  simp only [Fir.Wasm.compileFixedClosureFields, List.mem_flatMap] at member
+  obtain ⟨index, _indexMember, instructionMember⟩ := member
+  have independent :=
+    compileFixedClosureField_labelIndependent closureId target arity fixed
+      kinds index
+  rw [programLabelIndependent, List.all_eq_true] at independent
+  exact independent instruction instructionMember
+
+private theorem compileClosureCandidateAt_bodyLabelIndependent
+    {declId closureId : FVarId} {resultKind : AbiKind}
+    {argumentCode : List Fir.Wasm.Instruction}
+    {argumentKinds parameterKinds : Array AbiKind}
+    {target : LCNF.Decl .impure} {fixed : Nat}
+    {candidate : List Fir.Wasm.Instruction × List Fir.Wasm.Instruction}
+    (argumentsIndependent : programLabelIndependent argumentCode = true)
+    (compiled :
+      Fir.Wasm.compileClosureCandidateAt declId closureId resultKind
+        argumentCode argumentKinds target parameterKinds fixed =
+          some candidate) :
+    programLabelIndependent candidate.2 = true := by
+  unfold Fir.Wasm.compileClosureCandidateAt at compiled
+  split at compiled <;> simp_all
+  split at compiled
+  · split at compiled
+    · simp at compiled
+    · simp at compiled
+      obtain ⟨_, candidateEq⟩ := compiled
+      subst candidate
+      exact programLabelIndependent_append
+        (compileFixedClosureFields_labelIndependent closureId target
+          parameterKinds.size fixed parameterKinds)
+        (programLabelIndependent_append argumentsIndependent (by
+          simp [programLabelIndependent, instructionLabelIndependent]))
+  · simp only [Option.bind_eq_some_iff] at compiled
+    rcases compiled with ⟨_, _targetResult, _, result⟩
+    split at result
+    · simp at result
+    · simp at result
+      subst candidate
+      exact programLabelIndependent_append
+        (compileFixedClosureFields_labelIndependent closureId target
+          parameterKinds.size fixed parameterKinds)
+        (programLabelIndependent_append argumentsIndependent (by
+          simp [programLabelIndependent, instructionLabelIndependent]))
+
+private theorem compilerClosureCandidate_static
     {program : Fir.LeanIR.ImpureProgram}
     {targets : Array (LCNF.Decl .impure)}
     {declId closureId : FVarId}
@@ -8582,13 +8688,15 @@ private theorem compilerClosureCandidate_matcher
     {argumentCode : List Fir.Wasm.Instruction}
     {argumentKinds : Array AbiKind}
     {candidate : List Fir.Wasm.Instruction × List Fir.Wasm.Instruction}
+    (argumentsIndependent : programLabelIndependent argumentCode = true)
     (member : candidate ∈ targets.toList.flatMap (fun target =>
       compileClosureCandidatesForTarget program declId closureId resultKind
         argumentCode argumentKinds target)) :
     ∃ function arity fixed,
       candidate.1 = [
         .localGet closureId,
-        .call (.runtime (.closureMatches function arity fixed))] := by
+        .call (.runtime (.closureMatches function arity fixed))] ∧
+      programLabelIndependent candidate.2 = true := by
   obtain ⟨target, _targetMember, generatedMember⟩ :=
     List.mem_flatMap.mp member
   unfold compileClosureCandidatesForTarget at generatedMember
@@ -8601,7 +8709,9 @@ private theorem compilerClosureCandidate_matcher
       · obtain ⟨fixed, _fixedMember, compiled⟩ :=
           List.mem_filterMap.mp generatedMember
         exact ⟨target.name, parameterKinds.size, fixed,
-          compileClosureCandidateAt_matcher compiled⟩
+          compileClosureCandidateAt_matcher compiled,
+          compileClosureCandidateAt_bodyLabelIndependent
+            argumentsIndependent compiled⟩
 
 /-- Successful adaptation of the compiler's nested candidate chain packages
 every raw source row into the static proof-facing adapter record. -/
@@ -8615,7 +8725,7 @@ private theorem closureCandidateAdapters_of_adaptedChain
     {hosts : ResolvedHosts}
     (spec : ConcreteSupportedFunction program context sourceCode sourceModule
       sourceFunction target hosts)
-    {labels : List FVarId}
+    {candidateLabels actualLabels : LabelContext}
     {closureId : FVarId}
     (sources : List
       (List Fir.Wasm.Instruction × List Fir.Wasm.Instruction))
@@ -8623,19 +8733,20 @@ private theorem closureCandidateAdapters_of_adaptedChain
       ∃ function arity fixed,
         source.1 = [
           .localGet closureId,
-          .call (.runtime (.closureMatches function arity fixed))])
+          .call (.runtime (.closureMatches function arity fixed))] ∧
+        programLabelIndependent source.2 = true)
     {targetChain : Wasm.Program}
     (adapted :
-      instructions sourceModule sourceFunction labels
+      instructions sourceModule sourceFunction actualLabels
           (compileClosureCandidateChain sources) = .ok targetChain) :
     ∃ candidates : List
-        (ClosureCandidateAdapterCase sourceModule sourceFunction labels
+        (ClosureCandidateAdapterCase sourceModule sourceFunction candidateLabels
           target.wasmModule hosts.spec closureId),
       sources = candidates.map (·.source) := by
-  induction sources generalizing targetChain with
+  induction sources generalizing actualLabels targetChain with
   | nil => exact ⟨[], rfl⟩
   | cons source sources ih =>
-      obtain ⟨function, arity, fixed, sourceMatcher⟩ :=
+      obtain ⟨function, arity, fixed, sourceMatcher, sourceIndependent⟩ :=
         matcher source (by simp)
       have chainEq :
           compileClosureCandidateChain (source :: sources) =
@@ -8645,13 +8756,14 @@ private theorem closureCandidateAdapters_of_adaptedChain
       obtain ⟨targetMatcher, targetIf, matcherAdapted, ifAdapted,
           _targetChainEq⟩ := instructions_append_eq_ok adapted
       cases bodyAdapted :
-          instructions sourceModule sourceFunction labels source.2 with
+          instructions sourceModule sourceFunction (none :: actualLabels)
+            source.2 with
       | error error =>
           simp [instructions, instruction, bodyAdapted, Bind.bind,
             Except.bind] at ifAdapted
       | ok targetBody =>
           cases restAdapted :
-              instructions sourceModule sourceFunction labels
+              instructions sourceModule sourceFunction (none :: actualLabels)
                 (compileClosureCandidateChain sources) with
           | error error =>
               simp [instructions, instruction, bodyAdapted, restAdapted,
@@ -8659,7 +8771,7 @@ private theorem closureCandidateAdapters_of_adaptedChain
           | ok targetRest =>
               rw [sourceMatcher] at matcherAdapted
               have matcherAdapted' :
-                  instructions sourceModule sourceFunction labels
+                  instructions sourceModule sourceFunction actualLabels
                       ([.localGet closureId] ++ [
                         .call (.runtime
                           (.closureMatches function arity fixed))]) =
@@ -8674,9 +8786,16 @@ private theorem closureCandidateAdapters_of_adaptedChain
               obtain ⟨candidates, sourcesEq⟩ := ih
                 (fun candidate member =>
                   matcher candidate (by simp [member])) restAdapted
+              have bodyAdaptedAtCandidate :
+                  instructions sourceModule sourceFunction candidateLabels
+                      source.2 =
+                    .ok targetBody := by
+                rw [instructions_eq_of_labelIndependent sourceIndependent
+                  candidateLabels (none :: actualLabels)]
+                exact bodyAdapted
               let candidate :
                   ClosureCandidateAdapterCase sourceModule sourceFunction
-                    labels target.wasmModule hosts.spec closureId := {
+                    candidateLabels target.wasmModule hosts.spec closureId := {
                 source
                 targetBody
                 function
@@ -8685,7 +8804,8 @@ private theorem closureCandidateAdapters_of_adaptedChain
                 matcherIndex
                 imp
                 sourceMatcher
-                bodyAdapted
+                bodyAdapted := bodyAdaptedAtCandidate
+                bodyLabelIndependent := sourceIndependent
                 matcherFound
                 importFound
                 importInBounds
@@ -8709,7 +8829,7 @@ theorem ConcreteSupportedFunction.saturatedClosureCandidateAdapterResolver
     {hosts : ResolvedHosts}
     (spec : ConcreteSupportedFunction program context sourceCode sourceModule
       sourceFunction target hosts)
-    {labels : List FVarId} :
+    {labels : LabelContext} :
     SaturatedClosureCandidateAdapterResolver context sourceModule
       sourceFunction labels target hosts := by
   intro decl sourceEnv site targetDispatch dispatchAdapted
@@ -8729,9 +8849,14 @@ theorem ConcreteSupportedFunction.saturatedClosureCandidateAdapterResolver
   rw [dispatchEq] at dispatchAdapted
   obtain ⟨targetChain, _targetResult, chainAdapted, _resultAdapted,
       _targetDispatchEq⟩ := instructions_append_eq_ok dispatchAdapted
+  have argumentsIndependent :
+      programLabelIndependent site.argumentCode = true :=
+    (ConstructorArgsCompiled.ofCompileArgs
+      site.argumentsCompiled).programLabelIndependent
   obtain ⟨candidates, sourcesEq⟩ :=
     closureCandidateAdapters_of_adaptedChain spec sources
-      (fun candidate member => compilerClosureCandidate_matcher member)
+      (fun candidate member =>
+        compilerClosureCandidate_static argumentsIndependent member)
       chainAdapted
   exact ⟨candidates, sourcesEq⟩
 
@@ -8743,7 +8868,7 @@ execution is a theorem of the simulation invariant, not compiler metadata. -/
 theorem ClosureCandidateAdapterCase.execute_of_refines
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {spec : Wasm.HostSpec Host}
     {closureId : FVarId}
@@ -8798,6 +8923,7 @@ theorem ClosureCandidateAdapterCase.execute_of_refines
       imp := candidate.imp
       sourceMatcher := candidate.sourceMatcher
       bodyAdapted := candidate.bodyAdapted
+      bodyLabelIndependent := candidate.bodyLabelIndependent
       matcherFound := candidate.matcherFound
       importFound := candidate.importFound
       importInBounds := candidate.importInBounds
@@ -8824,6 +8950,7 @@ theorem ClosureCandidateAdapterCase.execute_of_refines
       imp := candidate.imp
       sourceMatcher := candidate.sourceMatcher
       bodyAdapted := candidate.bodyAdapted
+      bodyLabelIndependent := candidate.bodyLabelIndependent
       matcherFound := candidate.matcherFound
       importFound := candidate.importFound
       importInBounds := candidate.importInBounds
@@ -8837,7 +8964,7 @@ address, preserving the compiler-source enumeration exactly. -/
 theorem ClosureCandidateAdapterCase.executeAll_of_refines
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {spec : Wasm.HostSpec Host}
     {closureId : FVarId}
@@ -8898,7 +9025,7 @@ def SaturatedClosureCandidateResolutionInduction
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (callerFunction : Fir.Wasm.Function)
-    (labels : List FVarId)
+    (labels : LabelContext)
     (targetModule : AdaptedModule)
     (hosts : ResolvedHosts)
     (sourceExternals : ExternalImpl) : Prop :=
@@ -8985,7 +9112,7 @@ theorem SaturatedClosureCandidateResolutionInduction.toSelection
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
     {sourceExternals : ExternalImpl}
@@ -9045,7 +9172,7 @@ theorem SaturatedClosureCallImplementationWithCache.ofInternalCompiler
     {callerCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
     {exportName : String}
@@ -9133,7 +9260,7 @@ theorem SaturatedClosureCallImplementationWithCache.ofInternalCompilerResolved
     {callerCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
     {exportName : String}
@@ -9797,7 +9924,7 @@ theorem BudgetedCapacityPreservingLazyStep.miss_of_supportedFunctionCompiler
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (callerFunction : Fir.Wasm.Function)
-    (labels : List FVarId)
+    (labels : LabelContext)
     (targetModule : AdaptedModule)
     (hosts : ResolvedHosts)
     {callerCode : LCNF.Code .impure}
@@ -9906,7 +10033,7 @@ theorem
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceExternals : ExternalImpl}
@@ -9987,7 +10114,7 @@ theorem BudgetedCapacityPreservingLazyStep.hit_of_compiler
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List FVarId)
+    (labels : LabelContext)
     (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (sourceExternals : ExternalImpl)
@@ -10691,7 +10818,7 @@ structure LazyCacheImplementation
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List FVarId)
+    (labels : LabelContext)
     (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (sourceExternals : ExternalImpl)
@@ -10750,7 +10877,7 @@ structure LazyCacheImplementationWithEntryTransports
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List FVarId)
+    (labels : LabelContext)
     (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (sourceExternals : ExternalImpl)
@@ -10802,7 +10929,7 @@ theorem LazyCacheImplementation.ofInternalCompiler
     {callerCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
     {sourceExternals : ExternalImpl}
@@ -10855,7 +10982,7 @@ theorem
     {callerCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
     {sourceExternals : ExternalImpl}
@@ -10897,7 +11024,7 @@ theorem LazyCacheImplementation.runtimeRefines
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceExternals : ExternalImpl}
@@ -10939,7 +11066,7 @@ theorem
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceExternals : ExternalImpl}
@@ -11002,7 +11129,7 @@ theorem ConcreteSupportedFunction.internalLazyRuntimeRefines
     {callerCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
     {sourceExternals : ExternalImpl}
@@ -11036,7 +11163,7 @@ theorem ConcreteSupportedFunction.internalNonHeapLazyRuntimeRefines
     {callerCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
     {sourceExternals : ExternalImpl}
@@ -11074,7 +11201,7 @@ theorem
     {callerCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
     {sourceExternals : ExternalImpl}
@@ -13935,43 +14062,48 @@ theorem
         sourceExternals facts requiredBytes sourceRuntime sourceEnv initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness)
     (directRuntimeRefines :
-      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction [] target.wasmModule hosts.env DirectSupported
-        directLetAllocationCost
-        (ReuseCapacityEntryRelativeFrame
-          (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
-            sourceExternals)
-          sourceRuntime initial initialWitness))
+      ∀ innerLabels,
+        ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env DirectSupported
+          directLetAllocationCost
+          (ReuseCapacityEntryRelativeFrame
+            (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+              sourceExternals)
+            sourceRuntime initial initialWitness))
     (externalRuntimeRefines :
-      ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction [] target.wasmModule hosts.env sourceExternals
-        ExternalSupported
-        (ReuseCapacityEntryRelativeFrame
-          (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
-            sourceExternals)
-          sourceRuntime initial initialWitness))
+      ∀ innerLabels,
+        ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env sourceExternals
+          ExternalSupported
+          (ReuseCapacityEntryRelativeFrame
+            (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+              sourceExternals)
+            sourceRuntime initial initialWitness))
     (callRuntimeRefines :
-      ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction [] target.wasmModule hosts.env sourceExternals
-        CallSupported
-        (ReuseCapacityEntryRelativeFrame
-          (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
-            sourceExternals)
-          sourceRuntime initial initialWitness))
+      ∀ innerLabels,
+        ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env sourceExternals
+          CallSupported
+          (ReuseCapacityEntryRelativeFrame
+            (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+              sourceExternals)
+            sourceRuntime initial initialWitness))
     (lazyRuntimeRefines :
-      ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction [] target.wasmModule hosts.env sourceExternals
-        LazySupported
-        (ReuseCapacityEntryRelativeFrame
-          (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
-            sourceExternals)
-          sourceRuntime initial initialWitness))
+      ∀ innerLabels,
+        ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env sourceExternals
+          LazySupported
+          (ReuseCapacityEntryRelativeFrame
+            (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+              sourceExternals)
+            sourceRuntime initial initialWitness))
     (caseRuntimeRefines :
-      CaseRuntimeRefines context sourceModule sourceFunction []
-        target.wasmModule hosts.env CaseSupported)
+      ∀ innerLabels,
+        CaseRuntimeRefines context sourceModule sourceFunction innerLabels
+          target.wasmModule hosts.env CaseSupported)
     (effectRuntimeRefines :
-      ∀ facts,
-        EffectRuntimeRefines context sourceModule sourceFunction []
+      ∀ innerLabels facts,
+        EffectRuntimeRefines context sourceModule sourceFunction innerLabels
           target.wasmModule hosts.env EffectSupported
           (ReuseCapacityEntryRelativeFrame
             (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
@@ -14118,45 +14250,50 @@ theorem
         sourceExternals facts requiredBytes sourceRuntime sourceEnv initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness)
     (directRuntimeRefines :
-      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction [] target.wasmModule hosts.env (DirectSupported context)
-        directLetAllocationCost
-        (ReuseCapacityEntryRelativeFrame
-          (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
-            sourceExternals)
-          sourceRuntime initial initialWitness))
+      ∀ innerLabels,
+        ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env
+          (DirectSupported context) directLetAllocationCost
+          (ReuseCapacityEntryRelativeFrame
+            (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+              sourceExternals)
+            sourceRuntime initial initialWitness))
     (externalRuntimeRefines :
-      ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction [] target.wasmModule hosts.env sourceExternals
-        (ExternalSupported context)
-        (ReuseCapacityEntryRelativeFrame
-          (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
-            sourceExternals)
-          sourceRuntime initial initialWitness))
+      ∀ innerLabels,
+        ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env sourceExternals
+          (ExternalSupported context)
+          (ReuseCapacityEntryRelativeFrame
+            (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+              sourceExternals)
+            sourceRuntime initial initialWitness))
     (callRuntimeRefines :
-      ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction [] target.wasmModule hosts.env sourceExternals
-        (ReuseCapacityDirectHereditaryCallSupported sourceExternals
-          DirectSupported ExternalSupported LazySupported CaseSupported
-          EffectSupported directLetAllocationCost context)
-        (ReuseCapacityEntryRelativeFrame
-          (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
-            sourceExternals)
-          sourceRuntime initial initialWitness))
+      ∀ innerLabels,
+        ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env sourceExternals
+          (ReuseCapacityDirectHereditaryCallSupported sourceExternals
+            DirectSupported ExternalSupported LazySupported CaseSupported
+            EffectSupported directLetAllocationCost context)
+          (ReuseCapacityEntryRelativeFrame
+            (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+              sourceExternals)
+            sourceRuntime initial initialWitness))
     (lazyRuntimeRefines :
-      ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction [] target.wasmModule hosts.env sourceExternals
-        (LazySupported context)
-        (ReuseCapacityEntryRelativeFrame
-          (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
-            sourceExternals)
-          sourceRuntime initial initialWitness))
+      ∀ innerLabels,
+        ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
+          sourceFunction innerLabels target.wasmModule hosts.env sourceExternals
+          (LazySupported context)
+          (ReuseCapacityEntryRelativeFrame
+            (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+              sourceExternals)
+            sourceRuntime initial initialWitness))
     (caseRuntimeRefines :
-      CaseRuntimeRefines context sourceModule sourceFunction []
-        target.wasmModule hosts.env (CaseSupported context))
+      ∀ innerLabels,
+        CaseRuntimeRefines context sourceModule sourceFunction innerLabels
+          target.wasmModule hosts.env (CaseSupported context))
     (effectRuntimeRefines :
-      ∀ facts,
-        EffectRuntimeRefines context sourceModule sourceFunction []
+      ∀ innerLabels facts,
+        EffectRuntimeRefines context sourceModule sourceFunction innerLabels
           target.wasmModule hosts.env (EffectSupported context)
           (ReuseCapacityEntryRelativeFrame
             (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
@@ -14315,43 +14452,48 @@ theorem
         site.calleeEnv site.calleeCode resultFacts resultRuntime resultEnv
         resultValue stepCost)
     (directRuntimeRefines :
-      ReuseCapacityDirectLetRuntimeRefinesWithCost calleeContext sourceModule
-        calleeFunction [] target.wasmModule hosts.env DirectSupported
-        directLetAllocationCost
-        (ReuseCapacityEntryRelativeFrame
-          (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction
-            sourceExternals)
-          sourceRuntime initial initialWitness))
+      ∀ innerLabels,
+        ReuseCapacityDirectLetRuntimeRefinesWithCost calleeContext sourceModule
+          calleeFunction innerLabels target.wasmModule hosts.env DirectSupported
+          directLetAllocationCost
+          (ReuseCapacityEntryRelativeFrame
+            (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction
+              sourceExternals)
+            sourceRuntime initial initialWitness))
     (externalRuntimeRefines :
-      ReuseCapacityExternalLetRuntimeRefinesWithCost calleeContext sourceModule
-        calleeFunction [] target.wasmModule hosts.env sourceExternals
-        ExternalSupported
-        (ReuseCapacityEntryRelativeFrame
-          (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction
-            sourceExternals)
-          sourceRuntime initial initialWitness))
+      ∀ innerLabels,
+        ReuseCapacityExternalLetRuntimeRefinesWithCost calleeContext sourceModule
+          calleeFunction innerLabels target.wasmModule hosts.env sourceExternals
+          ExternalSupported
+          (ReuseCapacityEntryRelativeFrame
+            (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction
+              sourceExternals)
+            sourceRuntime initial initialWitness))
     (callRuntimeRefines :
-      ReuseCapacityCallLetRuntimeRefinesWithCost calleeContext sourceModule
-        calleeFunction [] target.wasmModule hosts.env sourceExternals
-        CallSupported
-        (ReuseCapacityEntryRelativeFrame
-          (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction
-            sourceExternals)
-          sourceRuntime initial initialWitness))
+      ∀ innerLabels,
+        ReuseCapacityCallLetRuntimeRefinesWithCost calleeContext sourceModule
+          calleeFunction innerLabels target.wasmModule hosts.env sourceExternals
+          CallSupported
+          (ReuseCapacityEntryRelativeFrame
+            (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction
+              sourceExternals)
+            sourceRuntime initial initialWitness))
     (lazyRuntimeRefines :
-      ReuseCapacityLazyLetRuntimeRefinesWithCost calleeContext sourceModule
-        calleeFunction [] target.wasmModule hosts.env sourceExternals
-        LazySupported
-        (ReuseCapacityEntryRelativeFrame
-          (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction
-            sourceExternals)
-          sourceRuntime initial initialWitness))
+      ∀ innerLabels,
+        ReuseCapacityLazyLetRuntimeRefinesWithCost calleeContext sourceModule
+          calleeFunction innerLabels target.wasmModule hosts.env sourceExternals
+          LazySupported
+          (ReuseCapacityEntryRelativeFrame
+            (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction
+              sourceExternals)
+            sourceRuntime initial initialWitness))
     (caseRuntimeRefines :
-      CaseRuntimeRefines calleeContext sourceModule calleeFunction []
-        target.wasmModule hosts.env CaseSupported)
+      ∀ innerLabels,
+        CaseRuntimeRefines calleeContext sourceModule calleeFunction innerLabels
+          target.wasmModule hosts.env CaseSupported)
     (effectRuntimeRefines :
-      ∀ facts,
-        EffectRuntimeRefines calleeContext sourceModule calleeFunction []
+      ∀ innerLabels facts,
+        EffectRuntimeRefines calleeContext sourceModule calleeFunction innerLabels
           target.wasmModule hosts.env EffectSupported
           (ReuseCapacityEntryRelativeFrame
             (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction
@@ -14435,9 +14577,10 @@ structure DirectHereditaryGeneratedOperationLaws
           context sourceCode sourceModule sourceFunction target)
         {entryRuntime : RuntimeState}
         {entryStore : Wasm.Store Host}
-        {entryWitness : RefinementWitness},
+        {entryWitness : RefinementWitness}
+        (labels : LabelContext),
       ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction [] target.wasmModule hosts.env
+        sourceFunction labels target.wasmModule hosts.env
         (DirectSupported context) directLetAllocationCost
         (ReuseCapacityEntryRelativeFrame
           (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
@@ -14452,9 +14595,10 @@ structure DirectHereditaryGeneratedOperationLaws
           context sourceCode sourceModule sourceFunction target)
         {entryRuntime : RuntimeState}
         {entryStore : Wasm.Store Host}
-        {entryWitness : RefinementWitness},
+        {entryWitness : RefinementWitness}
+        (labels : LabelContext),
       ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction [] target.wasmModule hosts.env sourceExternals
+        sourceFunction labels target.wasmModule hosts.env sourceExternals
         (ExternalSupported context)
         (ReuseCapacityEntryRelativeFrame
           (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
@@ -14469,9 +14613,10 @@ structure DirectHereditaryGeneratedOperationLaws
           context sourceCode sourceModule sourceFunction target)
         {entryRuntime : RuntimeState}
         {entryStore : Wasm.Store Host}
-        {entryWitness : RefinementWitness},
+        {entryWitness : RefinementWitness}
+        (labels : LabelContext),
       ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction [] target.wasmModule hosts.env sourceExternals
+        sourceFunction labels target.wasmModule hosts.env sourceExternals
         (LazySupported context)
         (ReuseCapacityEntryRelativeFrame
           (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
@@ -14483,8 +14628,9 @@ structure DirectHereditaryGeneratedOperationLaws
         {sourceCode : LCNF.Code .impure}
         {sourceFunction : Fir.Wasm.Function}
         (_row : ConcreteGeneratedInternalDeclaration program declaration
-          context sourceCode sourceModule sourceFunction target),
-      CaseRuntimeRefines context sourceModule sourceFunction []
+          context sourceCode sourceModule sourceFunction target)
+        (labels : LabelContext),
+      CaseRuntimeRefines context sourceModule sourceFunction labels
         target.wasmModule hosts.env (CaseSupported context)
   effect :
     ∀ {declaration : LCNF.Decl .impure}
@@ -14496,8 +14642,9 @@ structure DirectHereditaryGeneratedOperationLaws
         {entryRuntime : RuntimeState}
         {entryStore : Wasm.Store Host}
         {entryWitness : RefinementWitness}
+        (labels : LabelContext)
         (facts : ReuseCapacityFacts),
-      EffectRuntimeRefines context sourceModule sourceFunction []
+      EffectRuntimeRefines context sourceModule sourceFunction labels
         target.wasmModule hosts.env (EffectSupported context)
         (ReuseCapacityEntryRelativeFrame
           (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
@@ -14533,20 +14680,20 @@ theorem
       (fun _ => NoEffectsSupported) := by
   constructor
   · intro declaration context sourceCode sourceFunction row entryRuntime
-      entryStore entryWitness
+      entryStore entryWitness labels
     exact
       (row.toSupportedFunction spec).reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache
         sourceExternals
   · intro declaration context sourceCode sourceFunction row entryRuntime
-      entryStore entryWitness
+      entryStore entryWitness labels
     exact reuseCapacityExternalLetRuntimeRefinesWithCost_noExternals
   · intro declaration context sourceCode sourceFunction row entryRuntime
-      entryStore entryWitness
+      entryStore entryWitness labels
     exact reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy
-  · intro declaration context sourceCode sourceFunction row
+  · intro declaration context sourceCode sourceFunction row labels
     exact caseRuntimeRefines_defaultOnly
   · intro declaration context sourceCode sourceFunction row entryRuntime
-      entryStore entryWitness facts
+      entryStore entryWitness labels facts
     exact effectRuntimeRefines_noEffects
 
 /-- The production operation laws for recursive generated declarations with
@@ -14575,22 +14722,22 @@ theorem
       (fun _ => NoEffectsSupported) := by
   constructor
   · intro declaration context sourceCode sourceFunction row entryRuntime
-      entryStore entryWitness
+      entryStore entryWitness labels
     exact
       (row.toSupportedFunction spec).reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache
         sourceExternals
   · intro declaration context sourceCode sourceFunction row entryRuntime
-      entryStore entryWitness
+      entryStore entryWitness labels
     exact
       (row.toSupportedFunction spec).reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal_entryRelativeCache
         sourceExternals
   · intro declaration context sourceCode sourceFunction row entryRuntime
-      entryStore entryWitness
+      entryStore entryWitness labels
     exact reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy
-  · intro declaration context sourceCode sourceFunction row
+  · intro declaration context sourceCode sourceFunction row labels
     exact caseRuntimeRefines_defaultOnly
   · intro declaration context sourceCode sourceFunction row entryRuntime
-      entryStore entryWitness facts
+      entryStore entryWitness labels facts
     exact effectRuntimeRefines_noEffects
 
 /-- The production operation laws with pure external calls, the complete
@@ -14619,22 +14766,22 @@ theorem
       (fun context => OwnershipTagAndAllFieldMutationEffectSupported context) := by
   constructor
   · intro declaration context sourceCode sourceFunction row entryRuntime
-      entryStore entryWitness
+      entryStore entryWitness labels
     exact
       (row.toSupportedFunction spec).reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache
         sourceExternals
   · intro declaration context sourceCode sourceFunction row entryRuntime
-      entryStore entryWitness
+      entryStore entryWitness labels
     exact
       (row.toSupportedFunction spec).reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal_entryRelativeCache
         sourceExternals
   · intro declaration context sourceCode sourceFunction row entryRuntime
-      entryStore entryWitness
+      entryStore entryWitness labels
     exact reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy
-  · intro declaration context sourceCode sourceFunction row
+  · intro declaration context sourceCode sourceFunction row labels
     exact (row.toSupportedFunction spec).caseRuntimeRefines_productionCases
   · intro declaration context sourceCode sourceFunction row entryRuntime
-      entryStore entryWitness facts
+      entryStore entryWitness labels facts
     exact
       (row.toSupportedFunction spec).effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation_pureExternal_entryRelativeCache
         sourceExternals
@@ -14675,6 +14822,7 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_generated
     {context : Fir.Wasm.Context}
     {functionCode code : LCNF.Code .impure}
     {sourceFunction : Fir.Wasm.Function}
+    {labels : LabelContext}
     (row : ConcreteGeneratedInternalDeclaration program declaration context
       functionCode sourceModule sourceFunction target)
     {expectedResult : AbiKind}
@@ -14693,7 +14841,7 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_generated
     {locals : Wasm.Locals}
     {witness entryWitness : RefinementWitness}
     (codeAdapted :
-      CodeAdapted context sourceModule sourceFunction [] code targetCode)
+      CodeAdapted context sourceModule sourceFunction labels code targetCode)
     (invariant :
       ReuseCapacityEntryRelativeFrame
         (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
@@ -14701,7 +14849,7 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_generated
         entryRuntime entryStore entryWitness facts (requiredBytes + slack)
         sourceRuntime sourceEnv initial locals witness) :
     ∃ resultStore resultLocals resultWitness physical,
-      CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
+      CodeWP context sourceModule sourceFunction labels target.wasmModule hosts.env
           sourceRuntime sourceEnv code targetCode initial locals witness []
           (ExactReturnControlPost resultStore physical) ∧
         ReuseCapacityEntryRelativeFrame
@@ -14713,7 +14861,7 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_generated
         PhysicalValueRel resultWitness expectedResult physical resultValue := by
   induction evaluation generalizing declaration functionCode sourceFunction
       targetCode initial locals witness entryRuntime entryStore entryWitness
-      slack with
+      labels slack with
   | ret sourceLookup resultCompiled resultRefines =>
       exact codeWP_of_reuseCapacityDirectHereditaryReturn_withSlack
         sourceLookup resultCompiled resultRefines codeAdapted row.localsAligned
@@ -14727,7 +14875,7 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_generated
           resultFound, targetEq⟩ :=
         CodeAdapted.let_eq codeAdapted
       have continuationAdapted :
-          CodeAdapted context sourceModule sourceFunction [] continuation
+          CodeAdapted context sourceModule sourceFunction labels continuation
             targetRest :=
         ⟨restCode, restCompiled, restAdapted⟩
       have stepFits :
@@ -14738,7 +14886,7 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_generated
           _externalsPreserved, _hostDescriptorsPreserved,
           _witnessDescriptorsPreserved, _directTransports, producedTransfer,
           nextInvariant⟩ :=
-        operationLaws.direct row supported stepFits invariant sourceStep
+        operationLaws.direct row labels supported stepFits invariant sourceStep
           valueCompiled valueAdapted resultFound
       rw [transfer] at producedTransfer
       have factsEq := Option.some.inj producedTransfer
@@ -14774,7 +14922,7 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_generated
           resultFound, targetEq⟩ :=
         CodeAdapted.let_eq codeAdapted
       have continuationAdapted :
-          CodeAdapted context sourceModule sourceFunction [] continuation
+          CodeAdapted context sourceModule sourceFunction labels continuation
             targetRest :=
         ⟨restCode, restCompiled, restAdapted⟩
       have stepFits : stepCost ≤ (stepCost + continuationCost) + slack :=
@@ -14782,7 +14930,7 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_generated
       obtain ⟨nextStore, nextLocals, nextWitness, producedFacts, step,
           _externalsPreserved, _hostDescriptorsPreserved,
           _witnessDescriptorsPreserved, producedTransfer, nextInvariant⟩ :=
-        operationLaws.external row supported stepFits invariant sourceStep
+        operationLaws.external row labels supported stepFits invariant sourceStep
           valueCompiled valueAdapted resultFound
       rw [transfer] at producedTransfer
       have factsEq := Option.some.inj producedTransfer
@@ -14820,7 +14968,7 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_generated
           resultFound, targetEq⟩ :=
         CodeAdapted.let_eq codeAdapted
       have continuationAdapted :
-          CodeAdapted context sourceModule sourceFunction [] continuation
+          CodeAdapted context sourceModule sourceFunction labels continuation
             targetRest :=
         ⟨restCode, restCompiled, restAdapted⟩
       have stepFits :
@@ -15051,7 +15199,7 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_generated
           resultFound, targetEq⟩ :=
         CodeAdapted.let_eq codeAdapted
       have continuationAdapted :
-          CodeAdapted context sourceModule sourceFunction [] continuation
+          CodeAdapted context sourceModule sourceFunction labels continuation
             targetRest :=
         ⟨restCode, restCompiled, restAdapted⟩
       have stepFits : stepCost ≤ (stepCost + continuationCost) + slack :=
@@ -15059,7 +15207,7 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_generated
       obtain ⟨nextStore, nextLocals, nextWitness, producedFacts, step,
           _externalsPreserved, _hostDescriptorsPreserved,
           _witnessDescriptorsPreserved, producedTransfer, nextInvariant⟩ :=
-        operationLaws.lazy row supported stepFits invariant sourceStep
+        operationLaws.lazy row labels supported stepFits invariant sourceStep
           valueCompiled valueAdapted resultFound
       rw [transfer] at producedTransfer
       have factsEq := Option.some.inj producedTransfer
@@ -15088,8 +15236,9 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_generated
   | @caseOf context sourceRuntime sourceEnv cases selected expectedResult facts
       resultFacts resultRuntime resultEnv resultValue requiredBytes supported
       sourceStep continued ih =>
-      obtain ⟨selectedTarget, selectedAdapted, _selected, lift⟩ :=
-        operationLaws.caseOf row supported sourceStep
+      obtain ⟨selectedLabels, selectedTarget, selectedAdapted, _selected,
+          lift⟩ :=
+        operationLaws.caseOf row labels supported sourceStep
           invariant.1.stateRelated.stateRelated codeAdapted
       obtain ⟨resultStore, resultLocals, resultWitness, physical,
           continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
@@ -15107,7 +15256,7 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_generated
       requiredBytes supported sourceStep continued ih =>
       obtain ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
           _externalsPreserved, nextInvariant⟩ :=
-        operationLaws.effect row facts supported sourceStep
+        operationLaws.effect row labels facts supported sourceStep
           invariant.1.stateRelated.stateRelated invariant codeAdapted
       obtain ⟨resultStore, resultLocals, resultWitness, physical,
           continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
@@ -15347,9 +15496,10 @@ structure ProductionHereditaryFunctionOperationLaws
   direct :
     ∀ {entryRuntime : RuntimeState}
         {entryStore : Wasm.Store Host}
-        {entryWitness : RefinementWitness},
+        {entryWitness : RefinementWitness}
+        (labels : LabelContext),
       ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction [] target.wasmModule hosts.env
+        sourceFunction labels target.wasmModule hosts.env
         (ReuseBudgetedDirectSupported context) directLetAllocationCost
         (ReuseCapacityEntryRelativeFrame
           (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
@@ -15358,9 +15508,10 @@ structure ProductionHereditaryFunctionOperationLaws
   external :
     ∀ {entryRuntime : RuntimeState}
         {entryStore : Wasm.Store Host}
-        {entryWitness : RefinementWitness},
+        {entryWitness : RefinementWitness}
+        (labels : LabelContext),
       ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction [] target.wasmModule hosts.env sourceExternals
+        sourceFunction labels target.wasmModule hosts.env sourceExternals
         (PureExternalSupported context sourceExternals)
         (ReuseCapacityEntryRelativeFrame
           (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
@@ -15369,23 +15520,26 @@ structure ProductionHereditaryFunctionOperationLaws
   lazy :
     ∀ {entryRuntime : RuntimeState}
         {entryStore : Wasm.Store Host}
-        {entryWitness : RefinementWitness},
+        {entryWitness : RefinementWitness}
+        (labels : LabelContext),
       ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction [] target.wasmModule hosts.env sourceExternals
+        sourceFunction labels target.wasmModule hosts.env sourceExternals
         (ProductionHereditaryLazySupported sourceExternals context)
         (ReuseCapacityEntryRelativeFrame
           (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
             sourceExternals)
           entryRuntime entryStore entryWitness)
   caseOf :
-    CaseRuntimeRefines context sourceModule sourceFunction []
-      target.wasmModule hosts.env (ProductionCasesSupported context)
+    ∀ labels,
+      CaseRuntimeRefines context sourceModule sourceFunction labels
+        target.wasmModule hosts.env (ProductionCasesSupported context)
   effect :
     ∀ {entryRuntime : RuntimeState}
         {entryStore : Wasm.Store Host}
         {entryWitness : RefinementWitness}
+        (labels : LabelContext)
         (facts : ReuseCapacityFacts),
-      EffectRuntimeRefines context sourceModule sourceFunction []
+      EffectRuntimeRefines context sourceModule sourceFunction labels
         target.wasmModule hosts.env
         (OwnershipTagAndAllFieldMutationEffectSupported context)
         (ReuseCapacityEntryRelativeFrame
@@ -15455,6 +15609,7 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
     {context : Fir.Wasm.Context}
     {functionCode code : LCNF.Code .impure}
     {sourceFunction : Fir.Wasm.Function}
+    {labels : LabelContext}
     (functionSpec : ConcreteSupportedFunction program context functionCode
       sourceModule sourceFunction target hosts)
     (contextCaches :
@@ -15477,7 +15632,7 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
     {locals : Wasm.Locals}
     {witness entryWitness : RefinementWitness}
     (codeAdapted :
-      CodeAdapted context sourceModule sourceFunction [] code targetCode)
+      CodeAdapted context sourceModule sourceFunction labels code targetCode)
     (entryAbi : ClosureAllocationsAbiAligned context.program entryWitness)
     (invariant :
       ReuseCapacityEntryRelativeFrame
@@ -15486,7 +15641,7 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
         entryRuntime entryStore entryWitness facts (requiredBytes + slack)
         sourceRuntime sourceEnv initial locals witness) :
     ∃ resultStore resultLocals resultWitness physical,
-      CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
+      CodeWP context sourceModule sourceFunction labels target.wasmModule hosts.env
           sourceRuntime sourceEnv code targetCode initial locals witness []
           (ExactReturnControlPost resultStore physical) ∧
         ReuseCapacityEntryRelativeFrame
@@ -15497,7 +15652,7 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
         resultStore.host.failure? = none ∧
         PhysicalValueRel resultWitness expectedResult physical resultValue := by
   induction evaluation generalizing functionCode sourceFunction targetCode
-      initial locals witness entryRuntime entryStore entryWitness slack with
+      initial locals witness entryRuntime entryStore entryWitness labels slack with
   | ret sourceLookup resultCompiled resultRefines =>
       exact codeWP_of_reuseCapacityDirectHereditaryReturn_withSlack
         sourceLookup resultCompiled resultRefines codeAdapted
@@ -15512,7 +15667,7 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
           resultFound, targetEq⟩ :=
         CodeAdapted.let_eq codeAdapted
       have continuationAdapted :
-          CodeAdapted context sourceModule sourceFunction [] continuation
+          CodeAdapted context sourceModule sourceFunction labels continuation
             targetRest :=
         ⟨restCode, restCompiled, restAdapted⟩
       have stepFits :
@@ -15523,7 +15678,7 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
           _externalsPreserved, _hostDescriptorsPreserved,
           _witnessDescriptorsPreserved, _directTransports, producedTransfer,
           nextInvariant⟩ :=
-        functionLaws.direct supported stepFits invariant sourceStep
+        functionLaws.direct labels supported stepFits invariant sourceStep
           valueCompiled valueAdapted resultFound
       rw [transfer] at producedTransfer
       have factsEq := Option.some.inj producedTransfer
@@ -15560,7 +15715,7 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
           resultFound, targetEq⟩ :=
         CodeAdapted.let_eq codeAdapted
       have continuationAdapted :
-          CodeAdapted context sourceModule sourceFunction [] continuation
+          CodeAdapted context sourceModule sourceFunction labels continuation
             targetRest :=
         ⟨restCode, restCompiled, restAdapted⟩
       have stepFits : stepCost ≤ (stepCost + continuationCost) + slack :=
@@ -15568,7 +15723,7 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
       obtain ⟨nextStore, nextLocals, nextWitness, producedFacts, step,
           _externalsPreserved, _hostDescriptorsPreserved,
           _witnessDescriptorsPreserved, producedTransfer, nextInvariant⟩ :=
-        functionLaws.external supported stepFits invariant sourceStep
+        functionLaws.external labels supported stepFits invariant sourceStep
           valueCompiled valueAdapted resultFound
       rw [transfer] at producedTransfer
       have factsEq := Option.some.inj producedTransfer
@@ -15607,7 +15762,7 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
           resultFound, targetEq⟩ :=
         CodeAdapted.let_eq codeAdapted
       have continuationAdapted :
-          CodeAdapted context sourceModule sourceFunction [] continuation
+          CodeAdapted context sourceModule sourceFunction labels continuation
             targetRest :=
         ⟨restCode, restCompiled, restAdapted⟩
       have stepFits :
@@ -15855,7 +16010,7 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
           resultFound, targetEq⟩ :=
         CodeAdapted.let_eq codeAdapted
       have continuationAdapted :
-          CodeAdapted context sourceModule sourceFunction [] continuation
+          CodeAdapted context sourceModule sourceFunction labels continuation
             targetRest :=
         ⟨restCode, restCompiled, restAdapted⟩
       have stepFits :
@@ -16063,7 +16218,7 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
         Option.some.inj callFound
       subst functionIndex
       have dispatchAdapted :
-          instructions sourceModule sourceFunction []
+          instructions sourceModule sourceFunction labels
               (compileClosureDispatch context decl.fvarId site.closureId
                 site.resultKind site.argumentCode site.argumentKinds) =
             .ok
@@ -16158,7 +16313,7 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
           resultFound, targetEq⟩ :=
         CodeAdapted.let_eq codeAdapted
       have continuationAdapted :
-          CodeAdapted context sourceModule sourceFunction [] continuation
+          CodeAdapted context sourceModule sourceFunction labels continuation
             targetRest :=
         ⟨restCode, restCompiled, restAdapted⟩
       have stepFits : stepCost ≤ (stepCost + continuationCost) + slack :=
@@ -16166,7 +16321,7 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
       obtain ⟨nextStore, nextLocals, nextWitness, producedFacts, step,
           _externalsPreserved, _hostDescriptorsPreserved,
           _witnessDescriptorsPreserved, producedTransfer, nextInvariant⟩ :=
-        functionLaws.lazy supported stepFits invariant sourceStep
+        functionLaws.lazy labels supported stepFits invariant sourceStep
           valueCompiled valueAdapted resultFound
       rw [transfer] at producedTransfer
       have factsEq := Option.some.inj producedTransfer
@@ -16196,8 +16351,9 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
   | @caseOf context sourceRuntime sourceEnv cases selected expectedResult facts
       resultFacts resultRuntime resultEnv resultValue requiredBytes supported
       sourceStep continued ih =>
-      obtain ⟨selectedTarget, selectedAdapted, _selected, lift⟩ :=
-        functionLaws.caseOf supported sourceStep
+      obtain ⟨selectedLabels, selectedTarget, selectedAdapted, _selected,
+          lift⟩ :=
+        functionLaws.caseOf labels supported sourceStep
           invariant.1.stateRelated.stateRelated codeAdapted
       obtain ⟨resultStore, resultLocals, resultWitness, physical,
           continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
@@ -16216,7 +16372,7 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
       requiredBytes supported sourceStep continued ih =>
       obtain ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
           _externalsPreserved, nextInvariant⟩ :=
-        functionLaws.effect facts supported sourceStep
+        functionLaws.effect labels facts supported sourceStep
           invariant.1.stateRelated.stateRelated invariant codeAdapted
       obtain ⟨resultStore, resultLocals, resultWitness, physical,
           continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
@@ -16506,7 +16662,7 @@ theorem
     {callerCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
     {sourceExternals : ExternalImpl}
@@ -16708,17 +16864,17 @@ theorem
         sourceExternals)
   constructor
   · intro declaration context sourceCode sourceFunction row entryRuntime
-      entryStore entryWitness
+      entryStore entryWitness labels
     exact
       (row.toSupportedFunction spec).reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache
         sourceExternals
   · intro declaration context sourceCode sourceFunction row entryRuntime
-      entryStore entryWitness
+      entryStore entryWitness labels
     exact
       (row.toSupportedFunction spec).reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal_entryRelativeCache
         sourceExternals
   · intro declaration context sourceCode sourceFunction row entryRuntime
-      entryStore entryWitness
+      entryStore entryWitness labels
     have contexts : DeclarationContextsCoherent rootContext context := {
       program := spec.contextProgram.trans row.contextProgram.symm
       cachedDeclarations := contextCaches.trans row.contextCaches.symm }
@@ -16729,15 +16885,15 @@ theorem
       valueCompiled valueAdapted resultFound
     exact
       (row.toSupportedFunction spec).internalNonHeapHereditaryLazyRuntimeRefines_entryRelativeCache
-        (labels := []) (entryRuntime := entryRuntime)
+        (labels := labels) (entryRuntime := entryRuntime)
         (entryStore := entryStore) (entryWitness := entryWitness)
         row.contextCaches (generated.ofCoherent contexts)
         initializerDeclarations supported stepFits invariant sourceStep
         valueCompiled valueAdapted resultFound
-  · intro declaration context sourceCode sourceFunction row
+  · intro declaration context sourceCode sourceFunction row labels
     exact (row.toSupportedFunction spec).caseRuntimeRefines_productionCases
   · intro declaration context sourceCode sourceFunction row entryRuntime
-      entryStore entryWitness facts
+      entryStore entryWitness labels facts
     exact
       (row.toSupportedFunction spec).effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation_pureExternal_entryRelativeCache
         sourceExternals
@@ -16843,17 +16999,21 @@ theorem
       (spec.directHereditaryGeneratedOperationLaws_reuseBudgetedDirect_pureExternal_effects
         sourceExternals)
   constructor
-  · exact
+  · intro entryRuntime entryStore entryWitness labels
+    exact
       spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache
         sourceExternals
-  · exact
+  · intro entryRuntime entryStore entryWitness labels
+    exact
       spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal_entryRelativeCache
         sourceExternals
-  · exact
+  · intro entryRuntime entryStore entryWitness labels
+    exact
       spec.internalNonHeapHereditaryLazyRuntimeRefines_entryRelativeCache
         contextCaches generated initializerDeclarations
-  · exact spec.caseRuntimeRefines_productionCases
-  · intro entryRuntime entryStore entryWitness facts
+  · intro labels
+    exact spec.caseRuntimeRefines_productionCases
+  · intro entryRuntime entryStore entryWitness labels facts
     exact
       spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation_pureExternal_entryRelativeCache
         sourceExternals
@@ -16958,7 +17118,7 @@ theorem
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
     {sourceExternals : ExternalImpl}
@@ -17093,7 +17253,7 @@ theorem ConcreteSupportedExport.saturatedClosureCallRuntimeRefines_hereditary
     {callerCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
     {exportName : String}
@@ -17314,7 +17474,7 @@ theorem
     {callerCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
     {exportName : String}
@@ -17407,8 +17567,9 @@ theorem
       ClosureAllocationsAbiAligned context.program initialWitness :=
     invariant.closureAbi
   have directCalls :
+      ∀ labels,
       ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction [] target.wasmModule hosts.env sourceExternals
+        sourceFunction labels target.wasmModule hosts.env sourceExternals
         (ReuseCapacityDirectHereditaryCallSupported sourceExternals
           (fun context => ReuseBudgetedDirectSupported context)
           (fun context => PureExternalSupported context sourceExternals)
@@ -17421,16 +17582,19 @@ theorem
         (ReuseCapacityEntryRelativeFrame
           (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
             sourceExternals)
-          sourceRuntime initial initialWitness) :=
-    DirectDeclarationCallImplementationWithCache.runtimeRefinesEntryRelative
-      (DirectDeclarationCallImplementationWithCache.ofHereditaryInternalCompiler
-        spec.contextProgram contextCaches spec.programNamesUnique spec.lowered
-        spec.adapted spec.localsAligned
-        (spec.directHereditaryGeneratedDeclarationInduction_reuseBudgetedDirect_pureExternal_effects_oneLazy
-          contextCaches sourceExternals generated))
+          sourceRuntime initial initialWitness) := by
+    intro labels
+    exact
+      DirectDeclarationCallImplementationWithCache.runtimeRefinesEntryRelative
+        (DirectDeclarationCallImplementationWithCache.ofHereditaryInternalCompiler
+          spec.contextProgram contextCaches spec.programNamesUnique spec.lowered
+          spec.adapted spec.localsAligned
+          (spec.directHereditaryGeneratedDeclarationInduction_reuseBudgetedDirect_pureExternal_effects_oneLazy
+            contextCaches sourceExternals generated))
   have closureCallsAbi :
+      ∀ labels,
       ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction [] target.wasmModule hosts.env sourceExternals
+        sourceFunction labels target.wasmModule hosts.env sourceExternals
         (SaturatedClosureHereditaryCallSupported sourceExternals
           (fun context => ReuseBudgetedDirectSupported context)
           (fun context => PureExternalSupported context sourceExternals)
@@ -17443,12 +17607,15 @@ theorem
         (ReuseCapacityEntryRelativeFrame
           (ConcreteReuseCapacityCacheAbiFrame context sourceModule
             sourceFunction sourceExternals)
-          sourceRuntime initial initialWitness) :=
-    spec.saturatedClosureCallRuntimeRefines_reuseBudgetedDirect_pureExternal_effects_oneLazy
-      contextCaches sourceExternals generated
+          sourceRuntime initial initialWitness) := by
+    intro labels
+    exact
+      spec.saturatedClosureCallRuntimeRefines_reuseBudgetedDirect_pureExternal_effects_oneLazy
+        contextCaches sourceExternals generated
   have closureCalls :
+      ∀ labels,
       ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction [] target.wasmModule hosts.env sourceExternals
+        sourceFunction labels target.wasmModule hosts.env sourceExternals
         (SaturatedClosureHereditaryCallSupported sourceExternals
           (fun context => ReuseBudgetedDirectSupported context)
           (fun context => PureExternalSupported context sourceExternals)
@@ -17461,42 +17628,48 @@ theorem
         (ReuseCapacityEntryRelativeFrame
           (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
             sourceExternals)
-          sourceRuntime initial initialWitness) :=
-    closureCallsAbi.mapInvariant
+          sourceRuntime initial initialWitness) := by
+    intro labels
+    exact ReuseCapacityCallLetRuntimeRefinesWithCost.mapInvariant
+      (closureCallsAbi labels)
       (fun _ _ _ _ _ _ _ current => current.abiFrame_of_cache entryAbi)
       (fun _ _ _ _ _ _ _ current => current.cacheFrame_of_abi)
   have calls :
+      ∀ labels,
       ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
-        sourceFunction [] target.wasmModule hosts.env sourceExternals
+        sourceFunction labels target.wasmModule hosts.env sourceExternals
         (ProductionHereditaryCallSupported sourceExternals context)
         (ReuseCapacityEntryRelativeFrame
           (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
             sourceExternals)
           sourceRuntime initial initialWitness) := by
-    intro currentFacts currentRuntime nextRuntime currentEnv decl continuation
+    intro labels currentFacts currentRuntime nextRuntime currentEnv decl continuation
       sourceValue valueCode targetValue targetStore targetLocals resultIndex
       remainingBytes stepCost currentWitness supported stepFits currentInvariant
       sourceStep valueCompiled valueAdapted resultFound
     rcases supported with directSupported | closureSupported
-    · exact directCalls directSupported stepFits currentInvariant sourceStep
+    · exact directCalls labels directSupported stepFits currentInvariant sourceStep
         valueCompiled valueAdapted resultFound
-    · exact closureCalls closureSupported stepFits currentInvariant sourceStep
+    · exact closureCalls labels closureSupported stepFits currentInvariant sourceStep
         valueCompiled valueAdapted resultFound
   obtain ⟨resultStore, resultWitness, resultKind, physical, result⟩ :=
     spec.toSupportedDeclaration
       |>.budgetedDeclarationWithCache_of_reuseCapacityBudgetedCodeEvaluates
         evaluation invariant.cacheFrame
-        (spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache
-          sourceExternals)
-        (spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal_entryRelativeCache
-          sourceExternals)
-        calls
-        (spec.toConcreteSupportedFunction.internalNonHeapHereditaryLazyRuntimeRefines_entryRelativeCache
-          contextCaches generated
-          (spec.directHereditaryGeneratedDeclarationInduction_reuseBudgetedDirect_pureExternal_effects
-            sourceExternals))
-        spec.caseRuntimeRefines_productionCases
         (fun _ =>
+          spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache
+            sourceExternals)
+        (fun _ =>
+          spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal_entryRelativeCache
+            sourceExternals)
+        calls
+        (fun _ =>
+          spec.toConcreteSupportedFunction.internalNonHeapHereditaryLazyRuntimeRefines_entryRelativeCache
+            contextCaches generated
+            (spec.directHereditaryGeneratedDeclarationInduction_reuseBudgetedDirect_pureExternal_effects
+              sourceExternals))
+        (fun _ => spec.caseRuntimeRefines_productionCases)
+        (fun _ _ =>
           spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation_pureExternal_entryRelativeCache
             sourceExternals)
         parameterCount
@@ -17515,7 +17688,7 @@ theorem
     {sourceCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
     {exportName : String}
@@ -17550,7 +17723,7 @@ theorem
     {sourceCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
     {exportName : String}
@@ -17585,7 +17758,7 @@ theorem
     {sourceCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
     {exportName : String}
@@ -17620,7 +17793,7 @@ theorem
     {sourceCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
+    {labels : LabelContext}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
     {exportName : String}
@@ -17705,15 +17878,17 @@ theorem
     spec.toSupportedDeclaration
       |>.budgetedDeclarationWithCache_of_reuseCapacityDirectHereditaryCodeEvaluates
         evaluation invariant
-        (spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache
-          sourceExternals)
-        reuseCapacityExternalLetRuntimeRefinesWithCost_noExternals
-        (DirectDeclarationCallImplementationWithCache.runtimeRefinesEntryRelative
-          (spec.directDeclarationCallImplementationWithCache_reuseBudgetedDirect_noCalls
-            contextCaches sourceExternals))
-        reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy
-        caseRuntimeRefines_defaultOnly
-        (fun _ => effectRuntimeRefines_noEffects)
+        (fun _ =>
+          spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache
+            sourceExternals)
+        (fun _ => reuseCapacityExternalLetRuntimeRefinesWithCost_noExternals)
+        (fun _ =>
+          DirectDeclarationCallImplementationWithCache.runtimeRefinesEntryRelative
+            (spec.directDeclarationCallImplementationWithCache_reuseBudgetedDirect_noCalls
+              contextCaches sourceExternals))
+        (fun _ => reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy)
+        (fun _ => caseRuntimeRefines_defaultOnly)
+        (fun _ _ => effectRuntimeRefines_noEffects)
         parameterCount
 
 /-- Public partial-correctness corollary for the first recursive production
@@ -17832,16 +18007,19 @@ theorem
     spec.toSupportedDeclaration
       |>.budgetedDeclarationWithCache_of_reuseCapacityDirectHereditaryCodeEvaluates
         evaluation invariant
-        (spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache
-          sourceExternals)
-        (spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal_entryRelativeCache
-          sourceExternals)
-        (DirectDeclarationCallImplementationWithCache.runtimeRefinesEntryRelative
-          (spec.directDeclarationCallImplementationWithCache_reuseBudgetedDirect_pureExternal
-            contextCaches sourceExternals))
-        reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy
-        caseRuntimeRefines_defaultOnly
-        (fun _ => effectRuntimeRefines_noEffects)
+        (fun _ =>
+          spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache
+            sourceExternals)
+        (fun _ =>
+          spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal_entryRelativeCache
+            sourceExternals)
+        (fun _ =>
+          DirectDeclarationCallImplementationWithCache.runtimeRefinesEntryRelative
+            (spec.directDeclarationCallImplementationWithCache_reuseBudgetedDirect_pureExternal
+              contextCaches sourceExternals))
+        (fun _ => reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy)
+        (fun _ => caseRuntimeRefines_defaultOnly)
+        (fun _ _ => effectRuntimeRefines_noEffects)
         parameterCount
 
 /-- Public partial correctness for the recursive direct/pure-external
@@ -17958,16 +18136,19 @@ theorem
     spec.toSupportedDeclaration
       |>.budgetedDeclarationWithCache_of_reuseCapacityDirectHereditaryCodeEvaluates
         evaluation invariant
-        (spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache
-          sourceExternals)
-        (spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal_entryRelativeCache
-          sourceExternals)
-        (DirectDeclarationCallImplementationWithCache.runtimeRefinesEntryRelative
-          (spec.directDeclarationCallImplementationWithCache_reuseBudgetedDirect_pureExternal_effects
-            contextCaches sourceExternals))
-        reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy
-        spec.caseRuntimeRefines_productionCases
         (fun _ =>
+          spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache
+            sourceExternals)
+        (fun _ =>
+          spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal_entryRelativeCache
+            sourceExternals)
+        (fun _ =>
+          DirectDeclarationCallImplementationWithCache.runtimeRefinesEntryRelative
+            (spec.directDeclarationCallImplementationWithCache_reuseBudgetedDirect_pureExternal_effects
+              contextCaches sourceExternals))
+        (fun _ => reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy)
+        (fun _ => spec.caseRuntimeRefines_productionCases)
+        (fun _ _ =>
           spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation_pureExternal_entryRelativeCache
             sourceExternals)
         parameterCount
@@ -18095,19 +18276,23 @@ theorem
     spec.toSupportedDeclaration
       |>.budgetedDeclarationWithCache_of_reuseCapacityDirectHereditaryCodeEvaluates
         evaluation invariant
-        (spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache
-          sourceExternals)
-        (spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal_entryRelativeCache
-          sourceExternals)
-        (DirectDeclarationCallImplementationWithCache.runtimeRefinesEntryRelative
-          (spec.directDeclarationCallImplementationWithCache_reuseBudgetedDirect_pureExternal_effects_oneLazy
-            contextCaches sourceExternals generated))
-        (spec.toConcreteSupportedFunction.internalNonHeapHereditaryLazyRuntimeRefines_entryRelativeCache
-          contextCaches generated
-          (spec.directHereditaryGeneratedDeclarationInduction_reuseBudgetedDirect_pureExternal_effects
-            sourceExternals))
-        spec.caseRuntimeRefines_productionCases
         (fun _ =>
+          spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache
+            sourceExternals)
+        (fun _ =>
+          spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal_entryRelativeCache
+            sourceExternals)
+        (fun _ =>
+          DirectDeclarationCallImplementationWithCache.runtimeRefinesEntryRelative
+            (spec.directDeclarationCallImplementationWithCache_reuseBudgetedDirect_pureExternal_effects_oneLazy
+              contextCaches sourceExternals generated))
+        (fun _ =>
+          spec.toConcreteSupportedFunction.internalNonHeapHereditaryLazyRuntimeRefines_entryRelativeCache
+            contextCaches generated
+            (spec.directHereditaryGeneratedDeclarationInduction_reuseBudgetedDirect_pureExternal_effects
+              sourceExternals))
+        (fun _ => spec.caseRuntimeRefines_productionCases)
+        (fun _ _ =>
           spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation_pureExternal_entryRelativeCache
             sourceExternals)
         parameterCount

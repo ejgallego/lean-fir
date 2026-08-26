@@ -808,7 +808,7 @@ numeric sequence consumed by `wp_localGets`, at any surrounding label depth.
 -/
 theorem instructions_localGets
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {fvarIds : List Lean.FVarId}
+    {labels : LabelContext} {fvarIds : List Lean.FVarId}
     {indices : List Nat}
     (found :
       List.Forall₂
@@ -834,7 +834,7 @@ and continuation sequences are joined by the resolved numeric destination
 -/
 theorem instructions_let_sequence
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {valueCode restCode : List Fir.Wasm.Instruction}
     {targetValue targetRest : Wasm.Program}
     {result : Lean.FVarId} {resultIndex : Nat}
@@ -863,7 +863,7 @@ proof-only reimplementation.
 -/
 def CodeAdapted (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module) (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId) (code : Lean.Compiler.LCNF.Code .impure)
+    (labels : LabelContext) (code : Lean.Compiler.LCNF.Code .impure)
     (target : Wasm.Program) : Prop :=
   ∃ symbolic,
     Fir.Wasm.compileCode context code = .ok symbolic ∧
@@ -875,7 +875,7 @@ default exists, survives both executable compilation stages.
 -/
 def CaseFallbackAdapted (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module) (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId) (alts : List (Lean.Compiler.LCNF.Alt .impure))
+    (labels : LabelContext) (alts : List (Lean.Compiler.LCNF.Alt .impure))
     (target : Wasm.Program) : Prop :=
   ∃ symbolic,
     Fir.Wasm.compileCaseFallback context alts = .ok symbolic ∧
@@ -887,7 +887,7 @@ symbolic fallback, survives adaptation to Talos instructions.
 -/
 def CaseChainAdapted (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module) (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId) (discr : Lean.FVarId)
+    (labels : LabelContext) (discr : Lean.FVarId)
     (alts : List (Lean.Compiler.LCNF.Alt .impure))
     (fallback : List Fir.Wasm.Instruction) (target : Wasm.Program) : Prop :=
   ∃ symbolic,
@@ -897,7 +897,7 @@ def CaseChainAdapted (context : Fir.Wasm.Context)
 /-- The complete structural relation for one source `.cases` node. -/
 def CasesAdapted (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module) (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId) (cases : Lean.Compiler.LCNF.Cases .impure)
+    (labels : LabelContext) (cases : Lean.Compiler.LCNF.Cases .impure)
     (target : Wasm.Program) : Prop :=
   ∃ fallback,
     Fir.Wasm.compileCaseFallback context cases.alts.toList = .ok fallback ∧
@@ -908,7 +908,7 @@ def CasesAdapted (context : Fir.Wasm.Context)
 theorem caseFallbackAdapted_none
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {alts : List (Lean.Compiler.LCNF.Alt .impure)}
     (found : alts.find? Fir.Wasm.isDefaultAlt = none) :
     CaseFallbackAdapted context sourceModule sourceFunction labels alts
@@ -926,7 +926,7 @@ theorem caseFallbackAdapted_none
 theorem caseFallbackAdapted_default
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {alts : List (Lean.Compiler.LCNF.Alt .impure)}
     {code : Lean.Compiler.LCNF.Code .impure} {target : Wasm.Program}
     (found : alts.find? Fir.Wasm.isDefaultAlt = some (.default code))
@@ -944,7 +944,7 @@ theorem caseFallbackAdapted_default
 theorem caseChainAdapted_nil
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {discr : Lean.FVarId}
+    {labels : LabelContext} {discr : Lean.FVarId}
     {fallback : List Fir.Wasm.Instruction} {target : Wasm.Program}
     (fallbackAdapted :
       instructions sourceModule sourceFunction labels fallback = .ok target) :
@@ -959,7 +959,7 @@ theorem caseChainAdapted_nil
 theorem caseChainAdapted_default
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {discr : Lean.FVarId}
+    {labels : LabelContext} {discr : Lean.FVarId}
     {code : Lean.Compiler.LCNF.Code .impure}
     {alts : List (Lean.Compiler.LCNF.Alt .impure)}
     {fallback : List Fir.Wasm.Instruction} {target : Wasm.Program}
@@ -983,7 +983,7 @@ branches supplied by the same structural relations used recursively.
 theorem caseChainAdapted_constructor
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {discr : Lean.FVarId}
+    {labels : LabelContext} {discr : Lean.FVarId}
     {info : Lean.Compiler.LCNF.CtorInfo}
     {code : Lean.Compiler.LCNF.Code .impure}
     {alts : List (Lean.Compiler.LCNF.Alt .impure)}
@@ -993,9 +993,9 @@ theorem caseChainAdapted_constructor
     (modeEq : Fir.Wasm.caseDiscriminatorMode context discr = .objectTag)
     (fits : Fir.Wasm.constructorTagFitsI32 info = true)
     (thenAdapted :
-      CodeAdapted context sourceModule sourceFunction labels code thenTarget)
+      CodeAdapted context sourceModule sourceFunction (none :: labels) code thenTarget)
     (elseAdapted :
-      CaseChainAdapted context sourceModule sourceFunction labels discr alts
+      CaseChainAdapted context sourceModule sourceFunction (none :: labels) discr alts
         fallback elseTarget)
     (discrFound :
       findFVar?
@@ -1023,7 +1023,7 @@ directly, with no semantic-host `getTag` call. -/
 theorem caseChainAdapted_scalarUInt8_constructor
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {discr : Lean.FVarId}
+    {labels : LabelContext} {discr : Lean.FVarId}
     {info : Lean.Compiler.LCNF.CtorInfo}
     {code : Lean.Compiler.LCNF.Code .impure}
     {alts : List (Lean.Compiler.LCNF.Alt .impure)}
@@ -1033,9 +1033,9 @@ theorem caseChainAdapted_scalarUInt8_constructor
     (modeEq : Fir.Wasm.caseDiscriminatorMode context discr = .scalarUInt8)
     (fits : Fir.Wasm.constructorTagFitsUInt8 info = true)
     (thenAdapted :
-      CodeAdapted context sourceModule sourceFunction labels code thenTarget)
+      CodeAdapted context sourceModule sourceFunction (none :: labels) code thenTarget)
     (elseAdapted :
-      CaseChainAdapted context sourceModule sourceFunction labels discr alts
+      CaseChainAdapted context sourceModule sourceFunction (none :: labels) discr alts
         fallback elseTarget)
     (discrFound :
       findFVar?
@@ -1064,7 +1064,7 @@ chain, making default selection independent of constructor order.
 theorem casesAdapted_of_fallback
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {cases : Lean.Compiler.LCNF.Cases .impure}
+    {labels : LabelContext} {cases : Lean.Compiler.LCNF.Cases .impure}
     {fallbackTarget target : Wasm.Program}
     (fallbackAdapted :
       CaseFallbackAdapted context sourceModule sourceFunction labels
@@ -1083,7 +1083,7 @@ theorem casesAdapted_of_fallback
 theorem codeAdapted_cases
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {cases : Lean.Compiler.LCNF.Cases .impure}
+    {labels : LabelContext} {cases : Lean.Compiler.LCNF.Cases .impure}
     {target : Wasm.Program}
     (adapted : CasesAdapted context sourceModule sourceFunction labels cases target) :
     CodeAdapted context sourceModule sourceFunction labels (.cases cases) target := by
@@ -1097,7 +1097,7 @@ theorem codeAdapted_cases
 theorem codeAdapted_return
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {result : Lean.FVarId} {kind : Fir.Wasm.AbiKind}
+    {labels : LabelContext} {result : Lean.FVarId} {kind : Fir.Wasm.AbiKind}
     {resultIndex : Nat}
     (localCompiled :
       Fir.Wasm.getLocal context result = .ok (.localGet result, kind))
@@ -1116,7 +1116,7 @@ theorem codeAdapted_return
 @[simp] theorem codeAdapted_unreach
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module) (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId) (type : Lean.Expr) :
+    (labels : LabelContext) (type : Lean.Expr) :
     CodeAdapted context sourceModule sourceFunction labels (.unreach type)
       [.unreachable] := by
   refine ⟨[.unreachable], Fir.Wasm.compileCode_unreach context type, ?_⟩
@@ -1132,7 +1132,7 @@ induction over straight-line `let` chains.
 theorem codeAdapted_let
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {valueCode : List Fir.Wasm.Instruction} {targetValue targetRest : Wasm.Program}
@@ -1158,7 +1158,7 @@ theorem codeAdapted_let
 theorem codeAdapted_oset
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {objectId : Lean.FVarId} {index : Nat}
+    {labels : LabelContext} {objectId : Lean.FVarId} {index : Nat}
     {arg : Lean.Compiler.LCNF.Arg .impure}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {fieldCode : List Fir.Wasm.Instruction} {targetField targetRest : Wasm.Program}
@@ -1189,7 +1189,7 @@ theorem codeAdapted_oset
 theorem codeAdapted_uset
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {objectId fieldId : Lean.FVarId} {index : Nat}
+    {labels : LabelContext} {objectId fieldId : Lean.FVarId} {index : Nat}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {objectKind fieldKind : Fir.Wasm.AbiKind} {objectIndex fieldIndex callIndex : Nat}
     {targetRest : Wasm.Program}
@@ -1219,7 +1219,7 @@ theorem codeAdapted_uset
 theorem codeAdapted_sset
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {objectId fieldId : Lean.FVarId}
+    {labels : LabelContext} {objectId fieldId : Lean.FVarId}
     {width offset : Nat} {type : Lean.Expr}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {objectKind fieldKind : Fir.Wasm.AbiKind} {objectIndex fieldIndex callIndex : Nat}
@@ -1250,7 +1250,7 @@ theorem codeAdapted_sset
 theorem codeAdapted_setTag
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {objectId : Lean.FVarId} {tag : Nat}
+    {labels : LabelContext} {objectId : Lean.FVarId} {tag : Nat}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {objectKind : Fir.Wasm.AbiKind} {objectIndex callIndex : Nat}
     {targetRest : Wasm.Program}
@@ -1273,7 +1273,7 @@ theorem codeAdapted_setTag
 theorem codeAdapted_inc
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {objectId : Lean.FVarId}
+    {labels : LabelContext} {objectId : Lean.FVarId}
     {amount : Nat} {check : Bool}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {objectKind : Fir.Wasm.AbiKind} {objectIndex callIndex : Nat}
@@ -1298,7 +1298,7 @@ theorem codeAdapted_inc
 theorem codeAdapted_inc_persistent
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {objectId : Lean.FVarId}
+    {labels : LabelContext} {objectId : Lean.FVarId}
     {amount : Nat} {check : Bool}
     {continuation : Lean.Compiler.LCNF.Code .impure} {targetRest : Wasm.Program}
     (continuationAdapted :
@@ -1311,7 +1311,7 @@ theorem codeAdapted_inc_persistent
 theorem codeAdapted_dec
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {objectId : Lean.FVarId}
+    {labels : LabelContext} {objectId : Lean.FVarId}
     {amount : Nat} {check : Bool} {objectFields? : Option Nat}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {objectKind : Fir.Wasm.AbiKind} {objectIndex callIndex : Nat}
@@ -1337,7 +1337,7 @@ theorem codeAdapted_dec
 theorem codeAdapted_dec_persistent
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {objectId : Lean.FVarId}
+    {labels : LabelContext} {objectId : Lean.FVarId}
     {amount : Nat} {check : Bool} {objectFields? : Option Nat}
     {continuation : Lean.Compiler.LCNF.Code .impure} {targetRest : Wasm.Program}
     (continuationAdapted :
@@ -1350,7 +1350,7 @@ theorem codeAdapted_dec_persistent
 theorem codeAdapted_delete
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {objectId : Lean.FVarId}
+    {labels : LabelContext} {objectId : Lean.FVarId}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {objectKind : Fir.Wasm.AbiKind} {objectIndex callIndex : Nat}
     {targetRest : Wasm.Program}

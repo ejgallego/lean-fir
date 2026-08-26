@@ -125,7 +125,7 @@ the public fuel-free trap theorem at the generated function index. -/
 theorem CodeWP.toConcreteTrapsWith
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceRuntime : Fir.LeanIR.Impure.RuntimeState}
     {sourceEnv : Fir.LeanIR.Impure.Env}
@@ -245,7 +245,7 @@ def ConcreteFaultLeaf
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (sourceExternals : ExternalImpl)
@@ -274,22 +274,23 @@ inductive ConcreteFaultSimulation
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId)
     (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
     (sourceExternals : ExternalImpl) :
-    RuntimeState → Env → LCNF.Code .impure → Wasm.Program →
+    LabelContext → RuntimeState → Env → LCNF.Code .impure → Wasm.Program →
       Wasm.Store Host → Wasm.Locals → RefinementWitness →
       RuntimeState → RuntimeFault → Prop where
   | terminal
+      {labels : LabelContext}
       (leaf :
         ConcreteFaultLeaf context sourceModule sourceFunction labels module
           hostEnv sourceExternals sourceRuntime sourceEnv sourceCode targetCode
           targetStore targetLocals witness faultRuntime fault) :
-      ConcreteFaultSimulation context sourceModule sourceFunction labels module
-        hostEnv sourceExternals sourceRuntime sourceEnv sourceCode targetCode
+      ConcreteFaultSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels sourceRuntime sourceEnv sourceCode targetCode
         targetStore targetLocals witness faultRuntime fault
   | letValue
+      {labels : LabelContext}
       (valueCompiled :
         Fir.Wasm.compileLetValue context decl = .ok valueCode)
       (valueAdapted :
@@ -303,15 +304,16 @@ inductive ConcreteFaultSimulation
           sourceRuntime nextRuntime sourceEnv sourceValue targetStore nextStore
           targetLocals nextLocals resultIndex witness nextWitness)
       (continued :
-        ConcreteFaultSimulation context sourceModule sourceFunction labels
-          module hostEnv sourceExternals nextRuntime
+        ConcreteFaultSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels nextRuntime
           (bind sourceEnv decl.fvarId sourceValue) continuation targetRest
           nextStore nextLocals nextWitness faultRuntime fault) :
-      ConcreteFaultSimulation context sourceModule sourceFunction labels module
-        hostEnv sourceExternals sourceRuntime sourceEnv (.let decl continuation)
+      ConcreteFaultSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels sourceRuntime sourceEnv (.let decl continuation)
         (targetValue ++ .localSet resultIndex :: targetRest)
         targetStore targetLocals witness faultRuntime fault
   | callLet
+      {labels : LabelContext}
       (valueCompiled :
         Fir.Wasm.compileLetValue context decl = .ok valueCode)
       (valueAdapted :
@@ -326,15 +328,16 @@ inductive ConcreteFaultSimulation
           nextRuntime sourceEnv sourceValue targetStore nextStore targetLocals
           nextLocals resultIndex witness nextWitness)
       (continued :
-        ConcreteFaultSimulation context sourceModule sourceFunction labels
-          module hostEnv sourceExternals nextRuntime
+        ConcreteFaultSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels nextRuntime
           (bind sourceEnv decl.fvarId sourceValue) continuation targetRest
           nextStore nextLocals nextWitness faultRuntime fault) :
-      ConcreteFaultSimulation context sourceModule sourceFunction labels module
-        hostEnv sourceExternals sourceRuntime sourceEnv (.let decl continuation)
+      ConcreteFaultSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels sourceRuntime sourceEnv (.let decl continuation)
         (targetValue ++ .localSet resultIndex :: targetRest)
         targetStore targetLocals witness faultRuntime fault
   | externalLet
+      {labels : LabelContext}
       (valueCompiled :
         Fir.Wasm.compileLetValue context decl = .ok valueCode)
       (valueAdapted :
@@ -349,15 +352,16 @@ inductive ConcreteFaultSimulation
           nextRuntime sourceEnv sourceValue targetStore nextStore targetLocals
           nextLocals resultIndex witness nextWitness)
       (continued :
-        ConcreteFaultSimulation context sourceModule sourceFunction labels
-          module hostEnv sourceExternals nextRuntime
+        ConcreteFaultSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels nextRuntime
           (bind sourceEnv decl.fvarId sourceValue) continuation targetRest
           nextStore nextLocals nextWitness faultRuntime fault) :
-      ConcreteFaultSimulation context sourceModule sourceFunction labels module
-        hostEnv sourceExternals sourceRuntime sourceEnv (.let decl continuation)
+      ConcreteFaultSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels sourceRuntime sourceEnv (.let decl continuation)
         (targetValue ++ .localSet resultIndex :: targetRest)
         targetStore targetLocals witness faultRuntime fault
   | lazyLet
+      {labels : LabelContext}
       (path : LazyCachePath)
       (valueCompiled :
         Fir.Wasm.compileLetValue context decl = .ok valueCode)
@@ -373,39 +377,41 @@ inductive ConcreteFaultSimulation
           nextRuntime sourceEnv sourceValue targetStore nextStore targetLocals
           nextLocals resultIndex witness nextWitness)
       (continued :
-        ConcreteFaultSimulation context sourceModule sourceFunction labels
-          module hostEnv sourceExternals nextRuntime
+        ConcreteFaultSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels nextRuntime
           (bind sourceEnv decl.fvarId sourceValue) continuation targetRest
           nextStore nextLocals nextWitness faultRuntime fault) :
-      ConcreteFaultSimulation context sourceModule sourceFunction labels module
-        hostEnv sourceExternals sourceRuntime sourceEnv (.let decl continuation)
+      ConcreteFaultSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels sourceRuntime sourceEnv (.let decl continuation)
         (targetValue ++ .localSet resultIndex :: targetRest)
         targetStore targetLocals witness faultRuntime fault
   | caseOf
+      {labels selectedLabels : LabelContext}
       (target selectedTarget : Wasm.Program)
       (step :
         ConcreteCasesStepSimulates context sourceModule sourceFunction labels
-          module hostEnv sourceRuntime sourceEnv cases selected target
-          selectedTarget targetStore targetLocals witness)
+          selectedLabels module hostEnv sourceRuntime sourceEnv cases selected
+          target selectedTarget targetStore targetLocals witness)
       (continued :
-        ConcreteFaultSimulation context sourceModule sourceFunction labels
-          module hostEnv sourceExternals sourceRuntime sourceEnv selected
+        ConcreteFaultSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals selectedLabels sourceRuntime sourceEnv selected
           selectedTarget targetStore targetLocals witness faultRuntime fault) :
-      ConcreteFaultSimulation context sourceModule sourceFunction labels module
-        hostEnv sourceExternals sourceRuntime sourceEnv (.cases cases) target
+      ConcreteFaultSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels sourceRuntime sourceEnv (.cases cases) target
         targetStore targetLocals witness faultRuntime fault
   | effect
+      {labels : LabelContext}
       (target targetRest : Wasm.Program)
       (step :
         EffectStepSimulates context sourceModule sourceFunction labels module
           hostEnv sourceRuntime nextRuntime sourceEnv code continuation target
           targetRest targetStore nextStore targetLocals witness nextWitness)
       (continued :
-        ConcreteFaultSimulation context sourceModule sourceFunction labels
-          module hostEnv sourceExternals nextRuntime sourceEnv continuation
+        ConcreteFaultSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels nextRuntime sourceEnv continuation
           targetRest nextStore targetLocals nextWitness faultRuntime fault) :
-      ConcreteFaultSimulation context sourceModule sourceFunction labels module
-        hostEnv sourceExternals sourceRuntime sourceEnv code target targetStore
+      ConcreteFaultSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels sourceRuntime sourceEnv code target targetStore
         targetLocals witness faultRuntime fault
 
 /-- The T4 syntax induction constructs the exact trap-only concrete body
@@ -414,7 +420,7 @@ theorem ConcreteFaultSimulation.toCodeWP
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceExternals : ExternalImpl}
@@ -427,8 +433,8 @@ theorem ConcreteFaultSimulation.toCodeWP
     {witness : RefinementWitness}
     {fault : RuntimeFault}
     (simulation :
-      ConcreteFaultSimulation context sourceModule sourceFunction labels module
-        hostEnv sourceExternals sourceRuntime sourceEnv sourceCode target
+      ConcreteFaultSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels sourceRuntime sourceEnv sourceCode target
         targetStore targetLocals witness faultRuntime fault) :
     CodeWP context sourceModule sourceFunction labels module hostEnv
       sourceRuntime sourceEnv sourceCode target targetStore targetLocals witness
@@ -456,7 +462,7 @@ theorem ConcreteFaultSimulation.execEvaluates
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {sourceExternals : ExternalImpl}
@@ -469,8 +475,8 @@ theorem ConcreteFaultSimulation.execEvaluates
     {witness : RefinementWitness}
     {fault : RuntimeFault}
     (simulation :
-      ConcreteFaultSimulation context sourceModule sourceFunction labels module
-        hostEnv sourceExternals sourceRuntime sourceEnv sourceCode target
+      ConcreteFaultSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals labels sourceRuntime sourceEnv sourceCode target
         targetStore targetLocals witness faultRuntime fault) :
     ExecEvaluates sourceExternals
       (sourceCodeState context sourceRuntime sourceEnv sourceCode)
@@ -509,8 +515,8 @@ theorem ConcreteFaultSimulation.correct
     {parameters callerTail : List Wasm.Value}
     {fault : RuntimeFault}
     (simulation :
-      ConcreteFaultSimulation context sourceModule sourceFunction [] module
-        hostEnv sourceExternals sourceRuntime sourceEnv sourceCode
+      ConcreteFaultSimulation context sourceModule sourceFunction
+        module hostEnv sourceExternals [] sourceRuntime sourceEnv sourceCode
         targetFunction.body initial
         (targetFunction.toLocals parameters.reverse) initialWitness
         faultRuntime fault)
@@ -616,7 +622,7 @@ theorem concreteFaultLeaf_external_sourceFailure
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -686,7 +692,7 @@ theorem concreteFaultLeaf_hostLet
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -751,7 +757,7 @@ theorem concreteFaultLeaf_unaryHostLet
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -831,7 +837,7 @@ theorem concreteFaultLeaf_binaryHostEffect
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -893,7 +899,7 @@ theorem concreteFaultLeaf_unaryHostEffect
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -953,7 +959,7 @@ theorem concreteFaultLeaf_isShared_deadObject
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -1049,7 +1055,7 @@ theorem concreteFaultLeaf_objectProjection_outOfBounds
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -1155,7 +1161,7 @@ theorem concreteFaultLeaf_objectProjection_deadObject
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -1257,7 +1263,7 @@ theorem concreteFaultLeaf_usizeProjection_outOfBounds
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -1361,7 +1367,7 @@ theorem concreteFaultLeaf_usizeProjection_deadObject
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -1459,7 +1465,7 @@ theorem concreteFaultLeaf_scalarProjection_deadObject
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -1567,7 +1573,7 @@ theorem concreteFaultLeaf_objectProjection_expectedConstructor
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -1667,7 +1673,7 @@ theorem concreteFaultLeaf_usizeProjection_expectedConstructor
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -1764,7 +1770,7 @@ theorem concreteFaultLeaf_scalarProjection_expectedConstructor
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -1869,7 +1875,7 @@ theorem concreteFaultLeaf_unbox_deadObject
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -1971,7 +1977,7 @@ theorem concreteFaultLeaf_unbox_expectedScalar
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -2070,7 +2076,7 @@ theorem concreteFaultLeaf_reset_deadObject
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -2171,7 +2177,7 @@ theorem concreteFaultLeaf_reset_expectedConstructor
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -2275,7 +2281,7 @@ theorem concreteFaultLeaf_reset_outOfBounds
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -2384,7 +2390,7 @@ theorem concreteFaultLeaf_reset_unique_fault
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -2498,7 +2504,7 @@ theorem concreteFaultLeaf_reset_nonunique_fault
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -2607,7 +2613,7 @@ theorem concreteFaultLeaf_reuse_of_refines
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -2735,7 +2741,7 @@ theorem concreteFaultLeaf_reuse_deadObject
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -2829,7 +2835,7 @@ theorem concreteFaultLeaf_reuse_expectedConstructor
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -2923,7 +2929,7 @@ theorem concreteFaultLeaf_objectSet_expectedConstructor
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -3000,7 +3006,7 @@ theorem concreteFaultLeaf_usizeSet_expectedConstructor
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -3075,7 +3081,7 @@ theorem concreteFaultLeaf_scalarSet_expectedConstructor
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -3158,7 +3164,7 @@ theorem concreteFaultLeaf_setTag_expectedConstructor
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -3229,7 +3235,7 @@ theorem concreteFaultLeaf_objectSet_outOfBounds
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -3319,7 +3325,7 @@ theorem concreteFaultLeaf_objectSet_deadObject
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -3396,7 +3402,7 @@ theorem concreteFaultLeaf_usizeSet_outOfBounds
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -3484,7 +3490,7 @@ theorem concreteFaultLeaf_usizeSet_deadObject
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -3559,7 +3565,7 @@ theorem concreteFaultLeaf_scalarSet_deadObject
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -3751,7 +3757,7 @@ theorem concreteFaultLeaf_setTag_deadObject
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -3822,7 +3828,7 @@ theorem concreteFaultLeaf_increment_deadObject
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -3896,7 +3902,7 @@ theorem concreteFaultLeaf_increment_tagged_unchecked
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -3964,7 +3970,7 @@ theorem concreteFaultLeaf_decrement_deadObject
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -4040,7 +4046,7 @@ theorem concreteFaultLeaf_decrement_underflow
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -4120,7 +4126,7 @@ theorem concreteFaultLeaf_decrement_tagged_unchecked
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -4193,7 +4199,7 @@ theorem concreteFaultLeaf_decrement_fault
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -4272,7 +4278,7 @@ theorem concreteFaultLeaf_delete_deadObject
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -4341,7 +4347,7 @@ theorem concreteFaultLeaf_cases_getTag_expectedConstructor
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -4405,7 +4411,7 @@ theorem concreteFaultLeaf_cases_getTag_deadObject
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host}
     {hostSpec : Wasm.HostSpec Host}
@@ -4568,8 +4574,8 @@ theorem ConcreteSupportedExport.faultCorrectOfSimulation
     {parameters callerTail : List Wasm.Value}
     {fault : RuntimeFault}
     (simulation :
-      ConcreteFaultSimulation context sourceModule sourceFunction []
-        target.wasmModule hosts.env sourceExternals sourceRuntime sourceEnv
+      ConcreteFaultSimulation context sourceModule sourceFunction
+        target.wasmModule hosts.env sourceExternals [] sourceRuntime sourceEnv
         sourceCode spec.targetFunction.body initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness
         faultRuntime fault)

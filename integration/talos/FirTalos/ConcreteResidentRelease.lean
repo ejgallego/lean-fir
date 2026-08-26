@@ -449,7 +449,7 @@ theorem instructions_probeCompleteHeader
     (generated :
       Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
         .ok sourceFunction) :
-    FirTalos.instructions sourceModule sourceFunction []
+    FirTalos.instructions sourceModule sourceFunction labels
       Fir.Wasm.Emit.ResidentRelease.probeCompleteHeader =
         .ok probeCompleteHeaderProgram := by
   have addressFound : FirTalos.findFVar?
@@ -490,7 +490,7 @@ theorem instructions_decrementAboveOneBody
     (generated :
       Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
         .ok sourceFunction) :
-    FirTalos.instructions sourceModule sourceFunction []
+    FirTalos.instructions sourceModule sourceFunction labels
       Fir.Wasm.Emit.ResidentRelease.decrementAboveOneBody =
         .ok decrementAboveOneProgram := by
   have addressFound : FirTalos.findFVar?
@@ -1651,7 +1651,7 @@ theorem instructions_checkedNoop
     (generated :
       Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
         .ok sourceFunction) :
-    FirTalos.instructions sourceModule sourceFunction []
+    FirTalos.instructions sourceModule sourceFunction labels
       Fir.Wasm.Emit.ResidentRelease.checkedNoop =
         .ok checkedNoopProgram := by
   have checkFound : FirTalos.findFVar?
@@ -1717,9 +1717,9 @@ theorem instructions_lastReferenceReleaseBody_eq
     (releaseHeaderFound : FirTalos.callIndex? sourceModule
       (.declaration Fir.Wasm.Emit.ResidentRelease.releaseHeaderName) =
         some releaseHeaderIndex) :
-    FirTalos.instructions sourceModule sourceFunction [] lastSource = (do
+    FirTalos.instructions sourceModule sourceFunction labels lastSource = (do
       let ownedTarget ←
-        FirTalos.instructions sourceModule sourceFunction [] ownedSource
+        FirTalos.instructions sourceModule sourceFunction labels ownedSource
       pure (lastReferenceProgram releaseHeaderIndex ownedTarget)) := by
   have addressFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList)
@@ -1780,7 +1780,7 @@ theorem instructions_lastReferenceReleaseBody_eq
         simpa using lastGenerated.symm
   rw [sourceShape, FirTalos.Correctness.instructions_append]
   cases ownedAdapted :
-      FirTalos.instructions sourceModule sourceFunction [] ownedSource <;>
+      FirTalos.instructions sourceModule sourceFunction labels ownedSource <;>
     simp [lastReferenceProgram, Fir.Wasm.Emit.ResidentRelease.u32,
       FirTalos.instructions, FirTalos.instruction, addressFound, kindFound,
       countFound, captureCountFound, markerFound, releaseHeaderFound,
@@ -1807,9 +1807,9 @@ theorem instructions_lastReferenceReleaseBody
       (.declaration Fir.Wasm.Emit.ResidentRelease.releaseHeaderName) =
         some releaseHeaderIndex)
     (ownedAdapted :
-      FirTalos.instructions sourceModule sourceFunction [] ownedSource =
+      FirTalos.instructions sourceModule sourceFunction labels ownedSource =
         .ok ownedTarget) :
-    FirTalos.instructions sourceModule sourceFunction [] lastSource =
+    FirTalos.instructions sourceModule sourceFunction labels lastSource =
       .ok (lastReferenceProgram releaseHeaderIndex ownedTarget) := by
   rw [instructions_lastReferenceReleaseBody_eq generated ownedGenerated
     lastGenerated releaseHeaderFound, ownedAdapted]
@@ -1825,18 +1825,22 @@ theorem instructions_localEqDispatch_eq
     (localFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList)
       sourceLocal = some targetLocal) :
-    FirTalos.instructions sourceModule sourceFunction []
+    FirTalos.instructions sourceModule sourceFunction labels
       [.localGet sourceLocal, .i32Const .uint32 code, .i32Eq,
         .ifElse thenSource elseSource] = (do
-      let thenTarget ← FirTalos.instructions sourceModule sourceFunction []
+      let thenTarget ← FirTalos.instructions sourceModule sourceFunction
+        (none :: labels)
         thenSource
-      let elseTarget ← FirTalos.instructions sourceModule sourceFunction []
+      let elseTarget ← FirTalos.instructions sourceModule sourceFunction
+        (none :: labels)
         elseSource
       pure [.localGet targetLocal, .const code, .eq,
         .iff 0 0 thenTarget elseTarget]) := by
-  cases thenAdapted : FirTalos.instructions sourceModule sourceFunction []
+  cases thenAdapted : FirTalos.instructions sourceModule sourceFunction
+      (none :: labels)
       thenSource <;>
-    cases elseAdapted : FirTalos.instructions sourceModule sourceFunction []
+    cases elseAdapted : FirTalos.instructions sourceModule sourceFunction
+      (none :: labels)
       elseSource <;>
     simp [FirTalos.instructions, FirTalos.instruction, localFound,
       thenAdapted, elseAdapted, Bind.bind, Except.bind, pure, Except.pure]
@@ -1852,11 +1856,13 @@ theorem instructions_localEqDispatch
     (localFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList)
       sourceLocal = some targetLocal)
-    (thenAdapted : FirTalos.instructions sourceModule sourceFunction []
+    (thenAdapted : FirTalos.instructions sourceModule sourceFunction
+      (none :: labels)
       thenSource = .ok thenTarget)
-    (elseAdapted : FirTalos.instructions sourceModule sourceFunction []
+    (elseAdapted : FirTalos.instructions sourceModule sourceFunction
+      (none :: labels)
       elseSource = .ok elseTarget) :
-    FirTalos.instructions sourceModule sourceFunction []
+    FirTalos.instructions sourceModule sourceFunction labels
       [.localGet sourceLocal, .i32Const .uint32 code, .i32Eq,
         .ifElse thenSource elseSource] = .ok [
       .localGet targetLocal, .const code, .eq,
@@ -1875,11 +1881,13 @@ theorem instructions_kindDispatch
     (kindFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList)
       kindLocal = some kindIndex)
-    (thenAdapted : FirTalos.instructions sourceModule sourceFunction []
+    (thenAdapted : FirTalos.instructions sourceModule sourceFunction
+      (none :: labels)
       thenSource = .ok thenTarget)
-    (elseAdapted : FirTalos.instructions sourceModule sourceFunction []
+    (elseAdapted : FirTalos.instructions sourceModule sourceFunction
+      (none :: labels)
       elseSource = .ok elseTarget) :
-    FirTalos.instructions sourceModule sourceFunction []
+    FirTalos.instructions sourceModule sourceFunction labels
       [.localGet kindLocal, .i32Const .uint32 kindCode, .i32Eq,
         .ifElse thenSource elseSource] = .ok [
       .localGet kindIndex, .const kindCode, .eq,
@@ -1902,13 +1910,14 @@ theorem instructions_ownedReleaseBody_eq
     (ownedGenerated :
       Fir.Wasm.Emit.ResidentRelease.ownedReleaseBody descriptors =
         .ok ownedSource) :
-    FirTalos.instructions sourceModule sourceFunction [] ownedSource = (do
+    FirTalos.instructions sourceModule sourceFunction labels ownedSource = (do
       let constructorTarget ← FirTalos.instructions sourceModule sourceFunction
-        [] Fir.Wasm.Emit.ResidentRelease.constructorReleaseBody
+        (none :: labels) Fir.Wasm.Emit.ResidentRelease.constructorReleaseBody
       let closureTarget ← FirTalos.instructions sourceModule sourceFunction
-        [] closureSource
+        (none :: none :: labels) closureSource
       let opaqueTarget ← FirTalos.instructions sourceModule sourceFunction
-        [] Fir.Wasm.Emit.ResidentRelease.opaqueReleaseBody
+        (none :: none :: none :: labels)
+          Fir.Wasm.Emit.ResidentRelease.opaqueReleaseBody
       pure (ownedReleaseProgram constructorTarget closureTarget opaqueTarget)) := by
   have kindFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList)
@@ -1944,11 +1953,13 @@ theorem instructions_ownedReleaseBody_eq
           ownedGenerated.symm
   have opaqueEq := instructions_localEqDispatch_eq
     (sourceModule := sourceModule)
+    (labels := none :: none :: labels)
     (code := ObjectKind.opaque.code)
     (thenSource := Fir.Wasm.Emit.ResidentRelease.opaqueReleaseBody)
     (elseSource := [.ret]) kindFound
   have closureEq := instructions_localEqDispatch_eq
     (sourceModule := sourceModule)
+    (labels := none :: labels)
     (code := ObjectKind.closure.code) (thenSource := closureSource)
     (elseSource :=
       [.localGet sourceFunction.locals[1]!.1,
@@ -1958,6 +1969,7 @@ theorem instructions_ownedReleaseBody_eq
     kindFound
   have constructorEq := instructions_localEqDispatch_eq
     (sourceModule := sourceModule)
+    (labels := labels)
     (code := ObjectKind.constructor.code)
     (thenSource := Fir.Wasm.Emit.ResidentRelease.constructorReleaseBody)
     (elseSource :=
@@ -1971,16 +1983,17 @@ theorem instructions_ownedReleaseBody_eq
             .ifElse Fir.Wasm.Emit.ResidentRelease.opaqueReleaseBody
               [.ret]])]) kindFound
   have returnAdapted : FirTalos.instructions sourceModule sourceFunction
-      [] [.ret] = .ok [.ret] := by
+      (none :: none :: none :: labels) [.ret] = .ok [.ret] := by
     simp [FirTalos.instructions, FirTalos.instruction, Bind.bind,
       Except.bind, pure, Except.pure]
   rw [sourceShape, constructorEq, closureEq, opaqueEq, returnAdapted]
   cases constructorAdapted : FirTalos.instructions sourceModule sourceFunction
-      [] Fir.Wasm.Emit.ResidentRelease.constructorReleaseBody <;>
+      (none :: labels) Fir.Wasm.Emit.ResidentRelease.constructorReleaseBody <;>
     cases closureAdapted : FirTalos.instructions sourceModule sourceFunction
-      [] closureSource <;>
+      (none :: none :: labels) closureSource <;>
     cases opaqueAdapted : FirTalos.instructions sourceModule sourceFunction
-      [] Fir.Wasm.Emit.ResidentRelease.opaqueReleaseBody <;>
+      (none :: none :: none :: labels)
+        Fir.Wasm.Emit.ResidentRelease.opaqueReleaseBody <;>
     simp [ownedReleaseProgram, Bind.bind, Except.bind, pure, Except.pure]
 
 /-- Successful adaptation of the three object-kind branches determines the
@@ -2002,14 +2015,17 @@ theorem instructions_ownedReleaseBody
     (ownedGenerated :
       Fir.Wasm.Emit.ResidentRelease.ownedReleaseBody descriptors =
         .ok ownedSource)
-    (constructorAdapted : FirTalos.instructions sourceModule sourceFunction []
+    (constructorAdapted : FirTalos.instructions sourceModule sourceFunction
+      (none :: labels)
       Fir.Wasm.Emit.ResidentRelease.constructorReleaseBody =
         .ok constructorTarget)
-    (closureAdapted : FirTalos.instructions sourceModule sourceFunction []
+    (closureAdapted : FirTalos.instructions sourceModule sourceFunction
+      (none :: none :: labels)
       closureSource = .ok closureTarget)
-    (opaqueAdapted : FirTalos.instructions sourceModule sourceFunction []
+    (opaqueAdapted : FirTalos.instructions sourceModule sourceFunction
+      (none :: none :: none :: labels)
       Fir.Wasm.Emit.ResidentRelease.opaqueReleaseBody = .ok opaqueTarget) :
-    FirTalos.instructions sourceModule sourceFunction [] ownedSource =
+    FirTalos.instructions sourceModule sourceFunction labels ownedSource =
       .ok (ownedReleaseProgram constructorTarget closureTarget opaqueTarget) := by
   rw [instructions_ownedReleaseBody_eq generated closureGenerated
     ownedGenerated, constructorAdapted, closureAdapted, opaqueAdapted]
@@ -2028,7 +2044,7 @@ theorem instructions_releaseChild
     (selfFound : FirTalos.callIndex? sourceModule
       (.declaration Fir.Wasm.Emit.ResidentRelease.decrementOnceName) =
         some decrementIndex) :
-    FirTalos.instructions sourceModule sourceFunction []
+    FirTalos.instructions sourceModule sourceFunction labels
       (Fir.Wasm.Emit.ResidentRelease.releaseChild index) =
         .ok (releaseChildProgram decrementIndex index) := by
   have addressFound : FirTalos.findFVar?
@@ -2071,7 +2087,7 @@ theorem instructions_guardedReleaseChild
     (selfFound : FirTalos.callIndex? sourceModule
       (.declaration Fir.Wasm.Emit.ResidentRelease.decrementOnceName) =
         some decrementIndex) :
-    FirTalos.instructions sourceModule sourceFunction []
+    FirTalos.instructions sourceModule sourceFunction labels
       [.i32Const .uint32 (Fir.Wasm.Emit.ResidentRelease.u32 index),
         .localGet sourceFunction.locals[2]!.1,
         .i32LtU,
@@ -2083,9 +2099,10 @@ theorem instructions_guardedReleaseChild
     simpa [countIndex] using
       generatedDecrementOnceFunction_localFound generated (2 : Fin 10)
   have childAdapted := instructions_releaseChild
-    (sourceModule := sourceModule) (index := index) generated selfFound
+    (sourceModule := sourceModule) (labels := none :: labels)
+      (index := index) generated selfFound
   have emptyAdapted : FirTalos.instructions sourceModule sourceFunction
-      [] [] = .ok [] := by
+      (none :: labels) [] = .ok [] := by
     simp [FirTalos.instructions, pure, Except.pure]
   have branchAdapted := FirTalos.Correctness.instruction_ifElse
     childAdapted emptyAdapted
@@ -2106,7 +2123,7 @@ theorem instructions_guardedReleaseChildren
       (.declaration Fir.Wasm.Emit.ResidentRelease.decrementOnceName) =
         some decrementIndex)
     (indices : List Nat) :
-    FirTalos.instructions sourceModule sourceFunction []
+    FirTalos.instructions sourceModule sourceFunction labels
       (indices.flatMap fun index =>
         [.i32Const .uint32 (Fir.Wasm.Emit.ResidentRelease.u32 index),
           .localGet sourceFunction.locals[2]!.1,
@@ -2137,7 +2154,7 @@ theorem instructions_constructorReleaseBody
     (selfFound : FirTalos.callIndex? sourceModule
       (.declaration Fir.Wasm.Emit.ResidentRelease.decrementOnceName) =
         some decrementIndex) :
-    FirTalos.instructions sourceModule sourceFunction []
+    FirTalos.instructions sourceModule sourceFunction labels
       Fir.Wasm.Emit.ResidentRelease.constructorReleaseBody =
         .ok (constructorReleaseProgram decrementIndex) := by
   have countFound : FirTalos.findFVar?
@@ -2169,30 +2186,31 @@ theorem instructions_constructorReleaseBody
         subst sourceFunction
         rfl
   have fieldsAdapted := instructions_guardedReleaseChildren
-    (sourceModule := sourceModule) generated selfFound
+    (sourceModule := sourceModule) (labels := none :: labels)
+      generated selfFound
       (List.range Fir.Wasm.Emit.ResidentRelease.constructorFieldLimit)
   have returnAdapted : FirTalos.instructions sourceModule sourceFunction
-      [] [.ret] = .ok [.ret] := by
+      (none :: labels) [.ret] = .ok [.ret] := by
     simp [FirTalos.instructions, FirTalos.instruction, Bind.bind,
       Except.bind, pure, Except.pure]
   have fieldsReturned := FirTalos.Correctness.instructions_append_of_success
     fieldsAdapted returnAdapted
   have trapAdapted : FirTalos.instructions sourceModule sourceFunction
-      [] [.unreachable] = .ok [.unreachable] := by
+      (none :: labels) [.unreachable] = .ok [.unreachable] := by
     simp [FirTalos.instructions, FirTalos.instruction, Bind.bind,
       Except.bind, pure, Except.pure]
   have branchAdapted := FirTalos.Correctness.instruction_ifElse
     trapAdapted fieldsReturned
   rw [sourceShape]
-  have limitAdapted : FirTalos.instruction sourceModule sourceFunction []
+  have limitAdapted : FirTalos.instruction sourceModule sourceFunction labels
       (.i32Const .uint32 (Fir.Wasm.Emit.ResidentRelease.u32
         Fir.Wasm.Emit.ResidentRelease.constructorFieldLimit)) =
       .ok (.const (Fir.Wasm.Emit.ResidentRelease.u32
         Fir.Wasm.Emit.ResidentRelease.constructorFieldLimit)) := by
     simp [FirTalos.instruction, pure, Except.pure]
   have countAdapted := FirTalos.Correctness.instruction_localGet
-    (sourceModule := sourceModule) countFound
-  have lessAdapted : FirTalos.instruction sourceModule sourceFunction []
+    (sourceModule := sourceModule) (labels := labels) countFound
+  have lessAdapted : FirTalos.instruction sourceModule sourceFunction labels
       .i32LtU = .ok .ltU := by
     simp [FirTalos.instruction, pure, Except.pure]
   simp only [FirTalos.instructions, limitAdapted, countAdapted, lessAdapted,
@@ -2213,7 +2231,7 @@ theorem instructions_releaseChildren
       (.declaration Fir.Wasm.Emit.ResidentRelease.decrementOnceName) =
         some decrementIndex)
     (indices : List Nat) :
-    FirTalos.instructions sourceModule sourceFunction []
+    FirTalos.instructions sourceModule sourceFunction labels
       (indices.flatMap Fir.Wasm.Emit.ResidentRelease.releaseChild) =
         .ok (releaseChildrenProgram decrementIndex indices) := by
   induction indices with
@@ -2240,7 +2258,7 @@ theorem instructions_descriptorOwnedFields
       (.declaration Fir.Wasm.Emit.ResidentRelease.decrementOnceName) =
         some decrementIndex)
     (descriptor : Array Fir.Wasm.AbiKind) :
-    FirTalos.instructions sourceModule sourceFunction []
+    FirTalos.instructions sourceModule sourceFunction labels
       (Fir.Wasm.Emit.ResidentRelease.descriptorOwnedFields descriptor) =
       .ok (releaseChildrenProgram decrementIndex
         (closureOwnedCaptureIndices 0 descriptor.toList)) := by
@@ -2262,7 +2280,7 @@ theorem instructions_persistentReleaseBody
     (generated :
       Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
         .ok sourceFunction) :
-    FirTalos.instructions sourceModule sourceFunction []
+    FirTalos.instructions sourceModule sourceFunction labels
       Fir.Wasm.Emit.ResidentRelease.persistentReleaseBody =
         .ok persistentReleaseProgram := by
   have addressFound : FirTalos.findFVar?
@@ -2336,9 +2354,10 @@ theorem instructions_ordinaryReleaseBody
       Fir.Wasm.Emit.ResidentRelease.ordinaryReleaseBody descriptors =
         .ok ordinarySource)
     (lastAdapted :
-      FirTalos.instructions sourceModule sourceFunction [] lastSource =
+      FirTalos.instructions sourceModule sourceFunction
+        (none :: none :: labels) lastSource =
         .ok lastTarget) :
-    FirTalos.instructions sourceModule sourceFunction [] ordinarySource =
+    FirTalos.instructions sourceModule sourceFunction labels ordinarySource =
       .ok (ordinaryReleaseProgram lastTarget) := by
   have addressFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList)
@@ -2399,9 +2418,10 @@ theorem instructions_ordinaryReleaseBody_eq
     (ordinaryGenerated :
       Fir.Wasm.Emit.ResidentRelease.ordinaryReleaseBody descriptors =
         .ok ordinarySource) :
-    FirTalos.instructions sourceModule sourceFunction [] ordinarySource = (do
+    FirTalos.instructions sourceModule sourceFunction labels ordinarySource = (do
       let lastTarget ←
-        FirTalos.instructions sourceModule sourceFunction [] lastSource
+        FirTalos.instructions sourceModule sourceFunction
+          (none :: none :: labels) lastSource
       pure (ordinaryReleaseProgram lastTarget)) := by
   have addressFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList)
@@ -2441,7 +2461,8 @@ theorem instructions_ordinaryReleaseBody_eq
           (Except.ok.inj ordinaryGenerated).symm
   rw [sourceShape]
   cases lastAdapted :
-      FirTalos.instructions sourceModule sourceFunction [] lastSource <;>
+      FirTalos.instructions sourceModule sourceFunction
+        (none :: none :: labels) lastSource <;>
     simp [ordinaryReleaseProgram, Fir.Wasm.Emit.ResidentRelease.u32,
       FirTalos.instructions, FirTalos.instruction, addressFound,
       refCountFound, instructions_decrementAboveOneBody generated,
@@ -2466,9 +2487,10 @@ theorem instructions_liveReleaseBody
       Fir.Wasm.Emit.ResidentRelease.liveReleaseBody descriptors =
         .ok liveSource)
     (ordinaryAdapted :
-      FirTalos.instructions sourceModule sourceFunction [] ordinarySource =
+      FirTalos.instructions sourceModule sourceFunction
+        (none :: labels) ordinarySource =
         .ok (ordinaryReleaseProgram lastTarget)) :
-    FirTalos.instructions sourceModule sourceFunction [] liveSource =
+    FirTalos.instructions sourceModule sourceFunction labels liveSource =
       .ok (liveReleaseProgram persistentReleaseProgram lastTarget) := by
   have flagsFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList)
@@ -2522,9 +2544,10 @@ theorem instructions_liveReleaseBody_eq
     (liveGenerated :
       Fir.Wasm.Emit.ResidentRelease.liveReleaseBody descriptors =
         .ok liveSource) :
-    FirTalos.instructions sourceModule sourceFunction [] liveSource = (do
+    FirTalos.instructions sourceModule sourceFunction labels liveSource = (do
       let lastTarget ←
-        FirTalos.instructions sourceModule sourceFunction [] lastSource
+        FirTalos.instructions sourceModule sourceFunction
+          (none :: none :: none :: labels) lastSource
       pure (liveReleaseProgram persistentReleaseProgram lastTarget)) := by
   have flagsFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList)
@@ -2555,7 +2578,8 @@ theorem instructions_liveReleaseBody_eq
   rw [sourceShape, FirTalos.Correctness.instructions_append]
   rw [instructions_probeCompleteHeader generated]
   cases lastAdapted :
-      FirTalos.instructions sourceModule sourceFunction [] lastSource <;>
+      FirTalos.instructions sourceModule sourceFunction
+        (none :: none :: none :: labels) lastSource <;>
     simp [liveReleaseProgram, FirTalos.instructions, FirTalos.instruction,
       flagsFound, instructions_persistentReleaseBody generated,
       instructions_ordinaryReleaseBody_eq generated lastGenerated
@@ -2597,9 +2621,10 @@ theorem instructions_alignedReleaseBody
       Fir.Wasm.Emit.ResidentRelease.alignedReleaseBody descriptors =
         .ok alignedSource)
     (liveAdapted :
-      FirTalos.instructions sourceModule sourceFunction [] liveSource =
+      FirTalos.instructions sourceModule sourceFunction
+        (none :: labels) liveSource =
         .ok (liveReleaseProgram persistentReleaseProgram lastTarget)) :
-    FirTalos.instructions sourceModule sourceFunction [] alignedSource =
+    FirTalos.instructions sourceModule sourceFunction labels alignedSource =
       .ok (alignedReleaseProgram persistentReleaseProgram lastTarget) := by
   have objectFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList)
@@ -2671,9 +2696,10 @@ theorem instructions_alignedReleaseBody_eq
     (alignedGenerated :
       Fir.Wasm.Emit.ResidentRelease.alignedReleaseBody descriptors =
         .ok alignedSource) :
-    FirTalos.instructions sourceModule sourceFunction [] alignedSource = (do
+    FirTalos.instructions sourceModule sourceFunction labels alignedSource = (do
       let lastTarget ←
-        FirTalos.instructions sourceModule sourceFunction [] lastSource
+        FirTalos.instructions sourceModule sourceFunction
+          (none :: none :: none :: none :: labels) lastSource
       pure (alignedReleaseProgram persistentReleaseProgram lastTarget)) := by
   have objectFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList)
@@ -2719,7 +2745,8 @@ theorem instructions_alignedReleaseBody_eq
           (Except.ok.inj alignedGenerated).symm
   rw [sourceShape]
   cases lastAdapted :
-      FirTalos.instructions sourceModule sourceFunction [] lastSource <;>
+      FirTalos.instructions sourceModule sourceFunction
+        (none :: none :: none :: none :: labels) lastSource <;>
     simp [alignedReleaseProgram, Fir.Wasm.Emit.ResidentRelease.u32,
       FirTalos.instructions, FirTalos.instruction, objectFound, addressFound,
       flagsFound,
@@ -2766,9 +2793,10 @@ theorem instructions_decrementOnceBody
       Fir.Wasm.Emit.ResidentRelease.decrementOnceBody descriptors =
         .ok decrementSource)
     (alignedAdapted :
-      FirTalos.instructions sourceModule sourceFunction [] alignedSource =
+      FirTalos.instructions sourceModule sourceFunction
+        (none :: none :: none :: labels) alignedSource =
         .ok (alignedReleaseProgram persistentReleaseProgram lastTarget)) :
-    FirTalos.instructions sourceModule sourceFunction [] decrementSource =
+    FirTalos.instructions sourceModule sourceFunction labels decrementSource =
       .ok (decrementOnceProgram persistentReleaseProgram lastTarget) := by
   have objectFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList)
@@ -2837,9 +2865,11 @@ theorem instructions_decrementOnceBody_eq
     (decrementGenerated :
       Fir.Wasm.Emit.ResidentRelease.decrementOnceBody descriptors =
         .ok decrementSource) :
-    FirTalos.instructions sourceModule sourceFunction [] decrementSource = (do
+    FirTalos.instructions sourceModule sourceFunction labels decrementSource = (do
       let lastTarget ←
-        FirTalos.instructions sourceModule sourceFunction [] lastSource
+        FirTalos.instructions sourceModule sourceFunction
+          (none :: none :: none :: none :: none :: none :: none :: labels)
+          lastSource
       pure (decrementOnceProgram persistentReleaseProgram lastTarget)) := by
   have objectFound : FirTalos.findFVar?
       (sourceFunction.params.toList ++ sourceFunction.locals.toList)
@@ -2876,7 +2906,9 @@ theorem instructions_decrementOnceBody_eq
           (Except.ok.inj decrementGenerated).symm
   rw [sourceShape]
   cases lastAdapted :
-      FirTalos.instructions sourceModule sourceFunction [] lastSource <;>
+      FirTalos.instructions sourceModule sourceFunction
+        (none :: none :: none :: none :: none :: none :: none :: labels)
+        lastSource <;>
     simp [decrementOnceProgram, Fir.Wasm.Emit.ResidentRelease.u32,
       FirTalos.instructions, FirTalos.instruction, objectFound,
       instructions_checkedNoop generated,
@@ -2948,16 +2980,20 @@ theorem DecrementOnceInstallation.body_lastReference
                 installation.adapted
             rw [sourceBody] at targetBodyAdapted
             have adapterEq := instructions_decrementOnceBody_eq
-              (sourceModule := sourceModule) installation.generated
+              (sourceModule := sourceModule) (labels := [])
+                installation.generated
                 lastGenerated ordinaryGenerated liveGenerated alignedGenerated
                 decrementGenerated
             rw [targetBodyAdapted] at adapterEq
             have lastAdapterEq := instructions_lastReferenceReleaseBody_eq
-              (sourceModule := sourceModule) installation.generated
+              (sourceModule := sourceModule)
+                (labels := [none, none, none, none, none, none, none])
+                installation.generated
                 ownedGenerated lastGenerated installation.releaseHeaderFound
             rw [lastAdapterEq] at adapterEq
             cases ownedAdapted : FirTalos.instructions sourceModule
-                installation.sourceFunction [] ownedSource with
+                installation.sourceFunction
+                  [none, none, none, none, none, none, none] ownedSource with
             | error error =>
                 rw [ownedAdapted] at adapterEq
                 contradiction
@@ -3722,9 +3758,9 @@ theorem instructions_descriptorReleaseBody
     {sourceBody : List Fir.Wasm.Instruction}
     (bodyGenerated : Fir.Wasm.Emit.ResidentRelease.descriptorReleaseBody
       table ordinal = .ok sourceBody) :
-    FirTalos.instructions sourceModule sourceFunction [] sourceBody =
+    FirTalos.instructions sourceModule sourceFunction labels sourceBody =
       .ok (closureDescriptorReleaseProgram decrementIndex table ordinal) := by
-  induction table generalizing ordinal sourceBody with
+  induction table generalizing ordinal sourceBody labels with
   | nil =>
       simp [Fir.Wasm.Emit.ResidentRelease.descriptorReleaseBody,
         pure, Except.pure] at bodyGenerated
@@ -3808,23 +3844,29 @@ theorem instructions_descriptorReleaseBody
                   simpa [Fir.Wasm.Emit.ResidentRelease.equalsConst] using
                     bodyGenerated.symm
             have fieldsAdapted := instructions_descriptorOwnedFields
-              (sourceModule := sourceModule) generated selfFound descriptor
+              (sourceModule := sourceModule)
+                (labels := none :: none :: labels)
+                generated selfFound descriptor
             have returnAdapted : FirTalos.instructions sourceModule
-                sourceFunction [] [.ret] = .ok [.ret] := by
+                sourceFunction (none :: none :: labels) [.ret] = .ok [.ret] := by
               simp [FirTalos.instructions, FirTalos.instruction, Bind.bind,
                 Except.bind, pure, Except.pure]
             have fieldsReturned :=
               FirTalos.Correctness.instructions_append_of_success
                 fieldsAdapted returnAdapted
             have trapAdapted : FirTalos.instructions sourceModule
-                sourceFunction [] [.unreachable] = .ok [.unreachable] := by
+                sourceFunction (none :: none :: labels) [.unreachable] =
+                  .ok [.unreachable] := by
               simp [FirTalos.instructions, FirTalos.instruction, Bind.bind,
                 Except.bind, pure, Except.pure]
             have countDispatch := instructions_localEqDispatch
+              (labels := none :: labels)
               (code := Fir.Wasm.Emit.ResidentRelease.u32 descriptor.size)
               captureCountFound fieldsReturned trapAdapted
-            have restAdapted := ih (ordinal + 1) restGenerated
+            have restAdapted := ih (labels := none :: labels)
+              (ordinal + 1) restGenerated
             have descriptorDispatch := instructions_localEqDispatch
+              (labels := labels)
               (code := Fir.Wasm.Emit.ResidentRelease.u32 ordinal)
               descriptorFound countDispatch restAdapted
             rw [sourceShape]
@@ -3910,27 +3952,39 @@ theorem DecrementOnceInstallation.body_constructorClosure
                   installation.adapted
               rw [sourceBody] at targetBodyAdapted
               have adapterEq := instructions_decrementOnceBody_eq
-                (sourceModule := sourceModule) installation.generated
+                (sourceModule := sourceModule) (labels := [])
+                  installation.generated
                   lastGenerated ordinaryGenerated liveGenerated alignedGenerated
                   decrementGenerated
               rw [targetBodyAdapted] at adapterEq
               have lastAdapterEq := instructions_lastReferenceReleaseBody_eq
-                (sourceModule := sourceModule) installation.generated
+                (sourceModule := sourceModule)
+                  (labels := [none, none, none, none, none, none, none])
+                  installation.generated
                   ownedGenerated lastGenerated installation.releaseHeaderFound
               rw [lastAdapterEq] at adapterEq
               have ownedAdapterEq := instructions_ownedReleaseBody_eq
-                (sourceModule := sourceModule) installation.generated
+                (sourceModule := sourceModule)
+                  (labels := [none, none, none, none, none, none, none])
+                  installation.generated
                   closureGenerated ownedGenerated
               have constructorAdapted := instructions_constructorReleaseBody
-                (sourceModule := sourceModule) installation.generated
+                (sourceModule := sourceModule)
+                  (labels := [none, none, none, none, none, none, none, none])
+                  installation.generated
                   installation.selfFound
               have closureAdapted := instructions_descriptorReleaseBody
-                (sourceModule := sourceModule) installation.generated
+                (sourceModule := sourceModule)
+                  (labels := [none, none, none, none, none, none, none, none,
+                    none])
+                  installation.generated
                   installation.selfFound descriptors.toList 0 closureGenerated
               rw [ownedAdapterEq, constructorAdapted, closureAdapted]
                 at adapterEq
               cases opaqueAdapted : FirTalos.instructions sourceModule
-                  installation.sourceFunction []
+                  installation.sourceFunction
+                    [none, none, none, none, none, none, none, none, none,
+                      none]
                     Fir.Wasm.Emit.ResidentRelease.opaqueReleaseBody with
               | error error =>
                   rw [opaqueAdapted] at adapterEq

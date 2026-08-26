@@ -43,9 +43,26 @@ def findFVar? : List (FVarId × α) → FVarId → Option Nat
   | (candidate, _) :: rest, fvarId =>
       if candidate.name == fvarId.name then some 0 else (findFVar? rest fvarId).map (· + 1)
 
-def findLabel? : List FVarId → FVarId → Option Nat
+/- Every structured Wasm control frame occupies one branch-depth slot. Only
+named FIR block and loop frames can satisfy a symbolic branch lookup; an
+anonymous entry records the label introduced by `if`. -/
+abbrev LabelContext := List (Option FVarId)
+
+/-- A flat instruction cannot observe the structured-control label stack.
+Compiler-generated argument and closure-candidate bodies use this fragment;
+structured instructions and symbolic branches deliberately do not. -/
+def instructionLabelIndependent : Fir.Wasm.Instruction → Bool
+  | .block .. | .loop .. | .ifElse .. | .br .. => false
+  | _ => true
+
+/-- Every instruction in a flat program is independent of label depth. -/
+def programLabelIndependent (body : List Fir.Wasm.Instruction) : Bool :=
+  body.all instructionLabelIndependent
+
+def findLabel? : LabelContext → FVarId → Option Nat
   | [], _ => none
-  | candidate :: rest, fvarId =>
+  | none :: rest, fvarId => (findLabel? rest fvarId).map (· + 1)
+  | some candidate :: rest, fvarId =>
       if candidate.name == fvarId.name then some 0 else (findLabel? rest fvarId).map (· + 1)
 
 def findImportTarget? (module : Fir.Wasm.Module) (target : Fir.Wasm.CallTarget) : Option Nat :=
@@ -65,7 +82,7 @@ def callIndex? (module : Fir.Wasm.Module) : Fir.Wasm.CallTarget → Option Nat
 mutual
 
 def instruction (module : Fir.Wasm.Module) (function : Fir.Wasm.Function)
-    (labels : List FVarId) : Fir.Wasm.Instruction → Except AdapterError Wasm.Instruction
+    (labels : LabelContext) : Fir.Wasm.Instruction → Except AdapterError Wasm.Instruction
   | .i32Const _ value => return .const value
   | .i64Const _ value => return .constI64 value
   | .f32Const value => return .f32Const value
@@ -249,13 +266,13 @@ def instruction (module : Fir.Wasm.Module) (function : Fir.Wasm.Function)
   | .f32ReinterpretI32 _ => return .f32ReinterpretI32
   | .f64ReinterpretI64 _ => return .f64ReinterpretI64
   | .block label body => do
-      return .block 0 0 (← instructions module function (label :: labels) body)
+      return .block 0 0 (← instructions module function (some label :: labels) body)
   | .loop label body => do
-      return .loop 0 0 (← instructions module function (label :: labels) body)
+      return .loop 0 0 (← instructions module function (some label :: labels) body)
   | .ifElse thenBody elseBody => do
       return .iff 0 0
-        (← instructions module function labels thenBody)
-        (← instructions module function labels elseBody)
+        (← instructions module function (none :: labels) thenBody)
+        (← instructions module function (none :: labels) elseBody)
   | .br label => do
       let some index := findLabel? labels label | throw (.unknownLabel label)
       return .br index
@@ -265,7 +282,7 @@ def instruction (module : Fir.Wasm.Module) (function : Fir.Wasm.Function)
 termination_by source => sizeOf source
 
 def instructions (module : Fir.Wasm.Module) (function : Fir.Wasm.Function)
-    (labels : List FVarId) (body : List Fir.Wasm.Instruction) :
+    (labels : LabelContext) (body : List Fir.Wasm.Instruction) :
     Except AdapterError (List Wasm.Instruction) := do
   match body with
   | [] => return []

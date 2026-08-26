@@ -440,12 +440,12 @@ theorem abiDefaultCaseStateC_related :
   simpa [abiDefaultCaseEnvC, abiDefaultCaseStoreC, abiDefaultCaseDeclC, letDecl]
     using abiDefaultCaseCtorStep.2.2.1
 
-theorem abiDefaultCaseFalseBranch_adapted :
+theorem abiDefaultCaseFalseBranch_adapted {labels : LabelContext} :
     CodeAdapted abiDefaultCaseContext abiDefaultCaseSourceModule
-      abiDefaultCaseSourceFunction [] abiDefaultCaseFalseCode
+      abiDefaultCaseSourceFunction labels abiDefaultCaseFalseCode
       [.call 2, .localSet 2, .localGet 2, .ret] := by
   have valueAdapted :
-      instructions abiDefaultCaseSourceModule abiDefaultCaseSourceFunction []
+      instructions abiDefaultCaseSourceModule abiDefaultCaseSourceFunction labels
           [.call (.runtime (.literal (.nat 0) .tobject))] =
         .ok [.call 2] := by
     simp [instructions, instruction, abiDefaultCaseLiteral0Call_found]
@@ -457,7 +457,7 @@ theorem abiDefaultCaseFalseBranch_adapted :
       u, r, c]
   have returned :
       CodeAdapted abiDefaultCaseContext abiDefaultCaseSourceModule
-        abiDefaultCaseSourceFunction [] (.return u) [.localGet 2, .ret] :=
+        abiDefaultCaseSourceFunction labels (.return u) [.localGet 2, .ret] :=
     codeAdapted_return (resultIndex := 2) localU
       (by simpa [functionBindings] using abiDefaultCaseU_found)
   simpa [abiDefaultCaseFalseCode] using
@@ -466,15 +466,15 @@ theorem abiDefaultCaseFalseBranch_adapted :
         using abiDefaultCaseU_found)
       returned
 
-theorem abiDefaultCaseDefaultBranch_simulation :
+theorem abiDefaultCaseDefaultBranch_simulation {labels : LabelContext} :
     CodeSimulation abiDefaultCaseContext abiDefaultCaseSourceModule
-      abiDefaultCaseSourceFunction [] abiDefaultCaseAdaptedModule.wasmModule
+      abiDefaultCaseSourceFunction labels abiDefaultCaseAdaptedModule.wasmModule
       abiDefaultCaseResolvedHosts.env {} abiDefaultCaseEnvC
       abiDefaultCaseDefaultCode [.call 3, .localSet 1, .localGet 1, .ret]
       abiDefaultCaseStoreC abiDefaultCaseLocalsC {} abiDefaultCaseValue5
       .tobject := by
   have valueAdapted :
-      instructions abiDefaultCaseSourceModule abiDefaultCaseSourceFunction []
+      instructions abiDefaultCaseSourceModule abiDefaultCaseSourceFunction labels
           [.call (.runtime (.literal (.nat 5) .tobject))] =
         .ok [.call 3] := by
     simp [instructions, instruction, abiDefaultCaseLiteral5Call_found]
@@ -506,9 +506,9 @@ theorem abiDefaultCaseDefaultBranch_simulation :
     maxTaggedPayload, successfulHostStore, abiDefaultCaseStoreR] using
     step.2.2.1
 
-theorem abiDefaultCaseDefaultBranch_codeWP :
+theorem abiDefaultCaseDefaultBranch_codeWP {labels : LabelContext} :
     CodeWP abiDefaultCaseContext abiDefaultCaseSourceModule
-      abiDefaultCaseSourceFunction [] abiDefaultCaseAdaptedModule.wasmModule
+      abiDefaultCaseSourceFunction labels abiDefaultCaseAdaptedModule.wasmModule
       abiDefaultCaseResolvedHosts.env {} abiDefaultCaseEnvC
       abiDefaultCaseDefaultCode [.call 3, .localSet 1, .localGet 1, .ret]
       abiDefaultCaseStoreC abiDefaultCaseLocalsC []
@@ -518,7 +518,8 @@ theorem abiDefaultCaseDefaultBranch_codeWP :
 /-- Path-sensitive transformer for the source-selected default branch. -/
 theorem abiDefaultCaseCasesStep :
     CasesStepSimulates abiDefaultCaseContext abiDefaultCaseSourceModule
-      abiDefaultCaseSourceFunction [] abiDefaultCaseAdaptedModule.wasmModule
+      abiDefaultCaseSourceFunction [] [none]
+      abiDefaultCaseAdaptedModule.wasmModule
       abiDefaultCaseResolvedHosts.env {} abiDefaultCaseEnvC
       abiDefaultCaseCases abiDefaultCaseDefaultCode
       [.localGet 0, .call 1, .const 0, .eq,
@@ -540,7 +541,8 @@ theorem abiDefaultCaseCasesStep :
       ReturnPost {} abiDefaultCaseValue5 .tobject []
     have defaultResumed :
         CodeWP abiDefaultCaseContext abiDefaultCaseSourceModule
-          abiDefaultCaseSourceFunction [] abiDefaultCaseAdaptedModule.wasmModule
+          abiDefaultCaseSourceFunction [none]
+          abiDefaultCaseAdaptedModule.wasmModule
           abiDefaultCaseResolvedHosts.env {} abiDefaultCaseEnvC
           abiDefaultCaseDefaultCode [.call 3, .localSet 1, .localGet 1, .ret]
           abiDefaultCaseStoreC abiDefaultCaseLocalsC []
@@ -556,14 +558,16 @@ theorem abiDefaultCaseCasesStep :
       rfl
     have fallbackAdapted :
         CaseFallbackAdapted abiDefaultCaseContext abiDefaultCaseSourceModule
-          abiDefaultCaseSourceFunction [] abiDefaultCaseCases.alts.toList
+          abiDefaultCaseSourceFunction [none]
+          abiDefaultCaseCases.alts.toList
           [.call 3, .localSet 1, .localGet 1, .ret] :=
       caseFallbackAdapted_default defaultFound selectedCorrect.1
     rcases fallbackAdapted with
       ⟨fallback, fallbackCompiled, fallbackTarget⟩
     have fallbackChain :
         CaseChainWP abiDefaultCaseContext abiDefaultCaseSourceModule
-          abiDefaultCaseSourceFunction [] abiDefaultCaseAdaptedModule.wasmModule
+          abiDefaultCaseSourceFunction [none]
+          abiDefaultCaseAdaptedModule.wasmModule
           abiDefaultCaseResolvedHosts.env {} abiDefaultCaseEnvC c [] fallback
           [.call 3, .localSet 1, .localGet 1, .ret]
           abiDefaultCaseStoreC abiDefaultCaseLocalsC []

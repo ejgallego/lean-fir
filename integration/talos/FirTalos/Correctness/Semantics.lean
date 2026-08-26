@@ -87,7 +87,7 @@ fuel-free total-correctness weakest precondition.
 -/
 def CodeWP (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module) (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId) (module : Wasm.Module)
+    (labels : LabelContext) (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv RuntimeHost)
     (sourceRuntime : RuntimeState) (sourceEnv : Env)
     (code : Lean.Compiler.LCNF.Code .impure) (target : Wasm.Program)
@@ -128,7 +128,7 @@ case compiler.
 -/
 def CaseChainWP (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module) (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId) (module : Wasm.Module)
+    (labels : LabelContext) (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv RuntimeHost)
     (sourceRuntime : RuntimeState) (sourceEnv : Env)
     (discr : Lean.FVarId) (alts : List (Lean.Compiler.LCNF.Alt .impure))
@@ -1072,7 +1072,7 @@ the real compiler/adapter witness, the exact source step, preservation of the
 state relation, and a continuation-polymorphic Talos WP transformer. -/
 def EffectStepSimulates (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module) (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId) (module : Wasm.Module)
+    (labels : LabelContext) (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv RuntimeHost)
     (sourceRuntime nextRuntime : RuntimeState) (sourceEnv : Env)
     (code continuation : Lean.Compiler.LCNF.Code .impure)
@@ -1137,7 +1137,7 @@ theorem StateRelated.clearFailures
 theorem codeWP_return
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
     {targetStore : Wasm.Store RuntimeHost} {targetLocals : Wasm.Locals}
@@ -1176,7 +1176,7 @@ the already established continuation `CodeWP`.
 theorem codeWP_let
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost}
     {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -1216,7 +1216,7 @@ component is the explicit three-step external protocol carried by
 theorem codeWP_externalLet
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost} {externals : ExternalImpl}
     {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -1255,7 +1255,7 @@ path-specific simulation supplies its semantic WP transformer. -/
 theorem codeWP_lazyLet
     {path : LazyCachePath} {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost} {externals : ExternalImpl}
     {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -1293,7 +1293,7 @@ non-circular closure trampoline. -/
 theorem codeWP_callLet
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost} {externals : ExternalImpl}
     {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -1383,7 +1383,7 @@ proved by the recursively supplied continuation.
 theorem codeWP_naturalLiteral_let
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
     {id : Nat} {imp : Wasm.ImportDecl}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -1446,7 +1446,7 @@ to the exact source value under a fuel-free Talos weakest precondition.
 theorem codeWP_naturalLiteral_return
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
     {id : Nat} {imp : Wasm.ImportDecl}
     {decl : Lean.Compiler.LCNF.LetDecl .impure} {sourceEnv : Env}
@@ -1546,7 +1546,7 @@ theorem letStepSimulates_stringLiteral
 theorem codeWP_stringLiteral_let
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
     {id : Nat} {imp : Wasm.ImportDecl}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -1605,7 +1605,7 @@ theorem codeWP_stringLiteral_let
 theorem codeWP_stringLiteral_return
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
     {id : Nat} {imp : Wasm.ImportDecl}
     {decl : Lean.Compiler.LCNF.LetDecl .impure} {sourceEnv : Env}
@@ -1725,7 +1725,7 @@ theorem letStepSimulates_constructor
 theorem codeWP_constructor_let
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
     {id : Nat} {imp : Wasm.ImportDecl}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -1870,7 +1870,7 @@ theorem letStepSimulates_objectProjection
 theorem codeWP_objectProjection_let
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
     {id : Nat} {imp : Wasm.ImportDecl}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -2057,7 +2057,7 @@ theorem letStepSimulates_scalarProjection
 theorem codeWP_usizeProjection_let
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
     {id : Nat} {imp : Wasm.ImportDecl}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -2123,7 +2123,7 @@ theorem codeWP_usizeProjection_let
 theorem codeWP_scalarProjection_let
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
     {id : Nat} {imp : Wasm.ImportDecl}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
@@ -2508,7 +2508,7 @@ theorem letStepSimulates_reuse
 theorem effectStepSimulates_unaryHost
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {code continuation : Lean.Compiler.LCNF.Code .impure}
@@ -2549,7 +2549,7 @@ theorem effectStepSimulates_unaryHost
 theorem effectStepSimulates_elided
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost} {sourceEnv : Env}
     {code continuation : Lean.Compiler.LCNF.Code .impure}
     {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
@@ -2570,7 +2570,7 @@ theorem effectStepSimulates_elided
 theorem effectStepSimulates_usizeSet
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {objectId fieldId : Lean.FVarId} {index : Nat}
@@ -2637,7 +2637,7 @@ theorem effectStepSimulates_usizeSet
 theorem effectStepSimulates_scalarSet
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {objectId fieldId : Lean.FVarId} {width offset : Nat} {type : Lean.Expr}
@@ -2706,7 +2706,7 @@ theorem effectStepSimulates_scalarSet
 theorem effectStepSimulates_setTag
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {objectId : Lean.FVarId} {tag : Nat}
@@ -2761,7 +2761,7 @@ theorem effectStepSimulates_setTag
 theorem effectStepSimulates_objectSet
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {objectId fieldId : Lean.FVarId} {index : Nat}
@@ -2836,7 +2836,7 @@ theorem effectStepSimulates_objectSet
 theorem effectStepSimulates_inc
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
@@ -2891,7 +2891,7 @@ theorem effectStepSimulates_inc
 theorem effectStepSimulates_dec
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
@@ -2948,7 +2948,7 @@ theorem effectStepSimulates_dec
 theorem effectStepSimulates_delete
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
     {objectId : Lean.FVarId} {continuation : Lean.Compiler.LCNF.Code .impure}
@@ -3001,7 +3001,7 @@ theorem effectStepSimulates_delete
 theorem effectStepSimulates_inc_persistent
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost} {sourceEnv : Env}
     {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
     {continuation : Lean.Compiler.LCNF.Code .impure}
@@ -3025,7 +3025,7 @@ theorem effectStepSimulates_inc_persistent
 theorem effectStepSimulates_dec_persistent
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost} {sourceEnv : Env}
     {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
     {objectFields? : Option Nat} {continuation : Lean.Compiler.LCNF.Code .impure}
@@ -3049,7 +3049,7 @@ theorem effectStepSimulates_dec_persistent
 theorem caseChainWP_nil
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
     {discr : Lean.FVarId} {fallback : List Fir.Wasm.Instruction}
@@ -3072,7 +3072,7 @@ theorem caseChainWP_nil
 theorem caseChainWP_default
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
     {discr : Lean.FVarId} {code : Lean.Compiler.LCNF.Code .impure}
@@ -3098,7 +3098,7 @@ the hit and miss rules below.
 theorem caseChainWP_constructor
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
     {discr : Lean.FVarId} {info : Lean.Compiler.LCNF.CtorInfo}
@@ -3113,9 +3113,9 @@ theorem caseChainWP_constructor
     (modeEq : Fir.Wasm.caseDiscriminatorMode context discr = .objectTag)
     (fits : Fir.Wasm.constructorTagFitsI32 info = true)
     (thenAdapted :
-      CodeAdapted context sourceModule sourceFunction labels code thenTarget)
+      CodeAdapted context sourceModule sourceFunction (none :: labels) code thenTarget)
     (elseAdapted :
-      CaseChainAdapted context sourceModule sourceFunction labels discr alts
+      CaseChainAdapted context sourceModule sourceFunction (none :: labels) discr alts
         fallback elseTarget)
     (discrFound :
       findFVar? (sourceFunction.params.toList ++ sourceFunction.locals.toList)
@@ -3173,7 +3173,7 @@ runtime-state transition. -/
 theorem caseChainWP_scalarUInt8_constructor
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
     {discr : Lean.FVarId} {info : Lean.Compiler.LCNF.CtorInfo}
@@ -3187,9 +3187,9 @@ theorem caseChainWP_scalarUInt8_constructor
     (modeEq : Fir.Wasm.caseDiscriminatorMode context discr = .scalarUInt8)
     (fits : Fir.Wasm.constructorTagFitsUInt8 info = true)
     (thenAdapted :
-      CodeAdapted context sourceModule sourceFunction labels code thenTarget)
+      CodeAdapted context sourceModule sourceFunction (none :: labels) code thenTarget)
     (elseAdapted :
-      CaseChainAdapted context sourceModule sourceFunction labels discr alts
+      CaseChainAdapted context sourceModule sourceFunction (none :: labels) discr alts
         fallback elseTarget)
     (discrFound :
       findFVar? (sourceFunction.params.toList ++ sourceFunction.locals.toList)
@@ -3225,7 +3225,7 @@ semantic `CodeWP`; the unselected suffix remains a structural obligation.
 theorem caseChainWP_constructor_hit
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
     {discr : Lean.FVarId} {info : Lean.Compiler.LCNF.CtorInfo}
@@ -3240,11 +3240,11 @@ theorem caseChainWP_constructor_hit
     (modeEq : Fir.Wasm.caseDiscriminatorMode context discr = .objectTag)
     (fits : Fir.Wasm.constructorTagFitsI32 info = true)
     (thenBranch :
-      CodeWP context sourceModule sourceFunction labels module hostEnv
+      CodeWP context sourceModule sourceFunction (none :: labels) module hostEnv
         sourceRuntime sourceEnv code thenTarget initial locals tail
         (CaseResumePost module hostEnv [] Q tail))
     (elseAdapted :
-      CaseChainAdapted context sourceModule sourceFunction labels discr alts
+      CaseChainAdapted context sourceModule sourceFunction (none :: labels) discr alts
         fallback elseTarget)
     (tagEq : actualTag = info.cidx)
     (discrFound :
@@ -3284,7 +3284,7 @@ adaptation and the semantic proof proceeds recursively through the suffix.
 theorem caseChainWP_constructor_miss
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
     {discr : Lean.FVarId} {info : Lean.Compiler.LCNF.CtorInfo}
@@ -3299,9 +3299,9 @@ theorem caseChainWP_constructor_miss
     (modeEq : Fir.Wasm.caseDiscriminatorMode context discr = .objectTag)
     (fits : Fir.Wasm.constructorTagFitsI32 info = true)
     (thenAdapted :
-      CodeAdapted context sourceModule sourceFunction labels code thenTarget)
+      CodeAdapted context sourceModule sourceFunction (none :: labels) code thenTarget)
     (elseBranch :
-      CaseChainWP context sourceModule sourceFunction labels module hostEnv
+      CaseChainWP context sourceModule sourceFunction (none :: labels) module hostEnv
         sourceRuntime sourceEnv discr alts fallback elseTarget initial locals tail
         (CaseResumePost module hostEnv [] Q tail))
     (tagNe : actualTag ≠ info.cidx)
@@ -3339,7 +3339,7 @@ theorem caseChainWP_constructor_miss
 theorem codeWP_cases
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {labels : LabelContext} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
     {cases : Lean.Compiler.LCNF.Cases .impure}

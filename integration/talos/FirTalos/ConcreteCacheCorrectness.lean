@@ -14,7 +14,7 @@ theorem compileCachedLetValue_adapted
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (fvarId : Lean.FVarId) (type : Lean.Expr) (name : Lean.Name)
     (target : Lean.Compiler.LCNF.Decl .impure)
     (resultKind targetResultKind : AbiKind)
@@ -146,7 +146,7 @@ the cache simulation theorem.
 theorem adaptCachedLetValue_inv
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (name : Lean.Name) (resultKind : AbiKind) (cacheIndex : Nat)
     (targetValue : Wasm.Program)
     (valueAdapted :
@@ -219,7 +219,7 @@ theorem compileCachedLetValue_adapted_inv
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
-    (labels : List Lean.FVarId)
+    (labels : LabelContext)
     (decl : Lean.Compiler.LCNF.LetDecl .impure)
     (name : Lean.Name)
     (target : Lean.Compiler.LCNF.Decl .impure)
@@ -309,7 +309,7 @@ theorem concreteCodeWP_conseq
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
+    {labels : LabelContext}
     {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
     {sourceCode : Lean.Compiler.LCNF.Code .impure}
