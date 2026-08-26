@@ -115,3 +115,26 @@ passed all deterministic first/second artifact comparisons, and reported
 44/44 concrete-readiness artifacts and 16/16 sources. No parallelism is active
 in this candidate; the accepted attribution is removal of the artifact gate's
 third full V8-matrix execution.
+
+## Artifact generator build barrier
+
+The next candidate names both artifact-generator executables in one explicit
+Lake build barrier. After the barrier, 71 identical `lake exe` entries invoke
+the already-built executables directly. Dynamic Lean source generation and the
+Talos-owned differential/oracle paths remain unchanged. The script fails
+before generation if either expected executable is absent or not executable.
+
+Focused direct-invocation probes produced byte-identical resident-global and
+Float-source Wasm artifacts. Three warm complete artifact-gate samples were
+35.77, 42.28, and 33.99 seconds: median 35.77 seconds, MAD 1.78 seconds, and
+median utilization 1.08 effective cores. This is 10.18 seconds or 22.2% below
+the exact-receipt candidate median, and 69.93 seconds or 66.2% below the
+original artifact baseline. Median user-plus-system CPU time fell from 45.48
+to 38.93 seconds relative to the exact-receipt candidate.
+
+All three rounds verified the exact 721-case, three-pair receipt, retained the
+658 executable / 63 ByteArray-blocked concrete validation inventory, passed
+the deterministic first/second artifact comparisons, and reported 44/44
+concrete-readiness artifacts and 16/16 sources. This candidate adds no
+parallelism and does not skip the incremental Talos build; exact-checkpoint
+Talos attestation is a later isolated slice.

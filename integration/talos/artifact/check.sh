@@ -26,29 +26,35 @@ node --test "$root/integration/package-tools/postponed-source-view.test.mjs"
 node instruction-provenance-fixture/check.mjs \
   "$root/.deps/lcnf-c-wasm/emsdk/upstream/bin" \
   "$here/_build/instruction-provenance-fixture"
-lake build
-lake exe fir-wasm-artifact resident-global _build/resident-global.wasm
+lake build fir-wasm-artifact fir-wasm-float-source
+artifact_generator="$here/.lake/build/bin/fir-wasm-artifact"
+float_source_generator="$here/.lake/build/bin/fir-wasm-float-source"
+if [[ ! -x "$artifact_generator" || ! -x "$float_source_generator" ]]; then
+  echo "artifact build barrier did not produce both generators" >&2
+  exit 1
+fi
+"$artifact_generator" resident-global _build/resident-global.wasm
 node run-resident-global.mjs _build/resident-global.wasm
-lake exe fir-wasm-artifact resident-memory-surface \
+"$artifact_generator" resident-memory-surface \
   _build/resident-memory-surface.wasm
 node run-resident-memory-surface.mjs _build/resident-memory-surface.wasm
-lake exe fir-wasm-artifact resident-allocator _build/resident-allocator.wasm
+"$artifact_generator" resident-allocator _build/resident-allocator.wasm
 node run-resident-allocator.mjs _build/resident-allocator.wasm
-lake exe fir-wasm-artifact resident-arrays _build/resident-arrays.wasm
+"$artifact_generator" resident-arrays _build/resident-arrays.wasm
 node run-resident-arrays.mjs _build/resident-arrays.wasm
-lake exe fir-wasm-artifact resident-arrays-trusted \
+"$artifact_generator" resident-arrays-trusted \
   _build/resident-arrays-trusted.wasm
 node run-resident-trusted-array-set.mjs \
   _build/resident-arrays-trusted.wasm
-lake exe fir-wasm-artifact resident-byte-arrays \
+"$artifact_generator" resident-byte-arrays \
   _build/resident-byte-arrays.wasm
 node run-resident-byte-array.mjs _build/resident-byte-arrays.wasm
-lake exe fir-wasm-artifact resident-fixed-width \
+"$artifact_generator" resident-fixed-width \
   _build/resident-fixed-width.wasm
 node run-resident-fixed-width.mjs _build/resident-fixed-width.wasm
-lake exe fir-wasm-artifact resident-float _build/resident-float.wasm
+"$artifact_generator" resident-float _build/resident-float.wasm
 node run-resident-float.mjs _build/resident-float.wasm
-lake exe fir-wasm-artifact resident-libm-frontier \
+"$artifact_generator" resident-libm-frontier \
   _build/resident-libm-frontier.wasm
 emcc="$root/.deps/lcnf-c-wasm/emsdk/upstream/emscripten/emcc"
 libm_linker="$root/integration/wasm-runtime/link-runtime.mjs"
@@ -72,78 +78,78 @@ cmp _build/resident-libm-complete.wasm \
   _build/resident-libm-complete-repeat.wasm
 node run-resident-libm.mjs _build/resident-libm-frontier.wasm \
   _build/resident-libm-complete.wasm
-lake exe fir-wasm-float-source _build/source-float-conversions.wasm
+"$float_source_generator" _build/source-float-conversions.wasm
 node run-source-float.mjs _build/source-float-conversions.wasm
 for suffix in wasm wasm.json wasm.lcnf wasm.inventory.json wasm.oracle.json; do
   cp "_build/source-float-conversions.$suffix" \
     "_build/source-float-conversions-first.$suffix"
 done
-lake exe fir-wasm-float-source _build/source-float-conversions.wasm
+"$float_source_generator" _build/source-float-conversions.wasm
 node run-source-float.mjs _build/source-float-conversions.wasm
 for suffix in wasm wasm.json wasm.lcnf wasm.inventory.json wasm.oracle.json; do
   cmp "_build/source-float-conversions-first.$suffix" \
     "_build/source-float-conversions.$suffix"
 done
-lake exe fir-wasm-artifact resident-constructors \
+"$artifact_generator" resident-constructors \
   _build/resident-constructors.wasm
 node run-resident-constructors.mjs _build/resident-constructors.wasm
-lake exe fir-wasm-artifact resident-closure-allocation \
+"$artifact_generator" resident-closure-allocation \
   _build/resident-closure-allocation.wasm
 node run-resident-closure-allocation.mjs \
   _build/resident-closure-allocation.wasm
-lake exe fir-wasm-artifact resident-scalar-box \
+"$artifact_generator" resident-scalar-box \
   _build/resident-scalar-box.wasm
 node run-resident-scalar-box.mjs _build/resident-scalar-box.wasm
-lake exe fir-wasm-artifact resident-literals \
+"$artifact_generator" resident-literals \
   _build/resident-literals.wasm
 node run-resident-literals.mjs _build/resident-literals.wasm
-lake exe fir-wasm-artifact resident-setters \
+"$artifact_generator" resident-setters \
   _build/resident-setters.wasm
 node run-resident-setters.mjs _build/resident-setters.wasm
-lake exe fir-wasm-artifact resident-tag-setter \
+"$artifact_generator" resident-tag-setter \
   _build/resident-tag-setter.wasm
 node run-resident-tag-setter.mjs _build/resident-tag-setter.wasm
-lake exe fir-wasm-artifact resident-increments \
+"$artifact_generator" resident-increments \
   _build/resident-increments.wasm
 node run-resident-increments.mjs _build/resident-increments.wasm
-lake exe fir-wasm-artifact resident-releases \
+"$artifact_generator" resident-releases \
   _build/resident-releases.wasm
 node run-resident-releases.mjs _build/resident-releases.wasm
-lake exe fir-wasm-artifact resident-cache \
+"$artifact_generator" resident-cache \
   _build/resident-cache.wasm
 node run-resident-cache.mjs _build/resident-cache.wasm
-lake exe fir-wasm-artifact resident-numeric \
+"$artifact_generator" resident-numeric \
   _build/resident-numeric.wasm
 node run-resident-numeric.mjs _build/resident-numeric.wasm
-lake exe fir-wasm-artifact resident-big-numeric \
+"$artifact_generator" resident-big-numeric \
   _build/resident-big-numeric.wasm
 node run-resident-big-numeric.mjs _build/resident-big-numeric.wasm
-lake exe fir-wasm-artifact resident-nat-arithmetic \
+"$artifact_generator" resident-nat-arithmetic \
   _build/resident-nat-arithmetic.wasm
 node run-resident-nat-arithmetic.mjs _build/resident-nat-arithmetic.wasm
-lake exe fir-wasm-artifact resident-platform \
+"$artifact_generator" resident-platform \
   _build/resident-platform.wasm
 node run-resident-platform.mjs _build/resident-platform.wasm
-lake exe fir-wasm-artifact resident-string \
+"$artifact_generator" resident-string \
   _build/resident-string.wasm
 node run-resident-string.mjs _build/resident-string.wasm \
   --require-usize-repr --require-of-list
-lake exe fir-wasm-artifact resident-fallbacks \
+"$artifact_generator" resident-fallbacks \
   _build/resident-fallbacks.wasm
 node run-resident-fallbacks.mjs _build/resident-fallbacks.wasm
-lake exe fir-wasm-artifact resident-get-tag _build/resident-get-tag.wasm
+"$artifact_generator" resident-get-tag _build/resident-get-tag.wasm
 node run-resident-get-tag.mjs _build/resident-get-tag.wasm
-lake exe fir-wasm-artifact resident-is-shared _build/resident-is-shared.wasm
+"$artifact_generator" resident-is-shared _build/resident-is-shared.wasm
 node run-resident-is-shared.mjs _build/resident-is-shared.wasm
-lake exe fir-wasm-artifact resident-read-projections \
+"$artifact_generator" resident-read-projections \
   _build/resident-read-projections.wasm
 node run-resident-read-projections.mjs \
   _build/resident-read-projections.wasm
-lake exe fir-wasm-artifact resident-closure-projections \
+"$artifact_generator" resident-closure-projections \
   _build/resident-closure-projections.wasm
 node run-resident-closure-projections.mjs \
   _build/resident-closure-projections.wasm
-lake exe fir-wasm-artifact resident-closure-matches \
+"$artifact_generator" resident-closure-matches \
   _build/resident-closure-matches.wasm
 node run-resident-closure-matches.mjs \
   _build/resident-closure-matches.wasm
@@ -553,136 +559,136 @@ if [[ -n "${FIR_BROWSER:-}" ]]; then
   ./browser-check.sh "$FIR_BROWSER"
   ./browser-validation-check.sh "$FIR_BROWSER"
 fi
-lake exe fir-wasm-artifact all "$first"
-lake exe fir-wasm-artifact all "$second"
-lake exe fir-wasm-artifact resident-get-tag "$first/resident/get-tag.wasm"
-lake exe fir-wasm-artifact resident-get-tag "$second/resident/get-tag.wasm"
+"$artifact_generator" all "$first"
+"$artifact_generator" all "$second"
+"$artifact_generator" resident-get-tag "$first/resident/get-tag.wasm"
+"$artifact_generator" resident-get-tag "$second/resident/get-tag.wasm"
 cmp "$first/resident/get-tag.wasm" "$second/resident/get-tag.wasm"
 cmp "$first/resident/get-tag.wasm.json" "$second/resident/get-tag.wasm.json"
-lake exe fir-wasm-artifact resident-is-shared "$first/resident/is-shared.wasm"
-lake exe fir-wasm-artifact resident-is-shared "$second/resident/is-shared.wasm"
+"$artifact_generator" resident-is-shared "$first/resident/is-shared.wasm"
+"$artifact_generator" resident-is-shared "$second/resident/is-shared.wasm"
 cmp "$first/resident/is-shared.wasm" "$second/resident/is-shared.wasm"
 cmp "$first/resident/is-shared.wasm.json" "$second/resident/is-shared.wasm.json"
-lake exe fir-wasm-artifact resident-read-projections \
+"$artifact_generator" resident-read-projections \
   "$first/resident/read-projections.wasm"
-lake exe fir-wasm-artifact resident-read-projections \
+"$artifact_generator" resident-read-projections \
   "$second/resident/read-projections.wasm"
 cmp "$first/resident/read-projections.wasm" \
   "$second/resident/read-projections.wasm"
 cmp "$first/resident/read-projections.wasm.json" \
   "$second/resident/read-projections.wasm.json"
-lake exe fir-wasm-artifact resident-closure-projections \
+"$artifact_generator" resident-closure-projections \
   "$first/resident/closure-projections.wasm"
-lake exe fir-wasm-artifact resident-closure-projections \
+"$artifact_generator" resident-closure-projections \
   "$second/resident/closure-projections.wasm"
 cmp "$first/resident/closure-projections.wasm" \
   "$second/resident/closure-projections.wasm"
 cmp "$first/resident/closure-projections.wasm.json" \
   "$second/resident/closure-projections.wasm.json"
-lake exe fir-wasm-artifact resident-closure-matches \
+"$artifact_generator" resident-closure-matches \
   "$first/resident/closure-matches.wasm"
-lake exe fir-wasm-artifact resident-closure-matches \
+"$artifact_generator" resident-closure-matches \
   "$second/resident/closure-matches.wasm"
 cmp "$first/resident/closure-matches.wasm" \
   "$second/resident/closure-matches.wasm"
 cmp "$first/resident/closure-matches.wasm.json" \
   "$second/resident/closure-matches.wasm.json"
-lake exe fir-wasm-artifact resident-allocator \
+"$artifact_generator" resident-allocator \
   "$first/resident/allocator.wasm"
-lake exe fir-wasm-artifact resident-allocator \
+"$artifact_generator" resident-allocator \
   "$second/resident/allocator.wasm"
 cmp "$first/resident/allocator.wasm" "$second/resident/allocator.wasm"
 cmp "$first/resident/allocator.wasm.json" \
   "$second/resident/allocator.wasm.json"
-lake exe fir-wasm-artifact resident-closure-allocation \
+"$artifact_generator" resident-closure-allocation \
   "$first/resident/closure-allocation.wasm"
-lake exe fir-wasm-artifact resident-closure-allocation \
+"$artifact_generator" resident-closure-allocation \
   "$second/resident/closure-allocation.wasm"
 cmp "$first/resident/closure-allocation.wasm" \
   "$second/resident/closure-allocation.wasm"
 cmp "$first/resident/closure-allocation.wasm.json" \
   "$second/resident/closure-allocation.wasm.json"
-lake exe fir-wasm-artifact resident-literals \
+"$artifact_generator" resident-literals \
   "$first/resident/literals.wasm"
-lake exe fir-wasm-artifact resident-literals \
+"$artifact_generator" resident-literals \
   "$second/resident/literals.wasm"
 cmp "$first/resident/literals.wasm" "$second/resident/literals.wasm"
 cmp "$first/resident/literals.wasm.json" \
   "$second/resident/literals.wasm.json"
-lake exe fir-wasm-artifact resident-setters \
+"$artifact_generator" resident-setters \
   "$first/resident/setters.wasm"
-lake exe fir-wasm-artifact resident-setters \
+"$artifact_generator" resident-setters \
   "$second/resident/setters.wasm"
 cmp "$first/resident/setters.wasm" "$second/resident/setters.wasm"
 cmp "$first/resident/setters.wasm.json" \
   "$second/resident/setters.wasm.json"
-lake exe fir-wasm-artifact resident-tag-setter \
+"$artifact_generator" resident-tag-setter \
   "$first/resident/tag-setter.wasm"
-lake exe fir-wasm-artifact resident-tag-setter \
+"$artifact_generator" resident-tag-setter \
   "$second/resident/tag-setter.wasm"
 cmp "$first/resident/tag-setter.wasm" "$second/resident/tag-setter.wasm"
 cmp "$first/resident/tag-setter.wasm.json" \
   "$second/resident/tag-setter.wasm.json"
-lake exe fir-wasm-artifact resident-increments \
+"$artifact_generator" resident-increments \
   "$first/resident/increments.wasm"
-lake exe fir-wasm-artifact resident-increments \
+"$artifact_generator" resident-increments \
   "$second/resident/increments.wasm"
 cmp "$first/resident/increments.wasm" "$second/resident/increments.wasm"
 cmp "$first/resident/increments.wasm.json" \
   "$second/resident/increments.wasm.json"
-lake exe fir-wasm-artifact resident-releases \
+"$artifact_generator" resident-releases \
   "$first/resident/releases.wasm"
-lake exe fir-wasm-artifact resident-releases \
+"$artifact_generator" resident-releases \
   "$second/resident/releases.wasm"
 cmp "$first/resident/releases.wasm" "$second/resident/releases.wasm"
 cmp "$first/resident/releases.wasm.json" \
   "$second/resident/releases.wasm.json"
-lake exe fir-wasm-artifact resident-cache \
+"$artifact_generator" resident-cache \
   "$first/resident/cache.wasm"
-lake exe fir-wasm-artifact resident-cache \
+"$artifact_generator" resident-cache \
   "$second/resident/cache.wasm"
 cmp "$first/resident/cache.wasm" "$second/resident/cache.wasm"
 cmp "$first/resident/cache.wasm.json" \
   "$second/resident/cache.wasm.json"
-lake exe fir-wasm-artifact resident-numeric \
+"$artifact_generator" resident-numeric \
   "$first/resident/numeric.wasm"
-lake exe fir-wasm-artifact resident-numeric \
+"$artifact_generator" resident-numeric \
   "$second/resident/numeric.wasm"
 cmp "$first/resident/numeric.wasm" "$second/resident/numeric.wasm"
 cmp "$first/resident/numeric.wasm.json" \
   "$second/resident/numeric.wasm.json"
-lake exe fir-wasm-artifact resident-big-numeric \
+"$artifact_generator" resident-big-numeric \
   "$first/resident/big-numeric.wasm"
-lake exe fir-wasm-artifact resident-big-numeric \
+"$artifact_generator" resident-big-numeric \
   "$second/resident/big-numeric.wasm"
 cmp "$first/resident/big-numeric.wasm" "$second/resident/big-numeric.wasm"
 cmp "$first/resident/big-numeric.wasm.json" \
   "$second/resident/big-numeric.wasm.json"
-lake exe fir-wasm-artifact resident-nat-arithmetic \
+"$artifact_generator" resident-nat-arithmetic \
   "$first/resident/nat-arithmetic.wasm"
-lake exe fir-wasm-artifact resident-nat-arithmetic \
+"$artifact_generator" resident-nat-arithmetic \
   "$second/resident/nat-arithmetic.wasm"
 cmp "$first/resident/nat-arithmetic.wasm" \
   "$second/resident/nat-arithmetic.wasm"
 cmp "$first/resident/nat-arithmetic.wasm.json" \
   "$second/resident/nat-arithmetic.wasm.json"
-lake exe fir-wasm-artifact resident-platform \
+"$artifact_generator" resident-platform \
   "$first/resident/platform.wasm"
-lake exe fir-wasm-artifact resident-platform \
+"$artifact_generator" resident-platform \
   "$second/resident/platform.wasm"
 cmp "$first/resident/platform.wasm" "$second/resident/platform.wasm"
 cmp "$first/resident/platform.wasm.json" \
   "$second/resident/platform.wasm.json"
-lake exe fir-wasm-artifact resident-string \
+"$artifact_generator" resident-string \
   "$first/resident/string.wasm"
-lake exe fir-wasm-artifact resident-string \
+"$artifact_generator" resident-string \
   "$second/resident/string.wasm"
 cmp "$first/resident/string.wasm" "$second/resident/string.wasm"
 cmp "$first/resident/string.wasm.json" \
   "$second/resident/string.wasm.json"
-lake exe fir-wasm-artifact resident-fallbacks \
+"$artifact_generator" resident-fallbacks \
   "$first/resident/fallbacks.wasm"
-lake exe fir-wasm-artifact resident-fallbacks \
+"$artifact_generator" resident-fallbacks \
   "$second/resident/fallbacks.wasm"
 cmp "$first/resident/fallbacks.wasm" "$second/resident/fallbacks.wasm"
 cmp "$first/resident/fallbacks.wasm.json" \
