@@ -739,6 +739,37 @@ should test whether existing typed scalar/range information can survive to
 release sites, while retaining the three genuinely mixed projection sites and
 all unproved `Nat` paths.
 
+The next slice adds that generic transfer surface to typed call-site rewrites.
+A provider may state a conditional result refinement over the original local
+operand kinds; the linker applies it only to an immediately assigned compiler
+local with no other definition, iterating to a fixed point for eligible call
+chains. `Nat.sub` supplies the first rule: `left - right ≤ left`, so a tagged
+left operand implies a tagged result for every representation of `right`.
+Unrecognized instruction shapes, multiply assigned locals, and calls with a
+coarse left operand retain `tobject`. Because persistent planning installs
+release helpers before later big-numeric helpers, the linker propagates the
+complete policy's reviewed result facts once before any ownership operation is
+materialized; group-local propagation remains as a conservative second pass.
+
+On the raw lean-zip closure this changes the symbolic `fir_release_0` census
+from 4,478 to 4,329 sites. The existing exact-representation specialization
+accounts for 47 sites and the new `Nat.sub` transfer removes another 102;
+all 109 unproved `Nat.sub`-derived sites remain `tobject`. The final zero-import
+module shrinks from 367,442 to 366,723 bytes (719 bytes), and the pre-optimizer
+frontier shrinks from 832,339 to 831,737 bytes. The candidate hash is
+`da1e7209afa8995f170d79c461fb253d39b3b4e61a64942f044115e6ce187696`.
+The 50-way native/Wasm/inflate differential and persistent-cache plus scratch
+reclamation gate pass unchanged.
+
+Sixteen fresh-process, order-balanced 256-KiB level-6 pairs report baseline
+35.491 ms (MAD 0.386) and candidate 34.835 ms (MAD 0.314), with a 0.9801 paired
+median ratio, 15/16 improving pairs, and agreeing order buckets (0.9811 and
+0.9801). This is a useful roughly 2% screen, not an attributable performance
+claim: the comparison uses separately captured final-LCNF artifacts and crosses
+the documented recapture code-shape boundary. The exact accepted claims are
+the semantic range transfer, removed symbolic releases, smaller artifact, and
+green differential/ownership gates.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not
