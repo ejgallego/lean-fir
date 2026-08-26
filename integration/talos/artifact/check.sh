@@ -153,7 +153,13 @@ node run-resident-closure-projections.mjs \
   _build/resident-closure-matches.wasm
 node run-resident-closure-matches.mjs \
   _build/resident-closure-matches.wasm
-lake -d .. build FirTalos.Differential
+if python3 "$root/scripts/talos_build_attestation.py" verify \
+  --receipt "$root/_build/talos-check/build-receipt.json"; then
+  echo "reusing exact successful Talos build"
+else
+  echo "exact Talos build unavailable; rebuilding FirTalos.Differential"
+  lake -d .. build FirTalos.Differential
+fi
 lake -d ../../.. build Fir.Wasm.Emit.SourceExamples Fir.Wasm.Emit.Command \
   Fir.Wasm.Emit.ResidentPrettyFormat fir-prettyM-artifact
 pretty_generator="$root/.lake/build/bin/fir-prettyM-artifact"

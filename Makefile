@@ -31,6 +31,7 @@ inspect:
 validate-harness:
 	python3 scripts/test_validate_interpreters.py
 	python3 scripts/test_validation_reuse.py
+	python3 scripts/test_talos_build_attestation.py
 	node scripts/test_wasm_bit_exact_float_transport.mjs
 	node scripts/test_wasm_validation_externals.mjs
 
@@ -132,6 +133,8 @@ talos-setup:
 
 talos-check:
 	lake -d integration/talos build
+	python3 scripts/talos_build_attestation.py record \
+		--receipt _build/talos-check/build-receipt.json
 
 clean:
 	lake clean

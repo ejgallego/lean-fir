@@ -138,3 +138,26 @@ the deterministic first/second artifact comparisons, and reported 44/44
 concrete-readiness artifacts and 16/16 sources. This candidate adds no
 parallelism and does not skip the incremental Talos build; exact-checkpoint
 Talos attestation is a later isolated slice.
+
+## Exact Talos build reuse
+
+`make talos-check` now records a canonical, atomic, ignored receipt only after
+the complete Talos build succeeds. The receipt binds the Git head, FIR/Talos/
+interpreter Lean sources and manifests, the attestation implementation, the
+Lean and Lake executables, and the `FirTalos.Differential` OLean/ILean/hash/
+trace output set. Symlinks, noncanonical receipts, missing outputs, and any
+content or head drift reject reuse.
+
+The artifact gate verifies this receipt before its incremental differential
+build. Exact evidence skips that repeated build. Missing or stale evidence
+retains the previous behavior and rebuilds `FirTalos.Differential`; a complete
+fallback artifact run exercised that path successfully. The fallback does not
+write a full-build receipt because it did not execute the full Talos gate.
+
+Three warm attested artifact-gate samples were 31.21, 31.49, and 30.55
+seconds: median 31.21 seconds, MAD 0.28 seconds, and median utilization 1.14
+effective cores. This is 4.56 seconds or 12.7% below the build-barrier
+candidate median and 74.49 seconds or 70.5% below the original artifact
+baseline. Median user-plus-system CPU time fell from 38.93 to 35.53 seconds
+relative to the build-barrier candidate. All three rounds retained the exact
+validation, deterministic-artifact, and 44/44 readiness inventories.
