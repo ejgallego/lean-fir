@@ -14723,6 +14723,10 @@ structure LedgerCtorLeftGarbageResult
   heapSourceOnly :
     ∀ location, value = .object (.heap location) →
       SourceOnlyUnderTargetLedger runtime.ledger location
+  heapAllocatedSourceOnly :
+    ∀ location, value = .object (.heap location) →
+      AllocatedSourceOnlyLedgerShadowRuntimeRelAt rho
+        nextRuntime right leftExtra rightExtra location
 
 /-- A deleted constructor either creates no heap cell or adds one source-only
 cell. In both cases the target frontier, renaming, and allocation ledger are
@@ -14744,6 +14748,9 @@ noncomputable def LedgerShadowRuntimeRel.allocCtorLeftGarbage
       heapSourceOnly := by
         intro location impossible
         cases impossible
+      heapAllocatedSourceOnly := by
+        intro location impossible
+        cases impossible
     }
   · let object : ConstructorObject := {
       tag := info.cidx
@@ -14763,6 +14770,11 @@ noncomputable def LedgerShadowRuntimeRel.allocCtorLeftGarbage
         simp [alloc] at valueEq
         subst location
         exact related.sourceOnly_nextLocation
+      heapAllocatedSourceOnly := by
+        intro location valueEq
+        simp [alloc] at valueEq
+        subst location
+        exact related.allocLeftGarbageSourceOnly (.ctor object) false
     }
 
 /-- Proof-relevant result of a retained failed-token reuse. Such a reuse is
@@ -14836,6 +14848,10 @@ structure LedgerReuseNoneLeftGarbageResult
   heapSourceOnly :
     ∀ location, value = .object (.heap location) →
       SourceOnlyUnderTargetLedger runtime.ledger location
+  heapAllocatedSourceOnly :
+    ∀ location, value = .object (.heap location) →
+      AllocatedSourceOnlyLedgerShadowRuntimeRelAt rho
+        nextRuntime right leftExtra rightExtra location
 
 /-- A deleted failed reuse delegates to source-only constructor allocation
 and retains the incoming target ledger verbatim. -/
@@ -14853,6 +14869,7 @@ noncomputable def LedgerShadowRuntimeRel.reuseNoneLeftGarbage
     effect := by simpa [reuse] using allocated.effect
     runtime := allocated.runtime
     heapSourceOnly := allocated.heapSourceOnly
+    heapAllocatedSourceOnly := allocated.heapAllocatedSourceOnly
   }
 
 /-- Proof-relevant result of a retained concrete-token reuse. The operation
@@ -23938,6 +23955,85 @@ theorem match_retainedCtorLetStep_binderReady_ledger
             | ok result =>
                 simp [evalLetValue, sourceArgumentsEq, allocCtor, arity,
                   Bind.bind, Except.bind] at evaluatedEq
+
+/-- A genuinely evaluated deleted constructor returns more than the ordinary
+ledger-carrying post-step relation: when its value is heap-backed, the fresh
+source address carries durable allocation/source-only provenance.  The
+result is already lifted through the dead result binding and exact
+continuation graph, so later reset/reuse clients need not reconstruct the
+allocation from a current target binder. -/
+theorem coreStep_deletedCtor_of_ready_binderReady_ledger_withAllocatedSourceOnly
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedCtorReadyAt sourceState info arguments) :
+    let declaration : LCNF.LetDecl .impure := {
+      fvarId
+      binderName
+      type
+      value := .ctor info arguments }
+    ∃ nextRuntime value,
+      let sourceAfter := {
+        sourceState with
+        runtime := nextRuntime
+        env := bind sourceState.env fvarId value
+        control := .code sourceContinuation }
+      let targetAfter := {
+        targetState with control := .code targetContinuation }
+      coreStep { sourceState with
+          control := .code (.let declaration sourceContinuation) } =
+          .next sourceAfter ∧
+        LedgerBinderReadyReachableMachineRelated fuel rho
+          sourceAfter targetAfter ∧
+        ∀ location, value = .object (.heap location) →
+          AllocatedSourceOnlyLedgerBinderReadyReachableMachineRelatedAt
+            fuel sourceAfter targetAfter location := by
+  dsimp only
+  rcases ready with ⟨values, argumentsRead, arity⟩
+  let allocated := runtime.allocCtorLeftGarbage info values arity
+  have evaluated : evalLetValue sourceState {
+      fvarId
+      binderName
+      type
+      value := .ctor info arguments
+    } = .ok (allocated.nextRuntime, .value allocated.value) := by
+    simp only [evalLetValue, argumentsRead, Bind.bind, Except.bind]
+    rw [allocated.effect]
+    rfl
+  rcases coreStep_deletedLet_binderReadyReachableRelated
+      sourceState targetState programs frames continuation joins env absent
+      evaluated allocated.runtime.runtime with
+    ⟨transition, afterRelated⟩
+  refine ⟨allocated.nextRuntime, allocated.value,
+    transition, ⟨?_, afterRelated⟩, ?_⟩
+  · simpa using allocated.runtime.ledger
+  · intro location valueEq
+    have provenance :=
+      allocated.heapAllocatedSourceOnly location valueEq
+    have alignedProvenance :
+        AllocatedSourceOnlyLedgerShadowRuntimeRelAt rho
+          allocated.nextRuntime targetState.runtime
+          (envRootsOn used (bind sourceState.env fvarId allocated.value) ++
+            sourceFrameRoots)
+          (envRootsOn used targetState.env ++ targetFrameRoots)
+          location := by
+      simpa [envRootsOn_bind_of_absent absent] using provenance
+    exact alignedProvenance.binderReadyMachineRelated
+      programs
+      (.code continuation joins (env.bindLeft_of_absent absent))
+      frames
 
 /-- Ledger-carrying hereditary deleted-constructor matcher. The target
 stutters, so its allocation frontier and incoming owner ledger are unchanged
