@@ -762,7 +762,11 @@ private def floatingBoxGuard : Bool :=
 
 def unbox (runtime : RuntimeState) (type : Expr) (value : Value) : Except RuntimeFault Value :=
   match value with
-  | .object (.tagged payload) => scalarFromType type payload
+  | .object (.tagged payload) =>
+      if type == LCNF.ImpureType.uint64 then
+        .error .expectedScalar
+      else
+        scalarFromType type payload
   | .object (.heap location) => do
       let cell ← getLiveCell runtime location
       let .boxed _ value := cell.object | throw .expectedScalar
@@ -782,6 +786,10 @@ private def uint64BoxGuard : Bool :=
   | _, _ => false
 
 #guard uint64BoxGuard
+
+#guard match unbox {} LCNF.ImpureType.uint64 (.object (.tagged 41)) with
+  | .error .expectedScalar => true
+  | _ => false
 
 def isShared (runtime : RuntimeState) (value : Value) : Except RuntimeFault Value :=
   match value with

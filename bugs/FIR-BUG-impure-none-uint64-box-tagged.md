@@ -43,7 +43,8 @@ sed -n '250,375p' Fir/Wasm/Emit/ResidentScalarBox.lean
 ## Expected semantics
 
 Every boxed `UInt64` is a heap object, independent of payload. `unbox UInt64`
-reads that scalar object, and an unchecked reference decrement is valid.
+reads that scalar object and rejects tagged words, and an unchecked reference
+decrement is valid.
 
 ## Actual behavior
 
@@ -88,8 +89,9 @@ none
 
 ## Resolution and regression
 
-The integration contract candidate makes semantic UInt64 boxes heap-only and
-adds `generic-discard-boxed-uint64-small` plus
+The integration contract candidate makes semantic UInt64 boxes heap-only,
+rejects tagged inputs at semantic `unbox UInt64`, and adds
+`generic-discard-boxed-uint64-small` plus
 `generic-discard-boxed-uint64-max`. Both compile the real source declaration to
 the exact `box; fap; dec[ref]; return` ownership path, pin every executed form
 and count, and agree between native Lean and the LCNF interpreter.
