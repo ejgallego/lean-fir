@@ -163,10 +163,8 @@ private def makeNaturalResult (low high : FVarId) : List Instruction := [
   .localGet high,
   .call (.declaration ResidentNumeric.makeNaturalName)] ++ retypeRawResult
 
-private def releaseLocal (value : FVarId) : List Instruction := [
-  .localGet value,
-  .i32Const .uint32 1,
-  .call (.declaration ResidentRelease.decrementOnceName)]
+private def releaseLocal (value : FVarId) : List Instruction :=
+  ResidentRelease.checkedDecrementLocal value
 
 private def incrementLocal (value : FVarId) : List Instruction := [
   .localGet value,

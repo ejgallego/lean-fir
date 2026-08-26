@@ -387,19 +387,35 @@ private def decrementOnceCall (check : Bool) : List Instruction :=
 Lean's native `lean_dec` keeps the scalar test in the compiled caller and only
 enters the cold recursive release path for a heap reference.  Checked FIR
 decrements also accept the erased zero sentinel, so test it beside tagged
-immediates before calling `fir_dec_once`.  The helper deliberately retains its
-own checks: resident container helpers call it directly, and malformed heap
-references must keep trapping at that public generation boundary.
+immediates before calling `fir_dec_once`. The helper deliberately retains its
+own checks: recursive release and the public helper boundary still enter it
+directly, and malformed heap references must keep trapping there.
 -/
-private def checkedDecrementCalls (calls : List Instruction) :
+private def checkedDecrementLocalCalls
+    (value : FVarId) (calls : List Instruction) :
     List Instruction :=
-  [.localGet objectParam,
+  [.localGet value,
     .i32Const .uint32 1,
     .i32And,
     .ifElse []
-      ([.localGet objectParam] ++
+      ([.localGet value] ++
         equalsConst .tobject 0 ++
         [.ifElse [] calls])]
+
+/--
+Emit upstream-shaped `lean_dec` control flow for a checked resident value.
+Tagged immediates and the erased-zero sentinel stay in the caller; only heap
+references enter the stable `fir_dec_once` helper boundary.
+-/
+def checkedDecrementLocal (value : FVarId) : List Instruction :=
+  checkedDecrementLocalCalls value
+    [.localGet value,
+      .i32Const .uint32 1,
+      .call (.declaration decrementOnceName)]
+
+private def checkedDecrementCalls (calls : List Instruction) :
+    List Instruction :=
+  checkedDecrementLocalCalls objectParam calls
 
 private def decrementWrapper (ordinal amount : Nat) (check : Bool) :
     Except LinkError Function := do
@@ -638,6 +654,9 @@ def manifest : Json :=
   | .ok function => function.body == checkedDecrementCalls
       (decrementOnceCall true) ++ [.ret]
   | .error _ => false
+
+#guard checkedDecrementLocal objectParam == checkedDecrementCalls
+  (decrementOnceCall true)
 
 #guard match decrementWrapper 1 1 false with
   | .ok function => function.body == decrementOnceCall false ++ [.ret]

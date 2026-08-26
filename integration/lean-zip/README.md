@@ -609,6 +609,32 @@ median ratio 0.990802 (about -0.92%), and 43/64 wins. Both invocation-order
 buckets improve. Treat this as a modest generic runtime win, not an algorithmic
 compression improvement.
 
+Checked releases inside resident Array, ByteArray, String, and Nat helpers now
+reuse the same caller-local scalar/erased-zero gate as compiler-generated
+`lean_dec` wrappers. Typed `.object` values remain direct heap decrements;
+`.tobject` values enter `fir_dec_once` only when they are actual heap
+references. The stable helper signature and its recursive body are unchanged,
+so this is a caller-shape optimization rather than a new release ABI.
+
+On one steady 256-KiB seeded-random level-6 call, exact instrumentation reduces
+dynamic `fir_dec_once` entries from 1,222,005 to 169,608. Tagged no-op entries
+fall from 1,195,723 to 143,326; the retained tagged calls are chiefly the still
+generic recursive container-release path. Two exact-artifact profiles move the
+helper's median normalized Wasm-self share from 4.16% to 1.81% without changing
+the output digest or flat 9,237,304-byte frontier. Sixteen unprofiled,
+order-balanced AB/BA rounds with fresh instances move median steady call time
+from 33.097 ms to 30.979 ms; every round improves and the paired median is
+-2.096 ms (-6.38%).
+
+The inline gates trade a small amount of code for the avoided cold-helper
+entries: the complete zero-import module grows from 366,313 to 367,634 bytes
+(+1,321, 0.36%) and the frontier from 830,433 to 832,753 bytes. The base module,
+500 final functions, 630 source functions, 830 resident helpers, imports,
+exports, compressed bytes, and ownership frontier are unchanged.
+The same deterministic code-shape change grows the stored-block artifact from
+12,418 to 12,444 bytes and the Level-1 artifact from 198,424 to 199,468 bytes;
+their base modules and reviewed closure inventories remain unchanged.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not

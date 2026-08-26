@@ -548,6 +548,22 @@ persistent-cache/scratch-rewind contract, and deterministic publication remain
 unchanged. W6 proof review of the three tagged Nat branches and the trusted
 exclusive/shared Array split remains a separate acceptance boundary.
 
+### G1r. Apply checked decrement gates inside resident callers (generation-ready)
+
+Resident Array, ByteArray, String, and Nat helpers now use the same
+caller-local tagged/erased-zero classification as upstream `lean_dec` and
+FIR's compiled checked wrappers. Typed heap-only `.object` values keep their
+direct decrement path. The public `fir_dec_once` signature and complete
+recursive body remain unchanged, preserving the current W6 proof boundary.
+
+On the exact 256-KiB level-6 lean-zip workload, steady dynamic helper entries
+fall from 1,222,005 to 169,608 and tagged no-op entries from 1,195,723 to
+143,326. Two exact-artifact profiles move median `fir_dec_once` self share from
+4.16% to 1.81%. Sixteen unprofiled order-balanced AB/BA rounds improve 16/16,
+with median steady call time moving from 33.097 ms to 30.979 ms and a -6.38%
+paired median. The final zero-import module grows by 1,321 bytes (0.36%); exact
+output, imports/exports, and the flat rewind frontier are unchanged.
+
 ### G2. Separate production and diagnostic adapter costs (accepted)
 
 Finish the pending Illuminate selection-player request with an actually

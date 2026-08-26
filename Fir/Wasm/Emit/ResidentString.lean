@@ -919,10 +919,8 @@ private def setInputLength : List Instruction := [
   .localGet totalLengthLocal,
   .i32Store .uint32 (u32 headerAux1Offset)]
 
-private def releaseOwnedInput : List Instruction := [
-  .localGet inputTobjectLocal,
-  .i32Const .uint32 1,
-  .call (.declaration ResidentRelease.decrementOnceName)]
+private def releaseOwnedInput : List Instruction :=
+  ResidentRelease.checkedDecrementLocal inputTobjectLocal
 
 def appendFunction : Function := {
   name := externalName `String.Internal.append
@@ -1016,10 +1014,7 @@ def pushnFunction : Function := {
     captureOwnedObject sourceParam ++
     validateNatural countParam ++
     loadNaturalParts countParam ++
-    [
-      .localGet countParam,
-      .i32Const .uint32 1,
-      .call (.declaration ResidentRelease.decrementOnceName)] ++
+    ResidentRelease.checkedDecrementLocal countParam ++
     trapWhenTrue [.localGet highLocal] ++ [
     .localGet lowLocal] ++ equalsConst .uint32 0 ++ [
     .ifElse [.localGet sourceParam, .ret] []] ++
@@ -1627,10 +1622,8 @@ private def advanceList : List Instruction := [
   .i32Load .tobject (u32 (headerBytes + target.semanticSlotBytes)),
   .localSet tailLocal,
   .localGet tailLocal,
-  .call (.declaration ResidentReferenceCount.incrementOnceName),
-  .localGet listLocal,
-  .i32Const .uint32 1,
-  .call (.declaration ResidentRelease.decrementOnceName),
+  .call (.declaration ResidentReferenceCount.incrementOnceName)] ++
+  ResidentRelease.checkedDecrementLocal listLocal ++ [
   .localGet tailLocal,
   .localSet listLocal]
 

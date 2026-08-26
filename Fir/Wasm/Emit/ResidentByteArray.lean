@@ -615,10 +615,8 @@ def mkFunction : Function := {
         .i32Const .uint32 1,
         .i32Add,
         .localSet countParam,
-        .br packLoopLabel] []],
-    .localGet arrayTobjectLocal,
-    .i32Const .uint32 1,
-    .call (.declaration ResidentRelease.decrementOnceName),
+        .br packLoopLabel] []]] ++
+    ResidentRelease.checkedDecrementLocal arrayTobjectLocal ++ [
     .localGet addressLocal,
     .call (.declaration retypeObjectName),
     .ret] }

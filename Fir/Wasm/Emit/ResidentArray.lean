@@ -566,10 +566,8 @@ private def consumeListIntoArray : List Instruction := [
       .localGet elementLocal,
       .call (.declaration ResidentReferenceCount.incrementOnceName),
       .localGet tailLocal,
-      .call (.declaration ResidentReferenceCount.incrementOnceName),
-      .localGet listLocal,
-      .i32Const .uint32 1,
-      .call (.declaration ResidentRelease.decrementOnceName),
+      .call (.declaration ResidentReferenceCount.incrementOnceName)] ++
+      ResidentRelease.checkedDecrementLocal listLocal ++ [
       .localGet targetCursorLocal,
       .localGet elementLocal,
       .i32Store .tobject 0,
@@ -1124,10 +1122,8 @@ private def popFunctionFor (validation : InputValidation) : Function := {
       .localSet elementLocal,
       .localGet inputAddressLocal,
       .localGet sizeLocal,
-      .i32Store .uint32 (u32 headerAux1Offset),
-      .localGet elementLocal,
-      .i32Const .uint32 1,
-      .call (.declaration ResidentRelease.decrementOnceName),
+      .i32Store .uint32 (u32 headerAux1Offset)] ++
+      ResidentRelease.checkedDecrementLocal elementLocal ++ [
       .localGet arrayParam,
       .ret]) [],
     .localGet sizeLocal] ++ equalsConst .uint32 0 ++ [
@@ -1199,10 +1195,8 @@ private def replaceAtDecodedIndexBody (validation : InputValidation) :
       .localSet elementLocal,
       .localGet sourceCursorLocal,
       .localGet valueParam,
-      .i32Store .tobject 0,
-      .localGet elementLocal,
-      .i32Const .uint32 1,
-      .call (.declaration ResidentRelease.decrementOnceName),
+      .i32Store .tobject 0] ++
+      ResidentRelease.checkedDecrementLocal elementLocal ++ [
       .localGet arrayParam,
       .ret]) []] ++ allocationBytesBody ++ [
     .localGet allocationBytesLocal,
@@ -1279,10 +1273,8 @@ private def trustedSetCallSiteRewrite : ResidentCallSite.Rewrite := {
         .localSet inlineSetElementLocal,
         .localGet inlineSetCursorLocal,
         .localGet inlineSetValueLocal,
-        .i32Store .tobject 0,
-        .localGet inlineSetElementLocal,
-        .i32Const .uint32 1,
-        .call (.declaration ResidentRelease.decrementOnceName),
+        .i32Store .tobject 0] ++
+        ResidentRelease.checkedDecrementLocal inlineSetElementLocal ++ [
         .localGet inlineSetArrayLocal,
         .localSet inlineSetResultLocal])
       [.localGet inlineSetErasedLocal,
@@ -1313,10 +1305,8 @@ private partial def callSiteContains (needle : Instruction) :
 #guard trustedSetCallSiteRewrite.body.any
   (callSiteContains (.call (.declaration (externalName `Array.set))))
 
-private def setBangOutOfBounds : List Instruction := [
-  .localGet valueParam,
-  .i32Const .uint32 1,
-  .call (.declaration ResidentRelease.decrementOnceName),
+private def setBangOutOfBounds : List Instruction :=
+  ResidentRelease.checkedDecrementLocal valueParam ++ [
   .localGet arrayParam,
   .ret]
 
@@ -1566,10 +1556,8 @@ def replicateFunction : Function := {
     .localGet indexLocal,
     .localSet sizeLocal,
     .localGet indexLocal,
-    .localSet capacityLocal,
-    .localGet indexParam,
-    .i32Const .uint32 1,
-    .call (.declaration ResidentRelease.decrementOnceName)] ++
+    .localSet capacityLocal] ++
+    ResidentRelease.checkedDecrementLocal indexParam ++
     allocationBytesBody ++ [
     .localGet allocationBytesLocal,
     .call (.declaration ResidentAllocator.allocateName),
@@ -1577,10 +1565,7 @@ def replicateFunction : Function := {
     initializeHeader [.localGet sizeLocal] [.localGet capacityLocal] ++
     fillElementsBody ++ [
     .localGet sizeLocal] ++ equalsConst .uint32 0 ++ [
-    .ifElse [
-      .localGet valueParam,
-      .i32Const .uint32 1,
-      .call (.declaration ResidentRelease.decrementOnceName)] []] ++
+    .ifElse (ResidentRelease.checkedDecrementLocal valueParam) []] ++
     retypeAddress }
 
 private def functionsFor (validation : CallValidation) : Array Function := #[
