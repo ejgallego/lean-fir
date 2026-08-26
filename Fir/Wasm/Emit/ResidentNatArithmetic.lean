@@ -952,6 +952,14 @@ private def landCallSiteRewrite : ResidentCallSite.Rewrite := {
   signature := { params := #[.tobject, .tobject], results := #[.tobject] }
   locals := #[(inlineLeftLocal, .tobject), (inlineRightLocal, .tobject),
     (inlineResultLocal, .tobject)]
+  /- `Nat.land left right ≤ right`. A tagged right operand therefore bounds
+  the result by the complete immediate payload range, even when the left
+  operand takes the arbitrary-precision fallback. `landFunction` constructs
+  its one-limb result through `makeNatural`, which preserves this canonical
+  tagged representation. -/
+  conditionalResultRefinement? := some {
+    argumentKinds := #[none, some .tagged]
+    kind := .tagged }
   body := binaryPrefix ++ binaryImmediateTest ++ [
     .ifElse
       ([.localGet inlineLeftLocal,
@@ -1031,6 +1039,9 @@ private partial def callSiteContains (needle : Instruction) :
 #guard landCallSiteRewrite.locals.size == 3
 #guard modCallSiteRewrite.locals.size == 5
 #guard mulCallSiteRewrite.locals.size == 4
+#guard landCallSiteRewrite.conditionalResultRefinement? == some {
+  argumentKinds := #[none, some .tagged]
+  kind := .tagged }
 #guard landCallSiteRewrite.body.any (callSiteContains .i32And)
 #guard modCallSiteRewrite.body.any (callSiteContains .i32RemU)
 #guard mulCallSiteRewrite.body.any (callSiteContains .i64Mul)

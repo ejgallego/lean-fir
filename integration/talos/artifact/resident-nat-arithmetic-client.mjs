@@ -175,6 +175,14 @@ export async function checkResidentNatArithmetic({ bytes, manifest }) {
   assert.equal(apply(landCaller, heapLandLeft, heapLandRight),
     heapLandLeft & heapLandRight,
     "rewritten Nat.land heap fallback mismatch");
+  const taggedLandRight = 0x0123_4567n;
+  const mixedLandResult = landCaller(naturalInput(host, heapLandLeft),
+    naturalInput(host, taggedLandRight));
+  assert.equal(host.classify(mixedLandResult), "immediate",
+    "rewritten Nat.land heap/tagged fallback did not canonicalize its result");
+  assert.equal(naturalValue(host, mixedLandResult),
+    heapLandLeft & taggedLandRight,
+    "rewritten Nat.land heap/tagged fallback mismatch");
   const heapModLeft = (1n << 193n) + 12345n;
   const heapModRight = (1n << 65n) + 17n;
   assert.equal(apply(modCaller, heapModLeft, heapModRight),
