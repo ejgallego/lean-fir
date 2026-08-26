@@ -1363,6 +1363,70 @@ structure ConcreteStructuredValidatedLazyCallReadyOutcome
   validationAgrees :
     ConcreteStructuredValidationAgrees agrees frames.validation
 
+/-- Residual validation at the imported-call boundary.  The source has
+entered the named external and the target has evaluated its arguments, but
+the one host call and destination write are still pending. -/
+structure ConcreteStructuredValidatedExternalCallReadyOutcome
+    (program : Fir.LeanIR.ImpureProgram)
+    (context : Fir.Wasm.Context)
+    (functionCode : Lean.Compiler.LCNF.Code .impure)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts)
+    (externals : ExternalImpl)
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceValue : Value}
+    {stepCost : Nat}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    (site : PureExternalCallShape context externals sourceRuntime sourceEnv decl
+      nextRuntime sourceValue stepCost)
+    (operation : ExternalOperation)
+    (resolvedResultKind : AbiKind)
+    (targetImport : Wasm.ImportDecl)
+    (labels : LabelContext)
+    (continuation : Lean.Compiler.LCNF.Code .impure)
+    (callerJoins : JoinEnv)
+    (sourceFrames : List Frame)
+    (entryRuntime : RuntimeState)
+    (entryStore : Wasm.Store Host)
+    (entryWitness : RefinementWitness)
+    (functionResult : AbiKind)
+    (callerExpectedResult : Option AbiKind)
+    (facts : ReuseCapacityFacts)
+    (remainingBytes : Nat)
+    (targetStore : Wasm.Store Host)
+    (callerLocals : Wasm.Locals)
+    (callerRemainder : List Wasm.Value)
+    (targetRest : Wasm.Program)
+    (targetFrames : List StructuredWasmFrame)
+    (witness : RefinementWitness)
+    (physicalArgs : List Wasm.Value)
+    (callIndex resultIndex : Nat)
+    (source : MachineState)
+    (target : StructuredWasmState Host) : Prop where
+  activeResult : spec.sourceResultKind = functionResult
+  contextCaches :
+    context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program
+  core : ConcreteStructuredExternalCallReadyCoreRel program context
+    sourceModule sourceFunction targetModule hosts externals site operation
+    resolvedResultKind targetImport labels continuation callerJoins sourceFrames
+    entryRuntime entryStore entryWitness functionResult callerExpectedResult
+    facts remainingBytes targetStore callerLocals callerRemainder targetRest
+    targetFrames witness physicalArgs callIndex resultIndex source target
+  continuationValidation :
+    ConcreteStructuredAlignedValidationState program context functionResult
+      continuation
+  frames : ConcreteStructuredValidatedFrameStack program sourceModule
+    targetModule hosts functionResult callerExpectedResult sourceFrames
+    targetFrames
+  agrees : frames.supported.Agrees core.resources.suspended
+  validationAgrees :
+    ConcreteStructuredValidationAgrees agrees frames.validation
+
 /-- A closed post-call/pre-bind state.  The dynamic core retains the value
 that will be installed by `local.set`; the proof companion retains validation
 of that continuation and of the unchanged caller tail.  Lazy cache
@@ -1478,10 +1542,9 @@ hides the current generated function, entry anchor, resource budget, residual
 validator state, and compiler focus while retaining the proof that the active
 function's selected result ABI is the one validated at its root.
 
-The direct-ready constructor is the first administrative branch in this sum:
-it carries the caller continuation validation between staging and entry.
-Saturated, lazy, external, and yielded branches will join it as their matching
-transport lemmas are completed. -/
+The administrative constructors carry caller-continuation validation across
+direct, saturated, lazy-cache, and external staging boundaries; the returned
+branch retains the validated suspended stack needed by its next pop. -/
 inductive ConcreteStructuredValidatedCodeGlobalOutcome
     (program : Fir.LeanIR.ImpureProgram)
     (sourceModule : Fir.Wasm.Module)
@@ -1635,6 +1698,50 @@ inductive ConcreteStructuredValidatedCodeGlobalOutcome
         callerEnv continuation callerJoins sourceFrames targetStore callerLocals
         targetRest targetFrames witness cacheIndex declarationId cacheSetId
         resultIndex source target) :
+      ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
+        targetModule hosts externals source target
+  | externalReady
+      {context : Fir.Wasm.Context}
+      {functionCode : Lean.Compiler.LCNF.Code .impure}
+      {sourceFunction : Fir.Wasm.Function}
+      {spec : ConcreteSupportedFunction program context functionCode
+        sourceModule sourceFunction targetModule hosts}
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {sourceValue : Value}
+      {stepCost : Nat}
+      {decl : Lean.Compiler.LCNF.LetDecl .impure}
+      {site : PureExternalCallShape context externals sourceRuntime sourceEnv
+        decl nextRuntime sourceValue stepCost}
+      {operation : ExternalOperation}
+      {resolvedResultKind : AbiKind}
+      {targetImport : Wasm.ImportDecl}
+      {labels : LabelContext}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      {callerJoins : JoinEnv}
+      {sourceFrames : List Frame}
+      {entryRuntime : RuntimeState}
+      {entryStore targetStore : Wasm.Store Host}
+      {entryWitness witness : RefinementWitness}
+      {functionResult : AbiKind}
+      {callerExpectedResult : Option AbiKind}
+      {facts : ReuseCapacityFacts}
+      {remainingBytes : Nat}
+      {callerLocals : Wasm.Locals}
+      {callerRemainder : List Wasm.Value}
+      {targetRest : Wasm.Program}
+      {targetFrames : List StructuredWasmFrame}
+      {physicalArgs : List Wasm.Value}
+      {callIndex resultIndex : Nat}
+      {source : MachineState}
+      {target : StructuredWasmState Host}
+      (related : ConcreteStructuredValidatedExternalCallReadyOutcome program
+        context functionCode sourceModule sourceFunction targetModule hosts spec
+        externals site operation resolvedResultKind targetImport labels
+        continuation callerJoins sourceFrames entryRuntime entryStore
+        entryWitness functionResult callerExpectedResult facts remainingBytes
+        targetStore callerLocals callerRemainder targetRest targetFrames witness
+        physicalArgs callIndex resultIndex source target) :
       ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
         targetModule hosts externals source target
   | externalBind
@@ -1899,6 +2006,61 @@ theorem ConcreteStructuredValidatedLazyCallReadyOutcome.toSupportedOutcome
   .lazyReady related.path related.core related.contextCaches
     related.frames.supported related.agrees
 
+/-- Forget validation from a staged external call while retaining the exact
+dynamic host-call protocol and suspended resource stack. -/
+theorem ConcreteStructuredValidatedExternalCallReadyOutcome.toSupportedOutcome
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceValue : Value}
+    {stepCost : Nat}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {site : PureExternalCallShape context externals sourceRuntime sourceEnv decl
+      nextRuntime sourceValue stepCost}
+    {operation : ExternalOperation}
+    {resolvedResultKind : AbiKind}
+    {targetImport : Wasm.ImportDecl}
+    {labels : LabelContext}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {entryRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {callerLocals : Wasm.Locals}
+    {callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {physicalArgs : List Wasm.Value}
+    {callIndex resultIndex : Nat}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedExternalCallReadyOutcome program
+      context functionCode sourceModule sourceFunction targetModule hosts spec
+      externals site operation resolvedResultKind targetImport labels
+      continuation callerJoins sourceFrames entryRuntime entryStore
+      entryWitness functionResult callerExpectedResult facts remainingBytes
+      targetStore callerLocals callerRemainder targetRest targetFrames witness
+      physicalArgs callIndex resultIndex source target) :
+    ConcreteStructuredSupportedOutcome program context functionCode sourceModule
+      sourceFunction targetModule hosts spec externals labels entryRuntime
+      entryStore entryWitness functionResult callerExpectedResult source target :=
+  .externalReady related.core related.contextCaches related.frames.supported
+    related.agrees
+
 /-- Forget validation from a post-call/pre-bind state without changing the
 dynamic external-bind protocol. -/
 theorem ConcreteStructuredValidatedExternalBindOutcome.toSupportedOutcome
@@ -2055,6 +2217,8 @@ theorem ConcreteStructuredValidatedCodeGlobalOutcome.toSupportedGlobal
   | saturatedReady ready =>
       exact ready.toSupportedOutcome.toGlobal ready.activeResult
   | lazyReady ready =>
+      exact ready.toSupportedOutcome.toGlobal ready.activeResult
+  | externalReady ready =>
       exact ready.toSupportedOutcome.toGlobal ready.activeResult
   | externalBind bind =>
       exact bind.toSupportedOutcome.toGlobal bind.activeResult
@@ -2946,6 +3110,123 @@ private theorem LazyCacheCallSupported.resultCompiledForValidation
     Except.ok.inj (callEffective.symm.trans effective)
   subst kind
   exact resultCompiled
+
+/-- Recover the exact result ABI selected by an accepted external signature. -/
+private theorem externalSignatureResultKind
+    {types : Fir.Wasm.ExternalTypes}
+    {parameterKinds : Array AbiKind}
+    {kind : AbiKind}
+    (signature : Fir.Wasm.ExternalTypes.signature types =
+      .ok { params := parameterKinds, results := #[kind] }) :
+    Fir.Wasm.abiKind? types.result = .ok (some kind) := by
+  unfold Fir.Wasm.ExternalTypes.signature at signature
+  simp only [Bind.bind, Except.bind] at signature
+  split at signature
+  · simp_all
+  · cases result : Fir.Wasm.abiKind? types.result with
+    | error error =>
+        simp [Fir.Wasm.resultKinds, result, Bind.bind, Except.bind] at signature
+    | ok resultKind =>
+        cases resultKind with
+        | none =>
+            simp [Fir.Wasm.resultKinds, result, Bind.bind, Except.bind, pure,
+              Except.pure] at signature
+        | some actual =>
+            simp [Fir.Wasm.resultKinds, result, Bind.bind, Except.bind, pure,
+              Except.pure] at signature
+            exact congrArg (fun candidate =>
+              (.ok (some candidate) : Except Fir.Wasm.AbiError
+                (Option AbiKind))) signature.2
+
+/-- A named external declaration cannot acquire the strict internal-result
+refinement used for generated code; its executable and production result
+locals therefore agree at the declaration's exact public ABI kind. -/
+private theorem externalNamedResultCompiledForValidation
+    {context : Fir.Wasm.Context}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {name : Lean.Name}
+    {args : Array (Lean.Compiler.LCNF.Arg .impure)}
+    {target : Lean.Compiler.LCNF.Decl .impure}
+    {argumentKinds : Array AbiKind}
+    {resultKind : AbiKind}
+    (valueEq : decl.value = .fap name args)
+    (targetFound : context.program.findDecl? name = some target)
+    (targetExternal : ∃ metadata, target.value = .extern metadata)
+    (valueKind : Fir.Wasm.letValueKind decl = .ok resultKind)
+    (signature : Fir.Wasm.ExternalTypes.signature {
+        params := target.params.map (·.type)
+        result := target.type } =
+      .ok { params := argumentKinds, results := #[resultKind] })
+    (resultCompiled : Fir.Wasm.getLocal context decl.fvarId =
+      .ok (.localGet decl.fvarId, resultKind)) :
+    ∀ {locals kind},
+      Fir.Wasm.supportedLetDeclKind? context.program locals decl = some kind →
+        Fir.Wasm.getLocal context decl.fvarId =
+          .ok (.localGet decl.fvarId, kind) := by
+  intro locals kind supported
+  have effective := supportedLetDeclKind?_effectiveLetValueKind supported
+  obtain ⟨metadata, targetExternal⟩ := targetExternal
+  have targetResultKind :
+      Fir.Wasm.abiKind? target.type = .ok (some resultKind) :=
+    externalSignatureResultKind signature
+  have compatible : resultKind.leanCompatible resultKind = true := by
+    cases resultKind <;> decide
+  have callEffective :
+      Fir.Wasm.effectiveLetValueKind context.program decl =
+        .ok resultKind := by
+    unfold Fir.Wasm.effectiveLetValueKind
+    rw [valueKind, valueEq]
+    simp only [Bind.bind, Except.bind, pure, Except.pure]
+    rw [targetFound]
+    simp [Fir.Wasm.effectiveDeclarationResultKind?, targetResultKind,
+      targetExternal, compatible]
+  have kindEq : resultKind = kind :=
+    Except.ok.inj (callEffective.symm.trans effective)
+  subst kind
+  exact resultCompiled
+
+/-- The admitted pure-external result families share the same exact named-call
+destination theorem. -/
+private theorem PureExternalSupported.resultCompiledForValidation
+    {context : Fir.Wasm.Context}
+    {externals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceValue : Value}
+    {stepCost : Nat}
+    (supported : PureExternalSupported context externals sourceRuntime
+      sourceEnv decl continuation nextRuntime sourceValue stepCost) :
+    ∀ {locals kind},
+      Fir.Wasm.supportedLetDeclKind? context.program locals decl = some kind →
+        Fir.Wasm.getLocal context decl.fvarId =
+          .ok (.localGet decl.fvarId, kind) := by
+  rcases supported with integer | natural | scalar
+  · rcases integer with
+      ⟨name, args, _argumentCode, argumentKinds, _semanticArgs, target,
+        _value, valueEq, _operation, _nonempty, targetFound, targetExternal,
+        valueKind, _argumentsCompiled, _argumentsEvaluated, signature,
+        resultCompiled, _semanticCalled, _nextRuntimeEq, _sourceValueEq,
+        _stepCostEq⟩
+    exact externalNamedResultCompiledForValidation valueEq targetFound
+      targetExternal valueKind signature resultCompiled
+  · rcases natural with
+      ⟨name, args, _argumentCode, argumentKinds, _semanticArgs, target,
+        _value, valueEq, _operation, _nonempty, targetFound, targetExternal,
+        valueKind, _argumentsCompiled, _argumentsEvaluated, signature,
+        resultCompiled, _semanticCalled, _nextRuntimeEq, _sourceValueEq,
+        _stepCostEq⟩
+    exact externalNamedResultCompiledForValidation valueEq targetFound
+      targetExternal valueKind signature resultCompiled
+  · rcases scalar with
+      ⟨name, args, _argumentCode, argumentKinds, _semanticArgs, target,
+        _value, valueEq, _operation, _nonempty, targetFound, targetExternal,
+        valueKind, _argumentsCompiled, _argumentsEvaluated, signature,
+        resultCompiled, _semanticCalled, _nextRuntimeEq, _sourceValueEq,
+        _stepCostEq⟩
+    exact externalNamedResultCompiledForValidation valueEq targetFound
+      targetExternal valueKind signature resultCompiled
 
 /-- Any compiler/resource successor of a validated direct `let` continuation
 inherits the exact residual validator state, even when the concrete operation
@@ -3866,6 +4147,168 @@ theorem
   exact ⟨targetAfter, targetPath,
     ConcreteStructuredValidatedCodeGlobalOutcome.code calleeResultAt
       nextOutcome⟩
+
+/-- Stage an admitted pure external while retaining precisely the validation
+of its destination continuation and unchanged suspended caller stack.  Static
+ABI admission and dynamic allocation budget remain separate premises. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_pureExternal_stage
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime nextRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes stepCost : Nat}
+    {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceValue : Value}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.let decl continuation) targetStore targetLocals targetCode witness source
+      target)
+    (supported : PureExternalSupported context externals sourceRuntime sourceEnv
+      decl continuation nextRuntime sourceValue stepCost)
+    (budget : stepCost ≤ remainingBytes)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ (site : PureExternalCallShape context externals sourceRuntime sourceEnv
+        decl nextRuntime sourceValue stepCost)
+      (physicalArgs : List Wasm.Value) (operation : ExternalOperation)
+      (resolvedResultKind : AbiKind) (targetImport : Wasm.ImportDecl)
+      (callIndex resultIndex : Nat) (targetArguments targetRest : Wasm.Program)
+      (targetAfter : StructuredWasmState Host),
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetArguments.length target targetAfter ∧
+        ConcreteStructuredValidatedExternalCallReadyOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec
+          externals site operation resolvedResultKind targetImport labels
+          continuation source.joins source.frames entryRuntime entryStore
+          entryWitness functionResult callerExpectedResult facts remainingBytes
+          targetStore targetLocals targetLocals.values targetRest target.frames
+          witness physicalArgs callIndex resultIndex sourceAfter targetAfter ∧
+        compilerStructuredControlRank sourceAfter <
+          compilerStructuredControlRank source := by
+  have pointwise := related.toPointwise
+    (ConcreteStructuredCodeStepAdmission.pureExternal supported) budget
+  obtain ⟨site, physicalArgs, operation, resolvedResultKind, targetImport,
+      callIndex, resultIndex, targetArguments, targetRest, targetAfter,
+      targetPath, ready, rank⟩ :=
+    pointwise.advance_pureExternal_stage_of_step supported rfl sourceStep
+  have resultCompiled : ∀ {locals kind},
+      Fir.Wasm.supportedLetDeclKind? program locals decl = some kind →
+        Fir.Wasm.getLocal context decl.fvarId =
+          .ok (.localGet decl.fvarId, kind) := by
+    intro locals kind kindFound
+    apply supported.resultCompiledForValidation
+    simpa only [spec.contextProgram] using kindFound
+  obtain ⟨_kind, _locals, _kindFound, _resultCompiled,
+      continuationValidation⟩ :=
+    related.core.validation.letContinuation resultCompiled
+  exact ⟨site, physicalArgs, operation, resolvedResultKind, targetImport,
+    callIndex, resultIndex, targetArguments, targetRest, targetAfter,
+    targetPath,
+    ⟨activeResult, related.contextCaches, ready, continuationValidation,
+      related.frames, related.agrees, related.validationAgrees⟩,
+    rank⟩
+
+/-- Execute the one resolved host call and close at the already-validated
+common destination-bind boundary. -/
+theorem ConcreteStructuredValidatedExternalCallReadyOutcome.advance_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceValue : Value}
+    {stepCost : Nat}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {site : PureExternalCallShape context externals sourceRuntime sourceEnv decl
+      nextRuntime sourceValue stepCost}
+    {operation : ExternalOperation}
+    {resolvedResultKind : AbiKind}
+    {targetImport : Wasm.ImportDecl}
+    {labels : LabelContext}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {entryRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {callerLocals : Wasm.Locals}
+    {callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {physicalArgs : List Wasm.Value}
+    {callIndex resultIndex : Nat}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedExternalCallReadyOutcome program
+      context functionCode sourceModule sourceFunction targetModule hosts spec
+      externals site operation resolvedResultKind targetImport labels
+      continuation callerJoins sourceFrames entryRuntime entryStore
+      entryWitness functionResult callerExpectedResult facts remainingBytes
+      targetStore callerLocals callerRemainder targetRest targetFrames witness
+      physicalArgs callIndex resultIndex source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 1
+          target targetAfter ∧
+        ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
+          targetModule hosts externals sourceAfter targetAfter := by
+  obtain ⟨nextStore, nextWitness, physicalResult, targetAfter, targetPath,
+      bindCore⟩ :=
+    related.core.advance_of_step sourceStep
+  have nextAgrees :
+      related.frames.supported.Agrees bindCore.resources.suspended := by
+    simpa using related.agrees
+  have nextValidationAgrees :
+      ConcreteStructuredValidationAgrees nextAgrees
+        related.frames.validation := by
+    obtain ⟨spine, aligned⟩ := related.validationAgrees
+    exact ⟨spine, aligned⟩
+  let bindValidated :
+      ConcreteStructuredValidatedExternalBindOutcome program context
+        functionCode sourceModule sourceFunction targetModule hosts spec
+        externals labels entryRuntime entryStore entryWitness functionResult
+        callerExpectedResult facts (remainingBytes - stepCost) nextRuntime
+        sourceEnv sourceValue decl.fvarId continuation callerJoins sourceFrames
+        nextStore callerLocals callerRemainder targetRest targetFrames
+        nextWitness site.resultKind physicalResult resultIndex sourceAfter
+        targetAfter :=
+    ⟨related.activeResult, related.contextCaches, bindCore,
+      related.continuationValidation, related.frames, nextAgrees,
+      nextValidationAgrees⟩
+  exact ⟨targetAfter, targetPath,
+    ConcreteStructuredValidatedCodeGlobalOutcome.externalBind bindValidated⟩
 
 /-- A validated return enters the closed yielded branch.  Current-node
 admission supplies only the compiled result kind; the concrete theorem derives
