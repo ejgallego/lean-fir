@@ -16646,6 +16646,26 @@ theorem twoLocationLivePrefixControlReady :
         nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
         Impure.bind, lookup, live, resetObjectVar]
 
+/-- A historical target allocation need not be named by the current residual.
+This negative regression prevents the proof layer from claiming that direct
+live-binder coverage follows from an arbitrary allocated target frontier. -/
+theorem historicalTargetHeapHasNoDirectLivePrefix :
+    let target : MachineState := {
+      program := retainedPrefixReuseAfterProgram
+      control := .code (.return live)
+      env := nonemptyLedgerRetainedEnv
+      runtime := nonemptyLedgerSourceRuntime
+    }
+    ¬ ∃ binder, TargetLiveHeapPrefixControlAt binder target
+      (.return live) := by
+  dsimp
+  rintro ⟨binder, shape⟩
+  have bounded :
+      1 < nonemptyLedgerSourceRuntime.nextLocation := by
+    simp [nonemptyLedgerSourceRuntime, nonemptyLedgerPairedRuntime, alloc]
+  have read := shape.targetRead 1 bounded
+  simp [nonemptyLedgerRetainedEnv, Impure.bind, lookup, live] at read
+
 theorem retainedPrefixReuseBeforeSourceRuntimeReadyAt
     (state : MachineState) (sourceFrameRoots : List Value) :
     SourceRuntimeOwnershipReadyAt 6 state sourceFrameRoots
@@ -16959,15 +16979,16 @@ theorem retainedPrefixReuseSourceLocalReadinessPlan
     (retainedPrefixReuseSourceOuterPlan externals arguments) step
 
 /-- Every node in the local source plan is ledger-ready. Ordinary nodes use
-their target-independent machine certificate; a special node exposes one
-generic operation package and the arbitrary live-prefix control interface
-discharges its exact target-ledger premise. -/
+their target-independent machine certificate. At a special node the target
+path reconstructs the allocation/control phase automatically, so callers no
+longer maintain a separate target-state automaton alongside reachability. -/
 theorem retainedPrefixReuseSourcePlan_pairReady_ledger
     (sourcePlan : SourceLocalReadinessPlan externals
       (SourceRuntimeOwnershipMachineReadyAt 6)
       RetainedPrefixReuseLedgerOperationReadyAt source)
-    (targetInvariant :
-      RetainedPrefixReuseTargetAllocationControlInvariant target)
+    (targetPath : NonLockstep.Reaches externals
+      (initialState retainedPrefixReuseAfterProgram `main targetArguments)
+      target)
     (related :
     SomeLedgerBinderReadyReachableMachineRelated 6 source target) :
     LedgerBinderReadyReachableMachineReadyAt 6 source target := by
@@ -16977,6 +16998,11 @@ theorem retainedPrefixReuseSourcePlan_pairReady_ledger
         sourceReady
   | special specialReady _next =>
       rcases specialReady with ⟨readiness⟩
+      have targetInvariant :
+          RetainedPrefixReuseTargetAllocationControlInvariant target :=
+        targetPath.invariant
+          (.entry targetArguments)
+          retainedPrefixReuseTargetAllocationControlInvariant_step
       have targetShape :
           TargetLiveHeapPrefixControlAt (fun _ => live) target
             (.return live) :=
@@ -16993,8 +17019,9 @@ theorem retainedPrefixReuseSourcePlan_pairReady_sourceOwnedLedger
     (sourcePlan : SourceLocalReadinessPlan externals
       (SourceRuntimeOwnershipMachineReadyAt 6)
       RetainedPrefixReuseLedgerOperationReadyAt source)
-    (targetInvariant :
-      RetainedPrefixReuseTargetAllocationControlInvariant target)
+    (targetPath : NonLockstep.Reaches externals
+      (initialState retainedPrefixReuseAfterProgram `main targetArguments)
+      target)
     (sourceOwnership :
       SourceMachineOwnershipBelowFrontier source)
     (related :
@@ -17006,6 +17033,11 @@ theorem retainedPrefixReuseSourcePlan_pairReady_sourceOwnedLedger
         sourceReady
   | special specialReady _next =>
       rcases specialReady with ⟨readiness⟩
+      have targetInvariant :
+          RetainedPrefixReuseTargetAllocationControlInvariant target :=
+        targetPath.invariant
+          (.entry targetArguments)
+          retainedPrefixReuseTargetAllocationControlInvariant_step
       have targetShape :
           TargetLiveHeapPrefixControlAt (fun _ => live) target
             (.return live) :=
@@ -17016,17 +17048,11 @@ theorem retainedPrefixReuseSourcePlan_pairReady_sourceOwnedLedger
         targetShape (by intro targetContinuation; simp)
         sourceOwnership related
 
-theorem retainedPrefixReuseTargetAllocationControlInvariant_of_reaches
-    (path : NonLockstep.Reaches externals
-      (initialState retainedPrefixReuseAfterProgram `main arguments)
-      state) :
-    RetainedPrefixReuseTargetAllocationControlInvariant state := by
-  exact path.invariant
-    (.entry arguments)
-    retainedPrefixReuseTargetAllocationControlInvariant_step
-
 /-- Checked whole-program client of the ledger-exact ownership endpoint with
-a genuinely nonempty target owner table at reset and reuse. -/
+a genuinely nonempty target owner table at reset and reuse. The rectangular
+invariant stores the canonical target execution path, not a duplicate target
+phase machine; the focused phase facts are derived only when a special source
+node requests them. -/
 def retainedPrefixReuseLedgerExactOwnershipContract
     (externals : ExternalSpec) :
     ElimDeadLedgerExactOwnershipContract externals 6
@@ -17036,37 +17062,38 @@ def retainedPrefixReuseLedgerExactOwnershipContract
     SourceLocalReadinessPlan externals
         (SourceRuntimeOwnershipMachineReadyAt 6)
         RetainedPrefixReuseLedgerOperationReadyAt source ∧
-      RetainedPrefixReuseTargetAllocationControlInvariant target
+      NonLockstep.Reaches externals
+        (initialState retainedPrefixReuseAfterProgram `main targetArguments)
+        target
   initial := by
     intro entry member sourceArguments targetArguments _argumentsRelated
     have entryEq : entry = `main := by
       simpa using member
     subst entry
     exact ⟨retainedPrefixReuseSourceLocalReadinessPlan
-      externals sourceArguments, .entry targetArguments⟩
+      externals sourceArguments,
+      NonLockstep.reaches_refl _⟩
   sourcePreserved := by
     rintro entry sourceArguments targetArguments
       sourceBefore sourceAfter targetState
-      ⟨sourcePlan, targetInvariant⟩ step
-    exact ⟨sourcePlan.step step, targetInvariant⟩
+      ⟨sourcePlan, targetPath⟩ step
+    exact ⟨sourcePlan.step step, targetPath⟩
   targetPreserved := by
     rintro entry sourceArguments targetArguments
       sourceState targetBefore targetAfter
-      ⟨sourcePlan, targetInvariant⟩ step
+      ⟨sourcePlan, targetPath⟩ step
     exact ⟨sourcePlan,
-      retainedPrefixReuseTargetAllocationControlInvariant_step
-        targetInvariant step⟩
+      targetPath.trans (NonLockstep.reaches_of_step step)⟩
   ready := by
     rintro entry sourceArguments targetArguments source target
-      ⟨sourcePlan, targetInvariant⟩ related
+      ⟨sourcePlan, targetPath⟩ related
     exact retainedPrefixReuseSourcePlan_pairReady_ledger
-      sourcePlan targetInvariant related
+      sourcePlan targetPath related
 
 /-- Combined source-owned/ledger-exact contract for the same nonempty-prefix
-program.  The source still carries its operational reachability proof, while
-the target is tracked only by the step-preserved allocation/control
-invariant; reset readiness also consumes the separately maintained source
-carrier. -/
+program. The source carries its local readiness plan and the target carries
+only its canonical execution path; reset readiness also consumes the
+separately maintained source carrier. -/
 def retainedPrefixReuseSourceOwnedLedgerExactContract
     (externals : ExternalSpec) :
     ElimDeadSourceOwnedLedgerExactContract externals 6
@@ -17081,9 +17108,9 @@ def retainedPrefixReuseSourceOwnedLedgerExactContract
     ready := ?_
   }
   rintro entry sourceArguments targetArguments source target
-    ⟨sourcePlan, targetInvariant⟩ sourceOwnership related
+    ⟨sourcePlan, targetPath⟩ sourceOwnership related
   exact retainedPrefixReuseSourcePlan_pairReady_sourceOwnedLedger
-    sourcePlan targetInvariant sourceOwnership related
+    sourcePlan targetPath sourceOwnership related
 
 theorem retainedPrefixReuseBeforeProgramElimDeadWellFormed :
     ProgramElimDeadWellFormed retainedPrefixReuseBeforeProgram := by

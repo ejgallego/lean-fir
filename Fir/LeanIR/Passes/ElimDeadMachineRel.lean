@@ -20212,6 +20212,109 @@ than a constructor naming a particular whole-program state. -/
 def DeletedLedgerLetLocalReady (state : MachineState) : Prop :=
   Nonempty (DeletedLedgerLetLocalReadyAt state)
 
+/-- A structural compiler pair whose exact target ledger already certifies
+one selected source location as source-only. Unlike live-prefix evidence,
+this carrier remains meaningful when the target heap contains historical,
+currently unreachable allocations with no residual-code binder. -/
+def SourceOnlyLedgerBinderReadyReachableMachineRelatedAt
+    (fuel : Nat) (source target : MachineState)
+    (location : Location) : Prop :=
+  ∃ rho,
+    ∃ ledger : TargetAllocationLedger rho target.runtime.nextLocation,
+      SourceOnlyUnderTargetLedger ledger location ∧
+        BinderReadyReachableMachineRelated fuel rho source target
+
+/-- Forget the selected source-only capability while retaining its exact
+ledger and hereditary compiler relation. -/
+theorem SourceOnlyLedgerBinderReadyReachableMachineRelatedAt.related
+    (related : SourceOnlyLedgerBinderReadyReachableMachineRelatedAt
+      fuel source target location) :
+    SomeLedgerBinderReadyReachableMachineRelated fuel source target := by
+  rcases related with ⟨rho, ledger, _sourceOnly, structural⟩
+  exact ⟨rho, ledger, structural⟩
+
+/-- A deleted operation becomes ledger-ready directly from an aligned
+source-only capability. This is the historical-heap-safe bridge: it requires
+no binder for unrelated target allocations, only the exact compiler decision
+that the current declaration was deleted. -/
+theorem DeletedLedgerLetLocalReadyAt.ledgerMachineReadyAt_of_sourceOnly
+    (operation : DeletedLedgerLetLocalReadyAt source)
+    (targetControl : target.control = .code targetCode)
+    (targetNotSame : ∀ targetContinuation,
+      targetCode ≠ .let operation.declaration targetContinuation)
+    (related : SourceOnlyLedgerBinderReadyReachableMachineRelatedAt
+      fuel source target operation.location) :
+    LedgerBinderReadyReachableMachineReadyAt fuel source target := by
+  rcases related with
+    ⟨rho, ledger, sourceOnly, sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots,
+      programs, control, frames, runtime⟩
+  rw [operation.control] at control
+  rw [targetControl] at control
+  cases control with
+  | code graph joins env =>
+      rename_i used
+      have removed :
+          DeletedLetReadyAt source
+            (runtimeRoots source.runtime
+              (envRootsOn used source.env ++ sourceFrameRoots))
+            operation.declaration :=
+        operation.deletedReady runtime ledger sourceOnly
+      rcases graph with
+        ⟨remaining, final, bounded, exact, subset, static⟩
+      have decision : exact.view.runtimeDecision = .deletedLet :=
+        exact.view.runtimeDecision_eq_deletedLet_of_target_not_same_let
+          targetNotSame
+      refine ⟨rho, _, _, sourceFrameRoots, targetFrameRoots,
+        ledger, programs, ?_, frames, runtime⟩
+      simpa only [operation.control, targetControl] using
+        (BinderReadyReachableControlReadyAt.code
+          ⟨remaining, final, bounded, exact, subset, static,
+            ExactShadowCodeRuntimeReadyAt.letDeleted
+              decision removed⟩
+          joins env)
+
+/-- Source-owned form of the aligned source-only bridge. -/
+theorem
+    DeletedLedgerLetLocalReadyAt.ledgerMachineReadyAt_of_sourceOnly_withOwnership
+    (operation : DeletedLedgerLetLocalReadyAt source)
+    (targetControl : target.control = .code targetCode)
+    (targetNotSame : ∀ targetContinuation,
+      targetCode ≠ .let operation.declaration targetContinuation)
+    (sourceOwnership : SourceMachineOwnershipBelowFrontier source)
+    (related : SourceOnlyLedgerBinderReadyReachableMachineRelatedAt
+      fuel source target operation.location) :
+    LedgerBinderReadyReachableMachineReadyAt fuel source target := by
+  rcases related with
+    ⟨rho, ledger, sourceOnly, sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots,
+      programs, control, frames, runtime⟩
+  rw [operation.control] at control
+  rw [targetControl] at control
+  cases control with
+  | code graph joins env =>
+      rename_i used
+      have removed :
+          DeletedLetReadyAt source
+            (runtimeRoots source.runtime
+              (envRootsOn used source.env ++ sourceFrameRoots))
+            operation.declaration :=
+        operation.deletedReadyWithOwnership runtime ledger
+          sourceOwnership sourceOnly
+      rcases graph with
+        ⟨remaining, final, bounded, exact, subset, static⟩
+      have decision : exact.view.runtimeDecision = .deletedLet :=
+        exact.view.runtimeDecision_eq_deletedLet_of_target_not_same_let
+          targetNotSame
+      refine ⟨rho, _, _, sourceFrameRoots, targetFrameRoots,
+        ledger, programs, ?_, frames, runtime⟩
+      simpa only [operation.control, targetControl] using
+        (BinderReadyReachableControlReadyAt.code
+          ⟨remaining, final, bounded, exact, subset, static,
+            ExactShadowCodeRuntimeReadyAt.letDeleted
+              decision removed⟩
+          joins env)
+
 /-- Target-side prefix evidence for one generic deleted-ledger operation.
 The active target code and proof-relevant binding map are existential because
 `CodeCovered` is proposition-valued; keeping this interface in `Prop` avoids
@@ -20391,6 +20494,47 @@ theorem DeletedLedgerLiveHeapPrefixOperationAt.targetPrefix
   intro rightLocation _bounded
   exact readiness.ownerNe rightLocation
 
+/-- A live-prefix certificate is one producer of the aligned source-only
+carrier. Keeping this conversion explicit makes the generic deleted-operation
+bridge independent of how provenance was established; future clients may
+instead transport the capability from the original one-sided allocation. -/
+theorem DeletedLedgerLiveHeapPrefixOperationAt.sourceOnlyRelated
+    (readiness : DeletedLedgerLiveHeapPrefixOperationAt
+      source binder sourceOwner)
+    (targetShape : TargetLiveHeapPrefixControlAt binder target targetCode)
+    (targetNotSame : ∀ targetContinuation,
+      targetCode ≠ .let readiness.operation.declaration targetContinuation)
+    (related : SomeLedgerBinderReadyReachableMachineRelated
+      fuel source target) :
+    SourceOnlyLedgerBinderReadyReachableMachineRelatedAt
+      fuel source target readiness.operation.location := by
+  have targetPrefix := readiness.targetPrefix targetShape targetNotSame
+  rcases targetPrefix with
+    ⟨prefixCode, targetControl, targetBindings, _targetNotSame⟩
+  rcases related with
+    ⟨rho, ledger, sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots,
+      programs, control, frames, runtime⟩
+  rw [readiness.operation.control] at control
+  rw [targetControl] at control
+  cases control with
+  | code graph joins env =>
+      rename_i used
+      have covered : CodeCovered used prefixCode :=
+        graph.toShadowCodeGraph.covered
+      rcases targetBindings covered with ⟨bindings, different⟩
+      have sourceOnly :
+          SourceOnlyUnderTargetLedger ledger
+            readiness.operation.location :=
+        bindings.sourceOnly_of_owners_ne env different ledger
+      have structural :
+          BinderReadyReachableMachineRelated fuel rho source target := by
+        refine ⟨_, _, sourceFrameRoots, targetFrameRoots,
+          programs, ?_, frames, runtime⟩
+        simpa only [readiness.operation.control, targetControl] using
+          (BinderReadyReachableControlRelated.code graph joins env)
+      exact ⟨rho, ledger, sourceOnly, structural⟩
+
 /-- Generic arbitrary-prefix specialization of ledger operation readiness. -/
 theorem DeletedLedgerLiveHeapPrefixOperationAt.ledgerMachineReadyAt
     (readiness : DeletedLedgerLiveHeapPrefixOperationAt
@@ -20400,9 +20544,10 @@ theorem DeletedLedgerLiveHeapPrefixOperationAt.ledgerMachineReadyAt
       targetCode ≠ .let readiness.operation.declaration targetContinuation)
     (related : SomeLedgerBinderReadyReachableMachineRelated
       fuel source target) :
-    LedgerBinderReadyReachableMachineReadyAt fuel source target :=
-  readiness.operation.ledgerMachineReadyAt
-    (readiness.targetPrefix targetShape targetNotSame) related
+    LedgerBinderReadyReachableMachineReadyAt fuel source target := by
+  exact readiness.operation.ledgerMachineReadyAt_of_sourceOnly
+    targetShape.control targetNotSame
+    (readiness.sourceOnlyRelated targetShape targetNotSame related)
 
 /-- Source-owned arbitrary-prefix specialization. -/
 theorem DeletedLedgerLiveHeapPrefixOperationAt.ledgerMachineReadyAt_withOwnership
@@ -20414,10 +20559,10 @@ theorem DeletedLedgerLiveHeapPrefixOperationAt.ledgerMachineReadyAt_withOwnershi
     (sourceOwnership : SourceMachineOwnershipBelowFrontier source)
     (related : SomeLedgerBinderReadyReachableMachineRelated
       fuel source target) :
-    LedgerBinderReadyReachableMachineReadyAt fuel source target :=
-  readiness.operation.ledgerMachineReadyAt_withOwnership
-    (readiness.targetPrefix targetShape targetNotSame)
-    sourceOwnership related
+    LedgerBinderReadyReachableMachineReadyAt fuel source target := by
+  exact readiness.operation.ledgerMachineReadyAt_of_sourceOnly_withOwnership
+    targetShape.control targetNotSame sourceOwnership
+    (readiness.sourceOnlyRelated targetShape targetNotSame related)
 
 /-- Hereditary source-execution certificate parameterized by two local
 readiness interfaces. Ordinary states carry a target-independent source
