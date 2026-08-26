@@ -20470,6 +20470,75 @@ theorem
     sourceFrameRoots, targetFrameRoots,
     programs, control, frames, provenance.runtime.runtime⟩
 
+/-- A source-only deleted let preserves an already allocated source-only
+location whenever its source evaluation does not move the allocation frontier
+backwards.  The target stutters, so its owner ledger is reused exactly. -/
+theorem coreStep_deletedLet_binderReadyReachableRelated_withAllocatedSourceOnly
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains declaration.fvarId = false)
+    (provenance : AllocatedSourceOnlyLedgerShadowRuntimeRelAt rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots) location)
+    (evaluated : evalLetValue sourceState declaration =
+      .ok (nextRuntime, .value value))
+    (runtime : ShadowRuntimeRel rho nextRuntime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (sourceFrontier :
+      sourceState.runtime.nextLocation ≤ nextRuntime.nextLocation) :
+    let sourceAfter := {
+      sourceState with
+      runtime := nextRuntime
+      env := bind sourceState.env declaration.fvarId value
+      control := .code sourceContinuation }
+    let targetAfter := {
+      targetState with control := .code targetContinuation }
+    coreStep { sourceState with
+        control := .code (.let declaration sourceContinuation) } =
+        .next sourceAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      AllocatedSourceOnlyLedgerBinderReadyReachableMachineRelatedAt
+        fuel sourceAfter targetAfter location := by
+  dsimp only
+  let nextLedger : LedgerShadowRuntimeRel rho
+      nextRuntime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots) := {
+    runtime := runtime
+    ledger := provenance.runtime.ledger
+  }
+  let nextProvenance := provenance.sameTargetFrontierExtension
+    nextLedger (RenamingExtends.refl rho) rfl sourceFrontier
+  rcases coreStep_deletedLet_binderReadyReachableRelated
+      sourceState targetState programs frames continuation joins env absent
+      evaluated runtime with
+    ⟨transition, afterRelated⟩
+  refine ⟨transition, ⟨provenance.runtime.ledger, afterRelated⟩, ?_⟩
+  have alignedProvenance :
+      AllocatedSourceOnlyLedgerShadowRuntimeRelAt rho
+        nextRuntime targetState.runtime
+        (envRootsOn used
+            (bind sourceState.env declaration.fvarId value) ++
+          sourceFrameRoots)
+        (envRootsOn used targetState.env ++ targetFrameRoots)
+        location := by
+    simpa [envRootsOn_bind_of_absent absent] using nextProvenance
+  exact alignedProvenance.binderReadyMachineRelated
+    programs
+    (.code continuation joins (env.bindLeft_of_absent absent))
+    frames
+
 /-- A deleted operation becomes ledger-ready directly from an aligned
 source-only capability. This is the historical-heap-safe bridge: it requires
 no binder for unrelated target allocations, only the exact compiler decision
@@ -24034,6 +24103,63 @@ theorem coreStep_deletedCtor_of_ready_binderReady_ledger_withAllocatedSourceOnly
       programs
       (.code continuation joins (env.bindLeft_of_absent absent))
       frames
+
+/-- Semantic-step counterpart of the deleted-constructor allocation
+provenance theorem. Determinism aligns the exhibited source step with the
+fresh source allocation while the target stutters, retaining the exact heap
+address capability for later reset and reuse. -/
+theorem match_deletedCtorLetStep_binderReady_ledger_withAllocatedSourceOnly
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedCtorReadyAt sourceState info arguments)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .ctor info arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ nextRuntime value,
+      let sourceExpected := {
+        sourceState with
+        runtime := nextRuntime
+        env := bind sourceState.env fvarId value
+        control := .code sourceContinuation }
+      let targetAfter := {
+        targetState with control := .code targetContinuation }
+      sourceAfter = sourceExpected ∧
+        NonLockstep.Reaches externals targetAfter targetAfter ∧
+        LedgerBinderReadyReachableMachineRelated fuel rho
+          sourceAfter targetAfter ∧
+        ∀ location, value = .object (.heap location) →
+          AllocatedSourceOnlyLedgerBinderReadyReachableMachineRelatedAt
+            fuel sourceAfter targetAfter location := by
+  dsimp only
+  rcases coreStep_deletedCtor_of_ready_binderReady_ledger_withAllocatedSourceOnly
+      sourceState targetState programs frames continuation joins env absent
+      runtime ready with
+    ⟨nextRuntime, value, transition, afterRelated, provenance⟩
+  cases step with
+  | internal actual =>
+      rw [transition] at actual
+      cases actual
+      exact ⟨nextRuntime, value, rfl, NonLockstep.reaches_refl _,
+        afterRelated, provenance⟩
+  | external actual externalProof =>
+      rw [transition] at actual
+      contradiction
 
 /-- Ledger-carrying hereditary deleted-constructor matcher. The target
 stutters, so its allocation frontier and incoming owner ledger are unchanged
