@@ -11,17 +11,17 @@ owner: wasm-gen
 branch: wasm/generation
 worktree: .worktrees/wasm-generation
 state: ready
-base: 0c37e6d3902cf63c5baf2c81d2b54f8807897e24, accepted validated-effect checkpoint immediately below the atomic USize stack
+base: 0e836ad5c4f636f2a2cd2fda41c4472427079bc6, accepted main containing heap-only USize convergence, sampled-profile contract v1, and the integration-lease handoff to fir/root
 functional-head: 9c896a1d2ba7b9559040ef9a0fab6a8d61cdc273
 contract-base: 1db0b79d4b1607ee311432a27b5460853300399a; consumes the isolated heap-only USize semantic contract while retaining the existing semantic ABI signature, scalar-box layout, allocator, marker, and ownership contract
 clean-at-update: true
-slice: Internalizes heap-only `USize` box/unbox through the generic resident scalar-box layer. Every payload allocates the existing 40-byte owned object with marker 5, width 8, zero reserved lanes, reference count 1, and non-persistent ownership; tagged USize unboxing traps. The linked stack also contains the source semantics and fixtures, LCNF ElimDead adaptation, and W6 concrete refinement.
-files: Fir/Wasm/Emit/ResidentScalarBox.lean; Fir/Wasm/Emit/ScalarBoxingExamples.lean; integration/talos/artifact/README.md; integration/talos/artifact/resident-scalar-box-client.mjs; coordination/lanes/wasm-gen.md
-contracts: aligns the executable helper with the accepted heap-only USize contract. No semantic ABI signature, helper signature, concrete layout constant, allocator, marker, ownership rule, symbolic Wasm surface, public export, or unrelated scalar policy changes.
-checks: Lean Beam and focused generation checks passed on the functional slice. The combined exact checkpoint passed git diff --check, the focused LCNF and W6 cones, make check with 721 source cases plus 9 direct-machine cases, 730 unique cases, and 2172/2172 comparisons equal, all 3174 Talos jobs, and bash integration/talos/artifact/check.sh including deterministic package publication, resident helpers, native/LCNF/V8 differentials, and concrete execution.
-evidence: the seven-family source boxing ratchet now closes with zero imports and zero residual runtime operations. Small USize 42 and the maximum payload both allocate and round-trip through the exact owned heap representation; physical tagged USize input is rejected.
+slice: W7-1 is resumed at a clean generation checkpoint after relinquishing the dynamic integration lease. The last functional slice internalizes heap-only USize box/unbox through the generic resident scalar-box layer; every payload allocates the existing 40-byte owned object and tagged USize unboxing traps. No new generator/runtime change is active. The current canonical catalog already covers prettyM, retained Illuminate player and query packages, Verso Flat/HTML, and zero-import lean-zip.
+files: coordination/lanes/wasm-gen.md only for this status refresh; the last functional files remain Fir/Wasm/Emit/ResidentScalarBox.lean, Fir/Wasm/Emit/ScalarBoxingExamples.lean, integration/talos/artifact/README.md, and integration/talos/artifact/resident-scalar-box-client.mjs
+contracts: no new shared contract. The accepted heap-only USize semantic ABI, helper signatures, concrete layout, allocator, markers, ownership rules, symbolic Wasm surface, public exports, and unrelated scalar policies remain unchanged.
+checks: the accepted functional stack passed Lean Beam, focused LCNF/W6 cones, make check with 730 unique cases and 2172/2172 comparisons, all 3174 Talos jobs, and the complete deterministic artifact/concrete/V8 gate. The subsequent rebase adds only accepted tooling and coordination commits; this status refresh passes git diff --check and mailbox validation.
+evidence: the seven-family source boxing ratchet is closed with zero imports and zero residual runtime operations. Roadmap audit finds no real-source closure currently blocked on a missing W7 runtime family. Generation-ready caller/release items already have independent W6 proof requests; bounded Nat.land and USize range-fact successors belong to W7-2; check-throughput belongs to tooling.
 bug-cards: FIR-BUG-impure-none-usize-box-tagged fixed
-blockers: none for the landed heap-only USize stack.
-handoff: W7 functional head 9c896a1d is linked with LCNF proof head d78d128c and W6 functional head 0360367a through exact clean checkpoint de7c03ab on main.
-next: Rebase wasm/generation on accepted main, then review the two already-claimed bounded Nat.land and USize tagged-Nat range-fact candidates independently. Tooling profile-contract v1 is next in the integration queue after its required post-USize rebase.
+blockers: none in the compiler. Shared SOURCE_PACKAGE publication remains intentionally deferred until Illuminate completes the third consumer review; no client has supplied a new unsupported source closure.
+handoff: W7-1 is clean on accepted main 0e836ad5. Integration is owned by fir/root; W7-1 will not land W7-2, tooling, W6, or LCNF checkpoints.
+next: Stay checkpointed until either Illuminate returns the SOURCE_PACKAGE review or a real source closure exposes a missing generic compiler/runtime capability. Do not preemptively implement fail-closed FloatArray/DataArray/DOM/callback or other unused families, and do not overlap W7-2's Nat.land/USize fact work.
 ```
