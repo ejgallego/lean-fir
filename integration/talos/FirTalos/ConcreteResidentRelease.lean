@@ -1640,6 +1640,271 @@ def checkedNoopProgram : Wasm.Program := [
   .localGet checkIndex,
   .iff 0 0 [.ret] [.unreachable]]
 
+/-- Exact Talos spelling of W7's caller-local checked decrement gate.  Tagged
+words and zero fall through locally; only a nonzero untagged word calls the
+stable recursive decrement helper. -/
+def checkedDecrementLocalProgram
+    (valueIndex decrementIndex : Nat) : Wasm.Program := [
+  .localGet valueIndex,
+  .const 1,
+  .and,
+  .iff 0 0 [] [
+    .localGet valueIndex,
+    .const 0,
+    .eq,
+    .iff 0 0 [] [
+      .localGet valueIndex,
+      .const 1,
+      .call decrementIndex]]]
+
+/-- The public caller-local gate adapts exactly for any production local.
+This is the single syntactic bridge shared by the Array, ByteArray, Nat, and
+String resident call sites. -/
+theorem instructions_checkedDecrementLocal
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {value : Lean.FVarId} {valueIndex decrementIndex : Nat}
+    (valueFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) value =
+        some valueIndex)
+    (decrementFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentRelease.decrementOnceName) =
+        some decrementIndex) :
+    FirTalos.instructions sourceModule sourceFunction labels
+      (Fir.Wasm.Emit.ResidentRelease.checkedDecrementLocal value) =
+        .ok (checkedDecrementLocalProgram valueIndex decrementIndex) := by
+  have sourceShape :
+      Fir.Wasm.Emit.ResidentRelease.checkedDecrementLocal value = [
+        .localGet value,
+        .i32Const .uint32 1,
+        .i32And,
+        .ifElse [] [
+          .localGet value,
+          .i32Const .tobject 0,
+          .i32Eq,
+          .ifElse [] [
+            .localGet value,
+            .i32Const .uint32 1,
+            .call (.declaration
+              Fir.Wasm.Emit.ResidentRelease.decrementOnceName)]]] := by
+    rfl
+  rw [sourceShape]
+  simp [checkedDecrementLocalProgram, FirTalos.instructions,
+    FirTalos.instruction, valueFound, decrementFound, Bind.bind, Except.bind,
+    pure, Except.pure]
+
+/-- A tagged word is rejected by the caller-local heap test and falls through
+without entering `fir_dec_once` or touching memory. -/
+theorem wp_checkedDecrementLocalProgram_tagged
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {locals : Wasm.Locals} {valueIndex decrementIndex : Nat}
+    {word : UInt32}
+    (valueFound : locals.get valueIndex = some (.i32 word))
+    (tagged : (1 : UInt32) &&& word ≠ 0)
+    (continued : Q (.Fallthrough store locals)) :
+    Wasm.wp module
+      (checkedDecrementLocalProgram valueIndex decrementIndex)
+      Q store locals env := by
+  have valueFound' (values : List Wasm.Value) :
+      ({ locals with values } : Wasm.Locals).get valueIndex =
+        some (.i32 word) := by
+    simpa using valueFound
+  unfold checkedDecrementLocalProgram
+  simp only [Wasm.wp_localGet_cons, valueFound', Wasm.wp_const_cons,
+    Wasm.wp_and_cons]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_pos tagged]
+  simpa only [Wasm.wp_nil, List.take_zero, List.drop_zero, List.nil_append]
+    using continued
+
+/-- Physical zero takes the second caller-local no-op gate.  This is the
+erased-value case and likewise leaves the store, locals, and operand stack
+unchanged. -/
+theorem wp_checkedDecrementLocalProgram_sentinel
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {locals : Wasm.Locals} {valueIndex decrementIndex : Nat}
+    (valueFound : locals.get valueIndex = some (.i32 0))
+    (continued : Q (.Fallthrough store locals)) :
+    Wasm.wp module
+      (checkedDecrementLocalProgram valueIndex decrementIndex)
+      Q store locals env := by
+  have valueFound' (values : List Wasm.Value) :
+      ({ locals with values } : Wasm.Locals).get valueIndex =
+        some (.i32 0) := by
+    simpa using valueFound
+  unfold checkedDecrementLocalProgram
+  simp only [Wasm.wp_localGet_cons, valueFound', Wasm.wp_const_cons,
+    Wasm.wp_and_cons]
+  rw [show (1 : UInt32) &&& 0 = 0 by decide]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_localGet_cons, valueFound', Wasm.wp_const_cons, Wasm.wp_eq_cons,
+    if_true]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_pos (by decide : (1 : UInt32) ≠ 0)]
+  simpa only [Wasm.wp_nil, List.take_zero, List.drop_zero, List.nil_append]
+    using continued
+
+/-- A nonzero untagged word reaches exactly one checked helper call.  The
+caller-local proof is parameterized by that call's public `TerminatesWith`
+theorem, so it reuses `fir_dec_once` rather than duplicating its body proof. -/
+theorem wp_checkedDecrementLocalProgram_heap
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {locals : Wasm.Locals} {valueIndex decrementIndex : Nat}
+    {word : UInt32}
+    (valueFound : locals.get valueIndex = some (.i32 word))
+    (taggedClear : (1 : UInt32) &&& word = 0)
+    (nonzero : word ≠ 0)
+    (callRun : Wasm.TerminatesWith env module decrementIndex store
+      ([.i32 1, .i32 word] ++ locals.values)
+      (fun final _ =>
+        Q (.Fallthrough final { locals with values := locals.values }))) :
+    Wasm.wp module
+      (checkedDecrementLocalProgram valueIndex decrementIndex)
+      Q store locals env := by
+  have valueFound' (values : List Wasm.Value) :
+      ({ locals with values } : Wasm.Locals).get valueIndex =
+        some (.i32 word) := by
+    simpa using valueFound
+  unfold checkedDecrementLocalProgram
+  simp only [Wasm.wp_localGet_cons, valueFound', Wasm.wp_const_cons,
+    Wasm.wp_and_cons]
+  rw [taggedClear]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_localGet_cons, valueFound', Wasm.wp_const_cons, Wasm.wp_eq_cons,
+    if_neg nonzero]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_localGet_cons, valueFound', Wasm.wp_const_cons]
+  apply Wasm.wp_call_tw callRun
+  intro final values completed
+  simpa only [Wasm.wp_nil, List.take_zero, List.drop_zero, List.nil_append]
+    using completed
+
+/-- Heap classification supplies both physical admission facts required by
+the caller gate.  Consumers can therefore work with `Word32.classify` rather
+than repeat low-bit and nonzero arithmetic. -/
+theorem wp_checkedDecrementLocalProgram_classifiedHeap
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {locals : Wasm.Locals} {valueIndex decrementIndex : Nat}
+    {word : Word32}
+    (valueFound : locals.get valueIndex =
+      some (.i32 (UInt32.ofNat word.value)))
+    (heap : word.classify = .heap)
+    (callRun : Wasm.TerminatesWith env module decrementIndex store
+      ([.i32 1, .i32 (UInt32.ofNat word.value)] ++ locals.values)
+      (fun final _ =>
+        Q (.Fallthrough final { locals with values := locals.values }))) :
+    Wasm.wp module
+      (checkedDecrementLocalProgram valueIndex decrementIndex)
+      Q store locals env := by
+  have wordFits : word.value < UInt32.size := by
+    simpa [UInt32.size, wordModulus] using word.isLt
+  have wordNonzero : word.value ≠ 0 := by
+    intro zero
+    simp [Word32.classify, zero] at heap
+  have physicalNonzero : UInt32.ofNat word.value ≠ 0 := by
+    intro zero
+    have zeroNat := congrArg UInt32.toNat zero
+    rw [UInt32.toNat_ofNat_of_lt' wordFits] at zeroNat
+    simp at zeroNat
+    exact wordNonzero zeroNat
+  have objectLowBit : UInt32.ofNat word.value &&& 1 = 0 := by
+    have even : word.value % 2 = 0 := by
+      by_contra notEven
+      have modLt : word.value % 2 < 2 := Nat.mod_lt _ (by omega)
+      have odd : word.value % 2 = 1 := by omega
+      simp [Word32.classify, wordNonzero, odd] at heap
+    apply UInt32.toNat_inj.mp
+    simpa [Nat.and_one_is_mod] using even
+  have taggedClear :
+      (1 : UInt32) &&& UInt32.ofNat word.value = 0 := by
+    simpa [UInt32.and_comm] using objectLowBit
+  exact wp_checkedDecrementLocalProgram_heap valueFound taggedClear
+    physicalNonzero callRun
+
+/-- Complete `.tobject` caller classification.  Canonical immediates take the
+local no-op; mapped objects and promoted tags are heap-classified and reuse
+the supplied installed-helper theorem.  These are the only inhabitants of a
+well-typed production `.tobject` local. -/
+theorem ValueRel.wp_checkedDecrementLocalProgram_tobject
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {locals : Wasm.Locals} {valueIndex decrementIndex : Nat}
+    {witness : RefinementWitness} {word : Word32}
+    {semantic : Fir.LeanIR.Impure.Value}
+    (valueRelated : ValueRel witness .tobject (.word32 word) semantic)
+    (valid : witness.WellFormed)
+    (valueFound : locals.get valueIndex =
+      some (.i32 (UInt32.ofNat word.value)))
+    (noop : Q (.Fallthrough store locals))
+    (heapCall : word.classify = .heap →
+      Wasm.TerminatesWith env module decrementIndex store
+        ([.i32 1, .i32 (UInt32.ofNat word.value)] ++ locals.values)
+        (fun final _ =>
+          Q (.Fallthrough final { locals with values := locals.values }))) :
+    Wasm.wp module
+      (checkedDecrementLocalProgram valueIndex decrementIndex)
+      Q store locals env := by
+  cases valueRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          have classified := heapRelated.is_heap valid
+          exact wp_checkedDecrementLocalProgram_classifiedHeap valueFound
+            classified (heapCall classified)
+      | tagged taggedRelated =>
+          cases taggedRelated with
+          | immediate payload fits =>
+              apply wp_checkedDecrementLocalProgram_tagged valueFound
+              · simp [Word32.encodeImmediate]
+                bv_decide
+              · exact noop
+          | promoted found =>
+              have classified := valid.promotedHeap _ _ found
+              exact wp_checkedDecrementLocalProgram_classifiedHeap valueFound
+                classified (heapCall classified)
+
+/-- Exact `.object` lanes are already heap-only.  Resident call sites typed
+this way retain their existing direct helper path and need no scalar gate. -/
+theorem ValueRel.object_classify_heap
+    {witness : RefinementWitness} {word : Word32}
+    {semantic : Fir.LeanIR.Impure.Value}
+    (related : ValueRel witness .object (.word32 word) semantic)
+    (valid : witness.WellFormed) :
+    word.classify = .heap := by
+  cases related with
+  | object heapRelated => exact heapRelated.is_heap valid
+
+/-- Exact erased typing justifies the zero no-op semantically; an arbitrary
+physical zero is not admitted through the `.tobject` relation. -/
+theorem ValueRel.wp_checkedDecrementLocalProgram_erased
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {locals : Wasm.Locals} {valueIndex decrementIndex : Nat}
+    {witness : RefinementWitness} {word : Word32}
+    {semantic : Fir.LeanIR.Impure.Value}
+    (valueRelated : ValueRel witness .erased (.word32 word) semantic)
+    (valueFound : locals.get valueIndex =
+      some (.i32 (UInt32.ofNat word.value)))
+    (noop : Q (.Fallthrough store locals)) :
+    Wasm.wp module
+      (checkedDecrementLocalProgram valueIndex decrementIndex)
+      Q store locals env := by
+  cases valueRelated with
+  | erased =>
+      apply wp_checkedDecrementLocalProgram_sentinel
+      · simpa [Word32.zero] using valueFound
+      · exact noop
+
 /-- The checked no-op fragment in the production decrement body adapts
 exactly.  Its symbolic parameter is recovered from the generated function,
 so this theorem neither exposes private emitter identifiers nor accepts a
