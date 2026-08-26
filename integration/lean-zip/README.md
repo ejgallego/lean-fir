@@ -668,6 +668,31 @@ allowlist or a lean-zip-specific rewrite. A production successor needs a
 generic hot-call-site/code-placement policy, or a source-level upstream-shaped
 candidate whose post-optimizer size is materially smaller.
 
+Two generic placement experiments were subsequently rejected. To avoid the
+known repeated-capture code-shape variation, both start from the exact W7-1
+pre-optimizer frontier; its unmodified runtime link reproduces the canonical
+367,634-byte module byte for byte. A pre-optimizer source-body-size policy is
+cheap (the 100,000-character threshold adds 803 bytes), but a named final
+profile shows that Binaryen later recreates the dominant `lzMatchP ->
+fir_release_0` edge. The policy therefore acts at the wrong phase. Applying the
+same generic policy to already optimized functions reaches the edge: a
+1,000,000-character threshold selects two functions and rewrites 1,898 sites.
+Against a paired disassembly/reassembly control it adds 28,530 bytes (+7.6%)
+and sixteen warmed AB/BA pairs have a 0.8954 paired median ratio (about 10.5%
+faster, 11/16 wins); both order buckets improve. Two named profiles reduce the
+wrapper's median Wasm-self share from 1.81% to 0.43%. The size cost rejects this
+otherwise successful mechanism.
+
+Binaryen's native `--always-inline-max-function-size` knob does not supply the
+missing selective policy. Threshold eight adds 8,047 bytes (+2.19%) and passes
+the repeated-call and levels 1--10 semantic comparison, but sixteen warmed
+AB/BA pairs are neutral: paired ratio 0.9962, 9/16 wins, with the two order
+buckets disagreeing (0.9823 versus 1.0370). Thresholds four through six screen
+neutral, while ten regresses. The next production experiment should eliminate
+releases using representation/ownership facts, or use an explicit generic
+profile-guided placement mechanism; neither static body size nor a global
+inliner threshold is justified by this evidence.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not
