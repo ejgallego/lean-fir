@@ -29,9 +29,9 @@ compiler-emitted result-kind spelling.
 | Scalar | Exact `_boxed` result | Upstream operation on the captured Lean64 host | FIR semantic / W6 policy | W7 resident generation | Status |
 |---|---|---|---|---|---|
 | `UInt8` | `tagged` | generic `lean_box` / `lean_unbox`; always tagged | tagged | box/unbox, zero-import | conformant |
-| `UInt16` | `tagged` | generic `lean_box` / `lean_unbox`; always tagged | tagged | generic `tobject` box and unbox close; exact `tagged` adapter is rejected before lowering and has no resident alias | admission gap |
+| `UInt16` | `tagged` | generic `lean_box` / `lean_unbox`; always tagged | tagged | generic `tobject` and exact `tagged` boxes share one physical-body factory; both close with zero imports | generation conformant; alias proof pending |
 | `UInt32` | `tobject` | `lean_box_uint32`; tagged on Lean64 | semantic tag; direct wasm32 immediate or persistent promoted tag | box/unbox, zero-import | conformant for the named `wasm32-lean64` contract |
-| `UInt64` | `object` | `lean_box_uint64`; always ordinary heap | ordinary heap box | generic `tobject` box and unbox close; exact `object` adapter is rejected before lowering and has no resident alias | admission gap; representation conformant |
+| `UInt64` | `object` | `lean_box_uint64`; always ordinary heap | ordinary heap box | generic `tobject` and exact `object` boxes share one physical-body factory; both close with zero imports | generation conformant; generic helper contract-proved, alias proof pending |
 | `USize` | `tobject` | `lean_box_usize`; always ordinary heap | current main still uses the payload/tag split | no box/unbox helper | confirmed shared semantic gap plus W7 gap |
 | `Float32` | `object` | `lean_box_float32`; always ordinary heap | semantic box is heap-only; no stable W6 resident-box descriptor/refinement | no box/unbox helper | confirmed W7/W6 coverage gap |
 | `Float` | `object` | `lean_box_float`; always ordinary heap | semantic box is heap-only; resident proof remains separate | box/unbox, zero-import | generation-ready; W6 theorem remains separate |
@@ -85,21 +85,23 @@ def rawUInt64._boxed value : obj :=
   return r
 ```
 
-`supportedLetDeclKind?` currently computes
-`boxResultKind type .tobject`.  That refines only `UInt8`, `Float32`, and
-`Float`, so it cannot recognize upstream's exact `UInt16 -> tagged` or
-`UInt64 -> object` result.  Once admission is repaired, resident linking must
-also accept those exact result-kind operations without duplicating their
-physical helper logic.
+The accepted repair derives the exact annotation from upstream
+`Lean.Expr.boxed`, while `boxResultKind type declared` preserves FIR's existing
+generic `tobject` refinement.  The checker now recognizes exact
+`UInt16 -> tagged` and `UInt64 -> object` results and still rejects the
+converse malformed annotations.  Resident linking maps each exact operation
+to a signature-specific alias generated from the same physical helper-body
+factory as its generic operation.
 
 ## Findings and order
 
 1. Finish the already isolated heap-only `USize` contract stack, then add W7
    resident box/unbox and a zero-import executable round trip.  This is the
    only observed representation-semantic discrepancy.
-2. Repair exact `_boxed` result-kind admission for `UInt16` and `UInt64`, then
-   provide physical-signature-compatible resident aliases.  Do not weaken the
-   rule to accept arbitrary object-like results.
+2. **Generation complete.** Exact `_boxed` result-kind admission for `UInt16`
+   and `UInt64` uses upstream's mapping; physical-signature-compatible
+   resident aliases share the generic helper-body factories.  W6 may later
+   connect those aliases to the already proved physical helper contracts.
 3. Add heap-only, bit-exact `Float32` resident box/unbox support.  Promote its
    layout marker through W6 rather than inventing a W7-private proof contract.
 4. Ratchet all seven generic paths and all seven generated `_boxed` paths in a

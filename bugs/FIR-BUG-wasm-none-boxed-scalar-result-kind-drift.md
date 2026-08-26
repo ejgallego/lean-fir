@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-boxed-scalar-result-kind-drift
-status: confirmed
+status: fixed
 classification: compiler
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: d8b18978322de05a8f3dba51ef03cf5461676c17
@@ -9,7 +9,7 @@ pass: none
 discovered-by: invariant-check
 first-seen: 2026-08-26
 reproduction: Fir/Wasm/WellFormed.lean
-regression: none
+regression: Fir/Wasm/Examples.lean
 ---
 
 # Summary
@@ -103,6 +103,14 @@ none; FIR is rejecting valid upstream final LCNF.
 
 ## Resolution and regression
 
-Unresolved.  Add source-generated first-class-function cases for all seven
-scalar families and require exact declaration admission plus zero-import
-resident linking.
+The shared checker now derives the only legal exact result annotation from
+upstream `Lean.Expr.boxed`, while retaining the existing generic `tobject`
+path.  Exact `UInt16 -> tagged` and `UInt64 -> object` programs admit and lower;
+`UInt16 -> object` and `UInt64 -> tagged` remain rejected.
+
+W7 installs signature-specific aliases generated from the same physical-body
+factories as the generic `UInt16` and `UInt64` helpers.  The standalone module
+has module-owned memory and zero imports; exhaustive `UInt16` and boundary
+`UInt64` round trips cover both generic and exact aliases.  The later
+seven-family source-generated ratchet remains a coverage consolidation, not a
+workaround or blocker for this fixed discrepancy.

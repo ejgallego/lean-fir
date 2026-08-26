@@ -60,13 +60,17 @@ export async function checkResidentScalarBox(bytes) {
   for (const name of [
     "resident_scalar_box_uint8_roundtrip",
     "resident_scalar_box_uint16_roundtrip",
+    "resident_scalar_box_uint16_exact_roundtrip",
     "resident_scalar_box_uint32_roundtrip",
     "resident_scalar_box_uint64_roundtrip",
+    "resident_scalar_box_uint64_exact_roundtrip",
     "resident_scalar_unbox_uint32",
     "fir_box_uint8",
     "fir_box_uint16",
+    "fir_box_uint16_tagged",
     "fir_box_uint32",
     "fir_box_uint64",
+    "fir_box_uint64_object",
     "fir_unbox_uint8",
     "fir_unbox_uint16",
     "fir_unbox_uint32",
@@ -79,8 +83,12 @@ export async function checkResidentScalarBox(bytes) {
   for (let value = 0; value <= 0xffff; value += 1) {
     equal(exports.fir_box_uint16(value) >>> 0, 2 * value + 1,
       `UInt16 ${value} boxed incorrectly`);
+    equal(exports.fir_box_uint16_tagged(value) >>> 0, 2 * value + 1,
+      `exact-result UInt16 ${value} boxed incorrectly`);
     equal(exports.resident_scalar_box_uint16_roundtrip(value) >>> 0, value,
       `UInt16 ${value} round trip failed`);
+    equal(exports.resident_scalar_box_uint16_exact_roundtrip(value) >>> 0,
+      value, `exact-result UInt16 ${value} round trip failed`);
   }
 
   const initialFrontier = exports.fir_heap_frontier() >>> 0;
@@ -129,6 +137,18 @@ export async function checkResidentScalarBox(bytes) {
       `boxed UInt64 ${value} round trip failed`);
     equal(exports.fir_heap_frontier() >>> 0, roundtripBefore + 40,
       `boxed UInt64 ${value} round trip grew the frontier incorrectly`);
+    const exactBefore = exports.fir_heap_frontier() >>> 0;
+    const exactAddress = exports.fir_box_uint64_object(value) >>> 0;
+    equal(exactAddress, exactBefore,
+      `exact-result boxed UInt64 ${value} used the wrong address`);
+    equal(exports.fir_heap_frontier() >>> 0, exactBefore + 40,
+      `exact-result boxed UInt64 ${value} grew the frontier incorrectly`);
+    checkBoxedUInt64(exports.memory, exactAddress, value);
+    const exactRoundtripBefore = exports.fir_heap_frontier() >>> 0;
+    equal(u64(exports.resident_scalar_box_uint64_exact_roundtrip(value)), value,
+      `exact-result boxed UInt64 ${value} round trip failed`);
+    equal(exports.fir_heap_frontier() >>> 0, exactRoundtripBefore + 40,
+      `exact-result boxed UInt64 ${value} round trip grew the frontier incorrectly`);
   }
 
   const view = new DataView(exports.memory.buffer);

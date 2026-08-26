@@ -44,8 +44,10 @@ private def addressLocal : FVarId := ⟨`address⟩
 
 def boxUInt8Name : Name := `fir_box_uint8
 def boxUInt16Name : Name := `fir_box_uint16
+def boxUInt16TaggedName : Name := `fir_box_uint16_tagged
 def boxUInt32Name : Name := `fir_box_uint32
 def boxUInt64Name : Name := `fir_box_uint64
+def boxUInt64ObjectName : Name := `fir_box_uint64_object
 def unboxUInt8Name : Name := `fir_unbox_uint8
 def unboxUInt16Name : Name := `fir_unbox_uint16
 def unboxUInt32Name : Name := `fir_unbox_uint32
@@ -55,7 +57,8 @@ def uint32DecEqName : Name := `fir_ext_UInt32_decEq
 def externalDeclarations : Array Name := #[`UInt32.decEq]
 
 def helperNames : Array Name :=
-  #[boxUInt8Name, boxUInt16Name, boxUInt32Name, boxUInt64Name,
+  #[boxUInt8Name, boxUInt16Name, boxUInt16TaggedName, boxUInt32Name,
+    boxUInt64Name, boxUInt64ObjectName,
     unboxUInt8Name, unboxUInt16Name, unboxUInt32Name, unboxUInt64Name,
     uint32DecEqName]
 
@@ -97,7 +100,8 @@ def boxUInt8Function : Function := {
     .localSet rawLocal] ++
     retypeRaw .tagged taggedResultLocal }
 
-/-- Upstream `lean_box` specialized to the complete `UInt16` range. -/
+/-- Upstream `lean_box` specialized to the complete `UInt16` range, retaining
+the generic polymorphic result annotation. -/
 def boxUInt16Function : Function := {
   name := boxUInt16Name
   params := #[(valueParam, .uint16)]
@@ -112,6 +116,37 @@ def boxUInt16Function : Function := {
     .i32Add,
     .localSet rawLocal] ++
     retypeRaw .tobject objectResultLocal }
+
+private partial def retypeTObjectResultInstruction (result : AbiKind) :
+    Instruction → Instruction
+  | .i32Load .tobject offset => .i32Load result offset
+  | .block label body =>
+      .block label (body.map (retypeTObjectResultInstruction result))
+  | .loop label body =>
+      .loop label (body.map (retypeTObjectResultInstruction result))
+  | .ifElse thenBody elseBody =>
+      .ifElse (thenBody.map (retypeTObjectResultInstruction result))
+        (elseBody.map (retypeTObjectResultInstruction result))
+  | instruction => instruction
+
+/-- Change only object-family metadata on a physically i32 result.  The
+generic production body remains the single source of executable instructions. -/
+private def exactObjectResultAlias (function : Function) (name : Name)
+    (result : AbiKind) : Function := {
+  function with
+  name
+  results := #[result]
+  locals := function.locals.map fun (fvarId, kind) =>
+    if fvarId == objectResultLocal && kind == .tobject then
+      (fvarId, result)
+    else
+      (fvarId, kind)
+  body := function.body.map (retypeTObjectResultInstruction result) }
+
+/-- The same physical `UInt16` box for Lean's exact generated `_boxed`
+adapter result. -/
+def boxUInt16TaggedFunction : Function :=
+  exactObjectResultAlias boxUInt16Function boxUInt16TaggedName .tagged
 
 /-- Upstream `lean_unbox` specialized to a tagged `UInt8`. -/
 def unboxUInt8Function : Function := {
@@ -282,6 +317,11 @@ def boxUInt64Function : Function := {
     (savedScratchLocal, .uint32), (objectResultLocal, .tobject)]
   body := heapUInt64BoxBody }
 
+/-- The same physical `UInt64` allocation for Lean's exact generated `_boxed`
+adapter result. -/
+def boxUInt64ObjectFunction : Function :=
+  exactObjectResultAlias boxUInt64Function boxUInt64ObjectName .object
+
 private def heapUInt64Body : List Instruction :=
   trapUnless ([.localGet objectParam, .i32Load .uint32 (u32 headerFlagsOffset),
     .i32Const .uint32 liveFlag, .i32And] ++ equalsConst .uint32 liveFlag) ++
@@ -322,8 +362,10 @@ def uint32DecEqFunction : Function := {
 private def runtimeName? : RuntimeOp → Option Name
   | .box .uint8 .tagged => some boxUInt8Name
   | .box .uint16 .tobject => some boxUInt16Name
+  | .box .uint16 .tagged => some boxUInt16TaggedName
   | .box .uint32 .tobject => some boxUInt32Name
   | .box .uint64 .tobject => some boxUInt64Name
+  | .box .uint64 .object => some boxUInt64ObjectName
   | .unbox .uint8 => some unboxUInt8Name
   | .unbox .uint16 => some unboxUInt16Name
   | .unbox .uint32 => some unboxUInt32Name
@@ -333,8 +375,10 @@ private def runtimeName? : RuntimeOp → Option Name
 private def runtimeFunction : RuntimeOp → Except LinkError Function
   | .box .uint8 .tagged => pure boxUInt8Function
   | .box .uint16 .tobject => pure boxUInt16Function
+  | .box .uint16 .tagged => pure boxUInt16TaggedFunction
   | .box .uint32 .tobject => pure boxUInt32Function
   | .box .uint64 .tobject => pure boxUInt64Function
+  | .box .uint64 .object => pure boxUInt64ObjectFunction
   | .unbox .uint8 => pure unboxUInt8Function
   | .unbox .uint16 => pure unboxUInt16Function
   | .unbox .uint32 => pure unboxUInt32Function
@@ -437,8 +481,12 @@ def internalizeAvailable (module : Module) (validate : Bool := true) : Except Li
 
 private def roundtripName : Name := `resident_scalar_box_uint8_roundtrip
 private def roundtripUInt16Name : Name := `resident_scalar_box_uint16_roundtrip
+private def roundtripExactUInt16Name : Name :=
+  `resident_scalar_box_uint16_exact_roundtrip
 private def roundtripUInt32Name : Name := `resident_scalar_box_uint32_roundtrip
 private def roundtripUInt64Name : Name := `resident_scalar_box_uint64_roundtrip
+private def roundtripExactUInt64Name : Name :=
+  `resident_scalar_box_uint64_exact_roundtrip
 private def unboxUInt32ExampleName : Name := `resident_scalar_unbox_uint32
 
 private def exampleOperations : Array RuntimeOp := #[
@@ -447,9 +495,11 @@ private def exampleOperations : Array RuntimeOp := #[
   .unbox .uint32,
   .box .uint16 .tobject,
   .unbox .uint16,
+  .box .uint16 .tagged,
   .box .uint32 .tobject,
   .box .uint64 .tobject,
-  .unbox .uint64]
+  .unbox .uint64,
+  .box .uint64 .object]
 
 private def roundtripFunction : Function := {
   name := roundtripName
@@ -479,16 +529,32 @@ private def roundtripUInt32Function : Function := {
   params := #[(valueParam, .uint32)]
   results := #[.uint32]
   locals := #[]
-  body := [.localGet valueParam, .call (.runtime exampleOperations[5]!),
+  body := [.localGet valueParam, .call (.runtime exampleOperations[6]!),
     .call (.runtime exampleOperations[2]!), .ret] }
+
+private def roundtripExactUInt16Function : Function := {
+  name := roundtripExactUInt16Name
+  params := #[(valueParam, .uint16)]
+  results := #[.uint16]
+  locals := #[]
+  body := [.localGet valueParam, .call (.runtime exampleOperations[5]!),
+    .call (.runtime exampleOperations[4]!), .ret] }
 
 private def roundtripUInt64Function : Function := {
   name := roundtripUInt64Name
   params := #[(valueParam, .uint64)]
   results := #[.uint64]
   locals := #[]
-  body := [.localGet valueParam, .call (.runtime exampleOperations[6]!),
-    .call (.runtime exampleOperations[7]!), .ret] }
+  body := [.localGet valueParam, .call (.runtime exampleOperations[7]!),
+    .call (.runtime exampleOperations[8]!), .ret] }
+
+private def roundtripExactUInt64Function : Function := {
+  name := roundtripExactUInt64Name
+  params := #[(valueParam, .uint64)]
+  results := #[.uint64]
+  locals := #[]
+  body := [.localGet valueParam, .call (.runtime exampleOperations[9]!),
+    .call (.runtime exampleOperations[8]!), .ret] }
 
 def exampleModule : Module := {
   imports := exampleOperations.mapIdx Fir.Wasm.runtimeImport ++ #[{
@@ -500,9 +566,12 @@ def exampleModule : Module := {
       params := #[LCNF.ImpureType.uint32, LCNF.ImpureType.uint32]
       result := LCNF.ImpureType.uint8 } }]
   functions := #[roundtripFunction, unboxUInt32ExampleFunction,
-    roundtripUInt16Function, roundtripUInt32Function, roundtripUInt64Function]
-  exports := #[roundtripName, roundtripUInt16Name, roundtripUInt32Name,
-    roundtripUInt64Name, unboxUInt32ExampleName]
+    roundtripUInt16Function, roundtripExactUInt16Function,
+    roundtripUInt32Function, roundtripUInt64Function,
+    roundtripExactUInt64Function]
+  exports := #[roundtripName, roundtripUInt16Name, roundtripExactUInt16Name,
+    roundtripUInt32Name, roundtripUInt64Name, roundtripExactUInt64Name,
+    unboxUInt32ExampleName]
   initializers := #[]
   runtimeOperations := exampleOperations
   memory := some ResidentRuntime.residentMemory }
@@ -529,11 +598,19 @@ def manifest : Json :=
         ("params", Json.arr #["uint16"]),
         ("result", "uint16")],
       Json.mkObj [
+        ("entry", roundtripExactUInt16Name.toString),
+        ("params", Json.arr #["uint16"]),
+        ("result", "uint16")],
+      Json.mkObj [
         ("entry", roundtripUInt32Name.toString),
         ("params", Json.arr #["uint32"]),
         ("result", "uint32")],
       Json.mkObj [
         ("entry", roundtripUInt64Name.toString),
+        ("params", Json.arr #["uint64"]),
+        ("result", "uint64")],
+      Json.mkObj [
+        ("entry", roundtripExactUInt64Name.toString),
         ("params", Json.arr #["uint64"]),
         ("result", "uint64")]]),
     ("helpers", Json.arr <| helperNames.map fun name => (name.toString : Json)),
@@ -541,13 +618,13 @@ def manifest : Json :=
     ("imports", Json.arr #[]),
     ("scratchAddress", 0),
     ("scratchPolicy", "saved-and-restored"),
-    ("status", "generation-ready; W6 contract proofs pending")]
+    ("status", "generation-ready; exact-result alias proofs pending")]
 
 #guard match residentExampleModule with
   | .ok module =>
       module.imports.isEmpty && module.runtimeOperations.isEmpty &&
       module.functions.size ==
-        5 + helperNames.size + ResidentAllocator.helperNames.size &&
+        7 + helperNames.size + ResidentAllocator.helperNames.size &&
       helperNames.all module.exports.contains &&
       (Fir.Wasm.validateModule module).isOk && (Fir.Wasm.Emit.encode module).isOk
   | .error _ => false
