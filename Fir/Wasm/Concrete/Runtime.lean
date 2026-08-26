@@ -184,6 +184,23 @@ def BoxedScalarKind.semanticType : BoxedScalarKind → Lean.Expr
   | .uint64 => LCNF.ImpureType.uint64
   | .usize => LCNF.ImpureType.usize
 
+/-- Whether the upstream type-specific boxing API admits Lean's tagged object
+representation. `UInt64` is the sole integer scalar kind whose generic box and
+unbox primitives always use an ordinary heap constructor. -/
+def BoxedScalarKind.allowsTaggedRepresentation : BoxedScalarKind → Bool
+  | .uint64 => false
+  | .uint8 | .uint16 | .uint32 | .usize => true
+
+@[simp] theorem BoxedScalarKind.allowsTaggedRepresentation_eq_true
+    (kind : BoxedScalarKind) :
+    kind.allowsTaggedRepresentation = true ↔ kind ≠ .uint64 := by
+  cases kind <;> simp [BoxedScalarKind.allowsTaggedRepresentation]
+
+@[simp] theorem BoxedScalarKind.allowsTaggedRepresentation_eq_false
+    (kind : BoxedScalarKind) :
+    kind.allowsTaggedRepresentation = false ↔ kind = .uint64 := by
+  cases kind <;> simp [BoxedScalarKind.allowsTaggedRepresentation]
+
 /-- Every concrete scalar lane carries exactly its semantic integer value at
 the W6 ABI boundary. -/
 theorem BoxedScalar.valueRel (witness : RefinementWitness) (scalar : BoxedScalar) :
@@ -254,6 +271,8 @@ def readBoxedScalar (state : MemoryState) (expected : BoxedScalarKind)
     (object : Word32) : Except ConcreteError BoxedScalar := do
   match object.classify with
   | .immediate =>
+      unless expected.allowsTaggedRepresentation do
+        throw (.source .expectedScalar)
       let some payload := object.decodeImmediate? |
         throw (.target (.invalidObjectAddress object))
       return BoxedScalar.ofPayload expected (UInt64.ofNat payload)
@@ -261,7 +280,8 @@ def readBoxedScalar (state : MemoryState) (expected : BoxedScalarKind)
       let header ← liftMemory <| state.readLiveHeader object
       if header.kind == .boxed then
         readHeapBoxedScalar state object header
-      else if header.kind == .natural && header.persistent &&
+      else if expected.allowsTaggedRepresentation &&
+          header.kind == .natural && header.persistent &&
           header.aux0 == promotedTagMarker then
         return BoxedScalar.ofPayload expected (← readTag state object)
       else
@@ -309,25 +329,51 @@ def incrementReference (state : MemoryState) (object : Word32)
         writeLiveHeader state object { header with refCount }
   | .sentinel | .invalid => throw (.source .expectedObject)
 
-/-- Concrete FIR boxing. The allocation choice follows the source semantic
-tagged limit, not the narrower wasm32 immediate limit. The existing
-`encodeTagged` refinement owns the intermediate persistent representation. -/
+/-- Concrete FIR boxing. `UInt64` follows upstream's heap-only type-specific
+API. Other integer kinds use the source semantic tagged limit, not the narrower
+wasm32 immediate limit; `encodeTagged` owns the intermediate persistent
+representation. -/
 def boxScalar (state : MemoryState) (scalar : BoxedScalar) :
     Except ConcreteError (MemoryState × Word32) :=
-  if scalar.payload.toNat ≤ maxTaggedPayload then
+  if scalar.kind.allowsTaggedRepresentation &&
+      decide (scalar.payload.toNat ≤ maxTaggedPayload) then
     encodeTagged state scalar.payload
   else
     allocateBoxedScalar state scalar
 
 theorem boxScalar_of_tagged (state : MemoryState) (scalar : BoxedScalar)
+    (allowed : scalar.kind.allowsTaggedRepresentation = true)
     (tagged : scalar.payload.toNat ≤ maxTaggedPayload) :
     boxScalar state scalar = encodeTagged state scalar.payload := by
-  simp [boxScalar, tagged]
+  simp [boxScalar, allowed, tagged]
 
 theorem boxScalar_of_heap (state : MemoryState) (scalar : BoxedScalar)
     (heap : maxTaggedPayload < scalar.payload.toNat) :
     boxScalar state scalar = allocateBoxedScalar state scalar := by
   simp [boxScalar, Nat.not_le.mpr heap]
+
+theorem boxScalar_of_tagged_disallowed (state : MemoryState)
+    (scalar : BoxedScalar)
+    (disallowed : scalar.kind.allowsTaggedRepresentation = false) :
+    boxScalar state scalar = allocateBoxedScalar state scalar := by
+  simp [boxScalar, disallowed]
+
+/-- The public boxing branch is completely classified by the conjunction of
+the scalar-kind admission policy and FIR's tagged payload bound. -/
+theorem boxScalar_of_not_tagged (state : MemoryState) (scalar : BoxedScalar)
+    (notTagged : ¬ (scalar.kind.allowsTaggedRepresentation = true ∧
+      scalar.payload.toNat ≤ maxTaggedPayload)) :
+    boxScalar state scalar = allocateBoxedScalar state scalar := by
+  by_cases allowed : scalar.kind.allowsTaggedRepresentation = true
+  · have large : maxTaggedPayload < scalar.payload.toNat :=
+      Nat.lt_of_not_ge (fun small => notTagged ⟨allowed, small⟩)
+    exact boxScalar_of_heap state scalar large
+  · have disallowed :
+        scalar.kind.allowsTaggedRepresentation = false := by
+      cases representation : scalar.kind.allowsTaggedRepresentation
+      · rfl
+      · simp [representation] at allowed
+    exact boxScalar_of_tagged_disallowed state scalar disallowed
 
 /-- Address of one eight-byte constructor object slot. -/
 def objectFieldAddress (base index : Nat) : Nat :=
