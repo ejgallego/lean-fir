@@ -884,7 +884,8 @@ export class SemanticHost {
     assert.ok(scalar.kind === "scalar" || scalar.kind === "usize",
       "box expected a scalar value");
     const payload = scalar.value;
-    const value = !FLOAT_KINDS.has(operation.scalar) && payload <= MAX_TAGGED_PAYLOAD
+    const value = !FLOAT_KINDS.has(operation.scalar) && operation.scalar !== "uint64"
+        && payload <= MAX_TAGGED_PAYLOAD
       ? { kind: "tagged", payload }
       : this.alloc({ kind: "boxed", scalarKind: operation.scalar, value: scalar });
     return this.encode(operation.result, value);
@@ -895,7 +896,7 @@ export class SemanticHost {
     const source = this.decode("tobject", physicalArgs[0]);
     let value;
     if (source.kind === "tagged") {
-      if (FLOAT_KINDS.has(operation.scalar)) {
+      if (FLOAT_KINDS.has(operation.scalar) || operation.scalar === "uint64") {
         throw new SemanticFault({ kind: "expectedScalar" });
       }
       value = operation.scalar === "usize"

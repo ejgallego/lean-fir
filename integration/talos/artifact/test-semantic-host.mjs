@@ -160,6 +160,25 @@ function ctorRuntime() {
 
 {
   const host = new SemanticHost();
+  const small = scalar("uint64", 41n);
+  const boxedSmall = host.importFunction({ kind: "box", scalar: "uint64", result: "tobject" })(
+    host.encode("uint64", small));
+  const boxedSmallValue = host.decode("tobject", boxedSmall);
+  assert.equal(boxedSmallValue.kind, "heap");
+  assert.deepStrictEqual(host.objectJson(host.liveCell(boxedSmallValue.location).object), {
+    kind: "boxed",
+    type: "Lean.Expr.const `UInt64 []",
+    value: {
+      kind: "scalar",
+      scalar: { kind: "uint64", value: "41" },
+    },
+  });
+  assert.deepStrictEqual(
+    host.decode("uint64", host.importFunction({ kind: "unbox", scalar: "uint64" })(boxedSmall)),
+    small,
+  );
+  host.importFunction({ kind: "dec", amount: 1, check: false, objectFields: null })(boxedSmall);
+
   const maximum = scalar("uint64", 0xffffffffffffffffn);
   const boxed = host.importFunction({ kind: "box", scalar: "uint64", result: "tobject" })(
     host.encode("uint64", maximum));
@@ -185,6 +204,12 @@ function ctorRuntime() {
     host.encode("uint32", scalar("uint32", 0xffffffffn)));
   assert.equal(host.decode("tobject", immediate).kind, "tagged");
   assert.equal(host.importFunction({ kind: "isShared" })(immediate), 1);
+
+  assert.throws(
+    () => host.importFunction({ kind: "unbox", scalar: "uint64" })(
+      host.encode("tobject", tagged(41))),
+    (error) => error instanceof SemanticFault && error.fault.kind === "expectedScalar",
+  );
 }
 
 {
