@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-impure-none-usize-box-tagged
-status: confirmed
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: d8b18978322de05a8f3dba51ef03cf5461676c17
@@ -80,9 +80,10 @@ none
 
 ## Resolution and regression
 
-The isolated contract candidate makes `USize` heap-only in the semantic
-runtime, rejects tagged `USize` unboxing, and adds source-generated small and
-maximal owned-release cases. The focused native/LCNF/V8 triangle passes all
-six comparisons. The bug remains confirmed until the dependent W6 concrete
-proof and W7 zero-import resident box/unbox consumers are adapted and the
-complete stack is linked on `main`.
+The integrated contract makes `USize` heap-only in the semantic runtime,
+rejects tagged `USize` unboxing, and adds source-generated small and maximal
+owned-release cases. W7's zero-import resident box/unbox helpers use the same
+40-byte owned layout, and the LCNF ElimDead and W6 concrete-runtime proofs have
+been adapted to the heap-only policy. The complete stack is linked on `main`
+through exact checkpoint `de7c03ab`; the focused and full native/LCNF/V8
+triangles, Talos cone, and deterministic artifact gate pass.
