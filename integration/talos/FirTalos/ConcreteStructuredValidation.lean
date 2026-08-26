@@ -613,7 +613,8 @@ theorem ConcreteStructuredValidatedFrameStack.direct
       some kind)
     (calleeCompatible : calleeResult.refines kind = true)
     (continuationValidation :
-      ConcreteStructuredValidationState program callerResult continuation)
+      ConcreteStructuredAlignedValidationState program callerContext
+        callerResult continuation)
     (tail : ConcreteStructuredValidatedFrameStack program sourceModule
       targetModule hosts callerResult tailResult sourceFrames targetFrames) :
     ConcreteStructuredValidatedFrameStack program sourceModule targetModule
@@ -623,7 +624,7 @@ theorem ConcreteStructuredValidatedFrameStack.direct
           (.localSet resultIndex :: targetRest) :: targetFrames) :=
   ⟨.direct spec callerResultAt contextCaches continuationAdapted resultFound
       kindAt calleeCompatible tail.supported,
-    .bind continuationValidation tail.validation⟩
+    .bind continuationValidation.toValidationState tail.validation⟩
 
 /-- Saturated calls share the same source continuation-validation frame while
 retaining their distinct generated matcher/label layout. -/
@@ -661,7 +662,8 @@ theorem ConcreteStructuredValidatedFrameStack.saturated
       some kind)
     (calleeCompatible : calleeResult.refines kind = true)
     (continuationValidation :
-      ConcreteStructuredValidationState program callerResult continuation)
+      ConcreteStructuredAlignedValidationState program callerContext
+        callerResult continuation)
     (tail : ConcreteStructuredValidatedFrameStack program sourceModule
       targetModule hosts callerResult tailResult sourceFrames targetFrames) :
     ConcreteStructuredValidatedFrameStack program sourceModule targetModule
@@ -677,7 +679,7 @@ theorem ConcreteStructuredValidatedFrameStack.saturated
             targetFrames)) :=
   ⟨.saturated spec callerResultAt contextCaches continuationAdapted resultFound
       kindAt calleeCompatible tail.supported,
-    .bind continuationValidation tail.validation⟩
+    .bind continuationValidation.toValidationState tail.validation⟩
 
 /-- A lazy miss suspends both the cache marker and the validated caller
 continuation; cache publication later removes the marker before the bind. -/
@@ -725,7 +727,8 @@ theorem ConcreteStructuredValidatedFrameStack.lazy
     (notTObject : kind ≠ .tobject)
     (calleeCompatible : calleeResult.refines kind = true)
     (continuationValidation :
-      ConcreteStructuredValidationState program callerResult continuation)
+      ConcreteStructuredAlignedValidationState program callerContext
+        callerResult continuation)
     (tail : ConcreteStructuredValidatedFrameStack program sourceModule
       targetModule hosts callerResult tailResult sourceFrames targetFrames) :
     ConcreteStructuredValidatedFrameStack program sourceModule targetModule
@@ -744,7 +747,7 @@ theorem ConcreteStructuredValidatedFrameStack.lazy
   ⟨.lazy spec callerResultAt contextCaches continuationAdapted resultFound
       kindAt initializerFound signature cacheSetCall notObject notTObject
       calleeCompatible tail.supported,
-    .lazy continuationValidation tail.validation⟩
+    .lazy continuationValidation.toValidationState tail.validation⟩
 
 /-- Branch-exact agreement between the production static/resource stack and
 its residual source validation.  The explicit ABI spine is a non-proof index:
@@ -862,8 +865,8 @@ inductive ConcreteStructuredValidatedStackAgreement
       (kindAt : (functionBindings callerFunction)[resultIndex]?.map Prod.snd =
         some kind)
       (calleeCompatible : calleeResult.refines kind = true)
-      (continuationValidation : ConcreteStructuredValidationState program
-        callerResult continuation)
+      (continuationValidation : ConcreteStructuredAlignedValidationState
+        program callerContext callerResult continuation)
       (tailAligned : ConcreteStructuredValidatedStackAgreement spine tailAgrees
         tailValidation) :
       ConcreteStructuredValidatedStackAgreement
@@ -872,7 +875,7 @@ inductive ConcreteStructuredValidatedStackAgreement
           (callerRemainder := callerRemainder) spec callerResultAt contextCaches
           callerScope programEq continuationAdapted resultFound kindAt
           calleeCompatible supportedTail resourceTail tailAgrees)
-        (.bind continuationValidation tailValidation)
+        (.bind continuationValidation.toValidationState tailValidation)
   | saturated
       {spine : List (AbiKind × Option AbiKind)}
       {activeEntryRuntime callerEntryRuntime : RuntimeState}
@@ -925,8 +928,8 @@ inductive ConcreteStructuredValidatedStackAgreement
       (kindAt : (functionBindings callerFunction)[resultIndex]?.map Prod.snd =
         some kind)
       (calleeCompatible : calleeResult.refines kind = true)
-      (continuationValidation : ConcreteStructuredValidationState program
-        callerResult continuation)
+      (continuationValidation : ConcreteStructuredAlignedValidationState
+        program callerContext callerResult continuation)
       (tailAligned : ConcreteStructuredValidatedStackAgreement spine tailAgrees
         tailValidation) :
       ConcreteStructuredValidatedStackAgreement
@@ -935,7 +938,7 @@ inductive ConcreteStructuredValidatedStackAgreement
           (matcherCount := matcherCount) spec callerResultAt contextCaches
           callerScope programEq continuationAdapted resultFound kindAt
           calleeCompatible supportedTail resourceTail tailAgrees)
-        (.bind continuationValidation tailValidation)
+        (.bind continuationValidation.toValidationState tailValidation)
   | lazy
       {spine : List (AbiKind × Option AbiKind)}
       {activeEntryRuntime callerEntryRuntime : RuntimeState}
@@ -995,8 +998,8 @@ inductive ConcreteStructuredValidatedStackAgreement
       (notObject : kind ≠ .object)
       (notTObject : kind ≠ .tobject)
       (calleeCompatible : calleeResult.refines kind = true)
-      (continuationValidation : ConcreteStructuredValidationState program
-        callerResult continuation)
+      (continuationValidation : ConcreteStructuredAlignedValidationState
+        program callerContext callerResult continuation)
       (tailAligned : ConcreteStructuredValidatedStackAgreement spine tailAgrees
         tailValidation) :
       ConcreteStructuredValidatedStackAgreement
@@ -1006,7 +1009,7 @@ inductive ConcreteStructuredValidatedStackAgreement
           programEq continuationAdapted resultFound kindAt initializerFound
           signature cacheSetCall notObject notTObject calleeCompatible
           supportedTail resourceTail tailAgrees)
-        (.lazy continuationValidation tailValidation)
+        (.lazy continuationValidation.toValidationState tailValidation)
 
 /-- Existentially hide the caller ABI spine while retaining its branch-exact
 alignment. -/
@@ -1085,9 +1088,10 @@ theorem ConcreteStructuredValidationAgrees.reindex
   exact aligned
 
 /-- Admission-free compiler/resource core strengthened by the exact residual
-validation state of its current source node.  This companion relation is the
-incremental bridge to universal compiler admission: it adds no source step,
-target path, allocation budget, future admission, or termination evidence. -/
+validation state of its current source node and its agreement with the
+production compiler's local row.  This companion relation is the incremental
+bridge to universal compiler admission: it adds no source step, target path,
+allocation budget, future admission, or termination evidence. -/
 structure ConcreteStructuredValidatedCodeCoreRel
     (program : Fir.LeanIR.ImpureProgram)
     (context : Fir.Wasm.Context)
@@ -1116,8 +1120,8 @@ structure ConcreteStructuredValidatedCodeCoreRel
     functionResult callerExpectedResult facts remainingBytes sourceRuntime
     sourceEnv sourceCode targetStore targetLocals targetCode witness source
     target
-  validation : ConcreteStructuredValidationState program functionResult
-    sourceCode
+  validation : ConcreteStructuredAlignedValidationState program context
+    functionResult sourceCode
 
 /-- A closed active-code branch: the current generated node is validated,
 every suspended caller continuation is validated, and the established static
@@ -1222,7 +1226,8 @@ structure ConcreteStructuredValidatedDirectCallReadyOutcome
     callerJoins sourceFrames targetStore callerLocals callerRemainder targetRest
     targetFrames witness physicalArgs resultIndex source target
   continuationValidation :
-    ConcreteStructuredValidationState program functionResult continuation
+    ConcreteStructuredAlignedValidationState program callerContext
+      functionResult continuation
   frames : ConcreteStructuredValidatedFrameStack program sourceModule
     targetModule hosts functionResult callerExpectedResult sourceFrames
     targetFrames
@@ -1286,7 +1291,8 @@ structure ConcreteStructuredValidatedSaturatedCallReadyOutcome
     targetStore callerLocals targetValue targetRest targetFrames witness
     resultIndex source target
   continuationValidation :
-    ConcreteStructuredValidationState program functionResult continuation
+    ConcreteStructuredAlignedValidationState program context functionResult
+      continuation
   frames : ConcreteStructuredValidatedFrameStack program sourceModule
     targetModule hosts functionResult callerExpectedResult sourceFrames
     targetFrames
@@ -1345,7 +1351,8 @@ structure ConcreteStructuredValidatedExternalBindOutcome
     targetStore callerLocals callerRemainder targetRest targetFrames witness
     kind physical resultIndex source target
   continuationValidation :
-    ConcreteStructuredValidationState program functionResult continuation
+    ConcreteStructuredAlignedValidationState program context functionResult
+      continuation
   frames : ConcreteStructuredValidatedFrameStack program sourceModule
     targetModule hosts functionResult callerExpectedResult sourceFrames
     targetFrames
@@ -1993,8 +2000,8 @@ theorem ConcreteStructuredValidatedCodeOutcome.advanceCode
       labels entryRuntime entryStore entryWitness functionResult
       callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
       sourceCode targetStore targetLocals targetCode witness source target)
-    (nextValidation : ConcreteStructuredValidationState program functionResult
-      nextCode)
+    (nextValidation : ConcreteStructuredAlignedValidationState program context
+      functionResult nextCode)
     (advanced :
       ∃ targetAfter nextStore nextTargetCode,
         FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
@@ -2064,8 +2071,8 @@ theorem ConcreteStructuredValidatedCodeCoreRel.withSuccessor
       functionResult callerExpectedResult nextFacts nextRemainingBytes
       nextRuntime nextEnv nextCode nextStore nextLocals nextTargetCode
       nextWitness nextSource nextTarget)
-    (nextValidation : ConcreteStructuredValidationState program functionResult
-      nextCode) :
+    (nextValidation : ConcreteStructuredAlignedValidationState program context
+      functionResult nextCode) :
     ConcreteStructuredValidatedCodeCoreRel program context sourceModule
       sourceFunction externals labels entryRuntime entryStore entryWitness
       functionResult callerExpectedResult nextFacts nextRemainingBytes
@@ -2341,7 +2348,7 @@ theorem ConcreteStructuredCodeCoreRel.withRootValidation
       functionResult callerExpectedResult facts remainingBytes sourceRuntime
       sourceEnv functionCode targetStore targetLocals targetCode witness source
       target :=
-  ⟨core, spec.rootValidationState activeResult⟩
+  ⟨core, spec.rootAlignedValidationState activeResult⟩
 
 /-- A compiler-produced supported export starts in the closed validated
 active-code relation.  This strengthens `supportedGlobalRoot` at the same
@@ -2603,6 +2610,121 @@ theorem ConcreteStructuredAlignedValidationState.letContinuation
     next,
     agrees.insert resultCompiled⟩
 
+/-- For a non-named `let`, production and executable validation select the
+same destination kind.  This is the common compiler-admission bridge for the
+entire direct-value family and for closure calls. -/
+private theorem compiledLetResult_of_nonNamed
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {actual : Fir.Wasm.AbiKind}
+    (valueKind : Fir.Wasm.letValueKind decl = .ok actual)
+    (nonNamed : ∀ name args, decl.value ≠ .fap name args)
+    (resultCompiled : Fir.Wasm.getLocal context decl.fvarId =
+      .ok (.localGet decl.fvarId, actual)) :
+    ∀ {locals kind},
+      Fir.Wasm.supportedLetDeclKind? program locals decl = some kind →
+        Fir.Wasm.getLocal context decl.fvarId =
+          .ok (.localGet decl.fvarId, kind) := by
+  intro locals kind supported
+  have effective := supportedLetDeclKind?_effectiveLetValueKind supported
+  unfold Fir.Wasm.effectiveLetValueKind at effective
+  rw [valueKind] at effective
+  split at effective
+  · rename_i name args valueEq
+    exact False.elim (nonNamed name args valueEq)
+  · have kindEq : actual = kind := Except.ok.inj effective
+    subst kind
+    exact resultCompiled
+
+/-- Every currently supported direct-value operation exposes the exact
+destination equation needed to extend validator/compiler local agreement. -/
+private theorem ReuseBudgetedDirectSupported.resultCompiledForValidation
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {facts : ReuseCapacityFacts}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    (supported : ReuseBudgetedDirectSupported context facts decl) :
+    ∀ {locals kind},
+      Fir.Wasm.supportedLetDeclKind? program locals decl = some kind →
+        Fir.Wasm.getLocal context decl.fvarId =
+          .ok (.localGet decl.fvarId, kind) := by
+  have boundary :
+      ∃ actual,
+        Fir.Wasm.letValueKind decl = .ok actual ∧
+          (∀ name args, decl.value ≠ .fap name args) ∧
+          Fir.Wasm.getLocal context decl.fvarId =
+            .ok (.localGet decl.fvarId, actual) := by
+    unfold ReuseBudgetedDirectSupported ReuseConstructorBoxSupported
+      ReuseReadOnlyConstructorSupported ReuseReadOnlySupported
+      ReuseAliasSupported at supported
+    aesop (add safe cases [ReuseSupported, LocalAliasSupported,
+      ImmediateLiteralSupported, USizeProjectionSupported,
+      ObjectProjectionSupported, ScalarProjectionSupported, UnboxSupported,
+      IsSharedSupported, NonemptyConstructorSupported, BoxSupported,
+      NaturalLiteralSupported, StringLiteralSupported])
+  obtain ⟨actual, valueKind, nonNamed, resultCompiled⟩ := boundary
+  intro locals kind kindFound
+  exact compiledLetResult_of_nonNamed (program := program) valueKind nonNamed
+    resultCompiled kindFound
+
+/-- A saturated closure call is also a non-named `let`; its site already
+retains the exact destination kind selected by production lowering. -/
+private theorem SaturatedClosureCallSite.resultCompiledForValidation
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {sourceEnv : Env}
+    (site : SaturatedClosureCallSite context decl sourceEnv) :
+    ∀ {locals kind},
+      Fir.Wasm.supportedLetDeclKind? program locals decl = some kind →
+        Fir.Wasm.getLocal context decl.fvarId =
+          .ok (.localGet decl.fvarId, kind) := by
+  have valueKind :
+      Fir.Wasm.letValueKind decl = .ok site.resultKind := by
+    simp [Fir.Wasm.letValueKind, site.valueEq, site.kindEq]
+  have nonNamed : ∀ name args, decl.value ≠ .fap name args := by
+    intro name args
+    simp [site.valueEq]
+  intro locals kind kindFound
+  exact compiledLetResult_of_nonNamed (program := program) valueKind nonNamed
+    site.resultCompiled kindFound
+
+/-- Named-call validation retains the callee's precise result, whereas the
+current call-site contract stores the public destination kind.  When those
+kinds coincide, the call continuation extends exact local agreement.  The
+strict-refinement case is intentionally exposed as the next contract slice. -/
+private theorem DirectInternalCallSite.resultCompiledForValidation
+    {context : Fir.Wasm.Context}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {sourceEnv : Env}
+    (site : DirectInternalCallSite context decl sourceEnv)
+    (resultAligned : site.calleeResultKind = site.resultKind) :
+    ∀ {locals kind},
+      Fir.Wasm.supportedLetDeclKind? context.program locals decl = some kind →
+        Fir.Wasm.getLocal context decl.fvarId =
+          .ok (.localGet decl.fvarId, kind) := by
+  intro locals kind supported
+  have effective := supportedLetDeclKind?_effectiveLetValueKind supported
+  have valueKind :
+      Fir.Wasm.letValueKind decl = .ok site.resultKind := by
+    simp [Fir.Wasm.letValueKind, site.valueEq, site.kindEq]
+  have compatible :
+      site.calleeResultKind.leanCompatible site.resultKind = true :=
+    Fir.Wasm.AbiKind.leanCompatible_of_refines site.calleeResultRefines
+  have siteEffective :
+      Fir.Wasm.effectiveLetValueKind context.program decl =
+        .ok site.calleeResultKind := by
+    unfold Fir.Wasm.effectiveLetValueKind
+    rw [valueKind, site.valueEq]
+    simp only [Bind.bind, Except.bind, pure, Except.pure]
+    simp [site.declarationFound, site.calleeResult, compatible]
+  have kindEq : site.calleeResultKind = kind :=
+    Except.ok.inj (siteEffective.symm.trans effective)
+  rw [resultAligned] at kindEq
+  subst kind
+  exact site.resultCompiled
+
 /-- Any compiler/resource successor of a validated direct `let` continuation
 inherits the exact residual validator state, even when the concrete operation
 changes heap facts, remaining address-space budget, or refinement witness. -/
@@ -2632,6 +2754,10 @@ theorem ConcreteStructuredValidatedCodeCoreRel.letSuccessor
       entryWitness functionResult callerExpectedResult facts remainingBytes
       sourceRuntime sourceEnv (.let decl continuation) targetStore targetLocals
       targetCode witness source target)
+    (compiled : ∀ {locals kind},
+      Fir.Wasm.supportedLetDeclKind? program locals decl = some kind →
+        Fir.Wasm.getLocal context decl.fvarId =
+          .ok (.localGet decl.fvarId, kind))
     (nextCore : ConcreteStructuredCodeCoreRel program context sourceModule
       sourceFunction externals labels entryRuntime entryStore entryWitness
       functionResult callerExpectedResult nextFacts nextRemainingBytes
@@ -2642,8 +2768,8 @@ theorem ConcreteStructuredValidatedCodeCoreRel.letSuccessor
       functionResult callerExpectedResult nextFacts nextRemainingBytes
       nextRuntime nextEnv continuation nextStore nextLocals nextTargetCode
       nextWitness nextSource nextTarget := by
-  obtain ⟨_kind, _locals, _kindFound, nextValidation⟩ :=
-    related.validation.letContinuation
+  obtain ⟨_kind, _locals, _kindFound, _resultCompiled, nextValidation⟩ :=
+    related.validation.letContinuation compiled
   exact related.withSuccessor nextCore nextValidation
 
 /-- A direct-value `let` is a fully closed transition.  Executable validation
@@ -2704,7 +2830,8 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_directLet_of_step
       nextWitness, nextFacts, nextTargetCode, targetCount, targetPath,
       targetPositive, sourceFramesEq, targetFramesEq, nextCore⟩ :=
     pointwise.advance_directLet_of_step spec supported rfl sourceStep
-  have validatedCore := related.core.letSuccessor nextCore
+  have validatedCore := related.core.letSuccessor
+    supported.resultCompiledForValidation nextCore
   exact ⟨targetAfter, nextRuntime, sourceValue, nextStore, resumedLocals,
     nextWitness, nextFacts, nextTargetCode, targetCount, targetPath,
     targetPositive,
@@ -2748,6 +2875,7 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_directCall_stage_of_step
       (.let decl continuation) targetStore targetLocals targetCode witness source
       target)
     (site : DirectInternalCallSite callerContext decl callerEnv)
+    (resultAligned : site.calleeResultKind = site.resultKind)
     (sourceStep : executeStep externals source = .next sourceAfter) :
     ∃ calleeContext calleeFunction,
       ∃ row : ConcreteGeneratedInternalDeclaration callerContext.program
@@ -2785,8 +2913,16 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_directCall_stage_of_step
     rw [sourceStep] at computedStep
     exact ExecResult.next.inj computedStep
   subst computedAfter
-  obtain ⟨_kind, _locals, _kindFound, continuationValidation⟩ :=
-    related.core.validation.letContinuation
+  have resultCompiled : ∀ {locals kind},
+      Fir.Wasm.supportedLetDeclKind? program locals decl = some kind →
+        Fir.Wasm.getLocal callerContext decl.fvarId =
+          .ok (.localGet decl.fvarId, kind) := by
+    intro locals kind kindFound
+    apply site.resultCompiledForValidation resultAligned
+    simpa only [spec.contextProgram] using kindFound
+  obtain ⟨_kind, _locals, _kindFound, _resultCompiled,
+      continuationValidation⟩ :=
+    related.core.validation.letContinuation resultCompiled
   exact ⟨calleeContext, calleeFunction, row, physicalArgs, resultIndex,
     targetArguments, targetRest, targetAfter, targetPath,
     ⟨activeResult, related.contextCaches, ready, continuationValidation,
@@ -3020,8 +3156,10 @@ theorem
     rw [sourceStep] at computedStep
     exact ExecResult.next.inj computedStep
   subst computedAfter
-  obtain ⟨_kind, _locals, _kindFound, continuationValidation⟩ :=
+  obtain ⟨_kind, _locals, _kindFound, _resultCompiled,
+      continuationValidation⟩ :=
     related.core.validation.letContinuation
+      (site.resultCompiledForValidation (program := program))
   exact ⟨calleeContext, calleeFunction, row, targetValue, targetRest,
     resultIndex, targetPath,
     ⟨activeResult, related.contextCaches, sharedCapacity, ready,
@@ -7325,6 +7463,35 @@ theorem ConcreteStructuredValidationState.selectedCase
       Fir.Wasm.eraseSupportedCaseFact facts cases.discr,
       sharing, focus.defaultAlt (by simpa using default)⟩
 
+/-- Aligned executable validation follows the selected source branch while
+retaining the unchanged agreement between the validator's local row and the
+compiler context.  Case selection changes only discriminator facts. -/
+theorem ConcreteStructuredAlignedValidationState.selectedCase
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionResult : Fir.Wasm.AbiKind}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {selected : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredAlignedValidationState program context
+      functionResult (.cases cases))
+    (sourceResult : SourceCaseResult sourceRuntime sourceEnv cases selected) :
+    ConcreteStructuredAlignedValidationState program context functionResult
+      selected := by
+  obtain ⟨joins, locals, facts, sharing, focus, agrees⟩ := validated
+  obtain ⟨_discrValue, tag, _found, _tagged, chosen⟩ := sourceResult
+  rcases selected_alt_mem_of_chooseAlt chosen with constructor | default
+  · obtain ⟨info, member⟩ := constructor
+    obtain ⟨_mode, _fits, selectedFocus⟩ := focus.constructorAlt
+      (by simpa using member)
+    exact ⟨joins, locals,
+      Fir.Wasm.insertSupportedCaseFact facts cases.discr info.cidx,
+      sharing, selectedFocus, agrees⟩
+  · exact ⟨joins, locals,
+      Fir.Wasm.eraseSupportedCaseFact facts cases.discr,
+      sharing, focus.defaultAlt (by simpa using default), agrees⟩
+
 /-- Reassemble a closed active-code state when structured case testing has
 pushed target-only label frames.  Source caller validation is unchanged;
 production stack/resource agreement grows by the matching case protocol. -/
@@ -7367,8 +7534,8 @@ private theorem ConcreteStructuredValidatedCodeOutcome.withCaseSuccessor
       functionResult callerExpectedResult facts remainingBytes sourceRuntime
       sourceEnv selected targetStore nextLocals selectedTarget witness
       sourceAfter targetAfter)
-    (nextValidation : ConcreteStructuredValidationState program functionResult
-      selected)
+    (nextValidation : ConcreteStructuredAlignedValidationState program context
+      functionResult selected)
     (sourceFramesEq : sourceAfter.frames = source.frames)
     (targetFramesEq : targetAfter.frames =
       structuredWasmCaseLabels belowStack targetSuffix testCount ++
