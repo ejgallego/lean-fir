@@ -50,8 +50,9 @@ const packagedRuntimeContractName = "standard-libm-runtime-contract.mjs";
 const previewDirectory = process.env.FIR_RAW_PACKAGE_PREVIEW_DIR === undefined
   ? null
   : resolve(process.env.FIR_RAW_PACKAGE_PREVIEW_DIR);
-const emcc = join(firRoot,
-  ".deps/lcnf-c-wasm/emsdk/upstream/emscripten/emcc");
+const lcnfCWasmDeps = realpathSync(process.env.FIR_LCNF_C_WASM_DEPS ??
+  join(firRoot, ".deps/lcnf-c-wasm"));
+const emcc = join(lcnfCWasmDeps, "emsdk/upstream/emscripten/emcc");
 const inventoryPath = join(buildDirectory, "lean-zip-raw.inventory.json");
 const functionSidecarStem = `${wasmStem}.functions.json`;
 const expectedClosure = JSON.parse(readFileSync(
@@ -260,7 +261,7 @@ assert.deepEqual(functionOrigins, {
 });
 assert.deepEqual(functionExports, [
   { name: "fir_heap_frontier", index: 18 },
-  { name: "fir_heap_alloc", index: 21 },
+  { name: "fir_heap_alloc", index: 22 },
   { name: "fir_heap_rewind", index: 495 },
   { name: "fir_heap_set_frontier", index: 496 },
   { name: "Zip.Wasm.compressRaw", index: 497 },
