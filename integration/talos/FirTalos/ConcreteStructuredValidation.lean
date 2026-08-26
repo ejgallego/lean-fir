@@ -9286,4 +9286,256 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_scalarUInt8Cases_of_step
 
 end ClosedTestedCases
 
+/-- Normalized final-LCNF case-table shape used by source interpretation and
+production lowering: zero or more constructor arms followed by at most one
+default arm.  Constructor tag bounds remain representation-specific and are
+recovered from executable validation below. -/
+inductive ConcreteStructuredCaseAltsNormalized :
+    List (Lean.Compiler.LCNF.Alt .impure) → Prop where
+  | nil : ConcreteStructuredCaseAltsNormalized []
+  | default (code : Lean.Compiler.LCNF.Code .impure) :
+      ConcreteStructuredCaseAltsNormalized [.default code]
+  | ctor
+      (rest : ConcreteStructuredCaseAltsNormalized alternatives) :
+      ConcreteStructuredCaseAltsNormalized
+        (.ctorAlt info code :: alternatives)
+
+/-- Executable object-mode validation supplies every constructor-tag bound
+needed by the existing normalized object-chain theorem. -/
+theorem ConcreteStructuredCaseAltsNormalized.objectSupported_of_validation
+    {program : Fir.LeanIR.ImpureProgram}
+    {joins : Fir.Wasm.JoinPoints}
+    {locals : Fir.Wasm.LocalKinds}
+    {expectedResult : Option AbiKind}
+    {facts : Fir.Wasm.SupportedCaseFacts}
+    {sharing : Fir.Wasm.SupportedSharingFacts}
+    {discr : Lean.FVarId}
+    {alternatives : List (Lean.Compiler.LCNF.Alt .impure)}
+    (normalized : ConcreteStructuredCaseAltsNormalized alternatives)
+    (validated : Fir.Wasm.supportedAltsWithJoins program joins locals
+      expectedResult facts sharing .objectTag discr alternatives = true) :
+    ObjectConstructorCaseAltsSupported alternatives := by
+  induction normalized with
+  | nil => exact .nil
+  | default code => exact .default code
+  | ctor rest ih =>
+      simp only [Fir.Wasm.supportedAltsWithJoins, Bool.and_eq_true] at validated
+      exact .ctor validated.1.1 (ih validated.2)
+
+/-- Executable scalar-mode validation supplies the corresponding `UInt8`
+constructor-tag bounds. -/
+theorem ConcreteStructuredCaseAltsNormalized.scalarSupported_of_validation
+    {program : Fir.LeanIR.ImpureProgram}
+    {joins : Fir.Wasm.JoinPoints}
+    {locals : Fir.Wasm.LocalKinds}
+    {expectedResult : Option AbiKind}
+    {facts : Fir.Wasm.SupportedCaseFacts}
+    {sharing : Fir.Wasm.SupportedSharingFacts}
+    {discr : Lean.FVarId}
+    {alternatives : List (Lean.Compiler.LCNF.Alt .impure)}
+    (normalized : ConcreteStructuredCaseAltsNormalized alternatives)
+    (validated : Fir.Wasm.supportedAltsWithJoins program joins locals
+      expectedResult facts sharing .scalarUInt8 discr alternatives = true) :
+    ScalarUInt8CaseAltsSupported alternatives := by
+  induction normalized with
+  | nil => exact .nil
+  | default code => exact .default code
+  | ctor rest ih =>
+      simp only [Fir.Wasm.supportedAltsWithJoins, Bool.and_eq_true] at validated
+      exact .ctor validated.1.1 (ih validated.2)
+
+/-- A successful production local lookup exposes the exact compiler local
+kind used by case-discriminator mode selection. -/
+private theorem findLocalKind?_of_getLocal
+    {context : Fir.Wasm.Context} {fvarId : Lean.FVarId} {kind : AbiKind}
+    (compiled : Fir.Wasm.getLocal context fvarId =
+      .ok (.localGet fvarId, kind)) :
+    Fir.Wasm.findLocalKind? context.localKinds fvarId = some kind := by
+  unfold Fir.Wasm.getLocal at compiled
+  cases found : Fir.Wasm.findLocalKind? context.localKinds fvarId with
+  | none => simp [found] at compiled
+  | some actual =>
+      have actualEq : actual = kind := by simpa [found] using compiled
+      subst actual
+      rfl
+
+/-- Source-level safety boundary for a currently active case table.
+
+This is an invariant on final-LCNF syntax, the source runtime, and the compiler
+context, not a translation certificate: it contains no target module,
+instruction path, numeric local, refinement witness, or future execution.
+Executable residual validation supplies result compatibility and every static
+constructor-tag bound.  The phase bridge supplies only normalized alternative
+order, the two currently proved discriminator representations, and the
+semantic range law for object tags.
+
+The normalization field remains explicit until the final-LCNF phase interface
+exports the missing theorem recorded by
+`FIR-BUG-impure-case-table-selector-determinism`. -/
+structure ConcreteStructuredCaseSafeAt
+    (context : Fir.Wasm.Context)
+    (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (cases : Lean.Compiler.LCNF.Cases .impure) : Prop where
+  normalized : ConcreteStructuredCaseAltsNormalized cases.alts.toList
+  discriminator :
+    Fir.Wasm.getLocal context cases.discr =
+        .ok (.localGet cases.discr, .tobject) ∨
+      Fir.Wasm.getLocal context cases.discr =
+        .ok (.localGet cases.discr, .uint8)
+  objectTagsFit :
+    ∀ {sourceObject : Value} {actualTag : Nat},
+      lookupValue sourceEnv cases.discr = .ok sourceObject →
+      getTag sourceRuntime sourceObject = .ok actualTag →
+      actualTag < UInt32.size
+
+/-- Residual executable validation turns the minimal source case invariant
+into the existing production case family.  In particular, compiler-local
+agreement and discriminator mode are derived here rather than stored in a
+per-step certificate. -/
+theorem ConcreteStructuredValidatedCodeOutcome.productionCasesSupported_of_caseSafe
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.cases cases) targetStore targetLocals targetCode witness source target)
+    (sourceSafe : ConcreteStructuredCaseSafeAt context sourceRuntime sourceEnv
+      cases) :
+    ∀ {selected : Lean.Compiler.LCNF.Code .impure},
+      ProductionCasesSupported context sourceRuntime sourceEnv cases selected := by
+  intro selected
+  obtain ⟨joins, locals, validatorFacts, sharing, validated, agrees⟩ :=
+    related.core.validation
+  obtain ⟨discrKind, mode, discrFound, modeFound, _resultKnown,
+      _resultCompatible, alternatives⟩ := validated.cases_eq
+  have discrCompiled := agrees discrFound
+  unfold ProductionCasesSupported
+  rcases sourceSafe.discriminator with objectCompiled | scalarCompiled
+  · have discrKindEq : discrKind = .tobject := by
+      have pairEq := Except.ok.inj (discrCompiled.symm.trans objectCompiled)
+      exact congrArg Prod.snd pairEq
+    subst discrKind
+    have modeEq : mode = .objectTag := by
+      simpa [Fir.Wasm.supportedCaseDiscriminatorMode?] using modeFound.symm
+    subst mode
+    have contextFound := findLocalKind?_of_getLocal objectCompiled
+    have contextMode :
+        Fir.Wasm.caseDiscriminatorMode context cases.discr = .objectTag := by
+      simp [Fir.Wasm.caseDiscriminatorMode, contextFound]
+    exact Or.inr (Or.inl ⟨
+      sourceSafe.normalized.objectSupported_of_validation alternatives,
+      contextMode, objectCompiled, sourceSafe.objectTagsFit⟩)
+  · have discrKindEq : discrKind = .uint8 := by
+      have pairEq := Except.ok.inj (discrCompiled.symm.trans scalarCompiled)
+      exact congrArg Prod.snd pairEq
+    subst discrKind
+    have modeEq : mode = .scalarUInt8 := by
+      simpa [Fir.Wasm.supportedCaseDiscriminatorMode?] using modeFound.symm
+    subst mode
+    have contextFound := findLocalKind?_of_getLocal scalarCompiled
+    have contextMode :
+        Fir.Wasm.caseDiscriminatorMode context cases.discr = .scalarUInt8 := by
+      simp [Fir.Wasm.caseDiscriminatorMode, contextFound]
+    exact Or.inr (Or.inr ⟨
+      sourceSafe.normalized.scalarSupported_of_validation alternatives,
+      contextMode, scalarCompiled⟩)
+
+/-- One source case step satisfying the source-level case invariant has a
+finite concrete Wasm path and preserves the closed validated relation.
+
+The existential presentation deliberately forgets whether the path used the
+zero-step default protocol, five-step object tests, or four-step `UInt8`
+tests.  The specialized theorems retain those exact costs; this theorem is the
+uniform interface needed by the module-wide one-step dispatcher.  If the
+target path is empty, the source control rank strictly decreases. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_cases_of_source_safe_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.cases cases) targetStore targetLocals targetCode witness source target)
+    (sourceSafe : ConcreteStructuredCaseSafeAt context sourceRuntime sourceEnv
+      cases)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetSteps targetAfter selected selectedTarget nextLabels,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetSteps target targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals
+          nextLabels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+          selected targetStore
+          { targetLocals with values := targetLocals.values } selectedTarget
+          witness sourceAfter targetAfter ∧
+        (targetSteps = 0 →
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source) := by
+  obtain ⟨selected, _sourceResult, _sourceAfterEq⟩ :=
+    related.core.core.focus.caseResult_of_step sourceStep
+  rcases related.productionCasesSupported_of_caseSafe
+      (selected := selected) sourceSafe with defaultOnly | tested
+  · obtain ⟨targetPath, next, rank⟩ :=
+      related.advance_defaultOnlyCase_of_step defaultOnly sourceStep
+    refine ⟨0, target, selected, targetCode, labels, targetPath, ?_,
+      fun _ => rank⟩
+    simpa using next
+  · rcases tested with objectCases | scalarCases
+    · obtain ⟨testCount, targetAfter, selected, selectedTarget,
+          targetPath, next, zeroRank⟩ :=
+        related.advance_objectCases_of_step objectCases sourceStep
+      exact ⟨5 * testCount, targetAfter, selected, selectedTarget,
+        List.replicate testCount none ++ labels, targetPath, next, zeroRank⟩
+    · obtain ⟨testCount, targetAfter, selected, selectedTarget,
+          targetPath, next, zeroRank⟩ :=
+        related.advance_scalarUInt8Cases_of_step scalarCases sourceStep
+      exact ⟨4 * testCount, targetAfter, selected, selectedTarget,
+        List.replicate testCount none ++ labels, targetPath, next, zeroRank⟩
+
 end FirTalos.Concrete
