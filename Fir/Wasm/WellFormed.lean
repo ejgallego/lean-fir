@@ -178,9 +178,10 @@ def supportedLetDeclKind? (program : Fir.LeanIR.ImpureProgram)
   | .box type scalarId =>
       let scalarKind ← findLocalKind? locals scalarId
       let annotationKind ← abiValueKind? type
-      let resultKind := boxResultKind type .tobject
+      let upstreamResultKind ← upstreamBoxResultKind? type
+      let resultKind := boxResultKind type declared
       if annotationKind == scalarKind && supportedBoxScalarKind scalarKind &&
-          (declared == .tobject || declared == resultKind) then
+          (declared == .tobject || declared == upstreamResultKind) then
         some resultKind
       else
         none

@@ -48,6 +48,13 @@ def classifiesAs (type : Lean.Expr) (expected : AbiKind) : Bool :=
 #guard boxResultKind LCNF.ImpureType.float32 .tobject == .object
 #guard boxResultKind LCNF.ImpureType.float .tobject == .object
 #guard boxResultKind LCNF.ImpureType.uint32 .tobject == .tobject
+#guard upstreamBoxResultKind? LCNF.ImpureType.uint8 == some .tagged
+#guard upstreamBoxResultKind? LCNF.ImpureType.uint16 == some .tagged
+#guard upstreamBoxResultKind? LCNF.ImpureType.uint32 == some .tobject
+#guard upstreamBoxResultKind? LCNF.ImpureType.uint64 == some .object
+#guard upstreamBoxResultKind? LCNF.ImpureType.usize == some .tobject
+#guard upstreamBoxResultKind? LCNF.ImpureType.float32 == some .object
+#guard upstreamBoxResultKind? LCNF.ImpureType.float == some .object
 #guard match abiKind? LCNF.ImpureType.void with
   | .ok none => true
   | _ => false
@@ -546,6 +553,32 @@ def supportedPreciseUInt8BoxProgram : Fir.LeanIR.ImpureProgram :=
       .let (letDecl boxed taggedType (.box u8Type s)) <|
       .return boxed)] }
 
+/-- Lean's generic `lean_box` path gives boxed `UInt16` the exact tagged kind. -/
+def supportedPreciseUInt16BoxProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `supportedPreciseUInt16Box
+      #[param s LCNF.ImpureType.uint16] taggedType (.code <|
+      .let (letDecl boxed taggedType (.box LCNF.ImpureType.uint16 s)) <|
+      .return boxed)] }
+
+/-- Lean 4.33's `UInt64` box always has the exact heap-object kind. -/
+def supportedPreciseUInt64BoxProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `supportedPreciseUInt64Box #[param s u64Type] objType (.code <|
+      .let (letDecl boxed objType (.box u64Type s)) <|
+      .return boxed)] }
+
+/-- Exact admission does not make an always-tagged `UInt16` box a heap object. -/
+def malformedPreciseUInt16ObjectBoxProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `malformedPreciseUInt16ObjectBox
+      #[param s LCNF.ImpureType.uint16] objType (.code <|
+      .let (letDecl boxed objType (.box LCNF.ImpureType.uint16 s)) <|
+      .return boxed)] }
+
+/-- Exact admission does not make an always-heap `UInt64` box tagged. -/
+def malformedPreciseUInt64TaggedBoxProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `malformedPreciseUInt64TaggedBox #[param s u64Type] taggedType (.code <|
+      .let (letDecl boxed taggedType (.box u64Type s)) <|
+      .return boxed)] }
+
 /-- Lean 4.33's Float boxes have the exact heap-object result kind. -/
 def supportedPreciseFloatBoxProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `supportedPreciseFloatBox
@@ -554,10 +587,24 @@ def supportedPreciseFloatBoxProgram : Fir.LeanIR.ImpureProgram :=
         .return boxed)] }
 
 #guard supportedProgram supportedPreciseUInt8BoxProgram
+#guard supportedProgram supportedPreciseUInt16BoxProgram
+#guard supportedProgram supportedPreciseUInt64BoxProgram
 #guard supportedProgram supportedPreciseFloatBoxProgram
+#guard !supportedProgram malformedPreciseUInt16ObjectBoxProgram
+#guard !supportedProgram malformedPreciseUInt64TaggedBoxProgram
 #guard match lowerSupported supportedPreciseUInt8BoxProgram with
   | .ok module =>
       module.runtimeOperations.contains (.box .uint8 .tagged) &&
+        (validateModule module).isOk
+  | .error _ => false
+#guard match lowerSupported supportedPreciseUInt16BoxProgram with
+  | .ok module =>
+      module.runtimeOperations.contains (.box .uint16 .tagged) &&
+        (validateModule module).isOk
+  | .error _ => false
+#guard match lowerSupported supportedPreciseUInt64BoxProgram with
+  | .ok module =>
+      module.runtimeOperations.contains (.box .uint64 .object) &&
         (validateModule module).isOk
   | .error _ => false
 
@@ -627,12 +674,6 @@ def supportedIsSharedProgram : Fir.LeanIR.ImpureProgram :=
       .let (letDecl r u8Type (.isShared x)) (.return r))] }
 
 #guard supportedProgram supportedIsSharedProgram
-
-def malformedPreciseBoxProgram : Fir.LeanIR.ImpureProgram :=
-  { decls := #[decl `malformedPreciseBox #[param s u64Type] objType (.code <|
-      .let (letDecl boxed objType (.box u64Type s)) (.return boxed))] }
-
-#guard !supportedProgram malformedPreciseBoxProgram
 
 def unsupportedTypeProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `unsupported #[param x unknownAbiType] unknownAbiType

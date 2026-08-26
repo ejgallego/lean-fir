@@ -77,6 +77,8 @@ The support checker now computes the precise result from
 `boxResultKind type .tobject` and accepts either the compiler's generic
 `tobject` declaration or exactly that result. Focused regressions accept and
 lower the precise tagged `UInt8` form and accept the heap-only Float form.
-The pre-existing malformed `UInt64 → object` case remains rejected, ensuring
-that the rule does not admit an arbitrary declared kind for scalar families
-whose representation is not statically precise.
+Under Lean 4.32, the pre-existing malformed `UInt64 → object` case remained
+rejected.  Lean 4.33 changed the authoritative explicit-boxing result for
+`UInt64` to `object`, so that historical negative is now a required positive.
+`FIR-BUG-wasm-none-boxed-scalar-result-kind-drift` replaces it with exact
+negative cases for `UInt16 → object` and `UInt64 → tagged`.

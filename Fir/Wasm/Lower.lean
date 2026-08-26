@@ -656,6 +656,16 @@ def boxResultKind (type : Expr) (declared : AbiKind) : AbiKind :=
   else
     declared
 
+/--
+The exact result annotation selected by Lean's final-LCNF explicit-boxing
+pass.  Keep this derived from upstream's `Lean.Expr.boxed` classification so
+FIR does not duplicate the seven-family scalar boxing table.
+-/
+def upstreamBoxResultKind? (type : Expr) : Option AbiKind :=
+  match abiKind? (Lean.Compiler.LCNF.ImpureType.Lean.Expr.boxed type) with
+  | .ok kind => kind
+  | .error _ => none
+
 @[simp] theorem boxResultKind_uint8_tobject :
     boxResultKind LCNF.ImpureType.uint8 .tobject = .tagged := by
   have same :
