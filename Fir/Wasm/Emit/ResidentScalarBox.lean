@@ -10,10 +10,10 @@ open Lean.Compiler
 /-!
 # Wasm-resident small scalar boxing
 
-Lean 4.33 represents boxed small integers through the generic tagged path.
-FIR's `wasm32-lean64` contract preserves that source representation: payloads
-that fit wasm32 are immediate words and larger semantic tags are persistent
-promoted-tag objects. This helper family implements the exact operations
+Lean's type-specific small-integer APIs use tagged objects for `UInt8`,
+`UInt16`, and `UInt32`, but `lean_box_uint64` always allocates an ordinary
+heap constructor. FIR preserves those source representations across its
+`wasm32-lean64` boundary. This helper family implements the exact operations
 needed by compiler-generated boxed wrappers without adding host imports.
 -/
 
@@ -252,36 +252,6 @@ def boxUInt32Function : Function := {
     .i32LtU,
     .ifElse immediateUInt32BoxBody promotedUInt32BoxBody] }
 
-private def immediateUInt64BoxBody : List Instruction := [
-  .localGet valueParam,
-  .i32WrapI64 .uint32,
-  .localSet rawLocal,
-  .localGet rawLocal,
-  .localGet rawLocal,
-  .i32Add,
-  .i32Const .uint32 1,
-  .i32Add,
-  .localSet rawLocal] ++ retypeRaw .tobject objectResultLocal
-
-private def promotedUInt64BoxBody : List Instruction :=
-  [.i32Const .uint32 40,
-    .call (.declaration ResidentAllocator.allocateName),
-    .localSet addressLocal] ++
-  storeAddress32 [.i32Const .uint32 ObjectKind.natural.code]
-    headerKindOffset ++
-  storeAddress32 [.i32Const .uint32 (liveFlag + persistentFlag)]
-    headerFlagsOffset ++
-  storeAddress32 [.i32Const .uint32 0] headerRefCountOffset ++
-  storeAddress32 [.i32Const .uint32 40] headerAllocationBytesOffset ++
-  storeAddress32 [.i32Const .uint32 promotedTagMarker] headerAux0Offset ++
-  storeAddress32 [.i32Const .uint32 1] headerAux1Offset ++
-  storeAddress32 [.i32Const .uint32 0] headerAux2Offset ++
-  storeAddress32 [.i32Const .uint32 0] headerAux3Offset ++
-  storeAddress64 [.localGet valueParam] headerBytes ++ [
-    .localGet addressLocal,
-    .localSet rawLocal] ++
-  retypeRaw .tobject objectResultLocal
-
 private def heapUInt64BoxBody : List Instruction :=
   [.i32Const .uint32 40,
     .call (.declaration ResidentAllocator.allocateName),
@@ -301,43 +271,16 @@ private def heapUInt64BoxBody : List Instruction :=
       .localSet rawLocal] ++
     retypeRaw .tobject objectResultLocal
 
-/-- Lean's generic scalar box split: wasm32 immediate, persistent promoted
-semantic tag, or ordinary refcounted box above the 63-bit tagged limit. -/
+/-- Upstream `lean_box_uint64`: every payload uses an ordinary refcounted
+heap constructor, even when its value would fit another integer kind's tagged
+representation. -/
 def boxUInt64Function : Function := {
   name := boxUInt64Name
   params := #[(valueParam, .uint64)]
   results := #[.tobject]
   locals := #[(rawLocal, .uint32), (addressLocal, .uint32),
     (savedScratchLocal, .uint32), (objectResultLocal, .tobject)]
-  body := [
-    .localGet valueParam,
-    .i64Const .uint64 0x80000000,
-    .i64LtU,
-    .ifElse immediateUInt64BoxBody [
-      .localGet valueParam,
-      .i64Const .uint64 0x8000000000000000,
-      .i64LtU,
-      .ifElse promotedUInt64BoxBody heapUInt64BoxBody]] }
-
-private def immediateUInt64Body : List Instruction := [
-  .localGet objectParam,
-  .i32Const .uint32 1,
-  .i32ShrU,
-  .i64ExtendI32U .uint64,
-  .ret]
-
-private def promotedUInt64Body : List Instruction :=
-  trapUnless ([.localGet objectParam, .i32Load .uint32 (u32 headerFlagsOffset),
-    .i32Const .uint32 (liveFlag + persistentFlag), .i32And] ++
-    equalsConst .uint32 (liveFlag + persistentFlag)) ++
-  requireHeaderWord headerAllocationBytesOffset 40 ++
-  requireHeaderWord headerAux0Offset promotedTagMarker ++
-  requireHeaderWord headerAux1Offset 1 ++
-  requireHeaderWord headerAux2Offset 0 ++
-  requireHeaderWord headerAux3Offset 0 ++ [
-    .localGet objectParam,
-    .i64Load .uint64 (u32 headerBytes),
-    .ret]
+  body := heapUInt64BoxBody }
 
 private def heapUInt64Body : List Instruction :=
   trapUnless ([.localGet objectParam, .i32Load .uint32 (u32 headerFlagsOffset),
@@ -351,24 +294,17 @@ private def heapUInt64Body : List Instruction :=
     .i64Load .uint64 (u32 headerBytes),
     .ret]
 
-/-- Decode every canonical UInt64 box representation. -/
+/-- Upstream `lean_unbox_uint64`: accept only the ordinary heap constructor
+produced by `lean_box_uint64`; tagged immediates and promoted tags are invalid
+at this type-specific boundary. -/
 def unboxUInt64Function : Function := {
   name := unboxUInt64Name
   params := #[(objectParam, .tobject)]
   results := #[.uint64]
   locals := #[]
-  body := [
-    .localGet objectParam,
-    .i32Const .uint32 1,
-    .i32And,
-    .ifElse immediateUInt64Body <| requireHeapAddress ++ [
-      .localGet objectParam,
-      .i32Load .uint32 (u32 headerKindOffset),
-      .i32Const .uint32 ObjectKind.natural.code,
-      .i32Eq,
-      .ifElse promotedUInt64Body <|
-        requireHeaderWord headerKindOffset ObjectKind.boxed.code ++
-          heapUInt64Body]] }
+  body := requireHeapAddress ++
+    requireHeaderWord headerKindOffset ObjectKind.boxed.code ++
+    heapUInt64Body }
 
 /-- Upstream fixed-width equality is physical wasm32 equality. -/
 def uint32DecEqFunction : Function := {

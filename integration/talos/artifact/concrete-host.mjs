@@ -1541,7 +1541,8 @@ export class ConcreteHost {
   box(operation, args) {
     assert.equal(args.length, 1, "box host arity mismatch");
     const payload = this.boxedScalarPayload(operation.scalar, args[0]);
-    if (!FLOAT_KINDS.has(operation.scalar) && payload <= MAX_TAGGED_PAYLOAD) {
+    if (!FLOAT_KINDS.has(operation.scalar) && operation.scalar !== "uint64" &&
+        payload <= MAX_TAGGED_PAYLOAD) {
       return signed32(this.encodeTagged(payload));
     }
     const payloadBytes = ["uint64", "usize", "float"].includes(operation.scalar) ? 8 : 4;
@@ -1559,7 +1560,7 @@ export class ConcreteHost {
     const word = this.checkedWord("tobject", args[0]);
     const classification = this.classify(word);
     if (classification === "immediate" || this.isPromotedTag(this.readHeader(word))) {
-      if (FLOAT_KINDS.has(operation.scalar)) {
+      if (FLOAT_KINDS.has(operation.scalar) || operation.scalar === "uint64") {
         throw new ConcreteFault({ kind: "expectedScalar" });
       }
       return this.physicalScalar(operation.scalar, this.taggedPayload(word));

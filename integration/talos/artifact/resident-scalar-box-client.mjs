@@ -107,31 +107,15 @@ export async function checkResidentScalarBox(bytes) {
       value >>> 0, `promoted UInt32 ${value} round trip failed`);
   }
 
-  const uint64ImmediateFrontier = exports.fir_heap_frontier() >>> 0;
-  for (const value of [0n, 1n, 0x7fffffffn]) {
-    equal(exports.fir_box_uint64(value) >>> 0,
-      Number(value * 2n + 1n),
-      `immediate UInt64 ${value} boxed incorrectly`);
-    equal(u64(exports.fir_unbox_uint64(Number(value * 2n + 1n))), value,
-      `immediate UInt64 ${value} unboxed incorrectly`);
-    equal(u64(exports.resident_scalar_box_uint64_roundtrip(value)), value,
-      `immediate UInt64 ${value} round trip failed`);
-  }
-  equal(exports.fir_heap_frontier() >>> 0, uint64ImmediateFrontier,
-    "immediate UInt64 boxing grew the heap");
-
-  for (const value of [0x80000000n, 0x7fffffffffffffffn]) {
-    const before = exports.fir_heap_frontier() >>> 0;
-    const address = exports.fir_box_uint64(value) >>> 0;
-    equal(address, before, `promoted UInt64 ${value} used the wrong address`);
-    equal(exports.fir_heap_frontier() >>> 0, before + 40,
-      `promoted UInt64 ${value} grew the frontier incorrectly`);
-    checkPromotedTag(exports.memory, address, value);
-    equal(u64(exports.fir_unbox_uint64(address)), value,
-      `promoted UInt64 ${value} unboxed incorrectly`);
-  }
-
-  for (const value of [0x8000000000000000n, 0xffffffffffffffffn]) {
+  for (const value of [
+    0n,
+    1n,
+    0x7fffffffn,
+    0x80000000n,
+    0x7fffffffffffffffn,
+    0x8000000000000000n,
+    0xffffffffffffffffn,
+  ]) {
     const before = exports.fir_heap_frontier() >>> 0;
     const address = exports.fir_box_uint64(value) >>> 0;
     equal(address, before, `boxed UInt64 ${value} used the wrong address`);
@@ -140,6 +124,11 @@ export async function checkResidentScalarBox(bytes) {
     checkBoxedUInt64(exports.memory, address, value);
     equal(u64(exports.fir_unbox_uint64(address)), value,
       `boxed UInt64 ${value} unboxed incorrectly`);
+    const roundtripBefore = exports.fir_heap_frontier() >>> 0;
+    equal(u64(exports.resident_scalar_box_uint64_roundtrip(value)), value,
+      `boxed UInt64 ${value} round trip failed`);
+    equal(exports.fir_heap_frontier() >>> 0, roundtripBefore + 40,
+      `boxed UInt64 ${value} round trip grew the frontier incorrectly`);
   }
 
   const view = new DataView(exports.memory.buffer);
@@ -177,6 +166,10 @@ export async function checkResidentScalarBox(bytes) {
   writePromotedTag(exports.memory, 1104, 0x100000000n);
   expectTrap(() => exports.fir_unbox_uint32(1104),
     "out-of-range promoted UInt32 did not trap");
+  expectTrap(() => exports.fir_unbox_uint64(exports.fir_box_uint32(41)),
+    "tagged UInt64 input did not trap");
+  expectTrap(() => exports.fir_unbox_uint64(exports.fir_box_uint32(0x80000000)),
+    "promoted-tag UInt64 input did not trap");
 
   return "PASS zero-import resident scalar boxing";
 }

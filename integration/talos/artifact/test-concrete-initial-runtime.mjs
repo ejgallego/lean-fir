@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { ConcreteHost } from "./concrete-host.mjs";
+import { ConcreteFault, ConcreteHost } from "./concrete-host.mjs";
 import {
   concreteValidationExternalRegistry,
 } from "./concrete-validation-external-registry.mjs";
@@ -93,6 +93,30 @@ for (const [scalarKind, value, expectedBits] of [
       boxedHost.unbox({ scalar: scalarKind }, [boxedAddress]),
     ),
     { kind: "scalar", scalarKind, value: expectedBits },
+  );
+}
+
+{
+  const uint64Host = new ConcreteHost();
+  const before = uint64Host.heapCursor;
+  const boxed = uint64Host.box({ scalar: "uint64" }, [41n]);
+  assert.equal(boxed, before);
+  assert.equal(uint64Host.heapCursor, before + 40);
+  const boxedHeader = uint64Host.readHeader(boxed);
+  assert.equal(boxedHeader.kind, 3);
+  assert.equal(boxedHeader.rc, 1);
+  assert.equal(boxedHeader.aux0, 4);
+  assert.equal(boxedHeader.aux1, 8);
+  assert.equal(uint64Host.unbox({ scalar: "uint64" }, [boxed]), 41n);
+
+  assert.throws(
+    () => uint64Host.unbox({ scalar: "uint64" }, [83]),
+    (error) => error instanceof ConcreteFault && error.fault.kind === "expectedScalar",
+  );
+  const promoted = uint64Host.box({ scalar: "usize" }, [0x80000000n]);
+  assert.throws(
+    () => uint64Host.unbox({ scalar: "uint64" }, [promoted]),
+    (error) => error instanceof ConcreteFault && error.fault.kind === "expectedScalar",
   );
 }
 
