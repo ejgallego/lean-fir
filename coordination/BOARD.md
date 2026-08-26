@@ -5956,6 +5956,20 @@ identities.
   2,166/2,166 comparisons, and no shared semantic, runtime, generator, ABI,
   layout, or ownership contract changed.
 
+- W6's compiler-aligned structured validation checkpoint is linked/accepted
+  through functional head `45e515c0` and clean tracked handoff `a6c8d9a2`,
+  based directly on `main` at `238d6016`. Active validation, staged direct,
+  saturated, and external continuations, and hereditary suspended-call
+  agreement now retain exact validator/compiler local-row alignment. The
+  complete budgeted non-named-let and exact-result named-call families are
+  closed. Strictly refined internal named-call results remain explicit behind
+  the authoritative-local-kind gap recorded by
+  `FIR-BUG-wasm-none-direct-call-validation-result-kind-drift`; no certificate
+  or weakened mutation relation hides it. Lean Beam, the focused 3,127-job
+  cone, `make check` at 728 unique cases and 2,166/2,166 comparisons, and all
+  3,174 Talos jobs pass. No shared semantics, runtime, emitter, ABI, layout,
+  ownership, or W7 artifact changed.
+
 - The seven-family scalar-boxing audit is accepted at `e1f712f8`.  The first
   isolated repair admits Lean-generated exact `UInt16 → tagged` and
   `UInt64 → object` boxes using upstream's own boxed-type mapping while
