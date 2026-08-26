@@ -3379,6 +3379,138 @@ def opaqueReleaseProgram (decrementIndex : Nat) : Wasm.Program := [
   .eq,
   .iff 0 0 (arrayReleaseProgram decrementIndex) [.ret]]
 
+/-- W7's production Array-release loop adapts exactly to the canonical target
+program used by the concrete ownership proof.  The existential source loop
+label disappears into the target branch depth selected by `instructions`. -/
+theorem instructions_arrayReleaseBody
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function} {decrementIndex : Nat}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction)
+    (selfFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentRelease.decrementOnceName) =
+        some decrementIndex) :
+    FirTalos.instructions sourceModule sourceFunction labels
+      Fir.Wasm.Emit.ResidentRelease.arrayReleaseBody =
+        .ok (arrayReleaseProgram decrementIndex) := by
+  have addressFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[0]!.1 = some addressIndex := by
+    simpa [addressIndex] using
+      generatedDecrementOnceFunction_localFound generated (0 : Fin 10)
+  have countFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[2]!.1 = some countIndex := by
+    simpa [countIndex] using
+      generatedDecrementOnceFunction_localFound generated (2 : Fin 10)
+  have cursorFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[8]!.1 = some arrayCursorIndex := by
+    simpa [arrayCursorIndex] using
+      generatedDecrementOnceFunction_localFound generated (8 : Fin 10)
+  have indexFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[9]!.1 = some arrayIndex := by
+    simpa [arrayIndex] using
+      generatedDecrementOnceFunction_localFound generated (9 : Fin 10)
+  obtain ⟨loopLabel, sourceShape⟩ :
+      ∃ loopLabel,
+        Fir.Wasm.Emit.ResidentRelease.arrayReleaseBody = [
+          .localGet sourceFunction.locals[0]!.1,
+          .i32Const .uint32
+            (Fir.Wasm.Emit.ResidentRelease.u32 headerBytes),
+          .i32Add,
+          .localSet sourceFunction.locals[8]!.1,
+          .i32Const .uint32 0,
+          .localSet sourceFunction.locals[9]!.1,
+          .loop loopLabel [
+            .localGet sourceFunction.locals[9]!.1,
+            .localGet sourceFunction.locals[2]!.1,
+            .i32LtU,
+            .ifElse [
+              .localGet sourceFunction.locals[8]!.1,
+              .i32Load .tobject 0,
+              .i32Const .uint32 1,
+              .call (.declaration
+                Fir.Wasm.Emit.ResidentRelease.decrementOnceName),
+              .localGet sourceFunction.locals[8]!.1,
+              .i32Const .uint32
+                (Fir.Wasm.Emit.ResidentRelease.u32
+                  Fir.Wasm.Concrete.target.semanticSlotBytes),
+              .i32Add,
+              .localSet sourceFunction.locals[8]!.1,
+              .localGet sourceFunction.locals[9]!.1,
+              .i32Const .uint32 1,
+              .i32Add,
+              .localSet sourceFunction.locals[9]!.1,
+              .br loopLabel] []],
+          .ret] := by
+    have generatedEq := generated
+    unfold Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction at generatedEq
+    split at generatedEq
+    · contradiction
+    · simp only [Bind.bind, Except.bind] at generatedEq
+      split at generatedEq
+      · contradiction
+      · simp only [pure, Except.pure, Except.ok.injEq] at generatedEq
+        subst sourceFunction
+        exact ⟨_, rfl⟩
+  rw [sourceShape]
+  simp [arrayReleaseProgram, arrayReleaseLoopBody,
+    Fir.Wasm.Emit.ResidentRelease.u32, FirTalos.instructions,
+    FirTalos.instruction, addressFound, countFound, cursorFound, indexFound,
+    selfFound, FirTalos.findLabel?, Bind.bind, Except.bind, pure, Except.pure]
+
+/-- The production opaque-object dispatcher adapts exactly as well: the Array
+marker selects the canonical release loop, while ordinary opaque objects
+return without touching payload words. -/
+theorem instructions_opaqueReleaseBody
+    {sourceModule : Fir.Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {sourceFunction : Fir.Wasm.Function} {decrementIndex : Nat}
+    (generated :
+      Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction descriptors =
+        .ok sourceFunction)
+    (selfFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentRelease.decrementOnceName) =
+        some decrementIndex) :
+    FirTalos.instructions sourceModule sourceFunction labels
+      Fir.Wasm.Emit.ResidentRelease.opaqueReleaseBody =
+        .ok (opaqueReleaseProgram decrementIndex) := by
+  have markerFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+      sourceFunction.locals[7]!.1 = some markerIndex := by
+    simpa [markerIndex] using
+      generatedDecrementOnceFunction_localFound generated (7 : Fin 10)
+  have sourceShape :
+      Fir.Wasm.Emit.ResidentRelease.opaqueReleaseBody = [
+        .localGet sourceFunction.locals[7]!.1,
+        .i32Const .uint32 residentArrayMarker,
+        .i32Eq,
+        .ifElse Fir.Wasm.Emit.ResidentRelease.arrayReleaseBody [.ret]] := by
+    have generatedEq := generated
+    unfold Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction at generatedEq
+    split at generatedEq
+    · contradiction
+    · simp only [Bind.bind, Except.bind] at generatedEq
+      split at generatedEq
+      · contradiction
+      · simp only [pure, Except.pure, Except.ok.injEq] at generatedEq
+        subst sourceFunction
+        rfl
+  have arrayAdapted := instructions_arrayReleaseBody
+    (sourceModule := sourceModule) (labels := none :: labels)
+    generated selfFound
+  have returnAdapted : FirTalos.instructions sourceModule sourceFunction
+      (none :: labels) [.ret] = .ok [.ret] := by
+    simp [FirTalos.instructions, FirTalos.instruction, Bind.bind,
+      Except.bind, pure, Except.pure]
+  rw [sourceShape]
+  simpa [opaqueReleaseProgram] using
+    instructions_localEqDispatch markerFound arrayAdapted returnAdapted
+
 /-- Owned-dispatch frame with the two resident Array loop locals populated. -/
 def arrayReleaseLocals
     (object check flags descriptor refCount kind marker count captureCount
@@ -3874,25 +4006,23 @@ theorem instructions_descriptorReleaseBody
               Fir.Wasm.Emit.ResidentRelease.u32,
               closureDescriptorReleaseProgram] using descriptorDispatch
 
-/-- Installed production provenance through exact constructor and closure
-arms.  Only the opaque target remains existential, matching the currently
-open shared adapter branch-depth bug for the nested Array loop. -/
-theorem DecrementOnceInstallation.body_constructorClosure
+/-- Exact installed production provenance through constructor, closure, and
+opaque/Array release arms. -/
+theorem DecrementOnceInstallation.body_exact
     {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
     {descriptors : Array (Array Fir.Wasm.AbiKind)}
     (installation :
       DecrementOnceInstallation sourceModule module descriptors) :
-    ∃ opaqueTarget,
-      installation.targetFunction.body =
-        decrementOnceProgram persistentReleaseProgram
-            (lastReferenceProgram installation.releaseHeaderIndex
-              (ownedReleaseProgram
-                (constructorReleaseProgram installation.index)
-                (closureDescriptorReleaseProgram installation.index
-                  descriptors.toList 0)
-                opaqueTarget)) ++
-          FirTalos.functionTerminal sourceModule
-            installation.sourceFunction := by
+    installation.targetFunction.body =
+      decrementOnceProgram persistentReleaseProgram
+          (lastReferenceProgram installation.releaseHeaderIndex
+            (ownedReleaseProgram
+              (constructorReleaseProgram installation.index)
+              (closureDescriptorReleaseProgram installation.index
+                descriptors.toList 0)
+              (opaqueReleaseProgram installation.index))) ++
+        FirTalos.functionTerminal sourceModule
+          installation.sourceFunction := by
   obtain ⟨decrementSource, decrementGenerated, sourceBody⟩ :=
     Fir.Wasm.Emit.ResidentRelease.decrementOnceFunction_body_of_ok
       installation.generated
@@ -3979,24 +4109,65 @@ theorem DecrementOnceInstallation.body_constructorClosure
                     none])
                   installation.generated
                   installation.selfFound descriptors.toList 0 closureGenerated
-              rw [ownedAdapterEq, constructorAdapted, closureAdapted]
-                at adapterEq
-              cases opaqueAdapted : FirTalos.instructions sourceModule
-                  installation.sourceFunction
+              have opaqueAdapted := instructions_opaqueReleaseBody
+                (sourceModule := sourceModule)
+                  (labels :=
                     [none, none, none, none, none, none, none, none, none,
-                      none]
-                    Fir.Wasm.Emit.ResidentRelease.opaqueReleaseBody with
-              | error error =>
-                  rw [opaqueAdapted] at adapterEq
-                  contradiction
-              | ok opaqueTarget =>
-                  rw [opaqueAdapted] at adapterEq
-                  simp only [Bind.bind, Except.bind, pure, Except.pure,
-                    Except.ok.injEq] at adapterEq
-                  exact ⟨opaqueTarget, targetBodyEq.trans
-                    (congrArg (fun body => body ++
-                      FirTalos.functionTerminal sourceModule
-                        installation.sourceFunction) adapterEq)⟩
+                      none])
+                  installation.generated installation.selfFound
+              rw [ownedAdapterEq, constructorAdapted, closureAdapted,
+                opaqueAdapted] at adapterEq
+              simp only [Bind.bind, Except.bind, pure, Except.pure,
+                Except.ok.injEq] at adapterEq
+              exact targetBodyEq.trans
+                (congrArg (fun body => body ++
+                  FirTalos.functionTerminal sourceModule
+                    installation.sourceFunction) adapterEq)
+
+/-- Backwards-compatible existential view of `body_exact`. -/
+theorem DecrementOnceInstallation.body_constructorClosure
+    {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    (installation :
+      DecrementOnceInstallation sourceModule module descriptors) :
+    ∃ opaqueTarget,
+      installation.targetFunction.body =
+        decrementOnceProgram persistentReleaseProgram
+            (lastReferenceProgram installation.releaseHeaderIndex
+              (ownedReleaseProgram
+                (constructorReleaseProgram installation.index)
+                (closureDescriptorReleaseProgram installation.index
+                  descriptors.toList 0)
+                opaqueTarget)) ++
+          FirTalos.functionTerminal sourceModule
+            installation.sourceFunction :=
+  ⟨opaqueReleaseProgram installation.index, installation.body_exact⟩
+
+/-- Lift a proof about the exact canonical decrement program to the installed
+production body, discharging the adapter-added terminal suffix once. -/
+theorem DecrementOnceInstallation.wp_body_exact
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {descriptors : Array (Array Fir.Wasm.AbiKind)}
+    {store : Wasm.Store host} {locals : Wasm.Locals}
+    {Q : Wasm.Assertion host}
+    (installation :
+      DecrementOnceInstallation sourceModule module descriptors)
+    (noFallthrough : ∀ nextStore nextLocals,
+      ¬ Q (.Fallthrough nextStore nextLocals))
+    (coreWP : Wasm.wp module
+      (decrementOnceProgram persistentReleaseProgram
+        (lastReferenceProgram installation.releaseHeaderIndex
+          (ownedReleaseProgram
+            (constructorReleaseProgram installation.index)
+            (closureDescriptorReleaseProgram installation.index
+              descriptors.toList 0)
+            (opaqueReleaseProgram installation.index))))
+      Q store locals env) :
+    Wasm.wp module installation.targetFunction.body Q store locals env := by
+  rw [installation.body_exact]
+  exact FirTalos.Correctness.Wasm.wp_append_of_no_fallthrough
+    noFallthrough coreWP
 
 /-- Lift exact constructor/closure branch proofs to the actual installed body.
 The remaining opaque branch is quantified because neither constructor nor
@@ -7608,6 +7779,73 @@ theorem LiveHeapRel.decrementOnceProgram_array_exact_refines
   rw [objectRelated.marker, countEq]
   exact wp_opaqueReleaseProgram_array logicalSizeFits childRuns (by rfl)
 
+/-- Lift the exact resident-Array refinement through the production decrement
+installation.  Its postcondition is the common recursive success relation, so
+the theorem composes directly with `ResidentOwnershipStep`. -/
+theorem LiveHeapRel.wp_installedDecrementArray
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime nextRuntime : Fir.LeanIR.Impure.RuntimeState}
+    {location : Fir.LeanIR.Impure.Location} {address : Word32}
+    {cell : Fir.LeanIR.Impure.HeapCell}
+    {elements : Array Fir.LeanIR.Impure.Value} {capacity : Nat}
+    {header : Header} {fuel : Nat}
+    (installation : DecrementOnceInstallation sourceModule module
+      witness.closureDescriptors)
+    (related : LiveHeapRel state witness runtime)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (canonicalHeaders : CanonicalMappedHeadersRel state witness)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : Fir.LeanIR.Impure.findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (ordinary : cell.persistent = false) (one : cell.rc = 1)
+    (descriptor : witness.descriptors.lookup? address = some (.array capacity))
+    (objectEq : cell.object = .array elements capacity)
+    (objectRelated :
+      ResidentArrayObjectRel state witness address elements capacity header)
+    (refCount : header.refCount.toNat = cell.rc)
+    (persistent : header.persistent = cell.persistent)
+    (check : Bool) (checkWord : UInt32)
+    (semanticOperation :
+      Fir.LeanIR.Impure.decLocationFuel (fuel + 1) runtime location =
+        .ok nextRuntime)
+    (step : ResidentOwnershipStep env module installation.index fuel witness)
+    (releaseRun : Wasm.TerminatesWith env module
+      installation.releaseHeaderIndex store
+      [.i32 (UInt32.ofNat address.value)]
+      (fun final values =>
+        final = releaseHeaderStore store (UInt32.ofNat address.value) ∧
+          values = [])) :
+    Wasm.wp module installation.targetFunction.body
+      (fun continuation =>
+        ∃ result finalStore,
+          DecrementOnceSuccess (fuel + 1) state witness nextRuntime address
+              check result finalStore ∧
+            continuation = .Return finalStore [])
+      store (decrementEntry (UInt32.ofNat address.value) checkWord) env := by
+  apply installation.wp_body_exact
+  · intros
+    simp
+  · obtain ⟨result, finalStore, concreteOperation, finalRelated,
+        finalMemory, finalCanonical, finalFrame, execution⟩ :=
+      LiveHeapRel.decrementOnceProgram_array_exact_refines
+        (decrementIndex := installation.index)
+        (releaseHeaderIndex := installation.releaseHeaderIndex)
+        (constructorBody := constructorReleaseProgram installation.index)
+        (closureBody := closureDescriptorReleaseProgram installation.index
+          witness.closureDescriptors.toList 0)
+        related memoryRelated canonicalHeaders mapped found live ordinary one
+          descriptor objectEq objectRelated refCount persistent check checkWord
+          semanticOperation step releaseRun
+    apply Wasm.wp.conseq _ execution
+    intro continuation returned
+    subst continuation
+    exact ⟨result, finalStore,
+      ⟨concreteOperation, finalRelated, finalMemory, finalCanonical,
+        finalFrame⟩, rfl⟩
+
 /-- Complete three-semantics refinement for a nonrecursive count-one object.
 The W6 concrete runtime and FIR semantics both replace the live cell by its
 dead form; resident Wasm performs the exact released-header call and returns
@@ -8515,6 +8753,59 @@ theorem LiveHeapRel.terminatesWith_installedDecrementClosure
     objectRelated headerRead headerKind descriptorLookup descriptorTableFits
     fixedCount extent refCount persistent check checkWord semanticOperation
     step releaseRun
+
+/-- Public installed-call refinement for a count-one resident generic Array.
+The live prefix is released recursively; retained capacity remains framed, and
+the caller operand tail is unchanged. -/
+theorem LiveHeapRel.terminatesWith_installedDecrementArray
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime nextRuntime : Fir.LeanIR.Impure.RuntimeState}
+    {location : Fir.LeanIR.Impure.Location} {address : Word32}
+    {cell : Fir.LeanIR.Impure.HeapCell}
+    {elements : Array Fir.LeanIR.Impure.Value} {capacity : Nat}
+    {header : Header} {fuel : Nat}
+    (installation : DecrementOnceInstallation sourceModule module
+      witness.closureDescriptors)
+    (related : LiveHeapRel state witness runtime)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (canonicalHeaders : CanonicalMappedHeadersRel state witness)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : Fir.LeanIR.Impure.findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (ordinary : cell.persistent = false) (one : cell.rc = 1)
+    (descriptor : witness.descriptors.lookup? address = some (.array capacity))
+    (objectEq : cell.object = .array elements capacity)
+    (objectRelated :
+      ResidentArrayObjectRel state witness address elements capacity header)
+    (refCount : header.refCount.toNat = cell.rc)
+    (persistent : header.persistent = cell.persistent)
+    (check : Bool) (checkWord : UInt32)
+    (semanticOperation :
+      Fir.LeanIR.Impure.decLocationFuel (fuel + 1) runtime location =
+        .ok nextRuntime)
+    (step : ResidentOwnershipStep env module installation.index fuel witness)
+    (releaseRun : Wasm.TerminatesWith env module
+      installation.releaseHeaderIndex store
+      [.i32 (UInt32.ofNat address.value)]
+      (fun final values =>
+        final = releaseHeaderStore store (UInt32.ofNat address.value) ∧
+          values = []))
+    (tail : List Wasm.Value) :
+    Wasm.TerminatesWith env module installation.index store
+      ([.i32 checkWord, .i32 (UInt32.ofNat address.value)] ++ tail)
+      (fun final values =>
+        (∃ result,
+          DecrementOnceSuccess (fuel + 1) state witness nextRuntime address
+            check result final) ∧
+        values = tail) := by
+  apply installation.terminatesWith_of_success_wp checkWord tail
+  exact LiveHeapRel.wp_installedDecrementArray installation related
+    memoryRelated canonicalHeaders mapped found live ordinary one descriptor
+    objectEq objectRelated refCount persistent check checkWord
+    semanticOperation step releaseRun
 
 end ResidentRelease
 
