@@ -4310,6 +4310,105 @@ theorem ConcreteStructuredValidatedExternalCallReadyOutcome.advance_of_step
   exact ⟨targetAfter, targetPath,
     ConcreteStructuredValidatedCodeGlobalOutcome.externalBind bindValidated⟩
 
+/-- A validated, source-semantically typed return enters the closed yielded
+branch without a separately supplied current-node admission object.
+
+Residual production validation recovers the compiled local and its ordinary
+object-family carrier compatibility.  `resultSemantic` is the independent
+source typing/value-shape fact that makes a reverse object-family transfer
+sound.  The concrete return theorem then canonicalizes the physical result at
+the active function ABI, after which the existing suspended-resource stack
+supplies the caller refinement. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_return_of_semantic_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {result : Lean.FVarId}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.return result) targetStore targetLocals targetCode witness source target)
+    (resultSemantic :
+      ∀ {sourceValue}, lookup sourceEnv result = some sourceValue →
+        SemanticValueAtAbi functionResult sourceValue)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
+          targetModule hosts externals sourceAfter targetAfter := by
+  obtain ⟨joins, locals, validationFacts, sharing, validated, localsAgree⟩ :=
+    related.core.validation
+  have validatedReturn := validated.supported
+  obtain ⟨actualResult, localFound, _carrierCompatible⟩ :
+      ∃ actualResult,
+        Fir.Wasm.findLocalKind? locals result = some actualResult ∧
+          actualResult.leanCompatible functionResult = true := by
+    cases localFound : Fir.Wasm.findLocalKind? locals result with
+    | none =>
+        simp [Fir.Wasm.supportedCodeWithJoins, localFound] at validatedReturn
+    | some actualResult =>
+        exact ⟨actualResult, rfl, by
+          simpa [Fir.Wasm.supportedCodeWithJoins, localFound] using
+            validatedReturn⟩
+  have resultCompiled :
+      Fir.Wasm.getLocal context result =
+        .ok (.localGet result, actualResult) :=
+    localsAgree localFound
+  obtain ⟨targetAfter, sourceValue, physical, targetPath, yielded,
+      compatible, resources, sourceFramesEq, targetFramesEq⟩ :=
+    related.core.core.advance_return_at_functionResult spec resultCompiled
+      resultSemantic sourceStep
+  obtain ⟨supportedAfter, agreesAfter⟩ := related.agrees.reindex
+    sourceFramesEq targetFramesEq resources.suspended
+  have validationAfter :
+      ConcreteStructuredSuspendedValidation program functionResult
+        callerExpectedResult sourceAfter.frames := by
+    rw [sourceFramesEq]
+    exact related.frames.validation
+  have framesAfter :
+      ConcreteStructuredValidatedFrameStack program sourceModule targetModule
+        hosts functionResult callerExpectedResult sourceAfter.frames
+        targetAfter.frames :=
+    ⟨supportedAfter, validationAfter⟩
+  have validationAgreesAfter :
+      ConcreteStructuredValidationAgrees agreesAfter validationAfter :=
+    related.validationAgrees.reindex sourceFramesEq targetFramesEq agreesAfter
+      validationAfter
+  have returned :
+      ConcreteStructuredValidatedReturnedOutcome program context functionCode
+        sourceModule sourceFunction targetModule hosts spec externals labels
+        entryRuntime entryStore entryWitness functionResult
+        callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+        sourceValue targetStore targetLocals witness functionResult physical
+        sourceAfter targetAfter :=
+    ⟨activeResult, related.contextCaches, yielded, compatible, resources,
+      framesAfter, agreesAfter, validationAgreesAfter⟩
+  exact ⟨targetAfter, targetPath,
+    ConcreteStructuredValidatedCodeGlobalOutcome.returned returned⟩
+
 /-- A validated return enters the closed yielded branch.  Current-node
 admission supplies only the compiled result kind; the concrete theorem derives
 the semantic/physical result and both machine paths, while suspended caller

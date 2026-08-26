@@ -24394,6 +24394,117 @@ theorem ConcreteStructuredCodePointwiseRel.advance_directLet_of_step
     nextWitness, nextFacts, targetRest, targetCount, targetPath,
     targetPositive, by simpa using sourceFramesEq, targetFramesEq, nextCore⟩
 
+/-- A source-semantically typed return is reclassified at the active
+function's result ABI before it reaches the suspended caller protocol.
+
+Production lowering supplies the actual local kind.  The successful source
+step supplies the returned value, and `resultSemantic` supplies precisely the
+missing provenance needed when production's object-family carrier
+compatibility is not a directional `AbiKind.refines` proof.  The physical
+word is unchanged.  In particular, this rule cannot reinterpret an arbitrary
+`.tobject` as `.object` or `.tagged`; the source value must inhabit that exact
+semantic ABI kind. -/
+theorem ConcreteStructuredCodeCoreRel.advance_return_at_functionResult
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {result : Lean.FVarId}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    {actualResult : AbiKind}
+    (spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts)
+    (related : ConcreteStructuredCodeCoreRel program context sourceModule
+      sourceFunction externals labels entryRuntime entryStore entryWitness
+      functionResult callerExpectedResult facts remainingBytes sourceRuntime
+      sourceEnv (.return result) targetStore targetLocals targetCode witness
+      source target)
+    (resultCompiled :
+      Fir.Wasm.getLocal context result =
+        .ok (.localGet result, actualResult))
+    (resultSemantic :
+      ∀ {sourceValue}, lookup sourceEnv result = some sourceValue →
+        SemanticValueAtAbi functionResult sourceValue)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter sourceValue physical,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        ConcreteStructuredYieldFocus context sourceFunction sourceRuntime
+          sourceEnv sourceValue targetStore targetLocals witness functionResult
+          physical sourceAfter targetAfter ∧
+        ConcreteStructuredResultCompatible functionResult
+          callerExpectedResult ∧
+        ConcreteStructuredResourceStack program context sourceModule
+          sourceFunction externals entryRuntime sourceRuntime entryStore
+          targetStore entryWitness witness facts remainingBytes sourceEnv
+          targetLocals functionResult callerExpectedResult sourceAfter.frames
+          targetAfter.frames ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames := by
+  cases sourceLookup : lookup sourceEnv result with
+  | none =>
+      rcases source with
+        ⟨sourceProgram, sourceControl, sourceStateEnv, sourceJoins,
+          sourceFrames, runtime⟩
+      have controlEq := related.focus.sourceControlEq
+      change sourceControl = .code (.return result) at controlEq
+      subst sourceControl
+      have envEq := related.focus.sourceEnvEq
+      change sourceStateEnv = sourceEnv at envEq
+      subst sourceStateEnv
+      simp [executeStep, coreStep, lookupValue, sourceLookup, fail] at sourceStep
+  | some sourceValue =>
+      obtain ⟨actualKind, physical, computedAfter, targetAfter,
+          localCompiled, computedStep, targetPath, yielded,
+          _sourceJoinsEq, sourceFramesEq, targetFramesEq⟩ :=
+        related.focus.advance_return spec.localsAligned sourceLookup
+      have afterEq : sourceAfter = computedAfter := by
+        rw [sourceStep] at computedStep
+        injection computedStep
+      subst computedAfter
+      have kindEq : actualKind = actualResult := by
+        rw [resultCompiled] at localCompiled
+        have pairEq := Except.ok.inj localCompiled
+        exact (congrArg Prod.snd pairEq).symm
+      subst actualKind
+      have yieldedAtFunctionResult :
+          ConcreteStructuredYieldFocus context sourceFunction sourceRuntime
+            sourceEnv sourceValue targetStore targetLocals witness
+            functionResult physical sourceAfter targetAfter :=
+        { yielded with
+          valueRelated := yielded.valueRelated.ofSemanticValueAtAbi
+            (resultSemantic sourceLookup) }
+      have resourcesAfter :
+          ConcreteStructuredResourceStack program context sourceModule
+            sourceFunction externals entryRuntime sourceRuntime entryStore
+            targetStore entryWitness witness facts remainingBytes sourceEnv
+            targetLocals functionResult callerExpectedResult sourceAfter.frames
+            targetAfter.frames := by
+        rw [sourceFramesEq, targetFramesEq]
+        exact related.resources
+      exact ⟨targetAfter, sourceValue, physical, targetPath,
+        yieldedAtFunctionResult, related.resources.suspended.resultCompatible,
+        resourcesAfter, sourceFramesEq, targetFramesEq⟩
+
 /-- An admitted return is classified pointwise as either a terminal result or
 the appropriate direct/saturated bind protocol from the hereditary frame
 stack.  The successful source step supplies the lookup; admission supplies

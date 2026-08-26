@@ -24,6 +24,137 @@ inductive PhysicalValueRel (witness : RefinementWitness) :
   | float64Bits (related : ValueRel witness kind (.float64Bits bits) semantic) :
       PhysicalValueRel witness kind (.f64 bits) semantic
 
+/-- Source-semantic admissibility at one ABI kind.
+
+Unlike `AbiKind.leanCompatible`, this judgment records semantic provenance:
+an `.object` value is known to be a heap reference, a `.tagged` value is known
+to be tagged, and `.tobject` admits either representation.  Scalar and
+sentinel cases remain exact.  It deliberately contains no concrete address,
+Wasm lane, or refinement witness, so source typing and value-shape proofs can
+establish it independently of target execution. -/
+inductive SemanticValueAtAbi : AbiKind → Value → Prop where
+  | object : SemanticValueAtAbi .object (.object (.heap location))
+  | tagged : SemanticValueAtAbi .tagged (.object (.tagged payload))
+  | tobject (reference : ObjectRef) :
+      SemanticValueAtAbi .tobject (.object reference)
+  | erased : SemanticValueAtAbi .erased .erased
+  | reuseNone : SemanticValueAtAbi .reuseToken (.reuseToken none)
+  | reuseSome : SemanticValueAtAbi .reuseToken (.reuseToken (some location))
+  | uint8 : SemanticValueAtAbi .uint8 (.scalar (.uint8 value))
+  | uint16 : SemanticValueAtAbi .uint16 (.scalar (.uint16 value))
+  | uint32 : SemanticValueAtAbi .uint32 (.scalar (.uint32 value))
+  | uint64 : SemanticValueAtAbi .uint64 (.scalar (.uint64 value))
+  | float32Bits :
+      SemanticValueAtAbi .float32 (.scalar (.float32Bits bits))
+  | float64Bits :
+      SemanticValueAtAbi .float (.scalar (.float64Bits bits))
+  | usize : SemanticValueAtAbi .usize (.usize value)
+
+/-- Every concrete value relation exposes the corresponding source-semantic
+ABI fact after erasing its physical lane and refinement witness. -/
+theorem PhysicalValueRel.semanticValueAtAbi
+    {witness : RefinementWitness} {kind : AbiKind}
+    {physical : Wasm.Value} {semantic : Value}
+    (related : PhysicalValueRel witness kind physical semantic) :
+    SemanticValueAtAbi kind semantic := by
+  cases related with
+  | word32 valueRelated =>
+      cases valueRelated with
+      | object _ => exact .object
+      | tagged _ => exact .tagged
+      | tobject objectRelated =>
+          cases objectRelated with
+          | heap _ => exact .tobject _
+          | tagged _ => exact .tobject _
+      | erased => exact .erased
+      | reuseNone => exact .reuseNone
+      | reuseSome _ => exact .reuseSome
+      | uint8 _ => exact .uint8
+      | uint16 _ => exact .uint16
+      | uint32 _ => exact .uint32
+  | word64 valueRelated =>
+      cases valueRelated with
+      | uint64 => exact .uint64
+      | usize => exact .usize
+  | float32Bits valueRelated =>
+      cases valueRelated with
+      | float32Bits => exact .float32Bits
+  | float64Bits valueRelated =>
+      cases valueRelated with
+      | float64Bits => exact .float64Bits
+
+/-- Semantic provenance is the exact extra fact needed to reinterpret a
+compiler-compatible physical carrier at a more precise ABI kind.
+
+This theorem is intentionally stronger than the directional `ofRefines`
+helper below.  In particular, a `.tobject` lane may be specialized to
+`.object` only when the source value is known to be a heap reference, and to
+`.tagged` only when it is known to be tagged.  No raw `i32` or mere
+`leanCompatible` equation can justify either specialization. -/
+theorem PhysicalValueRel.ofSemanticValueAtAbi
+    {witness : RefinementWitness} {actual expected : AbiKind}
+    {physical : Wasm.Value} {semantic : Value}
+    (related : PhysicalValueRel witness actual physical semantic)
+    (semanticAtExpected : SemanticValueAtAbi expected semantic) :
+    PhysicalValueRel witness expected physical semantic := by
+  cases related with
+  | word32 valueRelated =>
+      cases valueRelated with
+      | object heapRelated =>
+          cases semanticAtExpected with
+          | object => exact .word32 (.object heapRelated)
+          | tobject _ => exact .word32 (.tobject (.heap heapRelated))
+      | tagged taggedRelated =>
+          cases semanticAtExpected with
+          | tagged => exact .word32 (.tagged taggedRelated)
+          | tobject _ => exact .word32 (.tobject (.tagged taggedRelated))
+      | tobject objectRelated =>
+          cases objectRelated with
+          | heap heapRelated =>
+              cases semanticAtExpected with
+              | object => exact .word32 (.object heapRelated)
+              | tobject _ => exact .word32 (.tobject (.heap heapRelated))
+          | tagged taggedRelated =>
+              cases semanticAtExpected with
+              | tagged => exact .word32 (.tagged taggedRelated)
+              | tobject _ => exact .word32 (.tobject (.tagged taggedRelated))
+      | erased =>
+          cases semanticAtExpected
+          exact .word32 .erased
+      | reuseNone =>
+          cases semanticAtExpected
+          exact .word32 .reuseNone
+      | reuseSome heapRelated =>
+          cases semanticAtExpected
+          exact .word32 (.reuseSome heapRelated)
+      | uint8 encoded =>
+          cases semanticAtExpected
+          exact .word32 (.uint8 encoded)
+      | uint16 encoded =>
+          cases semanticAtExpected
+          exact .word32 (.uint16 encoded)
+      | uint32 encoded =>
+          cases semanticAtExpected
+          exact .word32 (.uint32 encoded)
+  | word64 valueRelated =>
+      cases valueRelated with
+      | uint64 =>
+          cases semanticAtExpected
+          exact .word64 .uint64
+      | usize =>
+          cases semanticAtExpected
+          exact .word64 .usize
+  | float32Bits valueRelated =>
+      cases valueRelated with
+      | float32Bits =>
+          cases semanticAtExpected
+          exact .float32Bits .float32Bits
+  | float64Bits valueRelated =>
+      cases valueRelated with
+      | float64Bits =>
+          cases semanticAtExpected
+          exact .float64Bits .float64Bits
+
 /-- Every live FIR binding is represented in its compiler-assigned local by a
 W6 concrete lane. Unlike W5's opaque-handle relation, this relation exposes
 the exact address/tag word consumed by the concrete runtime. -/
