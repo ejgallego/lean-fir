@@ -25,12 +25,12 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   resident Array provenance consumer after rebasing, is the remaining
   milestone step.
 - Integration owner: `root`, holding the serial landing lease through accepted
-  integration head `d79ca362`. `wasm-gen` remains released to the W7-1
-  generation lane. The inherited cleanup, check-throughput, mailbox-routing,
-  bounded `Nat.land`, USize range-fact, and exact consumer-ratchet stack is now
-  integrated. Tooling's later bounded-parallelism successors remain parked on
-  their feature branches and require a fresh rebase/review request; they have
-  not advanced `main` and grant no ownership of W7 implementation files.
+  integration head `eb27fdd3`. `wasm-gen` remains released to the W7-1
+  generation lane. The inherited cleanup, serial and bounded check-throughput,
+  mailbox-routing, bounded `Nat.land`, USize range-fact, exact consumer-ratchet,
+  and transactional resident-linker stacks are now integrated. Tooling's
+  bounded work changed no W7 implementation file and granted no standing W7
+  ownership.
 - Accepted Lean 4.32 operational-residue cleanup: W7 functional head
   `66c325df` is linked through exact clean status checkpoint `1a6f5061`.
   Active LLVM SelectionAnimation/v4 metadata now records Lean 4.33, the
@@ -53,6 +53,32 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   retains 721 V8 cases, 658 executable plus 63 exact ByteArray-blocked concrete
   products, 44/44 readiness artifacts, and 16/16 sources. This is tooling-only:
   no semantics, ABI, runtime, proof, or generated-code contract changed.
+- Accepted bounded check-throughput stack: exact clean checkpoint `8d27898d`
+  bounds native validation concurrency, parallelizes only deterministic
+  producer pairs with disjoint output roots, isolates source and oracle
+  production, and verifies retained evidence through descriptor-relative
+  `O_NOFOLLOW` traversal without caching contents. The accepted exact-head
+  gates include `make check` at 730 unique cases and 2,172/2,172 comparisons,
+  all 3,174 Talos jobs with receipt
+  `5179f742b0bfce57761c00d1139dfb6e7918af9c3a9e69701c406f7628a5060a`,
+  and the complete artifact gate with deterministic products, 44/44 readiness
+  artifacts, and 16/16 sources. No semantic, ABI, runtime, proof, corpus,
+  evidence-schema, or publication contract changed.
+- Accepted transactional resident call-site linking: W7 functional head
+  `e8570099` is linked through clean tracked checkpoint `eb27fdd3`, based on
+  the accepted bounded tooling stack. The generic sequence validates the
+  untouched source module, applies reviewed caller rewrites, installs the
+  selected resident helper and module-owned memory as one unchecked
+  intermediate transaction, and validates the completed output. This fixes
+  `FIR-BUG-wasm-none-callsite-memory-installation-order` for memoryless
+  `getTag` sources while retaining invalid-input rejection. Exhaustive prettyM
+  acceptance also ratchets the bounded-Nat intermediate import frontiers from
+  14 to 13 and from 2 to 1; the final package remains zero-import. The combined
+  head passes 730 cases and 2,172/2,172 comparisons, all 3,174 Talos jobs with
+  receipt `1ebe83c87ec56ec6575c3a405d6580cec7a862720c843c7f1c39c9c65b0ca804`,
+  and every exhaustive artifact checkpoint plus 44/44 concrete readiness
+  artifacts. No resident-helper signature, semantic ABI, concrete layout,
+  ownership, or W6 proof contract changed.
 - Accepted default mailbox-to-Codex routing: exact clean checkpoint `0a9992ad`
   maps stable lane addresses to current session UUIDs. Every durable delivery
   now attempts recipient-route notification by default; `--no-notify` is the
