@@ -185,20 +185,22 @@ def BoxedScalarKind.semanticType : BoxedScalarKind → Lean.Expr
   | .usize => LCNF.ImpureType.usize
 
 /-- Whether the upstream type-specific boxing API permits Lean's tagged object
-representation. `UInt64` is the sole integer scalar kind whose generic box and
+representation. `UInt64` and `USize` are heap-only; their generic box and
 unbox primitives always use an ordinary heap constructor. -/
 def BoxedScalarKind.allowsTaggedRepresentation : BoxedScalarKind → Bool
-  | .uint64 => false
-  | .uint8 | .uint16 | .uint32 | .usize => true
+  | .uint64 | .usize => false
+  | .uint8 | .uint16 | .uint32 => true
 
 @[simp] theorem BoxedScalarKind.allowsTaggedRepresentation_eq_true
     (kind : BoxedScalarKind) :
-    kind.allowsTaggedRepresentation = true ↔ kind ≠ .uint64 := by
+    kind.allowsTaggedRepresentation = true ↔
+      kind ≠ .uint64 ∧ kind ≠ .usize := by
   cases kind <;> simp [BoxedScalarKind.allowsTaggedRepresentation]
 
 @[simp] theorem BoxedScalarKind.allowsTaggedRepresentation_eq_false
     (kind : BoxedScalarKind) :
-    kind.allowsTaggedRepresentation = false ↔ kind = .uint64 := by
+    kind.allowsTaggedRepresentation = false ↔
+      kind = .uint64 ∨ kind = .usize := by
   cases kind <;> simp [BoxedScalarKind.allowsTaggedRepresentation]
 
 /-- Every concrete scalar lane carries exactly its semantic integer value at
@@ -329,10 +331,10 @@ def incrementReference (state : MemoryState) (object : Word32)
         writeLiveHeader state object { header with refCount }
   | .sentinel | .invalid => throw (.source .expectedObject)
 
-/-- Concrete FIR boxing. `UInt64` follows upstream's heap-only type-specific
-API. Other integer kinds use the source semantic tagged limit, not the narrower
-wasm32 immediate limit; `encodeTagged` owns the intermediate persistent
-representation. -/
+/-- Concrete FIR boxing. `UInt64` and `USize` follow upstream's heap-only
+type-specific APIs. Other integer kinds use the source semantic tagged limit,
+not the narrower wasm32 immediate limit; `encodeTagged` owns the intermediate
+persistent representation. -/
 def boxScalar (state : MemoryState) (scalar : BoxedScalar) :
     Except ConcreteError (MemoryState × Word32) :=
   if scalar.kind.allowsTaggedRepresentation &&

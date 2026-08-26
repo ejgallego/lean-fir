@@ -362,6 +362,46 @@ def boxedUInt64Max : Except ConcreteError (MemoryState × Word32) :=
               scalar == .uint64 18446744073709551615
         | _, _ => false
 
+/-- `USize` is heap-only even for a value that would otherwise fit a direct
+tagged object word. -/
+def boxedUSizeSmall : Except ConcreteError (MemoryState × Word32) :=
+  boxScalar MemoryState.initial (.usize 42)
+
+#guard match boxedUSizeSmall with
+  | .error _ => false
+  | .ok (state, word) =>
+      word.value == heapBase && state.heapCursor == heapBase + 40 &&
+        match state.readLiveHeader word, readBoxedScalar state .usize word with
+        | .ok header, .ok scalar =>
+            header.kind == .boxed && !header.persistent && header.refCount == 1 &&
+              header.allocationBytes == 40 &&
+              header.aux0 == BoxedScalarKind.usize.code && header.aux1 == 8 &&
+              header.aux2 == 0 && header.aux3 == 0 && scalar == .usize 42
+        | _, _ => false
+
+/-- The heap-only `USize` contract retains the complete 64-bit payload. -/
+def boxedUSizeMax : Except ConcreteError (MemoryState × Word32) :=
+  boxScalar MemoryState.initial (.usize 18446744073709551615)
+
+#guard match boxedUSizeMax with
+  | .error _ => false
+  | .ok (state, word) =>
+      word.value == heapBase && state.heapCursor == heapBase + 40 &&
+        match state.readLiveHeader word, readBoxedScalar state .usize word with
+        | .ok header, .ok scalar =>
+            header.kind == .boxed && !header.persistent && header.refCount == 1 &&
+              header.allocationBytes == 40 &&
+              header.aux0 == 5 && header.aux1 == 8 &&
+              header.aux2 == 0 && header.aux3 == 0 &&
+              scalar == .usize 18446744073709551615
+        | _, _ => false
+
+/- Conversely, a physical tagged word is rejected at the `USize` boundary. -/
+#guard match readBoxedScalar MemoryState.initial .usize
+    (Word32.encodeImmediate 42 (by decide)) with
+  | .error (.source .expectedScalar) => true
+  | _ => false
+
 /-- Cache publication changes only ownership metadata. A heap-backed scalar
 therefore remains exactly decodable after its header becomes persistent. -/
 def persistentBoxedUInt64Max : Except ConcreteError (MemoryState × Word32) := do

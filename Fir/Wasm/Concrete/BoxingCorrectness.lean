@@ -319,6 +319,39 @@ theorem allocateBoxedScalar_objectRel
   · rfl
   · rfl
 
+/--
+The proof-facing resident contract for a heap-only `USize` box.  It exposes
+the stable scalar marker (`5`), full-width payload lane (`8` bytes), ordinary
+owned header, and exact allocation extent consumed by the resident Wasm
+helper.  The payload is unrestricted, so the same theorem covers both small
+values and `UInt64.max`.
+-/
+theorem allocateBoxedUSize_residentContract
+    (state result : MemoryState) (payload : UInt64) (address : Word32)
+    (valid : state.FrontierInvariant)
+    (allocated :
+      allocateBoxedScalar state (.usize payload) = .ok (result, address)) :
+    result.FrontierInvariant ∧
+      ∃ header,
+        BoxedObjectRel result address .usize (.usize payload) header ∧
+        header.kind = .boxed ∧
+        header.allocationBytes.toNat = 40 ∧
+        header.aux0 = 5 ∧
+        header.aux1 = 8 ∧
+        header.aux2 = 0 ∧
+        header.aux3 = 0 ∧
+        header.refCount.toNat = 1 ∧
+        header.persistent = false := by
+  obtain ⟨resultValid, header, related, refCount, persistent⟩ :=
+    allocateBoxedScalar_objectRel state result (.usize payload) address valid
+      allocated
+  refine ⟨resultValid, header, related, related.headerKind, ?_, ?_, ?_,
+    related.reserved2, related.reserved3, refCount, persistent⟩
+  · simpa [target, headerBytes, align8] using related.allocationBytes
+  · simpa [BoxedScalar.kind, BoxedScalarKind.code] using related.kindCode
+  · simpa [BoxedScalar.kind, BoxedScalarKind.payloadBytes] using
+      related.payloadBytes
+
 def semanticBoxCell (scalar : BoxedScalar) : HeapCell := {
   object := .boxed scalar.kind.semanticType scalar.semanticValue }
 
@@ -328,8 +361,8 @@ def semanticBoxResult (runtime : RuntimeState) (scalar : BoxedScalar) : RuntimeS
   nextLocation := runtime.nextLocation + 1 }
 
 /-- The concrete scalar-kind policy is exactly the type-specific semantic
-boxing policy. `UInt64` is heap-only; all other concrete integer kinds retain
-the historical payload-size split. -/
+boxing policy. `UInt64` and `USize` are heap-only; the other concrete integer
+kinds retain the historical payload-size split. -/
 @[simp] theorem boxUsesTaggedRepresentation_boxedScalar (scalar : BoxedScalar) :
     boxUsesTaggedRepresentation scalar.kind.semanticType scalar.payload =
       (scalar.kind.allowsTaggedRepresentation &&
@@ -337,7 +370,8 @@ the historical payload-size split. -/
   have guardEq :
       Bool.not (scalar.kind.semanticType == Lean.Compiler.LCNF.ImpureType.float32 ||
           scalar.kind.semanticType == Lean.Compiler.LCNF.ImpureType.float ||
-          scalar.kind.semanticType == Lean.Compiler.LCNF.ImpureType.uint64) =
+          scalar.kind.semanticType == Lean.Compiler.LCNF.ImpureType.uint64 ||
+          scalar.kind.semanticType == Lean.Compiler.LCNF.ImpureType.usize) =
         scalar.kind.allowsTaggedRepresentation := by
     cases scalar <;>
       simp only [BoxedScalar.kind, BoxedScalarKind.semanticType,
@@ -688,6 +722,27 @@ theorem boxScalar_taggedDisallowed_liveHeapRel
     allocateBoxedScalar_liveHeapRel state result witness runtime scalar address
       related allocated⟩
 
+/-- Every `USize` payload, including values in the ordinary tagged range, uses
+the owned heap-box refinement.  This is the W6 boundary consumed by the
+resident `fir_box_usize`/`fir_unbox_usize` proof. -/
+theorem boxUSize_liveHeapRel
+    (state result : MemoryState) (witness : RefinementWitness)
+    (runtime : RuntimeState) (payload : UInt64) (address : Word32)
+    (related : LiveHeapRel state witness runtime)
+    (boxed : boxScalar state (.usize payload) = .ok (result, address)) :
+    Fir.LeanIR.Impure.box runtime Lean.Compiler.LCNF.ImpureType.usize
+          (.usize payload) =
+        .ok (semanticBoxResult runtime (.usize payload),
+          .object (.heap runtime.nextLocation)) ∧
+      let nextWitness := witness.bindBoxed runtime.nextLocation address .usize
+      LiveHeapRel result nextWitness (semanticBoxResult runtime (.usize payload)) ∧
+        ValueRel nextWitness .tobject (.word32 address)
+          (.object (.heap runtime.nextLocation)) := by
+  simpa [BoxedScalar.kind, BoxedScalarKind.semanticType,
+    BoxedScalar.semanticValue] using
+      boxScalar_taggedDisallowed_liveHeapRel state result witness runtime
+        (.usize payload) address related (by rfl) boxed
+
 /-- The complement of the public tagged branch has one representation-neutral
 heap refinement. This factors the payload-too-large and kind-disallowed cases
 for compiler/runtime clients. -/
@@ -750,7 +805,7 @@ theorem boxScalar_tagged_liveHeapRel
       related encoded⟩
 
 /-- A successful semantic unbox of a tagged object statically excludes the
-heap-only `UInt64` result kind. -/
+heap-only `UInt64` and `USize` result kinds. -/
 theorem BoxedScalarKind.allowsTaggedRepresentation_of_unbox_tagged_eq_ok
     (runtime : RuntimeState) (kind : BoxedScalarKind) (payload : UInt64)
     (value : Value)
@@ -758,11 +813,24 @@ theorem BoxedScalarKind.allowsTaggedRepresentation_of_unbox_tagged_eq_ok
       (.object (.tagged payload)) = .ok value) :
     kind.allowsTaggedRepresentation = true := by
   cases kind with
-  | uint8 | uint16 | uint32 | usize => rfl
+  | uint8 | uint16 | uint32 => rfl
   | uint64 =>
       have typeEq :
           (BoxedScalarKind.uint64.semanticType ==
-            Lean.Compiler.LCNF.ImpureType.uint64) = true := by
+              Lean.Compiler.LCNF.ImpureType.uint64 ||
+            BoxedScalarKind.uint64.semanticType ==
+              Lean.Compiler.LCNF.ImpureType.usize) = true := by
+        native_decide
+      unfold Fir.LeanIR.Impure.unbox at unboxed
+      simp only at unboxed
+      rw [if_pos typeEq] at unboxed
+      contradiction
+  | usize =>
+      have typeEq :
+          (BoxedScalarKind.usize.semanticType ==
+              Lean.Compiler.LCNF.ImpureType.uint64 ||
+            BoxedScalarKind.usize.semanticType ==
+              Lean.Compiler.LCNF.ImpureType.usize) = true := by
         native_decide
       unfold Fir.LeanIR.Impure.unbox at unboxed
       simp only at unboxed
@@ -787,15 +855,16 @@ theorem LiveHeapRel.readBoxedScalar_tagged_refines
   have semantic : Fir.LeanIR.Impure.unbox runtime kind.semanticType
       (.object (.tagged payload)) =
         .ok (BoxedScalar.ofPayload kind payload).semanticValue := by
-    have typeNotUInt64 :
-        (kind.semanticType == Lean.Compiler.LCNF.ImpureType.uint64) = false := by
+    have typeNotHeapOnly :
+        (kind.semanticType == Lean.Compiler.LCNF.ImpureType.uint64 ||
+          kind.semanticType == Lean.Compiler.LCNF.ImpureType.usize) = false := by
       cases kind <;>
         simp_all [BoxedScalarKind.allowsTaggedRepresentation,
           BoxedScalarKind.semanticType] <;>
         native_decide
     unfold Fir.LeanIR.Impure.unbox
     simp only
-    rw [typeNotUInt64]
+    rw [typeNotHeapOnly]
     exact scalarFromType_boxedScalarKind kind payload
   have valueRelated := BoxedScalar.valueRel witness
     (BoxedScalar.ofPayload kind payload)
