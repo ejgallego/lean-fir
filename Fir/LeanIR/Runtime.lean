@@ -723,20 +723,24 @@ def scalarFromType (type : Expr) (payload : UInt64) : Except RuntimeFault Value 
 /--
 Whether final-LCNF `box` may use Lean's tagged immediate representation.
 
-Float32, Float, and UInt64 boxes are always heap objects: their type-specific
-upstream boxing primitives allocate constructors, and compiler-generated boxed
-wrappers may release them with unchecked `dec[ref]`. The remaining integer and
-`USize` boxes retain the existing target-model payload-size split.
+Float32, Float, UInt64, and USize boxes are always heap objects: their
+type-specific upstream boxing primitives allocate constructors, and
+compiler-generated boxed wrappers may release them with unchecked `dec[ref]`.
+The remaining integer boxes retain the existing target-model payload-size
+split.
 -/
 def boxUsesTaggedRepresentation (type : Expr) (payload : UInt64) : Bool :=
   !(type == LCNF.ImpureType.float32 || type == LCNF.ImpureType.float ||
-      type == LCNF.ImpureType.uint64) &&
+      type == LCNF.ImpureType.uint64 || type == LCNF.ImpureType.usize) &&
     decide (payload.toNat ≤ maxTaggedPayload)
 
 #guard boxUsesTaggedRepresentation LCNF.ImpureType.uint32 0xdeadbeef
 #guard !boxUsesTaggedRepresentation LCNF.ImpureType.uint64 0
 #guard !boxUsesTaggedRepresentation LCNF.ImpureType.uint64 41
 #guard !boxUsesTaggedRepresentation LCNF.ImpureType.uint64 0xffffffffffffffff
+#guard !boxUsesTaggedRepresentation LCNF.ImpureType.usize 0
+#guard !boxUsesTaggedRepresentation LCNF.ImpureType.usize 41
+#guard !boxUsesTaggedRepresentation LCNF.ImpureType.usize 0xffffffffffffffff
 #guard !boxUsesTaggedRepresentation LCNF.ImpureType.float32 0
 #guard !boxUsesTaggedRepresentation LCNF.ImpureType.float 0
 
@@ -763,7 +767,7 @@ private def floatingBoxGuard : Bool :=
 def unbox (runtime : RuntimeState) (type : Expr) (value : Value) : Except RuntimeFault Value :=
   match value with
   | .object (.tagged payload) =>
-      if type == LCNF.ImpureType.uint64 then
+      if type == LCNF.ImpureType.uint64 || type == LCNF.ImpureType.usize then
         .error .expectedScalar
       else
         scalarFromType type payload
@@ -788,6 +792,23 @@ private def uint64BoxGuard : Bool :=
 #guard uint64BoxGuard
 
 #guard match unbox {} LCNF.ImpureType.uint64 (.object (.tagged 41)) with
+  | .error .expectedScalar => true
+  | _ => false
+
+private def usizeBoxGuard : Bool :=
+  match box {} LCNF.ImpureType.usize (.usize 41),
+      box {} LCNF.ImpureType.usize (.usize 0xffffffffffffffff) with
+  | .ok (smallRuntime, .object (.heap smallLocation)),
+      .ok (largeRuntime, .object (.heap largeLocation)) =>
+      match unbox smallRuntime LCNF.ImpureType.usize (.object (.heap smallLocation)),
+          unbox largeRuntime LCNF.ImpureType.usize (.object (.heap largeLocation)) with
+      | .ok (.usize 41), .ok (.usize 0xffffffffffffffff) => true
+      | _, _ => false
+  | _, _ => false
+
+#guard usizeBoxGuard
+
+#guard match unbox {} LCNF.ImpureType.usize (.object (.tagged 41)) with
   | .error .expectedScalar => true
   | _ => false
 

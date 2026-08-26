@@ -309,6 +309,9 @@ def discardGeneric {α : Type} (_value : α) : Bool :=
 def discardBoxedUInt64 (value : UInt64) : UInt64 :=
   if discardGeneric value then 0 else value
 
+def discardBoxedUSize (value : USize) : USize :=
+  if discardGeneric value then 0 else value
+
 def okFloat (value : Float) : Except String Float :=
   .ok value
 
@@ -3858,14 +3861,14 @@ private def intOfNatFormTrace : Array String :=
 private def externalCallFormTrace : Array String :=
   #["fap", "extern", "return"]
 
-private def boxedUInt64ReleaseFormCounts : Array ExecutedFormCountRequirement :=
+private def boxedOwnedScalarReleaseFormCounts : Array ExecutedFormCountRequirement :=
   #[{ form := "box", minimum := 1, maximum := some 1 },
     { form := "fap", minimum := 1, maximum := some 1 },
     { form := "lit", minimum := 1, maximum := some 1 },
     { form := "return", minimum := 2, maximum := some 2 },
     { form := "dec", minimum := 1, maximum := some 1 }]
 
-private def boxedUInt64ReleaseFormTrace : Array String :=
+private def boxedOwnedScalarReleaseFormTrace : Array String :=
   #["box", "fap", "lit", "return", "dec", "return"]
 
 private def exactNatBinaryExternalCase
@@ -5356,8 +5359,8 @@ private def preConversionCases : Array Case := #[
     tags := #["quick", "scalar", "generic", "boxed", "uint64", "heap", "ownership"]
     requiredLcnfForms := #["box", "dec", "fap", "lit", "return"]
     requiredExecutedLcnfForms := #["box", "dec", "fap", "lit", "return"]
-    requiredExecutedLcnfFormCounts := boxedUInt64ReleaseFormCounts
-    requiredExecutedLcnfFormTrace := some boxedUInt64ReleaseFormTrace
+    requiredExecutedLcnfFormCounts := boxedOwnedScalarReleaseFormCounts
+    requiredExecutedLcnfFormTrace := some boxedOwnedScalarReleaseFormTrace
     provenance := firProvenance
       "Release a compiler-generated small boxed UInt64 through an owned generic argument" },
   { id := "generic-discard-boxed-uint64-max"
@@ -5370,10 +5373,39 @@ private def preConversionCases : Array Case := #[
     tags := #["stress", "scalar", "generic", "boxed", "uint64", "heap", "ownership"]
     requiredLcnfForms := #["box", "dec", "fap", "lit", "return"]
     requiredExecutedLcnfForms := #["box", "dec", "fap", "lit", "return"]
-    requiredExecutedLcnfFormCounts := boxedUInt64ReleaseFormCounts
-    requiredExecutedLcnfFormTrace := some boxedUInt64ReleaseFormTrace
+    requiredExecutedLcnfFormCounts := boxedOwnedScalarReleaseFormCounts
+    requiredExecutedLcnfFormTrace := some boxedOwnedScalarReleaseFormTrace
     provenance := firProvenance
       "Release a compiler-generated maximal boxed UInt64 through an owned generic argument" },
+  { id := "generic-discard-boxed-usize-small"
+    entry := ``Source.discardBoxedUSize
+    dependencies := #[``Source.discardGeneric]
+    args := #[.usize 41]
+    argSchemas := #[.usize]
+    resultSchema := .usize
+    native := fun _ => .usize (UInt64.ofNat (Source.discardBoxedUSize 41).toNat)
+    tags := #["quick", "scalar", "generic", "boxed", "usize", "heap", "ownership"]
+    requiredLcnfForms := #["box", "dec", "fap", "lit", "return"]
+    requiredExecutedLcnfForms := #["box", "dec", "fap", "lit", "return"]
+    requiredExecutedLcnfFormCounts := boxedOwnedScalarReleaseFormCounts
+    requiredExecutedLcnfFormTrace := some boxedOwnedScalarReleaseFormTrace
+    provenance := firProvenance
+      "Release a compiler-generated small boxed USize through an owned generic argument" },
+  { id := "generic-discard-boxed-usize-max"
+    entry := ``Source.discardBoxedUSize
+    dependencies := #[``Source.discardGeneric]
+    args := #[.usize (UInt64.ofNat Source.maxUSize.toNat)]
+    argSchemas := #[.usize]
+    resultSchema := .usize
+    native := fun _ =>
+      .usize (UInt64.ofNat (Source.discardBoxedUSize Source.maxUSize).toNat)
+    tags := #["stress", "scalar", "generic", "boxed", "usize", "heap", "ownership"]
+    requiredLcnfForms := #["box", "dec", "fap", "lit", "return"]
+    requiredExecutedLcnfForms := #["box", "dec", "fap", "lit", "return"]
+    requiredExecutedLcnfFormCounts := boxedOwnedScalarReleaseFormCounts
+    requiredExecutedLcnfFormTrace := some boxedOwnedScalarReleaseFormTrace
+    provenance := firProvenance
+      "Release a compiler-generated maximal boxed USize through an owned generic argument" },
   { id := "generic-except-float-build"
     entry := ``Source.okFloat
     args := #[float64Datum genericContainerFloat]

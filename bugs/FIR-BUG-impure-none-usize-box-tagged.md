@@ -9,7 +9,7 @@ pass: none
 discovered-by: invariant-check
 first-seen: 2026-08-26
 reproduction: Fir/LeanIR/Runtime.lean
-regression: none
+regression: Fir/Validation/Corpus.lean
 ---
 
 # Summary
@@ -80,4 +80,9 @@ none
 
 ## Resolution and regression
 
-unresolved
+The isolated contract candidate makes `USize` heap-only in the semantic
+runtime, rejects tagged `USize` unboxing, and adds source-generated small and
+maximal owned-release cases. The focused native/LCNF/V8 triangle passes all
+six comparisons. The bug remains confirmed until the dependent W6 concrete
+proof and W7 zero-import resident box/unbox consumers are adapted and the
+complete stack is linked on `main`.
