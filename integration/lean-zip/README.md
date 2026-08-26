@@ -795,6 +795,37 @@ This separately captured screen is inconclusive and makes no attributable
 runtime-performance claim. The accepted evidence is the semantic bound, exact
 52-site ownership reduction, smaller artifact, and green differential gate.
 
+The next range slice keeps scalar bounds separate from ABI kinds. A generic
+`fitsTaggedNat` fact may cross an ABI-preserving operation without claiming
+that its scalar result has an object ABI: a tagged input to `USize.ofNat`
+produces a `.usize` carrying that fact, and `USize.toNat` consumes the fact to
+refine its object result to `.tagged`. The same fixed-point analysis still
+requires immediately assigned compiler locals, a single reviewed definition,
+and exact provider conditions. Coarse or multiply assigned values retain their
+ordinary ABI kind and checked release.
+
+The raw closure contains 378 direct `USize.ofNat`/`USize.toNat` chains whose
+results account for 380 checked releases. Exactly 114 begin with a statically
+tagged Nat (all from the already reviewed tagged `ByteArray.size` surface), so
+only those 114 releases disappear; the other 266 remain conservative. The
+symbolic `fir_release_0` census falls from 4,277 to 4,163. The pre-optimizer
+frontier decreases from 831,513 to 830,857 bytes and the final zero-import
+module from 366,523 to 365,682 bytes. Its SHA-256 is
+`3780a49aaf5027c3ca33aa055e9575ef0c5e0fa1a15573a02fffb916515dce22`;
+all 50 native/Wasm/inflate comparisons and persistent-cache plus scratch
+reclamation checks pass unchanged.
+
+Two independent diagnostics-off campaigns total 32 order-balanced,
+fresh-process 256-KiB level-6 pairs. Baseline and candidate medians are 34.264
+ms (MAD 1.318) and 31.936 ms (MAD 0.417); the paired median is -2.249 ms with a
+0.9343 ratio, 24/32 improving pairs, and agreeing baseline-first/candidate-first
+ratios of 0.9368 and 0.9325. This is strong directional evidence for removing
+the round-trip release traffic, but not yet an attributable headline: the two
+artifacts were produced by separate source captures and cross the documented
+final-LCNF recapture boundary. Exact accepted claims remain the generic fact
+transfer, 114-site reduction, smaller module, and green semantic/ownership
+gates.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not
