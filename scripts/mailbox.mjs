@@ -3,20 +3,34 @@
 import { existsSync } from "node:fs";
 
 import {
+  deliverMessage,
   inspectMailbox,
   mailboxProtocol,
+  notifyCodexSession,
   resolveMailbox,
   terminalStates,
 } from "./mailbox-lib.mjs";
 
 function usage() {
-  console.error("usage: node scripts/mailbox.mjs <check|list> [--mailbox PATH] [--all] [--json]");
+  console.error(
+    "usage: node scripts/mailbox.mjs <check|list|deliver> [DRAFT] " +
+    "[--mailbox PATH] [--notify-session SESSION] [--all] [--json]",
+  );
 }
 
 function parseArgs(argv) {
   const [command, ...rest] = argv;
-  if (!new Set(["check", "list"]).has(command)) throw new Error("expected `check` or `list`");
-  const options = { command, all: false, json: false, mailbox: null };
+  if (!new Set(["check", "list", "deliver"]).has(command)) {
+    throw new Error("expected `check`, `list`, or `deliver`");
+  }
+  const options = {
+    command,
+    all: false,
+    json: false,
+    mailbox: null,
+    draft: null,
+    notifySession: null,
+  };
   for (let index = 0; index < rest.length; index += 1) {
     const argument = rest[index];
     if (argument === "--all") options.all = true;
@@ -27,11 +41,22 @@ function parseArgs(argv) {
         throw new Error("`--mailbox` requires a path");
       }
       index += 1;
-    } else throw new Error(`unknown argument ${JSON.stringify(argument)}`);
+    } else if (argument === "--notify-session") {
+      options.notifySession = rest[index + 1];
+      if (!options.notifySession || options.notifySession.startsWith("--")) {
+        throw new Error("`--notify-session` requires a session UUID or exact name");
+      }
+      index += 1;
+    } else if (command === "deliver" && !options.draft) options.draft = argument;
+    else throw new Error(`unknown argument ${JSON.stringify(argument)}`);
   }
-  if (command === "check" && (options.all || options.json)) {
+  if (command !== "list" && (options.all || options.json)) {
     throw new Error("`--all` and `--json` are list options");
   }
+  if (command !== "deliver" && options.notifySession) {
+    throw new Error("`--notify-session` is a deliver option");
+  }
+  if (command === "deliver" && !options.draft) throw new Error("deliver requires a draft path");
   return options;
 }
 
@@ -111,12 +136,27 @@ try {
 if (options) {
   try {
     const mailboxPath = resolveMailbox({ mailbox: options.mailbox });
-    if (options.mailbox && !existsSync(mailboxPath)) {
+    if (options.command !== "deliver" && options.mailbox && !existsSync(mailboxPath)) {
       throw new Error(`mailbox does not exist: ${mailboxPath}`);
     }
-    const result = inspectMailbox(mailboxPath);
-    if (options.command === "check") check(result);
-    else list(result, options);
+    if (options.command === "deliver") {
+      const delivered = deliverMessage(mailboxPath, options.draft);
+      console.log(`delivered ${delivered.messageId} -> ${delivered.destination}`);
+      if (options.notifySession) {
+        const notification = notifyCodexSession(options.notifySession, delivered);
+        if (notification.ok) {
+          console.log(`notified Codex session ${options.notifySession}`);
+        } else {
+          console.warn(
+            `warning: durable delivery succeeded, but Codex notification failed: ${notification.detail}`,
+          );
+        }
+      }
+    } else {
+      const result = inspectMailbox(mailboxPath);
+      if (options.command === "check") check(result);
+      else list(result, options);
+    }
   } catch (error) {
     console.error(`error: ${error.message}`);
     process.exitCode = 1;

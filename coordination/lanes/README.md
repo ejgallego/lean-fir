@@ -6,7 +6,7 @@ worktrees, tests, or the integration owner's board.
 
 They are tracked milestone snapshots, not the local operational mailbox. New
 requests and acknowledgements use the primary checkout's ignored
-`.agents/mailbox/` and `docs/MAILBOX_PROTOCOL.md`; a ready lane still commits
+`.fir-mailbox/` and `docs/MAILBOX_PROTOCOL.md`; a ready lane still commits
 the schema below here before integration.
 
 ## Single-writer ownership

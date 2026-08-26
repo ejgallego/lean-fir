@@ -1,5 +1,16 @@
+import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  linkSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { resolve } from "node:path";
 
 export const mailboxProtocol = "agent-mailbox/v1";
@@ -10,6 +21,7 @@ const hashPattern = /^[0-9a-fA-F]{7,64}$/;
 const completeHashPattern = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/;
 const worktreePattern = /^\.worktrees\/[a-z0-9][a-z0-9._-]*$/;
 const ignoredMetadataNames = new Set(["README.md"]);
+const reservedDirectoryNames = new Set(["tmp"]);
 
 const requiredFields = [
   "protocol",
@@ -132,7 +144,7 @@ export function primaryCheckout(cwd = process.cwd()) {
 }
 
 export function resolveMailbox({ cwd = process.cwd(), mailbox } = {}) {
-  return mailbox ? resolve(cwd, mailbox) : resolve(primaryCheckout(cwd), ".agents/mailbox");
+  return mailbox ? resolve(cwd, mailbox) : resolve(primaryCheckout(cwd), ".fir-mailbox");
 }
 
 export function parseMessage(source, file = "<message>") {
@@ -553,7 +565,7 @@ function loadMailbox(mailboxPath) {
   }
   for (const entry of readdirSync(mailboxPath, { withFileTypes: true })) {
     if (!entry.isFile()) {
-      ignoredFiles.push(`${entry.name}/`);
+      if (!reservedDirectoryNames.has(entry.name)) ignoredFiles.push(`${entry.name}/`);
       continue;
     }
     if (ignoredMetadataNames.has(entry.name)) {
@@ -591,4 +603,95 @@ export function inspectMailbox(mailboxPath) {
     errors: [...loaded.parseErrors, ...validated.errors],
     threads: validated.threads,
   };
+}
+
+function deliveryError(label, errors) {
+  return new Error(`${label}:\n${errors.join("\n")}`);
+}
+
+export function deliverMessage(mailboxPath, draftPath) {
+  const sourcePath = resolve(draftPath);
+  const source = readFileSync(sourcePath, "utf8");
+  const draft = parseMessage(source, sourcePath);
+  const messageId = draft.header["message-id"];
+
+  mkdirSync(mailboxPath, { recursive: true, mode: 0o700 });
+  const temporaryPath = resolve(mailboxPath, "tmp");
+  mkdirSync(temporaryPath, { recursive: true, mode: 0o700 });
+  const lockPath = resolve(temporaryPath, "delivery.lock");
+  let lock;
+  let staging;
+  try {
+    try {
+      lock = openSync(lockPath, "wx", 0o600);
+    } catch (error) {
+      if (error.code === "EEXIST") {
+        throw new Error(
+          `another mailbox delivery is active; if it crashed, inspect and remove ${lockPath}`,
+        );
+      }
+      throw error;
+    }
+
+    const active = inspectMailbox(mailboxPath);
+    if (active.errors.length > 0) {
+      throw deliveryError("mailbox must pass integrity checks before delivery", active.errors);
+    }
+
+    const destinationName = messageId ? `${messageId}.md` : "invalid-message.md";
+    const candidate = { ...draft, file: destinationName };
+    const prospective = validateMessages([...active.messages, candidate]);
+    if (prospective.errors.length > 0) {
+      throw deliveryError("message cannot be delivered", prospective.errors);
+    }
+
+    const destination = resolve(mailboxPath, destinationName);
+    if (existsSync(destination)) {
+      throw new Error(`message already exists: ${destinationName}`);
+    }
+
+    staging = resolve(temporaryPath, `deliver-${messageId}-${randomUUID()}.md`);
+    writeFileSync(staging, source, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    // A same-filesystem hard link publishes the complete staged inode and fails
+    // instead of overwriting if another process somehow created the identity.
+    linkSync(staging, destination);
+    unlinkSync(staging);
+    staging = null;
+
+    return {
+      messageId,
+      destination,
+      from: draft.header.from,
+      to: draft.header.to,
+      subject: draft.header.subject,
+    };
+  } finally {
+    if (staging && existsSync(staging)) unlinkSync(staging);
+    if (lock !== undefined) {
+      closeSync(lock);
+      if (existsSync(lockPath)) unlinkSync(lockPath);
+    }
+  }
+}
+
+export function notifyCodexSession(session, delivered, { run = spawnSync } = {}) {
+  const message = [
+    `FIR mailbox message ${delivered.messageId}`,
+    `from ${delivered.from} to ${delivered.to}: ${delivered.subject}.`,
+    `Run make mailbox-list and read ${delivered.messageId}.md; the mailbox event is authoritative.`,
+  ].join(" ");
+  const result = run(
+    "codex",
+    ["queue", "--thread", session, "--message", message],
+    { encoding: "utf8", timeout: 5_000, killSignal: "SIGTERM" },
+  );
+  if (result.error) {
+    return { ok: false, detail: result.error.message, message };
+  }
+  if (result.status !== 0) {
+    const detail = result.stderr?.trim() || result.stdout?.trim()
+      || `codex queue exited with status ${result.status}`;
+    return { ok: false, detail, message };
+  }
+  return { ok: true, detail: result.stdout?.trim() || "queued", message };
 }

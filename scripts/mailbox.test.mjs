@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
 import {
+  deliverMessage,
   inspectMailbox,
+  notifyCodexSession,
   parseMessage,
   primaryCheckout,
   resolveMailbox,
@@ -15,6 +16,7 @@ import {
 } from "./mailbox-lib.mjs";
 
 const script = resolve(import.meta.dirname, "mailbox.mjs");
+const scratchRoot = resolve(import.meta.dirname, "../.deps/mailbox-tests");
 
 function message({
   id,
@@ -47,11 +49,12 @@ function message({
 }
 
 async function withMailbox(run) {
-  const root = await mkdtemp(join(tmpdir(), "fir-mailbox-"));
-  const mailbox = join(root, ".agents", "mailbox");
+  await mkdir(scratchRoot, { recursive: true });
+  const root = await mkdtemp(join(scratchRoot, "case-"));
+  const mailbox = join(root, ".fir-mailbox");
   await mkdir(mailbox, { recursive: true });
   try {
-    await run(mailbox);
+    await run(mailbox, root);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -643,6 +646,96 @@ test("reports malformed messages and filename mismatches", async () => {
   });
 });
 
+test("atomically delivers a validated draft and preserves the draft", async () => {
+  await withMailbox(async (mailbox, root) => {
+    const id = "ROOT-FIR-20260813-001";
+    const source = message({ id });
+    const draft = join(root, "draft.md");
+    await writeFile(draft, source);
+
+    const delivered = deliverMessage(mailbox, draft);
+
+    assert.equal(delivered.messageId, id);
+    assert.equal(readFileSync(draft, "utf8"), source);
+    assert.equal(readFileSync(join(mailbox, `${id}.md`), "utf8"), source);
+    assert.deepEqual(inspectMailbox(mailbox).errors, []);
+    assert.deepEqual(await readdir(join(mailbox, "tmp")), []);
+  });
+});
+
+test("delivery rejects malformed drafts without publishing them", async () => {
+  await withMailbox(async (mailbox, root) => {
+    const draft = join(root, "broken.md");
+    await writeFile(draft, "not front matter\n");
+
+    assert.throws(() => deliverMessage(mailbox, draft), /message must start with/);
+    assert.deepEqual((await readdir(mailbox)).filter((name) => name.endsWith(".md")), []);
+  });
+});
+
+test("delivery does not remove another process's lock", async () => {
+  await withMailbox(async (mailbox, root) => {
+    const draft = join(root, "draft.md");
+    const lock = join(mailbox, "tmp", "delivery.lock");
+    await writeFile(draft, message({ id: "ROOT-FIR-20260813-001" }));
+    await mkdir(join(mailbox, "tmp"), { recursive: true });
+    await writeFile(lock, "held\n");
+
+    assert.throws(() => deliverMessage(mailbox, draft), /another mailbox delivery is active/);
+    assert.equal(readFileSync(lock, "utf8"), "held\n");
+  });
+});
+
+test("Codex notification is best-effort and contains only a mailbox pointer", () => {
+  const delivered = {
+    messageId: "ROOT-FIR-20260813-001",
+    from: "lean-zip/root",
+    to: "fir/wasm-gen",
+    subject: "review a measured candidate",
+  };
+  let invocation;
+  const success = notifyCodexSession("fir-wasm-gen", delivered, {
+    run(command, args, options) {
+      invocation = { command, args, options };
+      return { status: 0, stdout: "queued\n", stderr: "" };
+    },
+  });
+
+  assert.equal(success.ok, true);
+  assert.equal(invocation.command, "codex");
+  assert.deepEqual(invocation.args.slice(0, 3), ["queue", "--thread", "fir-wasm-gen"]);
+  assert.equal(invocation.options.timeout, 5_000);
+  assert.match(invocation.args[4], /mailbox message ROOT-FIR-20260813-001/);
+  assert.match(invocation.args[4], /mailbox event is authoritative/);
+  assert.doesNotMatch(invocation.args[4], /\.fir-mailbox|\/home\//);
+
+  const failure = notifyCodexSession("fir-wasm-gen", delivered, {
+    run: () => ({ status: 1, stdout: "", stderr: "session unavailable\n" }),
+  });
+  assert.deepEqual(
+    { ok: failure.ok, detail: failure.detail },
+    { ok: false, detail: "session unavailable" },
+  );
+});
+
+test("CLI delivers through the validated path", async () => {
+  await withMailbox(async (mailbox, root) => {
+    const id = "ROOT-FIR-20260813-001";
+    const draft = join(root, "draft.md");
+    await writeFile(draft, message({ id }));
+
+    const result = spawnSync(
+      process.execPath,
+      [script, "deliver", draft, "--mailbox", mailbox],
+      { encoding: "utf8" },
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, new RegExp(`delivered ${id}`));
+    assert.deepEqual(inspectMailbox(mailbox).errors, []);
+  });
+});
+
 test("CLI lists active threads and hides terminal threads by default", async () => {
   await withMailbox(async (mailbox) => {
     const open = "ROOT-FIR-20260813-001";
@@ -741,8 +834,9 @@ test("CLI rejects a missing mailbox option value", () => {
   assert.match(result.stderr, /`--mailbox` requires a path/);
 });
 
-test("CLI rejects a nonexistent explicit mailbox", () => {
-  const mailbox = join(tmpdir(), `fir-mailbox-missing-${process.pid}`);
+test("CLI rejects a nonexistent explicit mailbox", async () => {
+  await mkdir(scratchRoot, { recursive: true });
+  const mailbox = join(scratchRoot, `missing-${process.pid}`);
   const result = spawnSync(process.execPath, [script, "check", "--mailbox", mailbox], {
     encoding: "utf8",
   });
@@ -752,5 +846,5 @@ test("CLI rejects a nonexistent explicit mailbox", () => {
 
 test("default mailbox resolves to the primary checkout from a linked worktree", () => {
   const primary = primaryCheckout(process.cwd());
-  assert.equal(resolveMailbox(), join(primary, ".agents", "mailbox"));
+  assert.equal(resolveMailbox(), join(primary, ".fir-mailbox"));
 });

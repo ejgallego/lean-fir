@@ -1,4 +1,5 @@
 .agents/
+.fir-mailbox/
 .codex/
 .beam/
 .lake/

@@ -10,7 +10,7 @@ export LAKE_CACHE_DIR LAKE_ARTIFACT_CACHE LAKE_RESTORE_ARTIFACTS
 
 FIR_BINARYEN_DIR ?= $(CURDIR)/.deps/lcnf-c-wasm/emsdk/upstream/bin
 
-.PHONY: build examples scalar-surface-check inspect validate validate-direct-lcnf validate-v8 validate-native-oracle-attestations validate-coverage-index bug-cards trusted-assumptions no-placeholders mailbox-check mailbox-list mailbox-test tooling-unit-check tooling-check check beam talos-setup talos-check clean
+.PHONY: build examples scalar-surface-check inspect validate validate-direct-lcnf validate-v8 validate-native-oracle-attestations validate-coverage-index bug-cards trusted-assumptions no-placeholders mailbox-check mailbox-list mailbox-deliver mailbox-test tooling-unit-check tooling-check check beam talos-setup talos-check clean
 
 build:
 	lake build
@@ -82,6 +82,10 @@ mailbox-check:
 
 mailbox-list:
 	node scripts/mailbox.mjs list
+
+mailbox-deliver:
+	@test -n "$(DRAFT)" || { echo "usage: make mailbox-deliver DRAFT=/path/to/message.md [NOTIFY_SESSION=session]"; exit 2; }
+	node scripts/mailbox.mjs deliver "$(DRAFT)" $(if $(NOTIFY_SESSION),--notify-session "$(NOTIFY_SESSION)")
 
 mailbox-test:
 	node --test scripts/mailbox.test.mjs

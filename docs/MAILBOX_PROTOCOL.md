@@ -16,12 +16,12 @@ durable record of a decision.
 Each project has one canonical mailbox:
 
 ```text
-<primary-checkout>/.agents/mailbox/
+<primary-checkout>/.fir-mailbox/
 ```
 
 The primary checkout is the stable root checkout shown first by
 `git worktree list --porcelain`. Agents in linked worktrees must use that
-mailbox rather than creating `.agents/` below their current worktree. The
+mailbox rather than creating `.fir-mailbox/` below their current worktree. The
 repository commands resolve the primary checkout automatically:
 
 ```bash
@@ -62,8 +62,8 @@ Protocol v1 stores one immutable Markdown file per message directly in the
 mailbox directory:
 
 ```text
-.agents/mailbox/ROOT-FIR-20260813-001.md
-.agents/mailbox/FIR-ROOT-20260813-001.md
+.fir-mailbox/ROOT-FIR-20260813-001.md
+.fir-mailbox/FIR-ROOT-20260813-001.md
 ```
 
 The filename must equal `<message-id>.md`. IDs have the form:
@@ -82,9 +82,35 @@ Never edit a delivered message. Corrections and changed decisions are new
 must reply to the current tail of its thread, producing a linear event chain.
 This makes ownership and the latest state unambiguous.
 
-A file is delivered only after `make mailbox-check` accepts it. Correct or
-remove a newly written malformed file before anyone replies; immutability
-applies once the file validates. A reply cannot repair an invalid graph node.
+Compose a complete draft under the current worktree's ignored `.deps/` state,
+then deliver it through the repository command:
+
+```bash
+make mailbox-deliver DRAFT=.deps/mailbox-drafts/ROOT-FIR-20260813-001.md
+```
+
+Do not write directly into the canonical mailbox. Delivery validates the
+existing event graph and the candidate together, derives the destination
+filename from `message-id`, stages a complete mode-600 file under the
+mailbox's reserved `tmp/` directory, and publishes without overwriting an
+existing identity. A delivery lock serializes concurrent writers. The source
+draft is retained. A malformed draft or invalid transition never becomes a
+mailbox event.
+
+Codex CLI notification is deliberately optional:
+
+```bash
+make mailbox-deliver \
+  DRAFT=.deps/mailbox-drafts/ROOT-FIR-20260813-001.md \
+  NOTIFY_SESSION=fir-wasm-gen
+```
+
+After durable delivery, this runs `codex queue` against the session UUID or
+exact name with a short pointer to the message. Notification failure is a
+warning and does not undo delivery or make the command fail; the notification
+attempt is bounded to five seconds. The event file, not the Codex notification,
+is authoritative; a sleeping or unavailable lane reads its inbox when it next
+starts.
 
 ## Header
 
@@ -375,6 +401,20 @@ state, and maintainer approval.
 
 ## Commands
 
+Validate and atomically publish one complete draft:
+
+```bash
+make mailbox-deliver DRAFT=.deps/mailbox-drafts/<message-id>.md
+```
+
+Add `NOTIFY_SESSION=<UUID or exact name>` only when a best-effort Codex
+doorbell is useful. Direct CLI use is equivalent:
+
+```bash
+node scripts/mailbox.mjs deliver .deps/mailbox-drafts/<message-id>.md \
+  --notify-session <UUID-or-exact-name>
+```
+
 Validate all v1 messages and thread transitions:
 
 ```bash
@@ -407,19 +447,21 @@ Both commands work from the primary checkout or any linked worktree. For an
 explicit mailbox:
 
 ```bash
-node scripts/mailbox.mjs check --mailbox /path/to/.agents/mailbox
+node scripts/mailbox.mjs check --mailbox /path/to/.fir-mailbox
 ```
 
 Every Markdown file other than `README.md` is treated as a v1 message, so an
 obsolete directional ledger fails validation instead of silently remaining in
-the mailbox. Non-Markdown files, `README.md`, and subdirectories are ignored
-and reported so stale mailbox contents remain visible.
+the mailbox. Non-Markdown files, `README.md`, and non-reserved subdirectories
+are ignored and reported so stale mailbox contents remain visible. The
+reserved `tmp/` directory is ignored silently; a leftover `delivery.lock`
+means an interrupted delivery must be inspected before removing the lock.
 
 ## FIR Durable Coordination Boundary
 
 FIR deliberately has two coordination layers:
 
-- `.agents/mailbox/` is ignored local operational state. New requests,
+- `.fir-mailbox/` is ignored local operational state. New requests,
   acknowledgements, decisions, blockers, handoffs, completions, and closures
   use the immutable protocol in this document.
 - `coordination/lanes/*.md` and `coordination/BOARD.md` are tracked portable
@@ -435,4 +477,9 @@ Directional files such as `root-to-wasm-gen.md` created before this protocol
 are legacy ledgers. Preserve active evidence under an ignored `legacy/`
 subdirectory, but do not append new requests to them. Linked worktrees must
 stop creating independent mailboxes: every new v1 thread uses the primary FIR
-checkout's canonical `.agents/mailbox/`.
+checkout's canonical `.fir-mailbox/`.
+
+The former `.agents/mailbox/` location is a read-only migration source. Copy
+its complete contents once into `.fir-mailbox/`, validate the new location,
+and leave the old tree untouched until the cutover has been observed by every
+lane. No new event is delivered to the reserved `.agents/` path.
