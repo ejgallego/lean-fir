@@ -321,8 +321,31 @@ def boxedUInt32Max : Except ConcreteError (MemoryState × Word32) :=
               scalar == .uint32 4294967295
         | _, _ => false
 
-/-- Only payloads above FIR's 63-bit semantic tagged range allocate a real
-`boxed` object. -/
+/-- `UInt64` follows its type-specific heap-only ABI even for payloads that
+would fit in a direct tagged immediate for another integer kind. -/
+def boxedUInt64Small : Except ConcreteError (MemoryState × Word32) :=
+  boxScalar MemoryState.initial (.uint64 42)
+
+#guard match boxedUInt64Small with
+  | .error _ => false
+  | .ok (state, word) =>
+      word.value == heapBase && state.heapCursor == heapBase + 40
+
+def readBoxedUInt64Small : Except ConcreteError BoxedScalar := do
+  let (state, word) ← boxedUInt64Small
+  readBoxedScalar state .uint64 word
+
+#guard match readBoxedUInt64Small with
+  | .ok (.uint64 value) => value == 42
+  | _ => false
+
+/- Conversely, a physical tagged word is not admitted as a `UInt64` box. -/
+#guard match readBoxedScalar MemoryState.initial .uint64
+    (Word32.encodeImmediate 42 (by decide)) with
+  | .error (.source .expectedScalar) => true
+  | _ => false
+
+/-- The same heap-only `UInt64` ABI covers the full-width maximum payload. -/
 def boxedUInt64Max : Except ConcreteError (MemoryState × Word32) :=
   boxScalar MemoryState.initial (.uint64 18446744073709551615)
 
