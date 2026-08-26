@@ -8838,15 +8838,17 @@ theorem HeapOwnershipBelowFrontier.unboxResult
       | tagged payload =>
           by_cases uint64 : type == LCNF.ImpureType.uint64
           · simp [unbox, uint64] at effect
-          · have scalarRead :
-                scalarFromType type payload = .ok result := by
-              simpa [unbox, uint64] using effect
-            rcases scalarFromType_ok_eq_immediate scalarRead with
-              ⟨scalar, resultEq⟩ | ⟨word, resultEq⟩
-            · subst result
-              simp [HeapLocationsBelowFrontier]
-            · subst result
-              simp [HeapLocationsBelowFrontier]
+          · by_cases usize : type == LCNF.ImpureType.usize
+            · simp [unbox, uint64, usize] at effect
+            · have scalarRead :
+                  scalarFromType type payload = .ok result := by
+                simpa [unbox, uint64, usize] using effect
+              rcases scalarFromType_ok_eq_immediate scalarRead with
+                ⟨scalar, resultEq⟩ | ⟨word, resultEq⟩
+              · subst result
+                simp [HeapLocationsBelowFrontier]
+              · subst result
+                simp [HeapLocationsBelowFrontier]
       | heap parent =>
           unfold unbox at effect
           simp only [Bind.bind, Except.bind] at effect
