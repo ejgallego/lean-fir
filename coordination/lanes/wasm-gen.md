@@ -11,17 +11,17 @@ owner: wasm-gen
 branch: wasm/generation
 worktree: .worktrees/wasm-generation
 state: ready
-base: 8d27898de5a92763119d80d0c8b1081fd53a1dd6, accepted main after the five-commit bounded check-throughput tooling stack
-functional-head: e85700994465a83db79a9b65b9bccf1a6ca5e807
-contract-base: 8d27898de5a92763119d80d0c8b1081fd53a1dd6; no shared semantic, helper-signature, layout, ownership, or W6 proof contract changed
+base: c3a35d02500ee87598f0163e2c7a4201096a9735, exact current main
+functional-head: f32458a2c00e7845e1a3d0b99e1c8630459ba668
+contract-base: c3a35d02500ee87598f0163e2c7a4201096a9735; no shared semantic, helper-signature, layout, ownership, or executable runtime contract changed
 clean-at-update: true
-slice: Repairs generic resident internalization when a reviewed call-site rewrite introduces memory instructions and the selected helper installs module-owned memory. The transaction now validates the untouched input, rewrites callers, installs the helper and memory as one unchecked intermediate, and validates the completed output. A focused memoryless getTag regression preserves invalid-input checking and requires the import-free result to validate and encode. The exhaustive prettyM clients were also ratcheted to the bounded-Nat import frontier already present on main.
-files: Fir/Wasm/Emit/ResidentRuntime.lean; bugs/FIR-BUG-wasm-none-callsite-memory-installation-order.md; integration/talos/artifact/resident-numeric-client.mjs; integration/talos/artifact/resident-big-numeric-client.mjs; integration/talos/artifact/resident-string-client.mjs; and this lane status
-contracts: none. Resident helper bodies and signatures, semantic Wasm ABI, concrete layout, memory ownership, and W6 theorem statements are unchanged; only W7 transaction ordering and exact intermediate acceptance counts changed.
-checks: Lean Beam update/sync/save on Fir/Wasm/Emit/ResidentRuntime.lean passed with zero diagnostics; focused lake build Fir.Wasm.Emit.ResidentRuntime Fir.Wasm.Emit.ResidentPrettyFormat passed 57 jobs; FIR_PRETTYM_CHECKPOINTS=1 source generation passed; exact combined-head git diff --check passed; make check passed 730 unique cases, 2172/2172 comparisons, 721-case native/LCNF/V8 triangle, coverage policy, 211 bug cards, trusted-source validation, and 38 mailbox tests; make talos-setup plus make talos-check passed all 3174 jobs with exact receipt 1ebe83c87ec56ec6575c3a405d6580cec7a862720c843c7f1c39c9c65b0ca804; FIR_PRETTYM_EXHAUSTIVE_CHECKPOINTS=1 integration/talos/artifact/check.sh passed the rebased tooling/W7 stack through every intermediate checkpoint, final zero-import package, adapter/package determinism, shared validation, and 44/44 concrete readiness artifacts.
-evidence: generic linker fix 0bc95990c49e9ee55c808e46f7f39c1668c6d156; exact exhaustive frontier ratchets e85700994465a83db79a9b65b9bccf1a6ca5e807; final prettyM module 87396 bytes with 322 functions and 25493 instruction-origin records; exhaustive import progression ends 13 -> 1 -> 0 after numeric, String, and panic internalization.
-bug-cards: FIR-BUG-wasm-none-callsite-memory-installation-order fixed with in-module regression
+slice: Exposes the annotation-only source mapper already used by scalar aliases and two closed production facts for `boxUInt16TaggedFunction` and `boxUInt64ObjectFunction`. Each fact retains the generic parameter and local identifiers, states the exact tagged/object result and final-local kind, and equates the alias body to the generic body under the mapper. Executable instructions and alias construction remain single-sourced and unchanged.
+files: Fir/Wasm/Emit/ResidentScalarBox.lean and this lane status
+contracts: proof interface only. Resident helper bodies and signatures, semantic Wasm ABI, concrete layout, memory ownership, source call sites, linker behavior, and generated artifact bytes are unchanged.
+checks: Lean Beam update/sync/save on Fir/Wasm/Emit/ResidentScalarBox.lean passed with zero diagnostics; an external-import Lean Beam probe consumed both public body facts with zero diagnostics; focused `lake build Fir.Wasm.Emit.ResidentScalarBox` passed 16 jobs and the probe passed under `lake env lean`; git diff --check passed; make check passed 730 unique cases, 2172/2172 comparisons, the 721-case native/LCNF/V8 triangle, coverage policy, 211 bug cards, trusted-source validation, and 38 mailbox tests; make talos-setup plus make talos-check passed all 3174 jobs with exact receipt 38e336312b2247482a863b784fb16db32153de99660d5aabd05886d2bb49339a. The artifact gate was not rerun because this slice changes only source-level proof facts and leaves emitted instructions and package inputs unchanged.
+evidence: public mapper Fir.Wasm.Emit.ResidentScalarBox.retypeTObjectResultInstruction; closed facts boxUInt16TaggedFunction_exactSourceShape and boxUInt64ObjectFunction_exactSourceShape; functional checkpoint f32458a2c00e7845e1a3d0b99e1c8630459ba668.
+bug-cards: none
 blockers: none
-handoff: Integrate the containing clean status checkpoint after verifying it descends from base 8d27898d. Integration remains owned by fir/root; no W6 adaptation is required.
-next: After integration, tooling may rebase its source-isolation work and rerun the exhaustive gate. W7 returns to the consumer-driven generation queue.
+handoff: Integrate the containing clean status checkpoint after verifying it descends from exact base c3a35d02, then notify W6 on thread W6-W7-20260827-002 so its active proof branch can rebase. Integration remains owned by fir/root.
+next: W6 attaches its generic physical annotation-erasure proof to the two production aliases; W7 returns to the consumer-driven generation queue.
 ```
