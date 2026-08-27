@@ -125,14 +125,17 @@ def readTag (state : MemoryState) (word : Word32) : Except ConcreteError UInt64 
         throw (.source .expectedConstructor)
   | .sentinel | .invalid => throw (.source .expectedConstructor)
 
-/-- Concrete, typed payload accepted by FIR integer boxing. This deliberately
-excludes floats until the shared semantic runtime has float scalar values. -/
+/-- Concrete, typed payload accepted by FIR scalar boxing. Floating-point
+constructors carry raw IEEE bits so boxing and unboxing never appeal to host
+floating-point equality. -/
 inductive BoxedScalar where
   | uint8 (value : UInt8)
   | uint16 (value : UInt16)
   | uint32 (value : UInt32)
   | uint64 (value : UInt64)
   | usize (value : UInt64)
+  | float32 (bits : UInt32)
+  | float (bits : UInt64)
   deriving Inhabited, BEq, Repr
 
 def BoxedScalar.kind : BoxedScalar → BoxedScalarKind
@@ -141,12 +144,16 @@ def BoxedScalar.kind : BoxedScalar → BoxedScalarKind
   | .uint32 _ => .uint32
   | .uint64 _ => .uint64
   | .usize _ => .usize
+  | .float32 _ => .float32
+  | .float _ => .float
 
 def BoxedScalar.payload : BoxedScalar → UInt64
   | .uint8 value => value.toUInt64
   | .uint16 value => value.toUInt64
   | .uint32 value => value.toUInt64
   | .uint64 value | .usize value => value
+  | .float32 bits => bits.toUInt64
+  | .float bits => bits
 
 def BoxedScalar.semanticValue : BoxedScalar → Value
   | .uint8 value => .scalar (.uint8 value)
@@ -154,12 +161,16 @@ def BoxedScalar.semanticValue : BoxedScalar → Value
   | .uint32 value => .scalar (.uint32 value)
   | .uint64 value => .scalar (.uint64 value)
   | .usize value => .usize value
+  | .float32 bits => .scalar (.float32Bits bits)
+  | .float bits => .scalar (.float64Bits bits)
 
 def BoxedScalar.lane : BoxedScalar → LaneValue
   | .uint8 value => .word32 (Word32.ofUInt8 value)
   | .uint16 value => .word32 (Word32.ofUInt16 value)
   | .uint32 value => .word32 (Word32.ofUInt32 value)
   | .uint64 value | .usize value => .word64 value
+  | .float32 bits => .float32Bits bits
+  | .float bits => .float64Bits bits
 
 def BoxedScalar.ofPayload : BoxedScalarKind → UInt64 → BoxedScalar
   | .uint8, payload => .uint8 payload.toUInt8
@@ -167,6 +178,8 @@ def BoxedScalar.ofPayload : BoxedScalarKind → UInt64 → BoxedScalar
   | .uint32, payload => .uint32 payload.toUInt32
   | .uint64, payload => .uint64 payload
   | .usize, payload => .usize payload
+  | .float32, payload => .float32 payload.toUInt32
+  | .float, payload => .float payload
 
 @[simp] theorem BoxedScalar.kind_ofPayload (kind : BoxedScalarKind)
     (payload : UInt64) :
@@ -183,28 +196,30 @@ def BoxedScalarKind.semanticType : BoxedScalarKind → Lean.Expr
   | .uint32 => LCNF.ImpureType.uint32
   | .uint64 => LCNF.ImpureType.uint64
   | .usize => LCNF.ImpureType.usize
+  | .float32 => LCNF.ImpureType.float32
+  | .float => LCNF.ImpureType.float
 
 /-- Whether the upstream type-specific boxing API permits Lean's tagged object
-representation. `UInt64` and `USize` are heap-only; their generic box and
-unbox primitives always use an ordinary heap constructor. -/
+representation. `UInt64`, `USize`, `Float32`, and `Float` are heap-only; their
+generic box and unbox primitives always use an ordinary heap constructor. -/
 def BoxedScalarKind.allowsTaggedRepresentation : BoxedScalarKind → Bool
-  | .uint64 | .usize => false
+  | .uint64 | .usize | .float32 | .float => false
   | .uint8 | .uint16 | .uint32 => true
 
 @[simp] theorem BoxedScalarKind.allowsTaggedRepresentation_eq_true
     (kind : BoxedScalarKind) :
     kind.allowsTaggedRepresentation = true ↔
-      kind ≠ .uint64 ∧ kind ≠ .usize := by
+      kind ≠ .uint64 ∧ kind ≠ .usize ∧ kind ≠ .float32 ∧ kind ≠ .float := by
   cases kind <;> simp [BoxedScalarKind.allowsTaggedRepresentation]
 
 @[simp] theorem BoxedScalarKind.allowsTaggedRepresentation_eq_false
     (kind : BoxedScalarKind) :
     kind.allowsTaggedRepresentation = false ↔
-      kind = .uint64 ∨ kind = .usize := by
+      kind = .uint64 ∨ kind = .usize ∨ kind = .float32 ∨ kind = .float := by
   cases kind <;> simp [BoxedScalarKind.allowsTaggedRepresentation]
 
-/-- Every concrete scalar lane carries exactly its semantic integer value at
-the W6 ABI boundary. -/
+/-- Every concrete scalar lane carries exactly its semantic value at the W6
+ABI boundary; floating lanes relate through their raw bits. -/
 theorem BoxedScalar.valueRel (witness : RefinementWitness) (scalar : BoxedScalar) :
     ValueRel witness scalar.kind.abiKind scalar.lane scalar.semanticValue := by
   cases scalar with
@@ -213,6 +228,8 @@ theorem BoxedScalar.valueRel (witness : RefinementWitness) (scalar : BoxedScalar
   | uint32 value => exact .uint32 rfl
   | uint64 value => exact .uint64
   | usize value => exact .usize
+  | float32 bits => exact .float32Bits
+  | float bits => exact .float64Bits
 
 /-- Allocate one canonical heap-backed box. `boxScalar` calls this only above
 FIR's semantic tagged limit; keeping it public exposes the exact allocation
@@ -331,10 +348,10 @@ def incrementReference (state : MemoryState) (object : Word32)
         writeLiveHeader state object { header with refCount }
   | .sentinel | .invalid => throw (.source .expectedObject)
 
-/-- Concrete FIR boxing. `UInt64` and `USize` follow upstream's heap-only
-type-specific APIs. Other integer kinds use the source semantic tagged limit,
-not the narrower wasm32 immediate limit; `encodeTagged` owns the intermediate
-persistent representation. -/
+/-- Concrete FIR boxing. `UInt64`, `USize`, `Float32`, and `Float` follow
+upstream's heap-only type-specific APIs. Other integer kinds use the source
+semantic tagged limit, not the narrower wasm32 immediate limit; `encodeTagged`
+owns the intermediate persistent representation. -/
 def boxScalar (state : MemoryState) (scalar : BoxedScalar) :
     Except ConcreteError (MemoryState × Word32) :=
   if scalar.kind.allowsTaggedRepresentation &&

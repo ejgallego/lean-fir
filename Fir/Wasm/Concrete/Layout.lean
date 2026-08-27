@@ -206,15 +206,17 @@ Array representation. This is a physical-layout discriminator, not a new
 `ObjectKind`: generic Arrays remain ordinary opaque runtime allocations. -/
 def residentArrayMarker : UInt32 := 0x41525259
 
-/-- Integer scalar kinds accepted by FIR's semantic boxing operation. The
-codes are stored in `boxed` header `aux0`; floats stay outside this enum until
-the shared FIR runtime has matching semantic scalar constructors. -/
+/-- Scalar kinds accepted by FIR's semantic boxing operation. The codes are
+stored in `boxed` header `aux0`. Floating-point kinds retain exact IEEE payload
+bits and, like `UInt64` and `USize`, always use the heap representation. -/
 inductive BoxedScalarKind where
   | uint8
   | uint16
   | uint32
   | uint64
   | usize
+  | float32
+  | float
   deriving Inhabited, BEq, DecidableEq, Repr
 
 def BoxedScalarKind.code : BoxedScalarKind → UInt32
@@ -223,6 +225,8 @@ def BoxedScalarKind.code : BoxedScalarKind → UInt32
   | .uint32 => 3
   | .uint64 => 4
   | .usize => 5
+  | .float32 => 6
+  | .float => 7
 
 def BoxedScalarKind.ofCode? (code : UInt32) : Option BoxedScalarKind :=
   if code == BoxedScalarKind.uint8.code then some .uint8
@@ -230,6 +234,8 @@ def BoxedScalarKind.ofCode? (code : UInt32) : Option BoxedScalarKind :=
   else if code == BoxedScalarKind.uint32.code then some .uint32
   else if code == BoxedScalarKind.uint64.code then some .uint64
   else if code == BoxedScalarKind.usize.code then some .usize
+  else if code == BoxedScalarKind.float32.code then some .float32
+  else if code == BoxedScalarKind.float.code then some .float
   else none
 
 def BoxedScalarKind.abiKind : BoxedScalarKind → AbiKind
@@ -238,13 +244,15 @@ def BoxedScalarKind.abiKind : BoxedScalarKind → AbiKind
   | .uint32 => .uint32
   | .uint64 => .uint64
   | .usize => .usize
+  | .float32 => .float32
+  | .float => .float
 
 /-- Number of meaningful low payload bytes in a canonical boxed slot. The
 slot itself remains eight bytes so every semantic value slot has one target
 extent under `wasm32-lean64`. -/
 def BoxedScalarKind.payloadBytes : BoxedScalarKind → Nat
-  | .uint8 | .uint16 | .uint32 => 4
-  | .uint64 | .usize => 8
+  | .uint8 | .uint16 | .uint32 | .float32 => 4
+  | .uint64 | .usize | .float => 8
 
 @[simp] theorem BoxedScalarKind.ofCode_code (kind : BoxedScalarKind) :
     BoxedScalarKind.ofCode? kind.code = some kind := by
