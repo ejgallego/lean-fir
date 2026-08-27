@@ -31,6 +31,17 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   and transactional resident-linker stacks are now integrated. Tooling's
   bounded work changed no W7 implementation file and granted no standing W7
   ownership.
+- Accepted exact scalar-alias proof interface: W7 functional head `f32458a2`
+  is linked through clean tracked handoff `e3548322`. The emitter now exports
+  its annotation-only object-result source mapper plus closed source-shape
+  facts for the production `UInt16` tagged and `UInt64` object aliases. The
+  aliases retain their generic parameter/local identifiers and physical bodies;
+  only their symbolic result, final-local, and result-load kinds differ. Lean
+  Beam and an external consumer probe pass, `make check` remains at 730 unique
+  cases and 2,172/2,172 comparisons, and all 3,174 Talos jobs pass with receipt
+  `38e33631`. No executable instruction, helper signature, ABI, concrete
+  layout, ownership, linker, or artifact contract changed. W6 continuation is
+  thread `W6-W7-20260827-002`; bug cards: none.
 - Accepted Lean 4.32 operational-residue cleanup: W7 functional head
   `66c325df` is linked through exact clean status checkpoint `1a6f5061`.
   Active LLVM SelectionAnimation/v4 metadata now records Lean 4.33, the
