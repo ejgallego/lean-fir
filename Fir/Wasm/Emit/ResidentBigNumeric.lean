@@ -66,9 +66,12 @@ private def inlineAddResultLocal : FVarId := ⟨`_fir_inline_Nat_add_result⟩
 private def inlineSubLeftLocal : FVarId := ⟨`_fir_inline_Nat_sub_left⟩
 private def inlineSubRightLocal : FVarId := ⟨`_fir_inline_Nat_sub_right⟩
 private def inlineSubResultLocal : FVarId := ⟨`_fir_inline_Nat_sub_result⟩
-private def inlineDecLtLeftLocal : FVarId := ⟨`_fir_inline_Nat_decLt_left⟩
-private def inlineDecLtRightLocal : FVarId := ⟨`_fir_inline_Nat_decLt_right⟩
-private def inlineDecLtResultLocal : FVarId := ⟨`_fir_inline_Nat_decLt_result⟩
+private def inlineDecisionLeftLocal : FVarId :=
+  ⟨`_fir_inline_Nat_decision_left⟩
+private def inlineDecisionRightLocal : FVarId :=
+  ⟨`_fir_inline_Nat_decision_right⟩
+private def inlineDecisionResultLocal : FVarId :=
+  ⟨`_fir_inline_Nat_decision_result⟩
 private def decisionResultLocal : FVarId := ⟨`decisionResult⟩
 private def leftLowLocal : FVarId := ⟨`leftLowValue⟩
 private def leftHighLocal : FVarId := ⟨`leftHighValue⟩
@@ -1483,51 +1486,62 @@ private def natSubCallSiteRewriteFor (target fallback : Name) :
     kind := .tagged }
   body := natSubCallSiteBody fallback }
 
-private def natDecLtCallSiteBody (fallback : Name) : List Instruction := [
-  .localSet inlineDecLtRightLocal,
-  .localSet inlineDecLtLeftLocal,
-  .localGet inlineDecLtLeftLocal,
+private def natDecisionCallSiteBody (fallback : Name)
+    (comparison : Instruction) : List Instruction := [
+  .localSet inlineDecisionRightLocal,
+  .localSet inlineDecisionLeftLocal,
+  .localGet inlineDecisionLeftLocal,
   .i32Const .uint32 1,
   .i32And,
-  .localGet inlineDecLtRightLocal,
+  .localGet inlineDecisionRightLocal,
   .i32Const .uint32 1,
   .i32And,
   .i32And,
   .ifElse
-    [.localGet inlineDecLtLeftLocal,
-      .localGet inlineDecLtRightLocal,
-      .i32LtU,
+    [.localGet inlineDecisionLeftLocal,
+      .localGet inlineDecisionRightLocal,
+      comparison,
       .i64ExtendI32U .uint64,
       .i32WrapI64 .uint8,
-      .localSet inlineDecLtResultLocal]
-    [.localGet inlineDecLtLeftLocal,
-      .localGet inlineDecLtRightLocal,
+      .localSet inlineDecisionResultLocal]
+    [.localGet inlineDecisionLeftLocal,
+      .localGet inlineDecisionRightLocal,
       .call (.declaration fallback),
-      .localSet inlineDecLtResultLocal],
-  .localGet inlineDecLtResultLocal]
+      .localSet inlineDecisionResultLocal],
+  .localGet inlineDecisionResultLocal]
 
-private def natDecLtCallSiteRewriteFor (target fallback : Name) :
+private def natDecisionCallSiteRewriteFor (target fallback : Name)
+    (comparison : Instruction) :
     ResidentCallSite.Rewrite := {
   target := .declaration target
   signature := { params := #[.tobject, .tobject], results := #[.uint8] }
-  locals := #[(inlineDecLtLeftLocal, .tobject),
-    (inlineDecLtRightLocal, .tobject), (inlineDecLtResultLocal, .uint8)]
-  body := natDecLtCallSiteBody fallback }
+  locals := #[(inlineDecisionLeftLocal, .tobject),
+    (inlineDecisionRightLocal, .tobject),
+    (inlineDecisionResultLocal, .uint8)]
+  body := natDecisionCallSiteBody fallback comparison }
 
-/-- Mirror upstream `lean_nat_add` at original typed callers. Sums which no
-longer fit the wasm32 tagged payload retain the complete resident helper. -/
+/-- Mirror upstream's always-inline Nat arithmetic and decision wrappers at
+original typed callers. Sums which no longer fit the wasm32 tagged payload,
+and decisions over any non-immediate pair, retain the complete resident
+helper. Canonical tagged Nat words preserve equality and unsigned order. -/
 def callSiteRewrites : Array ResidentCallSite.Rewrite := #[
   natAddCallSiteRewriteFor `Nat.add (externalName `Nat.add),
   natSubCallSiteRewriteFor `Nat.sub (externalName `Nat.sub),
-  natDecLtCallSiteRewriteFor `Nat.decLt (externalName `Nat.decLt)]
+  natDecisionCallSiteRewriteFor `Nat.decEq (externalName `Nat.decEq) .i32Eq,
+  natDecisionCallSiteRewriteFor `Nat.decLt (externalName `Nat.decLt) .i32LtU,
+  natDecisionCallSiteRewriteFor `Nat.decLe (externalName `Nat.decLe) .i32LeU]
 
 private def internalCallSiteRewrites : Array ResidentCallSite.Rewrite := #[
   natAddCallSiteRewriteFor (ResidentNumeric.externalName `Nat.add)
     (externalName `Nat.add),
   natSubCallSiteRewriteFor (ResidentNumeric.externalName `Nat.sub)
     (externalName `Nat.sub),
-  natDecLtCallSiteRewriteFor (ResidentNumeric.externalName `Nat.decLt)
-    (externalName `Nat.decLt)]
+  natDecisionCallSiteRewriteFor (ResidentNumeric.externalName `Nat.decEq)
+    (externalName `Nat.decEq) .i32Eq,
+  natDecisionCallSiteRewriteFor (ResidentNumeric.externalName `Nat.decLt)
+    (externalName `Nat.decLt) .i32LtU,
+  natDecisionCallSiteRewriteFor (ResidentNumeric.externalName `Nat.decLe)
+    (externalName `Nat.decLe) .i32LeU]
 
 private partial def callSiteContains (needle : Instruction) :
     Instruction → Bool
@@ -1541,8 +1555,11 @@ private partial def callSiteContains (needle : Instruction) :
 #guard callSiteRewrites[0]!.body.any
   (callSiteContains (.i32Const .uint32 2147483648))
 #guard callSiteRewrites[1]!.body.any (callSiteContains .i32Sub)
+#guard callSiteRewrites.size == 5
 #guard callSiteRewrites[2]!.signature.results == #[.uint8]
-#guard callSiteRewrites[2]!.body.any (callSiteContains .i32LtU)
+#guard callSiteRewrites[2]!.body.any (callSiteContains .i32Eq)
+#guard callSiteRewrites[3]!.body.any (callSiteContains .i32LtU)
+#guard callSiteRewrites[4]!.body.any (callSiteContains .i32LeU)
 
 /-- Decode two immediate Nat payloads and reuse the existing bounded natural
 sum constructor.  That constructor returns an immediate when the sum fits and
@@ -2144,7 +2161,9 @@ def internalize (module : Module) (validate : Bool := true) : Except LinkError M
 
 private def natAddCallerName : Name := `fir_example_Nat_addCaller
 private def natSubCallerName : Name := `fir_example_Nat_subCaller
+private def natDecEqCallerName : Name := `fir_example_Nat_decEqCaller
 private def natDecLtCallerName : Name := `fir_example_Nat_decLtCaller
+private def natDecLeCallerName : Name := `fir_example_Nat_decLeCaller
 
 private def binaryCallerFunction (name declaration : Name)
     (result : AbiKind) : Function := {
@@ -2166,17 +2185,27 @@ private def natSubCallerFunction : Function :=
   binaryCallerFunction natSubCallerName
     (ResidentNumeric.externalName `Nat.sub) .tobject
 
+private def natDecEqCallerFunction : Function :=
+  binaryCallerFunction natDecEqCallerName
+    (ResidentNumeric.externalName `Nat.decEq) .uint8
+
 private def natDecLtCallerFunction : Function :=
   binaryCallerFunction natDecLtCallerName
     (ResidentNumeric.externalName `Nat.decLt) .uint8
+
+private def natDecLeCallerFunction : Function :=
+  binaryCallerFunction natDecLeCallerName
+    (ResidentNumeric.externalName `Nat.decLe) .uint8
 
 def residentExampleModule : Except String Module := do
   let numeric ← ResidentNumeric.residentExampleModule
   let module := { numeric with
     functions := numeric.functions ++ #[natAddCallerFunction,
-      natSubCallerFunction, natDecLtCallerFunction]
+      natSubCallerFunction, natDecEqCallerFunction, natDecLtCallerFunction,
+      natDecLeCallerFunction]
     exports := (#[natAddCallerName, natSubCallerName,
-      natDecLtCallerName]).foldl Fir.Wasm.addUnique numeric.exports }
+      natDecEqCallerName, natDecLtCallerName,
+      natDecLeCallerName]).foldl Fir.Wasm.addUnique numeric.exports }
   internalize module
     |>.mapError fun error => s!"big numeric: {repr error}"
 
@@ -2208,14 +2237,21 @@ def manifest : Json :=
   | .ok module =>
       match module.functions.find? (·.name == natAddCallerName),
           module.functions.find? (·.name == natSubCallerName),
-          module.functions.find? (·.name == natDecLtCallerName) with
-      | some addCaller, some subCaller, some decLtCaller =>
+          module.functions.find? (·.name == natDecEqCallerName),
+          module.functions.find? (·.name == natDecLtCallerName),
+          module.functions.find? (·.name == natDecLeCallerName) with
+      | some addCaller, some subCaller, some decEqCaller, some decLtCaller,
+          some decLeCaller =>
           addCaller.locals.size == 4 && subCaller.locals.size == 3 &&
+            decEqCaller.locals.size == 3 &&
             decLtCaller.locals.size == 3 &&
+            decLeCaller.locals.size == 3 &&
             addCaller.body != natAddCallerFunction.body &&
             subCaller.body != natSubCallerFunction.body &&
-            decLtCaller.body != natDecLtCallerFunction.body
-      | _, _, _ => false
+            decEqCaller.body != natDecEqCallerFunction.body &&
+            decLtCaller.body != natDecLtCallerFunction.body &&
+            decLeCaller.body != natDecLeCallerFunction.body
+      | _, _, _, _, _ => false
   | .error _ => false
 
 end Fir.Wasm.Emit.ResidentBigNumeric
