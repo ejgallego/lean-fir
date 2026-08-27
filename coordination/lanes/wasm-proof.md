@@ -16,6 +16,6 @@ contracts: Additive W6 proof interface over accepted W7 closed alias-body equati
 checks: After final rebase onto main 1aba4be6, Lean Beam update/sync/save passed with zero diagnostics for FirTalos/ConcreteResidentScalarBox.lean. lake -d integration/talos build FirTalos.ConcreteResidentScalarBox passed all 3,125 jobs. git diff --check passed. make check passed with 721/721 source cases, 9/9 direct-machine cases, 730 unique cases, 2,172/2,172 comparisons equal, zero findings, 211 active bug cards, and 38 mailbox tests. make talos-setup completed at Talos 0e05edbc. make talos-check passed all 3,174 jobs with receipt 9d66f0097a1a3db967f21944d7a1211aa237ae9290ef39cf622c6dd92460e7cc.
 bug-cards: none
 blockers: none
-handoff: GREEN LIGHT. Consume the exact clean integration checkpoint published by the completion event in authoritative mailbox thread ROOT-W6-20260827-001. It is based directly on main 1aba4be6, has functional head 7aaa5c42, changes only the W6-owned Talos proof module plus this mailbox, and passes every required W6 gate.
+handoff: GREEN LIGHT. Consume the exact clean integration checkpoint published by the completion event in authoritative mailbox thread ROOT-W6-20260827-002. It is based directly on main 1aba4be6, has functional head 7aaa5c42, changes only the W6-owned Talos proof module plus this mailbox, and passes every required W6 gate.
 next: Integrate this exact scalar-alias proof checkpoint promptly; after landing, reassess the open wasm-proof mailbox and select the next independent proof slice.
 ```
