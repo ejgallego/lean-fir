@@ -122,7 +122,11 @@ def boxUInt16Function : Function := {
     .localSet rawLocal] ++
     retypeRaw .tobject objectResultLocal }
 
-private partial def retypeTObjectResultInstruction (result : AbiKind) :
+/-- Retype only symbolic `.tobject` result loads. This preserves every
+executable Wasm operation and recursively traverses structured instruction
+bodies, exposing the exact source transformation shared by the production
+scalar aliases. -/
+partial def retypeTObjectResultInstruction (result : AbiKind) :
     Instruction → Instruction
   | .i32Load .tobject offset => .i32Load result offset
   | .block label body =>
@@ -152,6 +156,23 @@ private def exactObjectResultAlias (function : Function) (name : Name)
 adapter result. -/
 def boxUInt16TaggedFunction : Function :=
   exactObjectResultAlias boxUInt16Function boxUInt16TaggedName .tagged
+
+/-- Exact source shape of the production `UInt16` tagged-result alias. The
+parameter and local identifiers are inherited from the generic helper; only
+the symbolic result/local kind and matching result-load annotations change. -/
+theorem boxUInt16TaggedFunction_exactSourceShape :
+    boxUInt16TaggedFunction.params = boxUInt16Function.params ∧
+    boxUInt16TaggedFunction.results = #[.tagged] ∧
+    boxUInt16TaggedFunction.locals =
+      #[(boxUInt16Function.locals[0]!.1, .uint32),
+        (boxUInt16Function.locals[1]!.1, .uint32),
+        (boxUInt16Function.locals[2]!.1, .tagged)] ∧
+    boxUInt16TaggedFunction.body =
+      boxUInt16Function.body.map
+        (retypeTObjectResultInstruction .tagged) := by
+  simp [boxUInt16TaggedFunction, exactObjectResultAlias,
+    boxUInt16Function]
+  decide
 
 /-- Upstream `lean_unbox` specialized to a tagged `UInt8`. -/
 def unboxUInt8Function : Function := {
@@ -326,6 +347,24 @@ def boxUInt64Function : Function := {
 adapter result. -/
 def boxUInt64ObjectFunction : Function :=
   exactObjectResultAlias boxUInt64Function boxUInt64ObjectName .object
+
+/-- Exact source shape of the production `UInt64` object-result alias. The
+parameter and local identifiers are inherited from the generic helper; only
+the symbolic result/local kind and matching result-load annotations change. -/
+theorem boxUInt64ObjectFunction_exactSourceShape :
+    boxUInt64ObjectFunction.params = boxUInt64Function.params ∧
+    boxUInt64ObjectFunction.results = #[.object] ∧
+    boxUInt64ObjectFunction.locals =
+      #[(boxUInt64Function.locals[0]!.1, .uint32),
+        (boxUInt64Function.locals[1]!.1, .uint32),
+        (boxUInt64Function.locals[2]!.1, .uint32),
+        (boxUInt64Function.locals[3]!.1, .object)] ∧
+    boxUInt64ObjectFunction.body =
+      boxUInt64Function.body.map
+        (retypeTObjectResultInstruction .object) := by
+  simp [boxUInt64ObjectFunction, exactObjectResultAlias,
+    boxUInt64Function]
+  decide
 
 private def heapUInt64Body : List Instruction :=
   trapUnless ([.localGet objectParam, .i32Load .uint32 (u32 headerFlagsOffset),
