@@ -89,7 +89,7 @@ def boxUInt16SourceProgram (resultKind : Fir.Wasm.AbiKind)
   retypeRawResultSource resultKind raw saved result
 
 /-- Every `UInt16` payload fits the concrete wasm32 immediate-object range. -/
-def uint16FitsImmediate (value : UInt16) :
+theorem uint16FitsImmediate (value : UInt16) :
     value.toNat ≤ maxImmediatePayload := by
   have bound := value.toNat_lt
   simp [maxImmediatePayload] at bound ⊢
@@ -115,6 +115,19 @@ theorem boxUInt16Function_shape :
         Fir.Wasm.Emit.ResidentScalarBox.boxUInt16Function.locals[0]!.1
         Fir.Wasm.Emit.ResidentScalarBox.boxUInt16Function.locals[1]!.1
         Fir.Wasm.Emit.ResidentScalarBox.boxUInt16Function.locals[2]!.1 := by
+  rfl
+
+/-- W7's production tagged-result alias has the common explicit `UInt16`
+source shape. The closed emitter fact avoids unfolding any private alias
+constructor in the proof lane. -/
+theorem boxUInt16TaggedFunction_shape :
+    Fir.Wasm.Emit.ResidentScalarBox.boxUInt16TaggedFunction.body =
+      boxUInt16SourceProgram .tagged
+        Fir.Wasm.Emit.ResidentScalarBox.boxUInt16TaggedFunction.params[0]!.1
+        Fir.Wasm.Emit.ResidentScalarBox.boxUInt16TaggedFunction.locals[0]!.1
+        Fir.Wasm.Emit.ResidentScalarBox.boxUInt16TaggedFunction.locals[1]!.1
+        Fir.Wasm.Emit.ResidentScalarBox.boxUInt16TaggedFunction.locals[2]!.1 := by
+  rw [Fir.Wasm.Emit.ResidentScalarBox.boxUInt16TaggedFunction_body]
   rfl
 
 /-- Re-annotating the production `UInt16` alias as `.tagged` preserves its
@@ -184,6 +197,19 @@ def boxUInt64ObjectSourceProgram
   storeAddress64Source address [.localGet value] headerBytes ++
   [.localGet address] ++
     retypeRawResultSource .object raw saved result
+
+/-- W7's production exact-object alias has the common explicit heap-only
+`UInt64` source shape. -/
+theorem boxUInt64ObjectFunction_shape :
+    Fir.Wasm.Emit.ResidentScalarBox.boxUInt64ObjectFunction.body =
+      boxUInt64ObjectSourceProgram
+        Fir.Wasm.Emit.ResidentScalarBox.boxUInt64ObjectFunction.params[0]!.1
+        Fir.Wasm.Emit.ResidentScalarBox.boxUInt64ObjectFunction.locals[0]!.1
+        Fir.Wasm.Emit.ResidentScalarBox.boxUInt64ObjectFunction.locals[1]!.1
+        Fir.Wasm.Emit.ResidentScalarBox.boxUInt64ObjectFunction.locals[2]!.1
+        Fir.Wasm.Emit.ResidentScalarBox.boxUInt64ObjectFunction.locals[3]!.1 := by
+  rw [Fir.Wasm.Emit.ResidentScalarBox.boxUInt64ObjectFunction_body]
+  rfl
 
 /-- Re-annotating the production heap-only `UInt64` alias as `.object`
 preserves its complete physical signature; in particular the returned
@@ -1012,6 +1038,21 @@ theorem instructions_boxUInt16Function {sourceModule : Fir.Wasm.Module} :
   · decide
   · decide
 
+/-- The installed production tagged alias adapts to exactly the same physical
+program as generic `fir_box_uint16`; symbolic `.tagged` metadata does not
+change any wasm i32 instruction. -/
+theorem instructions_boxUInt16TaggedFunction
+    {sourceModule : Fir.Wasm.Module} :
+    FirTalos.instructions sourceModule
+      Fir.Wasm.Emit.ResidentScalarBox.boxUInt16TaggedFunction []
+      Fir.Wasm.Emit.ResidentScalarBox.boxUInt16TaggedFunction.body =
+        .ok boxUInt16Program := by
+  obtain ⟨paramsEq, _, localsEq, _⟩ :=
+    Fir.Wasm.Emit.ResidentScalarBox.boxUInt16TaggedFunction_exactSourceShape
+  apply instructions_boxUInt16SourceProgram boxUInt16TaggedFunction_shape
+  all_goals rw [paramsEq, localsEq]
+  all_goals native_decide
+
 /-- Any source helper with the exact-object `UInt64` alias shape adapts to the
 same heap-only physical program as the generic helper.  The `.object` result
 load is erased to the same i32 load as `.tobject`; allocation and stores are
@@ -1079,6 +1120,24 @@ theorem instructions_boxUInt64ObjectSourceProgram
       valueGet, rawGet, rawSet, addressSet, addressGet, savedSet, savedGet,
       resultSet, resultGet,
       Bind.bind, Except.bind, pure, Except.pure]
+
+/-- The production exact-object alias adapts to exactly the generic heap-only
+`UInt64` program at the resolved allocator index. -/
+theorem instructions_boxUInt64ObjectFunction
+    {sourceModule : Fir.Wasm.Module} {allocatorIndex : Nat}
+    (allocatorFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentAllocator.allocateName) =
+        some allocatorIndex) :
+    FirTalos.instructions sourceModule
+      Fir.Wasm.Emit.ResidentScalarBox.boxUInt64ObjectFunction []
+      Fir.Wasm.Emit.ResidentScalarBox.boxUInt64ObjectFunction.body =
+        .ok (boxUInt64Program allocatorIndex) := by
+  obtain ⟨paramsEq, _, localsEq, _⟩ :=
+    Fir.Wasm.Emit.ResidentScalarBox.boxUInt64ObjectFunction_exactSourceShape
+  apply instructions_boxUInt64ObjectSourceProgram
+    boxUInt64ObjectFunction_shape allocatorFound
+  all_goals rw [paramsEq, localsEq]
+  all_goals native_decide
 
 /-- The adapter preserves the complete production box body exactly. -/
 theorem instructions_boxUInt64Function
@@ -1246,6 +1305,19 @@ theorem UInt16TaggedInstallation.signature
   · rw [results, resultsPhysical]
     native_decide
 
+/-- The installed tagged `UInt16` export contains exactly the shared physical
+boxing core, followed only by the adapter's validation terminal. Combined
+with `uint16ImmediateWord_physical`, this identifies its returned i32 with the
+canonical concrete tagged word. -/
+theorem UInt16TaggedInstallation.box_body
+    {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    (installation : UInt16TaggedInstallation sourceModule module) :
+    installation.target.body = boxUInt16Program ++
+      FirTalos.functionTerminal sourceModule
+        Fir.Wasm.Emit.ResidentScalarBox.boxUInt16TaggedFunction := by
+  exact installation.body_of_instructions
+    instructions_boxUInt16TaggedFunction
+
 /-- The installed exact-object `UInt64` alias retains the generic heap-only
 helper's complete `i64 -> i32` physical signature. -/
 theorem UInt64ObjectInstallation.signature
@@ -1355,6 +1427,19 @@ theorem UInt64Installation.box_body
   rw [adaptedBoxUInt64Function_eq installation.allocatorCall
     installation.boxAdapted]
   rfl
+
+/-- The installed exact-object `UInt64` export contains the same verified
+heap-allocation core as generic `fir_box_uint64`, at the same resolved
+allocator index. -/
+theorem UInt64ObjectInstallation.box_body
+    {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    (generic : UInt64Installation sourceModule module)
+    (installation : UInt64ObjectInstallation sourceModule module) :
+    installation.target.body = boxUInt64Program generic.allocatorIndex ++
+      FirTalos.functionTerminal sourceModule
+        Fir.Wasm.Emit.ResidentScalarBox.boxUInt64ObjectFunction := by
+  exact installation.body_of_instructions
+    (instructions_boxUInt64ObjectFunction generic.allocatorCall)
 
 /-- Exact installed unbox body, with the same terminal-marker convention. -/
 theorem UInt64Installation.unbox_body
@@ -1827,6 +1912,37 @@ theorem UInt64ObjectInstallation.terminatesWith_box_of_allocateBoxedScalar_of_co
   obtain ⟨params, _locals, results⟩ := installation.signature
   simp [FirTalos.Correctness.FunctionBodyPost, Wasm.Function.numParams,
     params, results]
+
+/-- The real installed `fir_box_uint64_object` export refines W6's concrete
+heap-only `UInt64` allocator contract. Unlike the transport theorem above,
+this production theorem has no adapter premise: the closed W7 source body and
+the generic annotation-erasure proof discharge it internally. -/
+theorem UInt64ObjectInstallation.terminatesWith_box_of_allocateBoxedScalar
+    {host : Type} {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {env : Wasm.HostEnv host} {before after : MemoryState}
+    {store : Wasm.Store host} {payload : UInt64} {address : Word32}
+    (generic : UInt64Installation sourceModule module)
+    (installation : UInt64ObjectInstallation sourceModule module)
+    (tail : List Wasm.Value)
+    (memory32 : module.memIs64 = false)
+    (valid : before.FrontierInvariant)
+    (related : ResidentAllocatorRel before store generic.frontierIndex)
+    (allocated : allocateBoxedScalar before (.uint64 payload) =
+      .ok (after, address))
+    (strictEnd : after.heapCursor < wordModulus)
+    (withinCap : (after.heapCursor - 1) / wasmPageBytes + 1 ≤
+      store.memoryCap module 0) :
+    ∃ finalStore,
+      ResidentAllocatorRel after finalStore generic.frontierIndex ∧
+      UInt64BoxAdmission after address payload ∧
+      Wasm.TerminatesWith env module installation.index store
+        ([.i64 payload] ++ tail)
+        (fun final values => final = finalStore ∧
+          values = .i32 (UInt32.ofNat address.value) :: tail) := by
+  exact UInt64ObjectInstallation.terminatesWith_box_of_allocateBoxedScalar_of_coreAdapted
+      generic installation
+      (instructions_boxUInt64ObjectFunction generic.allocatorCall)
+      tail memory32 valid related allocated strictEnd withinCap
 
 /-- The installed production unbox call round-trips one canonical W6 box
 bit-for-bit and preserves the complete store and caller operand slack. -/
