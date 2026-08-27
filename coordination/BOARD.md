@@ -25,7 +25,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   resident Array provenance consumer after rebasing, is the remaining
   milestone step.
 - Integration owner: `root`, holding the serial landing lease through accepted
-  integration head `eb27fdd3`. `wasm-gen` remains released to the W7-1
+  integration head `75cfc834`. `wasm-gen` remains released to the W7-1
   generation lane. The inherited cleanup, serial and bounded check-throughput,
   mailbox-routing, bounded `Nat.land`, USize range-fact, exact consumer-ratchet,
   and transactional resident-linker stacks are now integrated. Tooling's
@@ -42,6 +42,20 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `38e33631`. No executable instruction, helper signature, ABI, concrete
   layout, ownership, linker, or artifact contract changed. W6 continuation is
   thread `W6-W7-20260827-002`; bug cards: none.
+- Accepted executable scalar-alias body interface: W7 functional head
+  `17097eff` is linked through clean tracked handoff `75cfc834`. The public
+  `UInt16` tagged and heap-only `UInt64` aliases now have closed body equations
+  that external W6 consumers can rewrite without unfolding private emitter
+  definitions. The annotation mapper is an extensionally identical total
+  structural traversal, removing the opaque partial-definition proof boundary
+  while retaining single-sourced alias construction. Lean Beam and an external
+  rewrite probe pass, `make check` remains at 730 unique cases and
+  2,172/2,172 comparisons, all 3,174 Talos jobs pass with receipt
+  `18cf26d0`, and the complete artifact gate passes with unchanged bytes
+  (resident scalar 3,238 bytes; prettyM 87,396 bytes, 322 functions). No emitted
+  instruction, helper signature, ABI, layout, ownership, linker, or artifact
+  contract changed. W6 continuation is thread `ROOT-W6-20260827-001`; bug
+  cards: none.
 - Accepted Lean 4.32 operational-residue cleanup: W7 functional head
   `66c325df` is linked through exact clean status checkpoint `1a6f5061`.
   Active LLVM SelectionAnimation/v4 metadata now records Lean 4.33, the
