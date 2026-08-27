@@ -54,7 +54,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `18cf26d0`, and the complete artifact gate passes with unchanged bytes
   (resident scalar 3,238 bytes; prettyM 87,396 bytes, 322 functions). No emitted
   instruction, helper signature, ABI, layout, ownership, linker, or artifact
-  contract changed. W6 continuation is thread `ROOT-W6-20260827-001`; bug
+  contract changed. W6 continuation is thread `W6-W7-20260827-003`; bug
   cards: none.
 - Accepted Lean 4.32 operational-residue cleanup: W7 functional head
   `66c325df` is linked through exact clean status checkpoint `1a6f5061`.
