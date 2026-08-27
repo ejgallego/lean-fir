@@ -1185,25 +1185,55 @@ private def copyUpdatedElementsBody : List Instruction := [
       .localSet countLocal,
       .br copyLoopLabel] []]]
 
-private def replaceAtDecodedIndexBody (validation : InputValidation) :
-    List Instruction :=
-  loadCapacity arrayParam ++ selectExclusive validation ++ [
-    .localGet exclusiveLocal,
-    .ifElse (elementAddress ++ [
-      .localGet sourceCursorLocal,
-      .i32Load .tobject 0,
-      .localSet elementLocal,
-      .localGet sourceCursorLocal,
-      .localGet valueParam,
-      .i32Store .tobject 0] ++
-      ResidentRelease.checkedDecrementLocal elementLocal ++ [
-      .localGet arrayParam,
-      .ret]) []] ++ allocationBytesBody ++ [
+private def replaceExclusiveElementBody : List Instruction :=
+  elementAddress ++ [
+    .localGet sourceCursorLocal,
+    .i32Load .tobject 0,
+    .localSet elementLocal,
+    .localGet sourceCursorLocal,
+    .localGet valueParam,
+    .i32Store .tobject 0] ++
+    ResidentRelease.checkedDecrementLocal elementLocal ++ [
+    .localGet arrayParam,
+    .ret]
+
+private def replaceSharedArrayBody : List Instruction :=
+  allocationBytesBody ++ [
     .localGet allocationBytesLocal,
     .call (.declaration ResidentAllocator.allocateName),
     .localSet addressLocal] ++
     initializeHeader [.localGet sizeLocal] [.localGet capacityLocal] ++
     copyUpdatedElementsBody ++ consumeSharedArray ++ retypeAddress
+
+private def checkedReplaceAtDecodedIndexBody : List Instruction :=
+  loadCapacity arrayParam ++ selectExclusive .checked ++ [
+    .localGet exclusiveLocal,
+    .ifElse replaceExclusiveElementBody []] ++ replaceSharedArrayBody
+
+private def trustedReplaceAtDecodedIndexPrefix : List Instruction := [
+  .localGet arrayParam,
+  .i32Load .uint32 (u32 headerRefCountOffset),
+  .i32Const .uint32 1,
+  .i32Eq,
+  .ifElse replaceExclusiveElementBody []]
+
+private def trustedReplaceAtDecodedIndexBody : List Instruction :=
+  trustedReplaceAtDecodedIndexPrefix ++ loadCapacity arrayParam ++
+    replaceSharedArrayBody
+
+private def replaceAtDecodedIndexBody (validation : InputValidation) :
+    List Instruction :=
+  match validation with
+  | .checked => checkedReplaceAtDecodedIndexBody
+  | .trusted => trustedReplaceAtDecodedIndexBody
+
+#guard replaceAtDecodedIndexBody .checked == checkedReplaceAtDecodedIndexBody
+#guard (replaceAtDecodedIndexBody .trusted).take
+    trustedReplaceAtDecodedIndexPrefix.length ==
+      trustedReplaceAtDecodedIndexPrefix
+#guard (replaceAtDecodedIndexBody .trusted).drop
+    trustedReplaceAtDecodedIndexPrefix.length ==
+      loadCapacity arrayParam ++ replaceSharedArrayBody
 
 private def setLocals : Array (FVarId × AbiKind) := #[(addressLocal, .uint32),
   (sizeLocal, .uint32), (inputAddressLocal, .uint32),
@@ -1451,7 +1481,11 @@ private def containsSequence (needle haystack : List Instruction) : Bool :=
   | [] => needle.isEmpty
   | _ :: tail =>
       haystack.take needle.length == needle || containsSequence needle tail
+
 termination_by haystack.length
+
+#guard !containsSequence (selectExclusive .trusted)
+  (replaceAtDecodedIndexBody .trusted)
 
 private def naturalBoundsCheck (index : FVarId) : List Instruction := [
   .localGet index,
