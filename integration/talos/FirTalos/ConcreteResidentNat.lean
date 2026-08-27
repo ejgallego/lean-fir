@@ -13204,6 +13204,85 @@ theorem terminatesWith_modFunctionImmediate_nonzero
       (tail := []) pair rightNonzero pagesPositive leftLocal rightLocal
       makeNaturalRun rawSet savedSet resultSet returned)
 
+/-- The actual adapted resident `Nat.mod` function implements mathematical
+remainder for every pair of canonical immediate Naturals.  This is the public
+case-independent boundary: divisor zero and nonzero unsigned remainder both
+return the same canonical immediate encoding, preserve the store exactly, and
+preserve the caller's operand-stack tail.  The checked arbitrary-precision
+fallback remains an opaque, unreachable branch of this theorem. -/
+theorem terminatesWith_modFunctionImmediate_of_adapted
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {targetFunction targetMakeNatural : Wasm.Function}
+    {functionIndex makeNaturalIndex : Nat}
+    {sourceFallback : List Fir.Wasm.Instruction}
+    {targetFallback : Wasm.Program}
+    {store : Wasm.Store host}
+    {leftWord rightWord : Word32}
+    {leftReference rightReference : Fir.LeanIR.Impure.ObjectRef}
+    {leftPayload rightPayload : UInt64} {tail : List Wasm.Value}
+    (adapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentNatArithmetic.modFunction = .ok targetFunction)
+    (notImport : module.imports[functionIndex]? = none)
+    (found : module.funcs[functionIndex - module.imports.length]? =
+      some targetFunction)
+    (shape :
+      Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.body =
+        Fir.Wasm.Emit.ResidentBigNumeric.withImmediateNaturalPair
+          Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.params[0]!.1
+          Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.params[1]!.1
+          (immediateModSource
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.params[0]!.1
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.params[1]!.1
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.locals[0]!.1
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.locals[1]!.1
+            Fir.Wasm.Emit.ResidentNatArithmetic.modFunction.locals[2]!.1)
+          sourceFallback)
+    (makeNaturalFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentNumeric.makeNaturalName) =
+        some makeNaturalIndex)
+    (fallbackAdapted :
+      FirTalos.instructions sourceModule
+        Fir.Wasm.Emit.ResidentNatArithmetic.modFunction [none] sourceFallback =
+          .ok targetFallback)
+    (makeNaturalNotImport : module.imports[makeNaturalIndex]? = none)
+    (makeNaturalAdapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentNumeric.makeNaturalFunction =
+        .ok targetMakeNatural)
+    (makeNaturalTargetFound :
+      module.funcs[makeNaturalIndex - module.imports.length]? =
+        some targetMakeNatural)
+    (pair : ImmediateNaturalPairRel leftWord rightWord leftReference
+      rightReference leftPayload rightPayload)
+    (pagesPositive : 0 < store.mem.pages) :
+    Wasm.TerminatesWith env module functionIndex store
+      ([.i32 (UInt32.ofNat rightWord.value),
+        .i32 (UInt32.ofNat leftWord.value)] ++ tail)
+      (fun final values =>
+        final = store ∧
+          values = .i32 (immediateRemainderWord pair) :: tail) := by
+  by_cases rightZero : rightPayload.toNat = 0
+  · have leftResult :
+        UInt32.ofNat leftWord.value = immediateRemainderWord pair := by
+      unfold immediateRemainderWord
+      apply congrArg (fun word : Word32 => UInt32.ofNat word.value)
+      calc
+        leftWord = Word32.encodeImmediate leftPayload.toNat pair.leftFits :=
+          pair.leftWordEq
+        _ = Word32.encodeImmediate
+              (leftPayload.toNat % rightPayload.toNat) pair.mod_fits := by
+          simp [rightZero]
+    simpa [leftResult] using
+      (terminatesWith_modFunctionImmediate_zero
+        (module := module) (env := env) (functionIndex := functionIndex)
+        (makeNaturalIndex := makeNaturalIndex) (store := store) (tail := tail)
+        adapted notImport found shape makeNaturalFound fallbackAdapted pair
+        rightZero)
+  · exact terminatesWith_modFunctionImmediate_nonzero
+      adapted notImport found shape makeNaturalFound fallbackAdapted
+      makeNaturalNotImport makeNaturalAdapted makeNaturalTargetFound pair
+      rightZero pagesPositive
+
 /-- The public resident `Nat.mod` body is structurally the shared pair
 dispatcher. This theorem deliberately exposes only the two branch lists; the
 checked arbitrary-precision implementation remains opaque. -/
