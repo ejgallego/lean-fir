@@ -122,21 +122,34 @@ def boxUInt16Function : Function := {
     .localSet rawLocal] ++
     retypeRaw .tobject objectResultLocal }
 
+mutual
+  private def retypeTObjectResultInstructionAux (result : AbiKind) :
+      Instruction → Instruction
+  | .i32Load .tobject offset => .i32Load result offset
+  | .block label body =>
+      .block label (retypeTObjectResultInstructionsAux result body)
+  | .loop label body =>
+      .loop label (retypeTObjectResultInstructionsAux result body)
+  | .ifElse thenBody elseBody =>
+      .ifElse (retypeTObjectResultInstructionsAux result thenBody)
+        (retypeTObjectResultInstructionsAux result elseBody)
+  | instruction => instruction
+
+  private def retypeTObjectResultInstructionsAux (result : AbiKind) :
+      List Instruction → List Instruction
+    | [] => []
+    | instruction :: instructions =>
+        retypeTObjectResultInstructionAux result instruction ::
+          retypeTObjectResultInstructionsAux result instructions
+end
+
 /-- Retype only symbolic `.tobject` result loads. This preserves every
 executable Wasm operation and recursively traverses structured instruction
 bodies, exposing the exact source transformation shared by the production
 scalar aliases. -/
-partial def retypeTObjectResultInstruction (result : AbiKind) :
-    Instruction → Instruction
-  | .i32Load .tobject offset => .i32Load result offset
-  | .block label body =>
-      .block label (body.map (retypeTObjectResultInstruction result))
-  | .loop label body =>
-      .loop label (body.map (retypeTObjectResultInstruction result))
-  | .ifElse thenBody elseBody =>
-      .ifElse (thenBody.map (retypeTObjectResultInstruction result))
-        (elseBody.map (retypeTObjectResultInstruction result))
-  | instruction => instruction
+def retypeTObjectResultInstruction (result : AbiKind)
+    (instruction : Instruction) : Instruction :=
+  retypeTObjectResultInstructionAux result instruction
 
 /-- Change only object-family metadata on a physically i32 result.  The
 generic production body remains the single source of executable instructions. -/
@@ -173,6 +186,40 @@ theorem boxUInt16TaggedFunction_exactSourceShape :
   simp [boxUInt16TaggedFunction, exactObjectResultAlias,
     boxUInt16Function]
   decide
+
+/-- Closed executable source body of the production `UInt16` tagged-result
+alias. Downstream proofs can rewrite with this theorem without reducing the
+annotation mapper or unfolding private emitter definitions. -/
+theorem boxUInt16TaggedFunction_body :
+    boxUInt16TaggedFunction.body = [
+      .localGet boxUInt16TaggedFunction.params[0]!.1,
+      .localGet boxUInt16TaggedFunction.params[0]!.1,
+      .i32Add,
+      .i32Const .uint32 1,
+      .i32Add,
+      .localSet boxUInt16TaggedFunction.locals[0]!.1,
+      .i32Const .uint32 0,
+      .i32Load .uint32 0,
+      .localSet boxUInt16TaggedFunction.locals[1]!.1,
+      .i32Const .uint32 0,
+      .localGet boxUInt16TaggedFunction.locals[0]!.1,
+      .i32Store .uint32 0,
+      .i32Const .uint32 0,
+      .i32Load .tagged 0,
+      .localSet boxUInt16TaggedFunction.locals[2]!.1,
+      .i32Const .uint32 0,
+      .localGet boxUInt16TaggedFunction.locals[1]!.1,
+      .i32Store .uint32 0,
+      .localGet boxUInt16TaggedFunction.locals[2]!.1,
+      .ret] := by
+  have rawNotResult : (rawLocal == objectResultLocal) = false := by decide
+  have savedNotResult :
+      (savedScratchLocal == objectResultLocal) = false := by decide
+  have resultSelf : (objectResultLocal == objectResultLocal) = true := by decide
+  have kindSelf : (AbiKind.tobject == .tobject) = true := by decide
+  simp [boxUInt16TaggedFunction, exactObjectResultAlias, boxUInt16Function,
+    retypeTObjectResultInstruction, retypeTObjectResultInstructionAux,
+    retypeRaw, rawNotResult, savedNotResult, resultSelf, kindSelf]
 
 /-- Upstream `lean_unbox` specialized to a tagged `UInt8`. -/
 def unboxUInt8Function : Function := {
@@ -365,6 +412,69 @@ theorem boxUInt64ObjectFunction_exactSourceShape :
   simp [boxUInt64ObjectFunction, exactObjectResultAlias,
     boxUInt64Function]
   decide
+
+/-- Closed executable source body of the production `UInt64` object-result
+alias. Downstream proofs can rewrite with this theorem without reducing the
+annotation mapper or unfolding private emitter definitions. -/
+theorem boxUInt64ObjectFunction_body :
+    boxUInt64ObjectFunction.body = [
+      .i32Const .uint32 40,
+      .call (.declaration ResidentAllocator.allocateName),
+      .localSet boxUInt64ObjectFunction.locals[1]!.1,
+      .localGet boxUInt64ObjectFunction.locals[1]!.1,
+      .i32Const .uint32 ObjectKind.boxed.code,
+      .i32Store .uint32 (UInt32.ofNat headerKindOffset),
+      .localGet boxUInt64ObjectFunction.locals[1]!.1,
+      .i32Const .uint32 liveFlag,
+      .i32Store .uint32 (UInt32.ofNat headerFlagsOffset),
+      .localGet boxUInt64ObjectFunction.locals[1]!.1,
+      .i32Const .uint32 1,
+      .i32Store .uint32 (UInt32.ofNat headerRefCountOffset),
+      .localGet boxUInt64ObjectFunction.locals[1]!.1,
+      .i32Const .uint32 40,
+      .i32Store .uint32 (UInt32.ofNat headerAllocationBytesOffset),
+      .localGet boxUInt64ObjectFunction.locals[1]!.1,
+      .i32Const .uint32 BoxedScalarKind.uint64.code,
+      .i32Store .uint32 (UInt32.ofNat headerAux0Offset),
+      .localGet boxUInt64ObjectFunction.locals[1]!.1,
+      .i32Const .uint32 8,
+      .i32Store .uint32 (UInt32.ofNat headerAux1Offset),
+      .localGet boxUInt64ObjectFunction.locals[1]!.1,
+      .i32Const .uint32 0,
+      .i32Store .uint32 (UInt32.ofNat headerAux2Offset),
+      .localGet boxUInt64ObjectFunction.locals[1]!.1,
+      .i32Const .uint32 0,
+      .i32Store .uint32 (UInt32.ofNat headerAux3Offset),
+      .localGet boxUInt64ObjectFunction.locals[1]!.1,
+      .localGet boxUInt64ObjectFunction.params[0]!.1,
+      .i64Store .uint64 (UInt32.ofNat headerBytes),
+      .localGet boxUInt64ObjectFunction.locals[1]!.1,
+      .localSet boxUInt64ObjectFunction.locals[0]!.1,
+      .i32Const .uint32 0,
+      .i32Load .uint32 0,
+      .localSet boxUInt64ObjectFunction.locals[2]!.1,
+      .i32Const .uint32 0,
+      .localGet boxUInt64ObjectFunction.locals[0]!.1,
+      .i32Store .uint32 0,
+      .i32Const .uint32 0,
+      .i32Load .object 0,
+      .localSet boxUInt64ObjectFunction.locals[3]!.1,
+      .i32Const .uint32 0,
+      .localGet boxUInt64ObjectFunction.locals[2]!.1,
+      .i32Store .uint32 0,
+      .localGet boxUInt64ObjectFunction.locals[3]!.1,
+      .ret] := by
+  have rawNotResult : (rawLocal == objectResultLocal) = false := by decide
+  have addressNotResult : (addressLocal == objectResultLocal) = false := by
+    decide
+  have savedNotResult :
+      (savedScratchLocal == objectResultLocal) = false := by decide
+  have resultSelf : (objectResultLocal == objectResultLocal) = true := by decide
+  have kindSelf : (AbiKind.tobject == .tobject) = true := by decide
+  simp [boxUInt64ObjectFunction, exactObjectResultAlias, boxUInt64Function,
+    heapUInt64BoxBody, storeAddress32, storeAddress64, retypeRaw, u32,
+    retypeTObjectResultInstruction, retypeTObjectResultInstructionAux,
+    rawNotResult, addressNotResult, savedNotResult, resultSelf, kindSelf]
 
 private def heapUInt64Body : List Instruction :=
   trapUnless ([.localGet objectParam, .i32Load .uint32 (u32 headerFlagsOffset),
