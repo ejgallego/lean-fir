@@ -25,7 +25,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   resident Array provenance consumer after rebasing, is the remaining
   milestone step.
 - Integration owner: `root`, holding the serial landing lease through accepted
-  integration head `75cfc834`. `wasm-gen` remains released to the W7-1
+  integration head `b5a78572`. `wasm-gen` remains released to the W7-1
   generation lane. The inherited cleanup, serial and bounded check-throughput,
   mailbox-routing, bounded `Nat.land`, USize range-fact, exact consumer-ratchet,
   and transactional resident-linker stacks are now integrated. Tooling's
@@ -55,6 +55,22 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   (resident scalar 3,238 bytes; prettyM 87,396 bytes, 322 functions). No emitted
   instruction, helper signature, ABI, layout, ownership, linker, or artifact
   contract changed. W6 continuation is thread `W6-W7-20260827-003`; bug
+  cards: none.
+- Accepted exact scalar-alias refinement: W6 functional head `7aaa5c42` is
+  linked through exact clean tracked handoff `b5a78572`. Generic
+  `fir_box_uint16` and production `fir_box_uint16_tagged` adapt to one physical
+  i32 program, whose result is the canonical tagged word `(payload * 2) + 1`.
+  Production `fir_box_uint64_object` adapts to the generic heap-only UInt64
+  allocator program; its unconditional installed-call theorem returns the
+  exact allocated address, establishes `UInt64BoxAdmission`, preserves
+  `ResidentAllocatorRel`, and retains caller operand slack. The proof factors
+  one installed exact-alias boundary and reuses the existing generic runtime
+  refinements—no certificate or duplicate heap proof. Lean Beam is
+  diagnostic-clean, the targeted 3,125-job cone passes, `make check` remains
+  at 730 unique cases and 2,172/2,172 comparisons, and all 3,174 Talos jobs
+  pass with receipt `9d66f009`. No source semantics, lowering, emitted helper,
+  ABI, layout, allocator, ownership, symbolic Wasm, artifact, or compiler
+  behavior changed. Authoritative completion is `ROOT-W6-20260827-002`; bug
   cards: none.
 - Accepted Lean 4.32 operational-residue cleanup: W7 functional head
   `66c325df` is linked through exact clean status checkpoint `1a6f5061`.
