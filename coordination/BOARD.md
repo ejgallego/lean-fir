@@ -25,7 +25,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   resident Array provenance consumer after rebasing, is the remaining
   milestone step.
 - Integration owner: `root`, holding the serial landing lease through accepted
-  integration head `4924332c`. `wasm-gen` remains released to the W7-1
+  integration head `0cf116ee`. `wasm-gen` remains released to the W7-1
   generation lane. The inherited cleanup, serial and bounded check-throughput,
   mailbox-routing, bounded `Nat.land`, USize range-fact, exact consumer-ratchet,
   and transactional resident-linker stacks are now integrated. Tooling's
@@ -62,6 +62,21 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `c3b430008f65ff9c4655dc5174892b8ab51716e3f2cabece64c3c17d5fefa222`.
   No shared contract changed; bug card
   `FIR-BUG-wasm-none-object-field-kind-admission` remains confirmed, not fixed.
+- Accepted W6 constructor-schema agreement foundation: functional proof head
+  `73379f74` is linked through clean tracked handoff `0cf116ee`, based on
+  accepted source return-typing head `330e6366`. `ConstructorSchema` retains
+  final-LCNF constructor layout and object-slot ABIs by semantic location;
+  `ConstructorSchema.WitnessAgrees` relates each entry to the descriptor in
+  exactly the active refinement witness. Agreement is proved for the empty
+  state, monotone witness growth, constructor binding, and in-place descriptor
+  rebinding. Source `FieldKindAt` plus agreement now derives the exact active
+  descriptor-slot alignment consumed by concrete mutation, without a claim
+  about arbitrary witnesses. Lean Beam, direct batch elaboration of both
+  edited modules, the forced 3,128-job cone, `make check` at 730 unique cases
+  and 2,172/2,172 comparisons, and all 3,182 Talos jobs pass with receipt
+  `e4c600a7196e8763e5a9790dc637b0012a8c2a58df6321731b2da94600a8a828`.
+  No shared contract changed. The object-field admission bug remains confirmed
+  until the schema/agreement pair is threaded through the closed dispatcher.
 - Accepted exact scalar-alias proof interface: W7 functional head `f32458a2`
   is linked through clean tracked handoff `e3548322`. The emitter now exports
   its annotation-only object-result source mapper plus closed source-shape
