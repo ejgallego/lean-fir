@@ -9832,6 +9832,106 @@ inductive ConcreteStructuredSourceAdmissionSafeAt
         expectedResult facts sourceRuntime sourceEnv source
         (.sset objectId slotIndex byteOffset fieldId type continuation)
 
+/-- Reference-count increment is source-admissible independently of whether
+the validator selected the persistent or ordinary lowering.  The ordinary
+case's finite `UInt32` headroom is deliberately kept in
+`ConcreteStructuredFiniteRuntimeSafeAt`, not this semantic judgment. -/
+theorem ConcreteStructuredSourceAdmissionSafeAt.inc_of_any_persistence
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {externals : ExternalImpl}
+    {expectedResult : AbiKind}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {source : MachineState}
+    {objectId : Lean.FVarId}
+    {amount : Nat}
+    {check persistent : Bool}
+    {continuation : Lean.Compiler.LCNF.Code .impure} :
+    ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv source
+      (.inc objectId amount check persistent continuation) := by
+  cases persistent with
+  | false => exact .incOrdinary
+  | true => exact .incPersistent
+
+/-- Reference-count decrement has no additional source semantic premise for
+either persistence mode. -/
+theorem ConcreteStructuredSourceAdmissionSafeAt.dec_of_any_persistence
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {externals : ExternalImpl}
+    {expectedResult : AbiKind}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {source : MachineState}
+    {objectId : Lean.FVarId}
+    {amount : Nat}
+    {check persistent : Bool}
+    {objectFields? : Option Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure} :
+    ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv source
+      (.dec objectId amount check persistent objectFields? continuation) := by
+  cases persistent with
+  | false => exact .decOrdinary
+  | true => exact .decPersistent
+
+/-- Deletion, constructor-tag mutation, and unboxed `USize` field mutation
+are the three persistence-independent mutation forms whose current source
+admission follows from their syntax alone. -/
+theorem ConcreteStructuredSourceAdmissionSafeAt.del_unconditional
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {externals : ExternalImpl}
+    {expectedResult : AbiKind}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {source : MachineState}
+    {objectId : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure} :
+    ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv source
+      (.del objectId continuation) :=
+  .del
+
+theorem ConcreteStructuredSourceAdmissionSafeAt.setTag_unconditional
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {externals : ExternalImpl}
+    {expectedResult : AbiKind}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {source : MachineState}
+    {objectId : Lean.FVarId}
+    {tag : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure} :
+    ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv source
+      (.setTag objectId tag continuation) :=
+  .setTag
+
+theorem ConcreteStructuredSourceAdmissionSafeAt.usizeField_unconditional
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {externals : ExternalImpl}
+    {expectedResult : AbiKind}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {source : MachineState}
+    {objectId fieldId : Lean.FVarId}
+    {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure} :
+    ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv source
+      (.uset objectId index fieldId continuation) :=
+  .usizeField
+
 /-- Finite concrete-runtime conditions for the current source syntax.
 
 Saturated closure entry needs capacity for retaining the captures selected by

@@ -99,20 +99,20 @@ structure ConcreteStructuredCompilerCurrentStepAdmission
           ConcreteStructuredCodeStepAdmission context sourceModule externals functionResult
             facts sourceRuntime sourceEnv requiredBytes sourceCode
 
-/-- Source/phase safety facts needed to admit each residual ordinary node.
+/-- Source/phase readiness of one concrete source state.
 
 The premise is the recursively validated compiler relation, so this law ranges
-only over genuine residual nodes and suspended continuations reached from a
-validated production root.  It records the remaining semantic facts not
-derivable from executable validation alone: return value shape, descriptor
-typing, normalized cases, and the current call/external/cache domain.  Finite
-runtime resources belong in the independent runtime-safety boundary. -/
-structure ConcreteStructuredCompilerSourceAdmissionSafety
+only over a genuine residual node reached from a validated production root.
+It records the semantic facts not derivable from executable validation alone:
+return value shape, descriptor typing, normalized cases, and the current
+call/external/cache domain.  It contains no future execution or target path. -/
+structure ConcreteStructuredSourceReadyAt
     (program : Fir.LeanIR.ImpureProgram)
     (sourceModule : Fir.Wasm.Module)
     (targetModule : AdaptedModule)
     (hosts : ResolvedHosts)
-    (externals : Fir.LeanIR.Impure.ExternalImpl) : Prop where
+    (externals : Fir.LeanIR.Impure.ExternalImpl)
+    (source : Fir.LeanIR.Impure.MachineState) : Prop where
   code :
     ∀ {context : Fir.Wasm.Context}
       {functionCode : Lean.Compiler.LCNF.Code .impure}
@@ -131,7 +131,7 @@ structure ConcreteStructuredCompilerSourceAdmissionSafety
       {sourceCode : Lean.Compiler.LCNF.Code .impure}
       {targetLocals : Wasm.Locals}
       {targetCode : Wasm.Program}
-      {source sourceAfter : Fir.LeanIR.Impure.MachineState}
+      {sourceAfter : Fir.LeanIR.Impure.MachineState}
       {target : StructuredWasmState Host},
       (activeResult : spec.sourceResultKind = functionResult) →
         ConcreteStructuredValidatedCodeOutcome program context functionCode
@@ -142,6 +142,73 @@ structure ConcreteStructuredCompilerSourceAdmissionSafety
         Fir.LeanIR.Impure.executeStep externals source = .next sourceAfter →
         ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
           functionResult facts sourceRuntime sourceEnv source sourceCode
+
+/-- A preserved source semantic invariant supplies current-state readiness.
+
+This is the same ready/preserved interface used by FIR's pass simulations.
+The invariant is source-only; compiler validation and concrete runtime
+resources stay in their existing independent relations. -/
+structure ConcreteStructuredSourceInvariantLaws
+    (program : Fir.LeanIR.ImpureProgram)
+    (sourceModule : Fir.Wasm.Module)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (externals : Fir.LeanIR.Impure.ExternalImpl)
+    (Invariant : Fir.LeanIR.Impure.MachineState → Prop) : Prop where
+  ready : ∀ {source}, Invariant source →
+    ConcreteStructuredSourceReadyAt program sourceModule targetModule hosts
+      externals source
+  preserved : ∀ {source sourceAfter},
+    Invariant source →
+      Fir.LeanIR.Impure.executeStep externals source = .next sourceAfter →
+        Invariant sourceAfter
+
+/-- Canonical hereditary semantic invariant: every finite source successor is
+ready for any validated compiler focus at that state.  Proving this at an
+export root is the final-LCNF type-safety obligation; it is not a supplied
+source/target execution certificate. -/
+def ConcreteStructuredReachablySourceReady
+    (program : Fir.LeanIR.ImpureProgram)
+    (sourceModule : Fir.Wasm.Module)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (externals : Fir.LeanIR.Impure.ExternalImpl)
+    (source : Fir.LeanIR.Impure.MachineState) : Prop :=
+  ∀ {count sourceAfter},
+    Fir.LeanIR.Impure.ExecSteps externals count source sourceAfter →
+      ConcreteStructuredSourceReadyAt program sourceModule targetModule hosts
+        externals sourceAfter
+
+/-- Hereditary source readiness is preserved by path composition. -/
+theorem concreteStructuredReachablySourceReadyLaws
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : Fir.LeanIR.Impure.ExternalImpl} :
+    ConcreteStructuredSourceInvariantLaws program sourceModule targetModule
+      hosts externals
+      (ConcreteStructuredReachablySourceReady program sourceModule targetModule
+        hosts externals) where
+  ready := by
+    intro source hereditary
+    exact hereditary (.refl source)
+  preserved := by
+    intro source sourceAfter hereditary sourceStep count final tail
+    exact hereditary (.step sourceStep tail)
+
+/-- Compatibility form of source readiness that quantifies over all source
+states.  New compiler theorems should prefer a preserved invariant and an
+initial proof instead of this module-global law. -/
+structure ConcreteStructuredCompilerSourceAdmissionSafety
+    (program : Fir.LeanIR.ImpureProgram)
+    (sourceModule : Fir.Wasm.Module)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (externals : Fir.LeanIR.Impure.ExternalImpl) : Prop where
+  ready : ∀ source,
+    ConcreteStructuredSourceReadyAt program sourceModule targetModule hosts
+      externals source
 
 /-- Dynamic finite-runtime safety for the selected validated source node.
 
@@ -239,29 +306,30 @@ structure ConcreteStructuredCurrentStepAddressSpaceSafety
             functionResult facts sourceRuntime sourceEnv requiredBytes sourceCode →
         requiredBytes ≤ remainingBytes
 
-/-- One source step preserves the recursively validated global relation.
+/-- Current source readiness and finite runtime safety preserve the recursively
+validated global relation for one source step.
 
-This is the provenance-correct form of compiler admission.  The active-code
+This is the state-local core of compiler admission.  The active-code
 branch reads residual validation from `ConcreteStructuredValidatedCodeOutcome`
-itself, combines it with the source/phase safety law for the current node, and
+itself, combines it with source readiness for the current node, and
 uses the independent finite-address-space premise only for the selected
 allocation cost.  Administrative call, cache, bind, and return states already
 carry their suspended validation and therefore require no fresh compiler
 certificate. -/
-theorem ConcreteStructuredCompilerAdmissionLaws.advanceValidatedGlobal
+theorem ConcreteStructuredValidatedCodeGlobalOutcome.advance_of_sourceReady
     {program : Fir.LeanIR.ImpureProgram}
     {sourceModule : Fir.Wasm.Module}
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
     {externals : Fir.LeanIR.Impure.ExternalImpl}
-    (laws : ConcreteStructuredCompilerAdmissionLaws program sourceModule
-      targetModule hosts externals)
+    {source sourceAfter : Fir.LeanIR.Impure.MachineState}
+    {target : StructuredWasmState Host}
+    (sourceReady : ConcreteStructuredSourceReadyAt program sourceModule
+      targetModule hosts externals source)
     (finiteRuntimeSafety : ConcreteStructuredCurrentStepFiniteRuntimeSafety
       program sourceModule targetModule hosts externals)
     (addressSpaceSafety : ConcreteStructuredCurrentStepAddressSpaceSafety
       program sourceModule targetModule hosts externals)
-    {source sourceAfter : Fir.LeanIR.Impure.MachineState}
-    {target : StructuredWasmState Host}
     (related : ConcreteStructuredValidatedCodeGlobalOutcome program
       sourceModule targetModule hosts externals source target)
     (sourceStep :
@@ -276,7 +344,7 @@ theorem ConcreteStructuredCompilerAdmissionLaws.advanceValidatedGlobal
             compilerStructuredControlRank source) := by
   cases related with
   | code activeResult related =>
-      have sourceSafe := laws.sourceSafety.code _ activeResult
+      have sourceSafe := sourceReady.code _ activeResult
         related sourceStep
       have finiteSafe := finiteRuntimeSafety.code _ activeResult related
         sourceStep
@@ -317,6 +385,88 @@ theorem ConcreteStructuredCompilerAdmissionLaws.advanceValidatedGlobal
       obtain ⟨targetCount, targetAfter, targetPath, targetPositive, next⟩ :=
         related.advance_of_step sourceStep
       exact ⟨targetCount, targetAfter, targetPath, next, by omega⟩
+
+/-- Compatibility wrapper for the former module-global source-safety law. -/
+theorem ConcreteStructuredCompilerAdmissionLaws.advanceValidatedGlobal
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : Fir.LeanIR.Impure.ExternalImpl}
+    (laws : ConcreteStructuredCompilerAdmissionLaws program sourceModule
+      targetModule hosts externals)
+    (finiteRuntimeSafety : ConcreteStructuredCurrentStepFiniteRuntimeSafety
+      program sourceModule targetModule hosts externals)
+    (addressSpaceSafety : ConcreteStructuredCurrentStepAddressSpaceSafety
+      program sourceModule targetModule hosts externals)
+    {source sourceAfter : Fir.LeanIR.Impure.MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeGlobalOutcome program
+      sourceModule targetModule hosts externals source target)
+    (sourceStep :
+      Fir.LeanIR.Impure.executeStep externals source = .next sourceAfter) :
+    ∃ targetCount targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetCount target targetAfter ∧
+        ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
+          targetModule hosts externals sourceAfter targetAfter ∧
+        (targetCount = 0 →
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source) :=
+  related.advance_of_sourceReady (laws.sourceSafety.ready source)
+    finiteRuntimeSafety addressSpaceSafety sourceStep
+
+/-- The validated compiler relation paired with a source-only semantic
+invariant.  Neither component stores a future source transition or a target
+execution path. -/
+structure ConcreteStructuredValidatedInvariantGlobalOutcome
+    (program : Fir.LeanIR.ImpureProgram)
+    (sourceModule : Fir.Wasm.Module)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (externals : Fir.LeanIR.Impure.ExternalImpl)
+    (Invariant : Fir.LeanIR.Impure.MachineState → Prop)
+    (source : Fir.LeanIR.Impure.MachineState)
+    (target : StructuredWasmState Host) : Prop where
+  validated : ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
+    targetModule hosts externals source target
+  sourceInvariant : Invariant source
+
+/-- One source step preserves both compiler validation and the source semantic
+invariant. -/
+theorem ConcreteStructuredValidatedInvariantGlobalOutcome.advance
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : Fir.LeanIR.Impure.ExternalImpl}
+    {Invariant : Fir.LeanIR.Impure.MachineState → Prop}
+    (laws : ConcreteStructuredSourceInvariantLaws program sourceModule
+      targetModule hosts externals Invariant)
+    (finiteRuntimeSafety : ConcreteStructuredCurrentStepFiniteRuntimeSafety
+      program sourceModule targetModule hosts externals)
+    (addressSpaceSafety : ConcreteStructuredCurrentStepAddressSpaceSafety
+      program sourceModule targetModule hosts externals)
+    {source sourceAfter : Fir.LeanIR.Impure.MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedInvariantGlobalOutcome program
+      sourceModule targetModule hosts externals Invariant source target)
+    (sourceStep :
+      Fir.LeanIR.Impure.executeStep externals source = .next sourceAfter) :
+    ∃ targetCount targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetCount target targetAfter ∧
+        ConcreteStructuredValidatedInvariantGlobalOutcome program sourceModule
+          targetModule hosts externals Invariant sourceAfter targetAfter ∧
+        (targetCount = 0 →
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source) := by
+  obtain ⟨targetCount, targetAfter, targetPath, validatedAfter, rank⟩ :=
+    related.validated.advance_of_sourceReady
+      (laws.ready related.sourceInvariant) finiteRuntimeSafety
+      addressSpaceSafety sourceStep
+  exact ⟨targetCount, targetAfter, targetPath,
+    ⟨validatedAfter, laws.preserved related.sourceInvariant sourceStep⟩, rank⟩
 
 /-- Compatibility package for clients that already possess both independent
 laws.  The compiler-owned field cannot manufacture the execution-owned
@@ -513,6 +663,59 @@ theorem ConcreteStructuredCurrentStepClassifier.toFiniteTraceCorrect
       (concreteStructuredWasmMachine targetModule.wasmModule hosts.env)
       sourceInitial targetInitial :=
   ⟨classifier.toGeneratedTraceSimulation, initial⟩
+
+/-- A preserved source semantic invariant and the validated compiler relation
+construct the ranked finite-prefix simulation directly. -/
+def ConcreteStructuredSourceInvariantLaws.toGeneratedTraceSimulation
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : Fir.LeanIR.Impure.ExternalImpl}
+    {Invariant : Fir.LeanIR.Impure.MachineState → Prop}
+    (laws : ConcreteStructuredSourceInvariantLaws program sourceModule
+      targetModule hosts externals Invariant)
+    (finiteRuntimeSafety : ConcreteStructuredCurrentStepFiniteRuntimeSafety
+      program sourceModule targetModule hosts externals)
+    (addressSpaceSafety : ConcreteStructuredCurrentStepAddressSpaceSafety
+      program sourceModule targetModule hosts externals) :
+    ConcreteGeneratedTraceSimulation externals targetModule.wasmModule
+      hosts.env where
+  relation := ConcreteStructuredValidatedInvariantGlobalOutcome program
+    sourceModule targetModule hosts externals Invariant
+  rank := compilerStructuredControlRank
+  observes := by
+    intro sourceState targetState related
+    exact related.validated.toSupportedGlobal.observes
+  advance := by
+    intro sourceBefore sourceAfter targetBefore related sourceStep
+    exact related.advance laws finiteRuntimeSafety addressSpaceSafety sourceStep
+
+/-- Initial validated compiler state plus an initial source invariant imply
+finite-prefix correctness. -/
+theorem ConcreteStructuredSourceInvariantLaws.toFiniteTraceCorrect
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : Fir.LeanIR.Impure.ExternalImpl}
+    {Invariant : Fir.LeanIR.Impure.MachineState → Prop}
+    (laws : ConcreteStructuredSourceInvariantLaws program sourceModule
+      targetModule hosts externals Invariant)
+    (finiteRuntimeSafety : ConcreteStructuredCurrentStepFiniteRuntimeSafety
+      program sourceModule targetModule hosts externals)
+    (addressSpaceSafety : ConcreteStructuredCurrentStepAddressSpaceSafety
+      program sourceModule targetModule hosts externals)
+    {sourceInitial : Fir.LeanIR.Impure.MachineState}
+    {targetInitial : StructuredWasmState Host}
+    (validated : ConcreteStructuredValidatedCodeGlobalOutcome program
+      sourceModule targetModule hosts externals sourceInitial targetInitial)
+    (sourceInvariant : Invariant sourceInitial) :
+    ConcreteFiniteTraceCorrect externals
+      (concreteStructuredWasmMachine targetModule.wasmModule hosts.env)
+      sourceInitial targetInitial :=
+  ⟨laws.toGeneratedTraceSimulation finiteRuntimeSafety addressSpaceSafety,
+    ⟨validated, sourceInvariant⟩⟩
 
 /-- The provenance-preserving compiler simulation.
 
@@ -733,6 +936,56 @@ theorem ConcreteSupportedExport.finiteTraceCorrect_of_currentStepAdmission
         parameters) :=
   admission.toFiniteTraceCorrect addressSpaceSafety
     (spec.supportedGlobalRoot contextCaches invariant)
+
+/-- Preferred export-facing finite-prefix theorem.
+
+The source semantic invariant is established once at the source entry and
+preserved by source execution.  Compiler validation is established once at
+the generated export entry and preserved by the structured simulation.
+Finite header/capture safety and allocation headroom remain explicit runtime
+premises.  No premise contains a target execution or future source step. -/
+theorem ConcreteSupportedExport.finiteTraceCorrect_of_sourceInvariant
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec : ConcreteSupportedExport program context sourceCode sourceModule
+      sourceFunction targetModule hosts exportName)
+    {externals : Fir.LeanIR.Impure.ExternalImpl}
+    {SourceInvariant : Fir.LeanIR.Impure.MachineState → Prop}
+    (sourceLaws : ConcreteStructuredSourceInvariantLaws program sourceModule
+      targetModule hosts externals SourceInvariant)
+    (finiteRuntimeSafety : ConcreteStructuredCurrentStepFiniteRuntimeSafety
+      program sourceModule targetModule hosts externals)
+    (addressSpaceSafety : ConcreteStructuredCurrentStepAddressSpaceSafety
+      program sourceModule targetModule hosts externals)
+    (contextCaches :
+      context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    {facts : Fir.Wasm.ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceRuntime : Fir.LeanIR.Impure.RuntimeState}
+    {sourceEnv : Fir.LeanIR.Impure.Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : Fir.Wasm.Concrete.RefinementWitness}
+    {parameters : List Wasm.Value}
+    (runtimeInvariant : ConcreteReuseCapacityCacheAbiFrame context sourceModule
+      sourceFunction externals facts remainingBytes sourceRuntime sourceEnv
+      initial (spec.targetFunction.toLocals parameters.reverse)
+      initialWitness)
+    (sourceInitialInvariant : SourceInvariant
+      (sourceCodeState context sourceRuntime sourceEnv sourceCode)) :
+    ConcreteFiniteTraceCorrect externals
+      (concreteStructuredWasmMachine targetModule.wasmModule hosts.env)
+      (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+      (concreteStructuredFunctionEntry spec.targetFunction initial
+        parameters) :=
+  sourceLaws.toFiniteTraceCorrect finiteRuntimeSafety addressSpaceSafety
+    (spec.validatedCodeGlobalRoot contextCaches runtimeInvariant)
+    sourceInitialInvariant
 
 /-- Export-facing form of the provenance-preserving production proof route.
 The compiler establishes validation once at the real export root, while the
