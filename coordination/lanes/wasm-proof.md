@@ -5,17 +5,17 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: ready
-base: 2693f59350c8f54b3b84b0a7ce1d9bcabe509f02
-functional-head: bd03de5b75b680562949eb19c59a483cd60ce34b
-contract-base: 2693f59350c8f54b3b84b0a7ce1d9bcabe509f02
+state: active
+base: 87c0299d2bfeaae6a1ad32ee87bfa00dd31fe090
+functional-head: 87c0299d2bfeaae6a1ad32ee87bfa00dd31fe090
+contract-base: 87c0299d2bfeaae6a1ad32ee87bfa00dd31fe090
 clean-at-update: true
-slice: Added a schema-aware current-node admission and validated ordinary-code dispatcher. Its guarded legacy arm excludes FVar and erased object-field syntax, so those shapes must use source ConstructorSchema typing plus WitnessAgrees for the active witness.
-files: integration/talos/FirTalos/ConcreteStructuredValidation.lean; integration/talos/FirTalos/ConcreteResumableWasm.lean; integration/talos/PLAN.md; bugs/FIR-BUG-wasm-none-object-field-kind-admission.md; coordination/lanes/wasm-proof.md
-contracts: additive proof-side admission/readiness boundary only; source semantics, semantic ABI, concrete layout/runtime operations, emitted code, and existing public finite-trace theorem unchanged
-checks: git diff --check PASS; Lean Beam sync/save ConcreteStructuredValidation and ConcreteResumableWasm PASS; direct lake env lean on both edited modules PASS; lake build FirTalos.ConcreteStructuredValidation FirTalos.ConcreteResumableWasm PASS (3128 jobs); make check PASS (730 cases, 2172/2172 comparisons); make talos-setup PASS; make talos-check PASS (3182 jobs, receipt b693d7a85cbccd7b4e27252826fbbc8c3e9e4bcc16496788d3ed49115b6d4f5b)
+slice: Add a uniform active-witness projection and constructor-schema agreement companion for every validated global outcome, then establish generic preservation across witness-unchanged successors.
+files: integration/talos/FirTalos/ConcreteStructuredValidation.lean; integration/talos/FirTalos/ConcreteResumableWasm.lean; integration/talos/PLAN.md; coordination/lanes/wasm-proof.md
+contracts: pending additive proof-side global relation companion; no source semantics, ABI, runtime operation, or emitted-code change intended
+checks: pending
 bug-cards: FIR-BUG-wasm-none-object-field-kind-admission
 blockers: none
-handoff: Land functional commit bd03de5b75b680562949eb19c59a483cd60ce34b and this clean status commit. The ordinary-code dispatcher is schema-aware; the module-global relation is not yet schema-enriched.
-next: Add one proof-side witness projection/agreement companion for every constructor of ConcreteStructuredValidatedCodeGlobalOutcome, then preserve it first across witness-unchanged administrative and mutation transitions before allocation/reuse updates.
+handoff: Active on wasm/talos-runtime; not ready for integration.
+next: Define the witness projection without duplicating global constructors, wrap validated outcomes with ConstructorSchema.WitnessAgrees, and prove the witness-identity transport used by field mutation and administrative stutters.
 ```
