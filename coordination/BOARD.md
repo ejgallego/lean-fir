@@ -25,7 +25,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   resident Array provenance consumer after rebasing, is the remaining
   milestone step.
 - Integration owner: `root`, holding the serial landing lease through accepted
-  integration head `82b10e74`. `wasm-gen` remains released to the W7-1
+  integration head `d723d1d4`. `wasm-gen` remains released to the W7-1
   generation lane. The inherited cleanup, serial and bounded check-throughput,
   mailbox-routing, bounded `Nat.land`, USize range-fact, exact consumer-ratchet,
   and transactional resident-linker stacks are now integrated. Tooling's
@@ -108,6 +108,23 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `b693d7a85cbccd7b4e27252826fbbc8c3e9e4bcc16496788d3ed49115b6d4f5b`.
   No shared contract changed. Global outcome agreement preservation remains;
   the object-field admission bug is still confirmed, not fixed.
+- Accepted W6 witness-indexed global-schema checkpoint: functional proof head
+  `34188823` is linked through clean tracked handoff `d723d1d4`, based on
+  accepted schema-dispatch integration head `87c0299d`. Because the established
+  validated global relation is `Prop`-valued, Lean correctly forbids projecting
+  its hidden witness as data. The additive
+  `ConcreteStructuredValidatedCodeGlobalOutcomeAt` therefore mirrors all seven
+  validated constructor shapes with the active witness as an explicit ghost
+  index. The schema-enriched relation existentially pairs that index with
+  `ConstructorSchema.WitnessAgrees`, erases back to the established relation,
+  and has a generic same-witness constructor. FVar and erased object-field
+  successors now preserve this schema-global relation across their exact
+  three-step target prefixes. Lean Beam, direct elaboration, the forced
+  3,128-job cone, `make check` at 730 unique cases and 2,172/2,172 comparisons,
+  and all 3,182 Talos jobs pass with receipt
+  `2cf08b48832249fa5c8e246182ecd1d0f71a875f299bdc821aca904b525ebdf2`.
+  No shared contract changed. Full administrative and allocation/reuse
+  preservation remains; the object-field admission bug is still open.
 - Accepted exact scalar-alias proof interface: W7 functional head `f32458a2`
   is linked through clean tracked handoff `e3548322`. The emitter now exports
   its annotation-only object-result source mapper plus closed source-shape
