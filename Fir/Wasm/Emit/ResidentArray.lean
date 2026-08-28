@@ -1189,11 +1189,25 @@ private def replaceExclusiveElementBody : List Instruction :=
   elementAddress ++ [
     .localGet sourceCursorLocal,
     .i32Load .tobject 0,
-    .localSet elementLocal,
+    .localSet elementLocal] ++
+    ResidentRelease.checkedDecrementLocal elementLocal ++ [
     .localGet sourceCursorLocal,
     .localGet valueParam,
-    .i32Store .tobject 0] ++
+    .i32Store .tobject 0,
+    .localGet arrayParam,
+    .ret]
+
+-- Match upstream `lean_array_uset`: release the displaced owner before the
+-- consumed replacement becomes reachable from the Array.
+#guard replaceExclusiveElementBody ==
+  elementAddress ++ [
+    .localGet sourceCursorLocal,
+    .i32Load .tobject 0,
+    .localSet elementLocal] ++
     ResidentRelease.checkedDecrementLocal elementLocal ++ [
+    .localGet sourceCursorLocal,
+    .localGet valueParam,
+    .i32Store .tobject 0,
     .localGet arrayParam,
     .ret]
 
