@@ -223,6 +223,101 @@ theorem WitnessAgrees.rebindConstructor
       info fieldKinds addressNe]
     exact oldDescriptor
 
+/-- One source-constructor-schema update synchronized with the concrete
+refinement witness used by the same runtime step.
+
+This is ghost invariant evolution, not a translation certificate.  The three
+constructors are exactly the runtime possibilities relevant to constructor
+provenance: an unrelated monotone witness extension, a fresh semantic
+constructor allocation, or replacement of the descriptor at a retained
+constructor address. -/
+inductive WitnessUpdate : RefinementWitness → RefinementWitness →
+    ConstructorSchema → ConstructorSchema → Prop where
+  | preserved
+      {before after : RefinementWitness}
+      {schema : ConstructorSchema}
+      (extension : before.Extends after) :
+      WitnessUpdate before after schema schema
+  | allocated
+      {before after : RefinementWitness}
+      {schema : ConstructorSchema}
+      (location : Location) (address : Word32)
+      (info : Lean.Compiler.LCNF.CtorInfo) (fieldKinds : Array AbiKind)
+      (extension : before.Extends after)
+      (mapped : after.locations.lookup? location = some address)
+      (descriptor : after.descriptors.lookup? address =
+        some (.constructor info fieldKinds)) :
+      WitnessUpdate before after schema
+        (schema.bind location info fieldKinds)
+  | reused
+      {before : RefinementWitness}
+      {schema : ConstructorSchema}
+      (wellFormed : before.WellFormed)
+      (location : Location) (address : Word32)
+      (info : Lean.Compiler.LCNF.CtorInfo) (fieldKinds : Array AbiKind)
+      (mapped : before.locations.lookup? location = some address) :
+      WitnessUpdate before
+        (before.rebindConstructor address info fieldKinds) schema
+        (schema.bind location info fieldKinds)
+
+/-- Schema/witness agreement is an invariant of the synchronized update.
+
+The fresh-allocation case only needs the observable successor mapping and
+descriptor plus monotonicity for older entries.  Consequently callers do not
+have to expose the implementation equality saying that the successor witness
+was built with `bindConstructor`. -/
+theorem WitnessUpdate.agrees
+    {before after : RefinementWitness}
+    {schema nextSchema : ConstructorSchema}
+    (update : WitnessUpdate before after schema nextSchema)
+    (agrees : schema.WitnessAgrees before) :
+    nextSchema.WitnessAgrees after := by
+  cases update with
+  | preserved extension =>
+      exact agrees.witnessExtension extension
+  | allocated location address info fieldKinds extension mapped descriptor =>
+      intro query entry found
+      by_cases isNew : query = location
+      · subst query
+        rw [bind_self] at found
+        have entryEq := Option.some.inj found
+        subst entry
+        exact ⟨address, mapped, descriptor⟩
+      · rw [bind_other schema location query info fieldKinds isNew] at found
+        obtain ⟨oldAddress, oldMapped, oldDescriptor⟩ := agrees found
+        exact ⟨oldAddress, extension.locations _ _ oldMapped,
+          extension.descriptors _ _ oldDescriptor⟩
+  | reused wellFormed location address info fieldKinds mapped =>
+      exact agrees.rebindConstructor wellFormed location address info
+        fieldKinds mapped
+
+/-- Source-determined constructor-schema shape of one successful `reuse`.
+
+The zero token either produces an immediate empty constructor and leaves the
+schema alone, or allocates a nonempty constructor at `runtime.nextLocation`.
+A retained token updates the schema entry at the retained semantic location.
+The companion `WitnessUpdate` proves that the concrete ghost witness performs
+the matching representation change. -/
+inductive ReuseShape (runtime : RuntimeState) (sourceToken : Value)
+    (info : Lean.Compiler.LCNF.CtorInfo) (fieldKinds : Array AbiKind) :
+    ConstructorSchema → ConstructorSchema → Prop where
+  | freshTagged
+      {schema : ConstructorSchema}
+      (tokenEq : sourceToken = .reuseToken none)
+      (empty : (info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0) :
+      ReuseShape runtime sourceToken info fieldKinds schema schema
+  | freshAllocated
+      {schema : ConstructorSchema}
+      (tokenEq : sourceToken = .reuseToken none)
+      (nonempty : ¬ ((info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0)) :
+      ReuseShape runtime sourceToken info fieldKinds schema
+        (schema.bind runtime.nextLocation info fieldKinds)
+  | retained
+      {schema : ConstructorSchema} (location : Location)
+      (tokenEq : sourceToken = .reuseToken (some location)) :
+      ReuseShape runtime sourceToken info fieldKinds schema
+        (schema.bind location info fieldKinds)
+
 end ConstructorSchema
 
 /-- Object-field alignment for the one refinement witness active in the

@@ -6319,6 +6319,21 @@ external execution without replaying the host proof. Next come constructor
 bind/rebind transitions for allocation and reuse and the complete
 schema-global dispatcher.
 
+The lower constructor/reuse boundary now exposes those transitions without a
+new compiler certificate. `ConstructorSchema.WitnessUpdate` is the factored
+ghost-state relation: monotone preservation keeps the schema unchanged, fresh
+allocation extends it with an observed successor mapping/descriptor, and
+retained reuse applies the exact descriptor rebind. Its `agrees` theorem is
+the single proof that all three transitions preserve schema/witness
+agreement. `ConstructorSchema.ReuseShape` separately records the
+source-determined update—tagged empty result, fresh heap allocation, or
+retained location—so proof metadata cannot silently choose the wrong schema
+branch. The nonempty constructor budget theorem now publishes the exact
+`bindConstructor` witness, and the branch-independent reuse refinement
+publishes a matching `ReuseShape`/`WitnessUpdate` pair for every incoming
+schema. The next lift carries this already-proved pair through the direct-let
+compiler/resource theorem and into the witness-indexed validated successor.
+
 W6.6 float packed-field admission closes the semantic-to-concrete gap for
 `Float32` and `Float` projection and mutation. `ValueRel` now relates the
 shared raw-bit semantic constructors directly to `.float32Bits` and

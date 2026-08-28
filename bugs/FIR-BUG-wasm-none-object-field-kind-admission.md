@@ -119,9 +119,19 @@ global dispatcher only forgets that index. A resolved external host call, by
 contrast, returns a `nextWitness`; its existing external-call evidence now
 flows through the control theorem as `witness.Extends nextWitness`, and the
 validated successor retains that exact index. `withSchemaExtension` transports
-the current schema agreement across it. Constructor allocation/reuse and the
-resulting full schema-global dispatcher remain outstanding, so this is still
-proof-side infrastructure rather than resolution of production admission.
+the current schema agreement across it.
+
+Constructor allocation/reuse now has a checked lower refinement boundary as
+well. `ConstructorSchema.WitnessUpdate.agrees` factors preservation for
+unchanged extensions, fresh constructor bindings, and retained-address
+rebindings. `ConstructorSchema.ReuseShape` ties the latter two choices to the
+successful source `reuse` branch, while the capacity refinement returns the
+matching update for every incoming schema. The compiler-facing nonempty
+constructor theorem also exposes its exact `bindConstructor` witness instead
+of hiding it behind an existential. Carrying this evidence through the
+direct-let resource theorem and assembling the full schema-global dispatcher
+remain outstanding, so this is still proof-side infrastructure rather than
+resolution of production admission.
 
 ## Semantic impact
 

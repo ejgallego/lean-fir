@@ -3184,7 +3184,9 @@ theorem allocCtorNonemptyStep_of_capacityEvidence
       HeaderCapacityTransport initial.host.runtime.heap heap witness ∧
       allocCtor runtime info semanticFields =
         .ok (semanticConstructorResult runtime info semanticFields,
-          .object (.heap runtime.nextLocation)) := by
+          .object (.heap runtime.nextLocation)) ∧
+      nextWitness =
+        witness.bindConstructor runtime.nextLocation address info fieldKinds := by
   obtain ⟨extension, concreteStep, nextRuntimeRelated, physicalRelated,
       semanticStep⟩ :=
     allocCtorNonemptyStep_of_refines runtimeRelated argsLength decoded arity
@@ -3232,7 +3234,7 @@ theorem allocCtorNonemptyStep_of_capacityEvidence
     ClosureAllocationsPersistent.bindConstructor witness runtime.nextLocation
       address info fieldKinds,
     concreteStep, nextRuntimeRelated, physicalRelated, nextCapacity, ?_,
-    semanticStep⟩
+    semanticStep, rfl⟩
   exact HeaderCapacityTransport.ofPrefixExtension witness heapExtension
 
 /-- Empty-token reuse of an empty-layout constructor preserves old retained
@@ -3338,7 +3340,9 @@ theorem reuseStep_none_nonempty_of_capacityEvidence
       HeaderCapacityTransport initial.host.runtime.heap heap witness ∧
       reuse runtime (.reuseToken none) info updateHeader semanticFields =
         .ok (semanticConstructorResult runtime info semanticFields,
-          .object (.heap runtime.nextLocation)) := by
+          .object (.heap runtime.nextLocation)) ∧
+      nextWitness =
+        witness.bindConstructor runtime.nextLocation address info fieldKinds := by
   obtain ⟨extension, closureAllocationsPersistent, concreteStep,
       nextRuntimeRelated, physicalRelated, semanticStep⟩ :=
     reuseStep_none_nonempty_of_refines runtimeRelated argsLength decoded arity
@@ -3358,7 +3362,7 @@ theorem reuseStep_none_nonempty_of_capacityEvidence
   exact ⟨_, extension, closureAllocationsPersistent, concreteStep,
     nextRuntimeRelated, physicalRelated,
     by simpa [ReuseCapacityEvidence.afterReuse] using capacityValue,
-    capacityTransport, semanticStep⟩
+    capacityTransport, semanticStep, rfl⟩
 
 /-- A unique reset changes an ordinary object lane into a reuse-token lane at
 the same address. Header-capacity transport carries the retained lower bound
@@ -3752,7 +3756,12 @@ theorem reuseStep_none_of_capacityEvidence
           resultKind (.word32 word) sourceValue ∧
         nextWitness.closureDispatch = witness.closureDispatch ∧
         nextWitness.closureDescriptors = witness.closureDescriptors ∧
-        HeaderCapacityTransport initial.host.runtime.heap heap witness := by
+        HeaderCapacityTransport initial.host.runtime.heap heap witness ∧
+        ∀ schema, ∃ nextSchema,
+          ConstructorSchema.ReuseShape runtime (.reuseToken none) info
+              fieldKinds schema nextSchema ∧
+            ConstructorSchema.WitnessUpdate witness nextWitness schema
+              nextSchema := by
   by_cases empty : (info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0
   · obtain ⟨nextWitness, extension, closureAllocationsPersistent,
         concreteStep, nextRuntimeRelated, valueRelated, physicalRelated,
@@ -3773,10 +3782,11 @@ theorem reuseStep_none_of_capacityEvidence
       ReuseCapacityValueRel.taggedObject_afterReuse
         (evidence := evidence) empty valueRelated,
       extension.closureDispatch, extension.closureDescriptors,
-      capacityTransport⟩
+      capacityTransport, fun schema =>
+        ⟨schema, .freshTagged rfl empty, .preserved extension⟩⟩
   · obtain ⟨nextWitness, extension, closureAllocationsPersistent,
         concreteStep, nextRuntimeRelated, physicalRelated, capacityValue,
-        capacityTransport, semanticExpected⟩ :=
+        capacityTransport, semanticExpected, witnessEq⟩ :=
       reuseStep_none_nonempty_of_capacityEvidence runtimeRelated argsLength
         decoded arity semanticArity fieldKindsSize fieldKindsValid
         fieldRelated empty tagFits objectFieldsFit usizeFieldsFit
@@ -3791,14 +3801,20 @@ theorem reuseStep_none_of_capacityEvidence
       congrArg Prod.snd resultEq
     subst nextRuntime
     subst sourceValue
+    subst nextWitness
     have evidenceEq :=
       FirTalos.Concrete.ReuseCapacityEvidence.afterReuse_eq_emptyToken_of_nonempty
         evidence info empty
-    exact ⟨nextWitness, concreteStep, WitnessTransport.ofExtension extension,
+    exact ⟨witness.bindConstructor runtime.nextLocation word info fieldKinds,
+      concreteStep, WitnessTransport.ofExtension extension,
       closureAllocationsPersistent, nextRuntimeRelated, physicalRelated, by
         simpa [evidenceEq] using capacityValue,
       extension.closureDispatch, extension.closureDescriptors,
-      capacityTransport⟩
+      capacityTransport, fun schema =>
+        ⟨schema.bind runtime.nextLocation info fieldKinds,
+          .freshAllocated rfl empty,
+          .allocated runtime.nextLocation word info fieldKinds extension
+            (by simp) (by simp)⟩⟩
 
 /--
 The central W6.6dg bridge: static fitting evidence and its dynamic header
@@ -4008,7 +4024,12 @@ theorem reuseStep_of_capacityEvidence
         nextWitness.closureDescriptors = witness.closureDescriptors ∧
         HeaderCapacityTransport initial.host.runtime.heap heap witness ∧
         heap.AddressSpaceBudget
-          (remainingBytes - constructorAllocationBytes info) := by
+          (remainingBytes - constructorAllocationBytes info) ∧
+        ∀ schema, ∃ nextSchema,
+          ConstructorSchema.ReuseShape runtime sourceToken info fieldKinds
+              schema nextSchema ∧
+            ConstructorSchema.WitnessUpdate witness nextWitness schema
+              nextSchema := by
   cases evidence with
   | emptyToken =>
       obtain ⟨tokenWordEq, sourceTokenEq⟩ :=
@@ -4020,7 +4041,7 @@ theorem reuseStep_of_capacityEvidence
       obtain ⟨nextWitness, concreteStep, transport,
           closureAllocationsPersistent, nextRuntimeRelated, physicalRelated,
           nextCapacity, witnessDispatch, witnessDescriptors,
-          capacityTransport⟩ :=
+          capacityTransport, schemaUpdates⟩ :=
         reuseStep_none_of_capacityEvidence runtimeRelated argsLength decoded
           arity semanticArity fieldKindsSize fieldKindsValid fieldRelated
           tagFits objectFieldsFit usizeFieldsFit scalarBytesFit resultRefines
@@ -4029,7 +4050,7 @@ theorem reuseStep_of_capacityEvidence
         closureAllocationsPersistent, nextRuntimeRelated, physicalRelated,
         nextCapacity,
         witnessDispatch, witnessDescriptors, capacityTransport,
-        remainingBudget⟩
+        remainingBudget, schemaUpdates⟩
   | retainedAtLeast available =>
       rcases capacityRelated.retainedToken_cases with zero | retained
       · obtain ⟨tokenWordEq, sourceTokenEq⟩ := zero
@@ -4041,7 +4062,7 @@ theorem reuseStep_of_capacityEvidence
             closureAllocationsPersistent, nextRuntimeRelated,
             physicalRelated, nextCapacity, witnessDispatch,
             witnessDescriptors,
-            capacityTransport⟩ :=
+            capacityTransport, schemaUpdates⟩ :=
           reuseStep_none_of_capacityEvidence runtimeRelated argsLength decoded
             arity semanticArity fieldKindsSize fieldKindsValid fieldRelated
             tagFits objectFieldsFit usizeFieldsFit scalarBytesFit resultRefines
@@ -4050,7 +4071,7 @@ theorem reuseStep_of_capacityEvidence
           closureAllocationsPersistent, nextRuntimeRelated, physicalRelated,
           nextCapacity,
           witnessDispatch, witnessDescriptors, capacityTransport,
-          remainingBudget⟩
+          remainingBudget, schemaUpdates⟩
       · obtain ⟨location, address, header, tokenWordEq, sourceTokenEq,
             tokenRelated, _rawHeaderRead, _headerOwned, _minimum⟩ :=
           retained
@@ -4119,7 +4140,11 @@ theorem reuseStep_of_capacityEvidence
                   by
                     simp [nextWitness,
                       RefinementWitness.rebindConstructor],
-                  capacityTransport, remainingBudget⟩
+                  capacityTransport, remainingBudget, fun schema =>
+                    ⟨schema.bind location info fieldKinds,
+                      .retained location rfl,
+                      .reused runtimeRelated.heap.witnessWellFormed location
+                        address info fieldKinds mapped⟩⟩
             | boxed descriptor relatedObjectEq objectRelated refCount
                 persistent cellLive =>
                 rw [objectEq] at relatedObjectEq

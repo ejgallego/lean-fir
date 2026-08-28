@@ -4525,7 +4525,9 @@ theorem constructorNonemptyStep_of_budget
                   nextStore.host.runtime.heap witness ∧
               nextStore.host.runtime.heap.AddressSpaceBudget
                 (remainingBytes -
-                  (ConstructorLayout.ofInfo info).allocationBytes) := by
+                  (ConstructorLayout.ofInfo info).allocationBytes) ∧
+              nextWitness = witness.bindConstructor sourceRuntime.nextLocation
+                word info fieldKinds := by
   obtain ⟨fields, decoded, fieldsLength, fieldsRelated⟩ :=
     argumentsRelated.decodeObjectWords (by simpa using fieldKindsValid) 0
   have arity : fields.toArray.size = info.size := by
@@ -4549,7 +4551,7 @@ theorem constructorNonemptyStep_of_budget
       scalarBytesFit resultRefines budget allocationFits
   obtain ⟨nextWitness, extension, closureAllocationsPersistent, operation,
       nextRuntimeRelated, physicalRelated, capacityRelated, capacityTransport,
-      expectedSourceStep⟩ :=
+      expectedSourceStep, witnessEq⟩ :=
     allocCtorNonemptyStep_of_capacityEvidence runtimeRelated argsLength decoded
       arity semanticArity fieldKindsSize fieldKindsValid fieldsRelatedArray
       nonempty tagFits objectFieldsFit usizeFieldsFit scalarBytesFit
@@ -4565,7 +4567,7 @@ theorem constructorNonemptyStep_of_budget
   refine ⟨replaceHeap initial heap, address, nextWitness, operation, ?_, ?_,
     ?_, extension.closureDispatch, extension.closureDescriptors, ?_, ?_,
     extension, closureAllocationsPersistent, nextRuntimeRelated, ?_,
-    physicalRelated, capacityRelated, ?_, ?_⟩
+    physicalRelated, capacityRelated, ?_, ?_, witnessEq⟩
   · simp [replaceHeap, clearFailure]
   · simp [replaceHeap, clearFailure]
   · simp [replaceHeap, clearFailure]
@@ -13323,7 +13325,8 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_nonemptyConstructor
       _witnessDispatchPreserved, witnessDescriptorsPreserved, _wasmGlobals,
       _hostStaticLayout, extension, _closureAllocationsPersistent,
       nextRuntimeRelated, failureClear,
-      valueRelated, _capacityValue, _capacityTransport, remainingBudget⟩ :=
+      valueRelated, _capacityValue, _capacityTransport, remainingBudget,
+      _witnessEq⟩ :=
     constructorNonemptyStep_of_budget stateRelated.1 physicalArity
       argumentsRelated semanticStep semanticArity operationFacts.1.1.symm
       operationFacts.1.2 nonempty tagFits' objectFieldsFit usizeFieldsFit
@@ -14553,7 +14556,7 @@ theorem ConcreteSupportedFunction.reuseLetStep_of_capacity
       closureAllocationsPersistent, nextRuntimeRelated, valueRelated,
       capacityValue, witnessDispatchPreserved,
       witnessDescriptorsPreserved,
-      capacityTransport, remainingBudget⟩ :=
+      capacityTransport, remainingBudget, _schemaUpdates⟩ :=
     reuseStep_of_capacityEvidence related.stateRelated.1 argsLength decoded
       tokenCapacity capacityFitting fieldsArity semanticArity
       operationFacts.1.1.symm operationFacts.1.2 fieldRelated tagFits'
@@ -16254,7 +16257,7 @@ theorem
       witnessDispatchPreserved, witnessDescriptorsPreserved, wasmGlobals,
       hostStaticLayout, extension, closureAllocationsPersistent,
       nextRuntimeRelated, failureClear, valueRelated, capacityValue,
-      capacityTransport, remainingBudget⟩ :=
+      capacityTransport, remainingBudget, _witnessEq⟩ :=
     constructorNonemptyStep_of_budget related.stateRelated.1 physicalArity
       argumentsRelated semanticStep semanticArity operationFacts.1.1.symm
       operationFacts.1.2 nonempty tagFits' objectFieldsFit usizeFieldsFit
