@@ -1392,6 +1392,75 @@ private def setBangFunctionFor (validation : InputValidation) : Function := {
 
 def setBangFunction : Function := setBangFunctionFor .checked
 
+/-!
+## Proof-visible trusted replacement helpers
+
+These closed aliases expose the three production trusted replacement helpers
+without making the validation modes or their constructors public.  The
+resident linker continues to construct exactly the same function values; the
+aliases and equations below are only a stable source-shape boundary for W6.
+-/
+
+/-- Closed executable body of the production trusted `Array.uset` helper. -/
+def trustedUsetFunctionBody : List Instruction :=
+  (usetFunctionFor .trusted .trusted).body
+
+/-- Proof-visible value of the production trusted `Array.uset` helper. -/
+def trustedUsetFunction : Function :=
+  usetFunctionFor .trusted .trusted
+
+@[simp] theorem trustedUsetFunction_name :
+    trustedUsetFunction.name = externalName `Array.uset := rfl
+
+@[simp] theorem trustedUsetFunction_signature :
+    trustedUsetFunction.signature = {
+      params := #[.erased, .object, .usize, .tobject, .erased]
+      results := #[.object] } := by
+  simp [trustedUsetFunction, Function.signature, usetFunctionFor]
+
+theorem trustedUsetFunction_body :
+    trustedUsetFunction.body = trustedUsetFunctionBody := rfl
+
+/-- Closed executable body of the production trusted `Array.set` helper. -/
+def trustedSetFunctionBody : List Instruction :=
+  (setFunctionFor .trusted .trusted).body
+
+/-- Proof-visible value of the production trusted `Array.set` helper. -/
+def trustedSetFunction : Function :=
+  setFunctionFor .trusted .trusted
+
+@[simp] theorem trustedSetFunction_name :
+    trustedSetFunction.name = externalName `Array.set := rfl
+
+@[simp] theorem trustedSetFunction_signature :
+    trustedSetFunction.signature = {
+      params := #[.erased, .object, .tobject, .tobject, .erased]
+      results := #[.object] } := by
+  simp [trustedSetFunction, Function.signature, setFunctionFor]
+
+theorem trustedSetFunction_body :
+    trustedSetFunction.body = trustedSetFunctionBody := rfl
+
+/-- Closed executable body of the production trusted `Array.set!` helper. -/
+def trustedSetBangFunctionBody : List Instruction :=
+  (setBangFunctionFor .trusted).body
+
+/-- Proof-visible value of the production trusted `Array.set!` helper. -/
+def trustedSetBangFunction : Function :=
+  setBangFunctionFor .trusted
+
+@[simp] theorem trustedSetBangFunction_name :
+    trustedSetBangFunction.name = externalName `Array.set! := rfl
+
+@[simp] theorem trustedSetBangFunction_signature :
+    trustedSetBangFunction.signature = {
+      params := #[.erased, .object, .tobject, .tobject]
+      results := #[.object] } := by
+  simp [trustedSetBangFunction, Function.signature, setBangFunctionFor]
+
+theorem trustedSetBangFunction_body :
+    trustedSetBangFunction.body = trustedSetBangFunctionBody := rfl
+
 private def swapDecodedElementsFunction : Function := {
   name := swapElementsName
   params := #[(arrayParam, .uint32), (indexParam, .uint32),
