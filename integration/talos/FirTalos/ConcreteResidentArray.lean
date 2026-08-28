@@ -79,6 +79,20 @@ def loadArraySizeSourceProgram (array size : Lean.FVarId) :
   .i32Load .uint32 (UInt32.ofNat headerAux1Offset),
   .localSet size]
 
+/-- Source spelling of the deferred Array physical-capacity header load. -/
+def loadArrayCapacitySourceProgram (array capacity : Lean.FVarId) :
+    List Fir.Wasm.Instruction := [
+  .localGet array,
+  .i32Load .uint32 (UInt32.ofNat headerAux2Offset),
+  .localSet capacity]
+
+/-- Trusted nonexclusive control prefix: test the reference count first, then
+load capacity only when the returning exclusive arm was not selected. -/
+def trustedNonexclusivePrefixSourceProgram (array capacity : Lean.FVarId)
+    (exclusive : List Fir.Wasm.Instruction) : List Fir.Wasm.Instruction :=
+  trustedExclusivePrefixSourceProgram array exclusive ++
+    loadArrayCapacitySourceProgram array capacity
+
 /-- Complete trusted entry prefix of proof-indexed `Array.uset`, ending with
 the wrapped `USize` payload in the shared decoded-index local. -/
 def trustedUsetEntrySourceProgram
@@ -214,6 +228,57 @@ theorem trustedSetBangFunction_exclusiveSourceShape :
         Fir.Wasm.Emit.ResidentArray.trustedSetBangFunction.body.drop 16 := by
   rfl
 
+/-- The complete optimized `uset` control boundary consists of the common
+reference-count probe followed by the formerly earlier capacity load. -/
+theorem trustedUsetFunction_nonexclusiveSourceShape :
+    Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.body =
+      Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.body.take 10 ++
+        trustedNonexclusivePrefixSourceProgram
+          Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.params[1]!.1
+          Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.locals[3]!.1
+          (exclusiveReplacementSourceProgram
+            Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.params[1]!.1
+            Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.locals[6]!.1
+            Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.locals[8]!.1
+            Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.params[3]!.1
+            Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.locals[13]!.1) ++
+        Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.body.drop 18 := by
+  rfl
+
+/-- The optimized trusted `set` helper has the same nonexclusive control
+boundary after its one-instruction-longer Nat decoder. -/
+theorem trustedSetFunction_nonexclusiveSourceShape :
+    Fir.Wasm.Emit.ResidentArray.trustedSetFunction.body =
+      Fir.Wasm.Emit.ResidentArray.trustedSetFunction.body.take 11 ++
+        trustedNonexclusivePrefixSourceProgram
+          Fir.Wasm.Emit.ResidentArray.trustedSetFunction.params[1]!.1
+          Fir.Wasm.Emit.ResidentArray.trustedSetFunction.locals[3]!.1
+          (exclusiveReplacementSourceProgram
+            Fir.Wasm.Emit.ResidentArray.trustedSetFunction.params[1]!.1
+            Fir.Wasm.Emit.ResidentArray.trustedSetFunction.locals[6]!.1
+            Fir.Wasm.Emit.ResidentArray.trustedSetFunction.locals[8]!.1
+            Fir.Wasm.Emit.ResidentArray.trustedSetFunction.params[3]!.1
+            Fir.Wasm.Emit.ResidentArray.trustedSetFunction.locals[13]!.1) ++
+        Fir.Wasm.Emit.ResidentArray.trustedSetFunction.body.drop 19 := by
+  rfl
+
+/-- The four-parameter `set!` helper shares the same deferred-capacity
+boundary and only changes the installed numeric local indices. -/
+theorem trustedSetBangFunction_nonexclusiveSourceShape :
+    Fir.Wasm.Emit.ResidentArray.trustedSetBangFunction.body =
+      Fir.Wasm.Emit.ResidentArray.trustedSetBangFunction.body.take 11 ++
+        trustedNonexclusivePrefixSourceProgram
+          Fir.Wasm.Emit.ResidentArray.trustedSetBangFunction.params[1]!.1
+          Fir.Wasm.Emit.ResidentArray.trustedSetBangFunction.locals[3]!.1
+          (exclusiveReplacementSourceProgram
+            Fir.Wasm.Emit.ResidentArray.trustedSetBangFunction.params[1]!.1
+            Fir.Wasm.Emit.ResidentArray.trustedSetBangFunction.locals[6]!.1
+            Fir.Wasm.Emit.ResidentArray.trustedSetBangFunction.locals[8]!.1
+            Fir.Wasm.Emit.ResidentArray.trustedSetBangFunction.params[3]!.1
+            Fir.Wasm.Emit.ResidentArray.trustedSetBangFunction.locals[13]!.1) ++
+        Fir.Wasm.Emit.ResidentArray.trustedSetBangFunction.body.drop 19 := by
+  rfl
+
 /-- Talos spelling of W7's constant-time live-element address calculation.
 The scale primitive is shared with resident Nat/BigNumeric rather than proved
 again instruction by instruction. -/
@@ -239,6 +304,12 @@ def loadArraySizeProgram (arrayIndex sizeIndex : Nat) : Wasm.Program := [
   .localGet arrayIndex,
   .load32 (UInt32.ofNat headerAux1Offset),
   .localSet sizeIndex]
+
+/-- Talos spelling of the deferred Array physical-capacity header load. -/
+def loadArrayCapacityProgram (arrayIndex capacityIndex : Nat) : Wasm.Program := [
+  .localGet arrayIndex,
+  .load32 (UInt32.ofNat headerAux2Offset),
+  .localSet capacityIndex]
 
 /-- Exact adapted trusted `Array.uset` entry prefix. -/
 def trustedUsetEntryProgram : Wasm.Program :=
@@ -532,6 +603,25 @@ def trustedSetBangDecodedEntry (params : List Wasm.Value)
     (array size index : UInt32) : Wasm.Locals := {
   params
   locals := [.i32 0, .i32 size, .i32 array, .i32 0, .i32 0, .i32 0,
+    .i32 index, .i32 0, .i32 0, .i32 0, .i32 0, .i32 0, .i32 0, .i32 0,
+    .i32 0]
+  values := [] }
+
+/-- Common five-parameter frame expected by the unchanged shared/persistent
+copy suffix after its deferred capacity load. -/
+def trustedCopyEntry (params : List Wasm.Value)
+    (array size capacity index : UInt32) : Wasm.Locals := {
+  params
+  locals := [.i32 0, .i32 size, .i32 array, .i32 capacity, .i32 0, .i32 0,
+    .i32 index, .i32 0, .i32 0, .i32 0, .i32 0, .i32 0, .i32 0, .i32 0]
+  values := [] }
+
+/-- Four-parameter `Array.set!` frame expected by the same unchanged copy
+suffix after capacity loading. -/
+def trustedSetBangCopyEntry (params : List Wasm.Value)
+    (array size capacity index : UInt32) : Wasm.Locals := {
+  params
+  locals := [.i32 0, .i32 size, .i32 array, .i32 capacity, .i32 0, .i32 0,
     .i32 index, .i32 0, .i32 0, .i32 0, .i32 0, .i32 0, .i32 0, .i32 0,
     .i32 0]
   values := [] }
@@ -1270,10 +1360,10 @@ theorem wp_replaceElementOwnershipProgram_tobject
     oldSet checkedWP
   simpa [replaceElementOwnershipProgram, List.append_assoc] using borrowWP
 
-/-- Semantic and concrete admission for the trusted in-place Array arm.  It
-contains no compiler certificate: every field is runtime state already needed
-by the whole-heap refinement and ownership proofs. -/
-structure TrustedExclusiveAdmission
+/-- Semantic and concrete admission shared by both trusted Array mutation
+arms.  It contains no compiler certificate: every field is runtime state
+already needed by the whole-heap refinement and ownership proofs. -/
+structure TrustedArrayAdmission
     (state : MemoryState) (witness : RefinementWitness)
     (runtime : RuntimeState) (location : Location) (address : Word32)
     (cell : HeapCell) (elements : Array Value) (capacity : Nat) : Prop where
@@ -1283,23 +1373,42 @@ structure TrustedExclusiveAdmission
   mapped : witness.locations.lookup? location = some address
   found : findCell? runtime.heap location = some cell
   live : cell.live = true
-  ordinary : cell.persistent = false
-  exclusive : cell.rc = 1
   objectEq : cell.object = .array elements capacity
   descriptor : witness.descriptors.lookup? address = some (.array capacity)
 
-/-- The semantic exclusivity premise determines the complete related Array
-header, including its exact raw word representation. -/
-theorem TrustedExclusiveAdmission.objectAdmission
+/-- Semantic specialization selecting the trusted in-place mutation arm. -/
+structure TrustedExclusiveAdmission
+    (state : MemoryState) (witness : RefinementWitness)
+    (runtime : RuntimeState) (location : Location) (address : Word32)
+    (cell : HeapCell) (elements : Array Value) (capacity : Nat) : Prop extends
+    TrustedArrayAdmission state witness runtime location address cell elements
+      capacity where
+  ordinary : cell.persistent = false
+  exclusive : cell.rc = 1
+
+/-- Semantic specialization selecting the unchanged shared/persistent
+copy-on-write arm.  Persistent Arrays have count zero; ordinary shared Arrays
+have a count greater than one, and this one condition covers both cases. -/
+structure TrustedNonexclusiveAdmission
+    (state : MemoryState) (witness : RefinementWitness)
+    (runtime : RuntimeState) (location : Location) (address : Word32)
+    (cell : HeapCell) (elements : Array Value) (capacity : Nat) : Prop extends
+    TrustedArrayAdmission state witness runtime location address cell elements
+      capacity where
+  nonexclusive : cell.rc ≠ 1
+
+/-- The common trusted premise determines the complete related Array header,
+including its semantic count/persistence lanes and exact raw words. -/
+theorem TrustedArrayAdmission.objectAdmission
     {state : MemoryState} {witness : RefinementWitness}
     {runtime : RuntimeState} {location : Location} {address : Word32}
     {cell : HeapCell} {elements : Array Value} {capacity : Nat}
-    (admission : TrustedExclusiveAdmission state witness runtime location
+    (admission : TrustedArrayAdmission state witness runtime location
       address cell elements capacity) :
     ∃ header,
       ResidentArrayObjectRel state witness address elements capacity header ∧
-      header.refCount = 1 ∧
-      header.persistent = false ∧
+      header.refCount.toNat = cell.rc ∧
+      header.persistent = cell.persistent ∧
       Header.ExactWords state.memory address header := by
   obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
     admission.heapRelated.concreteToSemantic location address admission.mapped
@@ -1334,13 +1443,7 @@ theorem TrustedExclusiveAdmission.objectAdmission
       have objectParts := HeapObject.array.inj storedObjectEq
       cases objectParts.1
       cases objectParts.2
-      have refCountOne : header.refCount = 1 := by
-        apply UInt32.toNat_inj.mp
-        simpa [admission.exclusive] using refCount
-      have persistentFalse : header.persistent = false :=
-        persistent.trans admission.ordinary
-      exact ⟨header, objectRelated, refCountOne,
-        persistentFalse,
+      exact ⟨header, objectRelated, refCount, persistent,
         admission.canonicalHeaders admission.mapped header
           objectRelated.headerRead⟩
   | closure closureRelated =>
@@ -1348,6 +1451,28 @@ theorem TrustedExclusiveAdmission.objectAdmission
         closureRelated.objectEq
       rw [admission.objectEq] at storedObjectEq
       contradiction
+
+/-- The semantic exclusivity premise specializes the common related header to
+the exact physical count-one, ordinary representation. -/
+theorem TrustedExclusiveAdmission.objectAdmission
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {elements : Array Value} {capacity : Nat}
+    (admission : TrustedExclusiveAdmission state witness runtime location
+      address cell elements capacity) :
+    ∃ header,
+      ResidentArrayObjectRel state witness address elements capacity header ∧
+      header.refCount = 1 ∧
+      header.persistent = false ∧
+      Header.ExactWords state.memory address header := by
+  obtain ⟨header, objectRelated, refCount, persistent, exactWords⟩ :=
+    admission.toTrustedArrayAdmission.objectAdmission
+  have refCountOne : header.refCount = 1 := by
+    apply UInt32.toNat_inj.mp
+    simpa [admission.exclusive] using refCount
+  have persistentFalse : header.persistent = false :=
+    persistent.trans admission.ordinary
+  exact ⟨header, objectRelated, refCountOne, persistentFalse, exactWords⟩
 
 /-- Relational outcome of one native-order resident Array replacement.  The
 ownership decrement and payload write remain separately visible, while the
@@ -1888,6 +2013,31 @@ def trustedExclusivePrefixProgram (arrayIndex : Nat)
   .eq,
   .iff 0 0 exclusive []]
 
+/-- Exact Talos boundary of the optimized nonexclusive arm: the pure
+reference-count probe precedes the deferred physical-capacity load. -/
+def trustedNonexclusivePrefixProgram (arrayIndex capacityIndex : Nat)
+    (exclusive : Wasm.Program) : Wasm.Program :=
+  trustedExclusivePrefixProgram arrayIndex exclusive ++
+    loadArrayCapacityProgram arrayIndex capacityIndex
+
+/-- Talos adaptation of the physical-capacity header load. -/
+theorem instructions_loadArrayCapacitySourceProgram
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {array capacity : Lean.FVarId} {arrayIndex capacityIndex : Nat}
+    (arrayFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) array =
+        some arrayIndex)
+    (capacityFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) capacity =
+        some capacityIndex) :
+    FirTalos.instructions sourceModule sourceFunction labels
+      (loadArrayCapacitySourceProgram array capacity) =
+        .ok (loadArrayCapacityProgram arrayIndex capacityIndex) := by
+  simp [loadArrayCapacitySourceProgram, loadArrayCapacityProgram,
+    FirTalos.instructions, FirTalos.instruction, arrayFound, capacityFound,
+    Bind.bind, Except.bind, pure, Except.pure]
+
 /-- Talos adaptation preserves the common trusted probe and embeds the exact
 adapted exclusive branch beneath its anonymous `if`. -/
 theorem instructions_trustedExclusivePrefixSourceProgram
@@ -1907,6 +2057,78 @@ theorem instructions_trustedExclusivePrefixSourceProgram
   simp [trustedExclusivePrefixSourceProgram, trustedExclusivePrefixProgram,
     FirTalos.instructions, FirTalos.instruction, arrayFound, exclusiveAdapted,
     Bind.bind, Except.bind, pure, Except.pure]
+
+/-- Adaptation preserves the complete probe-then-capacity boundary consumed by
+the nonexclusive continuation theorem. -/
+theorem instructions_trustedNonexclusivePrefixSourceProgram
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {array capacity : Lean.FVarId} {arrayIndex capacityIndex : Nat}
+    {exclusiveSource : List Fir.Wasm.Instruction}
+    {exclusiveTarget : Wasm.Program}
+    (arrayFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) array =
+        some arrayIndex)
+    (capacityFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) capacity =
+        some capacityIndex)
+    (exclusiveAdapted : FirTalos.instructions sourceModule sourceFunction
+      (none :: labels) exclusiveSource = .ok exclusiveTarget) :
+    FirTalos.instructions sourceModule sourceFunction labels
+      (trustedNonexclusivePrefixSourceProgram array capacity
+        exclusiveSource) =
+        .ok (trustedNonexclusivePrefixProgram arrayIndex capacityIndex
+          exclusiveTarget) := by
+  rw [trustedNonexclusivePrefixSourceProgram,
+    trustedNonexclusivePrefixProgram,
+    FirTalos.Correctness.instructions_append,
+    instructions_trustedExclusivePrefixSourceProgram arrayFound
+      exclusiveAdapted,
+    instructions_loadArrayCapacitySourceProgram arrayFound capacityFound]
+  rfl
+
+/-- A successfully adapted closed function preserves any successfully adapted
+contiguous source segment inside its installed target body.  Operation-specific
+shape theorems only need to supply the segment and its local/call indices. -/
+theorem adapted_body_contains_adaptedSegment
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetFunction : Wasm.Function}
+    {sourcePrefix sourceMiddle sourceSuffix : List Fir.Wasm.Instruction}
+    {targetMiddle : Wasm.Program}
+    (adapted : FirTalos.function sourceModule sourceFunction =
+      .ok targetFunction)
+    (shape : sourceFunction.body = sourcePrefix ++ sourceMiddle ++ sourceSuffix)
+    (middleAdapted : FirTalos.instructions sourceModule sourceFunction []
+      sourceMiddle = .ok targetMiddle) :
+    ∃ targetPrefix targetSuffix,
+      targetFunction.body = targetPrefix ++ targetMiddle ++ targetSuffix := by
+  obtain ⟨targetBody, bodyAdapted, installedBody⟩ :=
+    FirTalos.Correctness.function_preserves_body adapted
+  rw [shape] at bodyAdapted
+  simp only [List.append_assoc] at bodyAdapted
+  cases prefixAdapted :
+      FirTalos.instructions sourceModule sourceFunction [] sourcePrefix with
+  | error error =>
+      rw [FirTalos.Correctness.instructions_append, prefixAdapted] at bodyAdapted
+      contradiction
+  | ok targetPrefix =>
+      rw [FirTalos.Correctness.instructions_append, prefixAdapted,
+        FirTalos.Correctness.instructions_append, middleAdapted] at bodyAdapted
+      cases suffixAdapted :
+          FirTalos.instructions sourceModule sourceFunction [] sourceSuffix with
+      | error error =>
+          rw [suffixAdapted] at bodyAdapted
+          contradiction
+      | ok targetSuffix =>
+          rw [suffixAdapted] at bodyAdapted
+          simp only [Bind.bind, Except.bind, pure, Except.pure,
+            Except.ok.injEq] at bodyAdapted
+          subst targetBody
+          refine ⟨targetPrefix,
+            targetSuffix ++ FirTalos.functionTerminal sourceModule sourceFunction,
+            ?_⟩
+          simpa [List.append_assoc] using installedBody
 
 /-- Successful adaptation of a production-shaped trusted helper preserves the
 exact common probe and repaired exclusive arm inside the installed target
@@ -1954,34 +2176,135 @@ theorem adapted_body_contains_trustedExclusive
     instructions_exclusiveReplacementSourceProgram
       (labels := [none]) arrayFound indexFound cursorFound valueFound
       elementFound decrementFound
-  have commonAdapted := instructions_trustedExclusivePrefixSourceProgram
-    (labels := []) arrayFound exclusiveAdapted
-  obtain ⟨targetBody, bodyAdapted, installedBody⟩ :=
-    FirTalos.Correctness.function_preserves_body adapted
-  rw [shape] at bodyAdapted
-  simp only [List.append_assoc] at bodyAdapted
-  cases prefixAdapted :
-      FirTalos.instructions sourceModule sourceFunction [] sourcePrefix with
-  | error error =>
-      rw [FirTalos.Correctness.instructions_append, prefixAdapted] at bodyAdapted
-      contradiction
-  | ok targetPrefix =>
-      rw [FirTalos.Correctness.instructions_append, prefixAdapted,
-        FirTalos.Correctness.instructions_append, commonAdapted] at bodyAdapted
-      cases suffixAdapted :
-          FirTalos.instructions sourceModule sourceFunction [] sourceSuffix with
-      | error error =>
-          rw [suffixAdapted] at bodyAdapted
-          contradiction
-      | ok targetSuffix =>
-          rw [suffixAdapted] at bodyAdapted
-          simp only [Bind.bind, Except.bind, pure, Except.pure,
-            Except.ok.injEq] at bodyAdapted
-          subst targetBody
-          refine ⟨targetPrefix,
-            targetSuffix ++ FirTalos.functionTerminal sourceModule sourceFunction,
-            ?_⟩
-          simpa [List.append_assoc] using installedBody
+  apply adapted_body_contains_adaptedSegment adapted shape
+  exact instructions_trustedExclusivePrefixSourceProgram arrayFound
+    exclusiveAdapted
+
+/-- Successful adaptation also preserves the complete nonexclusive control
+boundary, including the capacity load now deferred past the refcount probe. -/
+theorem adapted_body_contains_trustedNonexclusive
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetFunction : Wasm.Function}
+    {sourcePrefix sourceSuffix : List Fir.Wasm.Instruction}
+    {array capacity index cursor value element : Lean.FVarId}
+    {arrayIndex capacityIndex indexIndex cursorIndex valueIndex elementIndex
+      decrementIndex : Nat}
+    (adapted : FirTalos.function sourceModule sourceFunction =
+      .ok targetFunction)
+    (shape : sourceFunction.body = sourcePrefix ++
+      trustedNonexclusivePrefixSourceProgram array capacity
+        (exclusiveReplacementSourceProgram array index cursor value element) ++
+      sourceSuffix)
+    (arrayFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) array =
+        some arrayIndex)
+    (capacityFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) capacity =
+        some capacityIndex)
+    (indexFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) index =
+        some indexIndex)
+    (cursorFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) cursor =
+        some cursorIndex)
+    (valueFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) value =
+        some valueIndex)
+    (elementFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) element =
+        some elementIndex)
+    (decrementFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentRelease.decrementOnceName) =
+        some decrementIndex) :
+    ∃ targetPrefix targetSuffix,
+      targetFunction.body = targetPrefix ++
+        trustedNonexclusivePrefixProgram arrayIndex capacityIndex
+          (exclusiveReplacementProgram arrayIndex indexIndex cursorIndex
+            valueIndex elementIndex decrementIndex) ++
+        targetSuffix := by
+  have exclusiveAdapted :=
+    instructions_exclusiveReplacementSourceProgram
+      (labels := [none]) arrayFound indexFound cursorFound valueFound
+      elementFound decrementFound
+  apply adapted_body_contains_adaptedSegment adapted shape
+  exact instructions_trustedNonexclusivePrefixSourceProgram arrayFound
+    capacityFound exclusiveAdapted
+
+/-- The installed trusted `uset` body contains the exact probe-then-capacity
+boundary at its production numeric indices. -/
+theorem adapted_trustedUset_body_containsNonexclusive
+    {sourceModule : Fir.Wasm.Module} {targetFunction : Wasm.Function}
+    {decrementIndex : Nat}
+    (adapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentArray.trustedUsetFunction = .ok targetFunction)
+    (decrementFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentRelease.decrementOnceName) =
+        some decrementIndex) :
+    ∃ targetPrefix targetSuffix,
+      targetFunction.body = targetPrefix ++
+        trustedNonexclusivePrefixProgram 1 8
+          (exclusiveReplacementProgram 1 11 13 3 18 decrementIndex) ++
+        targetSuffix := by
+  apply adapted_body_contains_trustedNonexclusive adapted
+    trustedUsetFunction_nonexclusiveSourceShape
+  · native_decide
+  · native_decide
+  · native_decide
+  · native_decide
+  · native_decide
+  · native_decide
+  · exact decrementFound
+
+/-- The installed trusted `set` body contains the same nonexclusive boundary
+after its Nat decoder. -/
+theorem adapted_trustedSet_body_containsNonexclusive
+    {sourceModule : Fir.Wasm.Module} {targetFunction : Wasm.Function}
+    {decrementIndex : Nat}
+    (adapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentArray.trustedSetFunction = .ok targetFunction)
+    (decrementFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentRelease.decrementOnceName) =
+        some decrementIndex) :
+    ∃ targetPrefix targetSuffix,
+      targetFunction.body = targetPrefix ++
+        trustedNonexclusivePrefixProgram 1 8
+          (exclusiveReplacementProgram 1 11 13 3 18 decrementIndex) ++
+        targetSuffix := by
+  apply adapted_body_contains_trustedNonexclusive adapted
+    trustedSetFunction_nonexclusiveSourceShape
+  · native_decide
+  · native_decide
+  · native_decide
+  · native_decide
+  · native_decide
+  · native_decide
+  · exact decrementFound
+
+/-- The installed four-parameter trusted `set!` body contains the same
+boundary at its shifted production local indices. -/
+theorem adapted_trustedSetBang_body_containsNonexclusive
+    {sourceModule : Fir.Wasm.Module} {targetFunction : Wasm.Function}
+    {decrementIndex : Nat}
+    (adapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentArray.trustedSetBangFunction = .ok targetFunction)
+    (decrementFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentRelease.decrementOnceName) =
+        some decrementIndex) :
+    ∃ targetPrefix targetSuffix,
+      targetFunction.body = targetPrefix ++
+        trustedNonexclusivePrefixProgram 1 7
+          (exclusiveReplacementProgram 1 10 12 3 17 decrementIndex) ++
+        targetSuffix := by
+  apply adapted_body_contains_trustedNonexclusive adapted
+    trustedSetBangFunction_nonexclusiveSourceShape
+  · native_decide
+  · native_decide
+  · native_decide
+  · native_decide
+  · native_decide
+  · native_decide
+  · exact decrementFound
 
 /-- The adapted production trusted `Array.uset` helper contains the one common
 exclusive proof program at the exact numeric frame indices selected by Talos. -/
@@ -2063,14 +2386,100 @@ def ReturnOnly (Q : Wasm.Assertion host) : Wasm.Assertion host
   | continuation@(.Return _ _) => Q continuation
   | _ => False
 
-/-- A related resident Array's logical size is represented exactly by its
-wasm32 header lane.  This is the common arithmetic fact needed by checked
-index dispatchers, independently of how that lane is read. -/
-theorem TrustedExclusiveAdmission.logicalSize_lt_uint32
+/-- A related trusted Array's retained physical capacity is represented
+exactly in one wasm32 header lane. -/
+theorem TrustedArrayAdmission.capacity_lt_uint32
     {state : MemoryState} {witness : RefinementWitness}
     {runtime : RuntimeState} {location : Location} {address : Word32}
     {cell : HeapCell} {elements : Array Value} {capacity : Nat}
-    (admission : TrustedExclusiveAdmission state witness runtime location
+    (admission : TrustedArrayAdmission state witness runtime location address
+      cell elements capacity) :
+    capacity < UInt32.size := by
+  obtain ⟨header, objectRelated, _refCount, _persistent, _exactWords⟩ :=
+    admission.objectAdmission
+  rw [← objectRelated.physicalCapacity]
+  exact header.aux2.toNat_lt_size
+
+/-- Transport the admitted Array's exact physical-capacity lane to Talos
+memory.  This fact is deliberately independent of branch selection. -/
+theorem TrustedArrayAdmission.residentCapacityRead
+    {host : Type} {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {elements : Array Value} {capacity : Nat}
+    {store : Wasm.Store host}
+    (admission : TrustedArrayAdmission state witness runtime location address
+      cell elements capacity)
+    (memoryRelated : ResidentMemoryRel state store.mem) :
+    ¬((UInt32.ofNat address.value).toNat +
+        (UInt32.ofNat headerAux2Offset).toNat + 4 >
+      store.mem.pages * wasmPageBytes) ∧
+    store.mem.read32
+      (UInt32.ofNat address.value + UInt32.ofNat headerAux2Offset) =
+        UInt32.ofNat capacity := by
+  obtain ⟨header, objectRelated, _refCount, _persistent, exactWords⟩ :=
+    admission.objectAdmission
+  have capacityFits := admission.capacity_lt_uint32
+  have capacityWord : header.aux2 = UInt32.ofNat capacity := by
+    apply UInt32.toNat_inj.mp
+    rw [UInt32.toNat_ofNat_of_lt' capacityFits]
+    exact objectRelated.physicalCapacity
+  have headerInBounds :
+      address.value + headerBytes ≤ state.memory.size :=
+    Nat.le_trans objectRelated.headerOwned
+      admission.heapRelated.frontier.cursorInBounds
+  have concreteRead :
+      state.memory.readUInt32 (address.value + headerAux2Offset) =
+        .ok (UInt32.ofNat capacity) := by
+    rw [← capacityWord]
+    exact exactWords.readAux2
+  exact ResidentBigNumeric.residentHeaderUInt32 memoryRelated headerInBounds
+    (by simp [headerAux2Offset, headerBytes]) concreteRead
+
+/-- The semantic nonexclusive premise transports to the exact physical
+refcount word tested by the trusted helper, and that word is not one. -/
+theorem TrustedNonexclusiveAdmission.residentRefCountRead
+    {host : Type} {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {elements : Array Value} {capacity : Nat}
+    {store : Wasm.Store host}
+    (admission : TrustedNonexclusiveAdmission state witness runtime location
+      address cell elements capacity)
+    (memoryRelated : ResidentMemoryRel state store.mem) :
+    ∃ count : UInt32,
+      ¬((UInt32.ofNat address.value).toNat +
+          (UInt32.ofNat headerRefCountOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes) ∧
+      store.mem.read32
+          (UInt32.ofNat address.value + UInt32.ofNat headerRefCountOffset) =
+        count ∧
+      count ≠ 1 := by
+  obtain ⟨header, objectRelated, refCount, _persistent, exactWords⟩ :=
+    admission.toTrustedArrayAdmission.objectAdmission
+  have countNe : header.refCount ≠ 1 := by
+    intro countOne
+    apply admission.nonexclusive
+    rw [← refCount, countOne]
+    rfl
+  have headerInBounds :
+      address.value + headerBytes ≤ state.memory.size :=
+    Nat.le_trans objectRelated.headerOwned
+      admission.heapRelated.frontier.cursorInBounds
+  have concreteRead :
+      state.memory.readUInt32 (address.value + headerRefCountOffset) =
+        .ok header.refCount := exactWords.readRefCount
+  obtain ⟨inBounds, read⟩ :=
+    ResidentBigNumeric.residentHeaderUInt32 memoryRelated headerInBounds
+      (by simp [headerRefCountOffset, headerBytes]) concreteRead
+  exact ⟨header.refCount, inBounds, read, countNe⟩
+
+/-- A related resident Array's logical size is represented exactly by its
+wasm32 header lane.  This is the common arithmetic fact needed by checked
+index dispatchers, independently of how that lane is read. -/
+theorem TrustedArrayAdmission.logicalSize_lt_uint32
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {elements : Array Value} {capacity : Nat}
+    (admission : TrustedArrayAdmission state witness runtime location
       address cell elements capacity) :
     elements.size < UInt32.size := by
   obtain ⟨header, objectRelated, _refCount, _persistent, _exactWords⟩ :=
@@ -2080,12 +2489,12 @@ theorem TrustedExclusiveAdmission.logicalSize_lt_uint32
 
 /-- Transport the admitted Array's exact logical-size lane to Talos memory.
 This is the common header fact used by both trusted index decoders. -/
-theorem TrustedExclusiveAdmission.residentSizeRead
+theorem TrustedArrayAdmission.residentSizeRead
     {host : Type} {state : MemoryState} {witness : RefinementWitness}
     {runtime : RuntimeState} {location : Location} {address : Word32}
     {cell : HeapCell} {elements : Array Value} {capacity : Nat}
     {store : Wasm.Store host}
-    (admission : TrustedExclusiveAdmission state witness runtime location
+    (admission : TrustedArrayAdmission state witness runtime location
       address cell elements capacity)
     (memoryRelated : ResidentMemoryRel state store.mem) :
     ¬((UInt32.ofNat address.value).toNat +
@@ -2116,7 +2525,7 @@ theorem TrustedExclusiveAdmission.residentSizeRead
 /-- Whole-relation entry theorem for trusted `Array.uset`.  The erased USize
 bound both admits the unchecked helper and proves that wasm32 narrowing is
 the exact semantic index, not merely modular truncation. -/
-theorem TrustedExclusiveAdmission.wp_usetEntry
+theorem TrustedArrayAdmission.wp_usetEntry
     {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
     {Q : Wasm.Assertion host} {store : Wasm.Store host}
     {state : MemoryState} {witness : RefinementWitness}
@@ -2124,7 +2533,7 @@ theorem TrustedExclusiveAdmission.wp_usetEntry
     {cell : HeapCell} {elements : Array Value} {capacity : Nat}
     {index : UInt64} {value : UInt32}
     {tail : List Wasm.Value} {rest : Wasm.Program}
-    (admission : TrustedExclusiveAdmission state witness runtime location
+    (admission : TrustedArrayAdmission state witness runtime location
       address cell elements capacity)
     (memoryRelated : ResidentMemoryRel state store.mem)
     (indexAdmission :
@@ -2146,7 +2555,7 @@ theorem TrustedExclusiveAdmission.wp_usetEntry
 /-- Whole-relation entry theorem for trusted `Array.set`.  Compiler admission
 excludes promoted Nat objects at this proof-indexed ABI and identifies the
 exact immediate payload decoded by the installed helper. -/
-theorem TrustedExclusiveAdmission.wp_setEntry
+theorem TrustedArrayAdmission.wp_setEntry
     {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
     {Q : Wasm.Assertion host} {store : Wasm.Store host}
     {state : MemoryState} {witness : RefinementWitness}
@@ -2154,7 +2563,7 @@ theorem TrustedExclusiveAdmission.wp_setEntry
     {cell : HeapCell} {elements : Array Value} {capacity : Nat}
     {indexWord : Word32} {payload : UInt64} {value : UInt32}
     {tail : List Wasm.Value} {rest : Wasm.Program}
-    (admission : TrustedExclusiveAdmission state witness runtime location
+    (admission : TrustedArrayAdmission state witness runtime location
       address cell elements capacity)
     (memoryRelated : ResidentMemoryRel state store.mem)
     (indexAdmission : ProofIndexedResidentArrayNatAdmission indexWord payload
@@ -2174,7 +2583,7 @@ theorem TrustedExclusiveAdmission.wp_setEntry
 /-- Whole-relation entry theorem for trusted `Array.set!`.  The related Array
 header supplies the exact wasm32 logical size, while compiler admission proves
 that the checked tag and bounds dispatcher reaches the mutation arm. -/
-theorem TrustedExclusiveAdmission.wp_setBangEntry
+theorem TrustedArrayAdmission.wp_setBangEntry
     {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
     {Q : Wasm.Assertion host} {store : Wasm.Store host}
     {state : MemoryState} {witness : RefinementWitness}
@@ -2182,7 +2591,7 @@ theorem TrustedExclusiveAdmission.wp_setBangEntry
     {cell : HeapCell} {elements : Array Value} {capacity : Nat}
     {indexWord : Word32} {payload : UInt64} {value : UInt32}
     {decrementIndex : Nat} {tail : List Wasm.Value} {rest : Wasm.Program}
-    (admission : TrustedExclusiveAdmission state witness runtime location
+    (admission : TrustedArrayAdmission state witness runtime location
       address cell elements capacity)
     (memoryRelated : ResidentMemoryRel state store.mem)
     (indexAdmission : ProofIndexedResidentArrayNatAdmission indexWord payload
@@ -2276,6 +2685,71 @@ theorem wp_trustedExclusivePrefixProgram
   intro continuation completed
   cases continuation <;> simp_all [ReturnOnly]
 
+/-- A nonexclusive trusted Array skips the returning exclusive arm and then
+performs the deferred capacity load.  The continuation starts in exactly the
+same store, operand tail, and capacity-populated frame as the unchanged
+shared/persistent copy suffix expected before the optimization. -/
+theorem wp_trustedNonexclusivePrefixProgram
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {initial afterCapacity : Wasm.Locals}
+    {arrayIndex capacityIndex : Nat} {address : Word32} {capacity : Nat}
+    {refCount : UInt32} {tail : List Wasm.Value}
+    {exclusive rest : Wasm.Program}
+    (arrayFound : initial.get arrayIndex =
+      some (.i32 (UInt32.ofNat address.value)))
+    (refCountInBounds :
+      ¬((UInt32.ofNat address.value).toNat +
+          (UInt32.ofNat headerRefCountOffset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (refCountRead : store.mem.read32
+      (UInt32.ofNat address.value + UInt32.ofNat headerRefCountOffset) =
+        refCount)
+    (refCountNe : refCount ≠ 1)
+    (capacityInBounds :
+      ¬((UInt32.ofNat address.value).toNat +
+          (UInt32.ofNat headerAux2Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (capacityRead : store.mem.read32
+      (UInt32.ofNat address.value + UInt32.ofNat headerAux2Offset) =
+        UInt32.ofNat capacity)
+    (capacitySet :
+      ({ initial with values := .i32 (UInt32.ofNat capacity) :: tail }).set?
+          capacityIndex (.i32 (UInt32.ofNat capacity)) = some afterCapacity)
+    (continued : Wasm.wp module rest Q store
+      { afterCapacity with values := tail } env) :
+    Wasm.wp module
+      (trustedNonexclusivePrefixProgram arrayIndex capacityIndex exclusive ++
+        rest)
+      Q store { initial with values := tail } env := by
+  have arrayAt (values : List Wasm.Value) :
+      ({ initial with values } : Wasm.Locals).get arrayIndex =
+        some (.i32 (UInt32.ofNat address.value)) := by
+    simpa using arrayFound
+  unfold trustedNonexclusivePrefixProgram trustedExclusivePrefixProgram
+    loadArrayCapacityProgram
+  simp only [List.cons_append, List.nil_append,
+    Wasm.wp_localGet_cons, arrayAt, Wasm.wp_load32_cons]
+  have refCountInBounds' :
+      ¬((UInt32.ofNat address.value).toNat +
+          (UInt32.ofNat headerRefCountOffset).toNat + 4 >
+        store.mem.pages * 65536) := by
+    simpa [wasmPageBytes] using refCountInBounds
+  rw [if_neg refCountInBounds', refCountRead]
+  simp only [Wasm.wp_const_cons, Wasm.wp_eq_cons, if_neg refCountNe]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by simp : ¬((0 : UInt32) ≠ 0))]
+  simp only [Wasm.wp_nil, List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_localGet_cons, arrayAt, Wasm.wp_load32_cons]
+  have capacityInBounds' :
+      ¬((UInt32.ofNat address.value).toNat +
+          (UInt32.ofNat headerAux2Offset).toNat + 4 >
+        store.mem.pages * 65536) := by
+    simpa [wasmPageBytes] using capacityInBounds
+  rw [if_neg capacityInBounds', capacityRead]
+  simp only [Wasm.wp_localSet_cons, capacitySet]
+  exact continued
+
 /-- Whole-relation specialization of the trusted early-branch theorem. -/
 theorem TrustedExclusiveAdmission.wp_prefix
     {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
@@ -2300,6 +2774,124 @@ theorem TrustedExclusiveAdmission.wp_prefix
   obtain ⟨inBounds, read⟩ := admission.residentRefCountRead memoryRelated
   exact wp_trustedExclusivePrefixProgram arrayFound inBounds read
     noFallthrough exclusiveWP
+
+/-- Whole-relation specialization of the nonexclusive control bridge.  Any
+proof of the unchanged copy suffix can be supplied as `continued`; the moved
+capacity load reconstructs exactly its former entry frame. -/
+theorem TrustedNonexclusiveAdmission.wp_prefix
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {elements : Array Value} {capacity : Nat}
+    {initial afterCapacity : Wasm.Locals}
+    {arrayIndex capacityIndex : Nat} {tail : List Wasm.Value}
+    {exclusive rest : Wasm.Program}
+    (admission : TrustedNonexclusiveAdmission state witness runtime location
+      address cell elements capacity)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (arrayFound : initial.get arrayIndex =
+      some (.i32 (UInt32.ofNat address.value)))
+    (capacitySet :
+      ({ initial with values := .i32 (UInt32.ofNat capacity) :: tail }).set?
+          capacityIndex (.i32 (UInt32.ofNat capacity)) = some afterCapacity)
+    (continued : Wasm.wp module rest Q store
+      { afterCapacity with values := tail } env) :
+    Wasm.wp module
+      (trustedNonexclusivePrefixProgram arrayIndex capacityIndex exclusive ++
+        rest)
+      Q store { initial with values := tail } env := by
+  obtain ⟨refCount, refInBounds, refRead, refNe⟩ :=
+    admission.residentRefCountRead memoryRelated
+  obtain ⟨capacityInBounds, capacityRead⟩ :=
+    admission.toTrustedArrayAdmission.residentCapacityRead memoryRelated
+  exact wp_trustedNonexclusivePrefixProgram arrayFound refInBounds refRead
+    refNe capacityInBounds capacityRead capacitySet continued
+
+/-- Canonical five-parameter decoded frame for the unchanged `uset`/`set`
+shared-copy suffix.  The optimized prefix reconstructs the former
+capacity-populated entry exactly. -/
+theorem TrustedNonexclusiveAdmission.wp_decodedNonexclusive
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {elements : Array Value} {capacity : Nat}
+    {size index : UInt32} {indexParam : Wasm.Value} {newWord : Word32}
+    {decrementIndex : Nat} {rest : Wasm.Program}
+    (admission : TrustedNonexclusiveAdmission state witness runtime location
+      address cell elements capacity)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (continued : Wasm.wp module rest Q store
+      (trustedCopyEntry
+        [.i32 0, .i32 (UInt32.ofNat address.value), indexParam,
+          .i32 (UInt32.ofNat newWord.value), .i32 0]
+        (UInt32.ofNat address.value) size (UInt32.ofNat capacity) index) env) :
+    Wasm.wp module
+      (trustedNonexclusivePrefixProgram 1 8
+          (exclusiveReplacementProgram 1 11 13 3 18 decrementIndex) ++ rest)
+      Q store
+      (trustedDecodedEntry
+        [.i32 0, .i32 (UInt32.ofNat address.value), indexParam,
+          .i32 (UInt32.ofNat newWord.value), .i32 0]
+        (UInt32.ofNat address.value) size index) env := by
+  apply admission.wp_prefix memoryRelated (arrayIndex := 1)
+    (capacityIndex := 8) (tail := [])
+    (initial := trustedDecodedEntry
+      [.i32 0, .i32 (UInt32.ofNat address.value), indexParam,
+        .i32 (UInt32.ofNat newWord.value), .i32 0]
+      (UInt32.ofNat address.value) size index)
+    (afterCapacity :=
+      { trustedCopyEntry
+          [.i32 0, .i32 (UInt32.ofNat address.value), indexParam,
+            .i32 (UInt32.ofNat newWord.value), .i32 0]
+          (UInt32.ofNat address.value) size (UInt32.ofNat capacity) index with
+        values := [.i32 (UInt32.ofNat capacity)] })
+  · rfl
+  · simp [trustedDecodedEntry, trustedCopyEntry]
+  · exact continued
+
+/-- Canonical four-parameter decoded frame for the unchanged `set!`
+shared-copy suffix. -/
+theorem TrustedNonexclusiveAdmission.wp_setBangDecodedNonexclusive
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {elements : Array Value} {capacity : Nat}
+    {size index : UInt32} {indexParam : Wasm.Value} {newWord : Word32}
+    {decrementIndex : Nat} {rest : Wasm.Program}
+    (admission : TrustedNonexclusiveAdmission state witness runtime location
+      address cell elements capacity)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (continued : Wasm.wp module rest Q store
+      (trustedSetBangCopyEntry
+        [.i32 0, .i32 (UInt32.ofNat address.value), indexParam,
+          .i32 (UInt32.ofNat newWord.value)]
+        (UInt32.ofNat address.value) size (UInt32.ofNat capacity) index) env) :
+    Wasm.wp module
+      (trustedNonexclusivePrefixProgram 1 7
+          (exclusiveReplacementProgram 1 10 12 3 17 decrementIndex) ++ rest)
+      Q store
+      (trustedSetBangDecodedEntry
+        [.i32 0, .i32 (UInt32.ofNat address.value), indexParam,
+          .i32 (UInt32.ofNat newWord.value)]
+        (UInt32.ofNat address.value) size index) env := by
+  apply admission.wp_prefix memoryRelated (arrayIndex := 1)
+    (capacityIndex := 7) (tail := [])
+    (initial := trustedSetBangDecodedEntry
+      [.i32 0, .i32 (UInt32.ofNat address.value), indexParam,
+        .i32 (UInt32.ofNat newWord.value)]
+      (UInt32.ofNat address.value) size index)
+    (afterCapacity :=
+      { trustedSetBangCopyEntry
+          [.i32 0, .i32 (UInt32.ofNat address.value), indexParam,
+            .i32 (UInt32.ofNat newWord.value)]
+          (UInt32.ofNat address.value) size (UInt32.ofNat capacity) index with
+        values := [.i32 (UInt32.ofNat capacity)] })
+  · rfl
+  · simp [trustedSetBangDecodedEntry, trustedSetBangCopyEntry]
+  · exact continued
 
 /-- From the common decoded trusted frame, the physical reference-count probe
 selects the exclusive arm, performs exactly one semantic replacement, and
@@ -2473,7 +3065,8 @@ theorem TrustedExclusiveAdmission.wp_usetExclusive
       Q store
       (trustedUsetEntry (UInt32.ofNat address.value) index
         (UInt32.ofNat newWord.value)) env := by
-  apply admission.wp_usetEntry memoryRelated indexAdmission
+  apply admission.toTrustedArrayAdmission.wp_usetEntry memoryRelated
+    indexAdmission
   intro _narrowed
   apply admission.wp_decodedExclusive memoryRelated oldAt oldRead oldRelated
     newRelated oldHeap semanticRelease parentPreserved semanticSet step
@@ -2531,7 +3124,8 @@ theorem TrustedExclusiveAdmission.wp_setExclusive
       Q store
       (trustedSetEntry (UInt32.ofNat address.value)
         (UInt32.ofNat indexWord.value) (UInt32.ofNat newWord.value)) env := by
-  apply admission.wp_setEntry memoryRelated indexAdmission
+  apply admission.toTrustedArrayAdmission.wp_setEntry memoryRelated
+    indexAdmission
   apply admission.wp_decodedExclusive memoryRelated oldAt oldRead oldRelated
     newRelated oldHeap semanticRelease parentPreserved semanticSet step
     noFallthrough returned
@@ -2589,10 +3183,111 @@ theorem TrustedExclusiveAdmission.wp_setBangExclusive
       Q store
       (trustedSetBangEntry (UInt32.ofNat address.value)
         (UInt32.ofNat indexWord.value) (UInt32.ofNat newWord.value)) env := by
-  apply admission.wp_setBangEntry memoryRelated indexAdmission
+  apply admission.toTrustedArrayAdmission.wp_setBangEntry memoryRelated
+    indexAdmission
   apply admission.wp_setBangDecodedExclusive memoryRelated oldAt oldRead
     oldRelated newRelated oldHeap semanticRelease parentPreserved semanticSet
     step noFallthrough returned
+
+/-- Complete trusted `Array.uset` nonexclusive control path.  It preserves the
+unchanged shared/persistent copy proof as a continuation at its original
+capacity-populated frame. -/
+theorem TrustedNonexclusiveAdmission.wp_usetNonexclusive
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {elements : Array Value} {capacity : Nat}
+    {index : UInt64} {newWord : Word32} {decrementIndex : Nat}
+    {rest : Wasm.Program}
+    (admission : TrustedNonexclusiveAdmission state witness runtime location
+      address cell elements capacity)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (indexAdmission :
+      ProofIndexedResidentArrayUSizeAdmission index elements.size)
+    (continued : Wasm.wp module rest Q store
+      (trustedCopyEntry
+        (trustedUsetEntry (UInt32.ofNat address.value) index
+          (UInt32.ofNat newWord.value)).params
+        (UInt32.ofNat address.value) (UInt32.ofNat elements.size)
+        (UInt32.ofNat capacity) (UInt32.ofNat index.toNat)) env) :
+    Wasm.wp module
+      (trustedUsetEntryProgram ++
+        trustedNonexclusivePrefixProgram 1 8
+          (exclusiveReplacementProgram 1 11 13 3 18 decrementIndex) ++ rest)
+      Q store
+      (trustedUsetEntry (UInt32.ofNat address.value) index
+        (UInt32.ofNat newWord.value)) env := by
+  apply admission.toTrustedArrayAdmission.wp_usetEntry memoryRelated
+    indexAdmission
+  intro _narrowed
+  apply admission.wp_decodedNonexclusive memoryRelated
+  exact continued
+
+/-- Complete trusted `Array.set` nonexclusive control path. -/
+theorem TrustedNonexclusiveAdmission.wp_setNonexclusive
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {elements : Array Value} {capacity : Nat}
+    {indexWord : Word32} {payload : UInt64} {newWord : Word32}
+    {decrementIndex : Nat} {rest : Wasm.Program}
+    (admission : TrustedNonexclusiveAdmission state witness runtime location
+      address cell elements capacity)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (indexAdmission : ProofIndexedResidentArrayNatAdmission indexWord payload
+      elements.size)
+    (continued : Wasm.wp module rest Q store
+      (trustedCopyEntry
+        (trustedSetEntry (UInt32.ofNat address.value)
+          (UInt32.ofNat indexWord.value) (UInt32.ofNat newWord.value)).params
+        (UInt32.ofNat address.value) (UInt32.ofNat elements.size)
+        (UInt32.ofNat capacity) (UInt32.ofNat payload.toNat)) env) :
+    Wasm.wp module
+      (trustedSetEntryProgram ++
+        trustedNonexclusivePrefixProgram 1 8
+          (exclusiveReplacementProgram 1 11 13 3 18 decrementIndex) ++ rest)
+      Q store
+      (trustedSetEntry (UInt32.ofNat address.value)
+        (UInt32.ofNat indexWord.value) (UInt32.ofNat newWord.value)) env := by
+  apply admission.toTrustedArrayAdmission.wp_setEntry memoryRelated
+    indexAdmission
+  apply admission.wp_decodedNonexclusive memoryRelated
+  exact continued
+
+/-- Complete trusted `Array.set!` nonexclusive control path, including its
+checked tag/bounds dispatcher and shifted four-parameter frame. -/
+theorem TrustedNonexclusiveAdmission.wp_setBangNonexclusive
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {elements : Array Value} {capacity : Nat}
+    {indexWord : Word32} {payload : UInt64} {newWord : Word32}
+    {decrementIndex : Nat} {rest : Wasm.Program}
+    (admission : TrustedNonexclusiveAdmission state witness runtime location
+      address cell elements capacity)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (indexAdmission : ProofIndexedResidentArrayNatAdmission indexWord payload
+      elements.size)
+    (continued : Wasm.wp module rest Q store
+      (trustedSetBangCopyEntry
+        (trustedSetBangEntry (UInt32.ofNat address.value)
+          (UInt32.ofNat indexWord.value) (UInt32.ofNat newWord.value)).params
+        (UInt32.ofNat address.value) (UInt32.ofNat elements.size)
+        (UInt32.ofNat capacity) (UInt32.ofNat payload.toNat)) env) :
+    Wasm.wp module
+      (trustedSetBangEntryProgram decrementIndex ++
+        trustedNonexclusivePrefixProgram 1 7
+          (exclusiveReplacementProgram 1 10 12 3 17 decrementIndex) ++ rest)
+      Q store
+      (trustedSetBangEntry (UInt32.ofNat address.value)
+        (UInt32.ofNat indexWord.value) (UInt32.ofNat newWord.value)) env := by
+  apply admission.toTrustedArrayAdmission.wp_setBangEntry memoryRelated
+    indexAdmission
+  apply admission.wp_setBangDecodedNonexclusive memoryRelated
+  exact continued
 
 end ResidentArray
 
