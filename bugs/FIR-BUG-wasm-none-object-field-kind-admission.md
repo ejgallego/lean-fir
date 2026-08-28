@@ -95,6 +95,14 @@ Both local closed-successor proofs now consume the replacement boundary:
 witness and reuse a common mutation transport. The remaining gap is global
 state threading and dispatcher selection, not the concrete field writer.
 
+The validated ordinary-code dispatcher now also consumes this boundary.
+`ConcreteStructuredSchemaCodeStepAdmission` separates established admission
+from the two source-schema field cases, and
+`advance_of_schemaSourceReady` sends those cases to the active-witness
+successors without the universal premise. The bug remains open because the
+module-global validated relation does not yet retain and preserve the evolving
+schema/agreement pair across its administrative and allocation transitions.
+
 ## Semantic impact
 
 The mismatch is ownership-relevant. If a descriptor classifies a slot erased

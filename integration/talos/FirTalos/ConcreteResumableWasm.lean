@@ -143,6 +143,52 @@ structure ConcreteStructuredSourceReadyAt
         ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
           functionResult facts sourceRuntime sourceEnv source sourceCode
 
+/-- Source/phase readiness with explicit constructor-schema provenance.
+
+The shape is intentionally parallel to `ConcreteStructuredSourceReadyAt` so
+final-LCNF type safety can migrate one current-node case at a time. Its field
+result is the schema admission boundary: all established cases may use the
+legacy alternative, while FVar and erased object-field writes use source
+schema typing and never quantify over unrelated refinement witnesses. -/
+structure ConcreteStructuredSchemaSourceReadyAt
+    (schema : ConstructorSchema)
+    (program : Fir.LeanIR.ImpureProgram)
+    (sourceModule : Fir.Wasm.Module)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (externals : Fir.LeanIR.Impure.ExternalImpl)
+    (source : Fir.LeanIR.Impure.MachineState) : Prop where
+  code :
+    ∀ {context : Fir.Wasm.Context}
+      {functionCode : Lean.Compiler.LCNF.Code .impure}
+      {sourceFunction : Fir.Wasm.Function}
+      (spec : ConcreteSupportedFunction program context functionCode
+        sourceModule sourceFunction targetModule hosts)
+      {labels : LabelContext}
+      {entryRuntime sourceRuntime : Fir.LeanIR.Impure.RuntimeState}
+      {entryStore targetStore : Wasm.Store Host}
+      {entryWitness witness : Fir.Wasm.Concrete.RefinementWitness}
+      {functionResult : Fir.Wasm.AbiKind}
+      {callerExpectedResult : Option Fir.Wasm.AbiKind}
+      {facts : Fir.Wasm.ReuseCapacityFacts}
+      {remainingBytes : Nat}
+      {sourceEnv : Fir.LeanIR.Impure.Env}
+      {sourceCode : Lean.Compiler.LCNF.Code .impure}
+      {targetLocals : Wasm.Locals}
+      {targetCode : Wasm.Program}
+      {sourceAfter : Fir.LeanIR.Impure.MachineState}
+      {target : StructuredWasmState Host},
+      (activeResult : spec.sourceResultKind = functionResult) →
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+          sourceCode targetStore targetLocals targetCode witness source target →
+        Fir.LeanIR.Impure.executeStep externals source = .next sourceAfter →
+        ConcreteStructuredSchemaSourceAdmissionSafeAt schema context
+          sourceModule externals functionResult facts sourceRuntime sourceEnv
+          source sourceCode
+
 /-- A preserved source semantic invariant supplies current-state readiness.
 
 This is the same ready/preserved interface used by FIR's pass simulations.
@@ -305,6 +351,79 @@ structure ConcreteStructuredCurrentStepAddressSpaceSafety
         ConcreteStructuredCodeStepAdmission context sourceModule externals
             functionResult facts sourceRuntime sourceEnv requiredBytes sourceCode →
         requiredBytes ≤ remainingBytes
+
+/-- The active ordinary-code branch advances from schema-aware source
+readiness and agreement with its one concrete refinement witness.
+
+Legacy admission keeps the independent address-space premise. The two
+schema-typed field mutations have exact cost zero, so they bypass the old
+universally witness-quantified admission constructors and dispatch directly to
+the active-witness successors. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_of_schemaSourceReady
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : Fir.LeanIR.Impure.ExternalImpl}
+    {schema : ConstructorSchema}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : Fir.LeanIR.Impure.RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : Fir.Wasm.Concrete.RefinementWitness}
+    {functionResult : Fir.Wasm.AbiKind}
+    {callerExpectedResult : Option Fir.Wasm.AbiKind}
+    {facts : Fir.Wasm.ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Fir.LeanIR.Impure.Env}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : Fir.LeanIR.Impure.MachineState}
+    {target : StructuredWasmState Host}
+    (sourceReady : ConcreteStructuredSchemaSourceReadyAt schema program
+      sourceModule targetModule hosts externals source)
+    (finiteRuntimeSafety : ConcreteStructuredCurrentStepFiniteRuntimeSafety
+      program sourceModule targetModule hosts externals)
+    (addressSpaceSafety : ConcreteStructuredCurrentStepAddressSpaceSafety
+      program sourceModule targetModule hosts externals)
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      sourceCode targetStore targetLocals targetCode witness source target)
+    (schemaAgrees : schema.WitnessAgrees witness)
+    (sourceStep : Fir.LeanIR.Impure.executeStep externals source =
+      .next sourceAfter) :
+    ∃ targetCount targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetCount target targetAfter ∧
+        ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
+          targetModule hosts externals sourceAfter targetAfter ∧
+        (targetCount = 0 →
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source) := by
+  have sourceSafe := sourceReady.code spec activeResult related sourceStep
+  have finiteSafe := finiteRuntimeSafety.code spec activeResult related sourceStep
+  obtain ⟨requiredBytes, admitted⟩ :=
+    related.core.admitSchema_of_source_safe_step sourceSafe finiteSafe sourceStep
+  cases admitted with
+  | legacy legacyAdmission eligible =>
+      have budget := addressSpaceSafety.code related.core.core sourceStep
+        legacyAdmission
+      exact related.advance_of_schema_admission activeResult schemaAgrees
+        (.legacy legacyAdmission eligible) budget sourceStep
+  | objectFieldFVar fieldTyped =>
+      exact related.advance_of_schema_admission activeResult schemaAgrees
+        (.objectFieldFVar fieldTyped) (Nat.zero_le _) sourceStep
+  | objectFieldErased fieldTyped =>
+      exact related.advance_of_schema_admission activeResult schemaAgrees
+        (.objectFieldErased fieldTyped) (Nat.zero_le _) sourceStep
 
 /-- Current source readiness and finite runtime safety preserve the recursively
 validated global relation for one source step.

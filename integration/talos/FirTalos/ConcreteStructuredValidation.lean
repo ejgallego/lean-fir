@@ -10039,6 +10039,105 @@ inductive ConcreteStructuredSourceAdmissionSafeAt
         expectedResult facts sourceRuntime sourceEnv source
         (.sset objectId slotIndex byteOffset fieldId type continuation)
 
+/-- The compatibility arm of schema admission excludes exactly the two object
+field shapes whose legacy proofs quantify over arbitrary witnesses. -/
+def ConcreteStructuredSchemaLegacyCode :
+    Lean.Compiler.LCNF.Code .impure → Prop
+  | .oset _ _ (.fvar _) _ => False
+  | .oset _ _ .erased _ => False
+  | _ => True
+
+/-- Source-admission boundary used while constructor-schema provenance is
+threaded into the global simulation.
+
+All already-proved non-field source facts pass through `legacy`. The two
+object-field cases instead retain final-LCNF schema typing and make no claim
+about an arbitrary refinement witness. Keeping this as a thin migration layer
+lets the global relation change independently of the concrete writer and the
+other current-node admission proofs. -/
+inductive ConcreteStructuredSchemaSourceAdmissionSafeAt
+    (schema : ConstructorSchema)
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (externals : ExternalImpl)
+    (expectedResult : AbiKind)
+    (facts : ReuseCapacityFacts)
+    (sourceRuntime : RuntimeState)
+    (sourceEnv : Env)
+    (source : MachineState) :
+    Lean.Compiler.LCNF.Code .impure → Prop where
+  | legacy
+      {code : Lean.Compiler.LCNF.Code .impure}
+      (safe : ConcreteStructuredSourceAdmissionSafeAt context sourceModule
+        externals expectedResult facts sourceRuntime sourceEnv source code)
+      (eligible : ConcreteStructuredSchemaLegacyCode code) :
+      ConcreteStructuredSchemaSourceAdmissionSafeAt schema context sourceModule
+        externals expectedResult facts sourceRuntime sourceEnv source code
+  | objectFieldFVar
+      {objectId fieldId : Lean.FVarId} {index : Nat}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      (fieldTyped : schema.ObjectFieldFVarTyped context sourceEnv objectId
+        fieldId index) :
+      ConcreteStructuredSchemaSourceAdmissionSafeAt schema context sourceModule
+        externals expectedResult facts sourceRuntime sourceEnv source
+        (.oset objectId index (.fvar fieldId) continuation)
+  | objectFieldErased
+      {objectId : Lean.FVarId} {index : Nat}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      (fieldTyped : schema.ObjectFieldKindAt sourceEnv objectId index .erased) :
+      ConcreteStructuredSchemaSourceAdmissionSafeAt schema context sourceModule
+        externals expectedResult facts sourceRuntime sourceEnv source
+        (.oset objectId index .erased continuation)
+
+/-- Current-node admission after source schema typing has been combined with
+residual compiler validation.
+
+`legacy` preserves every existing operation proof. The two schema cases have
+zero allocation cost and postpone descriptor alignment until the active
+simulation witness is available to the dispatcher. -/
+inductive ConcreteStructuredSchemaCodeStepAdmission
+    (schema : ConstructorSchema)
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (externals : ExternalImpl)
+    (expectedResult : AbiKind) :
+    ReuseCapacityFacts → RuntimeState → Env → Nat →
+      Lean.Compiler.LCNF.Code .impure → Prop where
+  | legacy
+      {facts : ReuseCapacityFacts}
+      {sourceRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {requiredBytes : Nat}
+      {code : Lean.Compiler.LCNF.Code .impure}
+      (admitted : ConcreteStructuredCodeStepAdmission context sourceModule
+        externals expectedResult facts sourceRuntime sourceEnv requiredBytes
+        code)
+      (eligible : ConcreteStructuredSchemaLegacyCode code) :
+      ConcreteStructuredSchemaCodeStepAdmission schema context sourceModule
+        externals expectedResult facts sourceRuntime sourceEnv requiredBytes
+        code
+  | objectFieldFVar
+      {facts : ReuseCapacityFacts}
+      {sourceRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {objectId fieldId : Lean.FVarId} {index : Nat}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      (fieldTyped : schema.ObjectFieldFVarTyped context sourceEnv objectId
+        fieldId index) :
+      ConcreteStructuredSchemaCodeStepAdmission schema context sourceModule
+        externals expectedResult facts sourceRuntime sourceEnv 0
+        (.oset objectId index (.fvar fieldId) continuation)
+  | objectFieldErased
+      {facts : ReuseCapacityFacts}
+      {sourceRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {objectId : Lean.FVarId} {index : Nat}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      (fieldTyped : schema.ObjectFieldKindAt sourceEnv objectId index .erased) :
+      ConcreteStructuredSchemaCodeStepAdmission schema context sourceModule
+        externals expectedResult facts sourceRuntime sourceEnv 0
+        (.oset objectId index .erased continuation)
+
 /-- Precise use-site typing of a current return binding directly supplies its
 source-admission constructor. -/
 theorem ConcreteStructuredSourceAdmissionSafeAt.ret_of_semanticBinding
@@ -10283,6 +10382,59 @@ theorem ConcreteStructuredValidatedCodeCoreRel.admit_of_source_safe_step
       exact ⟨0, related.validation.admit_sset_of_step related.core.focus
         sourceStep fieldTyped⟩
 
+/-- Schema-aware source safety constructs the migration admission without
+reintroducing arbitrary-witness descriptor premises.
+
+Existing operation cases reuse `admit_of_source_safe_step`. FVar and erased
+object-field writes carry only source schema typing; their successful semantic
+effect and active descriptor alignment are reconstructed by the schema
+dispatcher below. -/
+theorem ConcreteStructuredValidatedCodeCoreRel.admitSchema_of_source_safe_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    {schema : ConstructorSchema}
+    (related : ConcreteStructuredValidatedCodeCoreRel program context
+      sourceModule sourceFunction externals labels entryRuntime entryStore
+      entryWitness functionResult callerExpectedResult facts remainingBytes
+      sourceRuntime sourceEnv sourceCode targetStore targetLocals targetCode
+      witness source target)
+    (sourceSafe : ConcreteStructuredSchemaSourceAdmissionSafeAt schema context
+      sourceModule externals functionResult facts sourceRuntime sourceEnv source
+      sourceCode)
+    (finiteRuntimeSafe : ConcreteStructuredFiniteRuntimeSafeAt context
+      sourceRuntime sourceEnv sourceCode)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ requiredBytes,
+      ConcreteStructuredSchemaCodeStepAdmission schema context sourceModule
+        externals functionResult facts sourceRuntime sourceEnv requiredBytes
+        sourceCode := by
+  cases sourceSafe with
+  | legacy safe eligible =>
+      obtain ⟨requiredBytes, admitted⟩ :=
+        related.admit_of_source_safe_step safe finiteRuntimeSafe sourceStep
+      exact ⟨requiredBytes, .legacy admitted eligible⟩
+  | objectFieldFVar fieldTyped =>
+      exact ⟨0, .objectFieldFVar fieldTyped⟩
+  | objectFieldErased fieldTyped =>
+      exact ⟨0, .objectFieldErased fieldTyped⟩
+
 /-- Constructor-complete successor theorem for the validated ordinary-code
 relation.
 
@@ -10495,6 +10647,75 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_of_admission
       obtain ⟨objectId, fieldId, slotIndex, byteOffset, type, rfl⟩ := shape
       obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, next⟩ :=
         related.advance_scalarField_of_step supported sourceStep
+      exact ⟨3, targetAfter, targetPath, .code activeResult next, by omega⟩
+
+/-- Constructor-complete ordinary-code dispatcher at the schema boundary.
+
+All established admissions delegate to the existing dispatcher. The two
+object-field alternatives instead combine source constructor typing with
+agreement for the one active witness and invoke the schema-derived closed
+successors. This theorem is the interface the evolving global relation will
+use; it contains no universal-witness field premise. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_of_schema_admission
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {requiredBytes remainingBytes : Nat}
+    {sourceEnv : Env}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    {schema : ConstructorSchema}
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      sourceCode targetStore targetLocals targetCode witness source target)
+    (schemaAgrees : schema.WitnessAgrees witness)
+    (admitted : ConcreteStructuredSchemaCodeStepAdmission schema context
+      sourceModule externals functionResult facts sourceRuntime sourceEnv
+      requiredBytes sourceCode)
+    (budget : requiredBytes ≤ remainingBytes)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetCount targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetCount target targetAfter ∧
+        ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
+          targetModule hosts externals sourceAfter targetAfter ∧
+        (targetCount = 0 →
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source) := by
+  cases admitted with
+  | legacy admitted eligible =>
+      exact related.advance_of_admission activeResult admitted budget sourceStep
+  | objectFieldFVar fieldTyped =>
+      obtain ⟨resultRuntime, targetAfter, nextStore, nextTargetCode, targetPath,
+          next⟩ :=
+        related.advance_objectFieldFVar_of_schema_step schemaAgrees fieldTyped
+          sourceStep
+      exact ⟨3, targetAfter, targetPath, .code activeResult next, by omega⟩
+  | objectFieldErased fieldTyped =>
+      obtain ⟨resultRuntime, targetAfter, nextStore, nextTargetCode, targetPath,
+          next⟩ :=
+        related.advance_objectFieldErased_of_schema_step schemaAgrees fieldTyped
+          sourceStep
       exact ⟨3, targetAfter, targetPath, .code activeResult next, by omega⟩
 
 end FirTalos.Concrete

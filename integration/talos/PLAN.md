@@ -6282,6 +6282,18 @@ retained only for compatibility. The next layer gives the global validated
 relation one evolving schema/agreement component so its dispatcher selects
 these new successors directly.
 
+The current-node dispatcher boundary is now schema-aware as well. A thin
+three-way admission factors all established cases through the existing
+dispatcher while retaining separate schema-typed FVar and erased alternatives.
+Residual validation turns schema source safety into that admission, and the
+ordinary-code advancement theorem combines it with agreement for the active
+witness. The two field branches have exact zero allocation cost and reach the
+schema-derived closed successors directly; address-space safety remains
+necessary only for the legacy/allocation branch. The remaining global work is
+to retain schema/witness agreement in every validated administrative outcome
+and preserve or update it across allocation, reuse, call, cache, bind, and
+return transitions.
+
 W6.6 float packed-field admission closes the semantic-to-concrete gap for
 `Float32` and `Float` projection and mutation. `ValueRel` now relates the
 shared raw-bit semantic constructors directly to `.float32Bits` and
