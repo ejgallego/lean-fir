@@ -6303,9 +6303,16 @@ validated constructors with the active witness as an explicit ghost index.
 index with a constructor schema and `WitnessAgrees`, and erases back to the
 established relation. A generic `withSchema` constructor preserves agreement
 for any successor at the same witness; the FVar and erased field successors
-now use it. Next, witness-unchanged call/cache/bind/return transitions are
-lifted to this indexed relation, followed by witness-extension and constructor
-bind/rebind transitions for allocation and reuse.
+now use it. The witness-unchanged administrative boundary is also explicit:
+direct and saturated callee entry, lazy-cache hit and miss, destination bind,
+and both ordinary and lazy return-pop paths now return the witness-indexed
+global relation at exactly the incoming witness. The established unindexed
+dispatcher is a compatibility projection through `toValidatedGlobal`, so no
+proof needs to recover ghost data from a `Prop`. Executing a resolved external
+call is intentionally excluded from this class: the host refinement produces
+a `nextWitness`. The next layer transports schema agreement across that
+witness extension, followed by constructor bind/rebind transitions for
+allocation and reuse and the complete schema-global dispatcher.
 
 W6.6 float packed-field admission closes the semantic-to-concrete gap for
 `Float32` and `Float` projection and mutation. `ValueRel` now relates the

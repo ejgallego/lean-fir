@@ -111,6 +111,16 @@ and agreement, erases to the old validated relation, and is preserved by both
 object-field successors. Remaining work is preservation across the other
 administrative and witness-changing transitions; the card stays open.
 
+The witness-preserving administrative cone is now separated from genuine
+witness evolution. Direct and saturated entry, lazy hit/miss, external bind,
+and return-pop successors close in
+`ConcreteStructuredValidatedCodeGlobalOutcomeAt` at the same witness; the old
+global dispatcher only forgets that index. A resolved external host call, by
+contrast, returns a `nextWitness` and therefore belongs to the explicit
+witness-extension proof. Constructor allocation/reuse and the resulting full
+schema-global dispatcher remain outstanding, so this is still proof-side
+infrastructure rather than resolution of production admission.
+
 ## Semantic impact
 
 The mismatch is ownership-relevant. If a descriptor classifies a slot erased

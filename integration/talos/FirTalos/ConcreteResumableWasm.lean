@@ -475,23 +475,27 @@ theorem ConcreteStructuredValidatedCodeGlobalOutcome.advance_of_sourceReady
   | directReady related =>
       obtain ⟨targetAfter, targetPath, next⟩ :=
         related.advance_enter_of_step sourceStep
-      exact ⟨1, targetAfter, targetPath, next, by omega⟩
+      exact ⟨1, targetAfter, targetPath, next.toValidatedGlobal, by omega⟩
   | saturatedReady related =>
       obtain ⟨targetCount, targetAfter, targetPath, targetPositive, next⟩ :=
         related.advance_enter_of_step sourceStep
-      exact ⟨targetCount, targetAfter, targetPath, next, by omega⟩
+      exact ⟨targetCount, targetAfter, targetPath, next.toValidatedGlobal,
+        by omega⟩
   | lazyReady related =>
       cases related.path with
       | hit sourceValue semanticFound =>
           obtain ⟨physical, targetAfter, targetPath, next⟩ :=
             related.advance_hit_of_step semanticFound sourceStep
-          exact ⟨4, targetAfter, targetPath, .externalBind next, by omega⟩
+          exact ⟨4, targetAfter, targetPath,
+            (ConcreteStructuredValidatedCodeGlobalOutcomeAt.externalBind next)
+              |>.toValidatedGlobal,
+            by omega⟩
       | miss calleeCode internal resultClassified notObject notTObject
           semanticEmpty =>
           obtain ⟨targetAfter, targetPath, next⟩ :=
             related.advance_miss_of_step internal resultClassified notObject
               notTObject semanticEmpty sourceStep
-          exact ⟨3, targetAfter, targetPath, next, by omega⟩
+          exact ⟨3, targetAfter, targetPath, next.toValidatedGlobal, by omega⟩
   | externalReady related =>
       obtain ⟨targetAfter, targetPath, next⟩ :=
         related.advance_of_step sourceStep
@@ -499,11 +503,12 @@ theorem ConcreteStructuredValidatedCodeGlobalOutcome.advance_of_sourceReady
   | externalBind related =>
       obtain ⟨targetAfter, targetPath, next⟩ :=
         related.advance_of_step sourceStep
-      exact ⟨1, targetAfter, targetPath, next, by omega⟩
+      exact ⟨1, targetAfter, targetPath, next.toValidatedGlobal, by omega⟩
   | returned related =>
       obtain ⟨targetCount, targetAfter, targetPath, targetPositive, next⟩ :=
         related.advance_of_step sourceStep
-      exact ⟨targetCount, targetAfter, targetPath, next, by omega⟩
+      exact ⟨targetCount, targetAfter, targetPath, next.toValidatedGlobal,
+        by omega⟩
 
 /-- Compatibility wrapper for the former module-global source-safety law. -/
 theorem ConcreteStructuredCompilerAdmissionLaws.advanceValidatedGlobal

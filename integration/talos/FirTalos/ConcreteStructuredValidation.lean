@@ -3833,8 +3833,8 @@ theorem
     ∃ targetAfter,
       FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 1 target
           targetAfter ∧
-        ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
-          targetModule hosts externals sourceAfter targetAfter := by
+        ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+          targetModule hosts externals witness sourceAfter targetAfter := by
   obtain ⟨targetAfter, targetPath, nextCore, callerScope, entry⟩ :=
     related.core.advance_enter_of_step (hostEnv := hosts.env)
       spec.contextProgram sourceStep
@@ -3930,7 +3930,7 @@ theorem
     ⟨rowAtProgram.contextCaches, validatedCore, nextFrames, agreesAfter,
       nextValidationAgrees⟩
   exact ⟨targetAfter, targetPath,
-    ConcreteStructuredValidatedCodeGlobalOutcome.code calleeResultAt
+    ConcreteStructuredValidatedCodeGlobalOutcomeAt.code calleeResultAt
       nextOutcome⟩
 
 /-- Stage an exactly saturated closure call inside the closed relation.  The
@@ -4078,8 +4078,8 @@ theorem
       FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
           targetCount target targetAfter ∧
         0 < targetCount ∧
-        ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
-          targetModule hosts externals sourceAfter targetAfter := by
+        ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+          targetModule hosts externals witness sourceAfter targetAfter := by
   obtain ⟨targetAfter, nextStore, physicalArgs, matcherCount, argumentCount,
       callRuntime, targetPath, nextCore, callerScope, entry⟩ :=
     related.core.advance_enter_of_step resolution row spec
@@ -4172,7 +4172,7 @@ theorem
       nextValidationAgrees⟩
   refine ⟨3 * (matcherCount + 1) + argumentCount + 1, targetAfter,
     targetPath, ?_,
-    ConcreteStructuredValidatedCodeGlobalOutcome.code calleeResultAt
+    ConcreteStructuredValidatedCodeGlobalOutcomeAt.code calleeResultAt
       nextOutcome⟩
   omega
 
@@ -4398,8 +4398,8 @@ theorem
     ∃ targetAfter,
       FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3
           target targetAfter ∧
-        ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
-          targetModule hosts externals sourceAfter targetAfter := by
+        ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+          targetModule hosts externals witness sourceAfter targetAfter := by
   obtain ⟨calleeContext, calleeFunction, row, targetAfter, targetPath,
       nextCore, sourceFramesEq, targetFramesEq⟩ :=
     related.core.advance_miss_of_step (functionCode := functionCode)
@@ -4495,7 +4495,7 @@ theorem
     ⟨row.contextCaches, validatedCore, nextFrames, agreesAfter,
       nextValidationAgrees⟩
   exact ⟨targetAfter, targetPath,
-    ConcreteStructuredValidatedCodeGlobalOutcome.code calleeResultAt
+    ConcreteStructuredValidatedCodeGlobalOutcomeAt.code calleeResultAt
       nextOutcome⟩
 
 /-- Stage an admitted pure external while retaining precisely the validation
@@ -4964,8 +4964,8 @@ theorem ConcreteStructuredValidatedReturnedOutcome.advance_bindCaller_of_step
       FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
           targetCount target targetAfter ∧
         0 < targetCount ∧
-        ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
-          targetModule hosts externals sourceAfter targetAfter := by
+        ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+          targetModule hosts externals witness sourceAfter targetAfter := by
   rcases related with ⟨_activeResult, _contextCaches, yielded, compatible,
     resources, frames, agrees, validationAgrees⟩
   generalize sourceFramesEq : source.frames = sourceFrames at resources frames agrees validationAgrees
@@ -5128,7 +5128,7 @@ theorem ConcreteStructuredValidatedReturnedOutcome.advance_bindCaller_of_step
           ⟨contextCaches, validatedCore, validatedFrames, agreesAfter,
             validationAgreesAfter⟩
         exact ⟨2, targetAfter, targetPath, by omega,
-          ConcreteStructuredValidatedCodeGlobalOutcome.code callerResultAt
+          ConcreteStructuredValidatedCodeGlobalOutcomeAt.code callerResultAt
             nextActive⟩
   | @saturated spine activeEntryRuntime callerEntryRuntime activeEntryStore
       callerEntryStore activeEntryWitness callerEntryWitness callerContext
@@ -5247,7 +5247,7 @@ theorem ConcreteStructuredValidatedReturnedOutcome.advance_bindCaller_of_step
           ⟨contextCaches, validatedCore, validatedFrames, agreesAfter,
             validationAgreesAfter⟩
         exact ⟨matcherCount + 5, targetAfter, targetPath, by omega,
-          ConcreteStructuredValidatedCodeGlobalOutcome.code callerResultAt
+          ConcreteStructuredValidatedCodeGlobalOutcomeAt.code callerResultAt
             nextActive⟩
   | @lazy spine activeEntryRuntime callerEntryRuntime activeEntryStore
       callerEntryStore activeEntryWitness callerEntryWitness callerContext
@@ -5306,8 +5306,8 @@ theorem ConcreteStructuredValidatedReturnedOutcome.advance_lazyCache_of_step
       FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
           targetCount target targetAfter ∧
         0 < targetCount ∧
-        ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
-          targetModule hosts externals sourceAfter targetAfter := by
+        ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+          targetModule hosts externals witness sourceAfter targetAfter := by
   rcases related with ⟨activeResult, _contextCaches, yielded, compatible,
     resources, frames, agrees, validationAgrees⟩
   generalize sourceFramesEq : source.frames = sourceFrames at resources frames agrees validationAgrees
@@ -5715,7 +5715,7 @@ theorem ConcreteStructuredValidatedReturnedOutcome.advance_lazyCache_of_step
         ⟨callerResultAt, contextCaches, bindCore, continuationValidation,
           validatedFrames, nextAgrees, nextValidationAgrees⟩
       exact ⟨7, targetAfter, targetPath, by omega,
-        ConcreteStructuredValidatedCodeGlobalOutcome.externalBind
+        ConcreteStructuredValidatedCodeGlobalOutcomeAt.externalBind
           bindValidated⟩
 
 /-- Constructor-complete pop for a validated yielded state.
@@ -5761,8 +5761,8 @@ theorem ConcreteStructuredValidatedReturnedOutcome.advance_of_step
       FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
           targetCount target targetAfter ∧
         0 < targetCount ∧
-        ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
-          targetModule hosts externals sourceAfter targetAfter := by
+        ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+          targetModule hosts externals witness sourceAfter targetAfter := by
   generalize sourceFramesEq : source.frames = sourceFrames
   have validationAt :
       ConcreteStructuredSuspendedValidation program functionResult
@@ -5837,8 +5837,8 @@ theorem ConcreteStructuredValidatedExternalBindOutcome.advance_of_step
     ∃ targetAfter,
       FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 1
           target targetAfter ∧
-        ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
-          targetModule hosts externals sourceAfter targetAfter := by
+        ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+          targetModule hosts externals witness sourceAfter targetAfter := by
   obtain ⟨targetAfter, resumedLocals, targetPath, nextCore, sourceFramesEq,
       targetFramesEq⟩ :=
     related.core.advance_of_step (targetModule := targetModule) (hosts := hosts)
@@ -5879,7 +5879,7 @@ theorem ConcreteStructuredValidatedExternalBindOutcome.advance_of_step
     ⟨related.contextCaches, validatedCore, validatedFrames, agreesAfter,
       validationAgreesAfter⟩
   exact ⟨targetAfter, targetPath,
-    ConcreteStructuredValidatedCodeGlobalOutcome.code related.activeResult
+    ConcreteStructuredValidatedCodeGlobalOutcomeAt.code related.activeResult
       nextActive⟩
 
 /-- Persistent ownership increments are erased by lowering and preserve the
