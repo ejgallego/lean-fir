@@ -1831,6 +1831,69 @@ theorem wp_checkedDecrementLocalProgram_classifiedHeap
   exact wp_checkedDecrementLocalProgram_heap valueFound taggedClear
     physicalNonzero callRun
 
+/-- Sequencing form of the heap-classified checked-decrement rule.  It keeps
+the caller's operand tail explicit and resumes an arbitrary suffix from the
+callee's exact final store, so resident helpers can compose ownership effects
+without reopening the decrement implementation. -/
+theorem wp_checkedDecrementLocalProgram_classifiedHeap_then
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store final : Wasm.Store host}
+    {locals : Wasm.Locals} {valueIndex decrementIndex : Nat}
+    {word : Word32} {rest : Wasm.Program}
+    (valueFound : locals.get valueIndex =
+      some (.i32 (UInt32.ofNat word.value)))
+    (heap : word.classify = .heap)
+    (callRun : Wasm.TerminatesWith env module decrementIndex store
+      ([.i32 1, .i32 (UInt32.ofNat word.value)] ++ locals.values)
+      (fun next values => next = final ∧ values = locals.values))
+    (continued : Wasm.wp module rest Q final locals env) :
+    Wasm.wp module
+      (checkedDecrementLocalProgram valueIndex decrementIndex ++ rest)
+      Q store locals env := by
+  have wordFits : word.value < UInt32.size := by
+    simpa [UInt32.size, wordModulus] using word.isLt
+  have wordNonzero : word.value ≠ 0 := by
+    intro zero
+    simp [Word32.classify, zero] at heap
+  have physicalNonzero : UInt32.ofNat word.value ≠ 0 := by
+    intro zero
+    have zeroNat := congrArg UInt32.toNat zero
+    rw [UInt32.toNat_ofNat_of_lt' wordFits] at zeroNat
+    simp at zeroNat
+    exact wordNonzero zeroNat
+  have objectLowBit : UInt32.ofNat word.value &&& 1 = 0 := by
+    have even : word.value % 2 = 0 := by
+      by_contra notEven
+      have modLt : word.value % 2 < 2 := Nat.mod_lt _ (by omega)
+      have odd : word.value % 2 = 1 := by omega
+      simp [Word32.classify, wordNonzero, odd] at heap
+    apply UInt32.toNat_inj.mp
+    simpa [Nat.and_one_is_mod] using even
+  have taggedClear :
+      (1 : UInt32) &&& UInt32.ofNat word.value = 0 := by
+    simpa [UInt32.and_comm] using objectLowBit
+  have valueFound' (values : List Wasm.Value) :
+      ({ locals with values } : Wasm.Locals).get valueIndex =
+        some (.i32 (UInt32.ofNat word.value)) := by
+    simpa using valueFound
+  unfold checkedDecrementLocalProgram
+  simp only [List.cons_append, List.nil_append, Wasm.wp_localGet_cons,
+    valueFound', Wasm.wp_const_cons, Wasm.wp_and_cons]
+  rw [taggedClear]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_localGet_cons, valueFound', Wasm.wp_const_cons, Wasm.wp_eq_cons,
+    if_neg physicalNonzero]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_neg (by decide : ¬(0 : UInt32) ≠ 0)]
+  simp only [List.take_zero, List.drop_zero, List.nil_append,
+    Wasm.wp_localGet_cons, valueFound', Wasm.wp_const_cons]
+  apply Wasm.wp_call_tw callRun
+  intro next values completed
+  obtain ⟨rfl, rfl⟩ := completed
+  simpa only [Wasm.wp_nil] using continued
+
 /-- Complete `.tobject` caller classification.  Canonical immediates take the
 local no-op; mapped objects and promoted tags are heap-classified and reuse
 the supplied installed-helper theorem.  These are the only inhabitants of a

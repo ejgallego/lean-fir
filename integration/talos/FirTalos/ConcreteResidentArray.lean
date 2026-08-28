@@ -203,25 +203,21 @@ theorem liveElementResidentRead
   exact ⟨word, read, valueRelated,
     memoryRelated.readWord32_eq_read32 inBounds read⟩
 
-/-- Exact load/overwrite core of W7's exclusive replacement branch. -/
-def replaceElementStoreProgram
-    (cursorIndex valueIndex elementIndex : Nat) : Wasm.Program := [
+/-- Borrow the displaced resident Array word before any ownership effect. -/
+def borrowElementProgram (cursorIndex elementIndex : Nat) : Wasm.Program := [
   .localGet cursorIndex,
   .load32 0,
-  .localSet elementIndex,
-  .localGet cursorIndex,
-  .localGet valueIndex,
-  .store32 0]
+  .localSet elementIndex]
 
-/-- Execute the borrowed old-word load and the replacement store.  The old
-word remains in `elementIndex`; the supplied continuation therefore starts at
-exactly the state expected by the checked decrement gate. -/
-theorem wp_replaceElementStoreProgram
+/-- Execute the borrowed old-word load.  The store is unchanged and the old
+word is retained in `elementIndex`, exactly as required by the checked
+decrement gate that must run next. -/
+theorem wp_borrowElementProgram
     {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
     {Q : Wasm.Assertion host} {store : Wasm.Store host}
     {initial afterOld : Wasm.Locals}
-    {cursorIndex valueIndex elementIndex : Nat}
-    {cursor oldWord newWord : UInt32} {tail : List Wasm.Value}
+    {cursorIndex elementIndex : Nat}
+    {cursor oldWord : UInt32} {tail : List Wasm.Value}
     {rest : Wasm.Program}
     (cursorFound : initial.get cursorIndex = some (.i32 cursor))
     (oldRead : store.mem.read32 cursor = oldWord)
@@ -229,13 +225,10 @@ theorem wp_replaceElementStoreProgram
     (oldSet :
       ({ initial with values := .i32 oldWord :: tail }).set?
           elementIndex (.i32 oldWord) = some afterOld)
-    (cursorAfter : afterOld.get cursorIndex = some (.i32 cursor))
-    (valueAfter : afterOld.get valueIndex = some (.i32 newWord))
-    (continued : Wasm.wp module rest Q
-      (ResidentMemoryRel.write32Store store cursor newWord)
+    (continued : Wasm.wp module rest Q store
       { afterOld with values := tail } env) :
     Wasm.wp module
-      (replaceElementStoreProgram cursorIndex valueIndex elementIndex ++ rest)
+      (borrowElementProgram cursorIndex elementIndex ++ rest)
       Q store { initial with values := tail } env := by
   have cursorAt (values : List Wasm.Value) :
       ({ initial with values } : Wasm.Locals).get cursorIndex =
@@ -245,18 +238,103 @@ theorem wp_replaceElementStoreProgram
       ¬(cursor.toNat + (0 : UInt32).toNat + 4 >
         store.mem.pages * wasmPageBytes) := by
     simpa using Nat.not_lt.mpr inBounds
-  unfold replaceElementStoreProgram
+  unfold borrowElementProgram
   simp only [List.cons_append, List.nil_append, Wasm.wp_localGet_cons,
     cursorAt, Wasm.wp_load32_cons]
   rw [if_neg (by simpa [wasmPageBytes] using loadInBounds),
     UInt32.add_zero, oldRead]
   simp only [Wasm.wp_localSet_cons, oldSet]
+  exact continued
+
+/-- Install the consumed replacement word after the displaced word's checked
+decrement has completed. -/
+def writeReplacementProgram (cursorIndex valueIndex : Nat) : Wasm.Program := [
+  .localGet cursorIndex,
+  .localGet valueIndex,
+  .store32 0]
+
+/-- Execute the final replacement store and expose its exact updated Talos
+memory to the continuation. -/
+theorem wp_writeReplacementProgram
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {locals : Wasm.Locals} {cursorIndex valueIndex : Nat}
+    {cursor newWord : UInt32} {tail : List Wasm.Value}
+    {rest : Wasm.Program}
+    (cursorFound : locals.get cursorIndex = some (.i32 cursor))
+    (valueFound : locals.get valueIndex = some (.i32 newWord))
+    (inBounds : cursor.toNat + 4 ≤ store.mem.pages * wasmPageBytes)
+    (continued : Wasm.wp module rest Q
+      (ResidentMemoryRel.write32Store store cursor newWord)
+      { locals with values := tail } env) :
+    Wasm.wp module
+      (writeReplacementProgram cursorIndex valueIndex ++ rest)
+      Q store { locals with values := tail } env := by
   have continued' : Wasm.wp module rest Q
       (ResidentMemoryRel.write32Store store (cursor + 0) newWord)
-      { afterOld with values := tail } env := by
+      { locals with values := tail } env := by
     simpa only [UInt32.add_zero] using continued
-  exact ResidentMemoryRel.wp_store32_localGet_of_inBounds cursorAfter valueAfter
+  unfold writeReplacementProgram
+  exact ResidentMemoryRel.wp_store32_localGet_of_inBounds cursorFound valueFound
     inBounds continued'
+
+/-- Native-order ownership core of trusted Array replacement: borrow the old
+word, run the shared checked decrement, and only then overwrite the slot. -/
+def replaceElementOwnershipProgram
+    (cursorIndex valueIndex elementIndex decrementIndex : Nat) : Wasm.Program :=
+  borrowElementProgram cursorIndex elementIndex ++
+    ResidentRelease.checkedDecrementLocalProgram elementIndex decrementIndex ++
+    writeReplacementProgram cursorIndex valueIndex
+
+/-- Compose the heap-valued arm of native-order Array replacement from the
+shared checked-decrement theorem.  Read and write bounds are separated because
+the recursive ownership call may change the store while preserving the parent
+allocation through the caller's refinement invariant. -/
+theorem wp_replaceElementOwnershipProgram_heap
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store middleStore : Wasm.Store host}
+    {initial afterOld : Wasm.Locals}
+    {cursorIndex valueIndex elementIndex decrementIndex : Nat}
+    {cursor newWord : UInt32} {oldWord : Word32} {rest : Wasm.Program}
+    (cursorFound : initial.get cursorIndex = some (.i32 cursor))
+    (oldRead : store.mem.read32 cursor = UInt32.ofNat oldWord.value)
+    (readInBounds : cursor.toNat + 4 ≤ store.mem.pages * wasmPageBytes)
+    (oldSet :
+      ({ initial with values := [.i32 (UInt32.ofNat oldWord.value)] }).set?
+          elementIndex (.i32 (UInt32.ofNat oldWord.value)) = some afterOld)
+    (cursorAfter : afterOld.get cursorIndex = some (.i32 cursor))
+    (valueAfter : afterOld.get valueIndex = some (.i32 newWord))
+    (oldHeap : oldWord.classify = .heap)
+    (decrementRun : Wasm.TerminatesWith env module decrementIndex store
+      [.i32 1, .i32 (UInt32.ofNat oldWord.value)]
+      (fun next values => next = middleStore ∧ values = []))
+    (writeInBounds :
+      cursor.toNat + 4 ≤ middleStore.mem.pages * wasmPageBytes)
+    (continued : Wasm.wp module rest Q
+      (ResidentMemoryRel.write32Store middleStore cursor newWord)
+      { afterOld with values := [] } env) :
+    Wasm.wp module
+      (replaceElementOwnershipProgram cursorIndex valueIndex elementIndex
+          decrementIndex ++ rest)
+      Q store { initial with values := [] } env := by
+  have oldUpdate := FirTalos.Correctness.localUpdate_of_set? oldSet
+  have decrementRun' :
+      Wasm.TerminatesWith env module decrementIndex store
+        ([.i32 1, .i32 (UInt32.ofNat oldWord.value)] ++
+          ({ afterOld with values := [] } : Wasm.Locals).values)
+        (fun next values =>
+          next = middleStore ∧
+            values = ({ afterOld with values := [] } : Wasm.Locals).values) := by
+    simpa using decrementRun
+  have writeWP := wp_writeReplacementProgram cursorAfter valueAfter
+    writeInBounds continued
+  have decrementWP :=
+    ResidentRelease.wp_checkedDecrementLocalProgram_classifiedHeap_then
+      (locals := { afterOld with values := [] }) oldUpdate.1 oldHeap
+      decrementRun' writeWP
+  have borrowWP := wp_borrowElementProgram cursorFound oldRead readInBounds
+    oldSet decrementWP
+  simpa [replaceElementOwnershipProgram, List.append_assoc] using borrowWP
 
 /-- Exact Talos spelling of the production trusted exclusivity probe.  The
 exclusive branch is kept abstract so the same control theorem can be reused by
