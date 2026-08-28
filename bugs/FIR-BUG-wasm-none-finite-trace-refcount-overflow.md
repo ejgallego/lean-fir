@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-finite-trace-refcount-overflow
-status: confirmed
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: 7fd2d2d97feb82ca7d905ec8db13e30c49aeab33
@@ -86,5 +86,10 @@ none
 
 ## Resolution and regression
 
-Unresolved. The first validator-derived increment theorem exposes the exact
-premise without weakening the concrete header relation.
+Fixed at the theorem boundary. `ConcreteStructuredSourceAdmissionSafeAt` no
+longer embeds ordinary-increment headroom or saturated-closure retention
+capacity. `ConcreteStructuredFiniteRuntimeSafeAt` states those finite runtime
+conditions independently, and
+`ConcreteStructuredCurrentStepFiniteRuntimeSafety` supplies them to the
+validated one-step simulation beside (not inside) compiler source safety and
+allocation address-space safety. The concrete header relation is unchanged.

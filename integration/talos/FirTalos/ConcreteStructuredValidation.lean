@@ -5347,6 +5347,75 @@ theorem ConcreteStructuredValidatedReturnedOutcome.advance_lazyCache_of_step
         ConcreteStructuredValidatedCodeGlobalOutcome.externalBind
           bindValidated⟩
 
+/-- Constructor-complete pop for a validated yielded state.
+
+The suspended validation stack itself classifies the source caller head.  A
+plain bind resumes a direct or saturated caller, a cache marker publishes a
+lazy result first, and the empty stack is incompatible with a successful
+source successor.  This avoids forgetting validation merely to reuse the
+older supported-stack dispatcher. -/
+theorem ConcreteStructuredValidatedReturnedOutcome.advance_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult actualKind : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {sourceValue : Value}
+    {targetLocals : Wasm.Locals}
+    {physical : Wasm.Value}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedReturnedOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      sourceValue targetStore targetLocals witness actualKind physical source
+      target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetCount targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetCount target targetAfter ∧
+        0 < targetCount ∧
+        ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
+          targetModule hosts externals sourceAfter targetAfter := by
+  generalize sourceFramesEq : source.frames = sourceFrames
+  have validationAt :
+      ConcreteStructuredSuspendedValidation program functionResult
+        callerExpectedResult sourceFrames := by
+    rw [← sourceFramesEq]
+    exact related.frames.validation
+  cases validationAt with
+  | nil =>
+      rcases source with
+        ⟨sourceProgram, sourceControl, stateEnv, stateJoins, stateFrames,
+          runtime⟩
+      have controlEq := related.yielded.sourceControlEq
+      change sourceControl = .yielded sourceValue at controlEq
+      subst sourceControl
+      change stateFrames = [] at sourceFramesEq
+      subst stateFrames
+      simp [executeStep, coreStep] at sourceStep
+  | bind continuationValidation tail =>
+      apply related.advance_bindCaller_of_step
+        (bindCaller := ⟨_, _, _, _, _, sourceFramesEq⟩) sourceStep
+  | lazy continuationValidation tail =>
+      apply related.advance_lazyCache_of_step
+        (lazyCaller := ⟨_, _, _, _, _, _, sourceFramesEq⟩) sourceStep
+
 /-- Complete the pending generated destination write and return from the
 validated external-bind boundary to ordinary validated compiler code.  The
 source bind and target `local.set` each take one step; only the destination's
@@ -9623,7 +9692,8 @@ semantic heap update, selected case arm, target path, refinement witness,
 allocation budget, successor admission, or termination evidence.  Residual
 production validation recovers compiler equations, and the successful source
 step recovers dynamic effects.  The remaining fields are exactly the phase
-typing and runtime-domain facts that those two inputs cannot manufacture. -/
+typing and semantic operation-domain facts that those two inputs cannot
+manufacture; finite concrete resources are stated separately. -/
 inductive ConcreteStructuredSourceAdmissionSafeAt
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
@@ -9668,12 +9738,7 @@ inductive ConcreteStructuredSourceAdmissionSafeAt
       {decl : Lean.Compiler.LCNF.LetDecl .impure}
       {continuation : Lean.Compiler.LCNF.Code .impure}
       (site : SaturatedClosureCallSite context decl sourceEnv)
-      (resolution : SaturatedClosureCallResolution context sourceRuntime site)
-      (sharedCapacity : ∀ parentRuntime,
-        setCell sourceRuntime resolution.location
-            { resolution.cell with rc := resolution.cell.rc - 1 } =
-              .ok parentRuntime →
-          ClosureRetainCapacity parentRuntime resolution.captures.toList) :
+      (resolution : SaturatedClosureCallResolution context sourceRuntime site) :
       ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
         expectedResult facts sourceRuntime sourceEnv source
         (.let decl continuation)
@@ -9705,9 +9770,7 @@ inductive ConcreteStructuredSourceAdmissionSafeAt
         (.inc objectId amount check true continuation)
   | incOrdinary
       {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
-      {continuation : Lean.Compiler.LCNF.Code .impure}
-      (fits : ConcreteStructuredIncrementHeadroomAt sourceRuntime sourceEnv
-        objectId amount) :
+      {continuation : Lean.Compiler.LCNF.Code .impure} :
       ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
         expectedResult facts sourceRuntime sourceEnv source
         (.inc objectId amount check false continuation)
@@ -9769,6 +9832,32 @@ inductive ConcreteStructuredSourceAdmissionSafeAt
         expectedResult facts sourceRuntime sourceEnv source
         (.sset objectId slotIndex byteOffset fieldId type continuation)
 
+/-- Finite concrete-runtime conditions for the current source syntax.
+
+Saturated closure entry needs capacity for retaining the captures selected by
+its semantic resolution, and ordinary increment needs a `UInt32` header
+successor.  Every other currently admitted source shape is resource-neutral
+at this boundary; allocation bytes are checked independently against the
+frame's `remainingBytes`. -/
+def ConcreteStructuredFiniteRuntimeSafeAt
+    (context : Fir.Wasm.Context)
+    (sourceRuntime : RuntimeState)
+    (sourceEnv : Env) :
+    Lean.Compiler.LCNF.Code .impure → Prop
+  | .let decl _ =>
+      ∀ (site : SaturatedClosureCallSite context decl sourceEnv)
+        (resolution : SaturatedClosureCallResolution context sourceRuntime
+          site)
+        (parentRuntime : RuntimeState),
+        setCell sourceRuntime resolution.location
+            { resolution.cell with rc := resolution.cell.rc - 1 } =
+              .ok parentRuntime →
+          ClosureRetainCapacity parentRuntime resolution.captures.toList
+  | .inc objectId amount _ false _ =>
+      ConcreteStructuredIncrementHeadroomAt sourceRuntime sourceEnv objectId
+        amount
+  | _ => True
+
 /-- Residual production validation plus source admission safety construct the
 exact current-node admission and allocation cost.
 
@@ -9802,6 +9891,8 @@ theorem ConcreteStructuredValidatedCodeCoreRel.admit_of_source_safe_step
       witness source target)
     (sourceSafe : ConcreteStructuredSourceAdmissionSafeAt context sourceModule
       externals functionResult facts sourceRuntime sourceEnv source sourceCode)
+    (finiteRuntimeSafe : ConcreteStructuredFiniteRuntimeSafeAt context
+      sourceRuntime sourceEnv sourceCode)
     (sourceStep : executeStep externals source = .next sourceAfter) :
     ∃ requiredBytes,
       ConcreteStructuredCodeStepAdmission context sourceModule externals
@@ -9818,8 +9909,9 @@ theorem ConcreteStructuredValidatedCodeCoreRel.admit_of_source_safe_step
       exact ⟨_, .pureExternal supported⟩
   | directCall site =>
       exact ⟨0, .directCall site⟩
-  | saturatedCall site resolution sharedCapacity =>
-      exact ⟨0, .saturatedCall site resolution sharedCapacity⟩
+  | saturatedCall site resolution =>
+      exact ⟨0, .saturatedCall site resolution
+        (finiteRuntimeSafe site resolution)⟩
   | lazy call generated path =>
       cases path with
       | hit sourceValue semanticFound =>
@@ -9839,9 +9931,9 @@ theorem ConcreteStructuredValidatedCodeCoreRel.admit_of_source_safe_step
         · exact ⟨0, .scalarUInt8Cases scalarCases⟩
   | incPersistent =>
       exact ⟨0, related.validation.admit_incPersistent⟩
-  | incOrdinary fits =>
+  | incOrdinary =>
       exact ⟨0, related.validation.admit_incOrdinary_of_step
-        related.core.focus sourceStep fits⟩
+        related.core.focus sourceStep finiteRuntimeSafe⟩
   | decPersistent =>
       exact ⟨0, related.validation.admit_decPersistent⟩
   | decOrdinary =>
@@ -9865,5 +9957,219 @@ theorem ConcreteStructuredValidatedCodeCoreRel.admit_of_source_safe_step
   | scalarField fieldTyped =>
       exact ⟨0, related.validation.admit_sset_of_step related.core.focus
         sourceStep fieldTyped⟩
+
+/-- Constructor-complete successor theorem for the validated ordinary-code
+relation.
+
+The current admission is consumed exactly once.  Each branch delegates to its
+operation-specific theorem, which advances the residual validator state and
+the hereditary suspended-caller validation in lockstep with the source and
+target machines.  Thus the conclusion stays in the validated global relation;
+validation provenance is not reconstructed from an arbitrary admission-free
+compiler core after the fact. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_of_admission
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {requiredBytes remainingBytes : Nat}
+    {sourceEnv : Env}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      sourceCode targetStore targetLocals targetCode witness source target)
+    (admitted : ConcreteStructuredCodeStepAdmission context sourceModule
+      externals functionResult facts sourceRuntime sourceEnv requiredBytes
+      sourceCode)
+    (budget : requiredBytes ≤ remainingBytes)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetCount targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetCount target targetAfter ∧
+        ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
+          targetModule hosts externals sourceAfter targetAfter ∧
+        (targetCount = 0 →
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source) := by
+  cases admitted with
+  | ret resultCompiled resultCompatible resultSemantic =>
+      obtain ⟨targetAfter, targetPath, next⟩ :=
+        related.advance_return_of_step activeResult
+          (.ret resultCompiled resultCompatible resultSemantic) sourceStep
+      exact ⟨2, targetAfter, targetPath, next, by omega⟩
+  | directLet supported =>
+      obtain ⟨targetAfter, nextRuntime, sourceValue, nextStore,
+          resumedLocals, nextWitness, nextFacts, nextTargetCode, targetCount,
+          targetPath, targetPositive, next⟩ :=
+        related.advance_directLet_of_step supported budget sourceStep
+      exact ⟨targetCount, targetAfter, targetPath,
+        .code activeResult next, by omega⟩
+  | pureExternal supported =>
+      obtain ⟨site, physicalArgs, operation, resolvedResultKind,
+          targetImport, callIndex, resultIndex, targetArguments, targetRest,
+          targetAfter, targetPath, next, rank⟩ :=
+        related.advance_pureExternal_stage activeResult supported budget
+          sourceStep
+      exact ⟨targetArguments.length, targetAfter, targetPath,
+        .externalReady next, fun zero => rank⟩
+  | directCall site =>
+      obtain ⟨calleeContext, calleeFunction, row, physicalArgs, resultIndex,
+          targetArguments, targetRest, targetAfter, targetPath, next, rank⟩ :=
+        related.advance_directCall_stage_of_step activeResult site sourceStep
+      exact ⟨targetArguments.length, targetAfter, targetPath,
+        .directReady next, fun zero => rank⟩
+  | saturatedCall site resolution sharedCapacity =>
+      obtain ⟨calleeContext, calleeFunction, row, targetValue, targetRest,
+          resultIndex, targetPath, next, rank⟩ :=
+        related.advance_saturatedCall_stage_of_step activeResult site resolution
+          sharedCapacity sourceStep
+      exact ⟨0, target, targetPath, .saturatedReady next, fun _ => rank⟩
+  | lazyHit call generated semanticFound =>
+      let path : ConcreteStructuredLazyReadyAdmission context sourceModule call
+          generated sourceRuntime := .hit _ semanticFound
+      obtain ⟨cacheIndex, declarationId, cacheSetId, resultIndex, targetRest,
+          targetPath, next, rank⟩ :=
+        related.advance_lazy_stage_of_step activeResult call generated path
+          sourceStep
+      exact ⟨0, target, targetPath, .lazyReady next, fun _ => rank⟩
+  | lazyMiss call generated resultClassified notObject notTObject
+      semanticEmpty =>
+      let path : ConcreteStructuredLazyReadyAdmission context sourceModule
+          call.callSupported generated sourceRuntime :=
+        .miss _ call resultClassified notObject notTObject semanticEmpty
+      obtain ⟨cacheIndex, declarationId, cacheSetId, resultIndex, targetRest,
+          targetPath, next, rank⟩ :=
+        related.advance_lazy_stage_of_step activeResult call.callSupported
+          generated path sourceStep
+      exact ⟨0, target, targetPath, .lazyReady next, fun _ => rank⟩
+  | defaultOnlyCase supported =>
+      obtain ⟨targetPath, next, rank⟩ :=
+        related.advance_defaultOnlyCase_of_step supported sourceStep
+      exact ⟨0, target, targetPath, .code activeResult next, fun _ => rank⟩
+  | objectCases supported =>
+      obtain ⟨testCount, targetAfter, selected, selectedTarget, targetPath,
+          next, zeroRank⟩ :=
+        related.advance_objectCases_of_step supported sourceStep
+      exact ⟨5 * testCount, targetAfter, targetPath,
+        .code activeResult next, zeroRank⟩
+  | scalarUInt8Cases supported =>
+      obtain ⟨testCount, targetAfter, selected, selectedTarget, targetPath,
+          next, zeroRank⟩ :=
+        related.advance_scalarUInt8Cases_of_step supported sourceStep
+      exact ⟨4 * testCount, targetAfter, targetPath,
+        .code activeResult next, zeroRank⟩
+  | incPersistent =>
+      obtain ⟨_admitted, targetPath, _framesEq, next, rank⟩ :=
+        related.advance_incPersistent_of_step
+          (module := targetModule.wasmModule) (hostEnv := hosts.env) sourceStep
+      exact ⟨0, target, targetPath, .code activeResult next, fun _ => rank⟩
+  | decPersistent =>
+      obtain ⟨_admitted, targetPath, _framesEq, next, rank⟩ :=
+        related.advance_decPersistent_of_step
+          (module := targetModule.wasmModule) (hostEnv := hosts.env) sourceStep
+      exact ⟨0, target, targetPath, .code activeResult next, fun _ => rank⟩
+  | ordinaryIncrement supported =>
+      rename_i nextRuntime continuation
+      have shape : ∃ objectId amount check,
+          sourceCode = .inc objectId amount check false continuation := by
+        cases supported
+        exact ⟨_, _, _, rfl⟩
+      obtain ⟨objectId, amount, check, rfl⟩ := shape
+      obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, next⟩ :=
+        related.advance_ordinaryIncrement_of_step supported sourceStep
+      exact ⟨2, targetAfter, targetPath, .code activeResult next, by omega⟩
+  | ordinaryDecrement supported =>
+      rename_i nextRuntime continuation
+      have shape : ∃ objectId amount check objectFields?,
+          sourceCode =
+            .dec objectId amount check false objectFields? continuation := by
+        cases supported
+        exact ⟨_, _, _, _, rfl⟩
+      obtain ⟨objectId, amount, check, objectFields?, rfl⟩ := shape
+      obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, next⟩ :=
+        related.advance_ordinaryDecrement_of_step supported sourceStep
+      exact ⟨2, targetAfter, targetPath, .code activeResult next, by omega⟩
+  | ordinaryDelete supported =>
+      rename_i nextRuntime continuation
+      have shape : ∃ objectId,
+          sourceCode = .del objectId continuation := by
+        cases supported
+        exact ⟨_, rfl⟩
+      obtain ⟨objectId, rfl⟩ := shape
+      obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, next⟩ :=
+        related.advance_ordinaryDelete_of_step supported sourceStep
+      exact ⟨2, targetAfter, targetPath, .code activeResult next, by omega⟩
+  | constructorTag supported =>
+      rename_i nextRuntime continuation
+      have shape : ∃ objectId tag,
+          sourceCode = .setTag objectId tag continuation := by
+        cases supported
+        exact ⟨_, _, rfl⟩
+      obtain ⟨objectId, tag, rfl⟩ := shape
+      obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, next⟩ :=
+        related.advance_constructorTag_of_step supported sourceStep
+      exact ⟨2, targetAfter, targetPath, .code activeResult next, by omega⟩
+  | objectFieldFVar supported =>
+      rename_i nextRuntime continuation
+      have shape : ∃ objectId fieldId index,
+          sourceCode =
+            .oset objectId index (.fvar fieldId) continuation := by
+        cases supported
+        exact ⟨_, _, _, rfl⟩
+      obtain ⟨objectId, fieldId, index, rfl⟩ := shape
+      obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, next⟩ :=
+        related.advance_objectFieldFVar_of_step supported sourceStep
+      exact ⟨3, targetAfter, targetPath, .code activeResult next, by omega⟩
+  | objectFieldErased supported =>
+      rename_i nextRuntime continuation
+      have shape : ∃ objectId index,
+          sourceCode = .oset objectId index .erased continuation := by
+        cases supported
+        exact ⟨_, _, rfl⟩
+      obtain ⟨objectId, index, rfl⟩ := shape
+      obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, next⟩ :=
+        related.advance_objectFieldErased_of_step supported sourceStep
+      exact ⟨3, targetAfter, targetPath, .code activeResult next, by omega⟩
+  | usizeField supported =>
+      rename_i nextRuntime continuation
+      have shape : ∃ objectId fieldId index,
+          sourceCode = .uset objectId index fieldId continuation := by
+        cases supported
+        exact ⟨_, _, _, rfl⟩
+      obtain ⟨objectId, fieldId, index, rfl⟩ := shape
+      obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, next⟩ :=
+        related.advance_usizeField_of_step supported sourceStep
+      exact ⟨3, targetAfter, targetPath, .code activeResult next, by omega⟩
+  | scalarField supported =>
+      rename_i nextRuntime continuation
+      have shape : ∃ objectId fieldId slotIndex byteOffset type,
+          sourceCode = .sset objectId slotIndex byteOffset fieldId type
+            continuation := by
+        cases supported
+        exact ⟨_, _, _, _, _, rfl⟩
+      obtain ⟨objectId, fieldId, slotIndex, byteOffset, type, rfl⟩ := shape
+      obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, next⟩ :=
+        related.advance_scalarField_of_step supported sourceStep
+      exact ⟨3, targetAfter, targetPath, .code activeResult next, by omega⟩
 
 end FirTalos.Concrete

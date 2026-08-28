@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-structured-validation-provenance
-status: confirmed
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: 7fd2d2d97feb82ca7d905ec8db13e30c49aeab33
@@ -83,10 +83,14 @@ none
 
 ## Resolution and regression
 
-Unresolved. `ConcreteStructuredValidationFocus` now supplies the root and
-proof-visible residual transition laws. Resolution requires attaching that
-state to active and suspended structured relations and deriving universal
-current-node admission from it.
+Fixed. `ConcreteStructuredValidationFocus` is attached to active code and all
+suspended structured frames through
+`ConcreteStructuredValidatedCodeGlobalOutcome`. The export root constructs
+that relation from the real validator, and the constructor-complete one-step
+dispatcher preserves it across ordinary code, calls, cache states, external
+binds, and returns. The overstrong universal residual-validation field was
+removed from `ConcreteStructuredCompilerAdmissionLaws`; public finite-trace
+correctness now uses the preserved validated relation directly.
 
 ## Progress
 
@@ -156,3 +160,8 @@ header theorem; `FIR-BUG-wasm-none-settag-uint32-admission` records that
 independent compiler-domain gap. Return admission remains deliberately
 directional until upstream typing/value-shape information can justify the
 reverse object-family orientations accepted by physical compatibility.
+
+The closure slice added the global validated successor theorem and switched
+`finiteTraceCorrect_of_admissionLaws` to `validatedCodeGlobalRoot`. Remaining
+source semantic typing and finite-runtime resource assumptions are separate
+theorem boundaries, not validation-provenance gaps.

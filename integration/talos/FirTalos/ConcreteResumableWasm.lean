@@ -99,55 +99,14 @@ structure ConcreteStructuredCompilerCurrentStepAdmission
           ConcreteStructuredCodeStepAdmission context sourceModule externals functionResult
             facts sourceRuntime sourceEnv requiredBytes sourceCode
 
-/-- Production-lowering provenance for the residual validator state at every
-ordinary code focus.
-
-This is a universal compiler law, not a per-execution certificate.  The
-active result equality and admission-free compiler relation identify the
-exact dynamically selected residual code; the conclusion exposes the real
-validator's evolving join/local/case/sharing state at that code. -/
-structure ConcreteStructuredCompilerResidualValidation
-    (program : Fir.LeanIR.ImpureProgram)
-    (sourceModule : Fir.Wasm.Module)
-    (targetModule : AdaptedModule)
-    (hosts : ResolvedHosts)
-    (externals : Fir.LeanIR.Impure.ExternalImpl) : Prop where
-  code :
-    ∀ {context : Fir.Wasm.Context}
-      {functionCode : Lean.Compiler.LCNF.Code .impure}
-      {sourceFunction : Fir.Wasm.Function}
-      (spec : ConcreteSupportedFunction program context functionCode
-        sourceModule sourceFunction targetModule hosts)
-      {labels : LabelContext}
-      {entryRuntime sourceRuntime : Fir.LeanIR.Impure.RuntimeState}
-      {entryStore targetStore : Wasm.Store Host}
-      {entryWitness witness : Fir.Wasm.Concrete.RefinementWitness}
-      {functionResult : Fir.Wasm.AbiKind}
-      {callerExpectedResult : Option Fir.Wasm.AbiKind}
-      {facts : Fir.Wasm.ReuseCapacityFacts}
-      {remainingBytes : Nat}
-      {sourceEnv : Fir.LeanIR.Impure.Env}
-      {sourceCode : Lean.Compiler.LCNF.Code .impure}
-      {targetLocals : Wasm.Locals}
-      {targetCode : Wasm.Program}
-      {source : Fir.LeanIR.Impure.MachineState}
-      {target : StructuredWasmState Host},
-      spec.sourceResultKind = functionResult →
-        ConcreteStructuredCodeCoreRel program context sourceModule
-          sourceFunction externals labels entryRuntime entryStore entryWitness
-          functionResult callerExpectedResult facts remainingBytes sourceRuntime
-          sourceEnv sourceCode targetStore targetLocals targetCode witness source
-          target →
-        ConcreteStructuredAlignedValidationState program context functionResult
-          sourceCode
-
 /-- Source/phase safety facts needed to admit each residual ordinary node.
 
-The conclusion has no target execution or proof witness.  It records the
-semantic facts not derivable from executable validation alone: return value
-shape, descriptor typing, normalized cases, finite refcount headroom, and the
-current call/external/cache domain.  A final-LCNF typing theorem is expected
-to discharge this universal law. -/
+The premise is the recursively validated compiler relation, so this law ranges
+only over genuine residual nodes and suspended continuations reached from a
+validated production root.  It records the remaining semantic facts not
+derivable from executable validation alone: return value shape, descriptor
+typing, normalized cases, and the current call/external/cache domain.  Finite
+runtime resources belong in the independent runtime-safety boundary. -/
 structure ConcreteStructuredCompilerSourceAdmissionSafety
     (program : Fir.LeanIR.ImpureProgram)
     (sourceModule : Fir.Wasm.Module)
@@ -174,59 +133,72 @@ structure ConcreteStructuredCompilerSourceAdmissionSafety
       {targetCode : Wasm.Program}
       {source sourceAfter : Fir.LeanIR.Impure.MachineState}
       {target : StructuredWasmState Host},
-      spec.sourceResultKind = functionResult →
-        ConcreteStructuredCodeCoreRel program context sourceModule
-          sourceFunction externals labels entryRuntime entryStore entryWitness
-          functionResult callerExpectedResult facts remainingBytes sourceRuntime
-          sourceEnv sourceCode targetStore targetLocals targetCode witness source
-          target →
+      (activeResult : spec.sourceResultKind = functionResult) →
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+          sourceCode targetStore targetLocals targetCode witness source target →
         Fir.LeanIR.Impure.executeStep externals source = .next sourceAfter →
         ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
           functionResult facts sourceRuntime sourceEnv source sourceCode
 
-/-- The two production-facing laws needed to construct compiler admission.
+/-- Dynamic finite-runtime safety for the selected validated source node.
 
-Keeping validation provenance separate from semantic source safety makes the
-remaining obligations auditable and prevents the package from degenerating
-into a recursively supplied execution certificate. -/
+This law is execution-owned, not compiler-owned.  It currently covers finite
+reference-count header headroom and saturated-closure capture retention.  The
+separate address-space law below covers allocation bytes against the concrete
+frame budget. -/
+structure ConcreteStructuredCurrentStepFiniteRuntimeSafety
+    (program : Fir.LeanIR.ImpureProgram)
+    (sourceModule : Fir.Wasm.Module)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (externals : Fir.LeanIR.Impure.ExternalImpl) : Prop where
+  code :
+    ∀ {context : Fir.Wasm.Context}
+      {functionCode : Lean.Compiler.LCNF.Code .impure}
+      {sourceFunction : Fir.Wasm.Function}
+      (spec : ConcreteSupportedFunction program context functionCode
+        sourceModule sourceFunction targetModule hosts)
+      {labels : LabelContext}
+      {entryRuntime sourceRuntime : Fir.LeanIR.Impure.RuntimeState}
+      {entryStore targetStore : Wasm.Store Host}
+      {entryWitness witness : Fir.Wasm.Concrete.RefinementWitness}
+      {functionResult : Fir.Wasm.AbiKind}
+      {callerExpectedResult : Option Fir.Wasm.AbiKind}
+      {facts : Fir.Wasm.ReuseCapacityFacts}
+      {remainingBytes : Nat}
+      {sourceEnv : Fir.LeanIR.Impure.Env}
+      {sourceCode : Lean.Compiler.LCNF.Code .impure}
+      {targetLocals : Wasm.Locals}
+      {targetCode : Wasm.Program}
+      {source sourceAfter : Fir.LeanIR.Impure.MachineState}
+      {target : StructuredWasmState Host},
+      (activeResult : spec.sourceResultKind = functionResult) →
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+          sourceCode targetStore targetLocals targetCode witness source target →
+        Fir.LeanIR.Impure.executeStep externals source = .next sourceAfter →
+        ConcreteStructuredFiniteRuntimeSafeAt context sourceRuntime sourceEnv
+          sourceCode
+
+/-- The remaining production-facing source/phase law.
+
+Residual validation is no longer a universal field: it is established at the
+real compiler root and transported by `ConcreteStructuredValidatedCodeGlobalOutcome`.
+This package contains only the semantic source invariant that executable
+validation does not itself establish. -/
 structure ConcreteStructuredCompilerAdmissionLaws
     (program : Fir.LeanIR.ImpureProgram)
     (sourceModule : Fir.Wasm.Module)
     (targetModule : AdaptedModule)
     (hosts : ResolvedHosts)
     (externals : Fir.LeanIR.Impure.ExternalImpl) : Prop where
-  validation : ConcreteStructuredCompilerResidualValidation program
-    sourceModule targetModule hosts externals
   sourceSafety : ConcreteStructuredCompilerSourceAdmissionSafety program
     sourceModule targetModule hosts externals
-
-/-- Production residual validation and source typing construct the exact
-compiler current-step admission law consumed by finite-trace correctness. -/
-theorem ConcreteStructuredCompilerAdmissionLaws.toCurrentStepAdmission
-    {program : Fir.LeanIR.ImpureProgram}
-    {sourceModule : Fir.Wasm.Module}
-    {targetModule : AdaptedModule}
-    {hosts : ResolvedHosts}
-    {externals : Fir.LeanIR.Impure.ExternalImpl}
-    (laws : ConcreteStructuredCompilerAdmissionLaws program sourceModule
-      targetModule hosts externals) :
-    ConcreteStructuredCompilerCurrentStepAdmission program sourceModule
-      targetModule hosts externals where
-  code := by
-    intro context functionCode sourceFunction spec labels entryRuntime
-      sourceRuntime entryStore targetStore entryWitness witness functionResult
-      callerExpectedResult facts remainingBytes sourceEnv sourceCode
-      targetLocals targetCode source sourceAfter target activeResult core
-      sourceStep
-    let validatedCore :
-        ConcreteStructuredValidatedCodeCoreRel program context sourceModule
-          sourceFunction externals labels entryRuntime entryStore entryWitness
-          functionResult callerExpectedResult facts remainingBytes sourceRuntime
-          sourceEnv sourceCode targetStore targetLocals targetCode witness source
-          target :=
-      ⟨core, laws.validation.code spec activeResult core⟩
-    exact validatedCore.admit_of_source_safe_step
-      (laws.sourceSafety.code spec activeResult core sourceStep) sourceStep
 
 /-- Dynamic finite-address-space safety for an admitted ordinary-code step.
 
@@ -242,10 +214,7 @@ structure ConcreteStructuredCurrentStepAddressSpaceSafety
     (externals : Fir.LeanIR.Impure.ExternalImpl) : Prop where
   code :
     ∀ {context : Fir.Wasm.Context}
-      {functionCode : Lean.Compiler.LCNF.Code .impure}
       {sourceFunction : Fir.Wasm.Function}
-      (spec : ConcreteSupportedFunction program context functionCode
-        sourceModule sourceFunction targetModule hosts)
       {labels : LabelContext}
       {entryRuntime sourceRuntime : Fir.LeanIR.Impure.RuntimeState}
       {entryStore targetStore : Wasm.Store Host}
@@ -269,6 +238,85 @@ structure ConcreteStructuredCurrentStepAddressSpaceSafety
         ConcreteStructuredCodeStepAdmission context sourceModule externals
             functionResult facts sourceRuntime sourceEnv requiredBytes sourceCode →
         requiredBytes ≤ remainingBytes
+
+/-- One source step preserves the recursively validated global relation.
+
+This is the provenance-correct form of compiler admission.  The active-code
+branch reads residual validation from `ConcreteStructuredValidatedCodeOutcome`
+itself, combines it with the source/phase safety law for the current node, and
+uses the independent finite-address-space premise only for the selected
+allocation cost.  Administrative call, cache, bind, and return states already
+carry their suspended validation and therefore require no fresh compiler
+certificate. -/
+theorem ConcreteStructuredCompilerAdmissionLaws.advanceValidatedGlobal
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : Fir.LeanIR.Impure.ExternalImpl}
+    (laws : ConcreteStructuredCompilerAdmissionLaws program sourceModule
+      targetModule hosts externals)
+    (finiteRuntimeSafety : ConcreteStructuredCurrentStepFiniteRuntimeSafety
+      program sourceModule targetModule hosts externals)
+    (addressSpaceSafety : ConcreteStructuredCurrentStepAddressSpaceSafety
+      program sourceModule targetModule hosts externals)
+    {source sourceAfter : Fir.LeanIR.Impure.MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeGlobalOutcome program
+      sourceModule targetModule hosts externals source target)
+    (sourceStep :
+      Fir.LeanIR.Impure.executeStep externals source = .next sourceAfter) :
+    ∃ targetCount targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetCount target targetAfter ∧
+        ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
+          targetModule hosts externals sourceAfter targetAfter ∧
+        (targetCount = 0 →
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source) := by
+  cases related with
+  | code activeResult related =>
+      have sourceSafe := laws.sourceSafety.code _ activeResult
+        related sourceStep
+      have finiteSafe := finiteRuntimeSafety.code _ activeResult related
+        sourceStep
+      obtain ⟨requiredBytes, admitted⟩ :=
+        related.core.admit_of_source_safe_step sourceSafe finiteSafe sourceStep
+      have budget := addressSpaceSafety.code related.core.core sourceStep
+        admitted
+      exact related.advance_of_admission activeResult admitted budget sourceStep
+  | directReady related =>
+      obtain ⟨targetAfter, targetPath, next⟩ :=
+        related.advance_enter_of_step sourceStep
+      exact ⟨1, targetAfter, targetPath, next, by omega⟩
+  | saturatedReady related =>
+      obtain ⟨targetCount, targetAfter, targetPath, targetPositive, next⟩ :=
+        related.advance_enter_of_step sourceStep
+      exact ⟨targetCount, targetAfter, targetPath, next, by omega⟩
+  | lazyReady related =>
+      cases related.path with
+      | hit sourceValue semanticFound =>
+          obtain ⟨physical, targetAfter, targetPath, next⟩ :=
+            related.advance_hit_of_step semanticFound sourceStep
+          exact ⟨4, targetAfter, targetPath, .externalBind next, by omega⟩
+      | miss calleeCode internal resultClassified notObject notTObject
+          semanticEmpty =>
+          obtain ⟨targetAfter, targetPath, next⟩ :=
+            related.advance_miss_of_step internal resultClassified notObject
+              notTObject semanticEmpty sourceStep
+          exact ⟨3, targetAfter, targetPath, next, by omega⟩
+  | externalReady related =>
+      obtain ⟨targetAfter, targetPath, next⟩ :=
+        related.advance_of_step sourceStep
+      exact ⟨1, targetAfter, targetPath, next, by omega⟩
+  | externalBind related =>
+      obtain ⟨targetAfter, targetPath, next⟩ :=
+        related.advance_of_step sourceStep
+      exact ⟨1, targetAfter, targetPath, next, by omega⟩
+  | returned related =>
+      obtain ⟨targetCount, targetAfter, targetPath, targetPositive, next⟩ :=
+        related.advance_of_step sourceStep
+      exact ⟨targetCount, targetAfter, targetPath, next, by omega⟩
 
 /-- Compatibility package for clients that already possess both independent
 laws.  The compiler-owned field cannot manufacture the execution-owned
@@ -312,7 +360,7 @@ theorem ConcreteStructuredCompilerCurrentStepCoverage.code
   obtain ⟨requiredBytes, admitted⟩ :=
     coverage.admission.code spec activeResult core sourceStep
   exact ⟨requiredBytes, admitted,
-    coverage.addressSpaceSafety.code spec core sourceStep admitted⟩
+    coverage.addressSpaceSafety.code core sourceStep admitted⟩
 
 /-- Source-local closure of the strong compiler relation.
 
@@ -368,7 +416,7 @@ theorem ConcreteStructuredCompilerCurrentStepAdmission.toCurrentStepClassifier
         obtain ⟨requiredBytes, admitted⟩ :=
           admission.code spec activeResult core sourceStep
         have budget :=
-          addressSpaceSafety.code spec core sourceStep admitted
+          addressSpaceSafety.code core sourceStep admitted
         apply ConcreteStructuredRunnableOutcome.toRunnableGlobal
           (functionCode := functionCode) (spec := spec)
           (activeResult := activeResult)
@@ -466,6 +514,37 @@ theorem ConcreteStructuredCurrentStepClassifier.toFiniteTraceCorrect
       sourceInitial targetInitial :=
   ⟨classifier.toGeneratedTraceSimulation, initial⟩
 
+/-- The provenance-preserving compiler simulation.
+
+Its relation contains the residual validator state at the active node and in
+every suspended frame.  Validation is therefore established once at the
+generated export root and transported by the one-step proof; it is not
+reconstructed by a universal law over arbitrary admission-free code cores. -/
+def ConcreteStructuredCompilerAdmissionLaws.toValidatedGeneratedTraceSimulation
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : Fir.LeanIR.Impure.ExternalImpl}
+    (laws : ConcreteStructuredCompilerAdmissionLaws program sourceModule
+      targetModule hosts externals)
+    (finiteRuntimeSafety : ConcreteStructuredCurrentStepFiniteRuntimeSafety
+      program sourceModule targetModule hosts externals)
+    (addressSpaceSafety : ConcreteStructuredCurrentStepAddressSpaceSafety
+      program sourceModule targetModule hosts externals) :
+    ConcreteGeneratedTraceSimulation externals targetModule.wasmModule
+      hosts.env where
+  relation := ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
+    targetModule hosts externals
+  rank := compilerStructuredControlRank
+  observes := by
+    intro sourceState targetState related
+    exact related.toSupportedGlobal.observes
+  advance := by
+    intro sourceBefore sourceAfter targetBefore related sourceStep
+    exact laws.advanceValidatedGlobal finiteRuntimeSafety addressSpaceSafety
+      related sourceStep
+
 /-- The orthogonal admission and address-space laws directly construct the
 ranked generated trace simulation; callers never supply the intermediate
 global classifier. -/
@@ -518,9 +597,12 @@ theorem ConcreteStructuredCompilerCurrentStepAdmission.toFiniteTraceCorrect
   (admission.toCurrentStepClassifier addressSpaceSafety).toFiniteTraceCorrect
     initial
 
-/-- Production validation/source laws plus the independent finite-memory law
-imply finite-prefix correctness.  This is the direct theorem route for the
-factored, certificate-free admission proof. -/
+/-- Production source laws plus the independent finite-memory law preserve a
+root-validated compiler relation and imply finite-prefix correctness.
+
+The initial relation contains the production validator state.  The simulation
+then transports that state inductively, so no universal residual-validation
+premise is needed at later source nodes. -/
 theorem ConcreteStructuredCompilerAdmissionLaws.toFiniteTraceCorrect
     {program : Fir.LeanIR.ImpureProgram}
     {sourceModule : Fir.Wasm.Module}
@@ -529,16 +611,20 @@ theorem ConcreteStructuredCompilerAdmissionLaws.toFiniteTraceCorrect
     {externals : Fir.LeanIR.Impure.ExternalImpl}
     (laws : ConcreteStructuredCompilerAdmissionLaws program sourceModule
       targetModule hosts externals)
+    (finiteRuntimeSafety : ConcreteStructuredCurrentStepFiniteRuntimeSafety
+      program sourceModule targetModule hosts externals)
     (addressSpaceSafety : ConcreteStructuredCurrentStepAddressSpaceSafety program
       sourceModule targetModule hosts externals)
     {sourceInitial : Fir.LeanIR.Impure.MachineState}
     {targetInitial : StructuredWasmState Host}
-    (initial : ConcreteStructuredSupportedGlobalOutcome program sourceModule
+    (initial : ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
       targetModule hosts externals sourceInitial targetInitial) :
     ConcreteFiniteTraceCorrect externals
       (concreteStructuredWasmMachine targetModule.wasmModule hosts.env)
       sourceInitial targetInitial :=
-  laws.toCurrentStepAdmission.toFiniteTraceCorrect addressSpaceSafety initial
+  ⟨laws.toValidatedGeneratedTraceSimulation finiteRuntimeSafety
+      addressSpaceSafety,
+    initial⟩
 
 /-- Combined current-node coverage and the admission-free compiler root imply
 finite-prefix correctness of the concrete structured Wasm machine. -/
@@ -648,9 +734,9 @@ theorem ConcreteSupportedExport.finiteTraceCorrect_of_currentStepAdmission
   admission.toFiniteTraceCorrect addressSpaceSafety
     (spec.supportedGlobalRoot contextCaches invariant)
 
-/-- Export-facing form of the factored production proof route.  Callers see
-universal compiler/phase laws and the honest finite-memory premise, never a
-per-step translation or execution certificate. -/
+/-- Export-facing form of the provenance-preserving production proof route.
+The compiler establishes validation once at the real export root, while the
+simulation carries it through every active and suspended continuation. -/
 theorem ConcreteSupportedExport.finiteTraceCorrect_of_admissionLaws
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
@@ -665,6 +751,8 @@ theorem ConcreteSupportedExport.finiteTraceCorrect_of_admissionLaws
     {externals : Fir.LeanIR.Impure.ExternalImpl}
     (laws : ConcreteStructuredCompilerAdmissionLaws program sourceModule
       targetModule hosts externals)
+    (finiteRuntimeSafety : ConcreteStructuredCurrentStepFiniteRuntimeSafety
+      program sourceModule targetModule hosts externals)
     (addressSpaceSafety : ConcreteStructuredCurrentStepAddressSpaceSafety program
       sourceModule targetModule hosts externals)
     (contextCaches :
@@ -685,7 +773,7 @@ theorem ConcreteSupportedExport.finiteTraceCorrect_of_admissionLaws
       (sourceCodeState context sourceRuntime sourceEnv sourceCode)
       (concreteStructuredFunctionEntry spec.targetFunction initial
         parameters) :=
-  laws.toFiniteTraceCorrect addressSpaceSafety
-    (spec.supportedGlobalRoot contextCaches invariant)
+  laws.toFiniteTraceCorrect finiteRuntimeSafety addressSpaceSafety
+    (spec.validatedCodeGlobalRoot contextCaches invariant)
 
 end FirTalos.Concrete

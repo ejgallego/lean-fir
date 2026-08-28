@@ -5832,8 +5832,8 @@ correctness becomes a corollary; a backward simulation is deliberately later.
 | W6.7b instruction-boundary Talos adequacy | complete | finite residual-instruction paths agree with Talos `exec` above one common fuel bound and recover exact `Wasm.run` exits |
 | W6.7c emitted structured target | complete | frame laws plus the explicit label/loop/call stack expose progress through calls, branches, loops, returns, and halting |
 | W6.7d structured terminal adequacy | complete | every reachable canonical-entry-to-halted path collapses to the exact instruction-boundary/Talos run; stack shape and arities are proved, not assumed at the public boundary |
-| W6.7e compiler relation and rank | in progress; the branch-complete strong one-step dispatcher closes direct values, pure-external request/import/bind, generated named/saturated call staging and entry, direct/saturated return-pop, lazy-cache hit/miss/publication, erased default-only cases, arbitrary normalized object-constructor and scalar-`UInt8` case tables, ownership/delete, tag mutation, and FVar/erased object, `USize`, and packed-scalar field mutation; residual validator state is retained across active and suspended code, and one common source-safety theorem now constructs admission for the admitted primitive family | prove the universal residual-validation and source-safety laws from final-LCNF phase invariants; integrate join/jump after separating root and active extended contexts; newly reached code receives only fresh local admission, never future execution evidence |
-| W6.7f public finite-trace theorem | in progress; `ConcreteStructuredCompilerAdmissionLaws` now factors certificate-free compiler admission into residual validation plus source/phase safety and feeds `ConcreteSupportedExport.finiteTraceCorrect_of_admissionLaws`; compiler admission and finite wasm32 address-space safety remain independent | discharge the two universal compiler/phase laws, then discharge address-space safety from a resource-safe invariant or explicitly budgeted finite source prefix |
+| W6.7e compiler relation and rank | in progress; the constructor-complete validated dispatcher closes ordinary code plus direct/saturated calls, lazy cache, external bind, and returned-frame states; residual validator state is rooted once and retained across active and suspended code, while one common primitive theorem constructs admission from that state, source/phase safety, and a separately stated finite-runtime premise | derive the remaining source/phase safety law from a preserved final-LCNF semantic invariant; newly reached code receives only fresh local admission, never future execution evidence |
+| W6.7f public finite-trace theorem | in progress; `ConcreteSupportedExport.finiteTraceCorrect_of_admissionLaws` now constructs a ranked simulation over `ConcreteStructuredValidatedCodeGlobalOutcome`; the former universal residual-validation field has been eliminated, and finite header/capture safety is separate from compiler source safety and allocation headroom | prove the preserved source semantic invariant, then discharge finite-runtime and wasm32 address-space safety from a resource-safe invariant or explicitly budgeted finite source prefix |
 | W6.7g corollaries | pending | finite whole-export correctness follows from W6.7d/f; infinite source progress and trace preservation follow from W6.7e/f; backward weak simulation remains explicitly deferred |
 
 W6.7e initially follows the same admitted production fragment as
@@ -6168,11 +6168,14 @@ ordinary code resumes. Int, Nat, and scalar results share this path; no whole
 external execution or target certificate is stored in the relation.
 Fresh admission for successor code is attached after that dynamic state is
 known rather than stored as a recursive certificate.
-The two current-step obligations now have distinct theorem types.
+The current-step obligations now have distinct theorem types.
 `ConcreteStructuredCompilerCurrentStepAdmission` recovers only the current
 ordinary node's source/compiler admission and exact allocation cost;
 `ConcreteStructuredCurrentStepAddressSpaceSafety` separately states that the
-selected cost fits the retained wasm32 budget. Their composition derives the
+selected cost fits the retained wasm32 budget. The provenance-preserving route
+also exposes `ConcreteStructuredCurrentStepFiniteRuntimeSafety` for finite
+reference-count headers and saturated-closure capture retention. Their
+composition derives the
 global classifier by structural inversion, and the preferred export theorem
 `ConcreteSupportedExport.finiteTraceCorrect_of_currentStepAdmission` exposes
 both hypotheses rather than hiding the resource law in a compiler-named
@@ -6180,7 +6183,7 @@ package. The compatibility `ConcreteStructuredCompilerCurrentStepCoverage`
 is only a pair of those independent laws. All simulation wrappers remain free
 of target paths and future execution evidence. The root relation is constructed
 at the actual source/structured-Wasm entries by
-`ConcreteSupportedExport.supportedGlobalRoot`. The supported function package
+`ConcreteSupportedExport.validatedCodeGlobalRoot`. The supported function package
 now retains `sourceFunction.results[0]?`, and the strong and runnable global
 relations require that exact lane to equal the active result ABI. Generated
 direct, saturated, and lazy calls derive the callee equality from production
@@ -6190,9 +6193,8 @@ cannot manufacture the resource field. A valid
 budget can be weakened to zero, while supported allocating source steps have
 positive cost, and an indefinitely allocating source cannot be simulated
 forever by a fixed wasm32 address space. The next slices therefore (1) prove
-the residual-validation and source-safety fields of
-`ConcreteStructuredCompilerAdmissionLaws` from final-LCNF phase invariants and
-(2) select an honest
+the remaining source-safety field of `ConcreteStructuredCompilerAdmissionLaws`
+from a preserved final-LCNF semantic invariant and (2) select an honest
 resource-safe whole-simulation or explicitly budgeted finite-prefix theorem.
 `FIR-BUG-wasm-none-finite-trace-address-space-safety` records the remaining
 resource boundary; `FIR-BUG-wasm-none-structured-active-result-index` is fixed.
@@ -6213,11 +6215,15 @@ field mutation. `ConcreteStructuredSourceAdmissionSafeAt` contains only the
 source/phase facts the validator cannot derive, and
 `admit_of_source_safe_step` constructs the exact local admission and cost.
 `ConcreteStructuredCompilerAdmissionLaws` lifts this common primitive theorem
-to the universal compiler law and public finite-trace route. The return
+to the remaining source/phase law and public finite-trace route. Residual
+validation is no longer a universal law over arbitrary compiler cores: the
+validated global relation transports it inductively from the real export
+root. Finite increment headroom and saturated-capture capacity likewise no
+longer masquerade as source typing; they are consumed through the independent
+finite-runtime safety law. The return
 carrier-direction bug is fixed by combining production `leanCompatible` with
-semantic value-shape typing. The remaining validation-provenance work is the
-universal phase proof, including root-versus-active join context separation,
-tracked by `FIR-BUG-wasm-none-structured-validation-provenance`.
+semantic value-shape typing. The remaining static work is the source semantic
+invariant needed for return, descriptor, case, and operation-domain safety.
 
 W6.6 float packed-field admission closes the semantic-to-concrete gap for
 `Float32` and `Float` projection and mutation. `ValueRel` now relates the
