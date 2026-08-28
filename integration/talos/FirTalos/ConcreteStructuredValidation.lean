@@ -1812,6 +1812,356 @@ inductive ConcreteStructuredValidatedCodeGlobalOutcome
       ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
         targetModule hosts externals source target
 
+/-- Witness-indexed form of the closed validated global relation.
+
+The original relation is `Prop`-valued and therefore cannot expose the
+refinement witness hidden by its constructors. This companion keeps that ghost
+witness as an explicit index while reusing the same seven validated outcome
+structures. It is the uniform boundary required to state constructor-schema
+agreement without computing data from proof evidence. -/
+inductive ConcreteStructuredValidatedCodeGlobalOutcomeAt
+    (program : Fir.LeanIR.ImpureProgram)
+    (sourceModule : Fir.Wasm.Module)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (externals : ExternalImpl)
+    (witness : RefinementWitness) :
+    MachineState → StructuredWasmState Host → Prop where
+  | code
+      {context : Fir.Wasm.Context}
+      {functionCode : Lean.Compiler.LCNF.Code .impure}
+      {sourceFunction : Fir.Wasm.Function}
+      {spec : ConcreteSupportedFunction program context functionCode
+        sourceModule sourceFunction targetModule hosts}
+      {labels : LabelContext}
+      {entryRuntime sourceRuntime : RuntimeState}
+      {entryStore targetStore : Wasm.Store Host}
+      {entryWitness : RefinementWitness}
+      {functionResult : AbiKind}
+      {callerExpectedResult : Option AbiKind}
+      {facts : ReuseCapacityFacts}
+      {remainingBytes : Nat}
+      {sourceEnv : Env}
+      {sourceCode : Lean.Compiler.LCNF.Code .impure}
+      {targetLocals : Wasm.Locals}
+      {targetCode : Wasm.Program}
+      {source : MachineState}
+      {target : StructuredWasmState Host}
+      (activeResult : spec.sourceResultKind = functionResult)
+      (related : ConcreteStructuredValidatedCodeOutcome program context
+        functionCode sourceModule sourceFunction targetModule hosts spec
+        externals labels entryRuntime entryStore entryWitness functionResult
+        callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+        sourceCode targetStore targetLocals targetCode witness source target) :
+      ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+        targetModule hosts externals witness source target
+  | directReady
+      {callerContext calleeContext : Fir.Wasm.Context}
+      {callerCode : Lean.Compiler.LCNF.Code .impure}
+      {callerFunction calleeFunction : Fir.Wasm.Function}
+      {spec : ConcreteSupportedFunction program callerContext callerCode
+        sourceModule callerFunction targetModule hosts}
+      {decl : Lean.Compiler.LCNF.LetDecl .impure}
+      {callerEnv : Env}
+      {site : DirectInternalCallSite callerContext decl callerEnv}
+      {row : ConcreteGeneratedInternalDeclaration callerContext.program
+        site.sourceDeclaration calleeContext site.calleeCode sourceModule
+        calleeFunction targetModule}
+      {labels : LabelContext}
+      {entryRuntime sourceRuntime : RuntimeState}
+      {entryStore targetStore : Wasm.Store Host}
+      {entryWitness : RefinementWitness}
+      {functionResult : AbiKind}
+      {callerExpectedResult : Option AbiKind}
+      {facts : ReuseCapacityFacts}
+      {remainingBytes : Nat}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      {callerJoins : JoinEnv}
+      {sourceFrames : List Frame}
+      {callerLocals : Wasm.Locals}
+      {callerRemainder : List Wasm.Value}
+      {targetRest : Wasm.Program}
+      {targetFrames : List StructuredWasmFrame}
+      {physicalArgs : List Wasm.Value}
+      {resultIndex : Nat}
+      {source : MachineState}
+      {target : StructuredWasmState Host}
+      (related : ConcreteStructuredValidatedDirectCallReadyOutcome program
+        callerContext calleeContext callerCode sourceModule callerFunction
+        calleeFunction targetModule hosts spec site row externals labels
+        entryRuntime entryStore entryWitness functionResult
+        callerExpectedResult facts remainingBytes sourceRuntime continuation
+        callerJoins sourceFrames targetStore callerLocals callerRemainder
+        targetRest targetFrames witness physicalArgs resultIndex source target) :
+      ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+        targetModule hosts externals witness source target
+  | saturatedReady
+      {context calleeContext : Fir.Wasm.Context}
+      {callerCode : Lean.Compiler.LCNF.Code .impure}
+      {sourceFunction calleeFunction : Fir.Wasm.Function}
+      {spec : ConcreteSupportedFunction program context callerCode sourceModule
+        sourceFunction targetModule hosts}
+      {decl : Lean.Compiler.LCNF.LetDecl .impure}
+      {callerEnv : Env}
+      {site : SaturatedClosureCallSite context decl callerEnv}
+      {sourceRuntime : RuntimeState}
+      {resolution : SaturatedClosureCallResolution context sourceRuntime site}
+      {row : ConcreteGeneratedInternalDeclaration context.program
+        resolution.target calleeContext resolution.calleeCode sourceModule
+        calleeFunction targetModule}
+      {labels : LabelContext}
+      {entryRuntime : RuntimeState}
+      {entryStore targetStore : Wasm.Store Host}
+      {entryWitness : RefinementWitness}
+      {functionResult : AbiKind}
+      {callerExpectedResult : Option AbiKind}
+      {facts : ReuseCapacityFacts}
+      {remainingBytes : Nat}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      {callerJoins : JoinEnv}
+      {sourceFrames : List Frame}
+      {callerLocals : Wasm.Locals}
+      {targetValue targetRest : Wasm.Program}
+      {targetFrames : List StructuredWasmFrame}
+      {resultIndex : Nat}
+      {source : MachineState}
+      {target : StructuredWasmState Host}
+      (related : ConcreteStructuredValidatedSaturatedCallReadyOutcome program
+        context calleeContext callerCode sourceModule sourceFunction
+        calleeFunction targetModule hosts spec site resolution row externals
+        labels entryRuntime entryStore entryWitness functionResult
+        callerExpectedResult facts remainingBytes continuation callerJoins
+        sourceFrames targetStore callerLocals targetValue targetRest targetFrames
+        witness resultIndex source target) :
+      ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+        targetModule hosts externals witness source target
+  | lazyReady
+      {context : Fir.Wasm.Context}
+      {functionCode : Lean.Compiler.LCNF.Code .impure}
+      {sourceFunction : Fir.Wasm.Function}
+      {spec : ConcreteSupportedFunction program context functionCode
+        sourceModule sourceFunction targetModule hosts}
+      {decl : Lean.Compiler.LCNF.LetDecl .impure}
+      {declaration : Lean.Name}
+      {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
+      {resultKind : AbiKind}
+      {call : LazyCacheCallSupported context decl declaration
+        sourceDeclaration resultKind}
+      {generated : LazyCacheGeneratedEnvironment context sourceModule}
+      {labels : LabelContext}
+      {entryRuntime sourceRuntime : RuntimeState}
+      {entryStore targetStore : Wasm.Store Host}
+      {entryWitness : RefinementWitness}
+      {functionResult : AbiKind}
+      {callerExpectedResult : Option AbiKind}
+      {facts : ReuseCapacityFacts}
+      {remainingBytes : Nat}
+      {callerEnv : Env}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      {callerJoins : JoinEnv}
+      {sourceFrames : List Frame}
+      {callerLocals : Wasm.Locals}
+      {targetRest : Wasm.Program}
+      {targetFrames : List StructuredWasmFrame}
+      {cacheIndex declarationId cacheSetId resultIndex : Nat}
+      {source : MachineState}
+      {target : StructuredWasmState Host}
+      (related : ConcreteStructuredValidatedLazyCallReadyOutcome program
+        context functionCode sourceModule sourceFunction targetModule hosts spec
+        call generated externals labels entryRuntime entryStore entryWitness
+        functionResult callerExpectedResult facts remainingBytes sourceRuntime
+        callerEnv continuation callerJoins sourceFrames targetStore callerLocals
+        targetRest targetFrames witness cacheIndex declarationId cacheSetId
+        resultIndex source target) :
+      ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+        targetModule hosts externals witness source target
+  | externalReady
+      {context : Fir.Wasm.Context}
+      {functionCode : Lean.Compiler.LCNF.Code .impure}
+      {sourceFunction : Fir.Wasm.Function}
+      {spec : ConcreteSupportedFunction program context functionCode
+        sourceModule sourceFunction targetModule hosts}
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {sourceValue : Value}
+      {stepCost : Nat}
+      {decl : Lean.Compiler.LCNF.LetDecl .impure}
+      {site : PureExternalCallShape context externals sourceRuntime sourceEnv
+        decl nextRuntime sourceValue stepCost}
+      {operation : ExternalOperation}
+      {resolvedResultKind : AbiKind}
+      {targetImport : Wasm.ImportDecl}
+      {labels : LabelContext}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      {callerJoins : JoinEnv}
+      {sourceFrames : List Frame}
+      {entryRuntime : RuntimeState}
+      {entryStore targetStore : Wasm.Store Host}
+      {entryWitness : RefinementWitness}
+      {functionResult : AbiKind}
+      {callerExpectedResult : Option AbiKind}
+      {facts : ReuseCapacityFacts}
+      {remainingBytes : Nat}
+      {callerLocals : Wasm.Locals}
+      {callerRemainder : List Wasm.Value}
+      {targetRest : Wasm.Program}
+      {targetFrames : List StructuredWasmFrame}
+      {physicalArgs : List Wasm.Value}
+      {callIndex resultIndex : Nat}
+      {source : MachineState}
+      {target : StructuredWasmState Host}
+      (related : ConcreteStructuredValidatedExternalCallReadyOutcome program
+        context functionCode sourceModule sourceFunction targetModule hosts spec
+        externals site operation resolvedResultKind targetImport labels
+        continuation callerJoins sourceFrames entryRuntime entryStore
+        entryWitness functionResult callerExpectedResult facts remainingBytes
+        targetStore callerLocals callerRemainder targetRest targetFrames witness
+        physicalArgs callIndex resultIndex source target) :
+      ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+        targetModule hosts externals witness source target
+  | externalBind
+      {context : Fir.Wasm.Context}
+      {functionCode : Lean.Compiler.LCNF.Code .impure}
+      {sourceFunction : Fir.Wasm.Function}
+      {spec : ConcreteSupportedFunction program context functionCode
+        sourceModule sourceFunction targetModule hosts}
+      {labels : LabelContext}
+      {entryRuntime sourceRuntime : RuntimeState}
+      {entryStore targetStore : Wasm.Store Host}
+      {entryWitness : RefinementWitness}
+      {functionResult : AbiKind}
+      {callerExpectedResult : Option AbiKind}
+      {facts : ReuseCapacityFacts}
+      {remainingBytes : Nat}
+      {callerEnv : Env}
+      {sourceValue : Value}
+      {result : Lean.FVarId}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      {callerJoins : JoinEnv}
+      {sourceFrames : List Frame}
+      {callerLocals : Wasm.Locals}
+      {callerRemainder : List Wasm.Value}
+      {targetRest : Wasm.Program}
+      {targetFrames : List StructuredWasmFrame}
+      {kind : AbiKind}
+      {physical : Wasm.Value}
+      {resultIndex : Nat}
+      {source : MachineState}
+      {target : StructuredWasmState Host}
+      (related : ConcreteStructuredValidatedExternalBindOutcome program context
+        functionCode sourceModule sourceFunction targetModule hosts spec
+        externals labels entryRuntime entryStore entryWitness functionResult
+        callerExpectedResult facts remainingBytes sourceRuntime callerEnv
+        sourceValue result continuation callerJoins sourceFrames targetStore
+        callerLocals callerRemainder targetRest targetFrames witness kind
+        physical resultIndex source target) :
+      ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+        targetModule hosts externals witness source target
+  | returned
+      {context : Fir.Wasm.Context}
+      {functionCode : Lean.Compiler.LCNF.Code .impure}
+      {sourceFunction : Fir.Wasm.Function}
+      {spec : ConcreteSupportedFunction program context functionCode
+        sourceModule sourceFunction targetModule hosts}
+      {labels : LabelContext}
+      {entryRuntime sourceRuntime : RuntimeState}
+      {entryStore targetStore : Wasm.Store Host}
+      {entryWitness : RefinementWitness}
+      {functionResult : AbiKind}
+      {callerExpectedResult : Option AbiKind}
+      {facts : ReuseCapacityFacts}
+      {remainingBytes : Nat}
+      {sourceEnv : Env}
+      {sourceValue : Value}
+      {targetLocals : Wasm.Locals}
+      {kind : AbiKind}
+      {physical : Wasm.Value}
+      {source : MachineState}
+      {target : StructuredWasmState Host}
+      (related : ConcreteStructuredValidatedReturnedOutcome program context
+        functionCode sourceModule sourceFunction targetModule hosts spec
+        externals labels entryRuntime entryStore entryWitness functionResult
+        callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+        sourceValue targetStore targetLocals witness kind physical source
+        target) :
+      ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+        targetModule hosts externals witness source target
+
+
+/-- Forget the explicit witness index without changing the validated outcome. -/
+theorem ConcreteStructuredValidatedCodeGlobalOutcomeAt.toValidatedGlobal
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : ExternalImpl}
+    {witness : RefinementWitness}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeGlobalOutcomeAt program
+      sourceModule targetModule hosts externals witness source target) :
+    ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
+      targetModule hosts externals source target := by
+  cases related with
+  | code activeResult related => exact .code activeResult related
+  | directReady related => exact .directReady related
+  | saturatedReady related => exact .saturatedReady related
+  | lazyReady related => exact .lazyReady related
+  | externalReady related => exact .externalReady related
+  | externalBind related => exact .externalBind related
+  | returned related => exact .returned related
+
+/-- Closed validated execution with one existential constructor schema and an
+explicitly indexed active witness. Both are ghost proof state. -/
+def ConcreteStructuredSchemaValidatedCodeGlobalOutcome
+    (program : Fir.LeanIR.ImpureProgram)
+    (sourceModule : Fir.Wasm.Module)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (externals : ExternalImpl)
+    (source : MachineState)
+    (target : StructuredWasmState Host) : Prop :=
+  ∃ (schema : ConstructorSchema) (witness : RefinementWitness),
+    schema.WitnessAgrees witness ∧
+      ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+        targetModule hosts externals witness source target
+
+/-- Any witness-indexed successor with unchanged witness inherits the current
+schema agreement directly. -/
+theorem ConcreteStructuredValidatedCodeGlobalOutcomeAt.withSchema
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : ExternalImpl}
+    {schema : ConstructorSchema}
+    {witness : RefinementWitness}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeGlobalOutcomeAt program
+      sourceModule targetModule hosts externals witness source target)
+    (agrees : schema.WitnessAgrees witness) :
+    ConcreteStructuredSchemaValidatedCodeGlobalOutcome program sourceModule
+      targetModule hosts externals source target :=
+  ⟨schema, witness, agrees, related⟩
+
+/-- Erase the constructor-schema ghost layer back to the established global
+validated relation. -/
+theorem ConcreteStructuredSchemaValidatedCodeGlobalOutcome.toValidatedGlobal
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : ExternalImpl}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredSchemaValidatedCodeGlobalOutcome program
+      sourceModule targetModule hosts externals source target) :
+    ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
+      targetModule hosts externals source target := by
+  obtain ⟨schema, witness, agrees, indexed⟩ := related
+  exact indexed.toValidatedGlobal
+
 /-- Forget only the residual source-validation evidence.  The closed code
 branch projects to the established recursively stable supported relation
 without changing either machine state or any dynamic resource proof. -/
@@ -10717,5 +11067,114 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_of_schema_admission
         related.advance_objectFieldErased_of_schema_step schemaAgrees fieldTyped
           sourceStep
       exact ⟨3, targetAfter, targetPath, .code activeResult next, by omega⟩
+
+/-- FVar object-field mutation preserves the schema-enriched global relation
+because its concrete successor keeps the active witness unchanged. -/
+theorem
+    ConcreteStructuredValidatedCodeOutcome.advance_objectFieldFVarSchemaGlobal_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {objectId fieldId : Lean.FVarId}
+    {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    {schema : ConstructorSchema}
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.oset objectId index (.fvar fieldId) continuation) targetStore
+      targetLocals targetCode witness source target)
+    (schemaAgrees : schema.WitnessAgrees witness)
+    (fieldTyped : schema.ObjectFieldFVarTyped context sourceEnv objectId
+      fieldId index)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        ConcreteStructuredSchemaValidatedCodeGlobalOutcome program sourceModule
+          targetModule hosts externals sourceAfter targetAfter := by
+  obtain ⟨resultRuntime, targetAfter, nextStore, nextTargetCode, targetPath,
+      next⟩ :=
+    related.advance_objectFieldFVar_of_schema_step schemaAgrees fieldTyped
+      sourceStep
+  refine ⟨targetAfter, targetPath, ?_⟩
+  exact (ConcreteStructuredValidatedCodeGlobalOutcomeAt.code activeResult next)
+    |>.withSchema schemaAgrees
+
+/-- Erased object-field mutation preserves the same schema-enriched global
+relation and its active witness index. -/
+theorem
+    ConcreteStructuredValidatedCodeOutcome.advance_objectFieldErasedSchemaGlobal_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    {schema : ConstructorSchema}
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.oset objectId index .erased continuation) targetStore targetLocals
+      targetCode witness source target)
+    (schemaAgrees : schema.WitnessAgrees witness)
+    (fieldTyped : schema.ObjectFieldKindAt sourceEnv objectId index .erased)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        ConcreteStructuredSchemaValidatedCodeGlobalOutcome program sourceModule
+          targetModule hosts externals sourceAfter targetAfter := by
+  obtain ⟨resultRuntime, targetAfter, nextStore, nextTargetCode, targetPath,
+      next⟩ :=
+    related.advance_objectFieldErased_of_schema_step schemaAgrees fieldTyped
+      sourceStep
+  refine ⟨targetAfter, targetPath, ?_⟩
+  exact (ConcreteStructuredValidatedCodeGlobalOutcomeAt.code activeResult next)
+    |>.withSchema schemaAgrees
 
 end FirTalos.Concrete

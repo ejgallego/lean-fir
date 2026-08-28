@@ -6294,6 +6294,19 @@ to retain schema/witness agreement in every validated administrative outcome
 and preserve or update it across allocation, reuse, call, cache, bind, and
 return transitions.
 
+The global agreement carrier now has its final proof-theoretic shape. Because
+the established validated global relation is `Prop`-valued, Lean's proof
+irrelevance correctly prevents projecting the hidden witness as data. The new
+`ConcreteStructuredValidatedCodeGlobalOutcomeAt` therefore mirrors its seven
+validated constructors with the active witness as an explicit ghost index.
+`ConcreteStructuredSchemaValidatedCodeGlobalOutcome` existentially pairs that
+index with a constructor schema and `WitnessAgrees`, and erases back to the
+established relation. A generic `withSchema` constructor preserves agreement
+for any successor at the same witness; the FVar and erased field successors
+now use it. Next, witness-unchanged call/cache/bind/return transitions are
+lifted to this indexed relation, followed by witness-extension and constructor
+bind/rebind transitions for allocation and reuse.
+
 W6.6 float packed-field admission closes the semantic-to-concrete gap for
 `Float32` and `Float` projection and mutation. `ValueRel` now relates the
 shared raw-bit semantic constructors directly to `.float32Bits` and

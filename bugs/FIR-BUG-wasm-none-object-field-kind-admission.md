@@ -103,6 +103,14 @@ successors without the universal premise. The bug remains open because the
 module-global validated relation does not yet retain and preserve the evolving
 schema/agreement pair across its administrative and allocation transitions.
 
+The module-global carrier is now explicit and sound under proof irrelevance:
+the active witness is an index of
+`ConcreteStructuredValidatedCodeGlobalOutcomeAt`, not data projected from the
+old `Prop` proof. The schema-enriched relation existentially retains this index
+and agreement, erases to the old validated relation, and is preserved by both
+object-field successors. Remaining work is preservation across the other
+administrative and witness-changing transitions; the card stays open.
+
 ## Semantic impact
 
 The mismatch is ownership-relevant. If a descriptor classifies a slot erased
