@@ -534,10 +534,11 @@ theorem NaturalValidatorAdmission.topWords
             Except.ok.injEq] at limbRead
           have lowEq : low = limb.toUInt32 := by
             rw [← limbRead]
-            bv_decide
+            exact (LinearMemory.assembledUInt64_toUInt32 low high).symm
           have highEq : high = (limb >>> (32 : UInt64)).toUInt32 := by
             rw [← limbRead]
-            bv_decide
+            exact
+              (LinearMemory.assembledUInt64_shiftRight_toUInt32 low high).symm
           refine ⟨low, high, ?_, ?_, ?_, ?_⟩
           · simpa [target] using lowRead
           · simpa [target] using highRead
@@ -3198,7 +3199,7 @@ theorem readNaturalLimbs_firstWords
                                 UInt64.ofNat low.toNat = limb := by
                           simp only [UInt64.ofNat_uInt32ToNat]
                           rw [← limbRead]
-                          bv_decide
+                          exact LinearMemory.assembleUInt64Words low high
                         rw [assembled, ← decoded]
                         simp [UInt64.size]
 
@@ -3221,7 +3222,7 @@ theorem NaturalObjectRel.firstWords
   have accepted :
       header.kind == ObjectKind.natural && header.aux0 == bigNaturalMarker := by
     rw [related.headerKind, related.marker]
-    decide
+    rfl
   have decodedLimbs :
       readNaturalLimbs heap.memory address.value 0 header.aux1.toNat =
         .ok value := by

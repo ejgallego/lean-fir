@@ -343,6 +343,26 @@ private theorem assembleUInt64 (value : UInt64) :
       (value >>> (32 : UInt64)).toUInt32.toUInt64 * 4294967296 = value := by
   bv_decide
 
+/-- Reassembling two wasm32 words by shifting and disjunction agrees with the
+arithmetic spelling used by `readUInt64`.  Keeping this pure bit identity at
+the memory boundary prevents clients from rerunning bit-vector reflection in
+heap-rich proof contexts. -/
+theorem assembleUInt64Words (low high : UInt32) :
+    (high.toUInt64 <<< (32 : UInt64)) ||| low.toUInt64 =
+      low.toUInt64 + high.toUInt64 * 4294967296 := by
+  bv_decide
+
+/-- The low wasm32 projection of an arithmetically assembled 64-bit word. -/
+theorem assembledUInt64_toUInt32 (low high : UInt32) :
+    (low.toUInt64 + high.toUInt64 * 4294967296).toUInt32 = low := by
+  bv_decide
+
+/-- The high wasm32 projection of an arithmetically assembled 64-bit word. -/
+theorem assembledUInt64_shiftRight_toUInt32 (low high : UInt32) :
+    ((low.toUInt64 + high.toUInt64 * 4294967296) >>>
+        (32 : UInt64)).toUInt32 = high := by
+  bv_decide
+
 /-- A successful 64-bit write is exactly two successful adjacent 32-bit
 writes. Exposing this middle state lets all 64-bit proofs reuse the checked
 32-bit write and frame rules. -/
@@ -399,6 +419,31 @@ theorem readUInt64_of_writeUInt64_eq_ok (memory result : LinearMemory)
     return value.toUInt32.toUInt64 + high.toUInt64 * 4294967296) = .ok value
   rw [highReadResult]
   exact congrArg Except.ok (assembleUInt64 value)
+
+/-- The two physical wasm32 words written by a checked 64-bit store can be
+read back independently. This is the useful boundary for layouts with fewer
+than eight meaningful payload bytes and canonical zero high padding. -/
+theorem readUInt32_pair_of_writeUInt64_eq_ok (memory result : LinearMemory)
+    (address : Nat) (value : UInt64) (inBounds : address + 7 < memory.size)
+    (written : writeUInt64 memory address value = .ok result) :
+    readUInt32 result address = .ok value.toUInt32 ∧
+      readUInt32 result (address + 4) =
+        .ok (value >>> (32 : UInt64)).toUInt32 := by
+  obtain ⟨middle, lowWrite, middleSize, highWrite⟩ :=
+    writeUInt64_decompose memory result address value inBounds written
+  have highInBounds : address + 4 + 3 < middle.size := by omega
+  have lowReadMiddle : readUInt32 middle address = .ok value.toUInt32 :=
+    readUInt32_of_writeUInt32_eq_ok memory middle address value.toUInt32
+      (by omega) lowWrite
+  constructor
+  · calc
+      readUInt32 result address = readUInt32 middle address :=
+        readUInt32_of_writeUInt32_eq_ok_other middle result (address + 4)
+          address (value >>> (32 : UInt64)).toUInt32 highInBounds highWrite
+          (by omega)
+      _ = .ok value.toUInt32 := lowReadMiddle
+  · exact readUInt32_of_writeUInt32_eq_ok middle result (address + 4)
+      (value >>> (32 : UInt64)).toUInt32 highInBounds highWrite
 
 /-- A successful 64-bit write preserves every byte outside its eight-byte
 extent. Fresh boxed allocations use this to frame the complete old heap
