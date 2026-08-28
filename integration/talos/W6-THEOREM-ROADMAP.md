@@ -1608,26 +1608,39 @@ acceptance tests pass.
      relation repair; `FIR-BUG-wasm-none-finite-trace-address-space-safety`
      records the remaining resource boundary. Later runtime families widen
      admission independently.
-     The admission proof now also has a compiler-owned validation root:
+     The admission proof has a compiler-owned validation root:
      `ConcreteSupportedFunction` retains the exact source declaration, body,
      and effective result selected by production lowering, while
      `validatedBodyAt` reconstructs the actual `WasmSupported` body judgment
-     at the active result kind. The admission law receives that already
-     retained active-result equality. The next invariant slice advances the
-     validator's local/join/case/sharing state with the structured code focus;
-     `FIR-BUG-wasm-none-structured-validation-provenance` tracks this remaining
-     proof-relation widening.
+     at the active result kind. The closed companion relation now retains the
+     residual local/join/case/sharing state at active code and across suspended
+     callers. `ConcreteStructuredSourceAdmissionSafeAt` isolates the remaining
+     source/phase facts—return shape, descriptor typing, case normalization,
+     refcount headroom, and current call/cache/external classification—without
+     a target path or future execution. The common theorem
+     `ConcreteStructuredValidatedCodeCoreRel.admit_of_source_safe_step`
+     combines those facts with residual validation and one successful source
+     step to construct exact local admission and allocation cost for every
+     currently admitted primitive family.
      The validator itself is now a terminating traversal rather than an opaque
      `partial def`; its case-list implementation is proved equivalent to the
      former `Array.all` acceptance test. `ConcreteStructuredValidationFocus`
      retains the exact residual join/local/case/sharing judgment, constructs
      the production root, and exposes checked transition laws for every
      supported continuation plus join and selected-case state changes. The
-     next slice attaches this focus to active and suspended structured
-     relations. Its return inversion also made one independent contract bug
-     precise: production accepts `leanCompatible`, while current admission
-     demands directional `refines`
-     (`FIR-BUG-wasm-none-return-admission-refinement-direction`).
+     return boundary now preserves production `leanCompatible` carrier
+     acceptance and separately requires `SemanticValueAtAbi`; this fixes
+     `FIR-BUG-wasm-none-return-admission-refinement-direction` without an
+     unsound object-family coercion.
+     `ConcreteStructuredCompilerAdmissionLaws` packages universal residual
+     validation and source safety, derives
+     `ConcreteStructuredCompilerCurrentStepAdmission`, and connects directly
+     to both `ConcreteFiniteTraceCorrect` and the export-facing theorem. The
+     next proof slice discharges those two universal laws from final-LCNF
+     compiler/phase invariants. Join/jump still requires separating the root
+     function context from the active extended join context;
+     `FIR-BUG-wasm-none-structured-validation-provenance` tracks that remaining
+     widening.
      Heap-valued cache misses and target-only loop unwinding remain later
      widenings.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
@@ -1652,10 +1665,12 @@ acceptance tests pass.
 
    Thus the reusable W6.7e-to-W6.7f packaging bridge, structural
    coverage-to-classifier derivation, and export-entry root construction are
-   complete as conditional components. The next proof-bearing construction
-   proves the now-separated compiler-admission law and then closes the selected
-   public finite-prefix resource-safety boundary. Operation coverage remains
-   an explicit admission widening rather
+   complete as conditional components. The production admission law is now
+   factored into residual-validation and source-safety obligations and already
+   feeds the public theorem surface. The next proof-bearing construction proves
+   those universal obligations from final-LCNF phase invariants, then closes
+   the selected public finite-prefix resource-safety boundary. Operation
+   coverage remains an explicit admission widening rather
    than a target certificate supplied by the public caller.
 
 ### Resident helpers and proof-indexed typed-Array admission

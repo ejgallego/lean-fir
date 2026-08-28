@@ -8743,6 +8743,35 @@ theorem ConcreteStructuredValidationFocus.return_eq
       refine ⟨actual, rfl, ?_⟩
       simpa [Fir.Wasm.supportedCodeWithJoins, actualFound] using supported
 
+/-- Residual production validation plus source value typing closes return
+admission at exactly the compiler's object-family calling boundary.
+
+The validator supplies `leanCompatible`; the semantic premise supplies the
+strict value-shape information needed when that compatibility runs opposite
+to `AbiKind.refines`.  Thus no arbitrary `.tobject` is reinterpreted as a
+heap-only `.object` or immediate-only `.tagged` value. -/
+theorem ConcreteStructuredAlignedValidationState.admit_return
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {externals : ExternalImpl}
+    {expectedResult : AbiKind}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {result : Lean.FVarId}
+    (validated : ConcreteStructuredAlignedValidationState program context
+      expectedResult (.return result))
+    (resultSemantic :
+      ∀ {sourceValue}, lookup sourceEnv result = some sourceValue →
+        SemanticValueAtAbi expectedResult sourceValue) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv 0 (.return result) := by
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, focus, agrees⟩ :=
+    validated
+  obtain ⟨actualResult, resultFound, resultCompatible⟩ := focus.return_eq
+  exact .ret (agrees resultFound) resultCompatible resultSemantic
+
 /-- A validated jump retains the selected join declaration, result
 compatibility, and the complete path-sensitive argument check. -/
 theorem ConcreteStructuredValidationFocus.jump_eq
@@ -9392,16 +9421,11 @@ structure ConcreteStructuredCaseSafeAt
 into the existing production case family.  In particular, compiler-local
 agreement and discriminator mode are derived here rather than stored in a
 per-step certificate. -/
-theorem ConcreteStructuredValidatedCodeOutcome.productionCasesSupported_of_caseSafe
+theorem ConcreteStructuredValidatedCodeCoreRel.productionCasesSupported_of_caseSafe
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
-    {functionCode : Lean.Compiler.LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {targetModule : AdaptedModule}
-    {hosts : ResolvedHosts}
-    {spec : ConcreteSupportedFunction program context functionCode sourceModule
-      sourceFunction targetModule hosts}
     {externals : ExternalImpl}
     {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
@@ -9417,18 +9441,18 @@ theorem ConcreteStructuredValidatedCodeOutcome.productionCasesSupported_of_caseS
     {targetCode : Wasm.Program}
     {source : MachineState}
     {target : StructuredWasmState Host}
-    (related : ConcreteStructuredValidatedCodeOutcome program context
-      functionCode sourceModule sourceFunction targetModule hosts spec externals
-      labels entryRuntime entryStore entryWitness functionResult
-      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
-      (.cases cases) targetStore targetLocals targetCode witness source target)
+    (related : ConcreteStructuredValidatedCodeCoreRel program context
+      sourceModule sourceFunction externals labels entryRuntime entryStore
+      entryWitness functionResult callerExpectedResult facts remainingBytes
+      sourceRuntime sourceEnv (.cases cases) targetStore targetLocals targetCode
+      witness source target)
     (sourceSafe : ConcreteStructuredCaseSafeAt context sourceRuntime sourceEnv
       cases) :
     ∀ {selected : Lean.Compiler.LCNF.Code .impure},
       ProductionCasesSupported context sourceRuntime sourceEnv cases selected := by
   intro selected
   obtain ⟨joins, locals, validatorFacts, sharing, validated, agrees⟩ :=
-    related.core.validation
+    related.validation
   obtain ⟨discrKind, mode, discrFound, modeFound, _resultKnown,
       _resultCompatible, alternatives⟩ := validated.cases_eq
   have discrCompiled := agrees discrFound
@@ -9462,6 +9486,45 @@ theorem ConcreteStructuredValidatedCodeOutcome.productionCasesSupported_of_caseS
     exact Or.inr (Or.inr ⟨
       sourceSafe.normalized.scalarSupported_of_validation alternatives,
       contextMode, scalarCompiled⟩)
+
+/-- Outcome-level spelling of the case admission bridge.  Suspended-frame
+validation is irrelevant to classifying the current case node, so the proof
+delegates to the residual validated code core. -/
+theorem ConcreteStructuredValidatedCodeOutcome.productionCasesSupported_of_caseSafe
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.cases cases) targetStore targetLocals targetCode witness source target)
+    (sourceSafe : ConcreteStructuredCaseSafeAt context sourceRuntime sourceEnv
+      cases) :
+    ∀ {selected : Lean.Compiler.LCNF.Code .impure},
+      ProductionCasesSupported context sourceRuntime sourceEnv cases selected :=
+  related.core.productionCasesSupported_of_caseSafe sourceSafe
 
 /-- One source case step satisfying the source-level case invariant has a
 finite concrete Wasm path and preserves the closed validated relation.
@@ -9537,5 +9600,270 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_cases_of_source_safe_step
         related.advance_scalarUInt8Cases_of_step scalarCases sourceStep
       exact ⟨4 * testCount, targetAfter, selected, selectedTarget,
         List.replicate testCount none ++ labels, targetPath, next, zeroRank⟩
+
+/-- Finite-header safety needed only by a nonpersistent reference-count
+increment.  This is a source runtime invariant; successful unbounded source
+execution alone does not imply that the updated count fits the wasm32 header.
+-/
+def ConcreteStructuredIncrementHeadroomAt
+    (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (objectId : Lean.FVarId) (amount : Nat) : Prop :=
+  ∀ (sourceObject : Value) (location : Location) (cell : HeapCell),
+    lookupValue sourceEnv objectId = .ok sourceObject →
+      sourceObject = .object (.heap location) →
+        findCell? sourceRuntime.heap location = some cell →
+          cell.rc + amount < UInt32.size
+
+/-- Source/compiler facts that make one residual validated code node
+admissible.
+
+This judgment is deliberately weaker than
+`ConcreteStructuredCodeStepAdmission`: it stores no compiled-local equation,
+semantic heap update, selected case arm, target path, refinement witness,
+allocation budget, successor admission, or termination evidence.  Residual
+production validation recovers compiler equations, and the successful source
+step recovers dynamic effects.  The remaining fields are exactly the phase
+typing and runtime-domain facts that those two inputs cannot manufacture. -/
+inductive ConcreteStructuredSourceAdmissionSafeAt
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (externals : ExternalImpl)
+    (expectedResult : AbiKind)
+    (facts : ReuseCapacityFacts)
+    (sourceRuntime : RuntimeState)
+    (sourceEnv : Env)
+    (source : MachineState) :
+    Lean.Compiler.LCNF.Code .impure → Prop where
+  | ret
+      {result : Lean.FVarId}
+      (safe : ConcreteStructuredReturnValueSafeAt expectedResult source) :
+      ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
+        expectedResult facts sourceRuntime sourceEnv source (.return result)
+  | directLet
+      {decl : Lean.Compiler.LCNF.LetDecl .impure}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      (supported : ReuseBudgetedDirectSupported context facts decl) :
+      ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
+        expectedResult facts sourceRuntime sourceEnv source
+        (.let decl continuation)
+  | pureExternal
+      {nextRuntime : RuntimeState}
+      {decl : Lean.Compiler.LCNF.LetDecl .impure}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      {sourceValue : Value}
+      {stepCost : Nat}
+      (supported : PureExternalSupported context externals sourceRuntime
+        sourceEnv decl continuation nextRuntime sourceValue stepCost) :
+      ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
+        expectedResult facts sourceRuntime sourceEnv source
+        (.let decl continuation)
+  | directCall
+      {decl : Lean.Compiler.LCNF.LetDecl .impure}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      (site : DirectInternalCallSite context decl sourceEnv) :
+      ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
+        expectedResult facts sourceRuntime sourceEnv source
+        (.let decl continuation)
+  | saturatedCall
+      {decl : Lean.Compiler.LCNF.LetDecl .impure}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      (site : SaturatedClosureCallSite context decl sourceEnv)
+      (resolution : SaturatedClosureCallResolution context sourceRuntime site)
+      (sharedCapacity : ∀ parentRuntime,
+        setCell sourceRuntime resolution.location
+            { resolution.cell with rc := resolution.cell.rc - 1 } =
+              .ok parentRuntime →
+          ClosureRetainCapacity parentRuntime resolution.captures.toList) :
+      ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
+        expectedResult facts sourceRuntime sourceEnv source
+        (.let decl continuation)
+  | lazy
+      {decl : Lean.Compiler.LCNF.LetDecl .impure}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      {declaration : Lean.Name}
+      {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
+      {resultKind : AbiKind}
+      (call : LazyCacheCallSupported context decl declaration
+        sourceDeclaration resultKind)
+      (generated : LazyCacheGeneratedEnvironment context sourceModule)
+      (path : ConcreteStructuredLazyReadyAdmission context sourceModule call
+        generated sourceRuntime) :
+      ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
+        expectedResult facts sourceRuntime sourceEnv source
+        (.let decl continuation)
+  | cases
+      {cases : Lean.Compiler.LCNF.Cases .impure}
+      (safe : ConcreteStructuredCaseSafeAt context sourceRuntime sourceEnv
+        cases) :
+      ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
+        expectedResult facts sourceRuntime sourceEnv source (.cases cases)
+  | incPersistent
+      {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
+      {continuation : Lean.Compiler.LCNF.Code .impure} :
+      ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
+        expectedResult facts sourceRuntime sourceEnv source
+        (.inc objectId amount check true continuation)
+  | incOrdinary
+      {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      (fits : ConcreteStructuredIncrementHeadroomAt sourceRuntime sourceEnv
+        objectId amount) :
+      ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
+        expectedResult facts sourceRuntime sourceEnv source
+        (.inc objectId amount check false continuation)
+  | decPersistent
+      {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
+      {objectFields? : Option Nat}
+      {continuation : Lean.Compiler.LCNF.Code .impure} :
+      ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
+        expectedResult facts sourceRuntime sourceEnv source
+        (.dec objectId amount check true objectFields? continuation)
+  | decOrdinary
+      {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
+      {objectFields? : Option Nat}
+      {continuation : Lean.Compiler.LCNF.Code .impure} :
+      ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
+        expectedResult facts sourceRuntime sourceEnv source
+        (.dec objectId amount check false objectFields? continuation)
+  | del
+      {objectId : Lean.FVarId}
+      {continuation : Lean.Compiler.LCNF.Code .impure} :
+      ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
+        expectedResult facts sourceRuntime sourceEnv source
+        (.del objectId continuation)
+  | setTag
+      {objectId : Lean.FVarId} {tag : Nat}
+      {continuation : Lean.Compiler.LCNF.Code .impure} :
+      ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
+        expectedResult facts sourceRuntime sourceEnv source
+        (.setTag objectId tag continuation)
+  | objectFieldFVar
+      {objectId fieldId : Lean.FVarId} {index : Nat}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      (fieldTyped : ConcreteObjectFieldFVarTyped context sourceEnv objectId
+        fieldId index) :
+      ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
+        expectedResult facts sourceRuntime sourceEnv source
+        (.oset objectId index (.fvar fieldId) continuation)
+  | objectFieldErased
+      {objectId : Lean.FVarId} {index : Nat}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      (fieldTyped : ConcreteObjectFieldKindAligned sourceEnv objectId index
+        .erased) :
+      ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
+        expectedResult facts sourceRuntime sourceEnv source
+        (.oset objectId index .erased continuation)
+  | usizeField
+      {objectId fieldId : Lean.FVarId} {index : Nat}
+      {continuation : Lean.Compiler.LCNF.Code .impure} :
+      ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
+        expectedResult facts sourceRuntime sourceEnv source
+        (.uset objectId index fieldId continuation)
+  | scalarField
+      {objectId fieldId : Lean.FVarId} {slotIndex byteOffset : Nat}
+      {type : Lean.Expr}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      (fieldTyped : ConcreteScalarFieldMutationTyped context sourceRuntime
+        sourceEnv objectId fieldId slotIndex byteOffset) :
+      ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
+        expectedResult facts sourceRuntime sourceEnv source
+        (.sset objectId slotIndex byteOffset fieldId type continuation)
+
+/-- Residual production validation plus source admission safety construct the
+exact current-node admission and allocation cost.
+
+This is the common primitive factoring: validator equations are proved once,
+successful source effects are inverted once, and each operation contributes
+only its genuinely independent source invariant. -/
+theorem ConcreteStructuredValidatedCodeCoreRel.admit_of_source_safe_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeCoreRel program context
+      sourceModule sourceFunction externals labels entryRuntime entryStore
+      entryWitness functionResult callerExpectedResult facts remainingBytes
+      sourceRuntime sourceEnv sourceCode targetStore targetLocals targetCode
+      witness source target)
+    (sourceSafe : ConcreteStructuredSourceAdmissionSafeAt context sourceModule
+      externals functionResult facts sourceRuntime sourceEnv source sourceCode)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ requiredBytes,
+      ConcreteStructuredCodeStepAdmission context sourceModule externals
+        functionResult facts sourceRuntime sourceEnv requiredBytes sourceCode := by
+  cases sourceSafe with
+  | ret safe =>
+      refine ⟨0, related.validation.admit_return ?_⟩
+      intro sourceValue sourceLookup
+      apply safe related.core.focus.sourceControlEq
+      simpa only [related.core.focus.sourceEnvEq] using sourceLookup
+  | directLet supported =>
+      exact ⟨directLetAllocationCost _, .directLet supported⟩
+  | pureExternal supported =>
+      exact ⟨_, .pureExternal supported⟩
+  | directCall site =>
+      exact ⟨0, .directCall site⟩
+  | saturatedCall site resolution sharedCapacity =>
+      exact ⟨0, .saturatedCall site resolution sharedCapacity⟩
+  | lazy call generated path =>
+      cases path with
+      | hit sourceValue semanticFound =>
+          exact ⟨0, .lazyHit call generated semanticFound⟩
+      | miss calleeCode internal resultClassified notObject notTObject
+          semanticEmpty =>
+          exact ⟨0, .lazyMiss internal generated resultClassified notObject
+            notTObject semanticEmpty⟩
+  | cases safe =>
+      obtain ⟨selected, _sourceResult, _sourceAfterEq⟩ :=
+        related.core.focus.caseResult_of_step sourceStep
+      rcases related.productionCasesSupported_of_caseSafe
+          (selected := selected) safe with defaultOnly | tested
+      · exact ⟨0, .defaultOnlyCase defaultOnly⟩
+      · rcases tested with objectCases | scalarCases
+        · exact ⟨0, .objectCases objectCases⟩
+        · exact ⟨0, .scalarUInt8Cases scalarCases⟩
+  | incPersistent =>
+      exact ⟨0, related.validation.admit_incPersistent⟩
+  | incOrdinary fits =>
+      exact ⟨0, related.validation.admit_incOrdinary_of_step
+        related.core.focus sourceStep fits⟩
+  | decPersistent =>
+      exact ⟨0, related.validation.admit_decPersistent⟩
+  | decOrdinary =>
+      exact ⟨0, related.validation.admit_decOrdinary_of_step
+        related.core.focus sourceStep⟩
+  | del =>
+      exact ⟨0, related.validation.admit_del_of_step related.core.focus
+        sourceStep⟩
+  | setTag =>
+      exact ⟨0, related.validation.admit_setTag_of_step related.core.focus
+        sourceStep⟩
+  | objectFieldFVar fieldTyped =>
+      exact ⟨0, related.validation.admit_oset_fvar_of_step
+        related.core.focus sourceStep fieldTyped⟩
+  | objectFieldErased fieldTyped =>
+      exact ⟨0, related.validation.admit_oset_erased_of_step
+        related.core.focus sourceStep fieldTyped⟩
+  | usizeField =>
+      exact ⟨0, related.validation.admit_uset_of_step related.core.focus
+        sourceStep⟩
+  | scalarField fieldTyped =>
+      exact ⟨0, related.validation.admit_sset_of_step related.core.focus
+        sourceStep fieldTyped⟩
 
 end FirTalos.Concrete

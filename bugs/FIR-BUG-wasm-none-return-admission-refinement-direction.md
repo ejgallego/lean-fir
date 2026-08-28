@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-return-admission-refinement-direction
-status: confirmed
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: 7fd2d2d97feb82ca7d905ec8db13e30c49aeab33
@@ -97,9 +97,20 @@ none
 
 ## Resolution and regression
 
-Unresolved. `ConcreteStructuredValidationFocus.return_eq` preserves the exact
-production compatibility judgment. The attempted direct contract replacement
-was rejected because `ConcreteStructuredYieldFocus.advance_pop_*` must call
-`PhysicalValueRel.ofRefines` when rebinding the caller local. Resolution now
-depends on making the upstream typing/value-shape fact proof-visible rather
-than weakening that semantic transport.
+Fixed. `ConcreteStructuredCodeStepAdmission.ret` now preserves the exact
+production `leanCompatible` carrier judgment and separately requires
+`SemanticValueAtAbi` for the source value at the active result ABI.
+`ConcreteStructuredAlignedValidationState.admit_return` derives the carrier
+equation from the real residual validator; the source-facing
+`ConcreteStructuredReturnValueSafeAt` invariant supplies the semantic
+narrowing. `ConcreteStructuredCodePointwiseRel.advance_return` delegates to
+`advance_return_at_functionResult`, which canonicalizes the yielded physical
+value at the active ABI before the ordinary caller-result refinement is
+applied. Thus a compatible `.tobject` local is accepted without permitting an
+arbitrary tagged value to masquerade as `.object`, or vice versa.
+
+The shared `ConcreteStructuredSourceAdmissionSafeAt` factoring and
+`ConcreteStructuredValidatedCodeCoreRel.admit_of_source_safe_step` exercise
+this repaired boundary in the universal compiler-admission route. Direct
+builds of `FirTalos.ConcreteStructuredValidation` and
+`FirTalos.ConcreteResumableWasm` are the regression checks.

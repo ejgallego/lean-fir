@@ -19153,7 +19153,11 @@ inductive ConcreteStructuredCodeStepAdmission
       (resultCompiled :
         Fir.Wasm.getLocal context result =
           .ok (.localGet result, actualResult))
-      (resultRefines : actualResult.refines expectedResult = true) :
+      (resultCompatible :
+        actualResult.leanCompatible expectedResult = true)
+      (resultSemantic :
+        ∀ {sourceValue}, lookup sourceEnv result = some sourceValue →
+          SemanticValueAtAbi expectedResult sourceValue) :
       ConcreteStructuredCodeStepAdmission context sourceModule externals expectedResult facts
         sourceRuntime sourceEnv 0 (.return result)
   | directLet
@@ -19536,11 +19540,13 @@ theorem ConcreteStructuredCodeStepAdmission.return_cases
     ∃ actualResult,
       Fir.Wasm.getLocal context result =
           .ok (.localGet result, actualResult) ∧
-      actualResult.refines expectedResult = true ∧
+      actualResult.leanCompatible expectedResult = true ∧
+      (∀ {sourceValue}, lookup sourceEnv result = some sourceValue →
+        SemanticValueAtAbi expectedResult sourceValue) ∧
       requiredBytes = 0 := by
   cases admitted with
-  | ret resultCompiled resultRefines =>
-      exact ⟨_, resultCompiled, resultRefines, rfl⟩
+  | ret resultCompiled resultCompatible resultSemantic =>
+      exact ⟨_, resultCompiled, resultCompatible, resultSemantic, rfl⟩
   | ordinaryIncrement supported => cases supported
   | ordinaryDecrement supported => cases supported
   | ordinaryDelete supported => cases supported
@@ -24828,8 +24834,8 @@ theorem ConcreteStructuredCodeCoreRel.advance_return_at_functionResult
 
 /-- An admitted return is classified pointwise as either a terminal result or
 the appropriate direct/saturated bind protocol from the hereditary frame
-stack.  The successful source step supplies the lookup; admission supplies
-only the static result ABI refinement. -/
+stack.  Production carrier compatibility fixes the physical calling lane;
+the source-semantic premise prevents an unsound reverse object-family cast. -/
 theorem ConcreteStructuredCodePointwiseRel.advance_return
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
@@ -24879,53 +24885,15 @@ theorem ConcreteStructuredCodePointwiseRel.advance_return
         targetAfter.frames ∧
       sourceAfter.frames = source.frames ∧
       targetAfter.frames = target.frames := by
-  obtain ⟨admittedResult, resultCompiled, resultRefines, _requiredEq⟩ :=
+  obtain ⟨_admittedResult, resultCompiled, _resultCompatible,
+      resultSemantic, _requiredEq⟩ :=
     related.admitted.return_cases
-  cases sourceLookup : lookup sourceEnv result with
-  | none =>
-      rcases source with
-        ⟨sourceProgram, sourceControl, sourceStateEnv, sourceJoins,
-          sourceFrames, runtime⟩
-      have controlEq := related.focus.sourceControlEq
-      change sourceControl = .code (.return result) at controlEq
-      subst sourceControl
-      have envEq := related.focus.sourceEnvEq
-      change sourceStateEnv = sourceEnv at envEq
-      subst sourceStateEnv
-      simp [executeStep, coreStep, lookupValue, sourceLookup, fail] at sourceStep
-  | some sourceValue =>
-      obtain ⟨actualKind, physical, computedAfter, targetAfter,
-          localCompiled, computedStep, targetPath, yielded,
-          _sourceJoinsEq, sourceFramesEq, targetFramesEq⟩ :=
-        related.focus.advance_return spec.localsAligned sourceLookup
-      have afterEq : sourceAfter = computedAfter := by
-        rw [sourceStep] at computedStep
-        injection computedStep
-      subst computedAfter
-      have kindEq : actualKind = admittedResult := by
-        rw [resultCompiled] at localCompiled
-        have pairEq := Except.ok.inj localCompiled
-        exact (congrArg Prod.snd pairEq).symm
-      subst actualKind
-      have actualCompatible :
-          ConcreteStructuredResultCompatible admittedResult
-            callerExpectedResult := by
-        cases callerExpectedResult with
-        | none => trivial
-        | some expected =>
-            exact AbiKind.refines_trans resultRefines
-              related.resources.suspended.resultCompatible
-      have resourcesAfter :
-          ConcreteStructuredResourceStack program context sourceModule
-            sourceFunction externals entryRuntime sourceRuntime entryStore
-            targetStore entryWitness witness facts remainingBytes sourceEnv
-            targetLocals functionResult callerExpectedResult sourceAfter.frames
-            targetAfter.frames := by
-        rw [sourceFramesEq, targetFramesEq]
-        exact related.resources
-      exact ⟨targetAfter, sourceValue, admittedResult, physical, targetPath,
-        yielded, actualCompatible, resourcesAfter, sourceFramesEq,
-        targetFramesEq⟩
+  obtain ⟨targetAfter, sourceValue, physical, targetPath, yielded,
+      compatible, resources, sourceFramesEq, targetFramesEq⟩ :=
+    related.core.advance_return_at_functionResult spec resultCompiled
+      resultSemantic sourceStep
+  exact ⟨targetAfter, sourceValue, functionResult, physical, targetPath,
+    yielded, compatible, resources, sourceFramesEq, targetFramesEq⟩
 
 /-- A default-only case preserves the complete resource core across its
 compiler-erased source step. -/
