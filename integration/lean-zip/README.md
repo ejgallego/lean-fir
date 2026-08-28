@@ -826,6 +826,28 @@ final-LCNF recapture boundary. Exact accepted claims remain the generic fact
 transfer, 114-site reduction, smaller module, and green semantic/ownership
 gates.
 
+An upstream-shaped `ByteArray.get` experiment kept FIR's promoted-Nat fallback
+but decoded immediate proof indices directly in the single shared resident
+helper. This deliberately avoided the rejected 425-call caller expansion. The
+candidate preserved zero imports, all 50 native/Wasm/inflate comparisons,
+adapter output, and the flat ownership frontier. It changed the accepted
+383,816-byte module by only eight bytes to 383,824 bytes; the pre-optimizer
+frontier grew from 885,936 to 885,960 bytes, and the final function count stayed
+at 502.
+
+Four same-host profiles confirmed the intended local effect. The accepted
+helper and `fir_byte_array_decode_natural32` together account for a median
+0.99% of normalized Wasm self samples; the candidate removes all decoder
+samples and leaves 0.38% in the larger shared helper. That roughly 0.6-point
+shift does not become a repeatable end-to-end improvement: a 48-pair
+diagnostics-off AB/BA campaign is neutral at a 1.0016 paired median ratio,
+23/48 improving pairs, with an independently position-adjusted ratio of
+1.0016. The experiment is therefore rejected and production retains the
+complete shared Nat decoder. Future work should prefer an upstream-shaped
+`ByteArray.uget`/`USize` source path or a proved index-representation fact that
+removes conversion before this ABI boundary; neither another global caller
+expansion nor this shared branch is justified by the evidence.
+
 For performance characterization, `array-scaling-bench.mjs` runs one
 diagnostics-free, warmed level-6 workload and emits raw execute samples, input
 and output hashes, and the post-rewind frontier. It is a measurement seed, not
