@@ -25,7 +25,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   resident Array provenance consumer after rebasing, is the remaining
   milestone step.
 - Integration owner: `root`, holding the serial landing lease through accepted
-  integration head `e8b89fce`. `wasm-gen` remains released to the W7-1
+  integration head `be49211e`. `wasm-gen` remains released to the W7-1
   generation lane. The inherited cleanup, serial and bounded check-throughput,
   mailbox-routing, bounded `Nat.land`, USize range-fact, exact consumer-ratchet,
   and transactional resident-linker stacks are now integrated. Tooling's
@@ -302,6 +302,20 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   semantic runtime, or public package contract changed. W6 refinement request
   `W7-W6-20260828-004` may now be claimed; the measured ByteArray successor is
   tracked separately in `W72-W7-20260828-007`. Bug cards: none.
+- Accepted fixed-width proof-visible body surface: W7 checkpoint `be49211e`
+  publishes complete explicit body constants and closed `rfl` equations for
+  production `UInt8.toNat`, `UInt8.toBitVec`, `UInt16.toNat`, and
+  `UInt32.toNat`. The private helper constructors remain private; W6 can now
+  attach its generic range/WP proofs to the actual installed functions without
+  duplicating their implementations. Lean Beam is diagnostic-clean, the
+  focused 19-job cone passes, `make check` remains at 730 cases and
+  2,172/2,172 comparisons, all 3,180 Talos jobs pass with receipt `d9fb773f`,
+  and the complete artifact gate passes. The fixed-width artifact remains
+  byte-identical at 17,812 bytes and SHA-256
+  `cff779e93097de7c94d15c568d16ba15785042b9aa4a5a9dd85316f591cd794a`.
+  No executable helper, signature, ABI, layout, ownership, linker, import,
+  export, package, or semantic contract changed. W6 continues thread
+  `W7-W6-20260828-004`; bug cards: none.
 - Accepted precise direct-call result proof: W6 functional head `99a3c03e` is
   linked through clean immutable status head `ecbfed6b`, based directly on the
   accepted Float32 generation checkpoint. `DirectInternalCallSite` now retains
@@ -7037,7 +7051,7 @@ validation work continues; their historical handoff text remains unchanged.
 | Integration | integration owner | `upgrade/lean-4.33` | released | `LEAN-4.33-UPGRADE` landed at `476f001b`; the temporary lane may be retired after publication. | Moves the shared toolchain, compiler-source contracts, and versioned compact-Format package surface to Lean 4.33 without changing the semantic Wasm ABI, concrete layout, or resident-helper signatures. |
 | Lean pass proof | pass-proof owner | `proof/simpcase` | released | Clean tracked checkpoint `8788603c`, functional head `3d811853`, transports the accepted allocated source-only provenance through a monotone deleted let and exposes it from the semantic deleted-constructor matcher beside the exact ledger relation. | Proof-interface refinement only. Lean Beam, the focused 34-job cone, complete 728-case/2,166-comparison gate, and final diff check pass; no runtime, interpreter, pass, ledger, Wasm surface, or shared semantic contract changed. Heap-only USize adaptation remains queued under `W7-LCNF-20260826-021`. |
 | W6 runtime proof | W6 owner | `wasm/talos-runtime` | released | Clean head `614980cb` completes exclusive and nonexclusive installed refinement for trusted `Array.uset`, `Array.set`, and `Array.set!` against the repaired W7 source shapes. | Contract-proved over the existing Array layout and ownership boundary. Full root and 3,180-job Talos gates pass; no W7 implementation or shared contract changed. |
-| W7 generation | generation owner | `wasm/generation` | released | Accepted fixed-width natural boxing stack through `e8b89fce`; direct immediate results cover UInt8/UInt16 and the low UInt32 half, with the complete promoted fallback retained. The next bounded experiment is ByteArray immediate-index selection under `W72-W7-20260828-007`. | Generation-only optimization over stable contracts. Full root, 3,180-job Talos, deterministic artifact, concrete-readiness, reclamation, and differential gates pass; raw lean-zip is 383,816 bytes, zero imports, 502 functions. |
+| W7 generation | generation owner | `wasm/generation` | released | Accepted fixed-width natural boxing stack through `e8b89fce` plus proof-visible production body equations at `be49211e`. The next bounded experiment is ByteArray immediate-index selection under `W72-W7-20260828-007`. | Generation optimization and byte-neutral proof interface over stable contracts. Full root, 3,180-job Talos, deterministic artifact, concrete-readiness, reclamation, and differential gates pass; raw lean-zip is 383,816 bytes, zero imports, 502 functions. |
 | Compiler-native Wasm | integration owner | `wasm/lcnf-c` | parked | Landed checkpoint `a4855402` adds a separately packaged C/Emscripten `Std.Format.prettyM` facade on top of the optimized final-LCNF-to-C route from `2760e3e0`. The browser adapter shares the compact `Format` request and exact `{text, events}` trace contract with W7's FIR-native facade while retaining a private bulk wire, verified Emscripten loader, full pinned Lean runtime, and independent package. The differential suite compares Unicode, grouping, nesting, tags, arbitrary-precision values, initial columns, malformed requests, repeated calls, and a one-MiB UTF-8 transfer through both engines | No shared semantic contract changed and the packages remain physically independent. The lane consumes `Std.Format.prettyM`, final impure LCNF, and Lean's C ABI without changing the symbolic Wasm, W6 concrete-runtime, or W7 resident-runtime surfaces. Resume with controlled sampled profiling of the facade wire and generated C before accepting a runtime optimization |
 | Validation | validation owner | `validation/float-corpus` | active | Clean coordination head `cfa17d81` retains the long 1,008-case native/LCNF calibration. Current-main validation covers 633 native/LCNF cases, 601 V8 cases, 642 unique cases, 1,844 comparisons, 5,750 interpreter transitions, 51 semantic-tag floors, and 142 conjunctive domains. | Test-fixtures may now rebase and admit the 32 scalar-closure cases. The long validation branch rebases separately; alias, termination, IO, and stream-capture contracts remain isolated. |
 
@@ -7053,7 +7067,7 @@ validation work continues; their historical handoff text remains unchanged.
 | Generic Array/scalar/String HTML frontier: `Array.pop`, `UInt32.decEq`, `String.append`, `String.push`, `String.Pos.next`, `String.decodeChar` | `57ae699e` | `260ce30a`; existing concrete layouts and semantic ABI | generation-ready | W6 owner for later concrete refinement | Verso complete HTML `ce63b4fd71abddda8aa5795a57ab7849666f8029b501a015ee3e3c714a3eec1c` |
 | Canonical immediate Nat arithmetic and decisions (`Nat.add`, `Nat.mod`, `Nat.decEq`, `Nat.decLt`, `Nat.decLe`) | arithmetic `75b11c0c`/`8cb9cd82`; decision functional `6725cf9b`, tracked `640f30c1` | unchanged Nat layout, ownership, and helper signatures; immediate `Nat.mod` proof functional `5653cd51`, tracked `7851e481` | linked/accepted | W6 immediate `Nat.add` and `Nat.mod` refinements complete; decision callers reuse already-proved comparison helpers | raw lean-zip `b33ea862dc65272e7bd1fc5afb6aff9c7a951062aba04e2b38b65cee46c0de74`; sidecar `cc1039d6aae9f336f2a54b7a676086e35bdc4aac106c963b074d617973d0e013` |
 | Trusted resident Array replacement | W7 fast path `1777059b`; proof-visible/native-order repair `56e25d73` | existing Array layout and checked release contract; W6 installed refinement `614980cb` | contract-proved | W6 complete | trusted Array fixture remains 13,807 bytes; complete artifact gate and 44/44 readiness pass |
-| Bounded fixed-width `toNat` boxing | W7 functional `d87dc9bd`; tracked handoff `e8b89fce` | unchanged tagged/promoted Natural and fixed-width scalar layouts | generation-ready | W6 request `W7-W6-20260828-004` | raw lean-zip `2c01e190`, 383,816 bytes, zero imports, 502 functions; boundary artifact `cff779e9`, 17,812 bytes |
+| Bounded fixed-width `toNat` boxing | W7 functional `d87dc9bd`; tracked handoff `e8b89fce`; closed body surface `be49211e` | unchanged tagged/promoted Natural and fixed-width scalar layouts | generation-ready | W6 request `W7-W6-20260828-004` | raw lean-zip `2c01e190`, 383,816 bytes, zero imports, 502 functions; boundary artifact `cff779e9`, 17,812 bytes |
 | Heap-only resident `UInt64` box/unbox | W7 functional `af7d10a8`; tracked handoff `99241038` | accepted semantic/LCNF/W6 contract stack through `45761d92`; production-helper theorem `45989deb`, handoff `991b3774` | contract-proved | W6 complete; W7 owns only exact-result aliases | resident scalar-box Wasm `0a93bcc3f7a90cf87a5a1cbec7bb1aee5f410e796e41b279d68272e2796840f6` |
 | Heap-only resident `Float32`/`Float` box/unbox | W7 functional `1697038a`; tracked handoff `1d723b62` | descriptor/refinement boundary through W6 functional `48e340b7`, tracked `b605cd9d` | generation-ready | W6 descriptor promotion complete; actual installed production-helper refinement remains open | resident Float Wasm `fa806f59e3c1c0e56d52a6fe35fb5a3a5496f7e09b7183084b2a13af697a6c58`; manifest `94926697892f084f9c2425130f239e8d1bb20ae1f102db676376e3ee7c5ba1ac` |
 
