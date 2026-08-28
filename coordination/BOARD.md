@@ -25,7 +25,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   resident Array provenance consumer after rebasing, is the remaining
   milestone step.
 - Integration owner: `root`, holding the serial landing lease through accepted
-  integration head `e3bb25c0`. `wasm-gen` remains released to the W7-1
+  integration head `1c5b13b4`. `wasm-gen` remains released to the W7-1
   generation lane. The inherited cleanup, serial and bounded check-throughput,
   mailbox-routing, bounded `Nat.land`, USize range-fact, exact consumer-ratchet,
   and transactional resident-linker stacks are now integrated. Tooling's
@@ -154,6 +154,23 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `a228e280030505af07f3f3afc3c47876aa6a61409d1b3d8bea9ebeaafa736b5f`.
   No shared contract changed. Constructor allocation/reuse and the complete
   schema-global dispatcher remain; the object-field admission bug stays open.
+- Accepted W6 constructor-schema update checkpoint: functional proof head
+  `479e83da` is linked through clean tracked handoff `1c5b13b4`, based on
+  accepted external witness integration head `b54ed3c1`.
+  `ConstructorSchema.WitnessUpdate` factors unchanged witness extension,
+  fresh constructor allocation, and retained-address descriptor rebinding;
+  its `agrees` theorem preserves schema/witness agreement uniformly.
+  `ConstructorSchema.ReuseShape` separately fixes the successful source reuse
+  branch as tagged empty, fresh heap allocation, or retained-location reuse.
+  The capacity refinement returns the matching shape/update pair for every
+  incoming schema, while the nonempty constructor boundary now exposes its
+  exact `bindConstructor` successor instead of hiding it existentially. Lean
+  Beam, the 3,127-job structured-validation cone, `make check` at 730 unique
+  cases and 2,172/2,172 comparisons, and all 3,182 Talos jobs pass with receipt
+  `e7bfc2aaf7023236f194625d5ef29fef2c4ea442722b047fa1c43aeae85ac3d9`.
+  No shared contract changed. The next W6 slice carries this update through
+  the direct-let compiler/resource theorem and closes the schema-global
+  dispatcher; the object-field admission bug remains open.
 - Accepted exact scalar-alias proof interface: W7 functional head `f32458a2`
   is linked through clean tracked handoff `e3548322`. The emitter now exports
   its annotation-only object-result source mapper plus closed source-shape
