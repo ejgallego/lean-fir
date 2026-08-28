@@ -23,6 +23,94 @@ deferred capacity load.
 
 namespace ResidentArray
 
+/-- Proof-side spelling of W7's constant-time live-element address
+calculation.  The symbolic identifiers are supplied by the closed production
+function so this definition is shared by all three trusted aliases. -/
+def elementAddressSourceProgram (array index cursor : Lean.FVarId) :
+    List Fir.Wasm.Instruction :=
+  [.localGet index, .localSet cursor] ++
+    ResidentPrimitives.scale8Source cursor cursor ++ [
+    .localGet array,
+    .i32Const .uint32 (UInt32.ofNat headerBytes),
+    .i32Add,
+    .localGet cursor,
+    .i32Add,
+    .localSet cursor]
+
+/-- Exact source instruction order of the repaired production exclusive arm:
+borrow the displaced value, release it, install the consumed replacement, and
+return the original Array. -/
+def exclusiveReplacementSourceProgram
+    (array index cursor value element : Lean.FVarId) :
+    List Fir.Wasm.Instruction :=
+  elementAddressSourceProgram array index cursor ++ [
+    .localGet cursor,
+    .i32Load .tobject 0,
+    .localSet element] ++
+    Fir.Wasm.Emit.ResidentRelease.checkedDecrementLocal element ++ [
+    .localGet cursor,
+    .localGet value,
+    .i32Store .tobject 0,
+    .localGet array,
+    .ret]
+
+/-- Source spelling of the common trusted reference-count probe. -/
+def trustedExclusivePrefixSourceProgram (array : Lean.FVarId)
+    (exclusive : List Fir.Wasm.Instruction) : List Fir.Wasm.Instruction := [
+  .localGet array,
+  .i32Load .uint32 (UInt32.ofNat headerRefCountOffset),
+  .i32Const .uint32 1,
+  .i32Eq,
+  .ifElse exclusive []]
+
+/-- The actual production trusted `Array.uset` body contains the common
+exclusive replacement fragment at its exact post-decoding position. -/
+theorem trustedUsetFunction_exclusiveSourceShape :
+    Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.body =
+      Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.body.take 10 ++
+        trustedExclusivePrefixSourceProgram
+          Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.params[1]!.1
+          (exclusiveReplacementSourceProgram
+            Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.params[1]!.1
+            Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.locals[6]!.1
+            Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.locals[8]!.1
+            Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.params[3]!.1
+            Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.locals[13]!.1) ++
+        Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.body.drop 15 := by
+  rfl
+
+/-- The actual production trusted `Array.set` body contains the same common
+exclusive replacement fragment, after its natural-index decoder. -/
+theorem trustedSetFunction_exclusiveSourceShape :
+    Fir.Wasm.Emit.ResidentArray.trustedSetFunction.body =
+      Fir.Wasm.Emit.ResidentArray.trustedSetFunction.body.take 11 ++
+        trustedExclusivePrefixSourceProgram
+          Fir.Wasm.Emit.ResidentArray.trustedSetFunction.params[1]!.1
+          (exclusiveReplacementSourceProgram
+            Fir.Wasm.Emit.ResidentArray.trustedSetFunction.params[1]!.1
+            Fir.Wasm.Emit.ResidentArray.trustedSetFunction.locals[6]!.1
+            Fir.Wasm.Emit.ResidentArray.trustedSetFunction.locals[8]!.1
+            Fir.Wasm.Emit.ResidentArray.trustedSetFunction.params[3]!.1
+            Fir.Wasm.Emit.ResidentArray.trustedSetFunction.locals[13]!.1) ++
+        Fir.Wasm.Emit.ResidentArray.trustedSetFunction.body.drop 16 := by
+  rfl
+
+/-- The actual production trusted `Array.set!` body contains the same common
+exclusive replacement fragment, after its checked bounds prefix. -/
+theorem trustedSetBangFunction_exclusiveSourceShape :
+    Fir.Wasm.Emit.ResidentArray.trustedSetBangFunction.body =
+      Fir.Wasm.Emit.ResidentArray.trustedSetBangFunction.body.take 11 ++
+        trustedExclusivePrefixSourceProgram
+          Fir.Wasm.Emit.ResidentArray.trustedSetBangFunction.params[1]!.1
+          (exclusiveReplacementSourceProgram
+            Fir.Wasm.Emit.ResidentArray.trustedSetBangFunction.params[1]!.1
+            Fir.Wasm.Emit.ResidentArray.trustedSetBangFunction.locals[6]!.1
+            Fir.Wasm.Emit.ResidentArray.trustedSetBangFunction.locals[8]!.1
+            Fir.Wasm.Emit.ResidentArray.trustedSetBangFunction.params[3]!.1
+            Fir.Wasm.Emit.ResidentArray.trustedSetBangFunction.locals[13]!.1) ++
+        Fir.Wasm.Emit.ResidentArray.trustedSetBangFunction.body.drop 16 := by
+  rfl
+
 /-- Talos spelling of W7's constant-time live-element address calculation.
 The scale primitive is shared with resident Nat/BigNumeric rather than proved
 again instruction by instruction. -/
@@ -695,6 +783,70 @@ def exclusiveReplacementProgram
       decrementIndex ++
     [.localGet arrayIndex, .ret]
 
+/-- The repaired symbolic exclusive arm adapts to exactly the Talos program
+used by the semantic refinement below.  This bridge is independent of the
+three production frame sizes and resolves their locals positionally. -/
+theorem instructions_exclusiveReplacementSourceProgram
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {array index cursor value element : Lean.FVarId}
+    {arrayIndex indexIndex cursorIndex valueIndex elementIndex decrementIndex :
+      Nat}
+    (arrayFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) array =
+        some arrayIndex)
+    (indexFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) index =
+        some indexIndex)
+    (cursorFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) cursor =
+        some cursorIndex)
+    (valueFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) value =
+        some valueIndex)
+    (elementFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) element =
+        some elementIndex)
+    (decrementFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentRelease.decrementOnceName) =
+        some decrementIndex) :
+    FirTalos.instructions sourceModule sourceFunction labels
+      (exclusiveReplacementSourceProgram array index cursor value element) =
+        .ok (exclusiveReplacementProgram arrayIndex indexIndex cursorIndex
+          valueIndex elementIndex decrementIndex) := by
+  have addressAdapted :
+      FirTalos.instructions sourceModule sourceFunction labels
+        (elementAddressSourceProgram array index cursor) =
+          .ok (elementAddressProgram arrayIndex indexIndex cursorIndex) := by
+    simp [elementAddressSourceProgram, elementAddressProgram,
+      ResidentPrimitives.scale8Source, ResidentPrimitives.scale8Program,
+      FirTalos.instructions, FirTalos.instruction, arrayFound, indexFound,
+      cursorFound, Bind.bind, Except.bind, pure, Except.pure]
+  have borrowAdapted :
+      FirTalos.instructions sourceModule sourceFunction labels [
+        .localGet cursor, .i32Load .tobject 0, .localSet element] =
+          .ok (borrowElementProgram cursorIndex elementIndex) := by
+    simp [borrowElementProgram, FirTalos.instructions, FirTalos.instruction,
+      cursorFound, elementFound, Bind.bind, Except.bind, pure, Except.pure]
+  have decrementAdapted :=
+    ResidentRelease.instructions_checkedDecrementLocal
+      (labels := labels) elementFound decrementFound
+  have tailAdapted :
+      FirTalos.instructions sourceModule sourceFunction labels [
+        .localGet cursor, .localGet value, .i32Store .tobject 0,
+        .localGet array, .ret] =
+          .ok (writeReplacementProgram cursorIndex valueIndex ++ [
+            .localGet arrayIndex, .ret]) := by
+    simp [writeReplacementProgram, FirTalos.instructions,
+      FirTalos.instruction, cursorFound, valueFound, arrayFound, Bind.bind,
+      Except.bind, pure, Except.pure]
+  rw [exclusiveReplacementSourceProgram]
+  simp only [List.append_assoc]
+  rw [FirTalos.Correctness.instructions_append, addressAdapted,
+    FirTalos.Correctness.instructions_append, borrowAdapted,
+    FirTalos.Correctness.instructions_append, decrementAdapted, tailAdapted]
+  rfl
+
 /-- The complete exclusive arm refines one semantic Array replacement and
 returns the same resident Array address.  The explicit local-update premises
 are discharged once for each installed helper layout; the semantic ownership
@@ -819,6 +971,174 @@ def trustedExclusivePrefixProgram (arrayIndex : Nat)
   .const 1,
   .eq,
   .iff 0 0 exclusive []]
+
+/-- Talos adaptation preserves the common trusted probe and embeds the exact
+adapted exclusive branch beneath its anonymous `if`. -/
+theorem instructions_trustedExclusivePrefixSourceProgram
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {array : Lean.FVarId} {arrayIndex : Nat}
+    {exclusiveSource : List Fir.Wasm.Instruction}
+    {exclusiveTarget : Wasm.Program}
+    (arrayFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) array =
+        some arrayIndex)
+    (exclusiveAdapted : FirTalos.instructions sourceModule sourceFunction
+      (none :: labels) exclusiveSource = .ok exclusiveTarget) :
+    FirTalos.instructions sourceModule sourceFunction labels
+      (trustedExclusivePrefixSourceProgram array exclusiveSource) =
+        .ok (trustedExclusivePrefixProgram arrayIndex exclusiveTarget) := by
+  simp [trustedExclusivePrefixSourceProgram, trustedExclusivePrefixProgram,
+    FirTalos.instructions, FirTalos.instruction, arrayFound, exclusiveAdapted,
+    Bind.bind, Except.bind, pure, Except.pure]
+
+/-- Successful adaptation of a production-shaped trusted helper preserves the
+exact common probe and repaired exclusive arm inside the installed target
+body.  The decoder prefix, shared-copy suffix, and physical terminal remain
+opaque: only their successful compiler adaptation is used. -/
+theorem adapted_body_contains_trustedExclusive
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetFunction : Wasm.Function}
+    {sourcePrefix sourceSuffix : List Fir.Wasm.Instruction}
+    {array index cursor value element : Lean.FVarId}
+    {arrayIndex indexIndex cursorIndex valueIndex elementIndex decrementIndex :
+      Nat}
+    (adapted : FirTalos.function sourceModule sourceFunction =
+      .ok targetFunction)
+    (shape : sourceFunction.body = sourcePrefix ++
+      trustedExclusivePrefixSourceProgram array
+        (exclusiveReplacementSourceProgram array index cursor value element) ++
+      sourceSuffix)
+    (arrayFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) array =
+        some arrayIndex)
+    (indexFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) index =
+        some indexIndex)
+    (cursorFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) cursor =
+        some cursorIndex)
+    (valueFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) value =
+        some valueIndex)
+    (elementFound : FirTalos.findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) element =
+        some elementIndex)
+    (decrementFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentRelease.decrementOnceName) =
+        some decrementIndex) :
+    ∃ targetPrefix targetSuffix,
+      targetFunction.body = targetPrefix ++
+        trustedExclusivePrefixProgram arrayIndex
+          (exclusiveReplacementProgram arrayIndex indexIndex cursorIndex
+            valueIndex elementIndex decrementIndex) ++
+        targetSuffix := by
+  have exclusiveAdapted :=
+    instructions_exclusiveReplacementSourceProgram
+      (labels := [none]) arrayFound indexFound cursorFound valueFound
+      elementFound decrementFound
+  have commonAdapted := instructions_trustedExclusivePrefixSourceProgram
+    (labels := []) arrayFound exclusiveAdapted
+  obtain ⟨targetBody, bodyAdapted, installedBody⟩ :=
+    FirTalos.Correctness.function_preserves_body adapted
+  rw [shape] at bodyAdapted
+  simp only [List.append_assoc] at bodyAdapted
+  cases prefixAdapted :
+      FirTalos.instructions sourceModule sourceFunction [] sourcePrefix with
+  | error error =>
+      rw [FirTalos.Correctness.instructions_append, prefixAdapted] at bodyAdapted
+      contradiction
+  | ok targetPrefix =>
+      rw [FirTalos.Correctness.instructions_append, prefixAdapted,
+        FirTalos.Correctness.instructions_append, commonAdapted] at bodyAdapted
+      cases suffixAdapted :
+          FirTalos.instructions sourceModule sourceFunction [] sourceSuffix with
+      | error error =>
+          rw [suffixAdapted] at bodyAdapted
+          contradiction
+      | ok targetSuffix =>
+          rw [suffixAdapted] at bodyAdapted
+          simp only [Bind.bind, Except.bind, pure, Except.pure,
+            Except.ok.injEq] at bodyAdapted
+          subst targetBody
+          refine ⟨targetPrefix,
+            targetSuffix ++ FirTalos.functionTerminal sourceModule sourceFunction,
+            ?_⟩
+          simpa [List.append_assoc] using installedBody
+
+/-- The adapted production trusted `Array.uset` helper contains the one common
+exclusive proof program at the exact numeric frame indices selected by Talos. -/
+theorem adapted_trustedUset_body_containsExclusive
+    {sourceModule : Fir.Wasm.Module} {targetFunction : Wasm.Function}
+    {decrementIndex : Nat}
+    (adapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentArray.trustedUsetFunction = .ok targetFunction)
+    (decrementFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentRelease.decrementOnceName) =
+        some decrementIndex) :
+    ∃ targetPrefix targetSuffix,
+      targetFunction.body = targetPrefix ++
+        trustedExclusivePrefixProgram 1
+          (exclusiveReplacementProgram 1 11 13 3 18 decrementIndex) ++
+        targetSuffix := by
+  apply adapted_body_contains_trustedExclusive adapted
+    trustedUsetFunction_exclusiveSourceShape
+  · native_decide
+  · native_decide
+  · native_decide
+  · native_decide
+  · native_decide
+  · exact decrementFound
+
+/-- The adapted production trusted `Array.set` helper reuses exactly the same
+installed exclusive proof program as `Array.uset`. -/
+theorem adapted_trustedSet_body_containsExclusive
+    {sourceModule : Fir.Wasm.Module} {targetFunction : Wasm.Function}
+    {decrementIndex : Nat}
+    (adapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentArray.trustedSetFunction = .ok targetFunction)
+    (decrementFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentRelease.decrementOnceName) =
+        some decrementIndex) :
+    ∃ targetPrefix targetSuffix,
+      targetFunction.body = targetPrefix ++
+        trustedExclusivePrefixProgram 1
+          (exclusiveReplacementProgram 1 11 13 3 18 decrementIndex) ++
+        targetSuffix := by
+  apply adapted_body_contains_trustedExclusive adapted
+    trustedSetFunction_exclusiveSourceShape
+  · native_decide
+  · native_decide
+  · native_decide
+  · native_decide
+  · native_decide
+  · exact decrementFound
+
+/-- The adapted production trusted `Array.set!` helper has one fewer erased
+parameter, so only its decoded-index, cursor, and old-element numeric slots
+shift; the semantic exclusive theorem remains unchanged. -/
+theorem adapted_trustedSetBang_body_containsExclusive
+    {sourceModule : Fir.Wasm.Module} {targetFunction : Wasm.Function}
+    {decrementIndex : Nat}
+    (adapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentArray.trustedSetBangFunction = .ok targetFunction)
+    (decrementFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentRelease.decrementOnceName) =
+        some decrementIndex) :
+    ∃ targetPrefix targetSuffix,
+      targetFunction.body = targetPrefix ++
+        trustedExclusivePrefixProgram 1
+          (exclusiveReplacementProgram 1 10 12 3 17 decrementIndex) ++
+        targetSuffix := by
+  apply adapted_body_contains_trustedExclusive adapted
+    trustedSetBangFunction_exclusiveSourceShape
+  · native_decide
+  · native_decide
+  · native_decide
+  · native_decide
+  · native_decide
+  · exact decrementFound
 
 /-- Function-local exclusive branches end by returning the Array address.
 Keeping that fact in the postcondition rules out structured fallthrough and
