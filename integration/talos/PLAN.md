@@ -6309,10 +6309,15 @@ and both ordinary and lazy return-pop paths now return the witness-indexed
 global relation at exactly the incoming witness. The established unindexed
 dispatcher is a compatibility projection through `toValidatedGlobal`, so no
 proof needs to recover ghost data from a `Prop`. Executing a resolved external
-call is intentionally excluded from this class: the host refinement produces
-a `nextWitness`. The next layer transports schema agreement across that
-witness extension, followed by constructor bind/rebind transitions for
-allocation and reuse and the complete schema-global dispatcher.
+call is intentionally excluded from this same-witness class: the host
+refinement produces a `nextWitness`. Its core control theorem now exposes the
+already-proved `witness.Extends nextWitness` fact instead of discarding it, and
+the validated successor returns the global relation indexed by that exact
+next witness. `withSchemaExtension` composes the successor with
+`WitnessAgrees.witnessExtension`, closing schema preservation for resolved
+external execution without replaying the host proof. Next come constructor
+bind/rebind transitions for allocation and reuse and the complete
+schema-global dispatcher.
 
 W6.6 float packed-field admission closes the semantic-to-concrete gap for
 `Float32` and `Float` projection and mutation. `ValueRel` now relates the

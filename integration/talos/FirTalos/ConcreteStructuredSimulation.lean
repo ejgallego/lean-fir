@@ -20245,6 +20245,7 @@ theorem ConcreteStructuredExternalCallReadyCoreRel.advance_of_step
     ∃ nextStore nextWitness physicalResult targetAfter,
       FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 1
           target targetAfter ∧
+        witness.Extends nextWitness ∧
         ConcreteStructuredExternalBindCoreRel program context sourceModule
           sourceFunction externals labels entryRuntime entryStore entryWitness
           functionResult callerExpectedResult facts
@@ -20272,7 +20273,7 @@ theorem ConcreteStructuredExternalCallReadyCoreRel.advance_of_step
         targetFrames :=
     ⟨nextScope, related.resources.suspended⟩
   exact ⟨nextStore, nextWitness, physicalResult, targetAfter, targetPath,
-    ⟨bindFocus, nextResources⟩⟩
+    evidence.witnessExtension, ⟨bindFocus, nextResources⟩⟩
 
 /-- The generated destination write closes the external protocol, erases the
 shadowed destination fact, and returns to ordinary compiler code with the
@@ -27055,7 +27056,7 @@ theorem ConcreteStructuredRunnableOutcome.advance_supportedGlobal
       exact ⟨targetCount, targetAfter, targetPath, nextGlobal, by omega⟩
   | externalReady ready contextCaches supported agrees =>
       obtain ⟨nextStore, nextWitness, physicalResult, targetAfter,
-          targetPath, bindCore⟩ :=
+          targetPath, _witnessExtension, bindCore⟩ :=
         ready.advance_of_step sourceStep
       have nextAgrees : supported.Agrees bindCore.resources.suspended := by
         simpa using agrees

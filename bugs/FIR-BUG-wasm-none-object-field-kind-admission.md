@@ -116,10 +116,12 @@ witness evolution. Direct and saturated entry, lazy hit/miss, external bind,
 and return-pop successors close in
 `ConcreteStructuredValidatedCodeGlobalOutcomeAt` at the same witness; the old
 global dispatcher only forgets that index. A resolved external host call, by
-contrast, returns a `nextWitness` and therefore belongs to the explicit
-witness-extension proof. Constructor allocation/reuse and the resulting full
-schema-global dispatcher remain outstanding, so this is still proof-side
-infrastructure rather than resolution of production admission.
+contrast, returns a `nextWitness`; its existing external-call evidence now
+flows through the control theorem as `witness.Extends nextWitness`, and the
+validated successor retains that exact index. `withSchemaExtension` transports
+the current schema agreement across it. Constructor allocation/reuse and the
+resulting full schema-global dispatcher remain outstanding, so this is still
+proof-side infrastructure rather than resolution of production admission.
 
 ## Semantic impact
 

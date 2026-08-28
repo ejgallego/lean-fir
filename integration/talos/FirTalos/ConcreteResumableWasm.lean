@@ -497,9 +497,9 @@ theorem ConcreteStructuredValidatedCodeGlobalOutcome.advance_of_sourceReady
               notTObject semanticEmpty sourceStep
           exact ⟨3, targetAfter, targetPath, next.toValidatedGlobal, by omega⟩
   | externalReady related =>
-      obtain ⟨targetAfter, targetPath, next⟩ :=
+      obtain ⟨_nextWitness, targetAfter, targetPath, _witnessExtension, next⟩ :=
         related.advance_of_step sourceStep
-      exact ⟨1, targetAfter, targetPath, next, by omega⟩
+      exact ⟨1, targetAfter, targetPath, next.toValidatedGlobal, by omega⟩
   | externalBind related =>
       obtain ⟨targetAfter, targetPath, next⟩ :=
         related.advance_of_step sourceStep

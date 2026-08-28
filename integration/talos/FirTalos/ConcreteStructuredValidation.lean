@@ -2145,6 +2145,26 @@ theorem ConcreteStructuredValidatedCodeGlobalOutcomeAt.withSchema
       targetModule hosts externals source target :=
   ⟨schema, witness, agrees, related⟩
 
+/-- A witness-indexed successor under monotone witness growth inherits the
+current schema after transporting agreement through the extension. -/
+theorem ConcreteStructuredValidatedCodeGlobalOutcomeAt.withSchemaExtension
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : ExternalImpl}
+    {schema : ConstructorSchema}
+    {before after : RefinementWitness}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeGlobalOutcomeAt program
+      sourceModule targetModule hosts externals after source target)
+    (agrees : schema.WitnessAgrees before)
+    (extension : before.Extends after) :
+    ConcreteStructuredSchemaValidatedCodeGlobalOutcome program sourceModule
+      targetModule hosts externals source target :=
+  related.withSchema (agrees.witnessExtension extension)
+
 /-- Erase the constructor-schema ghost layer back to the established global
 validated relation. -/
 theorem ConcreteStructuredSchemaValidatedCodeGlobalOutcome.toValidatedGlobal
@@ -4629,13 +4649,14 @@ theorem ConcreteStructuredValidatedExternalCallReadyOutcome.advance_of_step
       targetStore callerLocals callerRemainder targetRest targetFrames witness
       physicalArgs callIndex resultIndex source target)
     (sourceStep : executeStep externals source = .next sourceAfter) :
-    ∃ targetAfter,
+    ∃ nextWitness targetAfter,
       FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 1
           target targetAfter ∧
-        ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
-          targetModule hosts externals sourceAfter targetAfter := by
+        witness.Extends nextWitness ∧
+        ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+          targetModule hosts externals nextWitness sourceAfter targetAfter := by
   obtain ⟨nextStore, nextWitness, physicalResult, targetAfter, targetPath,
-      bindCore⟩ :=
+      witnessExtension, bindCore⟩ :=
     related.core.advance_of_step sourceStep
   have nextAgrees :
       related.frames.supported.Agrees bindCore.resources.suspended := by
@@ -4657,8 +4678,8 @@ theorem ConcreteStructuredValidatedExternalCallReadyOutcome.advance_of_step
     ⟨related.activeResult, related.contextCaches, bindCore,
       related.continuationValidation, related.frames, nextAgrees,
       nextValidationAgrees⟩
-  exact ⟨targetAfter, targetPath,
-    ConcreteStructuredValidatedCodeGlobalOutcome.externalBind bindValidated⟩
+  exact ⟨nextWitness, targetAfter, targetPath, witnessExtension,
+    ConcreteStructuredValidatedCodeGlobalOutcomeAt.externalBind bindValidated⟩
 
 /-- Source-semantic safety of the currently active return, stated solely over
 the source machine state and its active function result ABI.
