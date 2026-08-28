@@ -684,6 +684,131 @@ theorem wp_replaceElementOwnershipProgram_heap_refines
     initialInBounds oldSet checkedWP
   simpa [replaceElementOwnershipProgram, List.append_assoc] using borrowWP
 
+/-- Complete native-order exclusive replacement after trusted index decoding:
+calculate the live slot address, borrow and release its displaced owner, write
+the consumed replacement, and return the original Array address. -/
+def exclusiveReplacementProgram
+    (arrayIndex indexIndex cursorIndex valueIndex elementIndex decrementIndex :
+      Nat) : Wasm.Program :=
+  elementAddressProgram arrayIndex indexIndex cursorIndex ++
+    replaceElementOwnershipProgram cursorIndex valueIndex elementIndex
+      decrementIndex ++
+    [.localGet arrayIndex, .ret]
+
+/-- The complete exclusive arm refines one semantic Array replacement and
+returns the same resident Array address.  The explicit local-update premises
+are discharged once for each installed helper layout; the semantic ownership
+argument and all post-state invariants are shared by every alias. -/
+theorem wp_exclusiveReplacementProgram_heap_refines
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime releasedRuntime nextRuntime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    {elements : Array Value} {capacity fuel index : Nat}
+    {oldValue newValue : Value} {oldWord newWord : Word32}
+    {initial afterIndex afterFirst afterSecond afterThird afterCursor afterOld :
+      Wasm.Locals}
+    {arrayIndex indexIndex cursorIndex valueIndex elementIndex decrementIndex :
+      Nat}
+    (admission : TrustedExclusiveAdmission state witness runtime location
+      address cell elements capacity)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (oldAt : elements[index]? = some oldValue)
+    (oldRead : state.memory.readWord32
+      (address.value + headerBytes + target.semanticSlotBytes * index) =
+        .ok oldWord)
+    (oldRelated : ValueRel witness .tobject (.word32 oldWord) oldValue)
+    (newRelated : ValueRel witness .tobject (.word32 newWord) newValue)
+    (oldHeap : oldWord.classify = .heap)
+    (semanticRelease :
+      (match oldValue with
+      | .object (.heap child) =>
+          Fir.LeanIR.Impure.decLocationFuel fuel runtime child
+      | _ => .ok runtime) = .ok releasedRuntime)
+    (parentPreserved :
+      findCell? releasedRuntime.heap location = some cell)
+    (semanticSet :
+      setCell releasedRuntime location
+          { cell with
+            object := .array (elements.set index newValue
+              (Array.getElem?_eq_some_iff.mp oldAt).1) capacity } =
+        .ok nextRuntime)
+    (step : ResidentRelease.ResidentOwnershipStep env module decrementIndex
+      fuel witness)
+    (indexFound : initial.get indexIndex =
+      some (.i32 (UInt32.ofNat index)))
+    (indexSet :
+      ({ initial with values := [.i32 (UInt32.ofNat index)] }).set?
+          cursorIndex (.i32 (UInt32.ofNat index)) = some afterIndex)
+    (firstSet :
+      ({ afterIndex with values :=
+          [.i32 (UInt32.ofNat index + UInt32.ofNat index)] }).set?
+          cursorIndex (.i32 (UInt32.ofNat index + UInt32.ofNat index)) =
+        some afterFirst)
+    (secondSet :
+      ({ afterFirst with values :=
+          [.i32 (UInt32.ofNat index + UInt32.ofNat index +
+            (UInt32.ofNat index + UInt32.ofNat index))] }).set?
+          cursorIndex
+            (.i32 (UInt32.ofNat index + UInt32.ofNat index +
+              (UInt32.ofNat index + UInt32.ofNat index))) =
+        some afterSecond)
+    (thirdSet :
+      ({ afterSecond with values :=
+          [.i32 (ResidentPrimitives.scale8Word (UInt32.ofNat index))] }).set?
+          cursorIndex
+            (.i32 (ResidentPrimitives.scale8Word (UInt32.ofNat index))) =
+        some afterThird)
+    (arrayAfterThird : afterThird.get arrayIndex =
+      some (.i32 (UInt32.ofNat address.value)))
+    (cursorSet :
+      ({ afterThird with values :=
+          [.i32 (elementAddressWord (UInt32.ofNat address.value)
+            (UInt32.ofNat index))] }).set? cursorIndex
+          (.i32 (elementAddressWord (UInt32.ofNat address.value)
+            (UInt32.ofNat index))) = some afterCursor)
+    (oldSet :
+      ({ afterCursor with values :=
+          [.i32 (UInt32.ofNat oldWord.value)] }).set? elementIndex
+          (.i32 (UInt32.ofNat oldWord.value)) = some afterOld)
+    (cursorAfter : afterOld.get cursorIndex =
+      some (.i32 (UInt32.ofNat
+        (address.value + headerBytes + target.semanticSlotBytes * index))))
+    (valueAfter : afterOld.get valueIndex =
+      some (.i32 (UInt32.ofNat newWord.value)))
+    (arrayAfter : afterOld.get arrayIndex =
+      some (.i32 (UInt32.ofNat address.value)))
+    (returned : ∀ result finalStore,
+      ReplacementSuccess fuel state witness nextRuntime address index oldWord
+          newWord result finalStore →
+      Q (.Return finalStore [.i32 (UInt32.ofNat address.value)])) :
+    Wasm.wp module
+      (exclusiveReplacementProgram arrayIndex indexIndex cursorIndex valueIndex
+        elementIndex decrementIndex)
+      Q store { initial with values := [] } env := by
+  have cursorUpdate := FirTalos.Correctness.localUpdate_of_set? cursorSet
+  have cursorFound : afterCursor.get cursorIndex =
+      some (.i32 (UInt32.ofNat
+        (address.value + headerBytes + target.semanticSlotBytes * index))) := by
+    rw [← elementAddressWord_ofNat]
+    exact cursorUpdate.1
+  have arrayFound (values : List Wasm.Value) :
+      ({ afterOld with values } : Wasm.Locals).get arrayIndex =
+        some (.i32 (UInt32.ofNat address.value)) := by
+    simpa using arrayAfter
+  have replacementWP :=
+    wp_replaceElementOwnershipProgram_heap_refines
+      (rest := [.localGet arrayIndex, .ret]) admission memoryRelated oldAt
+      oldRead oldRelated newRelated oldHeap semanticRelease parentPreserved
+      semanticSet step cursorFound oldSet cursorAfter valueAfter
+      (fun result finalStore success => by
+        simp only [Wasm.wp_localGet_cons, arrayFound, Wasm.wp_ret_cons]
+        exact returned result finalStore success)
+  have addressWP := wp_elementAddressProgram indexFound indexSet firstSet
+    secondSet thirdSet arrayAfterThird cursorSet replacementWP
+  simpa [exclusiveReplacementProgram, List.append_assoc] using addressWP
+
 /-- Exact Talos spelling of the production trusted exclusivity probe.  The
 exclusive branch is kept abstract so the same control theorem can be reused by
 all three installed helpers and by the typed `Array.set` caller rewrite. -/
