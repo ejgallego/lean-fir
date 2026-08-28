@@ -35,6 +35,7 @@ import FirTalos.ConcreteResidentNatSub
 import FirTalos.ConcreteResidentUSize
 import FirTalos.ConcreteResidentPrimitives
 import FirTalos.ConcreteResidentReplacement
+import FirTalos.ConcreteResidentArray
 import FirTalos.ConcreteReuseCapacityCorrectness
 import FirTalos.ConcreteCacheCorrectness
 import FirTalos.ConcreteDeclarationCorrectness
