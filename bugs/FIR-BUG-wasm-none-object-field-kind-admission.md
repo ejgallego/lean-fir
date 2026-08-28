@@ -133,6 +133,16 @@ direct-let resource theorem and assembling the full schema-global dispatcher
 remain outstanding, so this is still proof-side infrastructure rather than
 resolution of production admission.
 
+The schema-changing direct cone is now connected end to end. An additive
+compiler/resource law retains the exact constructor/reuse update through the
+pure-external, ownership, whole-cache, and entry-relative invariants. Its
+structured and validated successors return the same next witness and next
+schema and re-establish `WitnessAgrees` with the factored `DirectLetUpdate`
+theorem. The card remains open because other witness-extending direct
+operations still need an explicit monotone-extension result before the
+schema-global dispatcher can preserve the current schema for the entire
+legacy direct family and replace the old module-global admission surface.
+
 ## Semantic impact
 
 The mismatch is ownership-relevant. If a descriptor classifies a slot erased
@@ -164,6 +174,8 @@ Pending. The proof-side `ConcreteObjectFieldKindAligned` boundary documents the
 pointwise descriptor equality consumed by the existing runtime theorem, but
 the checked counterexample shows that it is not yet the right derivable
 source-invariant interface. The active-witness schema bridge now provides the
-right replacement boundary and its allocation/reuse transports, but it is not
-yet connected to the production dispatcher. It does not by itself fix
-production admission or establish final-LCNF type soundness.
+right replacement boundary and its allocation/reuse transports. Those
+transports now reach the closed schema-global constructor/reuse successor, but
+the complete dispatcher still awaits unchanged-schema transport for the rest
+of the direct family. This does not yet fix production admission or establish
+final-LCNF type soundness.

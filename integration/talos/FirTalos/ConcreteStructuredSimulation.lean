@@ -24687,6 +24687,131 @@ theorem ConcreteStructuredCodePointwiseRel.advance_directLet
   · simp [targetCount]
   · exact ⟨nextFocus, nextResources⟩
 
+/-- Schema-aware direct-value successor for precisely the constructor/reuse
+family.  It advances the same production structured state and resource stack
+as `advance_directLet`, while retaining the source-determined schema update
+paired with that exact successor witness. -/
+theorem ConcreteStructuredCodePointwiseRel.advance_schemaChangingDirectLet
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {requiredBytes : Nat}
+    {remainingBytes : Nat}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceValue : Value}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts)
+    (related : ConcreteStructuredCodePointwiseRel program context functionCode
+      sourceModule sourceFunction targetModule hosts spec externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts requiredBytes remainingBytes sourceRuntime sourceEnv
+      (.let decl continuation) targetStore targetLocals targetCode witness source
+      target)
+    (schema : ConstructorSchema)
+    (supported : SchemaChangingDirectSupported context facts decl)
+    (requiredEq : requiredBytes = directLetAllocationCost decl)
+    (sourceResult : SourceLetResult context sourceRuntime sourceEnv decl
+      nextRuntime sourceValue) :
+    ∃ sourceAfter targetAfter nextStore resumedLocals nextWitness nextFacts
+        nextSchema targetRest targetCount,
+      executeStep externals source = .next sourceAfter ∧
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+        targetCount target targetAfter ∧
+      0 < targetCount ∧
+      sourceAfter.frames = source.frames ∧
+      targetAfter.frames = target.frames ∧
+      ConcreteStructuredCodeCoreRel program context sourceModule sourceFunction
+        externals labels entryRuntime entryStore entryWitness functionResult
+        callerExpectedResult nextFacts
+        (remainingBytes - directLetAllocationCost decl) nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue) continuation nextStore
+        resumedLocals targetRest nextWitness sourceAfter targetAfter ∧
+      ConstructorSchema.DirectLetUpdate sourceRuntime sourceEnv decl witness
+        nextWitness schema nextSchema := by
+  have fits : directLetAllocationCost decl ≤ remainingBytes := by
+    rw [← requiredEq]
+    exact related.budget
+  obtain ⟨valueCode, targetValue, targetRest, resultIndex, valueCompiled,
+      valueAdapted, resultFound, continuationAdapted, targetCodeEq⟩ :=
+    CodeAdaptedWithSuffix.let_eq related.focus.adapted
+  obtain ⟨nextStore, nextLocals, nextWitness, nextFacts, nextSchema, step,
+      _externalsPreserved, _hostDescriptorsPreserved,
+      _witnessDescriptorsPreserved, transports, _producedTransfer,
+      nextInvariant, schemaUpdate⟩ :=
+    (spec.reuseCapacityDirectLetRuntimeRefinesWithSchema_schemaChanging_pureExternalOwnership_entryRelativeCache
+      externals) schema supported fits related.resources.current.1 sourceResult
+        valueCompiled valueAdapted resultFound
+  have flat : StructuredWasmFlatProgram targetModule.wasmModule
+      (targetValue ++ [.localSet resultIndex]) :=
+    spec.reuseCapacityDirectTargetFlat_reuseBudgetedDirect
+      supported.toReuseBudgetedDirectSupported valueCompiled valueAdapted
+  have nextAbi : ClosureAllocationsAbiAligned context.program nextWitness :=
+    ClosureAllocationsAbiAligned.ofPersistent related.resources.current.2
+      transports.closureAllocationsPersistent
+  let resumedLocals : Wasm.Locals :=
+    { nextLocals with values := targetLocals.values }
+  have nextScope :
+      ConcreteStructuredResourceScope context sourceModule sourceFunction
+        externals entryRuntime entryStore entryWitness nextFacts
+        (remainingBytes - directLetAllocationCost decl) nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue) nextStore resumedLocals
+        nextWitness := by
+    exact ⟨by
+      simpa [resumedLocals] using
+        nextInvariant.withValues targetLocals.values,
+      nextAbi⟩
+  obtain ⟨sourceAfter, targetAfter, sourceStep, targetPath, nextFocus,
+      _sourceJoinsEq, sourceFramesEq, targetFramesEq⟩ :=
+    related.focus.advance_flatLet targetCodeEq continuationAdapted flat
+      step nextScope.frameAligned
+  have nextResourcesBefore :
+      ConcreteStructuredResourceStack program context sourceModule
+        sourceFunction externals entryRuntime nextRuntime entryStore
+        nextStore entryWitness nextWitness nextFacts
+        (remainingBytes - directLetAllocationCost decl)
+        (bind sourceEnv decl.fvarId sourceValue) resumedLocals
+        functionResult callerExpectedResult source.frames target.frames :=
+    ⟨nextScope, related.resources.suspended⟩
+  have nextResources :
+      ConcreteStructuredResourceStack program context sourceModule
+        sourceFunction externals entryRuntime nextRuntime entryStore
+        nextStore entryWitness nextWitness nextFacts
+        (remainingBytes - directLetAllocationCost decl)
+        (bind sourceEnv decl.fvarId sourceValue) resumedLocals
+        functionResult callerExpectedResult sourceAfter.frames
+        targetAfter.frames := by
+    rw [sourceFramesEq, targetFramesEq]
+    exact nextResourcesBefore
+  let targetCount :=
+    (targetValue ++ [Wasm.Instruction.localSet resultIndex]).length
+  refine ⟨sourceAfter, targetAfter, nextStore, resumedLocals, nextWitness,
+    nextFacts, nextSchema, targetRest, targetCount, sourceStep, ?_, ?_,
+    sourceFramesEq, targetFramesEq, ?_, schemaUpdate⟩
+  · simpa [targetCount] using targetPath
+  · simp [targetCount]
+  · exact ⟨nextFocus, nextResources⟩
+
 /-- Relation-facing direct-value rule.  Its only dynamic premise is the
 ordinary interpreter step used by `RankedObservedWeakSimulation.advance`;
 the exact semantic value result and the generated successor are recovered
@@ -24755,6 +24880,81 @@ theorem ConcreteStructuredCodePointwiseRel.advance_directLet_of_step
   exact ⟨targetAfter, nextRuntime, sourceValue, nextStore, resumedLocals,
     nextWitness, nextFacts, targetRest, targetCount, targetPath,
     targetPositive, by simpa using sourceFramesEq, targetFramesEq, nextCore⟩
+
+/-- Relation-facing schema-changing direct rule. The ordinary interpreter
+step determines the source result; the schema-aware runtime law supplies the
+matching successor witness and schema update. -/
+theorem
+    ConcreteStructuredCodePointwiseRel.advance_schemaChangingDirectLet_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {requiredBytes remainingBytes : Nat}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts)
+    (related : ConcreteStructuredCodePointwiseRel program context functionCode
+      sourceModule sourceFunction targetModule hosts spec externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts requiredBytes remainingBytes sourceRuntime sourceEnv
+      (.let decl continuation) targetStore targetLocals targetCode witness source
+      target)
+    (schema : ConstructorSchema)
+    (supported : SchemaChangingDirectSupported context facts decl)
+    (requiredEq : requiredBytes = directLetAllocationCost decl)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextRuntime sourceValue nextStore resumedLocals nextWitness
+        nextFacts nextSchema targetRest targetCount,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+        targetCount target targetAfter ∧
+      0 < targetCount ∧
+      sourceAfter.frames = source.frames ∧
+      targetAfter.frames = target.frames ∧
+      ConcreteStructuredCodeCoreRel program context sourceModule sourceFunction
+        externals labels entryRuntime entryStore entryWitness functionResult
+        callerExpectedResult nextFacts
+        (remainingBytes - directLetAllocationCost decl) nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue) continuation nextStore
+        resumedLocals targetRest nextWitness sourceAfter targetAfter ∧
+      ConstructorSchema.DirectLetUpdate sourceRuntime sourceEnv decl witness
+        nextWitness schema nextSchema := by
+  obtain ⟨nextRuntime, sourceValue, sourceResult⟩ :=
+    related.focus.directLetResult_of_step
+      supported.toReuseBudgetedDirectSupported sourceStep
+  obtain ⟨computedAfter, targetAfter, nextStore, resumedLocals, nextWitness,
+      nextFacts, nextSchema, targetRest, targetCount, computedStep, targetPath,
+      targetPositive, sourceFramesEq, targetFramesEq, nextCore, schemaUpdate⟩ :=
+    related.advance_schemaChangingDirectLet spec schema supported requiredEq
+      sourceResult
+  have sourceAfterEq : sourceAfter = computedAfter := by
+    rw [sourceStep] at computedStep
+    exact ExecResult.next.inj computedStep
+  subst computedAfter
+  exact ⟨targetAfter, nextRuntime, sourceValue, nextStore, resumedLocals,
+    nextWitness, nextFacts, nextSchema, targetRest, targetCount, targetPath,
+    targetPositive, by simpa using sourceFramesEq, targetFramesEq, nextCore,
+    schemaUpdate⟩
 
 /-- A source-semantically typed return is reclassified at the active
 function's result ABI before it reaches the suspended caller protocol.

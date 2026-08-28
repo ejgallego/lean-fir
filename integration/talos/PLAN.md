@@ -6331,8 +6331,22 @@ retained location—so proof metadata cannot silently choose the wrong schema
 branch. The nonempty constructor budget theorem now publishes the exact
 `bindConstructor` witness, and the branch-independent reuse refinement
 publishes a matching `ReuseShape`/`WitnessUpdate` pair for every incoming
-schema. The next lift carries this already-proved pair through the direct-let
-compiler/resource theorem and into the witness-indexed validated successor.
+schema. The following lift carries this already-proved pair through the
+direct-let compiler/resource theorem and into the witness-indexed validated
+successor.
+
+That lift is now closed for the schema-changing direct family. The additive
+`ReuseCapacityDirectLetRuntimeRefinesWithSchema` law retains an exact
+`DirectLetUpdate` for nonempty constructor allocation and every successful
+reuse branch, composes the two cases once, and crosses the pure-external,
+ownership, whole-cache, and entry-relative resource layers. The structured
+successor uses the production compiler/adaptor path and returns the same next
+witness, next schema, fact map, budget, and validated continuation;
+`DirectLetUpdate.agrees` then closes the schema-enriched global relation. The
+remaining direct-dispatch work is to expose monotone witness extension for the
+other allocating direct operations, preserve the schema unchanged there, and
+combine both direct classes with the already-closed administrative, external,
+and object-field successors in the full schema-global dispatcher.
 
 W6.6 float packed-field admission closes the semantic-to-concrete gap for
 `Float32` and `Float` projection and mutation. `ValueRel` now relates the

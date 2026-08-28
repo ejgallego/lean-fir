@@ -14337,6 +14337,57 @@ theorem DirectLetStepTransports.replaceHeap
     witnessDescriptors closureAllocationsPersistent capacity ordinary
     sourceGlobals
 
+/-- Source/compiler shape that determines the constructor-schema successor of
+one allocating or reusing direct declaration.
+
+The declaration equation and source token lookup are semantic/compiler facts;
+the concrete witness transition is kept separately in `DirectLetUpdate`. -/
+inductive ConstructorSchema.DirectLetShape
+    (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (decl : LCNF.LetDecl .impure) :
+    ConstructorSchema → ConstructorSchema → Prop where
+  | constructor
+      {schema : ConstructorSchema}
+      (info : LCNF.CtorInfo) (args : Array (LCNF.Arg .impure))
+      (fieldKinds : Array AbiKind)
+      (valueEq : decl.value = .ctor info args)
+      (nonempty : ¬ ((info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0)) :
+      ConstructorSchema.DirectLetShape sourceRuntime sourceEnv decl schema
+        (schema.bind sourceRuntime.nextLocation info fieldKinds)
+  | reuse
+      {schema nextSchema : ConstructorSchema}
+      (tokenId : FVarId) (info : LCNF.CtorInfo) (updateHeader : Bool)
+      (args : Array (LCNF.Arg .impure)) (fieldKinds : Array AbiKind)
+      (sourceToken : Value)
+      (valueEq : decl.value = .reuse tokenId info updateHeader args)
+      (tokenLookup : lookup sourceEnv tokenId = some sourceToken)
+      (shape : ConstructorSchema.ReuseShape sourceRuntime sourceToken info
+        fieldKinds schema nextSchema) :
+      ConstructorSchema.DirectLetShape sourceRuntime sourceEnv decl schema
+        nextSchema
+
+/-- One direct declaration's source/compiler schema shape paired with the
+matching concrete witness evolution. -/
+structure ConstructorSchema.DirectLetUpdate
+    (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (decl : LCNF.LetDecl .impure)
+    (before after : RefinementWitness)
+    (schema nextSchema : ConstructorSchema) : Prop where
+  shape : ConstructorSchema.DirectLetShape sourceRuntime sourceEnv decl schema
+    nextSchema
+  witness : ConstructorSchema.WitnessUpdate before after schema nextSchema
+
+theorem ConstructorSchema.DirectLetUpdate.agrees
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {decl : LCNF.LetDecl .impure}
+    {before after : RefinementWitness}
+    {schema nextSchema : ConstructorSchema}
+    (update : ConstructorSchema.DirectLetUpdate sourceRuntime sourceEnv decl
+      before after schema nextSchema)
+    (agrees : schema.WitnessAgrees before) :
+    nextSchema.WitnessAgrees after :=
+  update.witness.agrees agrees
+
 /--
 Certificate-free compiler composition for one successful capacity-validated
 reuse declaration.
@@ -14417,7 +14468,10 @@ theorem ConcreteSupportedFunction.reuseLetStep_of_capacity
         (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
         nextWitness ∧
       nextStore.host.runtime.heap.AddressSpaceBudget
-        (remainingBytes - directLetAllocationCost decl) := by
+        (remainingBytes - directLetAllocationCost decl) ∧
+      ∀ schema, ∃ nextSchema,
+        ConstructorSchema.DirectLetUpdate sourceRuntime sourceEnv decl witness
+          nextWitness schema nextSchema := by
   rcases supported with
     ⟨tokenId, info, updateHeader, args, argumentCode, fieldKinds, resultKind,
       evidence, valueEq, tagFits, valueKind, tokenCompiled, argumentsCompiled,
@@ -14556,7 +14610,7 @@ theorem ConcreteSupportedFunction.reuseLetStep_of_capacity
       closureAllocationsPersistent, nextRuntimeRelated, valueRelated,
       capacityValue, witnessDispatchPreserved,
       witnessDescriptorsPreserved,
-      capacityTransport, remainingBudget, _schemaUpdates⟩ :=
+      capacityTransport, remainingBudget, schemaUpdates⟩ :=
     reuseStep_of_capacityEvidence related.stateRelated.1 argsLength decoded
       tokenCapacity capacityFitting fieldsArity semanticArity
       operationFacts.1.1.symm operationFacts.1.2 fieldRelated tagFits'
@@ -14615,7 +14669,13 @@ theorem ConcreteSupportedFunction.reuseLetStep_of_capacity
     transfer, nextCapacity, nextOrdinary, nextFrameAligned, by
       change heap.AddressSpaceBudget
         (remainingBytes - directLetAllocationCost decl)
-      simpa [directLetAllocationCost, valueEq] using remainingBudget⟩
+      simpa [directLetAllocationCost, valueEq] using remainingBudget,
+    fun schema => by
+      obtain ⟨nextSchema, shape, witnessUpdate⟩ := schemaUpdates schema
+      exact ⟨nextSchema,
+        ⟨.reuse tokenId info updateHeader args fieldKinds sourceToken valueEq
+            tokenLookup shape,
+          witnessUpdate⟩⟩⟩
 
 /--
 Facts-indexed resource invariant for structural reuse proofs.
@@ -14811,6 +14871,211 @@ def ReuseCapacityDirectLetRuntimeRefinesWithCost
                   Invariant nextFacts (remainingBytes - letCost decl)
                     nextRuntime (bind sourceEnv decl.fvarId sourceValue)
                     nextStore nextLocals nextWitness
+
+/-- Direct runtime law that retains the constructor-schema update paired with
+the same concrete store, locals, and witness as the ordinary resource
+successor.  This is an additive ghost-state strengthening of
+`ReuseCapacityDirectLetRuntimeRefinesWithCost`. -/
+def ReuseCapacityDirectLetRuntimeRefinesWithSchema
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (labels : LabelContext)
+    (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (Supported : ReuseCapacityFacts → LCNF.LetDecl .impure → Prop)
+    (letCost : LCNF.LetDecl .impure → Nat)
+    (Invariant :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop) : Prop :=
+  ∀ {facts : ReuseCapacityFacts}
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {decl : LCNF.LetDecl .impure}
+      {sourceValue : Value}
+      {valueCode : List Fir.Wasm.Instruction}
+      {targetValue : Wasm.Program}
+      {targetStore : Wasm.Store Host}
+      {targetLocals : Wasm.Locals}
+      {resultIndex remainingBytes : Nat}
+      {witness : RefinementWitness},
+    (schema : ConstructorSchema) →
+    Supported facts decl →
+      letCost decl ≤ remainingBytes →
+      Invariant facts remainingBytes sourceRuntime sourceEnv targetStore
+        targetLocals witness →
+      SourceLetResult context sourceRuntime sourceEnv decl nextRuntime
+        sourceValue →
+      Fir.Wasm.compileLetValue context decl = .ok valueCode →
+      instructions sourceModule sourceFunction labels valueCode =
+        .ok targetValue →
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex →
+      ∃ nextStore nextLocals nextWitness nextFacts nextSchema,
+        LetStepSimulates context sourceFunction module hostEnv decl targetValue
+          sourceRuntime nextRuntime sourceEnv sourceValue targetStore nextStore
+          targetLocals nextLocals resultIndex witness nextWitness ∧
+        nextStore.host.externals = targetStore.host.externals ∧
+          nextStore.host.closureDescriptors =
+              targetStore.host.closureDescriptors ∧
+            nextWitness.closureDescriptors = witness.closureDescriptors ∧
+              DirectLetStepTransports sourceRuntime nextRuntime targetStore
+                  nextStore witness nextWitness ∧
+                reuseCapacityLetFacts? facts decl = some nextFacts ∧
+                  Invariant nextFacts (remainingBytes - letCost decl)
+                    nextRuntime (bind sourceEnv decl.fvarId sourceValue)
+                    nextStore nextLocals nextWitness ∧
+                  ConstructorSchema.DirectLetUpdate sourceRuntime sourceEnv decl
+                    witness nextWitness schema nextSchema
+
+/-- Forget only the constructor-schema ghost update. -/
+theorem ReuseCapacityDirectLetRuntimeRefinesWithSchema.toRuntimeRefines
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : LabelContext}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {Supported : ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {letCost : LCNF.LetDecl .impure → Nat}
+    {Invariant :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
+    (runtimeRefines :
+      ReuseCapacityDirectLetRuntimeRefinesWithSchema context sourceModule
+        sourceFunction labels module hostEnv Supported letCost Invariant) :
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels module hostEnv Supported letCost Invariant := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported stepFits invariant sourceStep valueCompiled valueAdapted
+    resultFound
+  obtain ⟨nextStore, nextLocals, nextWitness, nextFacts, _nextSchema, step,
+      externalsPreserved, hostDescriptorsPreserved,
+      witnessDescriptorsPreserved, transports, transfer, nextInvariant,
+      _schemaUpdate⟩ :=
+    runtimeRefines ConstructorSchema.empty supported stepFits invariant
+      sourceStep valueCompiled valueAdapted resultFound
+  exact ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+    externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
+    transports, transfer, nextInvariant⟩
+
+/-- Schema-retaining direct runtime laws compose by source-admission
+disjunction without losing the exact successor schema. -/
+theorem ReuseCapacityDirectLetRuntimeRefinesWithSchema.or
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : LabelContext}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {Left Right : ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {letCost : LCNF.LetDecl .impure → Nat}
+    {Invariant :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
+    (left :
+      ReuseCapacityDirectLetRuntimeRefinesWithSchema context sourceModule
+        sourceFunction labels module hostEnv Left letCost Invariant)
+    (right :
+      ReuseCapacityDirectLetRuntimeRefinesWithSchema context sourceModule
+        sourceFunction labels module hostEnv Right letCost Invariant) :
+    ReuseCapacityDirectLetRuntimeRefinesWithSchema context sourceModule
+      sourceFunction labels module hostEnv
+      (fun facts decl => Left facts decl ∨ Right facts decl) letCost
+      Invariant := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    schema supported stepFits invariant sourceStep valueCompiled valueAdapted
+    resultFound
+  cases supported with
+  | inl leftSupported =>
+      exact left schema leftSupported stepFits invariant sourceStep
+        valueCompiled valueAdapted resultFound
+  | inr rightSupported =>
+      exact right schema rightSupported stepFits invariant sourceStep
+        valueCompiled valueAdapted resultFound
+
+/-- Schema-retaining direct laws preserve properties of the installed
+external table while carrying the same schema successor. -/
+theorem
+    ReuseCapacityDirectLetRuntimeRefinesWithSchema.preservingExternalInvariant
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : LabelContext}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {Supported : ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {letCost : LCNF.LetDecl .impure → Nat}
+    {Invariant :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
+    {ExternalInvariant : ConcreteExternalImpl → Prop}
+    (runtimeRefines :
+      ReuseCapacityDirectLetRuntimeRefinesWithSchema context sourceModule
+        sourceFunction labels module hostEnv Supported letCost Invariant) :
+    ReuseCapacityDirectLetRuntimeRefinesWithSchema context sourceModule
+      sourceFunction labels module hostEnv Supported letCost
+      (fun facts remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness =>
+        Invariant facts remainingBytes sourceRuntime sourceEnv targetStore
+            targetLocals witness ∧
+          ExternalInvariant targetStore.host.externals) := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    schema supported stepFits invariant sourceStep valueCompiled valueAdapted
+    resultFound
+  obtain ⟨nextStore, nextLocals, nextWitness, nextFacts, nextSchema, step,
+      externalsPreserved, hostDescriptorsPreserved,
+      witnessDescriptorsPreserved, transports, transfer, nextInvariant,
+      schemaUpdate⟩ :=
+    runtimeRefines schema supported stepFits invariant.1 sourceStep
+      valueCompiled valueAdapted resultFound
+  exact ⟨nextStore, nextLocals, nextWitness, nextFacts, nextSchema, step,
+    externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
+    transports, transfer, ⟨nextInvariant,
+      by simpa [externalsPreserved] using invariant.2⟩, schemaUpdate⟩
+
+/-- Schema-retaining direct laws lift through closure-descriptor agreement. -/
+theorem
+    ReuseCapacityDirectLetRuntimeRefinesWithSchema.preservingClosureDescriptorAgreement
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : LabelContext}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {Supported : ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {letCost : LCNF.LetDecl .impure → Nat}
+    {Invariant :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
+    (runtimeRefines :
+      ReuseCapacityDirectLetRuntimeRefinesWithSchema context sourceModule
+        sourceFunction labels module hostEnv Supported letCost Invariant) :
+    ReuseCapacityDirectLetRuntimeRefinesWithSchema context sourceModule
+      sourceFunction labels module hostEnv Supported letCost
+      (fun facts remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness =>
+        Invariant facts remainingBytes sourceRuntime sourceEnv targetStore
+            targetLocals witness ∧
+          targetStore.host.closureDescriptors = witness.closureDescriptors) := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    schema supported stepFits invariant sourceStep valueCompiled valueAdapted
+    resultFound
+  obtain ⟨nextStore, nextLocals, nextWitness, nextFacts, nextSchema, step,
+      externalsPreserved, hostDescriptorsPreserved,
+      witnessDescriptorsPreserved, transports, transfer, nextInvariant,
+      schemaUpdate⟩ :=
+    runtimeRefines schema supported stepFits invariant.1 sourceStep
+      valueCompiled valueAdapted resultFound
+  exact ⟨nextStore, nextLocals, nextWitness, nextFacts, nextSchema, step,
+    externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
+    transports, transfer, ⟨nextInvariant,
+      hostDescriptorsPreserved.trans
+        (invariant.2.trans witnessDescriptorsPreserved.symm)⟩, schemaUpdate⟩
 
 /--
 Facts-indexed runtime laws compose by source-admission disjunction when they
@@ -15011,13 +15276,51 @@ theorem ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost
   obtain ⟨related, ordinaryTokens, localFrame, budget⟩ := invariant
   obtain ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
       externalsPreserved, descriptorsPreserved, witnessDescriptorsPreserved,
-      transports, transfer, nextRelated, nextOrdinary, nextFrame, nextBudget⟩ :=
+      transports, transfer, nextRelated, nextOrdinary, nextFrame, nextBudget,
+      _schemaUpdates⟩ :=
     spec.reuseLetStep_of_capacity supported allocationFits related
       ordinaryTokens budget localFrame sourceStep valueCompiled valueAdapted
       resultFound
   exact ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
     externalsPreserved, descriptorsPreserved, witnessDescriptorsPreserved,
     transports, transfer, nextRelated, nextOrdinary, nextFrame, nextBudget⟩
+
+/-- Successful validated reuse retains its source-determined schema update
+through the complete facts-indexed resource successor. -/
+theorem
+    ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithSchema_reuse
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : LabelContext} :
+    ReuseCapacityDirectLetRuntimeRefinesWithSchema context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (ReuseSupported context) directLetAllocationCost
+      (ConcreteReuseCapacityFrame sourceFunction) := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    schema supported allocationFits invariant sourceStep valueCompiled
+    valueAdapted resultFound
+  obtain ⟨related, ordinaryTokens, localFrame, budget⟩ := invariant
+  obtain ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+      externalsPreserved, descriptorsPreserved, witnessDescriptorsPreserved,
+      transports, transfer, nextRelated, nextOrdinary, nextFrame, nextBudget,
+      schemaUpdates⟩ :=
+    spec.reuseLetStep_of_capacity supported allocationFits related
+      ordinaryTokens budget localFrame sourceStep valueCompiled valueAdapted
+      resultFound
+  obtain ⟨nextSchema, schemaUpdate⟩ := schemaUpdates schema
+  exact ⟨nextStore, nextLocals, nextWitness, nextFacts, nextSchema, step,
+    externalsPreserved, descriptorsPreserved, witnessDescriptorsPreserved,
+    transports, transfer, ⟨nextRelated, nextOrdinary, nextFrame, nextBudget⟩,
+    schemaUpdate⟩
 
 /--
 Cost-zero local aliases preserve the facts-indexed reuse frame.
@@ -16192,7 +16495,7 @@ Nonempty constructor allocation inserts the validator's exact constructor
 capacity fact while preserving every older fact and ordinary token.
 -/
 theorem
-    ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost_nonemptyConstructor
+    ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithSchema_nonemptyConstructor
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -16204,14 +16507,14 @@ theorem
       ConcreteSupportedFunction program context sourceCode sourceModule
         sourceFunction target hosts)
     {labels : LabelContext} :
-    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+    ReuseCapacityDirectLetRuntimeRefinesWithSchema context sourceModule
       sourceFunction labels target.wasmModule hosts.env
       (fun _ decl => NonemptyConstructorSupported context decl)
       directLetAllocationCost (ConcreteReuseCapacityFrame sourceFunction) := by
   intro facts sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
     targetValue targetStore targetLocals resultIndex remainingBytes witness
-    supported allocationFits invariant sourceStep valueCompiled valueAdapted
-    resultFound
+    schema supported allocationFits invariant sourceStep valueCompiled
+    valueAdapted resultFound
   rcases supported with
     ⟨info, args, argumentCode, fieldKinds, resultKind, valueEq, tagFits,
       valueKind, argumentsCompiled, resultCompiled, operationWellFormed,
@@ -16257,7 +16560,7 @@ theorem
       witnessDispatchPreserved, witnessDescriptorsPreserved, wasmGlobals,
       hostStaticLayout, extension, closureAllocationsPersistent,
       nextRuntimeRelated, failureClear, valueRelated, capacityValue,
-      capacityTransport, remainingBudget, _witnessEq⟩ :=
+      capacityTransport, remainingBudget, witnessEq⟩ :=
     constructorNonemptyStep_of_budget related.stateRelated.1 physicalArity
       argumentsRelated semanticStep semanticArity operationFacts.1.1.symm
       operationFacts.1.2 nonempty tagFits' objectFieldsFit usizeFieldsFit
@@ -16304,6 +16607,7 @@ theorem
   exact ⟨nextStore, updated, nextWitness,
     insertReuseCapacityFact facts decl.fvarId
       (constructorReuseCapacityEvidence info),
+    schema.bind sourceRuntime.nextLocation info fieldKinds,
     step, externalsPreserved, hostDescriptorsPreserved,
     witnessDescriptorsPreserved, {
       toClosureTablesTransport := {
@@ -16318,9 +16622,150 @@ theorem
       sourceGlobals := allocCtor_preserves_globals semanticStep
       wasmGlobals
       hostStaticLayout },
-    transfer, nextRelated, nextOrdinary,
-    nextFrame, by
-      simpa [directLetAllocationCost, valueEq] using remainingBudget⟩
+    transfer, ⟨nextRelated, nextOrdinary,
+      nextFrame, by
+        simpa [directLetAllocationCost, valueEq] using remainingBudget⟩,
+    {
+      shape := .constructor info args fieldKinds valueEq nonempty
+      witness := .allocated sourceRuntime.nextLocation word info fieldKinds
+        extension (by rw [witnessEq]; simp) (by rw [witnessEq]; simp) }⟩
+
+/-- Forgetting the constructor-schema ghost successor recovers the ordinary
+nonempty-constructor resource law. -/
+theorem
+    ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost_nonemptyConstructor
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : LabelContext} :
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (fun _ decl => NonemptyConstructorSupported context decl)
+      directLetAllocationCost (ConcreteReuseCapacityFrame sourceFunction) := by
+  exact ReuseCapacityDirectLetRuntimeRefinesWithSchema.toRuntimeRefines
+    (context := context) (sourceModule := sourceModule)
+    (sourceFunction := sourceFunction) (labels := labels)
+    (module := target.wasmModule) (hostEnv := hosts.env)
+    (Supported := fun _ decl => NonemptyConstructorSupported context decl)
+    (letCost := directLetAllocationCost)
+    (Invariant := ConcreteReuseCapacityFrame sourceFunction)
+    spec.reuseCapacityDirectLetRuntimeRefinesWithSchema_nonemptyConstructor
+
+/-- Direct declarations whose successful execution can change constructor
+schema: retained/fresh reuse and nonempty constructor allocation. -/
+def SchemaChangingDirectSupported (context : Fir.Wasm.Context)
+    (facts : ReuseCapacityFacts) (decl : LCNF.LetDecl .impure) : Prop :=
+  ReuseSupported context facts decl ∨ NonemptyConstructorSupported context decl
+
+/-- The production compiler/resource law for the complete schema-changing
+direct family. -/
+theorem
+    ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithSchema_schemaChanging
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : LabelContext} :
+    ReuseCapacityDirectLetRuntimeRefinesWithSchema context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (SchemaChangingDirectSupported context) directLetAllocationCost
+      (ConcreteReuseCapacityFrame sourceFunction) := by
+  change
+    ReuseCapacityDirectLetRuntimeRefinesWithSchema context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (fun facts decl =>
+        ReuseSupported context facts decl ∨
+          NonemptyConstructorSupported context decl)
+      directLetAllocationCost (ConcreteReuseCapacityFrame sourceFunction)
+  intro facts sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    schema supported stepFits invariant sourceStep valueCompiled valueAdapted
+    resultFound
+  cases supported with
+  | inl reuse =>
+      exact spec.reuseCapacityDirectLetRuntimeRefinesWithSchema_reuse schema
+        reuse stepFits invariant sourceStep valueCompiled valueAdapted
+        resultFound
+  | inr constructor =>
+      exact
+        spec.reuseCapacityDirectLetRuntimeRefinesWithSchema_nonemptyConstructor
+          schema constructor stepFits invariant sourceStep valueCompiled
+          valueAdapted resultFound
+
+/-- The schema-changing direct family preserves the pure external handler
+contracts and ownership descriptor agreement used by structured execution. -/
+theorem
+    ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithSchema_schemaChanging_pureExternalOwnership
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    (externals : ExternalImpl)
+    {labels : LabelContext} :
+    ReuseCapacityDirectLetRuntimeRefinesWithSchema context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (SchemaChangingDirectSupported context) directLetAllocationCost
+      (ConcreteReuseCapacityPureExternalOwnershipFrame sourceFunction
+        externals) := by
+  have pure :
+      ReuseCapacityDirectLetRuntimeRefinesWithSchema context sourceModule
+        sourceFunction labels target.wasmModule hosts.env
+        (SchemaChangingDirectSupported context) directLetAllocationCost
+        (ConcreteReuseCapacityPureExternalFrame sourceFunction externals) := by
+    change
+      ReuseCapacityDirectLetRuntimeRefinesWithSchema context sourceModule
+        sourceFunction labels target.wasmModule hosts.env
+        (SchemaChangingDirectSupported context) directLetAllocationCost
+        (fun facts remainingBytes sourceRuntime sourceEnv targetStore
+            targetLocals witness =>
+          ConcreteReuseCapacityFrame sourceFunction facts remainingBytes
+              sourceRuntime sourceEnv targetStore targetLocals witness ∧
+            (targetStore.host.externals.IntegerResultRefines externals ∧
+              FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+                  targetStore.host.externals externals ∧
+                FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+                  targetStore.host.externals externals))
+    exact
+      ReuseCapacityDirectLetRuntimeRefinesWithSchema.preservingExternalInvariant
+        (ExternalInvariant := fun concrete =>
+          concrete.IntegerResultRefines externals ∧
+            FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+                concrete externals ∧
+              FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+                concrete externals)
+        spec.reuseCapacityDirectLetRuntimeRefinesWithSchema_schemaChanging
+  change
+    ReuseCapacityDirectLetRuntimeRefinesWithSchema context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (SchemaChangingDirectSupported context) directLetAllocationCost
+      (fun facts remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness =>
+        ConcreteReuseCapacityPureExternalFrame sourceFunction externals facts
+            remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+            witness ∧
+          targetStore.host.closureDescriptors = witness.closureDescriptors)
+  exact
+    ReuseCapacityDirectLetRuntimeRefinesWithSchema.preservingClosureDescriptorAgreement
+      pure
 
 /--
 Finite successful source evaluation indexed by the authoritative reuse fact
@@ -19531,6 +19976,19 @@ def ReuseBudgetedDirectSupported (context : Fir.Wasm.Context)
   ReuseConstructorBoxSupported context facts decl ∨
     (NaturalLiteralSupported context decl ∨
       StringLiteralSupported context decl)
+
+/-- Every schema-changing direct declaration is admitted by the complete
+production direct family. -/
+theorem SchemaChangingDirectSupported.toReuseBudgetedDirectSupported
+    {context : Fir.Wasm.Context} {facts : ReuseCapacityFacts}
+    {decl : LCNF.LetDecl .impure}
+    (supported : SchemaChangingDirectSupported context facts decl) :
+    ReuseBudgetedDirectSupported context facts decl := by
+  cases supported with
+  | inl reuse =>
+      exact .inl (.inl (.inl (.inl (.inl (.inl reuse)))))
+  | inr constructor =>
+      exact .inl (.inl (.inr constructor))
 
 /--
 All current direct compiler operations share the facts-indexed reuse frame.

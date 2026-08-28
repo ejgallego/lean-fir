@@ -3710,6 +3710,71 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_directLet_of_step
     targetPositive,
     related.withSuccessor validatedCore sourceFramesEq targetFramesEq⟩
 
+/-- A successful constructor/reuse direct binding advances the closed
+validated relation and evolves the existential constructor schema in lockstep
+with the exact successor witness. -/
+theorem
+    ConcreteStructuredValidatedCodeOutcome.advance_schemaChangingDirectLetSchemaGlobal_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    {schema : ConstructorSchema}
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.let decl continuation) targetStore targetLocals targetCode witness source
+      target)
+    (schemaAgrees : schema.WitnessAgrees witness)
+    (supported : SchemaChangingDirectSupported context facts decl)
+    (budget : directLetAllocationCost decl ≤ remainingBytes)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter targetCount,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetCount target targetAfter ∧
+        0 < targetCount ∧
+        ConcreteStructuredSchemaValidatedCodeGlobalOutcome program sourceModule
+          targetModule hosts externals sourceAfter targetAfter := by
+  have broad := supported.toReuseBudgetedDirectSupported
+  have pointwise := related.toPointwise
+    (ConcreteStructuredCodeStepAdmission.directLet broad) budget
+  obtain ⟨targetAfter, nextRuntime, sourceValue, nextStore, resumedLocals,
+      nextWitness, nextFacts, nextSchema, nextTargetCode, targetCount,
+      targetPath, targetPositive, sourceFramesEq, targetFramesEq, nextCore,
+      schemaUpdate⟩ :=
+    pointwise.advance_schemaChangingDirectLet_of_step spec schema supported rfl
+      sourceStep
+  have validatedCore := related.core.letSuccessor
+    broad.resultCompiledForValidation nextCore
+  have next :=
+    related.withSuccessor validatedCore sourceFramesEq targetFramesEq
+  refine ⟨targetAfter, targetCount, targetPath, targetPositive, nextSchema,
+    nextWitness, schemaUpdate.agrees schemaAgrees, ?_⟩
+  exact ConcreteStructuredValidatedCodeGlobalOutcomeAt.code activeResult next
+
 /-- Stage a compiler-generated named call inside the closed relation.  The
 production pipeline selects the exact callee row, the concrete theorem runs
 the argument prefix, and validation contributes only the caller continuation
