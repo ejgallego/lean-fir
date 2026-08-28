@@ -179,6 +179,61 @@ theorem uint32ToNatFunction_valueFound :
         some 0 := by
   decide
 
+/-- W7's three closed bounded-helper equations instantiate the single common
+source spelling. -/
+theorem boundedFunction_body (kind : BoundedConversionKind) :
+    (boundedFunction kind).body =
+      immediateSource (boundedFunction kind).params[0]!.1
+        (boundedResultKind kind) := by
+  cases kind
+  · rw [boundedFunction, boundedResultKind,
+      Fir.Wasm.Emit.ResidentFixedWidth.uint8ToNatFunction_body]
+    rfl
+  · rw [boundedFunction, boundedResultKind,
+      Fir.Wasm.Emit.ResidentFixedWidth.uint8ToBitVecFunction_body]
+    rfl
+  · rw [boundedFunction, boundedResultKind,
+      Fir.Wasm.Emit.ResidentFixedWidth.uint16ToNatFunction_body]
+    rfl
+
+/-- W7's closed UInt32 equation is the exact declaration-independent split
+used by the target proof. -/
+theorem uint32ToNatFunction_body :
+    Fir.Wasm.Emit.ResidentFixedWidth.uint32ToNatFunction.body =
+      uint32ToNatSource
+        Fir.Wasm.Emit.ResidentFixedWidth.uint32ToNatFunction.params[0]!.1 := by
+  rw [Fir.Wasm.Emit.ResidentFixedWidth.uint32ToNatFunction_body]
+  rfl
+
+/-- Every successfully adapted bounded production alias contains the common
+verified target body. -/
+theorem adaptedBoundedFunction_body
+    {sourceModule : Fir.Wasm.Module} {targetFunction : Wasm.Function}
+    {kind : BoundedConversionKind}
+    (adapted : FirTalos.function sourceModule (boundedFunction kind) =
+      .ok targetFunction) :
+    targetFunction.body = immediateProgram 0 ++
+      FirTalos.functionTerminal sourceModule (boundedFunction kind) := by
+  exact adaptedImmediate_body_of_shape adapted (boundedFunction_body kind)
+    (boundedFunction_valueFound kind)
+
+/-- Every successfully adapted production UInt32 helper contains the verified
+two-arm target dispatcher at the resolved Natural-constructor index. -/
+theorem adaptedUInt32ToNatFunction_body
+    {sourceModule : Fir.Wasm.Module} {targetFunction : Wasm.Function}
+    {makeNaturalIndex : Nat}
+    (adapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentFixedWidth.uint32ToNatFunction =
+        .ok targetFunction)
+    (makeNaturalFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentNumeric.makeNaturalName) =
+        some makeNaturalIndex) :
+    targetFunction.body = uint32ToNatProgram makeNaturalIndex ++
+      FirTalos.functionTerminal sourceModule
+        Fir.Wasm.Emit.ResidentFixedWidth.uint32ToNatFunction := by
+  exact adaptedUInt32ToNat_body_of_shape adapted uint32ToNatFunction_body
+    uint32ToNatFunction_valueFound makeNaturalFound
+
 /-- All bounded production aliases erase to the same physical `i32 -> i32`
 signature, even though their semantic ABI annotations differ. -/
 theorem boundedFunction_physicalSignature (kind : BoundedConversionKind) :
@@ -188,6 +243,16 @@ theorem boundedFunction_physicalSignature (kind : BoundedConversionKind) :
         (FirTalos.abiKind ∘ Prod.snd) = [] ∧
       (boundedFunction kind).results.toList.map FirTalos.abiKind = [.i32] := by
   cases kind <;> native_decide
+
+/-- The UInt32 dispatcher has the same physical one-word call signature. -/
+theorem uint32ToNatFunction_physicalSignature :
+    Fir.Wasm.Emit.ResidentFixedWidth.uint32ToNatFunction.params.toList.map
+        (FirTalos.abiKind ∘ Prod.snd) = [.i32] ∧
+      Fir.Wasm.Emit.ResidentFixedWidth.uint32ToNatFunction.locals.toList.map
+        (FirTalos.abiKind ∘ Prod.snd) = [] ∧
+      Fir.Wasm.Emit.ResidentFixedWidth.uint32ToNatFunction.results.toList.map
+        FirTalos.abiKind = [.i32] := by
+  native_decide
 
 /-- Every i32 value below `2^31` fits Lean's wasm32 immediate-Nat payload. -/
 theorem fitsImmediate_of_lt (value : UInt32)
@@ -484,6 +549,35 @@ theorem terminatesWith_boundedFunction_of_adapted
       (rest := FirTalos.functionTerminal sourceModule (boundedFunction kind))
       fits valueLocal returned)
 
+/-- Production corollary: W7's closed body equations discharge the last
+emitter-specific premise of the generic bounded-helper theorem. -/
+theorem terminatesWith_boundedFunction
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {targetFunction : Wasm.Function} {functionIndex : Nat}
+    {kind : BoundedConversionKind} {store : Wasm.Store host}
+    {witness : RefinementWitness} {value : UInt32}
+    {tail : List Wasm.Value}
+    (fits : value.toNat < 2147483648)
+    (adapted : FirTalos.function sourceModule (boundedFunction kind) =
+      .ok targetFunction)
+    (notImport : module.imports[functionIndex]? = none)
+    (found : module.funcs[functionIndex - module.imports.length]? =
+      some targetFunction) :
+    Wasm.TerminatesWith env module functionIndex store
+      (.i32 value :: tail)
+      (fun final values =>
+        final = store ∧
+          values = .i32 (UInt32.ofNat
+            (Word32.encodeImmediate value.toNat
+              (fitsImmediate_of_lt value fits)).value) :: tail ∧
+          ValueRel witness (boundedResultKind kind)
+            (.word32 (Word32.encodeImmediate value.toNat
+              (fitsImmediate_of_lt value fits)))
+            (.object (.tagged (UInt64.ofNat value.toNat)))) := by
+  exact terminatesWith_boundedFunction_of_adapted fits adapted notImport found
+    (boundedFunction_body kind)
+
 /-- The low UInt32 arm selects the direct canonical boxing program. -/
 theorem wp_uint32ToNatProgram_low
     {module : Wasm.Module} {env : Wasm.HostEnv host}
@@ -605,6 +699,167 @@ theorem wp_uint32ToNatProgram_high_refines
       { locals with values := tail } env := by
   apply wp_uint32ToNatProgram_high wide valueLocal makeNaturalRun
   exact ⟨resultWord, rfl, resultRelated⟩
+
+/-- The installed production UInt32 helper is an exact canonical immediate
+Nat call throughout its low range. -/
+theorem terminatesWith_uint32ToNatFunction_low
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {targetFunction : Wasm.Function} {functionIndex : Nat}
+    {makeNaturalIndex : Nat} {store : Wasm.Store host}
+    {witness : RefinementWitness} {value : UInt32}
+    {tail : List Wasm.Value}
+    (fits : value.toNat < 2147483648)
+    (adapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentFixedWidth.uint32ToNatFunction =
+        .ok targetFunction)
+    (makeNaturalFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentNumeric.makeNaturalName) =
+        some makeNaturalIndex)
+    (notImport : module.imports[functionIndex]? = none)
+    (found : module.funcs[functionIndex - module.imports.length]? =
+      some targetFunction) :
+    Wasm.TerminatesWith env module functionIndex store
+      (.i32 value :: tail)
+      (fun final values =>
+        final = store ∧
+          values = .i32 (UInt32.ofNat
+            (Word32.encodeImmediate value.toNat
+              (fitsImmediate_of_lt value fits)).value) :: tail ∧
+          ValueRel witness .tobject
+            (.word32 (Word32.encodeImmediate value.toNat
+              (fitsImmediate_of_lt value fits)))
+            (.object (.tagged (UInt64.ofNat value.toNat)))) := by
+  obtain ⟨paramsEq, localsEq, resultsEq⟩ :=
+    FirTalos.Correctness.function_preserves_signature adapted
+  obtain ⟨sourceParams, sourceLocals, sourceResults⟩ :=
+    uint32ToNatFunction_physicalSignature
+  have targetParams : targetFunction.params = [.i32] :=
+    paramsEq.trans sourceParams
+  have targetLocals : targetFunction.locals = [] :=
+    localsEq.trans sourceLocals
+  have targetResults : targetFunction.results = [.i32] :=
+    resultsEq.trans sourceResults
+  have body := adaptedUInt32ToNatFunction_body adapted makeNaturalFound
+  apply FirTalos.Correctness.terminatesWith_of_wp_body_at notImport found
+  rw [body]
+  let word := UInt32.ofNat
+    (Word32.encodeImmediate value.toNat
+      (fitsImmediate_of_lt value fits)).value
+  let arguments := .i32 value :: tail
+  let entry := targetFunction.toLocals
+    (arguments.take targetFunction.numParams).reverse
+  have valueLocal : entry.get 0 = some (.i32 value) := by
+    simp [entry, arguments, Wasm.Function.toLocals,
+      Wasm.Function.numParams, targetParams, targetLocals]
+  have returned :
+      FirTalos.Correctness.FunctionBodyPost targetFunction arguments
+        (fun final values =>
+          final = store ∧ values = .i32 word :: tail ∧
+            ValueRel witness .tobject
+              (.word32 (Word32.encodeImmediate value.toNat
+                (fitsImmediate_of_lt value fits)))
+              (.object (.tagged (UInt64.ofNat value.toNat))))
+        (.Return store [.i32 word]) := by
+    simp [FirTalos.Correctness.FunctionBodyPost, arguments,
+      Wasm.Function.numParams, targetParams, targetResults, word]
+    simpa using immediateResultRel_tobject witness value fits
+  simpa [entry, arguments, word, Wasm.Function.toLocals] using
+    (wp_uint32ToNatProgram_low
+      (module := module) (env := env) (store := store) (locals := entry)
+      (Q := FirTalos.Correctness.FunctionBodyPost targetFunction arguments
+        (fun final values =>
+          final = store ∧ values = .i32 word :: tail ∧
+            ValueRel witness .tobject
+              (.word32 (Word32.encodeImmediate value.toNat
+                (fitsImmediate_of_lt value fits)))
+              (.object (.tagged (UInt64.ofNat value.toNat)))))
+      (value := value) (makeNaturalIndex := makeNaturalIndex)
+      (tail := [])
+      (rest := FirTalos.functionTerminal sourceModule
+        Fir.Wasm.Emit.ResidentFixedWidth.uint32ToNatFunction)
+      fits valueLocal returned)
+
+/-- The installed production UInt32 helper's high arm inherits the exact
+promoted-Natural constructor refinement, including its changed store and
+extended witness, while restoring the caller operand tail. -/
+theorem terminatesWith_uint32ToNatFunction_high
+    {host : Type} {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {targetFunction : Wasm.Function} {functionIndex : Nat}
+    {makeNaturalIndex : Nat} {store resultStore : Wasm.Store host}
+    {nextWitness : RefinementWitness} {value : UInt32}
+    {resultWord : Word32} {tail : List Wasm.Value}
+    (wide : 2147483648 ≤ value.toNat)
+    (adapted : FirTalos.function sourceModule
+      Fir.Wasm.Emit.ResidentFixedWidth.uint32ToNatFunction =
+        .ok targetFunction)
+    (makeNaturalFound : FirTalos.callIndex? sourceModule
+      (.declaration Fir.Wasm.Emit.ResidentNumeric.makeNaturalName) =
+        some makeNaturalIndex)
+    (notImport : module.imports[functionIndex]? = none)
+    (found : module.funcs[functionIndex - module.imports.length]? =
+      some targetFunction)
+    (makeNaturalRun :
+      Wasm.TerminatesWith env module makeNaturalIndex store
+        [.i32 0, .i32 value]
+        (fun final values =>
+          final = resultStore ∧
+            values = [.i32 (UInt32.ofNat resultWord.value)]))
+    (resultRelated : ValueRel nextWitness .tobject (.word32 resultWord)
+      (.object (.tagged (UInt64.ofNat value.toNat)))) :
+    Wasm.TerminatesWith env module functionIndex store
+      (.i32 value :: tail)
+      (fun final values =>
+        final = resultStore ∧
+          values = .i32 (UInt32.ofNat resultWord.value) :: tail ∧
+          ValueRel nextWitness .tobject (.word32 resultWord)
+            (.object (.tagged (UInt64.ofNat value.toNat)))) := by
+  obtain ⟨paramsEq, localsEq, resultsEq⟩ :=
+    FirTalos.Correctness.function_preserves_signature adapted
+  obtain ⟨sourceParams, sourceLocals, sourceResults⟩ :=
+    uint32ToNatFunction_physicalSignature
+  have targetParams : targetFunction.params = [.i32] :=
+    paramsEq.trans sourceParams
+  have targetLocals : targetFunction.locals = [] :=
+    localsEq.trans sourceLocals
+  have targetResults : targetFunction.results = [.i32] :=
+    resultsEq.trans sourceResults
+  have body := adaptedUInt32ToNatFunction_body adapted makeNaturalFound
+  apply FirTalos.Correctness.terminatesWith_of_wp_body_at notImport found
+  rw [body]
+  let arguments := .i32 value :: tail
+  let entry := targetFunction.toLocals
+    (arguments.take targetFunction.numParams).reverse
+  have valueLocal : entry.get 0 = some (.i32 value) := by
+    simp [entry, arguments, Wasm.Function.toLocals,
+      Wasm.Function.numParams, targetParams, targetLocals]
+  have returned :
+      FirTalos.Correctness.FunctionBodyPost targetFunction arguments
+        (fun final values =>
+          final = resultStore ∧
+            values = .i32 (UInt32.ofNat resultWord.value) :: tail ∧
+            ValueRel nextWitness .tobject (.word32 resultWord)
+              (.object (.tagged (UInt64.ofNat value.toNat))))
+        (.Return resultStore [.i32 (UInt32.ofNat resultWord.value)]) := by
+    simp [FirTalos.Correctness.FunctionBodyPost, arguments,
+      Wasm.Function.numParams, targetParams, targetResults]
+    simpa using resultRelated
+  simpa [entry, arguments, Wasm.Function.toLocals] using
+    (wp_uint32ToNatProgram_high
+      (module := module) (env := env) (store := store)
+      (resultStore := resultStore) (locals := entry) (value := value)
+      (resultWord := UInt32.ofNat resultWord.value)
+      (makeNaturalIndex := makeNaturalIndex) (tail := [])
+      (rest := FirTalos.functionTerminal sourceModule
+        Fir.Wasm.Emit.ResidentFixedWidth.uint32ToNatFunction)
+      (Q := FirTalos.Correctness.FunctionBodyPost targetFunction arguments
+        (fun final values =>
+          final = resultStore ∧
+            values = .i32 (UInt32.ofNat resultWord.value) :: tail ∧
+            ValueRel nextWitness .tobject (.word32 resultWord)
+              (.object (.tagged (UInt64.ofNat value.toNat)))))
+      wide valueLocal makeNaturalRun returned)
 
 end ResidentFixedWidthNat
 
