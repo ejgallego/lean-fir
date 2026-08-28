@@ -25,25 +25,28 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   resident Array provenance consumer after rebasing, is the remaining
   milestone step.
 - Integration owner: `root`, holding the serial landing lease through accepted
-  integration head `29106cfd`. `wasm-gen` remains released to the W7-1
+  integration head `3ffe30f1`. `wasm-gen` remains released to the W7-1
   generation lane. The inherited cleanup, serial and bounded check-throughput,
   mailbox-routing, bounded `Nat.land`, USize range-fact, exact consumer-ratchet,
   and transactional resident-linker stacks are now integrated. Tooling's
   bounded work changed no W7 implementation file and granted no standing W7
   ownership.
-- Accepted W6 validated-simulation checkpoint: functional proof head
-  `2380ade5` is linked through clean tracked handoff `29106cfd`, based directly
-  on `c170b88c`. The constructor-complete global step preserves residual
-  validation through ordinary code, generated calls, lazy cache, external
-  bind, and returned-frame pop, and the public finite-prefix theorem now starts
-  from the real validated export root. The former universal residual-validation
-  field is eliminated. Finite reference-count header and saturated-capture
-  safety are execution-owned beside independent allocation headroom. Lean Beam,
-  the forced 3,128-job cone, `make check`, and all 3,182 Talos jobs pass; bug
-  cards `FIR-BUG-wasm-none-structured-validation-provenance` and
-  `FIR-BUG-wasm-none-finite-trace-refcount-overflow` are fixed. W6 next derives
-  its sole remaining source/phase-safety field from a preserved final-LCNF
-  semantic invariant.
+- Accepted W6 source-invariant simulation checkpoint: functional proof head
+  `176cdbc7` is linked through clean tracked handoff `3ffe30f1`, based directly
+  on accepted validated-simulation head `638e05a2`. The public theorem
+  `ConcreteSupportedExport.finiteTraceCorrect_of_sourceInvariant` now pairs
+  the root-validated compiler relation with a source-only invariant providing
+  current readiness and preservation. The canonical hereditary instance is
+  stable by finite source-path composition; neither it nor the simulation
+  stores a target path or a future transition. Reference-count operations,
+  deletion, constructor-tag mutation, and `USize` field mutation have
+  invariant-free source-admission lemmas, while ordinary-increment headroom,
+  saturated-capture retention, and allocation space remain independent runtime
+  premises. Lean Beam, the forced 3,128-job cone, `make check` at 730 unique
+  cases and 2,172/2,172 comparisons, and all 3,182 Talos jobs pass. No shared
+  contract changed; bug cards: none. W6 next derives initial hereditary
+  readiness from final-LCNF semantic typing, beginning with return, descriptor,
+  and case safety.
 - Accepted exact scalar-alias proof interface: W7 functional head `f32458a2`
   is linked through clean tracked handoff `e3548322`. The emitter now exports
   its annotation-only object-result source mapper plus closed source-shape
