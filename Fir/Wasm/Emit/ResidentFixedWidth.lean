@@ -160,13 +160,17 @@ private def ofNatLT32Function (declaration : Name) (result : AbiKind)
       .i32Const .uint32 mask,
       .i32And]
 
-private def toNat32Function (declaration : Name) (param result : AbiKind) : Function :=
+/- Mirror upstream `lean_usize_to_nat` for fixed-width inputs whose complete
+range fits the wasm32 immediate-Nat payload.  Lean's native wrappers inline
+the same boxing path, and the `UInt8`/`UInt16` bounds make its large-Nat arm
+statically unreachable. -/
+private def boundedToNat32Function (declaration : Name) (param result : AbiKind) : Function :=
   retypedI32Function declaration #[(valueParam, param)] result [
     .localGet valueParam,
-    .i32Const .uint32 0xffffffff,
-    .i32And,
-    .i32Const .uint32 0,
-    .call (.declaration ResidentNumeric.makeNaturalName)]
+    .i32Const .uint32 1,
+    .i32Shl,
+    .i32Const .uint32 1,
+    .i32Or]
 
 private def widenI32Function (declaration : Name) (param result : AbiKind) : Function :=
   retypedI32Function declaration #[(valueParam, param)] result [
@@ -252,10 +256,10 @@ def uint8OfBitVecFunction : Function :=
   ofNat32Function `UInt8.ofBitVec .uint8 0xff
 
 def uint8ToNatFunction : Function :=
-  toNat32Function `UInt8.toNat .uint8 .tagged
+  boundedToNat32Function `UInt8.toNat .uint8 .tagged
 
 def uint8ToBitVecFunction : Function :=
-  toNat32Function `UInt8.toBitVec .uint8 .tobject
+  boundedToNat32Function `UInt8.toBitVec .uint8 .tobject
 
 def uint8ToUInt32Function : Function :=
   widenI32Function `UInt8.toUInt32 .uint8 .uint32
@@ -295,7 +299,7 @@ def uint8LorFunction : Function :=
   binaryI32Function `UInt8.lor .uint8 .i32Or
 
 def uint16ToNatFunction : Function :=
-  toNat32Function `UInt16.toNat .uint16 .tagged
+  boundedToNat32Function `UInt16.toNat .uint16 .tagged
 
 def uint16ToUInt32Function : Function :=
   widenI32Function `UInt16.toUInt32 .uint16 .uint32
@@ -330,8 +334,29 @@ def uint32Log2ClzFunction : Function := {
     .localGet countLocal]) with
     locals := #[(countLocal, .uint32)] }
 
-def uint32ToNatFunction : Function :=
-  toNat32Function `UInt32.toNat .uint32 .tobject
+/- Mirror upstream `lean_uint32_to_nat` through `lean_usize_to_nat`: values
+below the wasm32 immediate boundary box directly, while the high-bit arm
+retains the existing canonical promoted-Natural constructor. -/
+def uint32ToNatFunction : Function := {
+  name := externalName `UInt32.toNat
+  params := #[(valueParam, .uint32)]
+  results := #[.tobject]
+  locals := #[]
+  body := [
+    .localGet valueParam,
+    .i32Const .uint32 2147483648,
+    .i32LtU,
+    .ifElse
+      ([.localGet valueParam,
+        .i32Const .uint32 1,
+        .i32Shl,
+        .i32Const .uint32 1,
+        .i32Or] ++
+        retypeI32Result .tobject)
+      ([.localGet valueParam,
+        .i32Const .uint32 0,
+        .call (.declaration ResidentNumeric.makeNaturalName)] ++
+        retypeI32Result .tobject)] }
 
 private def narrowUInt32Function (declaration : Name) (result : AbiKind)
     (mask : UInt32) : Function :=
@@ -927,6 +952,17 @@ private def usesTypedI64ResultBridge (function : Function) : Bool :=
 #guard uint64CtzFastFunction.body.any (instructionContains .i64Ctz)
 #guard uint64ModFunction.body.any (instructionContains .i64RemU)
 #guard ResidentUSize.modFunction.body.any (instructionContains .i64RemU)
+#guard !uint8ToNatFunction.body.any
+  (instructionContains (.call (.declaration ResidentNumeric.makeNaturalName)))
+#guard !uint8ToBitVecFunction.body.any
+  (instructionContains (.call (.declaration ResidentNumeric.makeNaturalName)))
+#guard !uint16ToNatFunction.body.any
+  (instructionContains (.call (.declaration ResidentNumeric.makeNaturalName)))
+#guard uint32ToNatFunction.body.any
+  (instructionContains (.i32Const .uint32 2147483648))
+#guard uint32ToNatFunction.body.any (instructionContains .i32LtU)
+#guard uint32ToNatFunction.body.any
+  (instructionContains (.call (.declaration ResidentNumeric.makeNaturalName)))
 
 #guard match residentExampleModule with
   | .ok module =>
