@@ -1718,6 +1718,31 @@ theorem wp_checkedDecrementLocalProgram_tagged
   simpa only [Wasm.wp_nil, List.take_zero, List.drop_zero, List.nil_append]
     using continued
 
+/-- Sequencing form of the tagged no-op gate.  The suffix resumes in exactly
+the original store and locals because no ownership helper is called. -/
+theorem wp_checkedDecrementLocalProgram_tagged_then
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {locals : Wasm.Locals} {valueIndex decrementIndex : Nat}
+    {word : UInt32} {rest : Wasm.Program}
+    (valueFound : locals.get valueIndex = some (.i32 word))
+    (tagged : (1 : UInt32) &&& word ≠ 0)
+    (continued : Wasm.wp module rest Q store locals env) :
+    Wasm.wp module
+      (checkedDecrementLocalProgram valueIndex decrementIndex ++ rest)
+      Q store locals env := by
+  have valueFound' (values : List Wasm.Value) :
+      ({ locals with values } : Wasm.Locals).get valueIndex =
+        some (.i32 word) := by
+    simpa using valueFound
+  unfold checkedDecrementLocalProgram
+  simp only [List.cons_append, List.nil_append, Wasm.wp_localGet_cons,
+    valueFound', Wasm.wp_const_cons, Wasm.wp_and_cons]
+  apply Wasm.wp_iff_cons rfl
+  rw [if_pos tagged]
+  simpa only [Wasm.wp_nil, List.take_zero, List.drop_zero, List.nil_append]
+    using continued
+
 /-- Physical zero takes the second caller-local no-op gate.  This is the
 erased-value case and likewise leaves the store, locals, and operand stack
 unchanged. -/
@@ -1935,6 +1960,50 @@ theorem ValueRel.wp_checkedDecrementLocalProgram_tobject
               have classified := valid.promotedHeap _ _ found
               exact wp_checkedDecrementLocalProgram_classifiedHeap valueFound
                 classified (heapCall classified)
+
+/-- Complete sequencing rule for a well-typed `.tobject` local.  Immediate
+values resume the suffix in the original store; heap values resume it in the
+exact store returned by the public decrement theorem. -/
+theorem ValueRel.wp_checkedDecrementLocalProgram_tobject_then
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {locals : Wasm.Locals} {valueIndex decrementIndex : Nat}
+    {witness : RefinementWitness} {word : Word32}
+    {semantic : Fir.LeanIR.Impure.Value} {rest : Wasm.Program}
+    (valueRelated : ValueRel witness .tobject (.word32 word) semantic)
+    (valid : witness.WellFormed)
+    (valueFound : locals.get valueIndex =
+      some (.i32 (UInt32.ofNat word.value)))
+    (noop : Wasm.wp module rest Q store locals env)
+    (heapCall : word.classify = .heap →
+      ∃ final,
+        Wasm.TerminatesWith env module decrementIndex store
+          ([.i32 1, .i32 (UInt32.ofNat word.value)] ++ locals.values)
+          (fun next values => next = final ∧ values = locals.values) ∧
+        Wasm.wp module rest Q final locals env) :
+    Wasm.wp module
+      (checkedDecrementLocalProgram valueIndex decrementIndex ++ rest)
+      Q store locals env := by
+  cases valueRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          have classified := heapRelated.is_heap valid
+          obtain ⟨final, callRun, continued⟩ := heapCall classified
+          exact wp_checkedDecrementLocalProgram_classifiedHeap_then valueFound
+            classified callRun continued
+      | tagged taggedRelated =>
+          cases taggedRelated with
+          | immediate payload fits =>
+              apply wp_checkedDecrementLocalProgram_tagged_then valueFound
+              · simp [Word32.encodeImmediate]
+                bv_decide
+              · exact noop
+          | promoted found =>
+              have classified := valid.promotedHeap _ _ found
+              obtain ⟨final, callRun, continued⟩ := heapCall classified
+              exact wp_checkedDecrementLocalProgram_classifiedHeap_then
+                valueFound classified callRun continued
 
 /-- Exact `.object` lanes are already heap-only.  Resident call sites typed
 this way retain their existing direct helper path and need no scalar gate. -/

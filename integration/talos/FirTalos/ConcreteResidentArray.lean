@@ -336,6 +336,73 @@ theorem wp_replaceElementOwnershipProgram_heap
     oldSet decrementWP
   simpa [replaceElementOwnershipProgram, List.append_assoc] using borrowWP
 
+/-- Representation-complete native-order replacement.  Tagged `.tobject`
+elements take the local no-op gate and write in the original store; heap
+elements resume from the exact store produced by the shared decrement helper. -/
+theorem wp_replaceElementOwnershipProgram_tobject
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {initial afterOld : Wasm.Locals}
+    {cursorIndex valueIndex elementIndex decrementIndex : Nat}
+    {cursor newWord : UInt32} {oldWord : Word32}
+    {witness : RefinementWitness} {oldValue : Value}
+    {rest : Wasm.Program}
+    (oldRelated : ValueRel witness .tobject (.word32 oldWord) oldValue)
+    (valid : witness.WellFormed)
+    (cursorFound : initial.get cursorIndex = some (.i32 cursor))
+    (oldRead : store.mem.read32 cursor = UInt32.ofNat oldWord.value)
+    (readInBounds : cursor.toNat + 4 ≤ store.mem.pages * wasmPageBytes)
+    (oldSet :
+      ({ initial with values := [.i32 (UInt32.ofNat oldWord.value)] }).set?
+          elementIndex (.i32 (UInt32.ofNat oldWord.value)) = some afterOld)
+    (cursorAfter : afterOld.get cursorIndex = some (.i32 cursor))
+    (valueAfter : afterOld.get valueIndex = some (.i32 newWord))
+    (noopWriteInBounds :
+      cursor.toNat + 4 ≤ store.mem.pages * wasmPageBytes)
+    (noopContinued : Wasm.wp module rest Q
+      (ResidentMemoryRel.write32Store store cursor newWord)
+      { afterOld with values := [] } env)
+    (heapEffect : oldWord.classify = .heap →
+      ∃ middleStore,
+        Wasm.TerminatesWith env module decrementIndex store
+          [.i32 1, .i32 (UInt32.ofNat oldWord.value)]
+          (fun next values => next = middleStore ∧ values = []) ∧
+        cursor.toNat + 4 ≤ middleStore.mem.pages * wasmPageBytes ∧
+        Wasm.wp module rest Q
+          (ResidentMemoryRel.write32Store middleStore cursor newWord)
+          { afterOld with values := [] } env) :
+    Wasm.wp module
+      (replaceElementOwnershipProgram cursorIndex valueIndex elementIndex
+          decrementIndex ++ rest)
+      Q store { initial with values := [] } env := by
+  have oldUpdate := FirTalos.Correctness.localUpdate_of_set? oldSet
+  have oldFound :
+      ({ afterOld with values := [] } : Wasm.Locals).get elementIndex =
+        some (.i32 (UInt32.ofNat oldWord.value)) := by
+    simpa using oldUpdate.1
+  have noopWP := wp_writeReplacementProgram (tail := []) cursorAfter
+    valueAfter noopWriteInBounds noopContinued
+  have checkedWP :=
+    ResidentRelease.ValueRel.wp_checkedDecrementLocalProgram_tobject_then
+      (locals := { afterOld with values := [] }) oldRelated valid oldFound
+      noopWP (fun oldHeap => by
+      obtain ⟨middleStore, decrementRun, writeInBounds, continued⟩ :=
+        heapEffect oldHeap
+      have decrementRun' :
+          Wasm.TerminatesWith env module decrementIndex store
+            ([.i32 1, .i32 (UInt32.ofNat oldWord.value)] ++
+              ({ afterOld with values := [] } : Wasm.Locals).values)
+            (fun next values =>
+              next = middleStore ∧
+                values = ({ afterOld with values := [] } : Wasm.Locals).values) := by
+        simpa using decrementRun
+      exact ⟨middleStore, decrementRun',
+        wp_writeReplacementProgram (tail := []) cursorAfter valueAfter
+          writeInBounds continued⟩)
+  have borrowWP := wp_borrowElementProgram cursorFound oldRead readInBounds
+    oldSet checkedWP
+  simpa [replaceElementOwnershipProgram, List.append_assoc] using borrowWP
+
 /-- Exact Talos spelling of the production trusted exclusivity probe.  The
 exclusive branch is kept abstract so the same control theorem can be reused by
 all three installed helpers and by the typed `Array.set` caller rewrite. -/
