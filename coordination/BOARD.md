@@ -25,7 +25,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   resident Array provenance consumer after rebasing, is the remaining
   milestone step.
 - Integration owner: `root`, holding the serial landing lease through accepted
-  integration head `3ffe30f1`. `wasm-gen` remains released to the W7-1
+  integration head `4924332c`. `wasm-gen` remains released to the W7-1
   generation lane. The inherited cleanup, serial and bounded check-throughput,
   mailbox-routing, bounded `Nat.land`, USize range-fact, exact consumer-ratchet,
   and transactional resident-linker stacks are now integrated. Tooling's
@@ -47,6 +47,21 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   contract changed; bug cards: none. W6 next derives initial hereditary
   readiness from final-LCNF semantic typing, beginning with return, descriptor,
   and case safety.
+- Accepted W6 source return-typing checkpoint: functional proof head
+  `619f59ae` is linked through clean tracked handoff `4924332c`, based on
+  accepted source-invariant head `92f60ba2`. Precise use-site
+  `SemanticBindingAtAbi` now derives active-return admission without relying on
+  target state or a certificate; a coarse `tobject` storage kind is explicitly
+  insufficient to recover `.object` or `.tagged` result typing. A checked Lean
+  counterexample proves that the old universally witness-quantified object-field
+  alignment cannot follow from `MachineState` alone. The next proof boundary
+  therefore retains final-LCNF constructor-schema provenance and relates it to
+  the active refinement witness inside the combined source/target relation.
+  Lean Beam, the forced 3,128-job cone, `make check` at 730 unique cases and
+  2,172/2,172 comparisons, and all 3,182 Talos jobs pass with receipt
+  `c3b430008f65ff9c4655dc5174892b8ab51716e3f2cabece64c3c17d5fefa222`.
+  No shared contract changed; bug card
+  `FIR-BUG-wasm-none-object-field-kind-admission` remains confirmed, not fixed.
 - Accepted exact scalar-alias proof interface: W7 functional head `f32458a2`
   is linked through clean tracked handoff `e3548322`. The emitter now exports
   its annotation-only object-result source mapper plus closed source-shape
