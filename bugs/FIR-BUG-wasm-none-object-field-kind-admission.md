@@ -79,6 +79,16 @@ witness at the source/target relation boundary.  Treating the universal
 witness predicate itself as a source-only `MachineState` invariant would only
 rename the missing proof.
 
+The proof-side bridge is now implemented without weakening that diagnosis.
+`ConstructorSchema` retains the source allocation/reuse layout by semantic
+location, `ConstructorSchema.WitnessAgrees` relates it to the active witness,
+and `ConcreteObjectFieldKindAlignedAt.of_schema` derives the selected field ABI
+for precisely that witness.  Fresh allocation and in-place reuse have separate
+agreement-transport theorems.  This is infrastructure, not yet a production
+fix: the schema/agreement pair still has to be threaded through the closed
+validated simulation before the old universal effect-admission premise can be
+removed.
+
 ## Semantic impact
 
 The mismatch is ownership-relevant. If a descriptor classifies a slot erased
@@ -109,6 +119,7 @@ none
 Pending. The proof-side `ConcreteObjectFieldKindAligned` boundary documents the
 pointwise descriptor equality consumed by the existing runtime theorem, but
 the checked counterexample shows that it is not yet the right derivable
-source-invariant interface. It unblocks refinement experiments that assume the
-equality explicitly; it does not fix production admission or establish
-final-LCNF type soundness by itself.
+source-invariant interface. The active-witness schema bridge now provides the
+right replacement boundary and its allocation/reuse transports, but it is not
+yet connected to the production dispatcher. It does not by itself fix
+production admission or establish final-LCNF type soundness.

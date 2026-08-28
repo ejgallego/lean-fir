@@ -80,6 +80,151 @@ theorem SemanticBindingAtAbi.lookup
     SemanticValueAtAbi kind value :=
   typed found
 
+/-- Source-side provenance retained for one semantic constructor allocation.
+
+`info` records the layout selected by final LCNF and `fieldKinds` records the
+ABI of each owned object slot.  Neither component contains a concrete address
+or a target execution fact. -/
+structure ConstructorSchemaEntry where
+  info : Lean.Compiler.LCNF.CtorInfo
+  fieldKinds : Array AbiKind
+
+/-- Ghost constructor provenance indexed by semantic heap location.
+
+The source interpreter deliberately stores only the mutable constructor
+payload.  This map retains the static allocation/reuse layout needed to prove
+that generated typed field operations use the active concrete descriptor at
+the same ABI. -/
+abbrev ConstructorSchema := Location → Option ConstructorSchemaEntry
+
+namespace ConstructorSchema
+
+def empty : ConstructorSchema := fun _ => none
+
+/-- Install or replace the constructor provenance at one semantic location.
+Fresh allocation and successful in-place reuse use the same source-side
+operation; the witness side distinguishes binding from descriptor rebinding. -/
+def bind (schema : ConstructorSchema) (location : Location)
+    (info : Lean.Compiler.LCNF.CtorInfo)
+    (fieldKinds : Array AbiKind) : ConstructorSchema :=
+  fun query =>
+    if query = location then some ⟨info, fieldKinds⟩ else schema query
+
+@[simp] theorem bind_self (schema : ConstructorSchema) (location : Location)
+    (info : Lean.Compiler.LCNF.CtorInfo) (fieldKinds : Array AbiKind) :
+    schema.bind location info fieldKinds location =
+      some ⟨info, fieldKinds⟩ := by
+  simp [bind]
+
+theorem bind_other (schema : ConstructorSchema) (location other : Location)
+    (info : Lean.Compiler.LCNF.CtorInfo) (fieldKinds : Array AbiKind)
+    (different : other ≠ location) :
+    schema.bind location info fieldKinds other = schema other := by
+  simp [bind, different]
+
+/-- The source schema and the active concrete refinement witness name the same
+constructor descriptor for every retained schema entry.
+
+This deliberately quantifies only over the one active witness.  Requiring the
+same fact for every arbitrary witness is false: a proof witness unrelated to
+the current target may attach different proof-only metadata to the location. -/
+def WitnessAgrees (schema : ConstructorSchema)
+    (witness : RefinementWitness) : Prop :=
+  ∀ {location entry}, schema location = some entry →
+    ∃ address,
+      witness.locations.lookup? location = some address ∧
+      witness.descriptors.lookup? address =
+        some (.constructor entry.info entry.fieldKinds)
+
+theorem empty_witnessAgrees (witness : RefinementWitness) :
+    WitnessAgrees empty witness := by
+  intro location entry found
+  simp [empty] at found
+
+/-- Monotone witness growth preserves agreement for an unchanged schema.
+Every schema entry was already mapped, so witness extension transports both
+its location identity and its descriptor. -/
+theorem WitnessAgrees.witnessExtension
+    {schema : ConstructorSchema} {before after : RefinementWitness}
+    (agrees : WitnessAgrees schema before)
+    (extension : before.Extends after) :
+    WitnessAgrees schema after := by
+  intro location entry found
+  obtain ⟨address, mapped, descriptor⟩ := agrees found
+  exact ⟨address, extension.locations _ _ mapped,
+    extension.descriptors _ _ descriptor⟩
+
+/-- Constructor allocation extends source provenance and concrete ghost
+metadata in lockstep. Descriptor freshness is exactly what keeps every older
+schema entry visible; both maps intentionally shadow any entry at the newly
+bound semantic location. -/
+theorem WitnessAgrees.bindConstructor
+    {schema : ConstructorSchema} {witness : RefinementWitness}
+    (agrees : WitnessAgrees schema witness)
+    (location : Location) (address : Word32)
+    (info : Lean.Compiler.LCNF.CtorInfo) (fieldKinds : Array AbiKind)
+    (descriptorFresh : ∀ old descriptor,
+      witness.descriptors.lookup? old = some descriptor →
+        address.value ≠ old.value) :
+    WitnessAgrees (schema.bind location info fieldKinds)
+      (witness.bindConstructor location address info fieldKinds) := by
+  intro query entry found
+  by_cases isNew : query = location
+  · subst query
+    rw [bind_self] at found
+    have entryEq := Option.some.inj found
+    subst entry
+    exact ⟨address, by simp, by simp⟩
+  · rw [bind_other schema location query info fieldKinds isNew] at found
+    obtain ⟨oldAddress, oldMapped, oldDescriptor⟩ := agrees found
+    refine ⟨oldAddress, ?_, ?_⟩
+    · exact witness.lookup_bindConstructor_location_other location query
+        address info fieldKinds isNew |>.trans oldMapped
+    · exact witness.lookup_bindConstructor_descriptor_other location address
+        oldAddress info fieldKinds
+          (descriptorFresh oldAddress _ oldDescriptor) |>.trans oldDescriptor
+
+/-- In-place constructor reuse replaces both source provenance and the active
+descriptor at the already-mapped address.  Witness injectivity ensures that
+rebinding cannot disturb a different semantic constructor entry. -/
+theorem WitnessAgrees.rebindConstructor
+    {schema : ConstructorSchema} {witness : RefinementWitness}
+    (agrees : WitnessAgrees schema witness)
+    (wellFormed : witness.WellFormed)
+    (location : Location) (address : Word32)
+    (info : Lean.Compiler.LCNF.CtorInfo) (fieldKinds : Array AbiKind)
+    (mapped : witness.locations.lookup? location = some address) :
+    WitnessAgrees (schema.bind location info fieldKinds)
+      (witness.rebindConstructor address info fieldKinds) := by
+  intro query entry found
+  by_cases isReused : query = location
+  · subst query
+    rw [bind_self] at found
+    have entryEq := Option.some.inj found
+    subst entry
+    exact ⟨address, by simpa, by simp⟩
+  · rw [bind_other schema location query info fieldKinds isReused] at found
+    obtain ⟨oldAddress, oldMapped, oldDescriptor⟩ := agrees found
+    have addressNe : address.value ≠ oldAddress.value := by
+      intro valuesEq
+      have wordsEq : address = oldAddress := by
+        cases address with
+        | mk addressValue addressBound =>
+            cases oldAddress with
+            | mk oldValue oldBound =>
+                simp only at valuesEq
+                subst oldValue
+                rfl
+      subst oldAddress
+      exact isReused (wellFormed.locationInjective query location address
+        oldMapped mapped)
+    refine ⟨oldAddress, by simpa, ?_⟩
+    rw [witness.lookup_rebindConstructor_descriptor_other address oldAddress
+      info fieldKinds addressNe]
+    exact oldDescriptor
+
+end ConstructorSchema
+
 /-- Every concrete value relation exposes the corresponding source-semantic
 ABI fact after erasing its physical lane and refinement witness. -/
 theorem PhysicalValueRel.semanticValueAtAbi

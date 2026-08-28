@@ -6258,6 +6258,19 @@ validated source/target relation. This is the sharpened obligation tracked by
 `FIR-BUG-wasm-none-object-field-kind-admission`; replacing the missing bridge
 with a universal source assumption is not considered a correctness proof.
 
+The proof foundation for that abstraction is now explicit.
+`ConstructorSchema` maps semantic heap locations to the final-LCNF constructor
+layout and object-slot ABI vector, while `ConstructorSchema.WitnessAgrees`
+connects every retained entry to the descriptor at the same location in the
+one active refinement witness. Agreement starts empty, transports through
+monotone witness growth, and is preserved by both fresh constructor binding
+and in-place descriptor rebinding. `ConstructorSchema.FieldKindAt` plus this
+agreement derives `ConcreteObjectFieldKindAlignedAt`, the exact active-witness
+fact consumed by concrete mutation. The remaining integration work is to
+thread the schema and agreement through the validated global relation and
+replace the older universally quantified effect-admission field; the
+production compiler-admission bug remains open until that path is closed.
+
 W6.6 float packed-field admission closes the semantic-to-concrete gap for
 `Float32` and `Float` projection and mutation. `ValueRel` now relates the
 shared raw-bit semantic constructors directly to `.float32Bits` and

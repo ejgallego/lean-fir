@@ -7116,6 +7116,59 @@ def ConcreteObjectFieldKindAligned
             some (.constructor info fieldKinds) →
           fieldKinds[index]? = some kind
 
+/-- Object-field alignment for the one refinement witness active in the
+current source/target simulation state.
+
+Unlike `ConcreteObjectFieldKindAligned`, this is a relational fact: it does
+not make a claim about unrelated proof witnesses. -/
+def ConcreteObjectFieldKindAlignedAt
+    (witness : RefinementWitness) (location : Location) (index : Nat)
+    (kind : AbiKind) : Prop :=
+  ∀ {objectWord : Word32} {info : Lean.Compiler.LCNF.CtorInfo}
+      {fieldKinds : Array AbiKind},
+    ValueRel witness .tobject (.word32 objectWord)
+        (.object (.heap location)) →
+      witness.descriptors.lookup? objectWord =
+          some (.constructor info fieldKinds) →
+        fieldKinds[index]? = some kind
+
+/-- A source schema entry fixes the ABI of one constructor object slot. -/
+def ConstructorSchema.FieldKindAt
+    (schema : ConstructorSchema) (location : Location) (index : Nat)
+    (kind : AbiKind) : Prop :=
+  ∃ entry,
+    schema location = some entry ∧ entry.fieldKinds[index]? = some kind
+
+/-- Source constructor provenance plus agreement with the active witness is
+exactly sufficient to recover descriptor-slot alignment.
+
+The proof first resolves the schema location to its canonical concrete
+address.  The active value relation resolves the same semantic location to the
+object operand.  Functional lookup makes those words equal, after which the
+two descriptor equations identify the ABI array and selected slot. -/
+theorem ConcreteObjectFieldKindAlignedAt.of_schema
+    {schema : ConstructorSchema} {witness : RefinementWitness}
+    {location : Location} {index : Nat} {kind : AbiKind}
+    (agrees : schema.WitnessAgrees witness)
+    (typed : schema.FieldKindAt location index kind) :
+    ConcreteObjectFieldKindAlignedAt witness location index kind := by
+  intro objectWord info fieldKinds objectRelated descriptorFound
+  obtain ⟨entry, schemaFound, schemaKind⟩ := typed
+  obtain ⟨schemaWord, schemaMapped, schemaDescriptor⟩ := agrees schemaFound
+  cases objectRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped objectMapped =>
+              rw [schemaMapped] at objectMapped
+              have wordEq := Option.some.inj objectMapped
+              subst objectWord
+              rw [schemaDescriptor] at descriptorFound
+              have descriptorEq := Option.some.inj descriptorFound
+              cases descriptorEq
+              exact schemaKind
+
 /-- The current universally witness-quantified field-alignment boundary is not
 derivable from a semantic environment and heap location alone.
 
