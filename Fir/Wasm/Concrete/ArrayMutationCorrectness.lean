@@ -26,6 +26,58 @@ theorem ResidentArrayObjectRel.liveElementWordInBounds
   simp [residentArrayAllocationBytes, target] at allocationInMemory aligned ⊢
   omega
 
+/-- Recover the canonical resident Array object relation from the whole-heap
+mapping facts used by every Array mutation proof. -/
+theorem LiveHeapRel.residentArrayObjectRel_of_mapped
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    {elements : Array Value} {capacity : Nat}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .array elements capacity)
+    (descriptorFound : witness.descriptors.lookup? address =
+      some (.array capacity)) :
+    ∃ header,
+      ResidentArrayObjectRel state witness address elements capacity header := by
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  cases targetRelated with
+  | constructor descriptor storedObjectEq objectRelated headerRead headerKind =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | natural descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | integer descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | array descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [descriptor] at descriptorFound
+      have descriptorEq := Option.some.inj descriptorFound
+      cases descriptorEq
+      rw [objectEq] at storedObjectEq
+      have objectParts := HeapObject.array.inj storedObjectEq
+      cases objectParts.1
+      cases objectParts.2
+      exact ⟨_, objectRelated⟩
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, storedObjectEq⟩ :=
+        closureRelated.objectEq
+      rw [objectEq] at storedObjectEq
+      contradiction
+
 /-- One ownership-neutral low-word replacement updates exactly one live Array
 element, preserves the complete retained allocation boundary, and leaves the
 frontier invariant intact. -/
@@ -842,6 +894,75 @@ theorem LiveHeapRel.writeResidentArrayElementRaw_refines
       obtain ⟨function, arity, captures, storedObjectEq⟩ := closureRelated.objectEq
       rw [objectEq] at storedObjectEq
       contradiction
+
+/-- Complete exclusive Array replacement in Lean's native ownership order.
+
+`parentPreserved` is the explicit trusted-entry ownership premise: releasing
+the displaced value must not release or mutate the unique parent Array itself.
+For reference-count-balanced Lean heaps it follows from exclusivity; W6 keeps
+it visible until that global balance invariant is part of the compiler
+simulation relation. -/
+theorem LiveHeapRel.replaceResidentArrayElementInPlace_refines
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime releasedRuntime nextRuntime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    {elements : Array Value} {capacity : Nat}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .array elements capacity)
+    (descriptorFound : witness.descriptors.lookup? address =
+      some (.array capacity))
+    (index : Nat) (oldValue newValue : Value) (newWord : Word32)
+    (oldAt : elements[index]? = some oldValue)
+    (newRelated : ValueRel witness .tobject (.word32 newWord) newValue)
+    (semanticRelease :
+      Fir.LeanIR.Impure.decValueOnce runtime oldValue true =
+        .ok releasedRuntime)
+    (parentPreserved :
+      findCell? releasedRuntime.heap location = some cell)
+    (semanticSet :
+      setCell releasedRuntime location
+          { cell with
+            object := .array (elements.set index newValue
+              (Array.getElem?_eq_some_iff.mp oldAt).1) capacity } =
+        .ok nextRuntime) :
+    ∃ result,
+      replaceResidentArrayElementInPlace state address index newWord
+          witness.closureDescriptors = .ok result ∧
+      LiveHeapRel result witness nextRuntime ∧
+      MappedHeaderCapacityTransport state result witness ∧
+      result.heapCursor = state.heapCursor := by
+  have indexValid : index < elements.size :=
+    (Array.getElem?_eq_some_iff.mp oldAt).1
+  obtain ⟨header, objectRelated⟩ :=
+    related.residentArrayObjectRel_of_mapped mapped found live objectEq
+      descriptorFound
+  obtain ⟨oldWord, oldRead, oldRelated⟩ :=
+    objectRelated.readElementBorrowed oldAt
+  obtain ⟨middle, concreteRelease, middleRelated, releaseCapacity⟩ :=
+    related.releaseTObject_refines oldRelated semanticRelease
+  obtain ⟨result, actualRuntime, concreteWrite, semanticWrite, finalRelated,
+      writeCapacity, writeCursor⟩ :=
+    middleRelated.writeResidentArrayElementRaw_refines mapped parentPreserved
+      live objectEq descriptorFound index newValue newWord indexValid newRelated
+  have runtimeEq : actualRuntime = nextRuntime := by
+    rw [semanticSet] at semanticWrite
+    exact (Except.ok.inj semanticWrite).symm
+  subst actualRuntime
+  have concreteOperation :
+      replaceResidentArrayElementInPlace state address index newWord
+          witness.closureDescriptors = .ok result := by
+    unfold replaceResidentArrayElementInPlace
+    rw [oldRead]
+    simp only [Bind.bind, Except.bind]
+    rw [concreteRelease]
+    exact concreteWrite
+  have finalCursor : result.heapCursor = state.heapCursor :=
+    writeCursor.trans (decrementReferenceOnce_preserves_heapCursor concreteRelease)
+  exact ⟨result, concreteOperation, finalRelated,
+    releaseCapacity.trans writeCapacity, finalCursor⟩
 
 /-- The two raw stores used by resident `Array.swap` implement Lean's exact
 semantic Array swap and compose to one complete target-allocation frame. -/

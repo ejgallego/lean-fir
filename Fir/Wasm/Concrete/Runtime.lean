@@ -1027,6 +1027,18 @@ def decrementReferenceOnce (state : MemoryState) (object : Word32)
   decrementReferenceOnceFuel (state.heapCursor / headerBytes + 1) state object check
     descriptors
 
+/-- Replace one live resident-Array element with Lean's native ownership
+order: borrow the displaced word, release its owned reference, and only then
+install the consumed replacement.  Successful callers must establish that
+releasing the old value preserves the uniquely mutated parent allocation. -/
+def replaceResidentArrayElementInPlace (state : MemoryState) (object : Word32)
+    (index : Nat) (element : Word32)
+    (descriptors : ClosureDescriptorTable := #[]) :
+    Except ConcreteError MemoryState := do
+  let old ← readResidentArrayElementBorrowed state object index
+  let state ← decrementReferenceOnce state old true descriptors
+  writeResidentArrayElementRaw state object index element
+
 /-- Unique in-place pop: remove the last slot from the owned prefix before
 releasing its value. The empty Array is an exact no-op. -/
 def popResidentArrayElementInPlace (state : MemoryState) (object : Word32)
