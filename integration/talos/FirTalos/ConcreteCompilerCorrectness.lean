@@ -6523,7 +6523,7 @@ inductive ScalarProjectionSupported (context : Fir.Wasm.Context) :
       ScalarProjectionSupported context decl
 
 /--
-Static admission for integer boxing.
+Static admission for typed scalar boxing.
 
 The source annotation, operand local, destination local, and compiler result
 kind all agree with one supported `BoxedScalarKind`. Runtime scalar values and
@@ -6609,6 +6609,24 @@ theorem PhysicalValueRel.boxedScalar_of_kind
               exact ⟨.usize _, rfl, rfl, rfl⟩
       | float32Bits valueRelated => cases valueRelated
       | float64Bits valueRelated => cases valueRelated
+  | float32 =>
+      cases related with
+      | word32 valueRelated => cases valueRelated
+      | word64 valueRelated => cases valueRelated
+      | float32Bits valueRelated =>
+          cases valueRelated with
+          | float32Bits =>
+              exact ⟨.float32 _, rfl, rfl, rfl⟩
+      | float64Bits valueRelated => cases valueRelated
+  | float =>
+      cases related with
+      | word32 valueRelated => cases valueRelated
+      | word64 valueRelated => cases valueRelated
+      | float32Bits valueRelated => cases valueRelated
+      | float64Bits valueRelated =>
+          cases valueRelated with
+          | float64Bits =>
+              exact ⟨.float _, rfl, rfl, rfl⟩
 
 /--
 Source-state compatibility for typed unboxing.

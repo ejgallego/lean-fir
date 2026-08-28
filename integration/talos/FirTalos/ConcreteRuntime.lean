@@ -1086,9 +1086,8 @@ theorem ConcreteRuntimeRel.boxScalar
 
 /-- The representation selected by production lowering is justified by the
 same concrete boxing step. In particular, `UInt8` is always in FIR's tagged
-range, so its result may be related at the precise `.tagged` ABI kind; the
-other supported integer kinds retain the representation-polymorphic
-`.tobject` relation. -/
+range, Float32/Float are always heap objects, and the remaining scalar kinds
+retain the representation-polymorphic `.tobject` relation. -/
 theorem ConcreteRuntimeRel.boxScalarAtResultKind
     {concrete : ConcreteRuntimeState} {witness : RefinementWitness}
     {runtime : RuntimeState} {result : MemoryState}
@@ -1153,6 +1152,56 @@ theorem ConcreteRuntimeRel.boxScalarAtResultKind
         by simpa only [BoxedScalar.kind, BoxedScalarKind.semanticType,
           Fir.Wasm.boxResultKind_usize_tobject] using valueRelated,
         semanticStep⟩
+  | float32 bits =>
+      have canonical := semanticBox_heap_eq_of_tagged_disallowed runtime
+        (.float32 bits) rfl
+      rw [canonical] at semanticStep
+      simp only [Except.ok.injEq, Prod.mk.injEq] at semanticStep
+      rcases semanticStep with ⟨runtimeEq, sourceValueEq⟩
+      subst nextRuntime
+      subst sourceValue
+      refine ⟨semanticBoxResult runtime (.float32 bits),
+        .object (.heap runtime.nextLocation), nextWitness, extension,
+        closureAllocationsPersistent, nextRelated, ?_, canonical⟩
+      have notUInt8 :
+          (Lean.Compiler.LCNF.ImpureType.float32 ==
+            Lean.Compiler.LCNF.ImpureType.uint8) = false := by
+        native_decide
+      have isFloat32 :
+          (Lean.Compiler.LCNF.ImpureType.float32 ==
+            Lean.Compiler.LCNF.ImpureType.float32) = true := by
+        native_decide
+      simpa only [BoxedScalar.kind, BoxedScalarKind.semanticType,
+        Fir.Wasm.boxResultKind, notUInt8, isFloat32, Bool.true_or,
+        Bool.false_eq_true, if_false, if_true] using
+          valueRelated.tobject_heap_to_object
+  | float bits =>
+      have canonical := semanticBox_heap_eq_of_tagged_disallowed runtime
+        (.float bits) rfl
+      rw [canonical] at semanticStep
+      simp only [Except.ok.injEq, Prod.mk.injEq] at semanticStep
+      rcases semanticStep with ⟨runtimeEq, sourceValueEq⟩
+      subst nextRuntime
+      subst sourceValue
+      refine ⟨semanticBoxResult runtime (.float bits),
+        .object (.heap runtime.nextLocation), nextWitness, extension,
+        closureAllocationsPersistent, nextRelated, ?_, canonical⟩
+      have notUInt8 :
+          (Lean.Compiler.LCNF.ImpureType.float ==
+            Lean.Compiler.LCNF.ImpureType.uint8) = false := by
+        native_decide
+      have notFloat32 :
+          (Lean.Compiler.LCNF.ImpureType.float ==
+            Lean.Compiler.LCNF.ImpureType.float32) = false := by
+        native_decide
+      have isFloat :
+          (Lean.Compiler.LCNF.ImpureType.float ==
+            Lean.Compiler.LCNF.ImpureType.float) = true := by
+        native_decide
+      simpa only [BoxedScalar.kind, BoxedScalarKind.semanticType,
+        Fir.Wasm.boxResultKind, notUInt8, notFloat32, isFloat,
+        Bool.false_or, Bool.or_true, Bool.false_eq_true,
+        if_false, if_true] using valueRelated.tobject_heap_to_object
 
 /-- Failures at the concrete Talos host boundary retain either the exact W6
 runtime trap or a Wasm ABI-shape error detected before the operation runs. -/
@@ -2254,8 +2303,8 @@ theorem scalarExternalStep
   exact ⟨operationStep, semanticInvoke, post.runtime,
     physicalOfLane_related post.value⟩
 
-/-- Decode one supported integer/USize operand into the concrete boxing
-vocabulary while retaining ABI-shape failures at the Talos boundary. -/
+/-- Decode one supported scalar operand into the concrete boxing vocabulary
+while retaining ABI-shape failures at the Talos boundary. -/
 def decodeBoxedScalar (kind : BoxedScalarKind) (physical : Wasm.Value) :
     Except HostFailure BoxedScalar :=
   match kind, physical with
@@ -2264,6 +2313,8 @@ def decodeBoxedScalar (kind : BoxedScalarKind) (physical : Wasm.Value) :
   | .uint32, .i32 bits => .ok (.uint32 bits)
   | .uint64, .i64 value => .ok (.uint64 value)
   | .usize, .i64 value => .ok (.usize value)
+  | .float32, .f32 bits => .ok (.float32 bits)
+  | .float, .f64 bits => .ok (.float bits)
   | kind, _ => .error (.laneMismatch 0 kind.abiKind.valueType)
 
 @[simp] theorem decodeBoxedScalar_physicalOfLane (scalar : BoxedScalar) :

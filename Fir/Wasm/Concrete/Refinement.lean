@@ -1319,6 +1319,19 @@ theorem ValueRel.tobject_tagged_to_tagged
       cases objectRelated with
       | tagged taggedRelated => exact .tagged taggedRelated
 
+/-- A representation-polymorphic object relation can be specialized back to
+the precise heap-object ABI when its semantic reference is known to be heap
+allocated. -/
+theorem ValueRel.tobject_heap_to_object
+    {witness : RefinementWitness} {word : Word32} {location : Location}
+    (related : ValueRel witness .tobject (.word32 word)
+      (.object (.heap location))) :
+    ValueRel witness .object (.word32 word) (.object (.heap location)) := by
+  cases related with
+  | tobject objectRelated =>
+      cases objectRelated with
+      | heap heapRelated => exact .object heapRelated
+
 /-- Exact tagged results may flow through a representation-polymorphic
 `tobject` ABI boundary without changing their physical word. -/
 theorem ValueRel.tagged_to_tobject

@@ -352,6 +352,111 @@ theorem allocateBoxedUSize_residentContract
   · simpa [BoxedScalar.kind, BoxedScalarKind.payloadBytes] using
       related.payloadBytes
 
+/-- The physical low/high wasm32 payload words installed by any canonical
+heap scalar allocation. Float32 specializes the high word to zero. -/
+theorem allocateBoxedScalar_payloadWords
+    (state result : MemoryState) (scalar : BoxedScalar) (address : Word32)
+    (valid : state.FrontierInvariant)
+    (allocated : allocateBoxedScalar state scalar = .ok (result, address)) :
+    result.memory.readUInt32 (address.value + headerBytes) =
+        .ok scalar.payload.toUInt32 ∧
+      result.memory.readUInt32 (address.value + headerBytes + 4) =
+        .ok (scalar.payload >>> (32 : UInt64)).toUInt32 := by
+  obtain ⟨middle, objectAllocation, payloadWrite, _⟩ :=
+    allocateBoxedScalar_decompose state result scalar address allocated
+  have middleValid := valid.allocateObject objectAllocation
+  have middleExtent := MemoryState.allocateObject_extent objectAllocation
+  have payloadInBounds :
+      address.value + headerBytes + 7 < middle.memory.size := by
+    have cursorInBounds := middleValid.cursorInBounds
+    rw [middleExtent] at cursorInBounds
+    simp [target, headerBytes, align8] at cursorInBounds ⊢
+    omega
+  exact LinearMemory.readUInt32_pair_of_writeUInt64_eq_ok middle.memory
+    result.memory (address.value + headerBytes) scalar.payload payloadInBounds
+      payloadWrite
+
+/-- Proof-facing resident contract for a canonical heap-only `Float32` box.
+Only the low four payload bytes are meaningful; the high wasm32 word is
+explicitly zero, so the checked resident unbox helper rejects every malformed
+nonzero-padding representation. -/
+theorem allocateBoxedFloat32_residentContract
+    (state result : MemoryState) (bits : UInt32) (address : Word32)
+    (valid : state.FrontierInvariant)
+    (allocated : allocateBoxedScalar state (.float32 bits) =
+      .ok (result, address)) :
+    result.FrontierInvariant ∧
+      ∃ header,
+        BoxedObjectRel result address .float32 (.float32 bits) header ∧
+        header.kind = .boxed ∧
+        header.allocationBytes.toNat = 40 ∧
+        header.aux0 = 6 ∧
+        header.aux1 = 4 ∧
+        header.aux2 = 0 ∧
+        header.aux3 = 0 ∧
+        header.refCount.toNat = 1 ∧
+        header.persistent = false ∧
+        result.memory.readUInt32 (address.value + headerBytes) = .ok bits ∧
+        result.memory.readUInt32 (address.value + headerBytes + 4) = .ok 0 := by
+  obtain ⟨resultValid, header, related, refCount, persistent⟩ :=
+    allocateBoxedScalar_objectRel state result (.float32 bits) address valid
+      allocated
+  have payloadWords := allocateBoxedScalar_payloadWords state result
+    (.float32 bits) address valid allocated
+  refine ⟨resultValid, header, related, related.headerKind, ?_, ?_, ?_,
+    related.reserved2, related.reserved3, refCount, persistent, ?_, ?_⟩
+  · simpa [target, headerBytes, align8] using related.allocationBytes
+  · simpa [BoxedScalar.kind, BoxedScalarKind.code] using related.kindCode
+  · simpa [BoxedScalar.kind, BoxedScalarKind.payloadBytes] using
+      related.payloadBytes
+  · simpa [BoxedScalar.payload] using payloadWords.1
+  · have highZero :
+        (bits.toUInt64 >>> (32 : UInt64)).toUInt32 = 0 := by
+      bv_decide
+    simpa [BoxedScalar.payload, highZero] using payloadWords.2
+
+/-- Proof-facing resident contract for a canonical heap-only `Float` box.
+All eight payload bytes are meaningful and preserve the exact binary64 bits. -/
+theorem allocateBoxedFloat_residentContract
+    (state result : MemoryState) (bits : UInt64) (address : Word32)
+    (valid : state.FrontierInvariant)
+    (allocated : allocateBoxedScalar state (.float bits) =
+      .ok (result, address)) :
+    result.FrontierInvariant ∧
+      ∃ header,
+        BoxedObjectRel result address .float (.float bits) header ∧
+        header.kind = .boxed ∧
+        header.allocationBytes.toNat = 40 ∧
+        header.aux0 = 7 ∧
+        header.aux1 = 8 ∧
+        header.aux2 = 0 ∧
+        header.aux3 = 0 ∧
+        header.refCount.toNat = 1 ∧
+        header.persistent = false ∧
+        result.memory.readUInt64 (address.value + headerBytes) = .ok bits := by
+  obtain ⟨resultValid, header, related, refCount, persistent⟩ :=
+    allocateBoxedScalar_objectRel state result (.float bits) address valid
+      allocated
+  obtain ⟨middle, objectAllocation, payloadWrite, _⟩ :=
+    allocateBoxedScalar_decompose state result (.float bits) address allocated
+  have middleValid := valid.allocateObject objectAllocation
+  have middleExtent := MemoryState.allocateObject_extent objectAllocation
+  have payloadInBounds :
+      address.value + headerBytes + 7 < middle.memory.size := by
+    have cursorInBounds := middleValid.cursorInBounds
+    rw [middleExtent] at cursorInBounds
+    simp [target, headerBytes, align8] at cursorInBounds ⊢
+    omega
+  have payloadRead := LinearMemory.readUInt64_of_writeUInt64_eq_ok
+    middle.memory result.memory (address.value + headerBytes) bits
+      payloadInBounds (by simpa [BoxedScalar.payload] using payloadWrite)
+  refine ⟨resultValid, header, related, related.headerKind, ?_, ?_, ?_,
+    related.reserved2, related.reserved3, refCount, persistent, payloadRead⟩
+  · simpa [target, headerBytes, align8] using related.allocationBytes
+  · simpa [BoxedScalar.kind, BoxedScalarKind.code] using related.kindCode
+  · simpa [BoxedScalar.kind, BoxedScalarKind.payloadBytes] using
+      related.payloadBytes
+
 def semanticBoxCell (scalar : BoxedScalar) : HeapCell := {
   object := .boxed scalar.kind.semanticType scalar.semanticValue }
 
@@ -580,7 +685,8 @@ theorem allocateBoxedScalar_liveHeapRel
     exact ((related.promoted payload concreteAddress mapped).prefixExtension extension)
       |>.witnessExtension witnessExtension
 
-theorem scalarFromType_boxedScalarKind (kind : BoxedScalarKind) (payload : UInt64) :
+theorem scalarFromType_boxedScalarKind (kind : BoxedScalarKind) (payload : UInt64)
+    (allowed : kind.allowsTaggedRepresentation = true) :
     scalarFromType kind.semanticType payload =
       .ok (BoxedScalar.ofPayload kind payload).semanticValue := by
   cases kind with
@@ -603,11 +709,11 @@ theorem scalarFromType_boxedScalarKind (kind : BoxedScalarKind) (payload : UInt6
         if_neg (by native_decide), if_pos (by native_decide)]
       rfl
   | usize =>
-      unfold scalarFromType
-      rw [if_neg (by native_decide), if_neg (by native_decide),
-        if_neg (by native_decide), if_neg (by native_decide),
-        if_pos (by native_decide)]
-      rfl
+      simp [BoxedScalarKind.allowsTaggedRepresentation] at allowed
+  | float32 =>
+      simp [BoxedScalarKind.allowsTaggedRepresentation] at allowed
+  | float =>
+      simp [BoxedScalarKind.allowsTaggedRepresentation] at allowed
 
 /-- Checked heap-box decoding refines the actual semantic `unbox` operation
 for a mapped live boxed cell. The descriptor fixes the ABI result kind; the
@@ -804,8 +910,8 @@ theorem boxScalar_tagged_liveHeapRel
     encodeTagged_liveHeapRel state result witness runtime scalar.payload word
       related encoded⟩
 
-/-- A successful semantic unbox of a tagged object statically excludes the
-heap-only `UInt64` and `USize` result kinds. -/
+/-- A successful semantic unbox of a tagged object statically excludes every
+heap-only result kind. -/
 theorem BoxedScalarKind.allowsTaggedRepresentation_of_unbox_tagged_eq_ok
     (runtime : RuntimeState) (kind : BoxedScalarKind) (payload : UInt64)
     (value : Value)
@@ -836,6 +942,15 @@ theorem BoxedScalarKind.allowsTaggedRepresentation_of_unbox_tagged_eq_ok
       simp only at unboxed
       rw [if_pos typeEq] at unboxed
       contradiction
+  | float32 | float =>
+      unfold Fir.LeanIR.Impure.unbox at unboxed
+      simp only at unboxed
+      rw [if_neg (by native_decide)] at unboxed
+      unfold scalarFromType at unboxed
+      rw [if_neg (by native_decide), if_neg (by native_decide),
+        if_neg (by native_decide), if_neg (by native_decide),
+        if_neg (by native_decide)] at unboxed
+      contradiction
 
 /-- Direct immediates and persistent promoted naturals decode identically at
 the typed scalar boundary. -/
@@ -865,7 +980,7 @@ theorem LiveHeapRel.readBoxedScalar_tagged_refines
     unfold Fir.LeanIR.Impure.unbox
     simp only
     rw [typeNotHeapOnly]
-    exact scalarFromType_boxedScalarKind kind payload
+    exact scalarFromType_boxedScalarKind kind payload allowed
   have valueRelated := BoxedScalar.valueRel witness
     (BoxedScalar.ofPayload kind payload)
   simp only [BoxedScalar.kind_ofPayload] at valueRelated

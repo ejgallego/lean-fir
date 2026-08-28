@@ -4,9 +4,9 @@ namespace FirTalos.Concrete
 
 open Fir.Wasm
 
-/-- Heap boxing remains limited to the concrete boxed-scalar layout below;
-ordinary float lanes, captures, caches, projections, and packed fields are
-represented bit-exactly without passing through this enum. -/
+/-- Heap boxing uses the concrete boxed-scalar layout below. Floating lanes,
+captures, caches, projections, and packed fields remain bit-exact; only an
+explicit source `box` or `unbox` passes their bits through this enum. -/
 private def boxedScalarKind? :
     AbiKind → Option Fir.Wasm.Concrete.BoxedScalarKind
   | .uint8 => some Fir.Wasm.Concrete.BoxedScalarKind.uint8
@@ -14,6 +14,8 @@ private def boxedScalarKind? :
   | .uint32 => some Fir.Wasm.Concrete.BoxedScalarKind.uint32
   | .uint64 => some Fir.Wasm.Concrete.BoxedScalarKind.uint64
   | .usize => some Fir.Wasm.Concrete.BoxedScalarKind.usize
+  | .float32 => some Fir.Wasm.Concrete.BoxedScalarKind.float32
+  | .float => some Fir.Wasm.Concrete.BoxedScalarKind.float
   | _ => none
 
 private def packedScalarKind : AbiKind → Bool
