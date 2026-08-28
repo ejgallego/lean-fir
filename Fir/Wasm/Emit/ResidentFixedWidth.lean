@@ -358,6 +358,81 @@ def uint32ToNatFunction : Function := {
         .call (.declaration ResidentNumeric.makeNaturalName)] ++
         retypeI32Result .tobject)] }
 
+/-!
+## Proof-visible fixed-width Natural conversion bodies
+
+These closed equations expose the exact production helper bodies without
+making the private helper constructors public. They are a proof-only source
+boundary for W6; the resident linker continues to use the same function
+values above.
+-/
+
+/-- Closed executable body of the production `UInt8.toNat` helper. -/
+def uint8ToNatFunctionBody : List Instruction := [
+  .localGet valueParam,
+  .i32Const .uint32 1,
+  .i32Shl,
+  .i32Const .uint32 1,
+  .i32Or,
+  .i64ExtendI32U .uint64,
+  .i32WrapI64 .tagged,
+  .ret]
+
+theorem uint8ToNatFunction_body :
+    uint8ToNatFunction.body = uint8ToNatFunctionBody := rfl
+
+/-- Closed executable body of the production `UInt8.toBitVec` helper. -/
+def uint8ToBitVecFunctionBody : List Instruction := [
+  .localGet valueParam,
+  .i32Const .uint32 1,
+  .i32Shl,
+  .i32Const .uint32 1,
+  .i32Or,
+  .i64ExtendI32U .uint64,
+  .i32WrapI64 .tobject,
+  .ret]
+
+theorem uint8ToBitVecFunction_body :
+    uint8ToBitVecFunction.body = uint8ToBitVecFunctionBody := rfl
+
+/-- Closed executable body of the production `UInt16.toNat` helper. -/
+def uint16ToNatFunctionBody : List Instruction := [
+  .localGet valueParam,
+  .i32Const .uint32 1,
+  .i32Shl,
+  .i32Const .uint32 1,
+  .i32Or,
+  .i64ExtendI32U .uint64,
+  .i32WrapI64 .tagged,
+  .ret]
+
+theorem uint16ToNatFunction_body :
+    uint16ToNatFunction.body = uint16ToNatFunctionBody := rfl
+
+/-- Closed executable body of the production `UInt32.toNat` helper. -/
+def uint32ToNatFunctionBody : List Instruction := [
+  .localGet valueParam,
+  .i32Const .uint32 2147483648,
+  .i32LtU,
+  .ifElse
+    [.localGet valueParam,
+      .i32Const .uint32 1,
+      .i32Shl,
+      .i32Const .uint32 1,
+      .i32Or,
+      .i64ExtendI32U .uint64,
+      .i32WrapI64 .tobject,
+      .ret]
+    [.localGet valueParam,
+      .i32Const .uint32 0,
+      .call (.declaration ResidentNumeric.makeNaturalName),
+      .i64ExtendI32U .uint64,
+      .i32WrapI64 .tobject,
+      .ret]]
+
+theorem uint32ToNatFunction_body :
+    uint32ToNatFunction.body = uint32ToNatFunctionBody := rfl
+
 private def narrowUInt32Function (declaration : Name) (result : AbiKind)
     (mask : UInt32) : Function :=
   retypedI32Function declaration #[(valueParam, .uint32)] result [
