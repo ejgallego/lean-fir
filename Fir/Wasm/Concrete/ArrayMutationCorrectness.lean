@@ -5,6 +5,27 @@ namespace Fir.Wasm.Concrete
 
 open Fir.LeanIR.Impure
 
+/-- Every semantic live Array slot occupies a complete in-bounds 32-bit low
+word.  The retained slot is eight bytes wide, but element replacement touches
+only this ownership-bearing `tobject` lane. -/
+theorem ResidentArrayObjectRel.liveElementWordInBounds
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {elements : Array Value} {capacity : Nat} {header : Header}
+    (related :
+      ResidentArrayObjectRel state witness address elements capacity header)
+    (valid : state.FrontierInvariant) (index : Nat)
+    (indexValid : index < elements.size) :
+    address.value + headerBytes + target.semanticSlotBytes * index + 3 <
+      state.memory.size := by
+  have allocationInMemory :
+      address.value + residentArrayAllocationBytes capacity ≤ state.memory.size :=
+    Nat.le_trans related.extent valid.cursorInBounds
+  have aligned := align8_ge
+    (headerBytes + target.semanticSlotBytes * capacity)
+  have sizeCapacity := related.sizeCapacity
+  simp [residentArrayAllocationBytes, target] at allocationInMemory aligned ⊢
+  omega
+
 /-- One ownership-neutral low-word replacement updates exactly one live Array
 element, preserves the complete retained allocation boundary, and leaves the
 frontier invariant intact. -/
@@ -109,6 +130,43 @@ theorem ResidentArrayObjectRel.writeElementRaw_targetFrame
     obtain ⟨oldWord, oldRead, oldRelated⟩ :=
       related.liveElements other semanticValue oldValueAt
     exact ⟨oldWord, by rw [readOther other same]; exact oldRead, oldRelated⟩
+
+/-- A successful raw live-element replacement is exactly one mathematical
+32-bit memory write at the resident Array slot.  This decomposition is the
+bridge used by resident Wasm store proofs before ownership of the displaced
+value is released. -/
+theorem ResidentArrayObjectRel.writeElementRaw_decompose
+    {state result : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {elements : Array Value} {capacity : Nat}
+    {header : Header} (related :
+      ResidentArrayObjectRel state witness address elements capacity header)
+    (index : Nat) (word : Word32) (indexValid : index < elements.size)
+    (operation :
+      writeResidentArrayElementRaw state address index word = .ok result) :
+    ∃ memory,
+      state.memory.writeWord32
+          (address.value + headerBytes + target.semanticSlotBytes * index) word =
+        .ok memory ∧
+      result = { state with memory := memory } := by
+  let offset := address.value + headerBytes + target.semanticSlotBytes * index
+  unfold writeResidentArrayElementRaw at operation
+  rw [related.readHeader] at operation
+  simp only [Bind.bind, Except.bind] at operation
+  rw [if_pos (by simpa [related.logicalSize] using indexValid)] at operation
+  change (do
+    let memory ← liftMemory (state.memory.writeWord32 offset word)
+    return ({ state with memory := memory } : MemoryState)) = .ok result at operation
+  cases written : state.memory.writeWord32 offset word with
+  | error failure =>
+      rw [written] at operation
+      change (Except.error (ConcreteError.ofMemory failure) :
+        Except ConcreteError MemoryState) = Except.ok result at operation
+      contradiction
+  | ok memory =>
+      rw [written] at operation
+      change Except.ok ({ state with memory := memory } : MemoryState) =
+        Except.ok result at operation
+      exact ⟨memory, rfl, (Except.ok.inj operation).symm⟩
 
 /-- Writing a currently-spare capacity slot preserves the complete live Array
 relation while producing a target-allocation frame. -/
