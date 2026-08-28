@@ -262,9 +262,9 @@ assert.deepEqual(functionOrigins, {
 assert.deepEqual(functionExports, [
   { name: "fir_heap_frontier", index: 18 },
   { name: "fir_heap_alloc", index: 22 },
-  { name: "fir_heap_rewind", index: 496 },
-  { name: "fir_heap_set_frontier", index: 497 },
-  { name: "Zip.Wasm.compressRaw", index: 498 },
+  { name: "fir_heap_rewind", index: 497 },
+  { name: "fir_heap_set_frontier", index: 498 },
+  { name: "Zip.Wasm.compressRaw", index: 499 },
 ]);
 assert.deepEqual(inventory.frontierImports,
   frontierImports.map(({ name }) => name));
