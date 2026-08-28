@@ -25,7 +25,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   resident Array provenance consumer after rebasing, is the remaining
   milestone step.
 - Integration owner: `root`, holding the serial landing lease through accepted
-  integration head `d815b2be`. `wasm-gen` remains released to the W7-1
+  integration head `f4a48d79`. `wasm-gen` remains released to the W7-1
   generation lane. The inherited cleanup, serial and bounded check-throughput,
   mailbox-routing, bounded `Nat.land`, USize range-fact, exact consumer-ratchet,
   and transactional resident-linker stacks are now integrated. Tooling's
@@ -209,9 +209,26 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   the forced source-only root and 3,174-job Talos cones, `make check` at 730
   unique cases and 2,172/2,172 comparisons, and `make talos-check` with receipt
   `068f288e` pass. W7 helper names, signatures, bodies, symbolic Wasm, and
-  artifacts are unchanged. The remaining queue item is the theorem for the
-  actual installed `fir_float32_box`/`unbox` and `fir_float_box`/`unbox`
-  bodies after W7 rebases its disjoint checkpoint.
+  artifacts are unchanged. The production-installed body theorem is recorded
+  in the following accepted W6 checkpoint after W7's disjoint rebase.
+- Accepted installed floating helper refinement: W6 unbox head `4ad364ee` and
+  box head `846ba8f0` are linked through exact clean tracked handoff
+  `f4a48d79`, based directly on the accepted trusted-Array integration head
+  `cdaf6709`. The proofs connect the actual production-installed
+  `fir_float32_box`/`unbox` and `fir_float_box`/`unbox` bodies to the concrete
+  runtime rather than reconstructing helper examples. Unboxing recovers every
+  raw bit pattern, preserves arbitrary caller tails and the exact store, and
+  rejects tagged, misaligned, below-heap, malformed, and nonzero-Float32-
+  padding inputs. Boxing refines `allocateBoxedScalar` admission through the
+  fresh-zero allocation, canonical six-word header, exact Float32 or Float
+  payload writes, returned object identity, final store, trace, and caller
+  tail. Reusable zero-store, header-write, page-preservation, retyping, and
+  physical-memory facts carry the common proof. Lean Beam is diagnostic-clean,
+  the forced 3,177-job Talos cone, `make check` at 730 unique cases and
+  2,172/2,172 comparisons, and `make talos-check` with exact receipt
+  `a319034b` pass. No helper body, signature, ABI, layout, ownership, allocator,
+  source semantic, symbolic Wasm, artifact, or other shared contract changed.
+  Authoritative completion is `W6-W7-20260828-007`; bug cards: none.
 - Accepted trusted resident Array replacement fast path: W7 functional head
   `1777059b`, integration-owned raw package ratchet `bc6ca1e2`, and clean
   tracked checkpoint `d815b2be` are linked directly after the accepted W6
