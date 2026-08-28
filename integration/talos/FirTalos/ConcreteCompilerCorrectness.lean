@@ -5373,6 +5373,118 @@ inductive ObjectFieldErasedEffectSupported
       ObjectFieldErasedEffectSupported context sourceRuntime sourceEnv
         (.oset objectId index .erased continuation) continuation nextRuntime
 
+/-- Active-witness form of successful FVar object-field admission.
+
+It retains the same source/compiler facts as the witness-independent legacy
+predicate, but asks only for descriptor alignment in the witness belonging to
+the current simulation state. This is the form derived from source constructor
+schema provenance. -/
+inductive ObjectFieldFVarEffectSupportedAt
+    (context : Fir.Wasm.Context) (witness : RefinementWitness) :
+    EffectSupportedPredicate where
+  | oset
+      (sourceRuntime nextRuntime : RuntimeState)
+      (sourceEnv : Env)
+      (objectId fieldId : FVarId)
+      (index : Nat)
+      (continuation : LCNF.Code .impure)
+      (location : Location)
+      (cell : HeapCell)
+      (semantic : ConstructorObject)
+      (field : Value)
+      (fieldKind : AbiKind)
+      (objectCompiled :
+        Fir.Wasm.getLocal context objectId =
+          .ok (.localGet objectId, .object))
+      (fieldCompiled :
+        Fir.Wasm.getLocal context fieldId =
+          .ok (.localGet fieldId, fieldKind))
+      (fieldObjectKind : fieldKind.isObjectField = true)
+      (objectLookup :
+        lookupValue sourceEnv objectId =
+          .ok (.object (.heap location)))
+      (fieldLookup : lookupValue sourceEnv fieldId = .ok field)
+      (updated :
+        setObjectField sourceRuntime (.object (.heap location)) index field =
+          .ok nextRuntime)
+      (found : findCell? sourceRuntime.heap location = some cell)
+      (live : cell.live = true)
+      (objectEq : cell.object = .ctor semantic)
+      (indexValid : index < semantic.objectFields.size)
+      (fieldKindAligned :
+        ConcreteObjectFieldKindAlignedAt witness location index fieldKind) :
+      ObjectFieldFVarEffectSupportedAt context witness sourceRuntime sourceEnv
+        (.oset objectId index (.fvar fieldId) continuation) continuation
+        nextRuntime
+
+/-- Active-witness form of successful erased object-field admission. -/
+inductive ObjectFieldErasedEffectSupportedAt
+    (context : Fir.Wasm.Context) (witness : RefinementWitness) :
+    EffectSupportedPredicate where
+  | oset
+      (sourceRuntime nextRuntime : RuntimeState)
+      (sourceEnv : Env)
+      (objectId : FVarId)
+      (index : Nat)
+      (continuation : LCNF.Code .impure)
+      (location : Location)
+      (cell : HeapCell)
+      (semantic : ConstructorObject)
+      (objectCompiled :
+        Fir.Wasm.getLocal context objectId =
+          .ok (.localGet objectId, .object))
+      (objectLookup :
+        lookupValue sourceEnv objectId =
+          .ok (.object (.heap location)))
+      (updated :
+        setObjectField sourceRuntime (.object (.heap location)) index .erased =
+          .ok nextRuntime)
+      (found : findCell? sourceRuntime.heap location = some cell)
+      (live : cell.live = true)
+      (objectEq : cell.object = .ctor semantic)
+      (indexValid : index < semantic.objectFields.size)
+      (fieldKindAligned :
+        ConcreteObjectFieldKindAlignedAt witness location index .erased) :
+      ObjectFieldErasedEffectSupportedAt context witness sourceRuntime
+        sourceEnv (.oset objectId index .erased continuation) continuation
+        nextRuntime
+
+theorem ObjectFieldFVarEffectSupported.toActive
+    {context : Fir.Wasm.Context} {witness : RefinementWitness}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {code continuation : LCNF.Code .impure}
+    (supported : ObjectFieldFVarEffectSupported context sourceRuntime sourceEnv
+      code continuation nextRuntime) :
+    ObjectFieldFVarEffectSupportedAt context witness sourceRuntime sourceEnv
+      code continuation nextRuntime := by
+  cases supported with
+  | oset sourceRuntime nextRuntime sourceEnv objectId fieldId index continuation
+      location cell semantic field fieldKind objectCompiled fieldCompiled
+      fieldObjectKind objectLookup fieldLookup updated found live objectEq
+      indexValid fieldKindAligned =>
+      exact .oset sourceRuntime nextRuntime sourceEnv objectId fieldId index
+        continuation location cell semantic field fieldKind objectCompiled
+        fieldCompiled fieldObjectKind objectLookup fieldLookup updated found live
+        objectEq indexValid (fun related descriptor =>
+          fieldKindAligned related descriptor)
+
+theorem ObjectFieldErasedEffectSupported.toActive
+    {context : Fir.Wasm.Context} {witness : RefinementWitness}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {code continuation : LCNF.Code .impure}
+    (supported : ObjectFieldErasedEffectSupported context sourceRuntime
+      sourceEnv code continuation nextRuntime) :
+    ObjectFieldErasedEffectSupportedAt context witness sourceRuntime sourceEnv
+      code continuation nextRuntime := by
+  cases supported with
+  | oset sourceRuntime nextRuntime sourceEnv objectId index continuation
+      location cell semantic objectCompiled objectLookup updated found live
+      objectEq indexValid fieldKindAligned =>
+      exact .oset sourceRuntime nextRuntime sourceEnv objectId index continuation
+        location cell semantic objectCompiled objectLookup updated found live
+        objectEq indexValid (fun related descriptor =>
+          fieldKindAligned related descriptor)
+
 /--
 Source/compiler-facing admission for successful `USize` field mutation.
 

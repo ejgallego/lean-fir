@@ -7116,59 +7116,6 @@ def ConcreteObjectFieldKindAligned
             some (.constructor info fieldKinds) →
           fieldKinds[index]? = some kind
 
-/-- Object-field alignment for the one refinement witness active in the
-current source/target simulation state.
-
-Unlike `ConcreteObjectFieldKindAligned`, this is a relational fact: it does
-not make a claim about unrelated proof witnesses. -/
-def ConcreteObjectFieldKindAlignedAt
-    (witness : RefinementWitness) (location : Location) (index : Nat)
-    (kind : AbiKind) : Prop :=
-  ∀ {objectWord : Word32} {info : Lean.Compiler.LCNF.CtorInfo}
-      {fieldKinds : Array AbiKind},
-    ValueRel witness .tobject (.word32 objectWord)
-        (.object (.heap location)) →
-      witness.descriptors.lookup? objectWord =
-          some (.constructor info fieldKinds) →
-        fieldKinds[index]? = some kind
-
-/-- A source schema entry fixes the ABI of one constructor object slot. -/
-def ConstructorSchema.FieldKindAt
-    (schema : ConstructorSchema) (location : Location) (index : Nat)
-    (kind : AbiKind) : Prop :=
-  ∃ entry,
-    schema location = some entry ∧ entry.fieldKinds[index]? = some kind
-
-/-- Source constructor provenance plus agreement with the active witness is
-exactly sufficient to recover descriptor-slot alignment.
-
-The proof first resolves the schema location to its canonical concrete
-address.  The active value relation resolves the same semantic location to the
-object operand.  Functional lookup makes those words equal, after which the
-two descriptor equations identify the ABI array and selected slot. -/
-theorem ConcreteObjectFieldKindAlignedAt.of_schema
-    {schema : ConstructorSchema} {witness : RefinementWitness}
-    {location : Location} {index : Nat} {kind : AbiKind}
-    (agrees : schema.WitnessAgrees witness)
-    (typed : schema.FieldKindAt location index kind) :
-    ConcreteObjectFieldKindAlignedAt witness location index kind := by
-  intro objectWord info fieldKinds objectRelated descriptorFound
-  obtain ⟨entry, schemaFound, schemaKind⟩ := typed
-  obtain ⟨schemaWord, schemaMapped, schemaDescriptor⟩ := agrees schemaFound
-  cases objectRelated with
-  | tobject referenceRelated =>
-      cases referenceRelated with
-      | heap heapRelated =>
-          cases heapRelated with
-          | mapped objectMapped =>
-              rw [schemaMapped] at objectMapped
-              have wordEq := Option.some.inj objectMapped
-              subst objectWord
-              rw [schemaDescriptor] at descriptorFound
-              have descriptorEq := Option.some.inj descriptorFound
-              cases descriptorEq
-              exact schemaKind
-
 /-- The current universally witness-quantified field-alignment boundary is not
 derivable from a semantic environment and heap location alone.
 
@@ -7213,6 +7160,17 @@ def ConcreteObjectFieldFVarTyped
     Fir.Wasm.getLocal context fieldId =
         .ok (.localGet fieldId, fieldKind) →
       ConcreteObjectFieldKindAligned sourceEnv objectId index fieldKind
+
+/-- Source-schema form of FVar object-field typing. Production validation
+selects the payload ABI; final-LCNF typing proves that the object slot at the
+same use site has that ABI in the retained semantic schema. -/
+def ConstructorSchema.ObjectFieldFVarTyped
+    (schema : ConstructorSchema) (context : Fir.Wasm.Context)
+    (sourceEnv : Env) (objectId fieldId : Lean.FVarId) (index : Nat) : Prop :=
+  ∀ {fieldKind : AbiKind},
+    Fir.Wasm.getLocal context fieldId =
+        .ok (.localGet fieldId, fieldKind) →
+      schema.ObjectFieldKindAt sourceEnv objectId index fieldKind
 
 /-- Validation of an FVar object-field write fixes the object lane, payload
 lane, and the payload's object-field classification. -/
@@ -8676,6 +8634,56 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_objectFieldErased_of_step
   exact related.advanceCode related.core.validation.osetContinuation
     (pointwise.advance_objectFieldErased_of_step supported sourceStep)
 
+theorem ConcreteStructuredValidatedCodeOutcome.advance_objectFieldFVarAt_of_step
+    {objectId fieldId : Lean.FVarId} {index : Nat}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.oset objectId index (.fvar fieldId) continuation) targetStore
+      targetLocals targetCode witness source target)
+    (supported : ObjectFieldFVarEffectSupportedAt context witness sourceRuntime
+      sourceEnv (.oset objectId index (.fvar fieldId) continuation) continuation
+      nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter := by
+  exact related.advanceCode related.core.validation.osetContinuation
+    (related.core.core.advance_objectFieldFVarAt_of_step spec supported
+      sourceStep)
+
+theorem ConcreteStructuredValidatedCodeOutcome.advance_objectFieldErasedAt_of_step
+    {objectId : Lean.FVarId} {index : Nat}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.oset objectId index .erased continuation) targetStore targetLocals
+      targetCode witness source target)
+    (supported : ObjectFieldErasedEffectSupportedAt context witness
+      sourceRuntime sourceEnv (.oset objectId index .erased continuation)
+      continuation nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter := by
+  exact related.advanceCode related.core.validation.osetContinuation
+    (related.core.core.advance_objectFieldErasedAt_of_step spec supported
+      sourceStep)
+
 /-- `USize` slot mutation preserves the closed relation across its exact
 generated three-step prefix. -/
 theorem ConcreteStructuredValidatedCodeOutcome.advance_usizeField_of_step
@@ -8813,6 +8821,96 @@ theorem
         fieldTyped objectLookup objectRelated descriptorFound)
   obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, next⟩ :=
     related.advance_objectFieldErased_of_step supported sourceStep
+  exact ⟨resultRuntime, targetAfter, nextStore, nextTargetCode, targetPath, next⟩
+
+/-- Closed FVar object-field mutation from source schema typing and agreement
+with the active simulation witness. No arbitrary-witness premise remains. -/
+theorem
+    ConcreteStructuredValidatedCodeOutcome.advance_objectFieldFVar_of_schema_step
+    {objectId fieldId : Lean.FVarId} {index : Nat}
+    {schema : ConstructorSchema}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.oset objectId index (.fvar fieldId) continuation) targetStore
+      targetLocals targetCode witness source target)
+    (schemaAgrees : schema.WitnessAgrees witness)
+    (fieldTyped : schema.ObjectFieldFVarTyped context sourceEnv objectId
+      fieldId index)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ resultRuntime targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes resultRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter := by
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees⟩ :=
+    related.core.validation
+  obtain ⟨fieldKind, objectCompiled, fieldCompiled, fieldObjectKind⟩ :=
+    validated.oset_fvar_compiler agrees
+  obtain ⟨location, cell, semantic, field, resultRuntime, objectLookup,
+      fieldLookup, updated, found, live, objectEq, indexValid⟩ :=
+    related.core.core.focus.oset_fvar_source_of_step sourceStep
+  have activeAligned :
+      ConcreteObjectFieldKindAlignedAt witness location index fieldKind :=
+    ConcreteObjectFieldKindAlignedAt.of_schema schemaAgrees
+      (fieldTyped fieldCompiled objectLookup)
+  let supported : ObjectFieldFVarEffectSupportedAt context witness
+      sourceRuntime sourceEnv
+      (.oset objectId index (.fvar fieldId) continuation) continuation
+      resultRuntime :=
+    .oset sourceRuntime resultRuntime sourceEnv objectId fieldId index
+      continuation location cell semantic field fieldKind objectCompiled
+      fieldCompiled fieldObjectKind objectLookup fieldLookup updated found live
+      objectEq indexValid activeAligned
+  obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, next⟩ :=
+    related.advance_objectFieldFVarAt_of_step supported sourceStep
+  exact ⟨resultRuntime, targetAfter, nextStore, nextTargetCode, targetPath, next⟩
+
+/-- Closed erased object-field mutation from the same active schema bridge. -/
+theorem
+    ConcreteStructuredValidatedCodeOutcome.advance_objectFieldErased_of_schema_step
+    {objectId : Lean.FVarId} {index : Nat} {schema : ConstructorSchema}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.oset objectId index .erased continuation) targetStore targetLocals
+      targetCode witness source target)
+    (schemaAgrees : schema.WitnessAgrees witness)
+    (fieldTyped : schema.ObjectFieldKindAt sourceEnv objectId index .erased)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ resultRuntime targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes resultRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter := by
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees⟩ :=
+    related.core.validation
+  have objectCompiled := validated.oset_erased_compiler agrees
+  obtain ⟨location, cell, semantic, resultRuntime, objectLookup, updated,
+      found, live, objectEq, indexValid⟩ :=
+    related.core.core.focus.oset_erased_source_of_step sourceStep
+  have activeAligned :
+      ConcreteObjectFieldKindAlignedAt witness location index .erased :=
+    ConcreteObjectFieldKindAlignedAt.of_schema schemaAgrees
+      (fieldTyped objectLookup)
+  let supported : ObjectFieldErasedEffectSupportedAt context witness
+      sourceRuntime sourceEnv (.oset objectId index .erased continuation)
+      continuation resultRuntime :=
+    .oset sourceRuntime resultRuntime sourceEnv objectId index continuation
+      location cell semantic objectCompiled objectLookup updated found live
+      objectEq indexValid activeAligned
+  obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, next⟩ :=
+    related.advance_objectFieldErasedAt_of_step supported sourceStep
   exact ⟨resultRuntime, targetAfter, nextStore, nextTargetCode, targetPath, next⟩
 
 /-- Closed `USize` field mutation is fully reconstructed from validation and

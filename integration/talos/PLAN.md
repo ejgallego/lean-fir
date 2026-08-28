@@ -6271,6 +6271,17 @@ thread the schema and agreement through the validated global relation and
 replace the older universally quantified effect-admission field; the
 production compiler-admission bug remains open until that path is closed.
 
+The first threading layer is also closed. Active-witness FVar and erased
+object-field admission forms reuse one factored mutation transport rather than
+duplicating the concrete writer proof. Closed validated-code successor
+theorems now reconstruct production locals and the successful semantic update,
+derive active descriptor alignment from source `ObjectFieldKindAt` plus
+`WitnessAgrees`, and preserve the continuation relation across the exact
+three-step target prefix. The legacy witness-independent admission surface is
+retained only for compatibility. The next layer gives the global validated
+relation one evolving schema/agreement component so its dispatcher selects
+these new successors directly.
+
 W6.6 float packed-field admission closes the semantic-to-concrete gap for
 `Float32` and `Float` projection and mutation. `ValueRel` now relates the
 shared raw-bit semantic constructors directly to `.float32Bits` and

@@ -225,6 +225,61 @@ theorem WitnessAgrees.rebindConstructor
 
 end ConstructorSchema
 
+/-- Object-field alignment for the one refinement witness active in the
+current source/target simulation state. -/
+def ConcreteObjectFieldKindAlignedAt
+    (witness : RefinementWitness) (location : Location) (index : Nat)
+    (kind : AbiKind) : Prop :=
+  ∀ {objectWord : Word32} {info : Lean.Compiler.LCNF.CtorInfo}
+      {fieldKinds : Array AbiKind},
+    ValueRel witness .tobject (.word32 objectWord)
+        (.object (.heap location)) →
+      witness.descriptors.lookup? objectWord =
+          some (.constructor info fieldKinds) →
+        fieldKinds[index]? = some kind
+
+/-- A source schema entry fixes the ABI of one constructor object slot. -/
+def ConstructorSchema.FieldKindAt
+    (schema : ConstructorSchema) (location : Location) (index : Nat)
+    (kind : AbiKind) : Prop :=
+  ∃ entry,
+    schema location = some entry ∧ entry.fieldKinds[index]? = some kind
+
+/-- Source-environment form of constructor field typing. It follows the
+current object binding to its semantic heap location and consults only the
+source constructor schema. -/
+def ConstructorSchema.ObjectFieldKindAt
+    (schema : ConstructorSchema) (sourceEnv : Env)
+    (objectId : Lean.FVarId) (index : Nat) (kind : AbiKind) : Prop :=
+  ∀ {location},
+    lookupValue sourceEnv objectId = .ok (.object (.heap location)) →
+      schema.FieldKindAt location index kind
+
+/-- Source constructor provenance plus agreement with the active witness is
+exactly sufficient to recover descriptor-slot alignment. -/
+theorem ConcreteObjectFieldKindAlignedAt.of_schema
+    {schema : ConstructorSchema} {witness : RefinementWitness}
+    {location : Location} {index : Nat} {kind : AbiKind}
+    (agrees : schema.WitnessAgrees witness)
+    (typed : schema.FieldKindAt location index kind) :
+    ConcreteObjectFieldKindAlignedAt witness location index kind := by
+  intro objectWord info fieldKinds objectRelated descriptorFound
+  obtain ⟨entry, schemaFound, schemaKind⟩ := typed
+  obtain ⟨schemaWord, schemaMapped, schemaDescriptor⟩ := agrees schemaFound
+  cases objectRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped objectMapped =>
+              rw [schemaMapped] at objectMapped
+              have wordEq := Option.some.inj objectMapped
+              subst objectWord
+              rw [schemaDescriptor] at descriptorFound
+              have descriptorEq := Option.some.inj descriptorFound
+              cases descriptorEq
+              exact schemaKind
+
 /-- Every concrete value relation exposes the corresponding source-semantic
 ABI fact after erasing its physical lane and refinement witness. -/
 theorem PhysicalValueRel.semanticValueAtAbi

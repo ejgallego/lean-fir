@@ -89,6 +89,12 @@ fix: the schema/agreement pair still has to be threaded through the closed
 validated simulation before the old universal effect-admission premise can be
 removed.
 
+Both local closed-successor proofs now consume the replacement boundary:
+`advance_objectFieldFVar_of_schema_step` and
+`advance_objectFieldErased_of_schema_step` derive alignment for the active
+witness and reuse a common mutation transport. The remaining gap is global
+state threading and dispatcher selection, not the concrete field writer.
+
 ## Semantic impact
 
 The mismatch is ownership-relevant. If a descriptor classifies a slot erased
