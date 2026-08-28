@@ -172,6 +172,50 @@ theorem writeElementRaw_preservesMemory
   unfold LinearMemory.writeWord32 at written
   exact memoryRelated.writeUInt32 inBounds written
 
+/-- A resident Array payload replacement preserves canonical raw headers for
+every mapped allocation.  The target uses the exact-word payload-write lemma;
+all other allocations are framed by descriptor disjointness. -/
+theorem ResidentRelease.CanonicalMappedHeadersRel.writeResidentArrayElementRaw
+    {state result : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address word : Word32}
+    {elements : Array Value} {capacity : Nat} {header : Header}
+    (canonical : ResidentRelease.CanonicalMappedHeadersRel state witness)
+    (heapRelated : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (descriptorFound : witness.descriptors.lookup? address =
+      some (.array capacity))
+    (objectRelated :
+      ResidentArrayObjectRel state witness address elements capacity header)
+    (index : Nat) (indexValid : index < elements.size)
+    (value : Value)
+    (valueRelated : ValueRel witness .tobject (.word32 word) value)
+    (operation :
+      writeResidentArrayElementRaw state address index word = .ok result) :
+    ResidentRelease.CanonicalMappedHeadersRel result witness := by
+  obtain ⟨generated, generatedOperation, frame, _finalValid,
+      _finalObject⟩ :=
+    objectRelated.writeElementRaw_targetFrame heapRelated.frontier index value
+      word indexValid valueRelated
+  have generatedEq : generated = result := by
+    exact Except.ok.inj (generatedOperation.symm.trans operation)
+  subst generated
+  have exactBefore : Header.ExactWords state.memory address header :=
+    canonical mapped header objectRelated.headerRead
+  have exactAfter : Header.ExactWords result.memory address header :=
+    objectRelated.writeElementRaw_exactWords heapRelated.frontier exactBefore
+      index word indexValid operation
+  have rawRead : Header.read state.memory address = .ok header :=
+    (MemoryState.PrefixExtension.readLiveHeader_facts state address header
+      objectRelated.headerRead).2.1
+  intro nextLocation nextAddress nextMapped
+  exact (ResidentRelease.CanonicalMappedHeadersRel.ofTargetMutation
+    (before := state) (after := result) (witness := witness)
+    (targetAddress := address) (targetDescriptor := .array capacity)
+    (targetHeader := header) (canonical := canonical)
+    (related := heapRelated) (targetFound := descriptorFound)
+    (targetRead := rawRead) (targetLive := objectRelated.headerRead)
+    (frame := frame) (targetExactAfter := exactAfter)) nextMapped
+
 /-- A related semantic live element exposes one exact borrowed physical word
 to resident Wasm.  Borrowing does not retain it; the replacement branch must
 later pass this same word to the checked decrement gate. -/
@@ -403,24 +447,6 @@ theorem wp_replaceElementOwnershipProgram_tobject
     oldSet checkedWP
   simpa [replaceElementOwnershipProgram, List.append_assoc] using borrowWP
 
-/-- Exact Talos spelling of the production trusted exclusivity probe.  The
-exclusive branch is kept abstract so the same control theorem can be reused by
-all three installed helpers and by the typed `Array.set` caller rewrite. -/
-def trustedExclusivePrefixProgram (arrayIndex : Nat)
-    (exclusive : Wasm.Program) : Wasm.Program := [
-  .localGet arrayIndex,
-  .load32 (UInt32.ofNat headerRefCountOffset),
-  .const 1,
-  .eq,
-  .iff 0 0 exclusive []]
-
-/-- Function-local exclusive branches end by returning the Array address.
-Keeping that fact in the postcondition rules out structured fallthrough and
-branch completions before the deferred suffix is appended. -/
-def ReturnOnly (Q : Wasm.Assertion host) : Wasm.Assertion host
-  | continuation@(.Return _ _) => Q continuation
-  | _ => False
-
 /-- Semantic and concrete admission for the trusted in-place Array arm.  It
 contains no compiler certificate: every field is runtime state already needed
 by the whole-heap refinement and ownership proofs. -/
@@ -499,6 +525,182 @@ theorem TrustedExclusiveAdmission.objectAdmission
         closureRelated.objectEq
       rw [admission.objectEq] at storedObjectEq
       contradiction
+
+/-- Relational outcome of one native-order resident Array replacement.  The
+ownership decrement and payload write remain separately visible, while the
+caller receives the rebuilt semantic heap, byte-exact resident memory,
+canonical mapped headers, retained capacities, and unchanged frontier. -/
+def ReplacementSuccess
+    {host : Type} (fuel : Nat) (before : MemoryState)
+    (witness : RefinementWitness) (nextRuntime : RuntimeState)
+    (address : Word32) (index : Nat) (oldWord newWord : Word32)
+    (result : MemoryState) (finalStore : Wasm.Store host) : Prop :=
+  ∃ released,
+    decrementReferenceOnceFuel fuel before oldWord true
+        witness.closureDescriptors = .ok released ∧
+    writeResidentArrayElementRaw released address index newWord = .ok result ∧
+    LiveHeapRel result witness nextRuntime ∧
+    ResidentMemoryRel result finalStore.mem ∧
+    ResidentRelease.CanonicalMappedHeadersRel result witness ∧
+    MappedHeaderCapacityTransport before result witness ∧
+    result.heapCursor = before.heapCursor
+
+/-- Semantic/concrete/resident refinement of the heap-valued replacement arm.
+The recursive decrement is consumed only through `ResidentOwnershipStep`; the
+explicit `parentPreserved` premise is the compiler ownership obligation that
+rules out releasing the uniquely mutated Array through its displaced value. -/
+theorem wp_replaceElementOwnershipProgram_heap_refines
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime releasedRuntime nextRuntime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    {elements : Array Value} {capacity fuel index : Nat}
+    {oldValue newValue : Value} {oldWord newWord : Word32}
+    {initial afterOld : Wasm.Locals}
+    {cursorIndex valueIndex elementIndex decrementIndex : Nat}
+    {rest : Wasm.Program}
+    (admission : TrustedExclusiveAdmission state witness runtime location
+      address cell elements capacity)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (oldAt : elements[index]? = some oldValue)
+    (oldRead : state.memory.readWord32
+      (address.value + headerBytes + target.semanticSlotBytes * index) =
+        .ok oldWord)
+    (oldRelated : ValueRel witness .tobject (.word32 oldWord) oldValue)
+    (newRelated : ValueRel witness .tobject (.word32 newWord) newValue)
+    (oldHeap : oldWord.classify = .heap)
+    (semanticRelease :
+      (match oldValue with
+      | .object (.heap child) =>
+          Fir.LeanIR.Impure.decLocationFuel fuel runtime child
+      | _ => .ok runtime) = .ok releasedRuntime)
+    (parentPreserved :
+      findCell? releasedRuntime.heap location = some cell)
+    (semanticSet :
+      setCell releasedRuntime location
+          { cell with
+            object := .array (elements.set index newValue
+              (Array.getElem?_eq_some_iff.mp oldAt).1) capacity } =
+        .ok nextRuntime)
+    (step : ResidentRelease.ResidentOwnershipStep env module decrementIndex
+      fuel witness)
+    (cursorFound : initial.get cursorIndex =
+      some (.i32 (UInt32.ofNat
+        (address.value + headerBytes + target.semanticSlotBytes * index))))
+    (oldSet :
+      ({ initial with values := [.i32 (UInt32.ofNat oldWord.value)] }).set?
+          elementIndex (.i32 (UInt32.ofNat oldWord.value)) = some afterOld)
+    (cursorAfter : afterOld.get cursorIndex =
+      some (.i32 (UInt32.ofNat
+        (address.value + headerBytes + target.semanticSlotBytes * index))))
+    (valueAfter : afterOld.get valueIndex =
+      some (.i32 (UInt32.ofNat newWord.value)))
+    (continued : ∀ result finalStore,
+      ReplacementSuccess fuel state witness nextRuntime address index oldWord
+          newWord result finalStore →
+      Wasm.wp module rest Q finalStore { afterOld with values := [] } env) :
+    Wasm.wp module
+      (replaceElementOwnershipProgram cursorIndex valueIndex elementIndex
+          decrementIndex ++ rest)
+      Q store { initial with values := [] } env := by
+  have indexValid : index < elements.size :=
+    (Array.getElem?_eq_some_iff.mp oldAt).1
+  obtain ⟨header, objectRelated, _refCount, _ordinary, _exact⟩ :=
+    admission.objectAdmission
+  have initialInBounds := liveElementWasmInBounds objectRelated
+    admission.heapRelated.frontier memoryRelated index indexValid
+  have concreteInBounds :=
+    objectRelated.liveElementWordInBounds admission.heapRelated.frontier index
+      indexValid
+  have oldReadWasm : store.mem.read32
+      (UInt32.ofNat
+        (address.value + headerBytes + target.semanticSlotBytes * index)) =
+      UInt32.ofNat oldWord.value :=
+    memoryRelated.readWord32_eq_read32 concreteInBounds oldRead
+  have oldUpdate := FirTalos.Correctness.localUpdate_of_set? oldSet
+  have oldFound :
+      ({ afterOld with values := [] } : Wasm.Locals).get elementIndex =
+        some (.i32 (UInt32.ofNat oldWord.value)) := by
+    simpa using oldUpdate.1
+  have ownership : OwnershipValueRel witness oldWord oldValue :=
+    .intro .tobject (by rfl) oldRelated
+  have checkedWP :=
+    ResidentRelease.ResidentOwnershipStep.wp_checkedDecrementLocalProgram_heap_then
+      (locals := { afterOld with values := [] })
+      (rest := writeReplacementProgram cursorIndex valueIndex ++ rest)
+      step ownership admission.heapRelated memoryRelated
+      admission.canonicalHeaders semanticRelease oldFound rfl oldHeap
+      (fun released middleStore concreteRelease releasedRelated
+          releasedMemory canonicalAfter payloadFrame => by
+        obtain ⟨releasedHeader, releasedObject⟩ :=
+          releasedRelated.residentArrayObjectRel_of_mapped admission.mapped
+            parentPreserved admission.live admission.objectEq
+            admission.descriptor
+        obtain ⟨result, actualRuntime, concreteWrite, semanticWrite,
+            finalRelated, writeCapacity, writeCursor⟩ :=
+          releasedRelated.writeResidentArrayElementRaw_refines
+            admission.mapped parentPreserved admission.live
+            admission.objectEq admission.descriptor index newValue newWord
+            indexValid newRelated
+        have runtimeEq : actualRuntime = nextRuntime := by
+          rw [semanticSet] at semanticWrite
+          exact (Except.ok.inj semanticWrite).symm
+        subst actualRuntime
+        have writeInBounds := liveElementWasmInBounds releasedObject
+          releasedRelated.frontier releasedMemory index indexValid
+        have finalMemory : ResidentMemoryRel result
+            (ResidentMemoryRel.write32Store middleStore
+              (UInt32.ofNat
+                (address.value + headerBytes +
+                  target.semanticSlotBytes * index))
+              (UInt32.ofNat newWord.value)).mem :=
+          writeElementRaw_preservesMemory releasedObject releasedRelated.frontier
+            releasedMemory index indexValid concreteWrite
+        have finalCanonical :
+            ResidentRelease.CanonicalMappedHeadersRel result witness := by
+          intro nextLocation nextAddress nextMapped
+          exact
+            (ResidentRelease.CanonicalMappedHeadersRel.writeResidentArrayElementRaw
+              canonicalAfter releasedRelated admission.mapped
+              admission.descriptor releasedObject index indexValid newValue
+              newRelated concreteWrite) nextMapped
+        have finalCapacity :
+            MappedHeaderCapacityTransport state result witness :=
+          payloadFrame.capacity.trans writeCapacity
+        have finalCursor : result.heapCursor = state.heapCursor :=
+          writeCursor.trans payloadFrame.cursor
+        let finalStore := ResidentMemoryRel.write32Store middleStore
+          (UInt32.ofNat
+            (address.value + headerBytes + target.semanticSlotBytes * index))
+          (UInt32.ofNat newWord.value)
+        have success : ReplacementSuccess fuel state witness nextRuntime
+            address index oldWord newWord result finalStore :=
+          ⟨released, concreteRelease, concreteWrite, finalRelated,
+            finalMemory, finalCanonical, finalCapacity, finalCursor⟩
+        exact wp_writeReplacementProgram (tail := []) cursorAfter valueAfter
+          writeInBounds (continued result finalStore success))
+  have borrowWP := wp_borrowElementProgram cursorFound oldReadWasm
+    initialInBounds oldSet checkedWP
+  simpa [replaceElementOwnershipProgram, List.append_assoc] using borrowWP
+
+/-- Exact Talos spelling of the production trusted exclusivity probe.  The
+exclusive branch is kept abstract so the same control theorem can be reused by
+all three installed helpers and by the typed `Array.set` caller rewrite. -/
+def trustedExclusivePrefixProgram (arrayIndex : Nat)
+    (exclusive : Wasm.Program) : Wasm.Program := [
+  .localGet arrayIndex,
+  .load32 (UInt32.ofNat headerRefCountOffset),
+  .const 1,
+  .eq,
+  .iff 0 0 exclusive []]
+
+/-- Function-local exclusive branches end by returning the Array address.
+Keeping that fact in the postcondition rules out structured fallthrough and
+branch completions before the deferred suffix is appended. -/
+def ReturnOnly (Q : Wasm.Assertion host) : Wasm.Assertion host
+  | continuation@(.Return _ _) => Q continuation
+  | _ => False
 
 /-- Transport the exclusive Array's exact reference-count lane to Talos
 memory.  This is the precise condition tested by the production trusted

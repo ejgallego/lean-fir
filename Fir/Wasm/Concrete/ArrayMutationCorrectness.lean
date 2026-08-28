@@ -220,6 +220,43 @@ theorem ResidentArrayObjectRel.writeElementRaw_decompose
         Except.ok result at operation
       exact ⟨memory, rfl, (Except.ok.inj operation).symm⟩
 
+/-- A live Array payload replacement preserves the exact raw common-header
+words.  This is stronger than re-decoding the same `Header`: it also retains
+the raw flag bits intentionally forgotten by `Header.read`. -/
+theorem ResidentArrayObjectRel.writeElementRaw_exactWords
+    {state result : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {elements : Array Value} {capacity : Nat}
+    {header : Header}
+    (related :
+      ResidentArrayObjectRel state witness address elements capacity header)
+    (valid : state.FrontierInvariant)
+    (exact : Header.ExactWords state.memory address header)
+    (index : Nat) (word : Word32) (indexValid : index < elements.size)
+    (operation :
+      writeResidentArrayElementRaw state address index word = .ok result) :
+    Header.ExactWords result.memory address header := by
+  obtain ⟨memory, written, resultEq⟩ :=
+    related.writeElementRaw_decompose index word indexValid operation
+  subst result
+  have writeInBounds := related.liveElementWordInBounds valid index indexValid
+  unfold LinearMemory.writeWord32 at written
+  refine ⟨?_⟩
+  intro headerIndex headerWord wordAt
+  have headerIndexLt := (List.getElem?_eq_some_iff.mp wordAt).1
+  have disjoint :
+      address.value + headerBytes + target.semanticSlotBytes * index + 3 <
+          address.value + 4 * headerIndex ∨
+        address.value + 4 * headerIndex + 3 <
+          address.value + headerBytes + target.semanticSlotBytes * index := by
+    right
+    simp [Header.words, headerBytes, target] at headerIndexLt ⊢
+    omega
+  rw [LinearMemory.readUInt32_of_writeUInt32_eq_ok_other state.memory memory
+    (address.value + headerBytes + target.semanticSlotBytes * index)
+    (address.value + 4 * headerIndex) (UInt32.ofNat word.value)
+    writeInBounds written disjoint]
+  exact exact.wordAt headerIndex headerWord wordAt
+
 /-- Writing a currently-spare capacity slot preserves the complete live Array
 relation while producing a target-allocation frame. -/
 theorem ResidentArrayObjectRel.writeCapacityElementRaw_targetFrame

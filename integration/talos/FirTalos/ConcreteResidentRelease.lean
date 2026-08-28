@@ -1,5 +1,6 @@
 import Fir.Wasm.Emit.ResidentRelease
 import Fir.Wasm.Concrete.OwnershipFrameCorrectness
+import Fir.Wasm.Concrete.PayloadMutationFrameCorrectness
 import FirTalos.ConcreteResidentAllocator
 import FirTalos.ConcreteResidentMemory
 import FirTalos.Correctness.Adapter
@@ -214,6 +215,55 @@ theorem CanonicalMappedHeadersRel.ofHeaderWrite
     subst header
     rw [resultEq]
     exact Header.ExactWords.ofWrite_eq_ok headerInBounds written
+
+/-- A framed payload mutation preserves global raw-header admission once the
+target's exact header words are supplied.  The extra target premise is
+essential: equality of decoded `Header`s alone does not remember unsupported
+raw flag bits. -/
+theorem CanonicalMappedHeadersRel.ofTargetMutation
+    {before after : MemoryState} {witness : RefinementWitness}
+    {runtime : Fir.LeanIR.Impure.RuntimeState}
+    {targetAddress : Word32} {targetDescriptor : AllocationDescriptor}
+    {targetHeader : Header}
+    (canonical : CanonicalMappedHeadersRel before witness)
+    (related : LiveHeapRel before witness runtime)
+    (targetFound :
+      witness.descriptors.lookup? targetAddress = some targetDescriptor)
+    (targetRead : Header.read before.memory targetAddress = .ok targetHeader)
+    (targetLive : before.readLiveHeader targetAddress = .ok targetHeader)
+    (frame : before.TargetMutationFrame after targetAddress
+      targetHeader.allocationBytes.toNat)
+    (targetExactAfter :
+      Header.ExactWords after.memory targetAddress targetHeader) :
+    CanonicalMappedHeadersRel after witness := by
+  intro location address mapped header headerRead
+  obtain ⟨cell, _, cellRelated⟩ :=
+    related.concreteToSemantic location address mapped
+  obtain ⟨descriptor, descriptorFound⟩ := cellRelated.descriptor
+  by_cases different : targetAddress.value ≠ address.value
+  · obtain ⟨otherHeader, otherRead, minimum, _, _⟩ :=
+      related.descriptorRegion address descriptor descriptorFound
+    have disjoint := related.descriptorDisjoint targetAddress address
+      targetDescriptor descriptor targetFound descriptorFound different
+      targetHeader otherHeader targetRead otherRead
+    have allocationFrame :=
+      frame.other address otherHeader.allocationBytes.toNat disjoint
+    have beforeRead : before.readLiveHeader address = .ok header := by
+      rw [allocationFrame.readLiveHeader minimum] at headerRead
+      exact headerRead
+    exact (canonical mapped header beforeRead).allocationFrame allocationFrame
+      minimum
+  · have sameValue : targetAddress.value = address.value := by omega
+    have sameAddress : targetAddress = address := by
+      cases targetAddress
+      cases address
+      simp_all
+    subst address
+    rw [frame.targetLiveHeader, targetLive] at headerRead
+    have headerEq : header = targetHeader :=
+      (Except.ok.inj headerRead).symm
+    subst header
+    exact targetExactAfter
 
 /-- Branch-independent physical facts for entering resident release on one
 canonical live heap header.  Packaging these once keeps the semantic branch
@@ -2004,6 +2054,55 @@ theorem ValueRel.wp_checkedDecrementLocalProgram_tobject_then
               obtain ⟨final, callRun, continued⟩ := heapCall classified
               exact wp_checkedDecrementLocalProgram_classifiedHeap_then
                 valueFound classified callRun continued
+
+/-- Consume one semantic/concrete/resident ownership step at a caller-local
+checked decrement.  This is the common heap-valued bridge used by container
+mutations: recursive release stays behind `ResidentOwnershipStep`, while the
+caller receives every relation needed to continue safely in the returned
+store. -/
+theorem ResidentOwnershipStep.wp_checkedDecrementLocalProgram_heap_then
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {decrementIndex fuel : Nat} {witness : RefinementWitness}
+    {before : MemoryState} {beforeStore : Wasm.Store host}
+    {semantic nextSemantic : Fir.LeanIR.Impure.RuntimeState}
+    {word : Word32} {value : Fir.LeanIR.Impure.Value}
+    {locals : Wasm.Locals} {valueIndex : Nat}
+    {rest : Wasm.Program} {Q : Wasm.Assertion host}
+    (step : ResidentOwnershipStep env module decrementIndex fuel witness)
+    (ownership : OwnershipValueRel witness word value)
+    (related : LiveHeapRel before witness semantic)
+    (memoryRelated : ResidentMemoryRel before beforeStore.mem)
+    (canonicalHeaders : CanonicalMappedHeadersRel before witness)
+    (semanticOperation :
+      (match value with
+      | .object (.heap child) =>
+          Fir.LeanIR.Impure.decLocationFuel fuel semantic child
+      | _ => .ok semantic) = .ok nextSemantic)
+    (valueFound : locals.get valueIndex =
+      some (.i32 (UInt32.ofNat word.value)))
+    (stackEmpty : locals.values = [])
+    (heap : word.classify = .heap)
+    (continued : ∀ after middleStore,
+      decrementReferenceOnceFuel fuel before word true
+          witness.closureDescriptors = .ok after →
+      LiveHeapRel after witness nextSemantic →
+      ResidentMemoryRel after middleStore.mem →
+      CanonicalMappedHeadersRel after witness →
+      MappedPayloadFrameTransport before after witness →
+      Wasm.wp module rest Q middleStore locals env) :
+    Wasm.wp module
+      (checkedDecrementLocalProgram valueIndex decrementIndex ++ rest)
+      Q beforeStore locals env := by
+  obtain ⟨after, middleStore, concreteOperation, finalRelated,
+      finalMemory, canonicalAfter, payloadFrame, callRun⟩ :=
+    step ownership related memoryRelated canonicalHeaders semanticOperation
+  have callRun' : Wasm.TerminatesWith env module decrementIndex beforeStore
+      ([.i32 1, .i32 (UInt32.ofNat word.value)] ++ locals.values)
+      (fun next values => next = middleStore ∧ values = locals.values) := by
+    simpa [stackEmpty] using callRun
+  exact wp_checkedDecrementLocalProgram_classifiedHeap_then valueFound heap
+    callRun' (continued after middleStore concreteOperation finalRelated
+      finalMemory canonicalAfter payloadFrame)
 
 /-- Exact `.object` lanes are already heap-only.  Resident call sites typed
 this way retain their existing direct helper path and need no scalar gate. -/
