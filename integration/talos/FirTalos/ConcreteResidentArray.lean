@@ -1,4 +1,5 @@
 import Fir.Wasm.Emit.ResidentArray
+import Fir.Wasm.Concrete.ArrayAdmissionCorrectness
 import Fir.Wasm.Concrete.ArrayMutationCorrectness
 import FirTalos.ConcreteResidentBigNumeric
 import FirTalos.ConcreteResidentPrimitives
@@ -63,6 +64,64 @@ def trustedExclusivePrefixSourceProgram (array : Lean.FVarId)
   .i32Eq,
   .ifElse exclusive []]
 
+/-- Source spelling of the trusted typed object-address round trip. -/
+def trustedInputAddressSourceProgram (array inputAddress : Lean.FVarId) :
+    List Fir.Wasm.Instruction :=
+  [.localGet array,
+    .i64ExtendI32U .uint64,
+    .i32WrapI64 .uint32,
+    .localSet inputAddress]
+
+/-- Source spelling of the Array logical-size header load. -/
+def loadArraySizeSourceProgram (array size : Lean.FVarId) :
+    List Fir.Wasm.Instruction := [
+  .localGet array,
+  .i32Load .uint32 (UInt32.ofNat headerAux1Offset),
+  .localSet size]
+
+/-- Complete trusted entry prefix of proof-indexed `Array.uset`, ending with
+the wrapped `USize` payload in the shared decoded-index local. -/
+def trustedUsetEntrySourceProgram
+    (array inputAddress size index decodedIndex : Lean.FVarId) :
+    List Fir.Wasm.Instruction :=
+  trustedInputAddressSourceProgram array inputAddress ++
+    loadArraySizeSourceProgram array size ++ [
+    .localGet index,
+    .i32WrapI64 .uint32,
+    .localSet decodedIndex]
+
+/-- Complete trusted entry prefix of proof-indexed `Array.set`, ending with
+the canonical immediate-Nat payload in the same decoded-index local. -/
+def trustedSetEntrySourceProgram
+    (array inputAddress size index decodedIndex : Lean.FVarId) :
+    List Fir.Wasm.Instruction :=
+  trustedInputAddressSourceProgram array inputAddress ++
+    loadArraySizeSourceProgram array size ++
+    Fir.Wasm.Emit.ResidentBigNumeric.immediateNaturalPayload index ++ [
+    .localSet decodedIndex]
+
+/-- Exact closed source prefix of the production trusted `Array.uset`. -/
+theorem trustedUsetFunction_entrySourceShape :
+    Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.body.take 10 =
+      trustedUsetEntrySourceProgram
+        Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.params[1]!.1
+        Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.locals[2]!.1
+        Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.locals[1]!.1
+        Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.params[2]!.1
+        Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.locals[6]!.1 := by
+  rfl
+
+/-- Exact closed source prefix of the production trusted `Array.set`. -/
+theorem trustedSetFunction_entrySourceShape :
+    Fir.Wasm.Emit.ResidentArray.trustedSetFunction.body.take 11 =
+      trustedSetEntrySourceProgram
+        Fir.Wasm.Emit.ResidentArray.trustedSetFunction.params[1]!.1
+        Fir.Wasm.Emit.ResidentArray.trustedSetFunction.locals[2]!.1
+        Fir.Wasm.Emit.ResidentArray.trustedSetFunction.locals[1]!.1
+        Fir.Wasm.Emit.ResidentArray.trustedSetFunction.params[2]!.1
+        Fir.Wasm.Emit.ResidentArray.trustedSetFunction.locals[6]!.1 := by
+  rfl
+
 /-- The actual production trusted `Array.uset` body contains the common
 exclusive replacement fragment at its exact post-decoding position. -/
 theorem trustedUsetFunction_exclusiveSourceShape :
@@ -124,6 +183,381 @@ def elementAddressProgram (arrayIndex indexIndex cursorIndex : Nat) :
     .localGet cursorIndex,
     .add,
     .localSet cursorIndex]
+
+/-- Talos spelling of the trusted typed object-address round trip. -/
+def trustedInputAddressProgram (arrayIndex inputAddressIndex : Nat) :
+    Wasm.Program :=
+  [.localGet arrayIndex] ++ ResidentPrimitives.unsignedI32RoundTrip ++ [
+    .localSet inputAddressIndex]
+
+/-- Talos spelling of the Array logical-size header load. -/
+def loadArraySizeProgram (arrayIndex sizeIndex : Nat) : Wasm.Program := [
+  .localGet arrayIndex,
+  .load32 (UInt32.ofNat headerAux1Offset),
+  .localSet sizeIndex]
+
+/-- Exact adapted trusted `Array.uset` entry prefix. -/
+def trustedUsetEntryProgram : Wasm.Program :=
+  trustedInputAddressProgram 1 7 ++ loadArraySizeProgram 1 6 ++ [
+    .localGet 2, .wrapI64, .localSet 11]
+
+/-- Exact adapted trusted `Array.set` entry prefix. -/
+def trustedSetEntryProgram : Wasm.Program :=
+  trustedInputAddressProgram 1 7 ++ loadArraySizeProgram 1 6 ++
+    ResidentPrimitives.immediateNaturalPayload 2 ++ [.localSet 11]
+
+/-- The trusted object-address normalization is an exact physical i32
+round trip and writes only its designated local. -/
+theorem wp_trustedInputAddressProgram
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {initial after : Wasm.Locals} {arrayIndex inputAddressIndex : Nat}
+    {array : UInt32} {tail : List Wasm.Value} {rest : Wasm.Program}
+    (arrayFound : initial.get arrayIndex = some (.i32 array))
+    (inputSet :
+      ({ initial with values := .i32 array :: tail }).set?
+          inputAddressIndex (.i32 array) = some after)
+    (continued : Wasm.wp module rest Q store
+      { after with values := tail } env) :
+    Wasm.wp module
+      (trustedInputAddressProgram arrayIndex inputAddressIndex ++ rest)
+      Q store { initial with values := tail } env := by
+  have arrayAt (values : List Wasm.Value) :
+      ({ initial with values } : Wasm.Locals).get arrayIndex =
+        some (.i32 array) := by
+    simpa using arrayFound
+  unfold trustedInputAddressProgram
+  simp only [List.append_assoc, List.cons_append, List.nil_append,
+    Wasm.wp_localGet_cons, arrayAt]
+  apply ResidentPrimitives.wp_unsignedI32RoundTrip
+  simp only [Wasm.wp_localSet_cons, inputSet]
+  exact continued
+
+/-- Execute the shared trusted Array logical-size load without changing the
+store or operand tail. -/
+theorem wp_loadArraySizeProgram
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {initial after : Wasm.Locals} {arrayIndex sizeIndex : Nat}
+    {array size : UInt32} {tail : List Wasm.Value} {rest : Wasm.Program}
+    (arrayFound : initial.get arrayIndex = some (.i32 array))
+    (sizeInBounds :
+      ¬(array.toNat + (UInt32.ofNat headerAux1Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (sizeRead : store.mem.read32
+      (array + UInt32.ofNat headerAux1Offset) = size)
+    (sizeSet :
+      ({ initial with values := .i32 size :: tail }).set?
+          sizeIndex (.i32 size) = some after)
+    (continued : Wasm.wp module rest Q store
+      { after with values := tail } env) :
+    Wasm.wp module (loadArraySizeProgram arrayIndex sizeIndex ++ rest)
+      Q store { initial with values := tail } env := by
+  have arrayAt (values : List Wasm.Value) :
+      ({ initial with values } : Wasm.Locals).get arrayIndex =
+        some (.i32 array) := by
+    simpa using arrayFound
+  unfold loadArraySizeProgram
+  simp only [List.cons_append, List.nil_append, Wasm.wp_localGet_cons,
+    arrayAt, Wasm.wp_load32_cons]
+  have sizeInBounds' :
+      ¬(array.toNat + (UInt32.ofNat headerAux1Offset).toNat + 4 >
+        store.mem.pages * 65536) := by
+    simpa [wasmPageBytes] using sizeInBounds
+  rw [if_neg sizeInBounds', sizeRead]
+  simp only [Wasm.wp_localSet_cons, sizeSet]
+  exact continued
+
+/-- Canonical zero-initialized production frame for trusted `Array.uset`. -/
+def trustedUsetEntry (array : UInt32) (index : UInt64) (value : UInt32) :
+    Wasm.Locals := {
+  params := [.i32 0, .i32 array, .i64 index, .i32 value, .i32 0]
+  locals := List.replicate 14 (.i32 0)
+  values := [] }
+
+/-- Canonical zero-initialized production frame for trusted `Array.set`. -/
+def trustedSetEntry (array index value : UInt32) : Wasm.Locals := {
+  params := [.i32 0, .i32 array, .i32 index, .i32 value, .i32 0]
+  locals := List.replicate 14 (.i32 0)
+  values := [] }
+
+/-- Common frame at the decoded-index boundary of trusted `uset` and `set`.
+Only the three entry locals written before the reference-count probe differ
+from their zero initialization. -/
+def trustedDecodedEntry (params : List Wasm.Value)
+    (array size index : UInt32) : Wasm.Locals := {
+  params
+  locals := [.i32 0, .i32 size, .i32 array, .i32 0, .i32 0, .i32 0,
+    .i32 index, .i32 0, .i32 0, .i32 0, .i32 0, .i32 0, .i32 0, .i32 0]
+  values := [] }
+
+/-- Execute the complete `Array.uset` entry prefix through exact USize
+narrowing.  The abstract local-update premises make this reusable by the
+installed production frame and any validation fixture with the same ABI. -/
+theorem wp_trustedUsetEntryProgram
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {initial afterInput afterSize afterDecoded : Wasm.Locals}
+    {array : UInt32} {index : UInt64} {size : UInt32}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    (arrayFound : initial.get 1 = some (.i32 array))
+    (inputSet :
+      ({ initial with values := .i32 array :: tail }).set? 7 (.i32 array) =
+        some afterInput)
+    (arrayAfterInput : afterInput.get 1 = some (.i32 array))
+    (sizeInBounds :
+      ¬(array.toNat + (UInt32.ofNat headerAux1Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (sizeRead : store.mem.read32
+      (array + UInt32.ofNat headerAux1Offset) = size)
+    (sizeSet :
+      ({ afterInput with values := .i32 size :: tail }).set? 6 (.i32 size) =
+        some afterSize)
+    (indexAfterSize : afterSize.get 2 = some (.i64 index))
+    (decodedSet :
+      ({ afterSize with values := .i32 (UInt32.ofNat index.toNat) :: tail }).set?
+          11 (.i32 (UInt32.ofNat index.toNat)) = some afterDecoded)
+    (continued : Wasm.wp module rest Q store
+      { afterDecoded with values := tail } env) :
+    Wasm.wp module (trustedUsetEntryProgram ++ rest) Q store
+      { initial with values := tail } env := by
+  unfold trustedUsetEntryProgram
+  simp only [List.append_assoc]
+  apply wp_trustedInputAddressProgram arrayFound inputSet
+  apply wp_loadArraySizeProgram arrayAfterInput sizeInBounds sizeRead sizeSet
+  have indexAt (values : List Wasm.Value) :
+      ({ afterSize with values } : Wasm.Locals).get 2 = some (.i64 index) := by
+    simpa using indexAfterSize
+  simp only [List.cons_append, List.nil_append, Wasm.wp_localGet_cons,
+    indexAt, Wasm.wp_wrapI64_cons]
+  have narrowed :
+      UInt32.ofNat (index.toNat % 2 ^ 32) = UInt32.ofNat index.toNat := by
+    apply UInt32.toNat_inj.mp
+    simp
+  rw [narrowed]
+  simp only [Wasm.wp_localSet_cons, decodedSet]
+  exact continued
+
+/-- Execute the complete `Array.set` entry prefix through the common
+immediate-Nat decoder.  Its one operation-specific fact is the exact decoded
+word supplied by compiler admission. -/
+theorem wp_trustedSetEntryProgram
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {initial afterInput afterSize afterDecoded : Wasm.Locals}
+    {array indexWord size decodedIndex : UInt32}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    (arrayFound : initial.get 1 = some (.i32 array))
+    (inputSet :
+      ({ initial with values := .i32 array :: tail }).set? 7 (.i32 array) =
+        some afterInput)
+    (arrayAfterInput : afterInput.get 1 = some (.i32 array))
+    (sizeInBounds :
+      ¬(array.toNat + (UInt32.ofNat headerAux1Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (sizeRead : store.mem.read32
+      (array + UInt32.ofNat headerAux1Offset) = size)
+    (sizeSet :
+      ({ afterInput with values := .i32 size :: tail }).set? 6 (.i32 size) =
+        some afterSize)
+    (indexAfterSize : afterSize.get 2 = some (.i32 indexWord))
+    (decoded : indexWord >>> 1 = decodedIndex)
+    (decodedSet :
+      ({ afterSize with values := .i32 decodedIndex :: tail }).set?
+          11 (.i32 decodedIndex) = some afterDecoded)
+    (continued : Wasm.wp module rest Q store
+      { afterDecoded with values := tail } env) :
+    Wasm.wp module (trustedSetEntryProgram ++ rest) Q store
+      { initial with values := tail } env := by
+  unfold trustedSetEntryProgram
+  simp only [List.append_assoc]
+  apply wp_trustedInputAddressProgram arrayFound inputSet
+  apply wp_loadArraySizeProgram arrayAfterInput sizeInBounds sizeRead sizeSet
+  have indexAt (values : List Wasm.Value) :
+      ({ afterSize with values } : Wasm.Locals).get 2 =
+        some (.i32 indexWord) := by
+    simpa using indexAfterSize
+  simp only [ResidentPrimitives.immediateNaturalPayload, List.cons_append,
+    List.nil_append, Wasm.wp_localGet_cons, indexAt, Wasm.wp_const_cons,
+    Wasm.wp_shrU_cons]
+  have oneMod : (1 % 32 : UInt32) = 1 := by decide
+  rw [oneMod, decoded]
+  simp only [Wasm.wp_localSet_cons, decodedSet]
+  exact continued
+
+/-- Canonical installed-frame specialization of the trusted USize entry.
+The result names the exact common frame consumed by the reference-count
+probe and replacement proof. -/
+theorem wp_trustedUsetEntryCanonical
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {array size value : UInt32} {index : UInt64}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    (sizeInBounds :
+      ¬(array.toNat + (UInt32.ofNat headerAux1Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (sizeRead : store.mem.read32
+      (array + UInt32.ofNat headerAux1Offset) = size)
+    (continued : Wasm.wp module rest Q store
+      { trustedDecodedEntry (trustedUsetEntry array index value).params
+          array size (UInt32.ofNat index.toNat) with values := tail } env) :
+    Wasm.wp module (trustedUsetEntryProgram ++ rest) Q store
+      { trustedUsetEntry array index value with values := tail } env := by
+  let params := (trustedUsetEntry array index value).params
+  let afterInput : Wasm.Locals :=
+    { trustedDecodedEntry params array 0 0 with
+      values := .i32 array :: tail }
+  let afterSize : Wasm.Locals :=
+    { trustedDecodedEntry params array size 0 with
+      values := .i32 size :: tail }
+  let afterDecoded : Wasm.Locals :=
+    { trustedDecodedEntry params array size (UInt32.ofNat index.toNat) with
+      values := .i32 (UInt32.ofNat index.toNat) :: tail }
+  apply wp_trustedUsetEntryProgram
+    (afterInput := afterInput) (afterSize := afterSize)
+    (afterDecoded := afterDecoded)
+  · rfl
+  · rfl
+  · rfl
+  · exact sizeInBounds
+  · exact sizeRead
+  · rfl
+  · rfl
+  · rfl
+  · simpa [afterDecoded, params] using continued
+
+/-- Canonical installed-frame specialization of the trusted Nat entry.
+Compiler admission supplies the canonical immediate word and therefore the
+exact semantic payload recovered by the production shift. -/
+theorem wp_trustedSetEntryCanonical
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {array size value : UInt32} {indexWord : Word32} {payload : UInt64}
+    {logicalSize : Nat} {tail : List Wasm.Value} {rest : Wasm.Program}
+    (indexAdmission :
+      ProofIndexedResidentArrayNatAdmission indexWord payload logicalSize)
+    (sizeInBounds :
+      ¬(array.toNat + (UInt32.ofNat headerAux1Offset).toNat + 4 >
+        store.mem.pages * wasmPageBytes))
+    (sizeRead : store.mem.read32
+      (array + UInt32.ofNat headerAux1Offset) = size)
+    (continued : Wasm.wp module rest Q store
+      { trustedDecodedEntry
+          (trustedSetEntry array (UInt32.ofNat indexWord.value) value).params
+          array size (UInt32.ofNat payload.toNat) with values := tail } env) :
+    Wasm.wp module (trustedSetEntryProgram ++ rest) Q store
+      { trustedSetEntry array (UInt32.ofNat indexWord.value) value with
+          values := tail } env := by
+  let params :=
+    (trustedSetEntry array (UInt32.ofNat indexWord.value) value).params
+  let afterInput : Wasm.Locals :=
+    { trustedDecodedEntry params array 0 0 with
+      values := .i32 array :: tail }
+  let afterSize : Wasm.Locals :=
+    { trustedDecodedEntry params array size 0 with
+      values := .i32 size :: tail }
+  let afterDecoded : Wasm.Locals :=
+    { trustedDecodedEntry params array size (UInt32.ofNat payload.toNat) with
+      values := .i32 (UInt32.ofNat payload.toNat) :: tail }
+  apply wp_trustedSetEntryProgram
+    (afterInput := afterInput) (afterSize := afterSize)
+    (afterDecoded := afterDecoded)
+  · rfl
+  · rfl
+  · rfl
+  · exact sizeInBounds
+  · exact sizeRead
+  · rfl
+  · rfl
+  · exact indexAdmission.decode
+  · rfl
+  · simpa [afterDecoded, params] using continued
+
+/-- The production trusted `Array.uset` source prefix adapts to the exact
+Talos program consumed by the entry-execution theorem below. -/
+theorem instructions_trustedUsetEntryProgram
+    {sourceModule : Fir.Wasm.Module} :
+    FirTalos.instructions sourceModule
+      Fir.Wasm.Emit.ResidentArray.trustedUsetFunction []
+      (Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.body.take 10) =
+        .ok trustedUsetEntryProgram := by
+  have arrayFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.params[1]!.1 = some 1 := by
+    native_decide
+  have inputAddressFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.locals[2]!.1 = some 7 := by
+    native_decide
+  have sizeFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.locals[1]!.1 = some 6 := by
+    native_decide
+  have indexFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.params[2]!.1 = some 2 := by
+    native_decide
+  have decodedFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentArray.trustedUsetFunction.locals[6]!.1 = some 11 := by
+    native_decide
+  rw [trustedUsetFunction_entrySourceShape]
+  set_option maxRecDepth 100000 in
+    simp [trustedUsetEntrySourceProgram, trustedInputAddressSourceProgram,
+      loadArraySizeSourceProgram, trustedUsetEntryProgram,
+      trustedInputAddressProgram, loadArraySizeProgram,
+      ResidentPrimitives.unsignedI32RoundTrip, FirTalos.instructions,
+      FirTalos.instruction, arrayFound, inputAddressFound, sizeFound,
+      indexFound, decodedFound, Bind.bind, Except.bind, pure, Except.pure]
+
+/-- The production trusted `Array.set` source prefix adapts to its exact
+Talos immediate-Nat decoding program. -/
+theorem instructions_trustedSetEntryProgram
+    {sourceModule : Fir.Wasm.Module} :
+    FirTalos.instructions sourceModule
+      Fir.Wasm.Emit.ResidentArray.trustedSetFunction []
+      (Fir.Wasm.Emit.ResidentArray.trustedSetFunction.body.take 11) =
+        .ok trustedSetEntryProgram := by
+  have arrayFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentArray.trustedSetFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentArray.trustedSetFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentArray.trustedSetFunction.params[1]!.1 = some 1 := by
+    native_decide
+  have inputAddressFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentArray.trustedSetFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentArray.trustedSetFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentArray.trustedSetFunction.locals[2]!.1 = some 7 := by
+    native_decide
+  have sizeFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentArray.trustedSetFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentArray.trustedSetFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentArray.trustedSetFunction.locals[1]!.1 = some 6 := by
+    native_decide
+  have indexFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentArray.trustedSetFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentArray.trustedSetFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentArray.trustedSetFunction.params[2]!.1 = some 2 := by
+    native_decide
+  have decodedFound : FirTalos.findFVar?
+      (Fir.Wasm.Emit.ResidentArray.trustedSetFunction.params.toList ++
+        Fir.Wasm.Emit.ResidentArray.trustedSetFunction.locals.toList)
+      Fir.Wasm.Emit.ResidentArray.trustedSetFunction.locals[6]!.1 = some 11 := by
+    native_decide
+  rw [trustedSetFunction_entrySourceShape]
+  set_option maxRecDepth 100000 in
+    simp [trustedSetEntrySourceProgram, trustedInputAddressSourceProgram,
+      loadArraySizeSourceProgram, trustedSetEntryProgram,
+      trustedInputAddressProgram, loadArraySizeProgram,
+      Fir.Wasm.Emit.ResidentBigNumeric.immediateNaturalPayload,
+      ResidentPrimitives.unsignedI32RoundTrip,
+      ResidentPrimitives.immediateNaturalPayload, FirTalos.instructions,
+      FirTalos.instruction, arrayFound, inputAddressFound, sizeFound,
+      indexFound, decodedFound, Bind.bind, Except.bind, pure, Except.pure]
 
 /-- Exact modular address produced by `elementAddressProgram`. -/
 def elementAddressWord (array index : UInt32) : UInt32 :=
@@ -1146,6 +1580,101 @@ branch completions before the deferred suffix is appended. -/
 def ReturnOnly (Q : Wasm.Assertion host) : Wasm.Assertion host
   | continuation@(.Return _ _) => Q continuation
   | _ => False
+
+/-- Transport the admitted Array's exact logical-size lane to Talos memory.
+This is the common header fact used by both trusted index decoders. -/
+theorem TrustedExclusiveAdmission.residentSizeRead
+    {host : Type} {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {elements : Array Value} {capacity : Nat}
+    {store : Wasm.Store host}
+    (admission : TrustedExclusiveAdmission state witness runtime location
+      address cell elements capacity)
+    (memoryRelated : ResidentMemoryRel state store.mem) :
+    ¬((UInt32.ofNat address.value).toNat +
+        (UInt32.ofNat headerAux1Offset).toNat + 4 >
+      store.mem.pages * wasmPageBytes) ∧
+    store.mem.read32
+      (UInt32.ofNat address.value + UInt32.ofNat headerAux1Offset) =
+        UInt32.ofNat elements.size := by
+  obtain ⟨header, objectRelated, _refCount, _persistent, exactWords⟩ :=
+    admission.objectAdmission
+  have logicalSizeFits : elements.size < UInt32.size := by
+    rw [← objectRelated.logicalSize]
+    exact header.aux1.toNat_lt_size
+  have logicalSizeWord : header.aux1 = UInt32.ofNat elements.size := by
+    apply UInt32.toNat_inj.mp
+    rw [UInt32.toNat_ofNat_of_lt' logicalSizeFits]
+    exact objectRelated.logicalSize
+  have headerInBounds :
+      address.value + headerBytes ≤ state.memory.size :=
+    Nat.le_trans objectRelated.headerOwned
+      admission.heapRelated.frontier.cursorInBounds
+  have concreteRead :
+      state.memory.readUInt32 (address.value + headerAux1Offset) =
+        .ok (UInt32.ofNat elements.size) := by
+    rw [← logicalSizeWord]
+    exact exactWords.readAux1
+  exact ResidentBigNumeric.residentHeaderUInt32 memoryRelated headerInBounds
+    (by simp [headerAux1Offset, headerBytes]) concreteRead
+
+/-- Whole-relation entry theorem for trusted `Array.uset`.  The erased USize
+bound both admits the unchecked helper and proves that wasm32 narrowing is
+the exact semantic index, not merely modular truncation. -/
+theorem TrustedExclusiveAdmission.wp_usetEntry
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {elements : Array Value} {capacity : Nat}
+    {index : UInt64} {value : UInt32}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    (admission : TrustedExclusiveAdmission state witness runtime location
+      address cell elements capacity)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (indexAdmission :
+      ProofIndexedResidentArrayUSizeAdmission index elements.size)
+    (continued :
+      (UInt32.ofNat index.toNat).toNat = index.toNat →
+      Wasm.wp module rest Q store
+        { trustedDecodedEntry
+            (trustedUsetEntry (UInt32.ofNat address.value) index value).params
+            (UInt32.ofNat address.value) (UInt32.ofNat elements.size)
+            (UInt32.ofNat index.toNat) with values := tail } env) :
+    Wasm.wp module (trustedUsetEntryProgram ++ rest) Q store
+      { trustedUsetEntry (UInt32.ofNat address.value) index value with
+          values := tail } env := by
+  obtain ⟨inBounds, read⟩ := admission.residentSizeRead memoryRelated
+  exact wp_trustedUsetEntryCanonical inBounds read
+    (continued indexAdmission.narrowed_toNat)
+
+/-- Whole-relation entry theorem for trusted `Array.set`.  Compiler admission
+excludes promoted Nat objects at this proof-indexed ABI and identifies the
+exact immediate payload decoded by the installed helper. -/
+theorem TrustedExclusiveAdmission.wp_setEntry
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {elements : Array Value} {capacity : Nat}
+    {indexWord : Word32} {payload : UInt64} {value : UInt32}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    (admission : TrustedExclusiveAdmission state witness runtime location
+      address cell elements capacity)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (indexAdmission : ProofIndexedResidentArrayNatAdmission indexWord payload
+      elements.size)
+    (continued : Wasm.wp module rest Q store
+      { trustedDecodedEntry
+          (trustedSetEntry (UInt32.ofNat address.value)
+            (UInt32.ofNat indexWord.value) value).params
+          (UInt32.ofNat address.value) (UInt32.ofNat elements.size)
+          (UInt32.ofNat payload.toNat) with values := tail } env) :
+    Wasm.wp module (trustedSetEntryProgram ++ rest) Q store
+      { trustedSetEntry (UInt32.ofNat address.value)
+          (UInt32.ofNat indexWord.value) value with values := tail } env := by
+  obtain ⟨inBounds, read⟩ := admission.residentSizeRead memoryRelated
+  exact wp_trustedSetEntryCanonical indexAdmission inBounds read continued
 
 /-- Transport the exclusive Array's exact reference-count lane to Talos
 memory.  This is the precise condition tested by the production trusted
