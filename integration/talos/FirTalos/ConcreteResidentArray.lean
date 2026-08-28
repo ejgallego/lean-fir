@@ -1395,6 +1395,97 @@ theorem wp_exclusiveReplacementProgram_heap_refines
     secondSet thirdSet arrayAfterThird cursorSet replacementWP
   simpa [exclusiveReplacementProgram, List.append_assoc] using addressWP
 
+/-- Discharge the complete production local-frame calculation for the common
+trusted `uset`/`set` exclusive arm.  The index parameter itself is abstract:
+after admission and decoding, both ABIs share exactly this frame and semantic
+replacement theorem. -/
+theorem wp_trustedExclusiveReplacementCanonical
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime releasedRuntime nextRuntime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    {elements : Array Value} {capacity fuel index : Nat}
+    {oldValue newValue : Value} {oldWord newWord : Word32}
+    {size : UInt32} {indexParam : Wasm.Value} {decrementIndex : Nat}
+    (admission : TrustedExclusiveAdmission state witness runtime location
+      address cell elements capacity)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (oldAt : elements[index]? = some oldValue)
+    (oldRead : state.memory.readWord32
+      (address.value + headerBytes + target.semanticSlotBytes * index) =
+        .ok oldWord)
+    (oldRelated : ValueRel witness .tobject (.word32 oldWord) oldValue)
+    (newRelated : ValueRel witness .tobject (.word32 newWord) newValue)
+    (oldHeap : oldWord.classify = .heap)
+    (semanticRelease :
+      (match oldValue with
+      | .object (.heap child) =>
+          Fir.LeanIR.Impure.decLocationFuel fuel runtime child
+      | _ => .ok runtime) = .ok releasedRuntime)
+    (parentPreserved : findCell? releasedRuntime.heap location = some cell)
+    (semanticSet :
+      setCell releasedRuntime location
+          { cell with
+            object := .array (elements.set index newValue
+              (Array.getElem?_eq_some_iff.mp oldAt).1) capacity } =
+        .ok nextRuntime)
+    (step : ResidentRelease.ResidentOwnershipStep env module decrementIndex
+      fuel witness)
+    (returned : ∀ result finalStore,
+      ReplacementSuccess fuel state witness nextRuntime address index oldWord
+          newWord result finalStore →
+      Q (.Return finalStore [.i32 (UInt32.ofNat address.value)])) :
+    Wasm.wp module
+      (exclusiveReplacementProgram 1 11 13 3 18 decrementIndex)
+      Q store
+      { trustedDecodedEntry
+          [.i32 0, .i32 (UInt32.ofNat address.value), indexParam,
+            .i32 (UInt32.ofNat newWord.value), .i32 0]
+          (UInt32.ofNat address.value) size (UInt32.ofNat index) with
+        values := [] } env := by
+  let params : List Wasm.Value :=
+    [.i32 0, .i32 (UInt32.ofNat address.value), indexParam,
+      .i32 (UInt32.ofNat newWord.value), .i32 0]
+  let frame (cursor element : UInt32) (values : List Wasm.Value) :
+      Wasm.Locals := {
+    params
+    locals := [.i32 0, .i32 size, .i32 (UInt32.ofNat address.value),
+      .i32 0, .i32 0, .i32 0, .i32 (UInt32.ofNat index), .i32 0,
+      .i32 cursor, .i32 0, .i32 0, .i32 0, .i32 0, .i32 element]
+    values }
+  let indexWord := UInt32.ofNat index
+  let firstWord := indexWord + indexWord
+  let secondWord := firstWord + firstWord
+  let thirdWord := ResidentPrimitives.scale8Word indexWord
+  let cursorWord :=
+    elementAddressWord (UInt32.ofNat address.value) indexWord
+  apply wp_exclusiveReplacementProgram_heap_refines
+    (initial := trustedDecodedEntry params (UInt32.ofNat address.value) size
+      indexWord)
+    (afterIndex := frame indexWord 0 [.i32 indexWord])
+    (afterFirst := frame firstWord 0 [.i32 firstWord])
+    (afterSecond := frame secondWord 0 [.i32 secondWord])
+    (afterThird := frame thirdWord 0 [.i32 thirdWord])
+    (afterCursor := frame cursorWord 0 [.i32 cursorWord])
+    (afterOld := frame cursorWord (UInt32.ofNat oldWord.value)
+      [.i32 (UInt32.ofNat oldWord.value)])
+    admission memoryRelated oldAt oldRead oldRelated newRelated oldHeap
+    semanticRelease parentPreserved semanticSet step
+  · rfl
+  · rfl
+  · rfl
+  · rfl
+  · rfl
+  · rfl
+  · rfl
+  · rfl
+  · dsimp [frame, cursorWord, params, indexWord]
+    simpa using elementAddressWord_ofNat address.value index
+  · rfl
+  · rfl
+  · exact returned
+
 /-- Exact Talos spelling of the production trusted exclusivity probe.  The
 exclusive branch is kept abstract so the same control theorem can be reused by
 all three installed helpers and by the typed `Array.set` caller rewrite. -/
@@ -1776,6 +1867,180 @@ theorem TrustedExclusiveAdmission.wp_prefix
   obtain ⟨inBounds, read⟩ := admission.residentRefCountRead memoryRelated
   exact wp_trustedExclusivePrefixProgram arrayFound inBounds read
     noFallthrough exclusiveWP
+
+/-- From the common decoded trusted frame, the physical reference-count probe
+selects the exclusive arm, performs exactly one semantic replacement, and
+returns before every instruction in the shared/persistent suffix. -/
+theorem TrustedExclusiveAdmission.wp_decodedExclusive
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime releasedRuntime nextRuntime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    {elements : Array Value} {capacity fuel index : Nat}
+    {oldValue newValue : Value} {oldWord newWord : Word32}
+    {size : UInt32} {indexParam : Wasm.Value} {decrementIndex : Nat}
+    {rest : Wasm.Program}
+    (admission : TrustedExclusiveAdmission state witness runtime location
+      address cell elements capacity)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (oldAt : elements[index]? = some oldValue)
+    (oldRead : state.memory.readWord32
+      (address.value + headerBytes + target.semanticSlotBytes * index) =
+        .ok oldWord)
+    (oldRelated : ValueRel witness .tobject (.word32 oldWord) oldValue)
+    (newRelated : ValueRel witness .tobject (.word32 newWord) newValue)
+    (oldHeap : oldWord.classify = .heap)
+    (semanticRelease :
+      (match oldValue with
+      | .object (.heap child) =>
+          Fir.LeanIR.Impure.decLocationFuel fuel runtime child
+      | _ => .ok runtime) = .ok releasedRuntime)
+    (parentPreserved : findCell? releasedRuntime.heap location = some cell)
+    (semanticSet :
+      setCell releasedRuntime location
+          { cell with
+            object := .array (elements.set index newValue
+              (Array.getElem?_eq_some_iff.mp oldAt).1) capacity } =
+        .ok nextRuntime)
+    (step : ResidentRelease.ResidentOwnershipStep env module decrementIndex
+      fuel witness)
+    (noFallthrough : ∀ nextStore nextLocals,
+      ¬Q (.Fallthrough nextStore nextLocals))
+    (returned : ∀ result finalStore,
+      ReplacementSuccess fuel state witness nextRuntime address index oldWord
+          newWord result finalStore →
+      Q (.Return finalStore [.i32 (UInt32.ofNat address.value)])) :
+    Wasm.wp module
+      (trustedExclusivePrefixProgram 1
+          (exclusiveReplacementProgram 1 11 13 3 18 decrementIndex) ++ rest)
+      Q store
+      { trustedDecodedEntry
+          [.i32 0, .i32 (UInt32.ofNat address.value), indexParam,
+            .i32 (UInt32.ofNat newWord.value), .i32 0]
+          (UInt32.ofNat address.value) size (UInt32.ofNat index) with
+        values := [] } env := by
+  apply admission.wp_prefix memoryRelated (arrayIndex := 1) (tail := [])
+  · rfl
+  · exact noFallthrough
+  · apply wp_trustedExclusiveReplacementCanonical
+      admission memoryRelated oldAt oldRead oldRelated newRelated oldHeap
+      semanticRelease parentPreserved semanticSet step
+    intro result finalStore success
+    exact returned result finalStore success
+
+/-- Complete installed trusted `Array.uset` exclusive fast path, from its
+canonical production call frame through the same-address refined return. -/
+theorem TrustedExclusiveAdmission.wp_usetExclusive
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime releasedRuntime nextRuntime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    {elements : Array Value} {capacity fuel : Nat} {index : UInt64}
+    {oldValue newValue : Value} {oldWord newWord : Word32}
+    {decrementIndex : Nat} {rest : Wasm.Program}
+    (admission : TrustedExclusiveAdmission state witness runtime location
+      address cell elements capacity)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (indexAdmission :
+      ProofIndexedResidentArrayUSizeAdmission index elements.size)
+    (oldAt : elements[index.toNat]? = some oldValue)
+    (oldRead : state.memory.readWord32
+      (address.value + headerBytes +
+        target.semanticSlotBytes * index.toNat) = .ok oldWord)
+    (oldRelated : ValueRel witness .tobject (.word32 oldWord) oldValue)
+    (newRelated : ValueRel witness .tobject (.word32 newWord) newValue)
+    (oldHeap : oldWord.classify = .heap)
+    (semanticRelease :
+      (match oldValue with
+      | .object (.heap child) =>
+          Fir.LeanIR.Impure.decLocationFuel fuel runtime child
+      | _ => .ok runtime) = .ok releasedRuntime)
+    (parentPreserved : findCell? releasedRuntime.heap location = some cell)
+    (semanticSet :
+      setCell releasedRuntime location
+          { cell with
+            object := .array (elements.set index.toNat newValue
+              (Array.getElem?_eq_some_iff.mp oldAt).1) capacity } =
+        .ok nextRuntime)
+    (step : ResidentRelease.ResidentOwnershipStep env module decrementIndex
+      fuel witness)
+    (noFallthrough : ∀ nextStore nextLocals,
+      ¬Q (.Fallthrough nextStore nextLocals))
+    (returned : ∀ result finalStore,
+      ReplacementSuccess fuel state witness nextRuntime address index.toNat
+          oldWord newWord result finalStore →
+      Q (.Return finalStore [.i32 (UInt32.ofNat address.value)])) :
+    Wasm.wp module
+      (trustedUsetEntryProgram ++
+        trustedExclusivePrefixProgram 1
+          (exclusiveReplacementProgram 1 11 13 3 18 decrementIndex) ++ rest)
+      Q store
+      (trustedUsetEntry (UInt32.ofNat address.value) index
+        (UInt32.ofNat newWord.value)) env := by
+  apply admission.wp_usetEntry memoryRelated indexAdmission
+  intro _narrowed
+  apply admission.wp_decodedExclusive memoryRelated oldAt oldRead oldRelated
+    newRelated oldHeap semanticRelease parentPreserved semanticSet step
+    noFallthrough returned
+
+/-- Complete installed trusted `Array.set` exclusive fast path.  Its only
+additional premise is the compiler admission identifying the proof-indexed
+Nat argument with the canonical immediate word decoded by the helper. -/
+theorem TrustedExclusiveAdmission.wp_setExclusive
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime releasedRuntime nextRuntime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    {elements : Array Value} {capacity fuel : Nat}
+    {indexWord : Word32} {payload : UInt64}
+    {oldValue newValue : Value} {oldWord newWord : Word32}
+    {decrementIndex : Nat} {rest : Wasm.Program}
+    (admission : TrustedExclusiveAdmission state witness runtime location
+      address cell elements capacity)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (indexAdmission : ProofIndexedResidentArrayNatAdmission indexWord payload
+      elements.size)
+    (oldAt : elements[payload.toNat]? = some oldValue)
+    (oldRead : state.memory.readWord32
+      (address.value + headerBytes +
+        target.semanticSlotBytes * payload.toNat) = .ok oldWord)
+    (oldRelated : ValueRel witness .tobject (.word32 oldWord) oldValue)
+    (newRelated : ValueRel witness .tobject (.word32 newWord) newValue)
+    (oldHeap : oldWord.classify = .heap)
+    (semanticRelease :
+      (match oldValue with
+      | .object (.heap child) =>
+          Fir.LeanIR.Impure.decLocationFuel fuel runtime child
+      | _ => .ok runtime) = .ok releasedRuntime)
+    (parentPreserved : findCell? releasedRuntime.heap location = some cell)
+    (semanticSet :
+      setCell releasedRuntime location
+          { cell with
+            object := .array (elements.set payload.toNat newValue
+              (Array.getElem?_eq_some_iff.mp oldAt).1) capacity } =
+        .ok nextRuntime)
+    (step : ResidentRelease.ResidentOwnershipStep env module decrementIndex
+      fuel witness)
+    (noFallthrough : ∀ nextStore nextLocals,
+      ¬Q (.Fallthrough nextStore nextLocals))
+    (returned : ∀ result finalStore,
+      ReplacementSuccess fuel state witness nextRuntime address payload.toNat
+          oldWord newWord result finalStore →
+      Q (.Return finalStore [.i32 (UInt32.ofNat address.value)])) :
+    Wasm.wp module
+      (trustedSetEntryProgram ++
+        trustedExclusivePrefixProgram 1
+          (exclusiveReplacementProgram 1 11 13 3 18 decrementIndex) ++ rest)
+      Q store
+      (trustedSetEntry (UInt32.ofNat address.value)
+        (UInt32.ofNat indexWord.value) (UInt32.ofNat newWord.value)) env := by
+  apply admission.wp_setEntry memoryRelated indexAdmission
+  apply admission.wp_decodedExclusive memoryRelated oldAt oldRead oldRelated
+    newRelated oldHeap semanticRelease parentPreserved semanticSet step
+    noFallthrough returned
 
 end ResidentArray
 
