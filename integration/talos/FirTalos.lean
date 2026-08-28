@@ -33,6 +33,7 @@ import FirTalos.ConcreteResidentNatDecision
 import FirTalos.ConcreteResidentNatMul
 import FirTalos.ConcreteResidentNatSub
 import FirTalos.ConcreteResidentUSize
+import FirTalos.ConcreteResidentFixedWidth
 import FirTalos.ConcreteResidentPrimitives
 import FirTalos.ConcreteResidentReplacement
 import FirTalos.ConcreteResidentArray
