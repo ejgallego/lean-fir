@@ -5,17 +5,17 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: ready
-base: 2e5779aa7149e3f08151e4c298a5894fb93fadd5
-functional-head: bd908f8eda7ffc61a334d727376f56e9915ea863
-contract-base: 2e5779aa7149e3f08151e4c298a5894fb93fadd5
+state: active
+base: d9fd630fde2eae513c0909d46002874fd15aeb0f
+functional-head: d9fd630fde2eae513c0909d46002874fd15aeb0f
+contract-base: d9fd630fde2eae513c0909d46002874fd15aeb0f
 clean-at-update: true
-slice: Direct and saturated entry, lazy hit/miss, destination bind, and ordinary/lazy return-pop now close in ConcreteStructuredValidatedCodeGlobalOutcomeAt at the exact incoming witness. The legacy global dispatcher erases these stronger results. Resolved external execution is correctly classified as witness-changing because it produces nextWitness.
+slice: Lift resolved external execution into the schema-global relation by proving the returned nextWitness extends the incoming witness and transporting ConstructorSchema.WitnessAgrees across that extension.
 files: integration/talos/FirTalos/ConcreteStructuredValidation.lean; integration/talos/FirTalos/ConcreteResumableWasm.lean; integration/talos/PLAN.md; bugs/FIR-BUG-wasm-none-object-field-kind-admission.md; coordination/lanes/wasm-proof.md
-contracts: additive proof-side successor theorems only; source semantics, semantic ABI, concrete runtime/layout operations, emitted code, and established validated/finite-trace relations unchanged
-checks: git diff --check PASS; Lean Beam sync/save ConcreteStructuredValidation and downstream ConcreteResumableWasm PASS; lake build FirTalos.ConcreteStructuredValidation FirTalos.ConcreteResumableWasm PASS (3128 jobs); make check PASS (730 cases, 2172/2172 comparisons); make talos-setup PASS; make talos-check PASS (3182 jobs, receipt cc63d78b6eb09e2e873e7fcd0116e00760e64bd6c1c3a7d4747a891a99680b08)
+contracts: additive proof-side witness-extension successor only; source semantics, semantic ABI, concrete runtime/layout operations, emitted code, and established validated/finite-trace relations unchanged
+checks: pending
 bug-cards: FIR-BUG-wasm-none-object-field-kind-admission
 blockers: none
-handoff: Land functional commit bd908f8eda7ffc61a334d727376f56e9915ea863 and this clean status commit. The branch is frozen until integration.
-next: Lift resolved external execution through WitnessAgrees.witnessExtension, then cover constructor allocation and reuse via bindConstructor/rebindConstructor before assembling the full schema-global dispatcher.
+handoff: active
+next: Expose the external core's witness-extension proof, return the next witness explicitly from the validated successor, and package it with transported schema agreement.
 ```
