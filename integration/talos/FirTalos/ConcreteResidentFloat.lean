@@ -203,11 +203,9 @@ def zeroAllocationProgram (address : Nat) : Wasm.Program :=
     .localGet address, .const 0, .store32 32,
     .localGet address, .const 0, .store32 36]
 
-/-- Physical Talos prefix common to both floating box helpers. -/
-def boxPrefixProgram (allocatorIndex address : Nat)
-    (marker payloadBytes : UInt32) : Wasm.Program :=
-  [.const 40, .call allocatorIndex, .localSet address] ++
-  zeroAllocationProgram address ++
+/-- Six descriptor-dependent header writes after the zeroed common header. -/
+def boxHeaderWriteProgram (address : Nat) (marker payloadBytes : UInt32) :
+    Wasm.Program :=
   [.localGet address, .const ObjectKind.boxed.code,
       .store32 (u32 headerKindOffset),
     .localGet address, .const liveFlag,
@@ -220,6 +218,13 @@ def boxPrefixProgram (allocatorIndex address : Nat)
       .store32 (u32 headerAux0Offset),
     .localGet address, .const payloadBytes,
       .store32 (u32 headerAux1Offset)]
+
+/-- Physical Talos prefix common to both floating box helpers. -/
+def boxPrefixProgram (allocatorIndex address : Nat)
+    (marker payloadBytes : UInt32) : Wasm.Program :=
+  [.const 40, .call allocatorIndex, .localSet address] ++
+  zeroAllocationProgram address ++
+  boxHeaderWriteProgram address marker payloadBytes
 
 /-- Physical scratch cast used by both floating box helpers. -/
 def retypeAddressProgram (address saved result : Nat) : Wasm.Program := [
@@ -306,6 +311,7 @@ private theorem instructions_float32BoxSourceProgram
     simp [float32BoxSourceProgram, boxPrefixSource, zeroAllocationSource,
       retypeAddressSource, storeAddress32Source,
       float32BoxProgram, boxPrefixProgram, zeroAllocationProgram,
+      boxHeaderWriteProgram,
       retypeAddressProgram, u32, FirTalos.instructions, FirTalos.instruction,
       allocatorFound, valueFound, addressFound, savedFound, resultFound,
       Bind.bind, Except.bind, pure, Except.pure]
@@ -337,6 +343,7 @@ private theorem instructions_floatBoxSourceProgram
     simp [floatBoxSourceProgram, boxPrefixSource, zeroAllocationSource,
       retypeAddressSource, storeAddress32Source,
       floatBoxProgram, boxPrefixProgram, zeroAllocationProgram,
+      boxHeaderWriteProgram,
       retypeAddressProgram, u32, FirTalos.instructions, FirTalos.instruction,
       allocatorFound, valueFound, addressFound, savedFound, resultFound,
       Bind.bind, Except.bind, pure, Except.pure]
@@ -611,6 +618,750 @@ def unboxEntry (object : UInt32) : Wasm.Locals := {
   params := [.i32 object]
   locals := []
   values := [] }
+
+/-- Exact physical store after W7's ten explicit zero stores. -/
+def zeroAllocationStore (store : Wasm.Store host) (address : UInt32) :
+    Wasm.Store host :=
+  let store := ResidentMemoryRel.write32Store store (address + u32 0) 0
+  let store := ResidentMemoryRel.write32Store store (address + u32 4) 0
+  let store := ResidentMemoryRel.write32Store store (address + u32 8) 0
+  let store := ResidentMemoryRel.write32Store store (address + u32 12) 0
+  let store := ResidentMemoryRel.write32Store store (address + u32 16) 0
+  let store := ResidentMemoryRel.write32Store store (address + u32 20) 0
+  let store := ResidentMemoryRel.write32Store store (address + u32 24) 0
+  let store := ResidentMemoryRel.write32Store store (address + u32 28) 0
+  let store := ResidentMemoryRel.write32Store store (address + u32 32) 0
+  ResidentMemoryRel.write32Store store (address + u32 36) 0
+
+/-- Exact physical store after the six nonzero or descriptor-dependent
+common-header stores shared by both floating boxes. -/
+def writeBoxHeaderStore (store : Wasm.Store host)
+    (address marker payloadBytes :
+    UInt32) : Wasm.Store host :=
+  let store := ResidentMemoryRel.write32Store store
+    (address + u32 headerKindOffset) ObjectKind.boxed.code
+  let store := ResidentMemoryRel.write32Store store
+    (address + u32 headerFlagsOffset) liveFlag
+  let store := ResidentMemoryRel.write32Store store
+    (address + u32 headerRefCountOffset) 1
+  let store := ResidentMemoryRel.write32Store store
+    (address + u32 headerAllocationBytesOffset) 40
+  let store := ResidentMemoryRel.write32Store store
+    (address + u32 headerAux0Offset) marker
+  ResidentMemoryRel.write32Store store
+    (address + u32 headerAux1Offset) payloadBytes
+
+/-- Exact physical store after zero initialization and common-header writes. -/
+def boxHeaderStore (store : Wasm.Store host) (address marker payloadBytes :
+    UInt32) : Wasm.Store host :=
+  writeBoxHeaderStore (zeroAllocationStore store address)
+    address marker payloadBytes
+
+def float32BoxStore (store : Wasm.Store host) (address bits : UInt32) :
+    Wasm.Store host :=
+  ResidentMemoryRel.write32Store
+    (boxHeaderStore store address BoxedScalarKind.float32.code 4)
+    (address + u32 headerBytes) bits
+
+def floatBoxStore (store : Wasm.Store host) (address : UInt32)
+    (bits : UInt64) : Wasm.Store host :=
+  ResidentMemoryRel.write64Store
+    (boxHeaderStore store address BoxedScalarKind.float.code 8)
+    (address + u32 headerBytes) bits
+
+@[simp] theorem zeroAllocationStore_pages
+    (store : Wasm.Store host) (address : UInt32) :
+    (zeroAllocationStore store address).mem.pages = store.mem.pages := by
+  unfold zeroAllocationStore
+  simp only [ResidentMemoryRel.write32Store_pages]
+
+@[simp] theorem writeBoxHeaderStore_pages
+    (store : Wasm.Store host) (address marker payloadBytes : UInt32) :
+    (writeBoxHeaderStore store address marker payloadBytes).mem.pages =
+      store.mem.pages := by
+  unfold writeBoxHeaderStore
+  simp only [ResidentMemoryRel.write32Store_pages]
+
+@[simp] theorem boxHeaderStore_pages
+    (store : Wasm.Store host) (address marker payloadBytes : UInt32) :
+    (boxHeaderStore store address marker payloadBytes).mem.pages =
+      store.mem.pages := by
+  simp only [boxHeaderStore, writeBoxHeaderStore_pages,
+    zeroAllocationStore_pages]
+
+/-- A store of the word already present in one physical lane is a complete
+store no-op.  Fresh-allocation proofs use the zero specialization to erase
+W7's defensive initialization before comparing canonical W6 headers. -/
+theorem write32Store_eq_self_of_read32
+    (store : Wasm.Store host) (address value : UInt32)
+    (read : store.mem.read32 address = value) :
+    ResidentMemoryRel.write32Store store address value = store := by
+  unfold ResidentMemoryRel.write32Store
+  have memoryEq := ResidentMemoryRel.write32_read32_self store.mem address
+  rw [read] at memoryEq
+  cases store
+  simp_all
+
+set_option linter.unusedSimpArgs false in
+/-- On a zero high word, storing a zero-extended 32-bit payload as eight bytes
+is exactly the same physical update as storing its low four bytes. -/
+theorem write64_toUInt64_eq_write32_of_high_zero
+    (memory : Wasm.Mem) (address value : UInt32)
+    (nonwrap : address.toNat + 8 ≤ UInt32.size)
+    (highZero : memory.read32 (address + u32 4) = 0) :
+    memory.write64 address value.toUInt64 = memory.write32 address value := by
+  have highAddressToNat : (address + u32 4).toNat = address.toNat + 4 := by
+    have fits : address.toNat + 4 < UInt32.size := by omega
+    rw [show address + u32 4 = UInt32.ofNat (address.toNat + 4) by
+      simp [u32, UInt32.ofNat_add]]
+    exact UInt32.toNat_ofNat_of_lt' fits
+  unfold Wasm.Mem.read32 at highZero
+  simp only [highAddressToNat] at highZero
+  have offset5 : address.toNat + 4 + 1 = address.toNat + 5 := by omega
+  have offset6 : address.toNat + 4 + 2 = address.toNat + 6 := by omega
+  have offset7 : address.toNat + 4 + 3 = address.toNat + 7 := by omega
+  rw [offset5, offset6, offset7] at highZero
+  have h4 : memory.bytes (address.toNat + 4) = 0 := by bv_decide
+  have h5 : memory.bytes (address.toNat + 5) = 0 := by bv_decide
+  have h6 : memory.bytes (address.toNat + 6) = 0 := by bv_decide
+  have h7 : memory.bytes (address.toNat + 7) = 0 := by bv_decide
+  cases memory
+  simp only [Wasm.Mem.write64, Wasm.Mem.write32]
+  congr 1
+  funext other
+  by_cases selected0 : other = address.toNat
+  · subst other
+    simp
+  by_cases selected1 : other = address.toNat + 1
+  · subst other
+    simp [selected0]
+    bv_decide
+  by_cases selected2 : other = address.toNat + 2
+  · subst other
+    simp [selected0, selected1]
+    bv_decide
+  by_cases selected3 : other = address.toNat + 3
+  · subst other
+    simp [selected0, selected1, selected2]
+    bv_decide
+  by_cases selected4 : other = address.toNat + 4
+  · subst other
+    simp [selected0, selected1, selected2, selected3, h4]
+    bv_decide
+  by_cases selected5 : other = address.toNat + 5
+  · subst other
+    simp [selected0, selected1, selected2, selected3, selected4, h5]
+    bv_decide
+  by_cases selected6 : other = address.toNat + 6
+  · subst other
+    simp [selected0, selected1, selected2, selected3, selected4, selected5,
+      h6]
+    bv_decide
+  by_cases selected7 : other = address.toNat + 7
+  · subst other
+    simp [selected0, selected1, selected2, selected3, selected4, selected5,
+      selected6, h7]
+    bv_decide
+  simp [selected0, selected1, selected2, selected3, selected4, selected5,
+    selected6, selected7]
+
+/-- Width-parametric canonical common-header words for heap scalar boxes. -/
+def boxHeaderWords (marker payloadBytes : UInt32) : List UInt32 := [
+  ObjectKind.boxed.code, liveFlag, 1, 40, marker, payloadBytes, 0, 0]
+
+/-- W6 header corresponding to `boxHeaderWords`. -/
+def canonicalBoxHeader (marker payloadBytes : UInt32) : Header :=
+  Header.forAllocation .boxed 40 false marker payloadBytes
+
+/-- Physical eight-word canonical header store. -/
+def canonicalBoxHeaderStore (store : Wasm.Store host) (address marker
+    payloadBytes : UInt32) : Wasm.Store host :=
+  let store := writeBoxHeaderStore store address marker payloadBytes
+  let store := ResidentMemoryRel.write32Store store
+    (address + u32 headerAux2Offset) 0
+  ResidentMemoryRel.write32Store store
+    (address + u32 headerAux3Offset) 0
+
+theorem canonicalBoxHeaderStore_eq_words
+    (store : Wasm.Store host) (address marker payloadBytes : UInt32) :
+    canonicalBoxHeaderStore store address marker payloadBytes =
+      ResidentMemoryRel.writeUInt32sStore store address
+        (boxHeaderWords marker payloadBytes) := by
+  simp [canonicalBoxHeaderStore, writeBoxHeaderStore,
+    ResidentMemoryRel.writeUInt32sStore, boxHeaderWords,
+    headerKindOffset, headerFlagsOffset, headerRefCountOffset,
+    headerAllocationBytesOffset, headerAux0Offset, headerAux1Offset,
+    headerAux2Offset, headerAux3Offset]
+  ac_rfl
+
+theorem canonicalBoxHeader_words (marker payloadBytes : UInt32) :
+    (canonicalBoxHeader marker payloadBytes).words =
+      boxHeaderWords marker payloadBytes := by
+  simp [canonicalBoxHeader, boxHeaderWords, Header.words,
+    Header.forAllocation, Header.flags, liveFlag]
+
+/-- The generic physical scalar header refines the matching W6 header write.
+Float32 and Float differ only in marker and payload width. -/
+theorem canonicalBoxHeaderStore_refines
+    {heap : MemoryState} {store : Wasm.Store host} {frontierIndex : Nat}
+    (related : ResidentAllocatorRel heap store frontierIndex)
+    {address : Word32} {marker payloadBytes : UInt32}
+    {result : LinearMemory}
+    (inBounds : address.value + headerBytes ≤ heap.memory.size)
+    (written : (canonicalBoxHeader marker payloadBytes).write
+      heap.memory address = .ok result) :
+    ResidentAllocatorRel { heap with memory := result }
+      (canonicalBoxHeaderStore store (UInt32.ofNat address.value)
+        marker payloadBytes) frontierIndex := by
+  have refined := related.writeHeader inBounds written
+  rw [canonicalBoxHeaderStore_eq_words,
+    ResidentMemoryRel.writeUInt32sStore_eq,
+    ← canonicalBoxHeader_words]
+  exact refined
+
+/-- Every complete 32-bit lane inside a fresh raw allocation is still zero
+before an object header or payload is installed.  This is the checked W6 fact
+behind W7's explicit defensive zero stores. -/
+theorem rawAllocation_readUInt32_zero
+    {before raw : MemoryState} {requestedBytes offset : Nat}
+    {address : Word32}
+    (valid : before.FrontierInvariant)
+    (allocated : before.allocate requestedBytes = .ok (raw, address))
+    (within : offset + 4 ≤ align8 requestedBytes) :
+    raw.memory.readUInt32 (address.value + offset) = .ok 0 := by
+  have post := MemoryState.allocate_spec before raw requestedBytes address
+    allocated
+  have cursorAligned : align8 before.heapCursor = before.heapCursor :=
+    align8_eq_of_mod_eq_zero before.heapCursor (by
+      simpa [target] using valid.cursorAligned)
+  have zeroByte (byte : Nat) (afterAddress : address.value ≤ byte)
+      (beforeEnd : byte < address.value + align8 requestedBytes) :
+      raw.memory[byte]? = some 0 := by
+    have afterCursor : before.heapCursor ≤ byte := by
+      rw [post.addressValue, cursorAligned] at afterAddress
+      exact afterAddress
+    have rawInBounds : byte < raw.memory.size :=
+      Nat.lt_of_lt_of_le beforeEnd post.endInBounds
+    rw [post.memory] at rawInBounds ⊢
+    exact LinearMemory.growToFit_zero_from before.memory before.heapCursor
+      (align8 before.heapCursor + align8 requestedBytes)
+      valid.unusedZero byte afterCursor rawInBounds
+  have h0 : raw.memory[address.value + offset]? = some 0 :=
+    zeroByte _ (by omega) (by omega)
+  have h1 : raw.memory[address.value + offset + 1]? = some 0 :=
+    zeroByte _ (by omega) (by omega)
+  have h2 : raw.memory[address.value + offset + 2]? = some 0 :=
+    zeroByte _ (by omega) (by omega)
+  have h3 : raw.memory[address.value + offset + 3]? = some 0 :=
+    zeroByte _ (by omega) (by omega)
+  unfold LinearMemory.readUInt32 LinearMemory.readByte
+  rw [h0, h1, h2, h3]
+  rfl
+
+/-- The physical Talos view of every fresh raw-allocation word is zero. -/
+theorem rawAllocation_physicalRead32_zero
+    {before raw : MemoryState} {store : Wasm.Store host}
+    {requestedBytes offset : Nat} {address : Word32}
+    (valid : before.FrontierInvariant)
+    (allocated : before.allocate requestedBytes = .ok (raw, address))
+    (related : ResidentMemoryRel raw store.mem)
+    (within : offset + 4 ≤ align8 requestedBytes) :
+    store.mem.read32
+      (UInt32.ofNat address.value + u32 offset) = 0 := by
+  have post := MemoryState.allocate_spec before raw requestedBytes address
+    allocated
+  have laneInBounds : address.value + offset + 3 < raw.memory.size :=
+    Nat.lt_of_lt_of_le (by omega) post.endInBounds
+  have transported := related.readUInt32_eq_read32 laneInBounds
+  rw [rawAllocation_readUInt32_zero valid allocated within] at transported
+  have exactRead := Except.ok.inj transported
+  have physicalAddress :
+      UInt32.ofNat address.value + u32 offset =
+        UInt32.ofNat (address.value + offset) := by
+    simp [u32, UInt32.ofNat_add]
+  rw [physicalAddress]
+  exact exactRead.symm
+
+def allocationWordOffsets : List Nat := [0, 4, 8, 12, 16, 20, 24, 28,
+  32, 36]
+
+/-- Ten explicit zero stores disappear when all ten fresh words already read
+as zero. -/
+theorem zeroAllocationStore_eq_of_words_zero
+    (store : Wasm.Store host) (address : UInt32)
+    (zero : ∀ offset, offset ∈ allocationWordOffsets →
+      store.mem.read32 (address + u32 offset) = 0) :
+    zeroAllocationStore store address = store := by
+  unfold zeroAllocationStore
+  dsimp only
+  rw [write32Store_eq_self_of_read32 _ _ _ (zero 0 (by decide))]
+  rw [write32Store_eq_self_of_read32 _ _ _ (zero 4 (by decide))]
+  rw [write32Store_eq_self_of_read32 _ _ _ (zero 8 (by decide))]
+  rw [write32Store_eq_self_of_read32 _ _ _ (zero 12 (by decide))]
+  rw [write32Store_eq_self_of_read32 _ _ _ (zero 16 (by decide))]
+  rw [write32Store_eq_self_of_read32 _ _ _ (zero 20 (by decide))]
+  rw [write32Store_eq_self_of_read32 _ _ _ (zero 24 (by decide))]
+  rw [write32Store_eq_self_of_read32 _ _ _ (zero 28 (by decide))]
+  rw [write32Store_eq_self_of_read32 _ _ _ (zero 32 (by decide))]
+  exact write32Store_eq_self_of_read32 _ _ _ (zero 36 (by decide))
+
+/-- The six descriptor-dependent header writes preserve every later common
+header lane.  The address-space premise rules out modular wraparound. -/
+theorem writeBoxHeaderStore_read32_later
+    (store : Wasm.Store host) (address marker payloadBytes : UInt32)
+    (readOffset : Nat)
+    (nonwrap : address.toNat + 40 ≤ UInt32.size)
+    (later : headerAux1Offset + 4 ≤ readOffset)
+    (within : readOffset + 4 ≤ 40) :
+    (writeBoxHeaderStore store address marker payloadBytes).mem.read32
+        (address + u32 readOffset) =
+      store.mem.read32 (address + u32 readOffset) := by
+  have offsetToNat (offset : Nat) (offsetWithin : offset + 4 ≤ 40) :
+      (address + u32 offset).toNat = address.toNat + offset := by
+    have fits : address.toNat + offset < UInt32.size := by omega
+    rw [show address + u32 offset =
+      UInt32.ofNat (address.toNat + offset) by
+        simp [u32, UInt32.ofNat_add]]
+    exact UInt32.toNat_ofNat_of_lt' fits
+  have disjointAt (writtenOffset : Nat)
+      (writtenBefore : writtenOffset + 4 ≤ readOffset)
+      (writtenWithin : writtenOffset + 4 ≤ 40) :
+      (address + u32 writtenOffset).toNat + 3 <
+        (address + u32 readOffset).toNat := by
+    rw [offsetToNat writtenOffset writtenWithin,
+      offsetToNat readOffset within]
+    omega
+  unfold writeBoxHeaderStore
+  simp only [ResidentMemoryRel.write32Store_mem]
+  rw [ResidentMemoryRel.read32_write32_disjoint _ _ _ _
+    (.inl (disjointAt headerAux1Offset later (by decide)))]
+  rw [ResidentMemoryRel.read32_write32_disjoint _ _ _ _
+    (.inl (disjointAt headerAux0Offset
+      (Nat.le_trans (by decide) later) (by decide)))]
+  rw [ResidentMemoryRel.read32_write32_disjoint _ _ _ _
+    (.inl (disjointAt headerAllocationBytesOffset
+      (Nat.le_trans (by decide) later) (by decide)))]
+  rw [ResidentMemoryRel.read32_write32_disjoint _ _ _ _
+    (.inl (disjointAt headerRefCountOffset
+      (Nat.le_trans (by decide) later) (by decide)))]
+  rw [ResidentMemoryRel.read32_write32_disjoint _ _ _ _
+    (.inl (disjointAt headerFlagsOffset
+      (Nat.le_trans (by decide) later) (by decide)))]
+  exact ResidentMemoryRel.read32_write32_disjoint _ _ _ _
+    (.inl (disjointAt headerKindOffset
+      (Nat.le_trans (by decide) later) (by decide)))
+
+/-- When the two reserved auxiliary lanes are already zero, W7's six header
+writes are exactly the canonical eight-word W6 header store. -/
+theorem canonicalBoxHeaderStore_eq_writeBoxHeaderStore
+    (store : Wasm.Store host) (address marker payloadBytes : UInt32)
+    (nonwrap : address.toNat + 40 ≤ UInt32.size)
+    (aux2Zero : store.mem.read32 (address + u32 headerAux2Offset) = 0)
+    (aux3Zero : store.mem.read32 (address + u32 headerAux3Offset) = 0) :
+    canonicalBoxHeaderStore store address marker payloadBytes =
+      writeBoxHeaderStore store address marker payloadBytes := by
+  let headerStore := writeBoxHeaderStore store address marker payloadBytes
+  have aux2After : headerStore.mem.read32
+      (address + u32 headerAux2Offset) = 0 := by
+    rw [writeBoxHeaderStore_read32_later store address marker payloadBytes
+      headerAux2Offset nonwrap (by decide) (by decide)]
+    exact aux2Zero
+  have aux3After : headerStore.mem.read32
+      (address + u32 headerAux3Offset) = 0 := by
+    rw [writeBoxHeaderStore_read32_later store address marker payloadBytes
+      headerAux3Offset nonwrap (by decide) (by decide)]
+    exact aux3Zero
+  unfold canonicalBoxHeaderStore
+  dsimp only
+  change ResidentMemoryRel.write32Store
+      (ResidentMemoryRel.write32Store headerStore
+        (address + u32 headerAux2Offset) 0)
+      (address + u32 headerAux3Offset) 0 = headerStore
+  rw [write32Store_eq_self_of_read32 headerStore
+    (address + u32 headerAux2Offset) 0 aux2After]
+  exact write32Store_eq_self_of_read32 headerStore
+    (address + u32 headerAux3Offset) 0 aux3After
+
+/-- The complete canonical header store preserves every later lane, including
+the floating payload words. -/
+theorem canonicalBoxHeaderStore_read32_later
+    (store : Wasm.Store host) (address marker payloadBytes : UInt32)
+    (readOffset : Nat)
+    (nonwrap : address.toNat + 40 ≤ UInt32.size)
+    (later : headerAux3Offset + 4 ≤ readOffset)
+    (within : readOffset + 4 ≤ 40) :
+    (canonicalBoxHeaderStore store address marker payloadBytes).mem.read32
+        (address + u32 readOffset) =
+      store.mem.read32 (address + u32 readOffset) := by
+  have offsetToNat (offset : Nat) (offsetWithin : offset + 4 ≤ 40) :
+      (address + u32 offset).toNat = address.toNat + offset := by
+    have fits : address.toNat + offset < UInt32.size := by omega
+    rw [show address + u32 offset =
+      UInt32.ofNat (address.toNat + offset) by
+        simp [u32, UInt32.ofNat_add]]
+    exact UInt32.toNat_ofNat_of_lt' fits
+  have disjointAt (writtenOffset : Nat)
+      (writtenBefore : writtenOffset + 4 ≤ readOffset)
+      (writtenWithin : writtenOffset + 4 ≤ 40) :
+      (address + u32 writtenOffset).toNat + 3 <
+        (address + u32 readOffset).toNat := by
+    rw [offsetToNat writtenOffset writtenWithin,
+      offsetToNat readOffset within]
+    omega
+  unfold canonicalBoxHeaderStore
+  dsimp only
+  simp only [ResidentMemoryRel.write32Store_mem]
+  rw [ResidentMemoryRel.read32_write32_disjoint _ _ _ _
+    (.inl (disjointAt headerAux3Offset later (by decide)))]
+  rw [ResidentMemoryRel.read32_write32_disjoint _ _ _ _
+    (.inl (disjointAt headerAux2Offset
+      (Nat.le_trans (by decide) later) (by decide)))]
+  exact writeBoxHeaderStore_read32_later store address marker payloadBytes
+    readOffset nonwrap (Nat.le_trans (by decide) later) within
+
+/-- W7's complete zero-plus-header prefix is the canonical W6 header store
+on a fresh zero allocation. -/
+theorem boxHeaderStore_eq_canonical
+    (store : Wasm.Store host) (address marker payloadBytes : UInt32)
+    (nonwrap : address.toNat + 40 ≤ UInt32.size)
+    (zeroed : zeroAllocationStore store address = store)
+    (aux2Zero : store.mem.read32 (address + u32 headerAux2Offset) = 0)
+    (aux3Zero : store.mem.read32 (address + u32 headerAux3Offset) = 0) :
+    boxHeaderStore store address marker payloadBytes =
+      canonicalBoxHeaderStore store address marker payloadBytes := by
+  unfold boxHeaderStore
+  rw [zeroed]
+  exact (canonicalBoxHeaderStore_eq_writeBoxHeaderStore store address marker
+    payloadBytes nonwrap aux2Zero aux3Zero).symm
+
+def float32BoxAllocatedLocals (bits address : UInt32) : Wasm.Locals := {
+  params := [.f32 bits]
+  locals := [.i32 address, .i32 0, .i32 0]
+  values := [] }
+
+def floatBoxAllocatedLocals (bits : UInt64) (address : UInt32) : Wasm.Locals := {
+  params := [.f64 bits]
+  locals := [.i32 address, .i32 0, .i32 0]
+  values := [] }
+
+def float32BoxSavedLocals (bits address saved : UInt32) : Wasm.Locals := {
+  params := [.f32 bits]
+  locals := [.i32 address, .i32 saved, .i32 0]
+  values := [.i32 saved] }
+
+def floatBoxSavedLocals (bits : UInt64) (address saved : UInt32) : Wasm.Locals := {
+  params := [.f64 bits]
+  locals := [.i32 address, .i32 saved, .i32 0]
+  values := [.i32 saved] }
+
+def float32BoxResultLocals (bits address saved : UInt32) : Wasm.Locals := {
+  params := [.f32 bits]
+  locals := [.i32 address, .i32 saved, .i32 address]
+  values := [.i32 address] }
+
+def floatBoxResultLocals (bits : UInt64) (address saved : UInt32) : Wasm.Locals := {
+  params := [.f64 bits]
+  locals := [.i32 address, .i32 saved, .i32 address]
+  values := [.i32 address] }
+
+/-- Execute the ten-word zero initialization against one checked 40-byte
+allocation.  The theorem is independent of the shape of the enclosing box
+helper and is reusable by later resident constructors. -/
+theorem wp_zeroAllocationProgram
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {locals : Wasm.Locals} {address : UInt32} {addressIndex : Nat}
+    {rest : Wasm.Program}
+    (addressFound : locals.get addressIndex = some (.i32 address))
+    (allocationInBounds : address.toNat + 40 ≤
+      store.mem.pages * wasmPageBytes)
+    (continued : Wasm.wp module rest Q
+      (zeroAllocationStore store address) locals env) :
+    Wasm.wp module (zeroAllocationProgram addressIndex ++ rest) Q store
+      locals env := by
+  have bound (offset : Nat) (within : offset + 4 ≤ 40) :
+      address.toNat + (u32 offset).toNat + 4 ≤
+        store.mem.pages * wasmPageBytes := by
+    have offsetFits : offset < UInt32.size := by
+      unfold UInt32.size
+      omega
+    rw [show (u32 offset).toNat = offset by
+      exact UInt32.toNat_ofNat_of_lt' offsetFits]
+    exact Nat.le_trans (by omega) allocationInBounds
+  unfold zeroAllocationProgram
+  unfold zeroAllocationStore at continued
+  apply ResidentMemoryRel.wp_store32_const_of_inBounds addressFound
+    (bound 0 (by decide))
+  apply ResidentMemoryRel.wp_store32_const_of_inBounds addressFound
+  · simpa [u32] using bound 4 (by decide)
+  apply ResidentMemoryRel.wp_store32_const_of_inBounds addressFound
+  · simpa [u32] using bound 8 (by decide)
+  apply ResidentMemoryRel.wp_store32_const_of_inBounds addressFound
+  · simpa [u32] using bound 12 (by decide)
+  apply ResidentMemoryRel.wp_store32_const_of_inBounds addressFound
+  · simpa [u32] using bound 16 (by decide)
+  apply ResidentMemoryRel.wp_store32_const_of_inBounds addressFound
+  · simpa [u32] using bound 20 (by decide)
+  apply ResidentMemoryRel.wp_store32_const_of_inBounds addressFound
+  · simpa [u32] using bound 24 (by decide)
+  apply ResidentMemoryRel.wp_store32_const_of_inBounds addressFound
+  · simpa [u32] using bound 28 (by decide)
+  apply ResidentMemoryRel.wp_store32_const_of_inBounds addressFound
+  · simpa [u32] using bound 32 (by decide)
+  apply ResidentMemoryRel.wp_store32_const_of_inBounds addressFound
+  · simpa [u32] using bound 36 (by decide)
+  simpa [u32] using continued
+
+/-- Execute the six width-independent common-header writes.  Zeroed aux2 and
+aux3 lanes are deliberately supplied by `wp_zeroAllocationProgram`. -/
+theorem wp_boxHeaderWriteProgram
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {locals : Wasm.Locals} {address marker payloadBytes : UInt32}
+    {addressIndex : Nat} {rest : Wasm.Program}
+    (addressFound : locals.get addressIndex = some (.i32 address))
+    (allocationInBounds : address.toNat + 40 ≤
+      store.mem.pages * wasmPageBytes)
+    (continued : Wasm.wp module rest Q
+      (writeBoxHeaderStore store address marker payloadBytes) locals env) :
+    Wasm.wp module
+      (boxHeaderWriteProgram addressIndex marker payloadBytes ++ rest)
+      Q store locals env := by
+  have bound (offset : Nat) (within : offset + 4 ≤ 40) :
+      address.toNat + (u32 offset).toNat + 4 ≤
+        store.mem.pages * wasmPageBytes := by
+    have offsetFits : offset < UInt32.size := by
+      unfold UInt32.size
+      omega
+    rw [show (u32 offset).toNat = offset by
+      exact UInt32.toNat_ofNat_of_lt' offsetFits]
+    exact Nat.le_trans (by omega) allocationInBounds
+  unfold boxHeaderWriteProgram
+  unfold writeBoxHeaderStore at continued
+  apply ResidentMemoryRel.wp_store32_const_of_inBounds addressFound
+    (bound headerKindOffset (by decide))
+  apply ResidentMemoryRel.wp_store32_const_of_inBounds addressFound
+  · simpa [u32] using bound headerFlagsOffset (by decide)
+  apply ResidentMemoryRel.wp_store32_const_of_inBounds addressFound
+  · simpa [u32] using bound headerRefCountOffset (by decide)
+  apply ResidentMemoryRel.wp_store32_const_of_inBounds addressFound
+  · simpa [u32] using bound headerAllocationBytesOffset (by decide)
+  apply ResidentMemoryRel.wp_store32_const_of_inBounds addressFound
+  · simpa [u32] using bound headerAux0Offset (by decide)
+  apply ResidentMemoryRel.wp_store32_const_of_inBounds addressFound
+  · simpa [u32] using bound headerAux1Offset (by decide)
+  simpa [u32] using continued
+
+/-- Execute W7's scratch-slot cast when the allocation address is already in
+the raw local.  The temporary word-zero overwrite is restored exactly. -/
+theorem wp_retypeAddressProgram
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {initial afterSaved afterResult : Wasm.Locals}
+    {address : UInt32} {addressIndex savedIndex resultIndex : Nat}
+    (pagesPositive : 0 < store.mem.pages)
+    (addressNeSaved : addressIndex ≠ savedIndex)
+    (savedNeResult : savedIndex ≠ resultIndex)
+    (initialValues : initial.values = [])
+    (rawSet :
+      ({ initial with values := [.i32 address] }).set?
+          addressIndex (.i32 address) =
+            some { initial with values := [.i32 address] })
+    (savedSet :
+      ({ initial with values := [.i32 (store.mem.read32 0)] }).set?
+          savedIndex (.i32 (store.mem.read32 0)) = some afterSaved)
+    (resultSet :
+      ({ afterSaved with values := [.i32 address] }).set?
+          resultIndex (.i32 address) = some afterResult)
+    (returned : Q (.Return store [.i32 address])) :
+    Wasm.wp module (retypeAddressProgram addressIndex savedIndex resultIndex)
+      Q store initial env := by
+  have full := ResidentNat.wp_retypeRawObjectResultProgram
+    (module := module) (env := env)
+    (initial := initial)
+    (afterRaw := { initial with values := [.i32 address] })
+    (afterSaved := afterSaved)
+    (afterResult := afterResult) (rawValue := address) (tail := [])
+    pagesPositive addressNeSaved savedNeResult rawSet savedSet resultSet returned
+  unfold ResidentNat.retypeRawObjectResultProgram at full
+  simp only [Wasm.wp_localSet_cons, rawSet] at full
+  simpa [retypeAddressProgram, initialValues] using full
+
+/-- Exact instruction-level execution of the production Float32 box body.
+All forty initialized bytes and the scratch-slot cast are accounted for; the
+result store is exposed without yet assuming a particular allocator proof. -/
+theorem wp_float32BoxProgram
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store allocatedStore : Wasm.Store host}
+    {allocatorIndex : Nat} {bits address : UInt32}
+    (allocateRun : Wasm.TerminatesWith env module allocatorIndex store
+      [.i32 40]
+      (fun final values => final = allocatedStore ∧ values = [.i32 address]))
+    (allocationInBounds : address.toNat + 40 ≤
+      allocatedStore.mem.pages * wasmPageBytes)
+    (returned : Q (.Return (float32BoxStore allocatedStore address bits)
+      [.i32 address])) :
+    Wasm.wp module (float32BoxProgram allocatorIndex) Q store
+      (float32BoxEntry bits) env := by
+  have bound (offset bytes : Nat) (within : offset + bytes ≤ 40) :
+      address.toNat + (u32 offset).toNat + bytes ≤
+        allocatedStore.mem.pages * wasmPageBytes := by
+    have offsetFits : offset < UInt32.size := by
+      unfold UInt32.size
+      omega
+    rw [show (u32 offset).toNat = offset by
+      exact UInt32.toNat_ofNat_of_lt' offsetFits]
+    exact Nat.le_trans (by omega) allocationInBounds
+  have pagesPositive : 0 <
+      (float32BoxStore allocatedStore address bits).mem.pages := by
+    have basePositive : 0 < allocatedStore.mem.pages := by
+      unfold wasmPageBytes at allocationInBounds
+      omega
+    simpa [float32BoxStore, boxHeaderStore, writeBoxHeaderStore,
+      zeroAllocationStore, ResidentMemoryRel.write32Store] using basePositive
+  have allocatedAddress :
+      (float32BoxAllocatedLocals bits address).get 1 =
+        some (.i32 address) := by rfl
+  unfold float32BoxProgram boxPrefixProgram
+  simp only [List.cons_append, List.nil_append, Wasm.wp_const_cons]
+  apply Wasm.wp_call_tw allocateRun
+  intro final values completed
+  rcases completed with ⟨rfl, rfl⟩
+  apply FirTalos.Correctness.wp_localSet_of_set
+    (locals := float32BoxEntry bits)
+    (updated := float32BoxAllocatedLocals bits address)
+    (tail := [])
+  · rfl
+  · apply wp_zeroAllocationProgram allocatedAddress allocationInBounds
+    apply wp_boxHeaderWriteProgram allocatedAddress
+    · simpa [zeroAllocationStore, ResidentMemoryRel.write32Store] using
+      allocationInBounds
+    · change Wasm.wp module
+        (.localGet 1 :: .localGet 0 :: .i32ReinterpretF32 ::
+          .store32 (u32 headerBytes) :: retypeAddressProgram 1 2 3)
+        Q (writeBoxHeaderStore (zeroAllocationStore final address)
+          address BoxedScalarKind.float32.code 4)
+        (float32BoxAllocatedLocals bits address) env
+      simp only [Wasm.wp_localGet_cons, allocatedAddress,
+        Wasm.wp_localGet_cons,
+        Wasm.wp_i32ReinterpretF32_cons]
+      apply ResidentMemoryRel.wp_store32_of_inBounds
+      · simpa [boxHeaderStore, writeBoxHeaderStore, zeroAllocationStore,
+          ResidentMemoryRel.write32Store] using
+          bound headerBytes 4 (by decide)
+      · change Wasm.wp module (retypeAddressProgram 1 2 3) Q
+          (float32BoxStore final address bits)
+          (float32BoxAllocatedLocals bits address) env
+        let saved :=
+          (float32BoxStore final address bits).mem.read32 0
+        apply wp_retypeAddressProgram
+          (initial := float32BoxAllocatedLocals bits address)
+          (afterSaved := float32BoxSavedLocals bits address saved)
+          (afterResult := float32BoxResultLocals bits address saved)
+          (address := address) (addressIndex := 1) (savedIndex := 2)
+          (resultIndex := 3)
+          pagesPositive (by decide) (by decide)
+        · rfl
+        · simp [float32BoxAllocatedLocals, Wasm.Locals.set?]
+        · simp [float32BoxAllocatedLocals, float32BoxSavedLocals,
+            Wasm.Locals.set?, saved]
+        · simp [float32BoxSavedLocals, float32BoxResultLocals,
+            Wasm.Locals.set?, saved]
+        · exact returned
+
+/-- Exact instruction-level execution of the production Float box body.
+The 64-bit payload lane is stored bit-for-bit, including every NaN payload,
+and the scratch-slot cast restores word zero before returning. -/
+theorem wp_floatBoxProgram
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store allocatedStore : Wasm.Store host}
+    {allocatorIndex : Nat} {bits : UInt64} {address : UInt32}
+    (allocateRun : Wasm.TerminatesWith env module allocatorIndex store
+      [.i32 40]
+      (fun final values => final = allocatedStore ∧ values = [.i32 address]))
+    (allocationInBounds : address.toNat + 40 ≤
+      allocatedStore.mem.pages * wasmPageBytes)
+    (returned : Q (.Return (floatBoxStore allocatedStore address bits)
+      [.i32 address])) :
+    Wasm.wp module (floatBoxProgram allocatorIndex) Q store
+      (floatBoxEntry bits) env := by
+  have bound (offset bytes : Nat) (within : offset + bytes ≤ 40) :
+      address.toNat + (u32 offset).toNat + bytes ≤
+        allocatedStore.mem.pages * wasmPageBytes := by
+    have offsetFits : offset < UInt32.size := by
+      unfold UInt32.size
+      omega
+    rw [show (u32 offset).toNat = offset by
+      exact UInt32.toNat_ofNat_of_lt' offsetFits]
+    exact Nat.le_trans (by omega) allocationInBounds
+  have pagesPositive : 0 <
+      (floatBoxStore allocatedStore address bits).mem.pages := by
+    have basePositive : 0 < allocatedStore.mem.pages := by
+      unfold wasmPageBytes at allocationInBounds
+      omega
+    simpa only [floatBoxStore, ResidentMemoryRel.write64Store_pages,
+      boxHeaderStore_pages] using basePositive
+  have payloadInBounds :
+      address.toNat + (u32 headerBytes).toNat + 8 ≤
+        (boxHeaderStore allocatedStore address BoxedScalarKind.float.code 8).mem.pages *
+          wasmPageBytes := by
+    simpa only [boxHeaderStore_pages] using
+      bound headerBytes 8 (by decide)
+  have allocatedAddress :
+      (floatBoxAllocatedLocals bits address).get 1 =
+        some (.i32 address) := by rfl
+  have allocatedBits :
+      (floatBoxAllocatedLocals bits address).get 0 = some (.f64 bits) := by
+    rfl
+  have allocatedBits' :
+      ({ floatBoxAllocatedLocals bits address with
+        values := .i32 address ::
+          (floatBoxAllocatedLocals bits address).values }).get 0 =
+        some (.f64 bits) := by
+    simpa using allocatedBits
+  unfold floatBoxProgram boxPrefixProgram
+  simp only [List.cons_append, List.nil_append, Wasm.wp_const_cons]
+  apply Wasm.wp_call_tw allocateRun
+  intro final values completed
+  rcases completed with ⟨rfl, rfl⟩
+  apply FirTalos.Correctness.wp_localSet_of_set
+    (locals := floatBoxEntry bits)
+    (updated := floatBoxAllocatedLocals bits address)
+    (tail := [])
+  · rfl
+  · apply wp_zeroAllocationProgram allocatedAddress allocationInBounds
+    apply wp_boxHeaderWriteProgram allocatedAddress
+    · simpa [zeroAllocationStore, ResidentMemoryRel.write32Store] using
+        allocationInBounds
+    · change Wasm.wp module
+        (.localGet 1 :: .localGet 0 :: .i64ReinterpretF64 ::
+          .store64 (u32 headerBytes) :: retypeAddressProgram 1 2 3)
+        Q (writeBoxHeaderStore (zeroAllocationStore final address)
+          address BoxedScalarKind.float.code 8)
+        (floatBoxAllocatedLocals bits address) env
+      simp only [Wasm.wp_localGet_cons, allocatedAddress,
+        Wasm.wp_localGet_cons, allocatedBits',
+        Wasm.wp_i64ReinterpretF64_cons, Wasm.wp_store64_cons]
+      rw [if_neg (Nat.not_lt.mpr (by
+        simpa [wasmPageBytes] using payloadInBounds))]
+      change Wasm.wp module (retypeAddressProgram 1 2 3) Q
+        (floatBoxStore final address bits)
+        (floatBoxAllocatedLocals bits address) env
+      let saved := (floatBoxStore final address bits).mem.read32 0
+      apply wp_retypeAddressProgram
+        (initial := floatBoxAllocatedLocals bits address)
+        (afterSaved := floatBoxSavedLocals bits address saved)
+        (afterResult := floatBoxResultLocals bits address saved)
+        (address := address) (addressIndex := 1) (savedIndex := 2)
+        (resultIndex := 3)
+        pagesPositive (by decide) (by decide)
+      · rfl
+      · simp [floatBoxAllocatedLocals, Wasm.Locals.set?]
+      · simp [floatBoxAllocatedLocals, floatBoxSavedLocals,
+          Wasm.Locals.set?, saved]
+      · simp [floatBoxSavedLocals, floatBoxResultLocals,
+          Wasm.Locals.set?, saved]
+      · exact returned
 
 theorem Installation.float32Box_entry
     {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
@@ -970,6 +1721,358 @@ theorem HeapBoxAdmission.physical
       omega
     payload64Read }
 
+/-- The production Float32 box body implements W6's heap-only bit-exact
+allocation contract.  W6 writes the zero-extended payload as a doubleword;
+the generated helper writes only the low word, and the fresh-zero theorem
+proves those physical stores equal. -/
+theorem wp_float32BoxProgram_of_allocateBoxedScalar
+    {host : Type} {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {env : Wasm.HostEnv host} {allocatorFunction : Wasm.Function}
+    {allocatorIndex frontierIndex : Nat}
+    {before after : MemoryState} {store : Wasm.Store host}
+    {bits : UInt32} {address : Word32}
+    (allocatorAdapted : FirTalos.function sourceModule
+      (Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex) =
+        .ok allocatorFunction)
+    (allocatorNotImport : module.imports[allocatorIndex]? = none)
+    (allocatorFound :
+      module.funcs[allocatorIndex - module.imports.length]? =
+        some allocatorFunction)
+    (memory32 : module.memIs64 = false)
+    (valid : before.FrontierInvariant)
+    (related : ResidentAllocatorRel before store frontierIndex)
+    (allocated : allocateBoxedScalar before (.float32 bits) =
+      .ok (after, address))
+    (strictEnd : after.heapCursor < wordModulus)
+    (withinCap : (after.heapCursor - 1) / wasmPageBytes + 1 ≤
+      store.memoryCap module 0) :
+    ∃ finalStore,
+      ResidentAllocatorRel after finalStore frontierIndex ∧
+      Float32BoxAdmission after address bits ∧
+      Wasm.wp module (float32BoxProgram allocatorIndex)
+        (fun completion => completion = .Return finalStore
+          [.i32 (UInt32.ofNat address.value)]) store
+        (float32BoxEntry bits) env := by
+  obtain ⟨objectState, objectAllocation, payloadWrite, afterCursor⟩ :=
+    allocateBoxedScalar_decompose before after (.float32 bits) address
+      allocated
+  obtain ⟨rawState, rawAllocation, headerWrite, objectCursor, _⟩ :=
+    MemoryState.allocateObject_header before objectState .boxed
+      target.semanticSlotBytes false BoxedScalarKind.float32.code 4 0 0 address
+        objectAllocation
+  have rawAllocation40 : before.allocate 40 = .ok (rawState, address) := by
+    simpa [target, headerBytes, align8] using rawAllocation
+  have rawStrict : rawState.heapCursor < wordModulus := by
+    rw [← objectCursor, ← afterCursor]
+    exact strictEnd
+  have rawWithinCap :
+      (rawState.heapCursor - 1) / wasmPageBytes + 1 ≤
+        store.memoryCap module 0 := by
+    rw [← objectCursor, ← afterCursor]
+    exact withinCap
+  obtain ⟨allocatedStore, rawRelated, allocatorRun⟩ :=
+    ResidentAllocator.terminatesWith_allocateFunction_of_allocate
+      (env := env) allocatorAdapted allocatorNotImport allocatorFound memory32
+      valid related
+      (requestedAligned := (by decide : 40 % target.heapAlignment = 0))
+      rawAllocation40 rawStrict rawWithinCap
+  have rawPost := MemoryState.allocate_spec before rawState 40 address
+    rawAllocation40
+  have headerInBounds : address.value + headerBytes ≤ rawState.memory.size := by
+    have endInBounds := rawPost.endInBounds
+    simp [headerBytes] at endInBounds ⊢
+    omega
+  let physicalAddress := UInt32.ofNat address.value
+  have addressFits : address.value < UInt32.size := by
+    simpa [wordModulus, UInt32.size] using address.isLt
+  have physicalToNat : physicalAddress.toNat = address.value :=
+    UInt32.toNat_ofNat_of_lt' addressFits
+  have nonwrap : physicalAddress.toNat + 40 ≤ UInt32.size := by
+    rw [physicalToNat]
+    simpa [wordModulus, UInt32.size] using rawPost.endWithinAddressSpace
+  have freshWordZero (offset : Nat)
+      (member : offset ∈ allocationWordOffsets) :
+      allocatedStore.mem.read32 (physicalAddress + u32 offset) = 0 := by
+    have within : offset + 4 ≤ align8 40 := by
+      simp [allocationWordOffsets] at member
+      simp [align8]
+      omega
+    exact rawAllocation_physicalRead32_zero valid rawAllocation40
+      rawRelated.toResidentMemoryRel within
+  have zeroed : zeroAllocationStore allocatedStore physicalAddress =
+      allocatedStore :=
+    zeroAllocationStore_eq_of_words_zero allocatedStore physicalAddress
+      freshWordZero
+  have headerStoreEq :
+      boxHeaderStore allocatedStore physicalAddress
+          BoxedScalarKind.float32.code 4 =
+        canonicalBoxHeaderStore allocatedStore physicalAddress
+          BoxedScalarKind.float32.code 4 := by
+    exact boxHeaderStore_eq_canonical allocatedStore physicalAddress
+      BoxedScalarKind.float32.code 4 nonwrap zeroed
+      (freshWordZero headerAux2Offset (by decide))
+      (freshWordZero headerAux3Offset (by decide))
+  let headerStore := boxHeaderStore allocatedStore physicalAddress
+    BoxedScalarKind.float32.code 4
+  have headerHighZero : headerStore.mem.read32
+      (physicalAddress + u32 (headerBytes + 4)) = 0 := by
+    dsimp only [headerStore]
+    rw [headerStoreEq]
+    rw [canonicalBoxHeaderStore_read32_later allocatedStore physicalAddress
+      BoxedScalarKind.float32.code 4 (headerBytes + 4) nonwrap
+      (by decide) (by decide)]
+    exact freshWordZero (headerBytes + 4) (by decide)
+  let payloadAddress := physicalAddress + u32 headerBytes
+  have payloadAddressToNat :
+      payloadAddress.toNat = physicalAddress.toNat + headerBytes := by
+    have fits : physicalAddress.toNat + headerBytes < UInt32.size := by
+      simp [headerBytes] at nonwrap ⊢
+      omega
+    rw [show payloadAddress =
+      UInt32.ofNat (physicalAddress.toNat + headerBytes) by
+        simp [payloadAddress, u32, UInt32.ofNat_add]]
+    exact UInt32.toNat_ofNat_of_lt' fits
+  have payloadNonwrap : payloadAddress.toNat + 8 ≤ UInt32.size := by
+    rw [payloadAddressToNat]
+    simp [headerBytes] at nonwrap ⊢
+    omega
+  have payloadHighAddress :
+      payloadAddress + u32 4 =
+        physicalAddress + u32 (headerBytes + 4) := by
+    simp [payloadAddress, u32, UInt32.ofNat_add]
+    ac_rfl
+  have payloadHighZero : headerStore.mem.read32
+      (payloadAddress + u32 4) = 0 := by
+    rw [payloadHighAddress]
+    exact headerHighZero
+  have payloadMemoryEq :
+      headerStore.mem.write64 payloadAddress bits.toUInt64 =
+        headerStore.mem.write32 payloadAddress bits :=
+    write64_toUInt64_eq_write32_of_high_zero headerStore.mem payloadAddress
+      bits payloadNonwrap payloadHighZero
+  have headerStateEq :
+      ({ rawState with memory := objectState.memory } : MemoryState) =
+        objectState := by
+    cases rawState
+    cases objectState
+    simp_all only
+  have canonicalWrite :
+      (canonicalBoxHeader BoxedScalarKind.float32.code 4).write
+          rawState.memory address = .ok objectState.memory := by
+    simpa [canonicalBoxHeader, target, headerBytes, align8] using headerWrite
+  have canonicalRelated :
+      ResidentAllocatorRel objectState
+        (canonicalBoxHeaderStore allocatedStore physicalAddress
+          BoxedScalarKind.float32.code 4) frontierIndex := by
+    have refined := canonicalBoxHeaderStore_refines rawRelated headerInBounds
+      canonicalWrite
+    rw [headerStateEq] at refined
+    simpa only [physicalAddress] using refined
+  have headerRelated : ResidentAllocatorRel objectState headerStore
+      frontierIndex := by
+    dsimp only [headerStore]
+    rw [headerStoreEq]
+    exact canonicalRelated
+  have payloadInBounds :
+      address.value + headerBytes + 7 < objectState.memory.size := by
+    have objectValid := valid.allocateObject objectAllocation
+    have objectExtent := MemoryState.allocateObject_extent objectAllocation
+    have cursorInBounds := objectValid.cursorInBounds
+    rw [objectExtent] at cursorInBounds
+    simp [target, headerBytes, align8] at cursorInBounds ⊢
+    omega
+  let finalStore := float32BoxStore allocatedStore physicalAddress bits
+  have payloadRelatedRaw := headerRelated.writeUInt64 payloadInBounds
+    payloadWrite
+  have payloadPhysicalAddress :
+      UInt32.ofNat (address.value + headerBytes) = payloadAddress := by
+    simp [payloadAddress, physicalAddress, u32, UInt32.ofNat_add]
+  have payloadStoreEq :
+      ({ headerStore with mem := (headerStore.mem.write64
+        (UInt32.ofNat (address.value + headerBytes)) bits.toUInt64) } :
+          Wasm.Store host) = finalStore := by
+    rw [payloadPhysicalAddress]
+    unfold finalStore float32BoxStore
+    change { headerStore with mem :=
+        headerStore.mem.write64 payloadAddress bits.toUInt64 } =
+      ResidentMemoryRel.write32Store headerStore payloadAddress bits
+    unfold ResidentMemoryRel.write32Store
+    rw [payloadMemoryEq]
+  simp only [BoxedScalar.payload] at payloadRelatedRaw
+  rw [payloadStoreEq] at payloadRelatedRaw
+  have finalStateEq :
+      ({ objectState with memory := after.memory } : MemoryState) = after := by
+    cases objectState
+    cases after
+    simp_all only
+  have finalRelated :
+      ResidentAllocatorRel after finalStore frontierIndex := by
+    rw [← finalStateEq]
+    exact payloadRelatedRaw
+  have physicalInBounds : physicalAddress.toNat + 40 ≤
+      allocatedStore.mem.pages * wasmPageBytes := by
+    rw [physicalToNat, ← rawRelated.toResidentMemoryRel.size_eq]
+    exact rawPost.endInBounds
+  have coreWP : Wasm.wp module (float32BoxProgram allocatorIndex)
+      (fun completion => completion = .Return finalStore
+        [.i32 physicalAddress]) store (float32BoxEntry bits) env := by
+    apply wp_float32BoxProgram allocatorRun physicalInBounds
+    rfl
+  refine ⟨finalStore, finalRelated, ?_, ?_⟩
+  · exact allocateBoxedFloat32_admission before after bits address valid
+      related.frontierBase allocated
+  · simpa [physicalAddress] using coreWP
+
+/-- The production Float box body implements W6's heap-only 64-bit floating
+allocation contract.  The theorem returns the post-allocation runtime
+relation, the canonical semantic admission, and exact instruction execution
+in one boundary. -/
+theorem wp_floatBoxProgram_of_allocateBoxedScalar
+    {host : Type} {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {env : Wasm.HostEnv host} {allocatorFunction : Wasm.Function}
+    {allocatorIndex frontierIndex : Nat}
+    {before after : MemoryState} {store : Wasm.Store host}
+    {bits : UInt64} {address : Word32}
+    (allocatorAdapted : FirTalos.function sourceModule
+      (Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex) =
+        .ok allocatorFunction)
+    (allocatorNotImport : module.imports[allocatorIndex]? = none)
+    (allocatorFound :
+      module.funcs[allocatorIndex - module.imports.length]? =
+        some allocatorFunction)
+    (memory32 : module.memIs64 = false)
+    (valid : before.FrontierInvariant)
+    (related : ResidentAllocatorRel before store frontierIndex)
+    (allocated : allocateBoxedScalar before (.float bits) =
+      .ok (after, address))
+    (strictEnd : after.heapCursor < wordModulus)
+    (withinCap : (after.heapCursor - 1) / wasmPageBytes + 1 ≤
+      store.memoryCap module 0) :
+    ∃ finalStore,
+      ResidentAllocatorRel after finalStore frontierIndex ∧
+      FloatBoxAdmission after address bits ∧
+      Wasm.wp module (floatBoxProgram allocatorIndex)
+        (fun completion => completion = .Return finalStore
+          [.i32 (UInt32.ofNat address.value)]) store
+        (floatBoxEntry bits) env := by
+  obtain ⟨objectState, objectAllocation, payloadWrite, afterCursor⟩ :=
+    allocateBoxedScalar_decompose before after (.float bits) address allocated
+  obtain ⟨rawState, rawAllocation, headerWrite, objectCursor, _⟩ :=
+    MemoryState.allocateObject_header before objectState .boxed
+      target.semanticSlotBytes false BoxedScalarKind.float.code 8 0 0 address
+        objectAllocation
+  have rawAllocation40 : before.allocate 40 = .ok (rawState, address) := by
+    simpa [target, headerBytes, align8] using rawAllocation
+  have rawStrict : rawState.heapCursor < wordModulus := by
+    rw [← objectCursor, ← afterCursor]
+    exact strictEnd
+  have rawWithinCap :
+      (rawState.heapCursor - 1) / wasmPageBytes + 1 ≤
+        store.memoryCap module 0 := by
+    rw [← objectCursor, ← afterCursor]
+    exact withinCap
+  obtain ⟨allocatedStore, rawRelated, allocatorRun⟩ :=
+    ResidentAllocator.terminatesWith_allocateFunction_of_allocate
+      (env := env) allocatorAdapted allocatorNotImport allocatorFound memory32
+      valid related
+      (requestedAligned := (by decide : 40 % target.heapAlignment = 0))
+      rawAllocation40 rawStrict rawWithinCap
+  have rawPost := MemoryState.allocate_spec before rawState 40 address
+    rawAllocation40
+  have headerInBounds : address.value + headerBytes ≤ rawState.memory.size := by
+    have endInBounds := rawPost.endInBounds
+    simp [headerBytes] at endInBounds ⊢
+    omega
+  let physicalAddress := UInt32.ofNat address.value
+  have addressFits : address.value < UInt32.size := by
+    simpa [wordModulus, UInt32.size] using address.isLt
+  have physicalToNat : physicalAddress.toNat = address.value :=
+    UInt32.toNat_ofNat_of_lt' addressFits
+  have nonwrap : physicalAddress.toNat + 40 ≤ UInt32.size := by
+    rw [physicalToNat]
+    simpa [wordModulus, UInt32.size] using rawPost.endWithinAddressSpace
+  have freshWordZero (offset : Nat)
+      (member : offset ∈ allocationWordOffsets) :
+      allocatedStore.mem.read32 (physicalAddress + u32 offset) = 0 := by
+    have within : offset + 4 ≤ align8 40 := by
+      simp [allocationWordOffsets] at member
+      simp [align8]
+      omega
+    exact rawAllocation_physicalRead32_zero valid rawAllocation40
+      rawRelated.toResidentMemoryRel within
+  have zeroed : zeroAllocationStore allocatedStore physicalAddress =
+      allocatedStore :=
+    zeroAllocationStore_eq_of_words_zero allocatedStore physicalAddress
+      freshWordZero
+  have headerStoreEq :
+      boxHeaderStore allocatedStore physicalAddress
+          BoxedScalarKind.float.code 8 =
+        canonicalBoxHeaderStore allocatedStore physicalAddress
+          BoxedScalarKind.float.code 8 := by
+    exact boxHeaderStore_eq_canonical allocatedStore physicalAddress
+      BoxedScalarKind.float.code 8 nonwrap zeroed
+      (freshWordZero headerAux2Offset (by decide))
+      (freshWordZero headerAux3Offset (by decide))
+  have headerStateEq :
+      ({ rawState with memory := objectState.memory } : MemoryState) =
+        objectState := by
+    cases rawState
+    cases objectState
+    simp_all only
+  have canonicalWrite :
+      (canonicalBoxHeader BoxedScalarKind.float.code 8).write
+          rawState.memory address = .ok objectState.memory := by
+    simpa [canonicalBoxHeader, target, headerBytes, align8] using headerWrite
+  have canonicalRelated :
+      ResidentAllocatorRel objectState
+        (canonicalBoxHeaderStore allocatedStore physicalAddress
+          BoxedScalarKind.float.code 8) frontierIndex := by
+    have refined := canonicalBoxHeaderStore_refines rawRelated headerInBounds
+      canonicalWrite
+    rw [headerStateEq] at refined
+    simpa only [physicalAddress] using refined
+  have headerRelated :
+      ResidentAllocatorRel objectState
+        (boxHeaderStore allocatedStore physicalAddress
+          BoxedScalarKind.float.code 8) frontierIndex := by
+    rw [headerStoreEq]
+    exact canonicalRelated
+  have payloadInBounds :
+      address.value + headerBytes + 7 < objectState.memory.size := by
+    have objectValid := valid.allocateObject objectAllocation
+    have objectExtent := MemoryState.allocateObject_extent objectAllocation
+    have cursorInBounds := objectValid.cursorInBounds
+    rw [objectExtent] at cursorInBounds
+    simp [target, headerBytes, align8] at cursorInBounds ⊢
+    omega
+  let finalStore := floatBoxStore allocatedStore physicalAddress bits
+  have payloadRelatedRaw := headerRelated.writeUInt64 payloadInBounds
+    payloadWrite
+  have finalStateEq :
+      ({ objectState with memory := after.memory } : MemoryState) = after := by
+    cases objectState
+    cases after
+    simp_all only
+  have finalRelated :
+      ResidentAllocatorRel after finalStore frontierIndex := by
+    rw [← finalStateEq]
+    simpa [finalStore, floatBoxStore, ResidentMemoryRel.write64Store,
+      physicalAddress, u32,
+      UInt32.ofNat_add, BoxedScalar.payload] using payloadRelatedRaw
+  have physicalInBounds : physicalAddress.toNat + 40 ≤
+      allocatedStore.mem.pages * wasmPageBytes := by
+    rw [physicalToNat, ← rawRelated.toResidentMemoryRel.size_eq]
+    exact rawPost.endInBounds
+  have coreWP : Wasm.wp module (floatBoxProgram allocatorIndex)
+      (fun completion => completion = .Return finalStore
+        [.i32 physicalAddress]) store (floatBoxEntry bits) env := by
+    apply wp_floatBoxProgram allocatorRun physicalInBounds
+    rfl
+  refine ⟨finalStore, finalRelated, ?_, ?_⟩
+  · exact allocateBoxedFloat_admission before after bits address valid
+      related.frontierBase allocated
+  · simpa [physicalAddress] using coreWP
+
 /-- The shared floating unbox validator is transparent to a caller once all
 physical admission reads agree.  The optional final premise is exactly the
 Float32 zero-padding invariant; Float's 64-bit path does not need it. -/
@@ -1238,6 +2341,124 @@ theorem wp_float32UnboxProgram_nonzeroPadding
     (checkHighPadding := false) physical (by simp) paddingWP
   simpa [float32UnboxProgram, unboxPrefixProgram, paddingProgram,
     payloadProgram, List.append_assoc] using commonWP
+
+/-- Lift the exact Float32 box core through the adapter's terminal suffix. -/
+theorem Installation.wp_float32Box_body
+    {host : Type} {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {env : Wasm.HostEnv host} {store : Wasm.Store host}
+    {locals : Wasm.Locals} {Q : Wasm.Assertion host}
+    (installation : Installation sourceModule module)
+    (noFallthrough : ∀ final finalLocals, ¬Q (.Fallthrough final finalLocals))
+    (coreWP : Wasm.wp module
+      (float32BoxProgram installation.allocatorIndex) Q store locals env) :
+    Wasm.wp module installation.float32BoxTarget.body Q store locals env := by
+  rw [installation.float32Box_body]
+  exact FirTalos.Correctness.Wasm.wp_append_of_no_fallthrough
+    noFallthrough coreWP
+
+/-- Lift the exact Float box core through the adapter's terminal suffix. -/
+theorem Installation.wp_floatBox_body
+    {host : Type} {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {env : Wasm.HostEnv host} {store : Wasm.Store host}
+    {locals : Wasm.Locals} {Q : Wasm.Assertion host}
+    (installation : Installation sourceModule module)
+    (noFallthrough : ∀ final finalLocals, ¬Q (.Fallthrough final finalLocals))
+    (coreWP : Wasm.wp module
+      (floatBoxProgram installation.allocatorIndex) Q store locals env) :
+    Wasm.wp module installation.floatBoxTarget.body Q store locals env := by
+  rw [installation.floatBox_body]
+  exact FirTalos.Correctness.Wasm.wp_append_of_no_fallthrough
+    noFallthrough coreWP
+
+/-- The installed Float32 box export realizes the complete W6 allocation
+contract while preserving arbitrary caller operand slack. -/
+theorem Installation.terminatesWith_float32Box_of_allocateBoxedScalar
+    {host : Type} {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {env : Wasm.HostEnv host} {before after : MemoryState}
+    {store : Wasm.Store host} {bits : UInt32} {address : Word32}
+    (installation : Installation sourceModule module)
+    (tail : List Wasm.Value)
+    (memory32 : module.memIs64 = false)
+    (valid : before.FrontierInvariant)
+    (related : ResidentAllocatorRel before store installation.frontierIndex)
+    (allocated : allocateBoxedScalar before (.float32 bits) =
+      .ok (after, address))
+    (strictEnd : after.heapCursor < wordModulus)
+    (withinCap : (after.heapCursor - 1) / wasmPageBytes + 1 ≤
+      store.memoryCap module 0) :
+    ∃ finalStore,
+      ResidentAllocatorRel after finalStore installation.frontierIndex ∧
+      Float32BoxAdmission after address bits ∧
+      Wasm.TerminatesWith env module installation.float32BoxIndex store
+        ([.f32 bits] ++ tail)
+        (fun final values => final = finalStore ∧
+          values = .i32 (UInt32.ofNat address.value) :: tail) := by
+  obtain ⟨finalStore, finalRelated, admitted, coreWP⟩ :=
+    wp_float32BoxProgram_of_allocateBoxedScalar
+      installation.allocatorAdapted installation.allocatorNotImport
+      installation.allocatorInstalled memory32 valid related allocated
+      strictEnd withinCap
+  have bodyWP : Wasm.wp module installation.float32BoxTarget.body
+      (fun completion => completion = .Return finalStore
+        [.i32 (UInt32.ofNat address.value)]) store
+      (float32BoxEntry bits) env := by
+    apply installation.wp_float32Box_body (by intros; simp)
+    exact coreWP
+  refine ⟨finalStore, finalRelated, admitted, ?_⟩
+  apply FirTalos.Correctness.terminatesWith_of_wp_body_at
+    installation.float32BoxNotImport installation.float32BoxInstalled
+  rw [installation.float32Box_entry bits tail]
+  apply Wasm.wp.conseq _ bodyWP
+  intro completion completed
+  subst completion
+  obtain ⟨params, _locals, results⟩ := installation.float32Box_signature
+  simp [FirTalos.Correctness.FunctionBodyPost, Wasm.Function.numParams,
+    params, results]
+
+/-- The installed Float box export realizes the complete W6 allocation
+contract while preserving every 64-bit payload pattern and caller tail. -/
+theorem Installation.terminatesWith_floatBox_of_allocateBoxedScalar
+    {host : Type} {sourceModule : Fir.Wasm.Module} {module : Wasm.Module}
+    {env : Wasm.HostEnv host} {before after : MemoryState}
+    {store : Wasm.Store host} {bits : UInt64} {address : Word32}
+    (installation : Installation sourceModule module)
+    (tail : List Wasm.Value)
+    (memory32 : module.memIs64 = false)
+    (valid : before.FrontierInvariant)
+    (related : ResidentAllocatorRel before store installation.frontierIndex)
+    (allocated : allocateBoxedScalar before (.float bits) =
+      .ok (after, address))
+    (strictEnd : after.heapCursor < wordModulus)
+    (withinCap : (after.heapCursor - 1) / wasmPageBytes + 1 ≤
+      store.memoryCap module 0) :
+    ∃ finalStore,
+      ResidentAllocatorRel after finalStore installation.frontierIndex ∧
+      FloatBoxAdmission after address bits ∧
+      Wasm.TerminatesWith env module installation.floatBoxIndex store
+        ([.f64 bits] ++ tail)
+        (fun final values => final = finalStore ∧
+          values = .i32 (UInt32.ofNat address.value) :: tail) := by
+  obtain ⟨finalStore, finalRelated, admitted, coreWP⟩ :=
+    wp_floatBoxProgram_of_allocateBoxedScalar
+      installation.allocatorAdapted installation.allocatorNotImport
+      installation.allocatorInstalled memory32 valid related allocated
+      strictEnd withinCap
+  have bodyWP : Wasm.wp module installation.floatBoxTarget.body
+      (fun completion => completion = .Return finalStore
+        [.i32 (UInt32.ofNat address.value)]) store
+      (floatBoxEntry bits) env := by
+    apply installation.wp_floatBox_body (by intros; simp)
+    exact coreWP
+  refine ⟨finalStore, finalRelated, admitted, ?_⟩
+  apply FirTalos.Correctness.terminatesWith_of_wp_body_at
+    installation.floatBoxNotImport installation.floatBoxInstalled
+  rw [installation.floatBox_entry bits tail]
+  apply Wasm.wp.conseq _ bodyWP
+  intro completion completed
+  subst completion
+  obtain ⟨params, _locals, results⟩ := installation.floatBox_signature
+  simp [FirTalos.Correctness.FunctionBodyPost, Wasm.Function.numParams,
+    params, results]
 
 /-- Lift the exact Float32 unbox core through the adapter's terminal suffix. -/
 theorem Installation.wp_float32Unbox_body
