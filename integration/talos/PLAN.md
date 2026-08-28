@@ -5832,7 +5832,7 @@ correctness becomes a corollary; a backward simulation is deliberately later.
 | W6.7b instruction-boundary Talos adequacy | complete | finite residual-instruction paths agree with Talos `exec` above one common fuel bound and recover exact `Wasm.run` exits |
 | W6.7c emitted structured target | complete | frame laws plus the explicit label/loop/call stack expose progress through calls, branches, loops, returns, and halting |
 | W6.7d structured terminal adequacy | complete | every reachable canonical-entry-to-halted path collapses to the exact instruction-boundary/Talos run; stack shape and arities are proved, not assumed at the public boundary |
-| W6.7e compiler relation and rank | in progress; the constructor-complete validated dispatcher closes ordinary code plus direct/saturated calls, lazy cache, external bind, and returned-frame states; residual validator state is rooted once and retained across active and suspended code. `ConcreteStructuredSourceInvariantLaws` now supplies state-local readiness and preservation, and the validated relation is paired with that source-only invariant before stepping | establish the root final-LCNF semantic invariant for return, descriptors, cases, and operation domains. The ownership/delete/tag/`USize`-mutation family is already invariant-free; newly reached code receives only current readiness, never future execution evidence |
+| W6.7e compiler relation and rank | in progress; the constructor-complete validated dispatcher closes ordinary code plus direct/saturated calls, lazy cache, external bind, and returned-frame states; residual validator state is rooted once and retained across active and suspended code. `ConcreteStructuredSourceInvariantLaws` now supplies state-local readiness and preservation, and the validated relation is paired with that source-only invariant before stepping | establish the root final-LCNF semantic invariant for return, descriptors, cases, and operation domains. Return safety now factors through precise use-site `SemanticBindingAtAbi`; the ownership/delete/tag/`USize`-mutation family is invariant-free. Constructor writes additionally require retained source schema provenance related to the active descriptor witness |
 | W6.7f public finite-trace theorem | in progress; `ConcreteSupportedExport.finiteTraceCorrect_of_sourceInvariant` constructs a ranked simulation over the validated relation paired with a preserved source invariant. Compiler validation is established at the generated root; source semantics is established at the source root; finite header/capture safety and allocation headroom remain independent | derive the initial source invariant from final-LCNF semantic type safety, then discharge finite-runtime and wasm32 address-space safety from a resource-safe invariant or explicitly budgeted finite source prefix |
 | W6.7g corollaries | pending | finite whole-export correctness follows from W6.7d/f; infinite source progress and trace preservation follow from W6.7e/f; backward weak simulation remains explicitly deferred |
 
@@ -6238,6 +6238,25 @@ Reference-count increment/decrement, deletion, constructor-tag mutation, and
 unboxed `USize` field mutation have syntax-directed source-admission lemmas;
 the ordinary increment's finite `UInt32` headroom remains, correctly, in the
 separate runtime-resource law.
+
+The first source-typing extraction distinguishes storage typing from use-site
+typing. `SemanticBindingAtAbi` indexes a source environment binding by the ABI
+required at the current use. This is intentionally more precise than the
+compiler local kind: a coarse `.tobject` local does not by itself justify a
+precise `.object` or `.tagged` return. The active-return theorem now consumes
+that reusable binding judgment directly.
+
+The same audit found that constructor descriptors need a relational component,
+not merely a stronger predicate on `MachineState`. The existing
+`ConcreteObjectFieldKindAligned` quantifies over arbitrary refinement
+witnesses; `concreteObjectFieldKindAligned_not_of_sourceLocation_alone` proves
+that a semantic heap location alone cannot establish it, because another
+witness can attach a conflicting proof-only descriptor to the same location.
+The correct next abstraction retains constructor-schema provenance in the
+final-LCNF typing invariant and relates it to the active witness inside the
+validated source/target relation. This is the sharpened obligation tracked by
+`FIR-BUG-wasm-none-object-field-kind-admission`; replacing the missing bridge
+with a universal source assumption is not considered a correctness proof.
 
 W6.6 float packed-field admission closes the semantic-to-concrete gap for
 `Float32` and `Float` projection and mutation. `ValueRel` now relates the

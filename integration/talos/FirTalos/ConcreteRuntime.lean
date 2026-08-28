@@ -50,6 +50,36 @@ inductive SemanticValueAtAbi : AbiKind → Value → Prop where
       SemanticValueAtAbi .float (.scalar (.float64Bits bits))
   | usize : SemanticValueAtAbi .usize (.usize value)
 
+/-- Source-semantic typing of one environment binding at one use-site ABI.
+
+The ABI is the kind required by that use, not merely the possibly coarser kind
+of the local that stores it.  This distinction is essential for compiler
+boundaries where `.object`, `.tagged`, and `.tobject` share one physical lane:
+a `.tobject` local used as an `.object` result still needs semantic evidence
+that its current value is a heap reference. -/
+def SemanticBindingAtAbi
+    (env : Env) (fvarId : Lean.FVarId) (kind : AbiKind) : Prop :=
+  ∀ {value}, lookup env fvarId = some value → SemanticValueAtAbi kind value
+
+/-- A known source lookup and its semantic ABI fact package the corresponding
+use-site binding judgment. -/
+theorem SemanticBindingAtAbi.of_lookup
+    {env : Env} {fvarId : Lean.FVarId} {kind : AbiKind} {value : Value}
+    (found : lookup env fvarId = some value)
+    (typed : SemanticValueAtAbi kind value) :
+    SemanticBindingAtAbi env fvarId kind := by
+  intro actual actualFound
+  have actualEq : actual = value := Option.some.inj (actualFound.symm.trans found)
+  simpa [actualEq] using typed
+
+/-- Reading a semantically typed binding exposes the promised value shape. -/
+theorem SemanticBindingAtAbi.lookup
+    {env : Env} {fvarId : Lean.FVarId} {kind : AbiKind}
+    (typed : SemanticBindingAtAbi env fvarId kind)
+    {value : Value} (found : lookup env fvarId = some value) :
+    SemanticValueAtAbi kind value :=
+  typed found
+
 /-- Every concrete value relation exposes the corresponding source-semantic
 ABI fact after erasing its physical lane and refinement witness. -/
 theorem PhysicalValueRel.semanticValueAtAbi

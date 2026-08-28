@@ -67,6 +67,18 @@ sound concrete mutation theorem.
 this missing source-typing fact. With it, both FVar and erased current-step
 admission are derivable without inspecting target execution.
 
+The 2026-08-28 source-invariant audit sharpened this boundary.  The current
+predicate quantifies over every `RefinementWitness`, so a source environment
+containing a heap reference cannot prove it: another otherwise valid witness
+can map that location to a word carrying a conflicting proof-only constructor
+descriptor.  The theorem
+`concreteObjectFieldKindAligned_not_of_sourceLocation_alone` is the checked
+counterexample.  A complete repair must retain constructor-schema provenance
+in final-LCNF typing and connect that provenance to the active refinement
+witness at the source/target relation boundary.  Treating the universal
+witness predicate itself as a source-only `MachineState` invariant would only
+rename the missing proof.
+
 ## Semantic impact
 
 The mismatch is ownership-relevant. If a descriptor classifies a slot erased
@@ -95,6 +107,8 @@ none
 ## Resolution and regression
 
 Pending. The proof-side `ConcreteObjectFieldKindAligned` boundary documents the
-minimal missing invariant and unblocks refinement experiments that explicitly
-assume well-typed source states; it does not fix production admission by
-itself.
+pointwise descriptor equality consumed by the existing runtime theorem, but
+the checked counterexample shows that it is not yet the right derivable
+source-invariant interface. It unblocks refinement experiments that assume the
+equality explicitly; it does not fix production admission or establish
+final-LCNF type soundness by itself.

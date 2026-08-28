@@ -4326,6 +4326,27 @@ def ConcreteStructuredReturnValueSafeAt
       lookup source.env result = some sourceValue →
         SemanticValueAtAbi functionResult sourceValue
 
+/-- Use-site typing of the active return binding supplies the complete
+source-only return-safety judgment.
+
+This theorem deliberately asks for the function-result ABI at the use site.
+Typing the binding only at a coarser compiler local such as `.tobject` would
+not justify returning it through a precise `.object` or `.tagged` boundary. -/
+theorem ConcreteStructuredReturnValueSafeAt.of_semanticBinding
+    {functionResult : AbiKind} {source : MachineState}
+    {result : Lean.FVarId}
+    (control : source.control = .code (.return result))
+    (typed : SemanticBindingAtAbi source.env result functionResult) :
+    ConcreteStructuredReturnValueSafeAt functionResult source := by
+  intro actual sourceValue actualControl found
+  have codeEq :
+      Lean.Compiler.LCNF.Code.return result =
+        Lean.Compiler.LCNF.Code.return actual :=
+    Control.code.inj (control.symm.trans actualControl)
+  injection codeEq with resultEq
+  subst actual
+  exact typed found
+
 /-- A validated, source-semantically typed return enters the closed yielded
 branch without a separately supplied current-node admission object.
 
@@ -7095,6 +7116,41 @@ def ConcreteObjectFieldKindAligned
             some (.constructor info fieldKinds) →
           fieldKinds[index]? = some kind
 
+/-- The current universally witness-quantified field-alignment boundary is not
+derivable from a semantic environment and heap location alone.
+
+An otherwise valid reference witness may attach a different proof-only field
+descriptor to the same semantic location.  The eventual source typing theorem
+must therefore retain constructor-schema provenance and relate that provenance
+to the active refinement witness; it cannot manufacture this judgment from
+`MachineState` value shapes alone. -/
+theorem concreteObjectFieldKindAligned_not_of_sourceLocation_alone
+    (objectId : Lean.FVarId) (location : Location)
+    (info : Lean.Compiler.LCNF.CtorInfo) :
+    ¬ ConcreteObjectFieldKindAligned
+        (bind [] objectId (.object (.heap location))) objectId 0 .object := by
+  intro aligned
+  let address : Word32 := ⟨8, by decide⟩
+  let witness : RefinementWitness :=
+    (default : RefinementWitness).bindConstructor location address info
+      #[.erased]
+  have sourceLookup :
+      lookupValue (bind [] objectId (.object (.heap location))) objectId =
+        .ok (.object (.heap location)) := by
+    simp [lookupValue]
+  have valueRelated :
+      ValueRel witness .tobject (.word32 address)
+        (.object (.heap location)) :=
+    .tobject (.heap (.mapped (by
+      simp [witness, RefinementWitness.bindConstructor,
+        LocationMap.lookup?])))
+  have descriptorFound :
+      witness.descriptors.lookup? address =
+        some (.constructor info #[.erased]) := by
+    simp [witness, RefinementWitness.bindConstructor, DescriptorMap.lookup?]
+  have impossible := aligned sourceLookup valueRelated descriptorFound
+  simp at impossible
+
 /-- The FVar mutation specialization connects descriptor typing to the exact
 payload kind selected by production lowering. -/
 def ConcreteObjectFieldFVarTyped
@@ -9831,6 +9887,24 @@ inductive ConcreteStructuredSourceAdmissionSafeAt
       ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
         expectedResult facts sourceRuntime sourceEnv source
         (.sset objectId slotIndex byteOffset fieldId type continuation)
+
+/-- Precise use-site typing of a current return binding directly supplies its
+source-admission constructor. -/
+theorem ConcreteStructuredSourceAdmissionSafeAt.ret_of_semanticBinding
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {externals : ExternalImpl}
+    {expectedResult : AbiKind}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {source : MachineState}
+    {result : Lean.FVarId}
+    (control : source.control = .code (.return result))
+    (typed : SemanticBindingAtAbi source.env result expectedResult) :
+    ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv source (.return result) :=
+  .ret (ConcreteStructuredReturnValueSafeAt.of_semanticBinding control typed)
 
 /-- Reference-count increment is source-admissible independently of whether
 the validator selected the persistent or ordinary lowering.  The ordinary
