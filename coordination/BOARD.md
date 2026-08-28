@@ -25,12 +25,25 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   resident Array provenance consumer after rebasing, is the remaining
   milestone step.
 - Integration owner: `root`, holding the serial landing lease through accepted
-  integration head `d3366493`. `wasm-gen` remains released to the W7-1
+  integration head `29106cfd`. `wasm-gen` remains released to the W7-1
   generation lane. The inherited cleanup, serial and bounded check-throughput,
   mailbox-routing, bounded `Nat.land`, USize range-fact, exact consumer-ratchet,
   and transactional resident-linker stacks are now integrated. Tooling's
   bounded work changed no W7 implementation file and granted no standing W7
   ownership.
+- Accepted W6 validated-simulation checkpoint: functional proof head
+  `2380ade5` is linked through clean tracked handoff `29106cfd`, based directly
+  on `c170b88c`. The constructor-complete global step preserves residual
+  validation through ordinary code, generated calls, lazy cache, external
+  bind, and returned-frame pop, and the public finite-prefix theorem now starts
+  from the real validated export root. The former universal residual-validation
+  field is eliminated. Finite reference-count header and saturated-capture
+  safety are execution-owned beside independent allocation headroom. Lean Beam,
+  the forced 3,128-job cone, `make check`, and all 3,182 Talos jobs pass; bug
+  cards `FIR-BUG-wasm-none-structured-validation-provenance` and
+  `FIR-BUG-wasm-none-finite-trace-refcount-overflow` are fixed. W6 next derives
+  its sole remaining source/phase-safety field from a preserved final-LCNF
+  semantic invariant.
 - Accepted exact scalar-alias proof interface: W7 functional head `f32458a2`
   is linked through clean tracked handoff `e3548322`. The emitter now exports
   its annotation-only object-result source mapper plus closed source-shape
@@ -7076,7 +7089,7 @@ validation work continues; their historical handoff text remains unchanged.
 |---|---|---|---|---|---|
 | Integration | integration owner | `upgrade/lean-4.33` | released | `LEAN-4.33-UPGRADE` landed at `476f001b`; the temporary lane may be retired after publication. | Moves the shared toolchain, compiler-source contracts, and versioned compact-Format package surface to Lean 4.33 without changing the semantic Wasm ABI, concrete layout, or resident-helper signatures. |
 | Lean pass proof | pass-proof owner | `proof/simpcase` | released | Clean tracked checkpoint `8788603c`, functional head `3d811853`, transports the accepted allocated source-only provenance through a monotone deleted let and exposes it from the semantic deleted-constructor matcher beside the exact ledger relation. | Proof-interface refinement only. Lean Beam, the focused 34-job cone, complete 728-case/2,166-comparison gate, and final diff check pass; no runtime, interpreter, pass, ledger, Wasm surface, or shared semantic contract changed. Heap-only USize adaptation remains queued under `W7-LCNF-20260826-021`. |
-| W6 runtime proof | W6 owner | `wasm/talos-runtime` | released | Clean head `d3366493`, functional head `e6d3c2a5`, completes installed refinement for production `UInt8.toNat`, `UInt8.toBitVec`, `UInt16.toNat`, and both `UInt32.toNat` arms. | Contract-proved over the existing tagged/promoted Natural and fixed-width scalar layouts. Full root and 3,182-job Talos gates pass; no W7 implementation or shared contract changed. |
+| W6 runtime proof | W6 owner | `wasm/talos-runtime` | released | Clean head `29106cfd`, functional head `2380ade5`, closes the constructor-complete validated global simulation and switches the public finite-prefix route to the real validated export root. | Proof-interface correction only: residual validation is inductive, source/phase safety is the sole compiler field, and finite header/capture plus allocation safety remain execution-owned. Full root and 3,182-job Talos gates pass; no W7 implementation or shared semantic contract changed. |
 | W7 generation | generation owner | `wasm/generation` | released | Fixed-width natural boxing/body surface is accepted and W6-proved through `d3366493`. The bounded ByteArray immediate-index experiment was correctness-green but rejected for +9,894 bytes and neutral/slower timing; W7-2 is clean with no integration request. | Generation optimization and proof convergence over stable contracts. Full repository, 3,182-job Talos, deterministic artifact, concrete-readiness, reclamation, and differential gates pass; accepted raw lean-zip remains 383,816 bytes, zero imports, 502 functions. |
 | Compiler-native Wasm | integration owner | `wasm/lcnf-c` | parked | Landed checkpoint `a4855402` adds a separately packaged C/Emscripten `Std.Format.prettyM` facade on top of the optimized final-LCNF-to-C route from `2760e3e0`. The browser adapter shares the compact `Format` request and exact `{text, events}` trace contract with W7's FIR-native facade while retaining a private bulk wire, verified Emscripten loader, full pinned Lean runtime, and independent package. The differential suite compares Unicode, grouping, nesting, tags, arbitrary-precision values, initial columns, malformed requests, repeated calls, and a one-MiB UTF-8 transfer through both engines | No shared semantic contract changed and the packages remain physically independent. The lane consumes `Std.Format.prettyM`, final impure LCNF, and Lean's C ABI without changing the symbolic Wasm, W6 concrete-runtime, or W7 resident-runtime surfaces. Resume with controlled sampled profiling of the facade wire and generated C before accepting a runtime optimization |
 | Validation | validation owner | `validation/float-corpus` | active | Clean coordination head `cfa17d81` retains the long 1,008-case native/LCNF calibration. Current-main validation covers 633 native/LCNF cases, 601 V8 cases, 642 unique cases, 1,844 comparisons, 5,750 interpreter transitions, 51 semantic-tag floors, and 142 conjunctive domains. | Test-fixtures may now rebase and admit the 32 scalar-closure cases. The long validation branch rebases separately; alias, termination, IO, and stream-capture contracts remain isolated. |

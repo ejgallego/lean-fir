@@ -5,7 +5,7 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: ready
+state: released
 base: c170b88cb1c3d8697e57a66ec939e7ea72a1894a
 functional-head: 2380ade5bd5701770266086e7e081deeae31d3cc
 contract-base: c170b88cb1c3d8697e57a66ec939e7ea72a1894a
@@ -16,6 +16,6 @@ contracts: No source semantics, concrete layout/runtime, resident-helper signatu
 checks: Lean Beam update/sync/save passed with zero errors for ConcreteStructuredValidation and ConcreteResumableWasm. Forced lake build FirTalos.ConcreteStructuredValidation FirTalos.ConcreteResumableWasm passed all 3,128 jobs. git diff --check passed. make check passed with 730 unique validation cases, 2,172/2,172 comparisons equal, zero findings, 212 active bug cards, and 38 mailbox tests. make talos-setup completed at Talos 0e05edbcfbb105b33e90c60b4f50e2cf193d9254; make talos-check passed all 3,182 jobs with exact receipt 65908df5473988c07a7de67f2e0c953efd83058740bfc575fba7c693c1bf7541.
 bug-cards: FIR-BUG-wasm-none-structured-validation-provenance fixed; FIR-BUG-wasm-none-finite-trace-refcount-overflow fixed
 blockers: none
-handoff: GREEN LIGHT. Fast-forward main from c170b88cb1c3d8697e57a66ec939e7ea72a1894a through functional checkpoint 2380ade5bd5701770266086e7e081deeae31d3cc plus this containing status commit. This lands the provenance-correct ranked simulation and the honest finite-runtime boundary.
-next: After integration acceptance, derive the sole remaining compiler/phase field from a preserved final-LCNF semantic invariant: return value shape, descriptor/local typing, normalized cases, and operation domains. Then package finite runtime and address-space safety from a bounded-resource execution invariant or explicitly budgeted finite prefix.
+handoff: ACCEPTED. Main was fast-forwarded through functional checkpoint 2380ade5bd5701770266086e7e081deeae31d3cc and clean tracked handoff 29106cfd. The provenance-correct ranked simulation and honest finite-runtime boundary are integrated.
+next: Resume from accepted main and derive the sole remaining compiler/phase field from a preserved final-LCNF semantic invariant: return value shape, descriptor/local typing, normalized cases, and operation domains. Then package finite runtime and address-space safety from a bounded-resource execution invariant or explicitly budgeted finite prefix.
 ```
