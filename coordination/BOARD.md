@@ -25,7 +25,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   resident Array provenance consumer after rebasing, is the remaining
   milestone step.
 - Integration owner: `root`, holding the serial landing lease through accepted
-  integration head `d7cd31af`. `wasm-gen` remains released to the W7-1
+  integration head `e3bb25c0`. `wasm-gen` remains released to the W7-1
   generation lane. The inherited cleanup, serial and bounded check-throughput,
   mailbox-routing, bounded `Nat.land`, USize range-fact, exact consumer-ratchet,
   and transactional resident-linker stacks are now integrated. Tooling's
@@ -141,6 +141,19 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   No shared contract changed. External witness extension and constructor
   bind/rebind remain before the full schema-global dispatcher; the
   object-field admission bug stays open.
+- Accepted W6 external witness-extension checkpoint: functional proof head
+  `c4bc96e7` is linked through clean tracked handoff `e3bb25c0`, based on
+  accepted administrative integration head `d9fd630f`. The resolved external
+  core now exposes the `witness.Extends nextWitness` fact already present in
+  `ConcreteExternalCallEvidence`; its validated successor retains the global
+  relation at that exact next-witness index. The generic
+  `withSchemaExtension` combinator transports current constructor-schema
+  agreement through the extension, without replaying any external handler or
+  heap proof. Lean Beam, the forced 3,128-job cone, `make check` at 730 unique
+  cases and 2,172/2,172 comparisons, and all 3,182 Talos jobs pass with receipt
+  `a228e280030505af07f3f3afc3c47876aa6a61409d1b3d8bea9ebeaafa736b5f`.
+  No shared contract changed. Constructor allocation/reuse and the complete
+  schema-global dispatcher remain; the object-field admission bug stays open.
 - Accepted exact scalar-alias proof interface: W7 functional head `f32458a2`
   is linked through clean tracked handoff `e3548322`. The emitter now exports
   its annotation-only object-result source mapper plus closed source-shape
