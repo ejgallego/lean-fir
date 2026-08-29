@@ -47,6 +47,8 @@ import FirTalos.ConcreteResolver
 import FirTalos.ConcreteSupportedExportCorrectness
 import FirTalos.ConcreteTraceSimulation
 import FirTalos.ConcretePassComposition
+import FirTalos.ConcreteFinalLcnfTyping
+import FirTalos.ConcreteFinalLcnfTypingExamples
 import FirTalos.ConcreteResumableWasm
 import FirTalos.ConcreteCompilerCorrectness
 import FirTalos.ConcreteCompilerCorrectnessContract
