@@ -244,6 +244,21 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   invariant instance derived from final-LCNF semantic type/provenance
   soundness plus the independent finite-runtime and wasm32 address-space laws;
   `FIR-BUG-wasm-none-object-field-kind-admission` therefore remains confirmed.
+- Accepted W6 schema-indexed export theorem: functional proof head `a0e9f1fe`
+  is linked through clean tracked handoff `2e0dff75`, based directly on the
+  accepted framework head `8020cac5`.
+  `ConcreteSupportedExport.validatedCodeGlobalRootAt` retains the exact initial
+  refinement witness constructed by the canonical export frame, and
+  `finiteTraceCorrect_of_schemaSourceInvariant` composes that compiler-derived
+  root with one agreeing constructor schema, its hereditary source invariant,
+  and the independent finite-runtime/address-space laws. A caller supplies no
+  target relation, execution path, future transition, termination evidence,
+  universal-schema premise, or translation certificate. Lean Beam, the
+  targeted 3,128-job cone, `git diff --check`, `make check` at 730 unique cases
+  and 2,172/2,172 equal comparisons, `make talos-setup`, and all 3,182 Talos
+  jobs pass. No semantics, ABI, concrete runtime, lowering, emitted code, or
+  compatibility theorem changed. W6 next defines and preserves the final-LCNF
+  semantic type/provenance invariant that instantiates this public surface.
 - Accepted exact scalar-alias proof interface: W7 functional head `f32458a2`
   is linked through clean tracked handoff `e3548322`. The emitter now exports
   its annotation-only object-result source mapper plus closed source-shape
@@ -7289,7 +7304,7 @@ validation work continues; their historical handoff text remains unchanged.
 |---|---|---|---|---|---|
 | Integration | integration owner | `upgrade/lean-4.33` | released | `LEAN-4.33-UPGRADE` landed at `476f001b`; the temporary lane may be retired after publication. | Moves the shared toolchain, compiler-source contracts, and versioned compact-Format package surface to Lean 4.33 without changing the semantic Wasm ABI, concrete layout, or resident-helper signatures. |
 | Lean pass proof | pass-proof owner | `proof/simpcase` | released | Clean tracked checkpoint `8788603c`, functional head `3d811853`, transports the accepted allocated source-only provenance through a monotone deleted let and exposes it from the semantic deleted-constructor matcher beside the exact ledger relation. | Proof-interface refinement only. Lean Beam, the focused 34-job cone, complete 728-case/2,166-comparison gate, and final diff check pass; no runtime, interpreter, pass, ledger, Wasm surface, or shared semantic contract changed. Heap-only USize adaptation remains queued under `W7-LCNF-20260826-021`. |
-| W6 runtime proof | W6 owner | `wasm/talos-runtime` | released | Clean head `7a5d1be3`, functional head `d20971e6`, closes the schema-indexed finite-trace proof framework from exact source schema evolution through `ConcreteFiniteTraceCorrect`. | Additive proof interfaces only: the theorem consumes current-schema readiness and its preservation under the actual source transition, with no universal-schema premise or target certificate. Full root and 3,182-job Talos gates pass; final-LCNF type/provenance soundness and finite resource laws remain the production instantiation boundary. |
+| W6 runtime proof | W6 owner | `wasm/talos-runtime` | released | Clean head `2e0dff75`, functional head `a0e9f1fe`, exposes the schema-indexed finite-trace theorem at the canonical compiler-generated export root. | Additive proof interfaces only: the theorem consumes one agreeing initial schema, its hereditary source invariant, and separate finite resource laws; the compiler supplies the indexed target relation. Full root and 3,182-job Talos gates pass. Final-LCNF type/provenance soundness remains the production instantiation boundary. |
 | W7 generation | generation owner | `wasm/generation` | released | Fixed-width natural boxing/body surface is accepted and W6-proved through `d3366493`. The bounded ByteArray immediate-index experiment was correctness-green but rejected for +9,894 bytes and neutral/slower timing; W7-2 is clean with no integration request. | Generation optimization and proof convergence over stable contracts. Full repository, 3,182-job Talos, deterministic artifact, concrete-readiness, reclamation, and differential gates pass; accepted raw lean-zip remains 383,816 bytes, zero imports, 502 functions. |
 | Compiler-native Wasm | integration owner | `wasm/lcnf-c` | parked | Landed checkpoint `a4855402` adds a separately packaged C/Emscripten `Std.Format.prettyM` facade on top of the optimized final-LCNF-to-C route from `2760e3e0`. The browser adapter shares the compact `Format` request and exact `{text, events}` trace contract with W7's FIR-native facade while retaining a private bulk wire, verified Emscripten loader, full pinned Lean runtime, and independent package. The differential suite compares Unicode, grouping, nesting, tags, arbitrary-precision values, initial columns, malformed requests, repeated calls, and a one-MiB UTF-8 transfer through both engines | No shared semantic contract changed and the packages remain physically independent. The lane consumes `Std.Format.prettyM`, final impure LCNF, and Lean's C ABI without changing the symbolic Wasm, W6 concrete-runtime, or W7 resident-runtime surfaces. Resume with controlled sampled profiling of the facade wire and generated C before accepting a runtime optimization |
 | Validation | validation owner | `validation/float-corpus` | active | Clean coordination head `cfa17d81` retains the long 1,008-case native/LCNF calibration. Current-main validation covers 633 native/LCNF cases, 601 V8 cases, 642 unique cases, 1,844 comparisons, 5,750 interpreter transitions, 51 semantic-tag floors, and 142 conjunctive domains. | Test-fixtures may now rebase and admit the 32 scalar-closure cases. The long validation branch rebases separately; alias, termination, IO, and stream-capture contracts remain isolated. |
