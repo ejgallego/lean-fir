@@ -31,6 +31,24 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   and transactional resident-linker stacks are now integrated. Tooling's
   bounded work changed no W7 implementation file and granted no standing W7
   ownership.
+- Accepted W6 backward finite-prefix composition checkpoint: functional proof
+  head `937cd033` is linked through clean tracked handoff `1d220cc1`, based on
+  accepted schema-source-invariant head `d8ac1b47`. Generic observable weak
+  simulations and their entry-point finite-prefix packages now compose while
+  retaining intermediate states and observations only existentially. The W6
+  ranked theorem embeds into that package, and FIR's established relational
+  finite-stuttering pass interface is connected exactly to the deterministic
+  interpreter through the implementation-graph external specification. The
+  public `precomposeStutteringPass` theorem therefore extends final-LCNF-to-Wasm
+  correctness one impure pass backward without a target trace or program
+  certificate. The result deliberately retains finite-prefix correctness but
+  does not claim that W6's final-LCNF anti-stuttering rank composes through an
+  arbitrary pass; a composable progress theorem remains separate. Lean Beam,
+  the 3,108-job targeted cone, `make check` at 730 unique cases and 2,172/2,172
+  comparisons, and all 3,183 Talos jobs pass with receipt
+  `ec63d1eb3a275b7cbaa5d5c61a01bd1520288c52ee7291cde74c23d66a26d354`.
+  No shared semantic contract changed; bug cards: none. W6 next uses `sumTo`
+  to derive final-LCNF admission from reusable static typing/provenance facts.
 - Accepted W6 source-invariant simulation checkpoint: functional proof head
   `176cdbc7` is linked through clean tracked handoff `3ffe30f1`, based directly
   on accepted validated-simulation head `638e05a2`. The public theorem
