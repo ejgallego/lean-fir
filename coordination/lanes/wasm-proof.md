@@ -5,17 +5,17 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: ready
-base: d8ac1b47ebe0ce2ef4d6efc10a2924eb2772e2fb
-functional-head: 937cd033f7baf2b54b2de1c7f1d211a848925daa
-contract-base: d8ac1b47ebe0ce2ef4d6efc10a2924eb2772e2fb
+state: active
+base: 76ca1f18962166d60a714faca7e8daddbc7a6aee
+functional-head: 76ca1f18962166d60a714faca7e8daddbc7a6aee
+contract-base: 76ca1f18962166d60a714faca7e8daddbc7a6aee
 clean-at-update: true
-slice: Add reusable observable finite-prefix simulation composition, embed the ranked W6 theorem into it, bridge FIR's relational finite-stuttering pass API to the deterministic interpreter, and prove one-edge backward precomposition including an equality-pass regression.
-files: integration/talos/FirTalos/Correctness/WeakSimulation.lean; integration/talos/FirTalos/ConcreteTraceSimulation.lean; integration/talos/FirTalos/ConcretePassComposition.lean; integration/talos/FirTalos.lean; coordination/lanes/wasm-proof.md
-contracts: additive W6 proof-facing composition surface only; the existing ranked concrete theorem, source semantics, pass semantics, ABI, runtime/layout, lowering, and emitted code remain unchanged
-checks: Lean Beam sync/save WeakSimulation, ConcreteTraceSimulation, ConcretePassComposition, and FirTalos umbrella (pass); git diff --check (pass); lake build FirTalos.ConcretePassComposition (pass, 3108 jobs); make check (pass, 730 unique validation cases and 2172/2172 equal comparisons); make talos-setup (pass, Talos 0e05edbcfbb105b33e90c60b4f50e2cf193d9254); make talos-check (pass, 3183 jobs, receipt ec63d1eb3a275b7cbaa5d5c61a01bd1520288c52ee7291cde74c23d66a26d354)
+slice: Use the real compiled sumTo shape to derive reusable semantic ABI typing for admitted pure Integer, Nat, and scalar external results and their destination environment binding.
+files: integration/talos/FirTalos/ConcreteFinalLcnfTyping.lean; integration/talos/FirTalos.lean; coordination/lanes/wasm-proof.md
+contracts: additive source-semantic final-LCNF typing lemmas only; source/runtime semantics, existing admission judgments, ABI, concrete layout, lowering, and emitted code remain unchanged
+checks: not-run
 bug-cards: none
 blockers: none
-handoff: ready for integration from clean branch wasm/talos-runtime at the containing status commit
-next: Introduce the sumTo captured final-LCNF admission fixture and use it to drive generic static source typing/provenance; keep program-specific proof limited to closed syntax and entry/resource facts.
+handoff: none
+next: Prove pure external result typing generically, then retain sumTo only as a compiler-shape regression before extending typing through cases, direct recursion, and returns.
 ```
