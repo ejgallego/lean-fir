@@ -13,6 +13,8 @@ Wasm configuration and prove its terminating executions agree with
 
 namespace FirTalos.Concrete
 
+universe uState uObservation
+
 open Fir.Wasm
 open Fir.Wasm.Concrete
 open Fir.LeanIR.Impure
@@ -145,5 +147,42 @@ def ConcreteFiniteTraceCorrect
     (sourceInitial : MachineState) (targetInitial : target.State) : Prop :=
   ∃ simulation : ConcreteRankedTraceSimulation externals target,
     simulation.relation sourceInitial targetInitial
+
+/-- Forget the anti-stuttering rank at the public entry point while retaining
+the complete finite-prefix theorem and the exact W6 observation relation.
+This is the honest boundary used to compose with compiler-pass simulations
+whose current APIs establish finite stuttering but do not yet expose a
+composable progress measure. -/
+theorem ConcreteFiniteTraceCorrect.toObservedFinitePrefixCorrect
+    {externals : ExternalImpl} {target : ConcreteResumableMachine}
+    {sourceInitial : MachineState} {targetInitial : target.State}
+    (correct : ConcreteFiniteTraceCorrect externals target sourceInitial
+      targetInitial) :
+    ObservedFinitePrefixCorrect (sourceExecutionSystem externals) target.system
+      sourceInitial targetInitial := by
+  obtain ⟨simulation, initial⟩ := correct
+  exact ⟨simulation.toGeneric.toObserved, initial⟩
+
+/-- Precompose the W6 backend theorem with an arbitrary observable compiler
+pass or phase boundary.  The result relates the earlier program directly to
+the concrete Wasm machine; its state and observation relations retain the
+intermediate final-LCNF witness only existentially.
+
+The conclusion is intentionally the unranked finite-prefix package.  Recovering
+a divergence-sensitive ranked result requires a separate progress-composition
+law for the upstream pass rather than an unsound reuse of W6's final-LCNF
+control rank. -/
+theorem ConcreteFiniteTraceCorrect.precomposeFinitePrefix
+    {earlier : ObservableTransitionSystem.{uState, uObservation}}
+    {externals : ExternalImpl} {target : ConcreteResumableMachine}
+    {earlierInitial : earlier.State} {sourceInitial : MachineState}
+    {targetInitial : target.State}
+    (passCorrect : ObservedFinitePrefixCorrect earlier
+      (sourceExecutionSystem externals) earlierInitial sourceInitial)
+    (wasmCorrect : ConcreteFiniteTraceCorrect externals target sourceInitial
+      targetInitial) :
+    ObservedFinitePrefixCorrect earlier target.system earlierInitial
+      targetInitial :=
+  passCorrect.comp wasmCorrect.toObservedFinitePrefixCorrect
 
 end FirTalos.Concrete

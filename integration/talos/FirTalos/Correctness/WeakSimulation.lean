@@ -18,7 +18,7 @@ resumable target configuration and relating its terminating executions back to
 
 namespace FirTalos.Correctness
 
-universe uState uObservation vState vObservation
+universe uState uObservation vState vObservation wState wObservation
 
 /-- A transition system together with the observation available at every
 finite configuration, not merely at termination. -/
@@ -107,6 +107,13 @@ structure ObservedWeakSimulation
 
 namespace ObservedWeakSimulation
 
+/-- Relational composition, retaining the intermediate witness.  Keeping this
+definition independent of transition systems makes the same operation usable
+for both state relations and observation relations. -/
+def RelationComp (first : α → β → Prop) (second : β → γ → Prop)
+    (left : α) (right : γ) : Prop :=
+  ∃ middle, first left middle ∧ second middle right
+
 /-- Match an arbitrary finite source path by concatenating the target paths
 chosen for its individual transitions. -/
 theorem matchPath
@@ -157,7 +164,90 @@ theorem reaches
     simulation.finitePrefix related path
   exact ⟨targetAfter, ⟨targetCount, targetPath⟩, finalRelated, observations⟩
 
+/-- Observable weak simulations compose.  A path chosen by the first
+simulation is transported, step by step, through the second simulation.  The
+resulting observation relation is ordinary relational composition, so clients
+can later collapse representation-specific intermediate observations with an
+independent compatibility theorem.
+
+This theorem deliberately concerns finite prefixes only.  Anti-stuttering
+progress carried by `RankedObservedWeakSimulation` needs an additional
+composition law; it is not silently discarded under a ranked name. -/
+noncomputable def comp
+    {source : ObservableTransitionSystem.{uState, uObservation}}
+    {middle : ObservableTransitionSystem.{vState, vObservation}}
+    {target : ObservableTransitionSystem.{wState, wObservation}}
+    (first : ObservedWeakSimulation source middle)
+    (second : ObservedWeakSimulation middle target) :
+    ObservedWeakSimulation source target where
+  relation := RelationComp first.relation second.relation
+  observationRel := RelationComp first.observationRel second.observationRel
+  observes := by
+    intro sourceState targetState related
+    obtain ⟨middleState, firstRelated, secondRelated⟩ := related
+    exact ⟨middle.observe middleState, first.observes firstRelated,
+      second.observes secondRelated⟩
+  advance := by
+    intro sourceBefore sourceAfter targetBefore related transition
+    obtain ⟨middleBefore, firstRelated, secondRelated⟩ := related
+    obtain ⟨middleCount, middleAfter, middlePath, firstAfter⟩ :=
+      first.advance firstRelated transition
+    obtain ⟨targetCount, targetAfter, targetPath, secondAfter⟩ :=
+      second.matchPath secondRelated middlePath
+    exact ⟨targetCount, targetAfter, targetPath,
+      ⟨middleAfter, firstAfter, secondAfter⟩⟩
+
 end ObservedWeakSimulation
+
+/-- Entry-point packaging for finite observable-prefix correctness.  Unlike a
+ranked simulation, this structure makes no silent-divergence claim; its exact
+content is the finite-prefix theorem exposed by `ObservedWeakSimulation`. -/
+def ObservedFinitePrefixCorrect
+    (source : ObservableTransitionSystem.{uState, uObservation})
+    (target : ObservableTransitionSystem.{vState, vObservation})
+    (sourceInitial : source.State) (targetInitial : target.State) : Prop :=
+  ∃ simulation : ObservedWeakSimulation source target,
+    simulation.relation sourceInitial targetInitial
+
+namespace ObservedFinitePrefixCorrect
+
+/-- Backward compiler-pass composition at an entry point.  The first proof
+relates an earlier compiler snapshot to the snapshot consumed by the second
+proof. -/
+theorem comp
+    {source : ObservableTransitionSystem.{uState, uObservation}}
+    {middle : ObservableTransitionSystem.{vState, vObservation}}
+    {target : ObservableTransitionSystem.{wState, wObservation}}
+    {sourceInitial : source.State} {middleInitial : middle.State}
+    {targetInitial : target.State}
+    (first : ObservedFinitePrefixCorrect source middle sourceInitial
+      middleInitial)
+    (second : ObservedFinitePrefixCorrect middle target middleInitial
+      targetInitial) :
+    ObservedFinitePrefixCorrect source target sourceInitial targetInitial := by
+  obtain ⟨firstSimulation, firstInitial⟩ := first
+  obtain ⟨secondSimulation, secondInitial⟩ := second
+  exact ⟨firstSimulation.comp secondSimulation,
+    ⟨middleInitial, firstInitial, secondInitial⟩⟩
+
+/-- Direct finite-prefix consequence of the entry-point package. -/
+theorem finitePrefix
+    (correct : ObservedFinitePrefixCorrect source target sourceInitial
+      targetInitial)
+    (path : FinitePath source.step count sourceInitial sourceAfter) :
+    ∃ (simulation : ObservedWeakSimulation source target)
+        (targetCount : Nat) (targetAfter : target.State),
+      FinitePath target.step targetCount targetInitial targetAfter ∧
+      simulation.relation sourceAfter targetAfter ∧
+      simulation.observationRel
+        (source.observe sourceAfter) (target.observe targetAfter) :=
+  by
+    obtain ⟨simulation, initial⟩ := correct
+    obtain ⟨targetCount, targetAfter, targetPath, related, observed⟩ :=
+      simulation.finitePrefix initial path
+    exact ⟨simulation, targetCount, targetAfter, targetPath, related, observed⟩
+
+end ObservedFinitePrefixCorrect
 
 /-- A weak simulation equipped with a well-founded source rank for zero-step
 matches.  A source transition may stutter on the target only while this rank
