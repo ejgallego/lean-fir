@@ -25,7 +25,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   resident Array provenance consumer after rebasing, is the remaining
   milestone step.
 - Integration owner: `root`, holding the serial landing lease through accepted
-  integration head `a02a9941`. `wasm-gen` remains released to the W7-1
+  integration head `e9a31505`. `wasm-gen` remains released to the W7-1
   generation lane. The inherited cleanup, serial and bounded check-throughput,
   mailbox-routing, bounded `Nat.land`, USize range-fact, exact consumer-ratchet,
   and transactional resident-linker stacks are now integrated. Tooling's
@@ -188,6 +188,25 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   No shared contract changed. The next W6 slice exposes monotone witness
   extension for the remaining direct operations and assembles the complete
   schema-global dispatcher; the object-field admission bug remains open.
+- Accepted W6 schema-global direct-dispatch checkpoint: functional proof head
+  `ddfecad5` is linked through clean tracked handoff `e9a31505`, based on
+  accepted schema-changing direct-let integration head `c477dec0`.
+  `ReuseCapacityDirectLetRuntimeRefinesWithExtension` now exposes the exact
+  monotone witness relation for local aliases, immediate and allocating
+  literals, all projection families, boxing/unboxing, and `isShared`, through
+  the pure-external, ownership, whole-cache, entry-relative, structured, and
+  validated layers. `ReuseBudgetedDirectSupported.schema_cases` partitions
+  the complete production direct family between that preserving cone and the
+  schema-changing constructor/reuse cone, and
+  `advance_directLetSchemaGlobal_of_step` closes both behind one schema-global
+  successor. Lean Beam, the 3,127-job structured-validation cone, `make check`
+  at 730 unique cases and 2,172/2,172 comparisons, and all 3,182 Talos jobs
+  pass with receipt
+  `892f942460716ba3d7d6790ca6b3fb73d44e7935f304c79bd744004f48965b04`.
+  No shared contract changed. The next W6 slice strengthens the outer code
+  dispatcher to return the schema-global relation in every branch, then
+  retires the legacy module-global effect-admission surface; the object-field
+  admission bug remains open.
 - Accepted exact scalar-alias proof interface: W7 functional head `f32458a2`
   is linked through clean tracked handoff `e3548322`. The emitter now exports
   its annotation-only object-result source mapper plus closed source-shape
