@@ -425,6 +425,76 @@ Legacy admission keeps the independent address-space premise. The two
 schema-typed field mutations have exact cost zero, so they bypass the old
 universally witness-quantified admission constructors and dispatch directly to
 the active-witness successors. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advanceSchemaStep_of_schemaSourceReady
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : Fir.LeanIR.Impure.ExternalImpl}
+    {schema : ConstructorSchema}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : Fir.LeanIR.Impure.RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : Fir.Wasm.Concrete.RefinementWitness}
+    {functionResult : Fir.Wasm.AbiKind}
+    {callerExpectedResult : Option Fir.Wasm.AbiKind}
+    {facts : Fir.Wasm.ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Fir.LeanIR.Impure.Env}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : Fir.LeanIR.Impure.MachineState}
+    {target : StructuredWasmState Host}
+    (sourceReady : ConcreteStructuredSchemaSourceReadyAt schema program
+      sourceModule targetModule hosts externals source)
+    (finiteRuntimeSafety : ConcreteStructuredCurrentStepFiniteRuntimeSafety
+      program sourceModule targetModule hosts externals)
+    (addressSpaceSafety : ConcreteStructuredCurrentStepAddressSpaceSafety
+      program sourceModule targetModule hosts externals)
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      sourceCode targetStore targetLocals targetCode witness source target)
+    (schemaAgrees : schema.WitnessAgrees witness)
+    (sourceStep : Fir.LeanIR.Impure.executeStep externals source =
+      .next sourceAfter) :
+    ∃ targetCount targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetCount target targetAfter ∧
+        ConcreteStructuredSchemaValidatedCodeStepOutcome program sourceModule
+          targetModule hosts externals source sourceAfter schema targetAfter ∧
+        (targetCount = 0 →
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source) := by
+  have sourceSafe := sourceReady.code spec activeResult related sourceStep
+  have finiteSafe := finiteRuntimeSafety.code spec activeResult related sourceStep
+  obtain ⟨requiredBytes, admitted⟩ :=
+    related.core.admitSchema_of_source_safe_step sourceSafe finiteSafe sourceStep
+  cases admitted with
+  | legacy legacyAdmission eligible =>
+      have budget := addressSpaceSafety.code related.core.core sourceStep
+        legacyAdmission
+      exact related.advance_schemaStep_of_schema_admission activeResult
+        schemaAgrees
+        (.legacy legacyAdmission eligible) budget sourceStep
+  | objectFieldFVar fieldTyped =>
+      exact related.advance_schemaStep_of_schema_admission activeResult
+        schemaAgrees
+        (.objectFieldFVar fieldTyped) (Nat.zero_le _) sourceStep
+  | objectFieldErased fieldTyped =>
+      exact related.advance_schemaStep_of_schema_admission activeResult
+        schemaAgrees
+        (.objectFieldErased fieldTyped) (Nat.zero_le _) sourceStep
+
+/-- Compatibility projection of schema-aware active-code advancement. -/
 theorem ConcreteStructuredValidatedCodeOutcome.advance_of_schemaSourceReady
     {program : Fir.LeanIR.ImpureProgram}
     {sourceModule : Fir.Wasm.Module}
@@ -474,31 +544,122 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_of_schemaSourceReady
         (targetCount = 0 →
           compilerStructuredControlRank sourceAfter <
             compilerStructuredControlRank source) := by
-  have sourceSafe := sourceReady.code spec activeResult related sourceStep
-  have finiteSafe := finiteRuntimeSafety.code spec activeResult related sourceStep
-  obtain ⟨requiredBytes, admitted⟩ :=
-    related.core.admitSchema_of_source_safe_step sourceSafe finiteSafe sourceStep
-  cases admitted with
-  | legacy legacyAdmission eligible =>
-      have budget := addressSpaceSafety.code related.core.core sourceStep
-        legacyAdmission
-      exact related.advance_schemaGlobal_of_schema_admission activeResult
-        schemaAgrees
-        (.legacy legacyAdmission eligible) budget sourceStep
-  | objectFieldFVar fieldTyped =>
-      exact related.advance_schemaGlobal_of_schema_admission activeResult
-        schemaAgrees
-        (.objectFieldFVar fieldTyped) (Nat.zero_le _) sourceStep
-  | objectFieldErased fieldTyped =>
-      exact related.advance_schemaGlobal_of_schema_admission activeResult
-        schemaAgrees
-        (.objectFieldErased fieldTyped) (Nat.zero_le _) sourceStep
+  obtain ⟨targetCount, targetAfter, targetPath, next, rank⟩ :=
+    related.advanceSchemaStep_of_schemaSourceReady sourceReady
+      finiteRuntimeSafety addressSpaceSafety activeResult schemaAgrees sourceStep
+  exact ⟨targetCount, targetAfter, targetPath, next.toSchemaGlobal, rank⟩
 
 /-- The witness-indexed validated global relation advances while carrying one
 constructor schema through every established outcome shape. Active code uses
 schema-aware source readiness and the complete schema-global code dispatcher;
 administrative states preserve the witness, except resolved external execution
 which transports agreement through its explicit witness extension. -/
+theorem ConcreteStructuredValidatedCodeGlobalOutcomeAt.advanceSchemaStep_of_schemaSourceReady
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : Fir.LeanIR.Impure.ExternalImpl}
+    {schema : ConstructorSchema}
+    {witness : Fir.Wasm.Concrete.RefinementWitness}
+    {source sourceAfter : Fir.LeanIR.Impure.MachineState}
+    {target : StructuredWasmState Host}
+    (sourceReady : ConcreteStructuredSchemaSourceReadyAt schema program
+      sourceModule targetModule hosts externals source)
+    (finiteRuntimeSafety : ConcreteStructuredCurrentStepFiniteRuntimeSafety
+      program sourceModule targetModule hosts externals)
+    (addressSpaceSafety : ConcreteStructuredCurrentStepAddressSpaceSafety
+      program sourceModule targetModule hosts externals)
+    (schemaAgrees : schema.WitnessAgrees witness)
+    (related : ConcreteStructuredValidatedCodeGlobalOutcomeAt program
+      sourceModule targetModule hosts externals witness source target)
+    (sourceStep :
+      Fir.LeanIR.Impure.executeStep externals source = .next sourceAfter) :
+    ∃ targetCount targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetCount target targetAfter ∧
+        ConcreteStructuredSchemaValidatedCodeStepOutcome program sourceModule
+          targetModule hosts externals source sourceAfter schema targetAfter ∧
+        (targetCount = 0 →
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source) := by
+  cases related with
+  | code activeResult related =>
+      exact related.advanceSchemaStep_of_schemaSourceReady sourceReady
+        finiteRuntimeSafety addressSpaceSafety activeResult schemaAgrees
+        sourceStep
+  | directReady related =>
+      have noShape : ¬ ∃ nextSchema,
+          ConstructorSchema.DirectLetShapeAt source schema nextSchema := by
+        simp [ConstructorSchema.DirectLetShapeAt,
+          related.core.ready.sourceControlEq]
+      obtain ⟨targetAfter, targetPath, next⟩ :=
+        related.advance_enter_of_step sourceStep
+      exact ⟨1, targetAfter, targetPath,
+        next.withSchemaPreservedStep sourceStep noShape schemaAgrees,
+        by omega⟩
+  | saturatedReady related =>
+      have noShape : ¬ ∃ nextSchema,
+          ConstructorSchema.DirectLetShapeAt source schema nextSchema := by
+        simp [ConstructorSchema.DirectLetShapeAt,
+          related.core.ready.sourceControlEq]
+      obtain ⟨targetCount, targetAfter, targetPath, targetPositive, next⟩ :=
+        related.advance_enter_of_step sourceStep
+      exact ⟨targetCount, targetAfter, targetPath,
+        next.withSchemaPreservedStep sourceStep noShape schemaAgrees, by omega⟩
+  | lazyReady related =>
+      have noShape : ¬ ∃ nextSchema,
+          ConstructorSchema.DirectLetShapeAt source schema nextSchema := by
+        simp [ConstructorSchema.DirectLetShapeAt,
+          related.core.ready.sourceControlEq]
+      cases related.path with
+      | hit sourceValue semanticFound =>
+          obtain ⟨physical, targetAfter, targetPath, next⟩ :=
+            related.advance_hit_of_step semanticFound sourceStep
+          exact ⟨4, targetAfter, targetPath,
+            (ConcreteStructuredValidatedCodeGlobalOutcomeAt.externalBind next)
+              |>.withSchemaPreservedStep sourceStep noShape schemaAgrees,
+            by omega⟩
+      | miss calleeCode internal resultClassified notObject notTObject
+          semanticEmpty =>
+          obtain ⟨targetAfter, targetPath, next⟩ :=
+            related.advance_miss_of_step internal resultClassified notObject
+              notTObject semanticEmpty sourceStep
+          exact ⟨3, targetAfter, targetPath,
+            next.withSchemaPreservedStep sourceStep noShape schemaAgrees,
+            by omega⟩
+  | externalReady related =>
+      have noShape : ¬ ∃ nextSchema,
+          ConstructorSchema.DirectLetShapeAt source schema nextSchema := by
+        simp [ConstructorSchema.DirectLetShapeAt,
+          related.core.ready.sourceControlEq]
+      obtain ⟨nextWitness, targetAfter, targetPath, witnessExtension, next⟩ :=
+        related.advance_of_step sourceStep
+      exact ⟨1, targetAfter, targetPath,
+        next.withSchemaExtensionPreservedStep sourceStep noShape schemaAgrees
+          witnessExtension,
+        by omega⟩
+  | externalBind related =>
+      have noShape : ¬ ∃ nextSchema,
+          ConstructorSchema.DirectLetShapeAt source schema nextSchema := by
+        simp [ConstructorSchema.DirectLetShapeAt,
+          related.core.bindFocus.sourceControlEq]
+      obtain ⟨targetAfter, targetPath, next⟩ :=
+        related.advance_of_step sourceStep
+      exact ⟨1, targetAfter, targetPath,
+        next.withSchemaPreservedStep sourceStep noShape schemaAgrees,
+        by omega⟩
+  | returned related =>
+      have noShape : ¬ ∃ nextSchema,
+          ConstructorSchema.DirectLetShapeAt source schema nextSchema := by
+        simp [ConstructorSchema.DirectLetShapeAt,
+          related.yielded.sourceControlEq]
+      obtain ⟨targetCount, targetAfter, targetPath, targetPositive, next⟩ :=
+        related.advance_of_step sourceStep
+      exact ⟨targetCount, targetAfter, targetPath,
+        next.withSchemaPreservedStep sourceStep noShape schemaAgrees, by omega⟩
+
+/-- Compatibility projection of transition-retaining global advancement. -/
 theorem ConcreteStructuredValidatedCodeGlobalOutcomeAt.advance_of_schemaSourceReady
     {program : Fir.LeanIR.ImpureProgram}
     {sourceModule : Fir.Wasm.Module}
@@ -528,52 +689,106 @@ theorem ConcreteStructuredValidatedCodeGlobalOutcomeAt.advance_of_schemaSourceRe
         (targetCount = 0 →
           compilerStructuredControlRank sourceAfter <
             compilerStructuredControlRank source) := by
-  cases related with
-  | code activeResult related =>
-      exact related.advance_of_schemaSourceReady sourceReady
-        finiteRuntimeSafety addressSpaceSafety activeResult schemaAgrees
-        sourceStep
-  | directReady related =>
-      obtain ⟨targetAfter, targetPath, next⟩ :=
-        related.advance_enter_of_step sourceStep
-      exact ⟨1, targetAfter, targetPath, next.withSchema schemaAgrees,
-        by omega⟩
-  | saturatedReady related =>
-      obtain ⟨targetCount, targetAfter, targetPath, targetPositive, next⟩ :=
-        related.advance_enter_of_step sourceStep
-      exact ⟨targetCount, targetAfter, targetPath,
-        next.withSchema schemaAgrees, by omega⟩
-  | lazyReady related =>
-      cases related.path with
-      | hit sourceValue semanticFound =>
-          obtain ⟨physical, targetAfter, targetPath, next⟩ :=
-            related.advance_hit_of_step semanticFound sourceStep
-          exact ⟨4, targetAfter, targetPath,
-            (ConcreteStructuredValidatedCodeGlobalOutcomeAt.externalBind next)
-              |>.withSchema schemaAgrees,
-            by omega⟩
-      | miss calleeCode internal resultClassified notObject notTObject
-          semanticEmpty =>
-          obtain ⟨targetAfter, targetPath, next⟩ :=
-            related.advance_miss_of_step internal resultClassified notObject
-              notTObject semanticEmpty sourceStep
-          exact ⟨3, targetAfter, targetPath,
-            next.withSchema schemaAgrees, by omega⟩
-  | externalReady related =>
-      obtain ⟨nextWitness, targetAfter, targetPath, witnessExtension, next⟩ :=
-        related.advance_of_step sourceStep
-      exact ⟨1, targetAfter, targetPath,
-        next.withSchemaExtension schemaAgrees witnessExtension, by omega⟩
-  | externalBind related =>
-      obtain ⟨targetAfter, targetPath, next⟩ :=
-        related.advance_of_step sourceStep
-      exact ⟨1, targetAfter, targetPath, next.withSchema schemaAgrees,
-        by omega⟩
-  | returned related =>
-      obtain ⟨targetCount, targetAfter, targetPath, targetPositive, next⟩ :=
-        related.advance_of_step sourceStep
-      exact ⟨targetCount, targetAfter, targetPath,
-        next.withSchema schemaAgrees, by omega⟩
+  obtain ⟨targetCount, targetAfter, targetPath, next, rank⟩ :=
+    related.advanceSchemaStep_of_schemaSourceReady sourceReady
+      finiteRuntimeSafety addressSpaceSafety schemaAgrees sourceStep
+  exact ⟨targetCount, targetAfter, targetPath, next.toSchemaGlobal, rank⟩
+
+/-- One source step preserves the validated compiler state and its
+schema-indexed hereditary source invariant in lockstep. -/
+theorem ConcreteStructuredSchemaValidatedInvariantGlobalOutcome.advance
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : Fir.LeanIR.Impure.ExternalImpl}
+    {Invariant : Fir.LeanIR.Impure.MachineState → ConstructorSchema → Prop}
+    (laws : ConcreteStructuredSchemaSourceInvariantLaws program sourceModule
+      targetModule hosts externals Invariant)
+    (finiteRuntimeSafety : ConcreteStructuredCurrentStepFiniteRuntimeSafety
+      program sourceModule targetModule hosts externals)
+    (addressSpaceSafety : ConcreteStructuredCurrentStepAddressSpaceSafety
+      program sourceModule targetModule hosts externals)
+    {source sourceAfter : Fir.LeanIR.Impure.MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredSchemaValidatedInvariantGlobalOutcome program
+      sourceModule targetModule hosts externals Invariant source target)
+    (sourceStep :
+      Fir.LeanIR.Impure.executeStep externals source = .next sourceAfter) :
+    ∃ targetCount targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetCount target targetAfter ∧
+        ConcreteStructuredSchemaValidatedInvariantGlobalOutcome program
+          sourceModule targetModule hosts externals Invariant sourceAfter
+          targetAfter ∧
+        (targetCount = 0 →
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source) := by
+  obtain ⟨schema, witness, sourceInvariant, schemaAgrees, validated⟩ := related
+  obtain ⟨targetCount, targetAfter, targetPath, next, rank⟩ :=
+    validated.advanceSchemaStep_of_schemaSourceReady
+      (laws.ready sourceInvariant) finiteRuntimeSafety addressSpaceSafety
+      schemaAgrees sourceStep
+  exact ⟨targetCount, targetAfter, targetPath,
+    next.withInvariant laws sourceInvariant, rank⟩
+
+/-- The schema-indexed hereditary invariant closes the validated compiler
+relation into the generic ranked finite-prefix simulation. -/
+def ConcreteStructuredSchemaSourceInvariantLaws.toGeneratedTraceSimulation
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : Fir.LeanIR.Impure.ExternalImpl}
+    {Invariant : Fir.LeanIR.Impure.MachineState → ConstructorSchema → Prop}
+    (laws : ConcreteStructuredSchemaSourceInvariantLaws program sourceModule
+      targetModule hosts externals Invariant)
+    (finiteRuntimeSafety : ConcreteStructuredCurrentStepFiniteRuntimeSafety
+      program sourceModule targetModule hosts externals)
+    (addressSpaceSafety : ConcreteStructuredCurrentStepAddressSpaceSafety
+      program sourceModule targetModule hosts externals) :
+    ConcreteGeneratedTraceSimulation externals targetModule.wasmModule
+      hosts.env where
+  relation := ConcreteStructuredSchemaValidatedInvariantGlobalOutcome program
+    sourceModule targetModule hosts externals Invariant
+  rank := compilerStructuredControlRank
+  observes := by
+    intro sourceState targetState related
+    obtain ⟨schema, witness, sourceInvariant, schemaAgrees, validated⟩ := related
+    exact validated.toValidatedGlobal.toSupportedGlobal.observes
+  advance := by
+    intro sourceBefore sourceAfter targetBefore related sourceStep
+    exact related.advance laws finiteRuntimeSafety addressSpaceSafety sourceStep
+
+/-- Initial schema agreement, validated compiler state, and the corresponding
+source invariant imply finite-prefix correctness. -/
+theorem ConcreteStructuredSchemaSourceInvariantLaws.toFiniteTraceCorrect
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : Fir.LeanIR.Impure.ExternalImpl}
+    {Invariant : Fir.LeanIR.Impure.MachineState → ConstructorSchema → Prop}
+    (laws : ConcreteStructuredSchemaSourceInvariantLaws program sourceModule
+      targetModule hosts externals Invariant)
+    (finiteRuntimeSafety : ConcreteStructuredCurrentStepFiniteRuntimeSafety
+      program sourceModule targetModule hosts externals)
+    (addressSpaceSafety : ConcreteStructuredCurrentStepAddressSpaceSafety
+      program sourceModule targetModule hosts externals)
+    {sourceInitial : Fir.LeanIR.Impure.MachineState}
+    {targetInitial : StructuredWasmState Host}
+    {schema : ConstructorSchema}
+    {witness : Fir.Wasm.Concrete.RefinementWitness}
+    (sourceInvariant : Invariant sourceInitial schema)
+    (schemaAgrees : schema.WitnessAgrees witness)
+    (validated : ConcreteStructuredValidatedCodeGlobalOutcomeAt program
+      sourceModule targetModule hosts externals witness sourceInitial
+      targetInitial) :
+    ConcreteFiniteTraceCorrect externals
+      (concreteStructuredWasmMachine targetModule.wasmModule hosts.env)
+      sourceInitial targetInitial :=
+  ⟨laws.toGeneratedTraceSimulation finiteRuntimeSafety addressSpaceSafety,
+    ⟨schema, witness, sourceInvariant, schemaAgrees, validated⟩⟩
 
 /-- Current source readiness and finite runtime safety preserve the recursively
 validated global relation for one source step.

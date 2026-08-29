@@ -189,15 +189,14 @@ none
 
 ## Resolution and regression
 
-Pending. The proof-side `ConcreteObjectFieldKindAligned` boundary documents the
-pointwise descriptor equality consumed by the existing runtime theorem, but
-the checked counterexample shows that it is not yet the right derivable
-source-invariant interface. The active-witness schema bridge now provides the
-right replacement boundary and its allocation/reuse transports. Those
-transports now reach the closed schema-global constructor/reuse successor, and
-the complete direct dispatcher also carries unchanged-schema transport for the
-rest of the direct family. The outer code and administrative dispatchers now
-preserve the same schema-global relation end to end. The remaining gap is the
-schema-indexed hereditary source invariant and its finite-trace simulation
-wrapper, after which the legacy module-global admission surface can be
-retired. This does not yet establish final-LCNF type soundness.
+Pending upstream typing theorem. The proof-side
+`ConcreteObjectFieldKindAligned` boundary documents the pointwise descriptor
+equality consumed by the runtime theorem, while the checked counterexample
+shows why arbitrary accepted LCNF cannot derive it. The active-witness schema
+bridge, exact constructor/reuse transition, outer administrative dispatchers,
+and schema-indexed ranked simulation/finite-trace wrapper are now complete.
+The remaining gap is an invariant instance derived from final-LCNF semantic
+type/provenance soundness, together with the independent finite-runtime and
+wasm32 address-space laws. The generic proof framework is no longer missing;
+this card remains open because final-LCNF type soundness itself is not yet
+established.

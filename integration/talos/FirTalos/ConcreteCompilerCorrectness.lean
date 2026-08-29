@@ -14410,6 +14410,53 @@ def ConstructorSchema.DirectLetShapeAt
       ConstructorSchema.DirectLetShape context source.runtime source.env decl
         schema nextSchema
 
+/-- Code-focus form of `DirectLetShapeAt`, before the source machine equalities
+retained by the compiler relation are applied. -/
+def ConstructorSchema.DirectLetCodeShape
+    (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (sourceCode : LCNF.Code .impure)
+    (schema nextSchema : ConstructorSchema) : Prop :=
+  ∃ (context : Fir.Wasm.Context) (decl : LCNF.LetDecl .impure)
+      (continuation : LCNF.Code .impure),
+    sourceCode = .let decl continuation ∧
+      ConstructorSchema.DirectLetShape context sourceRuntime sourceEnv decl
+        schema nextSchema
+
+/-- Compiler-focus equalities transport code-local absence of a direct schema
+shape to the machine-state relation used by the trace simulation. -/
+theorem ConstructorSchema.noDirectLetShapeAt_of_noCodeShape
+    {source : MachineState} {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceCode : LCNF.Code .impure} {schema : ConstructorSchema}
+    (controlEq : source.control = .code sourceCode)
+    (runtimeEq : source.runtime = sourceRuntime)
+    (envEq : source.env = sourceEnv)
+    (noShape : ¬ ∃ nextSchema,
+      ConstructorSchema.DirectLetCodeShape sourceRuntime sourceEnv sourceCode
+        schema nextSchema) :
+    ¬ ∃ nextSchema,
+      ConstructorSchema.DirectLetShapeAt source schema nextSchema := by
+  rintro ⟨nextSchema, context, decl, continuation, sourceControl, shape⟩
+  have codeEq : sourceCode = .let decl continuation :=
+    Control.code.inj (controlEq.symm.trans sourceControl)
+  apply noShape
+  exact ⟨nextSchema, context, decl, continuation, codeEq, by
+    simpa [runtimeEq, envEq] using shape⟩
+
+theorem ConstructorSchema.noDirectLetCodeShape_of_noDeclShape
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {decl : LCNF.LetDecl .impure} {continuation : LCNF.Code .impure}
+    {schema : ConstructorSchema}
+    (noDeclShape : ∀ {context nextSchema},
+      ¬ ConstructorSchema.DirectLetShape context sourceRuntime sourceEnv decl
+        schema nextSchema) :
+    ¬ ∃ nextSchema,
+      ConstructorSchema.DirectLetCodeShape sourceRuntime sourceEnv
+        (.let decl continuation) schema nextSchema := by
+  rintro ⟨nextSchema, context, otherDecl, otherContinuation, codeEq, shape⟩
+  injection codeEq with declEq continuationEq
+  subst otherDecl
+  exact noDeclShape shape
+
 /-- Source/compiler constructor-schema evolution for one successful semantic
 step.
 
@@ -14441,6 +14488,26 @@ theorem ConstructorSchema.SourceStep.executeStep
       nextSchema) :
     executeStep externals source = .next sourceAfter := by
   cases step <;> assumption
+
+theorem ConstructorSchema.DirectLetShape.not_of_fap
+    {context : Fir.Wasm.Context} {sourceRuntime : RuntimeState}
+    {sourceEnv : Env} {decl : LCNF.LetDecl .impure}
+    {schema nextSchema : ConstructorSchema}
+    (shape : ConstructorSchema.DirectLetShape context sourceRuntime sourceEnv
+      decl schema nextSchema)
+    {name : Lean.Name} {args : Array (LCNF.Arg .impure)}
+    (valueEq : decl.value = .fap name args) : False := by
+  cases shape <;> simp_all
+
+theorem ConstructorSchema.DirectLetShape.not_of_fvar
+    {context : Fir.Wasm.Context} {sourceRuntime : RuntimeState}
+    {sourceEnv : Env} {decl : LCNF.LetDecl .impure}
+    {schema nextSchema : ConstructorSchema}
+    (shape : ConstructorSchema.DirectLetShape context sourceRuntime sourceEnv
+      decl schema nextSchema)
+    {function : Lean.FVarId} {args : Array (LCNF.Arg .impure)}
+    (valueEq : decl.value = .fvar function args) : False := by
+  cases shape <;> simp_all
 
 /--
 Certificate-free compiler composition for one successful capacity-validated
