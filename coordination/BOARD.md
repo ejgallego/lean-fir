@@ -25,7 +25,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   resident Array provenance consumer after rebasing, is the remaining
   milestone step.
 - Integration owner: `root`, holding the serial landing lease through accepted
-  integration head `a0c35a72`. `wasm-gen` remains released to the W7-1
+  integration head `bd53f022`. `wasm-gen` remains released to the W7-1
   generation lane. The inherited cleanup, serial and bounded check-throughput,
   mailbox-routing, bounded `Nat.land`, USize range-fact, exact consumer-ratchet,
   and transactional resident-linker stacks are now integrated. Tooling's
@@ -49,6 +49,26 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `ec63d1eb3a275b7cbaa5d5c61a01bd1520288c52ee7291cde74c23d66a26d354`.
   No shared semantic contract changed; bug cards: none. W6 next uses `sumTo`
   to derive final-LCNF admission from reusable static typing/provenance facts.
+- Accepted W6 `sumTo` semantic-typing checkpoint: functional proof head
+  `7e15da0f` is linked through clean tracked handoff `bd53f022`, based on the
+  accepted pass-composition head `76ca1f18`. The new source-only
+  `SemanticEnvAtLocalKinds` judgment says that every compiler local-kind row
+  is inhabited by a semantic value at its promised ABI. It is preserved by
+  replacement binding, and every admitted pure `Int`, `Nat`, or scalar
+  external now produces exactly the kind computed for its final-LCNF
+  destination. A real Lean 4.33 compilation of recursive `sumTo` pins the
+  stable program boundary: `tobject -> tobject`, natural literals, a scalar
+  Boolean case, a recursive direct call, ownership decrements, and precisely
+  the admitted `Nat.decEq`, `Nat.sub`, and `Nat.add` external families. The
+  fixture passes production whole-program Wasm admission without certifying a
+  hand-written body or enumerating reachable states. Lean Beam, the 3,133-job
+  targeted cone, `make check` at 730 unique cases and 2,172/2,172 comparisons,
+  and all 3,189 Talos jobs pass with receipt
+  `20aae5a846001015f9b48bc2a2e867fc1ee96feff1119512732f5153389de387`.
+  No shared semantic contract changed; bug cards: none. W6 next extends this
+  invariant through literals, scalar cases, recursive direct calls,
+  ownership decrements, and returns, reusing `sumTo` as the running compiler
+  shape rather than a finite-state certificate.
 - Accepted W6 source-invariant simulation checkpoint: functional proof head
   `176cdbc7` is linked through clean tracked handoff `3ffe30f1`, based directly
   on accepted validated-simulation head `638e05a2`. The public theorem
