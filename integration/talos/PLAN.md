@@ -6366,6 +6366,29 @@ operation direct reasoning: it is to make the overall code dispatcher return
 the schema-global outcome by composing this theorem with the established
 administrative, external, and schema-derived object-field successors.
 
+That outer dispatcher is now closed as well. Validated returns first retain
+their exact witness index instead of erasing it. The schema-global ordinary-
+code theorem handles every production admission: direct operations use the
+complete direct dispatcher; call, cache, case, ownership, deletion, tag, and
+non-object-field mutation successors reuse their same-witness proofs; and the
+legacy compatibility arm proves its two object-field alternatives impossible
+before the dedicated schema-derived successors handle them. At the enclosing
+global level, `ConcreteStructuredValidatedCodeGlobalOutcomeAt` now advances
+all seven outcome shapes. Direct/saturated/lazy ready states, external bind,
+and returned states preserve the schema at the same witness; resolved external
+execution alone invokes `withSchemaExtension`. The active-code source-ready
+theorem consequently returns
+`ConcreteStructuredSchemaValidatedCodeGlobalOutcome` rather than projecting
+back to the old relation.
+
+The next boundary is no longer a target simulation case. It is the source-only
+typing interface needed to iterate this theorem: hereditary readiness must be
+indexed by the current constructor schema and preserved while that schema
+evolves. Once that paired source invariant is available, the schema-global
+relation can instantiate the ranked finite-trace simulation, and the old
+module-global `ConcreteStructuredCompilerAdmissionLaws` route can remain only
+as an explicitly weaker compatibility theorem or be retired.
+
 W6.6 float packed-field admission closes the semantic-to-concrete gap for
 `Float32` and `Float` projection and mutation. `ValueRel` now relates the
 shared raw-bit semantic constructors directly to `.float32Bits` and

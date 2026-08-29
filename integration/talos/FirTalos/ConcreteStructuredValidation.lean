@@ -5058,10 +5058,84 @@ theorem
   apply sourceSafe related.core.core.focus.sourceControlEq
   simpa only [related.core.core.focus.sourceEnvEq] using sourceLookup
 
-/-- A validated return enters the closed yielded branch.  Current-node
-admission supplies only the compiled result kind; the concrete theorem derives
-the semantic/physical result and both machine paths, while suspended caller
-validation is transported across the unchanged-frame equalities. -/
+/-- A validated return enters the closed yielded branch at exactly the current
+refinement witness. Current-node admission supplies only the compiled result
+kind; the concrete theorem derives the semantic/physical result and both
+machine paths, while suspended caller validation is transported across the
+unchanged-frame equalities. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_returnAt_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {result : Lean.FVarId}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.return result) targetStore targetLocals targetCode witness source target)
+    (admitted : ConcreteStructuredCodeStepAdmission context sourceModule
+      externals functionResult facts sourceRuntime sourceEnv 0
+      (.return result))
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+          targetModule hosts externals witness sourceAfter targetAfter := by
+  have pointwise := related.toPointwise admitted (by omega)
+  obtain ⟨targetAfter, sourceValue, actualKind, physical, targetPath, yielded,
+      compatible, resources, sourceFramesEq, targetFramesEq⟩ :=
+    pointwise.advance_return spec sourceStep
+  obtain ⟨supportedAfter, agreesAfter⟩ := related.agrees.reindex
+    sourceFramesEq targetFramesEq resources.suspended
+  have validationAfter :
+      ConcreteStructuredSuspendedValidation program functionResult
+        callerExpectedResult sourceAfter.frames := by
+    rw [sourceFramesEq]
+    exact related.frames.validation
+  have framesAfter :
+      ConcreteStructuredValidatedFrameStack program sourceModule targetModule
+        hosts functionResult callerExpectedResult sourceAfter.frames
+        targetAfter.frames :=
+    ⟨supportedAfter, validationAfter⟩
+  have validationAgreesAfter :
+      ConcreteStructuredValidationAgrees agreesAfter validationAfter :=
+    related.validationAgrees.reindex sourceFramesEq targetFramesEq agreesAfter
+      validationAfter
+  have returned :
+      ConcreteStructuredValidatedReturnedOutcome program context functionCode
+        sourceModule sourceFunction targetModule hosts spec externals labels
+        entryRuntime entryStore entryWitness functionResult
+        callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+        sourceValue targetStore targetLocals witness actualKind physical
+        sourceAfter targetAfter :=
+    ⟨activeResult, related.contextCaches, yielded, compatible, resources,
+      framesAfter, agreesAfter, validationAgreesAfter⟩
+  exact ⟨targetAfter, targetPath,
+    ConcreteStructuredValidatedCodeGlobalOutcomeAt.returned returned⟩
+
+/-- Compatibility projection of the witness-indexed validated return. -/
 theorem ConcreteStructuredValidatedCodeOutcome.advance_return_of_step
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
@@ -5102,37 +5176,9 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_return_of_step
           targetAfter ∧
         ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
           targetModule hosts externals sourceAfter targetAfter := by
-  have pointwise := related.toPointwise admitted (by omega)
-  obtain ⟨targetAfter, sourceValue, actualKind, physical, targetPath, yielded,
-      compatible, resources, sourceFramesEq, targetFramesEq⟩ :=
-    pointwise.advance_return spec sourceStep
-  obtain ⟨supportedAfter, agreesAfter⟩ := related.agrees.reindex
-    sourceFramesEq targetFramesEq resources.suspended
-  have validationAfter :
-      ConcreteStructuredSuspendedValidation program functionResult
-        callerExpectedResult sourceAfter.frames := by
-    rw [sourceFramesEq]
-    exact related.frames.validation
-  have framesAfter :
-      ConcreteStructuredValidatedFrameStack program sourceModule targetModule
-        hosts functionResult callerExpectedResult sourceAfter.frames
-        targetAfter.frames :=
-    ⟨supportedAfter, validationAfter⟩
-  have validationAgreesAfter :
-      ConcreteStructuredValidationAgrees agreesAfter validationAfter :=
-    related.validationAgrees.reindex sourceFramesEq targetFramesEq agreesAfter
-      validationAfter
-  have returned :
-      ConcreteStructuredValidatedReturnedOutcome program context functionCode
-        sourceModule sourceFunction targetModule hosts spec externals labels
-        entryRuntime entryStore entryWitness functionResult
-        callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
-        sourceValue targetStore targetLocals witness actualKind physical
-        sourceAfter targetAfter :=
-    ⟨activeResult, related.contextCaches, yielded, compatible, resources,
-      framesAfter, agreesAfter, validationAgreesAfter⟩
-  exact ⟨targetAfter, targetPath,
-    ConcreteStructuredValidatedCodeGlobalOutcome.returned returned⟩
+  obtain ⟨targetAfter, targetPath, next⟩ :=
+    related.advance_returnAt_of_step activeResult admitted sourceStep
+  exact ⟨targetAfter, targetPath, next.toValidatedGlobal⟩
 
 /-- Pop a yielded direct or saturated call back into its validated caller.
 Target-only case labels may precede the call frame and are unwound first.  A
@@ -11388,5 +11434,276 @@ theorem
   refine ⟨targetAfter, targetPath, ?_⟩
   exact (ConcreteStructuredValidatedCodeGlobalOutcomeAt.code activeResult next)
     |>.withSchema schemaAgrees
+
+/-- Complete ordinary-code dispatcher for the schema-enriched global
+relation.  The legacy compatibility arm is inspected only to select an
+already-proved successor: direct operations use their complete schema-global
+law, every same-witness branch transports the current agreement, and the two
+object-field shapes are impossible in that arm.  The dedicated field arms use
+the active-schema successors above. -/
+theorem
+    ConcreteStructuredValidatedCodeOutcome.advance_schemaGlobal_of_schema_admission
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {requiredBytes remainingBytes : Nat}
+    {sourceEnv : Env}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    {schema : ConstructorSchema}
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      sourceCode targetStore targetLocals targetCode witness source target)
+    (schemaAgrees : schema.WitnessAgrees witness)
+    (admitted : ConcreteStructuredSchemaCodeStepAdmission schema context
+      sourceModule externals functionResult facts sourceRuntime sourceEnv
+      requiredBytes sourceCode)
+    (budget : requiredBytes ≤ remainingBytes)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetCount targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetCount target targetAfter ∧
+        ConcreteStructuredSchemaValidatedCodeGlobalOutcome program sourceModule
+          targetModule hosts externals sourceAfter targetAfter ∧
+        (targetCount = 0 →
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source) := by
+  cases admitted with
+  | legacy admitted eligible =>
+      cases admitted with
+      | ret resultCompiled resultCompatible resultSemantic =>
+          obtain ⟨targetAfter, targetPath, next⟩ :=
+            related.advance_returnAt_of_step activeResult
+              (.ret resultCompiled resultCompatible resultSemantic) sourceStep
+          exact ⟨2, targetAfter, targetPath,
+            next.withSchema schemaAgrees, by omega⟩
+      | directLet supported =>
+          obtain ⟨targetAfter, targetCount, targetPath, targetPositive,
+              next⟩ :=
+            related.advance_directLetSchemaGlobal_of_step activeResult
+              schemaAgrees supported budget sourceStep
+          exact ⟨targetCount, targetAfter, targetPath, next, by omega⟩
+      | pureExternal supported =>
+          obtain ⟨site, physicalArgs, operation, resolvedResultKind,
+              targetImport, callIndex, resultIndex, targetArguments,
+              targetRest, targetAfter, targetPath, next, rank⟩ :=
+            related.advance_pureExternal_stage activeResult supported budget
+              sourceStep
+          exact ⟨targetArguments.length, targetAfter, targetPath,
+            (ConcreteStructuredValidatedCodeGlobalOutcomeAt.externalReady next)
+              |>.withSchema schemaAgrees,
+            fun zero => rank⟩
+      | directCall site =>
+          obtain ⟨calleeContext, calleeFunction, row, physicalArgs,
+              resultIndex, targetArguments, targetRest, targetAfter,
+              targetPath, next, rank⟩ :=
+            related.advance_directCall_stage_of_step activeResult site
+              sourceStep
+          exact ⟨targetArguments.length, targetAfter, targetPath,
+            (ConcreteStructuredValidatedCodeGlobalOutcomeAt.directReady next)
+              |>.withSchema schemaAgrees,
+            fun zero => rank⟩
+      | saturatedCall site resolution sharedCapacity =>
+          obtain ⟨calleeContext, calleeFunction, row, targetValue,
+              targetRest, resultIndex, targetPath, next, rank⟩ :=
+            related.advance_saturatedCall_stage_of_step activeResult site
+              resolution sharedCapacity sourceStep
+          exact ⟨0, target, targetPath,
+            (ConcreteStructuredValidatedCodeGlobalOutcomeAt.saturatedReady next)
+              |>.withSchema schemaAgrees,
+            fun _ => rank⟩
+      | lazyHit call generated semanticFound =>
+          let path : ConcreteStructuredLazyReadyAdmission context sourceModule
+              call generated sourceRuntime := .hit _ semanticFound
+          obtain ⟨cacheIndex, declarationId, cacheSetId, resultIndex,
+              targetRest, targetPath, next, rank⟩ :=
+            related.advance_lazy_stage_of_step activeResult call generated path
+              sourceStep
+          exact ⟨0, target, targetPath,
+            (ConcreteStructuredValidatedCodeGlobalOutcomeAt.lazyReady next)
+              |>.withSchema schemaAgrees,
+            fun _ => rank⟩
+      | lazyMiss call generated resultClassified notObject notTObject
+          semanticEmpty =>
+          let path : ConcreteStructuredLazyReadyAdmission context sourceModule
+              call.callSupported generated sourceRuntime :=
+            .miss _ call resultClassified notObject notTObject semanticEmpty
+          obtain ⟨cacheIndex, declarationId, cacheSetId, resultIndex,
+              targetRest, targetPath, next, rank⟩ :=
+            related.advance_lazy_stage_of_step activeResult call.callSupported
+              generated path sourceStep
+          exact ⟨0, target, targetPath,
+            (ConcreteStructuredValidatedCodeGlobalOutcomeAt.lazyReady next)
+              |>.withSchema schemaAgrees,
+            fun _ => rank⟩
+      | defaultOnlyCase supported =>
+          obtain ⟨targetPath, next, rank⟩ :=
+            related.advance_defaultOnlyCase_of_step supported sourceStep
+          exact ⟨0, target, targetPath,
+            (ConcreteStructuredValidatedCodeGlobalOutcomeAt.code activeResult
+              next).withSchema schemaAgrees,
+            fun _ => rank⟩
+      | objectCases supported =>
+          obtain ⟨testCount, targetAfter, selected, selectedTarget,
+              targetPath, next, zeroRank⟩ :=
+            related.advance_objectCases_of_step supported sourceStep
+          exact ⟨5 * testCount, targetAfter, targetPath,
+            (ConcreteStructuredValidatedCodeGlobalOutcomeAt.code activeResult
+              next).withSchema schemaAgrees,
+            zeroRank⟩
+      | scalarUInt8Cases supported =>
+          obtain ⟨testCount, targetAfter, selected, selectedTarget,
+              targetPath, next, zeroRank⟩ :=
+            related.advance_scalarUInt8Cases_of_step supported sourceStep
+          exact ⟨4 * testCount, targetAfter, targetPath,
+            (ConcreteStructuredValidatedCodeGlobalOutcomeAt.code activeResult
+              next).withSchema schemaAgrees,
+            zeroRank⟩
+      | incPersistent =>
+          obtain ⟨_admitted, targetPath, _framesEq, next, rank⟩ :=
+            related.advance_incPersistent_of_step
+              (module := targetModule.wasmModule) (hostEnv := hosts.env)
+              sourceStep
+          exact ⟨0, target, targetPath,
+            (ConcreteStructuredValidatedCodeGlobalOutcomeAt.code activeResult
+              next).withSchema schemaAgrees,
+            fun _ => rank⟩
+      | decPersistent =>
+          obtain ⟨_admitted, targetPath, _framesEq, next, rank⟩ :=
+            related.advance_decPersistent_of_step
+              (module := targetModule.wasmModule) (hostEnv := hosts.env)
+              sourceStep
+          exact ⟨0, target, targetPath,
+            (ConcreteStructuredValidatedCodeGlobalOutcomeAt.code activeResult
+              next).withSchema schemaAgrees,
+            fun _ => rank⟩
+      | ordinaryIncrement supported =>
+          rename_i nextRuntime continuation
+          have shape : ∃ objectId amount check,
+              sourceCode = .inc objectId amount check false continuation := by
+            cases supported
+            exact ⟨_, _, _, rfl⟩
+          obtain ⟨objectId, amount, check, rfl⟩ := shape
+          obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, next⟩ :=
+            related.advance_ordinaryIncrement_of_step supported sourceStep
+          exact ⟨2, targetAfter, targetPath,
+            (ConcreteStructuredValidatedCodeGlobalOutcomeAt.code activeResult
+              next).withSchema schemaAgrees,
+            by omega⟩
+      | ordinaryDecrement supported =>
+          rename_i nextRuntime continuation
+          have shape : ∃ objectId amount check objectFields?,
+              sourceCode =
+                .dec objectId amount check false objectFields? continuation := by
+            cases supported
+            exact ⟨_, _, _, _, rfl⟩
+          obtain ⟨objectId, amount, check, objectFields?, rfl⟩ := shape
+          obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, next⟩ :=
+            related.advance_ordinaryDecrement_of_step supported sourceStep
+          exact ⟨2, targetAfter, targetPath,
+            (ConcreteStructuredValidatedCodeGlobalOutcomeAt.code activeResult
+              next).withSchema schemaAgrees,
+            by omega⟩
+      | ordinaryDelete supported =>
+          rename_i nextRuntime continuation
+          have shape : ∃ objectId,
+              sourceCode = .del objectId continuation := by
+            cases supported
+            exact ⟨_, rfl⟩
+          obtain ⟨objectId, rfl⟩ := shape
+          obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, next⟩ :=
+            related.advance_ordinaryDelete_of_step supported sourceStep
+          exact ⟨2, targetAfter, targetPath,
+            (ConcreteStructuredValidatedCodeGlobalOutcomeAt.code activeResult
+              next).withSchema schemaAgrees,
+            by omega⟩
+      | constructorTag supported =>
+          rename_i nextRuntime continuation
+          have shape : ∃ objectId tag,
+              sourceCode = .setTag objectId tag continuation := by
+            cases supported
+            exact ⟨_, _, rfl⟩
+          obtain ⟨objectId, tag, rfl⟩ := shape
+          obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, next⟩ :=
+            related.advance_constructorTag_of_step supported sourceStep
+          exact ⟨2, targetAfter, targetPath,
+            (ConcreteStructuredValidatedCodeGlobalOutcomeAt.code activeResult
+              next).withSchema schemaAgrees,
+            by omega⟩
+      | objectFieldFVar supported =>
+          rename_i nextRuntime continuation
+          have shape : ∃ objectId fieldId index,
+              sourceCode =
+                .oset objectId index (.fvar fieldId) continuation := by
+            cases supported
+            exact ⟨_, _, _, rfl⟩
+          obtain ⟨objectId, fieldId, index, rfl⟩ := shape
+          simp [ConcreteStructuredSchemaLegacyCode] at eligible
+      | objectFieldErased supported =>
+          rename_i nextRuntime continuation
+          have shape : ∃ objectId index,
+              sourceCode = .oset objectId index .erased continuation := by
+            cases supported
+            exact ⟨_, _, rfl⟩
+          obtain ⟨objectId, index, rfl⟩ := shape
+          simp [ConcreteStructuredSchemaLegacyCode] at eligible
+      | usizeField supported =>
+          rename_i nextRuntime continuation
+          have shape : ∃ objectId fieldId index,
+              sourceCode = .uset objectId index fieldId continuation := by
+            cases supported
+            exact ⟨_, _, _, rfl⟩
+          obtain ⟨objectId, fieldId, index, rfl⟩ := shape
+          obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, next⟩ :=
+            related.advance_usizeField_of_step supported sourceStep
+          exact ⟨3, targetAfter, targetPath,
+            (ConcreteStructuredValidatedCodeGlobalOutcomeAt.code activeResult
+              next).withSchema schemaAgrees,
+            by omega⟩
+      | scalarField supported =>
+          rename_i nextRuntime continuation
+          have shape : ∃ objectId fieldId slotIndex byteOffset type,
+              sourceCode = .sset objectId slotIndex byteOffset fieldId type
+                continuation := by
+            cases supported
+            exact ⟨_, _, _, _, _, rfl⟩
+          obtain ⟨objectId, fieldId, slotIndex, byteOffset, type, rfl⟩ :=
+            shape
+          obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, next⟩ :=
+            related.advance_scalarField_of_step supported sourceStep
+          exact ⟨3, targetAfter, targetPath,
+            (ConcreteStructuredValidatedCodeGlobalOutcomeAt.code activeResult
+              next).withSchema schemaAgrees,
+            by omega⟩
+  | objectFieldFVar fieldTyped =>
+      obtain ⟨targetAfter, targetPath, next⟩ :=
+        related.advance_objectFieldFVarSchemaGlobal_of_step activeResult
+          schemaAgrees fieldTyped sourceStep
+      exact ⟨3, targetAfter, targetPath, next, by omega⟩
+  | objectFieldErased fieldTyped =>
+      obtain ⟨targetAfter, targetPath, next⟩ :=
+        related.advance_objectFieldErasedSchemaGlobal_of_step activeResult
+          schemaAgrees fieldTyped sourceStep
+      exact ⟨3, targetAfter, targetPath, next, by omega⟩
 
 end FirTalos.Concrete

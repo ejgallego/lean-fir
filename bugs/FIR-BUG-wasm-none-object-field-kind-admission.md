@@ -149,10 +149,18 @@ compiler/resource, cache, structured, and validated layers. The validated
 successor transports the current schema agreement across the extension, and a
 constructive split of `ReuseBudgetedDirectSupported` combines it with the
 schema-changing constructor/reuse theorem in one complete schema-global direct
-dispatcher. The card remains open because the outer code dispatcher has not
-yet been strengthened to return this schema-global relation in all branches,
-and the legacy module-global effect-admission field has therefore not yet been
-removed.
+dispatcher. At that checkpoint, the outer code dispatcher was the remaining
+proof layer before replacing the legacy module-global effect-admission route.
+
+The outer dispatcher follow-up is now closed too. The ordinary-code theorem
+returns the schema-enriched global relation for every admission, and its
+legacy arm eliminates the two arbitrary-witness object-field constructors as
+impossible before dispatch. The witness-indexed global theorem covers all
+seven administrative outcome forms and uses the resolved external theorem's
+explicit extension exactly where the witness changes. What remains is a
+source-only hereditary invariant indexed by the evolving constructor schema;
+without that invariant the public finite-trace theorem still uses the older
+module-global source-admission compatibility route.
 
 ## Semantic impact
 
@@ -188,6 +196,8 @@ source-invariant interface. The active-witness schema bridge now provides the
 right replacement boundary and its allocation/reuse transports. Those
 transports now reach the closed schema-global constructor/reuse successor, and
 the complete direct dispatcher also carries unchanged-schema transport for the
-rest of the direct family. The remaining gap is the outer schema-global code
-dispatcher and retirement of the legacy module-global admission surface. This
-does not yet fix production admission or establish final-LCNF type soundness.
+rest of the direct family. The outer code and administrative dispatchers now
+preserve the same schema-global relation end to end. The remaining gap is the
+schema-indexed hereditary source invariant and its finite-trace simulation
+wrapper, after which the legacy module-global admission surface can be
+retired. This does not yet establish final-LCNF type soundness.

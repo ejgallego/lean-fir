@@ -403,7 +403,7 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_of_schemaSourceReady
     ∃ targetCount targetAfter,
       FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
           targetCount target targetAfter ∧
-        ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
+        ConcreteStructuredSchemaValidatedCodeGlobalOutcome program sourceModule
           targetModule hosts externals sourceAfter targetAfter ∧
         (targetCount = 0 →
           compilerStructuredControlRank sourceAfter <
@@ -416,14 +416,98 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_of_schemaSourceReady
   | legacy legacyAdmission eligible =>
       have budget := addressSpaceSafety.code related.core.core sourceStep
         legacyAdmission
-      exact related.advance_of_schema_admission activeResult schemaAgrees
+      exact related.advance_schemaGlobal_of_schema_admission activeResult
+        schemaAgrees
         (.legacy legacyAdmission eligible) budget sourceStep
   | objectFieldFVar fieldTyped =>
-      exact related.advance_of_schema_admission activeResult schemaAgrees
+      exact related.advance_schemaGlobal_of_schema_admission activeResult
+        schemaAgrees
         (.objectFieldFVar fieldTyped) (Nat.zero_le _) sourceStep
   | objectFieldErased fieldTyped =>
-      exact related.advance_of_schema_admission activeResult schemaAgrees
+      exact related.advance_schemaGlobal_of_schema_admission activeResult
+        schemaAgrees
         (.objectFieldErased fieldTyped) (Nat.zero_le _) sourceStep
+
+/-- The witness-indexed validated global relation advances while carrying one
+constructor schema through every established outcome shape. Active code uses
+schema-aware source readiness and the complete schema-global code dispatcher;
+administrative states preserve the witness, except resolved external execution
+which transports agreement through its explicit witness extension. -/
+theorem ConcreteStructuredValidatedCodeGlobalOutcomeAt.advance_of_schemaSourceReady
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : Fir.LeanIR.Impure.ExternalImpl}
+    {schema : ConstructorSchema}
+    {witness : Fir.Wasm.Concrete.RefinementWitness}
+    {source sourceAfter : Fir.LeanIR.Impure.MachineState}
+    {target : StructuredWasmState Host}
+    (sourceReady : ConcreteStructuredSchemaSourceReadyAt schema program
+      sourceModule targetModule hosts externals source)
+    (finiteRuntimeSafety : ConcreteStructuredCurrentStepFiniteRuntimeSafety
+      program sourceModule targetModule hosts externals)
+    (addressSpaceSafety : ConcreteStructuredCurrentStepAddressSpaceSafety
+      program sourceModule targetModule hosts externals)
+    (schemaAgrees : schema.WitnessAgrees witness)
+    (related : ConcreteStructuredValidatedCodeGlobalOutcomeAt program
+      sourceModule targetModule hosts externals witness source target)
+    (sourceStep :
+      Fir.LeanIR.Impure.executeStep externals source = .next sourceAfter) :
+    ∃ targetCount targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetCount target targetAfter ∧
+        ConcreteStructuredSchemaValidatedCodeGlobalOutcome program sourceModule
+          targetModule hosts externals sourceAfter targetAfter ∧
+        (targetCount = 0 →
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source) := by
+  cases related with
+  | code activeResult related =>
+      exact related.advance_of_schemaSourceReady sourceReady
+        finiteRuntimeSafety addressSpaceSafety activeResult schemaAgrees
+        sourceStep
+  | directReady related =>
+      obtain ⟨targetAfter, targetPath, next⟩ :=
+        related.advance_enter_of_step sourceStep
+      exact ⟨1, targetAfter, targetPath, next.withSchema schemaAgrees,
+        by omega⟩
+  | saturatedReady related =>
+      obtain ⟨targetCount, targetAfter, targetPath, targetPositive, next⟩ :=
+        related.advance_enter_of_step sourceStep
+      exact ⟨targetCount, targetAfter, targetPath,
+        next.withSchema schemaAgrees, by omega⟩
+  | lazyReady related =>
+      cases related.path with
+      | hit sourceValue semanticFound =>
+          obtain ⟨physical, targetAfter, targetPath, next⟩ :=
+            related.advance_hit_of_step semanticFound sourceStep
+          exact ⟨4, targetAfter, targetPath,
+            (ConcreteStructuredValidatedCodeGlobalOutcomeAt.externalBind next)
+              |>.withSchema schemaAgrees,
+            by omega⟩
+      | miss calleeCode internal resultClassified notObject notTObject
+          semanticEmpty =>
+          obtain ⟨targetAfter, targetPath, next⟩ :=
+            related.advance_miss_of_step internal resultClassified notObject
+              notTObject semanticEmpty sourceStep
+          exact ⟨3, targetAfter, targetPath,
+            next.withSchema schemaAgrees, by omega⟩
+  | externalReady related =>
+      obtain ⟨nextWitness, targetAfter, targetPath, witnessExtension, next⟩ :=
+        related.advance_of_step sourceStep
+      exact ⟨1, targetAfter, targetPath,
+        next.withSchemaExtension schemaAgrees witnessExtension, by omega⟩
+  | externalBind related =>
+      obtain ⟨targetAfter, targetPath, next⟩ :=
+        related.advance_of_step sourceStep
+      exact ⟨1, targetAfter, targetPath, next.withSchema schemaAgrees,
+        by omega⟩
+  | returned related =>
+      obtain ⟨targetCount, targetAfter, targetPath, targetPositive, next⟩ :=
+        related.advance_of_step sourceStep
+      exact ⟨targetCount, targetAfter, targetPath,
+        next.withSchema schemaAgrees, by omega⟩
 
 /-- Current source readiness and finite runtime safety preserve the recursively
 validated global relation for one source step.
