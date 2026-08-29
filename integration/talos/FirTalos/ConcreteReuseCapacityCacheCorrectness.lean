@@ -4464,6 +4464,53 @@ theorem
     ⟨⟨nextBaseInvariant, nextCache, nextClosureTables⟩, nextEntry⟩,
     schemaUpdate⟩
 
+/-- Lift a monotone-witness direct law through the whole-cache and fixed-entry
+resource invariant. -/
+theorem
+    ReuseCapacityDirectLetRuntimeRefinesWithExtension.reuseCapacityEntryRelativeCache
+    {context : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function} {labels : LabelContext}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {Supported : ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {letCost : LCNF.LetDecl .impure → Nat}
+    {entryRuntime : RuntimeState} {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness}
+    (runtimeRefines : ReuseCapacityDirectLetRuntimeRefinesWithExtension context
+      sourceModule sourceFunction labels module hostEnv Supported letCost
+      (ConcreteReuseCapacityPureExternalOwnershipFrame sourceFunction externals)) :
+    ReuseCapacityDirectLetRuntimeRefinesWithExtension context sourceModule
+      sourceFunction labels module hostEnv Supported letCost
+      (ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
+        entryRuntime entryStore entryWitness) := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported stepFits invariant sourceStep valueCompiled valueAdapted resultFound
+  rcases invariant with ⟨⟨baseInvariant, cacheTable, closureTables⟩,
+    entryTransports⟩
+  obtain ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+      externalsPreserved, hostDescriptorsPreserved,
+      witnessDescriptorsPreserved, transports, factsTransfer,
+      nextBaseInvariant, extension⟩ :=
+    runtimeRefines supported stepFits baseInvariant sourceStep valueCompiled
+      valueAdapted resultFound
+  have nextCache : LazyCacheGlobalsRel nextWitness sourceModule nextRuntime nextStore :=
+    cacheTable.transport transports.witnessTransport transports.sourceGlobals
+      transports.wasmGlobals transports.hostStaticLayout
+  have nextClosureTables : ClosureTablesAgree nextStore nextWitness :=
+    transports.toClosureTablesTransport.agree closureTables
+  have nextEntry : ReuseCapacityCodeEntryTransports entryRuntime nextRuntime
+      entryStore nextStore entryWitness nextWitness :=
+    entryTransports.step transports.witnessTransport
+      transports.closureAllocationsPersistent transports.capacity
+      transports.ordinary externalsPreserved transports.toClosureTablesTransport
+  exact ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+    externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
+    transports, factsTransfer,
+    ⟨⟨nextBaseInvariant, nextCache, nextClosureTables⟩, nextEntry⟩,
+    extension⟩
+
 /--
 The production direct fragment instantiates the entry-relative whole-cache
 law. This is the direct-operation premise used by hereditary generated
@@ -4524,6 +4571,28 @@ theorem
         entryRuntime entryStore entryWitness) :=
   ReuseCapacityDirectLetRuntimeRefinesWithSchema.reuseCapacityEntryRelativeCache
     (spec.reuseCapacityDirectLetRuntimeRefinesWithSchema_schemaChanging_pureExternalOwnership
+      externals)
+
+/-- Production entry-relative whole-cache law for schema-preserving direct
+operations. -/
+theorem
+    ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithExtension_schemaPreserving_pureExternalOwnership_entryRelativeCache
+    {program : Fir.LeanIR.ImpureProgram} {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure} {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function} {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context sourceCode sourceModule
+      sourceFunction target hosts) (externals : ExternalImpl)
+    {labels : LabelContext} {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host} {entryWitness : RefinementWitness} :
+    ReuseCapacityDirectLetRuntimeRefinesWithExtension context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (SchemaPreservingDirectSupported context) directLetAllocationCost
+      (ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
+        entryRuntime entryStore entryWitness) :=
+  ReuseCapacityDirectLetRuntimeRefinesWithExtension.reuseCapacityEntryRelativeCache
+    (spec.reuseCapacityDirectLetRuntimeRefinesWithExtension_schemaPreserving_pureExternalOwnership
       externals)
 
 /--

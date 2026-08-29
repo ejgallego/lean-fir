@@ -3775,6 +3775,132 @@ theorem
     nextWitness, schemaUpdate.agrees schemaAgrees, ?_⟩
   exact ConcreteStructuredValidatedCodeGlobalOutcomeAt.code activeResult next
 
+/-- A successful schema-preserving direct binding advances the closed
+validated relation under the current constructor schema.  Allocating literals
+and boxes may extend the concrete refinement witness, so preservation is
+transported through the runtime law's explicit monotone extension rather than
+requiring witness equality. -/
+theorem
+    ConcreteStructuredValidatedCodeOutcome.advance_schemaPreservingDirectLetSchemaGlobal_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    {schema : ConstructorSchema}
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.let decl continuation) targetStore targetLocals targetCode witness source
+      target)
+    (schemaAgrees : schema.WitnessAgrees witness)
+    (supported : SchemaPreservingDirectSupported context facts decl)
+    (budget : directLetAllocationCost decl ≤ remainingBytes)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter targetCount,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetCount target targetAfter ∧
+        0 < targetCount ∧
+        ConcreteStructuredSchemaValidatedCodeGlobalOutcome program sourceModule
+          targetModule hosts externals sourceAfter targetAfter := by
+  have broad := supported.toReuseBudgetedDirectSupported
+  have pointwise := related.toPointwise
+    (ConcreteStructuredCodeStepAdmission.directLet broad) budget
+  obtain ⟨targetAfter, nextRuntime, sourceValue, nextStore, resumedLocals,
+      nextWitness, nextFacts, nextTargetCode, targetCount, targetPath,
+      targetPositive, sourceFramesEq, targetFramesEq, nextCore, extension⟩ :=
+    pointwise.advance_schemaPreservingDirectLet_of_step spec supported rfl
+      sourceStep
+  have validatedCore := related.core.letSuccessor
+    broad.resultCompiledForValidation nextCore
+  have next :=
+    related.withSuccessor validatedCore sourceFramesEq targetFramesEq
+  have indexed :
+      ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+        targetModule hosts externals nextWitness sourceAfter targetAfter :=
+    ConcreteStructuredValidatedCodeGlobalOutcomeAt.code activeResult next
+  exact ⟨targetAfter, targetCount, targetPath, targetPositive,
+    indexed.withSchemaExtension schemaAgrees extension⟩
+
+/-- Complete schema-global successor for the production direct-value family.
+The compiler admission splits constructively into the constructor/reuse branch,
+which computes a new schema, and the monotone-witness branch, which transports
+the current schema unchanged. -/
+theorem
+    ConcreteStructuredValidatedCodeOutcome.advance_directLetSchemaGlobal_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    {schema : ConstructorSchema}
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.let decl continuation) targetStore targetLocals targetCode witness source
+      target)
+    (schemaAgrees : schema.WitnessAgrees witness)
+    (supported : ReuseBudgetedDirectSupported context facts decl)
+    (budget : directLetAllocationCost decl ≤ remainingBytes)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter targetCount,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetCount target targetAfter ∧
+        0 < targetCount ∧
+        ConcreteStructuredSchemaValidatedCodeGlobalOutcome program sourceModule
+          targetModule hosts externals sourceAfter targetAfter := by
+  cases supported.schema_cases with
+  | inl changing =>
+      exact related.advance_schemaChangingDirectLetSchemaGlobal_of_step
+        activeResult schemaAgrees changing budget sourceStep
+  | inr preserving =>
+      exact related.advance_schemaPreservingDirectLetSchemaGlobal_of_step
+        activeResult schemaAgrees preserving budget sourceStep
+
 /-- Stage a compiler-generated named call inside the closed relation.  The
 production pipeline selects the exact callee row, the concrete theorem runs
 the argument prefix, and validation contributes only the caller continuation

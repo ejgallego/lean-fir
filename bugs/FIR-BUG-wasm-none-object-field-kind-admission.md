@@ -143,6 +143,17 @@ operations still need an explicit monotone-extension result before the
 schema-global dispatcher can preserve the current schema for the entire
 legacy direct family and replace the old module-global admission surface.
 
+That direct-family follow-up is now closed. Every non-schema-changing direct
+operation exposes an explicit `witness.Extends nextWitness` fact through the
+compiler/resource, cache, structured, and validated layers. The validated
+successor transports the current schema agreement across the extension, and a
+constructive split of `ReuseBudgetedDirectSupported` combines it with the
+schema-changing constructor/reuse theorem in one complete schema-global direct
+dispatcher. The card remains open because the outer code dispatcher has not
+yet been strengthened to return this schema-global relation in all branches,
+and the legacy module-global effect-admission field has therefore not yet been
+removed.
+
 ## Semantic impact
 
 The mismatch is ownership-relevant. If a descriptor classifies a slot erased
@@ -175,7 +186,8 @@ pointwise descriptor equality consumed by the existing runtime theorem, but
 the checked counterexample shows that it is not yet the right derivable
 source-invariant interface. The active-witness schema bridge now provides the
 right replacement boundary and its allocation/reuse transports. Those
-transports now reach the closed schema-global constructor/reuse successor, but
-the complete dispatcher still awaits unchanged-schema transport for the rest
-of the direct family. This does not yet fix production admission or establish
-final-LCNF type soundness.
+transports now reach the closed schema-global constructor/reuse successor, and
+the complete direct dispatcher also carries unchanged-schema transport for the
+rest of the direct family. The remaining gap is the outer schema-global code
+dispatcher and retirement of the legacy module-global admission surface. This
+does not yet fix production admission or establish final-LCNF type soundness.

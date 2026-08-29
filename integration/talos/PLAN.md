@@ -6348,6 +6348,24 @@ other allocating direct operations, preserve the schema unchanged there, and
 combine both direct classes with the already-closed administrative, external,
 and object-field successors in the full schema-global dispatcher.
 
+The remaining production direct family now shares the same schema-global
+boundary. `ReuseCapacityDirectLetRuntimeRefinesWithExtension` strengthens the
+ordinary direct runtime law with the exact monotone relation between its input
+and successor witnesses. Local aliases, immediate literals, all three
+projection families, box/unbox, `isShared`, and allocating `Nat`/`String`
+literals instantiate that law; the existing pure-external, ownership,
+whole-cache, and entry-relative transports preserve it. The structured
+successor retains the extension, and the validated successor applies
+`WitnessAgrees.witnessExtension` while leaving the schema unchanged.
+`ReuseBudgetedDirectSupported.schema_cases` then partitions every admitted
+production direct operation into this preserving family or the already-proved
+constructor/reuse family, and
+`advance_directLetSchemaGlobal_of_step` closes both behind one schema-global
+direct dispatcher. The next proof step is therefore no longer operation-by-
+operation direct reasoning: it is to make the overall code dispatcher return
+the schema-global outcome by composing this theorem with the established
+administrative, external, and schema-derived object-field successors.
+
 W6.6 float packed-field admission closes the semantic-to-concrete gap for
 `Float32` and `Float` projection and mutation. `ValueRel` now relates the
 shared raw-bit semantic constructors directly to `.float32Bits` and
