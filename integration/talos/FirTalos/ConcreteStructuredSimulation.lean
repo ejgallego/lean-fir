@@ -24747,8 +24747,8 @@ theorem ConcreteStructuredCodePointwiseRel.advance_schemaChangingDirectLet
         (remainingBytes - directLetAllocationCost decl) nextRuntime
         (bind sourceEnv decl.fvarId sourceValue) continuation nextStore
         resumedLocals targetRest nextWitness sourceAfter targetAfter ∧
-      ConstructorSchema.DirectLetUpdate sourceRuntime sourceEnv decl witness
-        nextWitness schema nextSchema := by
+      ConstructorSchema.DirectLetUpdate context sourceRuntime sourceEnv decl
+        witness nextWitness schema nextSchema := by
   have fits : directLetAllocationCost decl ≤ remainingBytes := by
     rw [← requiredEq]
     exact related.budget
@@ -25060,8 +25060,8 @@ theorem
         (remainingBytes - directLetAllocationCost decl) nextRuntime
         (bind sourceEnv decl.fvarId sourceValue) continuation nextStore
         resumedLocals targetRest nextWitness sourceAfter targetAfter ∧
-      ConstructorSchema.DirectLetUpdate sourceRuntime sourceEnv decl witness
-        nextWitness schema nextSchema := by
+      ConstructorSchema.DirectLetUpdate context sourceRuntime sourceEnv decl
+        witness nextWitness schema nextSchema := by
   obtain ⟨nextRuntime, sourceValue, sourceResult⟩ :=
     related.focus.directLetResult_of_step
       supported.toReuseBudgetedDirectSupported sourceStep

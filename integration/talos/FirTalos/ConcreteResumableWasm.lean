@@ -189,6 +189,72 @@ structure ConcreteStructuredSchemaSourceReadyAt
           sourceModule externals functionResult facts sourceRuntime sourceEnv
           source sourceCode
 
+/-- Schema-indexed source invariant used by the constructor-provenance
+simulation.
+
+Readiness is required only for the schema paired with the current source
+state.  Preservation follows the exact source/compiler schema transition;
+there is no universal quantification over unrelated schemas or concrete
+refinement witnesses. -/
+structure ConcreteStructuredSchemaSourceInvariantLaws
+    (program : Fir.LeanIR.ImpureProgram)
+    (sourceModule : Fir.Wasm.Module)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (externals : Fir.LeanIR.Impure.ExternalImpl)
+    (Invariant : Fir.LeanIR.Impure.MachineState → ConstructorSchema → Prop) :
+    Prop where
+  ready : ∀ {source schema}, Invariant source schema →
+    ConcreteStructuredSchemaSourceReadyAt schema program sourceModule
+      targetModule hosts externals source
+  preserved : ∀ {source sourceAfter schema nextSchema},
+    Invariant source schema →
+      ConstructorSchema.SourceStep externals source sourceAfter schema
+          nextSchema →
+        Invariant sourceAfter nextSchema
+
+/-- Validated compiler state, active witness/schema agreement, and the
+source-only invariant at the same schema index. -/
+def ConcreteStructuredSchemaValidatedInvariantGlobalOutcome
+    (program : Fir.LeanIR.ImpureProgram)
+    (sourceModule : Fir.Wasm.Module)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (externals : Fir.LeanIR.Impure.ExternalImpl)
+    (Invariant : Fir.LeanIR.Impure.MachineState → ConstructorSchema → Prop)
+    (source : Fir.LeanIR.Impure.MachineState)
+    (target : StructuredWasmState Host) : Prop :=
+  ∃ (schema : ConstructorSchema)
+      (witness : Fir.Wasm.Concrete.RefinementWitness),
+    Invariant source schema ∧ schema.WitnessAgrees witness ∧
+      ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+        targetModule hosts externals witness source target
+
+/-- The transition-retaining validated successor composes directly with a
+schema-indexed source invariant. -/
+theorem ConcreteStructuredSchemaValidatedCodeStepOutcome.withInvariant
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : Fir.LeanIR.Impure.ExternalImpl}
+    {Invariant : Fir.LeanIR.Impure.MachineState → ConstructorSchema → Prop}
+    (laws : ConcreteStructuredSchemaSourceInvariantLaws program sourceModule
+      targetModule hosts externals Invariant)
+    {source sourceAfter : Fir.LeanIR.Impure.MachineState}
+    {schema : ConstructorSchema}
+    {targetAfter : StructuredWasmState Host}
+    (sourceInvariant : Invariant source schema)
+    (related : ConcreteStructuredSchemaValidatedCodeStepOutcome program
+      sourceModule targetModule hosts externals source sourceAfter schema
+      targetAfter) :
+    ConcreteStructuredSchemaValidatedInvariantGlobalOutcome program
+      sourceModule targetModule hosts externals Invariant sourceAfter
+      targetAfter := by
+  obtain ⟨nextSchema, nextWitness, transition, agrees, validated⟩ := related
+  exact ⟨nextSchema, nextWitness,
+    laws.preserved sourceInvariant transition, agrees, validated⟩
+
 /-- A preserved source semantic invariant supplies current-state readiness.
 
 This is the same ready/preserved interface used by FIR's pass simulations.

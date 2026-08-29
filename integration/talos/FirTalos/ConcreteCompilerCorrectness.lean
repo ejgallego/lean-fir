@@ -14343,38 +14343,47 @@ one allocating or reusing direct declaration.
 The declaration equation and source token lookup are semantic/compiler facts;
 the concrete witness transition is kept separately in `DirectLetUpdate`. -/
 inductive ConstructorSchema.DirectLetShape
+    (context : Fir.Wasm.Context)
     (sourceRuntime : RuntimeState) (sourceEnv : Env)
     (decl : LCNF.LetDecl .impure) :
     ConstructorSchema → ConstructorSchema → Prop where
   | constructor
       {schema : ConstructorSchema}
       (info : LCNF.CtorInfo) (args : Array (LCNF.Arg .impure))
+      (argumentCode : List Fir.Wasm.Instruction)
       (fieldKinds : Array AbiKind)
       (valueEq : decl.value = .ctor info args)
+      (argumentsCompiled :
+        Fir.Wasm.compileArgs context args = .ok (argumentCode, fieldKinds))
       (nonempty : ¬ ((info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0)) :
-      ConstructorSchema.DirectLetShape sourceRuntime sourceEnv decl schema
-        (schema.bind sourceRuntime.nextLocation info fieldKinds)
+      ConstructorSchema.DirectLetShape context sourceRuntime sourceEnv decl
+        schema (schema.bind sourceRuntime.nextLocation info fieldKinds)
   | reuse
       {schema nextSchema : ConstructorSchema}
       (tokenId : FVarId) (info : LCNF.CtorInfo) (updateHeader : Bool)
-      (args : Array (LCNF.Arg .impure)) (fieldKinds : Array AbiKind)
+      (args : Array (LCNF.Arg .impure))
+      (argumentCode : List Fir.Wasm.Instruction)
+      (fieldKinds : Array AbiKind)
       (sourceToken : Value)
       (valueEq : decl.value = .reuse tokenId info updateHeader args)
       (tokenLookup : lookup sourceEnv tokenId = some sourceToken)
+      (argumentsCompiled :
+        Fir.Wasm.compileArgs context args = .ok (argumentCode, fieldKinds))
       (shape : ConstructorSchema.ReuseShape sourceRuntime sourceToken info
         fieldKinds schema nextSchema) :
-      ConstructorSchema.DirectLetShape sourceRuntime sourceEnv decl schema
-        nextSchema
+      ConstructorSchema.DirectLetShape context sourceRuntime sourceEnv decl
+        schema nextSchema
 
 /-- One direct declaration's source/compiler schema shape paired with the
 matching concrete witness evolution. -/
 structure ConstructorSchema.DirectLetUpdate
+    (context : Fir.Wasm.Context)
     (sourceRuntime : RuntimeState) (sourceEnv : Env)
     (decl : LCNF.LetDecl .impure)
     (before after : RefinementWitness)
     (schema nextSchema : ConstructorSchema) : Prop where
-  shape : ConstructorSchema.DirectLetShape sourceRuntime sourceEnv decl schema
-    nextSchema
+  shape : ConstructorSchema.DirectLetShape context sourceRuntime sourceEnv decl
+    schema nextSchema
   witness : ConstructorSchema.WitnessUpdate before after schema nextSchema
 
 theorem ConstructorSchema.DirectLetUpdate.agrees
@@ -14382,11 +14391,56 @@ theorem ConstructorSchema.DirectLetUpdate.agrees
     {decl : LCNF.LetDecl .impure}
     {before after : RefinementWitness}
     {schema nextSchema : ConstructorSchema}
-    (update : ConstructorSchema.DirectLetUpdate sourceRuntime sourceEnv decl
-      before after schema nextSchema)
+    (update : ConstructorSchema.DirectLetUpdate context sourceRuntime sourceEnv
+      decl before after schema nextSchema)
     (agrees : schema.WitnessAgrees before) :
     nextSchema.WitnessAgrees after :=
   update.witness.agrees agrees
+
+/-- A schema-changing direct declaration focused in one source machine state.
+
+This relation keeps only source syntax, source runtime/environment, and the
+exact compiler argument-kinding equation.  In particular it contains no
+concrete address, refinement witness, target state, or Wasm execution path. -/
+def ConstructorSchema.DirectLetShapeAt
+    (source : MachineState) (schema nextSchema : ConstructorSchema) : Prop :=
+  ∃ (context : Fir.Wasm.Context) (decl : LCNF.LetDecl .impure)
+      (continuation : LCNF.Code .impure),
+    source.control = .code (.let decl continuation) ∧
+      ConstructorSchema.DirectLetShape context source.runtime source.env decl
+        schema nextSchema
+
+/-- Source/compiler constructor-schema evolution for one successful semantic
+step.
+
+The direct constructor records the exact compiler-derived layout selected by
+the active declaration.  The preservation constructor is available only when
+the current source focus admits no allocating/reusing direct shape.  This
+exclusion prevents a constructor allocation from being spuriously replayed as
+an unchanged-schema step. -/
+inductive ConstructorSchema.SourceStep
+    (externals : ExternalImpl) (source sourceAfter : MachineState) :
+    ConstructorSchema → ConstructorSchema → Prop where
+  | directLet
+      {schema nextSchema : ConstructorSchema}
+      (sourceStep : executeStep externals source = .next sourceAfter)
+      (shape : ConstructorSchema.DirectLetShapeAt source schema nextSchema) :
+      ConstructorSchema.SourceStep externals source sourceAfter schema
+        nextSchema
+  | preserved
+      {schema : ConstructorSchema}
+      (sourceStep : executeStep externals source = .next sourceAfter)
+      (noShape : ¬ ∃ nextSchema,
+        ConstructorSchema.DirectLetShapeAt source schema nextSchema) :
+      ConstructorSchema.SourceStep externals source sourceAfter schema schema
+
+theorem ConstructorSchema.SourceStep.executeStep
+    {externals : ExternalImpl} {source sourceAfter : MachineState}
+    {schema nextSchema : ConstructorSchema}
+    (step : ConstructorSchema.SourceStep externals source sourceAfter schema
+      nextSchema) :
+    executeStep externals source = .next sourceAfter := by
+  cases step <;> assumption
 
 /--
 Certificate-free compiler composition for one successful capacity-validated
@@ -14470,8 +14524,8 @@ theorem ConcreteSupportedFunction.reuseLetStep_of_capacity
       nextStore.host.runtime.heap.AddressSpaceBudget
         (remainingBytes - directLetAllocationCost decl) ∧
       ∀ schema, ∃ nextSchema,
-        ConstructorSchema.DirectLetUpdate sourceRuntime sourceEnv decl witness
-          nextWitness schema nextSchema := by
+        ConstructorSchema.DirectLetUpdate context sourceRuntime sourceEnv decl
+          witness nextWitness schema nextSchema := by
   rcases supported with
     ⟨tokenId, info, updateHeader, args, argumentCode, fieldKinds, resultKind,
       evidence, valueEq, tagFits, valueKind, tokenCompiled, argumentsCompiled,
@@ -14673,8 +14727,8 @@ theorem ConcreteSupportedFunction.reuseLetStep_of_capacity
     fun schema => by
       obtain ⟨nextSchema, shape, witnessUpdate⟩ := schemaUpdates schema
       exact ⟨nextSchema,
-        ⟨.reuse tokenId info updateHeader args fieldKinds sourceToken valueEq
-            tokenLookup shape,
+        ⟨.reuse tokenId info updateHeader args argumentCode fieldKinds
+            sourceToken valueEq tokenLookup argumentsCompiled shape,
           witnessUpdate⟩⟩⟩
 
 /--
@@ -14925,8 +14979,8 @@ def ReuseCapacityDirectLetRuntimeRefinesWithSchema
                   Invariant nextFacts (remainingBytes - letCost decl)
                     nextRuntime (bind sourceEnv decl.fvarId sourceValue)
                     nextStore nextLocals nextWitness ∧
-                  ConstructorSchema.DirectLetUpdate sourceRuntime sourceEnv decl
-                    witness nextWitness schema nextSchema
+                  ConstructorSchema.DirectLetUpdate context sourceRuntime
+                    sourceEnv decl witness nextWitness schema nextSchema
 
 /-- Direct runtime law for operations whose refinement witness evolves only
 monotonically.  This is the unchanged-schema companion of the richer
@@ -17033,7 +17087,8 @@ theorem
       nextFrame, by
         simpa [directLetAllocationCost, valueEq] using remainingBudget⟩,
     {
-      shape := .constructor info args fieldKinds valueEq nonempty
+      shape := .constructor info args argumentCode fieldKinds valueEq
+        argumentsCompiled nonempty
       witness := .allocated sourceRuntime.nextLocation word info fieldKinds
         extension (by rw [witnessEq]; simp) (by rw [witnessEq]; simp) }⟩
 
@@ -20531,6 +20586,48 @@ theorem ReuseBudgetedDirectSupported.schema_cases
     ReuseAliasSupported, SchemaChangingDirectSupported,
     SchemaPreservingDirectSupported] at supported ⊢
   aesop
+
+/-- A member of the monotone direct family cannot carry a constructor/reuse
+schema shape, independently of the surrounding runtime, environment, or
+compiler context. -/
+theorem SchemaPreservingDirectSupported.noDirectLetShape
+    {context : Fir.Wasm.Context} {facts : ReuseCapacityFacts}
+    {decl : LCNF.LetDecl .impure}
+    (supported : SchemaPreservingDirectSupported context facts decl)
+    {otherContext : Fir.Wasm.Context} {sourceRuntime : RuntimeState}
+    {sourceEnv : Env} {schema nextSchema : ConstructorSchema} :
+    ¬ ConstructorSchema.DirectLetShape otherContext sourceRuntime sourceEnv
+      decl schema nextSchema := by
+  intro shape
+  rcases supported with supported | supported
+  · cases supported
+    cases shape <;> simp_all
+  · rcases supported with supported | supported
+    · cases supported
+      cases shape <;> simp_all
+    · rcases supported with supported | supported
+      · cases supported
+        cases shape <;> simp_all
+      · rcases supported with supported | supported
+        · cases supported
+          cases shape <;> simp_all
+        · rcases supported with supported | supported
+          · cases supported
+            cases shape <;> simp_all
+          · rcases supported with supported | supported
+            · cases supported
+              cases shape <;> simp_all
+            · rcases supported with supported | supported
+              · cases supported
+                cases shape <;> simp_all
+              · rcases supported with supported | supported
+                · cases supported
+                  cases shape <;> simp_all
+                · rcases supported with supported | supported
+                  · cases supported
+                    cases shape <;> simp_all
+                  · cases supported
+                    cases shape <;> simp_all
 
 /--
 All current direct compiler operations share the facts-indexed reuse frame.
