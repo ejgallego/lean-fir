@@ -225,6 +225,25 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   source invariant and instantiates the ranked finite-trace simulation; the
   object-field admission bug remains open until final-LCNF type safety supplies
   that invariant and the legacy module-global route is retired.
+- Accepted W6 schema-indexed finite-trace framework: functional proof head
+  `d20971e6` is linked through clean tracked handoff `7a5d1be3`, based directly
+  on accepted schema-global validation head `9301c0e0`. `DirectLetShape` now
+  retains the compiler's exact `compileArgs` result, and
+  `ConstructorSchema.SourceStep` records either that exact constructor/reuse
+  transition or a proof that no schema-changing direct shape is present. One
+  factored source-schema dichotomy drives every ordinary-code branch, while
+  the witness-indexed global theorem retains the actual transition across all
+  seven administrative outcome families. Pairing current-schema readiness
+  with preservation under that transition now constructs the ranked weak
+  simulation and `ConcreteFiniteTraceCorrect` directly, without a universal-
+  schema premise, target execution certificate, or termination hypothesis.
+  Lean Beam, the targeted 3,128-job cone, `git diff --check`, `make check` at
+  730 unique cases and 2,172/2,172 equal comparisons, `make talos-setup`, and
+  all 3,182 Talos jobs pass. No source semantics, ABI, concrete runtime,
+  lowering, or emitted code changed. The remaining W6 obligation is an
+  invariant instance derived from final-LCNF semantic type/provenance
+  soundness plus the independent finite-runtime and wasm32 address-space laws;
+  `FIR-BUG-wasm-none-object-field-kind-admission` therefore remains confirmed.
 - Accepted exact scalar-alias proof interface: W7 functional head `f32458a2`
   is linked through clean tracked handoff `e3548322`. The emitter now exports
   its annotation-only object-result source mapper plus closed source-shape
@@ -7270,7 +7289,7 @@ validation work continues; their historical handoff text remains unchanged.
 |---|---|---|---|---|---|
 | Integration | integration owner | `upgrade/lean-4.33` | released | `LEAN-4.33-UPGRADE` landed at `476f001b`; the temporary lane may be retired after publication. | Moves the shared toolchain, compiler-source contracts, and versioned compact-Format package surface to Lean 4.33 without changing the semantic Wasm ABI, concrete layout, or resident-helper signatures. |
 | Lean pass proof | pass-proof owner | `proof/simpcase` | released | Clean tracked checkpoint `8788603c`, functional head `3d811853`, transports the accepted allocated source-only provenance through a monotone deleted let and exposes it from the semantic deleted-constructor matcher beside the exact ledger relation. | Proof-interface refinement only. Lean Beam, the focused 34-job cone, complete 728-case/2,166-comparison gate, and final diff check pass; no runtime, interpreter, pass, ledger, Wasm surface, or shared semantic contract changed. Heap-only USize adaptation remains queued under `W7-LCNF-20260826-021`. |
-| W6 runtime proof | W6 owner | `wasm/talos-runtime` | released | Clean head `29106cfd`, functional head `2380ade5`, closes the constructor-complete validated global simulation and switches the public finite-prefix route to the real validated export root. | Proof-interface correction only: residual validation is inductive, source/phase safety is the sole compiler field, and finite header/capture plus allocation safety remain execution-owned. Full root and 3,182-job Talos gates pass; no W7 implementation or shared semantic contract changed. |
+| W6 runtime proof | W6 owner | `wasm/talos-runtime` | released | Clean head `7a5d1be3`, functional head `d20971e6`, closes the schema-indexed finite-trace proof framework from exact source schema evolution through `ConcreteFiniteTraceCorrect`. | Additive proof interfaces only: the theorem consumes current-schema readiness and its preservation under the actual source transition, with no universal-schema premise or target certificate. Full root and 3,182-job Talos gates pass; final-LCNF type/provenance soundness and finite resource laws remain the production instantiation boundary. |
 | W7 generation | generation owner | `wasm/generation` | released | Fixed-width natural boxing/body surface is accepted and W6-proved through `d3366493`. The bounded ByteArray immediate-index experiment was correctness-green but rejected for +9,894 bytes and neutral/slower timing; W7-2 is clean with no integration request. | Generation optimization and proof convergence over stable contracts. Full repository, 3,182-job Talos, deterministic artifact, concrete-readiness, reclamation, and differential gates pass; accepted raw lean-zip remains 383,816 bytes, zero imports, 502 functions. |
 | Compiler-native Wasm | integration owner | `wasm/lcnf-c` | parked | Landed checkpoint `a4855402` adds a separately packaged C/Emscripten `Std.Format.prettyM` facade on top of the optimized final-LCNF-to-C route from `2760e3e0`. The browser adapter shares the compact `Format` request and exact `{text, events}` trace contract with W7's FIR-native facade while retaining a private bulk wire, verified Emscripten loader, full pinned Lean runtime, and independent package. The differential suite compares Unicode, grouping, nesting, tags, arbitrary-precision values, initial columns, malformed requests, repeated calls, and a one-MiB UTF-8 transfer through both engines | No shared semantic contract changed and the packages remain physically independent. The lane consumes `Std.Format.prettyM`, final impure LCNF, and Lean's C ABI without changing the symbolic Wasm, W6 concrete-runtime, or W7 resident-runtime surfaces. Resume with controlled sampled profiling of the facade wire and generated C before accepting a runtime optimization |
 | Validation | validation owner | `validation/float-corpus` | active | Clean coordination head `cfa17d81` retains the long 1,008-case native/LCNF calibration. Current-main validation covers 633 native/LCNF cases, 601 V8 cases, 642 unique cases, 1,844 comparisons, 5,750 interpreter transitions, 51 semantic-tag floors, and 142 conjunctive domains. | Test-fixtures may now rebase and admit the 32 scalar-closure cases. The long validation branch rebases separately; alias, termination, IO, and stream-capture contracts remain isolated. |
