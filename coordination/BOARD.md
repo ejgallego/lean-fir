@@ -25,7 +25,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   resident Array provenance consumer after rebasing, is the remaining
   milestone step.
 - Integration owner: `root`, holding the serial landing lease through accepted
-  integration head `e9a31505`. `wasm-gen` remains released to the W7-1
+  integration head `a0c35a72`. `wasm-gen` remains released to the W7-1
   generation lane. The inherited cleanup, serial and bounded check-throughput,
   mailbox-routing, bounded `Nat.land`, USize range-fact, exact consumer-ratchet,
   and transactional resident-linker stacks are now integrated. Tooling's
@@ -207,6 +207,24 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   dispatcher to return the schema-global relation in every branch, then
   retires the legacy module-global effect-admission surface; the object-field
   admission bug remains open.
+- Accepted W6 schema-global validated-dispatch checkpoint: functional proof
+  head `ecd2a08d` is linked through clean tracked handoff `a0c35a72`, based on
+  accepted direct-dispatch integration head `8b2b2a9c`. Validated returns now
+  retain their exact witness index. The ordinary-code dispatcher returns the
+  schema-enriched global relation for every production admission, and its
+  compatibility arm proves the two arbitrary-witness object-field cases
+  unreachable before invoking the dedicated schema-derived successors. The
+  enclosing witness-indexed theorem covers all seven validated outcome forms:
+  call/cache/bind/return administration preserves the schema at the same
+  witness, while resolved external execution transports agreement through its
+  explicit extension. Lean Beam, the 3,128-job resumable-Wasm cone, `make check`
+  at 730 unique cases and 2,172/2,172 comparisons, and all 3,182 Talos
+  jobs pass with receipt
+  `4ee591f6124a8e306b82a05d163fa3f0c083e98dc3ee1bf8d71688f849504423`.
+  No shared contract changed. Next W6 defines the schema-indexed hereditary
+  source invariant and instantiates the ranked finite-trace simulation; the
+  object-field admission bug remains open until final-LCNF type safety supplies
+  that invariant and the legacy module-global route is retired.
 - Accepted exact scalar-alias proof interface: W7 functional head `f32458a2`
   is linked through clean tracked handoff `e3548322`. The emitter now exports
   its annotation-only object-result source mapper plus closed source-shape
