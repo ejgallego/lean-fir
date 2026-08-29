@@ -1476,6 +1476,61 @@ theorem ConcreteSupportedExport.finiteTraceCorrect_of_sourceInvariant
     (spec.validatedCodeGlobalRoot contextCaches runtimeInvariant)
     sourceInitialInvariant
 
+/-- Production-facing schema-indexed finite-prefix correctness.
+
+The compiler constructs the validated target relation at the canonical export
+entry and retains its exact initial witness.  The client supplies one source-
+only constructor schema agreeing with that witness, the corresponding
+hereditary final-LCNF invariant, and the two independent finite-resource laws.
+No premise quantifies over unrelated schemas or contains a target execution,
+future source step, termination proof, or translation certificate. -/
+theorem ConcreteSupportedExport.finiteTraceCorrect_of_schemaSourceInvariant
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec : ConcreteSupportedExport program context sourceCode sourceModule
+      sourceFunction targetModule hosts exportName)
+    {externals : Fir.LeanIR.Impure.ExternalImpl}
+    {SourceInvariant :
+      Fir.LeanIR.Impure.MachineState → ConstructorSchema → Prop}
+    (sourceLaws : ConcreteStructuredSchemaSourceInvariantLaws program
+      sourceModule targetModule hosts externals SourceInvariant)
+    (finiteRuntimeSafety : ConcreteStructuredCurrentStepFiniteRuntimeSafety
+      program sourceModule targetModule hosts externals)
+    (addressSpaceSafety : ConcreteStructuredCurrentStepAddressSpaceSafety
+      program sourceModule targetModule hosts externals)
+    (contextCaches :
+      context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    {facts : Fir.Wasm.ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceRuntime : Fir.LeanIR.Impure.RuntimeState}
+    {sourceEnv : Fir.LeanIR.Impure.Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : Fir.Wasm.Concrete.RefinementWitness}
+    {parameters : List Wasm.Value}
+    {initialSchema : ConstructorSchema}
+    (runtimeInvariant : ConcreteReuseCapacityCacheAbiFrame context sourceModule
+      sourceFunction externals facts remainingBytes sourceRuntime sourceEnv
+      initial (spec.targetFunction.toLocals parameters.reverse)
+      initialWitness)
+    (schemaAgrees : initialSchema.WitnessAgrees initialWitness)
+    (sourceInitialInvariant : SourceInvariant
+      (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+      initialSchema) :
+    ConcreteFiniteTraceCorrect externals
+      (concreteStructuredWasmMachine targetModule.wasmModule hosts.env)
+      (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+      (concreteStructuredFunctionEntry spec.targetFunction initial
+        parameters) :=
+  sourceLaws.toFiniteTraceCorrect finiteRuntimeSafety addressSpaceSafety
+    sourceInitialInvariant schemaAgrees
+    (spec.validatedCodeGlobalRootAt contextCaches runtimeInvariant)
+
 /-- Export-facing form of the provenance-preserving production proof route.
 The compiler establishes validation once at the real export root, while the
 simulation carries it through every active and suspended continuation. -/

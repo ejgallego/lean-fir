@@ -5833,7 +5833,7 @@ correctness becomes a corollary; a backward simulation is deliberately later.
 | W6.7c emitted structured target | complete | frame laws plus the explicit label/loop/call stack expose progress through calls, branches, loops, returns, and halting |
 | W6.7d structured terminal adequacy | complete | every reachable canonical-entry-to-halted path collapses to the exact instruction-boundary/Talos run; stack shape and arities are proved, not assumed at the public boundary |
 | W6.7e compiler relation and rank | proof framework complete; `ConstructorSchema.SourceStep` records exact compiled-layout constructor/reuse evolution and excludes an unchanged replay at those nodes. The witness-indexed validated relation retains this transition through ordinary code and all six administrative families. `ConcreteStructuredSchemaSourceInvariantLaws` pairs current-schema readiness with preservation under that exact transition and directly constructs the ranked simulation | instantiate the framework with the root final-LCNF semantic/type invariant for return, descriptors, cases, and operation domains. Return safety already factors through precise use-site `SemanticBindingAtAbi`; ownership/delete/tag/`USize` mutation is invariant-free |
-| W6.7f public finite-trace theorem | proof framework complete; `ConcreteStructuredSchemaSourceInvariantLaws.toFiniteTraceCorrect` takes one initial schema, its active-witness agreement, root validation, and the independent finite-runtime/address-space laws. It asks for neither universal-schema readiness nor a target execution certificate | derive the initial schema-indexed invariant from final-LCNF semantic type safety, then discharge finite-runtime and wasm32 address-space safety from a resource-safe invariant or explicitly budgeted finite source prefix |
+| W6.7f public finite-trace theorem | proof framework complete; `ConcreteSupportedExport.finiteTraceCorrect_of_schemaSourceInvariant` constructs the exact witness-indexed validated relation at the canonical export root, then consumes one initial schema, its active-witness agreement, the hereditary source invariant, and independent finite-runtime/address-space laws. It asks for neither universal-schema readiness nor a target execution certificate | derive the initial schema-indexed invariant from final-LCNF semantic type safety, then discharge finite-runtime and wasm32 address-space safety from a resource-safe invariant or explicitly budgeted finite source prefix |
 | W6.7g corollaries | pending | finite whole-export correctness follows from W6.7d/f; infinite source progress and trace preservation follow from W6.7e/f; backward weak simulation remains explicitly deferred |
 
 W6.7e initially follows the same admitted production fragment as
@@ -6397,6 +6397,14 @@ LCNF semantic type/provenance soundness, and supply the independent finite
 runtime and wasm32 address-space laws. Once production uses that instance, the
 old module-global `ConcreteStructuredCompilerAdmissionLaws` route can remain
 only as an explicitly weaker compatibility theorem or be retired.
+
+The public export surface now follows this route directly.
+`ConcreteSupportedExport.validatedCodeGlobalRootAt` retains the exact initial
+refinement witness constructed by the ordinary export frame, and
+`finiteTraceCorrect_of_schemaSourceInvariant` composes it with one agreeing
+initial schema and the hereditary invariant. Thus downstream type-soundness
+work starts from source entry data; it never constructs the simulation's
+target-side relation by hand.
 
 W6.6 float packed-field admission closes the semantic-to-concrete gap for
 `Float32` and `Float` projection and mutation. `ValueRel` now relates the

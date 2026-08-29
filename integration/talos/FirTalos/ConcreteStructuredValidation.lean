@@ -3251,6 +3251,44 @@ theorem ConcreteSupportedExport.validatedCodeRoot
     ⟨[], .nil⟩
   exact ⟨contextCaches, validatedCore, frames, agrees, validationAgrees⟩
 
+/-- The canonical export entry retains its exact initial refinement witness.
+
+This is the indexed root used by constructor-schema provenance.  It is the
+same compiler-derived state as `validatedCodeGlobalRoot`; no witness is
+recovered from a `Prop`-valued existential and no additional runtime premise
+is introduced. -/
+theorem ConcreteSupportedExport.validatedCodeGlobalRootAt
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec : ConcreteSupportedExport program context sourceCode sourceModule
+      sourceFunction targetModule hosts exportName)
+    (contextCaches :
+      context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters : List Wasm.Value}
+    (invariant : ConcreteReuseCapacityCacheAbiFrame context sourceModule
+      sourceFunction externals facts remainingBytes sourceRuntime sourceEnv
+      initial (spec.targetFunction.toLocals parameters.reverse)
+      initialWitness) :
+    ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+      targetModule hosts externals initialWitness
+      (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+      (concreteStructuredFunctionEntry spec.targetFunction initial
+        parameters) :=
+  .code rfl (spec.validatedCodeRoot contextCaches invariant)
+
 /-- Hide the canonical export-entry indices behind the module-wide closed
 active-code relation. -/
 theorem ConcreteSupportedExport.validatedCodeGlobalRoot
@@ -3283,7 +3321,7 @@ theorem ConcreteSupportedExport.validatedCodeGlobalRoot
       (sourceCodeState context sourceRuntime sourceEnv sourceCode)
       (concreteStructuredFunctionEntry spec.targetFunction initial
         parameters) :=
-  .code rfl (spec.validatedCodeRoot contextCaches invariant)
+  (spec.validatedCodeGlobalRootAt contextCaches invariant).toValidatedGlobal
 
 /-- A validated direct `let` exposes the exact kind inserted into the residual
 local row and the guarded-sharing update used for its continuation. -/
