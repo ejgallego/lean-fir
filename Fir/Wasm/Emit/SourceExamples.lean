@@ -297,6 +297,15 @@ run_cmd do
       throwError "individual source-unit capture failed Wasm lowering: {repr error}"
 
 run_cmd do
+  let entries := #[``idFloatFixture, ``optionNatChangedFixture]
+  let source ← liftCoreM <|
+    compileEntriesIndividuallyInternalized entries
+  for entry in entries do
+    unless (source.program.findDecl? entry).isSome &&
+        !source.externalNames.contains entry do
+      throwError "individual-source multi-entry capture lost {entry}"
+
+run_cmd do
   let entries := #[``idFloat32Fixture, ``idFloatFixture]
   let source ← liftCoreM <|
     compileEntriesFinalCapturedInternalized entries

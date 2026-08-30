@@ -735,6 +735,33 @@ def compileEntryIndividuallyInternalized (entry : Name)
     completed pending #[moduleArtifact]
 
 /--
+Compile several public entries through their exact individual source-unit
+closures, merge declarations only when their independently recovered bodies
+agree, and retain every requested entry. This is the multi-entry counterpart
+of `compileEntryIndividuallyInternalized`; it avoids synthesizing one larger
+compiler unit around roots that Lean originally compiled in ordinary source
+modules.
+-/
+def compileEntriesIndividuallyInternalized (entries : Array Name)
+    (retainedExternalNames : Array String := #[]) :
+    CoreM Fir.Validation.Lcnf.Artifact := do
+  let some entry := entries[0]? |
+    throwError "individual-source multi-entry capture requires at least one entry"
+  unless (entries.foldl (init := #[]) addUniqueName).size == entries.size do
+    throwError "individual-source multi-entry capture received duplicate entries: {entries}"
+  let artifacts ← entries.mapM fun root =>
+    compileEntryIndividuallyInternalized root retainedExternalNames
+  let artifact ← mergeSeparatelyCompiledArtifacts entry artifacts
+  for root in entries do
+    let some declaration := artifact.program.findDecl? root |
+      throwError "individual-source multi-entry capture did not contain root `{root}`"
+    if artifact.externalNames.contains declaration.name then
+      throwError "individual-source multi-entry root `{root}` remained external"
+  match pruneUnreachableDeclarations artifact (entries.extract 1 entries.size) with
+  | .ok artifact => return artifact
+  | .error message => throwError message
+
+/--
 Compile an entry and its recursively discovered source dependencies as one
 compiler unit, obtaining that unit from the exact final-impure SCCs observed
 before Lean's IR handoff. Dependency discovery compiles only each new frontier;
