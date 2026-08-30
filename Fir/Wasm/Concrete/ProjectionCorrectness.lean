@@ -392,6 +392,24 @@ theorem ConstructorObjectRel.readTag_refines
   simp [liftMemory, headerKind, tag64, constructorBeq]
   rfl
 
+/-- A related heap constructor's semantic tag fits the physical header lane.
+
+This is stronger than the successful `readTag` equation: it records that the
+source tag is represented by an actual `UInt32` header word, rather than merely
+being narrowed through `UInt32.ofNat`.  Object-case admission can therefore
+derive its range fact for heap-only discriminators directly from the ordinary
+heap relation. -/
+theorem ConstructorObjectRel.semanticTag_lt_uint32
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {semantic : ConstructorObject}
+    (related : ConstructorObjectRel state witness address info fieldKinds semantic) :
+    semantic.tag < UInt32.size := by
+  obtain ⟨header, _headerRead, _headerKind, _extent, tag, _size, _usize,
+      _ssize⟩ := related.header
+  rw [← tag]
+  exact UInt32.toNat_lt_size header.aux0
+
 /-- A concrete tag read cannot reinterpret a canonical released header: it
 reports the exact address-indexed source fault before inspecting object kind or
 tag metadata. -/
@@ -574,6 +592,19 @@ theorem LiveHeapRel.readTaggedReferenceTag_refines
       rfl
   | promoted found =>
       exact (related.promoted payload word found).decoded
+
+/-- A semantic tag carried by an immediate or promoted tagged reference fits
+the full payload lane by construction. -/
+theorem TaggedReferenceRel.getTag_lt_uint64
+    {witness : RefinementWitness} {word : Word32} {payload : UInt64}
+    {runtime : RuntimeState} {tag : Nat}
+    (_related : TaggedReferenceRel witness word payload)
+    (semanticTag : getTag runtime (.object (.tagged payload)) = .ok tag) :
+    tag < UInt64.size := by
+  have tagEq : payload.toNat = tag := by
+    simpa [getTag] using Except.ok.inj semanticTag
+  rw [← tagEq]
+  exact payload.toNat_lt
 
 /-- The checked concrete object projection refines the actual W2 semantic
 `getObjectField` operation for a mapped live constructor. -/
@@ -1406,6 +1437,65 @@ theorem LiveHeapRel.readTag_refines
       rw [objectEq] at semanticTag
       simp at semanticTag
 
+/-- A successful semantic tag read through a mapped heap reference is bounded
+by the concrete constructor header that represents it. -/
+theorem LiveHeapRel.heapTag_lt_uint32
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {tag : Nat}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (semanticTag : getTag runtime (.object (.heap location)) = .ok tag) :
+    tag < UInt32.size := by
+  obtain ⟨cell, found, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  have live : cell.live = true := by
+    cases liveEq : cell.live with
+    | false =>
+        simp [getTag, getLiveCell, found, liveEq, Bind.bind, Except.bind]
+          at semanticTag
+    | true => rfl
+  have cellRelated := cellRelation.live_of_eq_true live
+  cases cellRelated with
+  | constructor _ objectEq objectRelated _ _ _ _ _ =>
+      simp [getTag, getLiveCell, found, live] at semanticTag
+      simp only [Bind.bind, Except.bind] at semanticTag
+      rw [objectEq] at semanticTag
+      change Except.ok _ = Except.ok tag at semanticTag
+      have tagEq := Except.ok.inj semanticTag
+      rw [← tagEq]
+      exact objectRelated.semanticTag_lt_uint32
+  | boxed _ objectEq _ _ _ _ =>
+      simp [getTag, getLiveCell, found, live] at semanticTag
+      simp only [Bind.bind, Except.bind] at semanticTag
+      rw [objectEq] at semanticTag
+      simp at semanticTag
+  | natural _ objectEq _ _ _ _ =>
+      simp [getTag, getLiveCell, found, live] at semanticTag
+      simp only [Bind.bind, Except.bind] at semanticTag
+      rw [objectEq] at semanticTag
+      simp at semanticTag
+  | integer _ objectEq _ _ _ _ =>
+      simp [getTag, getLiveCell, found, live] at semanticTag
+      simp only [Bind.bind, Except.bind] at semanticTag
+      rw [objectEq] at semanticTag
+      simp at semanticTag
+  | string _ objectEq _ _ _ _ =>
+      simp [getTag, getLiveCell, found, live] at semanticTag
+      simp only [Bind.bind, Except.bind] at semanticTag
+      rw [objectEq] at semanticTag
+      simp at semanticTag
+  | array _ objectEq _ _ _ _ =>
+      simp [getTag, getLiveCell, found, live] at semanticTag
+      simp only [Bind.bind, Except.bind] at semanticTag
+      rw [objectEq] at semanticTag
+      simp at semanticTag
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, objectEq⟩ := closureRelated.objectEq
+      simp [getTag, getLiveCell, found, live] at semanticTag
+      simp only [Bind.bind, Except.bind] at semanticTag
+      rw [objectEq] at semanticTag
+      simp at semanticTag
+
 /-- A mapped stale constructor reference preserves `deadObject` through tag
 observation.  As at the sharing boundary, the concrete side retains the wasm32
 address while FIR retains the represented semantic location. -/
@@ -1674,6 +1764,31 @@ theorem LiveHeapRel.readTag_tobject_refines
           have tagEq := Except.ok.inj semanticTag
           rw [← tagEq]
           simpa using related.readTaggedReferenceTag_refines taggedRelated
+
+/-- Every successful tag read represented by the concrete object relation fits
+the exact `UInt64` result returned by `readTag`.
+
+Heap constructors are actually bounded by their `UInt32` header word. Tagged
+references may be promoted and therefore need the full `UInt64` range, but no
+source invariant or producer-origin certificate is required for that bound.
+This is the proof boundary for a non-truncating generated case ABI. -/
+theorem LiveHeapRel.tobjectTag_lt_uint64
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {word : Word32} {value : Value} {tag : Nat}
+    (related : LiveHeapRel state witness runtime)
+    (valueRelated : ValueRel witness .tobject (.word32 word) value)
+    (semanticTag : getTag runtime value = .ok tag) :
+    tag < UInt64.size := by
+  cases valueRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped mapped =>
+              exact Nat.lt_trans (related.heapTag_lt_uint32 mapped semanticTag)
+                (by decide)
+      | tagged taggedRelated =>
+          exact taggedRelated.getTag_lt_uint64 semanticTag
 
 /-- A representation-polymorphic case discriminator rejected by FIR as a
 nonconstructor is rejected by the concrete tag reader with the same source
