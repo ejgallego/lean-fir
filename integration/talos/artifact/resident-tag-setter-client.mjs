@@ -51,7 +51,7 @@ export async function checkResidentTagSetter(bytes) {
   host.attachMemory(concrete.memory);
   prepareConstructor(concrete.memory, address);
   concrete.resident_set_tag(address);
-  equal(host.getTag([address]), 14,
+  equal(host.getTag([address]), 14n,
     "ConcreteHost getTag disagrees with resident tag setter");
 
   const invalid = async (prepare, invoke, label) => {

@@ -8,11 +8,11 @@ if (!reportPath) {
 
 const report = JSON.parse(await readFile(reportPath, "utf8"));
 assert.equal(report.version, 1);
-assert.equal(report.summary.artifactFixtures, 44);
-assert.equal(report.summary.artifactSuccessFixtures, 43);
+assert.equal(report.summary.artifactFixtures, 45);
+assert.equal(report.summary.artifactSuccessFixtures, 44);
 assert.equal(report.summary.artifactExpectedFaultFixtures, 1);
 assert.equal(report.summary.artifactRejectedFixtures, 0);
-assert.equal(report.summary.readyArtifactFixtures, 44);
+assert.equal(report.summary.readyArtifactFixtures, 45);
 assert.equal(report.summary.artifactSwitchReady, true);
 assert.equal(report.summary.sourceProbes, 16);
 assert.equal(report.summary.readySourceProbes, 16);

@@ -1367,12 +1367,12 @@ export class ConcreteHost {
     assert.equal(args.length, 1, "getTag host arity mismatch");
     const word = this.checkedWord("tobject", args[0]);
     if (this.classify(word) === "immediate") {
-      return signed32(this.decodeImmediate(word));
+      return BigInt.asIntN(64, this.decodeImmediate(word));
     }
     const header = this.readHeader(word);
-    if (header.kind === KIND.constructor) return signed32(header.aux0);
+    if (header.kind === KIND.constructor) return BigInt(header.aux0);
     if (header.kind === KIND.natural && header.persistent && header.aux0 === 1) {
-      return signed32(this.readU64(word + HEADER_BYTES));
+      return BigInt.asIntN(64, this.readU64(word + HEADER_BYTES));
     }
     throw new ConcreteFault({ kind: "expectedConstructor" });
   }

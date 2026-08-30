@@ -54,14 +54,14 @@ async function checkConcreteHostAttachment(module, entry, memoryExport) {
 
   const beforeAttach = new ConcreteHost();
   const beforeConstructor = allocateConstructor(beforeAttach, 11);
-  const beforePromoted = beforeAttach.encodeTagged(0x80000000n);
+  const beforePromoted = beforeAttach.encodeTagged(0x100000000n);
   const beforeInstance = await WebAssembly.instantiate(module, {});
   beforeAttach.attachMemory(beforeInstance.exports[memoryExport]);
   expect(beforeAttach.buffer === beforeInstance.exports[memoryExport].buffer,
     "prebuilt concrete heap did not attach to the module memory");
-  expect((beforeInstance.exports[entry](beforeConstructor) >>> 0) === 11,
+  expect(beforeInstance.exports[entry](beforeConstructor) === 11n,
     "resident getTag cannot read a constructor copied during attachment");
-  expect((beforeInstance.exports[entry](beforePromoted) >>> 0) === 0x80000000,
+  expect(beforeInstance.exports[entry](beforePromoted) === 0x100000000n,
     "resident getTag cannot read a promoted tag copied during attachment");
   beforeAttach.attachMemory(beforeInstance.exports[memoryExport]);
   expectTrap(
@@ -75,10 +75,10 @@ async function checkConcreteHostAttachment(module, entry, memoryExport) {
   const memory = afterInstance.exports[memoryExport];
   afterAttach.attachMemory(memory);
   const afterConstructor = allocateConstructor(afterAttach, 13);
-  const afterPromoted = afterAttach.encodeTagged(0x80000001n);
-  expect((afterInstance.exports[entry](afterConstructor) >>> 0) === 13,
+  const afterPromoted = afterAttach.encodeTagged(0x100000001n);
+  expect(afterInstance.exports[entry](afterConstructor) === 13n,
     "resident getTag cannot read a constructor allocated after attachment");
-  expect((afterInstance.exports[entry](afterPromoted) >>> 0) === 0x80000001,
+  expect(afterInstance.exports[entry](afterPromoted) === 0x100000001n,
     "resident getTag cannot read a promoted tag allocated after attachment");
 
   afterAttach.allocateString("x".repeat(70000));
@@ -98,7 +98,7 @@ export async function checkResidentGetTag(bytes, manifest) {
     "resident getTag descriptor retained imports");
   expect(manifest.entry === "fir_getTag", "resident getTag entry drifted");
   expect(manifest.memory === "memory", "resident getTag memory export drifted");
-  expect(manifest.result === "uint32", "resident getTag result ABI drifted");
+  expect(manifest.result === "uint64", "resident getTag result ABI drifted");
   expect(JSON.stringify(manifest.params) === JSON.stringify(["tobject"]),
     "resident getTag parameter ABI drifted");
 
@@ -115,7 +115,7 @@ export async function checkResidentGetTag(bytes, manifest) {
   expect(memory instanceof WebAssembly.Memory, "resident memory export is not a memory");
   const view = new DataView(memory.buffer);
 
-  expect((getTag(42 * 2 + 1) >>> 0) === 42,
+  expect(getTag(42 * 2 + 1) === 42n,
     "resident getTag failed the immediate path");
 
   const constructor = 1024;
@@ -125,11 +125,11 @@ export async function checkResidentGetTag(bytes, manifest) {
     allocationBytes: 32,
     aux0: 7,
   });
-  expect((getTag(constructor) >>> 0) === 7,
+  expect(getTag(constructor) === 7n,
     "resident getTag failed the constructor path");
 
   const promoted = 2048;
-  const promotedPayload = 0x80000000n;
+  const promotedPayload = 0x100000000n;
   writeHeader(view, promoted, {
     kind: 5,
     flags: 3,
@@ -137,7 +137,7 @@ export async function checkResidentGetTag(bytes, manifest) {
     aux0: 1,
   });
   view.setBigUint64(promoted + 32, promotedPayload, true);
-  expect((getTag(promoted) >>> 0) === Number(promotedPayload),
+  expect(getTag(promoted) === promotedPayload,
     "resident getTag failed the promoted-tag path");
 
   const dead = 3072;

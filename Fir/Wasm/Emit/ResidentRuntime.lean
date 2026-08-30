@@ -52,7 +52,6 @@ private def promotedTagBody : List Instruction :=
     [.ifElse
       [.localGet objectParam,
         .i64Load .uint64 (offset headerBytes),
-        .i32WrapI64 .uint32,
         .localSet resultLocal]
       [.unreachable]]
 
@@ -63,6 +62,7 @@ private def heapKindBody : List Instruction :=
   [.ifElse
     [.localGet objectParam,
       .i32Load .uint32 (offset headerAux0Offset),
+      .i64ExtendI32U .uint64,
       .localSet resultLocal]
     ([.localGet objectParam,
       .i32Load .uint32 (offset headerKindOffset)] ++
@@ -87,6 +87,7 @@ private def immediateBody : List Instruction :=
   [.localGet objectParam,
     .i32Const .uint32 1,
     .i32ShrU,
+    .i64ExtendI32U .uint64,
     .localSet resultLocal]
 
 /--
@@ -94,8 +95,8 @@ Executable valid-input portion of W6 `readTag`:
 
 * odd words decode as immediate tags;
 * live constructor headers return `aux0`;
-* live persistent natural headers carrying the promoted-tag marker return the
-  low wasm32 lane of their 64-bit payload.
+* live persistent natural headers carrying the promoted-tag marker return their
+  exact 64-bit payload.
 
 The full theorem relating this helper to the W6 `getTag` contract is
 intentionally owned by the proof lane. This generation definition traps on
@@ -105,8 +106,8 @@ precondition for the remaining header-allocation invariants.
 def getTagFunction : Function := {
   name := getTagName
   params := #[(objectParam, .tobject)]
-  results := #[.uint32]
-  locals := #[(resultLocal, .uint32)]
+  results := #[.uint64]
+  locals := #[(resultLocal, .uint64)]
   body :=
     [.localGet objectParam,
       .i32Const .uint32 1,
@@ -124,6 +125,7 @@ private def getTagCallSiteBody : List Instruction := [
     [.localGet inlineGetTagObjectLocal,
       .i32Const .uint32 1,
       .i32ShrU,
+      .i64ExtendI32U .uint64,
       .localSet inlineGetTagResultLocal]
     [.localGet inlineGetTagObjectLocal,
       .i32Load .uint32 (offset headerKindOffset),
@@ -132,6 +134,7 @@ private def getTagCallSiteBody : List Instruction := [
       .ifElse
         [.localGet inlineGetTagObjectLocal,
           .i32Load .uint32 (offset headerAux0Offset),
+          .i64ExtendI32U .uint64,
           .localSet inlineGetTagResultLocal]
         [.localGet inlineGetTagObjectLocal,
           .call (.runtime .getTag),
@@ -146,9 +149,9 @@ the complete checked resident helper for promoted tags and uncommon inputs.
 -/
 private def getTagCallSiteRewrite : ResidentCallSite.Rewrite := {
   target := .runtime .getTag
-  signature := { params := #[.tobject], results := #[.uint32] }
+  signature := { params := #[.tobject], results := #[.uint64] }
   locals := #[(inlineGetTagObjectLocal, .tobject),
-    (inlineGetTagResultLocal, .uint32)]
+    (inlineGetTagResultLocal, .uint64)]
   body := getTagCallSiteBody }
 
 /-- Typed call-site rules required when the resident `.getTag` step is linked. -/
@@ -165,9 +168,9 @@ private partial def instructionCallsGetTag : Instruction → Bool
 #guard callSiteRewrites.size == 1
 #guard getTagCallSiteRewrite.target == .runtime .getTag
 #guard getTagCallSiteRewrite.signature ==
-  { params := #[.tobject], results := #[.uint32] : Signature }
+  { params := #[.tobject], results := #[.uint64] : Signature }
 #guard getTagCallSiteRewrite.locals ==
-  #[(inlineGetTagObjectLocal, .tobject), (inlineGetTagResultLocal, .uint32)]
+  #[(inlineGetTagObjectLocal, .tobject), (inlineGetTagResultLocal, .uint64)]
 #guard getTagCallSiteRewrite.body.any instructionCallsGetTag
 
 def residentMemory : MemoryDecl := {
@@ -569,7 +572,7 @@ private def getTagCallSiteProbeName : Name :=
 private def getTagCallSiteProbeFunction : Function := {
   name := getTagCallSiteProbeName
   params := #[(objectParam, .tobject)]
-  results := #[.uint32]
+  results := #[.uint64]
   locals := #[]
   body := [
     .localGet objectParam,
@@ -1155,7 +1158,7 @@ def getTagManifest : Json :=
   Json.mkObj [
     ("entry", getTagName.toString),
     ("params", Json.arr #["tobject"]),
-    ("result", "uint32"),
+    ("result", "uint64"),
     ("memory", "memory"),
     ("imports", Json.arr #[]),
     ("status", "generation-only; W6 contract proof pending")]

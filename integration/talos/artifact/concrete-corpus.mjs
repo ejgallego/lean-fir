@@ -28,6 +28,7 @@ export const CONCRETE_FIXTURES = Object.freeze([
   "nested-heap",
   "object-mutation",
   "projection-fault",
+  "promoted-tag-case",
   "recursive-call",
   "reference-counting",
   "reset-reuse",

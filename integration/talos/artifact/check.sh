@@ -147,6 +147,8 @@ node run-resident-string.mjs _build/resident-string.wasm \
 node run-resident-fallbacks.mjs _build/resident-fallbacks.wasm
 "$artifact_generator" resident-get-tag _build/resident-get-tag.wasm
 node run-resident-get-tag.mjs _build/resident-get-tag.wasm
+"$artifact_generator" resident-object-case _build/resident-object-case.wasm
+node run-resident-object-case.mjs _build/resident-object-case.wasm
 "$artifact_generator" resident-is-shared _build/resident-is-shared.wasm
 node run-resident-is-shared.mjs _build/resident-is-shared.wasm
 "$artifact_generator" resident-read-projections \
@@ -604,6 +606,7 @@ if [[ -n "${FIR_BROWSER:-}" ]]; then
 fi
 resident_determinism_artifacts=(
   resident-get-tag:get-tag
+  resident-object-case:object-case
   resident-is-shared:is-shared
   resident-read-projections:read-projections
   resident-closure-projections:closure-projections
@@ -643,6 +646,7 @@ fir_run_producer_pair "$artifact_jobs" generate_determinism_root \
 
 cmp "$first/resident/get-tag.wasm" "$second/resident/get-tag.wasm"
 cmp "$first/resident/get-tag.wasm.json" "$second/resident/get-tag.wasm.json"
+cmp "$first/resident/object-case.wasm" "$second/resident/object-case.wasm"
 cmp "$first/resident/is-shared.wasm" "$second/resident/is-shared.wasm"
 cmp "$first/resident/is-shared.wasm.json" "$second/resident/is-shared.wasm.json"
 cmp "$first/resident/read-projections.wasm" \

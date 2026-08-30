@@ -76,7 +76,7 @@ function ctorRuntime() {
   assert.equal(host.importFunction({
     kind: "scalarProj", width: 4, offset: 0, result: "uint32",
   })(root), 13);
-  assert.equal(host.importFunction({ kind: "getTag" })(root), 14);
+  assert.equal(host.importFunction({ kind: "getTag" })(root), 14n);
 }
 
 {
@@ -312,7 +312,7 @@ function ctorRuntime() {
     result: "object",
   })(tokenPhysical, host.encode("tobject", tagged(13)));
   assert.deepStrictEqual(host.decode("object", reused), { kind: "heap", location: 0 });
-  assert.equal(host.importFunction({ kind: "getTag" })(reused), 9);
+  assert.equal(host.importFunction({ kind: "getTag" })(reused), 9n);
   assert.deepStrictEqual(
     host.decode("tobject", host.importFunction({
       kind: "objectProj", index: 0, result: "tobject",

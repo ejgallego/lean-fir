@@ -68,6 +68,23 @@ def emitResidentGetTag (path : System.FilePath) : IO Unit := do
     Fir.Wasm.Emit.ResidentRuntime.getTagManifest.compress
   IO.println s!"resident-get-tag: wrote {bytes.size} bytes to {path} and {manifestPath}"
 
+def emitResidentObjectCase (path : System.FilePath) : IO Unit := do
+  let lowered ← IO.ofExcept <|
+    (lowerSupported promotedObjectTagCaseProgram).mapError fun error =>
+      s!"resident object-case lowering failed: {repr error}"
+  let linked ← IO.ofExcept <|
+    (Fir.Wasm.Emit.ResidentRuntime.internalizeGetTag lowered).mapError fun error =>
+      s!"resident object-case linking failed: {repr error}"
+  unless linked.imports.isEmpty do
+    throw <| IO.userError
+      s!"resident object-case retained {linked.imports.size} import(s)"
+  let bytes ← IO.ofExcept <| (Fir.Wasm.Emit.encode linked).mapError fun error =>
+    s!"resident object-case encoding failed: {repr error}"
+  if let some parent := path.parent then
+    IO.FS.createDirAll parent
+  IO.FS.writeBinFile path bytes
+  IO.println s!"resident-object-case: wrote {bytes.size} bytes to {path}"
+
 def emitResidentGlobal (path : System.FilePath) : IO Unit := do
   let bytes ← IO.ofExcept <| (Fir.Wasm.Emit.encode
     Fir.Wasm.Emit.Examples.residentGlobalSurfaceModule).mapError fun error =>
@@ -452,6 +469,7 @@ def usage : String :=
   let names := String.intercalate "|" (fixtures.map (·.name))
   s!"usage: fir-wasm-artifact <{names}> <output.wasm>\n" ++
     "       fir-wasm-artifact resident-get-tag <output.wasm>\n" ++
+    "       fir-wasm-artifact resident-object-case <output.wasm>\n" ++
     "       fir-wasm-artifact resident-global <output.wasm>\n" ++
     "       fir-wasm-artifact resident-memory-surface <output.wasm>\n" ++
     "       fir-wasm-artifact resident-allocator <output.wasm>\n" ++
@@ -492,6 +510,9 @@ def main (args : List String) : IO UInt32 := do
         return 0
     | ["resident-get-tag", output] =>
         emitResidentGetTag output
+        return 0
+    | ["resident-object-case", output] =>
+        emitResidentObjectCase output
         return 0
     | ["resident-global", output] =>
         emitResidentGlobal output

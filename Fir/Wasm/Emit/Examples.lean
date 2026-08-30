@@ -35,6 +35,17 @@ def abiUInt64MaxProgram : Fir.LeanIR.ImpureProgram :=
 def abiUSizeMaxProgram : Fir.LeanIR.ImpureProgram :=
   abiDirectLiteralProgram usizeType (.usize 18446744073709551615)
 
+/-- Regression for `FIR-BUG-wasm-none-object-case-actual-tag-truncation`.
+The promoted tag `UInt32.size` must not alias constructor tag zero at the
+generated object-case comparison. -/
+def promotedObjectTagCaseProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[param c tobjectType] u8Type (.code <|
+      .cases (.mk `PromotedObjectTag u8Type c #[
+        .ctorAlt falseInfo
+          (.let (letDecl r u8Type (.lit (.uint8 0))) (.return r)),
+        .default
+          (.let (letDecl u u8Type (.lit (.uint8 5))) (.return u))]))] }
+
 def abiIdentityProgram (type : Lean.Expr) : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `main #[param x type] type (.code (.return x))] }
 
@@ -207,6 +218,8 @@ def initialFixtures : List CorpusFixture := [
     args := #[.usize 18446744073709551615] },
   { name := "ctor-projection", program := abiCtorProjectionProgram },
   { name := "case", program := abiCaseProgram },
+  { name := "promoted-tag-case", program := promotedObjectTagCaseProgram,
+    args := #[.object (.tagged (UInt64.ofNat UInt32.size))] },
   { name := "default-case", program := abiDefaultCaseProgram },
   { name := "mutation", program := abiMutationProgram },
   { name := "object-mutation", program := abiObjectMutationProgram },
