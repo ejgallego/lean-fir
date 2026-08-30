@@ -5972,6 +5972,24 @@ inductive ObjectConstructorCaseAltsSupported :
       (rest : ObjectConstructorCaseAltsSupported alts) :
       ObjectConstructorCaseAltsSupported (.ctorAlt info code :: alts)
 
+/-- Compiler-local evidence for the representation-polymorphic object case
+lane.  Production validation accepts all three object-family ABI kinds; each
+widens directionally to the concrete runtime's `tobject` input without
+changing its physical `i32` bits. -/
+def ObjectCaseDiscriminatorSupported
+    (context : Fir.Wasm.Context) (discr : FVarId) : Prop :=
+  ∃ kind : AbiKind,
+    Fir.Wasm.getLocal context discr = .ok (.localGet discr, kind) ∧
+      kind.refines .tobject = true
+
+/-- The precise immediate-object case lane is admitted without first erasing
+its compiler kind. -/
+theorem ObjectCaseDiscriminatorSupported.tagged
+    (compiled : Fir.Wasm.getLocal context discr =
+      .ok (.localGet discr, .tagged)) :
+    ObjectCaseDiscriminatorSupported context discr := by
+  exact ⟨.tagged, compiled, by simp [AbiKind.refines]⟩
+
 /--
 Source/runtime admission for arbitrary normalized object-constructor cases.
 
@@ -5985,8 +6003,7 @@ def ObjectConstructorCasesSupported
     (cases : LCNF.Cases .impure) (_selected : LCNF.Code .impure) : Prop :=
   ObjectConstructorCaseAltsSupported cases.alts.toList ∧
     Fir.Wasm.caseDiscriminatorMode context cases.discr = .objectTag ∧
-    Fir.Wasm.getLocal context cases.discr =
-      .ok (.localGet cases.discr, .tobject) ∧
+    ObjectCaseDiscriminatorSupported context cases.discr ∧
     ∀ {sourceObject : Value} {actualTag : Nat},
       lookupValue sourceEnv cases.discr = .ok sourceObject →
       getTag sourceRuntime sourceObject = .ok actualTag →
@@ -10318,12 +10335,14 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainRefines
     {witness : RefinementWitness}
     {sourceObject : Value}
     {actualTag : Nat}
+    {discrKind : AbiKind}
     (supported : ObjectConstructorCaseAltsSupported alts)
     (modeEq :
       Fir.Wasm.caseDiscriminatorMode context discr = .objectTag)
     (discrCompiled :
       Fir.Wasm.getLocal context discr =
-        .ok (.localGet discr, .tobject))
+        .ok (.localGet discr, discrKind))
+    (discrRefines : discrKind.refines .tobject = true)
     (selection : chooseAlt actualTag alts = some selected)
     (sourceLookup : lookup sourceEnv discr = some sourceObject)
     (tagged : getTag sourceRuntime sourceObject = .ok actualTag)
@@ -10377,7 +10396,7 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainRefines
       obtain ⟨thenTarget, elseTarget, discrIndex, getTagIndex, thenAdapted,
           elseAdapted, discrFound, getTagFound, targetEq⟩ :=
         CaseChainAdapted.objectConstructor_eq modeEq fits chainAdapted
-      obtain ⟨alignedIndex, alignedFound, discrKind⟩ :=
+      obtain ⟨alignedIndex, alignedFound, discrKindAt⟩ :=
         spec.localsAligned discrCompiled
       rw [discrFound] at alignedFound
       injection alignedFound with indexEq
@@ -10434,7 +10453,8 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainRefines
           · exact thenAdapted
           · exact elseAdapted
           · exact discrFound
-          · exact discrKind
+          · exact discrKindAt
+          · exact discrRefines
           · exact getTagFound
           · exact stateRelated
           · exact sourceLookup
@@ -10493,7 +10513,8 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainRefines
           · exact thenAdapted
           · exact restChain.1
           · exact discrFound
-          · exact discrKind
+          · exact discrKindAt
+          · exact discrRefines
           · exact getTagFound
           · exact stateRelated
           · exact sourceLookup
@@ -10823,7 +10844,8 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_objectConstructorCases
   intro sourceRuntime sourceEnv cases selected fullTarget targetStore
     targetLocals witness supported sourceStep stateRelated adapted
   rcases supported with
-    ⟨altsSupported, modeEq, discrCompiled, actualTagFits⟩
+    ⟨altsSupported, modeEq, discriminator, actualTagFits⟩
+  rcases discriminator with ⟨discrKind, discrCompiled, discrRefines⟩
   rcases sourceStep with
     ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩
   have sourceLookup :
@@ -10841,9 +10863,9 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_objectConstructorCases
   rcases CodeAdapted.cases_eq adapted with
     ⟨fallback, fallbackCompiled, chainAdapted⟩
   obtain ⟨selectedLabels, selectedTarget, selectedAdapted, liftChain⟩ :=
-    spec.objectConstructorCaseChainRefines altsSupported modeEq discrCompiled
-      chosen sourceLookup tagged actualFits stateRelated fallbackCompiled
-      chainAdapted
+    spec.objectConstructorCaseChainRefines altsSupported modeEq
+      discrCompiled discrRefines chosen sourceLookup tagged actualFits
+      stateRelated fallbackCompiled chainAdapted
   refine ⟨selectedLabels, selectedTarget, selectedAdapted,
     ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩, ?_⟩
   intro tail Q stable continued
@@ -11039,6 +11061,7 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_singleObjectConstructor
     · exact emptyChain
     · exact discrFound
     · exact discrKind
+    · simp [AbiKind.refines]
     · exact getTagFound
     · exact stateRelated
     · exact sourceLookup
@@ -11210,6 +11233,7 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
       · exact secondChainAdapted
       · exact discrFound
       · exact discrKind
+      · simp [AbiKind.refines]
       · exact getTagFound
       · exact stateRelated
       · exact sourceLookup
@@ -11283,6 +11307,7 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
         · exact defaultChainAdapted
         · exact discrFound
         · exact discrKind
+        · simp [AbiKind.refines]
         · exact getTagFound
         · exact stateRelated
         · exact sourceLookup
@@ -11328,6 +11353,7 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
         · exact innerChain.1
         · exact discrFound
         · exact discrKind
+        · simp [AbiKind.refines]
         · exact getTagFound
         · exact stateRelated
         · exact sourceLookup
@@ -11400,6 +11426,7 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
         · exact defaultChainAdapted
         · exact discrFound
         · exact discrKind
+        · simp [AbiKind.refines]
         · exact getTagFound
         · exact stateRelated
         · exact sourceLookup
@@ -11445,6 +11472,7 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
         · exact innerChain.1
         · exact discrFound
         · exact discrKind
+        · simp [AbiKind.refines]
         · exact getTagFound
         · exact stateRelated
         · exact sourceLookup

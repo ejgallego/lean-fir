@@ -10606,16 +10606,13 @@ This is an invariant on final-LCNF syntax, the source runtime, and the compiler
 context, not a translation certificate: it contains no target module,
 instruction path, numeric local, refinement witness, or future execution.
 Executable residual validation supplies result compatibility, normalized
-alternative order, the scalar discriminator representation, and every static
-constructor-tag bound.  The source-side boundary retains only the current
-object simulator's precise `tobject` compiler equation and the semantic range
-law for object tags. -/
+alternative order, the exact object-family discriminator representation, and
+every static constructor-tag bound.  The source-side boundary retains only
+the semantic range law for the current object tag. -/
 structure ConcreteStructuredObjectCaseSafeAt
     (context : Fir.Wasm.Context)
     (sourceRuntime : RuntimeState) (sourceEnv : Env)
     (cases : Lean.Compiler.LCNF.Cases .impure) : Prop where
-  discriminator : Fir.Wasm.getLocal context cases.discr =
-    .ok (.localGet cases.discr, .tobject)
   objectTagsFit :
     ∀ {sourceObject : Value} {actualTag : Nat},
       lookupValue sourceEnv cases.discr = .ok sourceObject →
@@ -10822,15 +10819,15 @@ theorem ConcreteStructuredValidatedCodeCoreRel.productionCasesSupported_of_caseS
                     .scalarUInt8 := contextMode.symm.trans scalarMode
               cases impossible
           | object objectSafe =>
-              have discrKindEq : discrKind = .tobject := by
-                have pairEq := Except.ok.inj
-                  (discrCompiled.symm.trans objectSafe.discriminator)
-                exact congrArg Prod.snd pairEq
-              subst discrKind
+              have discrRefines : discrKind.refines .tobject = true := by
+                cases discrKind <;>
+                  simp_all [Fir.Wasm.supportedCaseDiscriminatorMode?,
+                    AbiKind.refines]
               exact Or.inr (Or.inl ⟨
                 ConcreteStructuredCaseAltsNormalized.objectSupported_of_validation
                   normalizedOriginal alternatives,
-                contextMode, objectSafe.discriminator,
+                contextMode,
+                ⟨discrKind, discrCompiled, discrRefines⟩,
                 objectSafe.objectTagsFit⟩)
       | scalarUInt8 =>
           have discrKindEq : discrKind = .uint8 := by

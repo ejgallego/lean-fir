@@ -118,9 +118,12 @@ The current case slice makes that boundary branch-exact. `ConcreteStructuredCase
 is a default/scalar/object classification, and
 `caseSafe_of_objectCaseSafeWhenNeeded` derives the first two arms from residual
 validation plus the current source selection. The remaining case premise is
-now exactly a nonempty constructor table in object-tag mode, where the current
-object simulator still needs precise `tobject` origin and the live semantic
-tag bound.
+now exactly a nonempty constructor table in object-tag mode.
+`ObjectCaseDiscriminatorSupported` is derived from residual validation and
+preserves the precise `.object`, `.tagged`, or `.tobject` kind; the concrete
+simulator widens that related lane directionally to `.tobject` without
+changing bits. The sole residual case fact is therefore the live semantic
+tag's `UInt32` bound.
 
 The result/publication boundary is now substantially narrower.
 `SemanticEnvAtLocalKinds.ofStateRelated` derives every ordinary residual-local

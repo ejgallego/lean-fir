@@ -14305,7 +14305,7 @@ theorem caseChainWP_constructor
     {witness : RefinementWitness} {tail : List Wasm.Value}
     {Q : Wasm.Assertion Host}
     {discrIndex getTagIndex : Nat} {imp : Wasm.ImportDecl}
-    {sourceObject : Value} {actualTag : Nat}
+    {sourceObject : Value} {actualTag : Nat} {discrKind : AbiKind}
     (modeEq : Fir.Wasm.caseDiscriminatorMode context discr = .objectTag)
     (fits : Fir.Wasm.constructorTagFitsI32 info = true)
     (thenAdapted :
@@ -14316,9 +14316,10 @@ theorem caseChainWP_constructor
         (none :: labels) discr alts fallback elseTarget)
     (discrFound :
       findFVar? (functionBindings sourceFunction) discr = some discrIndex)
-    (discrKind :
+    (discrKindAt :
       (functionBindings sourceFunction)[discrIndex]?.map Prod.snd =
-        some .tobject)
+        some discrKind)
+    (discrRefines : discrKind.refines .tobject = true)
     (getTagFound :
       callIndex? sourceModule (.runtime .getTag) = some getTagIndex)
     (stateRelated :
@@ -14349,12 +14350,13 @@ theorem caseChainWP_constructor
   rw [discrFound] at found
   have indexEq := Option.some.inj found
   subst index
-  rw [discrKind] at kindAt
+  rw [discrKindAt] at kindAt
   have kindEq := Option.some.inj kindAt
   subst kind
+  have physicalAtTObject := physicalRelated.ofRefines discrRefines
   refine ⟨caseChainAdapted_constructor modeEq fits thenAdapted elseAdapted
     discrFound getTagFound, stateRelated, ?_⟩
-  cases physicalRelated with
+  cases physicalAtTObject with
   | word32 valueRelated =>
       apply wp_getTag_case_test
         (spec := spec) (rest := [])

@@ -5263,11 +5263,13 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainFinitePath
     {selected : Lean.Compiler.LCNF.Code .impure}
     {targetStore : Wasm.Store Host} {targetLocals : Wasm.Locals}
     {witness : RefinementWitness} {sourceObject : Value} {actualTag : Nat}
+    {discrKind : AbiKind}
     {frames : List StructuredWasmFrame}
     (supported : ObjectConstructorCaseAltsSupported alts)
     (modeEq : Fir.Wasm.caseDiscriminatorMode context discr = .objectTag)
     (discrCompiled :
-      Fir.Wasm.getLocal context discr = .ok (.localGet discr, .tobject))
+      Fir.Wasm.getLocal context discr = .ok (.localGet discr, discrKind))
+    (discrRefines : discrKind.refines .tobject = true)
     (selection : chooseAlt actualTag alts = some selected)
     (sourceLookup : lookup sourceEnv discr = some sourceObject)
     (tagged : getTag sourceRuntime sourceObject = .ok actualTag)
@@ -5323,19 +5325,20 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainFinitePath
       obtain ⟨thenTarget, elseTarget, discrIndex, getTagIndex, thenAdapted,
           elseAdapted, discrFound, getTagFound, targetEq⟩ :=
         CaseChainAdapted.objectConstructor_eq modeEq fits chainAdapted
-      obtain ⟨alignedIndex, alignedFound, discrKind⟩ :=
+      obtain ⟨alignedIndex, alignedFound, discrKindAt⟩ :=
         spec.localsAligned discrCompiled
       rw [discrFound] at alignedFound
       have alignedEq : alignedIndex = discrIndex :=
         Option.some.inj alignedFound.symm
       subst alignedIndex
       obtain ⟨discrPhysical, targetLookup, physicalRelated⟩ :=
-        stateRelated.resolve sourceLookup discrFound discrKind
+        stateRelated.resolve sourceLookup discrFound discrKindAt
+      have physicalAtTObject := physicalRelated.ofRefines discrRefines
       obtain ⟨word, physicalEq, objectRelated⟩ :
           ∃ word : Word32,
             discrPhysical = .i32 (UInt32.ofNat word.value) ∧
               ValueRel witness .tobject (.word32 word) sourceObject := by
-        cases physicalRelated with
+        cases physicalAtTObject with
         | word32 valueRelated => exact ⟨_, rfl, valueRelated⟩
         | word64 valueRelated => cases valueRelated
         | float32Bits valueRelated => cases valueRelated
@@ -5737,7 +5740,8 @@ theorem ConcreteSupportedFunction.objectConstructorCasesFinitePath
         (testCount = 0 →
           DefaultOnlyCaseSupported sourceRuntime sourceEnv cases selected) := by
   rcases supported with
-    ⟨altsSupported, modeEq, discrCompiled, actualTagFits⟩
+    ⟨altsSupported, modeEq, discriminator, actualTagFits⟩
+  rcases discriminator with ⟨discrKind, discrCompiled, discrRefines⟩
   rcases sourceResult with
     ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩
   have sourceLookup : lookup sourceEnv cases.discr = some sourceObject := by
@@ -5756,9 +5760,9 @@ theorem ConcreteSupportedFunction.objectConstructorCasesFinitePath
   obtain ⟨selectedTarget, testCount, selectedAdapted, rawTargetPrefix,
       zeroTests⟩ :=
     spec.objectConstructorCaseChainFinitePath altsSupported modeEq
-      discrCompiled chosen sourceLookup tagged actualFits stateRelated
-      fallbackCompiled chainAdapted (targetSuffix := targetSuffix)
-      (frames := frames)
+      discrCompiled discrRefines chosen sourceLookup tagged actualFits
+      stateRelated fallbackCompiled chainAdapted
+      (targetSuffix := targetSuffix) (frames := frames)
   refine ⟨selectedTarget, testCount, targetSuffix, selectedAdapted, ?_, ?_⟩
   · rw [targetCodeEq]
     exact rawTargetPrefix
@@ -15666,7 +15670,8 @@ theorem
       facts resultFacts resultRuntime resultEnv resultValue requiredBytes
       supported sourceStep continued ih =>
       rcases supported with
-        ⟨altsSupported, modeEq, discrCompiled, actualTagFits⟩
+        ⟨altsSupported, modeEq, discriminator, actualTagFits⟩
+      rcases discriminator with ⟨discrKind, discrCompiled, discrRefines⟩
       rcases sourceStep with
         ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩
       have sourceLookup :
@@ -15686,8 +15691,8 @@ theorem
       obtain ⟨selectedTarget, testCount, selectedAdapted,
           rawTargetPrefix, _zeroTests⟩ :=
         functionSpec.objectConstructorCaseChainFinitePath altsSupported
-          modeEq discrCompiled chosen sourceLookup tagged actualFits
-          related.stateRelated fallbackCompiled chainAdapted
+          modeEq discrCompiled discrRefines chosen sourceLookup tagged
+          actualFits related.stateRelated fallbackCompiled chainAdapted
           (targetSuffix := targetSuffix) (frames := target.frames)
       let sourceSelected : MachineState := {
         source with control := .code selected }
