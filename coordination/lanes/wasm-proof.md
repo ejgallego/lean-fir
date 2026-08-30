@@ -5,17 +5,17 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: active
-base: 91b2f3acbf4f6a57bf73592aa53a2f6dd02aaf30
-functional-head: 7998eba5e4931838b1bcf61b15262b863b94723a
-contract-base: 91b2f3acbf4f6a57bf73592aa53a2f6dd02aaf30
+state: ready
+base: 2ad732443badfdfa8e7de76193f93f3ec6c0d9f2
+functional-head: f57c4e0a
+contract-base: 2ad732443badfdfa8e7de76193f93f3ec6c0d9f2
 clean-at-update: true
-slice: Completed the second PA1 result slice. The existing StateRelated plus local-layout agreement now derives semantic typing for every residual compiler local, so no duplicate environment invariant is needed. Added a minimal current-node return use-site boundary for genuinely non-directional ABI edges, wired it to aligned validation, and factored one physical-result publication theorem shared by direct calls, saturated closures, and lazy-cache hit/miss. A structural audit of all 44 built-in artifact fixtures found no non-directional return edge; W6-W7-20260830-001 asks W7 to run the same read-only audit on prettyM/pretty-format and lean-zip before W6 chooses directional compiler admission versus retained precise producer origin.
-files: docs/pass-correctness-plan.md; docs/w6-source-admission-audit.md; integration/talos/PLAN.md; integration/talos/FirTalos/ConcreteFinalLcnfTyping.lean; coordination/lanes/wasm-proof.md
-contracts: proof-only semantic provenance and publication helpers plus planning status; no runtime semantics, ABI definition, layout, lowering, central relation, emitted-code, or shared-contract change
-checks: Lean Beam ConcreteFinalLcnfTyping update/sync (pass, zero diagnostics, before the installed wrapper registry-format change); lake -d integration/talos build FirTalos.ConcreteFinalLcnfTyping (pass: 3128 jobs); git diff --check (pass); make check (pass: 730 unique validation cases, 2172/2172 comparisons equal, coverage/trusted-assumption/mailbox gates green, exactly one trusted axiom); make talos-setup (pass: Talos 0e05edbcfbb105b33e90c60b4f50e2cf193d9254); make talos-check (pass: 3189 jobs, receipt e89a6bbfdbc6a12c70248eb85637ceccb5f87e53025fad6c3d3dff5c2f79aab2)
+slice: Completed the first PA1 case slice. Production Wasm admission now requires constructor-prefix/optional-final-default case order. Residual validation projects that Boolean fact into ConcreteStructuredCaseAltsNormalized, removing case normalization from ConcreteStructuredCaseSafeAt. The supported default-case fixture and its exact Talos simulation now use normalized order; the former default-before-constructor shape is retained as a fail-closed whole-program regression. The PA0 matrix consequently narrows from 7A/3B/10C to 7A/5B/8C: scalar and default-only case work are hidden-interface tasks, while object cases retain the genuine constructor/tag provenance gap.
+files: Fir/Wasm/WellFormed.lean; Fir/Wasm/Examples.lean; coordination/BOARD.md; docs/pass-correctness-plan.md; docs/w6-source-admission-audit.md; integration/talos/PLAN.md; integration/talos/FirTalos/ConcreteStructuredValidation.lean; integration/talos/FirTalos/Correctness/FunctionDefaultCaseExample.lean; coordination/lanes/wasm-proof.md
+contracts: WASM-NORMALIZED-CASE-TABLE-ADMISSION strengthens production validation only for non-normalized case tables; no lowering instruction, emitted code, runtime, ABI, layout, helper signature, ownership rule, or behavior changes for previously accepted normalized programs
+checks: Lean Beam Fir.Wasm.Examples, ConcreteStructuredValidation, and FunctionDefaultCaseExample update/sync/save (pass, zero errors); lake build Fir.Wasm.Examples (pass: 13 jobs); lake -d integration/talos build FirTalos.ConcreteStructuredValidation (pass: 3127 jobs); lake -d integration/talos build FirTalos.Correctness.FunctionDefaultCaseExample (pass: 3058 jobs); git diff --check (pass); make check (pass: 730 unique validation cases, 2172/2172 comparisons equal, coverage/trusted-assumption/mailbox gates green, exactly one trusted axiom); make talos-setup (pass: Talos 0e05edbcfbb105b33e90c60b4f50e2cf193d9254); make talos-check (pass: 3189 jobs, receipt 4d6cdaeb6ef55e895bc96d3984801f9047175f212b5cd88e2f33e254f0f04ae2)
 bug-cards: none
 blockers: none
-handoff: active clean proof checkpoint at functional head 7998eba5e4931838b1bcf61b15262b863b94723a; ready for integration as a proof-only PA1 slice while the production return-directionality audit proceeds independently
-next: Consume W6-W7-20260830-001. If production returns are directional, derive the compiler-owned directional return admission and add a negative rejection fixture; otherwise construct only the precise producer-origin fact for the reported non-directional sites. Then close the remaining object/schema and case class-C rows before PA2 assembly.
+handoff: clean W6 integration stack `bd43f7f0` then functional head `f57c4e0a`, based exactly on `2ad73244`; ready for fast-forward integration and W7/validation rebase
+next: Reshape ConcreteStructuredCaseSafeAt into branch-specific object and scalar evidence, derive scalar/default-only admission from validation plus StateRelated, then address the remaining object constructor/tag provenance. Consume W6-W7-20260830-001 before choosing the non-directional return policy.
 ```
