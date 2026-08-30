@@ -125,7 +125,7 @@ are independent finite-resource overlays.
 
 | # | Target branch | Source-safety constructor | Exact desired conclusion and cost | Exact dependency or missing boundary | Disposition | Class | Owner | Regression |
 |---:|---|---|---|---|---|---|---|---|
-| 1 | return | `.ret` | `.ret`; cost `0`; exact `SemanticValueAtAbi functionResult` | Existing: `ConcreteStructuredAlignedValidationState.admit_return`, `ConcreteStructuredReturnValueSafeAt.of_semanticBinding`. Missing: `CompilerProvenanceAt.returnBinding`. | Validation proves only carrier compatibility; the active result ABI needs use-site semantic typing. | C | W6-Results | `sumTo`; precise `.object`/`.tagged` negative fixture |
+| 1 | return | `.ret` | `.ret`; cost `0`; exact `SemanticValueAtAbi functionResult` | Existing: `ConcreteStructuredAlignedValidationState.admit_return`, `ConcreteStructuredAlignedValidationState.returnSemantic_ofUseSite`, and `ConcreteStructuredReturnUseSiteProvenanceAt`. Missing: construct the latter from the precise producer origin on non-directional object-family edges. | `SemanticEnvAtLocalKinds.ofStateRelated` derives ordinary local typing from the live relation. Validation still proves only carrier compatibility at a non-directional use, so the precise producer-origin fact remains genuinely semantic. | C | W6-Results | `sumTo`; precise `.object`/`.tagged` negative fixture |
 | 2 | direct let | `.directLet` | `.directLet`; cost `directLetAllocationCost decl`; `ReuseBudgetedDirectSupported` | Existing: `ConcreteStructuredValidationFocus.let_eq`, `supportedLetDeclKind?_effectiveLetValueKind`. Missing: `ReuseBudgetedDirectSupported.of_validated_step` from producer typing, reuse evidence, and the source step. | The reverse implication is absent; projection/unbox alignment and reuse provenance are semantic, not Boolean-validator facts. Allocation consumes address-space safety when cost is nonzero. | C + D(address) | W6-Results/Objects | complete direct-operation corpus |
 | 3 | pure external | `.pureExternal` | `.pureExternal`; exact `stepCost`; `PureExternalSupported` | Existing: `PureExternalSupported.resultSemanticValueAtAbi`, `PureExternalSupported.bindResult_preservesSemanticEnvAtLocalKinds`. Missing: `PureExternalSupported.of_validated_step` under the named external contract. | Validation and a generic successful external step cannot prove that the response is the canonical Int/Nat/scalar response. Keep a named external semantic contract; derive exact cost/result from it. | C + D(address) | W6-Results | `sumTo`; pure Int/Nat/scalar corpus |
 | 4 | direct call | `.directCall` | `.directCall`; cost `0`; `DirectInternalCallSite` | Existing: `supportedLetDeclKind?_effectiveLetValueKind`, `ConcreteStructuredValidatedCodeOutcome.advance_directCall_stage_of_step`. Missing export: `DirectInternalCallSite.of_validated_step`. | All site fields come from residual validation/program lookup plus the successful source step; no new invariant is needed for current admission. Result typing after return is the shared cross-branch PA1 obligation below. | B | W6-Results | `sumTo`; `direct-call` |
@@ -151,13 +151,17 @@ are independent finite-resource overlays.
 1. PA2 derives `ConcreteStructuredSchemaSourceAdmissionSafeAt` first. The
    existing `admitSchema_of_source_safe_step` remains the sole assembly bridge.
 2. The reusable result boundary is
-   `SemanticBindingAtAbi env fvarId effectiveResultKind`, plus a use-site
-   refinement theorem when a return expects `.object` or `.tagged` through a
-   coarser public `.tobject` declaration. It is not a new descriptor record.
+   `SemanticBindingAtAbi env fvarId effectiveResultKind`, plus
+   `SemanticBindingAtUseSite` only when the actual ABI does not directionally
+   refine the use-site ABI. `SemanticEnvAtLocalKinds.ofStateRelated` derives
+   the ordinary environment fact from the existing physical state relation;
+   it is not a new field of the central relation or a descriptor record.
 3. Direct producers each prove one exact `SemanticValueAtAbi` result theorem;
-   `SemanticEnvAtLocalKinds.bind_insertLocal` is the single bind-preservation
-   theorem. Calls, closure calls, externals, and lazy hit/miss reuse the same
-   destination-binding boundary after their common return/publication step.
+   `SemanticEnvAtLocalKinds.publishResult` is the single source
+   bind-preservation theorem. Calls, closure calls, and lazy hit/miss reuse
+   `publishPhysicalResult_ofRefines`; pure externals reuse its semantic form.
+   Thus hit/miss and call-family publication are closed without a new
+   operation-specific invariant.
 4. `ConstructorSchema.WitnessAgrees` closes only schema-to-descriptor
    alignment. Rows 17 and 18 still need source producer provenance for the
    schema slot. `concreteObjectFieldKindAligned_not_of_sourceLocation_alone`
@@ -167,11 +171,12 @@ are independent finite-resource overlays.
    and object-field mutation with a mismatched schema slot. Existing dynamic
    operation and artifact corpora remain the positive regressions.
 
-Although rows 4, 6, and 7 are class B for current admission, PA1 must also
-prove the shared result-publication preservation theorem for direct calls,
-saturated calls, pure externals, and lazy hit/miss. This theorem is what makes
-compiler provenance inductive; it is not an extra premise of their admission
-constructors.
+Rows 4, 6, and 7 remain class B for current admission. Their shared semantic
+publication obligation is now factored by
+`SemanticEnvAtLocalKinds.publishPhysicalResult_ofRefines`; the named-call,
+closure-resolution, and lazy-call records already provide the corresponding
+effective-to-public result refinement. This is not an extra premise of their
+admission constructors.
 
 ## PA0 completion record
 
@@ -197,6 +202,15 @@ constructors.
   return edge. `semanticTObject_not_subtype_object` and
   `semanticTObject_not_subtype_tagged` formally isolate the remaining reverse
   object-family provenance obligation.
+- Second PA1 result slice: `SemanticEnvAtLocalKinds.ofStateRelated` proves that
+  the established physical state relation and compiler layout already type
+  every residual validator local. `SemanticBindingAtUseSite` and
+  `ConcreteStructuredReturnUseSiteProvenanceAt` retain only the exact
+  non-directional use-site fact, while
+  `ConcreteStructuredAlignedValidationState.returnSemantic_ofUseSite` feeds it
+  directly to the existing return simulator. The common
+  `publishPhysicalResult_ofRefines` theorem closes direct-call,
+  saturated-closure, and lazy hit/miss publication at one boundary.
 - Focused proof cones for PA1/PA2:
   `FirTalos.ConcreteFinalLcnfTyping`,
   `FirTalos.ConcreteStructuredValidation`, and

@@ -46,6 +46,204 @@ theorem SemanticEnvAtLocalKinds.binding_ofRefines
     SemanticBindingAtAbi env fvarId expected :=
   SemanticBindingAtAbi.ofRefines (typedEnv.binding found) refines
 
+/-- Minimal semantic provenance for using one compiler local at a possibly
+more precise ABI.
+
+Directional ABI refinement needs no additional dynamic evidence.  On every
+other carrier-compatible edge (in particular the object-family edges accepted
+by `AbiKind.leanCompatible`) the predicate retains exactly the semantic
+binding required by this use.  It does not describe future code, a target
+path, or every source local. -/
+def SemanticBindingAtUseSite
+    (env : Env) (fvarId : Lean.FVarId)
+    (actual expected : AbiKind) : Prop :=
+  actual.refines expected = true ∨ SemanticBindingAtAbi env fvarId expected
+
+namespace SemanticBindingAtUseSite
+
+/-- Directional compiler refinement constructs use-site provenance without
+an additional semantic premise. -/
+theorem ofRefines
+    {env : Env} {fvarId : Lean.FVarId} {actual expected : AbiKind}
+    (refines : actual.refines expected = true) :
+    SemanticBindingAtUseSite env fvarId actual expected :=
+  Or.inl refines
+
+/-- Exact semantic producer information closes the non-directional use-site
+case. -/
+theorem ofSemanticBinding
+    {env : Env} {fvarId : Lean.FVarId} {actual expected : AbiKind}
+    (typed : SemanticBindingAtAbi env fvarId expected) :
+    SemanticBindingAtUseSite env fvarId actual expected :=
+  Or.inr typed
+
+/-- Combine the compiler local-row fact with its minimal use-site provenance.
+This is the only semantic elimination rule clients need. -/
+theorem binding
+    {env : Env} {fvarId : Lean.FVarId} {actual expected : AbiKind}
+    (useSite : SemanticBindingAtUseSite env fvarId actual expected)
+    (typedActual : SemanticBindingAtAbi env fvarId actual) :
+    SemanticBindingAtAbi env fvarId expected := by
+  rcases useSite with refines | typedExpected
+  · exact typedActual.ofRefines refines
+  · exact typedExpected
+
+/-- A non-refining ABI edge exposes the exact semantic fact retained for that
+use; the predicate cannot hide carrier-only specialization. -/
+theorem semanticBinding_of_not_refines
+    {env : Env} {fvarId : Lean.FVarId} {actual expected : AbiKind}
+    (useSite : SemanticBindingAtUseSite env fvarId actual expected)
+    (notRefines : actual.refines expected ≠ true) :
+    SemanticBindingAtAbi env fvarId expected := by
+  rcases useSite with refines | typedExpected
+  · exact False.elim (notRefines refines)
+  · exact typedExpected
+
+end SemanticBindingAtUseSite
+
+/-- A typed compiler local plus the minimal use-site fact gives the semantic
+binding at the ABI required by that use. -/
+theorem SemanticEnvAtLocalKinds.binding_atUseSite
+    {locals : Fir.Wasm.LocalKinds} {env : Env}
+    (typedEnv : SemanticEnvAtLocalKinds locals env)
+    {fvarId : Lean.FVarId} {actual expected : AbiKind}
+    (found : Fir.Wasm.findLocalKind? locals fvarId = some actual)
+    (useSite : SemanticBindingAtUseSite env fvarId actual expected) :
+    SemanticBindingAtAbi env fvarId expected :=
+  useSite.binding (typedEnv.binding found)
+
+/-- The existing concrete state relation already semantically types every
+successfully compiled local.  No separately preserved whole-environment
+invariant is needed: layout alignment identifies the exact target slot and
+`PhysicalValueRel` erases to the corresponding source ABI fact. -/
+theorem StateRelated.semanticBindingAtAbi_of_getLocal
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {targetStore : Wasm.Store Host} {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness} {fvarId : Lean.FVarId} {kind : AbiKind}
+    (related : StateRelated sourceFunction sourceRuntime sourceEnv targetStore
+      targetLocals witness)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (compiled : Fir.Wasm.getLocal context fvarId =
+      .ok (.localGet fvarId, kind)) :
+    SemanticBindingAtAbi sourceEnv fvarId kind := by
+  intro value found
+  obtain ⟨index, localFound, kindAt⟩ := localsAligned compiled
+  obtain ⟨_physical, _targetFound, valueRelated⟩ :=
+    related.resolve found localFound kindAt
+  exact valueRelated.semanticValueAtAbi
+
+/-- Residual validator locals are semantically typed directly by the live
+source/target relation and compiler-local agreement.  This projection is the
+reason PA1 does not need to add `SemanticEnvAtLocalKinds` as another field of
+the central simulation relation. -/
+theorem SemanticEnvAtLocalKinds.ofStateRelated
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {locals : Fir.Wasm.LocalKinds} {sourceRuntime : RuntimeState}
+    {sourceEnv : Env} {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals} {witness : RefinementWitness}
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (related : StateRelated sourceFunction sourceRuntime sourceEnv targetStore
+      targetLocals witness) :
+    SemanticEnvAtLocalKinds locals sourceEnv := by
+  intro fvarId kind found
+  exact related.semanticBindingAtAbi_of_getLocal localsAligned (agrees found)
+
+/-- Compiler-owned return provenance at one current use site.
+
+The production compiler chooses the actual local ABI.  Directional edges are
+discharged by that ABI equation alone; only a non-directional object-family
+edge retains semantic evidence about this result binding.  The predicate is
+current-node and contains no future source execution or target path. -/
+def ConcreteStructuredReturnUseSiteProvenanceAt
+    (context : Fir.Wasm.Context) (sourceEnv : Env)
+    (result : Lean.FVarId) (expected : AbiKind) : Prop :=
+  ∀ {actual},
+    Fir.Wasm.getLocal context result = .ok (.localGet result, actual) →
+      SemanticBindingAtUseSite sourceEnv result actual expected
+
+namespace ConcreteStructuredReturnUseSiteProvenanceAt
+
+/-- A directional result ABI constructs the current use-site boundary without
+any additional semantic evidence. -/
+theorem ofRefines
+    {context : Fir.Wasm.Context} {sourceEnv : Env}
+    {result : Lean.FVarId} {expected : AbiKind}
+    (refines : ∀ {actual},
+      Fir.Wasm.getLocal context result = .ok (.localGet result, actual) →
+        actual.refines expected = true) :
+    ConcreteStructuredReturnUseSiteProvenanceAt context sourceEnv result
+      expected := by
+  intro actual compiled
+  exact .ofRefines (refines compiled)
+
+/-- Exact producer information constructs the boundary for every compiler
+carrier assigned to this result. -/
+theorem ofSemanticBinding
+    {context : Fir.Wasm.Context} {sourceEnv : Env}
+    {result : Lean.FVarId} {expected : AbiKind}
+    (typed : SemanticBindingAtAbi sourceEnv result expected) :
+    ConcreteStructuredReturnUseSiteProvenanceAt context sourceEnv result
+      expected := by
+  intro _actual _compiled
+  exact .ofSemanticBinding typed
+
+/-- Eliminate current return provenance using only the already-established
+compiler layout and concrete state relation. -/
+theorem semanticBinding
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {targetStore : Wasm.Store Host} {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness} {result : Lean.FVarId}
+    {actual expected : AbiKind}
+    (provenance : ConcreteStructuredReturnUseSiteProvenanceAt context sourceEnv
+      result expected)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (related : StateRelated sourceFunction sourceRuntime sourceEnv targetStore
+      targetLocals witness)
+    (compiled : Fir.Wasm.getLocal context result =
+      .ok (.localGet result, actual)) :
+    SemanticBindingAtAbi sourceEnv result expected :=
+  (provenance compiled).binding
+    (related.semanticBindingAtAbi_of_getLocal localsAligned compiled)
+
+end ConcreteStructuredReturnUseSiteProvenanceAt
+
+/-- Residual return validation plus the minimal use-site boundary derives the
+exact semantic return fact consumed by W6's existing return simulator. -/
+theorem ConcreteStructuredAlignedValidationState.returnSemantic_ofUseSite
+    {program : Fir.LeanIR.ImpureProgram} {context : Fir.Wasm.Context}
+    {functionResult : AbiKind} {result : Lean.FVarId}
+    {sourceFunction : Fir.Wasm.Function} {sourceRuntime : RuntimeState}
+    {sourceEnv : Env} {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals} {witness : RefinementWitness}
+    (validated : ConcreteStructuredAlignedValidationState program context
+      functionResult (.return result))
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (related : StateRelated sourceFunction sourceRuntime sourceEnv targetStore
+      targetLocals witness)
+    (provenance : ConcreteStructuredReturnUseSiteProvenanceAt context sourceEnv
+      result functionResult) :
+    SemanticBindingAtAbi sourceEnv result functionResult := by
+  obtain ⟨_joins, _locals, _facts, _sharing, focus, agrees⟩ := validated
+  obtain ⟨actual, found, _compatible⟩ := focus.return_eq
+  exact provenance.semanticBinding localsAligned related (agrees found)
+
+/-- Use-site provenance closes both directional returns and the precise
+object-family return edges for which carrier compatibility is insufficient. -/
+theorem SemanticEnvAtLocalKinds.returnValueSafe_ofUseSite
+    {locals : Fir.Wasm.LocalKinds} {source : MachineState}
+    (typedEnv : SemanticEnvAtLocalKinds locals source.env)
+    {result : Lean.FVarId} {actual functionResult : AbiKind}
+    (control : source.control = .code (.return result))
+    (found : Fir.Wasm.findLocalKind? locals result = some actual)
+    (useSite :
+      SemanticBindingAtUseSite source.env result actual functionResult) :
+    ConcreteStructuredReturnValueSafeAt functionResult source :=
+  ConcreteStructuredReturnValueSafeAt.of_semanticBinding control
+    (typedEnv.binding_atUseSite found useSite)
+
 /-- Directional result refinement plus the compiler local-row invariant is
 already enough for source return safety. The only remaining return gap is the
 reverse object-family compatibility accepted by Lean (`tobject` to a precise
@@ -58,8 +256,7 @@ theorem SemanticEnvAtLocalKinds.returnValueSafe_ofRefines
     (found : Fir.Wasm.findLocalKind? locals result = some actual)
     (refines : actual.refines functionResult = true) :
     ConcreteStructuredReturnValueSafeAt functionResult source :=
-  ConcreteStructuredReturnValueSafeAt.of_semanticBinding control
-    (typedEnv.binding_ofRefines found refines)
+  typedEnv.returnValueSafe_ofUseSite control found (.ofRefines refines)
 
 /-- Binding a semantically typed value under the validator's replacement
 operation preserves the complete semantic local-kind environment. -/
@@ -88,6 +285,68 @@ theorem SemanticEnvAtLocalKinds.bind_insertLocal
     apply typedEnv query queryKind found
     simpa [Fir.LeanIR.Impure.bind, Fir.LeanIR.Impure.lookup, same] using
       actualFound
+
+/-- Publish a source result at its exact effective compiler ABI.  This named
+boundary is shared by direct producers, calls, closure calls, externals, and
+lazy-cache hit/miss; the producer only has to supply the one semantic value
+fact. -/
+theorem SemanticEnvAtLocalKinds.publishResult
+    {locals : Fir.Wasm.LocalKinds} {env : Env}
+    {fvarId : Lean.FVarId} {kind : AbiKind} {value : Value}
+    (typedEnv : SemanticEnvAtLocalKinds locals env)
+    (typedValue : SemanticValueAtAbi kind value) :
+    SemanticEnvAtLocalKinds (Fir.Wasm.insertLocal locals fvarId kind)
+      (bind env fvarId value) :=
+  typedEnv.bind_insertLocal typedValue
+
+/-- The call/cache publication law: every exact physical result relation
+erases to the same semantic result fact and therefore preserves the compiler
+local environment when the result is bound.  Direct calls, saturated closure
+calls, and both lazy-cache paths already produce this relation at their
+effective result ABI. -/
+theorem SemanticEnvAtLocalKinds.publishPhysicalResult
+    {locals : Fir.Wasm.LocalKinds} {env : Env}
+    {fvarId : Lean.FVarId} {kind : AbiKind} {value : Value}
+    {witness : RefinementWitness} {physical : Wasm.Value}
+    (typedEnv : SemanticEnvAtLocalKinds locals env)
+    (related : PhysicalValueRel witness kind physical value) :
+    SemanticEnvAtLocalKinds (Fir.Wasm.insertLocal locals fvarId kind)
+      (bind env fvarId value) :=
+  typedEnv.publishResult related.semanticValueAtAbi
+
+/-- Publish an exact producer result and simultaneously expose it at a weaker
+public use-site ABI.  The environment deliberately records the effective
+producer kind; the second conjunct is the semantic fact used by a caller whose
+declared carrier is weaker. -/
+theorem SemanticEnvAtLocalKinds.publishResult_ofRefines
+    {locals : Fir.Wasm.LocalKinds} {env : Env}
+    {fvarId : Lean.FVarId} {actual expected : AbiKind} {value : Value}
+    (typedEnv : SemanticEnvAtLocalKinds locals env)
+    (typedValue : SemanticValueAtAbi actual value)
+    (refines : actual.refines expected = true) :
+    SemanticEnvAtLocalKinds (Fir.Wasm.insertLocal locals fvarId actual)
+        (bind env fvarId value) ∧
+      SemanticBindingAtAbi (bind env fvarId value) fvarId expected := by
+  refine ⟨typedEnv.publishResult typedValue, ?_⟩
+  exact SemanticBindingAtAbi.of_lookup (lookup_bind_self env fvarId value)
+    (typedValue.ofRefines refines)
+
+/-- Physical form of `publishResult_ofRefines`.  This is the exact shared
+call/cache boundary: named calls provide `calleeResultRefines`, saturated
+closure resolution provides `targetResultRefines`, and lazy initialization
+provides `resultRefines`; hit and miss differ only in where the same physical
+result relation is recovered. -/
+theorem SemanticEnvAtLocalKinds.publishPhysicalResult_ofRefines
+    {locals : Fir.Wasm.LocalKinds} {env : Env}
+    {fvarId : Lean.FVarId} {actual expected : AbiKind} {value : Value}
+    {witness : RefinementWitness} {physical : Wasm.Value}
+    (typedEnv : SemanticEnvAtLocalKinds locals env)
+    (related : PhysicalValueRel witness actual physical value)
+    (refines : actual.refines expected = true) :
+    SemanticEnvAtLocalKinds (Fir.Wasm.insertLocal locals fvarId actual)
+        (bind env fvarId value) ∧
+      SemanticBindingAtAbi (bind env fvarId value) fvarId expected :=
+  typedEnv.publishResult_ofRefines related.semanticValueAtAbi refines
 
 /-- Natural literal allocation always returns an object reference, independent
 of whether the runtime chooses a tagged immediate, promoted tag, or limb
@@ -173,6 +432,6 @@ theorem PureExternalSupported.bindResult_preservesSemanticEnvAtLocalKinds
           (bind sourceEnv decl.fvarId sourceValue) := by
   obtain ⟨kind, valueKind, typedValue⟩ :=
     supported.resultSemanticValueAtAbi
-  exact ⟨kind, valueKind, typedEnv.bind_insertLocal typedValue⟩
+  exact ⟨kind, valueKind, typedEnv.publishResult typedValue⟩
 
 end FirTalos.Concrete

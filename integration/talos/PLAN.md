@@ -111,6 +111,21 @@ constructs `ConcreteStructuredSchemaSourceAdmissionSafeAt`, then reuses
 `ConcreteStructuredValidatedCodeCoreRel.admitSchema_of_source_safe_step` as
 the sole admission assembly theorem.
 
+The result/publication boundary is now substantially narrower.
+`SemanticEnvAtLocalKinds.ofStateRelated` derives every ordinary residual-local
+semantic ABI fact from the existing `StateRelated`, production-local
+agreement, and `LocalLayoutAligned`; W6 does not add a duplicate environment
+invariant to its central relation. `SemanticBindingAtUseSite` retains evidence
+only for a non-directional use-site edge, and
+`ConcreteStructuredAlignedValidationState.returnSemantic_ofUseSite` feeds
+that minimal fact into the existing return simulator. Direct calls, saturated
+closure calls, and lazy hit/miss share
+`SemanticEnvAtLocalKinds.publishPhysicalResult_ofRefines`; their established
+site records already carry the required effective-to-public refinement. The
+remaining result task is therefore construction of precise producer-origin
+evidence for non-directional object-family returns, not another publication
+or environment-preservation framework.
+
 `ConcreteStructuredSourceReadyAt` is already guarded by an actual supported
 function, recursively validated related state, active result equality, and
 successful source step.  A malformed arbitrary `MachineState` cannot satisfy
