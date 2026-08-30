@@ -58,10 +58,12 @@ def ConcreteGeneratedTraceSimulation
 /-- Compiler-derived admission for one currently executing ordinary-code node.
 
 The law is local to the successful source step presented to the simulation.
-It receives the exact active result equality already retained by the global
-compiler relation, then recovers only the source/compiler admission and its
-exact allocation cost. It contains no target execution, successor admission,
-recursive evaluator, termination evidence, or address-space claim. -/
+It receives the exact recursively validated current outcome, then recovers
+only the source/compiler admission and its exact allocation cost. Requiring
+that outcome is essential: residual validator facts cannot be reconstructed
+from the admission-free operational core alone. The law contains no target
+execution, successor admission, recursive evaluator, termination evidence, or
+address-space claim. -/
 structure ConcreteStructuredCompilerCurrentStepAdmission
     (program : Fir.LeanIR.ImpureProgram)
     (sourceModule : Fir.Wasm.Module)
@@ -89,11 +91,11 @@ structure ConcreteStructuredCompilerCurrentStepAdmission
       {source sourceAfter : Fir.LeanIR.Impure.MachineState}
       {target : StructuredWasmState Host},
       spec.sourceResultKind = functionResult →
-        ConcreteStructuredCodeCoreRel program context sourceModule
-          sourceFunction externals labels entryRuntime entryStore entryWitness
-          functionResult callerExpectedResult facts remainingBytes sourceRuntime
-          sourceEnv sourceCode targetStore targetLocals targetCode witness source
-          target →
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+          sourceCode targetStore targetLocals targetCode witness source target →
         Fir.LeanIR.Impure.executeStep externals source = .next sourceAfter →
         ∃ requiredBytes,
           ConcreteStructuredCodeStepAdmission context sourceModule externals functionResult
@@ -985,11 +987,11 @@ theorem ConcreteStructuredCompilerCurrentStepCoverage.code
     (spec : ConcreteSupportedFunction program context functionCode
       sourceModule sourceFunction targetModule hosts)
     (activeResult : spec.sourceResultKind = functionResult)
-    (core : ConcreteStructuredCodeCoreRel program context sourceModule
-      sourceFunction externals labels entryRuntime entryStore entryWitness
-      functionResult callerExpectedResult facts remainingBytes sourceRuntime
-      sourceEnv sourceCode targetStore targetLocals targetCode witness source
-      target)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      sourceCode targetStore targetLocals targetCode witness source target)
     (sourceStep :
       Fir.LeanIR.Impure.executeStep externals source = .next sourceAfter) :
     ∃ requiredBytes,
@@ -997,41 +999,46 @@ theorem ConcreteStructuredCompilerCurrentStepCoverage.code
           functionResult facts sourceRuntime sourceEnv requiredBytes sourceCode ∧
         requiredBytes ≤ remainingBytes := by
   obtain ⟨requiredBytes, admitted⟩ :=
-    coverage.admission.code spec activeResult core sourceStep
+    coverage.admission.code spec activeResult related sourceStep
   exact ⟨requiredBytes, admitted,
-    coverage.addressSpaceSafety.code core sourceStep admitted⟩
+    coverage.addressSpaceSafety.code related.core.core sourceStep admitted⟩
 
-/-- Source-local closure of the strong compiler relation.
+/-- Source-local closure of the recursively validated compiler relation.
 
 The classifier is applied only after the current source transition is known.
-It reconstructs the current node's runnable evidence from the admission-free
-supported relation; it stores no successor admission, future execution, target
-path, or termination evidence.  The eventual public export theorem derives
-this interface from compiler coverage instead of asking its caller to provide
-it. -/
+Its input retains the exact residual validator state transported from the
+production root; this is the static evidence from which compiler admission is
+derived. It stores no successor admission, future execution, target path, or
+termination evidence. -/
 structure ConcreteStructuredCurrentStepClassifier
     (program : Fir.LeanIR.ImpureProgram)
     (sourceModule : Fir.Wasm.Module)
     (targetModule : AdaptedModule)
     (hosts : ResolvedHosts)
     (externals : Fir.LeanIR.Impure.ExternalImpl) : Prop where
-  classify :
+  advance :
     ∀ {source sourceAfter : Fir.LeanIR.Impure.MachineState}
       {target : StructuredWasmState Host},
-      ConcreteStructuredSupportedGlobalOutcome program sourceModule
+      ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
           targetModule hosts externals source target →
         Fir.LeanIR.Impure.executeStep externals source = .next sourceAfter →
-        ConcreteStructuredRunnableGlobalOutcome program sourceModule
-          targetModule hosts externals source target
+        ∃ targetCount targetAfter,
+          FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+              targetCount target targetAfter ∧
+            ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
+              targetModule hosts externals sourceAfter targetAfter ∧
+            (targetCount = 0 →
+              compilerStructuredControlRank sourceAfter <
+                compilerStructuredControlRank source)
 
 /-- Compiler admission plus independent address-space safety discharge the
 only non-structural branch of the global classifier.
 
-Ordinary code asks the coverage law for its source-only admission and budget.
-The six staged call/cache/bind/return shapes are already branch-exact in the
-strong supported outcome, so their runnable constructors are recovered by
-inversion.
-No future source transition or target execution is inspected. -/
+Ordinary code asks the compiler law for its current admission and the
+independent resource law for its budget. The six staged
+call/cache/bind/return shapes already carry their transported validation and
+advance directly. No future source transition or target execution is
+inspected. -/
 theorem ConcreteStructuredCompilerCurrentStepAdmission.toCurrentStepClassifier
     {program : Fir.LeanIR.ImpureProgram}
     {sourceModule : Fir.Wasm.Module}
@@ -1044,54 +1051,52 @@ theorem ConcreteStructuredCompilerCurrentStepAdmission.toCurrentStepClassifier
       sourceModule targetModule hosts externals) :
     ConcreteStructuredCurrentStepClassifier program sourceModule targetModule
       hosts externals where
-  classify := by
+  advance := by
     intro source sourceAfter target related sourceStep
-    rcases related with
-      ⟨context, functionCode, sourceFunction, spec, labels, entryRuntime,
-        entryStore, entryWitness, functionResult, callerExpectedResult,
-        activeResult, active⟩
-    cases active with
-    | code contextCaches core supported agrees =>
+    cases related with
+    | code activeResult related =>
         obtain ⟨requiredBytes, admitted⟩ :=
-          admission.code spec activeResult core sourceStep
-        have budget :=
-          addressSpaceSafety.code core sourceStep admitted
-        apply ConcreteStructuredRunnableOutcome.toRunnableGlobal
-          (functionCode := functionCode) (spec := spec)
-          (activeResult := activeResult)
-        exact .code (core.withAdmission contextCaches admitted budget) supported
-          agrees
-    | directReady ready contextCaches supported agrees =>
-        apply ConcreteStructuredRunnableOutcome.toRunnableGlobal
-          (functionCode := functionCode) (spec := spec)
-          (activeResult := activeResult)
-        exact .directReady ready contextCaches supported agrees
-    | saturatedReady row sharedCapacity ready contextCaches supported agrees =>
-        apply ConcreteStructuredRunnableOutcome.toRunnableGlobal
-          (functionCode := functionCode) (spec := spec)
-          (activeResult := activeResult)
-        exact .saturatedReady row sharedCapacity ready contextCaches supported
-          agrees
-    | lazyReady path ready contextCaches supported agrees =>
-        apply ConcreteStructuredRunnableOutcome.toRunnableGlobal
-          (functionCode := functionCode) (spec := spec)
-          (activeResult := activeResult)
-        exact .lazyReady path ready contextCaches supported agrees
-    | externalReady ready contextCaches supported agrees =>
-        apply ConcreteStructuredRunnableOutcome.toRunnableGlobal
-          (functionCode := functionCode) (spec := spec)
-          (activeResult := activeResult)
-        exact .externalReady ready contextCaches supported agrees
-    | externalBind bindCore contextCaches supported agrees =>
-        apply ConcreteStructuredRunnableOutcome.toRunnableGlobal
-          (functionCode := functionCode) (spec := spec)
-          (activeResult := activeResult)
-        exact .externalBind bindCore contextCaches supported agrees
-    | returned yielded compatible resources contextCaches supported agrees =>
-        apply ConcreteStructuredRunnableOutcome.toRunnableGlobal
-          (functionCode := functionCode) (spec := spec) (labels := labels)
-          (activeResult := activeResult)
-        exact .returned yielded compatible resources contextCaches supported agrees
+          admission.code _ activeResult related sourceStep
+        have budget := addressSpaceSafety.code related.core.core sourceStep
+          admitted
+        exact related.advance_of_admission activeResult admitted budget sourceStep
+    | directReady related =>
+        obtain ⟨targetAfter, targetPath, next⟩ :=
+          related.advance_enter_of_step sourceStep
+        exact ⟨1, targetAfter, targetPath, next.toValidatedGlobal, by omega⟩
+    | saturatedReady related =>
+        obtain ⟨targetCount, targetAfter, targetPath, targetPositive, next⟩ :=
+          related.advance_enter_of_step sourceStep
+        exact ⟨targetCount, targetAfter, targetPath, next.toValidatedGlobal,
+          by omega⟩
+    | lazyReady related =>
+        cases related.path with
+        | hit sourceValue semanticFound =>
+            obtain ⟨physical, targetAfter, targetPath, next⟩ :=
+              related.advance_hit_of_step semanticFound sourceStep
+            exact ⟨4, targetAfter, targetPath,
+              (ConcreteStructuredValidatedCodeGlobalOutcomeAt.externalBind next)
+                |>.toValidatedGlobal,
+              by omega⟩
+        | miss calleeCode internal resultClassified notObject notTObject
+            semanticEmpty =>
+            obtain ⟨targetAfter, targetPath, next⟩ :=
+              related.advance_miss_of_step internal resultClassified notObject
+                notTObject semanticEmpty sourceStep
+            exact ⟨3, targetAfter, targetPath, next.toValidatedGlobal, by omega⟩
+    | externalReady related =>
+        obtain ⟨_nextWitness, targetAfter, targetPath, _witnessExtension,
+            next⟩ := related.advance_of_step sourceStep
+        exact ⟨1, targetAfter, targetPath, next.toValidatedGlobal, by omega⟩
+    | externalBind related =>
+        obtain ⟨targetAfter, targetPath, next⟩ :=
+          related.advance_of_step sourceStep
+        exact ⟨1, targetAfter, targetPath, next.toValidatedGlobal, by omega⟩
+    | returned related =>
+        obtain ⟨targetCount, targetAfter, targetPath, targetPositive, next⟩ :=
+          related.advance_of_step sourceStep
+        exact ⟨targetCount, targetAfter, targetPath, next.toValidatedGlobal,
+          by omega⟩
 
 /-- Compatibility projection for callers that already package the two laws. -/
 theorem ConcreteStructuredCompilerCurrentStepCoverage.toCurrentStepClassifier
@@ -1106,10 +1111,10 @@ theorem ConcreteStructuredCompilerCurrentStepCoverage.toCurrentStepClassifier
       hosts externals :=
   coverage.admission.toCurrentStepClassifier coverage.addressSpaceSafety
 
-/-- A source-local current-step classifier closes the admission-free strong
-relation into the generic ranked finite-prefix simulation object.  This is the
-central W6.7e-to-W6.7f bridge: its relation is stable across every step, while
-runnable evidence is reconstructed only for the current transition. -/
+/-- A source-local current-step classifier closes the recursively validated
+relation into the generic ranked finite-prefix simulation object. This is the
+central PA2 bridge: production validation is transported by the relation and
+consulted only at the current transition. -/
 def ConcreteStructuredCurrentStepClassifier.toGeneratedTraceSimulation
     {program : Fir.LeanIR.ImpureProgram}
     {sourceModule : Fir.Wasm.Module}
@@ -1120,22 +1125,22 @@ def ConcreteStructuredCurrentStepClassifier.toGeneratedTraceSimulation
       targetModule hosts externals) :
     ConcreteGeneratedTraceSimulation externals targetModule.wasmModule
       hosts.env where
-  relation := ConcreteStructuredSupportedGlobalOutcome program sourceModule
+  relation := ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
     targetModule hosts externals
   rank := compilerStructuredControlRank
   observes := by
     intro sourceState targetState related
-    exact related.observes
+    exact related.toSupportedGlobal.observes
   advance := by
     intro sourceBefore sourceAfter targetBefore related sourceStep
-    exact (classifier.classify related sourceStep).advance sourceStep
+    exact classifier.advance related sourceStep
 
 /-- Intermediate certificate-free finite-trace packaging theorem.
 
 The two remaining compiler obligations are now explicit and orthogonal: prove
-the universal current-step classifier, and construct the admission-free strong
-relation at the compiler-produced root entry.  Neither obligation exposes a
-target execution path or a simulation relation to the eventual public caller. -/
+the universal current-step classifier, and construct the validated relation at
+the compiler-produced root entry. Neither obligation exposes a target
+execution path or a simulation relation to the eventual public caller. -/
 theorem ConcreteStructuredCurrentStepClassifier.toFiniteTraceCorrect
     {program : Fir.LeanIR.ImpureProgram}
     {sourceModule : Fir.Wasm.Module}
@@ -1146,7 +1151,7 @@ theorem ConcreteStructuredCurrentStepClassifier.toFiniteTraceCorrect
       targetModule hosts externals)
     {sourceInitial : Fir.LeanIR.Impure.MachineState}
     {targetInitial : StructuredWasmState Host}
-    (initial : ConcreteStructuredSupportedGlobalOutcome program sourceModule
+    (initial : ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
       targetModule hosts externals sourceInitial targetInitial) :
     ConcreteFiniteTraceCorrect externals
       (concreteStructuredWasmMachine targetModule.wasmModule hosts.env)
@@ -1268,7 +1273,7 @@ def ConcreteStructuredCompilerCurrentStepCoverage.toGeneratedTraceSimulation
   coverage.admission.toGeneratedTraceSimulation coverage.addressSpaceSafety
 
 /-- Independent compiler admission and execution resource safety, together
-with an admission-free initial relation, imply finite-prefix correctness. -/
+with the compiler-produced validated root, imply finite-prefix correctness. -/
 theorem ConcreteStructuredCompilerCurrentStepAdmission.toFiniteTraceCorrect
     {program : Fir.LeanIR.ImpureProgram}
     {sourceModule : Fir.Wasm.Module}
@@ -1281,7 +1286,7 @@ theorem ConcreteStructuredCompilerCurrentStepAdmission.toFiniteTraceCorrect
       sourceModule targetModule hosts externals)
     {sourceInitial : Fir.LeanIR.Impure.MachineState}
     {targetInitial : StructuredWasmState Host}
-    (initial : ConcreteStructuredSupportedGlobalOutcome program sourceModule
+    (initial : ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
       targetModule hosts externals sourceInitial targetInitial) :
     ConcreteFiniteTraceCorrect externals
       (concreteStructuredWasmMachine targetModule.wasmModule hosts.env)
@@ -1318,7 +1323,7 @@ theorem ConcreteStructuredCompilerAdmissionLaws.toFiniteTraceCorrect
       addressSpaceSafety,
     initial⟩
 
-/-- Combined current-node coverage and the admission-free compiler root imply
+/-- Combined current-node coverage and the validated compiler root imply
 finite-prefix correctness of the concrete structured Wasm machine. -/
 theorem ConcreteStructuredCompilerCurrentStepCoverage.toFiniteTraceCorrect
     {program : Fir.LeanIR.ImpureProgram}
@@ -1330,7 +1335,7 @@ theorem ConcreteStructuredCompilerCurrentStepCoverage.toFiniteTraceCorrect
       sourceModule targetModule hosts externals)
     {sourceInitial : Fir.LeanIR.Impure.MachineState}
     {targetInitial : StructuredWasmState Host}
-    (initial : ConcreteStructuredSupportedGlobalOutcome program sourceModule
+    (initial : ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
       targetModule hosts externals sourceInitial targetInitial) :
     ConcreteFiniteTraceCorrect externals
       (concreteStructuredWasmMachine targetModule.wasmModule hosts.env)
@@ -1343,7 +1348,7 @@ entries.
 
 Unlike `ConcreteStructuredCompilerCurrentStepCoverage.toFiniteTraceCorrect`,
 this export-facing bridge does not ask its caller to construct the simulation's
-initial relation. `ConcreteSupportedExport.supportedGlobalRoot` derives it
+initial relation. `ConcreteSupportedExport.validatedCodeGlobalRoot` derives it
 from production lowering/adaptation and the concrete cache/ABI frame. The
 remaining `coverage` premise contains no target path or future execution
 evidence, but it does include the explicit wasm32 address-space safety law
@@ -1381,7 +1386,7 @@ theorem ConcreteSupportedExport.finiteTraceCorrect_of_currentStepCoverage
       (concreteStructuredFunctionEntry spec.targetFunction initial
         parameters) :=
   coverage.toFiniteTraceCorrect
-    (spec.supportedGlobalRoot contextCaches invariant)
+    (spec.validatedCodeGlobalRoot contextCaches invariant)
 
 /-- Export-facing finite-prefix correctness with compiler admission and
 finite-memory safety stated as visibly independent hypotheses.
@@ -1424,7 +1429,7 @@ theorem ConcreteSupportedExport.finiteTraceCorrect_of_currentStepAdmission
       (concreteStructuredFunctionEntry spec.targetFunction initial
         parameters) :=
   admission.toFiniteTraceCorrect addressSpaceSafety
-    (spec.supportedGlobalRoot contextCaches invariant)
+    (spec.validatedCodeGlobalRoot contextCaches invariant)
 
 /-- Preferred export-facing finite-prefix theorem.
 

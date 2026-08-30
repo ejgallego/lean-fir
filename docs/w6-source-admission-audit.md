@@ -37,6 +37,14 @@ from the guarded production relation. The audit does not redesign
 `ConcreteStructuredValidatedCodeOutcome`, `ConstructorSchema`, the concrete
 runtime relation, or the ranked trace simulator.
 
+The PA2 framework now enforces that boundary in its theorem type:
+`ConcreteStructuredCompilerCurrentStepAdmission.code` consumes the exact
+`ConcreteStructuredValidatedCodeOutcome`, rather than an arbitrary
+admission-free `ConcreteStructuredCodeCoreRel`. Its finite-prefix packaging
+preserves the validated global relation. Residual validator facts are
+therefore compiler-transported inputs to admission, not a caller invariant and
+not something the operational core is incorrectly expected to reconstruct.
+
 Only the W6 owner edits
 `integration/talos/FirTalos/ConcreteResumableWasm.lean`. Audit and provenance
 work uses this document or focused helper modules until an immutable handoff is

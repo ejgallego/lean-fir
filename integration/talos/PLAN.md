@@ -102,14 +102,20 @@ current validated source/target relation
 source/compiler admission for the current code node
 ```
 
-PA0 is complete. The exact 20-branch audit now records 9 already-derived branches,
-3 hidden-interface branches, 8 semantic-provenance branches, and no semantic
-discrepancy. PA1 is active with three focused boundaries: semantic
+PA0 is complete. Its initial exact 20-branch inventory recorded 9
+already-derived branches, 3 hidden-interface branches, 8
+semantic-provenance branches, and no semantic discrepancy. PA1 extraction has
+since reclassified direct calls around a directional compiler-policy gap and
+object cases around one exact runtime ABI discrepancy. PA1 remains active with
+three focused boundaries: semantic
 result/publication typing, constructor/schema/layout provenance, and remaining
 case discriminator/tag provenance. Production `WasmSupported` now enforces
 constructor-prefix/optional-final-default case order, and residual validation
 projects that fact into the existing structured case simulation rather than
-asking theorem clients for it. The audit also settled that PA2 first
+asking theorem clients for it. The PA2 theorem boundary now consumes the exact
+`ConcreteStructuredValidatedCodeOutcome` and preserves the validated global
+relation; it no longer asks an arbitrary admission-free operational core to
+reconstruct residual validation. The audit also settled that PA2 first
 constructs `ConcreteStructuredSchemaSourceAdmissionSafeAt`, then reuses
 `ConcreteStructuredValidatedCodeCoreRel.admitSchema_of_source_safe_step` as
 the sole admission assembly theorem.
@@ -6352,13 +6358,15 @@ external execution or target certificate is stored in the relation.
 Fresh admission for successor code is attached after that dynamic state is
 known rather than stored as a recursive certificate.
 The current-step obligations now have distinct theorem types.
-`ConcreteStructuredCompilerCurrentStepAdmission` recovers only the current
-ordinary node's source/compiler admission and exact allocation cost;
+`ConcreteStructuredCompilerCurrentStepAdmission` consumes the recursively
+validated current ordinary outcome and recovers only that node's
+source/compiler admission and exact allocation cost;
 `ConcreteStructuredCurrentStepAddressSpaceSafety` separately states that the
 selected cost fits the retained wasm32 budget. The provenance-preserving route
 also exposes `ConcreteStructuredCurrentStepFiniteRuntimeSafety` for finite
 reference-count headers and saturated-closure capture retention. Their
-composition derives the global classifier by structural inversion. The
+composition derives the global classifier by structural inversion while
+preserving the validated global relation. The
 compatibility export theorem
 `ConcreteSupportedExport.finiteTraceCorrect_of_currentStepAdmission` exposes
 both hypotheses rather than hiding the resource law in a compiler-named
