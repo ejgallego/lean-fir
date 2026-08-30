@@ -880,97 +880,10 @@ def addJoinParams (locals : LocalKinds) (decl : LCNF.FunDecl .impure) :
     let kind ← checkedJoinParamKind decl param
     return insertLocal locals param.fvarId kind
 
-/-- Proof-transparent partiality for declaration-local collection. -/
-abbrev CollectLocalsM (α : Type) := ExceptT CompileError Option α
-
-def liftCollectLocalsResult {α : Type}
-    (result : Except CompileError α) : CollectLocalsM α :=
-  some result
-
-def collectLocalsAltsWithM [Monad m]
-    (collect : LocalKinds → LCNF.Code .impure → m LocalKinds)
-    (locals : LocalKinds) : List (LCNF.Alt .impure) → m LocalKinds
-  | [] => pure locals
-  | alt :: alts => do
-      let locals ← match alt with
-        | .ctorAlt _ code => collect locals code
-        | .default code => collect locals code
-        | .alt _ _ _ h => nomatch h
-      collectLocalsAltsWithM collect locals alts
-
-open Lean.Order in
-@[partial_fixpoint_monotone]
-theorem monotone_collectLocalsAltsWithM
-    {γ : Type} [PartialOrder γ]
-    (collect : γ → LocalKinds → LCNF.Code .impure → CollectLocalsM LocalKinds)
-    (locals : LocalKinds) (alts : List (LCNF.Alt .impure))
-    (hmono : monotone collect) :
-    monotone (fun x => collectLocalsAltsWithM (collect x) locals alts) := by
-  induction alts generalizing locals with
-  | nil =>
-      simp only [collectLocalsAltsWithM]
-      apply monotone_const
-  | cons alt alts ih =>
-      cases alt with
-      | alt _ _ _ impossible => nomatch impossible
-      | ctorAlt info code =>
-          simp only [collectLocalsAltsWithM]
-          apply monotone_bind
-          · apply monotone_apply
-            apply monotone_apply
-            exact hmono
-          · apply monotone_of_monotone_apply
-            intro nextLocals
-            exact ih nextLocals
-      | default code =>
-          simp only [collectLocalsAltsWithM]
-          apply monotone_bind
-          · apply monotone_apply
-            apply monotone_apply
-            exact hmono
-          · apply monotone_of_monotone_apply
-            intro nextLocals
-            exact ih nextLocals
-
-def collectLocalsCore (locals : LocalKinds) :
-    LCNF.Code .impure → CollectLocalsM LocalKinds
-  | .let decl continuation => do
-      let kind ← liftCollectLocalsResult (letValueKind decl)
-      collectLocalsCore (insertLocal locals decl.fvarId kind) continuation
-  | .fun _ _ h => nomatch h
-  | .jp decl continuation => do
-      let locals ← liftCollectLocalsResult (addJoinParams locals decl)
-      let locals ← collectLocalsCore locals decl.value
-      collectLocalsCore locals continuation
-  | .jmp .. | .return .. | .unreach .. => pure locals
-  | .cases cases =>
-      collectLocalsAltsWithM collectLocalsCore locals cases.alts.toList
-  | .oset _ _ _ continuation
-  | .uset _ _ _ continuation
-  | .sset _ _ _ _ _ continuation
-  | .setTag _ _ continuation
-  | .inc _ _ _ _ continuation
-  | .dec _ _ _ _ _ continuation
-  | .del _ continuation => collectLocalsCore locals continuation
-partial_fixpoint
-
-def finishCollectLocalsResult {α : Type}
-    (result : CollectLocalsM α) : Except CompileError α :=
-  result.getD (.error (.malformed "declaration-local collection produced no result"))
-
-def collectLocals (locals : LocalKinds) (code : LCNF.Code .impure) :
-    Except CompileError LocalKinds :=
-  finishCollectLocalsResult (collectLocalsCore locals code)
-
-private def replaceLocalKind (locals : LocalKinds) (fvarId : FVarId)
-    (kind : AbiKind) : LocalKinds :=
-  locals.map fun entry =>
-    if sameFVar entry.fst fvarId then (entry.fst, kind) else entry
-
 /-- The alternative array embedded in a `cases` node is structurally smaller
-than that node. This is the termination fact for the transparent local-kind
-refinement traversal below. -/
-private theorem refineCaseAlts_sizeOf_lt (cases : LCNF.Cases .impure) :
+than that node. This is the shared termination fact for both transparent
+declaration-local traversals below. -/
+private theorem localKindsCaseAlts_sizeOf_lt (cases : LCNF.Cases .impure) :
     sizeOf cases.alts.toList < sizeOf (LCNF.Code.cases cases) := by
   rcases cases with ⟨typeName, resultType, discr, alts⟩
   rcases alts with ⟨alts⟩
@@ -978,7 +891,7 @@ private theorem refineCaseAlts_sizeOf_lt (cases : LCNF.Cases .impure) :
   omega
 
 /-- A join body is structurally smaller than the join node containing it. -/
-private theorem refineFunDeclValue_sizeOf_lt
+private theorem localKindsFunDeclValue_sizeOf_lt
     (declaration : LCNF.FunDecl .impure)
     (continuation : LCNF.Code .impure) :
     sizeOf declaration.value <
@@ -990,7 +903,7 @@ private theorem refineFunDeclValue_sizeOf_lt
 
 /-- The code selected from one alternative is structurally smaller than the
 nonempty alternative list containing it. -/
-private theorem refineAltCode_sizeOf_lt_cons
+private theorem localKindsAltCode_sizeOf_lt_cons
     (alternative : LCNF.Alt .impure)
     (rest : List (LCNF.Alt .impure)) :
     sizeOf alternative.getCode < sizeOf (alternative :: rest) := by
@@ -1002,6 +915,290 @@ private theorem refineAltCode_sizeOf_lt_cons
       simp [LCNF.Alt.getCode]
       omega
   | alt _ _ _ impossible => nomatch impossible
+
+/-- Collect join-parameter rows in production parameter order.  Keeping this
+small traversal transparent gives local-layout proofs an exact equation for
+the names inserted by a successful collection. -/
+def collectJoinParamKindInsertions (declaration : LCNF.FunDecl .impure) :
+    List (LCNF.Param .impure) →
+      Except CompileError (List (FVarId × AbiKind))
+  | [] => .ok []
+  | parameter :: parameters => do
+      let kind ← checkedJoinParamKind declaration parameter
+      let rest ← collectJoinParamKindInsertions declaration parameters
+      return (parameter.fvarId, kind) :: rest
+
+/-- Successful join-parameter collection preserves the source parameter names
+exactly; only their ABI annotations are computed. -/
+theorem collectJoinParamKindInsertions_names
+    (declaration : LCNF.FunDecl .impure)
+    (parameters : List (LCNF.Param .impure))
+    (rows : List (FVarId × AbiKind))
+    (collected :
+      collectJoinParamKindInsertions declaration parameters = .ok rows) :
+    rows.map Prod.fst = parameters.map (·.fvarId) := by
+  induction parameters generalizing rows with
+  | nil =>
+      change Except.ok [] = Except.ok rows at collected
+      cases collected
+      rfl
+  | cons parameter rest ih =>
+      simp only [collectJoinParamKindInsertions] at collected
+      cases headResult : checkedJoinParamKind declaration parameter with
+      | error fault =>
+          simp [headResult, Bind.bind, Except.bind] at collected
+      | ok kind =>
+          cases tailResult :
+              collectJoinParamKindInsertions declaration rest with
+          | error fault =>
+              simp [headResult, tailResult, Bind.bind, Except.bind] at collected
+          | ok values =>
+              simp [headResult, tailResult, Bind.bind, Except.bind,
+                pure, Except.pure] at collected
+              subst rows
+              simp [ih values tailResult]
+
+mutual
+
+/-- Collect the raw local-row insertions selected by production lowering.
+Each pair is applied in source traversal order, so later duplicate names keep
+the historical replacement behavior even before hygiene is consulted. -/
+def collectLocalKindInsertions :
+    LCNF.Code .impure → Except CompileError (List (FVarId × AbiKind))
+  | .let decl continuation => do
+      let kind ← letValueKind decl
+      let rest ← collectLocalKindInsertions continuation
+      return (decl.fvarId, kind) :: rest
+  | .jp decl continuation => do
+      let parameters ←
+        collectJoinParamKindInsertions decl decl.params.toList
+      let body ← collectLocalKindInsertions decl.value
+      let rest ← collectLocalKindInsertions continuation
+      return parameters ++ body ++ rest
+  | .cases cases => collectLocalKindInsertionsAlts cases.alts.toList
+  | .oset _ _ _ continuation
+  | .uset _ _ _ continuation
+  | .sset _ _ _ _ _ continuation
+  | .setTag _ _ continuation
+  | .inc _ _ _ _ continuation
+  | .dec _ _ _ _ _ continuation
+  | .del _ continuation => collectLocalKindInsertions continuation
+  | .fun _ _ h => nomatch h
+  | .jmp .. | .return .. | .unreach .. => .ok []
+
+  termination_by code => sizeOf code
+  decreasing_by
+    all_goals simp_all <;> try omega
+    all_goals first
+      | apply localKindsCaseAlts_sizeOf_lt
+      | apply localKindsFunDeclValue_sizeOf_lt
+
+/-- Collect raw local-row insertions from constructor/default alternatives in
+production left-to-right order. -/
+def collectLocalKindInsertionsAlts :
+    List (LCNF.Alt .impure) →
+      Except CompileError (List (FVarId × AbiKind))
+  | [] => .ok []
+  | alternative :: alternatives => do
+      let current ← collectLocalKindInsertions alternative.getCode
+      let rest ← collectLocalKindInsertionsAlts alternatives
+      return current ++ rest
+
+  termination_by alternatives => sizeOf alternatives
+  decreasing_by
+    all_goals simp_all <;> try omega
+    all_goals apply localKindsAltCode_sizeOf_lt_cons
+
+end
+
+/-- Every row produced by raw local collection names a genuine source binder.
+Join-point identifiers are control binders and are therefore skipped; join
+parameters and value binders retain their production traversal order. -/
+theorem collectLocalKindInsertions_names_sublist
+    (code : LCNF.Code .impure)
+    (insertions : List (FVarId × AbiKind))
+    (collected : collectLocalKindInsertions code = .ok insertions) :
+    (insertions.map Prod.fst).Sublist
+      (Fir.LeanIR.ImpureHygiene.codeBinders code) := by
+  revert insertions
+  apply collectLocalKindInsertions.induct
+    (motive1 := fun code => ∀ insertions,
+      collectLocalKindInsertions code = .ok insertions →
+      (insertions.map Prod.fst).Sublist
+        (Fir.LeanIR.ImpureHygiene.codeBinders code))
+    (motive2 := fun alternatives => ∀ insertions,
+      collectLocalKindInsertionsAlts alternatives = .ok insertions →
+      (insertions.map Prod.fst).Sublist
+        (Fir.LeanIR.ImpureHygiene.altsBinders alternatives))
+  all_goals
+    intros
+    simp_all [collectLocalKindInsertions, collectLocalKindInsertionsAlts,
+      Fir.LeanIR.ImpureHygiene.codeBinders,
+      Fir.LeanIR.ImpureHygiene.altsBinders, Bind.bind, Except.bind,
+      pure, Except.pure]
+  case case1 decl continuation ih insertions collected =>
+    split at collected <;> try simp_all
+    split at collected <;> try simp_all
+    next rest restEq kind kindEq =>
+      cases collected
+      exact List.Sublist.cons_cons decl.fvarId ih
+  case case2 decl continuation bodyIH continuationIH insertions collected =>
+    split at collected <;> try simp_all
+    next parameters parametersEq =>
+      split at collected <;> try simp_all
+      next body bodyEq =>
+        split at collected <;> try simp_all
+        next rest restEq =>
+          cases collected
+          have parameterNames :
+              parameters.map Prod.fst =
+                Fir.LeanIR.ImpureHygiene.paramIds decl.params := by
+            simpa [Fir.LeanIR.ImpureHygiene.paramIds] using
+              collectJoinParamKindInsertions_names decl decl.params.toList
+                parameters parametersEq
+          have bodyRest := List.Sublist.append bodyIH continuationIH
+          have allRows :=
+            List.Sublist.append
+              (List.Sublist.refl
+                (Fir.LeanIR.ImpureHygiene.paramIds decl.params))
+              bodyRest
+          apply List.Sublist.cons decl.fvarId
+          simpa [parameterNames, List.map_append, List.append_assoc] using allRows
+  case case15 alternative alternatives codeIH alternativesIH insertions collected =>
+    split at collected <;> try simp_all
+    next current currentEq =>
+      split at collected <;> try simp_all
+      next rest restEq =>
+        cases collected
+        simpa [List.map_append] using
+          List.Sublist.append codeIH alternativesIH
+
+/-- Apply raw local-row insertions in production traversal order. -/
+def applyLocalKindInsertions (locals : LocalKinds)
+    (insertions : List (FVarId × AbiKind)) : LocalKinds :=
+  insertions.foldl (fun locals insertion =>
+    insertLocal locals insertion.fst insertion.snd) locals
+
+/-- Filtering away one local name preserves lookup of every different name. -/
+theorem findLocalKind?_filter_different
+    (locals : LocalKinds) (removed query : FVarId)
+    (different : removed.name ≠ query.name) :
+    findLocalKind?
+        (locals.filter fun entry => entry.fst.name != removed.name) query =
+      findLocalKind? locals query := by
+  induction locals with
+  | nil => rfl
+  | cons entry rest ih =>
+      obtain ⟨candidate, candidateKind⟩ := entry
+      by_cases candidateRemoved : candidate.name = removed.name
+      · have candidateQuery : candidate.name ≠ query.name := by
+          simpa [candidateRemoved] using different
+        have removedTest : (candidate.name != removed.name) = false := by
+          simp [candidateRemoved]
+        have queryTest : (candidate.name == query.name) = false :=
+          beq_eq_false_iff_ne.mpr candidateQuery
+        simp only [List.filter_cons, removedTest, Bool.false_eq_true,
+          ↓reduceIte, findLocalKind?, queryTest]
+        exact ih
+      · have removedTest : (candidate.name != removed.name) = true :=
+          bne_iff_ne.mpr candidateRemoved
+        simp only [List.filter_cons, removedTest, ↓reduceIte,
+          findLocalKind?]
+        by_cases candidateQuery : candidate.name = query.name
+        · have queryTest : (candidate.name == query.name) = true :=
+            beq_iff_eq.mpr candidateQuery
+          simp [queryTest]
+        · have queryTest : (candidate.name == query.name) = false :=
+            beq_eq_false_iff_ne.mpr candidateQuery
+          simp [queryTest, ih]
+
+/-- Inserting one compiler local has the expected name-directed lookup. -/
+theorem findLocalKind?_insertLocal
+    (locals : LocalKinds) (inserted query : FVarId) (kind : AbiKind) :
+    findLocalKind? (insertLocal locals inserted kind) query =
+      if inserted.name = query.name then some kind
+      else findLocalKind? locals query := by
+  unfold insertLocal
+  by_cases same : inserted.name = query.name
+  · simp [findLocalKind?, same]
+  · simp [findLocalKind?, same,
+      findLocalKind?_filter_different locals inserted query same]
+
+/-- Insertions for locals with different names leave a queried lookup exact. -/
+theorem findLocalKind?_applyLocalKindInsertions_of_avoids
+    (locals : LocalKinds) (insertions : List (FVarId × AbiKind))
+    (query : FVarId)
+    (avoids : ∀ insertion ∈ insertions,
+      insertion.fst.name ≠ query.name) :
+    findLocalKind? (applyLocalKindInsertions locals insertions) query =
+      findLocalKind? locals query := by
+  induction insertions generalizing locals with
+  | nil => rfl
+  | cons insertion rest ih =>
+      obtain ⟨inserted, kind⟩ := insertion
+      have headDifferent : inserted.name ≠ query.name :=
+        avoids (inserted, kind) (by simp)
+      have restAvoids : ∀ insertion ∈ rest,
+          insertion.fst.name ≠ query.name := by
+        intro insertion member
+        exact avoids insertion (by simp [member])
+      change
+        findLocalKind?
+            (applyLocalKindInsertions
+              (insertLocal locals inserted kind) rest) query =
+          findLocalKind? locals query
+      rw [ih _ restAvoids]
+      rw [findLocalKind?_insertLocal, if_neg headDifferent]
+
+/-- In a name-unique insertion list, every listed compiler binder has exactly
+the ABI kind selected by production raw-local collection. -/
+theorem findLocalKind?_applyLocalKindInsertions_of_mem
+    (locals : LocalKinds) (insertions : List (FVarId × AbiKind))
+    (fvarId : FVarId) (kind : AbiKind)
+    (unique : (insertions.map Prod.fst).Pairwise
+      fun left right => left.name ≠ right.name)
+    (member : (fvarId, kind) ∈ insertions) :
+    findLocalKind? (applyLocalKindInsertions locals insertions) fvarId =
+      some kind := by
+  induction insertions generalizing locals with
+  | nil => simp at member
+  | cons insertion rest ih =>
+      obtain ⟨inserted, insertedKind⟩ := insertion
+      simp only [List.map_cons, List.pairwise_cons] at unique
+      simp only [List.mem_cons] at member
+      change
+        findLocalKind?
+            (applyLocalKindInsertions
+              (insertLocal locals inserted insertedKind) rest) fvarId =
+          some kind
+      rcases member with headEq | tailMember
+      · cases headEq
+        have insertedFound :
+            findLocalKind? (insertLocal locals fvarId kind) fvarId =
+              some kind := by
+          rw [findLocalKind?_insertLocal, if_pos rfl]
+        have tailAvoids : ∀ insertion ∈ rest,
+            insertion.fst.name ≠ fvarId.name := by
+          intro insertion insertionMember
+          apply Ne.symm
+          exact unique.1 insertion.fst
+            (List.mem_map.mpr ⟨insertion, insertionMember, rfl⟩)
+        rw [findLocalKind?_applyLocalKindInsertions_of_avoids
+          _ rest fvarId tailAvoids]
+        exact insertedFound
+      · exact ih (insertLocal locals inserted insertedKind) unique.2 tailMember
+
+/-- Proof-transparent declaration-local collection used by production
+lowering. -/
+def collectLocals (locals : LocalKinds) (code : LCNF.Code .impure) :
+    Except CompileError LocalKinds := do
+  let insertions ← collectLocalKindInsertions code
+  return applyLocalKindInsertions locals insertions
+
+private def replaceLocalKind (locals : LocalKinds) (fvarId : FVarId)
+    (kind : AbiKind) : LocalKinds :=
+  locals.map fun entry =>
+    if sameFVar entry.fst fvarId then (entry.fst, kind) else entry
 
 mutual
 
@@ -1039,8 +1236,8 @@ def collectEffectiveLocalKindUpdates (program : Fir.LeanIR.ImpureProgram) :
   decreasing_by
     all_goals simp_all <;> try omega
     all_goals first
-      | apply refineCaseAlts_sizeOf_lt
-      | apply refineFunDeclValue_sizeOf_lt
+      | apply localKindsCaseAlts_sizeOf_lt
+      | apply localKindsFunDeclValue_sizeOf_lt
 
 /-- Collect exact local-kind rewrites from case alternatives in production
 left-to-right order. -/
@@ -1057,9 +1254,82 @@ def collectEffectiveLocalKindUpdatesAlts
   termination_by alternatives => sizeOf alternatives
   decreasing_by
     all_goals simp_all <;> try omega
-    all_goals apply refineAltCode_sizeOf_lt_cons
+    all_goals apply localKindsAltCode_sizeOf_lt_cons
 
 end
+
+/-- Effective named-call rewrites never invent a compiler local: their names
+form a sublist of the raw rows collected from the same source code. -/
+theorem collectEffectiveLocalKindUpdates_names_sublist
+    (program : Fir.LeanIR.ImpureProgram)
+    (code : LCNF.Code .impure)
+    (insertions updates : List (FVarId × AbiKind))
+    (rawCollected : collectLocalKindInsertions code = .ok insertions)
+    (effectiveCollected :
+      collectEffectiveLocalKindUpdates program code = .ok updates) :
+    (updates.map Prod.fst).Sublist (insertions.map Prod.fst) := by
+  revert insertions updates
+  apply collectEffectiveLocalKindUpdates.induct
+    (motive1 := fun code => ∀ insertions updates,
+      collectLocalKindInsertions code = .ok insertions →
+      collectEffectiveLocalKindUpdates program code = .ok updates →
+      (updates.map Prod.fst).Sublist (insertions.map Prod.fst))
+    (motive2 := fun alternatives => ∀ insertions updates,
+      collectLocalKindInsertionsAlts alternatives = .ok insertions →
+      collectEffectiveLocalKindUpdatesAlts program alternatives = .ok updates →
+      (updates.map Prod.fst).Sublist (insertions.map Prod.fst))
+  all_goals
+    intros
+    simp_all [collectLocalKindInsertions, collectLocalKindInsertionsAlts,
+      collectEffectiveLocalKindUpdates,
+      collectEffectiveLocalKindUpdatesAlts, Bind.bind, Except.bind,
+      pure, Except.pure]
+  case case1 decl continuation ih insertions updates rawCollected
+      effectiveCollected =>
+    split at rawCollected <;> try simp_all
+    split at rawCollected <;> try simp_all
+    next rawRest rawRestEq rawKind rawKindEq =>
+      split at effectiveCollected <;> try simp_all
+      split at effectiveCollected <;> try simp_all
+      next effectiveRest effectiveRestEq effectiveKind effectiveKindEq =>
+        cases rawCollected
+        cases effectiveCollected
+        exact List.Sublist.cons_cons decl.fvarId ih
+  case case2 decl continuation bodyIH continuationIH insertions updates
+      rawCollected effectiveCollected =>
+    split at rawCollected <;> try simp_all
+    next parameters parametersEq =>
+      split at rawCollected <;> try simp_all
+      next rawBody rawBodyEq =>
+        split at rawCollected <;> try simp_all
+        next rawRest rawRestEq =>
+          split at effectiveCollected <;> try simp_all
+          next effectiveBody effectiveBodyEq =>
+            split at effectiveCollected <;> try simp_all
+            next effectiveRest effectiveRestEq =>
+              cases rawCollected
+              cases effectiveCollected
+              have bodyRest := List.Sublist.append bodyIH continuationIH
+              have afterParameters :=
+                List.sublist_append_right
+                  (parameters.map Prod.fst)
+                  (rawBody.map Prod.fst ++ rawRest.map Prod.fst)
+              simpa [List.map_append, List.append_assoc] using
+                bodyRest.trans afterParameters
+  case case15 alternative alternatives codeIH alternativesIH insertions updates
+      rawCollected effectiveCollected =>
+    split at rawCollected <;> try simp_all
+    next rawCurrent rawCurrentEq =>
+      split at rawCollected <;> try simp_all
+      next rawRest rawRestEq =>
+        split at effectiveCollected <;> try simp_all
+        next effectiveCurrent effectiveCurrentEq =>
+          split at effectiveCollected <;> try simp_all
+          next effectiveRest effectiveRestEq =>
+            cases rawCollected
+            cases effectiveCollected
+            simpa [List.map_append] using
+              List.Sublist.append codeIH alternativesIH
 
 /-- Apply exact kind rewrites without changing declaration-local row order. -/
 def applyEffectiveLocalKindUpdates (locals : LocalKinds)
@@ -1177,6 +1447,56 @@ theorem findLocalKind?_applyEffectiveLocalKindUpdates_of_mem
         exact ih (replaceLocalKind locals updated updatedKind) unique.2
           tailMember initialAfter
 
+/-- A hygienic successful raw/effective collection gives every effective
+compiler binder its exact final ABI kind.  This is the reusable local-row
+boundary needed by source admission: clients supply source hygiene and the
+production collection equations, not a separate layout certificate. -/
+theorem findLocalKind?_of_collected_effective_mem
+    (program : Fir.LeanIR.ImpureProgram)
+    (code : LCNF.Code .impure)
+    (locals : LocalKinds)
+    (insertions updates : List (FVarId × AbiKind))
+    (rawCollected : collectLocalKindInsertions code = .ok insertions)
+    (effectiveCollected :
+      collectEffectiveLocalKindUpdates program code = .ok updates)
+    (hygienic :
+      Fir.LeanIR.ImpureHygiene.BinderNamesUnique
+        (Fir.LeanIR.ImpureHygiene.codeBinders code))
+    (fvarId : FVarId) (kind : AbiKind)
+    (member : (fvarId, kind) ∈ updates) :
+    findLocalKind?
+        (applyEffectiveLocalKindUpdates
+          (applyLocalKindInsertions locals insertions) updates) fvarId =
+      some kind := by
+  have rawNames :=
+    collectLocalKindInsertions_names_sublist code insertions rawCollected
+  have effectiveNames :=
+    collectEffectiveLocalKindUpdates_names_sublist program code insertions
+      updates rawCollected effectiveCollected
+  have rawUnique :
+      (insertions.map Prod.fst).Pairwise
+        fun left right => left.name ≠ right.name :=
+    List.Pairwise.sublist rawNames hygienic
+  have effectiveUnique :
+      (updates.map Prod.fst).Pairwise
+        fun left right => left.name ≠ right.name :=
+    List.Pairwise.sublist effectiveNames rawUnique
+  have updateNameMember : fvarId ∈ updates.map Prod.fst :=
+    List.mem_map.mpr ⟨(fvarId, kind), member, rfl⟩
+  have rawNameMember : fvarId ∈ insertions.map Prod.fst :=
+    List.Sublist.mem updateNameMember effectiveNames
+  obtain ⟨rawInsertion, rawMember, rawNameEq⟩ :=
+    List.mem_map.mp rawNameMember
+  obtain ⟨rawFvarId, rawKind⟩ := rawInsertion
+  simp only at rawNameEq
+  subst rawFvarId
+  have rawFound :=
+    findLocalKind?_applyLocalKindInsertions_of_mem locals insertions
+      fvarId rawKind rawUnique rawMember
+  exact findLocalKind?_applyEffectiveLocalKindUpdates_of_mem
+    (applyLocalKindInsertions locals insertions) updates
+    fvarId kind rawKind effectiveUnique member rawFound
+
 /--
 Refine the declaration-local rows produced by `collectLocals` with exact
 internal named-call results. Keeping the original row order preserves numeric
@@ -1187,16 +1507,6 @@ def refineNamedCallLocalKinds (program : Fir.LeanIR.ImpureProgram)
     Except CompileError LocalKinds := do
   let updates ← collectEffectiveLocalKindUpdates program code
   return applyEffectiveLocalKindUpdates locals updates
-
-theorem finishCollectLocalsResult_eq_ok_iff
-    {α : Type} {result : CollectLocalsM α} {value : α} :
-    finishCollectLocalsResult result = .ok value ↔
-      result = some (.ok value) := by
-  cases result with
-  | none => simp [finishCollectLocalsResult]
-  | some result =>
-      change result = .ok value ↔ some result = some (.ok value)
-      exact ⟨congrArg some, Option.some.inj⟩
 
 def compileArg (context : Context) :
     LCNF.Arg .impure → Except CompileError (List Instruction × AbiKind)
