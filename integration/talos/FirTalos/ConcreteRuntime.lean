@@ -50,6 +50,46 @@ inductive SemanticValueAtAbi : AbiKind → Value → Prop where
       SemanticValueAtAbi .float (.scalar (.float64Bits bits))
   | usize : SemanticValueAtAbi .usize (.usize value)
 
+/-- Semantic ABI facts weaken along the same directional refinement relation
+used by runtime and compiler contracts.
+
+This is deliberately not stated for `AbiKind.leanCompatible`: a semantically
+arbitrary `.tobject` cannot be specialized to `.object` or `.tagged` merely
+because all three use an `i32` lane. -/
+theorem SemanticValueAtAbi.ofRefines
+    {actual expected : AbiKind} {value : Value}
+    (typed : SemanticValueAtAbi actual value)
+    (refines : actual.refines expected = true) :
+    SemanticValueAtAbi expected value := by
+  cases typed <;> simp [AbiKind.refines] at refines
+  case object =>
+    rcases refines with rfl | rfl
+    · exact .object
+    · exact .tobject _
+  case tagged =>
+    rcases refines with rfl | rfl
+    · exact .tagged
+    · exact .tobject _
+  all_goals subst_vars; constructor
+
+/-- Carrier compatibility alone cannot specialize an arbitrary tagged object
+to the heap-only `.object` ABI. -/
+theorem semanticTObject_not_subtype_object :
+    ¬ ∀ value, SemanticValueAtAbi .tobject value →
+      SemanticValueAtAbi .object value := by
+  intro specialize
+  have impossible := specialize (.object (.tagged 0)) (.tobject _)
+  cases impossible
+
+/-- Dually, carrier compatibility alone cannot specialize an arbitrary heap
+object to the immediate-only `.tagged` ABI. -/
+theorem semanticTObject_not_subtype_tagged :
+    ¬ ∀ value, SemanticValueAtAbi .tobject value →
+      SemanticValueAtAbi .tagged value := by
+  intro specialize
+  have impossible := specialize (.object (.heap 0)) (.tobject _)
+  cases impossible
+
 /-- Source-semantic typing of one environment binding at one use-site ABI.
 
 The ABI is the kind required by that use, not merely the possibly coarser kind
@@ -79,6 +119,15 @@ theorem SemanticBindingAtAbi.lookup
     {value : Value} (found : lookup env fvarId = some value) :
     SemanticValueAtAbi kind value :=
   typed found
+
+/-- Use-site binding facts inherit the directional ABI weakening law. -/
+theorem SemanticBindingAtAbi.ofRefines
+    {env : Env} {fvarId : Lean.FVarId} {actual expected : AbiKind}
+    (typed : SemanticBindingAtAbi env fvarId actual)
+    (refines : actual.refines expected = true) :
+    SemanticBindingAtAbi env fvarId expected := by
+  intro value found
+  exact (typed found).ofRefines refines
 
 /-- Source-side provenance retained for one semantic constructor allocation.
 

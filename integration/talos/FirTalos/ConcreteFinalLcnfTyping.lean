@@ -26,6 +26,41 @@ def SemanticEnvAtLocalKinds (locals : Fir.Wasm.LocalKinds) (env : Env) : Prop :=
     Fir.Wasm.findLocalKind? locals fvarId = some kind →
       SemanticBindingAtAbi env fvarId kind
 
+/-- Project the semantic binding selected by one compiler local-row lookup. -/
+theorem SemanticEnvAtLocalKinds.binding
+    {locals : Fir.Wasm.LocalKinds} {env : Env}
+    (typedEnv : SemanticEnvAtLocalKinds locals env)
+    {fvarId : Lean.FVarId} {kind : AbiKind}
+    (found : Fir.Wasm.findLocalKind? locals fvarId = some kind) :
+    SemanticBindingAtAbi env fvarId kind :=
+  typedEnv fvarId kind found
+
+/-- A compiler-row binding can be used at any directionally weaker ABI. This
+is the common return/call/publication rule for every non-reversing ABI edge. -/
+theorem SemanticEnvAtLocalKinds.binding_ofRefines
+    {locals : Fir.Wasm.LocalKinds} {env : Env}
+    (typedEnv : SemanticEnvAtLocalKinds locals env)
+    {fvarId : Lean.FVarId} {actual expected : AbiKind}
+    (found : Fir.Wasm.findLocalKind? locals fvarId = some actual)
+    (refines : actual.refines expected = true) :
+    SemanticBindingAtAbi env fvarId expected :=
+  SemanticBindingAtAbi.ofRefines (typedEnv.binding found) refines
+
+/-- Directional result refinement plus the compiler local-row invariant is
+already enough for source return safety. The only remaining return gap is the
+reverse object-family compatibility accepted by Lean (`tobject` to a precise
+`object` or `tagged` result), which needs independent semantic provenance. -/
+theorem SemanticEnvAtLocalKinds.returnValueSafe_ofRefines
+    {locals : Fir.Wasm.LocalKinds} {source : MachineState}
+    (typedEnv : SemanticEnvAtLocalKinds locals source.env)
+    {result : Lean.FVarId} {actual functionResult : AbiKind}
+    (control : source.control = .code (.return result))
+    (found : Fir.Wasm.findLocalKind? locals result = some actual)
+    (refines : actual.refines functionResult = true) :
+    ConcreteStructuredReturnValueSafeAt functionResult source :=
+  ConcreteStructuredReturnValueSafeAt.of_semanticBinding control
+    (typedEnv.binding_ofRefines found refines)
+
 /-- Binding a semantically typed value under the validator's replacement
 operation preserves the complete semantic local-kind environment. -/
 theorem SemanticEnvAtLocalKinds.bind_insertLocal

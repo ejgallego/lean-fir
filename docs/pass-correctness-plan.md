@@ -37,11 +37,12 @@ even when the execution may continue forever.
 
 ### Critical path
 
-1. **PA0 — admission audit.** Classify every schema-aware current-node branch
-   with exact theorem dependencies in
-   [`w6-source-admission-audit.md`](w6-source-admission-audit.md).
-2. **PA1 — minimal semantic provenance.** Add only source facts that PA0 proves
-   cannot be reconstructed from the guarded validated relation.
+1. **PA0 — admission audit (complete).** All 20 branches have exact
+   dependencies and dispositions in
+   [`w6-source-admission-audit.md`](w6-source-admission-audit.md): 7 A, 3 B,
+   10 C, 0 E, with four explicit resource overlays.
+2. **PA1 — minimal semantic provenance (active).** Add only source facts that
+   PA0 proved cannot be reconstructed from the guarded validated relation.
 3. **PA2 — compiler-derived guarded admission.** Derive the current-step
    compiler admission package from production validation, the active relation,
    and one successful source step.
@@ -81,8 +82,8 @@ roadmap and examples then reference only the closed endpoint.
 
 | Milestone | Current theorem or interface | Premises to eliminate | Premises retained | Owner | Definition of done |
 |---|---|---|---|---|---|
-| PA0 | `ConcreteStructuredSourceAdmissionSafeAt`; `ConcreteStructuredSchemaSourceAdmissionSafeAt`; `ConcreteStructuredCodeStepAdmission` | None during audit | Existing compiler, semantic, and resource boundaries unchanged | W6 audit owner | Every target branch has exact facts, conclusion, theorem dependency, A–E class, owner, and regression; no unresolved prose |
-| PA1 | Existing operation-specific source-safety and producer/result lemmas | Any caller-supplied precise-result or field-provenance fact identified as class C | Facts reconstructible locally from validation and the active relation | W6 result/object helper owners | Every class-C row is closed without a public provenance map or universal source invariant |
+| PA0 (complete) | `ConcreteStructuredSourceAdmissionSafeAt`; `ConcreteStructuredSchemaSourceAdmissionSafeAt`; `ConcreteStructuredCodeStepAdmission` | None during audit | Existing compiler, semantic, and resource boundaries unchanged | W6 audit owner | Met: 20/20 branches classified; no unresolved dependency or class-E discrepancy |
+| PA1 (active) | `SemanticEnvAtLocalKinds`; operation-specific source-safety and producer/result lemmas | Caller-supplied return, producer, closure-ingress, case, field, and layout provenance | Facts reconstructible locally from validation and the active relation | W6 result/object/case helper owners | All class-C facts and the shared call/cache result-publication law are compiler-derived without a public provenance map or universal source invariant |
 | PA2 | `ConcreteStructuredCompilerCurrentStepAdmission`; `ConcreteStructuredValidatedCodeCoreRel.admitSchema_of_source_safe_step` | `ConcreteStructuredSchemaSourceReadyAt` as a client-provided current-node law | `ConcreteStructuredCurrentStepFiniteRuntimeSafety`; `ConcreteStructuredCurrentStepAddressSpaceSafety` | W6 owner | Production compiler facts construct current-step admission for every successful guarded source step |
 | PA3 | `ConcreteSupportedExport.finiteTraceCorrect_of_schemaSourceInvariant` | `SourceInvariant`, `sourceLaws`, `sourceInitialInvariant`, caller-selected `initialSchema` | Entry relation; runtime/external contracts; finite header/capture safety; allocation headroom | W6 owner | Canonical `ConcreteSupportedExport.finiteTraceCorrect` has the closed-W6 surface and an exact axiom regression |
 | PA4a | Generic finite-stuttering/pass bridge, including `precomposeStutteringPass` | Any renamed form of the W6 source-invariant premise | The earlier pass's real semantic and well-formedness hypotheses | Composition owner | One existing pass theorem yields an earlier-LCNF-to-contracted-Wasm finite-prefix theorem |

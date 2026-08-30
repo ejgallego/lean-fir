@@ -1,15 +1,17 @@
 # W6 source-admission audit
 
-Status: **PA0 scaffold; classification has not started.**
+Status: **PA0 complete; PA1 theorem extraction is active.**
 
 This document is the review surface for eliminating caller-provided source
 readiness from the public final-LCNF-to-Wasm theorem. It inventories every
 current-step target branch before any new invariant or proof relation is
-introduced. The next action is to review this surface, then fill every A–E
-classification with exact dependencies.
+introduced. The classification below was checked against the production
+validator, the validated structured relation, the source-step inversion
+lemmas, and the schema-aware dispatcher.
 
-The audit is complete only when no row contains an unclassified dependency,
-an approximate theorem reference, or an unresolved owner/regression decision.
+The audit is complete: every row has a primary A–E disposition, exact existing
+dependencies, an exact missing boundary where applicable, an owner, and a
+regression. No class-E semantic discrepancy was found.
 
 ## Scope and fixed boundary
 
@@ -77,16 +79,27 @@ Finite runtime safety is audited separately from compiler admission:
 A row may have a compiler/provenance class and a separate D annotation. Class
 D must not obscure whether the compiler-owned portion is A, B, C, or E.
 
-## Candidate PA2 theorem boundary
+## Settled PA2 theorem boundary
 
-The branch audit targets a schema-aware theorem of approximately this shape;
-PA0 will settle its exact home and arguments before implementation:
+PA2 first derives schema source safety and then reuses the existing schema
+admission bridge. This keeps compiler/source classification separate from the
+source-step inversion that constructs target admission. The two exact new
+interfaces are:
 
 ```lean
-theorem currentStepAdmission_of_validated
+theorem ConcreteStructuredValidatedCodeOutcome.schemaSourceSafe_of_compiler
     (related : ConcreteStructuredValidatedCodeOutcome ...)
     (schemaAgrees : schema.WitnessAgrees witness)
     (sourceStep : executeStep externals source = .next sourceAfter)
+    (provenance : ConcreteStructuredCompilerProvenanceAt ... source) :
+    ConcreteStructuredSchemaSourceAdmissionSafeAt schema context sourceModule
+      externals functionResult facts sourceRuntime sourceEnv source sourceCode
+
+theorem ConcreteStructuredValidatedCodeOutcome.currentStepAdmission_of_compiler
+    (related : ConcreteStructuredValidatedCodeOutcome ...)
+    (schemaAgrees : schema.WitnessAgrees witness)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (provenance : ConcreteStructuredCompilerProvenanceAt ... source)
     (finiteRuntimeSafe : ConcreteStructuredFiniteRuntimeSafeAt
       context sourceRuntime sourceEnv sourceCode) :
     ∃ requiredBytes,
@@ -95,64 +108,98 @@ theorem currentStepAdmission_of_validated
         sourceCode
 ```
 
-The production wrapper then constructs the current-step classifier used by
-the existing ranked finite-prefix package. It does not store successor
-admission or a future execution.
+`ConcreteStructuredCompilerProvenanceAt` is a working name for the minimal
+PA1 bundle, not permission for a new caller premise. PA1 must construct and
+preserve it from checked final-LCNF/compiler facts. The second theorem is a
+one-line composition with
+`ConcreteStructuredValidatedCodeCoreRel.admitSchema_of_source_safe_step`.
+Neither theorem stores successor admission, a target path, or a future
+execution.
 
 ## Complete current-step branch inventory
 
-The “starting bridge” column records existing machinery, not an A–E decision.
-The “facts to enumerate” and “class” columns deliberately remain open until
-the review following this scaffold.
+The primary class describes construction of the current branch. A B row may
+still participate in the cross-branch result-preservation theorem described
+below; that does not turn its current admission into a C gap. D annotations
+are independent finite-resource overlays.
 
-| # | Target branch | Source-safety constructor | Exact desired conclusion and cost | Starting bridge or theorem | Facts to enumerate in PA0 | Class | Proposed owner | Regression candidate |
+| # | Target branch | Source-safety constructor | Exact desired conclusion and cost | Exact dependency or missing boundary | Disposition | Class | Owner | Regression |
 |---:|---|---|---|---|---|---|---|---|
-| 1 | return | `.ret` | `.ret`; cost `0`; compiled local, compatible result kind, and `SemanticValueAtAbi functionResult` | `ConcreteStructuredAlignedValidationState.admit_return`; `ConcreteStructuredSourceAdmissionSafeAt.ret_of_semanticBinding` | precise active-result provenance versus coarse local carrier | — | W6-Results | compiled `sumTo`; precise object/tagged negative fixture |
-| 2 | direct let | `.directLet` | `.directLet`; cost `directLetAllocationCost decl`; `ReuseBudgetedDirectSupported` | `ConcreteStructuredValidatedCodeCoreRel.admit_of_source_safe_step` direct-let arm | residual validation fields for every direct-operation family | — | W6-Audit | existing direct-operation corpus |
-| 3 | pure external | `.pureExternal` | `.pureExternal`; exact `stepCost`; `PureExternalSupported` | source-safety pure-external arm; installed pure Integer/Natural/scalar refinements | exact result kind/value and next-runtime facts available after one step | — | W6-Results | `sumTo` Nat externals; pure Int/String cases |
-| 4 | direct call | `.directCall` | `.directCall`; cost `0`; `DirectInternalCallSite` | source-safety direct-call arm | declaration lookup, evaluated arguments, effective callee result kind, caller continuation result | — | W6-Results | `sumTo`; `direct-call` |
-| 5 | saturated closure call | `.saturatedCall` | `.saturatedCall`; cost `0`; site, runtime resolution, and capture capacity | source-safety saturated-call arm; `ConcreteStructuredFiniteRuntimeSafeAt` | precise callee/caller result and capture provenance; separate D capacity | — + D review | W6-Results | `captured-partial`; mixed closure captures |
-| 6 | lazy-cache hit | `.lazyHit` | `.lazyHit`; cost `0`; call shape, generated environment, exact cached value lookup | `.lazy` plus `ConcreteStructuredLazyReadyAdmission.hit` | cached value result precision and agreement with generated declaration | — | W6-Results | cached Natural/String/Array hit cases |
-| 7 | lazy-cache miss | `.lazyMiss` | `.lazyMiss`; cost `0`; internal miss, result classification, object exclusions, empty lookup | `.lazy` plus `ConcreteStructuredLazyReadyAdmission.miss` | callee result provenance and identical publication type across miss/return | — | W6-Results | cached miss and first-publication cases |
-| 8 | default-only case | `.defaultOnlyCase` | `.defaultOnlyCase`; cost `0`; selected default | `ConcreteStructuredValidatedCodeCoreRel.productionCasesSupported_of_caseSafe` | normalized alternatives and source-step selected-arm evidence | — | W6-Audit | default-only case corpus |
-| 9 | object constructor cases | `.objectCases` | `.objectCases`; cost `0`; `ObjectConstructorCasesSupported` | `ConcreteStructuredValidatedCodeCoreRel.productionCasesSupported_of_caseSafe` object arm | discriminator object shape, tags, normalization, and selected alternative | — | W6-Objects | `branch-nat`; constructor cases |
-| 10 | scalar UInt8 cases | `.scalarUInt8Cases` | `.scalarUInt8Cases`; cost `0`; `ScalarUInt8CasesSupported` | `ConcreteStructuredValidatedCodeCoreRel.productionCasesSupported_of_caseSafe` scalar arm | precise UInt8 discriminator rather than Wasm `i32` compatibility | — | W6-Results | `sumTo`; scalar-enum cases |
-| 11 | persistent increment | `.incPersistent` | `.incPersistent`; cost `0` | `ConcreteStructuredAlignedValidationState.admit_incPersistent`; `ConcreteStructuredSourceAdmissionSafeAt.inc_of_any_persistence` | persistence-independent compiler facts | — | W6-Audit | persistent increment corpus |
-| 12 | persistent decrement | `.decPersistent` | `.decPersistent`; cost `0` | `ConcreteStructuredAlignedValidationState.admit_decPersistent`; `ConcreteStructuredSourceAdmissionSafeAt.dec_of_any_persistence` | persistence-independent compiler facts and erased fields | — | W6-Audit | persistent decrement/reset corpus |
-| 13 | ordinary increment | `.ordinaryIncrement`; source `.incOrdinary` | `.ordinaryIncrement`; cost `0`; exact semantic update | `ConcreteStructuredAlignedValidationState.admit_incOrdinary_of_step` | object lookup/kind from validation and step; separate D header headroom | — + D review | W6-Objects | ordinary increment boundary cases |
-| 14 | ordinary decrement | `.ordinaryDecrement`; source `.decOrdinary` | `.ordinaryDecrement`; cost `0`; exact semantic release update | `ConcreteStructuredAlignedValidationState.admit_decOrdinary_of_step` | object lookup/kind and recursive-release shape | — | W6-Objects | decrement and recursive-release corpus |
-| 15 | explicit delete | `.ordinaryDelete`; source `.del` | `.ordinaryDelete`; cost `0`; exact delete/no-op update | `ConcreteStructuredAlignedValidationState.admit_del_of_step`; `ConcreteStructuredSourceAdmissionSafeAt.del_unconditional` | erased-zero versus ordinary object decoding remains exact | — | W6-Objects | delete-erased and ordinary delete cases |
-| 16 | constructor tag mutation | `.constructorTag`; source `.setTag` | `.constructorTag`; cost `0`; live object and exact semantic tag update | `ConcreteStructuredAlignedValidationState.admit_setTag_of_step`; `ConcreteStructuredSourceAdmissionSafeAt.setTag_unconditional` | live constructor, `UInt32` tag bound, active schema transition | — | W6-Objects | setTag bound and reuse-tag cases |
-| 17 | object-field FVar mutation | schema `.objectFieldFVar` | schema object-field FVar branch; cost `0`; `schema.ObjectFieldFVarTyped` | `ConcreteStructuredValidatedCodeCoreRel.admitSchema_of_source_safe_step`; active schema/witness dispatcher | source local precision, object location/schema slot, active descriptor agreement | — | W6-Objects | multi-object and closure-field writes |
-| 18 | object-field erased mutation | schema `.objectFieldErased` | schema erased-field branch; cost `0`; `schema.ObjectFieldKindAt ... .erased` | `ConcreteStructuredValidatedCodeCoreRel.admitSchema_of_source_safe_step`; active schema/witness dispatcher | erased slot provenance and active descriptor agreement | — | W6-Objects | erased-field reset/delete fixtures |
-| 19 | `USize` field mutation | `.usizeField` | `.usizeField`; cost `0`; exact successful `USizeFieldEffectSupported` | `ConcreteStructuredAlignedValidationState.admit_uset_of_step`; `ConcreteStructuredSourceAdmissionSafeAt.usizeField_unconditional` | exact source `USize` lane and absolute slot bounds | — | W6-Objects | packed-project/update USize cases |
-| 20 | packed scalar field mutation | `.scalarField` | `.scalarField`; cost `0`; exact successful `ScalarFieldEffectSupported` | `ConcreteStructuredAlignedValidationState.admit_sset_of_step` | precise scalar kind, slot/byte offset, and layout safety | — | W6-Objects | multi-scalar and packed-preserve cases |
+| 1 | return | `.ret` | `.ret`; cost `0`; exact `SemanticValueAtAbi functionResult` | Existing: `ConcreteStructuredAlignedValidationState.admit_return`, `ConcreteStructuredReturnValueSafeAt.of_semanticBinding`. Missing: `CompilerProvenanceAt.returnBinding`. | Validation proves only carrier compatibility; the active result ABI needs use-site semantic typing. | C | W6-Results | `sumTo`; precise `.object`/`.tagged` negative fixture |
+| 2 | direct let | `.directLet` | `.directLet`; cost `directLetAllocationCost decl`; `ReuseBudgetedDirectSupported` | Existing: `ConcreteStructuredValidationFocus.let_eq`, `supportedLetDeclKind?_effectiveLetValueKind`. Missing: `ReuseBudgetedDirectSupported.of_validated_step` from producer typing, reuse evidence, and the source step. | The reverse implication is absent; projection/unbox alignment and reuse provenance are semantic, not Boolean-validator facts. Allocation consumes address-space safety when cost is nonzero. | C + D(address) | W6-Results/Objects | complete direct-operation corpus |
+| 3 | pure external | `.pureExternal` | `.pureExternal`; exact `stepCost`; `PureExternalSupported` | Existing: `PureExternalSupported.resultSemanticValueAtAbi`, `PureExternalSupported.bindResult_preservesSemanticEnvAtLocalKinds`. Missing: `PureExternalSupported.of_validated_step` under the named external contract. | Validation and a generic successful external step cannot prove that the response is the canonical Int/Nat/scalar response. Keep a named external semantic contract; derive exact cost/result from it. | C + D(address) | W6-Results | `sumTo`; pure Int/Nat/scalar corpus |
+| 4 | direct call | `.directCall` | `.directCall`; cost `0`; `DirectInternalCallSite` | Existing: `supportedLetDeclKind?_effectiveLetValueKind`, `ConcreteStructuredValidatedCodeOutcome.advance_directCall_stage_of_step`. Missing export: `DirectInternalCallSite.of_validated_step`. | All site fields come from residual validation/program lookup plus the successful source step; no new invariant is needed for current admission. Result typing after return is the shared cross-branch PA1 obligation below. | B | W6-Results | `sumTo`; `direct-call` |
+| 5 | saturated closure call | `.saturatedCall` | `.saturatedCall`; cost `0`; site, resolution, capture capacity | Existing: `ConcreteStructuredValidatedCodeOutcome.advance_saturatedCall_stage_of_step`, `ConcreteStructuredFiniteRuntimeSafeAt`. Missing: `SaturatedClosureCallSite.of_validated_step` and compiler-derived closed-ingress provenance for `SaturatedClosureCallResolution.closedIngressTarget`. | Static/site and dynamic heap fields are reconstructible, but candidate-table membership of a semantic closure requires closure-origin provenance. Capture retention remains a resource premise. | C + D(capture) | W6-Results | `captured-partial`; mixed closure captures |
+| 6 | lazy-cache hit | `.lazyHit` | `.lazyHit`; cost `0`; call/generated environment/current global lookup | Existing: `ConcreteStructuredValidatedCodeOutcome.advance_lazy_stage_of_step`, `ConcreteStructuredLazyReadyAdmission.hit`. Missing export: `ConcreteStructuredLazyReadyAdmission.hit_of_validated_step`. | Compiler/cache identity and hit lookup are already present; factor them. Typing the cached value at `call.resultKind` belongs to the shared result-publication theorem below. | B | W6-Results | cached Nat/String/Array hit cases |
+| 7 | lazy-cache miss | `.lazyMiss` | `.lazyMiss`; cost `0`; internal body, exact result class, exclusions, empty lookup | Existing: `LazyCacheInternalMissSupported`, `ConcreteStructuredLazyReadyAdmission.miss`, `ConcreteStructuredValidatedCodeOutcome.advance_lazy_stage_of_step`. Missing export: `ConcreteStructuredLazyReadyAdmission.miss_of_validated_step`. | Context cache generation, internal body, non-object result restriction, and empty lookup are reconstructible. Miss publication shares the result theorem below. | B | W6-Results | miss and first-publication cases |
+| 8 | default-only case | `.defaultOnlyCase` | `.defaultOnlyCase`; cost `0`; selected default | Existing: `ConcreteStructuredCodeFocus.caseResult_of_step`, `ConcreteStructuredValidatedCodeCoreRel.productionCasesSupported_of_caseSafe`. Missing: final-phase `ConcreteStructuredCaseAltsNormalized`. | The step supplies selection; validation does not enforce the source selector-order invariant. | C | W6-Cases | default-only corpus |
+| 9 | object constructor cases | `.objectCases` | `.objectCases`; cost `0`; `ObjectConstructorCasesSupported` | Existing: `ConcreteStructuredCaseAltsNormalized.objectSupported_of_validation`, `productionCasesSupported_of_caseSafe`. Missing: normalized alternatives, semantic discriminator typing, and reachable-constructor `objectTagsFit`. | Compiler mode/tag bounds are derived; source constructor/tag provenance is not. | C | W6-Cases/Objects | `branch-nat`; constructor cases |
+| 10 | scalar UInt8 cases | `.scalarUInt8Cases` | `.scalarUInt8Cases`; cost `0`; `ScalarUInt8CasesSupported` | Existing: `ConcreteStructuredCaseAltsNormalized.scalarSupported_of_validation`, `productionCasesSupported_of_caseSafe`. Missing: normalized alternatives and `SemanticBindingAtAbi sourceEnv cases.discr .uint8`. | A physical `i32`/compatible local does not imply semantic `UInt8`. | C | W6-Cases/Results | `sumTo`; scalar enum cases |
+| 11 | persistent increment | `.incPersistent` | `.incPersistent`; cost `0` | `ConcreteStructuredSourceAdmissionSafeAt.inc_of_any_persistence` → `ConcreteStructuredAlignedValidationState.admit_incPersistent` via `admit_of_source_safe_step`. | Closed now; syntax and residual validation suffice. | A | W6-Owner | persistent increment corpus |
+| 12 | persistent decrement | `.decPersistent` | `.decPersistent`; cost `0` | `ConcreteStructuredSourceAdmissionSafeAt.dec_of_any_persistence` → `ConcreteStructuredAlignedValidationState.admit_decPersistent`. | Closed now; erased field count needs no additional semantic fact. | A | W6-Owner | persistent decrement/reset corpus |
+| 13 | ordinary increment | `.ordinaryIncrement`; source `.incOrdinary` | `.ordinaryIncrement`; cost `0`; exact semantic update | `ConcreteStructuredAlignedValidationState.admit_incOrdinary_of_step`; resource overlay `ConcreteStructuredIncrementHeadroomAt`. | Validation plus source-step inversion closes admission; UInt32 header headroom stays explicit. | A + D(header) | W6-Owner | increment boundary cases |
+| 14 | ordinary decrement | `.ordinaryDecrement`; source `.decOrdinary` | `.ordinaryDecrement`; cost `0`; exact release update | `ConcreteStructuredAlignedValidationState.admit_decOrdinary_of_step`. | Closed now; source-step inversion supplies lookup and recursive-release shape. | A | W6-Owner | decrement/recursive-release corpus |
+| 15 | explicit delete | `.ordinaryDelete`; source `.del` | `.ordinaryDelete`; cost `0`; delete or erased-zero no-op | `ConcreteStructuredSourceAdmissionSafeAt.del_unconditional` → `ConcreteStructuredAlignedValidationState.admit_del_of_step`. | Closed now; ordinary decoding remains strict and physical zero is only the erased no-op. | A | W6-Owner | delete-erased and ordinary delete |
+| 16 | constructor tag mutation | `.constructorTag`; source `.setTag` | `.constructorTag`; cost `0`; exact tag update | `ConcreteStructuredSourceAdmissionSafeAt.setTag_unconditional` → `ConcreteStructuredAlignedValidationState.admit_setTag_of_step`. | Closed now; successful semantic mutation supplies live constructor and tag bound. Schema transition is handled by the existing schema dispatcher. | A | W6-Owner | tag-bound and reuse-tag cases |
+| 17 | object-field FVar mutation | schema `.objectFieldFVar` | schema FVar branch; cost `0`; `schema.ObjectFieldFVarTyped` | Existing: `ConcreteObjectFieldKindAlignedAt.of_schema`, schema dispatcher, `admitSchema_of_source_safe_step`. Missing: producer-preserved `schema.ObjectFieldFVarTyped`. | Witness agreement converts schema slot typing to descriptor alignment, but cannot invent the source constructor slot kind. | C | W6-Objects | multi-object and closure-field writes |
+| 18 | object-field erased mutation | schema `.objectFieldErased` | schema erased branch; cost `0`; `schema.ObjectFieldKindAt ... .erased` | Existing: `ConcreteObjectFieldKindAlignedAt.of_schema`, schema dispatcher. Missing: producer-preserved erased-slot schema fact. | Active witness agreement is sufficient only after source slot provenance is known. | C | W6-Objects | erased-field reset/delete fixtures |
+| 19 | `USize` field mutation | `.usizeField` | `.usizeField`; cost `0`; successful `USizeFieldEffectSupported` | `ConcreteStructuredSourceAdmissionSafeAt.usizeField_unconditional` → `ConcreteStructuredAlignedValidationState.admit_uset_of_step`. | Closed now; validation fixes both lanes and the successful step supplies absolute slot bounds. | A | W6-Owner | packed USize project/update |
+| 20 | packed scalar field mutation | `.scalarField` | `.scalarField`; cost `0`; successful `ScalarFieldEffectSupported` | Existing: `ConcreteStructuredAlignedValidationState.admit_sset_of_step`. Missing: producer/schema theorem yielding `ConcreteScalarFieldMutationTyped`. | Validation fixes scalar kind but deliberately provides no packed coordinate/extent/non-overlap fact. | C | W6-Objects | multi-scalar and packed-preserve cases |
 
-## Cross-branch questions for the review
+## Cross-branch conclusions
 
-1. Should PA2 derive `ConcreteStructuredSchemaCodeStepAdmission` directly, or
-   first derive `ConcreteStructuredSchemaSourceAdmissionSafeAt` and retain the
-   current bridge as the sole assembly theorem?
-2. Which result fact is genuinely common to return, direct call, closure call,
-   external result, and lazy hit/miss without becoming a pervasive descriptor
-   redesign?
-3. Can direct-let result typing be factored once at the successful producer to
-   environment-binding boundary, with operation families supplying only the
-   producer lemma?
-4. Does the existing schema/witness relation already close both object-field
-   branches, leaving only exported interface lemmas, or is source producer
-   provenance missing?
-5. Which existing regressions assert semantic shape, and which rows need a
-   negative compiler-acceptance fixture to prevent carrier-only reasoning?
+1. PA2 derives `ConcreteStructuredSchemaSourceAdmissionSafeAt` first. The
+   existing `admitSchema_of_source_safe_step` remains the sole assembly bridge.
+2. The reusable result boundary is
+   `SemanticBindingAtAbi env fvarId effectiveResultKind`, plus a use-site
+   refinement theorem when a return expects `.object` or `.tagged` through a
+   coarser public `.tobject` declaration. It is not a new descriptor record.
+3. Direct producers each prove one exact `SemanticValueAtAbi` result theorem;
+   `SemanticEnvAtLocalKinds.bind_insertLocal` is the single bind-preservation
+   theorem. Calls, closure calls, externals, and lazy hit/miss reuse the same
+   destination-binding boundary after their common return/publication step.
+4. `ConstructorSchema.WitnessAgrees` closes only schema-to-descriptor
+   alignment. Rows 17 and 18 still need source producer provenance for the
+   schema slot. `concreteObjectFieldKindAligned_not_of_sourceLocation_alone`
+   proves that the stronger fact cannot be manufactured from heap location.
+5. PA1 needs three negative regressions: precise object/tagged return through
+   a coarse carrier, scalar case discrimination through an arbitrary `i32`,
+   and object-field mutation with a mismatched schema slot. Existing dynamic
+   operation and artifact corpora remain the positive regressions.
+
+Although rows 4, 6, and 7 are class B for current admission, PA1 must also
+prove the shared result-publication preservation theorem for direct calls,
+saturated calls, pure externals, and lazy hit/miss. This theorem is what makes
+compiler provenance inductive; it is not an extra premise of their admission
+constructors.
 
 ## PA0 completion record
 
-This section stays empty until the review above is resolved. The completed
-record will include:
-
-- the exact theorem dependency for all 20 rows;
-- one A–E class plus any separate D premise for every row;
-- the minimal PA1 helper-module split, if class-C rows exist;
-- bug-card references for every class-E row;
-- exact focused build cones and full gates; and
-- the agreed target theorem name/signature for PA2.
+- Inventory: 17 source-safety constructors, 20 target admission branches.
+- Primary classes: 7 A, 3 B, 10 C, 0 E.
+- Resource overlays: direct-let/external address headroom, saturated-capture
+  retention, and ordinary-increment header headroom.
+- PA1 result module: return use-site precision, direct producer results,
+  external contracts, and call/cache result publication.
+- PA1 object module: constructor-schema slot preservation, closure ingress,
+  and packed-scalar layout.
+- PA1 case module: final-phase alternative normalization plus semantic
+  discriminator/tag provenance.
+- No class-E bug card was opened. The existing
+  `FIR-BUG-impure-case-table-selector-determinism` records the missing phase
+  interface behind case normalization; it is not a discovered W6 semantic
+  mismatch.
+- PA2 constructs schema source safety first and composes the existing schema
+  admission bridge, as specified above.
+- First PA1 slice: `SemanticValueAtAbi.ofRefines`,
+  `SemanticBindingAtAbi.ofRefines`, and
+  `SemanticEnvAtLocalKinds.returnValueSafe_ofRefines` close every directional
+  return edge. `semanticTObject_not_subtype_object` and
+  `semanticTObject_not_subtype_tagged` formally isolate the remaining reverse
+  object-family provenance obligation.
+- Focused proof cones for PA1/PA2:
+  `FirTalos.ConcreteFinalLcnfTyping`,
+  `FirTalos.ConcreteStructuredValidation`, and
+  `FirTalos.ConcreteResumableWasm`; full exit gates remain `make check`,
+  `make talos-check`, `git diff --check`, trust/source-hash gates, and
+  `#print axioms` for the public PA3 endpoint.
