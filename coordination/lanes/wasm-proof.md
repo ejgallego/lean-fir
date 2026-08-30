@@ -6,16 +6,16 @@ owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
 state: ready
-base: 0b942424
-functional-head: 355a31da
-contract-base: 0b942424
+base: c26ff528
+functional-head: 5be90cf1
+contract-base: c26ff528
 clean-at-update: true
-slice: Lifted exact effective named-call kinds through the real declaration-local layout. Production parameter lowering now exposes both exact source-order bindings when all runtime kinds are known and the weaker name-origin fact needed for declarations containing erased/type-level parameters. Declaration hygiene proves parameter/body disjointness; reversal and prefix lookup then yield the exact destination kind in the full compiler context. A supported function exports the resulting getLocal equation directly, without a caller layout certificate or runtime-parameter-totality assumption.
-files: Fir/Wasm/Lower.lean; integration/talos/FirTalos/ConcreteReuseCapacityCacheCorrectness.lean; integration/talos/FirTalos/ConcreteFinalLcnfTyping.lean; coordination/lanes/wasm-proof.md
-contracts: proof-facing compiler-local provenance only; production lowering behavior, source semantics, validator acceptance, runtime ABI/layout, symbolic instructions, emitted helpers, ownership, and resident-helper signatures are unchanged
-checks: Lean Beam ConcreteReuseCapacityCacheCorrectness update/sync/save (pass, zero errors, source hash a774cfdfce41c8cb); Lean Beam ConcreteFinalLcnfTyping update/sync/save (pass, zero diagnostics, source hash 06aa3e02d8361d6a); lake build Fir.Wasm.Lower (pass: 5 jobs); lake build FirTalos.ConcreteFinalLcnfTyping (pass: 3128 jobs); git diff --check (pass); make talos-setup (pass: Talos 0e05edbcfbb105b33e90c60b4f50e2cf193d9254); make talos-check (pass: 3189 jobs, receipt 7fdead14d647060f7924cae9d8c538bc910950fea515c288c3511bcba9d4542d); make check rerun sequentially after a discarded parallel mutable-build race (pass: scalar artifact 5706 bytes/163 exports, 730 unique validation cases, 2172/2172 comparisons equal, coverage/trusted-assumption/mailbox gates green, exactly one trusted axiom)
-bug-cards: FIR-BUG-wasm-none-object-case-actual-tag-truncation remains confirmed; no new card in this slice
-blockers: W6-W7-20260830-003 owns the exact object-case ABI repair; W6-W7-20260830-004 audits real named-call argument/result edges before selecting a directional validator or minimal-provenance policy
-handoff: clean W6 functional head `355a31da`, based exactly on accepted main `0b942424`; ready for fast-forward integration
-next: Package the exact-local theorem as an internally constructed and source-step-preserved current-code invariant, then discharge DirectInternalCallCompilerAdmission.resultCompiled. The two directional named-call edges remain with W6-W7-20260830-004.
+slice: Closed the complete case-family PA2 boundary after exact i64 object tags landed. Residual validation plus the successful source selection now derives default-only, scalar UInt8, and object-constructor support and constructs exact zero-allocation current-step admission. Deleted the obsolete semantic case classifier and removed its field from source readiness; no caller case invariant or schema premise remains.
+files: integration/talos/FirTalos/ConcreteStructuredValidation.lean; docs/w6-source-admission-audit.md; docs/pass-correctness-plan.md; integration/talos/PLAN.md; coordination/lanes/wasm-proof.md
+contracts: proof-facing source-admission API simplified by deleting the obsolete case-safety classifier and renaming case advancement to the validated theorem; source semantics, production validator acceptance, runtime ABI/layout, symbolic instructions, generated code, ownership, and resident-helper signatures are unchanged
+checks: Lean Beam ConcreteStructuredValidation update/sync (pass, zero errors) and dependency refresh of ConcreteResumableWasm (pass, zero diagnostics); lake build FirTalos.ConcreteResumableWasm (pass: 3128 jobs); git diff --check (pass); make check (pass: 730 unique cases, 2172/2172 comparisons equal, exactly one trusted axiom, mailbox gates green); make talos-setup (pass: Talos 0e05edbcfbb105b33e90c60b4f50e2cf193d9254); make talos-check (pass: 3189 jobs, receipt edd3671d324cd4cf48ddc926c66e16b6ee13a0ec2f18eb58972998cf3a8b84cf)
+bug-cards: FIR-BUG-wasm-none-object-case-actual-tag-truncation fixed by the accepted exact-tag stack; no new card
+blockers: PA3 still requires compiler-owned producer provenance for non-directional object-family return/call arguments, closure ingress, and schema/layout-sensitive field operations; W7 census W7-W6-20260830-005 confirms real tobject-to-object named-call arguments, so blanket directional validation is not sound for accepted products
+handoff: clean W6 functional head `5be90cf1`, based exactly on accepted main `c26ff528`; ready for fast-forward integration
+next: Factor the next compiler-derived admission family without redesigning the validated relation; prioritize a hidden-interface lazy-cache admission theorem, then the minimal tobject-to-object producer-origin carrier shared by return and named-call arguments.
 ```
