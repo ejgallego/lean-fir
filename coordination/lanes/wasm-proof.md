@@ -6,16 +6,16 @@ owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
 state: ready
-base: 370e7e9f
-functional-head: f9b0fa46
-contract-base: 370e7e9f
+base: 0b942424
+functional-head: 355a31da
+contract-base: 0b942424
 clean-at-update: true
-slice: Replaced raw declaration-local collection with an equivalent total ordered insertion traversal, alongside the already-transparent effective named-call refinement. Proved exact insertion lookup, hygiene-sublist, effective-to-raw coverage, name-unique update, and final exact-kind theorems over the production computations. Every effective compiler rewrite is now statically connected to a genuine hygienic source binder and its exact final local row, without a caller certificate.
-files: Fir/Wasm/Lower.lean; coordination/lanes/wasm-proof.md
-contracts: production raw local collection is now proof-transparent and list-based with the same left-to-right traversal, replacement order, error behavior, and emitted row order; no source semantics, runtime ABI, layout, instruction, validator acceptance, emitted helper, ownership, or resident-helper signature changed
-checks: Lean Beam Lower update/sync/save (pass, zero diagnostics, source hash 6e1df317624eb63c); lake build Fir.Wasm.Lower (pass: 5 jobs); focused Talos proof cone FirTalos.ConcreteStructuredValidation/FirTalos.ConcreteFinalLcnfTyping (pass: 3128 jobs); git diff --check (pass); make check (pass: scalar artifact 5706 bytes/163 exports, 730 unique validation cases, 2172/2172 comparisons equal, coverage/trusted-assumption/mailbox gates green, exactly one trusted axiom); make talos-setup (pass: Talos 0e05edbcfbb105b33e90c60b4f50e2cf193d9254); make talos-check (pass: full compiler-dependent rebuild, 3189 jobs, receipt 2406503674978fceccb684e387ea46845adb3cb4bf8a354d7f368d25f1d7f471)
+slice: Lifted exact effective named-call kinds through the real declaration-local layout. Production parameter lowering now exposes both exact source-order bindings when all runtime kinds are known and the weaker name-origin fact needed for declarations containing erased/type-level parameters. Declaration hygiene proves parameter/body disjointness; reversal and prefix lookup then yield the exact destination kind in the full compiler context. A supported function exports the resulting getLocal equation directly, without a caller layout certificate or runtime-parameter-totality assumption.
+files: Fir/Wasm/Lower.lean; integration/talos/FirTalos/ConcreteReuseCapacityCacheCorrectness.lean; integration/talos/FirTalos/ConcreteFinalLcnfTyping.lean; coordination/lanes/wasm-proof.md
+contracts: proof-facing compiler-local provenance only; production lowering behavior, source semantics, validator acceptance, runtime ABI/layout, symbolic instructions, emitted helpers, ownership, and resident-helper signatures are unchanged
+checks: Lean Beam ConcreteReuseCapacityCacheCorrectness update/sync/save (pass, zero errors, source hash a774cfdfce41c8cb); Lean Beam ConcreteFinalLcnfTyping update/sync/save (pass, zero diagnostics, source hash 06aa3e02d8361d6a); lake build Fir.Wasm.Lower (pass: 5 jobs); lake build FirTalos.ConcreteFinalLcnfTyping (pass: 3128 jobs); git diff --check (pass); make talos-setup (pass: Talos 0e05edbcfbb105b33e90c60b4f50e2cf193d9254); make talos-check (pass: 3189 jobs, receipt 7fdead14d647060f7924cae9d8c538bc910950fea515c288c3511bcba9d4542d); make check rerun sequentially after a discarded parallel mutable-build race (pass: scalar artifact 5706 bytes/163 exports, 730 unique validation cases, 2172/2172 comparisons equal, coverage/trusted-assumption/mailbox gates green, exactly one trusted axiom)
 bug-cards: FIR-BUG-wasm-none-object-case-actual-tag-truncation remains confirmed; no new card in this slice
 blockers: W6-W7-20260830-003 owns the exact object-case ABI repair; W6-W7-20260830-004 audits real named-call argument/result edges before selecting a directional validator or minimal-provenance policy
-handoff: clean W6 functional head `f9b0fa46`, based exactly on accepted main `370e7e9f`; ready for fast-forward integration
-next: Land this compiler-local provenance foundation, then package its root/residual current-code invariant and discharge DirectInternalCallCompilerAdmission.resultCompiled internally.
+handoff: clean W6 functional head `355a31da`, based exactly on accepted main `0b942424`; ready for fast-forward integration
+next: Package the exact-local theorem as an internally constructed and source-step-preserved current-code invariant, then discharge DirectInternalCallCompilerAdmission.resultCompiled. The two directional named-call edges remain with W6-W7-20260830-004.
 ```
