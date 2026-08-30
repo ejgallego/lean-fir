@@ -116,6 +116,27 @@ order.
 def Module.globalKinds (module : Module) : Array AbiKind :=
   module.cacheGlobalKinds ++ module.globals.map (·.kind)
 
+/-- Proof-facing summary of the lazy-cache initializer checks performed by
+symbolic module validation.
+
+The Boolean deliberately uses the public `Module.callSignature?` lookup.  It
+therefore gives downstream correctness proofs an accessor that is independent
+of the validator's private hash-table index while checking the same unique,
+nullary, singleton-result initializer surface. -/
+def Module.lazyCacheInitializersValid (module : Module) : Bool :=
+  listAllUnique module.initializers.toList &&
+    module.initializers.all fun declaration =>
+      match module.callSignature? (.declaration declaration) with
+      | some signature =>
+          signature.params.isEmpty && signature.results.size == 1
+      | none => false
+
+/-- Fail-closed executable form of `Module.lazyCacheInitializersValid`. -/
+private def validateLazyCacheInitializers
+    (module : Module) : Except SymbolicError Unit := do
+  unless module.lazyCacheInitializersValid do
+    throw (.invalidInitializer module.initializers[0]!)
+
 /--
 Module-wide lookups shared by every symbolic function check. The arrays in a
 `Module` remain authoritative and retain their stable order; this index only
@@ -763,6 +784,63 @@ def validateFunction (module : Module) (function : Function) : Except SymbolicEr
 def validateModule (module : Module) : Except SymbolicError Unit := do
   let index := module.checkIndex
   validateModuleShapeWithIndex index module
+  validateLazyCacheInitializers module
   module.functions.forM (validateFunctionWithIndex index module)
+
+/-- Successful symbolic validation exposes the complete public lazy-cache
+initializer summary.  Consumers need not unfold the validator's private
+indexed module-shape loop. -/
+theorem lazyCacheInitializersValid_of_validateModule
+    {module : Module}
+    (validated : validateModule module = .ok ()) :
+    module.lazyCacheInitializersValid = true := by
+  unfold validateModule at validated
+  simp only [Bind.bind, Except.bind] at validated
+  cases shape : validateModuleShapeWithIndex module.checkIndex module with
+  | error error => simp [shape] at validated
+  | ok value =>
+      simp only [shape] at validated
+      cases initializers : validateLazyCacheInitializers module with
+      | error error => simp [initializers] at validated
+      | ok value =>
+          unfold validateLazyCacheInitializers at initializers
+          split at initializers <;> simp_all
+
+/-- Validated initializer names are unique in their authoritative source
+order. -/
+theorem initializerNamesUnique_of_validateModule
+    {module : Module}
+    (validated : validateModule module = .ok ()) :
+    listAllUnique module.initializers.toList = true := by
+  have valid := lazyCacheInitializersValid_of_validateModule validated
+  simp only [Module.lazyCacheInitializersValid, Bool.and_eq_true] at valid
+  exact valid.1
+
+/-- Every validated initializer has a public declaration signature with one
+result.  This is the proof-facing accessor used by lazy-cache layout
+refinement; callers never inspect the validator's private `CheckIndex`. -/
+theorem initializerResultKind_of_validateModule
+    {module : Module}
+    (validated : validateModule module = .ok ())
+    {declaration : Name}
+    (member : declaration ∈ module.initializers.toList) :
+    ∃ kind,
+      (module.callSignature? (.declaration declaration)).bind
+          (·.results[0]?) = some kind := by
+  have valid := lazyCacheInitializersValid_of_validateModule validated
+  simp only [Module.lazyCacheInitializersValid, Bool.and_eq_true] at valid
+  have allValid := valid.2
+  have declarationValid :=
+    (Array.all_eq_true'.mp allValid) declaration (by simpa using member)
+  cases signatureEq : module.callSignature? (.declaration declaration) with
+  | none => simp [signatureEq] at declarationValid
+  | some signature =>
+      have signatureValid :
+          signature.params = #[] ∧ signature.results.size = 1 := by
+        simpa [signatureEq] using declarationValid
+      have resultSize : signature.results.size = 1 := by
+        exact signatureValid.2
+      have resultPresent : 0 < signature.results.size := by omega
+      exact ⟨signature.results[0], by simp [resultPresent]⟩
 
 end Fir.Wasm
