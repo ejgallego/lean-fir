@@ -132,9 +132,9 @@ are independent finite-resource overlays.
 | 5 | saturated closure call | `.saturatedCall` | `.saturatedCall`; cost `0`; site, resolution, capture capacity | Existing: `ConcreteStructuredValidatedCodeOutcome.advance_saturatedCall_stage_of_step`, `ConcreteStructuredFiniteRuntimeSafeAt`. Missing: `SaturatedClosureCallSite.of_validated_step` and compiler-derived closed-ingress provenance for `SaturatedClosureCallResolution.closedIngressTarget`. | Static/site and dynamic heap fields are reconstructible, but candidate-table membership of a semantic closure requires closure-origin provenance. Capture retention remains a resource premise. | C + D(capture) | W6-Results | `captured-partial`; mixed closure captures |
 | 6 | lazy-cache hit | `.lazyHit` | `.lazyHit`; cost `0`; call/generated environment/current global lookup | Existing: `ConcreteStructuredValidatedCodeOutcome.advance_lazy_stage_of_step`, `ConcreteStructuredLazyReadyAdmission.hit`. Missing export: `ConcreteStructuredLazyReadyAdmission.hit_of_validated_step`. | Compiler/cache identity and hit lookup are already present; factor them. Typing the cached value at `call.resultKind` belongs to the shared result-publication theorem below. | B | W6-Results | cached Nat/String/Array hit cases |
 | 7 | lazy-cache miss | `.lazyMiss` | `.lazyMiss`; cost `0`; internal body, exact result class, exclusions, empty lookup | Existing: `LazyCacheInternalMissSupported`, `ConcreteStructuredLazyReadyAdmission.miss`, `ConcreteStructuredValidatedCodeOutcome.advance_lazy_stage_of_step`. Missing export: `ConcreteStructuredLazyReadyAdmission.miss_of_validated_step`. | Context cache generation, internal body, non-object result restriction, and empty lookup are reconstructible. Miss publication shares the result theorem below. | B | W6-Results | miss and first-publication cases |
-| 8 | default-only case | `.defaultOnlyCase` | `.defaultOnlyCase`; cost `0`; selected default | Existing: `ConcreteStructuredCodeFocus.caseResult_of_step`, `ConcreteStructuredValidatedCodeCoreRel.productionCasesSupported_of_caseSafe`. Missing: final-phase `ConcreteStructuredCaseAltsNormalized`. | The step supplies selection; validation does not enforce the source selector-order invariant. | C | W6-Cases | default-only corpus |
-| 9 | object constructor cases | `.objectCases` | `.objectCases`; cost `0`; `ObjectConstructorCasesSupported` | Existing: `ConcreteStructuredCaseAltsNormalized.objectSupported_of_validation`, `productionCasesSupported_of_caseSafe`. Missing: normalized alternatives, semantic discriminator typing, and reachable-constructor `objectTagsFit`. | Compiler mode/tag bounds are derived; source constructor/tag provenance is not. | C | W6-Cases/Objects | `branch-nat`; constructor cases |
-| 10 | scalar UInt8 cases | `.scalarUInt8Cases` | `.scalarUInt8Cases`; cost `0`; `ScalarUInt8CasesSupported` | Existing: `ConcreteStructuredCaseAltsNormalized.scalarSupported_of_validation`, `productionCasesSupported_of_caseSafe`. Missing: normalized alternatives and `SemanticBindingAtAbi sourceEnv cases.discr .uint8`. | A physical `i32`/compatible local does not imply semantic `UInt8`. | C | W6-Cases/Results | `sumTo`; scalar enum cases |
+| 8 | default-only case | `.defaultOnlyCase` | `.defaultOnlyCase`; cost `0`; selected default | Existing: `ConcreteStructuredCodeFocus.caseResult_of_step`, `ConcreteStructuredCaseAltsNormalized.of_caseAltsNormalized`, and `ConcreteStructuredValidatedCodeCoreRel.productionCasesSupported_of_caseSafe`. Missing export: a default-only admission lemma that bypasses discriminator-specific source safety. | The source step supplies selection and production validation now supplies normalized order. No semantic provenance is needed for a default-only table. | B | W6-Cases | default-only corpus; default-before-constructor rejection |
+| 9 | object constructor cases | `.objectCases` | `.objectCases`; cost `0`; `ObjectConstructorCasesSupported` | Existing: `ConcreteStructuredCaseAltsNormalized.of_caseAltsNormalized`, `.objectSupported_of_validation`, and `productionCasesSupported_of_caseSafe`. Missing: exact object-family discriminator origin and reachable-constructor `objectTagsFit`. | Production validation derives normalized order, compiler mode, and compared-tag bounds; source constructor/tag provenance is not derivable from a generic object-family carrier. | C | W6-Cases/Objects | `branch-nat`; constructor cases |
+| 10 | scalar UInt8 cases | `.scalarUInt8Cases` | `.scalarUInt8Cases`; cost `0`; `ScalarUInt8CasesSupported` | Existing: `ConcreteStructuredCaseAltsNormalized.of_caseAltsNormalized`, `.scalarSupported_of_validation`, `SemanticEnvAtLocalKinds.ofStateRelated`, and `productionCasesSupported_of_caseSafe`. Missing export: branch-specific case safety that does not demand the unused object-tag law on the scalar branch. | Production validation derives normalized order and exact `.uint8` mode; the established physical relation derives semantic `UInt8`. The remaining obstacle is the current conjunctive source-safety interface, not missing provenance. | B | W6-Cases/Results | `sumTo`; scalar enum cases |
 | 11 | persistent increment | `.incPersistent` | `.incPersistent`; cost `0` | `ConcreteStructuredSourceAdmissionSafeAt.inc_of_any_persistence` → `ConcreteStructuredAlignedValidationState.admit_incPersistent` via `admit_of_source_safe_step`. | Closed now; syntax and residual validation suffice. | A | W6-Owner | persistent increment corpus |
 | 12 | persistent decrement | `.decPersistent` | `.decPersistent`; cost `0` | `ConcreteStructuredSourceAdmissionSafeAt.dec_of_any_persistence` → `ConcreteStructuredAlignedValidationState.admit_decPersistent`. | Closed now; erased field count needs no additional semantic fact. | A | W6-Owner | persistent decrement/reset corpus |
 | 13 | ordinary increment | `.ordinaryIncrement`; source `.incOrdinary` | `.ordinaryIncrement`; cost `0`; exact semantic update | `ConcreteStructuredAlignedValidationState.admit_incOrdinary_of_step`; resource overlay `ConcreteStructuredIncrementHeadroomAt`. | Validation plus source-step inversion closes admission; UInt32 header headroom stays explicit. | A + D(header) | W6-Owner | increment boundary cases |
@@ -168,8 +168,10 @@ are independent finite-resource overlays.
    proves that the stronger fact cannot be manufactured from heap location.
 5. PA1 needs three negative regressions: precise object/tagged return through
    a coarse carrier, scalar case discrimination through an arbitrary `i32`,
-   and object-field mutation with a mismatched schema slot. Existing dynamic
-   operation and artifact corpora remain the positive regressions.
+   and object-field mutation with a mismatched schema slot. The case-order
+   boundary additionally retains a whole-program default-before-constructor
+   rejection. Existing dynamic operation and artifact corpora remain the
+   positive regressions.
 
 Rows 4, 6, and 7 remain class B for current admission. Their shared semantic
 publication obligation is now factored by
@@ -181,15 +183,16 @@ admission constructors.
 ## PA0 completion record
 
 - Inventory: 17 source-safety constructors, 20 target admission branches.
-- Primary classes: 7 A, 3 B, 10 C, 0 E.
+- Primary classes: 7 A, 5 B, 8 C, 0 E.
 - Resource overlays: direct-let/external address headroom, saturated-capture
   retention, and ordinary-increment header headroom.
 - PA1 result module: return use-site precision, direct producer results,
   external contracts, and call/cache result publication.
 - PA1 object module: constructor-schema slot preservation, closure ingress,
   and packed-scalar layout.
-- PA1 case module: final-phase alternative normalization plus semantic
-  discriminator/tag provenance.
+- PA1 case module: semantic discriminator/tag provenance. Final-phase
+  constructor-prefix/optional-final-default normalization is now enforced by
+  `WasmSupported` and derived from residual validation.
 - No class-E bug card was opened. The existing
   `FIR-BUG-impure-case-table-selector-determinism` records the missing phase
   interface behind case normalization; it is not a discovered W6 semantic
@@ -211,6 +214,12 @@ admission constructors.
   directly to the existing return simulator. The common
   `publishPhysicalResult_ofRefines` theorem closes direct-call,
   saturated-closure, and lazy hit/miss publication at one boundary.
+- First PA1 case slice: `WASM-NORMALIZED-CASE-TABLE-ADMISSION` makes normalized
+  alternative order a production validator fact;
+  `ConcreteStructuredCaseAltsNormalized.of_caseAltsNormalized` projects the
+  proof fact and removes it from `ConcreteStructuredCaseSafeAt`. The remaining
+  case work is branch-specific: scalar mode reuses `StateRelated`, while object
+  mode still needs exact constructor/tag provenance.
 - Focused proof cones for PA1/PA2:
   `FirTalos.ConcreteFinalLcnfTyping`,
   `FirTalos.ConcreteStructuredValidation`, and

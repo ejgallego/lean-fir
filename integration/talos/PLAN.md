@@ -103,10 +103,13 @@ source/compiler admission for the current code node
 ```
 
 PA0 is complete. The exact 20-branch audit found 7 already-derived branches,
-3 hidden-interface branches, 10 semantic-provenance branches, and no semantic
+5 hidden-interface branches, 8 semantic-provenance branches, and no semantic
 discrepancy. PA1 is active with three focused boundaries: semantic
-result/publication typing, constructor/schema/layout provenance, and case
-normalization/discriminator provenance. The audit also settled that PA2 first
+result/publication typing, constructor/schema/layout provenance, and remaining
+case discriminator/tag provenance. Production `WasmSupported` now enforces
+constructor-prefix/optional-final-default case order, and residual validation
+projects that fact into the existing structured case simulation rather than
+asking theorem clients for it. The audit also settled that PA2 first
 constructs `ConcreteStructuredSchemaSourceAdmissionSafeAt`, then reuses
 `ConcreteStructuredValidatedCodeCoreRel.admitSchema_of_source_safe_step` as
 the sole admission assembly theorem.

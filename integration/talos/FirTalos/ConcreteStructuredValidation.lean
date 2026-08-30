@@ -10050,6 +10050,7 @@ theorem ConcreteStructuredValidationFocus.cases_eq
         Fir.Wasm.abiTypeKnown cases.resultType = true ∧
         Fir.Wasm.resultKindCompatible
             (Fir.Wasm.abiValueKind? cases.resultType) expectedResult = true ∧
+        Fir.Wasm.caseAltsNormalized cases.alts.toList = true ∧
         Fir.Wasm.supportedAltsWithJoins program joins locals expectedResult
           facts sharing mode cases.discr cases.alts.toList = true := by
   have supported := validated.supported
@@ -10067,7 +10068,7 @@ theorem ConcreteStructuredValidationFocus.cases_eq
           simp [discrFound, modeFound] at impossible
       | some mode =>
           refine ⟨discrKind, mode, rfl, modeFound,
-            supported.1.1, supported.1.2, ?_⟩
+            supported.1.1.1, supported.1.1.2, supported.1.2, ?_⟩
           simpa [discrFound, modeFound] using supported.2
 
 /-- A validated constructor alternative selected from a validated case chain
@@ -10091,7 +10092,7 @@ theorem ConcreteStructuredValidationFocus.constructorAlt
           (Fir.Wasm.insertSupportedCaseFact facts cases.discr info.cidx) sharing
           selected := by
   obtain ⟨discrKind, mode, _discrFound, _modeFound, _resultKnown,
-      _resultCompatible, alternatives⟩ := validated.cases_eq
+      _resultCompatible, _normalized, alternatives⟩ := validated.cases_eq
   have selectedSupported := Fir.Wasm.supportedAltWithJoins_of_mem alternatives
     (by simpa using member)
   simp only [Fir.Wasm.supportedAltWithJoins] at selectedSupported
@@ -10114,7 +10115,7 @@ theorem ConcreteStructuredValidationFocus.defaultAlt
     ConcreteStructuredValidationFocus program joins locals expectedResult
       (Fir.Wasm.eraseSupportedCaseFact facts cases.discr) sharing selected := by
   obtain ⟨_discrKind, mode, _discrFound, _modeFound, _resultKnown,
-      _resultCompatible, alternatives⟩ := validated.cases_eq
+      _resultCompatible, _normalized, alternatives⟩ := validated.cases_eq
   have selectedSupported := Fir.Wasm.supportedAltWithJoins_of_mem alternatives
     (by simpa using member)
   simp only [Fir.Wasm.supportedAltWithJoins] at selectedSupported
@@ -10519,6 +10520,27 @@ inductive ConcreteStructuredCaseAltsNormalized :
       ConcreteStructuredCaseAltsNormalized
         (.ctorAlt info code :: alternatives)
 
+/-- The production Boolean case-order gate is proof-equivalent to the
+normalized constructor-prefix/optional-final-default shape consumed by the
+case simulation. -/
+theorem ConcreteStructuredCaseAltsNormalized.of_caseAltsNormalized
+    {alternatives : List (Lean.Compiler.LCNF.Alt .impure)}
+    (checked : Fir.Wasm.caseAltsNormalized alternatives = true) :
+    ConcreteStructuredCaseAltsNormalized alternatives := by
+  induction alternatives with
+  | nil => exact .nil
+  | cons alternative rest ih =>
+      cases alternative with
+      | alt ctorName params code impossible => nomatch impossible
+      | ctorAlt info code purity =>
+          exact ConcreteStructuredCaseAltsNormalized.ctor
+            (ih (by simpa [Fir.Wasm.caseAltsNormalized] using checked))
+      | default code =>
+          cases rest with
+          | nil => exact .default code
+          | cons head tail =>
+              simp [Fir.Wasm.caseAltsNormalized] at checked
+
 /-- Executable object-mode validation supplies every constructor-tag bound
 needed by the existing normalized object-chain theorem. -/
 theorem ConcreteStructuredCaseAltsNormalized.objectSupported_of_validation
@@ -10583,19 +10605,15 @@ private theorem findLocalKind?_of_getLocal
 This is an invariant on final-LCNF syntax, the source runtime, and the compiler
 context, not a translation certificate: it contains no target module,
 instruction path, numeric local, refinement witness, or future execution.
-Executable residual validation supplies result compatibility and every static
-constructor-tag bound.  The phase bridge supplies only normalized alternative
-order, the two currently proved discriminator representations, and the
-semantic range law for object tags.
-
-The normalization field remains explicit until the final-LCNF phase interface
-exports the missing theorem recorded by
-`FIR-BUG-impure-case-table-selector-determinism`. -/
+Executable residual validation supplies result compatibility, normalized
+alternative order, and every static constructor-tag bound.  The source-side
+boundary retains only the two currently proved discriminator representations
+and the semantic range law for object tags.  Consequently callers no longer
+need a separate final-LCNF phase bridge merely to justify W6's case order. -/
 structure ConcreteStructuredCaseSafeAt
     (context : Fir.Wasm.Context)
     (sourceRuntime : RuntimeState) (sourceEnv : Env)
     (cases : Lean.Compiler.LCNF.Cases .impure) : Prop where
-  normalized : ConcreteStructuredCaseAltsNormalized cases.alts.toList
   discriminator :
     Fir.Wasm.getLocal context cases.discr =
         .ok (.localGet cases.discr, .tobject) ∨
@@ -10644,7 +10662,10 @@ theorem ConcreteStructuredValidatedCodeCoreRel.productionCasesSupported_of_caseS
   obtain ⟨joins, locals, validatorFacts, sharing, validated, agrees⟩ :=
     related.validation
   obtain ⟨discrKind, mode, discrFound, modeFound, _resultKnown,
-      _resultCompatible, alternatives⟩ := validated.cases_eq
+      _resultCompatible, normalizedCheck, alternatives⟩ := validated.cases_eq
+  have normalized :
+      ConcreteStructuredCaseAltsNormalized cases.alts.toList :=
+    .of_caseAltsNormalized normalizedCheck
   have discrCompiled := agrees discrFound
   unfold ProductionCasesSupported
   rcases sourceSafe.discriminator with objectCompiled | scalarCompiled
@@ -10660,7 +10681,7 @@ theorem ConcreteStructuredValidatedCodeCoreRel.productionCasesSupported_of_caseS
         Fir.Wasm.caseDiscriminatorMode context cases.discr = .objectTag := by
       simp [Fir.Wasm.caseDiscriminatorMode, contextFound]
     exact Or.inr (Or.inl ⟨
-      sourceSafe.normalized.objectSupported_of_validation alternatives,
+      normalized.objectSupported_of_validation alternatives,
       contextMode, objectCompiled, sourceSafe.objectTagsFit⟩)
   · have discrKindEq : discrKind = .uint8 := by
       have pairEq := Except.ok.inj (discrCompiled.symm.trans scalarCompiled)
@@ -10674,7 +10695,7 @@ theorem ConcreteStructuredValidatedCodeCoreRel.productionCasesSupported_of_caseS
         Fir.Wasm.caseDiscriminatorMode context cases.discr = .scalarUInt8 := by
       simp [Fir.Wasm.caseDiscriminatorMode, contextFound]
     exact Or.inr (Or.inr ⟨
-      sourceSafe.normalized.scalarSupported_of_validation alternatives,
+      normalized.scalarSupported_of_validation alternatives,
       contextMode, scalarCompiled⟩)
 
 /-- Outcome-level spelling of the case admission bridge.  Suspended-frame

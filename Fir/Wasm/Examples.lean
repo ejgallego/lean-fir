@@ -835,6 +835,18 @@ def abiDefaultCaseProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `main #[] tobjectType (.code <|
       .let (letDecl c taggedType (.ctor trueInfo #[])) <|
       .cases (.mk ``Bool tobjectType c #[
+        .ctorAlt falseInfo
+          (.let (letDecl u tobjectType (.lit (.nat 0))) (.return u)),
+        .default
+          (.let (letDecl r tobjectType (.lit (.nat 5))) (.return r))]))] }
+
+/-- Production case tables keep their optional default alternative last.  A
+default followed by a constructor alternative would be unreachable under the
+source interpreter's first-match semantics, and is rejected before lowering. -/
+def nonNormalizedDefaultCaseProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] tobjectType (.code <|
+      .let (letDecl c taggedType (.ctor trueInfo #[])) <|
+      .cases (.mk ``Bool tobjectType c #[
         .default
           (.let (letDecl r tobjectType (.lit (.nat 5))) (.return r)),
         .ctorAlt falseInfo
@@ -966,6 +978,10 @@ def oversizedSetTagProgram : Fir.LeanIR.ImpureProgram :=
 #guard !supportedProgram unguardedErasedJoinProgram
 #guard !supportedProgram unprovenGuardedJoinProgram
 #guard supportedProgram abiDefaultCaseProgram
+#guard !supportedProgram nonNormalizedDefaultCaseProgram
+#guard match lowerSupported nonNormalizedDefaultCaseProgram with
+  | .error (.validation (.unsupportedCode `main)) => true
+  | _ => false
 #guard !supportedProgram oversizedTagCaseProgram
 #guard !supportedProgram oversizedScalarTagCaseProgram
 #guard !supportedProgram oversizedAllocatedTagProgram
