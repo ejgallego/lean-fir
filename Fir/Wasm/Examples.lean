@@ -267,6 +267,30 @@ def voidParameterCallProgram : Fir.LeanIR.ImpureProgram :=
         function.params.map (·.snd) == #[.tobject, .erased]
   | .error _ => false
 
+def voidParameterExternalTarget : LCNF.Decl .impure :=
+  decl `voidParameterExternalTarget #[
+    param x LCNF.ImpureType.tobject,
+    param y LCNF.ImpureType.void]
+    LCNF.ImpureType.tobject (.extern { entries := [] })
+
+def voidParameterExternalCallProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[voidParameterExternalTarget,
+      decl `main #[] LCNF.ImpureType.tobject (.code <|
+        .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 11))) <|
+        .let (letDecl r LCNF.ImpureType.tobject
+          (.fap voidParameterExternalTarget.name #[.fvar x, .erased])) <|
+        .return r)] }
+
+#guard match lowerSupported voidParameterExternalCallProgram with
+  | .ok module =>
+      module.imports.find? (·.declaration? == some voidParameterExternalTarget.name)
+        |>.any fun import_ =>
+          import_.signature.params == #[.tobject, .erased] &&
+            (match validateModule module with
+             | .ok () => true
+             | .error _ => false)
+  | .error _ => false
+
 def abiDirectIdDecl : LCNF.Decl .impure :=
   decl `abiDirectId #[param x LCNF.ImpureType.tobject]
     LCNF.ImpureType.tobject (.code (.return x))

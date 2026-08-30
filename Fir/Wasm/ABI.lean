@@ -89,8 +89,10 @@ inductive AbiError where
   deriving Inhabited, BEq, Repr
 
 /--
-Classify an impure LCNF type. `none` is the ABI representation of `void`: it
-contributes no parameter, local, or result. Unknown types are rejected.
+Classify an impure LCNF value type. `none` is the semantic representation of
+`void`: it contributes no result or ordinary local value. Declaration
+parameters retain Lean's physical erased argument lane separately. Unknown
+types are rejected.
 -/
 def abiKind? (type : Expr) : Except AbiError (Option AbiKind) :=
   if type == LCNF.ImpureType.object then
@@ -394,7 +396,7 @@ def ExternalTypes.signature (types : ExternalTypes) : Except AbiError Signature 
   let params ← types.params.foldlM (init := #[]) fun params type => do
     match ← abiKind? type with
     | some kind => return params.push kind
-    | none => return params
+    | none => return params.push .erased
   return { params, results := ← resultKinds types.result }
 
 def externalImport (decl : LCNF.Decl .impure) : Except AbiError Import := do
