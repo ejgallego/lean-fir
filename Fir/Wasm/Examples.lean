@@ -238,10 +238,34 @@ def voidProgram : Fir.LeanIR.ImpureProgram :=
 
 #guard match lower voidProgram with
   | .ok module => module.functions[0]?.any fun function =>
-      function.params.isEmpty && function.results.isEmpty && function.locals.isEmpty
+      function.params.map (·.snd) == #[.erased] &&
+        function.results.isEmpty && function.locals.isEmpty
   | .error _ => false
 
 #guard supportedProgram voidProgram
+
+def voidParameterTarget : LCNF.Decl .impure :=
+  decl `voidParameterTarget #[
+    param x LCNF.ImpureType.tobject,
+    param y LCNF.ImpureType.void]
+    LCNF.ImpureType.tobject (.code (.return x))
+
+def voidParameterCallProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[voidParameterTarget,
+      decl `main #[] LCNF.ImpureType.tobject (.code <|
+        .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 11))) <|
+        .let (letDecl r LCNF.ImpureType.tobject
+          (.fap voidParameterTarget.name #[.fvar x, .erased])) <|
+        .return r)] }
+
+#guard declarationParameterKinds? voidParameterCallProgram voidParameterTarget ==
+  some #[.tobject, .erased]
+
+#guard match lowerSupported voidParameterCallProgram with
+  | .ok module =>
+      module.functions.find? (·.name == voidParameterTarget.name) |>.any fun function =>
+        function.params.map (·.snd) == #[.tobject, .erased]
+  | .error _ => false
 
 def abiDirectIdDecl : LCNF.Decl .impure :=
   decl `abiDirectId #[param x LCNF.ImpureType.tobject]

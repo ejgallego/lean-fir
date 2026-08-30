@@ -932,12 +932,15 @@ def effectiveLetValueKind (program : Fir.LeanIR.ImpureProgram)
     throw (.malformed s!"named call {name} result is incompatible with its let ABI")
   return actual
 
-/-- Proof-relevant parameter kind selected for one complete declaration.
-Compiler-declared `tobject` parameters whose uses are structurally erased are
-tracked as `.erased`; every other parameter retains its declared ABI kind. -/
+/-- Proof-relevant physical parameter kind selected for one complete declaration.
+Source `void` parameters retain Lean's physical erased argument lane, while
+compiler-declared `tobject` parameters whose uses are structurally erased are
+refined to that same `.erased` lane. Every other parameter retains its declared
+ABI kind. -/
 def declarationParamKind? (program : Fir.LeanIR.ImpureProgram)
     (decl : LCNF.Decl .impure) (param : LCNF.Param .impure) : Option AbiKind :=
   match abiKind? param.type with
+  | .ok none => some .erased
   | .ok (some kind) =>
       if kind == .tobject && erasedOnlyParameter program decl param then
         some .erased
@@ -948,11 +951,13 @@ def declarationParamKind? (program : Fir.LeanIR.ImpureProgram)
 def checkedDeclarationParamKind (program : Fir.LeanIR.ImpureProgram)
     (decl : LCNF.Decl .impure) (param : LCNF.Param .impure) :
     Except CompileError AbiKind := do
-  let kind ← checkedAbiKind param.type
-  return if kind == .tobject && erasedOnlyParameter program decl param then
-    .erased
-  else
-    kind
+  match ← checkedAbiKind? param.type with
+  | none => return .erased
+  | some kind =>
+      return if kind == .tobject && erasedOnlyParameter program decl param then
+        .erased
+      else
+        kind
 
 def declarationParameterKinds? (program : Fir.LeanIR.ImpureProgram)
     (decl : LCNF.Decl .impure) : Option (Array AbiKind) :=
@@ -990,21 +995,15 @@ def addParams (locals : LocalKinds) (params : Array (LCNF.Param .impure)) :
     | some kind => return insertLocal locals param.fvarId kind
     | none => return locals
 
-/-- Add declaration parameters using the same erased-only refinement consumed
-by partial-application descriptors and closure dispatch. -/
+/-- Add every physical declaration parameter using the same source-void and
+erased-only classification consumed by named calls, partial-application
+descriptors, and closure dispatch. -/
 def addDeclarationParams (program : Fir.LeanIR.ImpureProgram)
     (decl : LCNF.Decl .impure) (locals : LocalKinds := []) :
     Except CompileError LocalKinds := do
   decl.params.foldlM (init := locals) fun locals param => do
-    match ← checkedAbiKind? param.type with
-    | none => return locals
-    | some kind =>
-        let kind :=
-          if kind == .tobject && erasedOnlyParameter program decl param then
-            .erased
-          else
-            kind
-        return insertLocal locals param.fvarId kind
+    let kind ← checkedDeclarationParamKind program decl param
+    return insertLocal locals param.fvarId kind
 
 def addJoinParams (locals : LocalKinds) (decl : LCNF.FunDecl .impure) :
     Except CompileError LocalKinds := do
