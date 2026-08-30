@@ -131,6 +131,12 @@ theorem encodeResults_singleton_of_encodeValue
   simp [encodeResults, encodeValueList, encodeValue]
   rfl
 
+@[simp] theorem encodeResults_uint64_singleton (table : HandleTable) (value : UInt64) :
+    encodeResults table #[.uint64] #[.scalar (.uint64 value)] =
+      .ok (table, [.i64 value]) := by
+  simp [encodeResults, encodeValueList, encodeValue]
+  rfl
+
 /-- Proof-side relation for a successful single-value decode. -/
 def DecodesValue (table : HandleTable) (kind : AbiKind) (physical : Wasm.Value)
     (semantic : Value) : Prop :=

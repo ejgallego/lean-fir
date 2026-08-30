@@ -991,7 +991,7 @@ theorem caseChainAdapted_constructor
     {thenTarget elseTarget : Wasm.Program}
     {discrIndex getTagIndex : Nat}
     (modeEq : Fir.Wasm.caseDiscriminatorMode context discr = .objectTag)
-    (fits : Fir.Wasm.constructorTagFitsI32 info = true)
+    (fits : Fir.Wasm.constructorTagFitsUInt64 info = true)
     (thenAdapted :
       CodeAdapted context sourceModule sourceFunction (none :: labels) code thenTarget)
     (elseAdapted :
@@ -1006,12 +1006,12 @@ theorem caseChainAdapted_constructor
     CaseChainAdapted context sourceModule sourceFunction labels discr
       (.ctorAlt info code :: alts) fallback
       [.localGet discrIndex, .call getTagIndex,
-        .const (UInt32.ofNat info.cidx), .eq,
+        .constI64 (UInt64.ofNat info.cidx), .eqI64,
         .iff 0 0 thenTarget elseTarget] := by
   rcases thenAdapted with ⟨thenBody, thenCompiled, thenTargetCompiled⟩
   rcases elseAdapted with ⟨elseBody, elseCompiled, elseTargetCompiled⟩
   refine ⟨[.localGet discr, .call (.runtime .getTag),
-    .i32Const .uint32 (UInt32.ofNat info.cidx), .i32Eq,
+    .i64Const .uint64 (UInt64.ofNat info.cidx), .i64Eq,
     .ifElse thenBody elseBody], ?_, ?_⟩
   · exact compileCaseChain_constructor modeEq fits thenCompiled elseCompiled
   · simp [instructions, instruction, discrFound, getTagFound,

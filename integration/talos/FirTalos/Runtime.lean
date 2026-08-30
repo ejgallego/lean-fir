@@ -321,7 +321,7 @@ private def evaluate (operation : HostOperation) (runtime : RuntimeState)
       match args[0]? with
       | some object =>
           match getTag runtime object with
-          | .ok tag => .ok (runtime, #[.scalar (.uint32 (UInt32.ofNat tag))])
+          | .ok tag => .ok (runtime, #[.scalar (.uint64 (UInt64.ofNat tag))])
           | .error fault => .error (.source fault)
       | none => .error (.target (.arityMismatch 1 args.size))
   | .external operation =>
@@ -873,14 +873,14 @@ theorem hostStep_getTag_of_decode
       .ok #[sourceObject])
     (tagged : getTag initial.host.runtime sourceObject = .ok tag) :
     hostStep .getTag initial physicalArgs =
-      .Return [.i32 (UInt32.ofNat tag)] {
+      .Return [.i64 (UInt64.ofNat tag)] {
         initial with host := {
           initial.host with
           fault? := none
           targetFailure? := none } } := by
   simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
     HostOperation.runtimeOp, RuntimeOp.signature, decoded, tagged,
-    encodeResults_uint32_singleton]
+    encodeResults_uint64_singleton]
 
 /-- Concrete Talos resolver for one supported semantic FIR runtime operation. -/
 def hostFn (operation : HostOperation) : Wasm.HostFn RuntimeHost :=

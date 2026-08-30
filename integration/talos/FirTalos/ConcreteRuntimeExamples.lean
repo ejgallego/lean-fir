@@ -590,7 +590,7 @@ private def emptyHostStore : Wasm.Store Host :=
 -- The executable concrete host decodes immediate object words without any
 -- semantic handle table.
 #guard match getTagStep emptyHostStore [.i32 15] with
-  | .Return [.i32 tag] store =>
+  | .Return [.i64 tag] store =>
       tag == 7 && store.host.failure?.isNone
   | _ => false
 

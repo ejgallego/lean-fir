@@ -550,7 +550,9 @@ theorem compileCaseChain_eq_ok_of_core
                                         (Fir.Wasm.caseDiscriminatorMode context
                                           discr)
                                         discr info ++
-                                      [.i32Eq,
+                                      [Fir.Wasm.caseTagEq
+                                          (Fir.Wasm.caseDiscriminatorMode
+                                            context discr),
                                         .ifElse thenBody elseBody])
                               rw [Fir.Wasm.compileCaseChainWithM.eq_def]
                               simp only [fitsEq, ↓reduceIte]
@@ -673,7 +675,7 @@ theorem CaseChainAdapted.objectConstructor_eq
     {target : Wasm.Program}
     (modeEq :
       Fir.Wasm.caseDiscriminatorMode context discr = .objectTag)
-    (fits : Fir.Wasm.constructorTagFitsI32 info = true)
+    (fits : Fir.Wasm.constructorTagFitsUInt64 info = true)
     (adapted :
       CaseChainAdapted context sourceModule sourceFunction labels discr
         (.ctorAlt info code :: alts) fallback target) :
@@ -686,7 +688,7 @@ theorem CaseChainAdapted.objectConstructor_eq
       callIndex? sourceModule (.runtime .getTag) = some getTagIndex ∧
       target =
         [.localGet discrIndex, .call getTagIndex,
-          .const (UInt32.ofNat info.cidx), .eq,
+          .constI64 (UInt64.ofNat info.cidx), .eqI64,
           .iff 0 0 thenTarget elseTarget] := by
   rcases adapted with ⟨symbolic, compiled, targetCompiled⟩
   change
@@ -739,7 +741,7 @@ theorem CaseChainAdapted.objectConstructor_eq
               change findFVar?
                 (sourceFunction.params.toList ++ sourceFunction.locals.toList)
                 discr = none at discrFound
-              simp [Fir.Wasm.caseTagTest, instructions, instruction, discrFound,
+              simp [Fir.Wasm.caseTagTest, Fir.Wasm.caseTagEq, instructions, instruction, discrFound,
                 Bind.bind, Except.bind, Pure.pure, Except.pure]
                 at targetCompiled
           | some discrIndex =>
@@ -749,7 +751,7 @@ theorem CaseChainAdapted.objectConstructor_eq
               cases getTagFound :
                   callIndex? sourceModule (.runtime .getTag) with
               | none =>
-                  simp [Fir.Wasm.caseTagTest, instructions, instruction,
+                  simp [Fir.Wasm.caseTagTest, Fir.Wasm.caseTagEq, instructions, instruction,
                     discrFound, getTagFound, Bind.bind, Except.bind,
                     Pure.pure, Except.pure] at targetCompiled
               | some getTagIndex =>
@@ -757,7 +759,7 @@ theorem CaseChainAdapted.objectConstructor_eq
                       instructions sourceModule sourceFunction (none :: labels)
                         thenBody with
                   | error error =>
-                      simp [Fir.Wasm.caseTagTest, instructions, instruction,
+                      simp [Fir.Wasm.caseTagTest, Fir.Wasm.caseTagEq, instructions, instruction,
                         discrFound, getTagFound, thenAdapted, Bind.bind,
                         Except.bind, Pure.pure, Except.pure] at targetCompiled
                   | ok thenTarget =>
@@ -765,12 +767,12 @@ theorem CaseChainAdapted.objectConstructor_eq
                           instructions sourceModule sourceFunction (none :: labels)
                             elseBody with
                       | error error =>
-                          simp [Fir.Wasm.caseTagTest, instructions, instruction,
+                          simp [Fir.Wasm.caseTagTest, Fir.Wasm.caseTagEq, instructions, instruction,
                             discrFound, getTagFound, thenAdapted, elseAdapted,
                             Bind.bind, Except.bind, Pure.pure, Except.pure]
                             at targetCompiled
                       | ok elseTarget =>
-                          simp [Fir.Wasm.caseTagTest, instructions, instruction,
+                          simp [Fir.Wasm.caseTagTest, Fir.Wasm.caseTagEq, instructions, instruction,
                             discrFound, getTagFound, thenAdapted, elseAdapted,
                             Bind.bind, Except.bind, Pure.pure, Except.pure]
                             at targetCompiled
@@ -864,7 +866,7 @@ theorem CaseChainAdapted.scalarUInt8Constructor_eq
               change findFVar?
                 (sourceFunction.params.toList ++ sourceFunction.locals.toList)
                 discr = none at discrFound
-              simp [Fir.Wasm.caseTagTest, instructions, instruction, discrFound,
+              simp [Fir.Wasm.caseTagTest, Fir.Wasm.caseTagEq, instructions, instruction, discrFound,
                 Bind.bind, Except.bind, Pure.pure, Except.pure]
                 at targetCompiled
           | some discrIndex =>
@@ -875,7 +877,7 @@ theorem CaseChainAdapted.scalarUInt8Constructor_eq
                   instructions sourceModule sourceFunction (none :: labels)
                     thenBody with
               | error error =>
-                  simp [Fir.Wasm.caseTagTest, instructions, instruction,
+                  simp [Fir.Wasm.caseTagTest, Fir.Wasm.caseTagEq, instructions, instruction,
                     discrFound, thenAdapted, Bind.bind, Except.bind,
                     Pure.pure, Except.pure] at targetCompiled
               | ok thenTarget =>
@@ -883,11 +885,11 @@ theorem CaseChainAdapted.scalarUInt8Constructor_eq
                       instructions sourceModule sourceFunction (none :: labels)
                         elseBody with
                   | error error =>
-                      simp [Fir.Wasm.caseTagTest, instructions, instruction,
+                      simp [Fir.Wasm.caseTagTest, Fir.Wasm.caseTagEq, instructions, instruction,
                         discrFound, thenAdapted, elseAdapted, Bind.bind,
                         Except.bind, Pure.pure, Except.pure] at targetCompiled
                   | ok elseTarget =>
-                      simp [Fir.Wasm.caseTagTest, instructions, instruction,
+                      simp [Fir.Wasm.caseTagTest, Fir.Wasm.caseTagEq, instructions, instruction,
                         discrFound, thenAdapted, elseAdapted, Bind.bind,
                         Except.bind, Pure.pure, Except.pure] at targetCompiled
                       exact
@@ -909,7 +911,7 @@ theorem CodeAdapted.singleObjectConstructorCases_eq
     {selected : LCNF.Code .impure} {target : Wasm.Program}
     (altsEq : cases.alts.toList = [.ctorAlt info selected])
     (modeEq : Fir.Wasm.caseDiscriminatorMode context cases.discr = .objectTag)
-    (fits : Fir.Wasm.constructorTagFitsI32 info = true)
+    (fits : Fir.Wasm.constructorTagFitsUInt64 info = true)
     (adapted : CodeAdapted context sourceModule sourceFunction labels
       (.cases cases) target) :
     ∃ selectedTarget discrIndex getTagIndex,
@@ -919,7 +921,7 @@ theorem CodeAdapted.singleObjectConstructorCases_eq
         some discrIndex ∧
       callIndex? sourceModule (.runtime .getTag) = some getTagIndex ∧
       target = [.localGet discrIndex, .call getTagIndex,
-        .const (UInt32.ofNat info.cidx), .eq,
+        .constI64 (UInt64.ofNat info.cidx), .eqI64,
         .iff 0 0 selectedTarget [.unreachable]] := by
   rcases adapted with ⟨symbolic, compiled, targetCompiled⟩
   have core := Fir.Wasm.finishCompileResult_eq_ok_iff.mp compiled
@@ -954,7 +956,7 @@ theorem CodeAdapted.singleObjectConstructorCases_eq
               change findFVar?
                 (sourceFunction.params.toList ++ sourceFunction.locals.toList)
                 cases.discr = none at discrFound
-              simp [Fir.Wasm.caseTagTest, instructions, instruction, discrFound,
+              simp [Fir.Wasm.caseTagTest, Fir.Wasm.caseTagEq, instructions, instruction, discrFound,
                 Bind.bind, Except.bind, Pure.pure, Except.pure]
                 at targetCompiled
           | some discrIndex =>
@@ -964,7 +966,7 @@ theorem CodeAdapted.singleObjectConstructorCases_eq
               cases getTagFound :
                   callIndex? sourceModule (.runtime .getTag) with
               | none =>
-                  simp [Fir.Wasm.caseTagTest, instructions, instruction,
+                  simp [Fir.Wasm.caseTagTest, Fir.Wasm.caseTagEq, instructions, instruction,
                     discrFound, getTagFound, Bind.bind, Except.bind,
                     Pure.pure, Except.pure] at targetCompiled
               | some getTagIndex =>
@@ -972,12 +974,12 @@ theorem CodeAdapted.singleObjectConstructorCases_eq
                       instructions sourceModule sourceFunction (none :: labels)
                         selectedCode with
                   | error error =>
-                      simp [Fir.Wasm.caseTagTest, instructions, instruction,
+                      simp [Fir.Wasm.caseTagTest, Fir.Wasm.caseTagEq, instructions, instruction,
                         discrFound, getTagFound, selectedAdapted,
                         Bind.bind, Except.bind, Pure.pure, Except.pure]
                         at targetCompiled
                   | ok selectedTarget =>
-                      simp [Fir.Wasm.caseTagTest, instructions, instruction,
+                      simp [Fir.Wasm.caseTagTest, Fir.Wasm.caseTagEq, instructions, instruction,
                         discrFound, getTagFound, selectedAdapted,
                         Bind.bind, Except.bind, Pure.pure, Except.pure]
                         at targetCompiled
@@ -1001,8 +1003,8 @@ theorem CodeAdapted.twoObjectConstructorDefaultCases_eq
       [.ctorAlt firstInfo firstBranch, .ctorAlt secondInfo secondBranch,
         .default defaultBranch])
     (modeEq : Fir.Wasm.caseDiscriminatorMode context cases.discr = .objectTag)
-    (firstFits : Fir.Wasm.constructorTagFitsI32 firstInfo = true)
-    (secondFits : Fir.Wasm.constructorTagFitsI32 secondInfo = true)
+    (firstFits : Fir.Wasm.constructorTagFitsUInt64 firstInfo = true)
+    (secondFits : Fir.Wasm.constructorTagFitsUInt64 secondInfo = true)
     (adapted : CodeAdapted context sourceModule sourceFunction labels
       (.cases cases) target) :
     ∃ firstTarget secondTarget defaultTarget discrIndex getTagIndex,
@@ -1019,10 +1021,10 @@ theorem CodeAdapted.twoObjectConstructorDefaultCases_eq
       callIndex? sourceModule (.runtime .getTag) = some getTagIndex ∧
       target =
         [.localGet discrIndex, .call getTagIndex,
-          .const (UInt32.ofNat firstInfo.cidx), .eq,
+          .constI64 (UInt64.ofNat firstInfo.cidx), .eqI64,
           .iff 0 0 firstTarget
             [.localGet discrIndex, .call getTagIndex,
-              .const (UInt32.ofNat secondInfo.cidx), .eq,
+              .constI64 (UInt64.ofNat secondInfo.cidx), .eqI64,
               .iff 0 0 secondTarget defaultTarget]] := by
   rcases adapted with ⟨symbolic, compiled, targetCompiled⟩
   have core := Fir.Wasm.finishCompileResult_eq_ok_iff.mp compiled
@@ -1092,7 +1094,7 @@ theorem CodeAdapted.twoObjectConstructorDefaultCases_eq
                                 (sourceFunction.params.toList ++
                                   sourceFunction.locals.toList)
                                 cases.discr = none at discrFound
-                              simp [Fir.Wasm.caseTagTest, instructions,
+                              simp [Fir.Wasm.caseTagTest, Fir.Wasm.caseTagEq, instructions,
                                 instruction, discrFound, Bind.bind,
                                 Except.bind, Pure.pure, Except.pure]
                                 at targetCompiled
@@ -1105,7 +1107,7 @@ theorem CodeAdapted.twoObjectConstructorDefaultCases_eq
                                   callIndex? sourceModule
                                     (.runtime .getTag) with
                               | none =>
-                                  simp [Fir.Wasm.caseTagTest, instructions,
+                                  simp [Fir.Wasm.caseTagTest, Fir.Wasm.caseTagEq, instructions,
                                     instruction, discrFound, getTagFound,
                                     Bind.bind, Except.bind, Pure.pure,
                                     Except.pure] at targetCompiled
@@ -1114,7 +1116,7 @@ theorem CodeAdapted.twoObjectConstructorDefaultCases_eq
                                       instructions sourceModule sourceFunction
                                         (none :: labels) firstCode with
                                   | error error =>
-                                      simp [Fir.Wasm.caseTagTest,
+                                      simp [Fir.Wasm.caseTagTest, Fir.Wasm.caseTagEq,
                                         instructions, instruction, discrFound,
                                         getTagFound, firstAdapted, Bind.bind,
                                         Except.bind, Pure.pure, Except.pure]
@@ -1126,7 +1128,7 @@ theorem CodeAdapted.twoObjectConstructorDefaultCases_eq
                                               (none :: none :: labels)
                                               secondCode with
                                       | error error =>
-                                          simp [Fir.Wasm.caseTagTest,
+                                          simp [Fir.Wasm.caseTagTest, Fir.Wasm.caseTagEq,
                                             instructions, instruction,
                                             discrFound, getTagFound,
                                             firstAdapted, secondAdapted,
@@ -1139,7 +1141,7 @@ theorem CodeAdapted.twoObjectConstructorDefaultCases_eq
                                                 (none :: none :: labels)
                                                 defaultCode with
                                           | error error =>
-                                              simp [Fir.Wasm.caseTagTest,
+                                              simp [Fir.Wasm.caseTagTest, Fir.Wasm.caseTagEq,
                                                 instructions, instruction,
                                                 discrFound, getTagFound,
                                                 firstAdapted, secondAdapted,
@@ -1147,7 +1149,7 @@ theorem CodeAdapted.twoObjectConstructorDefaultCases_eq
                                                 Except.bind, Pure.pure,
                                                 Except.pure] at targetCompiled
                                           | ok defaultTarget =>
-                                              simp [Fir.Wasm.caseTagTest,
+                                              simp [Fir.Wasm.caseTagTest, Fir.Wasm.caseTagEq,
                                                 instructions, instruction,
                                                 discrFound, getTagFound,
                                                 firstAdapted, secondAdapted,
@@ -5908,9 +5910,8 @@ def DefaultOnlyCaseSupported
 Source-facing admission for the first real generated case family.
 
 The case has one object-constructor arm and no default. Static fields record
-only compiler facts. The dynamic range law is stated over source lookup and
-`getTag`; it ensures that the concrete i32 comparison does not wrap, without
-mentioning a target local, import index, physical word, or Wasm instruction.
+only compiler facts. The concrete heap relation derives the dynamic source-tag
+bound, so admission carries no caller-supplied execution invariant.
 -/
 def SingleObjectConstructorCaseSupported
     (context : Fir.Wasm.Context)
@@ -5919,20 +5920,16 @@ def SingleObjectConstructorCaseSupported
   ∃ info : LCNF.CtorInfo,
     cases.alts.toList = [.ctorAlt info selected] ∧
     Fir.Wasm.caseDiscriminatorMode context cases.discr = .objectTag ∧
-    Fir.Wasm.constructorTagFitsI32 info = true ∧
+    Fir.Wasm.constructorTagFitsUInt64 info = true ∧
     Fir.Wasm.getLocal context cases.discr =
-      .ok (.localGet cases.discr, .tobject) ∧
-    ∀ {sourceObject : Value} {actualTag : Nat},
-      lookupValue sourceEnv cases.discr = .ok sourceObject →
-      getTag sourceRuntime sourceObject = .ok actualTag →
-      actualTag < UInt32.size
+      .ok (.localGet cases.discr, .tobject)
 
 /--
 Source-facing admission for the first ordered multi-arm object case.
 
 Two constructor tests precede one default. The source interpreter still
-chooses the branch; the admission records only source/compiler shape and the
-semantic tag-range law needed by both generated i32 comparisons.
+chooses the branch; admission records only source/compiler shape. Dynamic
+tag representability follows from the concrete heap relation.
 -/
 def TwoObjectConstructorDefaultCasesSupported
     (context : Fir.Wasm.Context)
@@ -5945,21 +5942,17 @@ def TwoObjectConstructorDefaultCasesSupported
             .ctorAlt secondInfo secondBranch,
             .default defaultBranch] ∧
         Fir.Wasm.caseDiscriminatorMode context cases.discr = .objectTag ∧
-        Fir.Wasm.constructorTagFitsI32 firstInfo = true ∧
-        Fir.Wasm.constructorTagFitsI32 secondInfo = true ∧
+        Fir.Wasm.constructorTagFitsUInt64 firstInfo = true ∧
+        Fir.Wasm.constructorTagFitsUInt64 secondInfo = true ∧
         Fir.Wasm.getLocal context cases.discr =
-          .ok (.localGet cases.discr, .tobject) ∧
-        ∀ {sourceObject : Value} {actualTag : Nat},
-          lookupValue sourceEnv cases.discr = .ok sourceObject →
-          getTag sourceRuntime sourceObject = .ok actualTag →
-          actualTag < UInt32.size
+          .ok (.localGet cases.discr, .tobject)
 
 /--
 Compiler-facing shape for an arbitrary ordered object-constructor chain.
 
 The chain is either constructor-only or ends in exactly one default. This is
 the normalized order shared by `chooseAlt` and the executable case compiler;
-every constructor tag is statically representable in the generated i32 test.
+every constructor tag is statically representable in the generated i64 test.
 -/
 inductive ObjectConstructorCaseAltsSupported :
     List (LCNF.Alt .impure) → Prop where
@@ -5968,7 +5961,7 @@ inductive ObjectConstructorCaseAltsSupported :
   | default (code : LCNF.Code .impure) :
       ObjectConstructorCaseAltsSupported [.default code]
   | ctor
-      (fits : Fir.Wasm.constructorTagFitsI32 info = true)
+      (fits : Fir.Wasm.constructorTagFitsUInt64 info = true)
       (rest : ObjectConstructorCaseAltsSupported alts) :
       ObjectConstructorCaseAltsSupported (.ctorAlt info code :: alts)
 
@@ -5994,8 +5987,8 @@ theorem ObjectCaseDiscriminatorSupported.tagged
 Source/runtime admission for arbitrary normalized object-constructor cases.
 
 The selected branch remains determined by `SourceCaseResult`. Admission
-contains only the normalized source table, compiler discriminator facts, and
-the semantic tag bound needed by every concrete i32 comparison.
+contains only the normalized source table and compiler discriminator facts.
+The concrete heap relation proves the actual tag bound at execution time.
 -/
 def ObjectConstructorCasesSupported
     (context : Fir.Wasm.Context)
@@ -6003,11 +5996,7 @@ def ObjectConstructorCasesSupported
     (cases : LCNF.Cases .impure) (_selected : LCNF.Code .impure) : Prop :=
   ObjectConstructorCaseAltsSupported cases.alts.toList ∧
     Fir.Wasm.caseDiscriminatorMode context cases.discr = .objectTag ∧
-    ObjectCaseDiscriminatorSupported context cases.discr ∧
-    ∀ {sourceObject : Value} {actualTag : Nat},
-      lookupValue sourceEnv cases.discr = .ok sourceObject →
-      getTag sourceRuntime sourceObject = .ok actualTag →
-      actualTag < UInt32.size
+    ObjectCaseDiscriminatorSupported context cases.discr
 
 /--
 Compiler-facing shape for an arbitrary ordered scalar `UInt8` case chain.
@@ -10346,7 +10335,6 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainRefines
     (selection : chooseAlt actualTag alts = some selected)
     (sourceLookup : lookup sourceEnv discr = some sourceObject)
     (tagged : getTag sourceRuntime sourceObject = .ok actualTag)
-    (actualFits : actualTag < UInt32.size)
     (stateRelated :
       StateRelated sourceFunction sourceRuntime sourceEnv targetStore
         targetLocals witness)
@@ -10415,8 +10403,8 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainRefines
       have resultCount : imp.results.length = 1 := by
         change imp.results.length = 1 at results
         exact results
-      have expectedFits : info.cidx < UInt32.size := by
-        simpa [Fir.Wasm.constructorTagFitsI32] using fits
+      have expectedFits : info.cidx < UInt64.size := by
+        simpa [Fir.Wasm.constructorTagFitsUInt64] using fits
       by_cases hit : actualTag = info.cidx
       · have selectedEq : selected = code := by
           have branchEq : code = selected := by
@@ -10442,7 +10430,7 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainRefines
               target.wasmModule hosts.env sourceRuntime sourceEnv discr
               (.ctorAlt info code :: alts) fallback
               [.localGet discrIndex, .call getTagIndex,
-                .const (UInt32.ofNat info.cidx), .eq,
+                .constI64 (UInt64.ofNat info.cidx), .eqI64,
                 .iff 0 0 thenTarget elseTarget]
               targetStore targetLocals witness tail Q := by
           apply caseChainWP_constructor
@@ -10465,7 +10453,6 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainRefines
           · exact parameterCount
           · exact resultCount
           · exact tagged
-          · exact actualFits
           · exact expectedFits
           · exact branchWP
         simpa only [targetEq] using chain
@@ -10502,7 +10489,7 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainRefines
               target.wasmModule hosts.env sourceRuntime sourceEnv discr
               (.ctorAlt info code :: alts) fallback
               [.localGet discrIndex, .call getTagIndex,
-                .const (UInt32.ofNat info.cidx), .eq,
+                .constI64 (UInt64.ofNat info.cidx), .eqI64,
                 .iff 0 0 thenTarget elseTarget]
               targetStore targetLocals witness tail Q := by
           apply caseChainWP_constructor
@@ -10525,7 +10512,6 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainRefines
           · exact parameterCount
           · exact resultCount
           · exact tagged
-          · exact actualFits
           · exact expectedFits
           · exact branchWP
         simpa only [targetEq] using chain
@@ -10844,7 +10830,7 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_objectConstructorCases
   intro sourceRuntime sourceEnv cases selected fullTarget targetStore
     targetLocals witness supported sourceStep stateRelated adapted
   rcases supported with
-    ⟨altsSupported, modeEq, discriminator, actualTagFits⟩
+    ⟨altsSupported, modeEq, discriminator⟩
   rcases discriminator with ⟨discrKind, discrCompiled, discrRefines⟩
   rcases sourceStep with
     ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩
@@ -10858,13 +10844,11 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_objectConstructorCases
           simpa [lookupValue, lookupEq] using lookupFound
         subst value
         rfl
-  have actualFits : actualTag < UInt32.size :=
-    actualTagFits lookupFound tagged
   rcases CodeAdapted.cases_eq adapted with
     ⟨fallback, fallbackCompiled, chainAdapted⟩
   obtain ⟨selectedLabels, selectedTarget, selectedAdapted, liftChain⟩ :=
     spec.objectConstructorCaseChainRefines altsSupported modeEq
-      discrCompiled discrRefines chosen sourceLookup tagged actualFits
+      discrCompiled discrRefines chosen sourceLookup tagged
       stateRelated fallbackCompiled chainAdapted
   refine ⟨selectedLabels, selectedTarget, selectedAdapted,
     ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩, ?_⟩
@@ -10968,7 +10952,7 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_singleObjectConstructor
   intro sourceRuntime sourceEnv cases selected fullTarget targetStore
     targetLocals witness supported sourceStep stateRelated adapted
   rcases supported with
-    ⟨info, altsEq, modeEq, expectedTagFits, discrCompiled, actualTagFits⟩
+    ⟨info, altsEq, modeEq, expectedTagFits, discrCompiled⟩
   rcases sourceStep with
     ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩
   have sourceLookup :
@@ -10985,10 +10969,8 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_singleObjectConstructor
     rw [altsEq] at chosen
     simp [chooseAlt, findCtorAlt, findDefaultAlt] at chosen
     omega
-  have actualFits : actualTag < UInt32.size :=
-    actualTagFits lookupFound tagged
-  have expectedFits : info.cidx < UInt32.size := by
-    simpa [Fir.Wasm.constructorTagFitsI32] using expectedTagFits
+  have expectedFits : info.cidx < UInt64.size := by
+    simpa [Fir.Wasm.constructorTagFitsUInt64] using expectedTagFits
   obtain ⟨selectedTarget, discrIndex, getTagIndex, selectedAdapted,
       discrFound, getTagFound, targetEq⟩ :=
     CodeAdapted.singleObjectConstructorCases_eq altsEq modeEq expectedTagFits
@@ -11049,7 +11031,7 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_singleObjectConstructor
         hosts.env sourceRuntime sourceEnv cases.discr
         [.ctorAlt info selected] [.unreachable]
         [.localGet discrIndex, .call getTagIndex,
-          .const (UInt32.ofNat info.cidx), .eq,
+          .constI64 (UInt64.ofNat info.cidx), .eqI64,
           .iff 0 0 selectedTarget [.unreachable]]
         targetStore targetLocals witness tail Q := by
     apply caseChainWP_constructor
@@ -11072,7 +11054,6 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_singleObjectConstructor
     · exact parameterCount
     · exact resultCount
     · exact tagged
-    · exact actualFits
     · exact expectedFits
     · exact branchWP
   rw [targetEq]
@@ -11106,8 +11087,7 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
     targetLocals witness supported sourceStep stateRelated adapted
   rcases supported with
     ⟨firstInfo, secondInfo, firstBranch, secondBranch, defaultBranch,
-      altsEq, modeEq, firstTagFits, secondTagFits, discrCompiled,
-      actualTagFits⟩
+      altsEq, modeEq, firstTagFits, secondTagFits, discrCompiled⟩
   rcases sourceStep with
     ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩
   have sourceLookup :
@@ -11120,12 +11100,10 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
           simpa [lookupValue, lookupEq] using lookupFound
         subst value
         rfl
-  have actualFits : actualTag < UInt32.size :=
-    actualTagFits lookupFound tagged
-  have firstExpectedFits : firstInfo.cidx < UInt32.size := by
-    simpa [Fir.Wasm.constructorTagFitsI32] using firstTagFits
-  have secondExpectedFits : secondInfo.cidx < UInt32.size := by
-    simpa [Fir.Wasm.constructorTagFitsI32] using secondTagFits
+  have firstExpectedFits : firstInfo.cidx < UInt64.size := by
+    simpa [Fir.Wasm.constructorTagFitsUInt64] using firstTagFits
+  have secondExpectedFits : secondInfo.cidx < UInt64.size := by
+    simpa [Fir.Wasm.constructorTagFitsUInt64] using secondTagFits
   obtain ⟨firstTarget, secondTarget, defaultTarget, discrIndex, getTagIndex,
       firstAdapted, secondAdapted, defaultAdapted, discrFound, getTagFound,
       targetEq⟩ :=
@@ -11180,7 +11158,7 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
           .default defaultBranch]
         defaultSymbolic
         [.localGet discrIndex, .call getTagIndex,
-          .const (UInt32.ofNat secondInfo.cidx), .eq,
+          .constI64 (UInt64.ofNat secondInfo.cidx), .eqI64,
           .iff 0 0 secondTarget defaultTarget] :=
     caseChainAdapted_constructor modeEq secondTagFits secondAdapted
       defaultChainAdapted discrFound getTagFound
@@ -11205,7 +11183,7 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
         Wasm.wp target.wasmModule
           (if actualTag = firstInfo.cidx then firstTarget else
             [.localGet discrIndex, .call getTagIndex,
-              .const (UInt32.ofNat secondInfo.cidx), .eq,
+              .constI64 (UInt64.ofNat secondInfo.cidx), .eqI64,
               .iff 0 0 secondTarget defaultTarget])
           (CaseResumePost target.wasmModule hosts.env [] Q tail) targetStore
           { targetLocals with values := tail } hosts.env := by
@@ -11218,10 +11196,10 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
             .default defaultBranch]
           defaultSymbolic
           [.localGet discrIndex, .call getTagIndex,
-            .const (UInt32.ofNat firstInfo.cidx), .eq,
+            .constI64 (UInt64.ofNat firstInfo.cidx), .eqI64,
             .iff 0 0 firstTarget
               [.localGet discrIndex, .call getTagIndex,
-                .const (UInt32.ofNat secondInfo.cidx), .eq,
+                .constI64 (UInt64.ofNat secondInfo.cidx), .eqI64,
                 .iff 0 0 secondTarget defaultTarget]]
           targetStore targetLocals witness tail Q := by
       apply caseChainWP_constructor
@@ -11244,7 +11222,6 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
       · exact parameterCount
       · exact resultCount
       · exact tagged
-      · exact actualFits
       · exact firstExpectedFits
       · exact branchWP
     rw [targetEq]
@@ -11294,7 +11271,7 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
             [.ctorAlt secondInfo secondBranch, .default defaultBranch]
             defaultSymbolic
             [.localGet discrIndex, .call getTagIndex,
-              .const (UInt32.ofNat secondInfo.cidx), .eq,
+              .constI64 (UInt64.ofNat secondInfo.cidx), .eqI64,
               .iff 0 0 secondTarget defaultTarget]
             targetStore targetLocals witness tail
             (CaseResumePost target.wasmModule hosts.env [] Q tail) := by
@@ -11318,14 +11295,13 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
         · exact parameterCount
         · exact resultCount
         · exact tagged
-        · exact actualFits
         · exact secondExpectedFits
         · exact innerBranchWP
       have outerBranchWP :
           Wasm.wp target.wasmModule
             (if actualTag = firstInfo.cidx then firstTarget else
               [.localGet discrIndex, .call getTagIndex,
-                .const (UInt32.ofNat secondInfo.cidx), .eq,
+                .constI64 (UInt64.ofNat secondInfo.cidx), .eqI64,
                 .iff 0 0 secondTarget defaultTarget])
             (CaseResumePost target.wasmModule hosts.env [] Q tail) targetStore
             { targetLocals with values := tail } hosts.env := by
@@ -11338,10 +11314,10 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
               .default defaultBranch]
             defaultSymbolic
             [.localGet discrIndex, .call getTagIndex,
-              .const (UInt32.ofNat firstInfo.cidx), .eq,
+              .constI64 (UInt64.ofNat firstInfo.cidx), .eqI64,
               .iff 0 0 firstTarget
                 [.localGet discrIndex, .call getTagIndex,
-                  .const (UInt32.ofNat secondInfo.cidx), .eq,
+                  .constI64 (UInt64.ofNat secondInfo.cidx), .eqI64,
                   .iff 0 0 secondTarget defaultTarget]]
             targetStore targetLocals witness tail Q := by
         apply caseChainWP_constructor
@@ -11364,7 +11340,6 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
         · exact parameterCount
         · exact resultCount
         · exact tagged
-        · exact actualFits
         · exact firstExpectedFits
         · exact outerBranchWP
       rw [targetEq]
@@ -11413,7 +11388,7 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
             [.ctorAlt secondInfo secondBranch, .default defaultBranch]
             defaultSymbolic
             [.localGet discrIndex, .call getTagIndex,
-              .const (UInt32.ofNat secondInfo.cidx), .eq,
+              .constI64 (UInt64.ofNat secondInfo.cidx), .eqI64,
               .iff 0 0 secondTarget defaultTarget]
             targetStore targetLocals witness tail
             (CaseResumePost target.wasmModule hosts.env [] Q tail) := by
@@ -11437,14 +11412,13 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
         · exact parameterCount
         · exact resultCount
         · exact tagged
-        · exact actualFits
         · exact secondExpectedFits
         · exact innerBranchWP
       have outerBranchWP :
           Wasm.wp target.wasmModule
             (if actualTag = firstInfo.cidx then firstTarget else
               [.localGet discrIndex, .call getTagIndex,
-                .const (UInt32.ofNat secondInfo.cidx), .eq,
+                .constI64 (UInt64.ofNat secondInfo.cidx), .eqI64,
                 .iff 0 0 secondTarget defaultTarget])
             (CaseResumePost target.wasmModule hosts.env [] Q tail) targetStore
             { targetLocals with values := tail } hosts.env := by
@@ -11457,10 +11431,10 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
               .default defaultBranch]
             defaultSymbolic
             [.localGet discrIndex, .call getTagIndex,
-              .const (UInt32.ofNat firstInfo.cidx), .eq,
+              .constI64 (UInt64.ofNat firstInfo.cidx), .eqI64,
               .iff 0 0 firstTarget
                 [.localGet discrIndex, .call getTagIndex,
-                  .const (UInt32.ofNat secondInfo.cidx), .eq,
+                  .constI64 (UInt64.ofNat secondInfo.cidx), .eqI64,
                   .iff 0 0 secondTarget defaultTarget]]
             targetStore targetLocals witness tail Q := by
         apply caseChainWP_constructor
@@ -11483,7 +11457,6 @@ theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
         · exact parameterCount
         · exact resultCount
         · exact tagged
-        · exact actualFits
         · exact firstExpectedFits
         · exact outerBranchWP
       rw [targetEq]

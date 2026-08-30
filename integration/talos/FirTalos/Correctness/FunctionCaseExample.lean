@@ -10,10 +10,10 @@ open Fir.LeanIR.InterpreterExamples
 
 private def caseBodyCheck : Wasm.Program → Bool
   | [.call alloc, .localSet cIndex,
-      .localGet cLoad0, .call getTag0, .const falseTag, .eq,
+      .localGet cLoad0, .call getTag0, .constI64 falseTag, .eqI64,
       .iff depth0 results0
         [.call literal0, .localSet falseIndex, .localGet falseLoad, .ret]
-        [.localGet cLoad1, .call getTag1, .const trueTag, .eq,
+        [.localGet cLoad1, .call getTag1, .constI64 trueTag, .eqI64,
           .iff depth1 results1
             [.call literal1, .localSet trueIndex, .localGet trueLoad, .ret]
             [.unreachable]],
@@ -29,10 +29,10 @@ private def caseBodyCheck : Wasm.Program → Bool
 private theorem caseBody_eq_of_check {body : Wasm.Program}
     (checked : caseBodyCheck body = true) :
     body = [.call 0, .localSet 0,
-      .localGet 0, .call 1, .const 0, .eq,
+      .localGet 0, .call 1, .constI64 0, .eqI64,
       .iff 0 0
         [.call 2, .localSet 1, .localGet 1, .ret]
-        [.localGet 0, .call 1, .const 1, .eq,
+        [.localGet 0, .call 1, .constI64 1, .eqI64,
           .iff 0 0
             [.call 3, .localSet 2, .localGet 2, .ret]
             [.unreachable]],
@@ -182,10 +182,10 @@ theorem abiCaseMain_found :
 
 theorem abiCaseMain_body :
     abiCaseMainFunction.body = [.call 0, .localSet 0,
-      .localGet 0, .call 1, .const 0, .eq,
+      .localGet 0, .call 1, .constI64 0, .eqI64,
       .iff 0 0
         [.call 2, .localSet 1, .localGet 1, .ret]
-        [.localGet 0, .call 1, .const 1, .eq,
+        [.localGet 0, .call 1, .constI64 1, .eqI64,
           .iff 0 0
             [.call 3, .localSet 2, .localGet 2, .ret]
             [.unreachable]],
@@ -196,10 +196,10 @@ theorem abiCaseMain_body :
 /-- The compositional compiler body, before the adapter's validation marker. -/
 def abiCaseMainCore : Wasm.Program :=
   [.call 0, .localSet 0,
-    .localGet 0, .call 1, .const 0, .eq,
+    .localGet 0, .call 1, .constI64 0, .eqI64,
     .iff 0 0
       [.call 2, .localSet 1, .localGet 1, .ret]
-      [.localGet 0, .call 1, .const 1, .eq,
+      [.localGet 0, .call 1, .constI64 1, .eqI64,
         .iff 0 0
           [.call 3, .localSet 2, .localGet 2, .ret]
           [.unreachable]]]
@@ -543,10 +543,10 @@ theorem abiCaseCasesStep :
       [] [none, none] abiCaseAdaptedModule.wasmModule
       abiCaseResolvedHosts.env
       {} abiCaseEnvC abiCaseCases abiCaseTrueCode
-      [.localGet 0, .call 1, .const 0, .eq,
+      [.localGet 0, .call 1, .constI64 0, .eqI64,
         .iff 0 0
           [.call 2, .localSet 1, .localGet 1, .ret]
-          [.localGet 0, .call 1, .const 1, .eq,
+          [.localGet 0, .call 1, .constI64 1, .eqI64,
             .iff 0 0
               [.call 3, .localSet 2, .localGet 2, .ret]
               [.unreachable]]]
@@ -590,7 +590,7 @@ theorem abiCaseCasesStep :
           abiCaseAdaptedModule.wasmModule abiCaseResolvedHosts.env
           {} abiCaseEnvC c
           [.ctorAlt trueInfo abiCaseTrueCode] [.unreachable]
-          [.localGet 0, .call 1, .const 1, .eq,
+          [.localGet 0, .call 1, .constI64 1, .eqI64,
             .iff 0 0
               [.call 3, .localSet 2, .localGet 2, .ret]
               [.unreachable]]
@@ -623,10 +623,10 @@ theorem abiCaseCasesStep :
         CaseChainWP abiCaseContext abiCaseSourceModule abiCaseSourceFunction []
           abiCaseAdaptedModule.wasmModule abiCaseResolvedHosts.env
           {} abiCaseEnvC c abiCaseCases.alts.toList [.unreachable]
-          [.localGet 0, .call 1, .const 0, .eq,
+          [.localGet 0, .call 1, .constI64 0, .eqI64,
             .iff 0 0
               [.call 2, .localSet 1, .localGet 1, .ret]
-              [.localGet 0, .call 1, .const 1, .eq,
+              [.localGet 0, .call 1, .constI64 1, .eqI64,
                 .iff 0 0
                   [.call 3, .localSet 2, .localGet 2, .ret]
                   [.unreachable]]]

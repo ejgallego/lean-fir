@@ -10,7 +10,7 @@ open Fir.LeanIR.InterpreterExamples
 
 private def defaultCaseBodyCheck : Wasm.Program → Bool
   | [.call alloc, .localSet cIndex,
-      .localGet cLoad, .call getTag, .const falseTag, .eq,
+      .localGet cLoad, .call getTag, .constI64 falseTag, .eqI64,
       .iff depth results
         [.call literal0, .localSet falseIndex, .localGet falseLoad, .ret]
         [.call literal5, .localSet defaultIndex, .localGet defaultLoad, .ret],
@@ -24,7 +24,7 @@ private def defaultCaseBodyCheck : Wasm.Program → Bool
 private theorem defaultCaseBody_eq_of_check {body : Wasm.Program}
     (checked : defaultCaseBodyCheck body = true) :
     body = [.call 0, .localSet 0,
-      .localGet 0, .call 1, .const 0, .eq,
+      .localGet 0, .call 1, .constI64 0, .eqI64,
       .iff 0 0
         [.call 2, .localSet 1, .localGet 1, .ret]
         [.call 3, .localSet 2, .localGet 2, .ret],
@@ -177,7 +177,7 @@ theorem abiDefaultCaseMain_found :
 
 theorem abiDefaultCaseMain_body :
     abiDefaultCaseMainFunction.body = [.call 0, .localSet 0,
-      .localGet 0, .call 1, .const 0, .eq,
+      .localGet 0, .call 1, .constI64 0, .eqI64,
       .iff 0 0
         [.call 2, .localSet 1, .localGet 1, .ret]
         [.call 3, .localSet 2, .localGet 2, .ret],
@@ -188,7 +188,7 @@ theorem abiDefaultCaseMain_body :
 /-- The compositional compiler body, before the adapter's validation marker. -/
 def abiDefaultCaseMainCore : Wasm.Program :=
   [.call 0, .localSet 0,
-    .localGet 0, .call 1, .const 0, .eq,
+    .localGet 0, .call 1, .constI64 0, .eqI64,
     .iff 0 0
       [.call 2, .localSet 1, .localGet 1, .ret]
       [.call 3, .localSet 2, .localGet 2, .ret]]
@@ -522,7 +522,7 @@ theorem abiDefaultCaseCasesStep :
       abiDefaultCaseAdaptedModule.wasmModule
       abiDefaultCaseResolvedHosts.env {} abiDefaultCaseEnvC
       abiDefaultCaseCases abiDefaultCaseDefaultCode
-      [.localGet 0, .call 1, .const 0, .eq,
+      [.localGet 0, .call 1, .constI64 0, .eqI64,
         .iff 0 0
           [.call 2, .localSet 1, .localGet 1, .ret]
           [.call 3, .localSet 2, .localGet 2, .ret]]
@@ -591,7 +591,7 @@ theorem abiDefaultCaseCasesStep :
           abiDefaultCaseResolvedHosts.env {} abiDefaultCaseEnvC c
           [.ctorAlt falseInfo abiDefaultCaseFalseCode,
             .default abiDefaultCaseDefaultCode] fallback
-          [.localGet 0, .call 1, .const 0, .eq,
+          [.localGet 0, .call 1, .constI64 0, .eqI64,
             .iff 0 0
               [.call 2, .localSet 1, .localGet 1, .ret]
               [.call 3, .localSet 2, .localGet 2, .ret]]
@@ -624,7 +624,7 @@ theorem abiDefaultCaseCasesStep :
           abiDefaultCaseSourceFunction [] abiDefaultCaseAdaptedModule.wasmModule
           abiDefaultCaseResolvedHosts.env {} abiDefaultCaseEnvC c
           abiDefaultCaseCases.alts.toList fallback
-          [.localGet 0, .call 1, .const 0, .eq,
+          [.localGet 0, .call 1, .constI64 0, .eqI64,
             .iff 0 0
               [.call 2, .localSet 1, .localGet 1, .ret]
               [.call 3, .localSet 2, .localGet 2, .ret]]

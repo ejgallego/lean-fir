@@ -10827,8 +10827,7 @@ theorem ConcreteStructuredValidatedCodeCoreRel.productionCasesSupported_of_caseS
                 ConcreteStructuredCaseAltsNormalized.objectSupported_of_validation
                   normalizedOriginal alternatives,
                 contextMode,
-                ⟨discrKind, discrCompiled, discrRefines⟩,
-                objectSafe.objectTagsFit⟩)
+                ⟨discrKind, discrCompiled, discrRefines⟩⟩)
       | scalarUInt8 =>
           have discrKindEq : discrKind = .uint8 := by
             cases discrKind <;>

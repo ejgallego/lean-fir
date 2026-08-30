@@ -220,7 +220,7 @@ theorem compileCaseChain_constructor_of_mode
     (elseEq : compileCaseChain context discr alts fallback = .ok elseBody) :
     compileCaseChain context discr (.ctorAlt info code :: alts) fallback =
       .ok (caseTagTest mode discr info ++
-        [.i32Eq, .ifElse thenBody elseBody]) := by
+        [caseTagEq mode, .ifElse thenBody elseBody]) := by
   change compileCaseChainWithM (compileCode context)
     (caseDiscriminatorMode context discr) discr alts fallback =
     .ok elseBody at elseEq
@@ -239,17 +239,17 @@ theorem compileCaseChain_constructor
     {alts : List (Lean.Compiler.LCNF.Alt .impure)}
     {fallback thenBody elseBody : List Instruction}
     (modeEq : caseDiscriminatorMode context discr = .objectTag)
-    (fits : constructorTagFitsI32 info = true)
+    (fits : constructorTagFitsUInt64 info = true)
     (thenEq : compileCode context code = .ok thenBody)
     (elseEq : compileCaseChain context discr alts fallback = .ok elseBody) :
     compileCaseChain context discr (.ctorAlt info code :: alts) fallback =
       .ok [
         .localGet discr,
         .call (.runtime .getTag),
-        .i32Const .uint32 (UInt32.ofNat info.cidx),
-        .i32Eq,
+        .i64Const .uint64 (UInt64.ofNat info.cidx),
+        .i64Eq,
         .ifElse thenBody elseBody] := by
-  simpa [caseConstructorTagFits, caseTagTest] using
+  simpa [caseConstructorTagFits, caseTagTest, caseTagEq] using
     compileCaseChain_constructor_of_mode modeEq fits thenEq elseEq
 
 theorem compileCaseChain_scalarUInt8_constructor
@@ -267,7 +267,7 @@ theorem compileCaseChain_scalarUInt8_constructor
         .i32Const .uint8 (UInt32.ofNat info.cidx),
         .i32Eq,
         .ifElse thenBody elseBody] := by
-  simpa [caseConstructorTagFits, caseTagTest] using
+  simpa [caseConstructorTagFits, caseTagTest, caseTagEq] using
     compileCaseChain_constructor_of_mode modeEq fits thenEq elseEq
 
 theorem constructorTag_i32_eq_iff {left right : Nat}
@@ -279,6 +279,16 @@ theorem constructorTag_i32_eq_iff {left right : Nat}
     simpa [UInt32.toNat_ofNat_of_lt' leftFits,
       UInt32.toNat_ofNat_of_lt' rightFits] using this
   · exact congrArg UInt32.ofNat
+
+theorem constructorTag_uint64_eq_iff {left right : Nat}
+    (leftFits : left < UInt64.size) (rightFits : right < UInt64.size) :
+    UInt64.ofNat left = UInt64.ofNat right ↔ left = right := by
+  constructor
+  · intro equal
+    have := congrArg UInt64.toNat equal
+    simpa [UInt64.toNat_ofNat_of_lt' leftFits,
+      UInt64.toNat_ofNat_of_lt' rightFits] using this
+  · exact congrArg UInt64.ofNat
 
 theorem constructorTag_uint8_eq_iff {left right : Nat}
     (leftFits : left < UInt8.size) (rightFits : right < UInt8.size) :
@@ -812,7 +822,7 @@ theorem delete_host_simulates
   exact hostStep_delete_of_decode initial physicalArgs sourceObject sourceRuntime
     decodedArgs updated
 
-/-- Constructor tag lookup preserves the source tag modulo the checked i32 lane. -/
+/-- Constructor tag lookup preserves the source tag in the full `UInt64` lane. -/
 theorem getTag_host_simulates
     (initial : Wasm.Store RuntimeHost) (physicalArgs : List Wasm.Value)
     (sourceObject : Value) (tag : Nat)
@@ -822,9 +832,9 @@ theorem getTag_host_simulates
     (tagged : getTag initial.host.runtime sourceObject = .ok tag) :
     ∃ final,
       hostStep .getTag initial physicalArgs =
-        .Return [.i32 (UInt32.ofNat tag)] final ∧
-      StepResultRelated initial.host.runtime (.scalar (.uint32 (UInt32.ofNat tag)))
-        .uint32 final (.i32 (UInt32.ofNat tag)) ∧
+        .Return [.i64 (UInt64.ofNat tag)] final ∧
+      StepResultRelated initial.host.runtime (.scalar (.uint64 (UInt64.ofNat tag)))
+        .uint64 final (.i64 (UInt64.ofNat tag)) ∧
       HandleTableInvariant final.host.handles := by
   let final : Wasm.Store RuntimeHost := {
     initial with host := {
@@ -833,7 +843,7 @@ theorem getTag_host_simulates
       targetFailure? := none } }
   refine ⟨final, ?_, ?_, ?_⟩
   · exact hostStep_getTag_of_decode initial physicalArgs sourceObject tag decodedArgs tagged
-  · exact ⟨rfl, decodeValue_uint32 initial.host.handles (UInt32.ofNat tag)⟩
+  · exact ⟨rfl, decodeValue_uint64 initial.host.handles (UInt64.ofNat tag)⟩
   · exact invariant
 
 /--
@@ -1088,6 +1098,40 @@ theorem wp_i32Eq_ifElse
         cases level <;> rfl
     | _ => rfl
 
+/-- The `i64` counterpart of `wp_i32Eq_ifElse`, used by exact object tags. -/
+theorem wp_i64Eq_ifElse
+    {module : Wasm.Module} {env : Wasm.HostEnv RuntimeHost}
+    {thenBody elseBody rest : Wasm.Program} {Q : Wasm.Assertion RuntimeHost}
+    {store : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    (actual expected : UInt64) (tail : List Wasm.Value)
+    (hBody :
+      Wasm.wp module (if actual = expected then thenBody else elseBody)
+        (fun continuation => match continuation with
+          | .Fallthrough nextStore nextLocals =>
+              Wasm.wp module rest Q nextStore
+                { nextLocals with values := tail } env
+          | .Break 0 nextStore nextLocals =>
+              Wasm.wp module rest Q nextStore
+                { nextLocals with values := tail } env
+          | .Break (level + 1) nextStore nextLocals =>
+              Q (.Break level nextStore nextLocals)
+          | other => Q other)
+        store { locals with values := tail } env) :
+    Wasm.wp module
+      (.constI64 expected :: .eqI64 :: .iff 0 0 thenBody elseBody :: rest)
+      Q store { locals with values := .i64 actual :: tail } env := by
+  rw [Wasm.wp_constI64_cons, Wasm.wp_eqI64_cons]
+  apply Wasm.wp_iff_cons
+    (c := if actual = expected then 1 else 0) (vs := tail) rfl
+  convert hBody using 1
+  all_goals simp
+  all_goals
+    funext continuation
+    cases continuation with
+    | Break level nextStore nextLocals =>
+        cases level <;> rfl
+    | _ => rfl
+
 /-- Direct scalar-case dispatch: load the `UInt8` discriminator, compare it
 with the range-checked constructor index, and select the corresponding arm. -/
 theorem wp_scalarUInt8_case_test
@@ -1133,7 +1177,7 @@ theorem wp_getTag_case_test_of_return
     {spec : Wasm.HostSpec RuntimeHost} {id : Nat} {imp : Wasm.ImportDecl}
     {thenBody elseBody rest : Wasm.Program} {Q : Wasm.Assertion RuntimeHost}
     {initial final : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
-    {localIndex : Nat} {handle actual expected : UInt32}
+    {localIndex : Nat} {handle : UInt32} {actual expected : UInt64}
     (hLocal : locals.get localIndex = some (.i32 handle))
     (hImp : module.imports[id]? = some imp)
     (hSat : env.Satisfies module spec)
@@ -1143,7 +1187,7 @@ theorem wp_getTag_case_test_of_return
     (hResults : imp.results.length = 1)
     (step :
       hostStep .getTag initial [.i32 handle] =
-        .Return [.i32 actual] final)
+        .Return [.i64 actual] final)
     (hBody :
       Wasm.wp module (if actual = expected then thenBody else elseBody)
         (fun continuation => match continuation with
@@ -1158,22 +1202,22 @@ theorem wp_getTag_case_test_of_return
           | other => Q other)
         final { locals with values := locals.values } env) :
     Wasm.wp module
-      (.localGet localIndex :: .call id :: .const expected :: .eq ::
+      (.localGet localIndex :: .call id :: .constI64 expected :: .eqI64 ::
         .iff 0 0 thenBody elseBody :: rest)
       Q initial locals env := by
   rw [Wasm.wp_localGet_cons, hLocal]
   apply wp_host_call_of_return
-    (physicalArgs := [.i32 handle]) (results := [.i32 actual])
+    (physicalArgs := [.i32 handle]) (results := [.i64 actual])
     hImp hSat hi hContract
   · simp [hParams]
   · exact step
   · simpa [hParams, hResults] using
-      wp_i32Eq_ifElse actual expected locals.values hBody
+      wp_i64Eq_ifElse actual expected locals.values hBody
 
 /--
 Source-facing constructor-case rule. The source discriminator and candidate
 tags are compared as naturals, while the generated target compares their
-`i32` encodings. The two explicit range premises are precisely the executable
+`i64` encodings. The two explicit range premises are precisely the executable
 invariants enforced for constructor allocations and case alternatives.
 -/
 theorem wp_getTag_case_test
@@ -1194,8 +1238,8 @@ theorem wp_getTag_case_test
       decodeArgs initial.host.handles #[.tobject] [.i32 handle] =
         .ok #[sourceObject])
     (tagged : getTag initial.host.runtime sourceObject = .ok actualTag)
-    (actualFits : actualTag < UInt32.size)
-    (expectedFits : expectedTag < UInt32.size)
+    (actualFits : actualTag < UInt64.size)
+    (expectedFits : expectedTag < UInt64.size)
     (hBody :
       Wasm.wp module (if actualTag = expectedTag then thenBody else elseBody)
         (fun continuation => match continuation with
@@ -1215,14 +1259,14 @@ theorem wp_getTag_case_test
         { locals with values := locals.values } env) :
     Wasm.wp module
       (.localGet localIndex :: .call id ::
-        .const (UInt32.ofNat expectedTag) :: .eq ::
+        .constI64 (UInt64.ofNat expectedTag) :: .eqI64 ::
         .iff 0 0 thenBody elseBody :: rest)
       Q initial locals env := by
   apply wp_getTag_case_test_of_return
     hLocal hImp hSat hi hContract hParams hResults
   · exact hostStep_getTag_of_decode initial [.i32 handle]
       sourceObject actualTag decoded tagged
-  · simpa only [constructorTag_i32_eq_iff actualFits expectedFits] using hBody
+  · simpa only [constructorTag_uint64_eq_iff actualFits expectedFits] using hBody
 
 /--
 Generated-stack rule for constructor allocation. Source-order physical fields

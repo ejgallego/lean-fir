@@ -3111,7 +3111,7 @@ theorem caseChainWP_constructor
     {discrIndex getTagIndex : Nat} {handle : Handle}
     {imp : Wasm.ImportDecl} {sourceObject : Value} {actualTag : Nat}
     (modeEq : Fir.Wasm.caseDiscriminatorMode context discr = .objectTag)
-    (fits : Fir.Wasm.constructorTagFitsI32 info = true)
+    (fits : Fir.Wasm.constructorTagFitsUInt64 info = true)
     (thenAdapted :
       CodeAdapted context sourceModule sourceFunction (none :: labels) code thenTarget)
     (elseAdapted :
@@ -3136,8 +3136,8 @@ theorem caseChainWP_constructor
       decodeArgs initial.host.handles #[.tobject] [.i32 handle] =
         .ok #[sourceObject])
     (tagged : getTag initial.host.runtime sourceObject = .ok actualTag)
-    (actualFits : actualTag < UInt32.size)
-    (expectedFits : info.cidx < UInt32.size)
+    (actualFits : actualTag < UInt64.size)
+    (expectedFits : info.cidx < UInt64.size)
     (selectedWP :
       Wasm.wp module
         (if actualTag = info.cidx then thenTarget else elseTarget)
@@ -3146,7 +3146,7 @@ theorem caseChainWP_constructor
     CaseChainWP context sourceModule sourceFunction labels module hostEnv
       sourceRuntime sourceEnv discr (.ctorAlt info code :: alts) fallback
       [.localGet discrIndex, .call getTagIndex,
-        .const (UInt32.ofNat info.cidx), .eq,
+        .constI64 (UInt64.ofNat info.cidx), .eqI64,
         .iff 0 0 thenTarget elseTarget]
       initial locals tail Q := by
   refine ⟨caseChainAdapted_constructor modeEq fits thenAdapted elseAdapted
@@ -3238,7 +3238,7 @@ theorem caseChainWP_constructor_hit
     {discrIndex getTagIndex : Nat} {handle : Handle}
     {imp : Wasm.ImportDecl} {sourceObject : Value} {actualTag : Nat}
     (modeEq : Fir.Wasm.caseDiscriminatorMode context discr = .objectTag)
-    (fits : Fir.Wasm.constructorTagFitsI32 info = true)
+    (fits : Fir.Wasm.constructorTagFitsUInt64 info = true)
     (thenBranch :
       CodeWP context sourceModule sourceFunction (none :: labels) module hostEnv
         sourceRuntime sourceEnv code thenTarget initial locals tail
@@ -3264,12 +3264,12 @@ theorem caseChainWP_constructor_hit
       decodeArgs initial.host.handles #[.tobject] [.i32 handle] =
         .ok #[sourceObject])
     (tagged : getTag initial.host.runtime sourceObject = .ok actualTag)
-    (actualFits : actualTag < UInt32.size)
-    (expectedFits : info.cidx < UInt32.size) :
+    (actualFits : actualTag < UInt64.size)
+    (expectedFits : info.cidx < UInt64.size) :
     CaseChainWP context sourceModule sourceFunction labels module hostEnv
       sourceRuntime sourceEnv discr (.ctorAlt info code :: alts) fallback
       [.localGet discrIndex, .call getTagIndex,
-        .const (UInt32.ofNat info.cidx), .eq,
+        .constI64 (UInt64.ofNat info.cidx), .eqI64,
         .iff 0 0 thenTarget elseTarget]
       initial locals tail Q := by
   apply caseChainWP_constructor modeEq fits thenBranch.1 elseAdapted discrFound
@@ -3297,7 +3297,7 @@ theorem caseChainWP_constructor_miss
     {discrIndex getTagIndex : Nat} {handle : Handle}
     {imp : Wasm.ImportDecl} {sourceObject : Value} {actualTag : Nat}
     (modeEq : Fir.Wasm.caseDiscriminatorMode context discr = .objectTag)
-    (fits : Fir.Wasm.constructorTagFitsI32 info = true)
+    (fits : Fir.Wasm.constructorTagFitsUInt64 info = true)
     (thenAdapted :
       CodeAdapted context sourceModule sourceFunction (none :: labels) code thenTarget)
     (elseBranch :
@@ -3322,12 +3322,12 @@ theorem caseChainWP_constructor_miss
       decodeArgs initial.host.handles #[.tobject] [.i32 handle] =
         .ok #[sourceObject])
     (tagged : getTag initial.host.runtime sourceObject = .ok actualTag)
-    (actualFits : actualTag < UInt32.size)
-    (expectedFits : info.cidx < UInt32.size) :
+    (actualFits : actualTag < UInt64.size)
+    (expectedFits : info.cidx < UInt64.size) :
     CaseChainWP context sourceModule sourceFunction labels module hostEnv
       sourceRuntime sourceEnv discr (.ctorAlt info code :: alts) fallback
       [.localGet discrIndex, .call getTagIndex,
-        .const (UInt32.ofNat info.cidx), .eq,
+        .constI64 (UInt64.ofNat info.cidx), .eqI64,
         .iff 0 0 thenTarget elseTarget]
       initial locals tail Q := by
   apply caseChainWP_constructor modeEq fits thenAdapted elseBranch.1 discrFound

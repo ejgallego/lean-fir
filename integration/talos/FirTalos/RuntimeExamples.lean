@@ -111,7 +111,7 @@ def constructorTagHostWorks : Bool :=
   match hostStep allocate emptyHostStore [] with
   | .Return [.i32 constructor] store =>
       match hostStep .getTag store [.i32 constructor] with
-      | .Return [.i32 tag] store => tag == 1 && store.host.trap?.isNone
+      | .Return [.i64 tag] store => tag == 1 && store.host.trap?.isNone
       | _ => false
   | _ => false
 

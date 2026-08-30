@@ -664,7 +664,7 @@ theorem CodeAdaptedWithSuffix.singleObjectConstructorCases_eq
     {selected : Lean.Compiler.LCNF.Code .impure} {target : Wasm.Program}
     (altsEq : cases.alts.toList = [.ctorAlt info selected])
     (modeEq : Fir.Wasm.caseDiscriminatorMode context cases.discr = .objectTag)
-    (fits : Fir.Wasm.constructorTagFitsI32 info = true)
+    (fits : Fir.Wasm.constructorTagFitsUInt64 info = true)
     (adapted : CodeAdaptedWithSuffix context sourceModule sourceFunction labels
       (.cases cases) target) :
     ∃ selectedTarget discrIndex getTagIndex targetSuffix,
@@ -674,7 +674,7 @@ theorem CodeAdaptedWithSuffix.singleObjectConstructorCases_eq
         some discrIndex ∧
       callIndex? sourceModule (.runtime .getTag) = some getTagIndex ∧
       target = ([.localGet discrIndex, .call getTagIndex,
-        .const (UInt32.ofNat info.cidx), .eq,
+        .constI64 (UInt64.ofNat info.cidx), .eqI64,
         .iff 0 0 selectedTarget [.unreachable]] : Wasm.Program) ++
           targetSuffix := by
   rcases adapted with ⟨targetCore, targetSuffix, coreAdapted, rfl⟩
@@ -697,8 +697,8 @@ theorem CodeAdaptedWithSuffix.twoObjectConstructorDefaultCases_eq
       [.ctorAlt firstInfo firstBranch, .ctorAlt secondInfo secondBranch,
         .default defaultBranch])
     (modeEq : Fir.Wasm.caseDiscriminatorMode context cases.discr = .objectTag)
-    (firstFits : Fir.Wasm.constructorTagFitsI32 firstInfo = true)
-    (secondFits : Fir.Wasm.constructorTagFitsI32 secondInfo = true)
+    (firstFits : Fir.Wasm.constructorTagFitsUInt64 firstInfo = true)
+    (secondFits : Fir.Wasm.constructorTagFitsUInt64 secondInfo = true)
     (adapted : CodeAdaptedWithSuffix context sourceModule sourceFunction labels
       (.cases cases) target) :
     ∃ firstTarget secondTarget defaultTarget discrIndex getTagIndex
@@ -715,10 +715,10 @@ theorem CodeAdaptedWithSuffix.twoObjectConstructorDefaultCases_eq
         some discrIndex ∧
       callIndex? sourceModule (.runtime .getTag) = some getTagIndex ∧
       target = ([.localGet discrIndex, .call getTagIndex,
-          .const (UInt32.ofNat firstInfo.cidx), .eq,
+          .constI64 (UInt64.ofNat firstInfo.cidx), .eqI64,
           .iff 0 0 firstTarget
             [.localGet discrIndex, .call getTagIndex,
-              .const (UInt32.ofNat secondInfo.cidx), .eq,
+              .constI64 (UInt64.ofNat secondInfo.cidx), .eqI64,
               .iff 0 0 secondTarget defaultTarget]] : Wasm.Program) ++
         targetSuffix := by
   rcases adapted with ⟨targetCore, targetSuffix, coreAdapted, rfl⟩
@@ -4323,13 +4323,13 @@ theorem structuredWasmObjectCaseHitPrefixFinitePath
     (resultCount : imp.results.length = 1)
     (operation :
       getTagStep store [.i32 (UInt32.ofNat word.value)] =
-        .Return [.i32 (UInt32.ofNat actualTag)] store) :
+        .Return [.i64 (UInt64.ofNat actualTag)] store) :
     FinitePath (StructuredWasmStep module hostEnv) 5
       ⟨store, .running locals ([
           .localGet discrIndex,
           .call getTagIndex,
-          .const (UInt32.ofNat expectedTag),
-          .eq,
+          .constI64 (UInt64.ofNat expectedTag),
+          .eqI64,
           .iff 0 0 thenTarget elseTarget] ++ rest), frames⟩
       ⟨store, .running { locals with values := locals.values } thenTarget,
         .label 0 (locals.values.drop 0) rest :: frames⟩ := by
@@ -4338,24 +4338,24 @@ theorem structuredWasmObjectCaseHitPrefixFinitePath
       .running { locals with
         values := .i32 (UInt32.ofNat word.value) :: locals.values } ([
           .call getTagIndex,
-          .const (UInt32.ofNat expectedTag),
-          .eq,
+          .constI64 (UInt64.ofNat expectedTag),
+          .eqI64,
           .iff 0 0 thenTarget elseTarget] ++ rest),
       frames⟩
   let afterHost : StructuredWasmState Host :=
     ⟨store,
       .running { locals with
-        values := .i32 (UInt32.ofNat actualTag) :: locals.values } ([
-          .const (UInt32.ofNat expectedTag),
-          .eq,
+        values := .i64 (UInt64.ofNat actualTag) :: locals.values } ([
+          .constI64 (UInt64.ofNat expectedTag),
+          .eqI64,
           .iff 0 0 thenTarget elseTarget] ++ rest),
       frames⟩
   let afterConst : StructuredWasmState Host :=
     ⟨store,
       .running { locals with values :=
-        (.i32 (UInt32.ofNat expectedTag) ::
-          .i32 (UInt32.ofNat actualTag) :: locals.values) } ([
-          .eq,
+        (.i64 (UInt64.ofNat expectedTag) ::
+          .i64 (UInt64.ofNat actualTag) :: locals.values) } ([
+          .eqI64,
           .iff 0 0 thenTarget elseTarget] ++ rest),
       frames⟩
   let afterEq : StructuredWasmState Host :=
@@ -4368,8 +4368,8 @@ theorem structuredWasmObjectCaseHitPrefixFinitePath
         ⟨store, .running locals ([
             .localGet discrIndex,
             .call getTagIndex,
-            .const (UInt32.ofNat expectedTag),
-            .eq,
+            .constI64 (UInt64.ofNat expectedTag),
+            .eqI64,
             .iff 0 0 thenTarget elseTarget] ++ rest), frames⟩
         afterLocal := by
     apply StructuredWasmStep.atomic (fuel := 1)
@@ -4379,7 +4379,7 @@ theorem structuredWasmObjectCaseHitPrefixFinitePath
     hostSatisfies.lookup_contract importInBounds contractFound
   have invoked :
       hostFunction.invoke store [.i32 (UInt32.ofNat word.value)] =
-        .Return [.i32 (UInt32.ofNat actualTag)] store := by
+        .Return [.i64 (UInt64.ofNat actualTag)] store := by
     have contract :=
       hostContract store [.i32 (UInt32.ofNat word.value)]
     change hostFunction.invoke store [.i32 (UInt32.ofNat word.value)] =
@@ -4427,8 +4427,8 @@ theorem structuredWasmObjectCaseMissPrefixFinitePath
     {thenTarget elseTarget : Wasm.Program} {discrIndex getTagIndex : Nat}
     {imp : Wasm.ImportDecl} {word : Word32} {actualTag expectedTag : Nat}
     (tagNe : actualTag ≠ expectedTag)
-    (actualFits : actualTag < UInt32.size)
-    (expectedFits : expectedTag < UInt32.size)
+    (actualFits : actualTag < UInt64.size)
+    (expectedFits : expectedTag < UInt64.size)
     (localFound :
       locals.get discrIndex =
         some (.i32 (UInt32.ofNat word.value)))
@@ -4440,13 +4440,13 @@ theorem structuredWasmObjectCaseMissPrefixFinitePath
     (resultCount : imp.results.length = 1)
     (operation :
       getTagStep store [.i32 (UInt32.ofNat word.value)] =
-        .Return [.i32 (UInt32.ofNat actualTag)] store) :
+        .Return [.i64 (UInt64.ofNat actualTag)] store) :
     FinitePath (StructuredWasmStep module hostEnv) 5
       ⟨store, .running locals ([
           .localGet discrIndex,
           .call getTagIndex,
-          .const (UInt32.ofNat expectedTag),
-          .eq,
+          .constI64 (UInt64.ofNat expectedTag),
+          .eqI64,
           .iff 0 0 thenTarget elseTarget] ++ rest), frames⟩
       ⟨store, .running { locals with values := locals.values } elseTarget,
         .label 0 (locals.values.drop 0) rest :: frames⟩ := by
@@ -4455,24 +4455,24 @@ theorem structuredWasmObjectCaseMissPrefixFinitePath
       .running { locals with
         values := .i32 (UInt32.ofNat word.value) :: locals.values } ([
           .call getTagIndex,
-          .const (UInt32.ofNat expectedTag),
-          .eq,
+          .constI64 (UInt64.ofNat expectedTag),
+          .eqI64,
           .iff 0 0 thenTarget elseTarget] ++ rest),
       frames⟩
   let afterHost : StructuredWasmState Host :=
     ⟨store,
       .running { locals with
-        values := .i32 (UInt32.ofNat actualTag) :: locals.values } ([
-          .const (UInt32.ofNat expectedTag),
-          .eq,
+        values := .i64 (UInt64.ofNat actualTag) :: locals.values } ([
+          .constI64 (UInt64.ofNat expectedTag),
+          .eqI64,
           .iff 0 0 thenTarget elseTarget] ++ rest),
       frames⟩
   let afterConst : StructuredWasmState Host :=
     ⟨store,
       .running { locals with values :=
-        (.i32 (UInt32.ofNat expectedTag) ::
-          .i32 (UInt32.ofNat actualTag) :: locals.values) } ([
-          .eq,
+        (.i64 (UInt64.ofNat expectedTag) ::
+          .i64 (UInt64.ofNat actualTag) :: locals.values) } ([
+          .eqI64,
           .iff 0 0 thenTarget elseTarget] ++ rest),
       frames⟩
   let afterEq : StructuredWasmState Host :=
@@ -4485,8 +4485,8 @@ theorem structuredWasmObjectCaseMissPrefixFinitePath
         ⟨store, .running locals ([
             .localGet discrIndex,
             .call getTagIndex,
-            .const (UInt32.ofNat expectedTag),
-            .eq,
+            .constI64 (UInt64.ofNat expectedTag),
+            .eqI64,
             .iff 0 0 thenTarget elseTarget] ++ rest), frames⟩
         afterLocal := by
     apply StructuredWasmStep.atomic (fuel := 1)
@@ -4496,7 +4496,7 @@ theorem structuredWasmObjectCaseMissPrefixFinitePath
     hostSatisfies.lookup_contract importInBounds contractFound
   have invoked :
       hostFunction.invoke store [.i32 (UInt32.ofNat word.value)] =
-        .Return [.i32 (UInt32.ofNat actualTag)] store := by
+        .Return [.i64 (UInt64.ofNat actualTag)] store := by
     have contract :=
       hostContract store [.i32 (UInt32.ofNat word.value)]
     change hostFunction.invoke store [.i32 (UInt32.ofNat word.value)] =
@@ -4516,10 +4516,10 @@ theorem structuredWasmObjectCaseMissPrefixFinitePath
     · trivial
     · simp only [Wasm.execOne.eq_def]
   have physicalDifferent :
-      UInt32.ofNat actualTag ≠ UInt32.ofNat expectedTag := by
+      UInt64.ofNat actualTag ≠ UInt64.ofNat expectedTag := by
     intro physicalEqual
     exact tagNe <|
-      (constructorTag_i32_eq_iff actualFits expectedFits).mp physicalEqual
+      (constructorTag_uint64_eq_iff actualFits expectedFits).mp physicalEqual
   have compare : StructuredWasmStep module hostEnv afterConst afterEq := by
     apply StructuredWasmStep.atomic (fuel := 1)
     · trivial
@@ -5273,7 +5273,6 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainFinitePath
     (selection : chooseAlt actualTag alts = some selected)
     (sourceLookup : lookup sourceEnv discr = some sourceObject)
     (tagged : getTag sourceRuntime sourceObject = .ok actualTag)
-    (actualFits : actualTag < UInt32.size)
     (stateRelated :
       StateRelated sourceFunction sourceRuntime sourceEnv targetStore
         targetLocals witness)
@@ -5358,13 +5357,15 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainFinitePath
       have resultCount : imp.results.length = 1 := by
         change imp.results.length = 1 at results
         exact results
-      have expectedFits : info.cidx < UInt32.size := by
-        simpa [Fir.Wasm.constructorTagFitsI32] using fits
+      have actualFits : actualTag < UInt64.size :=
+        stateRelated.1.heap.tobjectTag_lt_uint64 objectRelated tagged
+      have expectedFits : info.cidx < UInt64.size := by
+        simpa [Fir.Wasm.constructorTagFitsUInt64] using fits
       have tagOperation :
           getTagStep targetStore [.i32 (UInt32.ofNat word.value)] =
-            .Return [.i32 (UInt32.ofNat actualTag)] targetStore := by
+            .Return [.i64 (UInt64.ofNat actualTag)] targetStore := by
         have operation :=
-          getTagStep_of_refines stateRelated.1 objectRelated tagged actualFits
+          getTagStep_of_refines stateRelated.1 objectRelated tagged
         rw [stateRelated.clearFailure] at operation
         exact operation
       by_cases hit : actualTag = info.cidx
@@ -5473,7 +5474,7 @@ theorem ConcreteSupportedFunction.singleObjectConstructorCaseFinitePath
             structuredWasmCaseLabels (targetLocals.values.drop 0)
                 targetSuffix 1 ++ frames⟩ := by
   rcases supported with
-    ⟨info, altsEq, modeEq, expectedTagFits, discrCompiled, actualTagFits⟩
+    ⟨info, altsEq, modeEq, expectedTagFits, discrCompiled⟩
   rcases sourceResult with
     ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩
   have sourceLookup : lookup sourceEnv cases.discr = some sourceObject := by
@@ -5488,8 +5489,6 @@ theorem ConcreteSupportedFunction.singleObjectConstructorCaseFinitePath
     rw [altsEq] at chosen
     simp [chooseAlt, findCtorAlt, findDefaultAlt] at chosen
     omega
-  have actualFits : actualTag < UInt32.size :=
-    actualTagFits lookupFound tagged
   obtain ⟨selectedTarget, discrIndex, getTagIndex, targetSuffix,
       selectedAdapted, discrFound, getTagFound, targetCodeEq⟩ :=
     CodeAdaptedWithSuffix.singleObjectConstructorCases_eq altsEq modeEq
@@ -5528,9 +5527,9 @@ theorem ConcreteSupportedFunction.singleObjectConstructorCaseFinitePath
     exact results
   have tagOperation :
       getTagStep targetStore [.i32 (UInt32.ofNat word.value)] =
-        .Return [.i32 (UInt32.ofNat info.cidx)] targetStore := by
+        .Return [.i64 (UInt64.ofNat info.cidx)] targetStore := by
     have operation :=
-      getTagStep_of_refines stateRelated.1 objectRelated tagged actualFits
+      getTagStep_of_refines stateRelated.1 objectRelated tagged
     rw [stateRelated.clearFailure, tagEq] at operation
     exact operation
   refine ⟨selectedTarget, targetSuffix, selectedAdapted, ?_⟩
@@ -5740,7 +5739,7 @@ theorem ConcreteSupportedFunction.objectConstructorCasesFinitePath
         (testCount = 0 →
           DefaultOnlyCaseSupported sourceRuntime sourceEnv cases selected) := by
   rcases supported with
-    ⟨altsSupported, modeEq, discriminator, actualTagFits⟩
+    ⟨altsSupported, modeEq, discriminator⟩
   rcases discriminator with ⟨discrKind, discrCompiled, discrRefines⟩
   rcases sourceResult with
     ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩
@@ -5752,15 +5751,13 @@ theorem ConcreteSupportedFunction.objectConstructorCasesFinitePath
           simpa [lookupValue, lookupEq] using lookupFound
         subst value
         rfl
-  have actualFits : actualTag < UInt32.size :=
-    actualTagFits lookupFound tagged
   rcases CodeAdaptedWithSuffix.cases_eq adapted with
     ⟨fallback, targetCore, targetSuffix, fallbackCompiled, chainAdapted,
       targetCodeEq⟩
   obtain ⟨selectedTarget, testCount, selectedAdapted, rawTargetPrefix,
       zeroTests⟩ :=
     spec.objectConstructorCaseChainFinitePath altsSupported modeEq
-      discrCompiled discrRefines chosen sourceLookup tagged actualFits
+      discrCompiled discrRefines chosen sourceLookup tagged
       stateRelated fallbackCompiled chainAdapted
       (targetSuffix := targetSuffix) (frames := frames)
   refine ⟨selectedTarget, testCount, targetSuffix, selectedAdapted, ?_, ?_⟩
@@ -15073,8 +15070,7 @@ theorem
       expectedResult facts resultFacts resultRuntime resultEnv resultValue
       requiredBytes supported sourceStep continued ih =>
       rcases supported with
-        ⟨info, altsEq, modeEq, expectedTagFits, discrCompiled,
-          actualTagFits⟩
+        ⟨info, altsEq, modeEq, expectedTagFits, discrCompiled⟩
       rcases sourceStep with
         ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩
       have sourceLookup :
@@ -15090,10 +15086,6 @@ theorem
         rw [altsEq] at chosen
         simp [chooseAlt, findCtorAlt, findDefaultAlt] at chosen
         omega
-      have actualFits : actualTag < UInt32.size :=
-        actualTagFits lookupFound tagged
-      have expectedFits : info.cidx < UInt32.size := by
-        simpa [Fir.Wasm.constructorTagFitsI32] using expectedTagFits
       obtain ⟨selectedTarget, discrIndex, getTagIndex, targetSuffix,
           selectedAdapted, discrFound, getTagFound, targetCodeEq⟩ :=
         CodeAdaptedWithSuffix.singleObjectConstructorCases_eq altsEq modeEq
@@ -15132,10 +15124,9 @@ theorem
         exact results
       have tagOperation :
           getTagStep targetStore [.i32 (UInt32.ofNat word.value)] =
-            .Return [.i32 (UInt32.ofNat info.cidx)] targetStore := by
+            .Return [.i64 (UInt64.ofNat info.cidx)] targetStore := by
         have operation :=
           getTagStep_of_refines related.stateRelated.1 objectRelated tagged
-            actualFits
         rw [related.stateRelated.clearFailure, tagEq] at operation
         exact operation
       let sourceSelected : MachineState := {
@@ -15266,8 +15257,7 @@ theorem
       requiredBytes supported sourceStep continued ih =>
       rcases supported with
         ⟨firstInfo, secondInfo, firstBranch, secondBranch, defaultBranch,
-          altsEq, modeEq, firstTagFits, secondTagFits, discrCompiled,
-          actualTagFits⟩
+          altsEq, modeEq, firstTagFits, secondTagFits, discrCompiled⟩
       rcases sourceStep with
         ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩
       have sourceLookup :
@@ -15279,12 +15269,10 @@ theorem
               simpa [lookupValue, lookupEq] using lookupFound
             subst value
             rfl
-      have actualFits : actualTag < UInt32.size :=
-        actualTagFits lookupFound tagged
-      have firstExpectedFits : firstInfo.cidx < UInt32.size := by
-        simpa [Fir.Wasm.constructorTagFitsI32] using firstTagFits
-      have secondExpectedFits : secondInfo.cidx < UInt32.size := by
-        simpa [Fir.Wasm.constructorTagFitsI32] using secondTagFits
+      have firstExpectedFits : firstInfo.cidx < UInt64.size := by
+        simpa [Fir.Wasm.constructorTagFitsUInt64] using firstTagFits
+      have secondExpectedFits : secondInfo.cidx < UInt64.size := by
+        simpa [Fir.Wasm.constructorTagFitsUInt64] using secondTagFits
       obtain ⟨firstTarget, secondTarget, defaultTarget, discrIndex,
           getTagIndex, targetSuffix, firstAdapted, secondAdapted,
           defaultAdapted, discrFound, getTagFound, targetCodeEq⟩ :=
@@ -15308,6 +15296,8 @@ theorem
         | float32Bits valueRelated => cases valueRelated
         | float64Bits valueRelated => cases valueRelated
       subst discrPhysical
+      have actualFits : actualTag < UInt64.size :=
+        related.stateRelated.1.heap.tobjectTag_lt_uint64 objectRelated tagged
       obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
         functionSpec.runtimeCallsAligned getTagFound
       have getTagContracted :
@@ -15324,10 +15314,9 @@ theorem
         exact results
       have tagOperation :
           getTagStep targetStore [.i32 (UInt32.ofNat word.value)] =
-            .Return [.i32 (UInt32.ofNat actualTag)] targetStore := by
+            .Return [.i64 (UInt64.ofNat actualTag)] targetStore := by
         have operation :=
           getTagStep_of_refines related.stateRelated.1 objectRelated tagged
-            actualFits
         rw [related.stateRelated.clearFailure] at operation
         exact operation
       let sourceSelected : MachineState := {
@@ -15355,10 +15344,10 @@ theorem
           target =
             ⟨targetStore, .running targetLocals ([
                 .localGet discrIndex, .call getTagIndex,
-                .const (UInt32.ofNat firstInfo.cidx), .eq,
+                .constI64 (UInt64.ofNat firstInfo.cidx), .eqI64,
                 .iff 0 0 firstTarget [
                   .localGet discrIndex, .call getTagIndex,
-                  .const (UInt32.ofNat secondInfo.cidx), .eq,
+                  .constI64 (UInt64.ofNat secondInfo.cidx), .eqI64,
                   .iff 0 0 secondTarget defaultTarget]] ++ targetSuffix),
               target.frames⟩ := by
         rcases target with ⟨actualStore, actualControl, actualFrames⟩
@@ -15513,7 +15502,7 @@ theorem
             (thenTarget := firstTarget)
             (elseTarget := [
               .localGet discrIndex, .call getTagIndex,
-              .const (UInt32.ofNat secondInfo.cidx), .eq,
+              .constI64 (UInt64.ofNat secondInfo.cidx), .eqI64,
               .iff 0 0 secondTarget defaultTarget])
             (discrIndex := discrIndex) (getTagIndex := getTagIndex)
             (imp := imp) (word := word) (actualTag := actualTag)
@@ -15537,7 +15526,7 @@ theorem
               .running
                 { targetLocals with values := targetLocals.values } [
                   .localGet discrIndex, .call getTagIndex,
-                  .const (UInt32.ofNat secondInfo.cidx), .eq,
+                  .constI64 (UInt64.ofNat secondInfo.cidx), .eqI64,
                   .iff 0 0 secondTarget defaultTarget],
               .label 0 (targetLocals.values.drop 0) targetSuffix ::
                 target.frames⟩
@@ -15563,7 +15552,7 @@ theorem
                 (thenTarget := firstTarget)
                 (elseTarget := [
                   .localGet discrIndex, .call getTagIndex,
-                  .const (UInt32.ofNat secondInfo.cidx), .eq,
+                  .constI64 (UInt64.ofNat secondInfo.cidx), .eqI64,
                   .iff 0 0 secondTarget defaultTarget])
                 (discrIndex := discrIndex) (getTagIndex := getTagIndex)
                 (imp := imp) (word := word) (actualTag := actualTag)
@@ -15609,7 +15598,7 @@ theorem
               .running
                 { targetLocals with values := targetLocals.values } [
                   .localGet discrIndex, .call getTagIndex,
-                  .const (UInt32.ofNat secondInfo.cidx), .eq,
+                  .constI64 (UInt64.ofNat secondInfo.cidx), .eqI64,
                   .iff 0 0 secondTarget defaultTarget],
               .label 0 (targetLocals.values.drop 0) targetSuffix ::
                 target.frames⟩
@@ -15635,7 +15624,7 @@ theorem
                 (thenTarget := firstTarget)
                 (elseTarget := [
                   .localGet discrIndex, .call getTagIndex,
-                  .const (UInt32.ofNat secondInfo.cidx), .eq,
+                  .constI64 (UInt64.ofNat secondInfo.cidx), .eqI64,
                   .iff 0 0 secondTarget defaultTarget])
                 (discrIndex := discrIndex) (getTagIndex := getTagIndex)
                 (imp := imp) (word := word) (actualTag := actualTag)
@@ -15670,7 +15659,7 @@ theorem
       facts resultFacts resultRuntime resultEnv resultValue requiredBytes
       supported sourceStep continued ih =>
       rcases supported with
-        ⟨altsSupported, modeEq, discriminator, actualTagFits⟩
+        ⟨altsSupported, modeEq, discriminator⟩
       rcases discriminator with ⟨discrKind, discrCompiled, discrRefines⟩
       rcases sourceStep with
         ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩
@@ -15683,8 +15672,6 @@ theorem
               simpa [lookupValue, lookupEq] using lookupFound
             subst value
             rfl
-      have actualFits : actualTag < UInt32.size :=
-        actualTagFits lookupFound tagged
       rcases CodeAdaptedWithSuffix.cases_eq related.adapted with
         ⟨fallback, targetCore, targetSuffix, fallbackCompiled, chainAdapted,
           targetCodeEq⟩
@@ -15692,7 +15679,7 @@ theorem
           rawTargetPrefix, _zeroTests⟩ :=
         functionSpec.objectConstructorCaseChainFinitePath altsSupported
           modeEq discrCompiled discrRefines chosen sourceLookup tagged
-          actualFits related.stateRelated fallbackCompiled chainAdapted
+          related.stateRelated fallbackCompiled chainAdapted
           (targetSuffix := targetSuffix) (frames := target.frames)
       let sourceSelected : MachineState := {
         source with control := .code selected }
