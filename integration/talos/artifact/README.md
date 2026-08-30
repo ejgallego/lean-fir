@@ -178,7 +178,9 @@ against the heap-only USize contract independently.
 
 W7 also emits the first standalone Wasm-resident runtime slice. Its module
 defines and exports one-page memory, has no imports, and exports the raw
-`tobject → UInt32` helper `fir_getTag`. The browser-neutral smoke client writes
+`tobject → UInt64` helper `fir_getTag`. The widened result preserves promoted
+object tags exactly instead of aliasing them through a 32-bit truncation. The
+browser-neutral smoke client writes
 ordinary W6 immediate, constructor, and promoted-tag layouts directly into the
 exported memory; no JavaScript runtime handler participates in the calls:
 
