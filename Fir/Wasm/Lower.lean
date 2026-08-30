@@ -1740,8 +1740,8 @@ def compilePartialArgument (context : Context) (param : LCNF.Param .impure)
     (expected : AbiKind) (arg : LCNF.Arg .impure) :
     Except CompileError (List Instruction × AbiKind) := do
   let (argument, actual) ← compileDeclarationArgument context param arg
-  if !actual.refines expected then
-    throw (.malformed "partial-application argument does not refine its parameter ABI")
+  if !actual.leanCompatible expected then
+    throw (.malformed "partial-application argument is not Lean-compatible with its parameter ABI")
   return (argument, actual)
 
 /-- Compile the supplied prefix of a partial application's effective target
@@ -1791,6 +1791,9 @@ def kindsLeanCompatible (actual expected : Array AbiKind) : Bool :=
   intro index indexLt
   exact AbiKind.leanCompatible_of_refines (refines.2 index indexLt)
 
+def closureProjectionKind (kind : AbiKind) : AbiKind :=
+  if kind.isObjectLike then .tobject else kind
+
 def compileFixedClosureField (closureId : FVarId) (target : LCNF.Decl .impure)
     (arity fixed : Nat) (kinds : Array AbiKind) (index : Nat) :
     List Instruction :=
@@ -1798,7 +1801,8 @@ def compileFixedClosureField (closureId : FVarId) (target : LCNF.Decl .impure)
   | some AbiKind.erased => [.i32Const .erased 0]
   | some kind => [
       .localGet closureId,
-      .call (.runtime (.closureProj target.name arity fixed index kind))]
+      .call (.runtime (.closureProj target.name arity fixed index
+        (closureProjectionKind kind)))]
   | none => []
 
 def compileFixedClosureFields (closureId : FVarId) (target : LCNF.Decl .impure)

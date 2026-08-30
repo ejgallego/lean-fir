@@ -103,8 +103,9 @@ def supportedDeclarationArgumentKinds? (program : Fir.LeanIR.ImpureProgram)
     else
       none
 
-/-- Validate the fixed capture descriptor against the effective declaration
-parameter kinds selected by the lowerer. -/
+/-- Validate one exact fixed-capture descriptor against the declaration's
+physical Lean ABI. Object-family captures retain their actual descriptor kind
+and are widened only when projected for the eventual ordinary call. -/
 def supportedPartialArgumentKinds? (locals : LocalKinds)
     (params : Array (LCNF.Param .impure)) (args : Array (LCNF.Arg .impure))
     (expected : Array AbiKind) :
@@ -116,7 +117,7 @@ def supportedPartialArgumentKinds? (locals : LocalKinds)
     let expectedKind := pair.snd
     let actual ← supportedArgKind? locals arg
     let actual := if param.type == LCNF.ImpureType.void then .erased else actual
-    if actual.refines expectedKind then some actual else none
+    if actual.leanCompatible expectedKind then some actual else none
 
 def supportedNamedCall (program : Fir.LeanIR.ImpureProgram)
     (locals : LocalKinds) (declared : AbiKind) (name : Name)

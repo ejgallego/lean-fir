@@ -858,7 +858,8 @@ def preciseBoxedConstantPartialApplicationProgram : Fir.LeanIR.ImpureProgram :=
   | .error _ => false
 
 /-- The same public `tobject` signature is not refined when the body may return
-a tagged value; this guards against globally weakening heap-object capture. -/
+a tagged value. Partial application still follows Lean's physical object-family
+ABI, while retaining the exact coarse capture descriptor. -/
 def impreciseTaggedConstantDecl : LCNF.Decl .impure :=
   decl `impreciseTaggedConstant #[] LCNF.ImpureType.tobject (.code <|
     .let (letDecl boxedFloatValue LCNF.ImpureType.tobject (.lit (.nat 1))) <|
@@ -871,10 +872,30 @@ def impreciseTaggedPartialApplicationProgram : Fir.LeanIR.ImpureProgram :=
           (.fap `impreciseTaggedConstant #[])) <|
         .let (letDecl boxedFloatClosure objType
           (.pap `boxedFloatClosureTarget #[.fvar boxedFloatValue])) <|
-        .return boxedFloatClosure)] }
+        .let (letDecl boxedFloatOther LCNF.ImpureType.tobject (.lit (.nat 2))) <|
+        .let (letDecl r objType
+          (.fvar boxedFloatClosure #[.fvar boxedFloatOther])) <|
+        .return r)] }
 
 #guard effectiveDeclarationResultKind? impreciseTaggedConstantDecl == some .tobject
-#guard !supportedProgram impreciseTaggedPartialApplicationProgram
+#guard supportedProgram impreciseTaggedPartialApplicationProgram
+#guard match lowerSupported impreciseTaggedPartialApplicationProgram with
+  | .ok module =>
+      (validateModule module).isOk &&
+        module.closureDescriptors.contains #[.tobject] &&
+        module.runtimeOperations.any fun
+          | .closureProj `boxedFloatClosureTarget 2 1 0 .tobject => true
+          | _ => false
+  | .error _ => false
+
+def scalarPartialCaptureProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[boxedFloatClosureTargetDecl,
+      decl `main #[param x LCNF.ImpureType.uint32] objType (.code <|
+        .let (letDecl c objType
+          (.pap `boxedFloatClosureTarget #[.fvar x])) <|
+        .return c)] }
+
+#guard !supportedProgram scalarPartialCaptureProgram
 
 def supportedIsSharedProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `supportedIsShared #[param x LCNF.ImpureType.tobject] u8Type (.code <|
