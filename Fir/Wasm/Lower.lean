@@ -1706,6 +1706,32 @@ def compileArgs (context : Context) (args : Array (LCNF.Arg .impure)) :
     let (argument, kind) ← compileArg context arg
     return (instructions ++ argument, kinds.push kind)
 
+/-- Compile one named-call argument against its exact source parameter.
+Lean keeps `void` declaration parameters as physical pointer lanes, but their
+value is unobservable. Canonicalize that lane to zero so generated boxed
+wrappers may pass any compiler-selected object representation without widening
+the semantic compatibility relation for ordinary values. -/
+def compileDeclarationArgument (context : Context)
+    (param : LCNF.Param .impure) (arg : LCNF.Arg .impure) :
+    Except CompileError (List Instruction × AbiKind) := do
+  let compiled@(_, _) ← compileArg context arg
+  if param.type == LCNF.ImpureType.void then
+    return ([.i32Const .erased 0], .erased)
+  return compiled
+
+def compileDeclarationArguments (context : Context)
+    (target : LCNF.Decl .impure) (args : Array (LCNF.Arg .impure)) :
+    Except CompileError (List Instruction × Array AbiKind) := do
+  if args.size != target.params.size then
+    throw (.arityMismatch target.params.size args.size)
+  (target.params.zip args).foldlM (init := ([], #[]))
+      fun (instructions, kinds) pair => do
+    let expected ← checkedDeclarationParamKind context.program target pair.fst
+    let (argument, actual) ← compileDeclarationArgument context pair.fst pair.snd
+    unless actual.leanCompatible expected do
+      throw (.malformed "named-call argument is not Lean-compatible with its parameter ABI")
+    return (instructions ++ argument, kinds.push actual)
+
 /-- Compile one fixed argument against the effective parameter slot it will
 occupy in a closure. Compiler-declared `tobject` parameters which are
 structurally erased have already been refined to `.erased`; no global
@@ -1884,7 +1910,6 @@ def compileLetValue (context : Context) (decl : LCNF.LetDecl .impure) :
       let (object, _) ← getLocal context fvarId
       return [object, .call (.runtime (.scalarProj width offset resultKind))]
   | .fap name args =>
-      let (arguments, _) ← compileArgs context args
       let some target := context.program.findDecl? name | throw (.unknownDeclaration name)
       if args.isEmpty && target.params.isEmpty then
         let some targetResultKind := effectiveDeclarationResultKind? target |
@@ -1904,6 +1929,7 @@ def compileLetValue (context : Context) (decl : LCNF.LetDecl .impure) :
               .globalSet flagIndex .uint32]),
           .globalGet valueIndex targetResultKind]
       else
+        let (arguments, _) ← compileDeclarationArguments context target args
         return arguments ++ [.call (.declaration name)]
   | .pap name args =>
       let some target := context.program.findDecl? name | throw (.unknownDeclaration name)
@@ -1960,7 +1986,7 @@ theorem compileLetValue_fap_cached
           .i32Const .uint32 1,
           .globalSet (2 * cacheIndex) .uint32],
         .globalGet (2 * cacheIndex + 1) targetResultKind] := by
-  simp [compileLetValue, letValueKind, kindEq, compileArgs, targetEq, targetResultEq,
+  simp [compileLetValue, letValueKind, kindEq, targetEq, targetResultEq,
     paramsEq, cacheEq]
   rfl
 

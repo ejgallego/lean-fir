@@ -267,6 +267,25 @@ def voidParameterCallProgram : Fir.LeanIR.ImpureProgram :=
         function.params.map (·.snd) == #[.tobject, .erased]
   | .error _ => false
 
+def voidParameterBoxedWrapper : LCNF.Decl .impure :=
+  decl `voidParameterBoxedWrapper #[
+    param x LCNF.ImpureType.tobject,
+    param y LCNF.ImpureType.tagged]
+    LCNF.ImpureType.tobject (.code <|
+      .let (letDecl r LCNF.ImpureType.tobject
+        (.fap voidParameterTarget.name #[.fvar x, .fvar y])) <|
+      .return r)
+
+def voidParameterBoxedCallProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[voidParameterTarget, voidParameterBoxedWrapper] }
+
+#guard match lowerSupported voidParameterBoxedCallProgram with
+  | .ok module =>
+      match validateModule module with
+      | .ok () => true
+      | .error _ => false
+  | .error _ => false
+
 def voidParameterExternalTarget : LCNF.Decl .impure :=
   decl `voidParameterExternalTarget #[
     param x LCNF.ImpureType.tobject,

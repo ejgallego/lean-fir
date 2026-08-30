@@ -82,6 +82,27 @@ def supportedArgKind? (locals : LocalKinds) : LCNF.Arg .impure → Option AbiKin
   | .fvar fvarId => findLocalKind? locals fvarId
   | .type _ h => nomatch h
 
+/-- Validate and normalize the arguments to one exact named declaration.
+Source `void` parameters consume a physical but unobservable erased lane, so
+their compiler-selected input representation is checked for existence and
+then canonicalized to `.erased`. -/
+def supportedDeclarationArgumentKinds? (program : Fir.LeanIR.ImpureProgram)
+    (locals : LocalKinds) (target : LCNF.Decl .impure)
+    (args : Array (LCNF.Arg .impure)) : Option (Array AbiKind) := do
+  if args.size != target.params.size then none
+  let expected ← declarationParameterKinds? program target
+  ((target.params.zip args).zip expected).mapM fun pair => do
+    let param := pair.fst.fst
+    let arg := pair.fst.snd
+    let expectedKind := pair.snd
+    let actual ← supportedArgKind? locals arg
+    if param.type == LCNF.ImpureType.void then
+      some .erased
+    else if actual.leanCompatible expectedKind then
+      some actual
+    else
+      none
+
 /-- Validate the fixed capture descriptor against the effective declaration
 parameter kinds selected by the lowerer. -/
 def supportedPartialArgumentKinds? (locals : LocalKinds)
@@ -99,17 +120,13 @@ def supportedNamedCall (program : Fir.LeanIR.ImpureProgram)
   | none => false
   | some target =>
       match target.value, effectiveDeclarationResultKind? target,
-          declarationParameterKinds? program target,
-          args.mapM (supportedArgKind? locals) with
-      | .extern _, some result, some paramKinds, some argKinds
-      | .code _, some result, some paramKinds, some argKinds =>
+          supportedDeclarationArgumentKinds? program locals target args with
+      | .extern _, some result, some _
+      | .code _, some result, some _ =>
           (result.refines declared ||
               (args.isEmpty && target.params.isEmpty &&
-                result.leanCompatible declared)) &&
-            argKinds.size == paramKinds.size &&
-            (argKinds.zip paramKinds).all fun pair =>
-              pair.fst.leanCompatible pair.snd
-      | _, _, _, _ => false
+                result.leanCompatible declared))
+      | _, _, _ => false
 
 def supportedPartialApply (program : Fir.LeanIR.ImpureProgram)
     (locals : LocalKinds) (declared : AbiKind) (name : Name)
