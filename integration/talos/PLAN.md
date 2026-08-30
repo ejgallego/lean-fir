@@ -102,8 +102,8 @@ current validated source/target relation
 source/compiler admission for the current code node
 ```
 
-PA0 is complete. The exact 20-branch audit found 7 already-derived branches,
-5 hidden-interface branches, 8 semantic-provenance branches, and no semantic
+PA0 is complete. The exact 20-branch audit now records 9 already-derived branches,
+3 hidden-interface branches, 8 semantic-provenance branches, and no semantic
 discrepancy. PA1 is active with three focused boundaries: semantic
 result/publication typing, constructor/schema/layout provenance, and remaining
 case discriminator/tag provenance. Production `WasmSupported` now enforces
@@ -113,6 +113,14 @@ asking theorem clients for it. The audit also settled that PA2 first
 constructs `ConcreteStructuredSchemaSourceAdmissionSafeAt`, then reuses
 `ConcreteStructuredValidatedCodeCoreRel.admitSchema_of_source_safe_step` as
 the sole admission assembly theorem.
+
+The current case slice makes that boundary branch-exact. `ConcreteStructuredCaseSafeAt`
+is a default/scalar/object classification, and
+`caseSafe_of_objectCaseSafeWhenNeeded` derives the first two arms from residual
+validation plus the current source selection. The remaining case premise is
+now exactly a nonempty constructor table in object-tag mode, where the current
+object simulator still needs precise `tobject` origin and the live semantic
+tag bound.
 
 The result/publication boundary is now substantially narrower.
 `SemanticEnvAtLocalKinds.ofStateRelated` derives every ordinary residual-local

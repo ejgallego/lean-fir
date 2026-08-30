@@ -39,7 +39,7 @@ even when the execution may continue forever.
 
 1. **PA0 — admission audit (complete).** All 20 branches have exact
    dependencies and dispositions in
-   [`w6-source-admission-audit.md`](w6-source-admission-audit.md): 7 A, 5 B,
+   [`w6-source-admission-audit.md`](w6-source-admission-audit.md): 9 A, 3 B,
    8 C, 0 E, with four explicit resource overlays.
 2. **PA1 — minimal semantic provenance (active).** Add only source facts that
    PA0 proved cannot be reconstructed from the guarded validated relation.
@@ -48,7 +48,9 @@ even when the execution may continue forever.
    compiler construction of precise non-directional use-site provenance,
    followed by the object/schema and remaining discriminator/tag families.
    Normalized case-table order is now a production validator fact rather than
-   a client premise.
+   a client premise, and default-only/scalar case admission is fully
+   compiler-derived. Only object constructor/tag provenance remains in the
+   case family.
 3. **PA2 — compiler-derived guarded admission.** Derive the current-step
    compiler admission package from production validation, the active relation,
    and one successful source step.
@@ -89,7 +91,7 @@ roadmap and examples then reference only the closed endpoint.
 | Milestone | Current theorem or interface | Premises to eliminate | Premises retained | Owner | Definition of done |
 |---|---|---|---|---|---|
 | PA0 (complete) | `ConcreteStructuredSourceAdmissionSafeAt`; `ConcreteStructuredSchemaSourceAdmissionSafeAt`; `ConcreteStructuredCodeStepAdmission` | None during audit | Existing compiler, semantic, and resource boundaries unchanged | W6 audit owner | Met: 20/20 branches classified; no unresolved dependency or class-E discrepancy |
-| PA1 (active) | `SemanticEnvAtLocalKinds.ofStateRelated`; `SemanticBindingAtUseSite`; `ConcreteStructuredReturnUseSiteProvenanceAt`; `ConcreteStructuredCaseAltsNormalized.of_caseAltsNormalized`; operation-specific source-safety lemmas | Precise non-directional producer origin, closure ingress, object-case tag, field, and layout provenance | Ordinary local typing, call/cache publication, and normalized case order derived from the active relation/validator | W6 result/object/case helper owners | All class-C facts are compiler-derived without a public provenance map or universal source invariant; shared publication and case-order laws are factored |
+| PA1 (active) | `SemanticEnvAtLocalKinds.ofStateRelated`; `SemanticBindingAtUseSite`; `ConcreteStructuredReturnUseSiteProvenanceAt`; `ConcreteStructuredCaseAltsNormalized.of_caseAltsNormalized`; `ConcreteStructuredValidatedCodeCoreRel.caseSafe_of_objectCaseSafeWhenNeeded`; operation-specific source-safety lemmas | Precise non-directional producer origin, closure ingress, object-case tag, field, and layout provenance | Ordinary local typing, call/cache publication, normalized case order, and default/scalar case admission derived from the active relation/validator | W6 result/object/case helper owners | All class-C facts are compiler-derived without a public provenance map or universal source invariant; shared publication and case-classification laws are factored |
 | PA2 | `ConcreteStructuredCompilerCurrentStepAdmission`; `ConcreteStructuredValidatedCodeCoreRel.admitSchema_of_source_safe_step` | `ConcreteStructuredSchemaSourceReadyAt` as a client-provided current-node law | `ConcreteStructuredCurrentStepFiniteRuntimeSafety`; `ConcreteStructuredCurrentStepAddressSpaceSafety` | W6 owner | Production compiler facts construct current-step admission for every successful guarded source step |
 | PA3 | `ConcreteSupportedExport.finiteTraceCorrect_of_schemaSourceInvariant` | `SourceInvariant`, `sourceLaws`, `sourceInitialInvariant`, caller-selected `initialSchema` | Entry relation; runtime/external contracts; finite header/capture safety; allocation headroom | W6 owner | Canonical `ConcreteSupportedExport.finiteTraceCorrect` has the closed-W6 surface and an exact axiom regression |
 | PA4a | Generic finite-stuttering/pass bridge, including `precomposeStutteringPass` | Any renamed form of the W6 source-invariant premise | The earlier pass's real semantic and well-formedness hypotheses | Composition owner | One existing pass theorem yields an earlier-LCNF-to-contracted-Wasm finite-prefix theorem |
