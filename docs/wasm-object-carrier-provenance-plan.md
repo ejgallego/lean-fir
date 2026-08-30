@@ -82,6 +82,47 @@ this model is introduced. Its straight-line recognizer becomes the first
 producer of result evidence, not the long-term definition of a declaration's
 ABI.
 
+## Role in closing the W6 theorem
+
+The 2026-08-30 proof-architecture review makes provenance a consumer-driven
+part of source-premise elimination, not a reason to build a parallel compiler
+type system up front.  W6's structured simulation already retains residual
+production validation, the current source/target value relation, the active
+refinement witness, and constructor-schema agreement.  Current-node readiness
+is additionally guarded by a supported function and one successful source
+step.  The first task is therefore to audit each admission branch against
+those facts.
+
+Provenance is added only where carrier compatibility leaves a real semantic
+gap.  The expected first consumers are:
+
+- return from a coarse `tobject` local through a precise `object` or `tagged`
+  function result;
+- propagation of a callee's precise result through direct calls, closure
+  calls, and lazy-cache hit/miss paths; and
+- heap-sensitive field/ownership operations whose active constructor evidence
+  cannot be inferred from an `i32` carrier.
+
+The common proof boundary records that a successful compiler-accepted producer
+binds a value with the exact effective result information selected by
+production validation.  Alias, literal, projection, boxing, constructor,
+reuse, and external families prove that fact once; environment insertion,
+call-frame push/pop, and cache publication preserve it generically.  The
+existing `SemanticEnvAtLocalKinds` and constructor-schema transitions are
+ingredients of this boundary, not new client premises.
+
+If the guarded relation already proves a branch, no persistent provenance
+field is introduced for it.  If it does not, the smallest producer/use-site
+fact is added to the schema-enriched validated relation and initialized from
+the real export-entry ABI/refinement data.  The production finite-prefix
+theorem must ultimately quantify over neither a caller-chosen provenance map
+nor an arbitrary source invariant.
+
+This audit precedes the broader `ValueInfo` refactor below.  The full
+three-axis descriptor remains the preferred design if several independent
+consumers need it; one isolated return fact is not sufficient justification
+for changing every local and emitted module descriptor.
+
 ## Boundary rules
 
 - Calls, returns, joins, and partial-application capture require compatible

@@ -19,6 +19,61 @@ The proof direction works backwards from final impure LCNF. The Wasm
 direction works forwards from that same boundary. This lets the interpreter,
 runtime model, differential examples, and bug reports serve both efforts.
 
+## End-to-end theorem and composition gate
+
+The intended repository theorem is finite-prefix behavioral preservation for
+the actual compiler chain; it is not termination or a functional property of
+the source program:
+
+```text
+earlier LCNF
+    | pass simulations
+    v
+final impure LCNF
+    | FIR-to-Wasm simulation
+    v
+contracted Wasm
+    | resident-runtime linking
+    v
+self-contained executable Wasm
+```
+
+The generic observable weak-simulation and finite-prefix packages already
+compose, and FIR's finite-stuttering pass interface is connected to the
+deterministic impure interpreter.  This permits one earlier pass theorem to be
+precomposed without mentioning a target trace or translation certificate.
+That mechanism is infrastructure, not by itself evidence that the final-LCNF
+backend theorem is closed.
+
+The current W6 export theorem still exposes a caller-selected source invariant
+providing current-node readiness and preservation.  The next shared proof gate
+is to eliminate that public premise by deriving schema-aware current-node
+admission from the actual guarded validated source/target relation.  The W6
+lane will first audit every admission constructor, then add only the missing
+semantic provenance facts; it will not build a second general final-LCNF type
+system unless the audit demonstrates that one is necessary.
+
+Backward work follows this ratchet:
+
+1. close final-LCNF-to-Wasm finite-prefix correctness without an arbitrary
+   source invariant or per-program certificate;
+2. precompose the nearest already-proved pass as an interface test;
+3. when that hop needs a typing or provenance fact, prove preservation of the
+   common fact once at the pass boundary;
+4. continue backward only while each hop produces a usable earlier-language
+   theorem rather than merely relocating an unresolved W6 premise.
+
+Runtime representation, allocation, ownership, and wasm32 resource facts stay
+local to W6.  Static local kinds, result provenance, constructor information,
+and well-formed call boundaries should flow through the pass proofs.  The
+compiled `sumTo` example is only a shape/admission regression and eventual
+one-line theorem application; it is not a program-specific proof campaign.
+
+Finite reference-count/capture bounds and wasm32 address-space headroom remain
+explicit execution premises until the semantics models their failures as
+matched observations.  Their presence does not turn the theorem into a
+termination claim.
+
 ## Why FIR represents three phases explicitly
 
 Lean has three named LCNF phases but only two syntax purity indices:

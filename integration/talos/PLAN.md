@@ -39,6 +39,136 @@ This layering separates three claims:
 The first proof should establish claims 1 and 2 without prematurely fixing a
 production heap layout.
 
+## Proof architecture review (2026-08-30)
+
+### Intended result
+
+The production theorem is a compiler simulation, not a program-verification
+theorem.  For a compiler-produced supported export, related entry arguments,
+correct runtime implementations, and adequate finite wasm32 resources, every
+finite observable final-LCNF execution prefix must have a matching generated
+Wasm prefix.  The theorem does not require source termination, a property of
+the returned value, a per-program execution certificate, or a caller-chosen
+future trace.
+
+The complete proof product has three independently reviewable links:
+
+```text
+earlier LCNF
+    | verified pass simulations
+    v
+final impure LCNF
+    | closed W6 compiler simulation
+    v
+Wasm with runtime contracts
+    | verified resident-helper linking
+    v
+self-contained executable Wasm
+```
+
+W6 owns the middle link.  The pass-proof lane owns the first link, while W7
+generation and the corresponding W6 helper refinements jointly close the last
+link.
+
+### Current theorem boundary
+
+The ranked finite-prefix machinery, structured control simulation, residual
+production validation, active constructor-schema/witness agreement, runtime
+primitive refinements, and one-pass backward composition are already present.
+The strongest convenient export theorem is nevertheless still conditional:
+`ConcreteSupportedExport.finiteTraceCorrect_of_sourceInvariant` asks the
+caller for an arbitrary source predicate, its `ready`/`preserved` laws, and an
+initial proof.  The schema-indexed form has the same logical gap while
+correctly avoiding the legacy arbitrary-witness field premise.
+
+The remaining compiler-proof obligation is narrower than a new proof of the
+whole interpreter's type safety:
+
+```text
+current validated source/target relation
+    + active schema/witness agreement
+    + one successful source step
+    ------------------------------------------------
+    source/compiler admission for the current code node
+```
+
+`ConcreteStructuredSourceReadyAt` is already guarded by an actual supported
+function, recursively validated related state, active result equality, and
+successful source step.  A malformed arbitrary `MachineState` cannot satisfy
+those guards.  The primary plan is therefore to derive current-node admission
+from the guarded production relation, enriching that relation only with the
+semantic provenance facts that the audit proves genuinely missing.  W6 will
+not first construct a duplicate standalone final-LCNF type system.
+
+### Strategic decisions
+
+1. **Use the schema-indexed production path.**  New work must not revive the
+   legacy object-field premise that quantifies over unrelated refinement
+   witnesses.  A canonical initial schema is constructed internally from the
+   actual entry refinement data and then updated by the existing
+   `ConstructorSchema.SourceStep` relation.
+2. **Audit before adding invariants.**  For every constructor of
+   `ConcreteStructuredSourceAdmissionSafeAt` and
+   `ConcreteStructuredSchemaSourceAdmissionSafeAt`, classify the needed fact
+   as already derivable, hidden but already proved, missing semantic
+   provenance, or independent finite-resource safety.
+3. **Strengthen minimally.**  If return or object-family narrowing cannot be
+   derived from the current local relation, retain the smallest producer/use-
+   site provenance fact and preserve it through the existing binding and
+   frame transitions.  Do not make clients provide it.
+4. **Keep examples subordinate.**  The real compiled `sumTo` fixture remains
+   a final-LCNF shape and production-admission smoke test.  No program-specific
+   recursive proof or reachable-state enumeration is planned.
+5. **Close W6 before extending the chain.**  The next backward pass hop occurs
+   only after the final-LCNF theorem no longer exposes an arbitrary source
+   invariant.  A pass-specific typing obligation is factored as a reusable
+   preservation theorem rather than copied into W6.
+
+### Admission audit
+
+| Current-node family | Expected proof source | Audit focus |
+|---|---|---|
+| return | related local plus precise active-result provenance | coarse `tobject` must not justify `.object` or `.tagged` |
+| direct `let` | residual validation and existing direct-operation admission | expose one common typed-result/binding boundary |
+| pure external | installed Integer/Natural/scalar result contracts | reuse `SemanticLetBindingAt`-style result facts |
+| direct call | declaration lookup, evaluated arguments, and signature relation | caller/callee result provenance |
+| saturated closure | closure relation and dispatch metadata | capture and result kinds |
+| lazy cache | cache relation and generated declaration environment | identical hit/miss result evidence |
+| cases | normalized residual case validation and related discriminator | exact object versus scalar discriminator domain |
+| ownership/tag effects | existing successful operation relation | keep finite headroom separate |
+| object-field mutation | active constructor schema and witness agreement | no arbitrary witness or carrier-only inference |
+| `USize`/scalar mutation | established scalar/local and field relations | exact lane kind, not Wasm type equality |
+
+### Premise-elimination milestones
+
+- **PA0 — audit:** publish the branch-by-branch derivability matrix with exact
+  theorem dependencies and record any real discrepancy as a bug card.
+- **PA1 — minimal provenance:** factor the common semantic result/binding
+  theorem and add only the return, call, cache, or field provenance missing
+  from the guarded relation.  Reuse `SemanticEnvAtLocalKinds`,
+  `ConstructorSchema`, and existing direct/external refinements.
+- **PA2 — guarded admission:** prove schema-aware production current-node
+  admission directly from the validated related state, its active witness,
+  and the successful source step.
+- **PA3 — closed W6 theorem:** build the ranked generated trace simulation
+  from the schema-enriched validated global relation and publish an
+  export-facing finite-prefix theorem with no arbitrary `SourceInvariant`,
+  `sourceLaws`, `sourceInitialInvariant`, schema, or program certificate in its
+  public premises.
+- **PA4 — composition:** instantiate the generic backward pass bridge once,
+  then compose resident-helper/linking correctness without changing the W6
+  source-admission theorem.
+
+### Premises deliberately retained
+
+Premise elimination does not turn finite machine resources into compiler
+facts.  Initial source/target runtime relatedness, external/runtime contracts,
+finite reference-count and saturated-capture safety, and exact allocation
+headroom remain explicit.  The wasm32 address-space premise disappears only
+if out-of-memory/wraparound is modeled as a matched observable outcome; an
+unbounded source execution cannot otherwise be proved to fit finite Wasm
+memory.  None of these premises implies termination.
+
 ## Current status
 
 - W0 is complete: the semantic ABI, checked kinds, stable imports, opaque
