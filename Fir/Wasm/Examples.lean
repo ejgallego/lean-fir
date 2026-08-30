@@ -99,7 +99,7 @@ def runtimeSignatureCases : Array (RuntimeOp × Signature) := #[
   (.inc 1 true, { params := #[.tobject], results := #[] }),
   (.dec 1 true none, { params := #[.tobject], results := #[] }),
   (.delete, { params := #[.object], results := #[] }),
-  (.getTag, { params := #[.tobject], results := #[.uint32] })]
+  (.getTag, { params := #[.tobject], results := #[.uint64] })]
 
 #guard runtimeSignatureCases.all fun (operation, expected) =>
   operation.abiWellFormed && operation.signature == expected
@@ -918,6 +918,17 @@ def oversizedTagCaseProgram : Fir.LeanIR.ImpureProgram :=
       .cases (.mk `Oversized tobjectType c #[
         .ctorAlt oversizedTagInfo (.return x)]))] }
 
+def tooWideTagInfo : LCNF.CtorInfo :=
+  { name := `Oversized.tooWide, cidx := UInt64.size,
+    size := 1, usize := 0, ssize := 0 }
+
+def tooWideTagCaseProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] tobjectType (.code <|
+      .let (letDecl x tobjectType (.lit (.nat 0))) <|
+      .let (letDecl c taggedType (.ctor falseInfo #[])) <|
+      .cases (.mk `Oversized tobjectType c #[
+        .ctorAlt tooWideTagInfo (.return x)]))] }
+
 def oversizedScalarTagInfo : LCNF.CtorInfo :=
   { name := `Oversized.scalar, cidx := UInt8.size,
     size := 0, usize := 0, ssize := 0 }
@@ -982,7 +993,8 @@ def oversizedSetTagProgram : Fir.LeanIR.ImpureProgram :=
 #guard match lowerSupported nonNormalizedDefaultCaseProgram with
   | .error (.validation (.unsupportedCode `main)) => true
   | _ => false
-#guard !supportedProgram oversizedTagCaseProgram
+#guard supportedProgram oversizedTagCaseProgram
+#guard !supportedProgram tooWideTagCaseProgram
 #guard !supportedProgram oversizedScalarTagCaseProgram
 #guard !supportedProgram oversizedAllocatedTagProgram
 #guard !supportedProgram oversizedSetTagProgram
@@ -1022,7 +1034,17 @@ def oversizedSetTagProgram : Fir.LeanIR.ImpureProgram :=
       | .error _ => false
   | .error _ => false
 
+#guard caseTagTest .objectTag c oversizedTagInfo ==
+  [.localGet c, .call (.runtime .getTag),
+    .i64Const .uint64 (UInt64.ofNat UInt32.size)]
+
+#guard caseTagEq .objectTag == .i64Eq
+
 #guard match lower oversizedTagCaseProgram with
+  | .ok _ => true
+  | _ => false
+
+#guard match lower tooWideTagCaseProgram with
   | .error (.malformed message) => message.contains "does not fit the case discriminator ABI"
   | _ => false
 

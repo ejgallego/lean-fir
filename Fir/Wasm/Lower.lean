@@ -377,7 +377,7 @@ def caseDiscriminatorMode (context : Context) (discr : FVarId) :
     .objectTag
 
 def caseConstructorTagFits : CaseDiscriminatorMode → LCNF.CtorInfo → Bool
-  | .objectTag => constructorTagFitsI32
+  | .objectTag => constructorTagFitsUInt64
   | .scalarUInt8 => constructorTagFitsUInt8
 
 def caseTagTest (mode : CaseDiscriminatorMode) (discr : FVarId)
@@ -386,10 +386,14 @@ def caseTagTest (mode : CaseDiscriminatorMode) (discr : FVarId)
   | .objectTag =>
       [.localGet discr,
         .call (.runtime .getTag),
-        .i32Const .uint32 (UInt32.ofNat info.cidx)]
+        .i64Const .uint64 (UInt64.ofNat info.cidx)]
   | .scalarUInt8 =>
       [.localGet discr,
         .i32Const .uint8 (UInt32.ofNat info.cidx)]
+
+def caseTagEq : CaseDiscriminatorMode → Instruction
+  | .objectTag => .i64Eq
+  | .scalarUInt8 => .i32Eq
 
 def findJoinPoint? : JoinPoints → FVarId → Option (LCNF.FunDecl .impure)
   | [], _ => none
@@ -1931,7 +1935,7 @@ def compileCaseChainWithM [Monad m] [MonadExceptOf CompileError m]
       let thenBody ← compile code
       let elseBody ← compileCaseChainWithM compile mode discr rest fallback
       return caseTagTest mode discr info ++ [
-        .i32Eq, .ifElse thenBody elseBody]
+        caseTagEq mode, .ifElse thenBody elseBody]
 
 termination_by sizeOf alts
 

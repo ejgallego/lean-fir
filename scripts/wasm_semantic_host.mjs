@@ -1159,7 +1159,7 @@ export class SemanticHost {
       assert.equal(cell.object.kind, "ctor", "getTag expected a constructor");
       tag = cell.object.tag;
     }
-    return Number(BigInt.asUintN(32, tag));
+    return BigInt.asIntN(64, tag);
   }
 
   liveCell(location) {

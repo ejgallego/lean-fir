@@ -141,9 +141,13 @@ def literalKind : LCNF.LitValue → AbiKind
 def constructorKind (info : LCNF.CtorInfo) : AbiKind :=
   if info.size == 0 && info.usize == 0 && info.ssize == 0 then .tagged else .object
 
-/-- Case dispatch uses an `i32` tag lane, so source `Nat` tags must not wrap. -/
+/-- Constructor headers store their tag in one `i32` field. -/
 def constructorTagFitsI32 (info : LCNF.CtorInfo) : Bool :=
   decide (info.cidx < UInt32.size)
+
+/-- Object-case dispatch uses the exact `i64` tag returned by `getTag`. -/
+def constructorTagFitsUInt64 (info : LCNF.CtorInfo) : Bool :=
+  decide (info.cidx < UInt64.size)
 
 /-- A scalar `UInt8` case discriminator can only denote constructor tags below `2^8`. -/
 def constructorTagFitsUInt8 (info : LCNF.CtorInfo) : Bool :=
@@ -328,7 +332,7 @@ def RuntimeOp.signature : RuntimeOp → Signature
   | .inc _ _ => { params := #[.tobject], results := #[] }
   | .dec _ _ _ => { params := #[.tobject], results := #[] }
   | .delete => { params := #[.object], results := #[] }
-  | .getTag => { params := #[.tobject], results := #[.uint32] }
+  | .getTag => { params := #[.tobject], results := #[.uint64] }
 
 def RuntimeOp.stem : RuntimeOp → String
   | .literal .. => "literal"
