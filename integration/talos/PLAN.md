@@ -120,16 +120,14 @@ constructs `ConcreteStructuredSchemaSourceAdmissionSafeAt`, then reuses
 `ConcreteStructuredValidatedCodeCoreRel.admitSchema_of_source_safe_step` as
 the sole admission assembly theorem.
 
-The current case slice makes that boundary branch-exact. `ConcreteStructuredCaseSafeAt`
-is a default/scalar/object classification, and
-`caseSafe_of_objectCaseSafeWhenNeeded` derives the first two arms from residual
-validation plus the current source selection. The remaining case premise is
-now exactly a nonempty constructor table in object-tag mode.
-`ObjectCaseDiscriminatorSupported` is derived from residual validation and
-preserves the precise `.object`, `.tagged`, or `.tobject` kind; the concrete
-simulator widens that related lane directionally to `.tobject` without
-changing bits. The sole residual case fact is therefore the live semantic
-tag's `UInt32` bound.
+The case family has crossed the PA2 boundary. Exact i64 object-tag lowering
+removed the truncation discrepancy and the former live-tag premise.
+`productionCasesSupported_of_validation` now derives default-only, scalar
+`UInt8`, and object-constructor support from residual production validation
+plus the successful source selection. The exported
+`admit_cases_of_validated_step` theorem constructs zero-allocation current-node
+admission with no source classifier, schema premise, or caller invariant;
+`ConcreteStructuredSourceAdmissionSafeAt.cases` consequently stores no data.
 
 The result/publication boundary is now substantially narrower.
 `SemanticEnvAtLocalKinds.ofStateRelated` derives every ordinary residual-local

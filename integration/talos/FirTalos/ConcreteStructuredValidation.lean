@@ -10600,85 +10600,16 @@ private theorem findLocalKind?_of_getLocal
       subst actual
       rfl
 
-/-- Source-level safety boundary for a currently active case table.
+/-- Residual executable validation and the successful source selection derive
+the complete production case family.
 
-This is an invariant on final-LCNF syntax, the source runtime, and the compiler
-context, not a translation certificate: it contains no target module,
-instruction path, numeric local, refinement witness, or future execution.
-Executable residual validation supplies result compatibility, normalized
-alternative order, the exact object-family discriminator representation, and
-every static constructor-tag bound.  The source-side boundary retains only
-the semantic range law for the current object tag. -/
-structure ConcreteStructuredObjectCaseSafeAt
-    (context : Fir.Wasm.Context)
-    (sourceRuntime : RuntimeState) (sourceEnv : Env)
-    (cases : Lean.Compiler.LCNF.Cases .impure) : Prop where
-  objectTagsFit :
-    ∀ {sourceObject : Value} {actualTag : Nat},
-      lookupValue sourceEnv cases.discr = .ok sourceObject →
-      getTag sourceRuntime sourceObject = .ok actualTag →
-      actualTag < UInt32.size
-
-/-- Minimal source-side classification for one case table.  Default-only and
-scalar tables contain only compiler facts; semantic constructor/tag provenance
-is retained exclusively by the object arm. -/
-inductive ConcreteStructuredCaseSafeAt
-    (context : Fir.Wasm.Context)
-    (sourceRuntime : RuntimeState) (sourceEnv : Env)
-    (cases : Lean.Compiler.LCNF.Cases .impure) : Prop where
-  | default
-      (code : Lean.Compiler.LCNF.Code .impure)
-      (alternatives : cases.alts.toList = [.default code]) :
-      ConcreteStructuredCaseSafeAt context sourceRuntime sourceEnv cases
-  | scalar
-      (mode : Fir.Wasm.caseDiscriminatorMode context cases.discr =
-        .scalarUInt8) :
-      ConcreteStructuredCaseSafeAt context sourceRuntime sourceEnv cases
-  | object
-      (safe : ConcreteStructuredObjectCaseSafeAt context sourceRuntime
-        sourceEnv cases) :
-      ConcreteStructuredCaseSafeAt context sourceRuntime sourceEnv cases
-
-/-- The sole semantic case premise still needed after production validation:
-if the normalized current table really starts with a constructor and selects
-the object-tag lane, supply the current object discriminator provenance. -/
-def ConcreteStructuredObjectCaseSafeWhenNeededAt
-    (context : Fir.Wasm.Context)
-    (sourceRuntime : RuntimeState) (sourceEnv : Env)
-    (cases : Lean.Compiler.LCNF.Cases .impure) : Prop :=
-  ∀ {info : Lean.Compiler.LCNF.CtorInfo}
-      {code : Lean.Compiler.LCNF.Code .impure}
-      {alternatives : List (Lean.Compiler.LCNF.Alt .impure)},
-    cases.alts.toList = .ctorAlt info code :: alternatives →
-    Fir.Wasm.caseDiscriminatorMode context cases.discr = .objectTag →
-    ConcreteStructuredObjectCaseSafeAt context sourceRuntime sourceEnv cases
-
-/-- A syntactic default-only table never reaches the object-provenance
-continuation. -/
-theorem ConcreteStructuredObjectCaseSafeWhenNeededAt.of_default
-    (alternativesEq : cases.alts.toList = [.default defaultCode]) :
-    ConcreteStructuredObjectCaseSafeWhenNeededAt context sourceRuntime
-      sourceEnv cases := by
-  intro info code alternatives constructorHead objectMode
-  rw [alternativesEq] at constructorHead
-  simp at constructorHead
-
-/-- A compiler-classified scalar table cannot select the object-provenance
-continuation. -/
-theorem ConcreteStructuredObjectCaseSafeWhenNeededAt.of_scalar
-    (scalarMode : Fir.Wasm.caseDiscriminatorMode context cases.discr =
-      .scalarUInt8) :
-    ConcreteStructuredObjectCaseSafeWhenNeededAt context sourceRuntime
-      sourceEnv cases := by
-  intro info code alternatives constructorHead objectMode
-  have impossible : Fir.Wasm.CaseDiscriminatorMode.objectTag =
-      .scalarUInt8 := objectMode.symm.trans scalarMode
-  cases impossible
-
-/-- Residual validation and one successful source selection classify the
-current case table as default-only, scalar, or object.  Only the final branch
-consults semantic object provenance. -/
-theorem ConcreteStructuredValidatedCodeCoreRel.caseSafe_of_objectCaseSafeWhenNeeded
+The object branch needs no caller-provided tag-range invariant: generated
+object comparisons preserve the exact `UInt64` tag, while the concrete heap
+refinement proves that every live `tobject` tag fits that representation.  The
+validated discriminator mode, normalized alternative order, compiled local,
+and static alternative bounds are therefore sufficient for all three case
+families. -/
+theorem ConcreteStructuredValidatedCodeCoreRel.productionCasesSupported_of_validation
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
@@ -10703,71 +10634,6 @@ theorem ConcreteStructuredValidatedCodeCoreRel.caseSafe_of_objectCaseSafeWhenNee
       entryWitness functionResult callerExpectedResult facts remainingBytes
       sourceRuntime sourceEnv (.cases cases) targetStore targetLocals targetCode
       witness source target)
-    (objectSafe : ConcreteStructuredObjectCaseSafeWhenNeededAt context
-      sourceRuntime sourceEnv cases)
-    {selected : Lean.Compiler.LCNF.Code .impure}
-    (sourceResult : SourceCaseResult sourceRuntime sourceEnv cases selected) :
-    ConcreteStructuredCaseSafeAt context sourceRuntime sourceEnv cases := by
-  obtain ⟨joins, locals, validatorFacts, sharing, validated, agrees⟩ :=
-    related.validation
-  obtain ⟨discrKind, mode, discrFound, modeFound, _resultKnown,
-      _resultCompatible, normalizedCheck, alternativesSupported⟩ :=
-    validated.cases_eq
-  have normalized :
-      ConcreteStructuredCaseAltsNormalized cases.alts.toList :=
-    .of_caseAltsNormalized normalizedCheck
-  have discrCompiled := agrees discrFound
-  have contextFound := findLocalKind?_of_getLocal discrCompiled
-  have contextMode :
-      Fir.Wasm.caseDiscriminatorMode context cases.discr = mode := by
-    cases discrKind <;>
-      simp_all [Fir.Wasm.supportedCaseDiscriminatorMode?,
-        Fir.Wasm.caseDiscriminatorMode]
-  generalize altsEq : cases.alts.toList = normalizedAlts at normalized
-  cases normalized with
-  | nil =>
-      rcases sourceResult with ⟨sourceObject, actualTag, sourceLookup, tagged,
-        chosen⟩
-      rw [altsEq] at chosen
-      simp [chooseAlt, findCtorAlt, findDefaultAlt] at chosen
-  | default defaultCode =>
-      exact .default defaultCode altsEq
-  | ctor rest =>
-      cases mode with
-      | objectTag => exact .object (objectSafe altsEq contextMode)
-      | scalarUInt8 => exact .scalar contextMode
-
-/-- Residual executable validation turns the minimal source case invariant
-into the existing production case family.  In particular, compiler-local
-agreement and discriminator mode are derived here rather than stored in a
-per-step certificate. -/
-theorem ConcreteStructuredValidatedCodeCoreRel.productionCasesSupported_of_caseSafe
-    {program : Fir.LeanIR.ImpureProgram}
-    {context : Fir.Wasm.Context}
-    {sourceModule : Fir.Wasm.Module}
-    {sourceFunction : Fir.Wasm.Function}
-    {externals : ExternalImpl}
-    {labels : LabelContext}
-    {entryRuntime sourceRuntime : RuntimeState}
-    {entryStore targetStore : Wasm.Store Host}
-    {entryWitness witness : RefinementWitness}
-    {functionResult : AbiKind}
-    {callerExpectedResult : Option AbiKind}
-    {facts : ReuseCapacityFacts}
-    {remainingBytes : Nat}
-    {sourceEnv : Env}
-    {cases : Lean.Compiler.LCNF.Cases .impure}
-    {targetLocals : Wasm.Locals}
-    {targetCode : Wasm.Program}
-    {source : MachineState}
-    {target : StructuredWasmState Host}
-    (related : ConcreteStructuredValidatedCodeCoreRel program context
-      sourceModule sourceFunction externals labels entryRuntime entryStore
-      entryWitness functionResult callerExpectedResult facts remainingBytes
-      sourceRuntime sourceEnv (.cases cases) targetStore targetLocals targetCode
-      witness source target)
-    (sourceSafe : ConcreteStructuredCaseSafeAt context sourceRuntime sourceEnv
-      cases)
     {selected : Lean.Compiler.LCNF.Code .impure}
     (sourceResult : SourceCaseResult sourceRuntime sourceEnv cases selected) :
     ProductionCasesSupported context sourceRuntime sourceEnv cases selected := by
@@ -10809,25 +10675,15 @@ theorem ConcreteStructuredValidatedCodeCoreRel.productionCasesSupported_of_caseS
         exact .ctor rest
       cases mode with
       | objectTag =>
-          cases sourceSafe with
-          | default defaultCode alternativesEq =>
-              rw [altsEq] at alternativesEq
-              simp at alternativesEq
-          | scalar scalarMode =>
-              have impossible :
-                  Fir.Wasm.CaseDiscriminatorMode.objectTag =
-                    .scalarUInt8 := contextMode.symm.trans scalarMode
-              cases impossible
-          | object objectSafe =>
-              have discrRefines : discrKind.refines .tobject = true := by
-                cases discrKind <;>
-                  simp_all [Fir.Wasm.supportedCaseDiscriminatorMode?,
-                    AbiKind.refines]
-              exact Or.inr (Or.inl ⟨
-                ConcreteStructuredCaseAltsNormalized.objectSupported_of_validation
-                  normalizedOriginal alternatives,
-                contextMode,
-                ⟨discrKind, discrCompiled, discrRefines⟩⟩)
+          have discrRefines : discrKind.refines .tobject = true := by
+            cases discrKind <;>
+              simp_all [Fir.Wasm.supportedCaseDiscriminatorMode?,
+                AbiKind.refines]
+          exact Or.inr (Or.inl ⟨
+            ConcreteStructuredCaseAltsNormalized.objectSupported_of_validation
+              normalizedOriginal alternatives,
+            contextMode,
+            ⟨discrKind, discrCompiled, discrRefines⟩⟩)
       | scalarUInt8 =>
           have discrKindEq : discrKind = .uint8 := by
             cases discrKind <;>
@@ -10838,10 +10694,10 @@ theorem ConcreteStructuredValidatedCodeCoreRel.productionCasesSupported_of_caseS
               normalizedOriginal alternatives,
             contextMode, discrCompiled⟩)
 
-/-- Outcome-level spelling of the case admission bridge.  Suspended-frame
+/-- Outcome-level spelling of compiler-derived case admission. Suspended-frame
 validation is irrelevant to classifying the current case node, so the proof
 delegates to the residual validated code core. -/
-theorem ConcreteStructuredValidatedCodeOutcome.productionCasesSupported_of_caseSafe
+theorem ConcreteStructuredValidatedCodeOutcome.productionCasesSupported_of_validation
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {functionCode : Lean.Compiler.LCNF.Code .impure}
@@ -10871,22 +10727,20 @@ theorem ConcreteStructuredValidatedCodeOutcome.productionCasesSupported_of_caseS
       labels entryRuntime entryStore entryWitness functionResult
       callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
       (.cases cases) targetStore targetLocals targetCode witness source target)
-    (sourceSafe : ConcreteStructuredCaseSafeAt context sourceRuntime sourceEnv
-      cases)
     {selected : Lean.Compiler.LCNF.Code .impure}
     (sourceResult : SourceCaseResult sourceRuntime sourceEnv cases selected) :
     ProductionCasesSupported context sourceRuntime sourceEnv cases selected :=
-  related.core.productionCasesSupported_of_caseSafe sourceSafe sourceResult
+  related.core.productionCasesSupported_of_validation sourceResult
 
-/-- One source case step satisfying the source-level case invariant has a
-finite concrete Wasm path and preserves the closed validated relation.
+/-- One validated source case step has a finite concrete Wasm path and
+preserves the closed validated relation.
 
 The existential presentation deliberately forgets whether the path used the
 zero-step default protocol, five-step object tests, or four-step `UInt8`
 tests.  The specialized theorems retain those exact costs; this theorem is the
 uniform interface needed by the module-wide one-step dispatcher.  If the
 target path is empty, the source control rank strictly decreases. -/
-theorem ConcreteStructuredValidatedCodeOutcome.advance_cases_of_source_safe_step
+theorem ConcreteStructuredValidatedCodeOutcome.advance_cases_of_validated_step
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {functionCode : Lean.Compiler.LCNF.Code .impure}
@@ -10916,8 +10770,6 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_cases_of_source_safe_step
       labels entryRuntime entryStore entryWitness functionResult
       callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
       (.cases cases) targetStore targetLocals targetCode witness source target)
-    (sourceSafe : ConcreteStructuredCaseSafeAt context sourceRuntime sourceEnv
-      cases)
     (sourceStep : executeStep externals source = .next sourceAfter) :
     ∃ targetSteps targetAfter selected selectedTarget nextLabels,
       FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
@@ -10934,8 +10786,8 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_cases_of_source_safe_step
             compilerStructuredControlRank source) := by
   obtain ⟨selected, sourceResult, _sourceAfterEq⟩ :=
     related.core.core.focus.caseResult_of_step sourceStep
-  rcases related.productionCasesSupported_of_caseSafe
-      sourceSafe sourceResult with defaultOnly | tested
+  rcases related.productionCasesSupported_of_validation sourceResult with
+      defaultOnly | tested
   · obtain ⟨targetPath, next, rank⟩ :=
       related.advance_defaultOnlyCase_of_step defaultOnly sourceStep
     refine ⟨0, target, selected, targetCode, labels, targetPath, ?_,
@@ -11040,9 +10892,7 @@ inductive ConcreteStructuredSourceAdmissionSafeAt
         expectedResult facts sourceRuntime sourceEnv source
         (.let decl continuation)
   | cases
-      {cases : Lean.Compiler.LCNF.Cases .impure}
-      (safe : ConcreteStructuredCaseSafeAt context sourceRuntime sourceEnv
-        cases) :
+      {cases : Lean.Compiler.LCNF.Cases .impure} :
       ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
         expectedResult facts sourceRuntime sourceEnv source (.cases cases)
   | incPersistent
@@ -11476,6 +11326,48 @@ def ConcreteStructuredFiniteRuntimeSafeAt
         amount
   | _ => True
 
+/-- A validated current case node constructs its exact zero-allocation
+admission directly from the successful source selection.
+
+This is the case-family PA2 boundary: it has no source invariant, semantic
+classifier, schema premise, target execution, or future-step certificate. -/
+theorem ConcreteStructuredValidatedCodeCoreRel.admit_cases_of_validated_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeCoreRel program context
+      sourceModule sourceFunction externals labels entryRuntime entryStore
+      entryWitness functionResult callerExpectedResult facts remainingBytes
+      sourceRuntime sourceEnv (.cases cases) targetStore targetLocals targetCode
+      witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+      functionResult facts sourceRuntime sourceEnv 0 (.cases cases) := by
+  obtain ⟨selected, sourceResult, _sourceAfterEq⟩ :=
+    related.core.focus.caseResult_of_step sourceStep
+  rcases related.productionCasesSupported_of_validation sourceResult with
+      defaultOnly | tested
+  · exact .defaultOnlyCase defaultOnly
+  · rcases tested with objectCases | scalarCases
+    · exact .objectCases objectCases
+    · exact .scalarUInt8Cases scalarCases
+
 /-- Residual production validation plus source admission safety construct the
 exact current-node admission and allocation cost.
 
@@ -11538,15 +11430,8 @@ theorem ConcreteStructuredValidatedCodeCoreRel.admit_of_source_safe_step
           semanticEmpty =>
           exact ⟨0, .lazyMiss internal generated resultClassified notObject
             notTObject semanticEmpty⟩
-  | cases safe =>
-      obtain ⟨selected, sourceResult, _sourceAfterEq⟩ :=
-        related.core.focus.caseResult_of_step sourceStep
-      rcases related.productionCasesSupported_of_caseSafe
-          safe sourceResult with defaultOnly | tested
-      · exact ⟨0, .defaultOnlyCase defaultOnly⟩
-      · rcases tested with objectCases | scalarCases
-        · exact ⟨0, .objectCases objectCases⟩
-        · exact ⟨0, .scalarUInt8Cases scalarCases⟩
+  | cases =>
+      exact ⟨0, related.admit_cases_of_validated_step sourceStep⟩
   | incPersistent =>
       exact ⟨0, related.validation.admit_incPersistent⟩
   | incOrdinary =>
