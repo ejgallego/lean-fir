@@ -106,12 +106,17 @@ def supportedDeclarationArgumentKinds? (program : Fir.LeanIR.ImpureProgram)
 /-- Validate the fixed capture descriptor against the effective declaration
 parameter kinds selected by the lowerer. -/
 def supportedPartialArgumentKinds? (locals : LocalKinds)
-    (args : Array (LCNF.Arg .impure)) (expected : Array AbiKind) :
+    (params : Array (LCNF.Param .impure)) (args : Array (LCNF.Arg .impure))
+    (expected : Array AbiKind) :
     Option (Array AbiKind) := do
-  if args.size != expected.size then none
-  (args.zip expected).mapM fun pair => do
-    let actual ← supportedArgKind? locals pair.fst
-    if actual.refines pair.snd then some actual else none
+  if params.size != args.size || args.size != expected.size then none
+  ((params.zip args).zip expected).mapM fun pair => do
+    let param := pair.fst.fst
+    let arg := pair.fst.snd
+    let expectedKind := pair.snd
+    let actual ← supportedArgKind? locals arg
+    let actual := if param.type == LCNF.ImpureType.void then .erased else actual
+    if actual.refines expectedKind then some actual else none
 
 def supportedNamedCall (program : Fir.LeanIR.ImpureProgram)
     (locals : LocalKinds) (declared : AbiKind) (name : Name)
@@ -137,7 +142,8 @@ def supportedPartialApply (program : Fir.LeanIR.ImpureProgram)
       match declarationParameterKinds? program target with
       | some paramKinds =>
           argKinds.size < paramKinds.size && declared.isObjectLike &&
-            (supportedPartialArgumentKinds? locals args
+            (supportedPartialArgumentKinds? locals
+              (target.params.extract 0 argKinds.size) args
               (paramKinds.extract 0 argKinds.size)).isSome
       | none => false
   | _, _ => false

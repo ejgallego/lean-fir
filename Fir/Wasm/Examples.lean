@@ -286,6 +286,29 @@ def voidParameterBoxedCallProgram : Fir.LeanIR.ImpureProgram :=
       | .error _ => false
   | .error _ => false
 
+def voidPartialTarget : LCNF.Decl .impure :=
+  decl `voidPartialTarget #[
+    param x LCNF.ImpureType.void,
+    param y LCNF.ImpureType.tobject]
+    LCNF.ImpureType.tobject (.code (.return y))
+
+def voidPartialWrapper : LCNF.Decl .impure :=
+  decl `voidPartialWrapper #[param x LCNF.ImpureType.tagged]
+    LCNF.ImpureType.tobject (.code <|
+      .let (letDecl c LCNF.ImpureType.tobject
+        (.pap voidPartialTarget.name #[.fvar x])) <|
+      .return c)
+
+def voidPartialCallProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[voidPartialTarget, voidPartialWrapper] }
+
+#guard match lowerSupported voidPartialCallProgram with
+  | .ok module =>
+      match validateModule module with
+      | .ok () => true
+      | .error _ => false
+  | .error _ => false
+
 def voidParameterExternalTarget : LCNF.Decl .impure :=
   decl `voidParameterExternalTarget #[
     param x LCNF.ImpureType.tobject,

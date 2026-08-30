@@ -1736,10 +1736,10 @@ def compileDeclarationArguments (context : Context)
 occupy in a closure. Compiler-declared `tobject` parameters which are
 structurally erased have already been refined to `.erased`; no global
 `erased ≤ tobject` compatibility is introduced here. -/
-def compilePartialArgument (context : Context) (expected : AbiKind)
-    (arg : LCNF.Arg .impure) :
+def compilePartialArgument (context : Context) (param : LCNF.Param .impure)
+    (expected : AbiKind) (arg : LCNF.Arg .impure) :
     Except CompileError (List Instruction × AbiKind) := do
-  let (argument, actual) ← compileArg context arg
+  let (argument, actual) ← compileDeclarationArgument context param arg
   if !actual.refines expected then
     throw (.malformed "partial-application argument does not refine its parameter ABI")
   return (argument, actual)
@@ -1752,10 +1752,13 @@ def compilePartialArguments (context : Context)
   if args.size > target.params.size then
     throw (.malformed "partial application fixes too many parameters")
   let expectedKinds ← checkedDeclarationParameterKinds context.program target
-  (expectedKinds.extract 0 args.size).zip args |>.foldlM
+  let params := target.params.extract 0 args.size
+  ((params.zip args).zip (expectedKinds.extract 0 args.size)) |>.foldlM
     (init := ([], #[])) fun (instructions, kinds) pair => do
-      let expected := pair.fst
-      let (argument, kind) ← compilePartialArgument context expected pair.snd
+      let param := pair.fst.fst
+      let arg := pair.fst.snd
+      let expected := pair.snd
+      let (argument, kind) ← compilePartialArgument context param expected arg
       return (instructions ++ argument, kinds.push kind)
 
 def directAbiKind? (type : Expr) : Option AbiKind :=
