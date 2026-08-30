@@ -6,16 +6,16 @@ owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
 state: ready
-base: 302a58c0322dfac1a1997ae9d987f84a35030eff
-functional-head: f9462c751983448a212d9cf813f3747b998f4910
-contract-base: 302a58c0322dfac1a1997ae9d987f84a35030eff
+base: 4ca74a0cf0131a95a48a4db6c2c041339750d9c4
+functional-head: e4d58c7fc25eb3fc459954e4d185cb04412588b3
+contract-base: 4ca74a0cf0131a95a48a4db6c2c041339750d9c4
 clean-at-update: true
-slice: Completed the third PA1 case slice. ObjectCaseDiscriminatorSupported preserves the validator's precise object-family kind and records its directional refinement to tobject. The concrete WP and finite-path simulators now transport .object, .tagged, and .tobject discriminator lanes through PhysicalValueRel.ofRefines without changing physical bits. ConcreteStructuredObjectCaseSafeAt consequently retains only the live source tag's UInt32 bound; compiler-local kind equations are fully derived. The existing abiCaseProgram exercises the precise .tagged lane.
-files: docs/pass-correctness-plan.md; docs/w6-source-admission-audit.md; integration/talos/PLAN.md; integration/talos/FirTalos/ConcreteRuntime.lean; integration/talos/FirTalos/ConcreteCompilerCorrectness.lean; integration/talos/FirTalos/ConcreteStructuredSimulation.lean; integration/talos/FirTalos/ConcreteStructuredValidation.lean; coordination/lanes/wasm-proof.md
-contracts: proof-interface generalization only; no shared semantic runtime, ABI, layout, validator, lowering, instruction, emitted-code, ownership, or resident-helper contract changed
-checks: Lean Beam ConcreteRuntime, ConcreteCompilerCorrectness, ConcreteStructuredSimulation, and ConcreteStructuredValidation update/sync/save (pass, zero errors); lake -d integration/talos build FirTalos.ConcreteStructuredValidation FirTalos.ConcreteResumableWasm FirTalos.Correctness.FunctionCaseExample (pass: 3133 jobs); git diff --check (pass); make check (pass: 730 unique validation cases, 2172/2172 comparisons equal, coverage/trusted-assumption/mailbox gates green, exactly one trusted axiom); make talos-setup (pass: Talos 0e05edbcfbb105b33e90c60b4f50e2cf193d9254); make talos-check (pass: 3189 jobs, receipt 70541be93669ea3af4ef5f522488dc236228448aadf8b5e90675364694c98b60)
-bug-cards: none
-blockers: none
-handoff: clean W6 functional head `f9462c75`, based exactly on accepted main `302a58c0`; ready for fast-forward integration
-next: Derive the remaining live object-case UInt32 tag bound from compiler-produced constructor provenance, then resume the other PA1 result/object gaps. Consume W6-W7-20260830-001 before choosing the non-directional return policy.
+slice: Audited the final object-case range premise against the concrete relation. Related heap constructors derive a UInt32 tag bound directly from their header, while immediate and promoted tagged references derive the exact UInt64 bound. The generic relation cannot derive the old UInt32 premise for promoted payloads because getTagStep truncates its UInt64 decoder result. Recorded the distinct semantic discrepancy and published W6-W7-20260830-003 requesting a non-truncating W7 case ABI. No caller provenance map or false compiler invariant was introduced.
+files: Fir/Wasm/Concrete/ProjectionCorrectness.lean; bugs/FIR-BUG-wasm-none-object-case-actual-tag-truncation.md; coordination/lanes/wasm-proof.md
+contracts: proof lemmas and confirmed bug card only; no semantic runtime, ABI, layout, validator, lowering, instruction, emitted-code, ownership, or resident-helper contract changed
+checks: Lean Beam ProjectionCorrectness update/sync/save (pass, zero errors); lake build Fir.Wasm.Concrete.ProjectionCorrectness (pass: 24 jobs); git diff --check (pass); make check (pass: 730 unique validation cases, 2172/2172 comparisons equal, coverage/trusted-assumption/mailbox gates green, exactly one trusted axiom); make talos-setup (pass: Talos 0e05edbcfbb105b33e90c60b4f50e2cf193d9254); make talos-check (pass: 3189 jobs, receipt 1a77da3e70f929d49abaf73b49b2249559d050b97b651b0f6d70217a116c22ab)
+bug-cards: FIR-BUG-wasm-none-object-case-actual-tag-truncation (confirmed)
+blockers: object-case premise elimination waits on W6-W7-20260830-003; other PA1 families remain independent
+handoff: clean W6 functional head `e4d58c7f`, based exactly on accepted main `4ca74a0c`; ready for fast-forward integration
+next: Land this proof boundary, then continue independent PA1 return/direct-let/closure provenance while W7 implements the exact object-case ABI. Consume W6-W7-20260830-001 before choosing the non-directional return policy.
 ```
