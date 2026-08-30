@@ -39,7 +39,17 @@ This layering separates three claims:
 The first proof should establish claims 1 and 2 without prematurely fixing a
 production heap layout.
 
-## Proof architecture review (2026-08-30)
+## Current verification frontier — 2026-08-30
+
+This section through **Premises deliberately retained** is the authoritative
+W6 roadmap. It supersedes every later chronological use of "next",
+"remaining", "queue", or "immediate" in this file. The detailed implementation
+ledger remains below as historical evidence, not as a competing backlog.
+
+The repository-wide theorem-contract and assumption-budget tables live in
+[`docs/pass-correctness-plan.md`](../../docs/pass-correctness-plan.md). The
+20-branch PA0 review surface lives in
+[`docs/w6-source-admission-audit.md`](../../docs/w6-source-admission-audit.md).
 
 ### Intended result
 
@@ -125,6 +135,11 @@ not first construct a duplicate standalone final-LCNF type system.
    preservation theorem rather than copied into W6.
 
 ### Admission audit
+
+The table below is the family-level summary. The PA0 audit document expands it
+to all 20 target admission branches, including separate lazy hit/miss and
+default/object/scalar case outcomes. Its initial inventory is intentionally
+unclassified pending review; no new invariant follows merely from this table.
 
 | Current-node family | Expected proof source | Audit focus |
 |---|---|---|

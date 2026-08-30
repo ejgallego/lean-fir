@@ -1,82 +1,161 @@
-# LCNF correctness and Wasm work plan
+# FIR verification roadmap
 
-This is the repository's source of truth for implementation status and next
-work. `docs/research.md` supplies rationale, while `docs/lcnf-to-c.md` supplies
-the compiler-pipeline reference.
+This is the live repository-wide verification roadmap for the Lean 4.33.0
+pipeline pinned by FIR. Detailed landed-proof chronology is archived in
+[`pass-correctness-history.md`](pass-correctness-history.md); historical uses
+of "next", "remaining", or "immediate" there, and in later chronological
+sections of track plans, do not define current priority.
 
-This is the executable work plan for the Lean 4.33.0 pipeline pinned by FIR.
-It has two parallel directions sharing one semantic boundary:
+`docs/research.md` supplies broader rationale, `docs/lcnf-to-c.md` supplies the
+compiler-pipeline reference, and `integration/talos/PLAN.md` records the W6/W7
+implementation ledger. Live status combines this roadmap, commit ancestry,
+the canonical local mailbox, and the accepted integration-board snapshot.
+Tracked lane files are milestone handoffs, not independent backlogs.
 
-```text
-base LCNF ----> mono LCNF ----> final impure LCNF ----> direct C
-                                         |
-                                         +----> FIR semantics
-                                         |
-                                         +----> semantic Wasm ABI ----> Talos
-```
+## Current verification frontier — 2026-08-30
 
-The proof direction works backwards from final impure LCNF. The Wasm
-direction works forwards from that same boundary. This lets the interpreter,
-runtime model, differential examples, and bug reports serve both efforts.
+### Repository goal
 
-## End-to-end theorem and composition gate
-
-The intended repository theorem is finite-prefix behavioral preservation for
-the actual compiler chain; it is not termination or a functional property of
-the source program:
+Prove finite-prefix behavioral preservation for the actual compiler chain:
 
 ```text
 earlier LCNF
-    | pass simulations
+    | verified pass simulations
     v
 final impure LCNF
-    | FIR-to-Wasm simulation
+    | closed W6 compiler simulation
     v
-contracted Wasm
+generated Wasm under runtime contracts
     | resident-runtime linking
     v
 self-contained executable Wasm
 ```
 
-The generic observable weak-simulation and finite-prefix packages already
-compose, and FIR's finite-stuttering pass interface is connected to the
-deterministic impure interpreter.  This permits one earlier pass theorem to be
-precomposed without mentioning a target trace or translation certificate.
-That mechanism is infrastructure, not by itself evidence that the final-LCNF
-backend theorem is closed.
+This is not a termination theorem and does not establish a functional
+postcondition for the source program. A finite observable prefix is matched
+even when the execution may continue forever.
 
-The current W6 export theorem still exposes a caller-selected source invariant
-providing current-node readiness and preservation.  The next shared proof gate
-is to eliminate that public premise by deriving schema-aware current-node
-admission from the actual guarded validated source/target relation.  The W6
-lane will first audit every admission constructor, then add only the missing
-semantic provenance facts; it will not build a second general final-LCNF type
-system unless the audit demonstrates that one is necessary.
+### Critical path
 
-Backward work follows this ratchet:
+1. **PA0 — admission audit.** Classify every schema-aware current-node branch
+   with exact theorem dependencies in
+   [`w6-source-admission-audit.md`](w6-source-admission-audit.md).
+2. **PA1 — minimal semantic provenance.** Add only source facts that PA0 proves
+   cannot be reconstructed from the guarded validated relation.
+3. **PA2 — compiler-derived guarded admission.** Derive the current-step
+   compiler admission package from production validation, the active relation,
+   and one successful source step.
+4. **PA3 — closed W6 theorem.** Publish an export-facing finite-prefix theorem
+   with no caller-provided `SourceInvariant`, source laws, constructor schema,
+   future trace, or program certificate.
+5. **PA4a — one backward composition.** Precompose the nearest already-proved
+   pass as an interface test.
+6. **PA4b — resident linking.** Discharge contracted runtime operations through
+   verified resident helpers as a distinct theorem layer.
 
-1. close final-LCNF-to-Wasm finite-prefix correctness without an arbitrary
-   source invariant or per-program certificate;
-2. precompose the nearest already-proved pass as an interface test;
-3. when that hop needs a typing or provenance fact, prove preservation of the
-   common fact once at the pass boundary;
-4. continue backward only while each hop produces a usable earlier-language
-   theorem rather than merely relocating an unresolved W6 premise.
+No further backward pass hop is on the shared critical path before PA3.
+New runtime features, program-specific verification of `sumTo`, a broad
+`ValueInfo` redesign, unrelated pass coverage, and performance changes that
+reshape shared proof contracts are not on this path.
 
-Runtime representation, allocation, ownership, and wasm32 resource facts stay
-local to W6.  Static local kinds, result provenance, constructor information,
-and well-formed call boundaries should flow through the pass proofs.  The
-compiled `sumTo` example is only a shape/admission regression and eventual
-one-line theorem application; it is not a program-specific proof campaign.
+### Definition of closed W6
 
-Finite reference-count/capture bounds and wasm32 address-space headroom remain
-explicit execution premises until the semantics models their failures as
-matched observations.  Their presence does not turn the theorem into a
-termination claim.
+The canonical export theorem:
 
-## Why FIR represents three phases explicitly
+- starts from a real compiler-produced `ConcreteSupportedExport`;
+- constructs its initial validated source/target relation internally;
+- constructs the initial constructor schema from the actual entry refinement;
+- derives current-node admission from compiler validation and semantic
+  provenance;
+- contains no caller-chosen source invariant, future execution, target path,
+  translation certificate, or reachability enumeration;
+- retains external/runtime compatibility and finite machine-resource safety as
+  explicit execution premises; and
+- introduces no trusted axiom.
 
-Lean has three named LCNF phases but only two syntax purity indices:
+`ConcreteSupportedExport.finiteTraceCorrect_of_sourceInvariant` and its
+schema-indexed form remain internal or compatibility layers after PA3. The
+roadmap and examples then reference only the closed endpoint.
+
+### Theorem contracts
+
+| Milestone | Current theorem or interface | Premises to eliminate | Premises retained | Owner | Definition of done |
+|---|---|---|---|---|---|
+| PA0 | `ConcreteStructuredSourceAdmissionSafeAt`; `ConcreteStructuredSchemaSourceAdmissionSafeAt`; `ConcreteStructuredCodeStepAdmission` | None during audit | Existing compiler, semantic, and resource boundaries unchanged | W6 audit owner | Every target branch has exact facts, conclusion, theorem dependency, A–E class, owner, and regression; no unresolved prose |
+| PA1 | Existing operation-specific source-safety and producer/result lemmas | Any caller-supplied precise-result or field-provenance fact identified as class C | Facts reconstructible locally from validation and the active relation | W6 result/object helper owners | Every class-C row is closed without a public provenance map or universal source invariant |
+| PA2 | `ConcreteStructuredCompilerCurrentStepAdmission`; `ConcreteStructuredValidatedCodeCoreRel.admitSchema_of_source_safe_step` | `ConcreteStructuredSchemaSourceReadyAt` as a client-provided current-node law | `ConcreteStructuredCurrentStepFiniteRuntimeSafety`; `ConcreteStructuredCurrentStepAddressSpaceSafety` | W6 owner | Production compiler facts construct current-step admission for every successful guarded source step |
+| PA3 | `ConcreteSupportedExport.finiteTraceCorrect_of_schemaSourceInvariant` | `SourceInvariant`, `sourceLaws`, `sourceInitialInvariant`, caller-selected `initialSchema` | Entry relation; runtime/external contracts; finite header/capture safety; allocation headroom | W6 owner | Canonical `ConcreteSupportedExport.finiteTraceCorrect` has the closed-W6 surface and an exact axiom regression |
+| PA4a | Generic finite-stuttering/pass bridge, including `precomposeStutteringPass` | Any renamed form of the W6 source-invariant premise | The earlier pass's real semantic and well-formedness hypotheses | Composition owner | One existing pass theorem yields an earlier-LCNF-to-contracted-Wasm finite-prefix theorem |
+| PA4b | Helper-specific implementation-to-concrete-runtime refinements | Abstract runtime-operation implementations covered by resident helpers | External operations not yet resident; finite wasm32 resources | W6/W7 linking owners | A separately named contracted-Wasm-to-self-contained-Wasm theorem composes with W6 |
+| EDV-general | `ElimDeadSourceOwnedExactContract` and strict checked endpoints | Fixture-specific source-state and target-ledger classifications | Nullary full-application exclusion; foreign-spec compatibility | LCNF proof owner | Arbitrary checked compiler entries construct mapped-owner, source-only allocation, reset/reuse, and ledger interfaces |
+
+### Assumption budget
+
+Compiler facts that must be derived inside the proof:
+
+- supported export/declaration identity and residual structured validation;
+- hygiene, local kinds, call signatures, result compatibility, and case
+  normalization;
+- the canonical initial constructor schema and active schema/witness agreement;
+- exact producer result information where ABI carrier compatibility is too
+  coarse;
+- call, closure, cache, constructor, projection, and field provenance; and
+- current-node admission plus its exact allocation cost.
+
+Execution and resource premises deliberately retained:
+
+- correct initial source/target runtime relation and runtime invariant;
+- external and resident-operation refinement contracts;
+- finite reference-count header and saturated-capture retention capacity; and
+- exact allocation headroom within the current wasm32 frame budget.
+
+Semantic exclusions and contracts kept visible:
+
+- effectful nullary full applications remain conservatively excluded until a
+  checked declaration/external contract supplies semantic purity or
+  stuttering;
+- address-renamed heaps require address-parametric or explicitly compatible
+  foreign semantics; and
+- address-space premises remain until resource exhaustion is represented as a
+  matched observable outcome.
+
+Trusted proof assumptions:
+
+- exactly one audited Lean 4.33 upstream-to-transparent alpha-equivalence
+  correspondence axiom in `AlphaEqvTrusted.lean`;
+- pinned upstream source hashes checked by `make check`; and
+- no W6, `elimDeadVars`, runtime-layout, or resident-helper axiom.
+
+Resource and foreign-semantics premises are contracts, not trusted axioms.
+
+## Parallel `elimDeadVars` lane
+
+The LCNF lane proceeds independently of PA0–PA3 and does not edit W6 theorem
+interfaces. Its next general endpoint is arbitrary compiler-produced checked
+entry states, not another family of local instruction matchers.
+
+The work order is:
+
+1. thread durable source-only allocation through the generic ledger dispatcher
+   and strong simulation;
+2. derive `TargetMappedOwnerPrefix`-style ownership from arbitrary exact
+   checked residual states;
+3. replace remaining finite reset/reuse classifications with generic local
+   operation-shape and ownership preservation lemmas;
+4. reach the strict compiler-facing whole-program theorem without fixture
+   enumeration; and
+5. retain the conservative nullary full-application exclusion until the
+   semantic constant-purity contract is resolved.
+
+After that endpoint, resume the reverse campaign through projection movement
+and later ownership/mono boundaries only when each theorem implements the
+common simulation interface.
+
+## Proof architecture that remains stable
+
+### Three explicit LCNF phases
+
+Lean has three named LCNF phases but two syntax purity indices:
 
 | Phase | Underlying type | Principal invariant |
 |---|---|---|
@@ -84,1798 +163,90 @@ Lean has three named LCNF phases but only two syntax purity indices:
 | mono | `LCNF.Decl .pure` | polymorphism has been eliminated |
 | impure | `LCNF.Decl .impure` | representation, effects, and ownership are explicit |
 
-FIR does not duplicate the syntax. It defines `Program phase`, containing an
-array of `LCNF.Decl phase.toPurity`. Consequently `BaseProgram` and
-`MonoProgram` are distinct theorem inputs even though Lean represents both
-with `.pure` declarations. `CheckedProgram phase` pairs a program with
-`WellFormedAt phase`; the initial invariant is unique declaration names and
-can be strengthened with facts from Lean's phase checker.
+FIR's `Program phase` distinguishes base and mono theorem inputs even though
+both use `.pure` syntax. `CheckedProgram phase` pairs a program with its phase
+invariant. FIR does not maintain three duplicate AST implementations.
 
-"Represent the phases explicitly" therefore means that phase boundaries and
-invariants appear in types, not that FIR owns three AST implementations.
+### Common correctness interfaces
 
-## Completed foundation
+Same-phase passes compare behavior at source entry points. Cross-phase and
+backend theorems use explicit value, observation, heap-renaming, and weak-step
+relations. Unreachable heap garbage may differ; observable worlds, traces,
+results, faults, and reachable storage must agree under the stated relation.
 
-The following work is implemented and checked by the default build:
+Compiler proofs have two layers:
 
-- Lean and all pipeline expectations are pinned to 4.33.0.
-- `Fir.LeanIR` and `Fir.Wasm` are the consolidated public imports; executable
-  examples and the legacy differential evaluator remain test-only modules.
-- `Hygiene.lean` checks lexical variable/join-point scope and declaration-wide
-  binder freshness for impure LCNF; `WellFormedAt .impure` carries this inherited
-  compiler invariant, and the full interpreter corpus is a positive regression.
-- `Pipeline.lean` checks every built-in pass key, occurrence, phase, and phase
-  transition against `LCNF.builtinPassManager`.
-- `Checkpoint.lean` can wrap Lean's actual `simpCase`, capture its input and
-  output declaration groups, and is installed only by the inspection command.
-- `Runtime.lean` models abstract Lean values, heap objects, reachable storage,
-  ownership operations, reset/reuse, external effects, and observations.
-- `Interpreter.lean` gives exhaustive final-impure instruction semantics,
-  calls and closures, join points, a canonical small-step relation, an
-  executable runner, and runner-to-relation soundness.
-- `InterpreterExamples.lean` executes straight-line code, constructors and all
-  projection classes, cases/defaults, direct and closure calls, joins,
-  boxing, mutation, reference counts, deletion, both reuse paths, and typed
-  externals.
-- `make validate` compiles one shared source corpus through Lean's native
-  backend and final impure LCNF, compares versioned structured observations,
-  checks emitted-form coverage, and retains the exact compiler artifacts.
-- `Inspect` remains a pass-checkpoint diagnostic; the original evaluator is a
-  unit fixture rather than the semantic oracle.
-- `PassCorrectness.lean` defines same-phase equivalence, cross-phase forward
-  simulation, and impure observation equivalence modulo address renaming and
-  unreachable heap garbage.
-- `Passes/SimpCase.lean` proves internal-step prefix equivalence, selected-arm
-  elimination, singleton default/constructor elimination, and removal of
-  unreachable alternatives when the phase invariant selects a reachable arm.
-  It also proves a generic selected-branch rewrite theorem and reduces default
-  folding to the explicit semantic soundness obligation for `Code.alphaEqv`.
-  `Passes/AlphaEqv.lean` relates alpha-renamed syntactic scopes to interpreter
-  environments, proves related arguments and impure let values evaluate
-  identically, and proves the binder-extension step once hygiene classifies new
-  versus existing variables. `Passes/AlphaEqvCode.lean` now carries that
-  relation through terminal code, value bindings, saved bind frames, machine
-  controls, states, core-step results, and impure case selection.
-  `Passes/AlphaEqvLocal.lean` provides a total transparent copy of Lean 4.33's
-  recursive checker, including a proof-facing structural alternative traversal;
-  `Passes/AlphaEqvLocalSound.lean` proves local acceptance constructs the
-  declarative relation for terminal code, value bindings, sequential impure
-  effects, recursively nested deterministic case tables, join declarations,
-  parameterized join bodies, and jumps under explicit normalization,
-  well-formedness, and runtime-metadata premises;
-  `Passes/AlphaEqvTrusted.lean` isolates correspondence with the opaque
-  upstream checker behind one audited axiom.
-  `SimpCaseExamples.lean` checks the singleton, filtering, and genuinely
-  alpha-renamed folding results against Lean 4.33's actual `simpCase.run`.
-- `Fir.Wasm` defines the typed runtime ABI and exhaustively lowers impure LCNF
-  to symbolic core-Wasm instructions and imports.
-- `integration/talos` pins a Lean-4.33-compatible Talos revision, converts the
-  symbolic module to Talos syntax, and executes a scalar module in Talos.
-- `bugs/` supplies versioned discrepancy cards and a validator used by
-  `make check`.
+1. a semantic transformation or simulation kernel; and
+2. conformance of Lean's actual compiler implementation, including generated
+   names, declaration groups, validation, and environment updates.
 
-This is the semantic and engineering infrastructure for the campaign; it is
-not a claim that Lean's individual compiler passes have all been proved
-correct.
+Generic observable weak simulations, finite-stuttering pass simulations, and
+finite-prefix packages already compose. Their presence is infrastructure; it
+does not close W6 until compiler-derived current-node admission is available.
 
-## Correctness statements
+### Backward campaign order
 
-For a same-phase pass, correctness compares behavior at the entry points that
-existed before the pass:
+`reverseProofCampaign` remains the executable source of the guarded reverse
+pass order. The strategic order is final impure passes, the late-mono/impure
+boundary, SCC and early-mono transformations, then base/frontend lowering.
+The exact historical list and rationale are preserved in
+[`pass-correctness-history.md`](pass-correctness-history.md).
+
+## Ownership and task acceptance
+
+Only the W6 owner edits
+`integration/talos/FirTalos/ConcreteResumableWasm.lean` while PA0–PA3 are
+active. Result- and object-provenance contributors add focused helper modules
+or isolated lemmas and publish immutable handoffs. Shared relation, ABI,
+layout, interpreter, and symbolic-Wasm changes follow the contract queue.
+
+Before implementation, every proof task records:
+
+1. target theorem name and intended signature;
+2. the public premise it removes or discharges;
+3. classification of every remaining premise as compiler, semantic, resource,
+   or trusted;
+4. the shared relation or theorem surface it must not redesign;
+5. the condition that signals a semantic discrepancy rather than a tactic or
+   elaboration failure; and
+6. focused and complete validation gates.
+
+Proof-only exit gates are:
 
 ```text
-Evaluates before entry args observation
-    iff
-Evaluates after entry args observation
+Lean Beam iteration
+lake build <focused proof cone>
+make check
+make talos-check
+git diff --check
+trusted-axiom and source-hash gates
+#print axioms <new public endpoint>
 ```
 
-Auxiliary declarations introduced by a pass are intentionally not new source
-entry points. A proof may first establish forward simulation and use
-determinism to obtain equivalence.
-
-For `toMono` and `toImpure`, source and target values are not generally equal.
-`LoweringCorrect` therefore accepts a `PhaseSimulation` with relations on
-values and observations. The same pattern will relate impure observations to
-Wasm observations.
-
-Impure observations include the result or runtime fault, external world and
-event trace, and reachable heap. Heap locations may be renamed and unreachable
-cells may differ. This is the default equivalence for allocation-reordering,
-reuse, and ownership passes.
-
-Each compiler theorem has two layers:
-
-1. prove a semantic transformation kernel correct;
-2. prove that Lean's actual `CompilerM` implementation conforms to that
-   kernel, including fresh names, declaration groups, and environment updates.
-
-This separation keeps early semantic arguments legible without proving only
-an unrelated reimplementation.
-
-## Backward proof order
-
-`reverseProofCampaign` constructs this order from the guarded forward pass
-lists, so this document and the compiler cannot drift silently.
-
-### 1. Final impure passes
-
-1. `saveImpure`
-2. `toposort`
-3. final `inferVisibility`
-4. `detectSimpleGround`
-5. `pushProj` occurrence 1
-6. `coalesceRc`
-7. `expandResetReuse`
-8. `explicitRc`
-9. `explicitBoxing`
-10. `inferBorrow`
-11. `simpCase`
-12. `elimDeadVars` occurrence 0
-13. `resetReuse`
-14. `pushProj` occurrence 0
-
-The first three are primarily administrative. The first semantic case study
-should be `simpCase`: it exercises control flow but not fresh heap layout.
-Then prove projection movement and dead-value elimination. Ownership proofs
-follow only after reachable-heap and reference-count invariants are stable;
-the interpreter now provides the operational behavior needed for them.
-
-### 2. Late mono and the impure boundary
-
-1. `toImpure`
-2. `extractClosed`
-3. mono `inferVisibility`
-4. `saveMono`
-5. `cse` occurrence 2
-6. `elimDeadBranches`
-7. `simp` occurrence 5
-8. `extendJoinPointContext` occurrence 1
-
-`toImpure` needs the first substantial cross-phase value relation: mono
-constructors and applications must correspond to concrete impure layouts,
-closures, boxes, and projections.
-
-### 3. SCC split and early mono
-
-After proving the declaration-group SCC split, continue backwards through:
-
-1. `lambdaLifting`
-2. `floatLetIn` occurrence 2
-3. `simp` occurrence 4
-4. `commonJoinPointArgs`
-5. `reduceArity`
-6. `floatLetIn` occurrence 1
-7. `extendJoinPointContext` occurrence 0
-8. `structProjCases`
-9. `reduceJpArity`
-10. `simp` occurrence 3
-
-These proofs require alpha-insensitive relations for generated declarations
-and explicit treatment of original entry points.
-
-### 4. Base phase and frontend lowering
-
-Work backwards from `toMono` through the guarded base list and finish with
-`toLCNF`. `toMono` introduces the base-to-mono value relation. Specialization,
-lambda lifting, join-point discovery, and simplification should reuse the
-declaration-renaming infrastructure developed for mono.
-
-## Parallel Wasm track
-
-The Wasm track proceeds independently where proof work does not yet depend on
-an earlier LCNF phase:
-
-1. freeze and test the `i32`/`i64` value ABI and the typed `fir.*` runtime
-   operation signatures;
-2. implement Talos host functions for allocation, projections, mutation,
-   ownership, reset/reuse, closures, and external calls;
-3. run every interpreter example through the FIR-to-Talos path and compare
-   outcomes, worlds, traces, and reachable heaps;
-4. prove instruction-level simulation, then lift it to functions and modules;
-5. connect the theorem to compiler-produced final impure snapshots;
-6. only then consider binary encoding or a production runtime ABI.
-
-The core FIR build remains independent of Talos. This keeps AGPL licensing and
-the external repository pin explicit and avoids making proof work depend on a
-network checkout.
-
-The validation track does not overlap this compiler work.  Once the Wasm track
-provides an executable supported fragment and stable artifact/ABI handoff, the
-validation runner will execute that artifact in V8 against the native Lean
-oracle.  Talos then becomes another consumer of the same backend protocol and
-is compared with V8 on identical modules and inputs.
-
-## Differential checkpoints and bug cards
-
-Every new pass theorem begins with a compiler-generated corpus and records:
-
-- the guarded pass key and occurrence;
-- source and target declarations at that checkpoint;
-- source and target interpreter observations;
-- the theorem or invariant being exercised;
-- the exact command and Lean revision.
-
-When a mismatch could indicate a compiler or model bug, copy
-`bugs/_template.md` immediately and keep the card at `candidate` until it is
-minimized. Classify it as `compiler`, `fir-semantics`,
-`validation-harness`, `wasm-adapter`, or `upstream-drift`; link the eventual
-permanent regression before marking it fixed. Workarounds belong in the card
-rather than silently weakening a theorem.
-
-## Current `simpCase` proof
-
-Two bounded proof slices are integrated. The first specifies and proves the
-two rewrites that discard control-flow structure:
-
-1. removing unreachable alternatives, under the explicit invariant that the
-   runtime-selected arm is reachable;
-2. eliminating a singleton default arm, or a singleton constructor arm whose
-   tag invariant holds.
-
-The second proves that an arbitrary case-table rewrite is correct whenever the
-branches selected before and after the rewrite are semantically equivalent.
-It defines `AlphaEqvSoundAt` as the exact missing bridge from Lean's Boolean
-`Code.alphaEqv` test to that semantic equivalence, and proves default folding
-correct conditional on this bridge. This exposes the remaining trust boundary
-rather than treating alpha-equivalence as an unproved semantic fact.
-
-The executable corpus runs Lean's actual pass on all three shapes and checks
-that it produces the specification result. The folding fixture uses different
-local `FVarId`s in its equal bodies, so it exercises alpha-renaming rather than
-mere syntactic equality. No discrepancy was found.
-
-Attempting to remove the `AlphaEqvSoundAt` hypothesis exposed a necessary
-phase invariant. `Code.alphaEqv` accepts a minimized pair with different
-observations when local `FVarId`s are reused. Lean's compiler intends these IDs
-to be globally fresh. FIR now checks that invariant, along with lexical scope,
-at the impure phase boundary. The executable witness, fix, and permanent
-regression are recorded in `FIR-BUG-impure-simpCase-alpha-hygiene`; this was a
-FIR invariant gap, not evidence of a compiler error on compiler-generated LCNF.
-
-The first alpha-soundness layer is also integrated. It defines environment
-coverage and agreement over Lean's right-to-left `FVarIdMap`, establishes the
-identity base case, proves lookup and argument-array evaluation preservation,
-and isolates binder extension behind the exact classification fact supplied by
-`withFVar` plus hygiene.
-
-The next semantic layer is integrated as well. `LetValueRelated` covers every
-impure let-value constructor and records equality of all metadata observed by
-the interpreter. `evalLetValue_eq_of_related` proves that related declarations
-evaluate to the same action and runtime state under related environments. In
-particular, declaration types remain an explicit premise because `unbox`
-observes them, while Lean's executable checker establishes only type
-alpha-equivalence.
-
-The executable argument-array bridge is now proved in both directions.
-`eqvArgs_true_of_related` verifies that Lean's parallel Array/Subarray loop
-returns `true` for every pointwise-related argument array, while
-`argsRelated_of_eqvArgs_true` recovers the semantic relation from a successful
-check when both arrays are lexically scoped. Their loop invariants respectively
-track the unprocessed suffixes and the successfully checked prefix while
-recording that the reader map is unchanged.
-
-The executable let-value bridge is now proved too.
-`letValueRelated_of_eqvLetValue_true` covers every impure constructor and uses
-the argument soundness theorem for nested argument arrays.
-`letDeclValueRelated_of_eqvLetValue_true` lifts that result to declarations.
-Both the `.box` type and declaration result type remain exact premises: Lean's
-checker establishes only type alpha-equivalence, while FIR's current runtime
-semantics observes those types during boxing and unboxing. This isolates the
-remaining type-level obligation instead of folding it into the recursive code
-proof.
-
-Binder extension is no longer an assumed classification boundary.
-`AlphaEqvBind` proves the comparison laws needed to reason about Lean 4.33's
-`Name.quickCmp`-backed `FVarIdMap`, then proves the concrete lookup law for
-insertion and identifies `withFVar` with that right-to-left update.
-`RenamingScoped` records that every mapped right-hand variable points into the
-left scope; it holds for the empty map, is preserved by a fresh binder, and
-yields the exact new-pair/old-pair split required by `envsAgree_bind`. Thus the
-recursive simulation can extend both the renaming and runtime environments
-without carrying an extra classification hypothesis.
-
-The first recursive-code layer is integrated. `TerminalCodeRelated` covers
-`return` and `unreach`, while `CodeRelated` adds recursive value bindings under
-the same right-to-left renaming update as Lean's checker. `FrameRelated`,
-`ControlRelated`, `MachineStateRelated`, and `CoreResultRelated` make the
-one-step invariant explicit. `coreStep_code_related` covers faults and all
-three successful let actions: immediate values extend both environments,
-whereas named and value calls save the agreement, freshness, and continuation
-relation in paired bind frames. `coreStep_yielded_bind_related` proves that a
-returned call value pops those frames and resumes the related continuations
-under the extended binders.
-
-The sequential impure-code layer is integrated as well. `CodeRelated` now
-covers object, usize, and scalar field writes, tag updates, reference-count
-increments and decrements, and deletion. `runtimeEffectResult_related` factors
-their common proof shape: related operands select one identical runtime
-operation; faults yield one observation, while success enters related
-continuations with the shared updated runtime. Persistent `inc` and `dec`
-instructions take the matching no-op path. The `sset` type annotation is left
-unconstrained in the semantic relation because the interpreter does not
-observe it; relating Lean's type checker remains an executable-bridge concern.
-
-The first branching layer is integrated. `AltRelated` relates constructor and
-default bodies, while `CaseSelectionRelated` states that `chooseAlt` either
-fails on both sides or selects related code. Structural lemmas lift this
-relation through constructor lookup, default lookup, and their combined
-selection rule. The `cases` branch of `coreStep_code_related` now covers
-discriminator lookup faults, tag-reading faults, missing alternatives, and
-successful entry into related branch bodies.
-
-Case selection is now proved insensitive to table order under the exact
-semantic condition it needs: each constructor tag and the default selector
-determine at most one body. Successful and failed constructor/default lookups
-are first characterized by table membership, then transported through
-`List.Perm`; `chooseAlt_eq_of_perm` combines the two lookup results.
-`QSortPerm` proves directly against Lean 4.33's private partition and sort
-workers that `Array.qsort` returns a permutation. `sortAlts_perm` specializes
-that generic theorem to Lean's alternative comparator. Consequently,
-`CaseTableNormalizationInvariant` now contains only the genuine compiler-side
-obligation—selector determinism—and `chooseAlt_sortAlts_eq` derives the
-normalization permutation internally.
-
-The older terminal boundary theorems remain useful independently:
-`coreStep_terminal_related` proves matching immediate outcomes, and
-`terminalCodeRelated_empty_sound` discharges both terminal cases at the
-top-level semantic boundary. The proof also isolates the exact remaining
-executable bridge in `alphaEqvSoundAt_of_terminal_bridge`.
-
-Trying to prove that bridge exposed an upstream proof-interface blocker. Lean
-4.33 declares recursive `LCNF.AlphaEqv.eqv` as an opaque `partial def` and
-exports no safe equation theorem, so a successful `Code.alphaEqv` check cannot
-be unfolded even for two `return` instructions.
-
-FIR now ships `AlphaEqv.Local.eqv`, a total transparent fuel-indexed copy of
-the full Lean 4.33 checker. `AlphaEqvLocalSound` defines
-`CodeSideConditions`, containing lexical scope, binder freshness, and exact
-runtime-observed type metadata not established by alpha-equivalence. Its
-theorem `codeRelated_of_local_accepts` does not depend on FIR's trusted bridge
-and proves that a successful local check constructs `CodeRelated` through
-`return`, `unreach`, recursive value bindings, and every sequential
-mutation/ownership instruction currently represented by that relation.
-`CodeSideConditions.cases` is recursive: constructor/default side conditions
-are indexed by semantic selector and may themselves contain cases beneath any
-already-supported continuation constructor.
-The local alternative loop is now a transparent list recursion after Lean's
-normalizing sort. `altsRelated_of_local_check` proves that an accepting
-ordered traversal constructs the semantic alternative relation, and
-`codeRelated_of_local_accepts` uses its structural branch induction hypotheses
-to lift that traversal through arbitrarily nested `cases` nodes. Branch side
-conditions are indexed by constructor tag/default rather than array position,
-so the proof can follow the checker's normalized traversal and then return to
-the interpreter's original order. The earlier fixed-point/canonical-array
-premise is gone; `CaseTableNormalizationInvariant` instead exposes only the
-strictly weaker selector-determinism obligation, because normalization's
-permutation property is now a theorem. The trusted adapter exposes the
-matching compiler-facing case theorem. Proof regressions cover the empty-table
-selection-failure path, a populated constructor/default table reordering, a
-two-level normalized case relation, and rejection of mismatched nested
-constructor/default bodies; executable guards compare each nested fixture with
-the upstream checker.
-
-The Lean 4.33 phase audit found no public invariant from which selector
-determinism can be derived. The pure checker rejects duplicate constructor
-names but assigns its `hasDefault` flag without consulting it, while impure
-`Cases` contains an unrestricted alternative array and no preservation
-theorem through `Alt.toImpure`. FIR therefore keeps
-`CaseTableNormalizationInvariant` as the exact minimal phase bridge rather
-than weakening semantic selection. The missing upstream proof interface and
-duplicate-default check are recorded in
-`FIR-BUG-impure-case-table-selector-determinism`.
-`AlphaEqvTrusted` is opt-in and contains the sole project correspondence axiom:
-upstream acceptance implies a finite accepting local run. The adapter records
-the audited upstream source hash. `make check` rejects toolchain/source drift,
-additional project axioms, or a `partial def` in the local checker, while
-executable guards compare the two implementations over every impure code
-constructor represented in the interpreter corpus. A Lean proof regression
-also closes the genuinely alpha-renamed `let` fixture through
-`CodeSideConditions`, local acceptance, and `CodeRelated`. The exact compiler
-Boolean is therefore usable through a small, explicit trust boundary;
-replacing that axiom with an upstream theorem remains the desired final
-resolution. Details are recorded in
-`FIR-BUG-impure-alphaEqv-opaque-eqv`.
-
-The control-flow audit is now underway. Lean 4.33's pure checker establishes
-that a jump target is an in-scope join point and that its argument count equals
-the target arity, but `Decl.check` remains a no-op at the impure phase. FIR's
-`ImpureHygienic` boundary preserves join/variable scope and global binder
-uniqueness; its current `codeScoped` predicate does not separately record jump
-arity. The transparent alpha checker nevertheless rejects unequal parameter
-and argument counts. `Local.withParamsUsing` now exposes the parameter loop
-and every reader-map extension instead of delegating to Lean's indexed loop.
-`paramBodyRelated_of_local_check` proves that an accepted traversal constructs
-a recursively related body under the accumulated parameter renaming, with
-freshness supplied by the phase boundary. The first regression closes an
-alpha-renamed one-parameter join body containing reordered constructor/default
-cases. Named negative regressions reject mismatched join bodies, targets,
-arities, and arguments; call regressions cover renamed call arguments and
-reject target/argument mismatches. Every fixture is checked against the
-upstream Boolean implementation. This slice introduces no new trusted axiom.
-
-The declarative proof relations now distinguish lexical variable scope from
-active join scope. `CodeRelated`, branch selection, controls, and machine
-states carry paired left/right join-scope indices, and every already-proved
-constructor preserves them unchanged. Top-level trusted theorems and
-regressions instantiate both scopes with the empty list. `CodeRelated.jp` now
-relates the parameterized body before extending the renaming and extends only
-the continuation's active join scopes; `CodeRelated.jmp` requires an
-alpha-related target present in both active join scopes and related,
-variable-scoped arguments. `CodeSideConditions` records the matching freshness
-and scope facts.
-
-Local-checker soundness for this control-flow syntax is complete. The proof is
-a fuel- and phase-indexed mutual recursion: recursive code checks consume fuel,
-the empty parameter traversal enters code at the same fuel, and nonempty
-parameter traversals decrease their list length. The full regression constructs
-`CodeRelated` for an alpha-renamed `jp`, its normalized case body, a subsequent
-value binding, and the final `jmp`.
-
-Runtime join installation and invocation are now part of the simulation.
-`JoinEnvsRelated` tracks alpha-renamed join stacks, their declaration bodies,
-transport across ordinary variable binders, and dormant prefixes accumulated
-after a declaration was installed. Related target lookup recovers the
-declaration's historical variable/join scopes while retaining a certificate
-for the complete current runtime stacks. Pointwise parameter binding then
-extends both environments, both scope indices, and the renaming in lockstep.
-`coreStep_code_related` proves both the `jp` and `jmp` steps, including equal
-argument-evaluation faults, successful jumps into related bodies, and matching
-arity-mismatch observations. Regressions execute both steps on the full
-alpha-renamed join fixture. `CoreStepSupported` consequently covers every code
-head represented by `CodeRelated`. The proof interface still states the
-compiler's global-freshness consequence that variable and parameter binders
-cannot shadow active join identifiers. No runtime contract or trusted
-assumption changed.
-
-Whole-control simulation is now complete at the interpreter's `coreStep`
-boundary. Related yielded values pop bind, apply, and cache frames in lockstep;
-cache writes preserve equal runtimes. Named calls agree on global-cache lookup,
-partial-application allocation, argument splitting, parameter binding,
-extra-argument frames, internal code entry, external requests, and faults.
-Closure calls read the same heap cell and delegate to the named-call theorem.
-`coreStep_machine_related` combines those paths with the complete code-head
-simulation. Focused regressions enter the same one-parameter body through both
-a named call and a heap closure.
-
-Declaration entry adds one deliberate phase premise: `ProgramBodiesRelated`
-says that every reachable internal declaration is reflexively related beneath
-its parameter binders. This is not a new axiom; call proofs accept it as an
-ordinary proposition. Attempting to derive it exposed a FIR proof-interface
-bug: `ImpureHygiene.codeScoped`, its alternative/declaration helpers, and the
-global binder traversals are opaque `partial def`s. The kernel cannot invert
-even an accepted `.return` check, so the checked impure program boundary cannot
-yet supply the scope and freshness facts required by `ProgramBodiesRelated`.
-`FIR-BUG-impure-none-opaque-hygiene` records the minimal failure and the
-required transparent-total refactor. The semantic proof keeps the exact
-ordinary premise instead of adding another axiom or weakening its invariant.
-
-The simulation now crosses the relational small-step boundary. A complete
-case proof shows that every `coreStep` result preserves the immutable program;
-the result is lifted through internal steps, external waiting/resumption, and
-finite executions. `step_forward` matches one left step with one right step,
-using the same external response after transporting equal runtimes.
-`steps_forward` composes this into a same-length execution while transporting
-`ProgramBodiesRelated` across successor states. `evaluatesState_forward` then
-reproduces every terminating observation, and `diverges_forward` reproduces
-arbitrarily long executions. The declaration-entry fixture exercises the
-execution-level interface. `StatesBisimilar` packages independently indexed
-simulations in both alpha-renaming directions; from it,
-`evaluatesState_iff_of_bisimilar` proves observational equivalence for every
-terminating result and `diverges_iff_of_bisimilar` proves divergence
-equivalence. This slice adds no trusted assumption.
-
-The bidirectional checker boundary is connected too.
-`codeEquivalentAt_of_birelated` embeds two oppositely oriented `CodeRelated`
-proofs into related machine states whenever the environment covers the proof
-scope, the saved frames relate to themselves, and declaration bodies satisfy
-the explicit phase premise. `codeEquivalentAt_of_local_accepts_both` obtains
-those two relations from FIR's transparent checker and the two orientations of
-`CodeSideConditions`; it is axiom-free. The genuinely alpha-renamed `let`
-fixture now closes all the way to `CodeEquivalentAt`. The compiler-facing
-`trustedCodeEquivalentAt_of_upstream_both` converts the two Lean Boolean
-checks through the existing audited correspondence axiom. It adds no trusted
-assumption and deliberately does not assume checker symmetry.
-
-`SimpCaseCorrectness` now specializes that boundary to the pass's
-alpha-equivalent default folding. The axiom-free theorem consumes two local
-checker acceptances; the compiler-facing theorem consumes both Lean Boolean
-checks and reuses the sole audited correspondence bridge. A regression proves
-the real `foldAlphaEquivalent` fixture observationally equivalent at the
-`True` constructor tag, exactly where `alphaRight` is replaced by
-`alphaLeft`. The existing command regression still executes Lean's actual
-pass and confirms the resulting syntax.
-
-All three local rewrite families expose `CodeEquivalentAt` interfaces. The
-singleton-default fixture eliminates directly; the unreachable-filter fixture
-first proves the compiler-shape dead arm removable and then eliminates the
-surviving singleton constructor; the alpha-fold fixture uses the bidirectional
-checker theorem. Thus every original actual-pass fixture has both an executed
-syntax regression and a kernel-checked observational-equivalence proof at its
-valid runtime tag.
-
-The execution relation also supports passes whose machines do not advance in
-lockstep. `NonLockstep.Reaches` existentially hides a finite target step count,
-and `StutteringSimulation` allows one source step to match zero or more target
-steps while preserving a caller-chosen machine relation. Two such simulations
-form a `StutteringBisimulation`, which proves equivalence of every terminating
-observation without requiring equal programs or equal step counts.
-`SamePhaseCorrectOn`, `InitialInvariantOn`, and `MachineRelatedWith` expose the
-typed/admissible entry boundary required by control-flow simplifications.
-
-### Consolidated whole-program `simpCase` endpoint
-
-The initially missing recursive compiler graph is now represented locally.
-`SimpCaseCompilerBridge.shadowCode?` is a transparent, fuel-indexed copy of
-the output-producing portion of Lean 4.33's private traversal. It recursively
-covers every impure code constructor and deliberately omits only compiler
-bookkeeping calls that do not affect returned syntax. `shadowProgram?` lifts
-that traversal through declarations and programs. `checkActualAgreement`
-executes the pinned upstream pass and the shadow on the same input and rejects
-any returned-syntax mismatch.
-
-`SimpCaseScopedBridge` composes structural traversal, alpha-equivalent branch
-folding, and structural traversal again. Its
-`ScopedProgramPhaseEndpointCertifiedTrace` carries the recursive source and
-target certificates needed by the semantic relation.
-`SimpCaseWellFormed.ProgramWellFormed` packages:
-
-- the shared impure phase invariant;
-- the transparent scope check;
-- deterministic case-table normalization;
-- canonical runtime-observed type metadata.
-
-The preferred theorem
-`shadowProgram_samePhaseCorrectOn_reachableCaseTag_of_programWellFormed`
-takes that well-formedness package, a successful transparent run, and an
-`UpstreamBridge`, then returns `SamePhaseCorrectOn` for the trace's explicit
-admissible entry arguments. This is the first assembled whole-program
-`simpCase` theorem for the transparent executable traversal.
-
-Two boundaries remain explicit:
-
-1. Lean 4.33 keeps the actual recursive traversal and its case simplifiers
-   private/opaque. Actual-pass agreement is therefore executable,
-   source-hash-guarded evidence rather than a universal kernel equation.
-   `FIR-BUG-impure-simpCase-private-proof-interface` records the missing public
-   equation/graph interface.
-2. The compiler-facing alpha-equivalence specialization instantiates
-   `UpstreamBridge` with the single audited
-   `AlphaEqvTrusted.lean433UpstreamBridge` axiom. The transparent local-checker
-   soundness theorems themselves remain axiom-free.
-
-## Current `elimDeadVars` proof
-
-`elimDeadVars` is the active proof lane after `simpCase`. It requires a
-reachability-aware relation because deleting an unused allocation changes the
-raw heap while preserving every observable root.
-
-### Transparent compiler graph and static certificates
-
-`ElimDead.shadowCode?` is an audited, fuel-indexed copy of Lean 4.33's impure
-backwards liveness/elimination traversal. It records the final used-local set,
-retained/deleted let decisions, retained/deleted join decisions, and
-retained/deleted write decisions. The traversal lifts through declaration
-groups and whole programs.
-
-`ExactShadowCodeGraph` and `ExactShadowCodeView` retain the proof-relevant
-branch selected by that run. The hygiene layer proves:
-
-- lexical scope and canonical binder uniqueness for every code subtree;
-- absence of every deleted binder from the ambient live set;
-- hereditary exact provenance for live join bodies, saved continuations,
-  declaration bodies, and active code;
-- projection of that exact provenance to the monotone operational graph.
-
-`ProgramElimDeadWellFormed` combines the shared `ProgramWellFormed` package
-with transparent binder uniqueness. A successful `shadowProgram?` run then
-constructs `ProgramRelated (BinderReadyShadowCodeRelated fuel)`.
-
-### Reachable-runtime simulation
-
-`ShadowRuntimeRel` compares only heap cells reachable from published roots,
-modulo an injective partial address renaming. Unreachable source garbage may
-therefore be absent from the target. The machine relation carries:
-
-- related live environments and join tables;
-- related declaration bodies and saved frames;
-- reference-count, persistence, cache, reset/reuse, and runtime-fault facts;
-- related external requests and suspended machines.
-
-The operational dispatcher `match_codeStep_of_ready` covers every executable
-impure code constructor and all fourteen impure let-value families. Deleted
-nodes take a source-only step; retained nodes advance together, possibly
-extending the address renaming. Terminal faults and returned observations are
-covered separately. `ReachableMachineRelatedWith.simulation` lifts these
-local results to a finite-stuttering forward simulation.
-
-At program level, `shadowProgram_loweringCorrect_reachablyCodeReady` proves
-`LoweringCorrect` for a successful transparent `elimDeadVars` run from:
-
-- `ProgramElimDeadWellFormed`;
-- an address-parametric `ReachableExternalSpecCompatible` contract;
-- hereditary active-code readiness at admissible entry states.
-
-Thus the observable/runtime proof and program lifting are complete. The
-remaining goal is to derive hereditary active-code readiness from the exact
-compiler graph instead of accepting it as an entry premise.
-
-### Hereditary preservation progress
-
-The strong preservation layer retains exact compiler provenance after each
-matched step. It is complete for:
-
-- retained and deleted join declarations;
-- cases, jumps, returns, and declaration entry;
-- retained and deleted object, `USize`, and scalar writes;
-- tag updates, increments, decrements, and deletion;
-- retained and deleted erased lets;
-- retained and deleted literal lets, including fresh-address extension for
-  heap-backed literals;
-- retained and deleted constructor lets, including fresh-address extension
-  for paired live allocations and source-only unreachable garbage;
-- retained and deleted object, `USize`, and packed-scalar projection lets;
-- retained and deleted partial applications, including fresh-address
-  extension for paired closures and source-only unreachable closure garbage;
-- retained and deleted boxing, including tagged immediates and fresh-address
-  extension for heap-backed boxes;
-- retained and deleted unboxing, including publication of heap payload
-  children as continuation roots;
-- retained and deleted sharedness queries over related live ownership
-  metadata;
-- retained and deleted reset lets, with compiler-owned unreachable cells
-  consumed only on the source side;
-- retained and deleted reuse lets, including paired fresh allocation,
-  in-place overwrite of related live cells, and source-only mutation of
-  certified unreachable cells.
-
-All stepping non-let code forms are therefore covered; `.unreach` is terminal.
-All fourteen impure let-value families now have exact hereditary wrappers.
-This includes retained and deleted `.fvar` applications, retained `.fap`
-applications, and the deleted nullary-`.fap` boundary.
-
-`ExactShadowCodeBinderReady.match_codeStep` assembles those family proofs into
-one exact active-code dispatcher. The deleted nullary-`.fap` case is rejected
-constructively: it cannot satisfy `DeletedLetReadyAt`'s generic
-runtime-neutral equality because evaluating `.fap` produces an invocation,
-not a value. Thus the local preservation proof does not assume this compiler
-case is sound; compiler-facing entry readiness must exclude it or supply a
-stronger constant-purity contract.
-
-`SomeBinderReadyReachableMachineRelated.matchCodeStep_of_ready` now lifts the
-exact dispatcher to complete machine states.
-`binderReadyReachablyCodeReadyCompilerLaws` proves the resulting readiness
-invariant stable across matched finite paths by path composition, and the
-whole-program endpoint retains that strong invariant directly.
-
-Canonical invocation entries and all non-code controls reconstruct strong
-readiness without an active-edge premise. Hereditary yielded steps preserve
-exact provenance through bind, apply, and cache frames; internal named calls
-preserve it through cache hits, partial-application allocation, and internal
-declaration entry. Closure calls and external waiting/resumption are covered
-as well, so the exact machine dispatcher now spans every code and non-code
-control reachable by the interpreter.
-
-The checked whole-program endpoints expose the remaining semantic boundary in
-three useful forms:
-
-- exact runtime/ownership readiness for each future related pair;
-- a hereditary source-only runtime/ownership invariant;
-- a source-machine invariant for every selected entry, projected
-  automatically into the non-lockstep relation.
-
-`ElimDeadRuntimeAdmissibility` packages the first and third forms as the two
-supported ways to discharge this boundary. `ElimDeadSemanticallyAdmissibleRun`
-then combines one of those dynamic certificates with
-`ProgramElimDeadWellFormed` and the successful transparent traversal.
-`ElimDeadSemanticallyAdmissibleRun.loweringCorrect` is the corrected general
-whole-program endpoint; address-parametric foreign compatibility remains a
-separate, explicit consumer premise.
-
-The client-facing ownership bridge is now inductive rather than
-reachability-quantified. `ElimDeadSourceOwnershipContract` asks for an
-entry-indexed one-machine predicate, its initial case, preservation by one
-source step, and active-edge readiness. `ElimDeadExactOwnershipContract`
-provides the corresponding source/target pair interface for ownership facts
-that depend on the exact compiler residual and target heap shape. Generic
-finite-path induction turns either contract into
-`ElimDeadRuntimeAdmissibility`; `ElimDeadOwnershipContract` retains the
-choice, and the checked correctness endpoint consumes it directly.
-
-The neutral fixture instantiates the source-only interface. The deleted
-owned-child reset/reuse fixture instantiates the exact pair interface:
-separate finite source and target graphs preserve the contract, while the
-target's empty frontier certifies that the concrete source reuse token names
-an unreachable compiler-owned cell. These two fixtures check both branches
-of the public bridge end to end.
-
-Ownership-sensitive operations now have a reusable static-to-dynamic split.
-`DeletedObjectSetLocalReadyAt`, `DeletedUSizeSetLocalReadyAt`, and
-`DeletedScalarSetLocalReadyAt` record root-independent environment, heap-shape,
-and slot-bound facts. `DeletedReuseSomeLocalReadyAt` does the same for a
-concrete reuse token, while `DeletedResetLocalReadyAt` records a successful
-reset outcome independently of its active roots. The write/reuse certificates
-become dynamically ready when their source location is absent from the
-address map; an empty related target frontier is a convenient sufficient
-condition. For reset,
-`ShadowRuntimeRel.leftRuntimeReachableFrame_of_rightNextLocation_zero` proves
-that an outcome preserving the allocation frontier and non-heap observables
-may rewrite any number of source-only garbage cells. The closed three-write,
-one-cell reset/reuse, and owned-child reset/reuse fixtures now consume these
-shared laws instead of rebuilding the mixed local/ownership existential at
-each edge.
-
-The empty-target shortcut is no longer the general ownership boundary.
-`TargetAllocationLedger` records, for every address below the target
-allocation frontier, the exact source allocation paired with it.
-`SourceOnlyUnderTargetLedger` says that a source address is outside that
-owner image. The runtime relation proves this criterion equivalent to
-`rho.forward location = none`; empty ledgers initialize it, and paired fresh
-allocations extend it while preserving older source-only locations. The
-criterion now discharges all three write certificates and concrete-token
-reuse. For reset, preserving the ledger-owned source cells yields the complete
-reachable-runtime frame while leaving source-only cells unconstrained. A
-kernel fixture with one retained paired allocation and one deleted
-source-only allocation exercises the object-write bridge against a genuinely
-non-empty target.
-
-The ledger is now proof-relevant execution history rather than a certificate
-reconstructed only at a final state. `LedgerShadowRuntimeRel` pairs the
-ordinary runtime relation with its current `TargetAllocationLedger`.
-`LedgerShadowRuntimeRel.empty` initializes both components,
-`allocLeftGarbage` leaves the target ledger unchanged for a deleted
-source-only allocation, and the proof-relevant `allocBoth` result extends the
-ledger using the actual larger renaming returned by paired allocation.
-`LedgerBinderReadyReachableMachineRelated` and its existential-renaming
-wrapper expose this stronger history to machine clients, while their
-`related` theorems forget it back to the established public relation. The
-non-empty-target fixture now obtains its source-only write fact from this
-carried history rather than constructing a final-state ledger by hand.
-
-The literal-let family is the first exact non-lockstep matcher to consume and
-return that history. `LedgerLiteralBothResult` distinguishes immediate
-literals, which retain the current ledger, from heap-backed naturals and
-strings, which extend it with their actual paired allocation.
-`match_retainedLiteralLetStep_binderReady_ledger` carries that result through
-the one-step target match; the deleted counterpart allows a source-only
-literal allocation while the target stutters and keeps its ledger unchanged.
-Exact traversal-view wrappers expose both branches at the compiler-facing
-boundary. A retained large-Nat fixture forces the paired heap branch from
-empty runtimes and proves that its post-state carries the enlarged ledger.
-
-The constructor-let family now consumes the same history without collapsing
-its two runtime representations. `LedgerCtorBothResult` records either the
-unchanged renaming/ledger for an immediate nullary constructor or the actual
-larger renaming and extended ledger for a heap-backed constructor.
-`LedgerShadowRuntimeRel.publishEvalArgs` publishes covered constructor
-arguments without changing allocation history, while
-`allocCtorLeftGarbage` keeps the target ledger unchanged for a deleted
-source-only constructor. Retained and deleted hereditary matchers carry those
-results through non-lockstep steps, and exact traversal-view wrappers expose
-both compiler branches. A one-field retained fixture forces paired heap
-allocation through the exact wrapper; a nullary fixture proves definitionally
-that the empty renaming, runtimes, frontier, and owner ledger are unchanged.
-
-The partial-application family now carries the ledger through closure
-allocation as well. `LedgerClosureBothResult` records the enlarged renaming,
-related closure addresses, and extended owner ledger for a retained
-underapplication; `LedgerPapLeftGarbageResult` records the source-only closure
-and unchanged target history for a deleted underapplication. Hereditary
-retained/deleted matchers and exact traversal-view wrappers expose both cases
-at the compiler boundary. A retained fixture proves the paired closure
-allocation from empty runtimes through the exact non-lockstep theorem, while a
-deleted regression proves that the target ledger remains empty after the
-source-only closure allocation.
-
-The box family now carries the ledger through both of its runtime
-representations. `LedgerBoxBothResult` distinguishes a tagged scalar or
-`USize`, which preserves the current renaming and ledger, from a heap-backed
-box, which returns the actual paired allocation and extended owner ledger.
-The runtime proof first constructs this data-bearing result under `Nonempty`
-and then selects it with `Classical.choice`, because eliminating the
-proposition-valued value relation directly into data is not permitted.
-`LedgerBoxLeftGarbageResult` records either the source tagged value or the
-source-only heap allocation while preserving the target ledger. Hereditary
-retained/deleted matchers and exact traversal-view wrappers expose both cases
-at the compiler boundary. A retained large-`UInt64` fixture forces paired heap
-allocation through the exact wrapper, and a deleted regression proves that
-the target owner ledger remains empty after the source-only allocation.
-
-The failed-token reuse family now carries the same history through its
-constructor-allocation semantics. `LedgerReuseNoneBothResult` delegates to
-the constructor primitive and therefore records either an unchanged ledger
-for an immediate constructor or the actual paired heap-allocation extension.
-`LedgerReuseNoneLeftGarbageResult` records the corresponding source-only
-constructor result while preserving the target ledger. Specialized
-hereditary retained/deleted matchers transport successful token and argument
-reads through exact compiler provenance. A retained exact fixture forces
-paired allocation from an empty failed token, while the deleted regression
-proves that its source-only allocation leaves the empty target owner ledger
-unchanged.
-
-The concrete-token reuse branch now carries the ledger through its
-existing-address semantics as well. Successful `setCell` and concrete
-`reuse` operations preserve `nextLocation`, while
-`TargetAllocationLedger.monoRenaming` transports the unchanged owner table
-across the hidden renaming extension returned by the established runtime
-simulation. `LedgerReuseSomeBothResult` packages the paired overwrite,
-related result values, and transported ledger. Specialized hereditary and
-exact retained matchers consume the token-reachability certificate; the
-deleted matcher instead consumes a ledger-certified source-only location and
-lets the target stutter. The retained exact regression starts from a genuinely
-paired live constructor and overwrites it with a self-reference on both sides;
-the deleted exact regression overwrites only an unmapped source cell while
-the empty target ledger remains unchanged.
-
-The first no-allocation layer now preserves the ledger uniformly.
-`match_internalCoreSteps_binderReady_ledger` and
-`match_sourceOnlyCoreStep_binderReady_ledger` lift the hereditary paired and
-source-only determinism lemmas without changing the target allocation
-history. Retained erased lets take their real step on both machines, while
-deleted runtime-neutral lets take the source step and let the target stutter;
-the generic exact wrapper covers erased values, copies, projections,
-unboxing, and `isShared` whenever their local evaluation equation is
-available. These branches no longer need operation-specific ledger proofs.
-
-Retained full applications now preserve the ledger across their immediate
-control-transfer step. `match_retainedFapLetStep_binderReady_ledger`
-publishes the related evaluated arguments, pushes the exact paired bind
-continuations, and enters matching named-invocation controls without changing
-either runtime or the target frontier. Its exact wrapper consumes the audited
-retained traversal view. A live nullary-call regression exercises the
-observable boundary specifically: it retains the call, takes the paired
-`.fap`-to-`invokeName` step, and carries the empty target ledger at frontier
-zero. The later foreign response remains a separate allocation-capable
-boundary rather than being hidden inside this theorem.
-
-Join-point installation now carries the ledger through both compiler
-decisions. A retained join takes one paired administrative step, installs the
-related hereditary bodies in both join environments, and preserves the
-target frontier. A deleted join installs only the unreachable source body and
-is matched by target stuttering. The exact retained and deleted traversal
-wrappers expose both rules directly to the future ledger dispatcher.
-
-Retained returns now preserve the ledger while changing from active code to
-yielded control. The proof transports the related live result values, narrows
-the published roots to those values plus saved-frame roots, and takes one
-paired return step. Since neither runtime changes, the exact target frontier
-and owner history are carried unchanged. The exact return view exposes this
-rule without retaining the consumed active graph.
-
-Case selection now preserves the ledger through its complete successful
-control path. The hereditary proof relates discriminator lookup, tag
-extraction, and alternative choice, then takes one paired step into the
-selected exact alternative. Faulting lookup/tag and missing-alternative
-branches are terminal and cannot inhabit the semantic-step premise. Since
-successful selection changes only control, the target frontier and owner
-ledger are unchanged; the exact case view supplies the related alternative
-table directly.
-
-Retained local-value applications now carry the ledger through both immediate
-semantics. The nullary `.fvar` branch binds the related function value into
-both exact continuations; nonempty arguments publish the related function and
-argument roots, push paired bind frames, and enter related `invokeValue`
-controls. Neither branch changes either runtime. A dynamically certified
-deleted `.fvar` is necessarily the runtime-neutral nullary copy, so the source
-steps while the target stutters and retains the incoming ledger. Exact
-retained/deleted wrappers expose the whole family to the future dispatcher.
-
-Retained object-field projections now preserve the ledger as well. A generic
-retained runtime-neutral let matcher separates the shared paired bind/control
-step from each operation's local evaluation proof. The object specialization
-transports a successful related field lookup, publishes the selected child as
-a continuation root, and proves that the unchanged target runtime keeps the
-same allocation frontier. Deleted object projections reuse the generic
-source-step/target-stutter rule. Exact retained/deleted wrappers and a focused
-compiler-view consumer exercise both interfaces.
-
-Absolute-slot `USize` and packed-scalar projections now use the same ledger
-path. Their retained matchers transport successful reads from related live
-objects and bind equal immediate values, so neither heap reachability nor the
-target allocation frontier changes. Their deleted exact branches stutter
-through the common runtime-neutral rule. Together with object projection, all
-three layout-field projection families now expose retained/deleted
-ledger-aware exact wrappers.
-
-Unboxing and ownership queries now complete the remaining read-only
-object-consumer layer. The retained unbox matcher transports successful
-unboxing across related live objects and publishes a heap-backed payload as a
-continuation root when necessary; tagged payloads remain immediate. The
-retained `isShared` matcher transports equal ownership metadata and binds the
-related scalar result. Neither operation changes either runtime, so both
-preserve the exact target frontier. Their deleted exact branches use the
-generic runtime-neutral source-step/target-stutter rule. All four exact
-retained/deleted wrappers are integrated at `3a12fe31`.
-
-Internal named invocation now carries the ledger through its complete
-`CoreResult.next` classification. Fully applied internal declarations enter
-the exact related bodies while retaining the current target frontier; empty
-cache hits publish an already-related global without changing either
-runtime. Under-application allocates one paired closure and returns the actual
-larger renaming and extended allocation ledger selected by that fresh pair.
-`SomeLedgerBinderReadyReachableMachineRelated.matchInvokeNameNext` combines
-the three outcomes and rules out unknown declarations, binding faults, and
-external declarations for an assumed internal transition. This slice is
-integrated at `dc4bea88`; external requests remain separate because their
-responses may allocate.
-
-Closure/value invocation now exposes the same complete ledger-aware internal
-dispatcher. A live mapped closure read publishes its related fixed arguments
-without changing the ledger, then either enters a fully applied internal body
-or under-applies through the same paired closure allocator as named
-invocation. Non-heap functions, dead or non-closure cells, unknown
-declarations, binding faults, and external declarations cannot produce the
-assumed internal transition.
-`SomeLedgerBinderReadyReachableMachineRelated.matchInvokeValueNext` packages
-that classification at `f5efc97e`. Thus all invocation `CoreResult.next`
-paths are ledger-aware.
-
-The source ownership carrier now follows that value-call classification as
-well. Heap ownership bounds every fixed argument stored in the live closure;
-the value-call theorem appends those bounds to the dynamic control arguments
-and delegates full application, re-partial application, and cache entry to the
-generic declaration-invocation carrier. The hereditary exact wrapper exposes
-the post-step relation and source ownership together. The global internal-step
-dispatcher now covers code, yielded restoration, named invocation, and
-value/closure invocation without a constructor-specific gap. This carrier
-slice is integrated at `7c0bb6c3`; `28aa7930` checks full application,
-re-partial application with fresh closure allocation, an exact related call,
-and the global dispatcher.
-
-External invocation suspension now preserves the same exact ledger as well.
-Runtime-equality lemmas show that declaration request construction, named
-dispatch, and live-closure dispatch do not mutate the runtime before yielding
-an `ExternalRequest`. The declaration-ready named and closure matchers lift
-their suspended structural relation with that transported ledger, and
-`SomeLedgerBinderReadyReachableMachineRelated.matchInvokeNameExternal` plus
-`matchInvokeValueExternal` expose the result at the existential state
-boundary. This slice is integrated at `d2ca5074`. Foreign response resumption
-remains separate because a compatible response may allocate and therefore
-extend the renaming and ledger.
-
-The three existing-address layout-write families now preserve the ledger.
-Frontier lemmas prove that successful constructor mutation, object-field
-replacement, absolute `USize`-slot replacement, and packed-scalar replacement
-leave `nextLocation` unchanged. Retained object, `USize`, and scalar writes
-therefore take paired steps, mutate only already-related cells, and transport
-the exact incoming target allocation ledger. Deleted writes take their
-certified source-only step while the target stutters with the same ledger.
-Core, semantic-step, and exact-view ledger wrappers for all six
-retained/deleted cases are integrated at `9519c3d1`.
-
-Retained constructor-tag updates now use the same existing-address argument.
-`setTag_nextLocation_eq_of_ok` transports the target ledger across the paired
-runtime mutation; `match_setTagCodeStep_binderReady_ledger` and
-`ExactShadowCodeBinderReady.match_setTagStep_ledger` carry it through the
-semantic and exact-view boundaries. This slice is integrated at `a70955fd`.
-
-Reference-count increments and retained nonrecursive deletes now preserve the
-ledger as well. Persistent increments are runtime-neutral administrative
-steps; ordinary increments replace one existing live cell; delete either
-accepts the erased sentinel without a runtime change or marks one existing
-live cell dead. Frontier lemmas, paired core rules, hereditary semantic
-matchers, and exact-view wrappers cover these cases at `7fca313f`. Recursive
-decrement/release now preserves the frontier too. The proof is by induction on
-`decLocationFuel`, with an inner induction over the released object's owned
-children; it lifts through `decLocation`, one checked value decrement, and the
-repeated `decValue` fold. Persistent and ordinary decrement semantic matchers
-then transport the ledger through their administrative or recursively
-mutating paths, and the exact-view wrapper closes the pass edge. This slice is
-integrated at `3f03055b`.
-
-Reset now preserves the ledger through all operational branches.
-`releaseResetField_nextLocation_eq_of_ok` reduces one cleared field to the
-erased no-op or an ordinary recursive decrement, its fold theorem composes
-that invariant across the cleared prefix, and
-`reset_nextLocation_eq_of_ok` covers tagged, shared, and unique-constructor
-results. `LedgerResetBothResult` packages the paired target effect, related
-reuse tokens, structural runtime relation, and unchanged target owner table.
-Retained and deleted hereditary matchers plus exact-view wrappers consume that
-package; deleted resets either use the common runtime-neutral rule or execute
-the ownership-certified transition only on the source. Together with the
-existing failed-token and concrete-token reuse matchers, this closes the
-general reset/reuse ledger family at `89d3bfbd`.
-
-A retained-prefix reset/reuse regression now exercises that family with a
-genuinely nonempty target ledger at `5a42dff6`. Target/source location zero is
-a retained natural owned by ledger entry `0 ↦ 0`; source-only location one is
-the deleted constructor selected by reset and concrete-token reuse. The
-runtime theorem derives source-only freshness from the paired allocation
-frontier, proves that reset preserves the retained owner, and carries the
-unchanged owner table into reuse readiness. Exact machine-readiness and
-unified-dispatcher regressions lift both source steps through the actual
-transparent reset/reuse compiler edges. The checked whole-program lift lands
-at `5b9bead7`: a retained heap-backed natural allocates paired location zero,
-the deleted constructor/reset/reuse suffix uses source-only location one, and
-finite source/target entry graphs instantiate
-`ElimDeadLedgerExactOwnershipContract`. Its readiness proof derives owner
-`0 ↦ 0` from the retained live root for every structurally related ledger,
-preserves that owner through reset, and reuses the unchanged ledger at the
-concrete-token overwrite. The fixture includes compiler well-formedness, the
-fail-closed checked traversal, an elaboration-time comparison with Lean
-4.33's actual pass, and
-`retainedPrefixReuseProgramLoweringCorrect_ledgerExact`.
-
-Allocation-capable foreign responses now have an explicit ledger contract.
-`LedgerBinderReadyReachableExternalSpecCompatible` requires the post-response
-renaming to extend the suspended one and requires the resumed pair to carry
-the exact target owner table at the response frontier. Named and
-closure-mediated external-call matchers preserve the incoming ledger through
-request suspension, take one related target external step, and return the
-larger post-response ledger. This boundary is integrated at `63750e62`; it
-does not assume that foreign calls are allocation-free.
-
-The completed families are now assembled into one ledger-aware non-lockstep
-dispatcher at `9d290b7f`. `LedgerBinderReadyReachableMachineReadyAt` aligns
-the exact active compiler edge, hereditary environments and frames, runtime
-relation, and target owner table under the same address renaming.
-`ExactShadowCodeBinderReady.match_codeStep_ledger` exhausts every transparent
-compiler view, including failed/concrete reuse and retained jumps. Yielded
-bind/apply/cache restoration preserves the same history, while the unified
-`SomeLedgerBinderReadyReachableMachineRelated.matchStep_of_ready` selects
-internal matching or allocation-capable foreign resumption for an arbitrary
-source semantic step.
-
-The ledger-aware dispatcher now reaches a checked whole-program endpoint at
-`6d61e0aa`. `LedgerBinderReadyExactRuntimeOwnershipInvariant` keeps the exact
-owner table aligned through every matched future pair, and
-`LedgerBinderReadyReachableMachineRelatedWith` packages that invariant with
-the structural relation as a stuttering simulation.
-`ElimDeadLedgerExactOwnershipContract` gives compiler clients an ordinary
-entry-indexed rectangular invariant with separate source/target one-step
-preservation laws; its readiness callback is asked only for the exact
-ledger-carrying compiler pair selected by execution.
-`nullarySafeShadowProgram_loweringCorrect_ledgerExactOwnership` composes that
-contract with compiler well-formedness, the fail-closed checked traversal,
-and allocation-capable foreign compatibility.
-
-The closed three-write chain also exercises the full client composition.
-`closedWritesExactOwnershipContract` packages its separate source and target
-finite graphs, one-step preservation, and exact-pair readiness as an
-`ElimDeadExactOwnershipContract`. The fail-closed checker is proved to compute
-the complete program target, and
-`closedWritesCompilerAdmissibleRun` combines that equation, compiler
-well-formedness, and the exact contract. Its public `LoweringCorrect` theorem
-therefore uses the strict compiler-facing endpoint rather than the older
-reachability-quantified helper.
-The stronger `closedWritesLedgerExactOwnershipContract` now instantiates the
-ledger-aware interface as well. Its object, `USize`, and scalar write proofs
-retain the structural pair's exact renaming and owner table, derive that the
-source-only location is outside the zero-frontier target ledger, combine that
-fact with each local heap-shape certificate, and reach
-`closedWritesProgramLoweringCorrect_ledgerExact` through the checked pass.
-
-The reset/reuse fixtures now use the same strict composition. The one-cell
-fixture has been migrated from a bespoke hereditary invariant to
-`closedConcreteReuseExactOwnershipContract`; it and the owned-child fixture
-both expose checked whole-program equations and
-`ElimDeadCompilerAdmissibleRun` packages. Their public `LoweringCorrect`
-theorems therefore consume the conservative compiler policy together with the
-exact finite-graph ownership proof, rather than stopping at the older semantic
-admissibility endpoint.
-The retained-prefix fixture strengthens this to the ledger-aware endpoint:
-the target owner table is nonempty at both ownership-sensitive source edges,
-and its checked whole-program proof reaches `LoweringCorrect` through the
-unified ledger dispatcher at `5b9bead7`.
-
-The first reusable extraction from that fixture lands at `3f720ba4`.
-`EnvRelOn` now exposes lookup transport, target-lookup existence, and direct
-heap-address mapping laws. `TargetAllocationLedger.owner_eq_of_forward`
-recovers the source owner of a paired target address, while
-`sourceOnly_of_owner_lt` and `ownerFrame_of_owner_lt` turn compiler allocation
-order plus a source-prefix frame into the source-only and owner-preservation
-premises required by reset/reuse. The retained-prefix client now consumes
-these laws and the common
-`deletedReadyAt_of_targetAllocationLedger` bridge instead of rebuilding the
-renaming inverse and runtime frame locally. Compiler typing and general
-ownership-lifecycle derivations remain to be extracted.
-
-The next extraction lands at `5a437fae`.
-`NonLockstep.Reaches.invariant` packages finite-path invariant induction and
-replaces seven repeated step-count proofs. `ReuseSomeSuccessShape` derives the
-pre-write live constructor cell and arity from a successful concrete-token
-`reuse`, while `DeletedResetLocalReadyAt.of_evalLetValue` derives the complete
-local reset outcome from the same interpreter evaluation used by the execution
-graph. The focused, one-cell, owned-child, and retained-prefix clients now
-build every reset/reuse local-readiness certificate through these operational
-laws instead of separately reducing heap cells and reset effects. The
-remaining gap is the genuinely static one: carry compiler allocation and
-ownership facts through arbitrary executions so those successful evaluations
-and source-only selections do not depend on enumerated fixture states.
-
-The allocation-lifecycle entry and transport layer lands at `3744edf1`.
-Every incoming source frontier is outside the target owner ledger, and the
-proof-relevant deleted constructor, failed-reuse, PAP, literal, and box
-results expose that fact for any heap value they allocate. Source-only
-provenance now survives arbitrary same-frontier renaming extensions, retained
-reset, concrete-token reuse, and a later paired allocation; the latter uses
-an old heap-cell witness to prove that the selected address precedes the new
-source frontier. A focused regression allocates a deleted constructor first,
-then adds an unrelated retained source/target pair, and proves that the
-earlier address remains outside the enlarged target ledger. This removes the
-allocation-order reconstruction from future clients. The next static step was
-to preserve which environment bindings and reset tokens name those certified
-addresses.
-
-The binding-provenance layer lands at `0041d70c`.
-`SourceOnlyHeapBinding` and `SourceOnlyReuseTokenBinding` combine an exact
-environment lookup with the address's source-only ledger certificate. Generic
-laws publish either capability under its own binder, preserve it across an
-unrelated binding, and transport it to any later ledger for which the address
-remains source-only. The operational
-`reset_reuseSome_location_eq_of_ok` theorem proves that a successful reset's
-concrete token names exactly its heap-object operand;
-`DeletedResetLocalReadyAt.sourceOnlyReuseTokenBinding` consequently transfers
-the heap binding into the exact successor token binding. A focused lifecycle
-regression allocates a deleted constructor, binds it as the reset operand,
-derives the concrete reset-token binding, and preserves that token provenance
-after a later paired source/target allocation enlarges the owner ledger.
-
-The deleted-write operation-shape layer lands at `7ecdc33b`.
-`getLiveCell_shape_of_ok` and `getConstructor_shape_of_ok` expose the heap
-lookup, liveness bit, address, and constructor payload already checked by a
-successful runtime helper. The object, absolute-slot `USize`, and packed
-scalar write inversions then recover their exact operand kind and layout
-bounds from the corresponding successful mutation. Proof-relevant selectors
-package these facts as the existing local readiness structures. The
-three-write fixture now consumes those inversions and supplies only its
-operand evaluations, successful effects, selected source address, and
-independent unreachable-root fact; it no longer restates cell contents,
-liveness, or slot bounds. The remaining static work is now to prove those
-operand evaluations and successful operation facts from compiler
-typing/ownership invariants along arbitrary checked executions.
-
-The compiler-facing deleted-write bridge lands at `44b1c2ff`.
-`SourceOnlyHeapBinding.deletedObjectSetReadyAt_of_effect`,
-`deletedUSizeSetReadyAt_of_effect`, and
-`deletedScalarSetReadyAt_of_effect` combine an exact source-only environment
-binding, operand evaluation, successful runtime mutation, and the related
-runtime pair into the complete root-aware deleted-write certificate. The
-bridge recovers heap layout and bounds from the successful effect and uses
-the allocation ledger to exclude the selected source address from target
-roots. Both the nonempty-ledger example and exact closed-write client now use
-this interface; their hand-built local heap-shape witnesses are gone. This
-also isolates the genuinely necessary static obligation: arbitrary
-compiler-produced states must guarantee operand evaluation and mutation
-success, since a faulting source write cannot be simulated by target
-stuttering.
-
-The reuse-effect bridge lands at `8c6ea3e6`.
-`reuseNone_arity_of_ok` extracts the allocation branch's constructor arity
-from a successful interpreter effect, while
-`DeletedReuseReadyAt.none_of_effect` packages the failed-token branch without
-a separately asserted arity fact.
-`SourceOnlyReuseTokenBinding.deletedReuseSomeReadyAt_of_effect` combines an
-exact source-only token binding, argument evaluation, successful concrete
-reuse, and the runtime relation into full root-aware readiness. The
-empty-target, nonempty-ledger, owned-child, and retained-prefix clients now
-use this interface instead of fixture-local live-cell and constructor-shape
-records. The retained-prefix proof also derives its token binding from the
-preceding successful reset and preserves it across the intervening argument
-binding. The remaining reset-specific invariant must cover the reset
-operand's recursively released owned subgraph; a source-only parent binding
-alone cannot prove that paired target owners remain unchanged.
-
-The hereditary reset-closure bridge lands at `475b642b`.
-`decLocationFuel_frame_of_ok`, `decLocation_frame_of_ok`, and the
-`releaseResetField_frame_of_ok`/`releaseResetFields_frame_of_ok` fold laws
-prove that recursive
-reference-count release preserves every cell outside the original union of
-released ownership closures while preserving the ownership graph used by
-later fold iterations. `reset_findCell_eq_of_unreachable_of_ok` lifts this
-through all heap-object reset branches: shared reset uses the recursive
-release frame, while unique-constructor reset proves that prefix clearing only
-removes ownership edges and that releasing the extracted fields remains
-inside the operand's original closure.
-
-`SourceOnlyHeapClosureBinding` is the proof-visible compiler invariant: an
-exact source heap binding together with disjointness between its complete
-owned closure and every source owner recorded by the target ledger. A
-successful reset plus this certificate now derives the ledger owner frame and
-the full deleted-reset readiness contract; frontier preservation comes from
-the effect itself. The nonempty-ledger reset/reuse regression and the
-retained-prefix whole-program client consume this bridge, replacing their
-hand-written owner-frame proofs. Leaf objects obtain the hereditary
-certificate from ordinary source-only provenance and the absence of heap
-children. The remaining static work is to construct and preserve this
-certificate for arbitrary compiler-owned allocation graphs, rather than only
-the checked leaf clients.
-
-The closure-certificate lifecycle lands at `cd09942c`.
-`SourceOnlyHeapClosureBinding` now transports across unrelated environment
-bindings, one-sided heap-reachability frames, exact ownership-graph frames,
-same-frontier renaming extensions, and paired target-ledger growth. The heap
-and ledger transports are also packaged as single transition laws for finite
-execution induction. For allocation specifically,
-`reachable_before_alloc_of_frontier_unreachable` proves that adding the fresh
-cell cannot reveal a new path from an old closure when that closure did not
-already reach the allocation frontier.
-`LedgerAllocBothResult.heapClosureBinding_of_frontierUnreachable` combines
-that heap fact with the paired-ledger extension: the same frontier exclusion
-both keeps the newly paired source owner out of the closure and prevents the
-new cell from exposing a latent path. The deleted-constructor lifecycle
-regression now carries its hereditary certificate through a later retained
-paired allocation using this generic rule.
-
-This isolates the next compiler/static premise more precisely than a generic
-“source-only allocation” condition. The source heap invariant must rule out
-owned paths to its fresh frontier for every compiler-owned closure that may
-survive across a later allocation. Once extracted, this premise supplies the
-allocation case of hereditary reset-certificate preservation; nonallocating
-ownership-graph frames and unrelated environment bindings are already
-covered.
-
-The fresh-frontier ownership bound lands at `f29b5a90`.
-`HeapOwnershipBelowFrontier` states that every stored cell address and every
-heap-valued owned edge lies strictly below `nextLocation`.
-`HeapOwnershipBelowFrontier.reachable_lt` lifts the local edge condition to
-arbitrary owned paths, and `frontierUnreachable` therefore excludes the next
-fresh address from the closure of every successfully found root. The invariant
-holds for the empty runtime and survives `alloc` when each heap reference
-owned by the new object names an address below the old frontier.
-
-`LedgerAllocBothResult.heapClosureBinding_of_heapOwnershipBelowFrontier`
-feeds that static fact directly into the paired allocation lifecycle: a root
-lookup plus the ownership bound replaces the earlier client-supplied
-reachability exclusion. The deleted-constructor/retained-allocation regression
-now constructs the bound from `empty` and `alloc` and no longer proves
-freshness by enumerating the leaf fixture's reachable paths. The next
-lifecycle step is to preserve this bound through checked heap operations and
-then package it with the machine readiness invariant so non-leaf
-compiler-owned graphs receive the same closure certificate.
-
-The nonallocating ownership lifecycle lands at `7ebfb53c`.
-`HeapOwnershipBelowFrontier.transportOwnershipFrame` carries the bound across
-any ownership-graph frame with an unchanged allocation frontier. The generic
-`setCell` law handles arbitrary replacement objects whose heap references are
-already below the frontier; its header-only specialization needs no new
-address premise. These laws lift through fuel-bounded and public recursive
-release, individual and folded reset-field release, the complete shared and
-unique-constructor reset branches, and concrete-token reuse.
-
-The unique reset proof checks that prefix clearing introduces only tagged
-sentinels before applying the recursive-release fold. Concrete reuse exposes
-the one remaining static premise directly: every heap argument installed in
-the replacement constructor lies below the current frontier. The lifecycle
-reset regression now reuses its allocation-derived ownership bound and the
-successful reset effect, without reducing the result heap again.
-
-The checked installed-value bridge lands at `67183055`.
-`HeapLocationsBelowFrontier` packages the address bound for evaluated values.
-Every heap-valued root of a `ShadowRuntimeRel` lies below its runtime frontier:
-reachable-heap correspondence supplies its cell, while runtime freshness
-excludes addresses at or above `nextLocation`. `ArgCovered` and `ArgsCovered`
-then lift that fact through successful `evalArg` and `evalArgs`, deriving the
-previously external address premise from the compiler's live input set.
-
-Constructor allocation, object-field replacement, and both concrete and
-missing-token reuse now preserve `HeapOwnershipBelowFrontier` directly.
-Compiler-facing wrappers compose successful operand evaluation with these
-operation laws.
-
-The complete source-environment bridge lands at `b05c62d5`. Continuation
-liveness cannot justify every source operand: a deleted operation still
-evaluates operands that are absent from the target continuation's live set.
-`EnvironmentBelowFrontier` therefore bounds every value found in the source
-environment independently of target liveness. It starts at the empty
-environment, survives binding and frontier growth, and supplies address bounds
-for arbitrary successful `evalArg` and `evalArgs` results.
-
-`SourceEnvironmentOwnershipBelowFrontier` combines that environment fact with
-heap ownership. Object-field replacement and reset preserve the full local
-carrier; constructor allocation and both reuse modes preserve its heap half.
-The failed-token reuse and deleted object-write fixtures now use this carrier
-without artificially widening target liveness, and inherit the ownership
-invariant without inspecting the result heap.
-
-The value-binding bridge lands at `fd4f531f`.
-`RuntimeValueBelowFrontier` packages frontier monotonicity with a bound on the
-returned value. Constructor allocation supplies it for both immediate and heap
-constructors; concrete reuse returns its existing token location and the
-missing-token branch delegates to allocation. The combined carrier now
-survives both runtime replacement and the compiler's following `let` binding.
-The failed-token fixture exercises the exact non-leaf transition: it allocates
-source-only garbage, binds the fresh result under the dead source local, and
-enters the retained continuation without widening target liveness.
-
-The machine-frame ownership bridge lands at `15092e7c`.
-`BindFrameEnvironmentsBelowFrontier` remembers the complete environment saved
-by every source bind frame, and `SourceMachineOwnershipBelowFrontier` combines
-those bounds with the current source environment and heap. The carrier is
-stable under frontier growth, result binding, bind-frame push/restoration, and
-apply-frame restoration. Control values and apply arguments are deliberately
-not duplicated in this carrier: the exact `ShadowRuntimeRel` already publishes
-them as runtime roots. Strengthened hereditary yielded-bind and yielded-apply
-theorems now preserve both the exact compiler relation and this ownership
-carrier. The failed-token fixture retains its source-only allocation while
-restoring a saved environment containing target-dead locals.
-
-The yielded-dispatch ownership bridge lands at `ba52212b`.
-`HeapOwnershipBelowFrontier` now survives recursive persistence and global
-installation by transporting across the existing metadata-only ownership
-frame. Cache restoration consequently preserves the current environment, heap,
-and every suspended bind environment. A source-only failed-reuse fixture checks
-that exact cache restoration retains compiler-only garbage across persistence.
-The source-side yielded dispatcher derives the yielded value's address bound
-from the exact runtime roots, selects the appropriate bind/apply/cache carrier
-law, and pairs that result with the existing hereditary target matcher. Its
-client-facing theorem returns the target stuttering path, the exact machine
-relation, and source ownership together. Remaining work is to preserve this
-carrier through checked active-code and invocation transitions, then combine
-it with the compositional source-only closure certificate in the general
-dispatcher.
-
-The first active-code ownership edge lands at `a43b7f4c`.
-Reusable whole-machine lifts now carry the local constructor-allocation,
-object-write, reset, and reuse ownership laws through every suspended bind
-environment. The deleted-reuse matcher uses one concrete runtime effect for
-both the exact source-only compiler relation and the ownership carrier, in
-both the missing-token allocation and concrete-token branches. A failed-token
-fixture checks the full semantic `Step`: the source allocates and binds
-compiler-only garbage while the target stutters at the retained continuation,
-and the resulting source machine remains owned below its frontier. Next apply
-the same active-code pattern to deleted constructor allocation, object writes,
-and reset, then cover retained result bindings and frame-pushing invocation
-edges before assembling the general dispatcher.
-
-The remaining heap-changing deleted-let families and the first write family
-land at `1cef5df2`, with concrete regressions at `23898302`.
-Constructor allocation, object-field replacement, and reset now reuse one
-successful runtime effect for both the exact source-only compiler relation and
-the complete machine carrier. Reset additionally proves that every successful
-result is an internal reuse token and therefore adds no ordinary heap-object
-root when the dead result is bound. Three semantic-step fixtures check the
-actual allocating constructor, unreachable object write, and recursive-reset
-edges; each returns the target stuttering path, exact hereditary relation, and
-post-step source ownership. Next cover the unboxed word/scalar write variants,
-thread these operation-specific theorems through the exact active-code
-dispatcher, and then handle retained result bindings and invocation/frame
-pushes.
-
-The remaining deleted-write ownership laws land at `8bde8037`, with concrete
-semantic-step regressions at `475451b9`. Successful absolute-slot `USize` and
-packed-scalar writes preserve the heap ownership graph and allocation
-frontier; local environment and complete-machine lifts carry that fact through
-every suspended bind environment. Their core and non-lockstep semantic
-matchers now return exact hereditary provenance and post-step source ownership
-together. Branch-local exact matchers expose the ownership result for deleted
-object, `USize`, and scalar writes, and concrete suffix fixtures check both
-unboxed source-only mutations while the target stutters. The global exact
-active-code dispatcher is intentionally not strengthened yet: doing so next
-requires ownership preservation for every retained active-code and
-invocation/frame-push branch, not just the three deleted-write cases.
-
-The retained-call ownership bridge lands at `597b57ea`, with concrete
-regressions at `633d259d`. `LetActionOwnershipBelowFrontier` packages the
-single distinction needed by every runtime-neutral let successor: a returned
-value must already lie below the current frontier, while named and value
-invocations preserve the current runtime and save the completely owned
-environment in a bind frame. Retained `.fap` now carries the machine invariant
-through named invocation; retained `.fvar` covers both nullary aliasing of an
-owned environment value and non-nullary value invocation. Hereditary and exact
-graph matchers expose the relation and post-step ownership together. Concrete
-fixtures check the bind-frame and local-alias successors. Next cover the
-remaining retained result-producing active-code families before strengthening
-the global exact dispatcher.
-
-The root-free retained-result ownership bridge lands at `51494be3`, with
-concrete projection regressions at `89d6a99e`. Retained `.erased`, `.uproj`,
-and `.sproj` successors all use the runtime-neutral ownership seam: erased,
-`USize`, and scalar results contain no heap locations, so successful
-evaluation and result binding preserve the complete source carrier without a
-new allocation or ownership premise. Hereditary and exact graph matchers
-return the semantic relation and post-step ownership together. A paired
-one-cell constructor fixture checks actual retained `USize` and packed-scalar
-projection steps, including the environment-root restriction needed by the
-runtime relation. Next cover the heap-derived retained read family
-(`.oproj`, `.unbox`, and `.isShared`), then the allocation-capable retained
-results before strengthening the global exact dispatcher.
-
-The heap-derived retained-read ownership bridge lands at `b535c662`, with
-exact semantic regressions at `61fe8259`. Successful `.oproj` results are
-either non-heap values or owned constructor children, and successful heap
-`.unbox` results are owned boxed payloads; in both cases
-`HeapOwnershipBelowFrontier` places every returned heap address below the
-existing frontier. Successful `.isShared` queries return an immediate
-`UInt8`. The source-step, hereditary, and exact matchers for all three
-families now return post-step source ownership with the non-lockstep relation.
-The examples exercise the object-projection ownership API, a concrete tagged
-unbox, and a concrete heap-backed sharedness query. Next close the
-allocation-capable retained result families, beginning with literals and
-constructors, before strengthening the global exact dispatcher.
-
-The retained literal/constructor allocation bridge lands at `8e144c34`, with
-exact semantic regressions at `0a5aa2f5`. Literal evaluation now preserves the
-heap ownership frontier and proves that its immediate or freshly allocated
-leaf result lies below the resulting frontier. Retained constructors reuse
-the existing argument-coverage and constructor-allocation ownership laws.
-Both source-step lifts transport the complete environment and saved-frame
-carrier across any advanced frontier; their hereditary and exact matchers
-return the enlarged address renaming, non-lockstep target execution, related
-post-state, and post-step source ownership together. The regressions exercise
-an actual heap-backed large-`Nat` literal and a one-field constructor
-allocation. Next cover retained partial applications and boxing, followed by
-retained reset/reuse, before strengthening the global exact dispatcher.
-
-The retained partial-application/box allocation bridge lands at `6f708f42`,
-with exact semantic regressions at `588146ac`. Primitive allocation now has a
-reusable result-frontier law. Closure allocation derives every owned fixed
-argument's bound from `EnvironmentBelowFrontier.of_evalArgs`; boxing proves
-the successful input is scalar or `USize` and covers both the tagged and
-fresh-leaf representations. Their source-step lifts transport the current
-environment and all saved bind environments across the new frontier.
-Hereditary and exact matchers return the enlarged paired-allocation renaming,
-non-lockstep execution, related post-state, and source ownership together.
-The regressions exercise a concrete underapplied-function closure and a
-heap-backed maximum-`UInt64` box. Next cover retained reset/reuse, then
-strengthen the global exact active-code dispatcher.
-
-The retained reset/reuse ownership bridge lands at `0d333649`, with exact
-semantic regressions at `997a8928`. Reset reuses the fixed-frontier
-recursive-release law and proves that its reuse-token result adds no ordinary
-heap root. Reuse lifts the complete environment and saved-frame carrier
-through both runtime branches: a missing token performs a paired constructor
-allocation, while a concrete token overwrites its reachable live cell in
-place. The hereditary and exact matchers return non-lockstep execution,
-related post-state, any enlarged address renaming, and post-step source
-ownership together. Concrete regressions exercise a heap-backed one-field
-reset, missing-token allocation, and concrete-token overwrite. All fourteen
-executable impure `let` families now expose ownership-strengthened exact
-matchers; next strengthen the global exact active-code dispatcher.
-
-The active-code ownership dispatcher lands at `fbf34a80`, with concrete
-dispatcher regressions at `fff91175`. A generic source theorem now preserves
-the complete current-environment, heap, and suspended-bind-frame ownership
-carrier across every executable impure `LCNF.Code` step: retained `let`,
-join-point installation, jump parameter binding, case selection, return,
-object/`USize`/scalar writes, tag replacement, reference-count increment and
-recursive decrement, and deletion. Exact-shadow and state-level reachable
-matchers return their existing non-lockstep target path and relation together
-with the successor source carrier. The jump case uses an explicit
-parameter-binding ownership law rather than treating the target environment
-as unchanged. Concrete regressions execute a one-argument jump, ordinary heap
-increment, recursive decrement to a dead cell, erased-sentinel deletion, and
-the global deleted-object-write dispatcher. This completes the active-code
-ownership boundary. The next distinct boundary is whole-machine ownership
-across named/value invocation and external request/response resumption.
-
-Internal named-invocation ownership lands at `88c85852`, with concrete branch
-regressions at `991c36ee`. Complete declaration parameter binding now starts
-from the empty environment and preserves the frontier bound for every
-installed argument; under-application allocates a closure only from bounded
-published call arguments. The source dispatcher covers all internal
-`.invokeName` successors: under-application, full body entry with extra/cache
-frame preparation, and nullary global-cache hits. The hereditary exact
-machine relation supplies the call-argument bound from its published control
-roots, so its state-level matcher returns the paired successor relation and
-source ownership together. Concrete machine steps exercise all three
-successful branches, including an exact related full call. Next close
-internal `.invokeValue`, where captured closure fields must be recovered from
-heap ownership, then specify the separate foreign-response ownership
-contract required when an external implementation replaces the source heap.
-
-The first compiler-facing policy is now explicit as well.
-`NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
-exactly a deleted nullary `.fap`; retained nullary applications remain
-admissible. `nullarySafeShadowCode?` is the corresponding fail-closed,
-executable traversal. Successful checks reconstruct the proof-relevant graph,
-and every graph computes the same checked result; the graph's mutual `result`
-theorem then reconstructs the underlying `shadowCode?`/`shadowAltList?`
-equations. Thus the executable policy cannot certify a different pass.
-`nullarySafeShadowProgram?` lifts the checker through declarations and whole
-programs, and `nullarySafeShadowProgram_certifies` derives both the exact
-ordinary program result and `NoDeletedNullaryFapProgramRun` from one successful
-checked equation.
-
-`ElimDeadCompilerAdmissibleRun` combines that conservative pass policy with
-the independently checked `ElimDeadRuntimeAdmissibility` package.
-`ElimDeadCompilerAdmissibleRun.loweringCorrect` is therefore the strict
-compiler-client endpoint under FIR's current impure semantics.
-`nullarySafeShadowProgram_loweringCorrect` exposes the same result directly
-from a successful checked-program equation, compiler well-formedness, the
-runtime/ownership certificate, and foreign compatibility. The neutral
-positive fixture reaches that endpoint end to end, while
-`deadNullaryFapNotCompilerAdmissible` proves that the known effectful
-counterexample cannot inhabit it. No suitable purity field was found in the
-audited Lean 4.33 input to `elimDeadVars`; `Decl.safe` records termination
-safety, not observational purity. A future semantics may replace this
-conservative rejection with a stuttering certificate for selected constants.
-An executable 11-row conformance matrix now checks Lean 4.33's pinned pass,
-the transparent traversal, the fail-closed policy decision, and the exact
-accepted target together. It covers neutral deletion, retained used and unsafe
-bindings, deleted allocation/write/reset/reuse/PAP/box bindings, and both sides
-of the nullary-application boundary. The pinned pass agrees on every row; the
-only rejected policy row remains deletion of the effectful nullary
-application. Kernel theorems pin representative retained-unsafe,
-deleted-allocation, deleted-write, retained-nullary, and rejected-nullary
-decisions. The accepted allocation row is also lifted through declarations and
-programs into `ElimDeadCompilerAdmissibleRun`, then consumed by the strict
-whole-program correctness endpoint.
-
-Closed end-to-end fixtures now discharge those premises for deleted object and
-scalar writes, failed-token reuse, concrete-token reuse, reset/reuse with an
-owned child, partial-application closure allocation, and heap-backed scalar
-boxing. Each fixture includes the finite source execution graph, concrete heap
-shape or ownership facts, compiler well-formedness, a successful transparent
-program run, and a public `LoweringCorrect` theorem. The PAP/box fixture also
-pins the actual Lean 4.33 pass to the transparent target while proving that
-both unreachable allocations may be omitted.
-
-The remaining general problem is therefore not an operational matcher, a
-missing whole-program theorem, an implicit nullary-purity assumption, an
-unauditable policy graph, a reachability-shaped client API, a missing
-ledger-aware entry contract, an untested nonempty-ledger client, or a split
-between the source-ownership and target-ledger carriers. It is to derive the
-contract for arbitrary compiler-produced entry states from auditable static
-ownership facts: derive each local operation shape from compiler
-typing/ownership invariants and prove the selected source allocation lies
-outside a potentially nonempty target owner table. The combined source-owned
-ledger relation solves the address-map part without assuming an empty target,
-and its proof-relevant carrier covers the allocation primitives
-and the complete
-literal-, constructor-, partial-application-, box-, and failed-reuse-let
-matchers, together with concrete-token existing-address reuse and the generic
-runtime-neutral erased/deleted layer, plus retained/deleted local-value
-applications, all three layout-field projection families, unboxing, and
-ownership queries, as well as named and closure external-request suspension.
-It now also covers retained/deleted object, `USize`, and scalar writes plus
-retained constructor-tag updates, the complete reference-count/delete family,
-retained/deleted reset/reuse, and allocation-capable external response
-resumption. Those families are now assembled into the unified non-lockstep
-dispatcher; the closed write fixture and retained-prefix reset/reuse fixture
-now discharge aligned checked entry contracts. The remaining compiler-client
-work is to replace finite fixture enumeration with general static
-preservation lemmas. The local nonempty-ledger edge proof lands at
-`5a42dff6`, its checked whole-program lift lands at `5b9bead7`, and the first
-environment/ledger owner-preservation extraction lands at `3f720ba4`;
-source-only allocation lifecycle transport lands at `3744edf1`, and exact
-heap-binding/reset-token provenance lands at `0041d70c`. Successful
-deleted-write effects are converted into all three local heap shapes at
-`7ecdc33b`; `44b1c2ff` composes those shapes with source-only binding
-provenance and the target allocation ledger into the complete compiler-facing
-write-readiness contract. The corresponding failed- and concrete-token reuse
-effect bridges land at `8c6ea3e6`; recursive release/reset closure framing and
-the hereditary target-ledger bridge land at `475b642b`, and its
-environment/heap/ledger/allocation lifecycle lands at `cd09942c`. Static
-fresh-frontier exclusion from heap ownership bounds lands at `f29b5a90`;
-`7ebfb53c` preserves the bound through release/reset and concrete reuse, and
-`67183055` derives installed-value bounds from checked evaluation and covers
-constructor allocation, object writes, and both reuse-token branches.
-`b05c62d5` separates target continuation liveness from complete source
-environment ownership, derives operand bounds for deleted operations, and
-preserves the combined local environment/heap carrier across object writes and
-reset while covering the heap results of allocation and reuse.
-`fd4f531f` adds monotone-frontier/returned-value laws for allocation and both
-reuse modes, preserves the full carrier through result binding, and checks the
-post-reuse retained-continuation state.
-`15092e7c` extends that local carrier to complete environments suspended in
-bind frames, preserves it through exact hereditary bind/apply restoration, and
-checks the source-only failed-reuse heap across an exact yielded-bind step.
-`ba52212b` preserves heap ownership through persistence/global installation,
-completes exact cache restoration, and assembles bind/apply/cache ownership
-under the hereditary yielded dispatcher.
-`a43b7f4c` lifts allocation, object-write, reset, and reuse ownership through
-the complete machine stack, preserves the carrier across both deleted-reuse
-token branches, and checks the semantic missing-token transition.
-`1cef5df2` preserves the same carrier across deleted constructor allocation,
-object-field replacement, and reset, including reset's dead token binding;
-`23898302` checks all three concrete semantic edges.
-`8bde8037` adds fixed-frontier ownership laws for `USize` and packed-scalar
-writes, strengthens their deleted core/semantic matchers, and exposes
-ownership-aware exact matchers for all three deleted-write branches;
-`475451b9` checks the two remaining concrete semantic edges.
-`597b57ea` unifies runtime-neutral let ownership and carries the complete
-machine invariant through retained `.fap`/`.fvar` value binding, control
-changes, and bind-frame pushes; `633d259d` checks exact named invocation and
-nullary local aliasing.
-`51494be3` carries the same invariant through retained `.erased`, `.uproj`,
-and `.sproj` result binding; `89d6a99e` checks concrete exact `USize` and
-packed-scalar projection steps over a related owned constructor.
-`b535c662` derives frontier bounds for object fields and boxed payloads,
-proves the sharedness result heap-free, and carries retained `.oproj`,
-`.unbox`, and `.isShared` through the ownership-aware exact matchers;
-`61fe8259` checks their exact semantic-step APIs and concrete successors.
-`8e144c34` proves literal heap/result frontier laws and carries retained
-literal and constructor allocations through source, hereditary, and exact
-ownership matchers; `0a5aa2f5` checks heap-backed large-`Nat` and one-field
-constructor allocation successors.
-`6f708f42` proves primitive-allocation, closure, and box ownership laws and
-carries retained partial applications and boxes through source, hereditary,
-and exact ownership matchers; `588146ac` checks concrete paired closure and
-heap-box allocation successors.
-`0d333649` carries retained reset and both reuse-token branches through the
-source, hereditary, and exact ownership matchers; `997a8928` checks a
-heap-backed reset, paired missing-token allocation, and concrete-token
-in-place overwrite.
-`fbf34a80` assembles the source, exact-shadow, and reachable state-level
-ownership dispatchers for every executable impure active-code constructor;
-`fff91175` checks jump binding, reference-count increment/decrement, erased
-deletion, and global deleted-write dispatch with concrete machine steps.
-`88c85852` preserves source ownership through every internal named-call
-successor and composes it with the hereditary exact matcher; `991c36ee`
-checks under-application, full declaration entry, cache hit, and an exact
-state-level full call.
-`7c0bb6c3` derives closure-owned fixed-argument bounds and preserves source
-ownership through full and partial internal value invocation, then assembles
-the ownership-strengthened dispatcher for every internal control;
-`28aa7930` checks full body entry, re-partial allocation, an exact related
-closure call, and the global dispatcher.
-`deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
-`ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
-imply correctness: the well-formed nullary-`.fap` counterexample has an
-observable external effect under FIR's unrestricted foreign semantics.
-Any stronger compiler-facing corollary must add such a semantic premise (or
-exclude the disputed rule) and retain the explicit foreign-compatibility
-contract.
-
-### Open semantic boundaries
-
-- `FIR-BUG-impure-elimDeadVars-nullary-fap-effects` is a real mismatch under
-  FIR's current unrestricted external semantics: Lean treats a nullary full
-  application as removable, while FIR permits it to emit observable effects.
-  `deadNullaryFapStaticPremisesButNotCorrect` gives full static
-  well-formedness, the successful transparent program run, and the negation of
-  `LoweringCorrect` for one concrete external specification. Whole-pass
-  correctness must therefore either exclude such programs, record the
-  compiler's constant-purity invariant, or require a semantic stuttering
-  certificate. The current `ElimDeadCompilerAdmissibleRun` endpoint chooses
-  the conservative exclusion and has positive and negative kernel fixtures.
-- `FIR-BUG-impure-none-external-spec-address-parametricity` is represented by
-  the explicit `ReachableExternalSpecCompatible` premise. Arbitrary foreign
-  semantics may inspect raw heap addresses and cannot be transported across a
-  renaming.
-- `FIR-BUG-impure-elimDeadVars-reuse-token-root-gap` is locally isolated by
-  `RetainedLetReadyAt`, which requires a concrete reuse token's cell to be
-  reachable. The compiler-facing proof must derive and preserve that
-  capability.
-- `FIR-BUG-impure-elimDeadVars-full-heap-observation` motivated the
-  `ObservationRel`/`LoweringCorrect` endpoint. The active proof no longer
-  compares raw heaps, although the shared unrestricted same-phase contract
-  remains a separate cleanup target.
-
-Actual-pass fixtures compare the transparent `elimDeadVars` shadow with Lean
-4.33 and preserve every discovered mismatch as a textual bug card and
-regression. The systematic policy matrix found no additional mismatch beyond
-the existing nullary-`.fap` semantic discrepancy.
-
-## Immediate proof queue
-
-1. Derive reusable compiler typing/heap-shape and reachable-state laws for
-   write/reset/reuse. Environment/ledger transport, finite-path invariant
-   induction, successful reset/reuse operational shapes, source-only
-   allocation entry certificates, and lifecycle transport across
-   same-frontier operations and paired allocations, plus exact heap-binding
-   and reset-token provenance, are extracted. Successful object, `USize`, and
-   scalar writes, reset, and concrete reuse now expose their local operation
-   shapes generically. Deleted writes additionally have a compiler-facing
-   source-only binding/effect bridge to the complete root-aware readiness
-   contract; both reuse-token branches now derive their operational facts
-   from successful effects, and concrete reuse consumes reset-token
-   provenance directly. Recursive release and reset now preserve every lookup
-   outside their original owned closures, and the target-ledger reset bridge
-   consumes an explicit hereditary source-only closure certificate.
-   `HeapOwnershipBelowFrontier` now derives fresh-frontier exclusion for
-   arbitrary owned paths and is initialized and preserved by allocation,
-   generic cell replacement, recursive release, complete reset, and
-   concrete-token reuse. `HeapLocationsBelowFrontier` and the shadow-runtime
-   root laws now derive the installed-value address premise from covered
-   `evalArg`/`evalArgs`; constructor allocation, object-field writes, and both
-   reuse-token branches consume it directly. Complete source-environment
-   ownership now covers deleted operands without changing the target liveness
-   set, and the combined local environment/heap carrier survives object writes
-   and reset. Allocation and both reuse modes now return a value below a
-   monotone result frontier, so the carrier also survives their following
-   source `let` bindings. The machine carrier now covers the current
-   environment, heap, and every complete environment suspended in bind frames;
-   exact hereditary yielded bind, apply, and cache restoration preserve it.
-   Recursive persistence/global insertion retains the ownership graph, and a
-   checked yielded dispatcher now returns the target path, exact machine
-   relation, and source carrier together. Whole-machine lifts now cover
-   constructor allocation, object writes, reset, and both reuse modes; the
-   deleted-reuse active-code matcher preserves the carrier in both token
-   branches and its semantic wrapper is checked by the failed-token fixture.
-   Deleted constructor allocation, object-field replacement, and reset now
-   have the same ownership-strengthened core and semantic matchers, with
-   concrete regressions for each. Absolute-slot `USize` and packed-scalar
-   writes now also preserve the heap, local-environment, and complete-machine
-   carriers; their deleted core and semantic matchers have concrete
-   regressions, and all three deleted-write views expose branch-local exact
-   ownership matchers. Runtime-neutral let actions now preserve the carrier
-   across retained named/local invocation control changes, pushed bind frames,
-   nullary local-value result binding, erased results, and root-free `USize`
-   and scalar projections, with exact wrappers and concrete regressions.
-   Retained object projections, unboxing, and ownership queries now also
-   preserve the carrier, including heap-valued owned children and boxed
-   payloads. Retained literal and constructor allocations now advance the
-   frontier and address renaming while preserving the complete source carrier,
-   with exact heap-backed allocation regressions. Retained partial-application
-   closures and boxes now have the same ownership-preserving allocation path,
-   including complete-environment bounds for captured fixed arguments and
-   concrete exact regressions. Retained reset and both reuse modes now
-   preserve the same carrier, completing ownership-strengthened exact
-   matchers for all fourteen executable impure `let` families. The generic
-   source active-code dispatcher now preserves the carrier across every
-   executable impure code constructor, including jump parameter binding,
-   reference-count operations, deletion, cases, return, and direct writes.
-   Exact-shadow and reachable state-level dispatchers expose that result
-   together with the existing non-lockstep relation. Internal named
-   invocation now preserves the carrier through closure allocation, complete
-   parameter binding and body entry, and cache hits. Internal value/closure
-   invocation now recovers captured fixed arguments from heap ownership and
-   preserves the carrier through full body entry and re-partial allocation.
-   The unified internal dispatcher therefore has no remaining control-form
-   gap. `SourceExternalSpecOwnershipCompatible` now states the source-side
-   foreign-response ownership obligation and preserves the carrier through
-   waiting/resumption. `SourceOwnedInvariantMachineRelatedWith` packages that
-   carrier with the client static invariant and the non-lockstep relation, and
-   `ElimDeadSourceOwnedExactContract` lifts it to the checked whole-program
-   endpoint. Concrete allocation-plus-write and reset/reuse clients reach
-   `LoweringCorrect` through that endpoint. Reset readiness now consumes the
-   source carrier: generic local-shape bridges derive post-reset freshness
-   from `HeapOwnershipBelowFrontier` for both empty targets and
-   target-ledger/source-only-closure shapes. Commit `4e882842` closes the
-   carrier-composition gap: source ownership is preserved independently over
-   structural source steps, `SourceOwnedLedgerInvariantMachineRelatedWith`
-   combines it with the exact target allocation ledger, and the resulting
-   non-lockstep simulation and compiler-facing contract reach
-   `LoweringCorrect`. The retained-prefix reset/reuse client checks this path
-   with a genuinely nonempty target ledger and obtains reset freshness from
-   source ownership.
-   Commit `6060a918` begins the static/local-shape replacement. The shared
-   `RetainedPrefixReuseTargetLivePrefixAt` invariant exposes only the target
-   residual control, retained live binding, and allocation frontier needed by
-   deleted reset/reuse. One relation-to-shape theorem now discharges the
-   target execution classification for both edges; their duplicated finite
-   target-state case analyses and concrete target-runtime rewrites are gone.
-   Source-only closure and reset-token provenance are generalized over an
-   arbitrary target-ledger frontier.
-   Commit `f5814ec6` removes the retained-prefix target execution graph from
-   both exact contracts.  A three-phase allocation/control invariant covers
-   declaration entry, the sole retained allocation, and an abstract
-   post-allocation phase.  The latter retains only the live binding,
-   allocation frontier, and terminal control/frame facts needed to prove that
-   return, cache, and attempted application cannot allocate again.  Its step
-   law is proved directly from those fields, and reset/reuse shape extraction
-   no longer accepts a finite target-reachability premise.
-   Commit `3c071252` extracts the first program-independent post-allocation
-   interface. `TargetSingletonLiveReturnAt` is parameterized by the retained
-   binder, its target location, and the allocation frontier; its generic
-   ledger theorem proves that every distinct source owner is absent from the
-   singleton target prefix. The retained-prefix fixture now derives this
-   interface from its phase invariant and uses the generic theorem for both
-   deleted reset and deleted reuse, eliminating its duplicate target shape and
-   owner calculation.
-   Commit `c904f3e8` generalizes the ledger calculation itself.
-   `TargetMappedOwnerPrefix` supplies a proof-visible source owner and forward
-   mapping for every address below an arbitrary target frontier; its exclusion
-   theorem turns pointwise owner inequality into
-   `SourceOnlyUnderTargetLedger`. The singleton live-return interface now
-   constructs this general owner map and delegates to the arbitrary-prefix
-   theorem rather than reasoning directly about the ledger.
-   The next structural gaps are to derive the mapped-owner interface from
-   arbitrary exact checked compiler residuals and to replace the remaining
-   finite source reset/reuse classification with generic local operation-shape
-   and ownership premises.
-2. Extend the actual-pass matrix when new ownership laws or semantic
-   boundaries produce a distinct compiler-relevant shape.
-3. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
-   contract and prove the queued closure-application preservation consumers
-   before that shared validation stack lands.
-
-In parallel, the Wasm lane continues from the same final-impure semantic
-boundary and runs constructor/projection artifacts through the shared
-validation protocol.
-
-## Trust and checked status
-
-The Lean proof sources are fully elaborated without proof holes. The sole
-registered project axiom is the pinned Lean 4.33 upstream-to-local
-alpha-equivalence correspondence in `AlphaEqvTrusted`; `elimDeadVars` adds no
-trusted axiom. `make check` validates the Lean build, executable examples,
-differential matrices, bug-card format, source hashes, and the exact
-trusted-axiom count.
-
-Completing the immediate queue yields the first reachability-aware
-whole-program proof for a behavior-changing final-impure pass. The remaining
-reverse campaign then continues through projection movement, ownership,
-late-mono lowering, SCC/lambda transformations, and finally the base/frontend
-passes in the order above.
+Emitter, resident-runtime, layout, ABI, or artifact changes additionally run
+the complete deterministic artifact and differential gates. Gate names, not a
+fixed corpus count, define acceptance.
+
+## Trust and release closure
+
+`simpCase`'s transparent recursive proof is mature. Its single upstream
+checker correspondence axiom remains isolated and source-hash audited. The
+durable resolution is an upstream equation theorem or proof-facing API,
+followed by a proof of `UpstreamBridge` and removal of that axiom.
+
+Hosted automation should eventually separate a required pull-request gate
+(focused Lean build, `make check`, trust hashes, bug-card validation, exact
+axiom count) from a heavyweight nightly/manual gate (Talos, deterministic
+generation, artifact execution, and native/LCNF/V8 differentials). Protect
+`main` only after those hosted checks are stable and required.
+
+## Phase milestones
+
+| Milestone | Result |
+|---|---|
+| M1 — Closed W6 | Final-LCNF-to-Wasm theorem without caller source invariant |
+| M2 — First compiler-chain theorem | One earlier verified pass composed with W6 |
+| M3 — Executable theorem | Contracted Wasm linked to verified resident helpers |
+| M4 — General `elimDeadVars` | Arbitrary checked compiler entries without finite fixture enumeration |
+| M5 — Backward campaign resumed | Projection movement and later passes composed through the common interface |
+| M6 — Trust/release closure | Alpha bridge removed or explicitly accepted; hosted required gates and protected `main` |

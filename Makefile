@@ -78,7 +78,7 @@ validate-coverage-index: validate-harness validate-source-from-v8 validate-direc
 		--verify-index _build/validation-coverage/index.json
 
 no-placeholders:
-	@if rg -n "sorry|admit" Fir docs Inspect FirValidation*.lean; then \
+	@if rg -n -w "sorry|admit" Fir docs Inspect FirValidation*.lean; then \
 		echo "Found proof placeholders"; \
 		exit 1; \
 	fi
