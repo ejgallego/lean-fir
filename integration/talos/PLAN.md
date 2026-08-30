@@ -5246,20 +5246,17 @@ the emitted module uses exactly `cachedDeclarationNames program`; callers no
 longer restate module-side cache-name alignment. `validated_of_adapt` similarly
 recovers successful symbolic validation from production adaptation.
 
-`LazyCacheValidatorSound` names the remaining integration-owned obligation as
-one theorem quantified over every successfully validated module. It is not a
-per-program certificate or a second checker. The attempted local proof
-confirmed that unfolding the monolithic `validateModuleShape` duplicates a
-large path tree, so the authoritative validator should expose its initializer
-uniqueness and singleton-signature loop through a small accessor (or first
-factor that loop into a named helper).
-`LazyCacheGeneratedEnvironment.ofSupportedPipeline` now combines that one
-uniform theorem with actual supported lowering/adaptation, canonical
-context-side cache names, and `LazyCacheResultKindsAligned`. Thus the remaining
-static conditions are exact and independently owned: integration exposes the
-validator theorem, the correctness framework supplies a context constructed
-with the compiler's cache-name table, and the shared lowering fix discharges
-result-kind alignment. No proof-side cache enumeration or caller-supplied
+`LazyCacheValidatorSound` is now discharged once for every successfully
+validated module by the public `initializerNamesUnique_of_validateModule` and
+`initializerResultKind_of_validateModule` accessors. The proof neither unfolds
+the validator's private index nor introduces a second checker.
+`LazyCacheGeneratedEnvironment.ofSupportedPipeline` combines that compiler
+theorem with actual supported lowering/adaptation, canonical context-side
+cache names, and `LazyCacheResultKindsAligned`. Thus the only remaining static
+condition is exact result-kind alignment: the correctness framework supplies
+a context constructed with the compiler's cache-name table, while the shared
+lowering relation must connect each declaration result to its emitted lane. No
+proof-side cache enumeration, validator-soundness premise, or caller-supplied
 initializer equation remains.
 `ofCanonicalSupportedPipeline` specializes this result to the exact context
 shape threaded by lowering, making context-side cache-name alignment

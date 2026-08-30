@@ -1079,13 +1079,24 @@ generated lazy caches.
 
 This is a theorem about the validator implementation, not a per-module
 certificate: one proof discharges the condition for every successfully
-validated module. W6 keeps this boundary explicit until the monolithic
-`validateModuleShape` initializer loop has an authoritative accessor.
+validated module.
 -/
 def LazyCacheValidatorSound : Prop :=
   ∀ {source : Fir.Wasm.Module},
     Fir.Wasm.validateModule source = .ok () →
       LazyCacheValidationFacts source
+
+/-- The production symbolic validator discharges the complete lazy-cache
+layout boundary.  The proof consumes only its public proof-facing accessors;
+no private validator index or proof-side checker is reconstructed. -/
+theorem lazyCacheValidatorSound : LazyCacheValidatorSound := by
+  intro source validated
+  exact {
+    initializerUnique :=
+      Fir.Wasm.initializerNamesUnique_of_validateModule validated
+    signatures := fun initializerMember =>
+      Fir.Wasm.initializerResultKind_of_validateModule validated
+        initializerMember }
 
 /--
 Static result-kind agreement between generated lazy-cache operations and the
@@ -1240,7 +1251,7 @@ theorem LazyCacheGeneratedEnvironment.validated_of_adapt
 Canonical whole-pipeline constructor for the generated lazy-cache environment.
 
 Supported lowering fixes the emitted initializer order, adaptation supplies
-symbolic validation, and the uniform validator theorem supplies the checked
+symbolic validation, and the validator's public theorem supplies the checked
 layout facts. The remaining cache-specific condition relates the selected
 declaration's effective result to its exact emitted signature kind.
 -/
@@ -1249,7 +1260,6 @@ theorem LazyCacheGeneratedEnvironment.ofSupportedPipeline
     {context : Fir.Wasm.Context}
     {source : Fir.Wasm.Module}
     {target : FirTalos.AdaptedModule}
-    (validatorSound : LazyCacheValidatorSound)
     (lowered : Fir.Wasm.lowerSupported program = .ok source)
     (adapted : FirTalos.adapt source = .ok target)
     (contextCacheNames :
@@ -1266,7 +1276,7 @@ theorem LazyCacheGeneratedEnvironment.ofSupportedPipeline
     LazyCacheGeneratedEnvironment.initializers_of_lower ordinaryLowering
   exact {
     checked :=
-      validatorSound
+      lazyCacheValidatorSound
         (LazyCacheGeneratedEnvironment.validated_of_adapt adapted)
     cacheNames := contextCacheNames.trans emittedNames.symm
     resultKinds }
@@ -1282,7 +1292,6 @@ theorem LazyCacheGeneratedEnvironment.ofCanonicalSupportedPipeline
     {target : FirTalos.AdaptedModule}
     (localKinds : Fir.Wasm.LocalKinds)
     (joins : Fir.Wasm.JoinPoints)
-    (validatorSound : LazyCacheValidatorSound)
     (lowered : Fir.Wasm.lowerSupported program = .ok source)
     (adapted : FirTalos.adapt source = .ok target)
     (resultKinds :
@@ -1298,8 +1307,8 @@ theorem LazyCacheGeneratedEnvironment.ofCanonicalSupportedPipeline
       joins
       cachedDeclarations :=
         Fir.Wasm.cachedDeclarationNames program } source := by
-  apply LazyCacheGeneratedEnvironment.ofSupportedPipeline validatorSound
-    lowered adapted rfl resultKinds
+  apply LazyCacheGeneratedEnvironment.ofSupportedPipeline lowered adapted rfl
+    resultKinds
 
 /--
 Select the exact emitted initializer slot and its physical value kind from

@@ -259,6 +259,12 @@ admission constructors.
   selection. `admit_cases_of_validated_step` exposes the zero-allocation PA2
   boundary, and `ConcreteStructuredSourceAdmissionSafeAt.cases` stores no
   semantic classifier.
+- Lazy-cache validator slice: the production validator now exposes
+  initializer-name uniqueness and singleton-result signature accessors.
+  `lazyCacheValidatorSound` derives `LazyCacheValidationFacts` uniformly, and
+  the supported-pipeline constructors no longer accept validator soundness as
+  a premise. `LazyCacheResultKindsAligned` remains the exact static gap before
+  hit/miss admission can be constructed entirely from compiler facts.
 - Focused proof cones for PA1/PA2:
   `FirTalos.ConcreteFinalLcnfTyping`,
   `FirTalos.ConcreteStructuredValidation`, and

@@ -3853,9 +3853,10 @@ example
 
 /--
 The production supported-lowering/adaptation pipeline determines the
-generated cache-name table and symbolic validation facts. The integration
-validator owes one uniform soundness theorem; callers retain the effective
-declaration-result condition that fixes each exact physical cache lane.
+generated cache-name table and symbolic validation facts. The validator's
+public accessors discharge the uniform layout theorem internally; callers
+retain only the effective declaration-result condition that fixes each exact
+physical cache lane.
 -/
 example
     {program : Fir.LeanIR.ImpureProgram}
@@ -3863,7 +3864,6 @@ example
     {target : FirTalos.AdaptedModule}
     (localKinds : Fir.Wasm.LocalKinds)
     (joins : Fir.Wasm.JoinPoints)
-    (validatorSound : LazyCacheValidatorSound)
     (lowered : Fir.Wasm.lowerSupported program = .ok source)
     (adapted : FirTalos.adapt source = .ok target)
     (resultKinds :
@@ -3880,7 +3880,7 @@ example
       cachedDeclarations :=
         Fir.Wasm.cachedDeclarationNames program } source :=
   LazyCacheGeneratedEnvironment.ofCanonicalSupportedPipeline localKinds joins
-    validatorSound lowered adapted resultKinds
+    lowered adapted resultKinds
 
 /--
 One generated environment replaces independent per-call initializer and
