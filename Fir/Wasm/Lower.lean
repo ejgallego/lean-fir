@@ -967,35 +967,226 @@ private def replaceLocalKind (locals : LocalKinds) (fvarId : FVarId)
   locals.map fun entry =>
     if sameFVar entry.fst fvarId then (entry.fst, kind) else entry
 
-/--
-Refine the declaration-local rows produced by `collectLocals` with exact
-internal named-call results. Keeping the original row order preserves numeric
-local assignment; only the proof-relevant ABI annotation changes.
--/
-partial def refineNamedCallLocalKinds (program : Fir.LeanIR.ImpureProgram)
-    (locals : LocalKinds) : LCNF.Code .impure → Except CompileError LocalKinds
+/-- The alternative array embedded in a `cases` node is structurally smaller
+than that node. This is the termination fact for the transparent local-kind
+refinement traversal below. -/
+private theorem refineCaseAlts_sizeOf_lt (cases : LCNF.Cases .impure) :
+    sizeOf cases.alts.toList < sizeOf (LCNF.Code.cases cases) := by
+  rcases cases with ⟨typeName, resultType, discr, alts⟩
+  rcases alts with ⟨alts⟩
+  simp [LCNF.Cases.alts]
+  omega
+
+/-- A join body is structurally smaller than the join node containing it. -/
+private theorem refineFunDeclValue_sizeOf_lt
+    (declaration : LCNF.FunDecl .impure)
+    (continuation : LCNF.Code .impure) :
+    sizeOf declaration.value <
+      sizeOf (LCNF.Code.jp declaration continuation) := by
+  cases declaration
+  simp_wf
+  simp only [LCNF.FunDecl.value]
+  omega
+
+/-- The code selected from one alternative is structurally smaller than the
+nonempty alternative list containing it. -/
+private theorem refineAltCode_sizeOf_lt_cons
+    (alternative : LCNF.Alt .impure)
+    (rest : List (LCNF.Alt .impure)) :
+    sizeOf alternative.getCode < sizeOf (alternative :: rest) := by
+  cases alternative with
+  | ctorAlt info code =>
+      simp [LCNF.Alt.getCode]
+      omega
+  | default code =>
+      simp [LCNF.Alt.getCode]
+      omega
+  | alt _ _ _ impossible => nomatch impossible
+
+mutual
+
+/-- Collect the exact local-kind rewrites selected by production lowering.
+
+The list order is the old state-threading order: a `let` precedes its
+continuation, join bodies precede join continuations, and case alternatives
+are visited from left to right. Keeping this traversal total and transparent
+lets correctness proofs inspect the compiler's real row computation rather
+than postulating a separate local-layout certificate. -/
+def collectEffectiveLocalKindUpdates (program : Fir.LeanIR.ImpureProgram) :
+    LCNF.Code .impure → Except CompileError (List (FVarId × AbiKind))
   | .let decl continuation => do
       let kind ← effectiveLetValueKind program decl
-      refineNamedCallLocalKinds program
-        (replaceLocalKind locals decl.fvarId kind) continuation
+      let rest ← collectEffectiveLocalKindUpdates program continuation
+      return (decl.fvarId, kind) :: rest
   | .jp decl continuation => do
-      let locals ← refineNamedCallLocalKinds program locals decl.value
-      refineNamedCallLocalKinds program locals continuation
+      let body ← collectEffectiveLocalKindUpdates program decl.value
+      let rest ← collectEffectiveLocalKindUpdates program continuation
+      return body ++ rest
   | .cases cases =>
-      cases.alts.foldlM (init := locals) fun locals alt =>
-        match alt with
-        | .ctorAlt _ code | .default code =>
-            refineNamedCallLocalKinds program locals code
-        | .alt _ _ _ h => nomatch h
+      collectEffectiveLocalKindUpdatesAlts program cases.alts.toList
   | .oset _ _ _ continuation
   | .uset _ _ _ continuation
   | .sset _ _ _ _ _ continuation
   | .setTag _ _ continuation
   | .inc _ _ _ _ continuation
   | .dec _ _ _ _ _ continuation
-  | .del _ continuation => refineNamedCallLocalKinds program locals continuation
+  | .del _ continuation =>
+      collectEffectiveLocalKindUpdates program continuation
   | .fun _ _ h => nomatch h
-  | .jmp .. | .return .. | .unreach .. => pure locals
+  | .jmp .. | .return .. | .unreach .. => .ok []
+
+  termination_by code => sizeOf code
+  decreasing_by
+    all_goals simp_all <;> try omega
+    all_goals first
+      | apply refineCaseAlts_sizeOf_lt
+      | apply refineFunDeclValue_sizeOf_lt
+
+/-- Collect exact local-kind rewrites from case alternatives in production
+left-to-right order. -/
+def collectEffectiveLocalKindUpdatesAlts
+    (program : Fir.LeanIR.ImpureProgram) :
+    List (LCNF.Alt .impure) →
+      Except CompileError (List (FVarId × AbiKind))
+  | [] => .ok []
+  | alternative :: alternatives => do
+      let current ← collectEffectiveLocalKindUpdates program alternative.getCode
+      let rest ← collectEffectiveLocalKindUpdatesAlts program alternatives
+      return current ++ rest
+
+  termination_by alternatives => sizeOf alternatives
+  decreasing_by
+    all_goals simp_all <;> try omega
+    all_goals apply refineAltCode_sizeOf_lt_cons
+
+end
+
+/-- Apply exact kind rewrites without changing declaration-local row order. -/
+def applyEffectiveLocalKindUpdates (locals : LocalKinds)
+    (updates : List (FVarId × AbiKind)) : LocalKinds :=
+  updates.foldl (fun locals update =>
+    replaceLocalKind locals update.fst update.snd) locals
+
+/-- Replacing one existing row kind changes exactly lookups of the same local
+name and never creates or removes a binding. -/
+theorem findLocalKind?_replaceLocalKind
+    (locals : LocalKinds) (updated query : FVarId) (kind : AbiKind) :
+    findLocalKind? (replaceLocalKind locals updated kind) query =
+      if updated.name = query.name then
+        (findLocalKind? locals query).map fun _ => kind
+      else
+        findLocalKind? locals query := by
+  induction locals with
+  | nil => simp [replaceLocalKind, findLocalKind?]
+  | cons entry rest ih =>
+      obtain ⟨candidate, candidateKind⟩ := entry
+      by_cases candidateUpdated : candidate.name = updated.name <;>
+        by_cases candidateQuery : candidate.name = query.name <;>
+          by_cases updatedQuery : updated.name = query.name <;>
+            simp_all [replaceLocalKind, findLocalKind?, sameFVar]
+
+/-- A sequence of row-kind rewrites preserves whether a queried local exists. -/
+theorem findLocalKind?_applyEffectiveLocalKindUpdates_isSome
+    (locals : LocalKinds) (updates : List (FVarId × AbiKind))
+    (query : FVarId) :
+    (findLocalKind? (applyEffectiveLocalKindUpdates locals updates) query).isSome =
+      (findLocalKind? locals query).isSome := by
+  induction updates generalizing locals with
+  | nil => rfl
+  | cons update rest ih =>
+      obtain ⟨updated, kind⟩ := update
+      change
+        (findLocalKind?
+          (applyEffectiveLocalKindUpdates
+            (replaceLocalKind locals updated kind) rest) query).isSome =
+          (findLocalKind? locals query).isSome
+      rw [ih]
+      rw [findLocalKind?_replaceLocalKind]
+      split <;> simp
+
+/-- Rewrites for locals with different names leave a queried lookup exact. -/
+theorem findLocalKind?_applyEffectiveLocalKindUpdates_of_avoids
+    (locals : LocalKinds) (updates : List (FVarId × AbiKind))
+    (query : FVarId)
+    (avoids : ∀ update ∈ updates, update.fst.name ≠ query.name) :
+    findLocalKind? (applyEffectiveLocalKindUpdates locals updates) query =
+      findLocalKind? locals query := by
+  induction updates generalizing locals with
+  | nil => rfl
+  | cons update rest ih =>
+      obtain ⟨updated, kind⟩ := update
+      have headDifferent : updated.name ≠ query.name :=
+        avoids (updated, kind) (by simp)
+      have restAvoids : ∀ update ∈ rest,
+          update.fst.name ≠ query.name := by
+        intro update member
+        exact avoids update (by simp [member])
+      change
+        findLocalKind?
+            (applyEffectiveLocalKindUpdates
+              (replaceLocalKind locals updated kind) rest) query =
+          findLocalKind? locals query
+      rw [ih _ restAvoids]
+      rw [findLocalKind?_replaceLocalKind, if_neg headDifferent]
+
+/-- In a name-unique update list, every listed destination has exactly the
+kind selected by its production refinement, independent of update order. -/
+theorem findLocalKind?_applyEffectiveLocalKindUpdates_of_mem
+    (locals : LocalKinds) (updates : List (FVarId × AbiKind))
+    (fvarId : FVarId) (kind initialKind : AbiKind)
+    (unique : (updates.map Prod.fst).Pairwise
+      fun left right => left.name ≠ right.name)
+    (member : (fvarId, kind) ∈ updates)
+    (initial : findLocalKind? locals fvarId = some initialKind) :
+    findLocalKind? (applyEffectiveLocalKindUpdates locals updates) fvarId =
+      some kind := by
+  induction updates generalizing locals with
+  | nil => simp at member
+  | cons update rest ih =>
+      obtain ⟨updated, updatedKind⟩ := update
+      simp only [List.map_cons, List.pairwise_cons] at unique
+      simp only [List.mem_cons] at member
+      change
+        findLocalKind?
+            (applyEffectiveLocalKindUpdates
+              (replaceLocalKind locals updated updatedKind) rest) fvarId =
+          some kind
+      rcases member with headEq | tailMember
+      · cases headEq
+        have updatedFound :
+            findLocalKind? (replaceLocalKind locals fvarId kind) fvarId =
+              some kind := by
+          rw [findLocalKind?_replaceLocalKind, if_pos rfl, initial]
+          rfl
+        have tailAvoids : ∀ update ∈ rest,
+            update.fst.name ≠ fvarId.name := by
+          intro update updateMember
+          apply Ne.symm
+          exact unique.1 update.fst
+            (List.mem_map.mpr ⟨update, updateMember, rfl⟩)
+        rw [findLocalKind?_applyEffectiveLocalKindUpdates_of_avoids
+          _ rest fvarId tailAvoids]
+        exact updatedFound
+      · have updatedDifferent : updated.name ≠ fvarId.name :=
+          unique.1 fvarId
+            (List.mem_map.mpr ⟨(fvarId, kind), tailMember, rfl⟩)
+        have initialAfter :
+            findLocalKind? (replaceLocalKind locals updated updatedKind) fvarId =
+              some initialKind := by
+          simpa [findLocalKind?_replaceLocalKind, updatedDifferent] using initial
+        exact ih (replaceLocalKind locals updated updatedKind) unique.2
+          tailMember initialAfter
+
+/--
+Refine the declaration-local rows produced by `collectLocals` with exact
+internal named-call results. Keeping the original row order preserves numeric
+local assignment; only the proof-relevant ABI annotation changes.
+-/
+def refineNamedCallLocalKinds (program : Fir.LeanIR.ImpureProgram)
+    (locals : LocalKinds) (code : LCNF.Code .impure) :
+    Except CompileError LocalKinds := do
+  let updates ← collectEffectiveLocalKindUpdates program code
+  return applyEffectiveLocalKindUpdates locals updates
 
 theorem finishCollectLocalsResult_eq_ok_iff
     {α : Type} {result : CollectLocalsM α} {value : α} :
