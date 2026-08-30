@@ -311,6 +311,19 @@ def supportedJumpArgs (locals : LocalKinds) (facts : SupportedCaseFacts)
               guardedObjectJoinArgumentSafe facts sharing decl args pair.fst pair.snd)
       | _, _ => false
 
+/-- Production-facing case-table order accepted by the Wasm backend.
+
+Constructor alternatives form a prefix and an optional default is last.  The
+source interpreter and the generated comparison chain then inspect the same
+ordered table.  This check is intentionally independent of branch-body
+validation so its proof can be projected from every residual validated case
+node. -/
+def caseAltsNormalized : List (LCNF.Alt .impure) → Bool
+  | [] => true
+  | .ctorAlt _ _ :: rest => caseAltsNormalized rest
+  | .default _ :: rest => rest.isEmpty
+  | .alt _ _ _ h :: _ => nomatch h
+
 private theorem supportedCode_caseAlts_sizeOf_lt (cases : LCNF.Cases .impure) :
     sizeOf cases.alts.toList < sizeOf (LCNF.Code.cases cases) := by
   rcases cases with ⟨typeName, resultType, discr, alts⟩
@@ -377,7 +390,7 @@ def supportedCodeWithJoins (program : Fir.LeanIR.ImpureProgram)
         | none => false
       resultKnown &&
         resultKindCompatible (abiValueKind? cases.resultType) expectedResult &&
-        altsSupported
+        caseAltsNormalized cases.alts.toList && altsSupported
   | .return fvarId =>
       match findLocalKind? locals fvarId, expectedResult with
       | some actual, some expected => actual.leanCompatible expected
