@@ -1079,6 +1079,31 @@ def applyLocalKindInsertions (locals : LocalKinds)
   insertions.foldl (fun locals insertion =>
     insertLocal locals insertion.fst insertion.snd) locals
 
+/-- Compiler insertion preserves duplicate-freedom of local names. -/
+theorem insertLocal_names_nodup
+    (locals : LocalKinds) (fvarId : FVarId) (kind : AbiKind)
+    (unique : (locals.map (·.fst.name)).Nodup) :
+    ((insertLocal locals fvarId kind).map (·.fst.name)).Nodup := by
+  unfold insertLocal
+  simp only [List.map_cons, List.nodup_cons]
+  constructor
+  · simp
+  · exact
+      (List.filter_sublist.map
+        (fun (entry : FVarId × AbiKind) => entry.fst.name)).nodup unique
+
+/-- Applying any raw compiler insertion list preserves name uniqueness. -/
+theorem applyLocalKindInsertions_names_nodup
+    (locals : LocalKinds) (insertions : List (FVarId × AbiKind))
+    (unique : (locals.map (·.fst.name)).Nodup) :
+    ((applyLocalKindInsertions locals insertions).map (·.fst.name)).Nodup := by
+  induction insertions generalizing locals with
+  | nil => exact unique
+  | cons insertion rest ih =>
+      obtain ⟨fvarId, kind⟩ := insertion
+      exact ih (insertLocal locals fvarId kind)
+        (insertLocal_names_nodup locals fvarId kind unique)
+
 /-- Filtering away one local name preserves lookup of every different name. -/
 theorem findLocalKind?_filter_different
     (locals : LocalKinds) (removed query : FVarId)
@@ -1199,6 +1224,17 @@ private def replaceLocalKind (locals : LocalKinds) (fvarId : FVarId)
     (kind : AbiKind) : LocalKinds :=
   locals.map fun entry =>
     if sameFVar entry.fst fvarId then (entry.fst, kind) else entry
+
+/-- Effective kind replacement preserves the local-name row exactly. -/
+theorem replaceLocalKind_names
+    (locals : LocalKinds) (fvarId : FVarId) (kind : AbiKind) :
+    (replaceLocalKind locals fvarId kind).map (·.fst.name) =
+      locals.map (·.fst.name) := by
+  unfold replaceLocalKind
+  simp only [List.map_map]
+  apply List.map_congr_left
+  intro entry member
+  by_cases same : sameFVar entry.fst fvarId = true <;> simp [same]
 
 mutual
 
@@ -1336,6 +1372,22 @@ def applyEffectiveLocalKindUpdates (locals : LocalKinds)
     (updates : List (FVarId × AbiKind)) : LocalKinds :=
   updates.foldl (fun locals update =>
     replaceLocalKind locals update.fst update.snd) locals
+
+/-- Effective named-call refinement changes kinds but not compiler local
+names, independently of update order. -/
+theorem applyEffectiveLocalKindUpdates_names
+    (locals : LocalKinds) (updates : List (FVarId × AbiKind)) :
+    (applyEffectiveLocalKindUpdates locals updates).map (·.fst.name) =
+      locals.map (·.fst.name) := by
+  induction updates generalizing locals with
+  | nil => rfl
+  | cons update rest ih =>
+      obtain ⟨fvarId, kind⟩ := update
+      change
+        (applyEffectiveLocalKindUpdates
+          (replaceLocalKind locals fvarId kind) rest).map (·.fst.name) =
+          locals.map (·.fst.name)
+      rw [ih, replaceLocalKind_names]
 
 /-- Replacing one existing row kind changes exactly lookups of the same local
 name and never creates or removes a binding. -/

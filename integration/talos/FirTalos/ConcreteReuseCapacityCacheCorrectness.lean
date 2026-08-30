@@ -11937,6 +11937,118 @@ private theorem declarationParamStep_eq
           · simp [erased] at known ⊢
             exact congrArg (Fir.Wasm.insertLocal locals param.fvarId) known
 
+/-- One production parameter step can only retain an existing local name or
+insert the current source parameter name. -/
+private theorem declarationParamStep_name_mem
+    {program : Fir.LeanIR.ImpureProgram}
+    {declaration : LCNF.Decl .impure}
+    {locals result : Fir.Wasm.LocalKinds}
+    {param : LCNF.Param .impure}
+    (stepped :
+      declarationParamStep program declaration locals param = .ok result)
+    {entry : FVarId × AbiKind}
+    (member : entry ∈ result) :
+    entry.fst.name = param.fvarId.name ∨
+      entry.fst.name ∈ locals.map (·.fst.name) := by
+  unfold declarationParamStep Fir.Wasm.checkedAbiKind? at stepped
+  cases classified : Fir.Wasm.abiKind? param.type with
+  | error fault =>
+      simp [classified, pure, Except.pure, Bind.bind, Except.bind] at stepped
+  | ok kindOption =>
+      cases kindOption with
+      | none =>
+          simp [classified, pure, Except.pure, Bind.bind, Except.bind] at stepped
+          subst result
+          exact .inr (List.mem_map.mpr ⟨entry, member, rfl⟩)
+      | some kind =>
+          by_cases erased :
+              (kind == .tobject &&
+                Fir.Wasm.erasedOnlyParameter program declaration param) = true
+          · simp [classified, erased, pure, Except.pure, Bind.bind,
+              Except.bind] at stepped
+            subst result
+            unfold Fir.Wasm.insertLocal at member
+            rcases List.mem_cons.mp member with selected | retained
+            · cases selected
+              exact .inl rfl
+            · exact .inr (List.mem_map.mpr
+                ⟨entry, (List.mem_filter.mp retained).1, rfl⟩)
+          · simp [classified, erased, pure, Except.pure, Bind.bind,
+              Except.bind] at stepped
+            subst result
+            unfold Fir.Wasm.insertLocal at member
+            rcases List.mem_cons.mp member with selected | retained
+            · cases selected
+              exact .inl rfl
+            · exact .inr (List.mem_map.mpr
+                ⟨entry, (List.mem_filter.mp retained).1, rfl⟩)
+
+/-- Every name retained by the production declaration-parameter fold comes
+from either the traversed source parameter list or the initial local row. -/
+private theorem declarationParamFold_name_mem
+    {program : Fir.LeanIR.ImpureProgram}
+    {declaration : LCNF.Decl .impure}
+    {params : List (LCNF.Param .impure)}
+    {initial result : Fir.Wasm.LocalKinds}
+    (folded :
+      params.foldlM (declarationParamStep program declaration) initial =
+        .ok result)
+    {entry : FVarId × AbiKind}
+    (member : entry ∈ result) :
+    entry.fst.name ∈
+      params.map (·.fvarId.name) ++ initial.map (·.fst.name) := by
+  induction params generalizing initial with
+  | nil =>
+      have resultEq : result = initial := by simpa using (Except.ok.inj folded).symm
+      subst result
+      simp only [List.map_nil, List.nil_append]
+      exact List.mem_map.mpr ⟨entry, member, rfl⟩
+  | cons head tail ih =>
+      rw [List.foldlM_cons] at folded
+      cases headStep : declarationParamStep program declaration initial head with
+      | error fault =>
+          rw [headStep] at folded
+          contradiction
+      | ok next =>
+          rw [headStep] at folded
+          have tailMem := ih folded
+          rw [List.mem_append] at tailMem
+          rcases tailMem with tailName | nextName
+          · simp [tailName]
+          · obtain ⟨nextEntry, nextEntryMem, nextEntryNameEq⟩ :=
+              List.mem_map.mp nextName
+            obtain headName | initialName :=
+              declarationParamStep_name_mem headStep nextEntryMem
+            · have entryName : entry.fst.name = head.fvarId.name :=
+                nextEntryNameEq.symm.trans headName
+              simp [entryName]
+            · have retained :
+                  entry.fst.name ∈ initial.map (·.fst.name) := by
+                simpa [nextEntryNameEq] using initialName
+              simp [retained]
+
+/-- Every local emitted by production declaration-parameter lowering has the
+name of a genuine source parameter, including declarations whose erased or
+type-level parameters do not contribute a runtime ABI lane. -/
+theorem LoweredInternalDeclaration.paramLocalName_mem
+    {program : Fir.LeanIR.ImpureProgram}
+    {cachedDeclarations : Array Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    (row : LoweredInternalDeclaration program cachedDeclarations declaration
+      sourceCode sourceFunction)
+    {entry : FVarId × AbiKind}
+    (member : entry ∈ row.paramLocals) :
+    entry.fst.name ∈ declaration.params.toList.map (·.fvarId.name) := by
+  have parametersAdded := row.paramsAdded
+  unfold Fir.Wasm.addDeclarationParams at parametersAdded
+  change declaration.params.foldlM
+      (declarationParamStep program declaration) [] =
+        .ok row.paramLocals at parametersAdded
+  rw [← Array.foldlM_toList] at parametersAdded
+  simpa using declarationParamFold_name_mem parametersAdded member
+
 /-- With fresh source parameter names, front-insertion followed by reversal is
 exactly the source-order `(identifier, effective ABI kind)` row. -/
 private theorem declarationParamFold_exact
@@ -12002,6 +12114,56 @@ private theorem declarationParamFold_exact
               simp only [Bind.bind, Except.bind]
               rw [insertEq, tailRun]
               simp [List.reverse_cons, List.append_assoc]
+
+/-- The exact production `lowerDecl` row exposes emitted parameters in source
+order, paired with the effective ABI kinds selected by validation. -/
+theorem LoweredInternalDeclaration.sourceParameterBindings
+    {program : Fir.LeanIR.ImpureProgram}
+    {cachedDeclarations : Array Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    {parameterKinds : Array AbiKind}
+    (row : LoweredInternalDeclaration program cachedDeclarations declaration
+      sourceCode sourceFunction)
+    (namesNodup :
+      (declaration.params.toList.map (·.fvarId.name)).Nodup)
+    (known :
+      Fir.Wasm.declarationParameterKinds? program declaration =
+        some parameterKinds) :
+    sourceFunction.params.toList =
+      (declaration.params.toList.zip parameterKinds.toList).map
+        (fun pair => (pair.fst.fvarId, pair.snd)) := by
+  unfold Fir.Wasm.declarationParameterKinds? at known
+  rw [Array.mapM_eq_mapM_toList] at known
+  cases listKnown :
+      declaration.params.toList.mapM
+        (Fir.Wasm.declarationParamKind? program declaration) with
+  | none => simp [listKnown] at known
+  | some listKinds =>
+      have parameterKindsEq : parameterKinds = listKinds.toArray := by
+        simpa [listKnown] using known.symm
+      subst parameterKinds
+      have folded := declarationParamFold_exact
+        (program := program) (declaration := declaration)
+        (params := declaration.params.toList) (kinds := listKinds)
+        (locals := []) namesNodup (by simp) listKnown
+      have parametersAdded := row.paramsAdded
+      unfold Fir.Wasm.addDeclarationParams at parametersAdded
+      change declaration.params.foldlM
+          (declarationParamStep program declaration) [] =
+        .ok row.paramLocals at parametersAdded
+      rw [← Array.foldlM_toList] at parametersAdded
+      rw [folded] at parametersAdded
+      have localsEq :
+          row.paramLocals =
+            ((declaration.params.toList.zip listKinds).map
+              (fun pair => (pair.fst.fvarId, pair.snd))).reverse := by
+        simpa using (Except.ok.inj parametersAdded).symm
+      have sourceParameters :=
+        congrArg (fun function : Fir.Wasm.Function => function.params.toList)
+          row.sourceFunctionEq
+      simpa [localsEq] using sourceParameters
 
 /-- The emitted symbolic parameter row is exactly the source declaration row
 paired, in source order, with the validator's effective ABI kinds. -/
