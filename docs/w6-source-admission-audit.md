@@ -11,7 +11,10 @@ lemmas, and the schema-aware dispatcher.
 
 The audit is complete: every row has a primary A–E disposition, exact existing
 dependencies, an exact missing boundary where applicable, an owner, and a
-regression. No class-E semantic discrepancy was found.
+regression. Subsequent PA1 extraction found one class-E discrepancy in the
+object-case runtime ABI and one previously hidden directional compiler-policy
+decision at named-call boundaries; both are recorded below rather than hidden
+inside a site constructor.
 
 ## Scope and fixed boundary
 
@@ -128,12 +131,12 @@ are independent finite-resource overlays.
 | 1 | return | `.ret` | `.ret`; cost `0`; exact `SemanticValueAtAbi functionResult` | Existing: `ConcreteStructuredAlignedValidationState.admit_return`, `ConcreteStructuredAlignedValidationState.returnSemantic_ofUseSite`, and `ConcreteStructuredReturnUseSiteProvenanceAt`. Missing: construct the latter from the precise producer origin on non-directional object-family edges. | `SemanticEnvAtLocalKinds.ofStateRelated` derives ordinary local typing from the live relation. Validation still proves only carrier compatibility at a non-directional use, so the precise producer-origin fact remains genuinely semantic. | C | W6-Results | `sumTo`; precise `.object`/`.tagged` negative fixture |
 | 2 | direct let | `.directLet` | `.directLet`; cost `directLetAllocationCost decl`; `ReuseBudgetedDirectSupported` | Existing: `ConcreteStructuredValidationFocus.let_eq`, `supportedLetDeclKind?_effectiveLetValueKind`. Missing: `ReuseBudgetedDirectSupported.of_validated_step` from producer typing, reuse evidence, and the source step. | The reverse implication is absent; projection/unbox alignment and reuse provenance are semantic, not Boolean-validator facts. Allocation consumes address-space safety when cost is nonzero. | C + D(address) | W6-Results/Objects | complete direct-operation corpus |
 | 3 | pure external | `.pureExternal` | `.pureExternal`; exact `stepCost`; `PureExternalSupported` | Existing: `PureExternalSupported.resultSemanticValueAtAbi`, `PureExternalSupported.bindResult_preservesSemanticEnvAtLocalKinds`. Missing: `PureExternalSupported.of_validated_step` under the named external contract. | Validation and a generic successful external step cannot prove that the response is the canonical Int/Nat/scalar response. Keep a named external semantic contract; derive exact cost/result from it. | C + D(address) | W6-Results | `sumTo`; pure Int/Nat/scalar corpus |
-| 4 | direct call | `.directCall` | `.directCall`; cost `0`; `DirectInternalCallSite` | Existing: `supportedLetDeclKind?_effectiveLetValueKind`, `ConcreteStructuredValidatedCodeOutcome.advance_directCall_stage_of_step`. Missing export: `DirectInternalCallSite.of_validated_step`. | All site fields come from residual validation/program lookup plus the successful source step; no new invariant is needed for current admission. Result typing after return is the shared cross-branch PA1 obligation below. | B | W6-Results | `sumTo`; `direct-call` |
+| 4 | direct call | `.directCall` | `.directCall`; cost `0`; `DirectInternalCallSite` | Existing: `supportedNamedCall_internal_facts`, `ConcreteStructuredValidationLocalsAgree.compileArgs_of_supported`, and `DirectInternalCallCompilerAdmission.toSite_of_step` reconstruct the operational site. Missing compiler policy: production `supportedNamedCall` proves only `leanCompatible`, while the simulator requires `kindsRefine` for arguments and `calleeResultKind.refines resultKind` for the result; the exact destination-local equation must also be exported from the production local-row refinement. | The dynamic hidden interface is closed. The remaining facts are static, but the directional edges are not consequences of current validation. W7 request `W6-W7-20260830-004` audits real products before choosing a directional validator check or minimal producer provenance. | C | W6-Results / W7 audit | `sumTo`; `direct-call`; reverse object-family negative fixture |
 | 5 | saturated closure call | `.saturatedCall` | `.saturatedCall`; cost `0`; site, resolution, capture capacity | Existing: `ConcreteStructuredValidatedCodeOutcome.advance_saturatedCall_stage_of_step`, `ConcreteStructuredFiniteRuntimeSafeAt`. Missing: `SaturatedClosureCallSite.of_validated_step` and compiler-derived closed-ingress provenance for `SaturatedClosureCallResolution.closedIngressTarget`. | Static/site and dynamic heap fields are reconstructible, but candidate-table membership of a semantic closure requires closure-origin provenance. Capture retention remains a resource premise. | C + D(capture) | W6-Results | `captured-partial`; mixed closure captures |
 | 6 | lazy-cache hit | `.lazyHit` | `.lazyHit`; cost `0`; call/generated environment/current global lookup | Existing: `ConcreteStructuredValidatedCodeOutcome.advance_lazy_stage_of_step`, `ConcreteStructuredLazyReadyAdmission.hit`. Missing export: `ConcreteStructuredLazyReadyAdmission.hit_of_validated_step`. | Compiler/cache identity and hit lookup are already present; factor them. Typing the cached value at `call.resultKind` belongs to the shared result-publication theorem below. | B | W6-Results | cached Nat/String/Array hit cases |
 | 7 | lazy-cache miss | `.lazyMiss` | `.lazyMiss`; cost `0`; internal body, exact result class, exclusions, empty lookup | Existing: `LazyCacheInternalMissSupported`, `ConcreteStructuredLazyReadyAdmission.miss`, `ConcreteStructuredValidatedCodeOutcome.advance_lazy_stage_of_step`. Missing export: `ConcreteStructuredLazyReadyAdmission.miss_of_validated_step`. | Context cache generation, internal body, non-object result restriction, and empty lookup are reconstructible. Miss publication shares the result theorem below. | B | W6-Results | miss and first-publication cases |
 | 8 | default-only case | `.defaultOnlyCase` | `.defaultOnlyCase`; cost `0`; selected default | `ConcreteStructuredCaseSafeAt.default`, `ConcreteStructuredObjectCaseSafeWhenNeededAt.of_default`, and `ConcreteStructuredValidatedCodeCoreRel.caseSafe_of_objectCaseSafeWhenNeeded`. | The source step supplies selection and production validation supplies normalized order. The object-provenance continuation is structurally unreachable. | A | W6-Cases | default-only corpus; default-before-constructor rejection |
-| 9 | object constructor cases | `.objectCases` | `.objectCases`; cost `0`; `ObjectConstructorCasesSupported` | Existing: `ConcreteStructuredCaseAltsNormalized.of_caseAltsNormalized`, `.objectSupported_of_validation`, `ObjectCaseDiscriminatorSupported`, and `productionCasesSupported_of_caseSafe`. Missing: reachable-constructor `objectTagsFit`. | Production validation now derives normalized order, compiler mode, the exact `.object`/`.tagged`/`.tobject` local, its directional widening to `.tobject`, and compared-tag bounds. Only the live source tag's `UInt32` bound still requires constructor provenance. | C | W6-Cases/Objects | `abiCaseProgram`; `branch-nat`; constructor cases |
+| 9 | object constructor cases | `.objectCases` | `.objectCases`; cost `0`; `ObjectConstructorCasesSupported` | Existing: normalized-order/compiler-mode derivation plus `LiveHeapRel.tobjectTag_lt_uint64`. Runtime gap: generated `getTag` truncates a promoted `UInt64` payload to `UInt32` before comparison. | This is a semantic discrepancy, not missing provenance: payload `UInt32.size` aliases constructor tag zero. Bug card `FIR-BUG-wasm-none-object-case-actual-tag-truncation` and W7 request `W6-W7-20260830-003` require an exact i64 object-case comparison; W6 then removes `objectTagsFit`. | E | W7 ABI / W6 proof adaptation | promoted tag `UInt32.size`; constructor cases |
 | 10 | scalar UInt8 cases | `.scalarUInt8Cases` | `.scalarUInt8Cases`; cost `0`; `ScalarUInt8CasesSupported` | `ConcreteStructuredCaseSafeAt.scalar`, `ConcreteStructuredObjectCaseSafeWhenNeededAt.of_scalar`, `ConcreteStructuredCaseAltsNormalized.scalarSupported_of_validation`, and `productionCasesSupported_of_caseSafe`. | Production validation derives normalized order, exact `.uint8` mode, compiled local, and every compared-tag bound. Object provenance is impossible on this branch. | A | W6-Cases/Results | `sumTo`; scalar enum cases |
 | 11 | persistent increment | `.incPersistent` | `.incPersistent`; cost `0` | `ConcreteStructuredSourceAdmissionSafeAt.inc_of_any_persistence` → `ConcreteStructuredAlignedValidationState.admit_incPersistent` via `admit_of_source_safe_step`. | Closed now; syntax and residual validation suffice. | A | W6-Owner | persistent increment corpus |
 | 12 | persistent decrement | `.decPersistent` | `.decPersistent`; cost `0` | `ConcreteStructuredSourceAdmissionSafeAt.dec_of_any_persistence` → `ConcreteStructuredAlignedValidationState.admit_decPersistent`. | Closed now; erased field count needs no additional semantic fact. | A | W6-Owner | persistent decrement/reset corpus |
@@ -173,8 +176,10 @@ are independent finite-resource overlays.
    rejection. Existing dynamic operation and artifact corpora remain the
    positive regressions.
 
-Rows 4, 6, and 7 remain class B for current admission. Their shared semantic
-publication obligation is now factored by
+Rows 6 and 7 remain class B for current admission. Row 4's dynamic
+construction is now factored, but its two directional ABI facts remain class C
+until the production audit selects the compiler policy. Their shared semantic
+publication obligation is factored by
 `SemanticEnvAtLocalKinds.publishPhysicalResult_ofRefines`; the named-call,
 closure-resolution, and lazy-call records already provide the corresponding
 effective-to-public result refinement. This is not an extra premise of their
@@ -183,7 +188,8 @@ admission constructors.
 ## PA0 completion record
 
 - Inventory: 17 source-safety constructors, 20 target admission branches.
-- Primary classes: 9 A, 3 B, 8 C, 0 E.
+- Initial PA0 classes: 9 A, 3 B, 8 C, 0 E. PA1 extraction reclassified direct
+  calls from B to C and object cases from C to E for the exact reasons above.
 - Resource overlays: direct-let/external address headroom, saturated-capture
   retention, and ordinary-increment header headroom.
 - PA1 result module: return use-site precision, direct producer results,
@@ -193,10 +199,10 @@ admission constructors.
 - PA1 case module: semantic discriminator/tag provenance. Final-phase
   constructor-prefix/optional-final-default normalization is now enforced by
   `WasmSupported` and derived from residual validation.
-- No class-E bug card was opened. The existing
-  `FIR-BUG-impure-case-table-selector-determinism` records the missing phase
-  interface behind case normalization; it is not a discovered W6 semantic
-  mismatch.
+- The initial audit opened no class-E card. PA1's exact-tag proof subsequently
+  exposed `FIR-BUG-wasm-none-object-case-actual-tag-truncation`. The older
+  `FIR-BUG-impure-case-table-selector-determinism` remains a phase-interface
+  issue behind case normalization, not this runtime discrepancy.
 - PA2 constructs schema source safety first and composes the existing schema
   admission bridge, as specified above.
 - First PA1 slice: `SemanticValueAtAbi.ofRefines`,
@@ -214,6 +220,14 @@ admission constructors.
   directly to the existing return simulator. The common
   `publishPhysicalResult_ofRefines` theorem closes direct-call,
   saturated-closure, and lazy hit/miss publication at one boundary.
+- Third PA1 result slice factors direct-call construction. Successful source
+  staging now yields the evaluated argument array; residual validation plus
+  compiler-local agreement yields the exact production `compileArgs`; and
+  equal arity constructs the callee environment. The resulting
+  `DirectInternalCallCompilerAdmission.toSite_of_step` leaves only three
+  static compiler facts visible: exact destination-local selection and the two
+  directional argument/result checks not implied by current
+  `leanCompatible` validation.
 - First PA1 case slice: `WASM-NORMALIZED-CASE-TABLE-ADMISSION` makes normalized
   alternative order a production validator fact;
   `ConcreteStructuredCaseAltsNormalized.of_caseAltsNormalized` projects the
@@ -227,9 +241,11 @@ admission constructors.
   remaining case fact to a nonempty constructor table in object-tag mode.
 - Third PA1 case slice: `ObjectCaseDiscriminatorSupported` preserves the exact
   validated object-family kind and widens its related physical lane only at
-  the concrete `getTag` boundary. `ConcreteStructuredObjectCaseSafeAt` no
-  longer stores a compiler equation; its sole field is the live semantic tag
-  bound. `abiCaseProgram` fixes the precise `.tagged` regression.
+  the concrete `getTag` boundary. Exact range lemmas prove that mapped heap
+  tags fit `UInt32` and every related `tobject` tag fits `UInt64`; they also
+  exposed the runtime's unsound low-`UInt32` truncation for promoted tags.
+  W7 owns the exact i64 comparison repair, after which W6 removes the live-tag
+  premise rather than preserving it as provenance.
 - Focused proof cones for PA1/PA2:
   `FirTalos.ConcreteFinalLcnfTyping`,
   `FirTalos.ConcreteStructuredValidation`, and

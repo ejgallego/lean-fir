@@ -17,6 +17,7 @@ namespace FirTalos.Concrete
 open Fir.Wasm
 open Fir.Wasm.Concrete
 open Fir.LeanIR.Impure
+open FirTalos.Correctness
 
 /-- Every semantic binding selected by a final-LCNF local-kind row contains a
 value of the promised ABI shape.  The row is name-directed in exactly the same
@@ -347,6 +348,433 @@ theorem SemanticEnvAtLocalKinds.publishPhysicalResult_ofRefines
         (bind env fvarId value) ∧
       SemanticBindingAtAbi (bind env fvarId value) fvarId expected :=
   typedEnv.publishResult_ofRefines related.semanticValueAtAbi refines
+
+/-- A successful source step at a named-call `let` exposes the exact semantic
+argument array evaluated by the interpreter.
+
+This is the dynamic half of direct-call admission.  It uses only the active
+compiler-focus equalities and the successful current source step; declaration
+lookup, ABI compatibility, and callee selection remain static compiler facts.
+In particular, no execution certificate or future callee behavior is stored. -/
+theorem ConcreteStructuredCodeFocus.evalArgs_of_fap_step
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : LabelContext}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host} {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program} {witness : RefinementWitness}
+    {source sourceAfter : MachineState} {target : StructuredWasmState Host}
+    {declaration : Lean.Name} {args : Array (Lean.Compiler.LCNF.Arg .impure)}
+    (focus : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.let decl continuation) targetStore
+      targetLocals targetCode witness source target)
+    (valueEq : decl.value = .fap declaration args)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ semanticArgs, evalArgs sourceEnv args = .ok semanticArgs := by
+  rcases source with
+    ⟨sourceProgram, sourceControl, stateEnv, stateJoins, stateFrames,
+      stateRuntime⟩
+  have sourceProgramEq := focus.sourceProgramEq
+  have sourceControlEq := focus.sourceControlEq
+  have sourceEnvEq := focus.sourceEnvEq
+  have sourceRuntimeEq := focus.sourceRuntimeEq
+  change sourceProgram = context.program at sourceProgramEq
+  change sourceControl = .code (.let decl continuation) at sourceControlEq
+  change stateEnv = sourceEnv at sourceEnvEq
+  change stateRuntime = sourceRuntime at sourceRuntimeEq
+  subst sourceProgram
+  subst sourceControl
+  subst stateEnv
+  subst stateRuntime
+  cases evaluated : evalArgs sourceEnv args with
+  | error fault =>
+      simp [executeStep, coreStep, evalLetValue, valueEq, evaluated, fail]
+        at sourceStep
+  | ok semanticArgs =>
+      exact ⟨semanticArgs, rfl⟩
+
+/-- Equal source parameter and argument arities construct the unique callee
+environment accepted by `bindParams`.
+
+The theorem is deliberately independent of argument ABI typing: the compiler
+proves ABI refinement separately, while source invocation needs only the same
+array cardinality. -/
+theorem bindParams_exists_of_size_eq
+    (params : Array (Lean.Compiler.LCNF.Param .impure)) (args : Array Value)
+    (sizeEq : params.size = args.size) :
+    ∃ calleeEnv, bindParams params args = .ok calleeEnv := by
+  let calleeEnv : Env :=
+    (params.toList.zip args.toList).foldl
+      (fun env pair => bind env pair.fst.fvarId pair.snd) []
+  refine ⟨calleeEnv, ?_⟩
+  simp [bindParams, sizeEq, calleeEnv]
+
+/-- Successful `Option` traversal preserves cardinality.  This is the static
+array counterpart of successful source argument evaluation and is shared by
+named-call argument and declaration-parameter classifiers. -/
+theorem optionListMapM_length
+    {α β : Type} {f : α → Option β} {xs : List α} {ys : List β}
+    (mapped : xs.mapM f = some ys) : ys.length = xs.length := by
+  induction xs generalizing ys with
+  | nil =>
+      have ysEq : ys = [] := by simpa using mapped.symm
+      subst ys
+      rfl
+  | cons head tail ih =>
+      cases headResult : f head with
+      | none => simp [List.mapM_cons, headResult] at mapped
+      | some value =>
+          cases tailResult : tail.mapM f with
+          | none => simp [List.mapM_cons, headResult, tailResult] at mapped
+          | some values =>
+              have ysEq : ys = value :: values := by
+                simpa [List.mapM_cons, headResult, tailResult] using
+                  mapped.symm
+              subst ys
+              simp [ih tailResult]
+
+/-- Successful production parameter classification preserves declaration
+arity without requiring a generated target row. -/
+theorem declarationParameterKinds?_size_of_some
+    {program : Fir.LeanIR.ImpureProgram}
+    {declaration : Lean.Compiler.LCNF.Decl .impure}
+    {parameterKinds : Array AbiKind}
+    (known : Fir.Wasm.declarationParameterKinds? program declaration =
+      some parameterKinds) :
+    parameterKinds.size = declaration.params.size := by
+  unfold Fir.Wasm.declarationParameterKinds? at known
+  rw [Array.mapM_eq_mapM_toList] at known
+  cases classified : declaration.params.toList.mapM
+      (Fir.Wasm.declarationParamKind? program declaration) with
+  | none => simp [classified] at known
+  | some kinds =>
+      have kindsEq : kinds.toArray = parameterKinds := by
+        simpa [classified] using known
+      rw [← kindsEq]
+      simpa using optionListMapM_length classified
+
+/-- Successful residual argument classification preserves source arity. -/
+theorem supportedArgumentKinds_size_of_some
+    {locals : Fir.Wasm.LocalKinds}
+    {args : Array (Lean.Compiler.LCNF.Arg .impure)}
+    {argumentKinds : Array AbiKind}
+    (known : args.mapM (Fir.Wasm.supportedArgKind? locals) =
+      some argumentKinds) :
+    argumentKinds.size = args.size := by
+  rw [Array.mapM_eq_mapM_toList] at known
+  cases classified : args.toList.mapM (Fir.Wasm.supportedArgKind? locals) with
+  | none => simp [classified] at known
+  | some kinds =>
+      have kindsEq : kinds.toArray = argumentKinds := by
+        simpa [classified] using known
+      rw [← kindsEq]
+      simpa using optionListMapM_length classified
+
+/-- Residual-validator local agreement turns one accepted source argument
+into the exact production `compileArg` equation at the same ABI. -/
+theorem ConcreteStructuredValidationLocalsAgree.compileArg_of_supported
+    {context : Fir.Wasm.Context} {locals : Fir.Wasm.LocalKinds}
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals)
+    {arg : Lean.Compiler.LCNF.Arg .impure} {kind : AbiKind}
+    (supported : Fir.Wasm.supportedArgKind? locals arg = some kind) :
+    ∃ code, Fir.Wasm.compileArg context arg = .ok (code, kind) := by
+  cases arg with
+  | erased =>
+      simp [Fir.Wasm.supportedArgKind?] at supported
+      subst kind
+      exact ⟨[.i32Const .erased 0], rfl⟩
+  | fvar fvarId =>
+      have compiled := agrees supported
+      unfold Fir.Wasm.getLocal at compiled
+      cases found : Fir.Wasm.findLocalKind? context.localKinds fvarId with
+      | none =>
+          rw [found] at compiled
+          contradiction
+      | some actual =>
+          rw [found] at compiled
+          have actualEq : actual = kind := by
+            have pairEq :
+                (Fir.Wasm.Instruction.localGet fvarId, actual) =
+                  (.localGet fvarId, kind) := Except.ok.inj compiled
+            exact congrArg Prod.snd pairEq
+          subst actual
+          exact ⟨[.localGet fvarId], by simp [Fir.Wasm.compileArg, found]⟩
+  | type expr impossible => exact nomatch impossible
+
+private theorem compileArgsList_of_supported
+    {context : Fir.Wasm.Context} {locals : Fir.Wasm.LocalKinds}
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals)
+    {args : List (Lean.Compiler.LCNF.Arg .impure)} {kinds : List AbiKind}
+    (supported : args.mapM (Fir.Wasm.supportedArgKind? locals) = some kinds)
+    (prefixCode : List Fir.Wasm.Instruction) (prefixKinds : Array AbiKind) :
+    ∃ code,
+      args.foldlM (init := (prefixCode, prefixKinds))
+          (fun (instructions, accumulatedKinds) arg => do
+            let (argument, kind) ← Fir.Wasm.compileArg context arg
+            return (instructions ++ argument, accumulatedKinds.push kind)) =
+        .ok (code, prefixKinds ++ kinds.toArray) := by
+  induction args generalizing kinds prefixCode prefixKinds with
+  | nil =>
+      have kindsEq : kinds = [] := by simpa using supported.symm
+      subst kinds
+      exact ⟨prefixCode, by simp [pure, Except.pure]⟩
+  | cons arg tail ih =>
+      cases argFound : Fir.Wasm.supportedArgKind? locals arg with
+      | none => simp [List.mapM_cons, argFound] at supported
+      | some kind =>
+          cases tailFound : tail.mapM (Fir.Wasm.supportedArgKind? locals) with
+          | none => simp [List.mapM_cons, argFound, tailFound] at supported
+          | some tailKinds =>
+              have kindsEq : kinds = kind :: tailKinds := by
+                simpa [List.mapM_cons, argFound, tailFound] using supported.symm
+              subst kinds
+              obtain ⟨argumentCode, argumentCompiled⟩ :=
+                agrees.compileArg_of_supported argFound
+              obtain ⟨code, tailCompiled⟩ := ih tailFound
+                (prefixCode ++ argumentCode) (prefixKinds.push kind)
+              refine ⟨code, ?_⟩
+              simp only [List.foldlM_cons, argumentCompiled, Bind.bind,
+                Except.bind]
+              change
+                tail.foldlM
+                    (init := (prefixCode ++ argumentCode,
+                      prefixKinds.push kind))
+                    (fun (instructions, accumulatedKinds) arg => do
+                      let (argument, nextKind) ← Fir.Wasm.compileArg context arg
+                      return (instructions ++ argument,
+                        accumulatedKinds.push nextKind)) =
+                  .ok (code, prefixKinds ++ (kind :: tailKinds).toArray)
+              rw [tailCompiled]
+              simp
+
+/-- Successful residual argument classification and local-row agreement expose
+the exact production argument compiler result.  This theorem is shared by
+direct calls, source externals, constructors, and closure ingress. -/
+theorem ConcreteStructuredValidationLocalsAgree.compileArgs_of_supported
+    {context : Fir.Wasm.Context} {locals : Fir.Wasm.LocalKinds}
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals)
+    {args : Array (Lean.Compiler.LCNF.Arg .impure)}
+    {argumentKinds : Array AbiKind}
+    (supported : args.mapM (Fir.Wasm.supportedArgKind? locals) =
+      some argumentKinds) :
+    ∃ argumentCode,
+      Fir.Wasm.compileArgs context args = .ok (argumentCode, argumentKinds) := by
+  rw [Array.mapM_eq_mapM_toList] at supported
+  cases classified : args.toList.mapM (Fir.Wasm.supportedArgKind? locals) with
+  | none => simp [classified] at supported
+  | some kinds =>
+      have kindsEq : kinds.toArray = argumentKinds := by
+        simpa [classified] using supported
+      obtain ⟨argumentCode, compiled⟩ :=
+        compileArgsList_of_supported agrees classified [] #[]
+      refine ⟨argumentCode, ?_⟩
+      unfold Fir.Wasm.compileArgs
+      rw [← Array.foldlM_toList]
+      simpa [kindsEq] using compiled
+
+/-- Exact facts exposed by successful production validation of one internal
+named call.
+
+The conclusion intentionally records `leanCompatible`, which is exactly what
+the current validator checks.  It does not silently strengthen either the
+argument or result edge to directional `refines`; those are the two compiler
+admission facts under the PA1 audit. -/
+theorem supportedNamedCall_internal_facts
+    {program : Fir.LeanIR.ImpureProgram} {locals : Fir.Wasm.LocalKinds}
+    {declared : AbiKind} {name : Lean.Name}
+    {args : Array (Lean.Compiler.LCNF.Arg .impure)}
+    {target : Lean.Compiler.LCNF.Decl .impure}
+    {calleeCode : Lean.Compiler.LCNF.Code .impure}
+    (supported : Fir.Wasm.supportedNamedCall program locals declared name args =
+      true)
+    (targetFound : program.findDecl? name = some target)
+    (bodyEq : target.value = .code calleeCode) :
+    ∃ resultKind parameterKinds argumentKinds,
+      Fir.Wasm.effectiveDeclarationResultKind? target = some resultKind ∧
+      Fir.Wasm.declarationParameterKinds? program target = some parameterKinds ∧
+      args.mapM (Fir.Wasm.supportedArgKind? locals) = some argumentKinds ∧
+      resultKind.leanCompatible declared = true ∧
+      argumentKinds.size = parameterKinds.size ∧
+      (argumentKinds.zip parameterKinds).all
+      (fun pair => pair.fst.leanCompatible pair.snd) = true := by
+  unfold Fir.Wasm.supportedNamedCall at supported
+  simp only [targetFound] at supported
+  rw [bodyEq] at supported
+  split at supported <;> simp_all
+  simpa [supported.1.2] using supported.2
+
+/-- Static, compiler-owned portion of one ordinary internal named-call site.
+
+All dynamic interpreter equations are deliberately absent.  The two
+directional fields are the exact difference between production validation's
+current carrier-level `leanCompatible` checks and the refinement relation
+consumed by the call simulator. -/
+structure DirectInternalCallCompilerAdmission
+    (context : Fir.Wasm.Context) (locals : Fir.Wasm.LocalKinds)
+    (decl : Lean.Compiler.LCNF.LetDecl .impure) where
+  declaration : Lean.Name
+  sourceDeclaration : Lean.Compiler.LCNF.Decl .impure
+  calleeCode : Lean.Compiler.LCNF.Code .impure
+  resultKind : AbiKind
+  parameterKinds : Array AbiKind
+  declaredCalleeResultKind : AbiKind
+  calleeResultKind : AbiKind
+  args : Array (Lean.Compiler.LCNF.Arg .impure)
+  argumentKinds : Array AbiKind
+  valueEq : decl.value = .fap declaration args
+  kindEq : Fir.Wasm.checkedAbiKind decl.type = .ok resultKind
+  declarationFound :
+    context.program.findDecl? declaration = some sourceDeclaration
+  parametersKnown :
+    Fir.Wasm.declarationParameterKinds? context.program sourceDeclaration =
+      some parameterKinds
+  argumentsClassified :
+    args.mapM (Fir.Wasm.supportedArgKind? locals) = some argumentKinds
+  argumentsRefine :
+    Fir.Wasm.kindsRefine argumentKinds parameterKinds = true
+  declaredCalleeResult :
+    Fir.Wasm.directAbiKind? sourceDeclaration.type =
+      some declaredCalleeResultKind
+  calleeResult :
+    Fir.Wasm.effectiveDeclarationResultKind? sourceDeclaration =
+      some calleeResultKind
+  calleeResultRefines : calleeResultKind.refines resultKind = true
+  nonCached :
+    (args.isEmpty && sourceDeclaration.params.isEmpty) = false
+  bodyEq : sourceDeclaration.value = .code calleeCode
+  destinationValidated :
+    Fir.Wasm.supportedLetDeclKind? context.program locals decl =
+      some calleeResultKind
+  resultCompiled :
+    Fir.Wasm.getLocal context decl.fvarId =
+      .ok (.localGet decl.fvarId, calleeResultKind)
+
+private theorem exceptListMapM_length
+    {α β ε : Type} {f : α → Except ε β} {xs : List α} {ys : List β}
+    (mapped : xs.mapM f = .ok ys) : ys.length = xs.length := by
+  induction xs generalizing ys with
+  | nil =>
+      change Except.ok [] = Except.ok ys at mapped
+      have ysEq : ([] : List β) = ys := Except.ok.inj mapped
+      subst ys
+      rfl
+  | cons head tail ih =>
+      rw [List.mapM_cons] at mapped
+      cases headResult : f head with
+      | error fault =>
+          rw [headResult] at mapped
+          change Except.error fault = Except.ok ys at mapped
+          contradiction
+      | ok value =>
+          rw [headResult] at mapped
+          cases tailResult : tail.mapM f with
+          | error fault =>
+              rw [tailResult] at mapped
+              change Except.error fault = Except.ok ys at mapped
+              contradiction
+          | ok values =>
+              rw [tailResult] at mapped
+              change Except.ok (value :: values) = Except.ok ys at mapped
+              have ysEq : value :: values = ys := Except.ok.inj mapped
+              subst ys
+              simp [ih tailResult]
+
+/-- Successful source argument evaluation preserves source arity. -/
+theorem evalArgs_size_of_ok
+    {env : Env} {args : Array (Lean.Compiler.LCNF.Arg .impure)}
+    {values : Array Value} (evaluated : evalArgs env args = .ok values) :
+    values.size = args.size := by
+  unfold evalArgs at evaluated
+  rw [Array.mapM_eq_mapM_toList] at evaluated
+  cases classified : args.toList.mapM (evalArg env) with
+  | error fault => simp [classified] at evaluated
+  | ok semanticValues =>
+      have valuesEq : semanticValues.toArray = values := by
+        simpa [classified] using evaluated
+      rw [← valuesEq]
+      simpa using exceptListMapM_length classified
+
+/-- The static compiler admission plus the successful current source step
+construct every field of the existing direct-call site.
+
+This is the dynamic hidden-interface elimination: source argument evaluation,
+callee-environment binding, and production argument compilation are all
+reconstructed rather than accepted from a client.  Destination-local
+compilation remains an exact static equation in the compiler boundary; the
+PA1 static extractor will derive it together with the two explicitly named
+directional ABI facts. -/
+theorem DirectInternalCallCompilerAdmission.toSite_of_step
+    {context : Fir.Wasm.Context} {locals : Fir.Wasm.LocalKinds}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : LabelContext} {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host} {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program} {witness : RefinementWitness}
+    {source sourceAfter : MachineState} {target : StructuredWasmState Host}
+    (admission : DirectInternalCallCompilerAdmission context locals decl)
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals)
+    (focus : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.let decl continuation) targetStore
+      targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    Nonempty (DirectInternalCallSite context decl sourceEnv) := by
+  obtain ⟨argumentCode, argumentsCompiled⟩ :=
+    agrees.compileArgs_of_supported admission.argumentsClassified
+  obtain ⟨semanticArgs, argumentsEvaluated⟩ :=
+    focus.evalArgs_of_fap_step admission.valueEq sourceStep
+  have argumentKindsSize : admission.argumentKinds.size = admission.args.size :=
+    supportedArgumentKinds_size_of_some admission.argumentsClassified
+  have parameterKindsSize :
+      admission.parameterKinds.size = admission.sourceDeclaration.params.size :=
+    declarationParameterKinds?_size_of_some admission.parametersKnown
+  have semanticArgsSize : semanticArgs.size = admission.args.size :=
+    evalArgs_size_of_ok argumentsEvaluated
+  have refinedSizes :
+      admission.argumentKinds.size = admission.parameterKinds.size := by
+    have argumentsRefine := admission.argumentsRefine
+    simp only [Fir.Wasm.kindsRefine, Bool.and_eq_true] at argumentsRefine
+    exact beq_iff_eq.mp argumentsRefine.1
+  have parameterSemanticSize :
+      admission.sourceDeclaration.params.size = semanticArgs.size := by
+    calc
+      admission.sourceDeclaration.params.size =
+          admission.parameterKinds.size := parameterKindsSize.symm
+      _ = admission.argumentKinds.size := refinedSizes.symm
+      _ = admission.args.size := argumentKindsSize
+      _ = semanticArgs.size := semanticArgsSize.symm
+  obtain ⟨calleeEnv, parametersBound⟩ := bindParams_exists_of_size_eq
+    admission.sourceDeclaration.params semanticArgs parameterSemanticSize
+  exact ⟨{
+    declaration := admission.declaration
+    sourceDeclaration := admission.sourceDeclaration
+    calleeCode := admission.calleeCode
+    calleeEnv := calleeEnv
+    resultKind := admission.resultKind
+    parameterKinds := admission.parameterKinds
+    declaredCalleeResultKind := admission.declaredCalleeResultKind
+    calleeResultKind := admission.calleeResultKind
+    args := admission.args
+    argumentCode := argumentCode
+    argumentKinds := admission.argumentKinds
+    semanticArgs := semanticArgs
+    valueEq := admission.valueEq
+    kindEq := admission.kindEq
+    declarationFound := admission.declarationFound
+    parametersKnown := admission.parametersKnown
+    argumentsRefine := admission.argumentsRefine
+    declaredCalleeResult := admission.declaredCalleeResult
+    calleeResult := admission.calleeResult
+    calleeResultRefines := admission.calleeResultRefines
+    nonCached := admission.nonCached
+    bodyEq := admission.bodyEq
+    argumentsCompiled := argumentsCompiled
+    argumentsEvaluated := argumentsEvaluated
+    parametersBound := parametersBound
+    resultCompiled := admission.resultCompiled }⟩
 
 /-- Natural literal allocation always returns an object reference, independent
 of whether the runtime chooses a tagged immediate, promoted tag, or limb
