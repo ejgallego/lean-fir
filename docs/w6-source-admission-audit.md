@@ -274,6 +274,26 @@ the cache simulator and does not weaken ordinary direct-call admission.
   return admission; `ConcreteStructuredReturnUseSiteProvenanceAt` contributes
   only the precise semantic shape on a genuinely non-directional object-family
   result edge.
+- Sixth PA1 result slice makes that boundary exact in the theorem types.
+  `SemanticArgumentUseSites` retains the actual and expected ABI at each
+  current argument, while `SemanticNonRefiningArgumentsAt` quantifies only
+  over non-refining triples which are members of that call row.
+  `DeclarationArgumentsSupported.semanticArgumentUseSites` reconstructs the
+  whole row from production declaration alignment and consults semantic
+  provenance only for those members. `NonRefiningArgumentsCoveredBy` then
+  separates the remaining proof into a compiler-produced precise-local row
+  and its semantic preservation; `toSite_of_step_ofProvenance` feeds that
+  boundary to the unchanged direct-call simulator.
+- The sixth slice also fixes the architectural lower bound for PA3. Current
+  `WasmSupported` carrier validation alone cannot derive precise heap shape:
+  `SemanticValueAtAbi .tobject` intentionally admits tagged values, and a
+  successful source call does not dynamically check an `.object` parameter.
+  Therefore the closed theorem must derive a canonical precise-local
+  provenance analysis (and prove it semantically preserved), or strengthen
+  the compiler-produced checked-program boundary with the equivalent fixed
+  representation-safety property. It must not merely rename that obligation
+  as a caller-selected `SourceInvariant` or encode the 158 observed uses as a
+  program certificate.
 - First PA1 case slice: `WASM-NORMALIZED-CASE-TABLE-ADMISSION` made normalized
   alternative order a production validator fact;
   `ConcreteStructuredCaseAltsNormalized.of_caseAltsNormalized` projects it.

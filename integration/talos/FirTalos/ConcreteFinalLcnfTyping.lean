@@ -345,6 +345,188 @@ def ConcreteStructuredDirectCallArgumentsAt
           SemanticArgumentsAtAbi sourceEnv args.toList
             parameterKinds.toList
 
+/-- Minimal per-argument provenance for one compiler-classified call row.
+
+The relation retains the validator's actual ABI beside the callee's expected
+ABI. Erased syntax is exact. A variable argument stores its compiler-local
+lookup and only the `SemanticBindingAtUseSite` needed to cross that one ABI
+edge. Consequently directional rows contain no additional semantic evidence,
+while a compatible `tobject -> object` row records precisely that the current
+binding is heap-backed. -/
+inductive SemanticArgumentUseSites
+    (locals : Fir.Wasm.LocalKinds) (env : Env) :
+    List (Lean.Compiler.LCNF.Arg .impure) ->
+      List AbiKind -> List AbiKind -> Prop where
+  | nil : SemanticArgumentUseSites locals env [] [] []
+  | erased
+      (rest : SemanticArgumentUseSites locals env args actual expected) :
+      SemanticArgumentUseSites locals env (.erased :: args)
+        (.erased :: actual) (.erased :: expected)
+  | fvar
+      (found : Fir.Wasm.findLocalKind? locals fvarId = some actualKind)
+      (useSite : SemanticBindingAtUseSite env fvarId actualKind expectedKind)
+      (rest : SemanticArgumentUseSites locals env args actual expected) :
+      SemanticArgumentUseSites locals env (.fvar fvarId :: args)
+        (actualKind :: actual) (expectedKind :: expected)
+
+namespace SemanticArgumentUseSites
+
+/-- The live semantic local row eliminates a complete call-use-site row.
+
+This is the common dynamic rule for named calls, closure calls, and any later
+consumer that uses Lean's carrier compatibility. It turns the compact
+per-edge provenance relation into the exact parameter typing already consumed
+by the call simulator. -/
+theorem semanticArguments
+    {locals : Fir.Wasm.LocalKinds} {env : Env}
+    {args : List (Lean.Compiler.LCNF.Arg .impure)}
+    {actual expected : List AbiKind}
+    (useSites : SemanticArgumentUseSites locals env args actual expected)
+    (typedEnv : SemanticEnvAtLocalKinds locals env) :
+    SemanticArgumentsAtAbi env args expected := by
+  induction useSites with
+  | nil => exact .nil
+  | erased rest ih => exact .erased ih
+  | fvar found useSite rest ih =>
+      exact .fvar (useSite.binding (typedEnv.binding found)) ih
+
+/-- Directional rows construct the use-site relation without semantic
+provenance. This list theorem is the proof-facing counterpart of
+`SemanticArgumentsAtAbi.ofKindsRefine`; unlike that endpoint it retains the
+actual row so non-directional producers can be filled one edge at a time. -/
+private theorem ofSupportedRefinesList
+    {locals : Fir.Wasm.LocalKinds} {env : Env}
+    {args : List (Lean.Compiler.LCNF.Arg .impure)}
+    {actual expected : List AbiKind}
+    (classified :
+      args.mapM (Fir.Wasm.supportedArgKind? locals) = some actual)
+    (sizes : actual.length = expected.length)
+    (pointwise :
+      (actual.zip expected).all
+        (fun pair => pair.fst.refines pair.snd) = true) :
+    SemanticArgumentUseSites locals env args actual expected := by
+  induction args generalizing actual expected with
+  | nil =>
+      have actualEq : actual = [] := by simpa using classified.symm
+      subst actual
+      cases expected with
+      | nil => exact .nil
+      | cons head tail => simp at sizes
+  | cons arg tail ih =>
+      cases argFound : Fir.Wasm.supportedArgKind? locals arg with
+      | none => simp [List.mapM_cons, argFound] at classified
+      | some actualHead =>
+          cases tailFound :
+              tail.mapM (Fir.Wasm.supportedArgKind? locals) with
+          | none =>
+              simp [List.mapM_cons, argFound, tailFound] at classified
+          | some actualTail =>
+              have actualEq : actual = actualHead :: actualTail := by
+                simpa [List.mapM_cons, argFound, tailFound] using
+                  classified.symm
+              subst actual
+              cases expected with
+              | nil => simp at sizes
+              | cons expectedHead expectedTail =>
+                  have tailSizes :
+                      actualTail.length = expectedTail.length := by
+                    simpa using sizes
+                  have refinements :
+                      actualHead.refines expectedHead = true ∧
+                        (actualTail.zip expectedTail).all
+                          (fun pair => pair.fst.refines pair.snd) = true := by
+                    simpa using pointwise
+                  have tailSites := ih tailFound tailSizes refinements.2
+                  cases arg with
+                  | erased =>
+                      simp [Fir.Wasm.supportedArgKind?] at argFound
+                      subst actualHead
+                      cases expectedHead <;>
+                        simp [Fir.Wasm.AbiKind.refines] at refinements
+                      exact .erased tailSites
+                  | fvar fvarId =>
+                      exact .fvar argFound (.ofRefines refinements.1)
+                        tailSites
+                  | type expr impossible => exact nomatch impossible
+
+/-- Array-facing constructor for a wholly directional argument row. -/
+theorem ofKindsRefine
+    {locals : Fir.Wasm.LocalKinds} {env : Env}
+    {args : Array (Lean.Compiler.LCNF.Arg .impure)}
+    {actual expected : Array AbiKind}
+    (classified :
+      args.mapM (Fir.Wasm.supportedArgKind? locals) = some actual)
+    (refines : Fir.Wasm.kindsRefine actual expected = true) :
+    SemanticArgumentUseSites locals env args.toList actual.toList
+      expected.toList := by
+  rw [Array.mapM_eq_mapM_toList] at classified
+  cases listResult :
+      args.toList.mapM (Fir.Wasm.supportedArgKind? locals) with
+  | none => simp [listResult] at classified
+  | some actualList =>
+      have actualEq : actualList.toArray = actual := by
+        simpa [listResult] using classified
+      subst actual
+      simp only [Fir.Wasm.kindsRefine, Bool.and_eq_true] at refines
+      have sizes : actualList.length = expected.toList.length := by
+        have sizeEq : actualList.toArray.size = expected.size :=
+          beq_iff_eq.mp refines.1
+        simpa using sizeEq
+      have pointwise :
+          (actualList.zip expected.toList).all
+            (fun pair => pair.fst.refines pair.snd) = true := by
+        have allRefines := refines.2
+        rw [← Array.all_toList] at allRefines
+        simpa [Array.toList_zip] using allRefines
+      exact ofSupportedRefinesList listResult sizes pointwise
+
+end SemanticArgumentUseSites
+
+/-- Exact semantic debt of one compiler-accepted argument row.
+
+Only variable triples which actually occur in the current argument/producer/
+consumer row are quantified.  Refining triples impose no condition; a
+non-refining triple retains the semantic binding at its consumer ABI.  This
+membership guard prevents a current-call boundary from accidentally becoming
+a whole-environment provenance invariant. -/
+def SemanticNonRefiningArgumentsAt
+    (env : Env)
+    (args : List (Lean.Compiler.LCNF.Arg .impure))
+    (actual expected : List AbiKind) : Prop :=
+  ∀ {fvarId : Lean.FVarId} {actualKind expectedKind : AbiKind},
+    ((Lean.Compiler.LCNF.Arg.fvar fvarId, actualKind), expectedKind) ∈
+        (args.zip actual).zip expected →
+      actualKind.refines expectedKind ≠ true →
+        SemanticBindingAtAbi env fvarId expectedKind
+
+/-- Static coverage of the same exact non-refining argument triples by a
+compiler-produced precise local row.
+
+The row is deliberately separate from the physical lowering row: a physical
+`.tobject` lane may have a compiler-proved semantic `.object` shape.  It is an
+analysis result, not a client-selected semantic map. -/
+def NonRefiningArgumentsCoveredBy
+    (provenance : Fir.Wasm.LocalKinds)
+    (args : List (Lean.Compiler.LCNF.Arg .impure))
+    (actual expected : List AbiKind) : Prop :=
+  ∀ {fvarId : Lean.FVarId} {actualKind expectedKind : AbiKind},
+    ((Lean.Compiler.LCNF.Arg.fvar fvarId, actualKind), expectedKind) ∈
+        (args.zip actual).zip expected →
+      actualKind.refines expectedKind ≠ true →
+        Fir.Wasm.findLocalKind? provenance fvarId = some expectedKind
+
+/-- A compiler-produced precise local row discharges the dynamic semantic
+debt of every non-refining argument occurrence it covers. -/
+theorem SemanticEnvAtLocalKinds.nonRefiningArgumentsAt
+    {provenance : Fir.Wasm.LocalKinds} {env : Env}
+    (typed : SemanticEnvAtLocalKinds provenance env)
+    {args : List (Lean.Compiler.LCNF.Arg .impure)}
+    {actual expected : List AbiKind}
+    (covered : NonRefiningArgumentsCoveredBy provenance args actual expected) :
+    SemanticNonRefiningArgumentsAt env args actual expected := by
+  intro fvarId actualKind expectedKind member notRefines
+  exact typed.binding (covered member notRefines)
+
 /-- A typed compiler local plus the minimal use-site fact gives the semantic
 binding at the ABI required by that use. -/
 theorem SemanticEnvAtLocalKinds.binding_atUseSite
@@ -1140,6 +1322,75 @@ theorem DeclarationArgumentsSupported.raw_eq_normalized_of_semanticValues
           cases expectedTyped with
           | cons expectedHead expectedTail =>
               exact congrArg (List.cons _) (ih actualTail expectedTail)
+
+/-- Declaration-aware validation reduces argument provenance to exactly the
+non-refining variable edges in the current call.
+
+Every directionally refining edge constructs its use-site evidence from the
+ABI relation alone.  The callback is consulted only when the accepted source
+producer does not refine the declaration parameter.  This includes both the
+object-family specialization admitted by `leanCompatible` and the deliberately
+discarded producer of a no-value declaration parameter. -/
+theorem DeclarationArgumentsSupported.semanticArgumentUseSites
+    {program : Fir.LeanIR.ImpureProgram} {locals : Fir.Wasm.LocalKinds}
+    {target : Lean.Compiler.LCNF.Decl .impure}
+    {params : List (Lean.Compiler.LCNF.Param .impure)}
+    {args : List (Lean.Compiler.LCNF.Arg .impure)}
+    {expected actual normalized : List AbiKind} {env : Env}
+    (supported : DeclarationArgumentsSupported program locals target params
+      args expected actual normalized) :
+    SemanticNonRefiningArgumentsAt env args actual expected →
+      SemanticArgumentUseSites locals env args actual expected := by
+  induction supported with
+  | nil =>
+      intro _nonRefining
+      exact .nil
+  | @erased param expected arg actual params args expectedKinds actualKinds
+      normalizedKinds noValueAbi paramKind expectedErased argKind rest ih =>
+      intro nonRefining
+      subst expected
+      have tailNonRefining : SemanticNonRefiningArgumentsAt env args
+          actualKinds expectedKinds := by
+        intro fvarId actualKind expectedKind member notRefines
+        exact nonRefining (by
+          simp only [List.zip_cons_cons, List.mem_cons]
+          exact Or.inr member) notRefines
+      have tailSites := ih tailNonRefining
+      cases arg with
+      | erased =>
+          simp [Fir.Wasm.supportedArgKind?] at argKind
+          subst actual
+          exact .erased tailSites
+      | fvar fvarId =>
+          by_cases refines : actual.refines .erased = true
+          · exact .fvar argKind (.ofRefines refines) tailSites
+          · exact .fvar argKind
+              (.ofSemanticBinding (nonRefining (by simp) refines)) tailSites
+      | type expr impossible => exact nomatch impossible
+  | @value paramAbi param expected arg actual params args expectedKinds
+      actualKinds normalizedKinds valueAbi paramKind argKind compatible rest ih =>
+      intro nonRefining
+      have tailNonRefining : SemanticNonRefiningArgumentsAt env args
+          actualKinds expectedKinds := by
+        intro fvarId actualKind expectedKind member notRefines
+        exact nonRefining (by
+          simp only [List.zip_cons_cons, List.mem_cons]
+          exact Or.inr member) notRefines
+      have tailSites := ih tailNonRefining
+      cases arg with
+      | erased =>
+          simp [Fir.Wasm.supportedArgKind?] at argKind
+          subst actual
+          cases expected <;>
+            simp [AbiKind.leanCompatible, AbiKind.refines,
+              AbiKind.isObjectLike] at compatible
+          exact .erased tailSites
+      | fvar fvarId =>
+          by_cases refines : actual.refines expected = true
+          · exact .fvar argKind (.ofRefines refines) tailSites
+          · exact .fvar argKind
+              (.ofSemanticBinding (nonRefining (by simp) refines)) tailSites
+      | type expr impossible => exact nomatch impossible
 
 private theorem checkedAbiKind?_of_valueClassifier
     {program : Fir.LeanIR.ImpureProgram}
@@ -2148,6 +2399,102 @@ theorem DirectInternalCallCompilerAdmission.toSite_of_step
     parametersBound := parametersBound
     resultCompiled := admission.resultCompiled }⟩
 
+/-- Use-site form of direct-call admission.
+
+The compiler-owned provenance analysis need only build the compact argument
+row. The live concrete relation supplies ordinary semantic local typing, and
+the generic row eliminator reconstructs the exact parameter typing consumed
+by `toSite_of_step`. -/
+theorem DirectInternalCallCompilerAdmission.toSite_of_step_ofUseSites
+    {context : Fir.Wasm.Context} {locals : Fir.Wasm.LocalKinds}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : LabelContext} {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host} {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program} {witness : RefinementWitness}
+    {source sourceAfter : MachineState} {target : StructuredWasmState Host}
+    (admission : DirectInternalCallCompilerAdmission context locals decl)
+    (useSites : SemanticArgumentUseSites locals sourceEnv
+      admission.args.toList admission.rawArgumentKinds.toList
+        admission.parameterKinds.toList)
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (focus : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.let decl continuation) targetStore
+      targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    Nonempty (DirectInternalCallSite context decl sourceEnv) := by
+  have typedEnv : SemanticEnvAtLocalKinds locals sourceEnv :=
+    SemanticEnvAtLocalKinds.ofStateRelated agrees localsAligned
+      focus.stateRelated
+  exact admission.toSite_of_step (useSites.semanticArguments typedEnv)
+    localsAligned focus sourceStep
+
+/-- Declaration-aware direct-call adapter exposing only the genuinely
+non-refining semantic obligations.
+
+Production validation and declaration alignment build the complete use-site
+row.  A compiler provenance proof supplies a binding only when the source
+producer's ABI does not directionally refine the declaration parameter ABI;
+ordinary refining arguments never reach the callback. -/
+theorem DirectInternalCallCompilerAdmission.toSite_of_step_ofNonRefining
+    {context : Fir.Wasm.Context} {locals : Fir.Wasm.LocalKinds}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : LabelContext} {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host} {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program} {witness : RefinementWitness}
+    {source sourceAfter : MachineState} {target : StructuredWasmState Host}
+    (admission : DirectInternalCallCompilerAdmission context locals decl)
+    (nonRefining : SemanticNonRefiningArgumentsAt sourceEnv
+      admission.args.toList admission.rawArgumentKinds.toList
+        admission.parameterKinds.toList)
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (focus : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.let decl continuation) targetStore
+      targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    Nonempty (DirectInternalCallSite context decl sourceEnv) := by
+  have useSites : SemanticArgumentUseSites locals sourceEnv
+      admission.args.toList admission.rawArgumentKinds.toList
+        admission.parameterKinds.toList :=
+    admission.argumentAlignment.semanticArgumentUseSites nonRefining
+  exact admission.toSite_of_step_ofUseSites useSites agrees localsAligned focus
+    sourceStep
+
+/-- Compiler-provenance-row form of the direct-call adapter.
+
+This separates PA1's remaining work into a static coverage theorem for the
+current call and preservation of the compiler-produced precise local row.
+Neither premise mentions a target path or future source step, and the row is
+consulted only at actual non-refining argument occurrences. -/
+theorem DirectInternalCallCompilerAdmission.toSite_of_step_ofProvenance
+    {context : Fir.Wasm.Context} {locals provenance : Fir.Wasm.LocalKinds}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : LabelContext} {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host} {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program} {witness : RefinementWitness}
+    {source sourceAfter : MachineState} {target : StructuredWasmState Host}
+    (admission : DirectInternalCallCompilerAdmission context locals decl)
+    (typedProvenance : SemanticEnvAtLocalKinds provenance sourceEnv)
+    (covered : NonRefiningArgumentsCoveredBy provenance admission.args.toList
+      admission.rawArgumentKinds.toList admission.parameterKinds.toList)
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (focus : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.let decl continuation) targetStore
+      targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    Nonempty (DirectInternalCallSite context decl sourceEnv) := by
+  exact admission.toSite_of_step_ofNonRefining
+    (typedProvenance.nonRefiningArgumentsAt covered) agrees localsAligned focus
+    sourceStep
+
 /-- Compatibility corollary for the common directional case.
 
 The live concrete state semantically types the residual compiler local row;
@@ -2173,15 +2520,13 @@ theorem DirectInternalCallCompilerAdmission.toSite_of_step_ofKindsRefine
       targetLocals targetCode witness source target)
     (sourceStep : executeStep externals source = .next sourceAfter) :
     Nonempty (DirectInternalCallSite context decl sourceEnv) := by
-  have typedEnv : SemanticEnvAtLocalKinds locals sourceEnv :=
-    SemanticEnvAtLocalKinds.ofStateRelated admission.localsAgree
-      localsAligned focus.stateRelated
-  have argumentsAtParameters :
-      SemanticArgumentsAtAbi sourceEnv admission.args.toList
+  have useSites : SemanticArgumentUseSites locals sourceEnv
+      admission.args.toList admission.rawArgumentKinds.toList
         admission.parameterKinds.toList :=
-    SemanticArgumentsAtAbi.ofKindsRefine typedEnv
-      admission.argumentsClassified argumentsRefine
-  exact admission.toSite_of_step argumentsAtParameters localsAligned focus
+    SemanticArgumentUseSites.ofKindsRefine admission.argumentsClassified
+      argumentsRefine
+  exact admission.toSite_of_step_ofUseSites useSites admission.localsAgree
+    localsAligned focus
     sourceStep
 
 /-- The recursively validated compiler relation constructs complete
