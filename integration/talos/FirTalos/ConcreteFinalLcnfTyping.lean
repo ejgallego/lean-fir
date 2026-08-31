@@ -501,12 +501,15 @@ theorem supportedNamedCall_nullary_facts
           try simp [parameterEq] at supported
         rename_i resultKind parameterKinds
         have acceptedFull :
-            (resultKind.leanCompatible declared = true ∧
-                0 = parameterKinds.size) ∧
+            ((resultKind.refines declared = true ∨
+                (target.params.isEmpty = true ∧
+                  resultKind.leanCompatible declared = true)) ∧
+              0 = parameterKinds.size) ∧
               ((#[] : Array AbiKind).zip parameterKinds).all
                   (fun pair : AbiKind × AbiKind =>
                     pair.fst.leanCompatible pair.snd) = true := by
-          simpa [targetEq, bodyEq, resultEq, parameterEq] using supported
+          simpa [targetEq, bodyEq, resultEq, parameterEq, Bool.or_eq_true,
+            Bool.and_eq_true] using supported
         have accepted := acceptedFull.1
         refine ⟨target, resultKind, rfl, resultEq, ?_⟩
         have parameterSize :=
@@ -830,13 +833,53 @@ theorem ConcreteStructuredValidationLocalsAgree.compileArgs_of_supported
       rw [← Array.foldlM_toList]
       simpa [kindsEq] using compiled
 
+/-- The effective result selected for any declaration refines the
+declaration's public ABI.  This is a definitional compiler property: the
+selector either keeps the declared kind or records a straight-line result
+only after checking that exact refinement. -/
+theorem effectiveDeclarationResultKind?_declared_refines
+    {declaration : Lean.Compiler.LCNF.Decl .impure} {result : AbiKind}
+    (resultFound :
+      Fir.Wasm.effectiveDeclarationResultKind? declaration = some result) :
+    ∃ declared,
+      Fir.Wasm.directAbiKind? declaration.type = some declared ∧
+        result.refines declared = true := by
+  unfold Fir.Wasm.effectiveDeclarationResultKind? at resultFound
+  cases classified : Fir.Wasm.abiKind? declaration.type with
+  | error error => simp [classified] at resultFound
+  | ok kind? =>
+      cases kind? with
+      | none => simp [classified] at resultFound
+      | some declared =>
+          refine ⟨declared, by simp [Fir.Wasm.directAbiKind?, classified], ?_⟩
+          simp only [classified, Bind.bind, Option.bind_some] at resultFound
+          split at resultFound
+          · simp_all [AbiKind.refines]
+          · cases valueEq : declaration.value <;>
+              simp_all [AbiKind.refines]
+            all_goals
+              split at resultFound <;> try simp_all
+              split at resultFound <;> try simp_all
+              all_goals
+                rename_i actual actualEq
+                subst declared
+                change (if actual.refines .tobject = true then some actual
+                  else some .tobject) = some result at resultFound
+                by_cases refined : actual.refines .tobject = true
+                · simp [refined] at resultFound
+                  subst result
+                  simpa [AbiKind.refines] using refined
+                · simp [refined] at resultFound
+                  subst result
+                  simp
+
 /-- Exact facts exposed by successful production validation of one internal
 named call.
 
-The conclusion intentionally records `leanCompatible`, which is exactly what
-the current validator checks.  It does not silently strengthen either the
-argument or result edge to directional `refines`; those are the two compiler
-admission facts under the PA1 audit. -/
+The result edge is directional because production validation requires the
+effective callee result to refine the source `let` ABI for non-cached calls.
+Ordinary arguments retain Lean's object-family carrier compatibility; their
+semantic ingress is the one remaining named-call provenance boundary. -/
 theorem supportedNamedCall_internal_facts
     {program : Fir.LeanIR.ImpureProgram} {locals : Fir.Wasm.LocalKinds}
     {declared : AbiKind} {name : Lean.Name}
@@ -846,27 +889,30 @@ theorem supportedNamedCall_internal_facts
     (supported : Fir.Wasm.supportedNamedCall program locals declared name args =
       true)
     (targetFound : program.findDecl? name = some target)
-    (bodyEq : target.value = .code calleeCode) :
+    (bodyEq : target.value = .code calleeCode)
+    (nonCached : (args.isEmpty && target.params.isEmpty) = false) :
     ∃ resultKind parameterKinds argumentKinds,
       Fir.Wasm.effectiveDeclarationResultKind? target = some resultKind ∧
       Fir.Wasm.declarationParameterKinds? program target = some parameterKinds ∧
       args.mapM (Fir.Wasm.supportedArgKind? locals) = some argumentKinds ∧
-      resultKind.leanCompatible declared = true ∧
+      resultKind.refines declared = true ∧
       argumentKinds.size = parameterKinds.size ∧
       (argumentKinds.zip parameterKinds).all
       (fun pair => pair.fst.leanCompatible pair.snd) = true := by
   unfold Fir.Wasm.supportedNamedCall at supported
   simp only [targetFound] at supported
   rw [bodyEq] at supported
-  split at supported <;> simp_all
-  simpa [supported.1.2] using supported.2
+  split at supported <;>
+    simp_all [Bool.or_eq_true, Bool.and_eq_true]
+  all_goals aesop
 
 /-- Static, compiler-owned portion of one ordinary internal named-call site.
 
-All dynamic interpreter equations are deliberately absent.  The two
-directional fields are the exact difference between production validation's
-current carrier-level `leanCompatible` checks and the refinement relation
-consumed by the call simulator. -/
+All dynamic interpreter equations are deliberately absent.  Result
+refinement and destination-local selection are production validator facts.
+`argumentsRefine` remains the exact difference between carrier-compatible
+named-call arguments and the directional relation consumed by the current
+call simulator. -/
 structure DirectInternalCallCompilerAdmission
     (context : Fir.Wasm.Context) (locals : Fir.Wasm.LocalKinds)
     (decl : Lean.Compiler.LCNF.LetDecl .impure) where
@@ -906,6 +952,120 @@ structure DirectInternalCallCompilerAdmission
   resultCompiled :
     Fir.Wasm.getLocal context decl.fvarId =
       .ok (.localGet decl.fvarId, calleeResultKind)
+
+/-- Production validation constructs the complete static direct-call
+admission once the remaining argument-ingress refinement is supplied.
+
+The existential arrays are the exact parameter and argument rows selected by
+the validator.  Their carrier compatibility is compiler-derived.  The final
+function shows that result refinement, declaration classification,
+destination-local selection, and every other static site field no longer need
+to be premises of PA2. -/
+theorem ConcreteStructuredAlignedValidationState.directInternalCallBoundary
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionResult : AbiKind}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (validated : ConcreteStructuredAlignedValidationState program context
+      functionResult (.let decl continuation))
+    (contextProgram : context.program = program)
+    {declaration : Lean.Name}
+    {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
+    {calleeCode : Lean.Compiler.LCNF.Code .impure}
+    {args : Array (Lean.Compiler.LCNF.Arg .impure)}
+    (valueEq : decl.value = .fap declaration args)
+    (declarationFound :
+      context.program.findDecl? declaration = some sourceDeclaration)
+    (bodyEq : sourceDeclaration.value = .code calleeCode)
+    (nonCached :
+      (args.isEmpty && sourceDeclaration.params.isEmpty) = false) :
+    ∃ locals parameterKinds argumentKinds,
+      argumentKinds.size = parameterKinds.size ∧
+        (argumentKinds.zip parameterKinds).all
+            (fun pair => pair.fst.leanCompatible pair.snd) = true ∧
+        (Fir.Wasm.kindsRefine argumentKinds parameterKinds = true →
+          Nonempty (DirectInternalCallCompilerAdmission context locals decl)) := by
+  subst program
+  obtain ⟨joins, locals, facts, sharing, focus, _agrees, localAlignment⟩ :=
+    validated
+  obtain ⟨selectedKind, supportedDecl, _continuationValidation⟩ := focus.let_eq
+  cases declaredFound : Fir.Wasm.abiValueKind? decl.type with
+  | none =>
+      unfold Fir.Wasm.supportedLetDeclKind? at supportedDecl
+      simp [declaredFound] at supportedDecl
+  | some declared =>
+      have supportedCall :
+          Fir.Wasm.supportedNamedCall context.program locals declared
+            declaration args = true := by
+        by_contra rejected
+        have rejectedEq :
+            Fir.Wasm.supportedNamedCall context.program locals declared
+              declaration args = false :=
+          Bool.eq_false_of_not_eq_true rejected
+        unfold Fir.Wasm.supportedLetDeclKind? at supportedDecl
+        simp [declaredFound, valueEq, rejectedEq] at supportedDecl
+      obtain ⟨calleeResultKind, parameterKinds, argumentKinds,
+          calleeResult, parametersKnown, argumentsClassified,
+          calleeResultRefines, argumentSizes, argumentsCompatible⟩ :=
+        supportedNamedCall_internal_facts supportedCall declarationFound bodyEq
+          nonCached
+      obtain ⟨declaredCalleeResultKind, declaredCalleeResult,
+          _calleeRefinesDeclaration⟩ :=
+        effectiveDeclarationResultKind?_declared_refines calleeResult
+      have kindEq : Fir.Wasm.checkedAbiKind decl.type = .ok declared :=
+        checkedAbiKind_of_abiValueKind? declaredFound
+      have validatedEffective :
+          Fir.Wasm.effectiveLetValueKind context.program decl =
+            .ok selectedKind :=
+        supportedLetDeclKind?_effectiveLetValueKind supportedDecl
+      have resultCompatible :
+          calleeResultKind.leanCompatible declared = true :=
+        Fir.Wasm.AbiKind.leanCompatible_of_refines calleeResultRefines
+      have callEffective :
+          Fir.Wasm.effectiveLetValueKind context.program decl =
+            .ok calleeResultKind := by
+        unfold Fir.Wasm.effectiveLetValueKind Fir.Wasm.letValueKind
+        rw [valueEq, kindEq]
+        simp only [Bind.bind, Except.bind, pure, Except.pure]
+        rw [declarationFound]
+        simp only
+        rw [calleeResult]
+        simp only
+        rw [if_pos resultCompatible]
+      have selectedEq : selectedKind = calleeResultKind :=
+        Except.ok.inj (validatedEffective.symm.trans callEffective)
+      subst selectedKind
+      have resultCompiled :
+          Fir.Wasm.getLocal context decl.fvarId =
+            .ok (.localGet decl.fvarId, calleeResultKind) :=
+        localAlignment.letHead validatedEffective
+      refine ⟨locals, parameterKinds, argumentKinds, argumentSizes,
+        argumentsCompatible, ?_⟩
+      intro argumentsRefine
+      exact ⟨{
+        declaration := declaration
+        sourceDeclaration := sourceDeclaration
+        calleeCode := calleeCode
+        resultKind := declared
+        parameterKinds := parameterKinds
+        declaredCalleeResultKind := declaredCalleeResultKind
+        calleeResultKind := calleeResultKind
+        args := args
+        argumentKinds := argumentKinds
+        valueEq := valueEq
+        kindEq := kindEq
+        declarationFound := declarationFound
+        parametersKnown := parametersKnown
+        argumentsClassified := argumentsClassified
+        argumentsRefine := argumentsRefine
+        declaredCalleeResult := declaredCalleeResult
+        calleeResult := calleeResult
+        calleeResultRefines := calleeResultRefines
+        nonCached := nonCached
+        bodyEq := bodyEq
+        destinationValidated := supportedDecl
+        resultCompiled := resultCompiled }⟩
 
 private theorem exceptListMapM_length
     {α β ε : Type} {f : α → Except ε β} {xs : List α} {ys : List β}

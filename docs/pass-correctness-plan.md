@@ -52,10 +52,13 @@ even when the execution may continue forever.
    default/scalar/object branches feed
    `admit_cases_of_validated_step`, while exact i64 object tags remove the
    former live-tag premise. The dynamic half of direct-call admission is
-   factored. A production census found no non-refining named-call result edge,
-   but did find real `tobject → object` argument edges in both `prettyM` and
-   `lean-zip`; that argument-origin fact must therefore be preserved rather
-   than replaced by a blanket directional validator restriction. The
+   factored. A production census found no non-refining named-call result edge
+   in `prettyM` or `lean-zip`, so ordinary non-cached calls now require
+   directional result refinement. The complete validation corpus also exposed
+   a legitimate reverse object-family result on a nullary cached declaration;
+   that lane deliberately retains `leanCompatible`. The same census found real
+   `tobject → object` argument edges in both products, so argument origin must
+   be preserved rather than replaced by a blanket directional restriction. The
    lazy-cache validator boundary is now also compiler-derived:
    `lazyCacheValidatorSound` consumes public validation accessors, and the
    supported-pipeline constructors no longer accept a validator-soundness
@@ -116,7 +119,7 @@ roadmap and examples then reference only the closed endpoint.
 | Milestone | Current theorem or interface | Premises to eliminate | Premises retained | Owner | Definition of done |
 |---|---|---|---|---|---|
 | PA0 (complete) | `ConcreteStructuredSourceAdmissionSafeAt`; `ConcreteStructuredSchemaSourceAdmissionSafeAt`; `ConcreteStructuredCodeStepAdmission` | None during audit | Existing compiler, semantic, and resource boundaries unchanged | W6 audit owner | Met: 20/20 branches classified; later PA1 discrepancies are explicitly tracked |
-| PA1 (active) | `SemanticEnvAtLocalKinds.ofStateRelated`; `SemanticBindingAtUseSite`; `ConcreteStructuredReturnUseSiteProvenanceAt`; `ConcreteResidualLocalAlignment`; `ConcreteStructuredValidatedCodeCoreRel.productionCasesSupported_of_validation`; `ConcreteStructuredValidatedCodeCoreRel.admit_cases_of_validated_step`; `lazyCacheValidatorSound`; operation-specific source-safety lemmas | Precise non-directional producer origin, closure ingress, field, and layout provenance | Ordinary local typing, residual compiler-local alignment, call/cache publication, complete case admission, and lazy-cache validator soundness are derived from and retained by the active relation/validator | W6 result/object/case helper owners | All remaining class-C facts are compiler-derived without a public provenance map or universal source invariant; shared publication and case admission laws are factored |
+| PA1 (active) | `SemanticEnvAtLocalKinds.ofStateRelated`; `SemanticBindingAtUseSite`; `ConcreteStructuredReturnUseSiteProvenanceAt`; `ConcreteResidualLocalAlignment`; `effectiveDeclarationResultKind?_declared_refines`; `ConcreteStructuredAlignedValidationState.directInternalCallBoundary`; `ConcreteStructuredValidatedCodeCoreRel.productionCasesSupported_of_validation`; `ConcreteStructuredValidatedCodeCoreRel.admit_cases_of_validated_step`; `lazyCacheValidatorSound`; operation-specific source-safety lemmas | Precise non-directional producer origin, named-call argument ingress, closure ingress, field, and layout provenance | Ordinary local typing, residual compiler-local alignment, non-cached named-call result refinement and exact destination selection, call/cache publication, complete case admission, and lazy-cache validator soundness are compiler-derived | W6 result/object/case helper owners | All remaining class-C facts are compiler-derived without a public provenance map or universal source invariant; shared publication and case admission laws are factored |
 | PA2 | `ConcreteStructuredCompilerCurrentStepAdmission`; `ConcreteStructuredValidatedCodeOutcome.advance_of_admission` | `ConcreteStructuredSchemaSourceReadyAt` as a client-provided current-node law | `ConcreteStructuredCurrentStepFiniteRuntimeSafety`; `ConcreteStructuredCurrentStepAddressSpaceSafety` | W6 owner | Production compiler facts construct current-step admission from the exact validated outcome for every successful guarded source step |
 | PA3 | `ConcreteSupportedExport.finiteTraceCorrect_of_schemaSourceInvariant` | `SourceInvariant`, `sourceLaws`, `sourceInitialInvariant`, caller-selected `initialSchema` | Entry relation; runtime/external contracts; finite header/capture safety; allocation headroom | W6 owner | Canonical `ConcreteSupportedExport.finiteTraceCorrect` has the closed-W6 surface and an exact axiom regression |
 | PA4a | Generic finite-stuttering/pass bridge, including `precomposeStutteringPass` | Any renamed form of the W6 source-invariant premise | The earlier pass's real semantic and well-formedness hypotheses | Composition owner | One existing pass theorem yields an earlier-LCNF-to-contracted-Wasm finite-prefix theorem |
@@ -128,7 +131,9 @@ roadmap and examples then reference only the closed endpoint.
 Compiler facts that must be derived inside the proof:
 
 - supported export/declaration identity and residual structured validation;
-- hygiene, local kinds, call signatures, result compatibility, and case
+- hygiene, local kinds, call signatures, directional non-cached named-call
+  result refinement, the explicit compatible nullary-cache exception,
+  argument provenance where carrier compatibility is coarser, and case
   normalization;
 - the canonical initial constructor schema and active schema/witness agreement;
 - exact producer result information where ABI carrier compatibility is too

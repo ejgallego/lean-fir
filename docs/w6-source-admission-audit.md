@@ -140,7 +140,7 @@ are independent finite-resource overlays.
 | 1 | return | `.ret` | `.ret`; cost `0`; exact `SemanticValueAtAbi functionResult` | Existing: `ConcreteStructuredAlignedValidationState.admit_return`, `ConcreteStructuredAlignedValidationState.returnSemantic_ofUseSite`, and `ConcreteStructuredReturnUseSiteProvenanceAt`. Missing: construct the latter from the precise producer origin on non-directional object-family edges. | `SemanticEnvAtLocalKinds.ofStateRelated` derives ordinary local typing from the live relation. Validation still proves only carrier compatibility at a non-directional use, so the precise producer-origin fact remains genuinely semantic. | C | W6-Results | `sumTo`; precise `.object`/`.tagged` negative fixture |
 | 2 | direct let | `.directLet` | `.directLet`; cost `directLetAllocationCost decl`; `ReuseBudgetedDirectSupported` | Existing: `ConcreteStructuredValidationFocus.let_eq`, `supportedLetDeclKind?_effectiveLetValueKind`. Missing: `ReuseBudgetedDirectSupported.of_validated_step` from producer typing, reuse evidence, and the source step. | The reverse implication is absent; projection/unbox alignment and reuse provenance are semantic, not Boolean-validator facts. Allocation consumes address-space safety when cost is nonzero. | C + D(address) | W6-Results/Objects | complete direct-operation corpus |
 | 3 | pure external | `.pureExternal` | `.pureExternal`; exact `stepCost`; `PureExternalSupported` | Existing: `PureExternalSupported.resultSemanticValueAtAbi`, `PureExternalSupported.bindResult_preservesSemanticEnvAtLocalKinds`. Missing: `PureExternalSupported.of_validated_step` under the named external contract. | Validation and a generic successful external step cannot prove that the response is the canonical Int/Nat/scalar response. Keep a named external semantic contract; derive exact cost/result from it. | C + D(address) | W6-Results | `sumTo`; pure Int/Nat/scalar corpus |
-| 4 | direct call | `.directCall` | `.directCall`; cost `0`; `DirectInternalCallSite` | Existing: `supportedNamedCall_internal_facts`, `ConcreteStructuredValidationLocalsAgree.compileArgs_of_supported`, and `DirectInternalCallCompilerAdmission.toSite_of_step` reconstruct the operational site. Missing compiler policy: production `supportedNamedCall` proves only `leanCompatible`, while the simulator requires `kindsRefine` for arguments and `calleeResultKind.refines resultKind` for the result; the exact destination-local equation must also be exported from the production local-row refinement. | The dynamic hidden interface is closed. The remaining facts are static, but the directional edges are not consequences of current validation. W7 request `W6-W7-20260830-004` audits real products before choosing a directional validator check or minimal producer provenance. | C | W6-Results / W7 audit | `sumTo`; `direct-call`; reverse object-family negative fixture |
+| 4 | direct call | `.directCall` | `.directCall`; cost `0`; `DirectInternalCallSite` | Existing: `supportedNamedCall_internal_facts`, `effectiveDeclarationResultKind?_declared_refines`, `ConcreteStructuredAlignedValidationState.directInternalCallBoundary`, `ConcreteStructuredValidationLocalsAgree.compileArgs_of_supported`, and `DirectInternalCallCompilerAdmission.toSite_of_step` reconstruct the result direction, exact destination local, and operational site. Missing: semantic ingress for carrier-compatible arguments whose compiler row is `tobject` but whose parameter requires `object`. | Production now requires the effective callee result to directionally refine the source `let` result for non-cached calls. Across W7's 11,487 result edges no product edge was rejected; the full validation corpus additionally preserves a legitimate compatible reverse object-family result for the separate nullary-cache lane. All 158 non-refining argument edges are exactly `tobject -> object`, so argument provenance is the sole remaining ordinary direct-call gap. | C(arguments only) | W6-Results | `sumTo`; `direct-call`; reverse result negative fixture; `tobject -> object` argument fixtures |
 | 5 | saturated closure call | `.saturatedCall` | `.saturatedCall`; cost `0`; site, resolution, capture capacity | Existing: `ConcreteStructuredValidatedCodeOutcome.advance_saturatedCall_stage_of_step`, `ConcreteStructuredFiniteRuntimeSafeAt`. Missing: `SaturatedClosureCallSite.of_validated_step` and compiler-derived closed-ingress provenance for `SaturatedClosureCallResolution.closedIngressTarget`. | Static/site and dynamic heap fields are reconstructible, but candidate-table membership of a semantic closure requires closure-origin provenance. Capture retention remains a resource premise. | C + D(capture) | W6-Results | `captured-partial`; mixed closure captures |
 | 6 | lazy-cache hit | `.lazyHit` | `.lazyHit`; cost `0`; call/generated environment/current global lookup | `ConcreteStructuredValidatedCodeOutcome.admit_lazyHit_of_compiler` derives the declaration, effective and annotation result lanes, nullary arity, destination local, generated cache environment, and exact hit admission from the current validated outcome. `ConcreteSupportedFunction.residualLocalAlignment` constructs the root row; aligned validation retains it through lets, unchanged-layout continuations, selected case alternatives, and suspended callers. | Crossed PA2 without a cache-specific invariant: the only dynamic fact is the actual semantic global lookup, and it is not chosen by the client. | A | W6-Results | cached Nat/String/Array hit cases |
 | 7 | lazy-cache miss | `.lazyMiss` | `.lazyMiss`; cost `0`; initializer execution and empty lookup | `ConcreteStructuredValidatedCodeOutcome.admit_lazy_of_compiler` performs runtime branch selection and derives every shared compiler/cache fact. Its sole additional premise is the named `ConcreteStructuredLazyMissBackendCoverageAt` boundary. | Internal non-object misses are implemented. External initializers and `.object`/`.tobject` result publication are accepted by lowering but not yet covered by this simulator branch; they must be implemented and then delete the backend-coverage premise rather than hiding it in a universal source invariant. | C(backend coverage) | W6-Results | miss and first-publication cases; external/object miss fixtures |
@@ -188,14 +188,13 @@ are independent finite-resource overlays.
    rejection. Existing dynamic operation and artifact corpora remain the
    positive regressions.
 
-Rows 6 and 7 remain class B for current admission. Row 4's dynamic
-construction is now factored, but its two directional ABI facts remain class C
-until the production audit selects the compiler policy. Their shared semantic
-publication obligation is factored by
-`SemanticEnvAtLocalKinds.publishPhysicalResult_ofRefines`; the named-call,
-closure-resolution, and lazy-call records already provide the corresponding
-effective-to-public result refinement. This is not an extra premise of their
-admission constructors.
+Rows 6 and 7 have crossed from the original class-B audit into explicit PA2
+interfaces: hit admission is closed, while miss admission exposes only named
+backend coverage. Row 4's dynamic construction, exact destination, and
+non-cached result direction are now compiler-derived. Its sole remaining
+ordinary-call gap is directional argument ingress. The nullary cache exception
+is separate: it retains the exact `leanCompatible` rule already consumed by
+the cache simulator and does not weaken ordinary direct-call admission.
 
 ## PA0 completion record
 
@@ -236,10 +235,22 @@ admission constructors.
   staging now yields the evaluated argument array; residual validation plus
   compiler-local agreement yields the exact production `compileArgs`; and
   equal arity constructs the callee environment. The resulting
-  `DirectInternalCallCompilerAdmission.toSite_of_step` leaves only three
-  static compiler facts visible: exact destination-local selection and the two
-  directional argument/result checks not implied by current
-  `leanCompatible` validation.
+  `DirectInternalCallCompilerAdmission.toSite_of_step` initially isolated
+  exact destination-local selection and the two directional argument/result
+  checks.
+- Fourth PA1 result slice closes the ordinary direct-call result half.
+  Production `supportedNamedCall` now requires directional result refinement
+  for non-cached calls, while retaining carrier compatibility for arguments.
+  The 11,487 named-call result edges in current prettyM and lean-zip products
+  all satisfy that rule. A full-corpus regression exposed one legitimate
+  reverse object-family result for a nullary cached declaration, so that
+  semantically separate lane deliberately retains `leanCompatible`.
+  `effectiveDeclarationResultKind?_declared_refines` proves the general
+  selector property, and
+  `ConcreteStructuredAlignedValidationState.directInternalCallBoundary`
+  derives declaration classification, result refinement, and exact
+  destination-local selection from residual validation. Its conclusion
+  exposes only the exact `kindsRefine` argument-ingress obligation.
 - First PA1 case slice: `WASM-NORMALIZED-CASE-TABLE-ADMISSION` made normalized
   alternative order a production validator fact;
   `ConcreteStructuredCaseAltsNormalized.of_caseAltsNormalized` projects it.
