@@ -103,7 +103,10 @@ def supportedNamedCall (program : Fir.LeanIR.ImpureProgram)
           args.mapM (supportedArgKind? locals) with
       | .extern _, some result, some paramKinds, some argKinds
       | .code _, some result, some paramKinds, some argKinds =>
-          result.leanCompatible declared && argKinds.size == paramKinds.size &&
+          (result.refines declared ||
+              (args.isEmpty && target.params.isEmpty &&
+                result.leanCompatible declared)) &&
+            argKinds.size == paramKinds.size &&
             (argKinds.zip paramKinds).all fun pair =>
               pair.fst.leanCompatible pair.snd
       | _, _, _, _ => false

@@ -253,6 +253,18 @@ def abiDirectCallProgram : Fir.LeanIR.ImpureProgram :=
       .let (letDecl r LCNF.ImpureType.tobject (.fap `abiDirectId #[.fvar x])) <|
       .return r)] }
 
+/-- A named call cannot publish a coarse `tobject` callee result through a
+more precise `object` destination merely because both use the same physical
+`i32` lane.  Such a call needs producer provenance that ordinary validation
+does not retain, so the supported boundary rejects it. -/
+def reverseObjectFamilyResultCallProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[abiDirectIdDecl,
+      decl `reverseObjectFamilyResultCall
+        #[param x LCNF.ImpureType.tobject] LCNF.ImpureType.object (.code <|
+          .let (letDecl r LCNF.ImpureType.object
+            (.fap `abiDirectId #[.fvar x])) <|
+          .return r)] }
+
 /-- Regression for duplicate same-scope declaration parameters. Source
 binding accepts both arguments, but symbolic lowering cannot assign two Wasm
 locals the same `FVarId`; the supported boundary rejects the declaration. -/
@@ -313,6 +325,7 @@ def abiClosureCallProgram : Fir.LeanIR.ImpureProgram :=
       .return r)] }
 
 #guard supportedProgram abiDirectCallProgram
+#guard !supportedProgram reverseObjectFamilyResultCallProgram
 #guard supportedProgram abiClosureCallProgram
 
 /-- A generic helper may hold a closure in the precise heap-object lane while
