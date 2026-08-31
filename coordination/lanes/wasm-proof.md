@@ -6,16 +6,16 @@ owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
 state: ready
-base: 14286b61
-functional-head: 52f01fea
-contract-base: 14286b61
+base: ee228797
+functional-head: c5b28b36
+contract-base: ee228797
 clean-at-update: true
-slice: Retained the production-derived `ConcreteResidualLocalAlignment` inside every active aligned validation state. Root construction is compiler-derived; lets remove the exact head row; layout-neutral mutation and ownership nodes use one generic reindexing rule; selected case alternatives inherit their traversal subrow; suspended callers retain the strengthened aligned state. Lazy admission now projects its destination lane from the current recursively validated outcome.
-files: integration/talos/FirTalos/ConcreteResidualLocalAlignment.lean; integration/talos/FirTalos/ConcreteStructuredValidation.lean; integration/talos/FirTalos/ConcreteFinalLcnfTyping.lean; docs/w6-source-admission-audit.md; docs/pass-correctness-plan.md; integration/talos/PLAN.md; coordination/lanes/wasm-proof.md
-contracts: proof-only `ConcreteStructuredAlignedValidationState` now includes compiler-derived residual-local alignment. Source semantics, production acceptance, public runtime ABI/layout, symbolic instructions, generated code, ownership, and resident-helper signatures are unchanged.
-checks: Lean Beam refresh/save for ConcreteResidualLocalAlignment, ConcreteStructuredValidation, and ConcreteFinalLcnfTyping (pass: zero errors; only pre-existing validation warnings); lake build FirTalos.ConcreteFinalLcnfTyping (pass: 3129 jobs); git diff --check (pass); make check (pass: 730 unique cases, 2172/2172 comparisons equal, exactly one trusted axiom, mailbox gates green); make talos-setup (pass: Talos 0e05edbcfbb105b33e90c60b4f50e2cf193d9254); make talos-check (pass: 3190 jobs, exact build receipt 297f1b59ac2c94f2962f88086eca918d0baa80eaa6b2c28581d8f4360e52cb72)
+slice: Derived the complete lazy-cache compiler site from nullary production validation, including declaration identity, annotation/effective result lanes, and nullary arity. The supported-function package constructs the generated cache environment. `admit_lazyHit_of_compiler` closes exact zero-byte hit admission from the recursively validated outcome; `admit_lazy_of_compiler` selects hit/miss from the current runtime and isolates only unimplemented miss shapes behind `ConcreteStructuredLazyMissBackendCoverageAt`.
+files: integration/talos/FirTalos/ConcreteFinalLcnfTyping.lean; docs/w6-source-admission-audit.md; docs/pass-correctness-plan.md; integration/talos/PLAN.md; coordination/lanes/wasm-proof.md
+contracts: proof-side compiler admission now reconstructs all shared lazy-cache facts from production validation. The named miss boundary records backend implementation coverage only; it is not a public source invariant and is intended to disappear. Source semantics, production acceptance, public runtime ABI/layout, symbolic instructions, generated code, ownership, and resident-helper signatures are unchanged.
+checks: Lean Beam refresh/save for ConcreteFinalLcnfTyping (pass: zero errors/warnings); lake build FirTalos.ConcreteFinalLcnfTyping (pass: 3129 jobs); git diff --check (pass); make check (pass: 730 unique cases, 2172/2172 comparisons equal, exactly one trusted axiom, mailbox gates green); make talos-setup (pass: Talos 0e05edbcfbb105b33e90c60b4f50e2cf193d9254); make talos-check (pass: 3190 jobs, exact build receipt 36aed295c6f3c20e25047e435223e2d7c3b734a69dbe58b0725c92497caf031d)
 bug-cards: none
-blockers: Lazy misses accepted by production but implemented by an external initializer or returning `.object`/`.tobject` remain a genuine backend-coverage gap. PA3 also retains the known producer-origin, closure-ingress, and schema/layout-sensitive field gaps.
-handoff: clean W6 functional head `52f01fea`, based exactly on accepted main `14286b61`; ready for fast-forward integration
-next: Assemble the now-closed lazy-hit branch into `ConcreteStructuredCompilerCurrentStepAdmission`, then continue the remaining class-C producer/object proofs without reintroducing a caller source invariant.
+blockers: Lazy misses accepted by production but implemented by an external initializer or returning `.object`/`.tobject` remain the exact `ConcreteStructuredLazyMissBackendCoverageAt` gap. PA3 also retains the known producer-origin, closure-ingress, and schema/layout-sensitive field gaps.
+handoff: clean W6 functional head `c5b28b36`, based exactly on accepted main `ee228797`; ready for fast-forward integration
+next: Continue PA2 assembly with the return/use-site producer boundary or implement the miss-only backend families; do not reintroduce a caller source invariant.
 ```
