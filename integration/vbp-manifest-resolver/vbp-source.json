@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/leanprover/verso-blueprint.git",
+  "revision": "1af64db22340823e4d295d7613f676e6ff84246a",
+  "files": {
+    "src/VersoBlueprintRuntime/ManifestResolver.lean": "bde8ab5cea8576abfa0aa876944fc9ef3b91bcf878595e2e23ffdbbb96a45849",
+    "tests/VersoBlueprintTests/RuntimeManifestResolver.lean": "43f9ca3ff1942ce92d3f76fa8f4af75bf00e16819d71d9d25f7fe7163d4b0c1e",
+    "tests/fixtures/runtime-manifest-resolver.json": "030cb081cd43e33fb1caccee24170160a86cf52c69800eb60cbc72b2190c4c82"
+  }
+}

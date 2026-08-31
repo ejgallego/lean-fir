@@ -1,0 +1,1 @@
+import FirVbpManifestResolver.Compile
