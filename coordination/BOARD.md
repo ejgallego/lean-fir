@@ -25,12 +25,34 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   resident Array provenance consumer after rebasing, is the remaining
   milestone step.
 - Integration owner: `root`, holding the serial landing lease through accepted
-  integration head `ba2bc34a`. `wasm-gen` remains released to the W7-1
+  integration head `70268c2a`. `wasm-gen` remains released to the W7-1
   generation lane. The inherited cleanup, serial and bounded check-throughput,
   mailbox-routing, bounded `Nat.land`, USize range-fact, exact consumer-ratchet,
   and transactional resident-linker stacks are now integrated. Tooling's
   bounded work changed no W7 implementation file and granted no standing W7
   ownership.
+- Accepted W6 return current-admission checkpoint: functional proof head
+  `2d41d220` and clean tracked handoff `70268c2a`, based directly on accepted
+  main `7d36f9b5`. The theorem
+  `ConcreteStructuredValidatedCodeOutcome.admit_return_of_compiler` derives
+  the exact zero-allocation `ConcreteStructuredCodeStepAdmission.ret` branch
+  from residual production validation, the compiler-selected local layout,
+  and the live concrete state relation. Its only additional input is
+  `ConcreteStructuredReturnUseSiteProvenanceAt`, which contributes evidence
+  solely when a coarse `tobject` producer is consumed at a more precise
+  object-family result kind. No compiled-local equation, future transition,
+  target path, global source invariant, or program certificate is supplied by
+  the theorem client. Lean Beam reports zero blocking diagnostics; the
+  3,129-job focused cone passes, `make check` passes 730 unique cases and
+  2,172/2,172 comparisons with exactly one trusted axiom, and all 3,190 Talos
+  jobs pass with receipt
+  `11a306aae0aecf49591b03cdf603e95cef22ff229e3369a2c8a9ca70dd75820c`.
+  No shared semantic, validation/lowering, runtime ABI/layout, symbolic
+  instruction, generated-code, ownership, or resident-helper contract
+  changed; bug cards: none. W6 next factors the precise producer-origin
+  analysis shared by return and direct-call argument consumers, consumes W7
+  census request `W6-W7-20260831-002`, and wires the completed branches into
+  the whole current-step admission dispatcher.
 - Accepted W6 direct-call current-admission checkpoint: functional proof head
   `134dc403` and clean tracked handoff `ba2bc34a`, based directly on accepted
   main `2899747e`. `DirectInternalCallCompilerAdmission` now retains the
