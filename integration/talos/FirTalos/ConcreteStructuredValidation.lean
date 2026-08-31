@@ -40,29 +40,19 @@ validator. -/
 private def supportedDeclarationParamStep
     (program : Fir.LeanIR.ImpureProgram) (declaration : LCNF.Decl .impure)
     (locals : Fir.Wasm.LocalKinds) (param : LCNF.Param .impure) :
-    Option Fir.Wasm.LocalKinds := do
+  Option Fir.Wasm.LocalKinds := do
   if !Fir.Wasm.abiTypeKnown param.type then none
-  match Fir.Wasm.abiValueKind? param.type with
-  | none => some locals
-  | some _ => do
-      let kind ← Fir.Wasm.declarationParamKind? program declaration param
-      some (Fir.Wasm.insertLocal locals param.fvarId kind)
+  let kind ← Fir.Wasm.declarationParamKind? program declaration param
+  some (Fir.Wasm.insertLocal locals param.fvarId kind)
 
 /-- One proof-transparent declaration-parameter step of production lowering. -/
 private def loweredDeclarationParamStep
     (program : Fir.LeanIR.ImpureProgram) (declaration : LCNF.Decl .impure)
     (locals : Fir.Wasm.LocalKinds) (param : LCNF.Param .impure) :
     Except Fir.Wasm.CompileError Fir.Wasm.LocalKinds := do
-  match ← Fir.Wasm.checkedAbiKind? param.type with
-  | none => return locals
-  | some kind =>
-      let kind :=
-        if kind == .tobject &&
-            Fir.Wasm.erasedOnlyParameter program declaration param then
-          .erased
-        else
-          kind
-      return Fir.Wasm.insertLocal locals param.fvarId kind
+  let kind ←
+    Fir.Wasm.checkedDeclarationParamKind program declaration param
+  return Fir.Wasm.insertLocal locals param.fvarId kind
 
 /-- A successful validator parameter step is exactly the corresponding
 production-lowering step. -/
@@ -76,18 +66,18 @@ private theorem supportedDeclarationParamStep_lowered
     loweredDeclarationParamStep program declaration locals param = .ok next := by
   unfold supportedDeclarationParamStep at validated
   unfold loweredDeclarationParamStep
-  unfold Fir.Wasm.abiTypeKnown Fir.Wasm.abiValueKind?
-    Fir.Wasm.declarationParamKind? at validated
-  unfold Fir.Wasm.checkedAbiKind?
+  unfold Fir.Wasm.abiTypeKnown Fir.Wasm.declarationParamKind? at validated
+  unfold Fir.Wasm.checkedDeclarationParamKind Fir.Wasm.checkedAbiKind?
   cases classified : Fir.Wasm.abiKind? param.type with
   | error error => simp [classified] at validated
   | ok kindOption =>
       cases kindOption with
       | none =>
-          have nextEq : next = locals := by
+          have nextEq :
+              next = Fir.Wasm.insertLocal locals param.fvarId .erased := by
             simpa [classified] using validated.symm
           subst next
-          rfl
+          simp [classified, pure, Except.pure, Bind.bind, Except.bind]
       | some kind =>
           by_cases erased :
               (kind == .tobject &&
@@ -198,15 +188,21 @@ private theorem supportedDeclarationParamFold_namesNodup
           rw [headValidated] at validated
           have nextUnique : (next.map (·.fst.name)).Nodup := by
             unfold supportedDeclarationParamStep at headValidated
-            unfold Fir.Wasm.abiTypeKnown Fir.Wasm.abiValueKind? at headValidated
+            unfold Fir.Wasm.abiTypeKnown at headValidated
             cases classified : Fir.Wasm.abiKind? head.type with
             | error error => simp [classified] at headValidated
             | ok kindOption =>
                 cases kindOption with
                 | none =>
-                    have nextEq : next = initial := by
+                    unfold Fir.Wasm.declarationParamKind? at headValidated
+                    have nextEq :
+                        next = Fir.Wasm.insertLocal initial head.fvarId
+                          .erased := by
                       simpa [classified] using headValidated.symm
-                    simpa [nextEq] using initialUnique
+                    simpa [nextEq] using
+                      insertLocal_namesNodup
+                        (fvarId := head.fvarId) (kind := .erased)
+                        initialUnique
                 | some kind =>
                     unfold Fir.Wasm.declarationParamKind? at headValidated
                     by_cases erased :
@@ -2861,7 +2857,7 @@ private theorem supportedNamedCall_result_compatible
   split at supported <;>
     simp_all [Bool.or_eq_true, Bool.and_eq_true]
   all_goals
-    rcases supported.1.1 with resultRefines | cached
+    rcases supported with resultRefines | cached
     · exact Fir.Wasm.AbiKind.leanCompatible_of_refines resultRefines
     · exact cached.2
 
@@ -3683,25 +3679,31 @@ private theorem PureExternalSupported.resultCompiledForValidation
           .ok (.localGet decl.fvarId, kind) := by
   rcases supported with integer | natural | scalar
   · rcases integer with
-      ⟨name, args, _argumentCode, argumentKinds, _semanticArgs, target,
+      ⟨name, args, _argumentCode, _declarationArgumentCode, argumentKinds,
+        _semanticArgs, target,
         _value, valueEq, _operation, _nonempty, targetFound, targetExternal,
-        valueKind, _argumentsCompiled, _argumentsEvaluated, signature,
+        valueKind, _argumentsCompiled, _declarationArgumentsCompiled,
+        _argumentsEvaluated, signature,
         resultCompiled, _semanticCalled, _nextRuntimeEq, _sourceValueEq,
         _stepCostEq⟩
     exact externalNamedResultCompiledForValidation valueEq targetFound
       targetExternal valueKind signature resultCompiled
   · rcases natural with
-      ⟨name, args, _argumentCode, argumentKinds, _semanticArgs, target,
+      ⟨name, args, _argumentCode, _declarationArgumentCode, argumentKinds,
+        _semanticArgs, target,
         _value, valueEq, _operation, _nonempty, targetFound, targetExternal,
-        valueKind, _argumentsCompiled, _argumentsEvaluated, signature,
+        valueKind, _argumentsCompiled, _declarationArgumentsCompiled,
+        _argumentsEvaluated, signature,
         resultCompiled, _semanticCalled, _nextRuntimeEq, _sourceValueEq,
         _stepCostEq⟩
     exact externalNamedResultCompiledForValidation valueEq targetFound
       targetExternal valueKind signature resultCompiled
   · rcases scalar with
-      ⟨name, args, _argumentCode, argumentKinds, _semanticArgs, target,
+      ⟨name, args, _argumentCode, _declarationArgumentCode, argumentKinds,
+        _semanticArgs, target,
         _value, valueEq, _operation, _nonempty, targetFound, targetExternal,
-        valueKind, _argumentsCompiled, _argumentsEvaluated, signature,
+        valueKind, _argumentsCompiled, _declarationArgumentsCompiled,
+        _argumentsEvaluated, signature,
         resultCompiled, _semanticCalled, _nextRuntimeEq, _sourceValueEq,
         _stepCostEq⟩
     exact externalNamedResultCompiledForValidation valueEq targetFound

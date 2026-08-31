@@ -1741,9 +1741,9 @@ def compileDeclarationArgument (context : Context)
     (param : LCNF.Param .impure) (arg : LCNF.Arg .impure) :
     Except CompileError (List Instruction × AbiKind) := do
   let compiled@(_, _) ← compileArg context arg
-  if param.type == LCNF.ImpureType.void then
-    return ([.i32Const .erased 0], .erased)
-  return compiled
+  match ← checkedAbiKind? param.type with
+  | none => return ([.i32Const .erased 0], .erased)
+  | some _ => return compiled
 
 def compileDeclarationArguments (context : Context)
     (target : LCNF.Decl .impure) (args : Array (LCNF.Arg .impure)) :

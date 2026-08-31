@@ -71,11 +71,8 @@ def addSupportedDeclarationParams? (program : Fir.LeanIR.ImpureProgram)
     Option LocalKinds := do
   decl.params.foldlM (init := locals) fun locals param => do
     if !abiTypeKnown param.type then none
-    match abiValueKind? param.type with
-    | none => some locals
-    | some _ => do
-        let kind ← declarationParamKind? program decl param
-        some (insertLocal locals param.fvarId kind)
+    let kind ← declarationParamKind? program decl param
+    some (insertLocal locals param.fvarId kind)
 
 def supportedArgKind? (locals : LocalKinds) : LCNF.Arg .impure → Option AbiKind
   | .erased => some .erased
@@ -96,12 +93,10 @@ def supportedDeclarationArgumentKinds? (program : Fir.LeanIR.ImpureProgram)
     let arg := pair.fst.snd
     let expectedKind := pair.snd
     let actual ← supportedArgKind? locals arg
-    if param.type == LCNF.ImpureType.void then
-      some .erased
-    else if actual.leanCompatible expectedKind then
-      some actual
-    else
-      none
+    match abiValueKind? param.type with
+    | none => some .erased
+    | some _ =>
+        if actual.leanCompatible expectedKind then some actual else none
 
 /-- Validate one exact fixed-capture descriptor against the declaration's
 physical Lean ABI. Object-family captures retain their actual descriptor kind
@@ -116,7 +111,9 @@ def supportedPartialArgumentKinds? (locals : LocalKinds)
     let arg := pair.fst.snd
     let expectedKind := pair.snd
     let actual ← supportedArgKind? locals arg
-    let actual := if param.type == LCNF.ImpureType.void then .erased else actual
+    let actual := match abiValueKind? param.type with
+      | none => .erased
+      | some _ => actual
     if actual.leanCompatible expectedKind then some actual else none
 
 def supportedNamedCall (program : Fir.LeanIR.ImpureProgram)

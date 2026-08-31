@@ -1654,20 +1654,22 @@ private theorem declarationArgCompiled_of_compile
     DeclarationArgsCompiled context [arg] argument [kind] := by
   cases arg with
   | erased =>
-      have pairEq :
-          ([.i32Const .erased 0], .erased) = (argument, kind) := by
-        have compiled' :
-            (Except.ok ([.i32Const .erased 0], .erased) :
-                Except Fir.Wasm.CompileError
-                  (List Fir.Wasm.Instruction × AbiKind)) =
-              .ok (argument, kind) := by
-          simpa [Fir.Wasm.compileDeclarationArgument, Fir.Wasm.compileArg,
-            Bind.bind, Except.bind, pure, Except.pure] using compiled
-        exact Except.ok.inj compiled'
-      injection pairEq with codeEq kindEq
-      subst argument
-      subst kind
-      exact .canonicalErased .erased .nil
+      cases paramKind : Fir.Wasm.checkedAbiKind? param.type with
+      | error error =>
+          simp [Fir.Wasm.compileDeclarationArgument, Fir.Wasm.compileArg,
+            paramKind, Bind.bind, Except.bind] at compiled
+      | ok kindOption =>
+          cases kindOption with
+          | none =>
+              simp [Fir.Wasm.compileDeclarationArgument, Fir.Wasm.compileArg,
+                paramKind, Bind.bind, Except.bind, pure, Except.pure] at compiled
+              obtain ⟨rfl, rfl⟩ := compiled
+              exact .canonicalErased .erased .nil
+          | some expected =>
+              simp [Fir.Wasm.compileDeclarationArgument, Fir.Wasm.compileArg,
+                paramKind, Bind.bind, Except.bind, pure, Except.pure] at compiled
+              obtain ⟨rfl, rfl⟩ := compiled
+              exact .canonicalErased .erased .nil
   | fvar fvarId =>
       cases kindFound :
           Fir.Wasm.findLocalKind? context.localKinds fvarId with
@@ -1675,37 +1677,44 @@ private theorem declarationArgCompiled_of_compile
           simp [Fir.Wasm.compileDeclarationArgument, Fir.Wasm.compileArg,
             kindFound, Bind.bind, Except.bind] at compiled
       | some actual =>
-          by_cases void : param.type == LCNF.ImpureType.void
-          · have pairEq :
-                ([.i32Const .erased 0], .erased) = (argument, kind) := by
-              have compiled' :
-                  (Except.ok ([.i32Const .erased 0], .erased) :
-                      Except Fir.Wasm.CompileError
-                        (List Fir.Wasm.Instruction × AbiKind)) =
-                    .ok (argument, kind) := by
-                simpa [Fir.Wasm.compileDeclarationArgument,
-                  Fir.Wasm.compileArg, kindFound, void, Bind.bind, Except.bind,
-                  pure, Except.pure] using compiled
-              exact Except.ok.inj compiled'
-            injection pairEq with codeEq kindEq
-            subst argument
-            subst kind
-            exact .canonicalErased (.fvar fvarId) .nil
-          · have pairEq :
-                ([.localGet fvarId], actual) = (argument, kind) := by
-              have compiled' :
-                  (Except.ok ([.localGet fvarId], actual) :
-                      Except Fir.Wasm.CompileError
-                        (List Fir.Wasm.Instruction × AbiKind)) =
-                    .ok (argument, kind) := by
-                simpa [Fir.Wasm.compileDeclarationArgument,
-                  Fir.Wasm.compileArg, kindFound, void, Bind.bind, Except.bind,
-                  pure, Except.pure] using compiled
-              exact Except.ok.inj compiled'
-            injection pairEq with codeEq kindEq
-            subst argument
-            subst kind
-            exact .fvar kindFound .nil
+          cases paramKind : Fir.Wasm.checkedAbiKind? param.type with
+          | error error =>
+              simp [Fir.Wasm.compileDeclarationArgument, Fir.Wasm.compileArg,
+                kindFound, paramKind, Bind.bind, Except.bind] at compiled
+          | ok kindOption =>
+            cases kindOption with
+            | none =>
+                have pairEq :
+                    ([.i32Const .erased 0], .erased) = (argument, kind) := by
+                  have compiled' :
+                      (Except.ok ([.i32Const .erased 0], .erased) :
+                          Except Fir.Wasm.CompileError
+                            (List Fir.Wasm.Instruction × AbiKind)) =
+                        .ok (argument, kind) := by
+                    simpa [Fir.Wasm.compileDeclarationArgument,
+                      Fir.Wasm.compileArg, kindFound, paramKind, Bind.bind,
+                      Except.bind, pure, Except.pure] using compiled
+                  exact Except.ok.inj compiled'
+                injection pairEq with codeEq kindEq
+                subst argument
+                subst kind
+                exact .canonicalErased (.fvar fvarId) .nil
+            | some expected =>
+                have pairEq :
+                    ([.localGet fvarId], actual) = (argument, kind) := by
+                  have compiled' :
+                      (Except.ok ([.localGet fvarId], actual) :
+                          Except Fir.Wasm.CompileError
+                            (List Fir.Wasm.Instruction × AbiKind)) =
+                        .ok (argument, kind) := by
+                    simpa [Fir.Wasm.compileDeclarationArgument,
+                      Fir.Wasm.compileArg, kindFound, paramKind, Bind.bind,
+                      Except.bind, pure, Except.pure] using compiled
+                  exact Except.ok.inj compiled'
+                injection pairEq with codeEq kindEq
+                subst argument
+                subst kind
+                exact .fvar kindFound .nil
   | type expr impossible => exact nomatch impossible
 
 private def declarationArgumentStep (context : Fir.Wasm.Context)

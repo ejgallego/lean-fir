@@ -284,6 +284,44 @@ theorem ofKindsRefine
         simpa [Array.toList_zip] using allRefines
       exact of_supportedRefinesList typedEnv listResult sizes pointwise
 
+/-- Exact residual classification semantically types the current source
+argument row at the same ABI kinds. -/
+theorem ofSupported
+    {locals : Fir.Wasm.LocalKinds} {env : Env}
+    (typedEnv : SemanticEnvAtLocalKinds locals env)
+    {args : Array (Lean.Compiler.LCNF.Arg .impure)}
+    {actual : Array AbiKind}
+    (classified :
+      args.mapM (Fir.Wasm.supportedArgKind? locals) = some actual) :
+    SemanticArgumentsAtAbi env args.toList actual.toList := by
+  rw [Array.mapM_eq_mapM_toList] at classified
+  cases listResult :
+      args.toList.mapM (Fir.Wasm.supportedArgKind? locals) with
+  | none => simp [listResult] at classified
+  | some actualList =>
+      have actualEq : actualList.toArray = actual := by
+        simpa [listResult] using classified
+      subst actual
+      have kindRefinesSelf :
+          ∀ kind : AbiKind, kind.refines kind = true := by
+        intro kind
+        cases kind <;> rfl
+      have rowRefinesSelf :
+          ∀ row : List AbiKind,
+            (row.zip row).all
+              (fun pair => pair.fst.refines pair.snd) = true := by
+        intro row
+        induction row with
+        | nil => rfl
+        | cons kind kinds ih =>
+            simp only [List.zip_cons_cons, List.all_cons, Bool.and_eq_true]
+            exact ⟨kindRefinesSelf kind, ih⟩
+      have selfRefines :
+          (actualList.zip actualList).all
+            (fun pair => pair.fst.refines pair.snd) = true := by
+        exact rowRefinesSelf actualList
+      exact of_supportedRefinesList typedEnv listResult rfl selfRefines
+
 end SemanticArgumentsAtAbi
 
 /-- Exact semantic provenance needed by one current direct-call node.
@@ -688,6 +726,21 @@ theorem optionListMapM_length
               subst ys
               simp [ih tailResult]
 
+private theorem arrayMapM_toList_of_some
+    {α β : Type} {f : α → Option β} {xs : Array α} {ys : Array β}
+    (mapped : xs.mapM f = some ys) :
+    xs.toList.mapM f = some ys.toList := by
+  rw [Array.mapM_eq_mapM_toList] at mapped
+  cases listResult : xs.toList.mapM f with
+  | none => simp [listResult] at mapped
+  | some values =>
+      have valuesEq : values.toArray = ys := by
+        simpa [listResult] using mapped
+      have listEq : values = ys.toList := by
+        simpa using congrArg Array.toList valuesEq
+      subst values
+      simpa [listResult]
+
 /-- Successful production parameter classification preserves declaration
 arity without requiring a generated target row. -/
 theorem declarationParameterKinds?_size_of_some
@@ -725,6 +778,577 @@ theorem supportedArgumentKinds_size_of_some
       rw [← kindsEq]
       simpa using optionListMapM_length classified
 
+/-- Pointwise evidence retained by successful declaration-aware argument
+validation.  The raw row records the source producer lanes.  The normalized
+row records the lanes actually emitted for the declaration call: only a
+source parameter with no value ABI is replaced by canonical `.erased`.
+
+Keeping this relation separate from semantic typing is important.  Validation
+alone is allowed to see a coarse producer at a void use; the current source
+step will later show that any reachable such producer is semantically erased.
+-/
+inductive DeclarationArgumentsSupported
+    (program : Fir.LeanIR.ImpureProgram) (locals : Fir.Wasm.LocalKinds)
+    (target : Lean.Compiler.LCNF.Decl .impure) :
+    List (Lean.Compiler.LCNF.Param .impure) →
+      List (Lean.Compiler.LCNF.Arg .impure) → List AbiKind →
+      List AbiKind → List AbiKind → Prop where
+  | nil : DeclarationArgumentsSupported program locals target [] [] [] [] []
+  | erased
+      (noValueAbi : Fir.Wasm.abiValueKind? param.type = none)
+      (paramKind :
+        Fir.Wasm.declarationParamKind? program target param = some expected)
+      (expectedErased : expected = .erased)
+      (argKind : Fir.Wasm.supportedArgKind? locals arg = some actual)
+      (rest : DeclarationArgumentsSupported program locals target params args
+        expectedKinds actualKinds normalizedKinds) :
+      DeclarationArgumentsSupported program locals target
+        (param :: params) (arg :: args) (expected :: expectedKinds)
+        (actual :: actualKinds) (.erased :: normalizedKinds)
+  | value
+      (valueAbi : Fir.Wasm.abiValueKind? param.type = some paramAbi)
+      (paramKind :
+        Fir.Wasm.declarationParamKind? program target param = some expected)
+      (argKind : Fir.Wasm.supportedArgKind? locals arg = some actual)
+      (compatible : actual.leanCompatible expected = true)
+      (rest : DeclarationArgumentsSupported program locals target params args
+        expectedKinds actualKinds normalizedKinds) :
+      DeclarationArgumentsSupported program locals target
+        (param :: params) (arg :: args) (expected :: expectedKinds)
+        (actual :: actualKinds) (actual :: normalizedKinds)
+
+private theorem declarationParamKind?_eq_erased_of_noValueAbi
+    {program : Fir.LeanIR.ImpureProgram}
+    {target : Lean.Compiler.LCNF.Decl .impure}
+    {param : Lean.Compiler.LCNF.Param .impure} {expected : AbiKind}
+    (noValueAbi : Fir.Wasm.abiValueKind? param.type = none)
+    (found :
+      Fir.Wasm.declarationParamKind? program target param = some expected) :
+    expected = .erased := by
+  unfold Fir.Wasm.abiValueKind? at noValueAbi
+  unfold Fir.Wasm.declarationParamKind? at found
+  cases classified : Fir.Wasm.abiKind? param.type with
+  | error error => simp [classified] at found
+  | ok kindOption =>
+      cases kindOption with
+      | none =>
+          simp [classified] at found
+          exact found.symm
+      | some kind => simp [classified] at noValueAbi
+
+private def declarationArgumentKindStep (locals : Fir.Wasm.LocalKinds)
+    (pair : (Lean.Compiler.LCNF.Param .impure ×
+      Lean.Compiler.LCNF.Arg .impure) × AbiKind) : Option AbiKind := do
+  let actual ← Fir.Wasm.supportedArgKind? locals pair.fst.snd
+  match Fir.Wasm.abiValueKind? pair.fst.fst.type with
+  | none => some .erased
+  | some _ =>
+      if actual.leanCompatible pair.snd then some actual else none
+
+private theorem DeclarationArgumentsSupported.ofLists
+    {program : Fir.LeanIR.ImpureProgram} {locals : Fir.Wasm.LocalKinds}
+    {target : Lean.Compiler.LCNF.Decl .impure}
+    {params : List (Lean.Compiler.LCNF.Param .impure)}
+    {args : List (Lean.Compiler.LCNF.Arg .impure)}
+    {expected normalized : List AbiKind}
+    (sizes : params.length = args.length)
+    (parametersKnown :
+      params.mapM (Fir.Wasm.declarationParamKind? program target) =
+        some expected)
+    (accepted : ((params.zip args).zip expected).mapM
+        (declarationArgumentKindStep locals) =
+        some normalized) :
+    ∃ actual,
+      args.mapM (Fir.Wasm.supportedArgKind? locals) = some actual ∧
+        DeclarationArgumentsSupported program locals target params args
+          expected actual normalized := by
+  induction params generalizing args expected normalized with
+  | nil =>
+      cases args with
+      | nil =>
+          have expectedEq : expected = [] := by
+            simpa using parametersKnown.symm
+          subst expected
+          have normalizedEq : normalized = [] := by
+            simpa using accepted.symm
+          subst normalized
+          exact ⟨[], rfl, DeclarationArgumentsSupported.nil⟩
+      | cons arg args => simp at sizes
+  | cons param params ih =>
+      cases args with
+      | nil => simp at sizes
+      | cons arg args =>
+          cases expected with
+          | nil =>
+              have lengths := optionListMapM_length parametersKnown
+              simp at lengths
+          | cons expected expectedKinds =>
+              rw [List.mapM_cons] at parametersKnown
+              cases paramKind :
+                  Fir.Wasm.declarationParamKind? program target param with
+              | none => simp [paramKind] at parametersKnown
+              | some actualExpected =>
+                  cases restParameters : params.mapM
+                      (Fir.Wasm.declarationParamKind? program target) with
+                  | none => simp [paramKind, restParameters] at parametersKnown
+                  | some restExpected =>
+                      have expectedListEq :
+                          actualExpected :: restExpected =
+                            expected :: expectedKinds := by
+                        simpa [paramKind, restParameters] using parametersKnown
+                      injection expectedListEq with expectedEq restExpectedEq
+                      subst actualExpected
+                      subst restExpected
+                      simp only [List.zip_cons_cons, List.mapM_cons] at accepted
+                      cases rawFound :
+                          Fir.Wasm.supportedArgKind? locals arg with
+                      | none =>
+                          have headRejected :
+                              declarationArgumentKindStep locals
+                                ((param, arg), expected) = none := by
+                            simp [declarationArgumentKindStep, rawFound]
+                          rw [headRejected] at accepted
+                          contradiction
+                      | some actual =>
+                          cases valueAbi : Fir.Wasm.abiValueKind? param.type with
+                          | none =>
+                              have headAccepted :
+                                  declarationArgumentKindStep locals
+                                    ((param, arg), expected) = some .erased := by
+                                simp [declarationArgumentKindStep, rawFound,
+                                  valueAbi]
+                              rw [headAccepted] at accepted
+                              cases restAccepted :
+                                  ((params.zip args).zip expectedKinds).mapM
+                                    (declarationArgumentKindStep locals) with
+                              | none =>
+                                  simp [restAccepted] at accepted
+                              | some restNormalized =>
+                                  rw [restAccepted] at accepted
+                                  have normalizedEq :
+                                      normalized = .erased :: restNormalized := by
+                                    simpa using accepted.symm
+                                  subst normalized
+                                  obtain ⟨restActual, restRaw, restRelation⟩ :=
+                                    ih (by simpa using sizes) restParameters
+                                      restAccepted
+                                  exact ⟨actual :: restActual, by
+                                    simp [rawFound, restRaw],
+                                    .erased valueAbi paramKind
+                                      (declarationParamKind?_eq_erased_of_noValueAbi
+                                        valueAbi paramKind)
+                                      rawFound restRelation⟩
+                          | some paramAbi =>
+                              by_cases compatible :
+                                  actual.leanCompatible expected = true
+                              · have headAccepted :
+                                    declarationArgumentKindStep locals
+                                      ((param, arg), expected) = some actual := by
+                                  simp [declarationArgumentKindStep, rawFound,
+                                    valueAbi, compatible]
+                                rw [headAccepted] at accepted
+                                cases restAccepted :
+                                    ((params.zip args).zip expectedKinds).mapM
+                                      (declarationArgumentKindStep locals) with
+                                | none =>
+                                    simp [restAccepted] at accepted
+                                | some restNormalized =>
+                                    rw [restAccepted] at accepted
+                                    have normalizedEq :
+                                        normalized = actual :: restNormalized := by
+                                      simpa using accepted.symm
+                                    subst normalized
+                                    obtain ⟨restActual, restRaw,
+                                        restRelation⟩ :=
+                                      ih (by simpa using sizes) restParameters
+                                        restAccepted
+                                    exact ⟨actual :: restActual, by
+                                      simp [rawFound, restRaw],
+                                      .value valueAbi paramKind rawFound
+                                        compatible restRelation⟩
+                              · have headRejected :
+                                    declarationArgumentKindStep locals
+                                      ((param, arg), expected) = none := by
+                                  simp [declarationArgumentKindStep, rawFound,
+                                    valueAbi, compatible]
+                                rw [headRejected] at accepted
+                                contradiction
+
+/-- Array-shaped production validation exposes both the raw producer row and
+the exact pointwise normalization relation used by declaration lowering. -/
+theorem DeclarationArgumentsSupported.ofValidation
+    {program : Fir.LeanIR.ImpureProgram} {locals : Fir.Wasm.LocalKinds}
+    {target : Lean.Compiler.LCNF.Decl .impure}
+    {args : Array (Lean.Compiler.LCNF.Arg .impure)}
+    {parameterKinds normalized : Array AbiKind}
+    (parametersKnown :
+      Fir.Wasm.declarationParameterKinds? program target =
+        some parameterKinds)
+    (supported :
+      Fir.Wasm.supportedDeclarationArgumentKinds? program locals target args =
+        some normalized) :
+    ∃ raw,
+      args.mapM (Fir.Wasm.supportedArgKind? locals) = some raw ∧
+        DeclarationArgumentsSupported program locals target
+          target.params.toList args.toList parameterKinds.toList raw.toList
+            normalized.toList := by
+  have arity : args.size = target.params.size := by
+    by_contra different
+    have mismatch : (args.size != target.params.size) = true := by
+      simp [different]
+    simp [Fir.Wasm.supportedDeclarationArgumentKinds?, mismatch] at supported
+  have noMismatch : (args.size != target.params.size) = false := by
+    simp [arity]
+  have parameterListKnown :
+      target.params.toList.mapM
+          (Fir.Wasm.declarationParamKind? program target) =
+        some parameterKinds.toList := by
+    unfold Fir.Wasm.declarationParameterKinds? at parametersKnown
+    exact arrayMapM_toList_of_some parametersKnown
+  have acceptedArray :
+      ((target.params.zip args).zip parameterKinds).mapM
+          (declarationArgumentKindStep locals) = some normalized := by
+    unfold Fir.Wasm.supportedDeclarationArgumentKinds? at supported
+    simp only [noMismatch, Bool.false_eq_true, ↓reduceIte] at supported
+    rw [parametersKnown] at supported
+    have stepEq :
+        (fun pair : (Lean.Compiler.LCNF.Param .impure ×
+            Lean.Compiler.LCNF.Arg .impure) × AbiKind => do
+          let actual ← Fir.Wasm.supportedArgKind? locals pair.fst.snd
+          match Fir.Wasm.abiValueKind? pair.fst.fst.type with
+          | none => some AbiKind.erased
+          | some _ =>
+              if actual.leanCompatible pair.snd then some actual else none) =
+          declarationArgumentKindStep locals := by
+      funext pair
+      rfl
+    rw [← stepEq]
+    exact supported
+  have acceptedList :
+      ((target.params.zip args).zip parameterKinds).toList.mapM
+          (declarationArgumentKindStep locals) =
+        some normalized.toList :=
+    arrayMapM_toList_of_some acceptedArray
+  have zippedList :
+      ((target.params.zip args).zip parameterKinds).toList =
+        ((target.params.toList.zip args.toList).zip parameterKinds.toList) := by
+    simp [Array.toList_zip]
+  rw [zippedList] at acceptedList
+  obtain ⟨raw, rawKnown, relation⟩ :=
+    DeclarationArgumentsSupported.ofLists
+      (by simpa using arity.symm) parameterListKnown acceptedList
+  refine ⟨raw.toArray, ?_, ?_⟩
+  · rw [Array.mapM_eq_mapM_toList]
+    simp [rawKnown]
+  · simpa using relation
+
+theorem DeclarationArgumentsSupported.normalizedLength
+    {program : Fir.LeanIR.ImpureProgram} {locals : Fir.Wasm.LocalKinds}
+    {target : Lean.Compiler.LCNF.Decl .impure}
+    {params : List (Lean.Compiler.LCNF.Param .impure)}
+    {args : List (Lean.Compiler.LCNF.Arg .impure)}
+    {expected actual normalized : List AbiKind}
+    (supported : DeclarationArgumentsSupported program locals target params
+      args expected actual normalized) :
+    normalized.length = expected.length := by
+  induction supported with
+  | nil => rfl
+  | erased _ _ _ _ _ ih => simp [ih]
+  | value _ _ _ _ _ ih => simp [ih]
+
+theorem DeclarationArgumentsSupported.argumentLength
+    {program : Fir.LeanIR.ImpureProgram} {locals : Fir.Wasm.LocalKinds}
+    {target : Lean.Compiler.LCNF.Decl .impure}
+    {params : List (Lean.Compiler.LCNF.Param .impure)}
+    {args : List (Lean.Compiler.LCNF.Arg .impure)}
+    {expected actual normalized : List AbiKind}
+    (supported : DeclarationArgumentsSupported program locals target params
+      args expected actual normalized) :
+    normalized.length = args.length := by
+  induction supported with
+  | nil => rfl
+  | erased _ _ _ _ _ ih => simp [ih]
+  | value _ _ _ _ _ ih => simp [ih]
+
+theorem DeclarationArgumentsSupported.parameterArgumentLength
+    {program : Fir.LeanIR.ImpureProgram} {locals : Fir.Wasm.LocalKinds}
+    {target : Lean.Compiler.LCNF.Decl .impure}
+    {params : List (Lean.Compiler.LCNF.Param .impure)}
+    {args : List (Lean.Compiler.LCNF.Arg .impure)}
+    {expected actual normalized : List AbiKind}
+    (supported : DeclarationArgumentsSupported program locals target params
+      args expected actual normalized) :
+    params.length = args.length := by
+  induction supported with
+  | nil => rfl
+  | erased _ _ _ _ _ ih => simp [ih]
+  | value _ _ _ _ _ ih => simp [ih]
+
+theorem DeclarationArgumentsSupported.normalizedCompatible
+    {program : Fir.LeanIR.ImpureProgram} {locals : Fir.Wasm.LocalKinds}
+    {target : Lean.Compiler.LCNF.Decl .impure}
+    {params : List (Lean.Compiler.LCNF.Param .impure)}
+    {args : List (Lean.Compiler.LCNF.Arg .impure)}
+    {expected actual normalized : List AbiKind}
+    (supported : DeclarationArgumentsSupported program locals target params
+      args expected actual normalized) :
+    (normalized.zip expected).all
+      (fun pair => pair.fst.leanCompatible pair.snd) = true := by
+  induction supported with
+  | nil => rfl
+  | erased _ _ expectedErased _ _ ih =>
+      simp only [List.zip_cons_cons, List.all_cons, Bool.and_eq_true]
+      have head : AbiKind.erased.leanCompatible .erased = true := by
+        simp [AbiKind.leanCompatible, AbiKind.refines]
+      exact ⟨by simpa [expectedErased] using head, ih⟩
+  | value _ _ _ compatible _ ih =>
+      simp only [List.zip_cons_cons, List.all_cons, Bool.and_eq_true]
+      exact ⟨compatible, ih⟩
+
+/-- On a successful source evaluation, declaration normalization does not
+change the semantic ABI row.  The only potentially different lane is a void
+parameter.  Its parameter typing forces the evaluated value to be `.erased`,
+which in turn forces the raw producer lane to be `.erased` as well. -/
+theorem DeclarationArgumentsSupported.raw_eq_normalized_of_semanticValues
+    {program : Fir.LeanIR.ImpureProgram} {locals : Fir.Wasm.LocalKinds}
+    {target : Lean.Compiler.LCNF.Decl .impure}
+    {params : List (Lean.Compiler.LCNF.Param .impure)}
+    {args : List (Lean.Compiler.LCNF.Arg .impure)}
+    {expected actual normalized : List AbiKind} {values : List Value}
+    (supported : DeclarationArgumentsSupported program locals target params
+      args expected actual normalized)
+    (actualTyped : SemanticValuesAtAbi actual values)
+    (expectedTyped : SemanticValuesAtAbi expected values) :
+    actual = normalized := by
+  induction supported generalizing values with
+  | nil =>
+      cases actualTyped
+      rfl
+  | @erased param expected arg actual params args expectedKinds actualKinds
+      normalizedKinds noValueAbi paramKind expectedErased argKind rest ih =>
+      cases actualTyped with
+      | cons actualHead actualTail =>
+          cases expectedTyped with
+          | cons expectedHead expectedTail =>
+              subst expected
+              cases expectedHead
+              cases actualHead
+              exact congrArg (List.cons .erased) (ih actualTail expectedTail)
+  | value valueAbi paramKind argKind compatible rest ih =>
+      cases actualTyped with
+      | cons actualHead actualTail =>
+          cases expectedTyped with
+          | cons expectedHead expectedTail =>
+              exact congrArg (List.cons _) (ih actualTail expectedTail)
+
+private theorem checkedAbiKind?_of_valueClassifier
+    {program : Fir.LeanIR.ImpureProgram}
+    {target : Lean.Compiler.LCNF.Decl .impure}
+    {param : Lean.Compiler.LCNF.Param .impure}
+    {expected : AbiKind} {kindOption : Option AbiKind}
+    (classified : Fir.Wasm.abiValueKind? param.type = kindOption)
+    (known :
+      Fir.Wasm.declarationParamKind? program target param = some expected) :
+    Fir.Wasm.checkedAbiKind? param.type = .ok kindOption := by
+  unfold Fir.Wasm.abiValueKind? at classified
+  unfold Fir.Wasm.declarationParamKind? at known
+  unfold Fir.Wasm.checkedAbiKind?
+  cases result : Fir.Wasm.abiKind? param.type with
+  | error error => simp [result] at known
+  | ok actualOption =>
+      simp [result] at classified
+      subst kindOption
+      simp [result, pure, Except.pure]
+
+private theorem checkedDeclarationParamKind_of_classifier
+    {program : Fir.LeanIR.ImpureProgram}
+    {target : Lean.Compiler.LCNF.Decl .impure}
+    {param : Lean.Compiler.LCNF.Param .impure} {expected : AbiKind}
+    (known :
+      Fir.Wasm.declarationParamKind? program target param = some expected) :
+    Fir.Wasm.checkedDeclarationParamKind program target param = .ok expected := by
+  unfold Fir.Wasm.checkedDeclarationParamKind Fir.Wasm.checkedAbiKind?
+  unfold Fir.Wasm.declarationParamKind? at known
+  cases result : Fir.Wasm.abiKind? param.type with
+  | error error => simp [result] at known
+  | ok kindOption =>
+      cases kindOption with
+      | none =>
+          simp [result] at known
+          subst expected
+          simp [result, pure, Except.pure, Bind.bind, Except.bind]
+      | some declaredKind =>
+          by_cases erased :
+              (declaredKind == .tobject &&
+                Fir.Wasm.erasedOnlyParameter program target param) = true
+          · simp [result, erased] at known ⊢
+            subst expected
+            simp [pure, Except.pure]
+          · simp [result, erased] at known ⊢
+            subst expected
+            simp [pure, Except.pure]
+
+private def declarationCompileStep (context : Fir.Wasm.Context)
+    (target : Lean.Compiler.LCNF.Decl .impure)
+    (state : List Fir.Wasm.Instruction × Array AbiKind)
+    (pair : Lean.Compiler.LCNF.Param .impure ×
+      Lean.Compiler.LCNF.Arg .impure) :
+    Except Fir.Wasm.CompileError
+      (List Fir.Wasm.Instruction × Array AbiKind) := do
+  let expected ←
+    Fir.Wasm.checkedDeclarationParamKind context.program target pair.fst
+  let (argument, actual) ←
+    Fir.Wasm.compileDeclarationArgument context pair.fst pair.snd
+  unless actual.leanCompatible expected do
+    throw (.malformed
+      "named-call argument is not Lean-compatible with its parameter ABI")
+  return (state.fst ++ argument, state.snd.push actual)
+
+private theorem DeclarationArgumentsSupported.compileFold
+    {context : Fir.Wasm.Context} {locals : Fir.Wasm.LocalKinds}
+    {target : Lean.Compiler.LCNF.Decl .impure}
+    {params : List (Lean.Compiler.LCNF.Param .impure)}
+    {args : List (Lean.Compiler.LCNF.Arg .impure)}
+    {expected actual normalized : List AbiKind}
+    (supported : DeclarationArgumentsSupported context.program locals target
+      params args expected actual normalized)
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals)
+    (prefixCode : List Fir.Wasm.Instruction) (prefixKinds : Array AbiKind) :
+    ∃ code,
+      (params.zip args).foldlM (init := (prefixCode, prefixKinds))
+          (declarationCompileStep context target) =
+        .ok (code, prefixKinds ++ normalized.toArray) := by
+  have compileArgOfSupported :
+      ∀ {arg : Lean.Compiler.LCNF.Arg .impure} {kind : AbiKind},
+        Fir.Wasm.supportedArgKind? locals arg = some kind →
+          ∃ code, Fir.Wasm.compileArg context arg = .ok (code, kind) := by
+    intro arg kind accepted
+    cases arg with
+    | erased =>
+        simp [Fir.Wasm.supportedArgKind?] at accepted
+        subst kind
+        exact ⟨[.i32Const .erased 0], rfl⟩
+    | fvar fvarId =>
+        have compiled := agrees accepted
+        unfold Fir.Wasm.getLocal at compiled
+        cases found : Fir.Wasm.findLocalKind? context.localKinds fvarId with
+        | none =>
+            rw [found] at compiled
+            contradiction
+        | some actual =>
+            rw [found] at compiled
+            have actualEq : actual = kind := by
+              have pairEq :
+                  (Fir.Wasm.Instruction.localGet fvarId, actual) =
+                    (.localGet fvarId, kind) := Except.ok.inj compiled
+              exact congrArg Prod.snd pairEq
+            subst actual
+            exact ⟨[.localGet fvarId], by simp [Fir.Wasm.compileArg, found]⟩
+    | type expr impossible => exact nomatch impossible
+  induction supported generalizing prefixCode prefixKinds with
+  | nil => exact ⟨prefixCode, by simp [pure, Except.pure]⟩
+  | @erased param expected arg actual params args expectedKinds actualKinds
+      normalizedKinds noValueAbi paramKind expectedErased argKind rest ih =>
+      subst expected
+      obtain ⟨rawCode, rawCompiled⟩ := compileArgOfSupported argKind
+      have abiChecked : Fir.Wasm.checkedAbiKind? param.type = .ok none :=
+        checkedAbiKind?_of_valueClassifier noValueAbi paramKind
+      have paramChecked :
+          Fir.Wasm.checkedDeclarationParamKind context.program target param =
+            .ok .erased :=
+        checkedDeclarationParamKind_of_classifier paramKind
+      have declarationCompiled :
+          Fir.Wasm.compileDeclarationArgument context param arg =
+            .ok ([.i32Const .erased 0], .erased) := by
+        simp [Fir.Wasm.compileDeclarationArgument, rawCompiled, abiChecked,
+          Bind.bind, Except.bind, pure, Except.pure]
+      have erasedCompatible : AbiKind.erased.leanCompatible .erased = true := by
+        simp [AbiKind.leanCompatible, AbiKind.refines]
+      obtain ⟨code, tailCompiled⟩ :=
+        ih (prefixCode ++ [.i32Const .erased 0])
+          (prefixKinds.push .erased)
+      refine ⟨code, ?_⟩
+      simpa [List.foldlM_cons, declarationCompileStep, paramChecked,
+        declarationCompiled, erasedCompatible, Bind.bind, Except.bind,
+        pure, Except.pure] using tailCompiled
+  | @value paramAbi param expected arg actual params args expectedKinds
+      actualKinds normalizedKinds valueAbi paramKind argKind compatible rest ih =>
+      obtain ⟨rawCode, rawCompiled⟩ := compileArgOfSupported argKind
+      have abiChecked :
+          Fir.Wasm.checkedAbiKind? param.type = .ok (some paramAbi) :=
+        checkedAbiKind?_of_valueClassifier valueAbi paramKind
+      have paramChecked :
+          Fir.Wasm.checkedDeclarationParamKind context.program target param =
+            .ok expected :=
+        checkedDeclarationParamKind_of_classifier paramKind
+      have declarationCompiled :
+          Fir.Wasm.compileDeclarationArgument context param arg =
+            .ok (rawCode, actual) := by
+        simp [Fir.Wasm.compileDeclarationArgument, rawCompiled, abiChecked,
+          Bind.bind, Except.bind, pure, Except.pure]
+      obtain ⟨code, tailCompiled⟩ :=
+        ih (prefixCode ++ rawCode) (prefixKinds.push actual)
+      refine ⟨code, ?_⟩
+      simpa [List.foldlM_cons, declarationCompileStep, paramChecked,
+        declarationCompiled, compatible, Bind.bind, Except.bind, pure,
+        Except.pure] using tailCompiled
+
+theorem DeclarationArgumentsSupported.compileDeclarationArguments
+    {context : Fir.Wasm.Context} {locals : Fir.Wasm.LocalKinds}
+    {target : Lean.Compiler.LCNF.Decl .impure}
+    {args : Array (Lean.Compiler.LCNF.Arg .impure)}
+    {parameterKinds rawKinds normalized : Array AbiKind}
+    (supported : DeclarationArgumentsSupported context.program locals target
+      target.params.toList args.toList parameterKinds.toList rawKinds.toList
+        normalized.toList)
+    (agrees : ConcreteStructuredValidationLocalsAgree context locals) :
+    ∃ code,
+      Fir.Wasm.compileDeclarationArguments context target args =
+        .ok (code, normalized) := by
+  have arity : args.size = target.params.size := by
+    simpa using supported.parameterArgumentLength.symm
+  have noMismatch : (args.size != target.params.size) = false := by
+    simp [arity]
+  obtain ⟨code, compiled⟩ := supported.compileFold agrees [] #[]
+  refine ⟨code, ?_⟩
+  unfold Fir.Wasm.compileDeclarationArguments
+  simp only [noMismatch, Bool.false_eq_true, ↓reduceIte]
+  rw [← Array.foldlM_toList]
+  have stepEq :
+      (fun (instructions, kinds) pair => do
+        let expected ←
+          Fir.Wasm.checkedDeclarationParamKind context.program target pair.fst
+        let (argument, actual) ←
+          Fir.Wasm.compileDeclarationArgument context pair.fst pair.snd
+        unless actual.leanCompatible expected do
+          throw (Fir.Wasm.CompileError.malformed
+            "named-call argument is not Lean-compatible with its parameter ABI")
+        return (instructions ++ argument, kinds.push actual)) =
+        declarationCompileStep context target := by
+    funext state pair
+    obtain ⟨instructions, kinds⟩ := state
+    rfl
+  rw [stepEq]
+  simpa [Array.toList_zip] using compiled
+
+private theorem supportedDeclarationArgumentKinds?_parameterKinds
+    {program : Fir.LeanIR.ImpureProgram} {locals : Fir.Wasm.LocalKinds}
+    {target : Lean.Compiler.LCNF.Decl .impure}
+    {args : Array (Lean.Compiler.LCNF.Arg .impure)}
+    {normalized : Array AbiKind}
+    (supported :
+      Fir.Wasm.supportedDeclarationArgumentKinds? program locals target args =
+        some normalized) :
+    ∃ parameterKinds,
+      Fir.Wasm.declarationParameterKinds? program target =
+        some parameterKinds := by
+  unfold Fir.Wasm.supportedDeclarationArgumentKinds? at supported
+  split at supported
+  · contradiction
+  · cases known : Fir.Wasm.declarationParameterKinds? program target with
+    | none => simp [known] at supported
+    | some parameterKinds => exact ⟨parameterKinds, rfl⟩
+
 /-- A successful nullary named-call check exposes the declaration and exact
 effective result lane, and proves that the selected source declaration is
 itself nullary.  This is a direct inversion of production validation, not a
@@ -747,26 +1371,23 @@ theorem supportedNamedCall_nullary_facts
       all_goals
         cases resultEq : Fir.Wasm.effectiveDeclarationResultKind? target <;>
           try simp [targetEq, bodyEq, resultEq] at supported
-        cases parameterEq :
-            Fir.Wasm.declarationParameterKinds? program target <;>
-          try simp [parameterEq] at supported
-        rename_i resultKind parameterKinds
-        have acceptedFull :
-            ((resultKind.refines declared = true ∨
-                (target.params.isEmpty = true ∧
-                  resultKind.leanCompatible declared = true)) ∧
-              0 = parameterKinds.size) ∧
-              ((#[] : Array AbiKind).zip parameterKinds).all
-                  (fun pair : AbiKind × AbiKind =>
-                    pair.fst.leanCompatible pair.snd) = true := by
-          simpa [targetEq, bodyEq, resultEq, parameterEq, Bool.or_eq_true,
-            Bool.and_eq_true] using supported
-        have accepted := acceptedFull.1
+        cases argumentsEq :
+            Fir.Wasm.supportedDeclarationArgumentKinds? program locals target
+              #[] <;> try simp [argumentsEq] at supported
+        rename_i resultKind argumentKinds
+        have targetSize : target.params.size = 0 := by
+          by_cases equal : target.params.size = 0
+          · exact equal
+          · have mismatch :
+                ((#[] : Array (Lean.Compiler.LCNF.Arg .impure)).size !=
+                  target.params.size) = true := by
+              change (0 != target.params.size) = true
+              exact bne_iff_ne.mpr (fun reversed => equal reversed.symm)
+            simp [Fir.Wasm.supportedDeclarationArgumentKinds?, mismatch] at argumentsEq
+            exact argumentsEq.1.symm
         refine ⟨target, resultKind, rfl, resultEq, ?_⟩
-        have parameterSize :=
-          declarationParameterKinds?_size_of_some parameterEq
         rw [Array.isEmpty_iff_size_eq_zero]
-        omega
+        exact targetSize
 
 /-- Residual validation constructs the complete static lazy-cache call site
 for a nullary named-call `let`.  The theorem client supplies only the syntactic
@@ -1142,10 +1763,15 @@ theorem supportedNamedCall_internal_facts
     (targetFound : program.findDecl? name = some target)
     (bodyEq : target.value = .code calleeCode)
     (nonCached : (args.isEmpty && target.params.isEmpty) = false) :
-    ∃ resultKind parameterKinds argumentKinds,
+    ∃ resultKind parameterKinds argumentKinds rawArgumentKinds,
       Fir.Wasm.effectiveDeclarationResultKind? target = some resultKind ∧
       Fir.Wasm.declarationParameterKinds? program target = some parameterKinds ∧
-      args.mapM (Fir.Wasm.supportedArgKind? locals) = some argumentKinds ∧
+      Fir.Wasm.supportedDeclarationArgumentKinds? program locals target args =
+        some argumentKinds ∧
+      args.mapM (Fir.Wasm.supportedArgKind? locals) = some rawArgumentKinds ∧
+      DeclarationArgumentsSupported program locals target target.params.toList
+        args.toList parameterKinds.toList rawArgumentKinds.toList
+          argumentKinds.toList ∧
       resultKind.refines declared = true ∧
       argumentKinds.size = parameterKinds.size ∧
       (argumentKinds.zip parameterKinds).all
@@ -1153,9 +1779,39 @@ theorem supportedNamedCall_internal_facts
   unfold Fir.Wasm.supportedNamedCall at supported
   simp only [targetFound] at supported
   rw [bodyEq] at supported
-  split at supported <;>
-    simp_all [Bool.or_eq_true, Bool.and_eq_true]
-  all_goals aesop
+  cases resultFound : Fir.Wasm.effectiveDeclarationResultKind? target with
+  | none => simp [resultFound] at supported
+  | some resultKind =>
+      cases argumentsFound :
+          Fir.Wasm.supportedDeclarationArgumentKinds? program locals target args with
+      | none => simp [resultFound, argumentsFound] at supported
+      | some argumentKinds =>
+          simp only [resultFound, argumentsFound, Bool.or_eq_true,
+            Bool.and_eq_true] at supported
+          have resultRefines : resultKind.refines declared = true := by
+            rcases supported with refined | cached
+            · exact refined
+            · have cachedCall :
+                  (args.isEmpty && target.params.isEmpty) = true := by
+                simp [cached.1.1, cached.1.2]
+              rw [cachedCall] at nonCached
+              contradiction
+          obtain ⟨parameterKinds, parametersKnown⟩ :=
+            supportedDeclarationArgumentKinds?_parameterKinds argumentsFound
+          obtain ⟨rawArgumentKinds, rawKnown, relation⟩ :=
+            DeclarationArgumentsSupported.ofValidation parametersKnown
+              argumentsFound
+          have argumentSizes :
+              argumentKinds.size = parameterKinds.size := by
+            simpa using relation.normalizedLength
+          have argumentsCompatible :
+              (argumentKinds.zip parameterKinds).all
+                (fun pair => pair.fst.leanCompatible pair.snd) = true := by
+            rw [← Array.all_toList]
+            simpa [Array.toList_zip] using relation.normalizedCompatible
+          exact ⟨resultKind, parameterKinds, argumentKinds, rawArgumentKinds,
+            rfl, parametersKnown, rfl, rawKnown, relation,
+            resultRefines, argumentSizes, argumentsCompatible⟩
 
 /-- Static, compiler-owned portion of one ordinary internal named-call site.
 
@@ -1176,6 +1832,7 @@ structure DirectInternalCallCompilerAdmission
   calleeResultKind : AbiKind
   args : Array (Lean.Compiler.LCNF.Arg .impure)
   argumentKinds : Array AbiKind
+  rawArgumentKinds : Array AbiKind
   valueEq : decl.value = .fap declaration args
   kindEq : Fir.Wasm.checkedAbiKind decl.type = .ok resultKind
   declarationFound :
@@ -1183,9 +1840,16 @@ structure DirectInternalCallCompilerAdmission
   parametersKnown :
     Fir.Wasm.declarationParameterKinds? context.program sourceDeclaration =
       some parameterKinds
+  declarationArgumentsClassified :
+    Fir.Wasm.supportedDeclarationArgumentKinds? context.program locals
+      sourceDeclaration args = some argumentKinds
   argumentsClassified :
-    args.mapM (Fir.Wasm.supportedArgKind? locals) = some argumentKinds
+    args.mapM (Fir.Wasm.supportedArgKind? locals) = some rawArgumentKinds
   localsAgree : ConcreteStructuredValidationLocalsAgree context locals
+  argumentAlignment :
+    DeclarationArgumentsSupported context.program locals sourceDeclaration
+      sourceDeclaration.params.toList args.toList parameterKinds.toList
+        rawArgumentKinds.toList argumentKinds.toList
   argumentSizes : argumentKinds.size = parameterKinds.size
   argumentsCompatible :
     (argumentKinds.zip parameterKinds).all
@@ -1259,8 +1923,10 @@ theorem ConcreteStructuredAlignedValidationState.directInternalCallBoundary
         unfold Fir.Wasm.supportedLetDeclKind? at supportedDecl
         simp [declaredFound, valueEq, rejectedEq] at supportedDecl
       obtain ⟨calleeResultKind, parameterKinds, argumentKinds,
-          calleeResult, parametersKnown, argumentsClassified,
-          calleeResultRefines, argumentSizes, argumentsCompatible⟩ :=
+          rawArgumentKinds, calleeResult, parametersKnown,
+          declarationArgumentsClassified, argumentsClassified,
+          argumentAlignment, calleeResultRefines, argumentSizes,
+          argumentsCompatible⟩ :=
         supportedNamedCall_internal_facts supportedCall declarationFound bodyEq
           nonCached
       obtain ⟨declaredCalleeResultKind, declaredCalleeResult,
@@ -1305,12 +1971,15 @@ theorem ConcreteStructuredAlignedValidationState.directInternalCallBoundary
         calleeResultKind := calleeResultKind
         args := args
         argumentKinds := argumentKinds
+        rawArgumentKinds := rawArgumentKinds
         valueEq := valueEq
         kindEq := kindEq
         declarationFound := declarationFound
         parametersKnown := parametersKnown
+        declarationArgumentsClassified := declarationArgumentsClassified
         argumentsClassified := argumentsClassified
         localsAgree := _agrees
+        argumentAlignment := argumentAlignment
         argumentSizes := argumentSizes
         argumentsCompatible := argumentsCompatible
         declaredCalleeResult := declaredCalleeResult
@@ -1388,18 +2057,48 @@ theorem DirectInternalCallCompilerAdmission.toSite_of_step
     (argumentsAtParameters :
       SemanticArgumentsAtAbi sourceEnv admission.args.toList
         admission.parameterKinds.toList)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
     (focus : ConcreteStructuredCodeFocus context sourceModule sourceFunction
       labels sourceRuntime sourceEnv (.let decl continuation) targetStore
       targetLocals targetCode witness source target)
     (sourceStep : executeStep externals source = .next sourceAfter) :
-  Nonempty (DirectInternalCallSite context decl sourceEnv) := by
-  obtain ⟨argumentCode, argumentsCompiled⟩ :=
-    ConcreteStructuredValidationLocalsAgree.compileArgs_of_supported
-      admission.localsAgree admission.argumentsClassified
+    Nonempty (DirectInternalCallSite context decl sourceEnv) := by
+  obtain ⟨argumentCode, rawArgumentsCompiled⟩ :=
+    admission.localsAgree.compileArgs_of_supported admission.argumentsClassified
+  obtain ⟨declarationArgumentCode, declarationArgumentsCompiled⟩ :=
+    admission.argumentAlignment.compileDeclarationArguments
+      admission.localsAgree
   obtain ⟨semanticArgs, argumentsEvaluated⟩ :=
     focus.evalArgs_of_fap_step admission.valueEq sourceStep
+  have typedEnv : SemanticEnvAtLocalKinds locals sourceEnv :=
+    SemanticEnvAtLocalKinds.ofStateRelated admission.localsAgree
+      localsAligned focus.stateRelated
+  have argumentsAtRaw :
+      SemanticArgumentsAtAbi sourceEnv admission.args.toList
+        admission.rawArgumentKinds.toList :=
+    SemanticArgumentsAtAbi.ofSupported typedEnv
+      admission.argumentsClassified
+  have rawSemanticValues :
+      SemanticValuesAtAbi admission.rawArgumentKinds.toList
+        semanticArgs.toList :=
+    argumentsAtRaw.of_evalArgs argumentsEvaluated
+  have parameterSemanticValues :
+      SemanticValuesAtAbi admission.parameterKinds.toList
+        semanticArgs.toList :=
+    argumentsAtParameters.of_evalArgs argumentsEvaluated
+  have rawKindsListEq :
+      admission.rawArgumentKinds.toList = admission.argumentKinds.toList :=
+    admission.argumentAlignment.raw_eq_normalized_of_semanticValues
+      rawSemanticValues parameterSemanticValues
+  have rawKindsEq :
+      admission.rawArgumentKinds = admission.argumentKinds := by
+    simpa using congrArg List.toArray rawKindsListEq
+  have argumentsCompiled :
+      Fir.Wasm.compileArgs context admission.args =
+        .ok (argumentCode, admission.argumentKinds) := by
+    simpa [rawKindsEq] using rawArgumentsCompiled
   have argumentKindsSize : admission.argumentKinds.size = admission.args.size :=
-    supportedArgumentKinds_size_of_some admission.argumentsClassified
+    by simpa using admission.argumentAlignment.argumentLength
   have parameterKindsSize :
       admission.parameterKinds.size = admission.sourceDeclaration.params.size :=
     declarationParameterKinds?_size_of_some admission.parametersKnown
@@ -1429,6 +2128,7 @@ theorem DirectInternalCallCompilerAdmission.toSite_of_step
     calleeResultKind := admission.calleeResultKind
     args := admission.args
     argumentCode := argumentCode
+    declarationArgumentCode := declarationArgumentCode
     argumentKinds := admission.argumentKinds
     semanticArgs := semanticArgs
     valueEq := admission.valueEq
@@ -1436,13 +2136,14 @@ theorem DirectInternalCallCompilerAdmission.toSite_of_step
     declarationFound := admission.declarationFound
     parametersKnown := admission.parametersKnown
     semanticArgumentsAtParameters :=
-      argumentsAtParameters.of_evalArgs argumentsEvaluated
+      parameterSemanticValues
     declaredCalleeResult := admission.declaredCalleeResult
     calleeResult := admission.calleeResult
     calleeResultRefines := admission.calleeResultRefines
     nonCached := admission.nonCached
     bodyEq := admission.bodyEq
     argumentsCompiled := argumentsCompiled
+    declarationArgumentsCompiled := declarationArgumentsCompiled
     argumentsEvaluated := argumentsEvaluated
     parametersBound := parametersBound
     resultCompiled := admission.resultCompiled }⟩
@@ -1464,7 +2165,7 @@ theorem DirectInternalCallCompilerAdmission.toSite_of_step_ofKindsRefine
     {source sourceAfter : MachineState} {target : StructuredWasmState Host}
     (admission : DirectInternalCallCompilerAdmission context locals decl)
     (argumentsRefine :
-      Fir.Wasm.kindsRefine admission.argumentKinds
+      Fir.Wasm.kindsRefine admission.rawArgumentKinds
         admission.parameterKinds = true)
     (localsAligned : LocalLayoutAligned context sourceFunction)
     (focus : ConcreteStructuredCodeFocus context sourceModule sourceFunction
@@ -1480,7 +2181,8 @@ theorem DirectInternalCallCompilerAdmission.toSite_of_step_ofKindsRefine
         admission.parameterKinds.toList :=
     SemanticArgumentsAtAbi.ofKindsRefine typedEnv
       admission.argumentsClassified argumentsRefine
-  exact admission.toSite_of_step argumentsAtParameters focus sourceStep
+  exact admission.toSite_of_step argumentsAtParameters localsAligned focus
+    sourceStep
 
 /-- The recursively validated compiler relation constructs complete
 zero-allocation admission for one ordinary internal named call.
@@ -1546,7 +2248,7 @@ theorem ConcreteStructuredValidatedCodeOutcome.admit_directCall_of_compiler
   have semanticArguments := argumentsAt admission.valueEq
     admission.declarationFound admission.parametersKnown
   obtain ⟨site⟩ := admission.toSite_of_step semanticArguments
-    related.core.core.focus sourceStep
+    spec.localsAligned related.core.core.focus sourceStep
   exact .directCall site
 
 /-- Natural literal allocation always returns an object reference, independent
@@ -1590,26 +2292,32 @@ theorem PureExternalSupported.resultSemanticValueAtAbi
         SemanticValueAtAbi kind sourceValue := by
   rcases supported with integer | natural | scalar
   · cases integer with
-    | intro name args argumentCode argumentKinds semanticArgs target value
+    | intro name args argumentCode declarationArgumentCode argumentKinds
+        semanticArgs target value
         valueEq operation nonempty targetFound targetExternal valueKind
-        argumentsCompiled argumentsEvaluated signature resultCompiled
-        semanticCalled nextRuntimeEq sourceValueEq stepCostEq =>
+        argumentsCompiled declarationArgumentsCompiled argumentsEvaluated
+        signature resultCompiled semanticCalled nextRuntimeEq sourceValueEq
+        stepCostEq =>
       refine ⟨.tobject, valueKind, ?_⟩
       rw [sourceValueEq]
       exact semanticIntegerExternalResponse_value_at_tobject sourceRuntime value
   · cases natural with
-    | intro name args argumentCode argumentKinds semanticArgs target value
+    | intro name args argumentCode declarationArgumentCode argumentKinds
+        semanticArgs target value
         valueEq operation nonempty targetFound targetExternal valueKind
-        argumentsCompiled argumentsEvaluated signature resultCompiled
-        semanticCalled nextRuntimeEq sourceValueEq stepCostEq =>
+        argumentsCompiled declarationArgumentsCompiled argumentsEvaluated
+        signature resultCompiled semanticCalled nextRuntimeEq sourceValueEq
+        stepCostEq =>
       refine ⟨.tobject, valueKind, ?_⟩
       rw [sourceValueEq]
       exact semanticNaturalExternalResponse_value_at_tobject sourceRuntime value
   · cases scalar with
-    | intro name args argumentCode argumentKinds semanticArgs target scalar
+    | intro name args argumentCode declarationArgumentCode argumentKinds
+        semanticArgs target scalar
         valueEq operation nonempty targetFound targetExternal valueKind
-        argumentsCompiled argumentsEvaluated signature resultCompiled
-        semanticCalled nextRuntimeEq sourceValueEq stepCostEq =>
+        argumentsCompiled declarationArgumentsCompiled argumentsEvaluated
+        signature resultCompiled semanticCalled nextRuntimeEq sourceValueEq
+        stepCostEq =>
       refine ⟨scalar.kind.abiKind, valueKind, ?_⟩
       rw [sourceValueEq]
       exact FirTalos.Concrete.BoxedScalar.semanticValueAtAbi scalar

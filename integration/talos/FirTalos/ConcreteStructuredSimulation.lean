@@ -1375,6 +1375,65 @@ theorem ConstructorArgsCompiled.structuredFlatProgram
           subst targetArguments
           exact .cons (.atomic (by trivial)) (ih restAdapted)
 
+/-- Declaration-aware arguments have the same flat target shape as ordinary
+arguments: each lane is either a resolved local read or the canonical erased
+zero selected for a physical `void` parameter. -/
+theorem DeclarationArgsCompiled.structuredFlatProgram
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : LabelContext} {module : Wasm.Module}
+    {args : List (Lean.Compiler.LCNF.Arg .impure)}
+    {argumentCode : List Fir.Wasm.Instruction}
+    {fieldKinds : List AbiKind} {targetArguments : Wasm.Program}
+    (compiled : DeclarationArgsCompiled context args argumentCode fieldKinds)
+    (adapted :
+      instructions sourceModule sourceFunction labels argumentCode =
+        .ok targetArguments) :
+    StructuredWasmFlatProgram module targetArguments := by
+  induction compiled generalizing targetArguments with
+  | nil =>
+      have targetEq : targetArguments = [] := by
+        have adaptedEq :
+            (Except.ok [] : Except AdapterError Wasm.Program) =
+              .ok targetArguments := by
+          simpa [instructions, pure, Except.pure] using adapted
+        exact (Except.ok.inj adaptedEq).symm
+      subst targetArguments
+      exact .nil
+  | canonicalErased arg rest ih =>
+      obtain ⟨targetHead, targetRest, headAdapted, restAdapted, targetEq⟩ :=
+        instructions_cons_eq_ok adapted
+      have targetHeadEq : targetHead = .const 0 := by
+        have adaptedEq :
+            (Except.ok (.const 0) : Except AdapterError Wasm.Instruction) =
+              .ok targetHead := by
+          simpa [instruction, pure, Except.pure] using headAdapted
+        exact (Except.ok.inj adaptedEq).symm
+      subst targetHead
+      subst targetArguments
+      exact .cons (.atomic (by trivial)) (ih restAdapted)
+  | @fvar fvarId kind args argumentCode fieldKinds kindFound rest ih =>
+      obtain ⟨targetHead, targetRest, headAdapted, restAdapted, targetEq⟩ :=
+        instructions_cons_eq_ok adapted
+      cases sourceFound :
+          findFVar?
+            (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+            fvarId with
+      | none => simp [instruction, sourceFound] at headAdapted
+      | some sourceIndex =>
+          have targetHeadEq : targetHead = .localGet sourceIndex := by
+            have adaptedEq :
+                (Except.ok (.localGet sourceIndex) :
+                    Except AdapterError Wasm.Instruction) =
+                  .ok targetHead := by
+              simpa [instruction, sourceFound, pure, Except.pure] using
+                headAdapted
+            exact (Except.ok.inj adaptedEq).symm
+          subst targetHead
+          subst targetArguments
+          exact .cons (.atomic (by trivial)) (ih restAdapted)
+
 /-- A successfully compiled argument row followed by any runtime call is flat
 after production adaptation whenever the selected call is covered by the
 module-wide runtime-call alignment theorem. -/
@@ -1437,7 +1496,7 @@ theorem
     {argumentKinds : Array AbiKind}
     {targetValue : Wasm.Program} {resultIndex : Nat}
     (argumentsCompiled :
-      Fir.Wasm.compileArgs context args =
+      Fir.Wasm.compileDeclarationArguments context declaration args =
         .ok (argumentCode, argumentKinds))
     (declarationFound : program.findDecl? name = some declaration)
     (declarationExternal : ∃ metadata, declaration.value = .extern metadata)
@@ -1456,8 +1515,8 @@ theorem
     spec.externalCall declarationFound declarationExternal callFound
   have argumentsFlat :
       StructuredWasmFlatProgram target.wasmModule targetArguments :=
-    (ConstructorArgsCompiled.ofCompileArgs argumentsCompiled).structuredFlatProgram
-      argumentsAdapted
+    (DeclarationArgsCompiled.ofCompileDeclarationArguments
+      argumentsCompiled).structuredFlatProgram argumentsAdapted
   subst targetValue
   simpa [List.append_assoc] using
     StructuredWasmFlatProgram.append argumentsFlat
@@ -1495,11 +1554,11 @@ theorem PureExternalSupported.structuredFlatProgram
       (targetValue ++ [.localSet resultIndex]) := by
   rcases supported with integer | natural | scalar
   · rcases integer with
-      ⟨name, args, argumentCode, argumentKinds, _semanticArgs, declaration,
-        _value, valueEq, _operation, nonempty, targetFound, targetExternal,
-        valueKind, argumentsCompiled, _argumentsEvaluated, _signature,
-        _resultCompiled, _semanticCalled, _nextRuntimeEq, _sourceValueEq,
-        _stepCostEq⟩
+      ⟨name, args, _rawArgumentCode, argumentCode, argumentKinds,
+        _semanticArgs, declaration, _value, valueEq, _operation, nonempty,
+        targetFound, targetExternal, valueKind, _rawArgumentsCompiled,
+        argumentsCompiled, _argumentsEvaluated, _signature, _resultCompiled,
+        _semanticCalled, _nextRuntimeEq, _sourceValueEq, _stepCostEq⟩
     have expectedCompiled :
         Fir.Wasm.compileLetValue context decl =
           .ok (argumentCode ++ [.call (.declaration name)]) := by
@@ -1514,11 +1573,11 @@ theorem PureExternalSupported.structuredFlatProgram
     exact spec.structuredFlatProgram_compileArgs_externalCall
       argumentsCompiled declarationFound targetExternal valueAdapted
   · rcases natural with
-      ⟨name, args, argumentCode, argumentKinds, _semanticArgs, declaration,
-        _value, valueEq, _operation, nonempty, targetFound, targetExternal,
-        valueKind, argumentsCompiled, _argumentsEvaluated, _signature,
-        _resultCompiled, _semanticCalled, _nextRuntimeEq, _sourceValueEq,
-        _stepCostEq⟩
+      ⟨name, args, _rawArgumentCode, argumentCode, argumentKinds,
+        _semanticArgs, declaration, _value, valueEq, _operation, nonempty,
+        targetFound, targetExternal, valueKind, _rawArgumentsCompiled,
+        argumentsCompiled, _argumentsEvaluated, _signature, _resultCompiled,
+        _semanticCalled, _nextRuntimeEq, _sourceValueEq, _stepCostEq⟩
     have expectedCompiled :
         Fir.Wasm.compileLetValue context decl =
           .ok (argumentCode ++ [.call (.declaration name)]) := by
@@ -1533,11 +1592,11 @@ theorem PureExternalSupported.structuredFlatProgram
     exact spec.structuredFlatProgram_compileArgs_externalCall
       argumentsCompiled declarationFound targetExternal valueAdapted
   · rcases scalar with
-      ⟨name, args, argumentCode, argumentKinds, _semanticArgs, declaration,
-        _value, valueEq, _operation, nonempty, targetFound, targetExternal,
-        valueKind, argumentsCompiled, _argumentsEvaluated, _signature,
-        _resultCompiled, _semanticCalled, _nextRuntimeEq, _sourceValueEq,
-        _stepCostEq⟩
+      ⟨name, args, _rawArgumentCode, argumentCode, argumentKinds,
+        _semanticArgs, declaration, _value, valueEq, _operation, nonempty,
+        targetFound, targetExternal, valueKind, _rawArgumentsCompiled,
+        argumentsCompiled, _argumentsEvaluated, _signature, _resultCompiled,
+        _semanticCalled, _nextRuntimeEq, _sourceValueEq, _stepCostEq⟩
     have expectedCompiled :
         Fir.Wasm.compileLetValue context decl =
           .ok (argumentCode ++ [.call (.declaration name)]) := by
@@ -1723,7 +1782,8 @@ theorem ClosureCaptureRows.structuredFlatProgram_of_adapted
                 parameterKinds index = [
               .localGet closureId,
               .call (.runtime
-                (.closureProj function arity fixed index expectedKind))] := by
+                (.closureProj function arity fixed index
+                  (Fir.Wasm.closureProjectionKind expectedKind)))] := by
           simp [Fir.Wasm.compileFixedClosureField, expectedAt, targetName]
         rw [fieldSource] at fieldAdapted
         exact StructuredWasmFlatProgram.append
@@ -1759,7 +1819,8 @@ theorem ClosureCaptureRows.structuredFlatProgram_of_adapted
                 parameterKinds index = [
               .localGet closureId,
               .call (.runtime
-                (.closureProj function arity fixed index expectedKind))] := by
+                (.closureProj function arity fixed index
+                  (Fir.Wasm.closureProjectionKind expectedKind)))] := by
           simp [Fir.Wasm.compileFixedClosureField, expectedAt, targetName]
         rw [fieldSource] at fieldAdapted
         exact StructuredWasmFlatProgram.append prefixFlat
@@ -7734,6 +7795,7 @@ structure PureExternalCallShape
     (nextRuntime : RuntimeState) (sourceValue : Value) (stepCost : Nat) where
   name : Lean.Name
   args : Array (Lean.Compiler.LCNF.Arg .impure)
+  rawArgumentCode : List Fir.Wasm.Instruction
   argumentCode : List Fir.Wasm.Instruction
   argumentKinds : Array AbiKind
   semanticArgs : Array Value
@@ -7747,7 +7809,10 @@ structure PureExternalCallShape
   declarationExternal : ∃ metadata, declaration.value = .extern metadata
   valueKind : Fir.Wasm.letValueKind decl = .ok resultKind
   argumentsCompiled :
-    Fir.Wasm.compileArgs context args = .ok (argumentCode, argumentKinds)
+    Fir.Wasm.compileArgs context args = .ok (rawArgumentCode, argumentKinds)
+  declarationArgumentsCompiled :
+    Fir.Wasm.compileDeclarationArguments context declaration args =
+      .ok (argumentCode, argumentKinds)
   argumentsEvaluated : evalArgs sourceEnv args = .ok semanticArgs
   signature :
     ExternalTypes.signature {
@@ -7786,14 +7851,16 @@ theorem PureExternalSupported.callShapeExists
         nextRuntime sourceValue stepCost) := by
   rcases supported with integer | natural | scalar
   · rcases integer with
-      ⟨name, args, argumentCode, argumentKinds, semanticArgs, declaration,
-        value, valueEq, _operation, nonempty, declarationFound,
-        declarationExternal, valueKind, argumentsCompiled, argumentsEvaluated,
-        signature, resultCompiled, semanticCalled, nextRuntimeEq,
-        sourceValueEq, stepCostEq⟩
+      ⟨name, args, rawArgumentCode, argumentCode, argumentKinds,
+        semanticArgs, declaration, value, valueEq, _operation, nonempty,
+        declarationFound, declarationExternal, valueKind, argumentsCompiled,
+        declarationArgumentsCompiled, argumentsEvaluated, signature,
+        resultCompiled, semanticCalled, nextRuntimeEq, sourceValueEq,
+        stepCostEq⟩
     exact ⟨{
       name
       args
+      rawArgumentCode
       argumentCode
       argumentKinds
       semanticArgs
@@ -7807,6 +7874,7 @@ theorem PureExternalSupported.callShapeExists
       declarationExternal
       valueKind
       argumentsCompiled
+      declarationArgumentsCompiled
       argumentsEvaluated
       signature
       resultCompiled
@@ -7817,14 +7885,16 @@ theorem PureExternalSupported.callShapeExists
       responseEq := rfl
       stepCostEq }⟩
   · rcases natural with
-      ⟨name, args, argumentCode, argumentKinds, semanticArgs, declaration,
-        value, valueEq, _operation, nonempty, declarationFound,
-        declarationExternal, valueKind, argumentsCompiled, argumentsEvaluated,
-        signature, resultCompiled, semanticCalled, nextRuntimeEq,
-        sourceValueEq, stepCostEq⟩
+      ⟨name, args, rawArgumentCode, argumentCode, argumentKinds,
+        semanticArgs, declaration, value, valueEq, _operation, nonempty,
+        declarationFound, declarationExternal, valueKind, argumentsCompiled,
+        declarationArgumentsCompiled, argumentsEvaluated, signature,
+        resultCompiled, semanticCalled, nextRuntimeEq, sourceValueEq,
+        stepCostEq⟩
     exact ⟨{
       name
       args
+      rawArgumentCode
       argumentCode
       argumentKinds
       semanticArgs
@@ -7838,6 +7908,7 @@ theorem PureExternalSupported.callShapeExists
       declarationExternal
       valueKind
       argumentsCompiled
+      declarationArgumentsCompiled
       argumentsEvaluated
       signature
       resultCompiled
@@ -7848,14 +7919,16 @@ theorem PureExternalSupported.callShapeExists
       responseEq := rfl
       stepCostEq }⟩
   · rcases scalar with
-      ⟨name, args, argumentCode, argumentKinds, semanticArgs, declaration,
-        value, valueEq, _operation, nonempty, declarationFound,
-        declarationExternal, valueKind, argumentsCompiled, argumentsEvaluated,
-        signature, resultCompiled, semanticCalled, nextRuntimeEq,
-        sourceValueEq, stepCostEq⟩
+      ⟨name, args, rawArgumentCode, argumentCode, argumentKinds,
+        semanticArgs, declaration, value, valueEq, _operation, nonempty,
+        declarationFound, declarationExternal, valueKind, argumentsCompiled,
+        declarationArgumentsCompiled, argumentsEvaluated, signature,
+        resultCompiled, semanticCalled, nextRuntimeEq, sourceValueEq,
+        stepCostEq⟩
     exact ⟨{
       name
       args
+      rawArgumentCode
       argumentCode
       argumentKinds
       semanticArgs
@@ -7869,6 +7942,7 @@ theorem PureExternalSupported.callShapeExists
       declarationExternal
       valueKind
       argumentsCompiled
+      declarationArgumentsCompiled
       argumentsEvaluated
       signature
       resultCompiled
@@ -8085,8 +8159,8 @@ theorem ConcreteStructuredCodeFocus.advance_external_stage
       Fir.Wasm.compileLetValue context decl =
         .ok (site.argumentCode ++ [.call (.declaration site.name)]) := by
     simp [Fir.Wasm.compileLetValue, site.valueEq, site.valueKind,
-      site.argumentsCompiled, site.declarationFound, site.nonempty, Bind.bind,
-      Except.bind, pure, Except.pure]
+      site.declarationArgumentsCompiled, site.declarationFound, site.nonempty,
+      Bind.bind, Except.bind, pure, Except.pure]
   have valueCodeEq :
       valueCode = site.argumentCode ++ [.call (.declaration site.name)] := by
     rw [expectedCompiled] at valueCompiled
@@ -8110,7 +8184,8 @@ theorem ConcreteStructuredCodeFocus.advance_external_stage
     exact Except.ok.inj (operationMatches.signature.symm.trans site.signature)
   obtain ⟨physicalArgs, argumentsReady, _physicalLength,
       argumentsRelated⟩ :=
-    constructorArgsReady_of_compileArgs localsAligned site.argumentsCompiled
+    constructorArgsReady_of_compileDeclarationArguments localsAligned
+      site.argumentsCompiled site.declarationArgumentsCompiled
       argumentsAdapted site.argumentsEvaluated related.stateRelated
   obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
     localsAligned site.resultCompiled
@@ -9526,14 +9601,15 @@ theorem ConcreteStructuredCodeFocus.advance_directCall_stage
     CodeAdaptedWithSuffix.let_eq related.adapted
   have expectedCompiled :
       Fir.Wasm.compileLetValue callerContext decl =
-        .ok (site.argumentCode ++
+        .ok (site.declarationArgumentCode ++
           [.call (.declaration site.declaration)]) := by
     simp [Fir.Wasm.compileLetValue, Fir.Wasm.letValueKind, site.valueEq,
-      site.kindEq, site.argumentsCompiled, site.declarationFound,
+      site.kindEq, site.declarationArgumentsCompiled, site.declarationFound,
       site.nonCached, Bind.bind, Except.bind, pure, Except.pure]
   have valueCodeEq :
       valueCode =
-        site.argumentCode ++ [.call (.declaration site.declaration)] := by
+        site.declarationArgumentCode ++
+          [.call (.declaration site.declaration)] := by
     rw [expectedCompiled] at valueCompiled
     exact (Except.ok.inj valueCompiled).symm
   subst valueCode
@@ -9556,7 +9632,8 @@ theorem ConcreteStructuredCodeFocus.advance_directCall_stage
   subst functionIndex
   obtain ⟨physicalArgs, argumentsReady, _physicalLength,
       argumentsRelated⟩ :=
-    constructorArgsReady_of_compileArgs localsAligned site.argumentsCompiled
+    constructorArgsReady_of_compileDeclarationArguments localsAligned
+      site.argumentsCompiled site.declarationArgumentsCompiled
       argumentsAdapted site.argumentsEvaluated related.stateRelated
   obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
     localsAligned site.resultCompiled

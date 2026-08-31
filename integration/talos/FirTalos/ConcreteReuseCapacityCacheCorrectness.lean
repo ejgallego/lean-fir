@@ -5114,6 +5114,7 @@ structure DirectInternalCallSite
   calleeResultKind : AbiKind
   args : Array (LCNF.Arg .impure)
   argumentCode : List Fir.Wasm.Instruction
+  declarationArgumentCode : List Fir.Wasm.Instruction
   argumentKinds : Array AbiKind
   semanticArgs : Array Value
   valueEq : decl.value = .fap declaration args
@@ -5138,6 +5139,9 @@ structure DirectInternalCallSite
   argumentsCompiled :
     Fir.Wasm.compileArgs context args =
       .ok (argumentCode, argumentKinds)
+  declarationArgumentsCompiled :
+    Fir.Wasm.compileDeclarationArguments context sourceDeclaration args =
+      .ok (declarationArgumentCode, argumentKinds)
   argumentsEvaluated :
     evalArgs sourceEnv args = .ok semanticArgs
   parametersBound :
@@ -6264,14 +6268,15 @@ theorem DirectDeclarationCallImplementationWithCache.ofInternalCompiler
   | intro site =>
       have expectedCompiled :
           Fir.Wasm.compileLetValue context decl =
-            .ok (site.argumentCode ++
+            .ok (site.declarationArgumentCode ++
               [.call (.declaration site.declaration)]) := by
         simp [Fir.Wasm.compileLetValue, Fir.Wasm.letValueKind, site.valueEq,
-          site.kindEq, site.argumentsCompiled, site.declarationFound,
+          site.kindEq, site.declarationArgumentsCompiled, site.declarationFound,
           site.nonCached, Bind.bind, Except.bind, pure, Except.pure]
       have valueCodeEq :
           valueCode =
-            site.argumentCode ++ [.call (.declaration site.declaration)] := by
+            site.declarationArgumentCode ++
+              [.call (.declaration site.declaration)] := by
         rw [expectedCompiled] at valueCompiled
         exact (Except.ok.inj valueCompiled).symm
       subst valueCode
@@ -6280,8 +6285,9 @@ theorem DirectDeclarationCallImplementationWithCache.ofInternalCompiler
         instructions_append_declaration_call_eq valueAdapted
       subst targetValue
       obtain ⟨physicalArgs, argumentsReady, _, argumentsRelated⟩ :=
-        constructorArgsReady_of_compileArgs spec.localsAligned
-          site.argumentsCompiled argumentsAdapted site.argumentsEvaluated
+        constructorArgsReady_of_compileDeclarationArguments spec.localsAligned
+          site.argumentsCompiled site.declarationArgumentsCompiled
+          argumentsAdapted site.argumentsEvaluated
           invariant.1.1.1.1.stateRelated
       have assembled :
           ClosureArgumentAssembly targetModule.wasmModule hosts.env
@@ -7090,7 +7096,8 @@ theorem ClosureArgumentAssembly.fixedProjection_of_adapted
       instructions sourceModule sourceFunction labels [
           .localGet closureId,
           .call (.runtime
-            (.closureProj function arity fixed index expectedKind))] =
+            (.closureProj function arity fixed index
+              (Fir.Wasm.closureProjectionKind expectedKind)))] =
         .ok targetCode)
     (applicationFound : initial.host.closureApplication? = some application)
     (applicationRelated : ClosureApplicationRel witness application address
@@ -7104,6 +7111,12 @@ theorem ClosureArgumentAssembly.fixedProjection_of_adapted
       ClosureArgumentAssembly target.wasmModule hosts.env targetCode [physical]
           initial locals ∧
         PhysicalValueRel witness expectedKind physical value := by
+  have projectionRefines :
+      actualKind.refines
+          (Fir.Wasm.closureProjectionKind expectedKind) = true := by
+    cases actualKind <;> cases expectedKind <;>
+      simp_all [Fir.Wasm.closureProjectionKind, AbiKind.refines,
+        AbiKind.isObjectLike]
   have localFound :
       findFVar?
           (sourceFunction.params.toList ++ sourceFunction.locals.toList)
@@ -7111,7 +7124,8 @@ theorem ClosureArgumentAssembly.fixedProjection_of_adapted
     simpa [functionBindings] using closureFound
   cases callFound :
       callIndex? sourceModule
-        (.runtime (.closureProj function arity fixed index expectedKind)) with
+        (.runtime (.closureProj function arity fixed index
+          (Fir.Wasm.closureProjectionKind expectedKind))) with
   | none =>
       simp [instructions, instruction, localFound, callFound, Functor.map,
         Except.map, Bind.bind, Except.bind, pure, Except.pure] at adapted
@@ -7123,10 +7137,28 @@ theorem ClosureArgumentAssembly.fixedProjection_of_adapted
       subst targetCode
       obtain ⟨imp, importFound, inBounds, contractFound, parameterCount,
           resultCount⟩ := spec.closureProjCall callFound
-      exact ClosureArgumentAssembly.closureProj_of_related closureLocal
-        importFound spec.hostsSatisfy inBounds contractFound parameterCount
-        resultCount applicationFound applicationRelated fixedSize kindAt
-        kindRefines valueAt failureClear
+      obtain ⟨lane, projected, laneRelated⟩ :=
+        applicationRelated.project_of_refines index actualKind
+          (Fir.Wasm.closureProjectionKind expectedKind) value kindAt
+          projectionRefines valueAt
+      have operation :
+          closureProjStep function arity fixed index
+              (Fir.Wasm.closureProjectionKind expectedKind) initial
+              [.i32 (UInt32.ofNat address.value)] =
+            .Return [physicalOfLane lane] (clearFailure initial) := by
+        unfold closureProjStep
+        simp only [clearFailure]
+        rw [applicationFound]
+        simp only
+        rw [Word32.ofUInt32_ofNat_value]
+        rw [fixedSize] at projected
+        rw [projected]
+      refine ⟨physicalOfLane lane, ?_,
+        (physicalOfLane_related laneRelated).ofRefines kindRefines⟩
+      apply ClosureArgumentAssembly.closureProj closureLocal importFound
+        spec.hostsSatisfy inBounds contractFound parameterCount resultCount
+        operation failureClear
+      exact .nil
 
 /-- The erased sibling of `fixedProjection_of_adapted`. ABI refinement forces
 the stored capture kind and semantic value to be erased, while adaptation
@@ -7351,7 +7383,8 @@ theorem ClosureCaptureRows.assembly_of_adapted
                 parameterKinds index = [
               .localGet closureId,
               .call (.runtime
-                (.closureProj function arity fixed index expectedKind))] := by
+                (.closureProj function arity fixed index
+                  (Fir.Wasm.closureProjectionKind expectedKind)))] := by
           simp [Fir.Wasm.compileFixedClosureField, expectedAt, expectedErased,
             targetName]
         rw [fieldSource] at fieldAdapted
@@ -7389,7 +7422,8 @@ theorem ClosureCaptureRows.assembly_of_adapted
                 parameterKinds index = [
               .localGet closureId,
               .call (.runtime
-                (.closureProj function arity fixed index expectedKind))] := by
+                (.closureProj function arity fixed index
+                  (Fir.Wasm.closureProjectionKind expectedKind)))] := by
           simp [Fir.Wasm.compileFixedClosureField, expectedAt, expectedErased,
             targetName]
         rw [fieldSource] at fieldAdapted
@@ -11904,16 +11938,9 @@ private def declarationParamStep
     (program : Fir.LeanIR.ImpureProgram) (declaration : LCNF.Decl .impure)
     (locals : Fir.Wasm.LocalKinds) (param : LCNF.Param .impure) :
     Except Fir.Wasm.CompileError Fir.Wasm.LocalKinds := do
-  match ← Fir.Wasm.checkedAbiKind? param.type with
-  | none => return locals
-  | some kind =>
-      let kind :=
-        if kind == .tobject &&
-            Fir.Wasm.erasedOnlyParameter program declaration param then
-          .erased
-        else
-          kind
-      return Fir.Wasm.insertLocal locals param.fvarId kind
+  let kind ←
+    Fir.Wasm.checkedDeclarationParamKind program declaration param
+  return Fir.Wasm.insertLocal locals param.fvarId kind
 
 /-- The pure parameter-kind classifier and the executable lowerer select the
 same effective lane for one admitted declaration parameter. -/
@@ -11927,13 +11954,19 @@ private theorem declarationParamStep_eq
     declarationParamStep program declaration locals param =
       .ok (Fir.Wasm.insertLocal locals param.fvarId kind) := by
   unfold declarationParamStep
+  unfold Fir.Wasm.checkedDeclarationParamKind
   unfold Fir.Wasm.checkedAbiKind?
   unfold Fir.Wasm.declarationParamKind? at known
   cases kindResult : Fir.Wasm.abiKind? param.type with
   | error error => simp_all
   | ok kindOption =>
       cases kindOption with
-      | none => simp_all
+      | none =>
+          rw [kindResult] at known
+          simp only at known
+          injection known with kindEq
+          subst kind
+          simp [kindResult, pure, Except.pure, Bind.bind, Except.bind]
       | some declaredKind =>
           rw [kindResult] at known
           simp only at known
@@ -11959,7 +11992,8 @@ private theorem declarationParamStep_name_mem
     (member : entry ∈ result) :
     entry.fst.name = param.fvarId.name ∨
       entry.fst.name ∈ locals.map (·.fst.name) := by
-  unfold declarationParamStep Fir.Wasm.checkedAbiKind? at stepped
+  unfold declarationParamStep Fir.Wasm.checkedDeclarationParamKind
+    Fir.Wasm.checkedAbiKind? at stepped
   cases classified : Fir.Wasm.abiKind? param.type with
   | error fault =>
       simp [classified, pure, Except.pure, Bind.bind, Except.bind] at stepped
@@ -11968,7 +12002,12 @@ private theorem declarationParamStep_name_mem
       | none =>
           simp [classified, pure, Except.pure, Bind.bind, Except.bind] at stepped
           subst result
-          exact .inr (List.mem_map.mpr ⟨entry, member, rfl⟩)
+          unfold Fir.Wasm.insertLocal at member
+          rcases List.mem_cons.mp member with selected | retained
+          · cases selected
+            exact .inl rfl
+          · exact .inr (List.mem_map.mpr
+              ⟨entry, (List.mem_filter.mp retained).1, rfl⟩)
       | some kind =>
           by_cases erased :
               (kind == .tobject &&
@@ -15668,14 +15707,15 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_generated
           callee.sourceResult
       have expectedCompiled :
           Fir.Wasm.compileLetValue context decl =
-            .ok (site.argumentCode ++
+            .ok (site.declarationArgumentCode ++
               [.call (.declaration site.declaration)]) := by
         simp [Fir.Wasm.compileLetValue, Fir.Wasm.letValueKind, site.valueEq,
-          site.kindEq, site.argumentsCompiled, site.declarationFound,
+          site.kindEq, site.declarationArgumentsCompiled, site.declarationFound,
           site.nonCached, Bind.bind, Except.bind, pure, Except.pure]
       have valueCodeEq :
           valueCode =
-            site.argumentCode ++ [.call (.declaration site.declaration)] := by
+            site.declarationArgumentCode ++
+              [.call (.declaration site.declaration)] := by
         rw [expectedCompiled] at valueCompiled
         exact (Except.ok.inj valueCompiled).symm
       subst valueCode
@@ -15684,8 +15724,9 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_generated
         instructions_append_declaration_call_eq valueAdapted
       subst targetValue
       obtain ⟨physicalArgs, argumentsReady, _, argumentsRelated⟩ :=
-        constructorArgsReady_of_compileArgs row.localsAligned
-          site.argumentsCompiled argumentsAdapted site.argumentsEvaluated
+        constructorArgsReady_of_compileDeclarationArguments row.localsAligned
+          site.argumentsCompiled site.declarationArgumentsCompiled
+          argumentsAdapted site.argumentsEvaluated
           invariant.1.stateRelated.stateRelated
       have assembled :
           ClosureArgumentAssembly target.wasmModule hosts.env targetArguments
@@ -16461,14 +16502,15 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
           callee.sourceResult
       have expectedCompiled :
           Fir.Wasm.compileLetValue context decl =
-            .ok (site.argumentCode ++
+            .ok (site.declarationArgumentCode ++
               [.call (.declaration site.declaration)]) := by
         simp [Fir.Wasm.compileLetValue, Fir.Wasm.letValueKind, site.valueEq,
-          site.kindEq, site.argumentsCompiled, site.declarationFound,
+          site.kindEq, site.declarationArgumentsCompiled, site.declarationFound,
           site.nonCached, Bind.bind, Except.bind, pure, Except.pure]
       have valueCodeEq :
           valueCode =
-            site.argumentCode ++ [.call (.declaration site.declaration)] := by
+            site.declarationArgumentCode ++
+              [.call (.declaration site.declaration)] := by
         rw [expectedCompiled] at valueCompiled
         exact (Except.ok.inj valueCompiled).symm
       subst valueCode
@@ -16477,9 +16519,10 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
         instructions_append_declaration_call_eq valueAdapted
       subst targetValue
       obtain ⟨physicalArgs, argumentsReady, _, argumentsRelated⟩ :=
-        constructorArgsReady_of_compileArgs functionSpec.localsAligned
-          site.argumentsCompiled argumentsAdapted site.argumentsEvaluated
-          invariant.1.stateRelated.stateRelated
+        constructorArgsReady_of_compileDeclarationArguments
+          functionSpec.localsAligned site.argumentsCompiled
+          site.declarationArgumentsCompiled argumentsAdapted
+          site.argumentsEvaluated invariant.1.stateRelated.stateRelated
       have assembled :
           ClosureArgumentAssembly target.wasmModule hosts.env targetArguments
             physicalArgs initial locals :=
@@ -17844,14 +17887,15 @@ theorem
   rcases supported with ⟨site, loweredRow, calleeEvaluation⟩
   have expectedCompiled :
       Fir.Wasm.compileLetValue context decl =
-        .ok (site.argumentCode ++
+        .ok (site.declarationArgumentCode ++
           [.call (.declaration site.declaration)]) := by
     simp [Fir.Wasm.compileLetValue, Fir.Wasm.letValueKind, site.valueEq,
-      site.kindEq, site.argumentsCompiled, site.declarationFound,
+      site.kindEq, site.declarationArgumentsCompiled, site.declarationFound,
       site.nonCached, Bind.bind, Except.bind, pure, Except.pure]
   have valueCodeEq :
       valueCode =
-        site.argumentCode ++ [.call (.declaration site.declaration)] := by
+        site.declarationArgumentCode ++
+          [.call (.declaration site.declaration)] := by
     rw [expectedCompiled] at valueCompiled
     exact (Except.ok.inj valueCompiled).symm
   subst valueCode
@@ -17860,8 +17904,9 @@ theorem
     instructions_append_declaration_call_eq valueAdapted
   subst targetValue
   obtain ⟨physicalArgs, argumentsReady, _, argumentsRelated⟩ :=
-    constructorArgsReady_of_compileArgs callerLocalsAligned
-      site.argumentsCompiled argumentsAdapted site.argumentsEvaluated
+    constructorArgsReady_of_compileDeclarationArguments callerLocalsAligned
+      site.argumentsCompiled site.declarationArgumentsCompiled
+      argumentsAdapted site.argumentsEvaluated
       invariant.1.1.1.1.stateRelated
   have assembled :
       ClosureArgumentAssembly target.wasmModule hosts.env targetArguments
