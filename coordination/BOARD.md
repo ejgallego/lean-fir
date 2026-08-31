@@ -25,12 +25,36 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   resident Array provenance consumer after rebasing, is the remaining
   milestone step.
 - Integration owner: `root`, holding the serial landing lease through accepted
-  integration head `635f07d1`. `wasm-gen` remains released to the W7-1
+  integration head `ba2bc34a`. `wasm-gen` remains released to the W7-1
   generation lane. The inherited cleanup, serial and bounded check-throughput,
   mailbox-routing, bounded `Nat.land`, USize range-fact, exact consumer-ratchet,
   and transactional resident-linker stacks are now integrated. Tooling's
   bounded work changed no W7 implementation file and granted no standing W7
   ownership.
+- Accepted W6 direct-call current-admission checkpoint: functional proof head
+  `134dc403` and clean tracked handoff `ba2bc34a`, based directly on accepted
+  main `2899747e`. `DirectInternalCallCompilerAdmission` now retains the
+  residual compiler-local agreement already transported by production
+  validation. `ConcreteStructuredValidatedCodeOutcome.admit_directCall_of_compiler`
+  consequently reconstructs declaration and result facts, argument
+  compilation and evaluation, parameter binding, the destination equation,
+  and exact zero-cost `ConcreteStructuredCodeStepAdmission.directCall` from
+  the guarded validated outcome and one successful current source step. Its
+  only open input is `ConcreteStructuredDirectCallArgumentsAt`: the current
+  semantic argument row at the compiler-selected callee ABI. This is exactly
+  the producer-origin fact needed by the 158 observed `tobject -> object`
+  uses, not a global source invariant, future trace, target path, or program
+  certificate. Lean Beam reports zero blocking diagnostics; the 3,129-job
+  focused cone passes, `make check` passes 730 unique cases and 2,172/2,172
+  comparisons with exactly one trusted axiom, and all 3,190 Talos jobs pass
+  with receipt
+  `d2f741c0d9f7d512ed3e774db64dc9ad2f92dd7a477120f7c8862cde337c5d9c`.
+  No shared semantic, validation/lowering, runtime ABI/layout, symbolic
+  instruction, generated-code, ownership, or resident-helper contract
+  changed; bug cards: none. W6 next consumes origin census request
+  `W6-W7-20260831-002`, derives the argument predicate from the smallest
+  compiler-owned precise-value analysis, and wires the completed branch into
+  the whole current-step admission dispatcher.
 - Accepted W6 semantic named-call ingress checkpoint: functional proof head
   `566459aa` and clean tracked handoff based directly on accepted main
   `635f07d1`. The preceding result-admission policy remains: ordinary
