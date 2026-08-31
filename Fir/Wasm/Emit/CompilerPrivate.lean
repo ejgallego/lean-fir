@@ -54,6 +54,30 @@ def specializationCalleeCandidates (name : Name) : Array Name := Id.run do
       candidates := candidates.push candidate
   return candidates.reverse
 
+private def erasePrivateHeader? : Name → Option Name
+  | name@(.str parent component) =>
+      if name == Lean.privateHeader then
+        some .anonymous
+      else
+        return .str (← erasePrivateHeader? parent) component
+  | _ => none
+
+/--
+Recover the module component of a Lean private declaration name.
+
+Lean constructs private declarations as `_private.<module>.0.<user-name>`.
+Use `privatePrefix?` to find that structural boundary, then remove exactly
+Lean's `privateHeader`; do not infer module ownership from rendered-name
+prefixes. This is useful for generated specializations whose leading private
+prefix belongs to the generic callee while a caller embedded after `._at_.`
+belongs to another module.
+-/
+def privateNameModule? (name : Name) : Option Name := do
+  let .num parent 0 ← Lean.privatePrefix? name | none
+  let moduleName ← erasePrivateHeader? parent
+  guard !moduleName.isAnonymous
+  return moduleName
+
 private partial def sourceDeclarationAncestor? (sourceNames : Std.HashSet Name) (name : Name) :
     Option Name :=
   if sourceNames.contains name then

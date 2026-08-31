@@ -44,6 +44,16 @@ def externalAdapterEntryFixture (value : UInt32) : UInt32 :=
 #guard Fir.Wasm.Emit.CompilerPrivate.specializationCalleeCandidates
     `List.zipWith._at_.List.zip.spec_0._redArg == #[`List.zipWith]
 
+#guard (Fir.Wasm.Emit.CompilerPrivate.specializationCallerCandidates
+    `List.map._at_.Array.map._at_.Source.owner.spec_0.spec_1).size == 2
+
+#guard Fir.Wasm.Emit.CompilerPrivate.privateNameModule?
+    (Lean.mkPrivateNameCore `Verso.Doc `Verso.Doc.ListItem.toJson) ==
+      some `Verso.Doc
+
+#guard Fir.Wasm.Emit.CompilerPrivate.privateNameModule?
+    `List.foldl._at_.Array.appendList.spec_0._redArg == none
+
 run_cmd do
   let source ← liftCoreM <|
     compileEntryIndividuallyInternalized

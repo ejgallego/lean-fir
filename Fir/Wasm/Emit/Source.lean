@@ -687,9 +687,24 @@ private def compileDeferredModuleFinalCaptured (moduleName entry : Name) :
 
 private def sourceModuleFor? (environment : Environment) (name : Name) :
     CoreM (Option (Name × Name)) := do
-  let some sourceRoot ← sourceDeclarationAncestor? environment name | return none
-  let some moduleIndex := environment.getModuleIdxFor? sourceRoot | return none
-  return some (environment.header.moduleNames[moduleIndex]!, sourceRoot)
+  if let some sourceRoot ← sourceDeclarationAncestor? environment name then
+    if let some moduleIndex := environment.getModuleIdxFor? sourceRoot then
+      return some (environment.header.moduleNames[moduleIndex]!, sourceRoot)
+  /-
+  A private source caller is absent from an ordinary imported environment, but
+  its exact module remains encoded by Lean in the specialization provenance.
+  Prefer caller candidates over the generated name itself: the latter keeps
+  the private prefix of the generic callee and can therefore name the wrong
+  module. The private module replay imports the private environment and finds
+  this exact source root in its postponed declaration groups.
+  -/
+  for candidate in
+      Fir.Wasm.Emit.CompilerPrivate.specializationCallerCandidates name do
+    let some moduleName :=
+      Fir.Wasm.Emit.CompilerPrivate.privateNameModule? candidate | continue
+    unless environment.getModuleIdx? moduleName |>.isSome do continue
+    return some (moduleName, candidate)
+  return none
 
 /-- Resolve an ordinary public source entry even when its module postponed
 final-LCNF compilation and therefore exported no impure signature. Generated
@@ -765,6 +780,32 @@ def compileEntryModuleWiseInternalized (entry : Name)
     throwError "entry `{entry}` has no source module"
   compileEntryModuleWiseInternalizedFrom moduleName sourceRoot entry
     retainedExternalNames
+
+/--
+Compile several public entries by replaying each entry's recursively required
+postponed source modules, then link the independently captured module closures.
+This is the multi-entry counterpart of `compileEntryModuleWiseInternalized`.
+It preserves the source-module boundary (including private specializations)
+while exposing several logical roots from one physical Wasm package.
+-/
+def compileEntriesModuleWiseInternalized (entries : Array Name)
+    (retainedExternalNames : Array String := #[]) :
+    CoreM Fir.Validation.Lcnf.Artifact := do
+  let some entry := entries[0]? |
+    throwError "module-wise multi-entry capture requires at least one entry"
+  unless (entries.foldl (init := #[]) addUniqueName).size == entries.size do
+    throwError "module-wise multi-entry capture received duplicate entries: {entries}"
+  let artifacts ← entries.mapM fun root =>
+    compileEntryModuleWiseInternalized root retainedExternalNames
+  let artifact ← mergeSeparatelyCompiledArtifacts entry artifacts
+  for root in entries do
+    let some declaration := artifact.program.findDecl? root |
+      throwError "module-wise multi-entry capture did not contain root `{root}`"
+    if artifact.externalNames.contains declaration.name then
+      throwError "module-wise multi-entry root `{root}` remained external"
+  match pruneUnreachableDeclarations artifact (entries.extract 1 entries.size) with
+  | .ok artifact => return artifact
+  | .error message => throwError message
 
 /--
 Capture an entry at the same source-unit boundary Lean made available, then
@@ -957,6 +998,79 @@ private partial def sourceValueReachesAny (environment : Environment)
         | none => #[]
       sourceValueReachesAny environment targets (references.toList ++ pending) seen
 
+private partial def sourceRuntimeValueClosure (environment : Environment)
+    (pending : List Name) (seen : NameSet := {})
+    (names : Array Name := #[]) : CoreM (Array Name) := do
+  let some name := pending.head? | return names
+  let pending := pending.tail!
+  if seen.contains name then
+    return ← sourceRuntimeValueClosure environment pending seen names
+  let seen := seen.insert name
+  unless environment.constants.contains name && !isExtern environment name &&
+      (← sourceDeclarationIsCompilable environment name) do
+    return ← sourceRuntimeValueClosure environment pending seen names
+  let references := match environment.find? name with
+    | some declaration => match declaration.value? (allowOpaque := true) with
+      | some value => value.getUsedConstants
+      | none => #[]
+    | none => #[]
+  sourceRuntimeValueClosure environment (references.toList ++ pending)
+    seen (addUniqueName names name)
+
+/--
+Find missing imported generated specializations whose source caller is
+reachable from the source roots about to be recompiled, but whose body was not
+captured at the current source boundary.
+
+Classic (non-`module`) Lean libraries export these generated declarations as
+native object/IR symbols plus final-LCNF signatures. A fresh source overlay
+cannot resolve such a symbol if an inline imported body refers to it. Lean's
+per-module `extraConstNames` index and specializer `._at_.` provenance identify
+the exact source caller and generic callee needed to regenerate it. Adding that
+pair to the same source unit mirrors the original compiler ownership boundary.
+Do not add every nested specialization recorded for that caller: Lean already
+regenerates those while compiling the source root, and forcing their generic
+callees into the root set can suppress the nested specialization itself.
+-/
+private def sourceSpecializationBridgeRoots (environment : Environment)
+    (artifact : Fir.Validation.Lcnf.Artifact)
+    (roots : Array SourceCompilationRoot) :
+    CoreM (Array SourceCompilationRoot) := do
+  let pending := roots.foldl (init := []) fun pending root =>
+    (root.name :: root.companions.toList) ++ pending
+  let sourceNames ← sourceRuntimeValueClosure environment pending
+  let moduleIndices := sourceNames.foldl (init := #[]) fun indices name =>
+    match environment.getModuleIdxFor? name with
+    | some index => if indices.contains index then indices else indices.push index
+    | none => indices
+  let mut bridges : Array SourceCompilationRoot := #[]
+  for moduleIndex in moduleIndices do
+    for generated in environment.header.moduleData[moduleIndex]!.extraConstNames do
+      if (artifact.program.findDecl? generated |>.isSome) &&
+          !artifact.externalNames.contains generated then
+        continue
+      if (← LCNF.getLocalImpureDecl? generated).isSome then continue
+      let callers :=
+        Fir.Wasm.Emit.CompilerPrivate.specializationCallerCandidates generated
+      let some caller := callers.find? sourceNames.contains | continue
+      /- A nested specialization records its generated immediate caller before
+      the real source ancestor in its sequence of `._at_.` contexts.
+      Recompiling that ancestor regenerates the entire nested chain; adding the
+      nested generic callee as an explicit companion can instead suppress
+      Lean's ordinary inner specialization. Only a generated edge with one
+      caller context crosses this source-unit boundary. -/
+      unless callers.size == 1 do continue
+      unless ← sourceDeclarationIsCompilable environment caller do continue
+      let mut companions : Array Name := #[]
+      for callee in
+          Fir.Wasm.Emit.CompilerPrivate.specializationCalleeCandidates generated do
+        unless environment.constants.contains callee do continue
+        if isExtern environment callee then continue
+        unless ← sourceDeclarationIsCompilable environment callee do continue
+        companions := addUniqueName companions callee
+      bridges := addSourceCompilationRoot bridges { name := caller, companions }
+  return bridges
+
 private partial def addSourceBridgeRoots (environment : Environment)
     (unresolvedSourceNames sourceTargetNames : Array Name)
     (roots : Array SourceCompilationRoot)
@@ -1009,6 +1123,9 @@ def internalizeFinalDependencies (artifact : Fir.Validation.Lcnf.Artifact)
   let sourceTargetNames := directRoots.map (·.name)
   let roots ← addSourceBridgeRoots environment unresolvedSourceNames
     sourceTargetNames roots
+  let specializationRoots ← sourceSpecializationBridgeRoots environment
+    artifact roots
+  let roots := specializationRoots.foldl addSourceCompilationRoot roots
   let dependencyNames := roots.foldl (init := #[]) fun names root =>
     (#[root.name] ++ root.companions).foldl addUniqueName names
   let some dependencyEntry := dependencyNames[0]? | return artifact
