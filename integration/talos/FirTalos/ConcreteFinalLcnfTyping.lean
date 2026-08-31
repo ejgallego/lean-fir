@@ -286,6 +286,27 @@ theorem ofKindsRefine
 
 end SemanticArgumentsAtAbi
 
+/-- Exact semantic provenance needed by one current direct-call node.
+
+Production validation determines the declaration and its parameter ABI row.
+This predicate says only that the current source arguments inhabit that exact
+row.  It is deliberately local: it contains no target execution, successor
+state, future source step, global environment invariant, or program-specific
+reachability certificate. -/
+def ConcreteStructuredDirectCallArgumentsAt
+    (context : Fir.Wasm.Context) (sourceEnv : Env)
+    (decl : Lean.Compiler.LCNF.LetDecl .impure) : Prop :=
+  ∀ {declaration : Lean.Name}
+      {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
+      {args : Array (Lean.Compiler.LCNF.Arg .impure)}
+      {parameterKinds : Array AbiKind},
+    decl.value = .fap declaration args →
+      context.program.findDecl? declaration = some sourceDeclaration →
+        Fir.Wasm.declarationParameterKinds? context.program
+            sourceDeclaration = some parameterKinds →
+          SemanticArgumentsAtAbi sourceEnv args.toList
+            parameterKinds.toList
+
 /-- A typed compiler local plus the minimal use-site fact gives the semantic
 binding at the ABI required by that use. -/
 theorem SemanticEnvAtLocalKinds.binding_atUseSite
@@ -1118,6 +1139,7 @@ structure DirectInternalCallCompilerAdmission
       some parameterKinds
   argumentsClassified :
     args.mapM (Fir.Wasm.supportedArgKind? locals) = some argumentKinds
+  localsAgree : ConcreteStructuredValidationLocalsAgree context locals
   argumentSizes : argumentKinds.size = parameterKinds.size
   argumentsCompatible :
     (argumentKinds.zip parameterKinds).all
@@ -1242,6 +1264,7 @@ theorem ConcreteStructuredAlignedValidationState.directInternalCallBoundary
         declarationFound := declarationFound
         parametersKnown := parametersKnown
         argumentsClassified := argumentsClassified
+        localsAgree := _agrees
         argumentSizes := argumentSizes
         argumentsCompatible := argumentsCompatible
         declaredCalleeResult := declaredCalleeResult
@@ -1319,14 +1342,14 @@ theorem DirectInternalCallCompilerAdmission.toSite_of_step
     (argumentsAtParameters :
       SemanticArgumentsAtAbi sourceEnv admission.args.toList
         admission.parameterKinds.toList)
-    (agrees : ConcreteStructuredValidationLocalsAgree context locals)
     (focus : ConcreteStructuredCodeFocus context sourceModule sourceFunction
       labels sourceRuntime sourceEnv (.let decl continuation) targetStore
       targetLocals targetCode witness source target)
     (sourceStep : executeStep externals source = .next sourceAfter) :
-    Nonempty (DirectInternalCallSite context decl sourceEnv) := by
+  Nonempty (DirectInternalCallSite context decl sourceEnv) := by
   obtain ⟨argumentCode, argumentsCompiled⟩ :=
-    agrees.compileArgs_of_supported admission.argumentsClassified
+    ConcreteStructuredValidationLocalsAgree.compileArgs_of_supported
+      admission.localsAgree admission.argumentsClassified
   obtain ⟨semanticArgs, argumentsEvaluated⟩ :=
     focus.evalArgs_of_fap_step admission.valueEq sourceStep
   have argumentKindsSize : admission.argumentKinds.size = admission.args.size :=
@@ -1397,7 +1420,6 @@ theorem DirectInternalCallCompilerAdmission.toSite_of_step_ofKindsRefine
     (argumentsRefine :
       Fir.Wasm.kindsRefine admission.argumentKinds
         admission.parameterKinds = true)
-    (agrees : ConcreteStructuredValidationLocalsAgree context locals)
     (localsAligned : LocalLayoutAligned context sourceFunction)
     (focus : ConcreteStructuredCodeFocus context sourceModule sourceFunction
       labels sourceRuntime sourceEnv (.let decl continuation) targetStore
@@ -1405,14 +1427,81 @@ theorem DirectInternalCallCompilerAdmission.toSite_of_step_ofKindsRefine
     (sourceStep : executeStep externals source = .next sourceAfter) :
     Nonempty (DirectInternalCallSite context decl sourceEnv) := by
   have typedEnv : SemanticEnvAtLocalKinds locals sourceEnv :=
-    SemanticEnvAtLocalKinds.ofStateRelated agrees localsAligned
-      focus.stateRelated
+    SemanticEnvAtLocalKinds.ofStateRelated admission.localsAgree
+      localsAligned focus.stateRelated
   have argumentsAtParameters :
       SemanticArgumentsAtAbi sourceEnv admission.args.toList
         admission.parameterKinds.toList :=
     SemanticArgumentsAtAbi.ofKindsRefine typedEnv
       admission.argumentsClassified argumentsRefine
-  exact admission.toSite_of_step argumentsAtParameters agrees focus sourceStep
+  exact admission.toSite_of_step argumentsAtParameters focus sourceStep
+
+/-- The recursively validated compiler relation constructs complete
+zero-allocation admission for one ordinary internal named call.
+
+All declaration lookup, ABI rows, arity, carrier compatibility, residual
+local compilation, result refinement, and destination-local equations come
+from production validation.  The successful current source step reconstructs
+argument evaluation and parameter binding.  The only remaining input is the
+exact current-node semantic argument provenance isolated by
+`ConcreteStructuredDirectCallArgumentsAt`. -/
+theorem ConcreteStructuredValidatedCodeOutcome.admit_directCall_of_compiler
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    {declaration : Lean.Name}
+    {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
+    {calleeCode : Lean.Compiler.LCNF.Code .impure}
+    {args : Array (Lean.Compiler.LCNF.Arg .impure)}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.let decl continuation) targetStore targetLocals targetCode witness source
+      target)
+    (argumentsAt : ConcreteStructuredDirectCallArgumentsAt context sourceEnv
+      decl)
+    (valueEq : decl.value = .fap declaration args)
+    (declarationFound :
+      context.program.findDecl? declaration = some sourceDeclaration)
+    (bodyEq : sourceDeclaration.value = .code calleeCode)
+    (nonCached :
+      (args.isEmpty && sourceDeclaration.params.isEmpty) = false)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+      functionResult facts sourceRuntime sourceEnv 0
+      (.let decl continuation) := by
+  obtain ⟨_locals, _parameterKinds, _argumentKinds, _argumentSizes,
+      _argumentsCompatible, ⟨admission⟩⟩ :=
+    related.core.validation.directInternalCallBoundary spec.contextProgram
+      valueEq declarationFound bodyEq nonCached
+  have semanticArguments := argumentsAt admission.valueEq
+    admission.declarationFound admission.parametersKnown
+  obtain ⟨site⟩ := admission.toSite_of_step semanticArguments
+    related.core.core.focus sourceStep
+  exact .directCall site
 
 /-- Natural literal allocation always returns an object reference, independent
 of whether the runtime chooses a tagged immediate, promoted tag, or limb
