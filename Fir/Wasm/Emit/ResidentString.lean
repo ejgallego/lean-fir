@@ -66,6 +66,7 @@ private def copyBytesLoop : FVarId := ⟨`copyBytesLoop⟩
 private def countLeadingLoop : FVarId := ⟨`countLeadingLoop⟩
 private def fillCodePointLoop : FVarId := ⟨`fillCodePointLoop⟩
 private def findCodePointLoop : FVarId := ⟨`findCodePointLoop⟩
+private def stringCompareLoop : FVarId := ⟨`stringCompareLoop⟩
 private def listSizeLoop : FVarId := ⟨`stringOfListSizeLoop⟩
 private def listEncodeLoop : FVarId := ⟨`stringOfListEncodeLoop⟩
 
@@ -115,6 +116,8 @@ private def tailLocal : FVarId := ⟨`tailValue⟩
 private def charLocal : FVarId := ⟨`charValue⟩
 private def codePointLocal : FVarId := ⟨`codePointValue⟩
 private def cursorLocal : FVarId := ⟨`cursor⟩
+private def comparisonResultLocal : FVarId := ⟨`comparisonResult⟩
+private def decisionResultLocal : FVarId := ⟨`decisionResult⟩
 
 def validateName : Name := `fir_string_validate
 def byteLengthName : Name := `fir_string_byte_length
@@ -172,6 +175,9 @@ def availableExternalDeclarations : Array Name :=
     `String.Pos.next,
     `String.decodeChar,
     `String.ofList,
+    `String.decEq,
+    `String.decidableLT,
+    `String.compare,
     `USize.repr]
 
 def externalName (declaration : Name) : Name :=
@@ -808,6 +814,94 @@ def findCodePointFunction : Function := {
             .i32Add,
             .localSet indexParam,
             .br findCodePointLoop]]] }
+
+def stringCompareFunction : Function := {
+  name := externalName `String.compare
+  params := #[(leftParam, .object), (rightParam, .object)]
+  results := #[.uint8]
+  locals := #[
+    (leftLengthLocal, .uint32),
+    (rightLengthLocal, .uint32),
+    (indexParam, .uint32)]
+  body := [
+    .localGet leftParam,
+    .call (.declaration validateName),
+    .localGet rightParam,
+    .call (.declaration validateName),
+    .localGet leftParam,
+    .call (.declaration byteLengthName),
+    .localSet leftLengthLocal,
+    .localGet rightParam,
+    .call (.declaration byteLengthName),
+    .localSet rightLengthLocal,
+    .i32Const .uint32 0,
+    .localSet indexParam,
+    .loop stringCompareLoop [
+      .localGet indexParam,
+      .localGet leftLengthLocal,
+      .i32Eq,
+      .ifElse
+        [.localGet indexParam,
+          .localGet rightLengthLocal,
+          .i32Eq,
+          .ifElse [.i32Const .uint8 1, .ret]
+            [.i32Const .uint8 0, .ret]]
+        [],
+      .localGet indexParam,
+      .localGet rightLengthLocal,
+      .i32Eq,
+      .ifElse [.i32Const .uint8 2, .ret] [],
+      .localGet leftParam,
+      .localGet indexParam,
+      .i32Add,
+      .i32Load8U .uint32 (u32 headerBytes),
+      .localGet rightParam,
+      .localGet indexParam,
+      .i32Add,
+      .i32Load8U .uint32 (u32 headerBytes),
+      .i32Eq,
+      .ifElse [] [
+        .localGet leftParam,
+        .localGet indexParam,
+        .i32Add,
+        .i32Load8U .uint32 (u32 headerBytes),
+        .localGet rightParam,
+        .localGet indexParam,
+        .i32Add,
+        .i32Load8U .uint32 (u32 headerBytes),
+        .i32LtU,
+        .ifElse [.i32Const .uint8 0, .ret]
+          [.i32Const .uint8 2, .ret]],
+      .localGet indexParam,
+      .i32Const .uint32 1,
+      .i32Add,
+      .localSet indexParam,
+      .br stringCompareLoop]] }
+
+private def stringDecisionFunction (name : Name) (expected : UInt32) : Function := {
+  name := externalName name
+  params := #[(leftParam, .object), (rightParam, .object)]
+  results := #[.uint8]
+  locals := #[
+    (comparisonResultLocal, .uint8),
+    (decisionResultLocal, .uint8),
+    (savedScratchLocal, .uint32),
+    (rawLocal, .uint32)]
+  body := [
+    .localGet leftParam,
+    .localGet rightParam,
+    .call (.declaration (externalName `String.compare)),
+    .localSet comparisonResultLocal,
+    .localGet comparisonResultLocal,
+    .i32Const .uint8 expected,
+    .i32Eq] ++
+    retypeRaw .uint8 decisionResultLocal }
+
+def stringDecEqFunction : Function :=
+  stringDecisionFunction `String.decEq 1
+
+def stringDecidableLTFunction : Function :=
+  stringDecisionFunction `String.decidableLT 0
 
 private def encodedLocals : Array (FVarId × AbiKind) := #[
   (widthLocal, .uint32),
@@ -1731,6 +1825,9 @@ def externalFunctions : Array Function := #[
   positionNextFunction,
   decodeCharFunction,
   ofListFunction,
+  stringCompareFunction,
+  stringDecEqFunction,
+  stringDecidableLTFunction,
   usizeReprFunction]
 
 def internalFunctions : Array Function := #[
@@ -1804,6 +1901,10 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
       results := #[.uint32] }
   else if declaration == `String.ofList then
     some { params := #[.tobject], results := #[.object] }
+  else if declaration == `String.decEq then
+    some { params := #[.object, .object], results := #[.uint8] }
+  else if declaration == `String.decidableLT || declaration == `String.compare then
+    some { params := #[.object, .object], results := #[.uint8] }
   else if declaration == `USize.repr then
     some { params := #[.usize], results := #[.object] }
   else
@@ -1854,6 +1955,10 @@ private def internalizeSelected (module : Module) (declarations : Array Name)
     else names
     let names := if declarations.contains `String.push then
       Fir.Wasm.addUnique names (externalName `String.Internal.pushn)
+    else names
+    let names := if declarations.contains `String.decEq ||
+        declarations.contains `String.decidableLT then
+      Fir.Wasm.addUnique names (externalName `String.compare)
     else names
     if declarations.contains `String.Pos.next then
       Fir.Wasm.addUnique names (externalName `String.Internal.next)
@@ -1912,6 +2017,7 @@ private def externalTypes? (declaration : Name) : Option ExternalTypes :=
   let object := LCNF.ImpureType.object
   let tobject := LCNF.ImpureType.tobject
   let uint32 := LCNF.ImpureType.uint32
+  let uint8 := LCNF.ImpureType.uint8
   let tagged := LCNF.ImpureType.tagged
   if declaration == `String.Internal.pushn then
     some {
@@ -1946,6 +2052,10 @@ private def externalTypes? (declaration : Name) : Option ExternalTypes :=
       result := uint32 }
   else if declaration == `String.ofList then
     some { params := #[tobject], result := object }
+  else if declaration == `String.decEq then
+    some { params := #[object, object], result := uint8 }
+  else if declaration == `String.decidableLT || declaration == `String.compare then
+    some { params := #[object, object], result := uint8 }
   else if declaration == `USize.repr then
     some { params := #[LCNF.ImpureType.usize], result := object }
   else
