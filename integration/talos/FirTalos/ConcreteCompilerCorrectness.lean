@@ -1259,6 +1259,32 @@ inductive ConstructorArgsCompiled (context : Fir.Wasm.Context) :
         (.localGet fvarId :: argumentCode) (kind :: fieldKinds)
 
 /--
+Syntax-directed characterization of the argument code emitted by
+`compileDeclarationArguments`.
+
+Unlike `ConstructorArgsCompiled`, the `canonicalErased` constructor records
+that a declaration-level `void` slot may replace any compiler-selected source
+argument by the canonical physical zero.  Source-semantic typing at `.erased`
+is required later, at the execution boundary; this static relation contains
+only production compiler facts.
+-/
+inductive DeclarationArgsCompiled (context : Fir.Wasm.Context) :
+    List (LCNF.Arg .impure) → List Fir.Wasm.Instruction →
+      List AbiKind → Prop where
+  | nil : DeclarationArgsCompiled context [] [] []
+  | canonicalErased
+      (arg : LCNF.Arg .impure)
+      (rest : DeclarationArgsCompiled context args argumentCode kinds) :
+      DeclarationArgsCompiled context (arg :: args)
+        (.i32Const .erased 0 :: argumentCode) (.erased :: kinds)
+  | fvar
+      (kindFound :
+        Fir.Wasm.findLocalKind? context.localKinds fvarId = some kind)
+      (rest : DeclarationArgsCompiled context args argumentCode kinds) :
+      DeclarationArgsCompiled context (.fvar fvarId :: args)
+        (.localGet fvarId :: argumentCode) (kind :: kinds)
+
+/--
 The source-order physical constructor operands produced by compiled arguments
 refine the corresponding evaluated source values at their compiler-selected
 ABI kinds. This relation is target-numbering independent and contains no
@@ -1598,6 +1624,231 @@ theorem ConstructorArgsCompiled.append
       simpa [List.append_assoc] using
         ConstructorArgsCompiled.fvar kindFound ih
 
+theorem DeclarationArgsCompiled.append
+    {context : Fir.Wasm.Context}
+    {leftArgs rightArgs : List (LCNF.Arg .impure)}
+    {leftCode rightCode : List Fir.Wasm.Instruction}
+    {leftKinds rightKinds : List AbiKind}
+    (left : DeclarationArgsCompiled context leftArgs leftCode leftKinds)
+    (right : DeclarationArgsCompiled context rightArgs rightCode rightKinds) :
+    DeclarationArgsCompiled context (leftArgs ++ rightArgs)
+      (leftCode ++ rightCode) (leftKinds ++ rightKinds) := by
+  induction left with
+  | nil => simpa using right
+  | canonicalErased arg rest ih =>
+      simpa [List.append_assoc] using
+        DeclarationArgsCompiled.canonicalErased arg ih
+  | fvar kindFound rest ih =>
+      simpa [List.append_assoc] using
+        DeclarationArgsCompiled.fvar kindFound ih
+
+/-- Every successful declaration-aware single-argument compilation has one
+of the two proof-relevant source shapes above. -/
+private theorem declarationArgCompiled_of_compile
+    {context : Fir.Wasm.Context} {param : LCNF.Param .impure}
+    {arg : LCNF.Arg .impure} {argument : List Fir.Wasm.Instruction}
+    {kind : AbiKind}
+    (compiled :
+      Fir.Wasm.compileDeclarationArgument context param arg =
+        .ok (argument, kind)) :
+    DeclarationArgsCompiled context [arg] argument [kind] := by
+  cases arg with
+  | erased =>
+      have pairEq :
+          ([.i32Const .erased 0], .erased) = (argument, kind) := by
+        have compiled' :
+            (Except.ok ([.i32Const .erased 0], .erased) :
+                Except Fir.Wasm.CompileError
+                  (List Fir.Wasm.Instruction × AbiKind)) =
+              .ok (argument, kind) := by
+          simpa [Fir.Wasm.compileDeclarationArgument, Fir.Wasm.compileArg,
+            Bind.bind, Except.bind, pure, Except.pure] using compiled
+        exact Except.ok.inj compiled'
+      injection pairEq with codeEq kindEq
+      subst argument
+      subst kind
+      exact .canonicalErased .erased .nil
+  | fvar fvarId =>
+      cases kindFound :
+          Fir.Wasm.findLocalKind? context.localKinds fvarId with
+      | none =>
+          simp [Fir.Wasm.compileDeclarationArgument, Fir.Wasm.compileArg,
+            kindFound, Bind.bind, Except.bind] at compiled
+      | some actual =>
+          by_cases void : param.type == LCNF.ImpureType.void
+          · have pairEq :
+                ([.i32Const .erased 0], .erased) = (argument, kind) := by
+              have compiled' :
+                  (Except.ok ([.i32Const .erased 0], .erased) :
+                      Except Fir.Wasm.CompileError
+                        (List Fir.Wasm.Instruction × AbiKind)) =
+                    .ok (argument, kind) := by
+                simpa [Fir.Wasm.compileDeclarationArgument,
+                  Fir.Wasm.compileArg, kindFound, void, Bind.bind, Except.bind,
+                  pure, Except.pure] using compiled
+              exact Except.ok.inj compiled'
+            injection pairEq with codeEq kindEq
+            subst argument
+            subst kind
+            exact .canonicalErased (.fvar fvarId) .nil
+          · have pairEq :
+                ([.localGet fvarId], actual) = (argument, kind) := by
+              have compiled' :
+                  (Except.ok ([.localGet fvarId], actual) :
+                      Except Fir.Wasm.CompileError
+                        (List Fir.Wasm.Instruction × AbiKind)) =
+                    .ok (argument, kind) := by
+                simpa [Fir.Wasm.compileDeclarationArgument,
+                  Fir.Wasm.compileArg, kindFound, void, Bind.bind, Except.bind,
+                  pure, Except.pure] using compiled
+              exact Except.ok.inj compiled'
+            injection pairEq with codeEq kindEq
+            subst argument
+            subst kind
+            exact .fvar kindFound .nil
+  | type expr impossible => exact nomatch impossible
+
+private def declarationArgumentStep (context : Fir.Wasm.Context)
+    (target : LCNF.Decl .impure)
+    (state : List Fir.Wasm.Instruction × Array AbiKind)
+    (pair : LCNF.Param .impure × LCNF.Arg .impure) :
+    Except Fir.Wasm.CompileError
+      (List Fir.Wasm.Instruction × Array AbiKind) := do
+  let expected ←
+    Fir.Wasm.checkedDeclarationParamKind context.program target pair.fst
+  let (argument, actual) ←
+    Fir.Wasm.compileDeclarationArgument context pair.fst pair.snd
+  unless actual.leanCompatible expected do
+    throw (Fir.Wasm.CompileError.malformed
+      "named-call argument is not Lean-compatible with its parameter ABI")
+  return (state.fst ++ argument, state.snd.push actual)
+
+private theorem declarationArgsCompiled_of_foldlM
+    {context : Fir.Wasm.Context} {target : LCNF.Decl .impure}
+    {prefixArgs : List (LCNF.Arg .impure)}
+    {remaining : List (LCNF.Param .impure × LCNF.Arg .impure)}
+    {prefixCode argumentCode : List Fir.Wasm.Instruction}
+    {prefixKinds argumentKinds : Array AbiKind}
+    (prefixReady :
+      DeclarationArgsCompiled context prefixArgs prefixCode
+        prefixKinds.toList)
+    (compiled :
+      remaining.foldlM (init := (prefixCode, prefixKinds))
+          (declarationArgumentStep context target) =
+        .ok (argumentCode, argumentKinds)) :
+    DeclarationArgsCompiled context
+      (prefixArgs ++ remaining.map Prod.snd) argumentCode
+      argumentKinds.toList := by
+  induction remaining generalizing prefixArgs prefixCode prefixKinds with
+  | nil =>
+      simp only [List.foldlM_nil] at compiled
+      have pairEq :
+          (prefixCode, prefixKinds) = (argumentCode, argumentKinds) :=
+        Except.ok.inj compiled
+      injection pairEq with codeEq kindsEq
+      subst argumentCode
+      subst argumentKinds
+      simpa using prefixReady
+  | cons pair remaining ih =>
+      obtain ⟨param, arg⟩ := pair
+      cases expectedResult :
+          Fir.Wasm.checkedDeclarationParamKind context.program target param with
+      | error error =>
+          simp [List.foldlM_cons, declarationArgumentStep, expectedResult,
+            Bind.bind, Except.bind] at compiled
+      | ok expected =>
+          cases argumentResult :
+              Fir.Wasm.compileDeclarationArgument context param arg with
+          | error error =>
+              simp [List.foldlM_cons, declarationArgumentStep,
+                expectedResult, argumentResult, Bind.bind, Except.bind] at compiled
+          | ok result =>
+              obtain ⟨argument, actual⟩ := result
+              by_cases compatible : actual.leanCompatible expected = true
+              · have remainingCompiled :
+                    remaining.foldlM
+                        (init :=
+                          (prefixCode ++ argument,
+                            prefixKinds.push actual))
+                        (declarationArgumentStep context target) =
+                      .ok (argumentCode, argumentKinds) := by
+                    simpa [List.foldlM_cons, declarationArgumentStep,
+                      expectedResult, argumentResult, compatible, Bind.bind,
+                      Except.bind, pure, Except.pure]
+                      using compiled
+                have singleton :
+                    DeclarationArgsCompiled context [arg] argument [actual] :=
+                  declarationArgCompiled_of_compile argumentResult
+                have nextPrefix :
+                    DeclarationArgsCompiled context
+                      (prefixArgs ++ [arg]) (prefixCode ++ argument)
+                      (prefixKinds.push actual).toList := by
+                  simpa using prefixReady.append singleton
+                simpa [List.append_assoc] using
+                  ih nextPrefix remainingCompiled
+              · simp [List.foldlM_cons, declarationArgumentStep,
+                  expectedResult, argumentResult, compatible, Bind.bind,
+                  Except.bind] at compiled
+
+/-- Successful production `compileDeclarationArguments` is characterized by
+`DeclarationArgsCompiled`; the proof follows the real arity guard and zipped
+declaration/source row. -/
+theorem DeclarationArgsCompiled.ofCompileDeclarationArguments
+    {context : Fir.Wasm.Context} {target : LCNF.Decl .impure}
+    {args : Array (LCNF.Arg .impure)}
+    {argumentCode : List Fir.Wasm.Instruction}
+    {argumentKinds : Array AbiKind}
+    (compiled :
+      Fir.Wasm.compileDeclarationArguments context target args =
+        .ok (argumentCode, argumentKinds)) :
+    DeclarationArgsCompiled context args.toList argumentCode
+      argumentKinds.toList := by
+  have arity : args.size = target.params.size := by
+    by_contra different
+    have mismatch : (args.size != target.params.size) = true := by
+      simp [different]
+    simp [Fir.Wasm.compileDeclarationArguments, mismatch, Bind.bind,
+      Except.bind] at compiled
+  have notMismatch : (args.size != target.params.size) = false := by
+    simp [arity]
+  have folded :
+      (target.params.zip args).toList.foldlM
+          (init := ([], #[]))
+          (declarationArgumentStep context target) =
+        .ok (argumentCode, argumentKinds) := by
+    unfold Fir.Wasm.compileDeclarationArguments at compiled
+    simp only [notMismatch, Bool.false_eq_true, ↓reduceIte] at compiled
+    rw [← Array.foldlM_toList] at compiled
+    have stepEq :
+        (fun (instructions, kinds) pair => do
+          let expected ←
+            Fir.Wasm.checkedDeclarationParamKind context.program target
+              pair.fst
+          let (argument, actual) ←
+            Fir.Wasm.compileDeclarationArgument context pair.fst pair.snd
+          unless actual.leanCompatible expected do
+            throw (Fir.Wasm.CompileError.malformed
+              "named-call argument is not Lean-compatible with its parameter ABI")
+          return (instructions ++ argument, kinds.push actual)) =
+        declarationArgumentStep context target := by
+      funext state pair
+      obtain ⟨instructions, kinds⟩ := state
+      simp [declarationArgumentStep, Functor.map, Except.map, Bind.bind,
+        Except.bind, pure, Except.pure]
+    rw [stepEq] at compiled
+    exact compiled
+  have argsEq :
+      (target.params.zip args).toList.map Prod.snd = args.toList := by
+    rw [Array.toList_zip]
+    apply List.map_snd_zip
+    simpa using arity.le
+  have characterized :=
+    declarationArgsCompiled_of_foldlM
+      (target := target) (prefixArgs := []) (prefixCode := [])
+      (prefixKinds := #[]) DeclarationArgsCompiled.nil folded
+  rw [argsEq] at characterized
+  exact characterized
+
 private theorem constructorArgsCompiled_of_foldlM
     {context : Fir.Wasm.Context}
     {prefixArgs remaining : List (LCNF.Arg .impure)}
@@ -1702,6 +1953,73 @@ theorem ConstructorArgsCompiled.ofCompileArgs
   unfold Fir.Wasm.compileArgs at compiled
   rw [← Array.foldlM_toList] at compiled
   exact compiled
+
+/-- Raw compiler argument facts and the live state relation recover the
+source-semantic ABI row without executing or adapting the argument prefix. -/
+theorem ConstructorArgsCompiled.semanticValuesAtAbi
+    {context : Fir.Wasm.Context}
+    {sourceFunction : Fir.Wasm.Function}
+    {args : List (LCNF.Arg .impure)}
+    {argumentCode : List Fir.Wasm.Instruction}
+    {kinds : List AbiKind}
+    {semanticArgs : List Value}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    (compiled : ConstructorArgsCompiled context args argumentCode kinds)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (evaluated : args.mapM (evalArg sourceEnv) = .ok semanticArgs)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals
+        witness) :
+    SemanticValuesAtAbi kinds semanticArgs := by
+  induction compiled generalizing semanticArgs with
+  | nil =>
+      have semanticEq : semanticArgs = [] := by
+        change (Except.ok [] : Except RuntimeFault (List Value)) =
+          Except.ok semanticArgs at evaluated
+        exact (Except.ok.inj evaluated).symm
+      subst semanticArgs
+      exact .nil
+  | @erased args argumentCode kinds rest ih =>
+      cases restEvaluated : args.mapM (evalArg sourceEnv) with
+      | error fault =>
+          rw [List.mapM_cons] at evaluated
+          simp [evalArg, restEvaluated, Bind.bind, Except.bind] at evaluated
+      | ok restValues =>
+          have semanticEq : semanticArgs = .erased :: restValues := by
+            rw [List.mapM_cons] at evaluated
+            simpa [evalArg, restEvaluated, Bind.bind, Except.bind, pure,
+              Except.pure] using evaluated.symm
+          subst semanticArgs
+          exact .cons .erased (ih restEvaluated)
+  | @fvar fvarId kind args argumentCode kinds kindFound rest ih =>
+      cases sourceLookup : lookup sourceEnv fvarId with
+      | none =>
+          rw [List.mapM_cons] at evaluated
+          simp [evalArg, sourceLookup, Bind.bind, Except.bind] at evaluated
+      | some sourceValue =>
+          cases restEvaluated : args.mapM (evalArg sourceEnv) with
+          | error fault =>
+              rw [List.mapM_cons] at evaluated
+              simp [evalArg, sourceLookup, restEvaluated, Bind.bind,
+                Except.bind] at evaluated
+          | ok restValues =>
+              have localCompiled :
+                  Fir.Wasm.getLocal context fvarId =
+                    .ok (.localGet fvarId, kind) := by
+                simp [Fir.Wasm.getLocal, kindFound]
+              obtain ⟨index, localFound, kindAt⟩ :=
+                localsAligned localCompiled
+              obtain ⟨physical, _physicalFound, physicalRelated⟩ :=
+                stateRelated.resolve sourceLookup localFound kindAt
+              have semanticEq : semanticArgs = sourceValue :: restValues := by
+                rw [List.mapM_cons] at evaluated
+                simpa [evalArg, sourceLookup, restEvaluated, Bind.bind,
+                  Except.bind, pure, Except.pure] using evaluated.symm
+              subst semanticArgs
+              exact .cons physicalRelated.semanticValueAtAbi
+                (ih restEvaluated)
 
 /--
 Compiler-characterized source arguments, successful source evaluation, the
@@ -1828,6 +2146,129 @@ theorem ConstructorArgsCompiled.ready
                 .localGet physicalFound ready, by simp [lengthEq],
                 .cons physicalRelated argumentsRelated⟩
 
+/-- Declaration-aware argument code executes to the same semantic ABI row.
+The only additional source fact is pointwise semantic typing: it justifies
+discarding the compiler-selected value of a `void` argument when lowering
+canonicalizes that physical lane to zero. -/
+theorem DeclarationArgsCompiled.ready
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : LabelContext}
+    {args : List (LCNF.Arg .impure)}
+    {argumentCode : List Fir.Wasm.Instruction}
+    {kinds : List AbiKind}
+    {targetArguments : Wasm.Program}
+    {semanticArgs : List Value}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    (compiled : DeclarationArgsCompiled context args argumentCode kinds)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (adapted :
+      instructions sourceModule sourceFunction labels argumentCode =
+        .ok targetArguments)
+    (evaluated : args.mapM (evalArg sourceEnv) = .ok semanticArgs)
+    (semanticTyped : SemanticValuesAtAbi kinds semanticArgs)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals
+        witness) :
+    ∃ physicalArgs,
+      ConstructorArgsReady locals targetArguments physicalArgs ∧
+        physicalArgs.length = kinds.length ∧
+        ConstructorArgumentsRelated witness kinds physicalArgs semanticArgs := by
+  induction compiled generalizing targetArguments semanticArgs with
+  | nil =>
+      have targetEq : targetArguments = [] := by
+        simpa [instructions, pure, Except.pure] using adapted.symm
+      have semanticEq : semanticArgs = [] := by
+        change (Except.ok [] : Except RuntimeFault (List Value)) =
+          Except.ok semanticArgs at evaluated
+        exact (Except.ok.inj evaluated).symm
+      subst targetArguments
+      subst semanticArgs
+      exact ⟨[], .nil, rfl, .nil⟩
+  | @canonicalErased args argumentCode kinds arg rest ih =>
+      obtain ⟨targetHead, targetRest, headAdapted, restAdapted, targetEq⟩ :=
+        instructions_cons_eq_ok adapted
+      have targetHeadEq : targetHead = .const 0 := by
+        simpa [instruction, pure, Except.pure] using headAdapted.symm
+      cases headEvaluated : evalArg sourceEnv arg with
+      | error fault =>
+          rw [List.mapM_cons] at evaluated
+          simp [headEvaluated, Bind.bind, Except.bind] at evaluated
+      | ok sourceValue =>
+          cases restEvaluated : args.mapM (evalArg sourceEnv) with
+          | error fault =>
+              rw [List.mapM_cons] at evaluated
+              simp [headEvaluated, restEvaluated, Bind.bind, Except.bind] at evaluated
+          | ok restValues =>
+              have semanticEq :
+                  semanticArgs = sourceValue :: restValues := by
+                rw [List.mapM_cons] at evaluated
+                simpa [headEvaluated, restEvaluated, Bind.bind, Except.bind,
+                  pure, Except.pure] using evaluated.symm
+              subst semanticArgs
+              cases semanticTyped with
+              | cons headTyped restTyped =>
+                  cases headTyped
+                  obtain ⟨physicalArgs, ready, lengthEq, argumentsRelated⟩ :=
+                    ih restAdapted restEvaluated restTyped
+                  subst targetHead
+                  subst targetArguments
+                  exact ⟨.i32 0 :: physicalArgs, .erased ready,
+                    by simp [lengthEq],
+                    .cons (.word32 .erased) argumentsRelated⟩
+  | @fvar fvarId kind args argumentCode kinds kindFound rest ih =>
+      obtain ⟨targetHead, targetRest, headAdapted, restAdapted, targetEq⟩ :=
+        instructions_cons_eq_ok adapted
+      cases sourceLookup : lookup sourceEnv fvarId with
+      | none =>
+          rw [List.mapM_cons] at evaluated
+          simp [evalArg, sourceLookup, Bind.bind, Except.bind] at evaluated
+      | some sourceValue =>
+          cases restEvaluated : args.mapM (evalArg sourceEnv) with
+          | error fault =>
+              rw [List.mapM_cons] at evaluated
+              simp [evalArg, sourceLookup, restEvaluated, Bind.bind,
+                Except.bind] at evaluated
+          | ok restValues =>
+              have localCompiled :
+                  Fir.Wasm.getLocal context fvarId =
+                    .ok (.localGet fvarId, kind) := by
+                simp [Fir.Wasm.getLocal, kindFound]
+              obtain ⟨index, localFound, kindAt⟩ :=
+                localsAligned localCompiled
+              have localFound' :
+                  findFVar?
+                      (sourceFunction.params.toList ++
+                        sourceFunction.locals.toList) fvarId = some index := by
+                simpa [functionBindings] using localFound
+              have targetHeadEq : targetHead = .localGet index := by
+                have adaptedEq :
+                    (Except.ok (.localGet index) :
+                        Except AdapterError Wasm.Instruction) =
+                      .ok targetHead := by
+                  simpa [instruction, localFound', pure, Except.pure] using
+                    headAdapted
+                exact (Except.ok.inj adaptedEq).symm
+              obtain ⟨physical, physicalFound, physicalRelated⟩ :=
+                stateRelated.resolve sourceLookup localFound kindAt
+              have semanticEq : semanticArgs = sourceValue :: restValues := by
+                rw [List.mapM_cons] at evaluated
+                simpa [evalArg, sourceLookup, restEvaluated, Bind.bind,
+                  Except.bind, pure, Except.pure] using evaluated.symm
+              subst semanticArgs
+              cases semanticTyped with
+              | cons _headTyped restTyped =>
+                  obtain ⟨physicalArgs, ready, lengthEq, argumentsRelated⟩ :=
+                    ih restAdapted restEvaluated restTyped
+                  subst targetHead
+                  subst targetArguments
+                  exact ⟨physical :: physicalArgs,
+                    .localGet physicalFound ready, by simp [lengthEq],
+                    .cons physicalRelated argumentsRelated⟩
+
 /--
 Public array-facing corollary: the actual `compileArgs`, adapter, evaluator,
 and state relation produce the exact mixed local/erased target prefix and its
@@ -1877,6 +2318,64 @@ theorem constructorArgsReady_of_compileArgs
         simpa [listEvaluated] using evaluated.symm
       obtain ⟨physicalArgs, ready, lengthEq, argumentsRelated⟩ :=
         characterized.ready localsAligned adapted listEvaluated stateRelated
+      subst semanticArgs
+      exact ⟨physicalArgs, ready, by simpa using lengthEq, by simpa using
+        argumentsRelated⟩
+
+/-- Array-facing declaration-call corollary. Raw `compileArgs` supplies the
+semantic producer ABI row, while `compileDeclarationArguments` supplies the
+actual executable prefix.  The common output-kind row is a compiler fact;
+canonical `void` lanes are therefore justified without equating their code
+with an erased local read. -/
+theorem constructorArgsReady_of_compileDeclarationArguments
+    {context : Fir.Wasm.Context} {target : LCNF.Decl .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function} {labels : LabelContext}
+    {args : Array (LCNF.Arg .impure)}
+    {rawArgumentCode declarationArgumentCode : List Fir.Wasm.Instruction}
+    {argumentKinds : Array AbiKind} {targetArguments : Wasm.Program}
+    {semanticArgs : Array Value}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (rawCompiled :
+      Fir.Wasm.compileArgs context args =
+        .ok (rawArgumentCode, argumentKinds))
+    (declarationCompiled :
+      Fir.Wasm.compileDeclarationArguments context target args =
+        .ok (declarationArgumentCode, argumentKinds))
+    (adapted :
+      instructions sourceModule sourceFunction labels declarationArgumentCode =
+        .ok targetArguments)
+    (evaluated : evalArgs sourceEnv args = .ok semanticArgs)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals
+        witness) :
+    ∃ physicalArgs,
+      ConstructorArgsReady locals targetArguments physicalArgs ∧
+        physicalArgs.length = argumentKinds.size ∧
+        ConstructorArgumentsRelated witness argumentKinds.toList physicalArgs
+          semanticArgs.toList := by
+  have rawCharacterized := ConstructorArgsCompiled.ofCompileArgs rawCompiled
+  have declarationCharacterized :=
+    DeclarationArgsCompiled.ofCompileDeclarationArguments declarationCompiled
+  unfold evalArgs at evaluated
+  rw [Array.mapM_eq_mapM_toList] at evaluated
+  cases listEvaluated : args.toList.mapM (evalArg sourceEnv) with
+  | error fault =>
+      rw [listEvaluated] at evaluated
+      contradiction
+  | ok semanticValues =>
+      have semanticEq : semanticArgs = semanticValues.toArray := by
+        simpa [listEvaluated] using evaluated.symm
+      have semanticTyped :
+          SemanticValuesAtAbi argumentKinds.toList semanticValues :=
+        rawCharacterized.semanticValuesAtAbi localsAligned listEvaluated
+          stateRelated
+      obtain ⟨physicalArgs, ready, lengthEq, argumentsRelated⟩ :=
+        declarationCharacterized.ready localsAligned adapted listEvaluated
+          semanticTyped stateRelated
       subst semanticArgs
       exact ⟨physicalArgs, ready, by simpa using lengthEq, by simpa using
         argumentsRelated⟩
@@ -6181,6 +6680,7 @@ inductive PureIntegerExternalSupported
   | intro
       (name : Lean.Name) (args : Array (LCNF.Arg .impure))
       (argumentCode : List Fir.Wasm.Instruction)
+      (declarationArgumentCode : List Fir.Wasm.Instruction)
       (argumentKinds : Array AbiKind) (semanticArgs : Array Value)
       (target : LCNF.Decl .impure) (value : Int)
       (valueEq : decl.value = .fap name args)
@@ -6192,6 +6692,9 @@ inductive PureIntegerExternalSupported
       (argumentsCompiled :
         Fir.Wasm.compileArgs context args =
           .ok (argumentCode, argumentKinds))
+      (declarationArgumentsCompiled :
+        Fir.Wasm.compileDeclarationArguments context target args =
+          .ok (declarationArgumentCode, argumentKinds))
       (argumentsEvaluated :
         evalArgs sourceEnv args = .ok semanticArgs)
       (signature :
@@ -6243,6 +6746,7 @@ inductive PureNaturalExternalSupported
   | intro
       (name : Lean.Name) (args : Array (LCNF.Arg .impure))
       (argumentCode : List Fir.Wasm.Instruction)
+      (declarationArgumentCode : List Fir.Wasm.Instruction)
       (argumentKinds : Array AbiKind) (semanticArgs : Array Value)
       (target : LCNF.Decl .impure) (value : Nat)
       (valueEq : decl.value = .fap name args)
@@ -6254,6 +6758,9 @@ inductive PureNaturalExternalSupported
       (argumentsCompiled :
         Fir.Wasm.compileArgs context args =
           .ok (argumentCode, argumentKinds))
+      (declarationArgumentsCompiled :
+        Fir.Wasm.compileDeclarationArguments context target args =
+          .ok (declarationArgumentCode, argumentKinds))
       (argumentsEvaluated :
         evalArgs sourceEnv args = .ok semanticArgs)
       (signature :
@@ -6306,6 +6813,7 @@ inductive PureScalarExternalSupported
   | intro
       (name : Lean.Name) (args : Array (LCNF.Arg .impure))
       (argumentCode : List Fir.Wasm.Instruction)
+      (declarationArgumentCode : List Fir.Wasm.Instruction)
       (argumentKinds : Array AbiKind) (semanticArgs : Array Value)
       (target : LCNF.Decl .impure) (scalar : BoxedScalar)
       (valueEq : decl.value = .fap name args)
@@ -6318,6 +6826,9 @@ inductive PureScalarExternalSupported
       (argumentsCompiled :
         Fir.Wasm.compileArgs context args =
           .ok (argumentCode, argumentKinds))
+      (declarationArgumentsCompiled :
+        Fir.Wasm.compileDeclarationArguments context target args =
+          .ok (declarationArgumentCode, argumentKinds))
       (argumentsEvaluated :
         evalArgs sourceEnv args = .ok semanticArgs)
       (signature :
@@ -11519,17 +12030,20 @@ theorem
     stepCost witness supported stepFits invariant sourceStep stateRelated
     valueCompiled valueAdapted resultFound
   rcases supported with
-    ⟨name, args, argumentCode, argumentKinds, semanticArgs, declaration, value,
+    ⟨name, args, argumentCode, declarationArgumentCode, argumentKinds,
+      semanticArgs, declaration, value,
       valueEq, _family, nonempty, targetFound, targetExternal, valueKind,
-      argumentsCompiled, argumentsEvaluated, signature, resultCompiled,
-      semanticCalled, nextRuntimeEq, sourceValueEq, stepCostEq⟩
+      argumentsCompiled, declarationArgumentsCompiled, argumentsEvaluated,
+      signature, resultCompiled, semanticCalled, nextRuntimeEq, sourceValueEq,
+      stepCostEq⟩
   have expectedCompiled :
       Fir.Wasm.compileLetValue context decl =
-        .ok (argumentCode ++ [.call (.declaration name)]) := by
-    simp [Fir.Wasm.compileLetValue, valueEq, valueKind, argumentsCompiled,
+        .ok (declarationArgumentCode ++ [.call (.declaration name)]) := by
+    simp [Fir.Wasm.compileLetValue, valueEq, valueKind,
+      declarationArgumentsCompiled,
       targetFound, nonempty, Bind.bind, Except.bind, pure, Except.pure]
   have valueCodeEq :
-      valueCode = argumentCode ++ [.call (.declaration name)] := by
+      valueCode = declarationArgumentCode ++ [.call (.declaration name)] := by
     rw [expectedCompiled] at valueCompiled
     exact (Except.ok.inj valueCompiled).symm
   subst valueCode
@@ -11538,8 +12052,9 @@ theorem
     instructions_append_declaration_call_eq valueAdapted
   subst targetValue
   obtain ⟨physicalArgs, argumentsReady, physicalLength, argumentsRelated⟩ :=
-    constructorArgsReady_of_compileArgs spec.localsAligned argumentsCompiled
-      argumentsAdapted argumentsEvaluated stateRelated
+    constructorArgsReady_of_compileDeclarationArguments spec.localsAligned
+      argumentsCompiled declarationArgumentsCompiled argumentsAdapted
+      argumentsEvaluated stateRelated
   obtain ⟨concreteArgs, decoded, concreteLength, semanticLength,
       concreteRelated⟩ :=
     argumentsRelated.decodePhysicalLanes 0
@@ -11796,17 +12311,20 @@ theorem
     stepCost witness supported stepFits invariant sourceStep stateRelated
     valueCompiled valueAdapted resultFound
   rcases supported with
-    ⟨name, args, argumentCode, argumentKinds, semanticArgs, declaration, value,
+    ⟨name, args, argumentCode, declarationArgumentCode, argumentKinds,
+      semanticArgs, declaration, value,
       valueEq, _family, nonempty, targetFound, targetExternal, valueKind,
-      argumentsCompiled, argumentsEvaluated, signature, resultCompiled,
-      semanticCalled, nextRuntimeEq, sourceValueEq, stepCostEq⟩
+      argumentsCompiled, declarationArgumentsCompiled, argumentsEvaluated,
+      signature, resultCompiled, semanticCalled, nextRuntimeEq, sourceValueEq,
+      stepCostEq⟩
   have expectedCompiled :
       Fir.Wasm.compileLetValue context decl =
-        .ok (argumentCode ++ [.call (.declaration name)]) := by
-    simp [Fir.Wasm.compileLetValue, valueEq, valueKind, argumentsCompiled,
+        .ok (declarationArgumentCode ++ [.call (.declaration name)]) := by
+    simp [Fir.Wasm.compileLetValue, valueEq, valueKind,
+      declarationArgumentsCompiled,
       targetFound, nonempty, Bind.bind, Except.bind, pure, Except.pure]
   have valueCodeEq :
-      valueCode = argumentCode ++ [.call (.declaration name)] := by
+      valueCode = declarationArgumentCode ++ [.call (.declaration name)] := by
     rw [expectedCompiled] at valueCompiled
     exact (Except.ok.inj valueCompiled).symm
   subst valueCode
@@ -11815,8 +12333,9 @@ theorem
     instructions_append_declaration_call_eq valueAdapted
   subst targetValue
   obtain ⟨physicalArgs, argumentsReady, physicalLength, argumentsRelated⟩ :=
-    constructorArgsReady_of_compileArgs spec.localsAligned argumentsCompiled
-      argumentsAdapted argumentsEvaluated stateRelated
+    constructorArgsReady_of_compileDeclarationArguments spec.localsAligned
+      argumentsCompiled declarationArgumentsCompiled argumentsAdapted
+      argumentsEvaluated stateRelated
   obtain ⟨concreteArgs, decoded, concreteLength, semanticLength,
       concreteRelated⟩ :=
     argumentsRelated.decodePhysicalLanes 0
@@ -12073,17 +12592,20 @@ theorem
     stepCost witness supported _stepFits invariant sourceStep stateRelated
     valueCompiled valueAdapted resultFound
   rcases supported with
-    ⟨name, args, argumentCode, argumentKinds, semanticArgs, declaration, scalar,
+    ⟨name, args, argumentCode, declarationArgumentCode, argumentKinds,
+      semanticArgs, declaration, scalar,
       valueEq, _family, nonempty, targetFound, targetExternal, valueKind,
-      argumentsCompiled, argumentsEvaluated, signature, resultCompiled,
-      semanticCalled, nextRuntimeEq, sourceValueEq, stepCostEq⟩
+      argumentsCompiled, declarationArgumentsCompiled, argumentsEvaluated,
+      signature, resultCompiled, semanticCalled, nextRuntimeEq, sourceValueEq,
+      stepCostEq⟩
   have expectedCompiled :
       Fir.Wasm.compileLetValue context decl =
-        .ok (argumentCode ++ [.call (.declaration name)]) := by
-    simp [Fir.Wasm.compileLetValue, valueEq, valueKind, argumentsCompiled,
+        .ok (declarationArgumentCode ++ [.call (.declaration name)]) := by
+    simp [Fir.Wasm.compileLetValue, valueEq, valueKind,
+      declarationArgumentsCompiled,
       targetFound, nonempty, Bind.bind, Except.bind, pure, Except.pure]
   have valueCodeEq :
-      valueCode = argumentCode ++ [.call (.declaration name)] := by
+      valueCode = declarationArgumentCode ++ [.call (.declaration name)] := by
     rw [expectedCompiled] at valueCompiled
     exact (Except.ok.inj valueCompiled).symm
   subst valueCode
@@ -12092,8 +12614,9 @@ theorem
     instructions_append_declaration_call_eq valueAdapted
   subst targetValue
   obtain ⟨physicalArgs, argumentsReady, physicalLength, argumentsRelated⟩ :=
-    constructorArgsReady_of_compileArgs spec.localsAligned argumentsCompiled
-      argumentsAdapted argumentsEvaluated stateRelated
+    constructorArgsReady_of_compileDeclarationArguments spec.localsAligned
+      argumentsCompiled declarationArgumentsCompiled argumentsAdapted
+      argumentsEvaluated stateRelated
   obtain ⟨concreteArgs, decoded, concreteLength, semanticLength,
       concreteRelated⟩ :=
     argumentsRelated.decodePhysicalLanes 0
