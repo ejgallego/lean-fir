@@ -89,7 +89,10 @@ even when the execution may continue forever.
    branch now reaches exact zero-cost `ConcreteStructuredCodeStepAdmission`
    through `admit_directCall_of_compiler`; the remaining argument input is the
    current semantic row at the compiler-selected callee ABI, not compiler
-   locals, call-site equations, or a future invariant.
+   locals, call-site equations, or a future invariant. Return nodes likewise
+   reach exact zero-cost admission through `admit_return_of_compiler`; only a
+   genuinely non-directional object-family return needs precise producer
+   origin.
 4. **PA3 — closed W6 theorem.** Publish an export-facing finite-prefix theorem
    with no caller-provided `SourceInvariant`, source laws, constructor schema,
    future trace, or program certificate.

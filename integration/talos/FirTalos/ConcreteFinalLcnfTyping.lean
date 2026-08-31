@@ -437,6 +437,52 @@ theorem ConcreteStructuredAlignedValidationState.returnSemantic_ofUseSite
   obtain ⟨actual, found, _compatible⟩ := focus.return_eq
   exact provenance.semanticBinding localsAligned related (agrees found)
 
+/-- The recursively validated compiler relation constructs complete
+zero-allocation return admission from the current return use-site fact.
+
+Residual validation supplies the selected local and its compiler ABI; the
+live concrete relation supplies semantic typing at that ABI.  Therefore the
+provenance input contributes information only when the active function result
+is more precise than the compiler local carrier. -/
+theorem ConcreteStructuredValidatedCodeOutcome.admit_return_of_compiler
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {result : Lean.FVarId}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.return result) targetStore targetLocals targetCode witness source target)
+    (provenance : ConcreteStructuredReturnUseSiteProvenanceAt context sourceEnv
+      result functionResult) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+      functionResult facts sourceRuntime sourceEnv 0 (.return result) := by
+  apply related.core.validation.admit_return
+  intro sourceValue found
+  exact (related.core.validation.returnSemantic_ofUseSite spec.localsAligned
+    related.core.core.focus.stateRelated provenance) found
+
 /-- Use-site provenance closes both directional returns and the precise
 object-family return edges for which carrier compatibility is insufficient. -/
 theorem SemanticEnvAtLocalKinds.returnValueSafe_ofUseSite
