@@ -65,10 +65,12 @@ even when the execution may continue forever.
    runtime lookup now selects hit versus miss, and lazy-call validation stores
    only the compiler's actual `leanCompatible` result condition. Production
    lowering now supplies a reusable residual-local alignment at the function
-   root, with structural `let` head/continuation projections; lazy admission
-   uses that common row rather than a cache-specific destination premise. The
-   remaining work is to carry the row through the validated global relation
-   and implement external and object-result cache misses.
+   root. The recursively validated relation now retains that alignment through
+   lets, mutation/reference-count continuations, case selection, and suspended
+   callers; lazy admission projects it directly rather than accepting a
+   cache-specific destination premise. The remaining lazy work is genuine
+   backend coverage for external and object-result cache misses, followed by
+   assembly into the compiler current-step admission law.
 3. **PA2 — compiler-derived guarded admission.** Derive the current-step
    compiler admission package from production validation, the active relation,
    and one successful source step. The admission law now consumes
@@ -111,7 +113,7 @@ roadmap and examples then reference only the closed endpoint.
 | Milestone | Current theorem or interface | Premises to eliminate | Premises retained | Owner | Definition of done |
 |---|---|---|---|---|---|
 | PA0 (complete) | `ConcreteStructuredSourceAdmissionSafeAt`; `ConcreteStructuredSchemaSourceAdmissionSafeAt`; `ConcreteStructuredCodeStepAdmission` | None during audit | Existing compiler, semantic, and resource boundaries unchanged | W6 audit owner | Met: 20/20 branches classified; later PA1 discrepancies are explicitly tracked |
-| PA1 (active) | `SemanticEnvAtLocalKinds.ofStateRelated`; `SemanticBindingAtUseSite`; `ConcreteStructuredReturnUseSiteProvenanceAt`; `ConcreteStructuredValidatedCodeCoreRel.productionCasesSupported_of_validation`; `ConcreteStructuredValidatedCodeCoreRel.admit_cases_of_validated_step`; `lazyCacheValidatorSound`; operation-specific source-safety lemmas | Precise non-directional producer origin, closure ingress, field, and layout provenance | Ordinary local typing, call/cache publication, complete case admission, and lazy-cache validator soundness are derived from the active relation/validator | W6 result/object/case helper owners | All remaining class-C facts are compiler-derived without a public provenance map or universal source invariant; shared publication and case admission laws are factored |
+| PA1 (active) | `SemanticEnvAtLocalKinds.ofStateRelated`; `SemanticBindingAtUseSite`; `ConcreteStructuredReturnUseSiteProvenanceAt`; `ConcreteResidualLocalAlignment`; `ConcreteStructuredValidatedCodeCoreRel.productionCasesSupported_of_validation`; `ConcreteStructuredValidatedCodeCoreRel.admit_cases_of_validated_step`; `lazyCacheValidatorSound`; operation-specific source-safety lemmas | Precise non-directional producer origin, closure ingress, field, and layout provenance | Ordinary local typing, residual compiler-local alignment, call/cache publication, complete case admission, and lazy-cache validator soundness are derived from and retained by the active relation/validator | W6 result/object/case helper owners | All remaining class-C facts are compiler-derived without a public provenance map or universal source invariant; shared publication and case admission laws are factored |
 | PA2 | `ConcreteStructuredCompilerCurrentStepAdmission`; `ConcreteStructuredValidatedCodeOutcome.advance_of_admission` | `ConcreteStructuredSchemaSourceReadyAt` as a client-provided current-node law | `ConcreteStructuredCurrentStepFiniteRuntimeSafety`; `ConcreteStructuredCurrentStepAddressSpaceSafety` | W6 owner | Production compiler facts construct current-step admission from the exact validated outcome for every successful guarded source step |
 | PA3 | `ConcreteSupportedExport.finiteTraceCorrect_of_schemaSourceInvariant` | `SourceInvariant`, `sourceLaws`, `sourceInitialInvariant`, caller-selected `initialSchema` | Entry relation; runtime/external contracts; finite header/capture safety; allocation headroom | W6 owner | Canonical `ConcreteSupportedExport.finiteTraceCorrect` has the closed-W6 surface and an exact axiom regression |
 | PA4a | Generic finite-stuttering/pass bridge, including `precomposeStutteringPass` | Any renamed form of the W6 source-invariant premise | The earlier pass's real semantic and well-formedness hypotheses | Composition owner | One existing pass theorem yields an earlier-LCNF-to-contracted-Wasm finite-prefix theorem |

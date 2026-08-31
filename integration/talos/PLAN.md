@@ -129,6 +129,16 @@ plus the successful source selection. The exported
 admission with no source classifier, schema premise, or caller invariant;
 `ConcreteStructuredSourceAdmissionSafeAt.cases` consequently stores no data.
 
+The residual compiler-local row now also survives the complete recursively
+validated state rather than being reconstructed by individual admission
+branches. `ConcreteSupportedFunction.residualLocalAlignment` constructs the
+root fact from production lowering and hygiene. Structural rules retain it
+through lets, layout-neutral mutation/reference-count continuations, selected
+case alternatives, and the aligned validation stored in suspended callers.
+Lazy-cache admission therefore reads its exact destination lane from the
+current validated outcome; no cache-specific local premise or duplicated
+source invariant remains.
+
 The result/publication boundary is now substantially narrower.
 `SemanticEnvAtLocalKinds.ofStateRelated` derives every ordinary residual-local
 semantic ABI fact from the existing `StateRelated`, production-local

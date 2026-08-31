@@ -244,86 +244,6 @@ theorem addSupportedDeclarationParams?_namesNodup
         some result at validated
   rw [← Array.foldlM_toList] at validated
   exact supportedDeclarationParamFold_namesNodup (by simp) validated
-
-/-- A successful name-directed lookup identifies an entry in the row. -/
-private theorem findLocalKind?_eq_some_mem
-    {locals : Fir.Wasm.LocalKinds}
-    {query : Lean.FVarId} {kind : Fir.Wasm.AbiKind}
-    (found : Fir.Wasm.findLocalKind? locals query = some kind) :
-    ∃ bound, (bound, kind) ∈ locals ∧ bound.name = query.name := by
-  induction locals with
-  | nil => simp [Fir.Wasm.findLocalKind?] at found
-  | cons entry rest ih =>
-      obtain ⟨candidate, candidateKind⟩ := entry
-      by_cases same : candidate.name == query.name
-      · rw [Fir.Wasm.findLocalKind?, if_pos same] at found
-        have kindEq : candidateKind = kind := Option.some.inj found
-        subst candidateKind
-        exact ⟨candidate, by simp, LawfulBEq.eq_of_beq same⟩
-      · rw [Fir.Wasm.findLocalKind?, if_neg same] at found
-        obtain ⟨bound, member, names⟩ := ih found
-        exact ⟨bound, by simp [member], names⟩
-
-/-- In a name-unique row, membership determines name-directed lookup. -/
-private theorem findLocalKind?_eq_some_of_mem
-    {locals : Fir.Wasm.LocalKinds}
-    {query bound : Lean.FVarId} {kind : Fir.Wasm.AbiKind}
-    (unique : (locals.map (·.fst.name)).Nodup)
-    (member : (bound, kind) ∈ locals)
-    (names : bound.name = query.name) :
-    Fir.Wasm.findLocalKind? locals query = some kind := by
-  induction locals with
-  | nil => simp at member
-  | cons entry rest ih =>
-      obtain ⟨candidate, candidateKind⟩ := entry
-      simp only [List.map_cons, List.nodup_cons] at unique
-      rcases unique with ⟨candidateFresh, restUnique⟩
-      rcases List.mem_cons.mp member with selected | member
-      · cases selected
-        simp [Fir.Wasm.findLocalKind?, names]
-      · have different : candidate.name ≠ query.name := by
-          intro same
-          apply candidateFresh
-          exact List.mem_map.mpr ⟨(bound, kind), member,
-            by simp [names, same]⟩
-        simp [Fir.Wasm.findLocalKind?, different,
-          ih restUnique member]
-
-/-- Reversing a duplicate-free local row does not change a successful
-name-directed lookup. -/
-theorem findLocalKind?_reverse_eq_some
-    {locals : Fir.Wasm.LocalKinds}
-    {query : Lean.FVarId} {kind : Fir.Wasm.AbiKind}
-    (unique : (locals.map (·.fst.name)).Nodup)
-    (found : Fir.Wasm.findLocalKind? locals query = some kind) :
-    Fir.Wasm.findLocalKind? locals.reverse query = some kind := by
-  obtain ⟨bound, member, names⟩ := findLocalKind?_eq_some_mem found
-  apply findLocalKind?_eq_some_of_mem
-  · rw [List.map_reverse]
-    apply unique.reverse.imp
-    intro left right different same
-    exact different same.symm
-  · simpa using member
-  · exact names
-
-/-- A successful lookup in the left row remains successful after appending
-any later locals. -/
-theorem findLocalKind?_append_eq_some
-    {left right : Fir.Wasm.LocalKinds}
-    {query : Lean.FVarId} {kind : Fir.Wasm.AbiKind}
-    (found : Fir.Wasm.findLocalKind? left query = some kind) :
-    Fir.Wasm.findLocalKind? (left ++ right) query = some kind := by
-  induction left with
-  | nil => simp [Fir.Wasm.findLocalKind?] at found
-  | cons entry rest ih =>
-      obtain ⟨candidate, candidateKind⟩ := entry
-      by_cases same : candidate.name == query.name
-      · simpa [Fir.Wasm.findLocalKind?, same] using found
-      · have restFound :
-            Fir.Wasm.findLocalKind? rest query = some kind := by
-          simpa [Fir.Wasm.findLocalKind?, same] using found
-        simp [Fir.Wasm.findLocalKind?, same, ih restFound]
-
 /-- Agreement between the validator's residual local-kind row and the exact
 production compiler context at the current code node.
 
@@ -429,7 +349,8 @@ def ConcreteStructuredAlignedValidationState
         ∃ sharing : Fir.Wasm.SupportedSharingFacts,
           ConcreteStructuredValidationFocus program joins locals
               (some functionResult) facts sharing code ∧
-            ConcreteStructuredValidationLocalsAgree context locals
+            ConcreteStructuredValidationLocalsAgree context locals ∧
+              ConcreteResidualLocalAlignment context program code
 
 /-- Existential package for the complete residual validator state at an
 active generated-function node.  The indices retain only the stable program,
@@ -457,8 +378,24 @@ theorem ConcreteStructuredAlignedValidationState.toValidationState
     (aligned : ConcreteStructuredAlignedValidationState program context
       functionResult code) :
     ConcreteStructuredValidationState program functionResult code := by
-  obtain ⟨joins, locals, facts, sharing, validated, _agrees⟩ := aligned
+  obtain ⟨joins, locals, facts, sharing, validated, _agrees,
+      _localAlignment⟩ := aligned
   exact ⟨joins, locals, facts, sharing, validated⟩
+
+/-- Project the compiler-derived residual local row retained by aligned
+validation.  This is a static production fact, not a semantic source
+invariant. -/
+theorem ConcreteStructuredAlignedValidationState.residualLocalAlignment
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionResult : Fir.Wasm.AbiKind}
+    {code : Lean.Compiler.LCNF.Code .impure}
+    (aligned : ConcreteStructuredAlignedValidationState program context
+      functionResult code) :
+    ConcreteResidualLocalAlignment context program code := by
+  obtain ⟨_joins, _locals, _facts, _sharing, _validated, _agrees,
+      localAlignment⟩ := aligned
+  exact localAlignment
 
 /-- Static validation retained for every suspended source caller.  Direct and
 saturated calls have the same source bind frame, so validation intentionally
@@ -2935,61 +2872,6 @@ theorem supportedLetDeclKind?_effectiveLetValueKind
         | apply supportedNamedCall_result_compatible <;> assumption
         | apply boxResultKind_idempotent_tobject
 
-/-- Whole-program impure hygiene specializes to the exact declaration found
-by the production name lookup.  This is a static phase fact: it carries no
-compiler execution, target path, or recursive admission evidence. -/
-theorem impureHygienic_declarationOfFind
-    {program : Fir.LeanIR.ImpureProgram}
-    (hygienic : program.ImpureHygienic)
-    {name : Lean.Name} {declaration : Lean.Compiler.LCNF.Decl .impure}
-    (found : program.findDecl? name = some declaration) :
-    Fir.LeanIR.ImpureHygiene.declHygienic declaration = true := by
-  have member : declaration ∈ program.decls := by
-    obtain ⟨_, index, inBounds, selected, _⟩ :=
-      Array.find?_eq_some_iff_getElem.mp found
-    rw [← selected]
-    exact Array.getElem_mem inBounds
-  unfold Fir.LeanIR.Program.ImpureHygienic at hygienic
-  rw [Array.all_eq_true'] at hygienic
-  exact hygienic declaration member
-
-/-- Hygiene of a code declaration exposes the exact declaration-wide binder
-uniqueness check consumed by the local-collector agreement proof. -/
-theorem declHygienic_code_bindersUnique
-    {declaration : Lean.Compiler.LCNF.Decl .impure}
-    {code : Lean.Compiler.LCNF.Code .impure}
-    (body : declaration.value = .code code)
-    (hygienic :
-      Fir.LeanIR.ImpureHygiene.declHygienic declaration = true) :
-    Fir.LeanIR.ImpureHygiene.bindersUnique
-      (Fir.LeanIR.ImpureHygiene.paramIds declaration.params ++
-        Fir.LeanIR.ImpureHygiene.codeBinders code) = true := by
-  unfold Fir.LeanIR.ImpureHygiene.declHygienic at hygienic
-  rw [body] at hygienic
-  simp only [Bool.and_eq_true] at hygienic
-  exact hygienic.1.1
-
-/-- The source declaration selected by one supported-function package inherits
-the existing impure phase hygiene invariant.  The explicit premise will be
-discharged directly from `WasmSupported` once the shared admission contract
-lands. -/
-theorem ConcreteSupportedFunction.sourceBodyBindersUnique_of_hygienic
-    {program : Fir.LeanIR.ImpureProgram}
-    {context : Fir.Wasm.Context}
-    {functionCode : Lean.Compiler.LCNF.Code .impure}
-    {sourceModule : Fir.Wasm.Module}
-    {sourceFunction : Fir.Wasm.Function}
-    {target : AdaptedModule}
-    {hosts : ResolvedHosts}
-    (spec : ConcreteSupportedFunction program context functionCode sourceModule
-      sourceFunction target hosts)
-    (hygienic : program.ImpureHygienic) :
-    Fir.LeanIR.ImpureHygiene.bindersUnique
-      (Fir.LeanIR.ImpureHygiene.paramIds spec.sourceDeclaration.params ++
-        Fir.LeanIR.ImpureHygiene.codeBinders functionCode) = true := by
-  apply declHygienic_code_bindersUnique spec.sourceDeclarationBody
-  exact impureHygienic_declarationOfFind hygienic spec.sourceDeclarationFound
-
 /-- Production validation supplies the root residual state at the active
 generated function's exact result ABI. -/
 theorem ConcreteSupportedFunction.rootValidation
@@ -3067,7 +2949,8 @@ theorem ConcreteSupportedFunction.rootAlignedValidationState
       findLocalKind?_append_eq_some parameterFound
     simp [Fir.Wasm.getLocal, spec.localKindsExact,
       FirTalos.Correctness.functionBindings, bindingFound]
-  exact ⟨[], rootLocals, [], [], validated, agrees⟩
+  exact ⟨[], rootLocals, [], [], validated, agrees,
+    spec.residualLocalAlignment⟩
 
 /-- The production-supported function constructs the packaged validation
 state at its generated entry. -/
@@ -3413,9 +3296,12 @@ theorem ConcreteStructuredAlignedValidationState.letContinuation
             .ok (.localGet decl.fvarId, kind) ∧
           ConcreteStructuredAlignedValidationState program context
             functionResult continuation := by
-  obtain ⟨joins, locals, facts, sharing, focus, agrees⟩ := validated
+  obtain ⟨joins, locals, facts, sharing, focus, agrees, localAlignment⟩ :=
+    validated
   obtain ⟨kind, kindFound, next⟩ := focus.let_eq
   have resultCompiled := compiled kindFound
+  have effective := supportedLetDeclKind?_effectiveLetValueKind kindFound
+  have nextLocalAlignment := localAlignment.letContinuation effective
   exact ⟨kind, locals, kindFound, resultCompiled,
     joins,
     Fir.Wasm.insertLocal locals decl.fvarId kind,
@@ -3425,7 +3311,8 @@ theorem ConcreteStructuredAlignedValidationState.letContinuation
         Fir.Wasm.insertSupportedSharingFact sharing decl.fvarId objectId
     | _ => Fir.Wasm.eraseSupportedSharingFact sharing decl.fvarId),
     next,
-    agrees.insert resultCompiled⟩
+    agrees.insert resultCompiled,
+    nextLocalAlignment⟩
 
 /-- For a non-named `let`, production and executable validation select the
 same destination kind.  This is the common compiler-admission bridge for the
@@ -3609,15 +3496,14 @@ theorem ConcreteStructuredAlignedValidationState.lazyCacheCallSupported
     {resultKind declaredResultKind : AbiKind}
     (validated : ConcreteStructuredAlignedValidationState program context
       functionResult (.let decl continuation))
-    (localAlignment : ConcreteResidualLocalAlignment context program
-      (.let decl continuation))
     (contextProgram : context.program = program)
     (site : LazyCacheCallCompilerSite context decl declaration
       sourceDeclaration resultKind declaredResultKind) :
     LazyCacheCallSupported context decl declaration sourceDeclaration
       resultKind := by
   subst program
-  obtain ⟨joins, locals, facts, sharing, focus, _agrees⟩ := validated
+  obtain ⟨joins, locals, facts, sharing, focus, _agrees, localAlignment⟩ :=
+    validated
   obtain ⟨_selectedKind, supported, _continuation⟩ := focus.let_eq
   have supportedCall :
       Fir.Wasm.supportedNamedCall context.program locals declaredResultKind
@@ -5340,7 +5226,7 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_return_of_semantic_step
           targetAfter ∧
         ConcreteStructuredValidatedCodeGlobalOutcome program sourceModule
           targetModule hosts externals sourceAfter targetAfter := by
-  obtain ⟨joins, locals, validationFacts, sharing, validated, localsAgree⟩ :=
+  obtain ⟨joins, locals, validationFacts, sharing, validated, localsAgree, localAlignment⟩ :=
     related.core.validation
   have validatedReturn := validated.supported
   obtain ⟨actualResult, localFound, _carrierCompatible⟩ :
@@ -6815,7 +6701,7 @@ theorem ConcreteStructuredAlignedValidationState.admit_decOrdinary_of_step
     ConcreteStructuredCodeStepAdmission context sourceModule externals
       expectedResult facts sourceRuntime sourceEnv 0
       (.dec objectId amount check false objectFields? continuation) := by
-  obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees⟩ := validated
+  obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees, localAlignment⟩ := validated
   exact focus.admit_decOrdinary_of_step agrees related sourceStep
 
 /-- Ordinary-increment validation exposes the same object-family local guard
@@ -7018,7 +6904,7 @@ theorem ConcreteStructuredAlignedValidationState.admit_incOrdinary_of_step
     ConcreteStructuredCodeStepAdmission context sourceModule externals
       expectedResult facts sourceRuntime sourceEnv 0
       (.inc objectId amount check false continuation) := by
-  obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees⟩ := validated
+  obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees, localAlignment⟩ := validated
   exact focus.admit_incOrdinary_of_step agrees related sourceStep fits
 
 /-- Both persistent and ordinary increments retain the validator state at
@@ -7072,8 +6958,10 @@ theorem ConcreteStructuredAlignedValidationState.incContinuation
       functionResult (.inc objectId amount check persistent continuation)) :
     ConcreteStructuredAlignedValidationState program context functionResult
       continuation := by
-  obtain ⟨joins, locals, facts, sharing, focus, agrees⟩ := validated
-  exact ⟨joins, locals, facts, sharing, focus.incContinuation, agrees⟩
+  obtain ⟨joins, locals, facts, sharing, focus, agrees, localAlignment⟩ := validated
+  exact ⟨joins, locals, facts, sharing, focus.incContinuation, agrees,
+    localAlignment.reindexCode (by
+      simp [Fir.Wasm.collectEffectiveLocalKindUpdates])⟩
 
 /-- Both decrement modes retain the same validator state at their
 continuation. -/
@@ -7128,8 +7016,10 @@ theorem ConcreteStructuredAlignedValidationState.decContinuation
       (.dec objectId amount check persistent objectFields? continuation)) :
     ConcreteStructuredAlignedValidationState program context functionResult
       continuation := by
-  obtain ⟨joins, locals, facts, sharing, focus, agrees⟩ := validated
-  exact ⟨joins, locals, facts, sharing, focus.decContinuation, agrees⟩
+  obtain ⟨joins, locals, facts, sharing, focus, agrees, localAlignment⟩ := validated
+  exact ⟨joins, locals, facts, sharing, focus.decContinuation, agrees,
+    localAlignment.reindexCode (by
+      simp [Fir.Wasm.collectEffectiveLocalKindUpdates])⟩
 
 /-- Uniform successor transport for ownership increments. -/
 theorem ConcreteStructuredValidatedCodeCoreRel.incSuccessor
@@ -7628,7 +7518,7 @@ theorem
           callerExpectedResult facts remainingBytes nextRuntime sourceEnv
           continuation nextStore targetLocals nextTargetCode witness sourceAfter
           targetAfter := by
-  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees⟩ :=
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees, localAlignment⟩ :=
     related.core.validation
   obtain ⟨objectKind, objectCompiled, objectRefines⟩ :=
     validated.incOrdinary_compiler agrees
@@ -7667,7 +7557,7 @@ theorem
           callerExpectedResult facts remainingBytes nextRuntime sourceEnv
           continuation nextStore targetLocals nextTargetCode witness sourceAfter
           targetAfter := by
-  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees⟩ :=
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees, localAlignment⟩ :=
     related.core.validation
   obtain ⟨objectKind, objectCompiled, objectRefines⟩ :=
     validated.decOrdinary_compiler agrees
@@ -7738,8 +7628,10 @@ theorem ConcreteStructuredAlignedValidationState.osetContinuation
       functionResult (.oset objectId fieldIndex field continuation)) :
     ConcreteStructuredAlignedValidationState program context functionResult
       continuation := by
-  obtain ⟨joins, locals, facts, sharing, focus, agrees⟩ := validated
-  exact ⟨joins, locals, facts, sharing, focus.osetContinuation, agrees⟩
+  obtain ⟨joins, locals, facts, sharing, focus, agrees, localAlignment⟩ := validated
+  exact ⟨joins, locals, facts, sharing, focus.osetContinuation, agrees,
+    localAlignment.reindexCode (by
+      simp [Fir.Wasm.collectEffectiveLocalKindUpdates])⟩
 
 /-- `USize` field writes preserve the residual validator state. -/
 theorem ConcreteStructuredValidationFocus.usetContinuation
@@ -7782,8 +7674,10 @@ theorem ConcreteStructuredAlignedValidationState.usetContinuation
       functionResult (.uset objectId fieldIndex fieldId continuation)) :
     ConcreteStructuredAlignedValidationState program context functionResult
       continuation := by
-  obtain ⟨joins, locals, facts, sharing, focus, agrees⟩ := validated
-  exact ⟨joins, locals, facts, sharing, focus.usetContinuation, agrees⟩
+  obtain ⟨joins, locals, facts, sharing, focus, agrees, localAlignment⟩ := validated
+  exact ⟨joins, locals, facts, sharing, focus.usetContinuation, agrees,
+    localAlignment.reindexCode (by
+      simp [Fir.Wasm.collectEffectiveLocalKindUpdates])⟩
 
 /-- Packed scalar field writes preserve the residual validator state. -/
 theorem ConcreteStructuredValidationFocus.ssetContinuation
@@ -7837,8 +7731,10 @@ theorem ConcreteStructuredAlignedValidationState.ssetContinuation
       (.sset objectId byteOffset fieldIndex fieldId type continuation)) :
     ConcreteStructuredAlignedValidationState program context functionResult
       continuation := by
-  obtain ⟨joins, locals, facts, sharing, focus, agrees⟩ := validated
-  exact ⟨joins, locals, facts, sharing, focus.ssetContinuation, agrees⟩
+  obtain ⟨joins, locals, facts, sharing, focus, agrees, localAlignment⟩ := validated
+  exact ⟨joins, locals, facts, sharing, focus.ssetContinuation, agrees,
+    localAlignment.reindexCode (by
+      simp [Fir.Wasm.collectEffectiveLocalKindUpdates])⟩
 
 /-- Validation of constructor-tag mutation exposes both parts of its static
 admission boundary: the source `Nat` fits the wasm32 header and the mutated
@@ -8084,7 +7980,7 @@ theorem ConcreteStructuredAlignedValidationState.admit_setTag_of_step
     ConcreteStructuredCodeStepAdmission context sourceModule externals
       expectedResult facts sourceRuntime sourceEnv 0
       (.setTag objectId tag continuation) := by
-  obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees⟩ := validated
+  obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees, localAlignment⟩ := validated
   exact focus.admit_setTag_of_step agrees related sourceStep
 
 /-- Source-level descriptor typing for one object field.
@@ -8554,7 +8450,7 @@ theorem ConcreteStructuredAlignedValidationState.admit_oset_fvar_of_step
     ConcreteStructuredCodeStepAdmission context sourceModule externals
       expectedResult facts sourceRuntime sourceEnv 0
       (.oset objectId index (.fvar fieldId) continuation) := by
-  obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees⟩ := validated
+  obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees, localAlignment⟩ := validated
   exact focus.admit_oset_fvar_of_step agrees related sourceStep fieldTyped
 
 /-- The aligned residual package closes erased object-field admission under
@@ -8590,7 +8486,7 @@ theorem ConcreteStructuredAlignedValidationState.admit_oset_erased_of_step
     ConcreteStructuredCodeStepAdmission context sourceModule externals
       expectedResult facts sourceRuntime sourceEnv 0
       (.oset objectId index .erased continuation) := by
-  obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees⟩ := validated
+  obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees, localAlignment⟩ := validated
   exact focus.admit_oset_erased_of_step agrees related sourceStep fieldTyped
 
 /-- Validation of a `USize` field write fixes both compiler-local lanes. -/
@@ -8825,7 +8721,7 @@ theorem ConcreteStructuredAlignedValidationState.admit_uset_of_step
     ConcreteStructuredCodeStepAdmission context sourceModule externals
       expectedResult facts sourceRuntime sourceEnv 0
       (.uset objectId index fieldId continuation) := by
-  obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees⟩ := validated
+  obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees, localAlignment⟩ := validated
   exact focus.admit_uset_of_step agrees related sourceStep
 
 /-- Source/runtime layout typing for one packed-scalar field mutation.
@@ -9114,7 +9010,7 @@ theorem ConcreteStructuredAlignedValidationState.admit_sset_of_step
     ConcreteStructuredCodeStepAdmission context sourceModule externals
       expectedResult facts sourceRuntime sourceEnv 0
       (.sset objectId slotIndex byteOffset fieldId type continuation) := by
-  obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees⟩ := validated
+  obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees, localAlignment⟩ := validated
   exact focus.admit_sset_of_step agrees related sourceStep fieldTyped
 
 /-- Constructor-tag writes preserve the residual validator state. -/
@@ -9157,8 +9053,10 @@ theorem ConcreteStructuredAlignedValidationState.setTagContinuation
       functionResult (.setTag objectId tag continuation)) :
     ConcreteStructuredAlignedValidationState program context functionResult
       continuation := by
-  obtain ⟨joins, locals, facts, sharing, focus, agrees⟩ := validated
-  exact ⟨joins, locals, facts, sharing, focus.setTagContinuation, agrees⟩
+  obtain ⟨joins, locals, facts, sharing, focus, agrees, localAlignment⟩ := validated
+  exact ⟨joins, locals, facts, sharing, focus.setTagContinuation, agrees,
+    localAlignment.reindexCode (by
+      simp [Fir.Wasm.collectEffectiveLocalKindUpdates])⟩
 
 /-- Validation of explicit deletion selects the exact ordinary-object local
 lane used by production lowering. -/
@@ -9320,7 +9218,7 @@ theorem ConcreteStructuredAlignedValidationState.admit_del_of_step
     ConcreteStructuredCodeStepAdmission context sourceModule externals
       expectedResult facts sourceRuntime sourceEnv 0
       (.del objectId continuation) := by
-  obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees⟩ := validated
+  obtain ⟨joins, locals, validatorFacts, sharing, focus, agrees, localAlignment⟩ := validated
   exact focus.admit_del_of_step agrees related sourceStep
 
 /-- Explicit deletion preserves the residual validator state. -/
@@ -9363,8 +9261,10 @@ theorem ConcreteStructuredAlignedValidationState.delContinuation
       functionResult (.del objectId continuation)) :
     ConcreteStructuredAlignedValidationState program context functionResult
       continuation := by
-  obtain ⟨joins, locals, facts, sharing, focus, agrees⟩ := validated
-  exact ⟨joins, locals, facts, sharing, focus.delContinuation, agrees⟩
+  obtain ⟨joins, locals, facts, sharing, focus, agrees, localAlignment⟩ := validated
+  exact ⟨joins, locals, facts, sharing, focus.delContinuation, agrees,
+    localAlignment.reindexCode (by
+      simp [Fir.Wasm.collectEffectiveLocalKindUpdates])⟩
 
 /-- Explicit delete, including erased physical zero, preserves the closed
 relation across the exact two-instruction generated host prefix. -/
@@ -9463,7 +9363,7 @@ theorem
           callerExpectedResult facts remainingBytes nextRuntime sourceEnv
           continuation nextStore targetLocals nextTargetCode witness sourceAfter
           targetAfter := by
-  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees⟩ :=
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees, localAlignment⟩ :=
     related.core.validation
   have objectCompiled := validated.del_compiler agrees
   obtain ⟨sourceObject, nextRuntime, objectLookup, updated⟩ :=
@@ -9553,7 +9453,7 @@ theorem
           callerExpectedResult facts remainingBytes resultRuntime sourceEnv
           continuation nextStore targetLocals nextTargetCode witness sourceAfter
           targetAfter := by
-  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees⟩ :=
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees, localAlignment⟩ :=
     related.core.validation
   obtain ⟨tagFits, objectCompiled⟩ := validated.setTag_compiler agrees
   obtain ⟨location, cell, semantic, resultRuntime, objectLookup, updated,
@@ -9754,7 +9654,7 @@ theorem
           callerExpectedResult facts remainingBytes resultRuntime sourceEnv
           continuation nextStore targetLocals nextTargetCode witness sourceAfter
           targetAfter := by
-  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees⟩ :=
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees, localAlignment⟩ :=
     related.core.validation
   obtain ⟨fieldKind, objectCompiled, fieldCompiled, fieldObjectKind⟩ :=
     validated.oset_fvar_compiler agrees
@@ -9796,7 +9696,7 @@ theorem
           callerExpectedResult facts remainingBytes resultRuntime sourceEnv
           continuation nextStore targetLocals nextTargetCode witness sourceAfter
           targetAfter := by
-  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees⟩ :=
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees, localAlignment⟩ :=
     related.core.validation
   have objectCompiled := validated.oset_erased_compiler agrees
   obtain ⟨location, cell, semantic, resultRuntime, objectLookup, updated,
@@ -9838,7 +9738,7 @@ theorem
           callerExpectedResult facts remainingBytes resultRuntime sourceEnv
           continuation nextStore targetLocals nextTargetCode witness sourceAfter
           targetAfter := by
-  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees⟩ :=
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees, localAlignment⟩ :=
     related.core.validation
   obtain ⟨fieldKind, objectCompiled, fieldCompiled, fieldObjectKind⟩ :=
     validated.oset_fvar_compiler agrees
@@ -9883,7 +9783,7 @@ theorem
           callerExpectedResult facts remainingBytes resultRuntime sourceEnv
           continuation nextStore targetLocals nextTargetCode witness sourceAfter
           targetAfter := by
-  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees⟩ :=
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees, localAlignment⟩ :=
     related.core.validation
   have objectCompiled := validated.oset_erased_compiler agrees
   obtain ⟨location, cell, semantic, resultRuntime, objectLookup, updated,
@@ -9924,7 +9824,7 @@ theorem
           callerExpectedResult facts remainingBytes resultRuntime sourceEnv
           continuation nextStore targetLocals nextTargetCode witness sourceAfter
           targetAfter := by
-  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees⟩ :=
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees, localAlignment⟩ :=
     related.core.validation
   obtain ⟨objectCompiled, fieldCompiled⟩ := validated.uset_compiler agrees
   obtain ⟨location, cell, semantic, field, resultRuntime, objectLookup,
@@ -9964,7 +9864,7 @@ theorem
           callerExpectedResult facts remainingBytes resultRuntime sourceEnv
           continuation nextStore targetLocals nextTargetCode witness sourceAfter
           targetAfter := by
-  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees⟩ :=
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees, localAlignment⟩ :=
     related.core.validation
   obtain ⟨fieldKind, objectCompiled, fieldCompiled, _annotationFound,
       _scalarSupported⟩ := validated.sset_compiler agrees
@@ -10033,7 +9933,8 @@ theorem ConcreteStructuredAlignedValidationState.admit_return
         SemanticValueAtAbi expectedResult sourceValue) :
     ConcreteStructuredCodeStepAdmission context sourceModule externals
       expectedResult facts sourceRuntime sourceEnv 0 (.return result) := by
-  obtain ⟨_joins, _locals, _validatorFacts, _sharing, focus, agrees⟩ :=
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, focus, agrees,
+      _localAlignment⟩ :=
     validated
   obtain ⟨actualResult, resultFound, resultCompatible⟩ := focus.return_eq
   exact .ret (agrees resultFound) resultCompatible resultSemantic
@@ -10306,18 +10207,31 @@ theorem ConcreteStructuredAlignedValidationState.selectedCase
     (sourceResult : SourceCaseResult sourceRuntime sourceEnv cases selected) :
     ConcreteStructuredAlignedValidationState program context functionResult
       selected := by
-  obtain ⟨joins, locals, facts, sharing, focus, agrees⟩ := validated
+  obtain ⟨joins, locals, facts, sharing, focus, agrees, localAlignment⟩ := validated
   obtain ⟨_discrValue, tag, _found, _tagged, chosen⟩ := sourceResult
   rcases selected_alt_mem_of_chooseAlt chosen with constructor | default
   · obtain ⟨info, member⟩ := constructor
     obtain ⟨_mode, _fits, selectedFocus⟩ := focus.constructorAlt
       (by simpa using member)
+    have selectedLocalAlignment := localAlignment.caseAlternative
+      (alternative := Lean.Compiler.LCNF.Alt.ctorAlt info selected)
+      (by simpa using member)
     exact ⟨joins, locals,
       Fir.Wasm.insertSupportedCaseFact facts cases.discr info.cidx,
-      sharing, selectedFocus, agrees⟩
-  · exact ⟨joins, locals,
+      sharing, selectedFocus, agrees, by
+        change ConcreteResidualLocalAlignment context program
+          (Lean.Compiler.LCNF.Alt.ctorAlt info selected).getCode
+        exact selectedLocalAlignment⟩
+  · have selectedLocalAlignment := localAlignment.caseAlternative
+      (alternative := Lean.Compiler.LCNF.Alt.default selected)
+      (by simpa using default)
+    exact ⟨joins, locals,
       Fir.Wasm.eraseSupportedCaseFact facts cases.discr,
-      sharing, focus.defaultAlt (by simpa using default), agrees⟩
+      sharing, focus.defaultAlt (by simpa using default), agrees,
+      by
+        change ConcreteResidualLocalAlignment context program
+          (Lean.Compiler.LCNF.Alt.default selected).getCode
+        exact selectedLocalAlignment⟩
 
 /-- Reassemble a closed active-code state when structured case testing has
 pushed target-only label frames.  Source caller validation is unchanged;
@@ -10713,7 +10627,7 @@ theorem ConcreteStructuredValidatedCodeCoreRel.productionCasesSupported_of_valid
     {selected : Lean.Compiler.LCNF.Code .impure}
     (sourceResult : SourceCaseResult sourceRuntime sourceEnv cases selected) :
     ProductionCasesSupported context sourceRuntime sourceEnv cases selected := by
-  obtain ⟨joins, locals, validatorFacts, sharing, validated, agrees⟩ :=
+  obtain ⟨joins, locals, validatorFacts, sharing, validated, agrees, localAlignment⟩ :=
     related.validation
   obtain ⟨discrKind, mode, discrFound, modeFound, _resultKnown,
       _resultCompatible, normalizedCheck, alternatives⟩ := validated.cases_eq
@@ -11102,8 +11016,6 @@ theorem ConcreteStructuredSourceAdmissionSafeAt.lazy_of_compiler
     {resultKind declaredResultKind : AbiKind}
     (validated : ConcreteStructuredAlignedValidationState program context
       expectedResult (.let decl continuation))
-    (localAlignment : ConcreteResidualLocalAlignment context program
-      (.let decl continuation))
     (contextProgram : context.program = program)
     (site : LazyCacheCallCompilerSite context decl declaration
       sourceDeclaration resultKind declaredResultKind)
@@ -11119,8 +11031,7 @@ theorem ConcreteStructuredSourceAdmissionSafeAt.lazy_of_compiler
     ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
       expectedResult facts sourceRuntime sourceEnv source
       (.let decl continuation) := by
-  have call := validated.lazyCacheCallSupported localAlignment contextProgram
-    site
+  have call := validated.lazyCacheCallSupported contextProgram site
   exact .lazy_of_runtimeLookup call generated missCapability
 
 /-- The compatibility arm of schema admission excludes exactly the two object
