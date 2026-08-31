@@ -21,6 +21,16 @@ def preserveAliasedBytes (first second : ByteArray) : ByteArray × ByteArray :=
 def optionNatChangedFixture (prior next : Option Nat) : Bool :=
   prior != next
 
+@[extern "fir_source_external_adapter_fixture"]
+opaque externalAdapterFixture (value : UInt32) : UInt32
+
+@[noinline] def invokeUInt32Fixture (function : UInt32 → UInt32)
+    (value : UInt32) : UInt32 :=
+  function value
+
+def externalAdapterEntryFixture (value : UInt32) : UInt32 :=
+  invokeUInt32Fixture externalAdapterFixture value
+
 #guard Fir.Wasm.Emit.CompilerPrivate.specializationCallerCandidates
     `List.foldl._at_.Array.appendList.spec_0._redArg == #[`Array.appendList]
 
@@ -337,6 +347,46 @@ run_cmd do
       throwError "unavailable multi-entry export reported the wrong error kind: {repr error}"
   | .ok _ =>
       throwError "unavailable multi-entry export did not fail closed"
+
+run_cmd do
+  let raw := ``externalAdapterFixture
+  let boxed := raw.str "_boxed"
+  let source ← liftCoreM <|
+    compileEntryIndividuallyInternalized ``externalAdapterEntryFixture
+      #[raw.toString, boxed.toString]
+  unless source.externalNames.contains raw && !source.externalNames.contains boxed do
+    throwError
+      "external-adapter fixture did not retain its raw frontier and local boxed adapter: {source.externalNames}"
+  let some boxedDeclaration := source.program.findDecl? boxed |
+    throwError "external-adapter fixture did not generate {boxed}"
+  match boxedDeclaration.value with
+  | .code _ => pure ()
+  | .extern _ => throwError "external-adapter fixture generated {boxed} as an import"
+  let deferredDecls := source.program.decls.map fun declaration =>
+    if declaration.name == boxed then
+      { declaration with value := .extern { entries := [.opaque] }, inlineAttr? := none }
+    else
+      declaration
+  let deferredProgram : Fir.LeanIR.ImpureProgram := { decls := deferredDecls }
+  let deferred := { source with
+    program := deferredProgram
+    externalNames := source.externalNames.push boxed
+    forms := Fir.Validation.Lcnf.collectForms deferredProgram }
+  let internalized ← liftCoreM <| internalizeExternalBoxedAdapters deferred #[raw]
+  unless internalized.externalNames.contains raw do
+    throwError "external-adapter internalization consumed raw host declaration {raw}"
+  if internalized.externalNames.contains boxed then
+    throwError "external-adapter internalization retained generated adapter import {boxed}"
+  let some boxedDeclaration := internalized.program.findDecl? boxed |
+    throwError "external-adapter internalization lost generated declaration {boxed}"
+  match boxedDeclaration.value with
+  | .code _ => pure ()
+  | .extern _ =>
+      throwError "external-adapter internalization did not install code for {boxed}"
+  match Fir.Wasm.validateSupported internalized.program with
+  | .ok _ => pure ()
+  | .error error =>
+      throwError "internalized external adapter failed Wasm admission: {repr error}"
 
 run_cmd do
   let result ← liftCoreM <|

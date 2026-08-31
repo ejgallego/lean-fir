@@ -238,6 +238,76 @@ private def capturedExternDecl (sig : LCNF.Signature .impure)
     value := .extern data
     inlineAttr? := none }
 
+private def declaredExternalBehindBoxedAdapter? (externalNames : Array Name) :
+    Name → Option Name
+  | .str declaration "_boxed" =>
+      if externalNames.contains declaration then some declaration else none
+  | _ => none
+
+/--
+Internalize Lean's generated boxed adapters for an explicit source-level
+external frontier while leaving the named raw declarations external.
+
+Some source compilers expose host operations through their own declaration
+attributes rather than Lean's `@[extern]`. Their imported final LCNF still has
+the ordinary raw declaration and `._boxed` call boundary, but FIR must not
+compile the opaque source fallback or retain the generated adapter as a second
+host import. Re-run Lean's public `LCNF.addBoxedVersions` pass over the exact
+captured raw signatures and replace only matching unresolved adapters. This
+keeps boxed ABI policy upstream-owned and does not teach FIR about a producer's
+custom attribute.
+-/
+def internalizeExternalBoxedAdapters (artifact : Fir.Validation.Lcnf.Artifact)
+    (externalNames : Array Name) : CoreM Fir.Validation.Lcnf.Artifact := do
+  let boxedSource? := declaredExternalBehindBoxedAdapter? externalNames
+  let boxedExternalNames := artifact.externalNames.filter (boxedSource? · |>.isSome)
+  if boxedExternalNames.isEmpty then
+    return artifact
+  let mut rawDeclarations : Array (LCNF.Decl .impure) := #[]
+  let mut recoveredRawDeclarations : Array (LCNF.Decl .impure) := #[]
+  let environment ← getEnv
+  for boxedName in boxedExternalNames do
+    let some rawName := boxedSource? boxedName |
+      throwError "internal error: boxed external `{boxedName}` lost its source declaration"
+    let declaration ← match artifact.program.findDecl? rawName with
+      | some declaration => pure declaration
+      | none => do
+          let some signature ← LCNF.getImpureSignature? rawName |
+            throwError
+              "boxed external `{boxedName}` has no captured or environment signature for `{rawName}`"
+          let data := getExternAttrData? environment rawName |>.getD
+            { entries := [.opaque] }
+          let declaration := capturedExternDecl signature data
+          recoveredRawDeclarations := recoveredRawDeclarations.push declaration
+          pure declaration
+    match declaration.value with
+    | .code _ =>
+        throwError "boxed external `{boxedName}` names local raw declaration `{rawName}`"
+    | .extern _ => pure ()
+    unless rawDeclarations.any (·.name == rawName) do
+      rawDeclarations := rawDeclarations.push declaration
+  let generated ← withoutModifyingEnv <|
+    LCNF.CompilerM.run (LCNF.addBoxedVersions rawDeclarations) (phase := .impure)
+  let mut replacements : Array (LCNF.Decl .impure) := #[]
+  for boxedName in boxedExternalNames do
+    let some declaration := generated.find? (·.name == boxedName) |
+      throwError
+        "Lean ExplicitBoxing did not regenerate required external adapter `{boxedName}`"
+    match declaration.value with
+    | .code _ => replacements := replacements.push declaration
+    | .extern _ =>
+        throwError "Lean ExplicitBoxing regenerated `{boxedName}` as an external declaration"
+  let decls := artifact.program.decls.map (fun declaration =>
+    replacements.find? (·.name == declaration.name) |>.getD declaration) ++
+      recoveredRawDeclarations
+  let program : Fir.LeanIR.ImpureProgram := { decls }
+  let externalNames := rawDeclarations.foldl (init := artifact.externalNames) fun names raw =>
+    if names.contains raw.name then names else names.push raw.name
+  return { artifact with
+    program
+    externalNames := externalNames.filter (!boxedExternalNames.contains ·)
+    forms := Fir.Validation.Lcnf.collectForms program }
+
 private def appendCapturedDecl (decls : Array (LCNF.Decl .impure))
     (decl : LCNF.Decl .impure) : Array (LCNF.Decl .impure) :=
   match decls.find? (fun existing => existing.name == decl.name) with
@@ -832,6 +902,85 @@ def compileEntriesFinalCapturedInternalized (entries : Array Name)
   | .ok artifact => return artifact
   | .error message => throwError message
 
+private def sourceOwnersCallingUnresolvedDeclarations
+    (artifact : Fir.Validation.Lcnf.Artifact)
+    (retainedExternalNames : Array String) :
+    CoreM (Array SourceCompilationRoot) := do
+  let environment ← getEnv
+  let unresolvedSourceNames ← artifact.externalNames.filterM fun name => do
+    if retainedExternalNames.contains name.toString then return false
+    return (← sourceCompilationRoot? environment name).isSome
+  if unresolvedSourceNames.isEmpty then return #[]
+  artifact.program.decls.foldlM (init := #[]) fun roots declaration => do
+    if artifact.externalNames.contains declaration.name then return roots
+    let references := match declaration.value with
+      | .code code => collectCodeReferences #[] code
+      | .extern _ => #[]
+    unless references.any unresolvedSourceNames.contains do return roots
+    let some source ← sourceDeclarationAncestor? environment declaration.name |
+      return roots
+    unless ← sourceDeclarationIsCompilable environment source do return roots
+    return addSourceCompilationRoot roots { name := source }
+
+private partial def importedClosureReachesAny (targets : Array Name)
+    (pending : List Name) (seen : NameSet := {}) : CoreM Bool := do
+  let some name := pending.head? | return false
+  let pending := pending.tail!
+  if targets.contains name then return true
+  if seen.contains name then
+    return ← importedClosureReachesAny targets pending seen
+  let seen := seen.insert name
+  let references ← match ← LCNF.getLocalImpureDecl? name with
+    | some declaration => pure <| match declaration.value with
+      | .code code => collectCodeReferences #[] code
+      | .extern _ => #[]
+    | none => pure #[]
+  importedClosureReachesAny targets (references.toList ++ pending) seen
+
+private partial def sourceValueReachesAny (environment : Environment)
+    (targets : Array Name) (pending : List Name) (seen : NameSet := {}) : Bool :=
+  match pending with
+  | [] => false
+  | name :: pending =>
+    if targets.contains name then true
+    else if seen.contains name then
+      sourceValueReachesAny environment targets pending seen
+    else
+      let seen := seen.insert name
+      let references := match environment.find? name with
+        | some declaration => match declaration.value? (allowOpaque := true) with
+          | some value => value.getUsedConstants
+          | none => #[]
+        | none => #[]
+      sourceValueReachesAny environment targets (references.toList ++ pending) seen
+
+private partial def addSourceBridgeRoots (environment : Environment)
+    (unresolvedSourceNames sourceTargetNames : Array Name)
+    (roots : Array SourceCompilationRoot)
+    (index : Nat := 0) : CoreM (Array SourceCompilationRoot) := do
+  if h : index < roots.size then
+    let root := roots[index]
+    let usedConstants := match environment.find? root.name with
+      | some declaration => match declaration.value? (allowOpaque := true) with
+        | some value => value.getUsedConstants
+        | none => #[]
+      | none => #[]
+    let mut roots := roots
+    for dependency in usedConstants do
+      let importedReach ← importedClosureReachesAny unresolvedSourceNames [dependency]
+      let sourceReach :=
+        sourceValueReachesAny environment sourceTargetNames [dependency]
+      unless importedReach || sourceReach do
+        continue
+      let some source ← sourceDeclarationAncestor? environment dependency |
+        continue
+      unless ← sourceDeclarationIsCompilable environment source do continue
+      roots := addSourceCompilationRoot roots { name := source }
+    addSourceBridgeRoots environment unresolvedSourceNames sourceTargetNames
+      roots (index + 1)
+  else
+    return roots
+
 /--
 Close the source dependencies left by an exact module-wise replay through one
 fresh final-LCNF compiler unit. The replayed module's declarations keep their
@@ -840,19 +989,50 @@ prebuilt modules without postponed groups are recompiled. Explicit runtime
 frontier names remain external.
 -/
 def internalizeFinalDependencies (artifact : Fir.Validation.Lcnf.Artifact)
-    (retainedExternalNames : Array String := #[]) :
+    (retainedExternalNames : Array String := #[])
+    (retainedRoots : Array Name := #[]) :
     CoreM Fir.Validation.Lcnf.Artifact := do
-  let localNames := artifact.program.decls.filterMap fun declaration =>
-    if artifact.externalNames.contains declaration.name then none
-    else some declaration.name
-  let roots ← discoveredFinalSourceRoots artifact retainedExternalNames localNames
+  /- An unresolved generated declaration can belong to a source caller that is
+  already local. Do not exclude that caller here: the coherent source-unit
+  overlay below is what replaces its stale imported body. -/
+  let directRoots ← discoveredFinalSourceRoots artifact retainedExternalNames #[]
+  let callerRoots ←
+    sourceOwnersCallingUnresolvedDeclarations artifact retainedExternalNames
+  let roots := callerRoots.foldl (addSourceCompilationRoot) directRoots
+  let environment ← getEnv
+  let unresolvedSourceNames ← artifact.externalNames.filterM fun name => do
+    if retainedExternalNames.contains name.toString then return false
+    return (← sourceCompilationRoot? environment name).isSome
+  let sourceTargetNames := directRoots.map (·.name)
+  let roots ← addSourceBridgeRoots environment unresolvedSourceNames
+    sourceTargetNames roots
   let dependencyNames := roots.foldl (init := #[]) fun names root =>
     (#[root.name] ++ root.companions).foldl addUniqueName names
   let some dependencyEntry := dependencyNames[0]? | return artifact
-  let dependencies ← compileEntryFinalCapturedInternalized dependencyEntry
-    (dependencyNames.extract 1 dependencyNames.size) retainedExternalNames
-  let merged ← mergeSeparatelyCompiledArtifacts artifact.entry #[artifact, dependencies]
-  match pruneUnreachableDeclarations merged with
+  let dependencies ← Core.prependError
+      m!"Failed to rebuild unresolved source closure {dependencyNames}" do
+    compileEntryFinalCapturedInternalized dependencyEntry
+      (dependencyNames.extract 1 dependencyNames.size) retainedExternalNames
+  /- The freshly compiled dependency unit is an atomic source closure. An
+  imported caller can reference a bootstrap-generated specialization whose
+  exact name is not regenerated by the current compiler; keeping that caller
+  while merely appending its new closure would leave the stale reference
+  reachable. Let the coherent new unit replace every declaration it supplies,
+  while declarations it still treats as external continue to resolve from the
+  original artifact. -/
+  let replacementNames := dependencies.program.decls.filterMap fun declaration =>
+    if dependencies.externalNames.contains declaration.name then none
+    else some declaration.name
+  let retainedDecls := artifact.program.decls.filter fun declaration =>
+    !replacementNames.contains declaration.name
+  let retainedProgram : Fir.LeanIR.ImpureProgram := { decls := retainedDecls }
+  let retainedArtifact := { artifact with
+    program := retainedProgram
+    externalNames := artifact.externalNames.filter (!replacementNames.contains ·)
+    forms := Fir.Validation.Lcnf.collectForms retainedProgram }
+  let merged ← mergeSeparatelyCompiledArtifacts artifact.entry
+    #[retainedArtifact, dependencies]
+  match pruneUnreachableDeclarations merged retainedRoots with
   | .ok merged => return merged
   | .error message => throwError message
 
