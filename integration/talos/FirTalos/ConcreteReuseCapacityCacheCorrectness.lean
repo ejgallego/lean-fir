@@ -9787,7 +9787,7 @@ inductive LazyCacheCallSupported (context : Fir.Wasm.Context) :
       (targetResultEq :
         Fir.Wasm.effectiveDeclarationResultKind? sourceDeclaration =
           some resultKind)
-      (resultRefines : resultKind.refines declaredResultKind = true)
+      (resultCompatible : resultKind.leanCompatible declaredResultKind = true)
       (paramsEq : sourceDeclaration.params.isEmpty = true)
       (resultCompiled :
         Fir.Wasm.getLocal context decl.fvarId =
@@ -9808,7 +9808,7 @@ theorem LazyCacheCallSupported.effectiveResult
     Fir.Wasm.effectiveDeclarationResultKind? sourceDeclaration =
       some resultKind := by
   cases call with
-  | intro _valueEq _kindEq _targetEq targetResultEq _resultRefines _paramsEq
+  | intro _valueEq _kindEq _targetEq targetResultEq _resultCompatible _paramsEq
       _resultCompiled =>
       exact targetResultEq
 
@@ -10146,7 +10146,7 @@ theorem BudgetedCapacityPreservingLazyStep.miss_of_supportedFunctionCompiler
             some (eraseReuseCapacityFact facts decl.fvarId) ∧
           LazyCacheGlobalsRel nextWitness sourceModule nextRuntime nextStore := by
   rcases supported with
-    ⟨⟨valueEq, kindEq, targetEq, targetResultEq, _resultRefines, paramsEq,
+    ⟨⟨valueEq, kindEq, targetEq, targetResultEq, _resultCompatible, paramsEq,
       resultCompiled⟩, bodyEq⟩
   obtain ⟨targetResultKind, cacheIndex, declarationId, cacheSetId,
       recoveredTargetResultEq, cacheEq, declarationCall, cacheSetCall, _,
@@ -10234,7 +10234,7 @@ theorem
     (notTObject : resultKind ≠ .tobject) :
     OrdinaryPersistenceTransport sourceRuntime nextRuntime := by
   rcases supported with
-    ⟨⟨valueEq, kindEq, targetEq, targetResultEq, _resultRefines, paramsEq,
+    ⟨⟨valueEq, kindEq, targetEq, targetResultEq, _resultCompatible, paramsEq,
       resultCompiled⟩, bodyEq⟩
   obtain ⟨targetResultKind, cacheIndex, declarationId, cacheSetId,
       recoveredTargetResultEq, cacheEq, declarationCall, cacheSetCall,
@@ -10326,7 +10326,7 @@ theorem BudgetedCapacityPreservingLazyStep.hit_of_compiler
             some (eraseReuseCapacityFact facts decl.fvarId) ∧
           LazyCacheGlobalsRel nextWitness sourceModule nextRuntime nextStore := by
   rcases supported with
-    ⟨valueEq, kindEq, targetEq, targetResultEq, _resultRefines, paramsEq,
+    ⟨valueEq, kindEq, targetEq, targetResultEq, _resultCompatible, paramsEq,
       resultCompiled⟩
   obtain ⟨runtimeEq, semanticFound⟩ :=
     SourceLazyLetResult.hit_cacheFacts_of_valueEq valueEq targetEq paramsEq
@@ -10381,7 +10381,7 @@ theorem SourceLazyLetResult.hit_ordinaryTransport_of_supported
         decl continuation nextRuntime sourceValue) :
     OrdinaryPersistenceTransport sourceRuntime nextRuntime := by
   rcases supported with
-    ⟨valueEq, kindEq, targetEq, _targetResultEq, _resultRefines, paramsEq,
+    ⟨valueEq, kindEq, targetEq, _targetResultEq, _resultCompatible, paramsEq,
       resultCompiled⟩
   obtain ⟨runtimeEq, semanticFound⟩ :=
     SourceLazyLetResult.hit_cacheFacts_of_valueEq valueEq targetEq paramsEq
@@ -17418,7 +17418,7 @@ theorem
       resultKind calleeCode calleeFunction calleeResultFacts call loweredRow
       resultClassified notObject notTObject calleeEvaluation =>
       rcases call with
-        ⟨⟨valueEq, kindEq, targetEq, targetResultEq, resultRefines, paramsEq,
+        ⟨⟨valueEq, kindEq, targetEq, targetResultEq, resultCompatible, paramsEq,
           resultCompiled⟩, bodyEq⟩
       have programEq : context.program = program := spec.contextProgram
       subst program
@@ -17458,7 +17458,7 @@ theorem
           LazyCacheInternalMissSupported context decl declaration
             sourceDeclaration resultKind calleeCode :=
         .intro
-          (.intro valueEq kindEq targetEq targetResultEq resultRefines paramsEq
+          (.intro valueEq kindEq targetEq targetResultEq resultCompatible paramsEq
             resultCompiled)
           bodyEq
       have publication :

@@ -3571,6 +3571,84 @@ theorem DirectInternalCallSite.strictObjectToTObjectValidationRegression
     exact congrArg Prod.snd kindEq.symm
   exact ⟨kindEq, compiledAtObject, by simp [calleeObject, publicTObject]⟩
 
+/-- Static lowering facts for a nullary named call, excluding only the
+compatibility check already performed by residual validation.
+
+This is deliberately smaller than `LazyCacheCallSupported`: the compiler row
+selects the destination lane, while the validated current node proves that
+the declaration result is compatible with the public `let` annotation. -/
+structure LazyCacheCallCompilerSite
+    (context : Fir.Wasm.Context)
+    (decl : Lean.Compiler.LCNF.LetDecl .impure)
+    (declaration : Lean.Name)
+    (sourceDeclaration : Lean.Compiler.LCNF.Decl .impure)
+    (resultKind declaredResultKind : AbiKind) : Prop where
+  valueEq : decl.value = .fap declaration #[]
+  declaredFound :
+    Fir.Wasm.abiValueKind? decl.type = some declaredResultKind
+  targetEq :
+    context.program.findDecl? declaration = some sourceDeclaration
+  targetResultEq :
+    Fir.Wasm.effectiveDeclarationResultKind? sourceDeclaration =
+      some resultKind
+  paramsEq : sourceDeclaration.params.isEmpty = true
+
+/-- Residual production validation discharges the exact named-result
+compatibility field of a compiler-selected lazy call.
+
+No directional subtype claim is manufactured: the conclusion stores the
+same `leanCompatible` check executed by `supportedNamedCall`. -/
+theorem ConcreteStructuredAlignedValidationState.lazyCacheCallSupported
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionResult : Fir.Wasm.AbiKind}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {declaration : Lean.Name}
+    {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
+    {resultKind declaredResultKind : AbiKind}
+    (validated : ConcreteStructuredAlignedValidationState program context
+      functionResult (.let decl continuation))
+    (localAlignment : ConcreteResidualLocalAlignment context program
+      (.let decl continuation))
+    (contextProgram : context.program = program)
+    (site : LazyCacheCallCompilerSite context decl declaration
+      sourceDeclaration resultKind declaredResultKind) :
+    LazyCacheCallSupported context decl declaration sourceDeclaration
+      resultKind := by
+  subst program
+  obtain ⟨joins, locals, facts, sharing, focus, _agrees⟩ := validated
+  obtain ⟨_selectedKind, supported, _continuation⟩ := focus.let_eq
+  have supportedCall :
+      Fir.Wasm.supportedNamedCall context.program locals declaredResultKind
+        declaration #[] = true := by
+    by_contra rejected
+    have rejectedEq :
+        Fir.Wasm.supportedNamedCall context.program locals declaredResultKind
+          declaration #[] = false :=
+      Bool.eq_false_of_not_eq_true rejected
+    unfold Fir.Wasm.supportedLetDeclKind? at supported
+    simp [site.declaredFound, site.valueEq, rejectedEq] at supported
+  have compatible :
+      resultKind.leanCompatible declaredResultKind = true :=
+    supportedNamedCall_result_compatible supportedCall site.targetEq
+      site.targetResultEq
+  have valueKind :
+      Fir.Wasm.letValueKind decl = .ok declaredResultKind := by
+    simp [Fir.Wasm.letValueKind, site.valueEq,
+      checkedAbiKind_of_abiValueKind? site.declaredFound]
+  have effective :
+      Fir.Wasm.effectiveLetValueKind context.program decl =
+        .ok resultKind := by
+    unfold Fir.Wasm.effectiveLetValueKind
+    rw [valueKind, site.valueEq]
+    simp only [Bind.bind, Except.bind, pure, Except.pure]
+    simp [site.targetEq, site.targetResultEq, compatible]
+  have resultCompiled := localAlignment.letHead effective
+  exact .intro site.valueEq
+    (checkedAbiKind_of_abiValueKind? site.declaredFound) site.targetEq
+    site.targetResultEq compatible site.paramsEq resultCompiled
+
 /-- Lazy named calls and executable validation retain the same effective
 declaration result kind.  The public `let` ABI remains only a compatibility
 boundary and need not equal that precise compiler-local kind. -/
@@ -3587,7 +3665,7 @@ private theorem LazyCacheCallSupported.resultCompiledForValidation
         Fir.Wasm.getLocal context decl.fvarId =
           .ok (.localGet decl.fvarId, kind) := by
   rcases call with
-    ⟨valueEq, kindEq, targetEq, targetResultEq, resultRefines, _paramsEq,
+    ⟨valueEq, kindEq, targetEq, targetResultEq, resultCompatible, _paramsEq,
       resultCompiled⟩
   rename_i declaredResultKind
   intro locals kind supported
@@ -3595,14 +3673,12 @@ private theorem LazyCacheCallSupported.resultCompiledForValidation
   have valueKind :
       Fir.Wasm.letValueKind decl = .ok declaredResultKind := by
     simp [Fir.Wasm.letValueKind, valueEq, kindEq]
-  have compatible :=
-    Fir.Wasm.AbiKind.leanCompatible_of_refines resultRefines
   have callEffective :
       Fir.Wasm.effectiveLetValueKind context.program decl = .ok resultKind := by
     unfold Fir.Wasm.effectiveLetValueKind
     rw [valueKind, valueEq]
     simp only [Bind.bind, Except.bind, pure, Except.pure]
-    simp [targetEq, targetResultEq, compatible]
+    simp [targetEq, targetResultEq, resultCompatible]
   have selectedKindEq : resultKind = kind :=
     Except.ok.inj (callEffective.symm.trans effective)
   subst kind
@@ -10964,6 +11040,88 @@ inductive ConcreteStructuredSourceAdmissionSafeAt
       ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
         expectedResult facts sourceRuntime sourceEnv source
         (.sset objectId slotIndex byteOffset fieldId type continuation)
+
+/-- Construct lazy source safety without asking a client to classify the
+current cache lookup as a hit or miss.
+
+The remaining implication is exactly the implementation boundary of the
+current simulator: only an empty cache needs an internal, non-object
+initializer.  Cached values of any supported kind use the hit branch without
+that restriction. -/
+theorem ConcreteStructuredSourceAdmissionSafeAt.lazy_of_runtimeLookup
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {externals : ExternalImpl}
+    {expectedResult : AbiKind}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {source : MachineState}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {declaration : Lean.Name}
+    {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
+    {resultKind : AbiKind}
+    (call : LazyCacheCallSupported context decl declaration sourceDeclaration
+      resultKind)
+    (generated : LazyCacheGeneratedEnvironment context sourceModule)
+    (missCapability :
+      findGlobal? sourceRuntime.globals declaration = none →
+        ∃ calleeCode,
+          LazyCacheInternalMissSupported context decl declaration
+              sourceDeclaration resultKind calleeCode ∧
+            Fir.Wasm.abiKind? sourceDeclaration.type =
+              .ok (some resultKind) ∧
+            resultKind ≠ .object ∧ resultKind ≠ .tobject) :
+    ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv source
+      (.let decl continuation) :=
+  .lazy call generated
+    (ConcreteStructuredLazyReadyAdmission.of_runtimeLookup call generated
+      sourceRuntime missCapability)
+
+/-- Compiler-site form of lazy source safety.
+
+Residual validation supplies the named-result compatibility check, and the
+current runtime supplies the branch.  Thus neither a `LazyCacheCallSupported`
+record nor a hit/miss witness is a theorem-client premise. -/
+theorem ConcreteStructuredSourceAdmissionSafeAt.lazy_of_compiler
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {externals : ExternalImpl}
+    {expectedResult : AbiKind}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {source : MachineState}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {declaration : Lean.Name}
+    {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
+    {resultKind declaredResultKind : AbiKind}
+    (validated : ConcreteStructuredAlignedValidationState program context
+      expectedResult (.let decl continuation))
+    (localAlignment : ConcreteResidualLocalAlignment context program
+      (.let decl continuation))
+    (contextProgram : context.program = program)
+    (site : LazyCacheCallCompilerSite context decl declaration
+      sourceDeclaration resultKind declaredResultKind)
+    (generated : LazyCacheGeneratedEnvironment context sourceModule)
+    (missCapability :
+      findGlobal? sourceRuntime.globals declaration = none →
+        ∃ calleeCode,
+          LazyCacheInternalMissSupported context decl declaration
+              sourceDeclaration resultKind calleeCode ∧
+            Fir.Wasm.abiKind? sourceDeclaration.type =
+              .ok (some resultKind) ∧
+            resultKind ≠ .object ∧ resultKind ≠ .tobject) :
+    ConcreteStructuredSourceAdmissionSafeAt context sourceModule externals
+      expectedResult facts sourceRuntime sourceEnv source
+      (.let decl continuation) := by
+  have call := validated.lazyCacheCallSupported localAlignment contextProgram
+    site
+  exact .lazy_of_runtimeLookup call generated missCapability
 
 /-- The compatibility arm of schema admission excludes exactly the two object
 field shapes whose legacy proofs quantify over arbitrary witnesses. -/

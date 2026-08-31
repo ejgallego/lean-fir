@@ -1,6 +1,7 @@
 import FirTalos.ConcreteTraceSimulation
 import FirTalos.ConcreteCompilerCorrectness
 import FirTalos.ConcreteReuseCapacityCacheCorrectness
+import FirTalos.ConcreteResidualLocalAlignment
 import FirTalos.Correctness.StructuredWasmAdequacy
 
 /-!
@@ -5918,7 +5919,7 @@ theorem ConcreteStructuredCodeFocus.advance_lazyHit_of_compiler
                     sourceAfter.frames = source.frames ∧
                       targetAfter.frames = target.frames := by
   rcases supported with
-    ⟨valueEq, kindEq, targetEq, targetResultEq, _resultRefines, paramsEq,
+    ⟨valueEq, kindEq, targetEq, targetResultEq, _resultCompatible, paramsEq,
       resultCompiled⟩
   obtain ⟨runtimeEq, semanticFound⟩ :=
     SourceLazyLetResult.hit_cacheFacts_of_valueEq valueEq targetEq paramsEq
@@ -6183,7 +6184,7 @@ theorem ConcreteStructuredCodeFocus.advance_lazy_stage
         source.frames targetStore callerLocals targetRest target.frames witness
         cacheIndex declarationId cacheSetId resultIndex sourceAfter target := by
   rcases call with
-    ⟨valueEq, kindEq, targetEq, targetResultEq, _resultRefines, paramsEq,
+    ⟨valueEq, kindEq, targetEq, targetResultEq, _resultCompatible, paramsEq,
       resultCompiled⟩
   obtain ⟨valueCode, targetValue, targetRest, resultIndex, valueCompiled,
       valueAdapted, resultFound, continuationAdapted, targetCodeEq⟩ :=
@@ -6235,7 +6236,7 @@ theorem ConcreteStructuredCodeFocus.advance_lazy_stage
       ConcreteStructuredLazyCallReadyFocus context sourceModule sourceFunction
         labels
         (LazyCacheCallSupported.intro valueEq kindEq targetEq targetResultEq
-          _resultRefines paramsEq resultCompiled)
+          _resultCompatible paramsEq resultCompiled)
         generated sourceRuntime callerEnv continuation source.joins source.frames
         targetStore callerLocals targetRest target.frames witness cacheIndex
         declarationId cacheSetId resultIndex staged target := by
@@ -6264,7 +6265,7 @@ theorem ConcreteStructuredCodeFocus.advance_lazy_stage
       ConcreteStructuredLazyCallReadyFocus context sourceModule sourceFunction
         labels
         (LazyCacheCallSupported.intro valueEq kindEq targetEq targetResultEq
-          _resultRefines paramsEq resultCompiled)
+          _resultCompatible paramsEq resultCompiled)
         generated sourceRuntime callerEnv continuation source.joins source.frames
         targetStore callerLocals targetRest target.frames witness cacheIndex
         declarationId cacheSetId resultIndex sourceAfter target := by
@@ -16872,7 +16873,7 @@ theorem
       notObject notTObject sourceStep callee transfer continued calleeIH
       continuedIH =>
       rcases call with
-        ⟨⟨valueEq, kindEq, targetEq, targetResultEq, resultRefines, paramsEq,
+        ⟨⟨valueEq, kindEq, targetEq, targetResultEq, resultCompatible, paramsEq,
           resultCompiled⟩, bodyEq⟩
       have programEq : context.program = program := functionSpec.contextProgram
       subst program
@@ -19979,6 +19980,44 @@ inductive ConcreteStructuredLazyReadyAdmission
       ConcreteStructuredLazyReadyAdmission context sourceModule call generated
         sourceRuntime
 
+/-- Select the lazy-cache branch from the current semantic global table.
+
+The hit/miss choice is executable state, not compiler provenance.  A client
+therefore supplies only the capability needed if the lookup is empty; a hit
+requires no initializer-body or result-shape certificate.  This prevents a
+source invariant from choosing a branch that disagrees with the current
+runtime while keeping the still-supported internal/non-heap miss boundary
+explicit. -/
+theorem ConcreteStructuredLazyReadyAdmission.of_runtimeLookup
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {declaration : Lean.Name}
+    {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
+    {resultKind : AbiKind}
+    (call : LazyCacheCallSupported context decl declaration sourceDeclaration
+      resultKind)
+    (generated : LazyCacheGeneratedEnvironment context sourceModule)
+    (sourceRuntime : RuntimeState)
+    (missCapability :
+      findGlobal? sourceRuntime.globals declaration = none →
+        ∃ calleeCode,
+          LazyCacheInternalMissSupported context decl declaration
+              sourceDeclaration resultKind calleeCode ∧
+            Fir.Wasm.abiKind? sourceDeclaration.type =
+              .ok (some resultKind) ∧
+            resultKind ≠ .object ∧ resultKind ≠ .tobject) :
+    ConcreteStructuredLazyReadyAdmission context sourceModule call generated
+      sourceRuntime := by
+  cases lookup : findGlobal? sourceRuntime.globals declaration with
+  | none =>
+      obtain ⟨calleeCode, internal, resultClassified, notObject,
+          notTObject⟩ := missCapability lookup
+      exact .miss calleeCode internal resultClassified notObject notTObject
+        lookup
+  | some sourceValue =>
+      exact .hit sourceValue lookup
+
 theorem ConcreteStructuredLazyCallReadyCoreRel.observes
     {source : MachineState} {target : StructuredWasmState Host}
     (related : ConcreteStructuredLazyCallReadyCoreRel program context
@@ -20581,7 +20620,7 @@ theorem ConcreteStructuredLazyCallReadyCoreRel.advance_miss_of_step
               targetFrames := by
   rcases internal with ⟨internalCall, bodyEq⟩
   rcases call with
-    ⟨valueEq, kindEq, targetEq, targetResultEq, resultRefines, paramsEq,
+    ⟨valueEq, kindEq, targetEq, targetResultEq, _resultCompatible, paramsEq,
       resultCompiled⟩
   have declarationFound :
       program.findDecl? declaration = some sourceDeclaration := by

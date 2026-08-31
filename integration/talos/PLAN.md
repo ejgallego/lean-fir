@@ -5258,9 +5258,18 @@ combines those cases, and
 `LazyCacheGeneratedEnvironment.ofCanonicalSupportedPipeline` now accepts no
 cache-specific client premise. No proof-side cache enumeration,
 validator-soundness premise, result-kind certificate, or caller-supplied
-initializer equation remains. The next admission slice is therefore only to
-export the already isolated generated hit/miss constructors from a validated
-successful source step.
+initializer equation remains. The current semantic global lookup now selects
+hit versus miss through `ConcreteStructuredLazyReadyAdmission.of_runtimeLookup`,
+and the lazy call stores the validator's actual `leanCompatible` condition
+rather than an unused directional refinement. This exposes the next two exact
+boundaries. `ConcreteResidualLocalAlignment` now derives the production
+destination-local lane from the compiler's exact effective-update traversal;
+`ConcreteSupportedFunction.residualLocalAlignment` establishes it at every
+lowered function root, while common `letHead` and `letContinuation` rules
+project it at residual nodes. The validated global relation must now carry
+that reusable row. Separately, miss execution must extend beyond the currently
+proved internal non-object initializer family to external and object-result
+initializers.
 `ofCanonicalSupportedPipeline` specializes this result to the exact context
 shape threaded by lowering, making context-side cache-name alignment
 definitional as well.

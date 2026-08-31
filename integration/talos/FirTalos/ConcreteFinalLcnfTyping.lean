@@ -850,6 +850,34 @@ theorem ConcreteSupportedFunction.getLocal_of_effective_mem
   unfold Fir.Wasm.getLocal
   rw [contextLocalsEq, rowFound]
 
+/-- A real successfully lowered function supplies the complete compiler local
+alignment at its source root.  Success of the production refinement pass also
+proves that effective-update collection cannot fail; no caller-selected local
+row or per-program certificate appears in the conclusion. -/
+theorem ConcreteSupportedFunction.residualLocalAlignment
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts) :
+    ConcreteResidualLocalAlignment context program functionCode := by
+  obtain ⟨row⟩ := spec.loweredInternalDeclaration
+  cases effectiveCollected :
+      Fir.Wasm.collectEffectiveLocalKindUpdates program functionCode with
+  | error fault =>
+      have localsRefined := row.localsRefined
+      unfold Fir.Wasm.refineNamedCallLocalKinds at localsRefined
+      rw [effectiveCollected] at localsRefined
+      contradiction
+  | ok updates =>
+      refine .intro updates effectiveCollected ?_
+      intro fvarId kind member
+      exact spec.getLocal_of_effective_mem effectiveCollected member
+
 /-- Static, compiler-owned portion of one ordinary internal named-call site.
 
 All dynamic interpreter equations are deliberately absent.  The two

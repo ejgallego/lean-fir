@@ -61,7 +61,14 @@ even when the execution may continue forever.
    supported-pipeline constructors no longer accept a validator-soundness
    premise. Internal-function and external-import table theorems now derive
    exact declaration/result-lane alignment as well, so the canonical generated
-   lazy-cache environment has no cache-specific client premise.
+   lazy-cache environment has no cache-specific client premise. The current
+   runtime lookup now selects hit versus miss, and lazy-call validation stores
+   only the compiler's actual `leanCompatible` result condition. Production
+   lowering now supplies a reusable residual-local alignment at the function
+   root, with structural `let` head/continuation projections; lazy admission
+   uses that common row rather than a cache-specific destination premise. The
+   remaining work is to carry the row through the validated global relation
+   and implement external and object-result cache misses.
 3. **PA2 — compiler-derived guarded admission.** Derive the current-step
    compiler admission package from production validation, the active relation,
    and one successful source step. The admission law now consumes
