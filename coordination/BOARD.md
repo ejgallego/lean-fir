@@ -25,28 +25,33 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   resident Array provenance consumer after rebasing, is the remaining
   milestone step.
 - Integration owner: `root`, holding the serial landing lease through accepted
-  integration head `1ee832cb`. `wasm-gen` remains released to the W7-1
+  integration head `635f07d1`. `wasm-gen` remains released to the W7-1
   generation lane. The inherited cleanup, serial and bounded check-throughput,
   mailbox-routing, bounded `Nat.land`, USize range-fact, exact consumer-ratchet,
   and transactional resident-linker stacks are now integrated. Tooling's
   bounded work changed no W7 implementation file and granted no standing W7
   ownership.
-- Accepted W6 non-cached named-call result-admission checkpoint: isolated
-  validator contract `d30afbe8`, functional proof head `30bc5522`, and clean
-  tracked handoff `1ee832cb`, based directly on accepted main `302d4cd7`.
-  Ordinary non-cached calls now require the effective callee result to
-  directionally refine the source `let` ABI. Nullary cached declarations
-  deliberately retain the prior object-family `leanCompatible` rule: the full
-  corpus contains a legitimate reverse result edge there, while W7's product
-  census found zero non-refining results across 11,487 named-call result edges.
-  Residual validation now derives the effective result, exact destination
-  local, and result refinement for direct-call admission; only directional
-  argument ingress remains. Lean Beam and the 3,129-job focused cone pass,
-  `make check` passes 730 unique cases and 2,172/2,172 comparisons, and all
-  3,190 Talos jobs pass with receipt
-  `313cea9a36c96b9ce2471ff6f7f7d74e71f116e27ad9f1f60e8d84209c255c22`.
-  No source semantic, runtime ABI/layout, symbolic instruction, ownership, or
-  resident-helper contract changed; bug cards: none.
+- Accepted W6 semantic named-call ingress checkpoint: functional proof head
+  `566459aa` and clean tracked handoff based directly on accepted main
+  `635f07d1`. The preceding result-admission policy remains: ordinary
+  non-cached calls require directional result refinement, while nullary cached
+  declarations retain their necessary object-family compatibility exception.
+  Static direct-call admission is now entirely compiler-derived, including
+  exact arity, carrier compatibility, effective result, and destination local.
+  `SemanticArgumentsAtAbi` types only the current source argument row at the
+  callee ABI; evaluation produces `SemanticValuesAtAbi`, and the concrete
+  relation reclassifies the same physical row without changing values or
+  addresses. The existing live state relation discharges every directional
+  row automatically. Only the 158 product-observed `tobject -> object` uses
+  need precise producer-origin evidence; W7 census request
+  `W6-W7-20260831-002` is open to classify those origins before choosing the
+  compiler-owned analysis. Lean Beam and the 3,127-/3,129-job focused cones
+  pass, `make check` passes 730 unique cases and 2,172/2,172 comparisons, and
+  all 3,190 Talos jobs pass with receipt
+  `7873f274a4e88e8151314c259ad75bd4785af18b90c83c09cae9f2df12b5a2aa`.
+  No source semantic, production validator/lowering, runtime ABI/layout,
+  symbolic instruction, ownership, generated-code, or resident-helper
+  contract changed; bug cards: none.
 - Accepted W6 backward finite-prefix composition checkpoint: functional proof
   head `937cd033` is linked through clean tracked handoff `1d220cc1`, based on
   accepted schema-source-invariant head `d8ac1b47`. Generic observable weak
