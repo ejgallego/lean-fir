@@ -5250,14 +5250,17 @@ recovers successful symbolic validation from production adaptation.
 validated module by the public `initializerNamesUnique_of_validateModule` and
 `initializerResultKind_of_validateModule` accessors. The proof neither unfolds
 the validator's private index nor introduces a second checker.
-`LazyCacheGeneratedEnvironment.ofSupportedPipeline` combines that compiler
-theorem with actual supported lowering/adaptation, canonical context-side
-cache names, and `LazyCacheResultKindsAligned`. Thus the only remaining static
-condition is exact result-kind alignment: the correctness framework supplies
-a context constructed with the compiler's cache-name table, while the shared
-lowering relation must connect each declaration result to its emitted lane. No
-proof-side cache enumeration, validator-soundness premise, or caller-supplied
-initializer equation remains.
+The lowering-table proof now closes exact result-kind alignment as well.
+Internal declarations recover the effective result stored in their generated
+function row; external declarations recover the declared singleton result in
+their generated import row. `LazyCacheResultKindsAligned.ofSupportedPipeline`
+combines those cases, and
+`LazyCacheGeneratedEnvironment.ofCanonicalSupportedPipeline` now accepts no
+cache-specific client premise. No proof-side cache enumeration,
+validator-soundness premise, result-kind certificate, or caller-supplied
+initializer equation remains. The next admission slice is therefore only to
+export the already isolated generated hit/miss constructors from a validated
+successful source step.
 `ofCanonicalSupportedPipeline` specializes this result to the exact context
 shape threaded by lowering, making context-side cache-name alignment
 definitional as well.

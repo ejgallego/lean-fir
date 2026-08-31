@@ -1255,7 +1255,7 @@ symbolic validation, and the validator's public theorem supplies the checked
 layout facts. The remaining cache-specific condition relates the selected
 declaration's effective result to its exact emitted signature kind.
 -/
-theorem LazyCacheGeneratedEnvironment.ofSupportedPipeline
+theorem LazyCacheGeneratedEnvironment.ofSupportedPipeline_of_resultKinds
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {source : Fir.Wasm.Module}
@@ -1286,7 +1286,7 @@ Specialize the pipeline theorem to the exact context shape constructed and
 threaded by production lowering. Cache-name alignment is then definitional,
 not a caller-provided equality.
 -/
-theorem LazyCacheGeneratedEnvironment.ofCanonicalSupportedPipeline
+theorem LazyCacheGeneratedEnvironment.ofCanonicalSupportedPipeline_of_resultKinds
     {program : Fir.LeanIR.ImpureProgram}
     {source : Fir.Wasm.Module}
     {target : FirTalos.AdaptedModule}
@@ -1307,8 +1307,8 @@ theorem LazyCacheGeneratedEnvironment.ofCanonicalSupportedPipeline
       joins
       cachedDeclarations :=
         Fir.Wasm.cachedDeclarationNames program } source := by
-  apply LazyCacheGeneratedEnvironment.ofSupportedPipeline lowered adapted rfl
-    resultKinds
+  apply LazyCacheGeneratedEnvironment.ofSupportedPipeline_of_resultKinds
+    lowered adapted rfl resultKinds
 
 /--
 Select the exact emitted initializer slot and its physical value kind from
@@ -13386,6 +13386,40 @@ private theorem functionFindIdx?_eq_some_of_namesNodup
       rw [earlierListFound, indexListFound]
     omega
 
+/-- An exact first matching index selects the same array element through
+`find?`.  This small bridge keeps compiler table proofs on the executable
+lookup functions used by `Module.callSignature?`. -/
+private theorem arrayFind?_eq_some_of_findIdx?_eq_some
+    {α : Type} {values : Array α} {predicate : α → Bool}
+    {index : Nat} {value : α}
+    (indexFound : values.findIdx? predicate = some index)
+    (valueFound : values[index]? = some value) :
+    values.find? predicate = some value := by
+  obtain ⟨indexLt, selected, earlier⟩ :=
+    Array.findIdx?_eq_some_iff_getElem.mp indexFound
+  obtain ⟨valueLt, valueEq⟩ := Array.getElem?_eq_some_iff.mp valueFound
+  have valueEq' : values[index] = value := by simpa using valueEq
+  apply Array.find?_eq_some_iff_getElem.mpr
+  refine ⟨?_, index, indexLt, valueEq', ?_⟩
+  · simpa [valueEq'] using selected
+  · intro earlierIndex earlierLt
+    cases candidate : predicate values[earlierIndex] with
+    | false => rfl
+    | true =>
+        exact (earlier earlierIndex earlierLt (by simp [candidate])).elim
+
+/-- Failure of the executable first-index lookup is equivalent to failure of
+the corresponding first-element lookup. -/
+private theorem arrayFind?_eq_none_of_findIdx?_eq_none
+    {α : Type} {values : Array α} {predicate : α → Bool}
+    (indexMissing : values.findIdx? predicate = none) :
+    values.find? predicate = none := by
+  have allFalse := Array.findIdx?_eq_none_iff.mp indexMissing
+  apply Array.find?_eq_none.mpr
+  intro value member selected
+  have rejected := allFalse value member
+  simp_all
+
 /-- Top-level declaration-name uniqueness makes the source declaration table
 injective on its members. -/
 private theorem declaration_eq_of_namesUnique
@@ -13483,6 +13517,68 @@ private theorem externalImport_declaration?
         Except.ok.injEq] at imported
       subst import_
       rfl
+
+/-- Externals retain their declared singleton ABI result; the stricter
+straight-line internal-result selector never changes that lane. -/
+private theorem abiKind_of_external_effectiveResult
+    {declaration : LCNF.Decl .impure}
+    {metadata : ExternAttrData}
+    {kind : AbiKind}
+    (bodyEq : declaration.value = .extern metadata)
+    (selected :
+      Fir.Wasm.effectiveDeclarationResultKind? declaration = some kind) :
+    Fir.Wasm.abiKind? declaration.type = .ok (some kind) := by
+  unfold Fir.Wasm.effectiveDeclarationResultKind? at selected
+  cases classified : Fir.Wasm.abiKind? declaration.type with
+  | error error => simp [classified] at selected
+  | ok kind? =>
+      cases kind? with
+      | none => simp [classified] at selected
+      | some declared =>
+          by_cases tagged : declared = .tobject
+          · subst declared
+            simp [classified, bodyEq] at selected
+            subst kind
+            rfl
+          · simp [classified, tagged] at selected
+            subst kind
+            rfl
+
+/-- A successfully generated external import exposes the exact effective
+declaration result in its first symbolic result lane. -/
+private theorem externalImport_resultAt_of_effectiveResult
+    {declaration : LCNF.Decl .impure}
+    {metadata : ExternAttrData}
+    {import_ : Fir.Wasm.Import}
+    {kind : AbiKind}
+    (bodyEq : declaration.value = .extern metadata)
+    (imported : Fir.Wasm.externalImport declaration = .ok import_)
+    (selected :
+      Fir.Wasm.effectiveDeclarationResultKind? declaration = some kind) :
+    import_.signature.results[0]? = some kind := by
+  have classified := abiKind_of_external_effectiveResult bodyEq selected
+  unfold Fir.Wasm.externalImport at imported
+  simp only [Bind.bind, Except.bind] at imported
+  cases signatureEq : Fir.Wasm.ExternalTypes.signature {
+      params := declaration.params.map (·.type)
+      result := declaration.type } with
+  | error error => simp [signatureEq] at imported
+  | ok signature =>
+      simp only [signatureEq, pure, Except.pure, Except.ok.injEq] at imported
+      subst import_
+      unfold Fir.Wasm.ExternalTypes.signature at signatureEq
+      simp only [Bind.bind, Except.bind] at signatureEq
+      split at signatureEq
+      · simp_all
+      · have results :
+            Fir.Wasm.resultKinds declaration.type = .ok #[kind] := by
+            unfold Fir.Wasm.resultKinds
+            rw [classified]
+            rfl
+        rw [results] at signatureEq
+        simp only [pure, Except.pure, Except.ok.injEq] at signatureEq
+        subst signature
+        rfl
 
 /-- Successful source lookup fixes the selected declaration's name. -/
 private theorem declarationName_of_findDecl?
@@ -13678,6 +13774,267 @@ theorem LoweredInternalDeclaration.exists_of_lower
     simpa using sourceFunctionFoundList
   exact ⟨sourceFunctionIndex, sourceFunction, sourceFunctionFound,
     LoweredInternalDeclaration.exists_of_lowerDecl bodyEq selected⟩
+
+/-- Whole-module lowering gives an internal declaration the exact public call
+signature selected by `effectiveDeclarationResultKind?`. -/
+theorem LoweredInternalDeclaration.callSignatureResult_of_internal
+    {program : Fir.LeanIR.ImpureProgram}
+    {source : Fir.Wasm.Module}
+    {declarationName : Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {resultKind : AbiKind}
+    (namesUnique : program.NamesUnique)
+    (lowered : Fir.Wasm.lower program = .ok source)
+    (declarationFound :
+      program.findDecl? declarationName = some declaration)
+    (bodyEq : declaration.value = .code sourceCode)
+    (resultSelected :
+      Fir.Wasm.effectiveDeclarationResultKind? declaration = some resultKind) :
+    (source.callSignature? (.declaration declarationName)).bind
+        (·.results[0]?) = some resultKind := by
+  obtain ⟨sourceFunctionIndex, sourceFunction, sourceFunctionFound,
+      ⟨row⟩⟩ :=
+    LoweredInternalDeclaration.exists_of_lower lowered declarationFound bodyEq
+  have noImport :=
+    LoweredInternalDeclaration.findImportTarget?_eq_none namesUnique lowered
+      declarationFound bodyEq
+  have importFindNone :
+      source.imports.find?
+          (·.declaration? == some declarationName) = none := by
+    exact arrayFind?_eq_none_of_findIdx?_eq_none noImport
+  have namesNodup :=
+    LoweredInternalDeclaration.functionNamesNodup namesUnique lowered
+  have sourceName : sourceFunction.name = declarationName :=
+    row.sourceFunctionName.trans
+      (declarationName_of_findDecl? declarationFound)
+  have functionIndex :
+      source.functions.findIdx? (·.name == declarationName) =
+        some sourceFunctionIndex :=
+    functionFindIdx?_eq_some_of_namesNodup namesNodup sourceFunctionFound
+      sourceName
+  have functionFound :
+      source.functions.find? (·.name == declarationName) =
+        some sourceFunction :=
+    arrayFind?_eq_some_of_findIdx?_eq_some functionIndex sourceFunctionFound
+  have resultAt : sourceFunction.results[0]? = some resultKind := by
+    have functionResults : sourceFunction.results = row.abiResults := by
+      simpa using congrArg Fir.Wasm.Function.results row.sourceFunctionEq
+    rw [functionResults]
+    have resultsSelected := row.resultsSelected
+    rw [resultSelected] at resultsSelected
+    rw [resultsSelected]
+    rfl
+  have signatureResultAt :
+      sourceFunction.signature.results[0]? = some resultKind := by
+    simpa [Fir.Wasm.Function.signature] using resultAt
+  simp [Fir.Wasm.Module.callSignature?, importFindNone, functionFound,
+    signatureResultAt]
+
+/-- Whole-module lowering gives an external declaration the exact public call
+signature selected by `effectiveDeclarationResultKind?`.  Runtime imports are
+excluded structurally and source-name uniqueness identifies any matching
+external row with the declaration selected by `Program.findDecl?`. -/
+theorem LoweredInternalDeclaration.callSignatureResult_of_external
+    {program : Fir.LeanIR.ImpureProgram}
+    {source : Fir.Wasm.Module}
+    {declarationName : Name}
+    {declaration : LCNF.Decl .impure}
+    {metadata : ExternAttrData}
+    {resultKind : AbiKind}
+    (namesUnique : program.NamesUnique)
+    (lowered : Fir.Wasm.lower program = .ok source)
+    (declarationFound :
+      program.findDecl? declarationName = some declaration)
+    (bodyEq : declaration.value = .extern metadata)
+    (resultSelected :
+      Fir.Wasm.effectiveDeclarationResultKind? declaration = some resultKind) :
+    (source.callSignature? (.declaration declarationName)).bind
+        (·.results[0]?) = some resultKind := by
+  obtain ⟨externalImports, importsEq, externalMappedArray⟩ :=
+    LoweredInternalDeclaration.imports_of_lower lowered
+  have externalMappedList :
+      (program.decls.toList.filterMapM (fun sourceDeclaration =>
+            match sourceDeclaration.value with
+            | .extern _ => do
+                match Fir.Wasm.externalImport sourceDeclaration with
+                | .ok import_ => return some import_
+                | .error error =>
+                    throw (Fir.Wasm.CompileError.abi error)
+            | .code _ => pure none) :
+        Except Fir.Wasm.CompileError (List Fir.Wasm.Import)) =
+          Except.ok externalImports.toList := by
+    rw [← Array.toList_filterMapM]
+    rw [externalMappedArray]
+    rfl
+  have declarationMember : declaration ∈ program.decls.toList := by
+    obtain ⟨_, index, inBounds, selected, _⟩ :=
+      Array.find?_eq_some_iff_getElem.mp declarationFound
+    have member : declaration ∈ program.decls := by
+      rw [← selected]
+      exact Array.getElem_mem inBounds
+    simpa using member
+  obtain ⟨result, declarationMapped⟩ :=
+    exceptListFilterMapM_ok_of_mem externalMappedList declarationMember
+  cases imported : Fir.Wasm.externalImport declaration with
+  | error error => simp [bodyEq, imported] at declarationMapped
+  | ok targetImport =>
+      have targetSelected :
+          (match declaration.value with
+            | .extern _ => do
+                match Fir.Wasm.externalImport declaration with
+                | .ok import_ => return some import_
+                | .error error =>
+                    throw (Fir.Wasm.CompileError.abi error)
+            | .code _ => pure none) =
+            (Except.ok (some targetImport) :
+              Except Fir.Wasm.CompileError (Option Fir.Wasm.Import)) := by
+        simp [bodyEq, imported, pure, Except.pure]
+      have targetExternalMember : targetImport ∈ externalImports.toList :=
+        exceptListFilterMapM_mem_of_mem externalMappedList declarationMember
+          targetSelected
+      have targetImportMember : targetImport ∈ source.imports := by
+        rw [importsEq]
+        apply Array.mem_append.mpr
+        exact .inr (by simpa using targetExternalMember)
+      have targetName : targetImport.declaration? = some declarationName := by
+        exact (externalImport_declaration? imported).trans
+          (congrArg some (declarationName_of_findDecl? declarationFound))
+      cases foundEq :
+          source.imports.find?
+            (·.declaration? == some declarationName) with
+      | none =>
+          have rejected :=
+            Array.find?_eq_none.mp foundEq targetImport targetImportMember
+          exact (rejected (by simp [targetName])).elim
+      | some foundImport =>
+          have foundMember : foundImport ∈ source.imports :=
+            Array.mem_of_find?_eq_some foundEq
+          have foundMatches :
+              foundImport.declaration? = some declarationName :=
+            beq_iff_eq.mp (Array.find?_eq_some_iff_getElem.mp foundEq).1
+          have foundResult :
+              foundImport.signature.results[0]? = some resultKind := by
+            rw [importsEq] at foundMember
+            rcases Array.mem_append.mp foundMember with
+              runtimeMember | externalMember
+            · obtain ⟨operationIndex, operationInBounds, runtimeEq⟩ :=
+                Array.exists_of_mem_mapIdx runtimeMember
+              have noDeclaration : foundImport.declaration? = none := by
+                rw [← runtimeEq]
+                rfl
+              rw [noDeclaration] at foundMatches
+              contradiction
+            · have externalMemberList :
+                  foundImport ∈ externalImports.toList := by
+                simpa using externalMember
+              obtain ⟨externalDeclaration, externalDeclarationMember,
+                  externalSelected⟩ :=
+                exceptListFilterMapM_source_of_mem externalMappedList
+                  externalMemberList
+              cases externalValue : externalDeclaration.value with
+              | code externalCode =>
+                  simp [externalValue, pure, Except.pure] at externalSelected
+              | extern externalMetadata =>
+                  cases externalImported :
+                      Fir.Wasm.externalImport externalDeclaration with
+                  | error error =>
+                      simp [externalValue, externalImported] at externalSelected
+                  | ok externalImport =>
+                      simp only [externalValue, externalImported, pure,
+                        Except.pure, Except.ok.injEq, Option.some.injEq]
+                          at externalSelected
+                      subst externalImport
+                      have externalName :=
+                        externalImport_declaration? externalImported
+                      have namesEq :
+                          externalDeclaration.name = declaration.name := by
+                        rw [externalName] at foundMatches
+                        exact (Option.some.inj foundMatches).trans
+                          (declarationName_of_findDecl?
+                            declarationFound).symm
+                      have declarationsEq :
+                          externalDeclaration = declaration :=
+                        declaration_eq_of_namesUnique namesUnique
+                          externalDeclarationMember declarationMember namesEq
+                      subst externalDeclaration
+                      exact externalImport_resultAt_of_effectiveResult bodyEq
+                        externalImported resultSelected
+          simp [Fir.Wasm.Module.callSignature?, foundEq, foundResult]
+
+/-- Supported whole-module lowering determines every generated lazy-cache
+result lane from the selected source declaration.  Internal rows use the
+effective result stored on the generated function; external rows use the
+declared singleton result stored on the generated import. -/
+theorem LazyCacheResultKindsAligned.ofSupportedPipeline
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {source : Fir.Wasm.Module}
+    (contextProgram : context.program = program)
+    (namesUnique : program.NamesUnique)
+    (lowered : Fir.Wasm.lowerSupported program = .ok source) :
+    LazyCacheResultKindsAligned context source := by
+  have ordinaryLowering : Fir.Wasm.lower program = .ok source :=
+    LazyCacheGeneratedEnvironment.lower_of_lowerSupported lowered
+  intro type declaration target declaredKind targetKind index _kindEq
+    targetEq targetResultEq _paramsEq _cacheEq
+  have targetEq' : program.findDecl? declaration = some target := by
+    simpa [contextProgram] using targetEq
+  cases bodyEq : target.value with
+  | extern metadata =>
+      exact LoweredInternalDeclaration.callSignatureResult_of_external
+        namesUnique ordinaryLowering targetEq' bodyEq targetResultEq
+  | code sourceCode =>
+      exact LoweredInternalDeclaration.callSignatureResult_of_internal
+        namesUnique ordinaryLowering targetEq' bodyEq targetResultEq
+
+/-- Canonical whole-pipeline constructor with no caller-supplied cache
+validator or result-kind alignment premise.  All static cache facts come from
+the accepted compiler pipeline. -/
+theorem LazyCacheGeneratedEnvironment.ofSupportedPipeline
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {source : Fir.Wasm.Module}
+    {target : FirTalos.AdaptedModule}
+    (contextProgram : context.program = program)
+    (namesUnique : program.NamesUnique)
+    (lowered : Fir.Wasm.lowerSupported program = .ok source)
+    (adapted : FirTalos.adapt source = .ok target)
+    (contextCacheNames :
+      context.cachedDeclarations =
+        Fir.Wasm.cachedDeclarationNames program) :
+    LazyCacheGeneratedEnvironment context source := by
+  apply LazyCacheGeneratedEnvironment.ofSupportedPipeline_of_resultKinds
+    lowered adapted contextCacheNames
+  exact LazyCacheResultKindsAligned.ofSupportedPipeline contextProgram
+    namesUnique lowered
+
+/-- The production declaration context makes both compiler equalities
+definitional, leaving only source-name uniqueness and successful lowering /
+adaptation as explicit inputs. -/
+theorem LazyCacheGeneratedEnvironment.ofCanonicalSupportedPipeline
+    {program : Fir.LeanIR.ImpureProgram}
+    {source : Fir.Wasm.Module}
+    {target : FirTalos.AdaptedModule}
+    (localKinds : Fir.Wasm.LocalKinds)
+    (joins : Fir.Wasm.JoinPoints)
+    (namesUnique : program.NamesUnique)
+    (lowered : Fir.Wasm.lowerSupported program = .ok source)
+    (adapted : FirTalos.adapt source = .ok target) :
+    LazyCacheGeneratedEnvironment {
+      program
+      localKinds
+      joins
+      cachedDeclarations :=
+        Fir.Wasm.cachedDeclarationNames program } source := by
+  exact LazyCacheGeneratedEnvironment.ofSupportedPipeline
+    (program := program)
+    (context := {
+      program
+      localKinds
+      joins
+      cachedDeclarations := Fir.Wasm.cachedDeclarationNames program })
+    (source := source) (target := target) rfl namesUnique lowered adapted rfl
 
 /-- A supported function's named declaration and selected symbolic function
 recover one exact production `lowerDecl` row.  The proof uses only the real

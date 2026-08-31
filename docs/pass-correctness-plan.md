@@ -59,8 +59,9 @@ even when the execution may continue forever.
    lazy-cache validator boundary is now also compiler-derived:
    `lazyCacheValidatorSound` consumes public validation accessors, and the
    supported-pipeline constructors no longer accept a validator-soundness
-   premise. Exact declaration/result-lane alignment remains the only static
-   lazy-cache environment condition.
+   premise. Internal-function and external-import table theorems now derive
+   exact declaration/result-lane alignment as well, so the canonical generated
+   lazy-cache environment has no cache-specific client premise.
 3. **PA2 — compiler-derived guarded admission.** Derive the current-step
    compiler admission package from production validation, the active relation,
    and one successful source step. The admission law now consumes

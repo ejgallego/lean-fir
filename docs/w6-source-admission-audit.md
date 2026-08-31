@@ -263,8 +263,14 @@ admission constructors.
   initializer-name uniqueness and singleton-result signature accessors.
   `lazyCacheValidatorSound` derives `LazyCacheValidationFacts` uniformly, and
   the supported-pipeline constructors no longer accept validator soundness as
-  a premise. `LazyCacheResultKindsAligned` remains the exact static gap before
-  hit/miss admission can be constructed entirely from compiler facts.
+  a premise.
+- Lazy-cache result-lane slice: exact signature theorems cover both generated
+  internal functions and generated external imports.
+  `LazyCacheResultKindsAligned.ofSupportedPipeline` now derives the complete
+  result-lane relation from source-name uniqueness and successful lowering;
+  `LazyCacheGeneratedEnvironment.ofCanonicalSupportedPipeline` accepts no
+  cache-specific client premise. Only the row-6/7 hit/miss current-step
+  admission exports remain to close this family.
 - Focused proof cones for PA1/PA2:
   `FirTalos.ConcreteFinalLcnfTyping`,
   `FirTalos.ConcreteStructuredValidation`, and

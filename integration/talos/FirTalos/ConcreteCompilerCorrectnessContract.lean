@@ -3854,9 +3854,9 @@ example
 /--
 The production supported-lowering/adaptation pipeline determines the
 generated cache-name table and symbolic validation facts. The validator's
-public accessors discharge the uniform layout theorem internally; callers
-retain only the effective declaration-result condition that fixes each exact
-physical cache lane.
+public accessors discharge the uniform layout theorem, and the generated
+internal-function/external-import tables determine each exact physical result
+lane. No cache-specific fact remains caller-supplied.
 -/
 example
     {program : Fir.LeanIR.ImpureProgram}
@@ -3864,15 +3864,9 @@ example
     {target : FirTalos.AdaptedModule}
     (localKinds : Fir.Wasm.LocalKinds)
     (joins : Fir.Wasm.JoinPoints)
+    (namesUnique : program.NamesUnique)
     (lowered : Fir.Wasm.lowerSupported program = .ok source)
-    (adapted : FirTalos.adapt source = .ok target)
-    (resultKinds :
-      LazyCacheResultKindsAligned {
-        program
-        localKinds
-        joins
-        cachedDeclarations :=
-          Fir.Wasm.cachedDeclarationNames program } source) :
+    (adapted : FirTalos.adapt source = .ok target) :
     LazyCacheGeneratedEnvironment {
       program
       localKinds
@@ -3880,7 +3874,7 @@ example
       cachedDeclarations :=
         Fir.Wasm.cachedDeclarationNames program } source :=
   LazyCacheGeneratedEnvironment.ofCanonicalSupportedPipeline localKinds joins
-    lowered adapted resultKinds
+    namesUnique lowered adapted
 
 /--
 One generated environment replaces independent per-call initializer and
