@@ -119,6 +119,7 @@ def requiredExternalDeclarations : Array Name := #[
 def additionalExternalDeclarations : Array Name := #[
   `Int.negSucc,
   `Int.neg,
+  `Int.decEq,
   `Int.decLe]
 
 def externalDeclarations : Array Name :=
@@ -1073,6 +1074,25 @@ def intDecLtFunction : Function := {
     .localGet rawLocal] ++
     retypeRawResult .uint8 }
 
+def intDecEqFunction : Function := {
+  name := externalName `Int.decEq
+  params := #[(leftParam, .tobject), (rightParam, .tobject)]
+  results := #[.uint8]
+  locals := decisionResultLocals ++ integerOperandLocals
+  body := loadIntegerOperands ++ [
+    .localGet leftSignLocal,
+    .localGet rightSignLocal,
+    .i32Eq,
+    .localGet leftLowLocal,
+    .localGet rightLowLocal,
+    .i32Eq,
+    .i32And,
+    .localGet leftHighLocal,
+    .localGet rightHighLocal,
+    .i32Eq,
+    .i32And] ++
+    retypeRawResult .uint8 }
+
 def intDecLeFunction : Function := {
   name := externalName `Int.decLe
   params := #[(leftParam, .tobject), (rightParam, .tobject)]
@@ -1109,6 +1129,7 @@ def externalFunctions : Array Function := #[
   intOfNatFunction,
   intNegSuccFunction,
   intNegFunction,
+  intDecEqFunction,
   intDecLtFunction,
   intDecLeFunction,
   intNatAbsFunction,
@@ -1159,7 +1180,8 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
   if declaration == `Int.ofNat || declaration == `Int.negSucc ||
       declaration == `Int.neg || declaration == `Int.natAbs then
     some { params := #[.tobject], results := #[.tobject] }
-  else if declaration == `Int.decLt || declaration == `Int.decLe ||
+  else if declaration == `Int.decEq || declaration == `Int.decLt ||
+      declaration == `Int.decLe ||
       declaration == `Nat.decEq ||
       declaration == `Nat.decLt || declaration == `Nat.decLe then
     some { params := #[.tobject, .tobject], results := #[.uint8] }
@@ -1272,7 +1294,8 @@ private def externalTypes? (declaration : Name) : Option ExternalTypes :=
     some { params := #[int], result := int }
   else if declaration == `Int.natAbs then
     some { params := #[int], result := nat }
-  else if declaration == `Int.decLt || declaration == `Int.decLe then
+  else if declaration == `Int.decEq || declaration == `Int.decLt ||
+      declaration == `Int.decLe then
     some { params := #[int, int], result := bool }
   else if declaration == `Int.add || declaration == `Int.sub then
     some { params := #[int, int], result := int }

@@ -56,6 +56,7 @@ def externalDeclarations : Array Name := #[
   `UInt16.toNat,
   `UInt16.toUInt32,
   `UInt16.toUInt64,
+  `UInt16.decLt,
   `UInt16.land,
   `UInt16.xor,
   `UInt16.shiftLeft,
@@ -306,6 +307,9 @@ def uint16ToUInt32Function : Function :=
 
 def uint16ToUInt64Function : Function :=
   extendI32Function `UInt16.toUInt64 .uint16 .uint64
+
+def uint16DecLtFunction : Function :=
+  decisionI32Function `UInt16.decLt .uint16 .i32LtU
 
 def uint32OfNatFunction : Function :=
   ofNat32Function `UInt32.ofNat .uint32 0xffffffff
@@ -629,6 +633,7 @@ def functions : Array Function := #[
   uint16ToNatFunction,
   uint16ToUInt32Function,
   uint16ToUInt64Function,
+  uint16DecLtFunction,
   landFunction,
   xorFunction,
   shiftLeftFunction,
@@ -703,6 +708,8 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
     some { params := #[.uint16], results := #[.uint32] }
   else if declaration == `UInt16.toUInt64 then
     some { params := #[.uint16], results := #[.uint64] }
+  else if declaration == `UInt16.decLt then
+    some { params := #[.uint16, .uint16], results := #[.uint8] }
   else if #[`UInt32.add, `UInt32.sub, `UInt32.land, `UInt32.xor,
       `UInt32.shiftRight, `UInt32.shiftLeft, `UInt32.lor,
       `UInt32.mul].contains declaration then

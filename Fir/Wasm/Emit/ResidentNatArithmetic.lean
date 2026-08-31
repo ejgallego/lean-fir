@@ -35,7 +35,8 @@ inductive LinkError where
 private def u32 (value : Nat) : UInt32 := UInt32.ofNat value
 
 def externalDeclarations : Array Name := #[
-  `Nat.mul, `Nat.pow, `Nat.land, `Nat.lor, `Nat.div, `Nat.mod, `Nat.shiftLeft]
+  `Nat.mul, `Nat.pow, `Nat.land, `Nat.lor, `Nat.div, `Nat.mod, `Nat.shiftLeft,
+  `Int.mul]
 
 def externalName (declaration : Name) : Name :=
   ResidentNumeric.externalName declaration
@@ -93,6 +94,13 @@ private def factorLocal : FVarId := ⟨`factor⟩
 private def remainderLocal : FVarId := ⟨`remainder⟩
 private def quotientLocal : FVarId := ⟨`quotient⟩
 private def comparisonLocal : FVarId := ⟨`comparison⟩
+private def leftSignLocal : FVarId := ⟨`leftSign⟩
+private def rightSignLocal : FVarId := ⟨`rightSign⟩
+private def resultSignLocal : FVarId := ⟨`resultSign⟩
+private def leftNaturalLocal : FVarId := ⟨`leftNatural⟩
+private def rightNaturalLocal : FVarId := ⟨`rightNatural⟩
+private def productLocal : FVarId := ⟨`product⟩
+private def integerLocal : FVarId := ⟨`integerValue⟩
 
 private def mulSmallLoop : FVarId := ⟨`natMulSmallLoop⟩
 private def mulPartLoop : FVarId := ⟨`natMulPartLoop⟩
@@ -428,6 +436,55 @@ def mulFunction : Function := {
     (objectResultLocal, .tobject)]
   body := ResidentBigNumeric.withImmediateNaturalPair leftParam rightParam
     immediateMulBody checkedMulBody }
+
+def intMulFunction : Function := {
+  name := externalName `Int.mul
+  params := #[(leftParam, .tobject), (rightParam, .tobject)]
+  results := #[.tobject]
+  locals := #[(leftSignLocal, .uint32), (rightSignLocal, .uint32),
+    (resultSignLocal, .uint32), (leftNaturalLocal, .tobject),
+    (rightNaturalLocal, .tobject), (productLocal, .tobject),
+    (integerLocal, .tobject), (resultLocal, .tobject)]
+  body := [
+    .localGet leftParam,
+    .call (.declaration ResidentBigNumeric.validateIntegerName),
+    .localGet rightParam,
+    .call (.declaration ResidentBigNumeric.validateIntegerName),
+    .localGet leftParam,
+    .call (.declaration ResidentBigNumeric.integerSignName),
+    .localSet leftSignLocal,
+    .localGet rightParam,
+    .call (.declaration ResidentBigNumeric.integerSignName),
+    .localSet rightSignLocal,
+    .localGet leftSignLocal,
+    .localGet rightSignLocal,
+    .i32Xor,
+    .localSet resultSignLocal,
+    .localGet leftParam,
+    .call (.declaration (ResidentBigNumeric.externalName `Int.natAbs)),
+    .localSet leftNaturalLocal,
+    .localGet rightParam,
+    .call (.declaration (ResidentBigNumeric.externalName `Int.natAbs)),
+    .localSet rightNaturalLocal,
+    .localGet leftNaturalLocal,
+    .localGet rightNaturalLocal,
+    .call (.declaration (externalName `Nat.mul)),
+    .localSet productLocal] ++
+    releaseLocal leftNaturalLocal ++ releaseLocal rightNaturalLocal ++ [
+    .localGet productLocal,
+    .call (.declaration (ResidentBigNumeric.externalName `Int.ofNat)),
+    .localSet integerLocal] ++
+    releaseLocal productLocal ++ [
+    .localGet resultSignLocal,
+    .ifElse
+      ([.localGet integerLocal,
+          .call (.declaration (ResidentBigNumeric.externalName `Int.neg)),
+          .localSet resultLocal] ++
+        releaseLocal integerLocal)
+      [.localGet integerLocal,
+        .localSet resultLocal],
+    .localGet resultLocal,
+    .ret] }
 
 private def landParts : List Instruction := [
   .localGet leftParam,
@@ -1048,7 +1105,7 @@ private partial def callSiteContains (needle : Instruction) :
 
 def externalFunctions : Array Function := #[
   mulFunction, powFunction, landFunction, lorFunction, divFunction, modFunction,
-  shiftLeftFunction]
+  shiftLeftFunction, intMulFunction]
 
 def internalFunctions : Array Function := #[
   mulGenericFunction, divGenericFunction, modGenericFunction]
@@ -1102,7 +1159,8 @@ def internalizeAvailable (module : Module) (validate : Bool := true) :
       throw (.reservedDeclaration helper)
   let selectedExternalFunctions := externalFunctions.filter fun function =>
     present.any fun declaration => externalName declaration == function.name
-  let needsMul := present.contains `Nat.pow || present.contains `Nat.shiftLeft
+  let needsMul := present.contains `Nat.pow || present.contains `Nat.shiftLeft ||
+    present.contains `Int.mul
   let needsPow := present.contains `Nat.shiftLeft
   let selectedExternalFunctions :=
     if needsMul && !selectedExternalFunctions.any (·.name == mulFunction.name) then
@@ -1115,7 +1173,7 @@ def internalizeAvailable (module : Module) (validate : Bool := true) :
   let selectedInternalFunctions := internalFunctions.filter fun function =>
     (function.name == mulGenericName &&
       (present.contains `Nat.mul || present.contains `Nat.pow ||
-        present.contains `Nat.shiftLeft)) ||
+        present.contains `Nat.shiftLeft || present.contains `Int.mul)) ||
     (function.name == divGenericName && present.contains `Nat.div) ||
     (function.name == modGenericName && present.contains `Nat.mod)
   for function in selectedInternalFunctions do

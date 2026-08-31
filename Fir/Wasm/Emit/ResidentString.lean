@@ -1,4 +1,5 @@
 import Fir.Wasm.Emit.ResidentLiteral
+import Fir.Wasm.Emit.ResidentBigNumeric
 import Fir.Wasm.Emit.ResidentNumeric
 import Fir.Wasm.Emit.ResidentReferenceCount
 import Fir.Wasm.Emit.ResidentRelease
@@ -61,12 +62,17 @@ private def byte2Param : FVarId := ⟨`byte2⟩
 private def byte3Param : FVarId := ⟨`byte3⟩
 private def usizeParam : FVarId := ⟨`usize⟩
 private def listParam : FVarId := ⟨`list⟩
+private def leftPositionParam : FVarId := ⟨`leftPosition⟩
+private def rightPositionParam : FVarId := ⟨`rightPosition⟩
+private def lengthParam : FVarId := ⟨`length⟩
 
 private def copyBytesLoop : FVarId := ⟨`copyBytesLoop⟩
 private def countLeadingLoop : FVarId := ⟨`countLeadingLoop⟩
 private def fillCodePointLoop : FVarId := ⟨`fillCodePointLoop⟩
 private def findCodePointLoop : FVarId := ⟨`findCodePointLoop⟩
 private def stringCompareLoop : FVarId := ⟨`stringCompareLoop⟩
+private def stringMemcmpLoop : FVarId := ⟨`stringMemcmpLoop⟩
+private def stringPrevLoop : FVarId := ⟨`stringPrevLoop⟩
 private def listSizeLoop : FVarId := ⟨`stringOfListSizeLoop⟩
 private def listEncodeLoop : FVarId := ⟨`stringOfListEncodeLoop⟩
 
@@ -118,6 +124,9 @@ private def codePointLocal : FVarId := ⟨`codePointValue⟩
 private def cursorLocal : FVarId := ⟨`cursor⟩
 private def comparisonResultLocal : FVarId := ⟨`comparisonResult⟩
 private def decisionResultLocal : FVarId := ⟨`decisionResult⟩
+private def leftPositionLocal : FVarId := ⟨`leftPositionValue⟩
+private def rightPositionLocal : FVarId := ⟨`rightPositionValue⟩
+private def lengthLocal : FVarId := ⟨`lengthValue⟩
 
 def validateName : Name := `fir_string_validate
 def byteLengthName : Name := `fir_string_byte_length
@@ -179,7 +188,16 @@ def availableExternalDeclarations : Array Name :=
     `String.decEq,
     `String.decidableLT,
     `String.compare,
-    `USize.repr]
+    `USize.repr,
+    `String.Pos.Raw.prev,
+    `String.Pos.Raw.get,
+    `String.Pos.Raw.extract,
+    `String.Pos.Raw.next,
+    `String.getUTF8Byte,
+    `String.extract,
+    `String.Pos.Raw.isValid,
+    `String.Internal.contains,
+    `String.Slice.Pattern.Internal.memcmpStr]
 
 def externalName (declaration : Name) : Name :=
   ResidentNumeric.externalName declaration
@@ -1387,7 +1405,7 @@ def nextFunction : Function := {
     .ifElse
       [.localGet positionParam,
         .i32Const .tobject 3,
-        .call (.declaration (externalName `Nat.add)),
+        .call (.declaration (ResidentBigNumeric.externalName `Nat.add)),
         .ret]
       [.localGet lowLocal,
         .localGet sourceLengthLocal,
@@ -1403,8 +1421,305 @@ def nextFunction : Function := {
             .ret])
           [.localGet positionParam,
             .i32Const .tobject 3,
-            .call (.declaration (externalName `Nat.add)),
+            .call (.declaration (ResidentBigNumeric.externalName `Nat.add)),
             .ret]]] }
+
+private def extractAliasFunction (declaration : Name) : Function := {
+  name := externalName declaration
+  params := #[(sourceParam, .object), (beginParam, .tobject),
+    (endParam, .tobject)]
+  results := #[.object]
+  locals := #[]
+  body := [
+    .localGet sourceParam,
+    .localGet beginParam,
+    .localGet endParam,
+    .call (.declaration (externalName `String.Internal.extract)),
+    .ret] }
+
+def rawExtractFunction : Function :=
+  extractAliasFunction `String.Pos.Raw.extract
+
+def publicExtractFunction : Function :=
+  extractAliasFunction `String.extract
+
+def rawNextFunction : Function := {
+  name := externalName `String.Pos.Raw.next
+  params := #[(sourceParam, .object), (positionParam, .tobject)]
+  results := #[.tobject]
+  locals := #[]
+  body := [
+    .localGet sourceParam,
+    .localGet positionParam,
+    .call (.declaration (externalName `String.Internal.next)),
+    .ret] }
+
+def getUTF8ByteFunction : Function := {
+  name := externalName `String.getUTF8Byte
+  params := #[(sourceParam, .object), (positionParam, .tobject),
+    (proofParam, .erased)]
+  results := #[.uint8]
+  locals := #[(sourceLengthLocal, .uint32), (lowLocal, .uint32),
+    (highLocal, .uint32), (rawLocal, .uint32),
+    (savedScratchLocal, .uint32),
+    (decisionResultLocal, .uint8)]
+  body := [
+    .localGet sourceParam,
+    .call (.declaration validateName)] ++
+    validateNatural positionParam ++ loadNaturalParts positionParam ++
+    trapUnlessTrue [
+      .localGet highLocal,
+      .i32Eqz] ++ [
+    .localGet sourceParam,
+    .call (.declaration byteLengthName),
+    .localSet sourceLengthLocal] ++
+    trapUnlessTrue [
+      .localGet lowLocal,
+      .localGet sourceLengthLocal,
+      .i32LtU] ++
+    dynamicByteLoad sourceParam lowLocal ++
+    retypeRaw .uint8 decisionResultLocal }
+
+def rawIsValidFunction : Function := {
+  name := externalName `String.Pos.Raw.isValid
+  params := #[(sourceParam, .object), (positionParam, .tobject)]
+  results := #[.uint8]
+  locals := #[(sourceLengthLocal, .uint32), (lowLocal, .uint32),
+    (highLocal, .uint32), (rawLocal, .uint32),
+    (savedScratchLocal, .uint32),
+    (decisionResultLocal, .uint8)]
+  body := [
+    .localGet sourceParam,
+    .call (.declaration validateName)] ++
+    validateNatural positionParam ++ loadNaturalParts positionParam ++ [
+    .i32Const .uint32 0,
+    .localSet rawLocal,
+    .localGet highLocal,
+    .i32Eqz,
+    .ifElse
+      [.localGet sourceParam,
+        .call (.declaration byteLengthName),
+        .localSet sourceLengthLocal,
+        .localGet lowLocal,
+        .localGet sourceLengthLocal,
+        .i32Eq,
+        .ifElse
+          [.i32Const .uint32 1,
+            .localSet rawLocal]
+          [.localGet lowLocal,
+            .localGet sourceLengthLocal,
+            .i32LtU,
+            .ifElse
+              [.localGet sourceParam,
+                .localGet sourceLengthLocal,
+                .localGet lowLocal,
+                .call (.declaration isBoundaryName),
+                .localSet rawLocal]
+              []]]
+      [],
+    .localGet rawLocal] ++
+    retypeRaw .uint8 decisionResultLocal }
+
+def rawGetFunction : Function := {
+  name := externalName `String.Pos.Raw.get
+  params := #[(sourceParam, .object), (positionParam, .tobject)]
+  results := #[.uint32]
+  locals := #[(sourceLengthLocal, .uint32), (lowLocal, .uint32),
+    (highLocal, .uint32)]
+  body := [
+    .localGet sourceParam,
+    .call (.declaration validateName)] ++
+    validateNatural positionParam ++ loadNaturalParts positionParam ++ [
+    .localGet highLocal,
+    .ifElse [.i32Const .uint32 65, .ret] [],
+    .localGet sourceParam,
+    .call (.declaration byteLengthName),
+    .localSet sourceLengthLocal,
+    .localGet lowLocal,
+    .localGet sourceLengthLocal,
+    .i32LtU,
+    .i32Eqz,
+    .ifElse [.i32Const .uint32 65, .ret] [],
+    .localGet sourceParam,
+    .localGet sourceLengthLocal,
+    .localGet lowLocal,
+    .call (.declaration isBoundaryName),
+    .i32Eqz,
+    .ifElse [.i32Const .uint32 65, .ret] [],
+    .localGet sourceParam,
+    .localGet positionParam,
+    .i32Const .erased 0,
+    .call (.declaration (externalName `String.decodeChar)),
+    .ret] }
+
+def rawPrevFunction : Function := {
+  name := externalName `String.Pos.Raw.prev
+  params := #[(sourceParam, .object), (positionParam, .tobject)]
+  results := #[.tobject]
+  locals := naturalResultLocals ++ #[(sourceLengthLocal, .uint32),
+    (lowLocal, .uint32), (highLocal, .uint32)]
+  body := [
+    .localGet sourceParam,
+    .call (.declaration validateName)] ++
+    validateNatural positionParam ++ loadNaturalParts positionParam ++ [
+    .localGet highLocal,
+    .ifElse
+      [.localGet positionParam,
+        .i32Const .tobject 3,
+        .call (.declaration (ResidentBigNumeric.externalName `Nat.sub)),
+        .ret]
+      [],
+    .localGet lowLocal,
+    .i32Eqz,
+    .ifElse [.i32Const .tobject 1, .ret] [],
+    .localGet sourceParam,
+    .call (.declaration byteLengthName),
+    .localSet sourceLengthLocal,
+    .localGet lowLocal,
+    .localGet sourceLengthLocal,
+    .i32GtU,
+    .ifElse
+      [.localGet lowLocal,
+        .i32Const .uint32 1,
+        .i32Sub,
+        .call (.declaration makeNatural32Name),
+        .ret]
+      [],
+    .localGet lowLocal,
+    .i32Const .uint32 1,
+    .i32Sub,
+    .localSet lowLocal,
+    .loop stringPrevLoop [
+      .localGet sourceParam,
+      .localGet sourceLengthLocal,
+      .localGet lowLocal,
+      .call (.declaration isBoundaryName),
+      .ifElse
+        [.localGet lowLocal,
+          .call (.declaration makeNatural32Name),
+          .ret]
+        [.localGet lowLocal,
+          .i32Const .uint32 1,
+          .i32Sub,
+          .localSet lowLocal,
+          .br stringPrevLoop]]] }
+
+def containsFunction : Function := {
+  name := externalName `String.Internal.contains
+  params := #[(sourceParam, .object), (codePointParam, .uint32)]
+  results := #[.uint8]
+  locals := encodedLocals ++ #[(sourceLengthLocal, .uint32),
+    (indexParam, .uint32), (rawLocal, .uint32),
+    (savedScratchLocal, .uint32),
+    (decisionResultLocal, .uint8)]
+  body := [
+    .localGet sourceParam,
+    .call (.declaration validateName)] ++ receiveEncodedCodePoint ++ [
+    .localGet sourceParam,
+    .call (.declaration byteLengthName),
+    .localSet sourceLengthLocal,
+    .localGet sourceParam,
+    .localGet sourceLengthLocal,
+    .i32Const .uint32 0,
+    .localGet widthLocal,
+    .localGet byte0Local,
+    .localGet byte1Local,
+    .localGet byte2Local,
+    .localGet byte3Local,
+    .call (.declaration findCodePointName),
+    .localGet sourceLengthLocal,
+    .i32LtU] ++
+    retypeRaw .uint8 decisionResultLocal }
+
+def memcmpStrFunction : Function := {
+  name := externalName `String.Slice.Pattern.Internal.memcmpStr
+  params := #[(leftParam, .object), (rightParam, .object),
+    (leftPositionParam, .tobject), (rightPositionParam, .tobject),
+    (lengthParam, .tobject), (proofParam, .erased),
+    (FVarId.mk `proof2, .erased)]
+  results := #[.uint8]
+  locals := #[(leftLengthLocal, .uint32), (rightLengthLocal, .uint32),
+    (leftPositionLocal, .uint32), (rightPositionLocal, .uint32),
+    (lengthLocal, .uint32), (lowLocal, .uint32), (highLocal, .uint32),
+    (indexParam, .uint32), (rawLocal, .uint32),
+    (savedScratchLocal, .uint32),
+    (decisionResultLocal, .uint8)]
+  body := [
+    .localGet leftParam,
+    .call (.declaration validateName),
+    .localGet rightParam,
+    .call (.declaration validateName)] ++
+    validateNatural leftPositionParam ++ validateNatural rightPositionParam ++
+    validateNatural lengthParam ++
+    loadNaturalParts leftPositionParam ++
+    trapUnlessTrue [.localGet highLocal, .i32Eqz] ++ [
+    .localGet lowLocal,
+    .localSet leftPositionLocal] ++
+    loadNaturalParts rightPositionParam ++
+    trapUnlessTrue [.localGet highLocal, .i32Eqz] ++ [
+    .localGet lowLocal,
+    .localSet rightPositionLocal] ++
+    loadNaturalParts lengthParam ++
+    trapUnlessTrue [.localGet highLocal, .i32Eqz] ++ [
+    .localGet lowLocal,
+    .localSet lengthLocal,
+    .localGet leftParam,
+    .call (.declaration byteLengthName),
+    .localSet leftLengthLocal,
+    .localGet rightParam,
+    .call (.declaration byteLengthName),
+    .localSet rightLengthLocal] ++
+    trapWhenTrue [
+      .localGet leftPositionLocal,
+      .localGet leftLengthLocal,
+      .i32GtU] ++
+    trapWhenTrue [
+      .localGet lengthLocal,
+      .localGet leftLengthLocal,
+      .localGet leftPositionLocal,
+      .i32Sub,
+      .i32GtU] ++
+    trapWhenTrue [
+      .localGet rightPositionLocal,
+      .localGet rightLengthLocal,
+      .i32GtU] ++
+    trapWhenTrue [
+      .localGet lengthLocal,
+      .localGet rightLengthLocal,
+      .localGet rightPositionLocal,
+      .i32Sub,
+      .i32GtU] ++ [
+    .i32Const .uint32 0,
+    .localSet indexParam,
+    .loop stringMemcmpLoop [
+      .localGet indexParam,
+      .localGet lengthLocal,
+      .i32Eq,
+      .ifElse
+        ([.i32Const .uint32 1] ++ retypeRaw .uint8 decisionResultLocal)
+        [],
+      .localGet leftParam,
+      .localGet leftPositionLocal,
+      .i32Add,
+      .localGet indexParam,
+      .i32Add,
+      .i32Load8U .uint32 (u32 headerBytes),
+      .localGet rightParam,
+      .localGet rightPositionLocal,
+      .i32Add,
+      .localGet indexParam,
+      .i32Add,
+      .i32Load8U .uint32 (u32 headerBytes),
+      .i32Eq,
+      .i32Eqz,
+      .ifElse
+        ([.i32Const .uint32 0] ++ retypeRaw .uint8 decisionResultLocal)
+        [],
+      .localGet indexParam,
+      .i32Const .uint32 1,
+      .i32Add,
+      .localSet indexParam,
+      .br stringMemcmpLoop]] }
 
 /-- Exposed `String.append` delegates to the same resident implementation as
 the historical `String.Internal.append` primitive. -/
@@ -1846,7 +2161,16 @@ def externalFunctions : Array Function := #[
   stringCompareFunction,
   stringDecEqFunction,
   stringDecidableLTFunction,
-  usizeReprFunction]
+  usizeReprFunction,
+  rawPrevFunction,
+  rawGetFunction,
+  rawExtractFunction,
+  rawNextFunction,
+  getUTF8ByteFunction,
+  publicExtractFunction,
+  rawIsValidFunction,
+  containsFunction,
+  memcmpStrFunction]
 
 def internalFunctions : Array Function := #[
   expectedAllocationFunction,
@@ -1875,6 +2199,8 @@ private partial def rewriteInstruction (declarations : Array Name) :
         .call (.declaration declaration)
   | .block label body =>
       .block label (body.map (rewriteInstruction declarations))
+  | .loop label body =>
+      .loop label (body.map (rewriteInstruction declarations))
   | .ifElse thenBody elseBody =>
       .ifElse
         (thenBody.map (rewriteInstruction declarations))
@@ -1927,6 +2253,28 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
     some { params := #[.object, .object], results := #[.uint8] }
   else if declaration == `USize.repr then
     some { params := #[.usize], results := #[.object] }
+  else if declaration == `String.Pos.Raw.prev ||
+      declaration == `String.Pos.Raw.get ||
+      declaration == `String.Pos.Raw.next ||
+      declaration == `String.Pos.Raw.isValid then
+    if declaration == `String.Pos.Raw.get then
+      some { params := #[.object, .tobject], results := #[.uint32] }
+    else if declaration == `String.Pos.Raw.isValid then
+      some { params := #[.object, .tobject], results := #[.uint8] }
+    else
+      some { params := #[.object, .tobject], results := #[.tobject] }
+  else if declaration == `String.Pos.Raw.extract ||
+      declaration == `String.extract then
+    some { params := #[.object, .tobject, .tobject], results := #[.object] }
+  else if declaration == `String.getUTF8Byte then
+    some { params := #[.object, .tobject, .erased], results := #[.uint8] }
+  else if declaration == `String.Internal.contains then
+    some { params := #[.object, .uint32], results := #[.uint8] }
+  else if declaration == `String.Slice.Pattern.Internal.memcmpStr then
+    some {
+      params := #[.object, .object, .tobject, .tobject, .tobject,
+        .erased, .erased]
+      results := #[.uint8] }
   else
     none
 
@@ -1991,8 +2339,16 @@ private def internalizeSelected (module : Module) (declarations : Array Name)
         declarations.contains `String.decidableLT then
       Fir.Wasm.addUnique names (externalName `String.compare)
     else names
-    if declarations.contains `String.Pos.next then
+    let names := if declarations.contains `String.Pos.next ||
+        declarations.contains `String.Pos.Raw.next then
       Fir.Wasm.addUnique names (externalName `String.Internal.next)
+    else names
+    let names := if declarations.contains `String.Pos.Raw.extract ||
+        declarations.contains `String.extract then
+      Fir.Wasm.addUnique names (externalName `String.Internal.extract)
+    else names
+    if declarations.contains `String.Pos.Raw.get then
+      Fir.Wasm.addUnique names (externalName `String.decodeChar)
     else names
   let selectedHelperNames :=
     internalHelperNames ++ selectedImplementationHelperNames
@@ -2096,6 +2452,27 @@ private def externalTypes? (declaration : Name) : Option ExternalTypes :=
     some { params := #[object, object], result := uint8 }
   else if declaration == `USize.repr then
     some { params := #[LCNF.ImpureType.usize], result := object }
+  else if declaration == `String.Pos.Raw.prev ||
+      declaration == `String.Pos.Raw.next then
+    some { params := #[object, tobject], result := tobject }
+  else if declaration == `String.Pos.Raw.get then
+    some { params := #[object, tobject], result := uint32 }
+  else if declaration == `String.Pos.Raw.isValid then
+    some { params := #[object, tobject], result := uint8 }
+  else if declaration == `String.Pos.Raw.extract ||
+      declaration == `String.extract then
+    some { params := #[object, tobject, tobject], result := object }
+  else if declaration == `String.getUTF8Byte then
+    some {
+      params := #[object, tobject, LCNF.ImpureType.erased]
+      result := uint8 }
+  else if declaration == `String.Internal.contains then
+    some { params := #[object, uint32], result := uint8 }
+  else if declaration == `String.Slice.Pattern.Internal.memcmpStr then
+    some {
+      params := #[object, object, tobject, tobject, tobject,
+        LCNF.ImpureType.erased, LCNF.ImpureType.erased]
+      result := uint8 }
   else
     none
 
@@ -2149,6 +2526,8 @@ def residentExampleModule : Except String Module := do
     |>.mapError fun error => s!"allocator: {repr error}"
   let module ← ResidentNumeric.internalize module
     |>.mapError fun error => s!"numeric: {repr error}"
+  let module ← ResidentBigNumeric.internalize module
+    |>.mapError fun error => s!"big numeric: {repr error}"
   let module ← ResidentRelease.internalizeReleases module
     |>.mapError fun error => s!"releases: {repr error}"
   let module ← internalizeAvailable module

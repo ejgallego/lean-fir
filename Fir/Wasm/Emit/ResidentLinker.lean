@@ -9,8 +9,10 @@ import Fir.Wasm.Emit.ExternalRuntime
 import Fir.Wasm.Emit.ResidentFallback
 import Fir.Wasm.Emit.ResidentFloat
 import Fir.Wasm.Emit.ResidentFixedWidth
+import Fir.Wasm.Emit.ResidentHash
 import Fir.Wasm.Emit.ResidentLiteral
 import Fir.Wasm.Emit.ResidentMutation
+import Fir.Wasm.Emit.ResidentName
 import Fir.Wasm.Emit.ResidentNatArithmetic
 import Fir.Wasm.Emit.ResidentNatMod
 import Fir.Wasm.Emit.ResidentNatShift
@@ -58,6 +60,8 @@ inductive Step where
   | fixedWidthAvailable
   | stringOperations
   | stringOperationsAvailable
+  | hashAvailable
+  | nameAvailable
   | stringLiterals
   | fallbacks
   | fallbacksAvailable
@@ -197,6 +201,12 @@ private def applyStep (validate : Bool) (step : Step) (module : Module) :
   | .stringOperationsAvailable =>
       transform "available String operations"
         (ResidentString.internalizeAvailable · validate) module
+  | .hashAvailable =>
+      transform "available hashing operations"
+        (ResidentHash.internalizeAvailable · validate) module
+  | .nameAvailable =>
+      transform "available Name operations"
+        (ResidentName.internalizeAvailable · validate) module
   | .stringLiterals =>
       transform "String literals" (ResidentLiteral.internalizeStrings · validate) module
   | .fallbacks =>
@@ -361,6 +371,8 @@ private def callSitePolicyForStep : Step → CallSitePolicy
   | .fixedWidthAvailable
   | .stringOperations
   | .stringOperationsAvailable
+  | .hashAvailable
+  | .nameAvailable
   | .stringLiterals
   | .fallbacks
   | .fallbacksAvailable
@@ -723,6 +735,8 @@ def closedApplicationExternalDeclarations : Array Name :=
     #[ResidentPlatform.declaration] ++
     ResidentUSize.externalDeclarations ++
     ResidentString.availableExternalDeclarations ++
+    ResidentHash.externalDeclarations ++
+    #[ResidentName.declaration] ++
     ResidentScalarBox.externalDeclarations ++
     ResidentFallback.externalDeclarations
   declarations.foldl addUnique #[]
@@ -744,6 +758,8 @@ def closedApplicationFamilySteps : Array Step := #[
   .platformAvailable,
   .usizeAvailable,
   .stringOperationsAvailable,
+  .hashAvailable,
+  .nameAvailable,
   .stringLiterals,
   .fallbacksAvailable,
   .directSelfTailCallsAvailable]

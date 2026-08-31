@@ -2012,6 +2012,37 @@ def intDecLtFunction : Function := {
     .localGet rawLocal] ++
     retypeRawResult .uint8 decisionResultLocal }
 
+def intDecEqFunction : Function := {
+  name := externalName `Int.decEq
+  params := #[(leftParam, .tobject), (rightParam, .tobject)]
+  results := #[.uint8]
+  locals := decisionResultLocals ++ #[(leftSignLocal, .uint32),
+    (rightSignLocal, .uint32), (compareLocal, .uint32)]
+  body := [
+    .localGet leftParam,
+    .call (.declaration validateIntegerName),
+    .localGet rightParam,
+    .call (.declaration validateIntegerName),
+    .localGet leftParam,
+    .call (.declaration integerSignName),
+    .localSet leftSignLocal,
+    .localGet rightParam,
+    .call (.declaration integerSignName),
+    .localSet rightSignLocal,
+    .localGet leftParam,
+    .i32Const .uint32 1,
+    .localGet rightParam,
+    .i32Const .uint32 1,
+    .call (.declaration compareName),
+    .localSet compareLocal,
+    .localGet leftSignLocal,
+    .localGet rightSignLocal,
+    .i32Eq,
+    .localGet compareLocal,
+    .i32Eqz,
+    .i32And] ++
+    retypeRawResult .uint8 decisionResultLocal }
+
 def intDecLeFunction : Function := {
   name := externalName `Int.decLe
   params := #[(leftParam, .tobject), (rightParam, .tobject)]
@@ -2061,6 +2092,7 @@ def externalFunctions : Array Function := #[
   intOfNatFunction,
   intNegSuccFunction,
   intNegFunction,
+  intDecEqFunction,
   intDecLtFunction,
   intDecLeFunction,
   intNatAbsFunction,
