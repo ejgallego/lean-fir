@@ -917,10 +917,13 @@ private def sourceOwnersCallingUnresolvedDeclarations
       | .code code => collectCodeReferences #[] code
       | .extern _ => #[]
     unless references.any unresolvedSourceNames.contains do return roots
-    let some source ← sourceDeclarationAncestor? environment declaration.name |
+    /- A generated caller may live below an unrelated private implementation
+    namespace while its `._at_.` suffix records the real source declaration
+    that owns the specialization. Reuse the same compiler-provenance resolver
+    as direct external discovery instead of relying only on name ancestry. -/
+    let some source ← sourceCompilationRoot? environment declaration.name |
       return roots
-    unless ← sourceDeclarationIsCompilable environment source do return roots
-    return addSourceCompilationRoot roots { name := source }
+    return addSourceCompilationRoot roots source
 
 private partial def importedClosureReachesAny (targets : Array Name)
     (pending : List Name) (seen : NameSet := {}) : CoreM Bool := do

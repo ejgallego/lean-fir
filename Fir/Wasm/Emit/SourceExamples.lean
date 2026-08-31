@@ -2,6 +2,7 @@ import Fir.Validation.Corpus
 import Fir.Wasm.Emit.PrettyFormat
 import Fir.Wasm.Emit.ScalarBoxingExamples
 import Fir.Wasm.Emit.Source
+import Fir.Wasm.Emit.SourceArrayAppendFixture
 import Fir.Wasm.Emit.SourceClosedFixture
 import Fir.Wasm.PrettyFormat
 import Lean.Elab.Command
@@ -42,6 +43,16 @@ def externalAdapterEntryFixture (value : UInt32) : UInt32 :=
 
 #guard Fir.Wasm.Emit.CompilerPrivate.specializationCalleeCandidates
     `List.zipWith._at_.List.zip.spec_0._redArg == #[`List.zipWith]
+
+run_cmd do
+  let source ← liftCoreM <|
+    compileEntryIndividuallyInternalized
+      ``Fir.Wasm.Emit.SourceArrayAppendFixture.appendNestedArrays
+  let source ← liftCoreM <| internalizeFinalDependencies source
+  let stale := `List.foldl._at_.Array.appendList.spec_0._redArg
+  if source.externalNames.contains stale then
+    throwError
+      "cross-module Array.appendList specialization remained external: {stale}"
 
 run_cmd do
   let source ← liftCoreM <|
