@@ -14,10 +14,10 @@ open Lean.Compiler
 /-!
 # Wasm-resident `prettyM` UTF-8 frontier
 
-This generation slice internalizes the eight String declarations reachable
-from `Std.Format.prettyM`. It consumes and produces the W6 concrete UTF-8
-String layout directly and reuses the resident one-limb Natural helpers for
-String positions and results.
+This generation slice internalizes the String declarations selected by a
+captured source closure. It consumes and produces the W6 concrete UTF-8 String
+layout directly and reuses the resident one-limb Natural helpers for String
+positions and results.
 
 The byte walkers use structured Wasm loops. Their stack usage is therefore
 independent of String size while preserving the same concrete W6 layout and
@@ -175,6 +175,7 @@ def availableExternalDeclarations : Array Name :=
     `String.Pos.next,
     `String.decodeChar,
     `String.ofList,
+    `String.length,
     `String.decEq,
     `String.decidableLT,
     `String.compare,
@@ -1447,6 +1448,22 @@ private def retypeTobjectAsTagged : List Instruction := [
   .localGet taggedResultLocal,
   .ret]
 
+/-- Exposed `String.length` delegates to the same resident Unicode-code-point
+walker as the historical `String.Internal.length` primitive. Upstream marks
+the public declaration `tagged_return`, while a direct final-LCNF capture may
+retain the coarser `tobject` result. Returning the precise tagged value refines
+either compiler-produced object-family surface. -/
+def publicLengthFunction : Function := {
+  name := externalName `String.length
+  params := #[(sourceParam, .object)]
+  results := #[.tagged]
+  locals := #[(tobjectResultLocal, .tobject),
+    (savedScratchLocal, .uint32), (taggedResultLocal, .tagged)]
+  body := [
+    .localGet sourceParam,
+    .call (.declaration (externalName `String.Internal.length)),
+    .localSet tobjectResultLocal] ++ retypeTobjectAsTagged }
+
 /-- Proof-carrying `String.Pos.next` shares the resident UTF-8 walker. -/
 def positionNextFunction : Function := {
   name := externalName `String.Pos.next
@@ -1822,6 +1839,7 @@ def externalFunctions : Array Function := #[
   nextFunction,
   publicAppendFunction,
   publicPushFunction,
+  publicLengthFunction,
   positionNextFunction,
   decodeCharFunction,
   ofListFunction,
@@ -1891,6 +1909,8 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
     some { params := #[.object, .object], results := #[.object] }
   else if declaration == `String.push then
     some { params := #[.object, .uint32], results := #[.object] }
+  else if declaration == `String.length then
+    some { params := #[.object], results := #[.tobject] }
   else if declaration == `String.Pos.next then
     some {
       params := #[.object, .tobject, .erased]
@@ -1909,6 +1929,14 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
     some { params := #[.usize], results := #[.object] }
   else
     none
+
+private def functionSignature (function : Function) : Signature := {
+  params := function.params.map (·.2)
+  results := function.results }
+
+private def sourceProviderCompatible (helper provider : Signature) : Bool :=
+  helper.params == provider.params &&
+    Fir.Wasm.kindsRefine helper.results provider.results
 
 private def internalizeSelected (module : Module) (declarations : Array Name)
     (validate : Bool) :
@@ -1956,6 +1984,9 @@ private def internalizeSelected (module : Module) (declarations : Array Name)
     let names := if declarations.contains `String.push then
       Fir.Wasm.addUnique names (externalName `String.Internal.pushn)
     else names
+    let names := if declarations.contains `String.length then
+      Fir.Wasm.addUnique names (externalName `String.Internal.length)
+    else names
     let names := if declarations.contains `String.decEq ||
         declarations.contains `String.decidableLT then
       Fir.Wasm.addUnique names (externalName `String.compare)
@@ -1976,7 +2007,12 @@ private def internalizeSelected (module : Module) (declarations : Array Name)
       throw (.missingExternal declaration)
     let some signature := expectedSignature? declaration |
       throw (.incompatibleExternal declaration)
-    unless imports[0]!.signature == signature do
+    let some helper := externalFunctions.find?
+        (·.name == externalName declaration) |
+      throw (.incompatibleExternal declaration)
+    unless sourceProviderCompatible (functionSignature helper) signature &&
+        sourceProviderCompatible (functionSignature helper)
+          imports[0]!.signature do
       throw (.incompatibleExternal declaration)
   let selectedExternalFunctions := externalFunctions.filter fun function =>
     selectedImplementationHelperNames.contains function.name
@@ -2042,6 +2078,8 @@ private def externalTypes? (declaration : Name) : Option ExternalTypes :=
     some { params := #[object, object], result := object }
   else if declaration == `String.push then
     some { params := #[object, uint32], result := object }
+  else if declaration == `String.length then
+    some { params := #[object], result := tobject }
   else if declaration == `String.Pos.next then
     some {
       params := #[object, tobject, LCNF.ImpureType.erased]
