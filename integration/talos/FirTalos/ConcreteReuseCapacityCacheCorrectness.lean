@@ -5123,8 +5123,8 @@ structure DirectInternalCallSite
   parametersKnown :
     Fir.Wasm.declarationParameterKinds? context.program sourceDeclaration =
       some parameterKinds
-  argumentsRefine :
-    Fir.Wasm.kindsRefine argumentKinds parameterKinds = true
+  semanticArgumentsAtParameters :
+    SemanticValuesAtAbi parameterKinds.toList semanticArgs.toList
   declaredCalleeResult :
     Fir.Wasm.directAbiKind? sourceDeclaration.type =
       some declaredCalleeResultKind
@@ -12617,7 +12617,8 @@ theorem ConcreteGeneratedInternalDeclaration.entryEnvLocalsRelatedOfArguments
     EnvLocalsRelated witness (functionBindings calleeFunction) site.calleeEnv
       (row.targetFunction.toLocals physicalArgs) :=
   row.entryEnvLocalsRelated site
-    (argumentsRelated.ofKindsRefine site.argumentsRefine)
+    (argumentsRelated.ofSemanticValuesAtAbi
+      site.semanticArgumentsAtParameters)
 
 /-- Re-index an unchanged valid caller store as the generated direct callee's
 canonical entry frame. Reuse facts and their ordinary-token obligations start
@@ -12682,7 +12683,8 @@ theorem ConcreteReuseCapacityCacheFrame.generatedDirectCalleeEntry
     rw [← classifiedSize] at lengths
     simpa using lengths
   have parameterRelated :=
-    argumentsRelated.ofKindsRefine site.argumentsRefine
+    argumentsRelated.ofSemanticValuesAtAbi
+      site.semanticArgumentsAtParameters
   have physicalSize : physicalArgs.length = site.parameterKinds.size := by
     simpa using parameterRelated.physicalLength
   have parameterFrameSize :
@@ -12959,7 +12961,8 @@ theorem ConcreteGeneratedInternalDeclaration.targetParameterCount
     simpa using lengths
   have physicalSize : physicalArgs.length = site.parameterKinds.size := by
     simpa using
-      (argumentsRelated.ofKindsRefine site.argumentsRefine).physicalLength
+      (argumentsRelated.ofSemanticValuesAtAbi
+        site.semanticArgumentsAtParameters).physicalLength
   have signature :=
     FirTalos.Correctness.function_preserves_signature row.functionAdapted
   simp [Wasm.Function.numParams, signature.1, physicalSize,

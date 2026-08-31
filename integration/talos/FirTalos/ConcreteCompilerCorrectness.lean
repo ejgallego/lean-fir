@@ -1410,6 +1410,31 @@ theorem ConstructorArgumentsRelated.ofKindsRefine
     simpa only [Array.toList_zip] using allRefines
   exact related.ofListRefines sizes pointwise
 
+/-- Semantic consumer typing transports an already-related physical argument
+row to the exact parameter ABI without requiring a directional comparison of
+the compiler carriers.
+
+This is the general boundary needed for Lean's compatible object family: a
+physical `.tobject` argument may enter an `.object` parameter exactly when its
+source value is semantically known to be heap-backed. The theorem changes
+neither the physical values nor the source values. -/
+theorem ConstructorArgumentsRelated.ofSemanticValuesAtAbi
+    {witness : RefinementWitness}
+    {actual expected : List AbiKind}
+    {physicals : List Wasm.Value} {semanticValues : List Value}
+    (related :
+      ConstructorArgumentsRelated witness actual physicals semanticValues)
+    (typed : SemanticValuesAtAbi expected semanticValues) :
+    ConstructorArgumentsRelated witness expected physicals semanticValues := by
+  induction related generalizing expected with
+  | nil =>
+      cases typed
+      exact .nil
+  | cons head rest ih =>
+      cases typed with
+      | cons typedHead typedRest =>
+          exact .cons (head.ofSemanticValueAtAbi typedHead) (ih typedRest)
+
 /-- Pointwise array refinement exposes the relation at any pair of successful
 lookups. This is the index-shaped form used by generated closure projections. -/
 theorem kindsRefine_getElem

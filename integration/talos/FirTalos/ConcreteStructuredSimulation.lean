@@ -9657,7 +9657,8 @@ theorem ConcreteGeneratedInternalDeclaration.entryFrameAligned
     rw [← classifiedSize] at lengths
     simpa using lengths
   have parameterRelated :=
-    argumentsRelated.ofKindsRefine site.argumentsRefine
+    argumentsRelated.ofSemanticValuesAtAbi
+      site.semanticArgumentsAtParameters
   have physicalSize : physicalArgs.length = site.parameterKinds.size := by
     simpa using parameterRelated.physicalLength
   have parameterFrameSize :

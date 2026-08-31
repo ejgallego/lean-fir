@@ -50,6 +50,28 @@ inductive SemanticValueAtAbi : AbiKind → Value → Prop where
       SemanticValueAtAbi .float (.scalar (.float64Bits bits))
   | usize : SemanticValueAtAbi .usize (.usize value)
 
+/-- Pointwise source-semantic typing for an ABI row.
+
+Unlike a compiler-kind comparison, this relation can justify a precise
+object-family use of a coarse physical carrier: each value itself is known at
+the ABI required by the consumer. It contains no concrete address, Wasm value,
+refinement witness, or execution path. -/
+inductive SemanticValuesAtAbi : List AbiKind → List Value → Prop where
+  | nil : SemanticValuesAtAbi [] []
+  | cons
+      (head : SemanticValueAtAbi kind value)
+      (rest : SemanticValuesAtAbi kinds values) :
+      SemanticValuesAtAbi (kind :: kinds) (value :: values)
+
+/-- A semantically typed ABI row has exactly one kind per source value. -/
+theorem SemanticValuesAtAbi.length
+    {kinds : List AbiKind} {values : List Value}
+    (typed : SemanticValuesAtAbi kinds values) :
+    kinds.length = values.length := by
+  induction typed with
+  | nil => rfl
+  | cons _ _ ih => simp [ih]
+
 /-- Semantic ABI facts weaken along the same directional refinement relation
 used by runtime and compiler contracts.
 
