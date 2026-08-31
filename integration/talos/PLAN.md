@@ -137,7 +137,13 @@ through lets, layout-neutral mutation/reference-count continuations, selected
 case alternatives, and the aligned validation stored in suspended callers.
 Lazy-cache admission therefore reads its exact destination lane from the
 current validated outcome; no cache-specific local premise or duplicated
-source invariant remains.
+source invariant remains. `admit_lazyHit_of_compiler` now constructs exact
+zero-allocation hit admission from that outcome, including the production
+generated-cache environment. The combined `admit_lazy_of_compiler` theorem
+performs runtime hit/miss selection internally and leaves only
+`ConcreteStructuredLazyMissBackendCoverageAt`, the explicit implementation
+gap for external or heap-result cache misses. That boundary must disappear by
+adding backend coverage, not by moving it into a source invariant.
 
 The result/publication boundary is now substantially narrower.
 `SemanticEnvAtLocalKinds.ofStateRelated` derives every ordinary residual-local

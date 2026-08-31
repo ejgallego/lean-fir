@@ -474,6 +474,260 @@ theorem supportedArgumentKinds_size_of_some
       rw [← kindsEq]
       simpa using optionListMapM_length classified
 
+/-- A successful nullary named-call check exposes the declaration and exact
+effective result lane, and proves that the selected source declaration is
+itself nullary.  This is a direct inversion of production validation, not a
+separate call-site certificate. -/
+theorem supportedNamedCall_nullary_facts
+    {program : Fir.LeanIR.ImpureProgram}
+    {locals : Fir.Wasm.LocalKinds}
+    {declared : AbiKind} {name : Lean.Name}
+    (supported : Fir.Wasm.supportedNamedCall program locals declared name #[] =
+      true) :
+    ∃ target resultKind,
+      program.findDecl? name = some target ∧
+        Fir.Wasm.effectiveDeclarationResultKind? target = some resultKind ∧
+        target.params.isEmpty = true := by
+  unfold Fir.Wasm.supportedNamedCall at supported
+  cases targetEq : program.findDecl? name with
+  | none => simp [targetEq] at supported
+  | some target =>
+      cases bodyEq : target.value
+      all_goals
+        cases resultEq : Fir.Wasm.effectiveDeclarationResultKind? target <;>
+          try simp [targetEq, bodyEq, resultEq] at supported
+        cases parameterEq :
+            Fir.Wasm.declarationParameterKinds? program target <;>
+          try simp [parameterEq] at supported
+        rename_i resultKind parameterKinds
+        have acceptedFull :
+            (resultKind.leanCompatible declared = true ∧
+                0 = parameterKinds.size) ∧
+              ((#[] : Array AbiKind).zip parameterKinds).all
+                  (fun pair : AbiKind × AbiKind =>
+                    pair.fst.leanCompatible pair.snd) = true := by
+          simpa [targetEq, bodyEq, resultEq, parameterEq] using supported
+        have accepted := acceptedFull.1
+        refine ⟨target, resultKind, rfl, resultEq, ?_⟩
+        have parameterSize :=
+          declarationParameterKinds?_size_of_some parameterEq
+        rw [Array.isEmpty_iff_size_eq_zero]
+        omega
+
+/-- Residual validation constructs the complete static lazy-cache call site
+for a nullary named-call `let`.  The theorem client supplies only the syntactic
+head equation that selects this compiler family; all ABI and declaration
+facts are recovered from the production validator. -/
+theorem ConcreteStructuredAlignedValidationState.lazyCacheCallCompilerSite
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionResult : AbiKind}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {declaration : Lean.Name}
+    (validated : ConcreteStructuredAlignedValidationState program context
+      functionResult (.let decl continuation))
+    (contextProgram : context.program = program)
+    (valueEq : decl.value = .fap declaration #[]) :
+    ∃ sourceDeclaration resultKind declaredResultKind,
+      LazyCacheCallCompilerSite context decl declaration sourceDeclaration
+        resultKind declaredResultKind := by
+  subst program
+  obtain ⟨_joins, locals, _facts, _sharing, focus, _agrees,
+      _localAlignment⟩ := validated
+  obtain ⟨_selectedKind, supported, _continuation⟩ := focus.let_eq
+  cases declaredEq : Fir.Wasm.abiValueKind? decl.type with
+  | none =>
+      simp [Fir.Wasm.supportedLetDeclKind?, declaredEq] at supported
+  | some declaredResultKind =>
+      have callEq : Fir.Wasm.supportedNamedCall context.program locals
+          declaredResultKind declaration #[] = true := by
+        by_contra rejected
+        have callFalse := Bool.eq_false_of_not_eq_true rejected
+        simp [Fir.Wasm.supportedLetDeclKind?, declaredEq, valueEq,
+          callFalse] at supported
+      obtain ⟨sourceDeclaration, resultKind, targetEq, targetResultEq,
+          paramsEq⟩ := supportedNamedCall_nullary_facts callEq
+      exact ⟨sourceDeclaration, resultKind, declaredResultKind,
+        ⟨valueEq, declaredEq, targetEq, targetResultEq, paramsEq⟩⟩
+
+/-- The real supported-function package constructs the module-wide generated
+lazy-cache environment at its exact compiler context. -/
+theorem ConcreteSupportedFunction.lazyCacheGeneratedEnvironment
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts)
+    (contextCaches :
+      context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program) :
+    LazyCacheGeneratedEnvironment context sourceModule :=
+  LazyCacheGeneratedEnvironment.ofSupportedPipeline spec.contextProgram
+    spec.programNamesUnique spec.lowered spec.adapted contextCaches
+
+/-- A validated nullary call whose current cache lookup is a hit has exact
+zero-allocation compiler admission.  The declaration, ABI lanes, destination
+local, and generated cache environment are compiler-derived; only the current
+semantic lookup is dynamic. -/
+theorem ConcreteStructuredAlignedValidationState.admit_lazyHit_of_compiler
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {externals : ExternalImpl}
+    {functionResult : AbiKind}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {declaration : Lean.Name}
+    {sourceValue : Value}
+    (validated : ConcreteStructuredAlignedValidationState program context
+      functionResult (.let decl continuation))
+    (contextProgram : context.program = program)
+    (generated : LazyCacheGeneratedEnvironment context sourceModule)
+    (valueEq : decl.value = .fap declaration #[])
+    (semanticFound :
+      findGlobal? sourceRuntime.globals declaration = some sourceValue) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+      functionResult facts sourceRuntime sourceEnv 0
+      (.let decl continuation) := by
+  obtain ⟨sourceDeclaration, resultKind, declaredResultKind, site⟩ :=
+    validated.lazyCacheCallCompilerSite contextProgram valueEq
+  have call := validated.lazyCacheCallSupported contextProgram site
+  exact .lazyHit call generated semanticFound
+
+/-- The current recursively validated outcome closes the complete lazy-hit
+admission branch directly from production facts and the current runtime
+lookup.  This is one branch of the PA2 compiler admission law, not a
+source-invariant hypothesis. -/
+theorem ConcreteStructuredValidatedCodeOutcome.admit_lazyHit_of_compiler
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    {declaration : Lean.Name}
+    {sourceValue : Value}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.let decl continuation) targetStore targetLocals targetCode witness source
+      target)
+    (valueEq : decl.value = .fap declaration #[])
+    (semanticFound :
+      findGlobal? sourceRuntime.globals declaration = some sourceValue) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+      functionResult facts sourceRuntime sourceEnv 0
+      (.let decl continuation) :=
+  related.core.validation.admit_lazyHit_of_compiler spec.contextProgram
+    (spec.lazyCacheGeneratedEnvironment related.contextCaches) valueEq
+    semanticFound
+
+/-- Exact remaining backend-coverage boundary for a compiler-selected lazy
+cache miss.  It names only the initializer shapes not yet implemented by the
+current structured simulator; hit admission does not consume it. -/
+def ConcreteStructuredLazyMissBackendCoverageAt
+    (context : Fir.Wasm.Context)
+    (sourceRuntime : RuntimeState)
+    (decl : Lean.Compiler.LCNF.LetDecl .impure)
+    (declaration : Lean.Name) : Prop :=
+  ∀ {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
+      {resultKind declaredResultKind : AbiKind},
+    LazyCacheCallCompilerSite context decl declaration sourceDeclaration
+        resultKind declaredResultKind →
+      findGlobal? sourceRuntime.globals declaration = none →
+        ∃ calleeCode,
+          LazyCacheInternalMissSupported context decl declaration
+              sourceDeclaration resultKind calleeCode ∧
+            Fir.Wasm.abiKind? sourceDeclaration.type =
+              .ok (some resultKind) ∧
+            resultKind ≠ .object ∧ resultKind ≠ .tobject
+
+/-- Complete current lazy-cache admission from the validated compiler
+relation, modulo the named backend miss-coverage boundary above.  Runtime
+lookup selects the branch internally; clients cannot choose a stale hit/miss
+witness or provide compiler ABI/local facts. -/
+theorem ConcreteStructuredValidatedCodeOutcome.admit_lazy_of_compiler
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    {declaration : Lean.Name}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.let decl continuation) targetStore targetLocals targetCode witness source
+      target)
+    (valueEq : decl.value = .fap declaration #[])
+    (missCoverage : ConcreteStructuredLazyMissBackendCoverageAt context
+      sourceRuntime decl declaration) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+      functionResult facts sourceRuntime sourceEnv 0
+      (.let decl continuation) := by
+  obtain ⟨sourceDeclaration, resultKind, declaredResultKind, site⟩ :=
+    related.core.validation.lazyCacheCallCompilerSite spec.contextProgram
+      valueEq
+  have call := related.core.validation.lazyCacheCallSupported
+    spec.contextProgram site
+  have generated :=
+    spec.lazyCacheGeneratedEnvironment related.contextCaches
+  cases lookup : findGlobal? sourceRuntime.globals declaration with
+  | some sourceValue =>
+      exact .lazyHit call generated lookup
+  | none =>
+      obtain ⟨calleeCode, internal, resultClassified, notObject,
+          notTObject⟩ := missCoverage site lookup
+      exact .lazyMiss internal generated resultClassified notObject notTObject
+        lookup
+
 /-- Residual-validator local agreement turns one accepted source argument
 into the exact production `compileArg` equation at the same ABI. -/
 theorem ConcreteStructuredValidationLocalsAgree.compileArg_of_supported

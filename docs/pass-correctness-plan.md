@@ -68,9 +68,12 @@ even when the execution may continue forever.
    root. The recursively validated relation now retains that alignment through
    lets, mutation/reference-count continuations, case selection, and suspended
    callers; lazy admission projects it directly rather than accepting a
-   cache-specific destination premise. The remaining lazy work is genuine
-   backend coverage for external and object-result cache misses, followed by
-   assembly into the compiler current-step admission law.
+   cache-specific destination premise. `admit_lazyHit_of_compiler` now closes
+   the hit branch at exact cost zero from the recursively validated outcome,
+   and `admit_lazy_of_compiler` isolates all miss-only debt behind
+   `ConcreteStructuredLazyMissBackendCoverageAt`. The remaining lazy work is
+   genuine backend coverage for external and object-result cache misses,
+   followed by final assembly into the compiler current-step admission law.
 3. **PA2 — compiler-derived guarded admission.** Derive the current-step
    compiler admission package from production validation, the active relation,
    and one successful source step. The admission law now consumes
