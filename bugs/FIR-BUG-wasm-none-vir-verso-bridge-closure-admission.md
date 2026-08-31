@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-vir-verso-bridge-closure-admission
-status: active
+status: fixed
 classification: compiler
 lean-toolchain: leanprover/lean4:v4.34.0-rc2
 lean-revision: 6a10ac8c22beadecabdbb0919c2b50214762f91d
@@ -9,7 +9,7 @@ pass: none
 discovered-by: source-closure-test
 first-seen: 2026-08-31
 reproduction: Fir/Wasm/Emit/Source.lean
-regression: none
+regression: Fir/Wasm/Emit/SourceExamples.lean
 ---
 
 # Summary
@@ -30,6 +30,14 @@ commit `99e9df791e46ec647f81d98b109965f166b9b6b4`, compile these roots with
 Retain the 44 `@[vir_js]` host declarations and their compiler-generated
 `_boxed` adapters, plus FIR's ordinary closed-application external frontier.
 The exact source capture contains 1,786 declarations and 151 externals.
+
+## Exact commands
+
+```sh
+export LAKE_CACHE_DIR="$(bash scripts/fir-lake-cache-path.sh)"
+export LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true
+lake build Fir.Wasm.Examples Fir.Wasm.Emit.SourceExamples
+```
 
 ## Expected semantics
 
@@ -82,4 +90,15 @@ none
 
 ## Resolution and regression
 
-Pending.
+The compiler now preserves physical void lanes, canonicalizes named-call and
+partial-capture void arguments, accepts Lean's object-family calling
+convention for partial captures, regenerates explicit external boxed adapters
+through `LCNF.addBoxedVersions`, and selectively recompiles source owners and
+bridges needed by unresolved generated externals. The focused examples cover
+the compiler-produced boundary shapes.
+
+The exact Lean 4.34 viewer probe subsequently captured 2,000 declarations,
+lowered 1,845 source functions, reported no caller of the stale
+`Lean.Name.toStringWithToken._at_.Lean.Name.toString.spec_0`, and reached the
+resident external frontier. The remaining external runtime inventory is
+tracked as package/runtime work rather than closure admission failure.
