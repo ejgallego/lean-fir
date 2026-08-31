@@ -589,6 +589,16 @@ def ConcreteStructuredReturnUseSiteProvenanceAt
     Fir.Wasm.getLocal context result = .ok (.localGet result, actual) →
       SemanticBindingAtUseSite sourceEnv result actual expected
 
+/-- Static coverage of a non-refining return edge by the same canonical
+precise-local row used for call arguments. -/
+def ConcreteStructuredReturnUseSiteCoveredBy
+    (provenance : Fir.Wasm.LocalKinds) (context : Fir.Wasm.Context)
+    (result : Lean.FVarId) (expected : AbiKind) : Prop :=
+  ∀ {actual},
+    Fir.Wasm.getLocal context result = .ok (.localGet result, actual) →
+      actual.refines expected ≠ true →
+        Fir.Wasm.findLocalKind? provenance result = some expected
+
 namespace ConcreteStructuredReturnUseSiteProvenanceAt
 
 /-- A directional result ABI constructs the current use-site boundary without
@@ -614,6 +624,22 @@ theorem ofSemanticBinding
       expected := by
   intro _actual _compiled
   exact .ofSemanticBinding typed
+
+/-- A semantically preserved compiler provenance row constructs the exact
+current return-use boundary.  Directional returns still use no provenance
+lookup. -/
+theorem ofCoverage
+    {provenance : Fir.Wasm.LocalKinds} {context : Fir.Wasm.Context}
+    {sourceEnv : Env} {result : Lean.FVarId} {expected : AbiKind}
+    (typed : SemanticEnvAtLocalKinds provenance sourceEnv)
+    (covered : ConcreteStructuredReturnUseSiteCoveredBy provenance context
+      result expected) :
+    ConcreteStructuredReturnUseSiteProvenanceAt context sourceEnv result
+      expected := by
+  intro actual compiled
+  by_cases refines : actual.refines expected = true
+  · exact .ofRefines refines
+  · exact .ofSemanticBinding (typed.binding (covered compiled refines))
 
 /-- Eliminate current return provenance using only the already-established
 compiler layout and concrete state relation. -/
@@ -657,51 +683,43 @@ theorem ConcreteStructuredAlignedValidationState.returnSemantic_ofUseSite
   obtain ⟨actual, found, _compatible⟩ := focus.return_eq
   exact provenance.semanticBinding localsAligned related (agrees found)
 
-/-- The recursively validated compiler relation constructs complete
-zero-allocation return admission from the current return use-site fact.
-
-Residual validation supplies the selected local and its compiler ABI; the
-live concrete relation supplies semantic typing at that ABI.  Therefore the
-provenance input contributes information only when the active function result
-is more precise than the compiler local carrier. -/
+/-- Branch-local PA2 return assembly from the canonical compiler provenance
+row.  Existing residual validation supplies the physical compiler edge; the
+precise row is consulted only if that edge is non-directional. -/
 theorem ConcreteStructuredValidatedCodeOutcome.admit_return_of_compiler
-    {program : Fir.LeanIR.ImpureProgram}
-    {context : Fir.Wasm.Context}
+    {program : Fir.LeanIR.ImpureProgram} {context : Fir.Wasm.Context}
     {functionCode : Lean.Compiler.LCNF.Code .impure}
-    {sourceModule : Fir.Wasm.Module}
-    {sourceFunction : Fir.Wasm.Function}
-    {targetModule : AdaptedModule}
-    {hosts : ResolvedHosts}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule} {hosts : ResolvedHosts}
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
-    {externals : ExternalImpl}
-    {labels : LabelContext}
+    {externals : ExternalImpl} {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
-    {functionResult : AbiKind}
-    {callerExpectedResult : Option AbiKind}
-    {facts : ReuseCapacityFacts}
-    {remainingBytes : Nat}
-    {sourceEnv : Env}
-    {result : Lean.FVarId}
-    {targetLocals : Wasm.Locals}
-    {targetCode : Wasm.Program}
-    {source : MachineState}
-    {target : StructuredWasmState Host}
+    {functionResult : AbiKind} {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts} {remainingBytes : Nat} {sourceEnv : Env}
+    {result : Lean.FVarId} {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program} {source : MachineState}
+    {target : StructuredWasmState Host} {provenance : Fir.Wasm.LocalKinds}
     (related : ConcreteStructuredValidatedCodeOutcome program context
       functionCode sourceModule sourceFunction targetModule hosts spec externals
       labels entryRuntime entryStore entryWitness functionResult
       callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
       (.return result) targetStore targetLocals targetCode witness source target)
-    (provenance : ConcreteStructuredReturnUseSiteProvenanceAt context sourceEnv
+    (typedProvenance : SemanticEnvAtLocalKinds provenance sourceEnv)
+    (covered : ConcreteStructuredReturnUseSiteCoveredBy provenance context
       result functionResult) :
     ConcreteStructuredCodeStepAdmission context sourceModule externals
       functionResult facts sourceRuntime sourceEnv 0 (.return result) := by
-  apply related.core.validation.admit_return
-  intro sourceValue found
-  exact (related.core.validation.returnSemantic_ofUseSite spec.localsAligned
-    related.core.core.focus.stateRelated provenance) found
+  have returnProvenance : ConcreteStructuredReturnUseSiteProvenanceAt context
+      sourceEnv result functionResult :=
+    ConcreteStructuredReturnUseSiteProvenanceAt.ofCoverage typedProvenance
+      covered
+  have resultSemantic : SemanticBindingAtAbi sourceEnv result functionResult :=
+    related.core.validation.returnSemantic_ofUseSite spec.localsAligned
+      related.core.core.focus.stateRelated returnProvenance
+  exact related.core.validation.admit_return resultSemantic
 
 /-- Use-site provenance closes both directional returns and the precise
 object-family return edges for which carrier compatibility is insufficient. -/
@@ -883,6 +901,84 @@ theorem bindParams_exists_of_size_eq
       (fun env pair => bind env pair.fst.fvarId pair.snd) []
   refine ⟨calleeEnv, ?_⟩
   simp [bindParams, sizeEq, calleeEnv]
+
+/-- The canonical precise local row associated with a parameter ABI row.
+
+This uses the same left-to-right replacement discipline as source
+`bindParams`: later duplicate names shadow earlier ones in both structures.
+Production hygiene normally excludes duplicates, but the semantic theorem
+does not need that extra premise. -/
+def semanticParameterLocalKinds
+    (params : List (Lean.Compiler.LCNF.Param .impure))
+    (kinds : List AbiKind) : Fir.Wasm.LocalKinds :=
+  (params.zip kinds).foldl (init := []) fun locals pair =>
+    Fir.Wasm.insertLocal locals pair.fst.fvarId pair.snd
+
+/-- Binding a semantically typed parameter/value row preserves a precise
+local environment, starting from arbitrary matching accumulators. -/
+private theorem semanticEnvAtLocalKinds_foldl_bindParams
+    {kinds : List AbiKind} {values : List Value}
+    (typedValues : SemanticValuesAtAbi kinds values) :
+    ∀ {params : List (Lean.Compiler.LCNF.Param .impure)}
+      {locals : Fir.Wasm.LocalKinds} {env : Env},
+      params.length = kinds.length →
+        SemanticEnvAtLocalKinds locals env →
+          SemanticEnvAtLocalKinds
+            ((params.zip kinds).foldl (init := locals) fun locals pair =>
+              Fir.Wasm.insertLocal locals pair.fst.fvarId pair.snd)
+            ((params.zip values).foldl (init := env) fun env pair =>
+              bind env pair.fst.fvarId pair.snd) := by
+  induction typedValues with
+  | nil =>
+      intro params locals env sizes typedEnv
+      cases params with
+      | nil => exact typedEnv
+      | cons param params => simp at sizes
+  | @cons kind value kinds values typedHead typedTail ih =>
+      intro params locals env sizes typedEnv
+      cases params with
+      | nil => simp at sizes
+      | cons param params =>
+          have tailSizes : params.length = kinds.length := by
+            simp only [List.length_cons] at sizes
+            omega
+          simp only [List.zip_cons_cons, List.foldl_cons]
+          exact ih tailSizes (typedEnv.bind_insertLocal typedHead)
+
+/-- A successful source parameter bind produces the exact semantic local row
+selected by the parameter ABI kinds.
+
+This is the common provenance entry law for named calls, closure calls, and
+join invocation.  In particular an `.object` parameter remains semantically
+precise inside the callee even when the caller's physical source lane was
+coarser and justified at the call use site. -/
+theorem SemanticValuesAtAbi.semanticEnv_of_bindParams
+    {params : Array (Lean.Compiler.LCNF.Param .impure)}
+    {kinds : List AbiKind} {values : Array Value} {calleeEnv : Env}
+    (typedValues : SemanticValuesAtAbi kinds values.toList)
+    (sizes : params.size = kinds.length)
+    (bound : bindParams params values = .ok calleeEnv) :
+    SemanticEnvAtLocalKinds
+      (semanticParameterLocalKinds params.toList kinds) calleeEnv := by
+  have valueSizes : values.size = kinds.length := by
+    simpa using typedValues.length.symm
+  have parameterValueSizes : params.size = values.size := sizes.trans valueSizes.symm
+  have parameterListSizes : params.toList.length = kinds.length := by
+    simpa using sizes
+  have emptyTyped : SemanticEnvAtLocalKinds [] [] := by
+    intro fvarId kind found
+    simp [Fir.Wasm.findLocalKind?] at found
+  have folded := semanticEnvAtLocalKinds_foldl_bindParams typedValues
+    parameterListSizes emptyTyped
+  unfold bindParams at bound
+  have calleeEnvEq :
+      (params.toList.zip values.toList).foldl
+          (fun env pair => bind env pair.fst.fvarId pair.snd) [] = calleeEnv :=
+    by
+      simp [parameterValueSizes] at bound
+      exact bound
+  subst calleeEnv
+  simpa [semanticParameterLocalKinds] using folded
 
 /-- Successful `Option` traversal preserves cardinality.  This is the static
 array counterpart of successful source argument evaluation and is shared by
@@ -2122,6 +2218,21 @@ structure DirectInternalCallCompilerAdmission
     Fir.Wasm.getLocal context decl.fvarId =
       .ok (.localGet decl.fvarId, calleeResultKind)
 
+/-- Canonical current-node semantic boundary for a named call.
+
+The production validator may expose its residual local row existentially, so
+the boundary accepts whichever exact static admission it constructs.  Its
+conclusion is still restricted to the non-refining members of that admission's
+current argument row.  A later compiler provenance analysis constructs this
+property; it is not intended as a public theorem-client premise. -/
+def ConcreteDirectCallArgumentProvenanceAt
+    (context : Fir.Wasm.Context) (sourceEnv : Env)
+    (decl : Lean.Compiler.LCNF.LetDecl .impure) : Prop :=
+  ∀ {locals : Fir.Wasm.LocalKinds}
+    (admission : DirectInternalCallCompilerAdmission context locals decl),
+      SemanticNonRefiningArgumentsAt sourceEnv admission.args.toList
+        admission.rawArgumentKinds.toList admission.parameterKinds.toList
+
 /-- Production validation constructs the complete static direct-call
 admission without a caller-supplied directional argument comparison.
 
@@ -2155,7 +2266,7 @@ theorem ConcreteStructuredAlignedValidationState.directInternalCallBoundary
             (fun pair => pair.fst.leanCompatible pair.snd) = true ∧
         Nonempty (DirectInternalCallCompilerAdmission context locals decl) := by
   subst program
-  obtain ⟨joins, locals, facts, sharing, focus, _agrees, localAlignment⟩ :=
+  obtain ⟨joins, locals, facts, sharing, focus, agrees, localAlignment⟩ :=
     validated
   obtain ⟨selectedKind, supportedDecl, _continuationValidation⟩ := focus.let_eq
   cases declaredFound : Fir.Wasm.abiValueKind? decl.type with
@@ -2229,7 +2340,7 @@ theorem ConcreteStructuredAlignedValidationState.directInternalCallBoundary
         parametersKnown := parametersKnown
         declarationArgumentsClassified := declarationArgumentsClassified
         argumentsClassified := argumentsClassified
-        localsAgree := _agrees
+        localsAgree := agrees
         argumentAlignment := argumentAlignment
         argumentSizes := argumentSizes
         argumentsCompatible := argumentsCompatible
@@ -2313,9 +2424,10 @@ theorem DirectInternalCallCompilerAdmission.toSite_of_step
       labels sourceRuntime sourceEnv (.let decl continuation) targetStore
       targetLocals targetCode witness source target)
     (sourceStep : executeStep externals source = .next sourceAfter) :
-    Nonempty (DirectInternalCallSite context decl sourceEnv) := by
+  Nonempty (DirectInternalCallSite context decl sourceEnv) := by
   obtain ⟨argumentCode, rawArgumentsCompiled⟩ :=
-    admission.localsAgree.compileArgs_of_supported admission.argumentsClassified
+    ConcreteStructuredValidationLocalsAgree.compileArgs_of_supported
+      admission.localsAgree admission.argumentsClassified
   obtain ⟨declarationArgumentCode, declarationArgumentsCompiled⟩ :=
     admission.argumentAlignment.compileDeclarationArguments
       admission.localsAgree
@@ -2398,6 +2510,28 @@ theorem DirectInternalCallCompilerAdmission.toSite_of_step
     argumentsEvaluated := argumentsEvaluated
     parametersBound := parametersBound
     resultCompiled := admission.resultCompiled }⟩
+
+/-- The operational direct-call site already carries enough information to
+establish the callee's canonical precise parameter environment.
+
+This is the call-entry preservation half of the provenance carrier.  It is a
+consequence of the exact semantic argument row and source `bindParams`, not a
+new caller premise. -/
+theorem DirectInternalCallSite.semanticEnvAtParameterKinds
+    {context : Fir.Wasm.Context} {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {sourceEnv : Env}
+    (site : DirectInternalCallSite context decl sourceEnv) :
+    SemanticEnvAtLocalKinds
+      (semanticParameterLocalKinds site.sourceDeclaration.params.toList
+        site.parameterKinds.toList)
+      site.calleeEnv := by
+  have sizes : site.sourceDeclaration.params.size =
+      site.parameterKinds.toList.length := by
+    have classifiedSize :=
+      declarationParameterKinds?_size_of_some site.parametersKnown
+    simpa using classifiedSize.symm
+  exact site.semanticArgumentsAtParameters.semanticEnv_of_bindParams sizes
+    site.parametersBound
 
 /-- Use-site form of direct-call admission.
 
@@ -2529,72 +2663,59 @@ theorem DirectInternalCallCompilerAdmission.toSite_of_step_ofKindsRefine
     localsAligned focus
     sourceStep
 
-/-- The recursively validated compiler relation constructs complete
-zero-allocation admission for one ordinary internal named call.
+/-- Current residual validation, exact producer provenance, and the successful
+source step construct the direct-call admission consumed by W6.
 
-All declaration lookup, ABI rows, arity, carrier compatibility, residual
-local compilation, result refinement, and destination-local equations come
-from production validation.  The successful current source step reconstructs
-argument evaluation and parameter binding.  The only remaining input is the
-exact current-node semantic argument provenance isolated by
-`ConcreteStructuredDirectCallArgumentsAt`. -/
+This is the branch-local PA2 assembly theorem.  Static call selection and
+layout come from production validation; the source step contributes only
+argument evaluation; `provenance` contributes only non-refining current-row
+members. -/
 theorem ConcreteStructuredValidatedCodeOutcome.admit_directCall_of_compiler
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {functionCode : Lean.Compiler.LCNF.Code .impure}
-    {sourceModule : Fir.Wasm.Module}
-    {sourceFunction : Fir.Wasm.Function}
-    {targetModule : AdaptedModule}
-    {hosts : ResolvedHosts}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule} {hosts : ResolvedHosts}
     {spec : ConcreteSupportedFunction program context functionCode sourceModule
       sourceFunction targetModule hosts}
-    {externals : ExternalImpl}
-    {labels : LabelContext}
+    {externals : ExternalImpl} {labels : LabelContext}
     {entryRuntime sourceRuntime : RuntimeState}
     {entryStore targetStore : Wasm.Store Host}
     {entryWitness witness : RefinementWitness}
-    {functionResult : AbiKind}
-    {callerExpectedResult : Option AbiKind}
-    {facts : ReuseCapacityFacts}
-    {remainingBytes : Nat}
-    {sourceEnv : Env}
+    {functionResult : AbiKind} {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts} {remainingBytes : Nat} {sourceEnv : Env}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {continuation : Lean.Compiler.LCNF.Code .impure}
-    {targetLocals : Wasm.Locals}
-    {targetCode : Wasm.Program}
-    {source sourceAfter : MachineState}
-    {target : StructuredWasmState Host}
-    {declaration : Lean.Name}
-    {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
-    {calleeCode : Lean.Compiler.LCNF.Code .impure}
-    {args : Array (Lean.Compiler.LCNF.Arg .impure)}
+    {targetLocals : Wasm.Locals} {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState} {target : StructuredWasmState Host}
     (related : ConcreteStructuredValidatedCodeOutcome program context
       functionCode sourceModule sourceFunction targetModule hosts spec externals
       labels entryRuntime entryStore entryWitness functionResult
       callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
       (.let decl continuation) targetStore targetLocals targetCode witness source
       target)
-    (argumentsAt : ConcreteStructuredDirectCallArgumentsAt context sourceEnv
-      decl)
+    {declaration : Lean.Name}
+    {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
+    {calleeCode : Lean.Compiler.LCNF.Code .impure}
+    {args : Array (Lean.Compiler.LCNF.Arg .impure)}
     (valueEq : decl.value = .fap declaration args)
     (declarationFound :
       context.program.findDecl? declaration = some sourceDeclaration)
     (bodyEq : sourceDeclaration.value = .code calleeCode)
     (nonCached :
       (args.isEmpty && sourceDeclaration.params.isEmpty) = false)
+    (provenance : ConcreteDirectCallArgumentProvenanceAt context sourceEnv decl)
     (sourceStep : executeStep externals source = .next sourceAfter) :
     ConcreteStructuredCodeStepAdmission context sourceModule externals
-      functionResult facts sourceRuntime sourceEnv 0
-      (.let decl continuation) := by
-  obtain ⟨_locals, _parameterKinds, _argumentKinds, _argumentSizes,
+      functionResult facts sourceRuntime sourceEnv 0 (.let decl continuation) := by
+  obtain ⟨locals, _parameterKinds, _argumentKinds, _argumentSizes,
       _argumentsCompatible, ⟨admission⟩⟩ :=
     related.core.validation.directInternalCallBoundary spec.contextProgram
       valueEq declarationFound bodyEq nonCached
-  have semanticArguments := argumentsAt admission.valueEq
-    admission.declarationFound admission.parametersKnown
-  obtain ⟨site⟩ := admission.toSite_of_step semanticArguments
-    spec.localsAligned related.core.core.focus sourceStep
-  exact .directCall site
+  have site := admission.toSite_of_step_ofNonRefining
+    (provenance admission) admission.localsAgree spec.localsAligned
+    related.core.core.focus sourceStep
+  exact site.elim fun site => .directCall site
 
 /-- Natural literal allocation always returns an object reference, independent
 of whether the runtime chooses a tagged immediate, promoted tag, or limb

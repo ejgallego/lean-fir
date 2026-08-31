@@ -294,6 +294,21 @@ the cache simulator and does not weaken ordinary direct-call admission.
   representation-safety property. It must not merely rename that obligation
   as a caller-selected `SourceInvariant` or encode the 158 observed uses as a
   program certificate.
+- Seventh PA1/PA2 result slice makes preservation and current-node assembly
+  explicit. `semanticParameterLocalKinds` is the canonical precise parameter
+  row, and `SemanticValuesAtAbi.semanticEnv_of_bindParams` proves that the
+  real source `bindParams` operation constructs its semantic environment.
+  `DirectInternalCallSite.semanticEnvAtParameterKinds` therefore closes
+  precise callee-entry preservation from the already-required exact argument
+  semantics. `ConcreteDirectCallArgumentProvenanceAt` quantifies over the
+  exact residual admission selected by production validation, and
+  `ConcreteStructuredValidatedCodeOutcome.admit_directCall_of_compiler`
+  assembles the direct-call admission from that current provenance plus the
+  successful source step. The analogous
+  `admit_return_of_compiler` consumes only non-refining return coverage.
+  What remains is static construction and ordinary-step preservation of the
+  canonical precise-local row for its projection and join producers; call
+  entry itself needs no caller invariant.
 - First PA1 case slice: `WASM-NORMALIZED-CASE-TABLE-ADMISSION` made normalized
   alternative order a production validator fact;
   `ConcreteStructuredCaseAltsNormalized.of_caseAltsNormalized` projects it.
