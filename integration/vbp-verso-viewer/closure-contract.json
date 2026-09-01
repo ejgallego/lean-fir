@@ -4,10 +4,10 @@
   "retainedSourceFunctions": 2247,
   "retainedSourceFunctionSha256": "1e6a431f1649f7cb18e7d2e3d8d1511dea77bb88cc1f6d1c569b95def8a0d4e9",
   "residentHelpers": 5360,
-  "residentHelperSha256": "cedc03ff0a42179164c8897b2cd264b953340d21bbdba286cb2ef3cfa824b617",
+  "residentHelperSha256": "4ed5f674d8190647c3d00df45eb845cd7a16376f9c0416f80c016b76b3658e08",
   "completeFunctions": 7607,
-  "baseWasmBytes": 4319151,
-  "completeWasmBytes": 6278717,
+  "baseWasmBytes": 4279601,
+  "completeWasmBytes": 6239344,
   "lazyCacheInitializers": 0,
   "residentGlobals": 3
 }
