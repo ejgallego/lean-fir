@@ -1526,8 +1526,7 @@ private theorem checkedDeclarationParamKind_of_classifier
           simp [result, pure, Except.pure, Bind.bind, Except.bind]
       | some declaredKind =>
           by_cases erased :
-              (declaredKind == .tobject &&
-                Fir.Wasm.erasedOnlyParameter program target param) = true
+              Fir.Wasm.erasedOnlyParameter program target param = true
           · simp [result, erased] at known ⊢
             subst expected
             simp [pure, Except.pure]

@@ -11972,8 +11972,7 @@ private theorem declarationParamStep_eq
           simp only at known
           simp only [pure, Except.pure, Bind.bind, Except.bind]
           by_cases erased :
-              (declaredKind == .tobject &&
-                Fir.Wasm.erasedOnlyParameter program declaration param) = true
+              Fir.Wasm.erasedOnlyParameter program declaration param = true
           · simp [erased] at known ⊢
             exact congrArg (Fir.Wasm.insertLocal locals param.fvarId) known
           · simp [erased] at known ⊢
@@ -12010,8 +12009,7 @@ private theorem declarationParamStep_name_mem
               ⟨entry, (List.mem_filter.mp retained).1, rfl⟩)
       | some kind =>
           by_cases erased :
-              (kind == .tobject &&
-                Fir.Wasm.erasedOnlyParameter program declaration param) = true
+              Fir.Wasm.erasedOnlyParameter program declaration param = true
           · simp [classified, erased, pure, Except.pure, Bind.bind,
               Except.bind] at stepped
             subst result

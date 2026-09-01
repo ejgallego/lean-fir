@@ -80,8 +80,7 @@ private theorem supportedDeclarationParamStep_lowered
           simp [classified, pure, Except.pure, Bind.bind, Except.bind]
       | some kind =>
           by_cases erased :
-              (kind == .tobject &&
-                Fir.Wasm.erasedOnlyParameter program declaration param) = true
+              Fir.Wasm.erasedOnlyParameter program declaration param = true
           · have nextEq :
                 next = Fir.Wasm.insertLocal locals param.fvarId .erased := by
               simpa [classified, erased] using validated.symm
@@ -206,9 +205,8 @@ private theorem supportedDeclarationParamFold_namesNodup
                 | some kind =>
                     unfold Fir.Wasm.declarationParamKind? at headValidated
                     by_cases erased :
-                        (kind == .tobject &&
-                          Fir.Wasm.erasedOnlyParameter program declaration
-                            head) = true
+                        Fir.Wasm.erasedOnlyParameter program declaration
+                          head = true
                     · have nextEq :
                           next = Fir.Wasm.insertLocal initial head.fvarId
                             .erased := by

@@ -4973,8 +4973,8 @@ The erased generic-parameter admission used by compiler-generated `_boxed`
 facades is deliberately structural. This executable proof fixture mirrors the
 relevant final-LCNF shape without relying on a declaration suffix: a raw
 `tobject` parameter is accepted as `.erased` only because its sole use follows
-two exact named forwarding calls to a parameter whose final-LCNF type is
-erased.
+an exact `tobject → tagged → void` named-forwarding path. The middle edge is
+Lean's `ExplicitBoxing` shape; no ordinary tagged value is admitted.
 -/
 
 private def erasedFacadeAlpha : FVarId :=
@@ -5001,7 +5001,7 @@ private def erasedFacadeTarget : LCNF.Decl .impure :=
     levelParams := []
     type := LCNF.ImpureType.tobject
     params := #[
-      erasedFacadeParam erasedFacadeAlpha LCNF.ImpureType.erased,
+      erasedFacadeParam erasedFacadeAlpha LCNF.ImpureType.void,
       erasedFacadeParam erasedFacadeCaptured LCNF.ImpureType.tobject,
       erasedFacadeParam erasedFacadeValue LCNF.ImpureType.tobject]
     value := .code (.return erasedFacadeCaptured)
@@ -5014,7 +5014,7 @@ private def erasedFacadeBridge : LCNF.Decl .impure :=
     levelParams := []
     type := LCNF.ImpureType.tobject
     params := #[
-      erasedFacadeParam erasedFacadeAlpha LCNF.ImpureType.tobject,
+      erasedFacadeParam erasedFacadeAlpha LCNF.ImpureType.tagged,
       erasedFacadeParam erasedFacadeCaptured LCNF.ImpureType.tobject,
       erasedFacadeParam erasedFacadeValue LCNF.ImpureType.tobject]
     value := .code <| .let
@@ -5072,6 +5072,9 @@ private def erasedFacadeProgram : Fir.LeanIR.ImpureProgram :=
 
 #guard Fir.Wasm.erasedOnlyParameter erasedFacadeProgram erasedFacadeBridge
   erasedFacadeBridge.params[0]!
+
+#guard Fir.Wasm.declarationParameterKinds? erasedFacadeProgram erasedFacadeBridge ==
+  some #[.erased, .tobject, .tobject]
 
 #guard Fir.Wasm.erasedOnlyParameter erasedFacadeProgram erasedFacade
   erasedFacade.params[0]!
