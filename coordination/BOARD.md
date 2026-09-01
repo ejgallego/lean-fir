@@ -21,25 +21,38 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   W6's complete recursive resident release refinement and the shared Talos
   anonymous-control-depth repair are accepted. Exact
   prettyM/lean-zip publication and the lean-zip single-pass export repair are
-  complete; convergence with the remaining caller-path proofs, including W6's
-  resident Array provenance consumer after rebasing, is the remaining
-  milestone step.
-- Integration owner: `root`, holding the serial landing lease through accepted
-  integration head `70268c2a`. `wasm-gen` remains released to the W7-1
-  generation lane. The inherited cleanup, serial and bounded check-throughput,
-  mailbox-routing, bounded `Nat.land`, USize range-fact, exact consumer-ratchet,
-  and transactional resident-linker stacks are now integrated. Tooling's
-  bounded work changed no W7 implementation file and granted no standing W7
-  ownership.
-- Active shared-lowering convergence: root claimed authoritative request
-  `W7-ROOT-20260901-003` on current main `a5449905`. Isolated checkpoint
-  `d21e93ae` replaces one-hop erased forwarding with one bounded, cycle-safe
-  declaration/parameter query shared by the universal-use and raw-sink
-  predicates. A generic two-hop closure facade now emits its erased capture;
-  a mutual forwarding cycle fails closed. W6 rebases and checks its
-  declaration-aware proof cone before W7 rebases for the exact synchronous
-  VBP mount/update/unmount gate. W7 package files remain read-only to root and
-  W6 during this convergence.
+  complete. The generic transitive-erased closure classifier, its resident
+  persistent-cache successor, the exact VBP viewer package ratchet, and W6's
+  declaration-aware proof adaptation are now serialized and accepted through
+  functional integration head `1fb8b65a`.
+- Integration owner: `root`, completing the serial landing lease for
+  authoritative thread `W7-ROOT-20260901-003`. `wasm-gen` remains released to
+  the W7-1 generation lane. The inherited cleanup, serial and bounded
+  check-throughput, mailbox-routing, bounded `Nat.land`, USize range-fact,
+  exact consumer-ratchet, transactional resident-linker, and erased-widget
+  stacks are integrated. Tooling's bounded work changed no W7 implementation
+  file and granted no standing W7 ownership.
+- Accepted shared-lowering and widget convergence: root classifier head
+  `f8954036` replaces one-hop erased forwarding with one bounded, cycle-safe
+  declaration/parameter query shared by universal-use and raw-sink
+  predicates. W7 heads `52f3e113`, `9bd5aa68`, and `a648a272` make the
+  canonical erased zero word a precise `fir_mark_persistent` no-op, align the
+  nullable smoke host with VIR's owned-resource protocol, and ratchet the
+  resulting closure. W6 functional head `7a47337c` with tracked checkpoint
+  `90a6e533` attaches the declaration-aware proof adaptation. On the serialized
+  stack, `make check` passes 730 cases and 2,172/2,172 comparisons; all 3,196
+  Talos jobs pass with receipt
+  `09213c41a6a41538f8134f2c6d910c1ed5fe0991ed3bf33c3a6563355db52703`;
+  the complete W7 artifact gate passes; and the exact VBP gate regenerates
+  twice with identical 6,239,344-byte Wasm SHA-256
+  `d738584215ea9c4b3eabef3aa290245c49fc54e2128d0dddf303db82cdc26a66`.
+  Its immutable local package is
+  `integration/vbp-verso-viewer/_build/vbp-verso-viewer-packages/1fb8b65a2730-cad90a2f5954-90aa3f493815-ebe016531bae395081c3`;
+  both runs pass two mounts, update, unmount, four effects, eight event
+  handlers, checksums, and the declared export surface. Bug cards:
+  `FIR-BUG-wasm-none-transitive-erased-closure-dispatch`,
+  `FIR-BUG-wasm-none-persistent-cache-erased-sentinel`, and
+  `FIR-BUG-wasm-none-vbp-smoke-js-resource-result`.
 - Accepted W6 return current-admission checkpoint: functional proof head
   `2d41d220` and clean tracked handoff `70268c2a`, based directly on accepted
   main `7d36f9b5`. The theorem
