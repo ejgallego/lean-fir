@@ -31,6 +31,15 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   and transactional resident-linker stacks are now integrated. Tooling's
   bounded work changed no W7 implementation file and granted no standing W7
   ownership.
+- Active shared-lowering convergence: root claimed authoritative request
+  `W7-ROOT-20260901-003` on current main `a5449905`. Isolated checkpoint
+  `d21e93ae` replaces one-hop erased forwarding with one bounded, cycle-safe
+  declaration/parameter query shared by the universal-use and raw-sink
+  predicates. A generic two-hop closure facade now emits its erased capture;
+  a mutual forwarding cycle fails closed. W6 rebases and checks its
+  declaration-aware proof cone before W7 rebases for the exact synchronous
+  VBP mount/update/unmount gate. W7 package files remain read-only to root and
+  W6 during this convergence.
 - Accepted W6 return current-admission checkpoint: functional proof head
   `2d41d220` and clean tracked handoff `70268c2a`, based directly on accepted
   main `7d36f9b5`. The theorem
@@ -7451,6 +7460,7 @@ validation work continues; their historical handoff text remains unchanged.
 
 | ID | Producer | Consumers | Status | Standalone commit | Effect |
 |---|---|---|---|---|---|
+| `WASM-TRANSITIVE-ERASED-CLOSURE-DISPATCH` | integration/W7 | W6, W7, validation | active | isolated shared lowering `d21e93ae`; mailbox `W7-ROOT-20260901-003` / `W6-ROOT-20260901-001` | Follows compiler-generated erased lanes transitively through statically named declaration parameters. Raw erased parameters remain the only terminal sinks; `tobject` forwarding recurses through the same bounded, visited-node query used by both structural predicates. Cycles, exhaustion, unknown declarations, arity mismatch, and external `tobject` parameters fail closed. No generated-name match or global erased/object compatibility is added. W6 adapts the declaration-aware validation/simulation cone; W7 then reruns the exact VBP widget callback gate. Bug `FIR-BUG-wasm-none-transitive-erased-closure-dispatch` remains open until both sides pass. |
 | `WASM-NONCACHED-NAMED-CALL-RESULT-REFINEMENT` | W6/integration | W6, W7, validation | released | isolated contract `d30afbe8`; proof `30bc5522`; tracked handoff `1ee832cb` | Requires directional effective-result refinement for ordinary non-cached named calls, matching the direct-call simulator and all 11,487 audited prettyM/lean-zip result edges. Nullary cache calls retain `leanCompatible`, as required by the cached heap-owner full-corpus regression. Arguments retain object-family compatibility pending compiler-derived producer provenance. No runtime, ABI/layout, instruction, emitted-body, ownership, or resident-helper change. |
 | `WASM-NORMALIZED-CASE-TABLE-ADMISSION` | W6/integration | W6, W7, validation | released | isolated contract `bd43f7f0`; proof/fixture consumer `f57c4e0a`; mailbox `W6-W7-20260830-002` | Requires production-accepted case tables to contain a constructor prefix followed by at most one final default, matching the source interpreter's first-match semantics and the existing structured case simulation. The former default-before-constructor example is retained as a fail-closed whole-program regression, and its exact Talos proof now follows normalized constructor-then-default order. W6 derives `ConcreteStructuredCaseAltsNormalized` directly from residual validation and removes it from the source-safety premise. Existing compiler-produced final LCNF is expected to be normalized; W7 and validation rebase and report any rejected artifact. No lowering instruction, runtime, ABI, layout, helper signature, ownership rule, or emitted code changes for previously accepted normalized programs. Root validation passes 730 cases/2,172 comparisons; all 3,189 Talos jobs pass with receipt `4d6cdaeb6ef55e895bc96d3984801f9047175f212b5cd88e2f33e254f0f04ae2`. |
 | `SCALAR-BOX-RESULT-KIND-ADMISSION` | integration/W7 | W6 exact-alias proof bridge | released | contract `29aff571`; W7 functional `bf4c9f4f`; tracked handoff `3953370c`; bug `FIR-BUG-wasm-none-boxed-scalar-result-kind-drift` fixed | Uses upstream `Lean.Expr.boxed` as the authoritative exact result-kind mapping. The checker accepts generic `tobject` or exactly upstream's annotation, so generated `UInt16 → tagged` and `UInt64 → object` adapters lower while converse malformed forms remain rejected. W7 supplies exact aliases over unchanged generic helper bodies. Generic lowering, physical Wasm, semantic ABI, layouts, ownership, and existing helpers are unchanged; the complete root, Talos, and deterministic artifact gates pass. |
