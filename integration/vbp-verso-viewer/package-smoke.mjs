@@ -142,10 +142,11 @@ function createFakeHost() {
     },
     "browser.event.currentTarget": (event) => valueOf(event).currentTarget,
     "browser.event.target": (event) => valueOf(event).target,
-    "js.nullable.isNull": (value) => valueOf(value) === null,
+    "js.nullable.isNull": (value) =>
+      resource("bool", valueOf(value) === null),
     "js.nullable.value": (value) => {
       assert.notEqual(valueOf(value), null);
-      return valueOf(value);
+      return resource("nullableValue", valueOf(value));
     },
     "browser.htmlInputElement.fromElement": (element) =>
       resource("nullable", valueOf(element)),
