@@ -197,6 +197,23 @@ export async function checkResidentCache(bytes) {
   expectPersistent(exports.memory, closureChildOne, "closure child one");
   expectPersistent(exports.memory, closureChildTwo, "closure child two");
 
+  const { exports: erasedCapture } = await WebAssembly.instantiate(module, {});
+  const erasedClosure = 1024;
+  writeHeader(erasedCapture.memory, erasedClosure, {
+    kind: 2,
+    refCount: 17,
+    allocationBytes: 40,
+    aux2: 1,
+    aux3: 1,
+  });
+  writeSlot(erasedCapture.memory, erasedClosure, 0, 0);
+  setFrontier(erasedCapture, 1064);
+  equal(erasedCapture.resident_cache_set(erasedClosure) >>> 0,
+    erasedClosure,
+    "resident cache changed a closure with an erased capture");
+  expectPersistent(erasedCapture.memory, erasedClosure,
+    "erased-capture closure root");
+
   const alreadyPersistent = 1296;
   writeHeader(exports.memory, alreadyPersistent, {
     flags: 3,
@@ -251,12 +268,9 @@ export async function checkResidentCache(bytes) {
       `ConcreteHost disagrees with resident cache for ${label}`);
   }
 
-  await expectTrap(
-    module,
-    () => {},
-    (candidate) => candidate.resident_cache_set(0),
-    "zero cache root",
-  );
+  const { exports: erasedSentinel } = await WebAssembly.instantiate(module, {});
+  equal(erasedSentinel.resident_cache_set(0) >>> 0, 0,
+    "resident cache changed the canonical erased sentinel");
   await expectTrap(
     module,
     (candidate) => {
@@ -282,7 +296,7 @@ export async function checkResidentCache(bytes) {
         kind: 2,
         allocationBytes: 40,
         aux2: 1,
-        aux3: 1,
+        aux3: 2,
       });
       setFrontier(candidate, 1064);
     },

@@ -236,14 +236,18 @@ private def markPersistentFunction
       .i32And,
       .ifElse
         [.ret]
-        (trapWhenTrue [
-            .localGet objectParam,
-            .i32Const .uint32 (u32 heapBase),
-            .i32LtU] ++
-          trapWhenTrue [
-            .localGet objectParam,
-            .i32Const .uint32 (u32 (target.heapAlignment - 1)),
-            .i32And] ++ aligned)] }
+        ([.localGet objectParam] ++
+          equalsConst .tobject 0 ++
+          [.ifElse
+            [.ret]
+            (trapWhenTrue [
+                .localGet objectParam,
+                .i32Const .uint32 (u32 heapBase),
+                .i32LtU] ++
+              trapWhenTrue [
+                .localGet objectParam,
+                .i32Const .uint32 (u32 (target.heapAlignment - 1)),
+                .i32And] ++ aligned)])] }
 
 private def cacheSetFunction
     (ordinal : Nat) (operation : RuntimeOp)
@@ -569,7 +573,7 @@ def eliminateLazyInitializers (module : Module) (validate : Bool := true) :
   return result
 
 def exampleDescriptors : Array (Array AbiKind) :=
-  #[#[.tobject, .uint8, .tobject]]
+  #[#[.tobject, .uint8, .tobject], #[.erased]]
 
 def exampleOperation : RuntimeOp :=
   .cacheSet `residentCacheExample .object
