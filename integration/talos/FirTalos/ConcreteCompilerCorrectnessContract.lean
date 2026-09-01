@@ -4972,8 +4972,9 @@ example
 The erased generic-parameter admission used by compiler-generated `_boxed`
 facades is deliberately structural. This executable proof fixture mirrors the
 relevant final-LCNF shape without relying on a declaration suffix: a raw
-`tobject` parameter is accepted as `.erased` only because its sole use is an
-exact forwarding call to a parameter whose final-LCNF type is erased.
+`tobject` parameter is accepted as `.erased` only because its sole use follows
+two exact named forwarding calls to a parameter whose final-LCNF type is
+erased.
 -/
 
 private def erasedFacadeAlpha : FVarId :=
@@ -5008,6 +5009,27 @@ private def erasedFacadeTarget : LCNF.Decl .impure :=
     recursive := false
     inlineAttr? := none }
 
+private def erasedFacadeBridge : LCNF.Decl .impure :=
+  { name := `FirTalos.Concrete.CompilerCorrectnessContract.erasedFacadeBridge
+    levelParams := []
+    type := LCNF.ImpureType.tobject
+    params := #[
+      erasedFacadeParam erasedFacadeAlpha LCNF.ImpureType.tobject,
+      erasedFacadeParam erasedFacadeCaptured LCNF.ImpureType.tobject,
+      erasedFacadeParam erasedFacadeValue LCNF.ImpureType.tobject]
+    value := .code <| .let
+      { fvarId := erasedFacadeResult
+        binderName := erasedFacadeResult.name
+        type := LCNF.ImpureType.tobject
+        value := .fap erasedFacadeTarget.name #[
+          .fvar erasedFacadeAlpha,
+          .fvar erasedFacadeCaptured,
+          .fvar erasedFacadeValue] }
+      (.return erasedFacadeResult)
+    safe := true
+    recursive := false
+    inlineAttr? := none }
+
 private def erasedFacade : LCNF.Decl .impure :=
   { name := `FirTalos.Concrete.CompilerCorrectnessContract.erasedFacade
     levelParams := []
@@ -5020,7 +5042,7 @@ private def erasedFacade : LCNF.Decl .impure :=
       { fvarId := erasedFacadeResult
         binderName := erasedFacadeResult.name
         type := LCNF.ImpureType.tobject
-        value := .fap erasedFacadeTarget.name #[
+        value := .fap erasedFacadeBridge.name #[
           .fvar erasedFacadeAlpha,
           .fvar erasedFacadeCaptured,
           .fvar erasedFacadeValue] }
@@ -5045,7 +5067,11 @@ private def erasedFacadeCaller : LCNF.Decl .impure :=
     inlineAttr? := none }
 
 private def erasedFacadeProgram : Fir.LeanIR.ImpureProgram :=
-  { decls := #[erasedFacadeTarget, erasedFacade, erasedFacadeCaller] }
+  { decls := #[erasedFacadeTarget, erasedFacadeBridge, erasedFacade,
+      erasedFacadeCaller] }
+
+#guard Fir.Wasm.erasedOnlyParameter erasedFacadeProgram erasedFacadeBridge
+  erasedFacadeBridge.params[0]!
 
 #guard Fir.Wasm.erasedOnlyParameter erasedFacadeProgram erasedFacade
   erasedFacade.params[0]!
