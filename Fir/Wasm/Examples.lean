@@ -286,6 +286,84 @@ def voidParameterBoxedCallProgram : Fir.LeanIR.ImpureProgram :=
       | .error _ => false
   | .error _ => false
 
+/-!
+Lean's `ExplicitBoxing` wrapper may represent an unboxed physical `void`
+parameter as `tagged`. The wrapper parameter is refined to `.erased` only when
+its complete source use is the exact named forwarding edge to that `void`
+slot. This mirrors the VBP component callback shape without recognizing any
+generated declaration name.
+-/
+
+def explicitVoidObject : FVarId := ⟨`explicitVoidObject⟩
+def explicitVoidClosure : FVarId := ⟨`explicitVoidClosure⟩
+def explicitVoidCaptured : FVarId := ⟨`explicitVoidCaptured⟩
+def explicitVoidValue : FVarId := ⟨`explicitVoidValue⟩
+def explicitVoidSink : FVarId := ⟨`explicitVoidSink⟩
+def explicitVoidResult : FVarId := ⟨`explicitVoidResult⟩
+def explicitVoidBridgeValue : FVarId := ⟨`explicitVoidBridgeValue⟩
+def explicitVoidBridgeResult : FVarId := ⟨`explicitVoidBridgeResult⟩
+
+def explicitVoidUnboxedDecl : LCNF.Decl .impure :=
+  decl `explicitVoidUnboxed #[
+    param explicitVoidObject LCNF.ImpureType.object,
+    param explicitVoidCaptured LCNF.ImpureType.tobject,
+    param explicitVoidValue LCNF.ImpureType.tagged,
+    param explicitVoidSink LCNF.ImpureType.void]
+    LCNF.ImpureType.object (.code (.return explicitVoidObject))
+
+def explicitVoidBoxedDecl : LCNF.Decl .impure :=
+  decl `explicitVoidBoxed #[
+    param explicitVoidObject LCNF.ImpureType.object,
+    param explicitVoidCaptured LCNF.ImpureType.tobject,
+    param explicitVoidValue LCNF.ImpureType.tagged,
+    param explicitVoidSink LCNF.ImpureType.tagged]
+    LCNF.ImpureType.object (.code <|
+      .let (letDecl explicitVoidResult LCNF.ImpureType.object
+        (.fap explicitVoidUnboxedDecl.name #[
+          .fvar explicitVoidObject,
+          .fvar explicitVoidCaptured,
+          .fvar explicitVoidValue,
+          .fvar explicitVoidSink])) <|
+      .return explicitVoidResult)
+
+def explicitVoidBridgeDecl : LCNF.Decl .impure :=
+  decl `explicitVoidBridge #[
+    param explicitVoidClosure LCNF.ImpureType.tobject,
+    param explicitVoidBridgeValue LCNF.ImpureType.tagged]
+    LCNF.ImpureType.object (.code <|
+      .let (letDecl explicitVoidBridgeResult LCNF.ImpureType.object
+        (.fvar explicitVoidClosure #[
+          .fvar explicitVoidBridgeValue, .erased])) <|
+      .return explicitVoidBridgeResult)
+
+def explicitVoidClosureDispatchProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[explicitVoidUnboxedDecl, explicitVoidBoxedDecl,
+      explicitVoidBridgeDecl] }
+
+#guard erasedOnlyParameter explicitVoidClosureDispatchProgram
+  explicitVoidBoxedDecl explicitVoidBoxedDecl.params[3]!
+
+#guard declarationParameterKinds? explicitVoidClosureDispatchProgram
+  explicitVoidBoxedDecl == some #[.object, .tobject, .tagged, .erased]
+
+#guard match lowerSupported explicitVoidClosureDispatchProgram with
+  | .ok module =>
+      module.runtimeOperations.contains <|
+        .closureMatches explicitVoidBoxedDecl.name 4 2
+  | .error _ => false
+
+/-- An ordinary tagged value remains observable and cannot be refined merely
+because `tagged` is an eligible explicit-boxing carrier. -/
+def observedTaggedDecl : LCNF.Decl .impure :=
+  decl `observedTagged #[param explicitVoidValue LCNF.ImpureType.tagged]
+    LCNF.ImpureType.tagged (.code (.return explicitVoidValue))
+
+def observedTaggedProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[observedTaggedDecl] }
+
+#guard !erasedOnlyParameter observedTaggedProgram observedTaggedDecl
+  observedTaggedDecl.params[0]!
+
 def voidPartialTarget : LCNF.Decl .impure :=
   decl `voidPartialTarget #[
     param x LCNF.ImpureType.void,

@@ -432,15 +432,27 @@ def letValueReferencesFVar (target : FVarId) : LCNF.LetValue .impure → Bool
   | .reuse fvarId _ _ args =>
       sameFVar target fvarId || argsReferenceFVar target args
 
+/-- Raw source parameter types whose physical Wasm argument lane is erased.
+`void` contributes no semantic value, while source `erased` carries the
+canonical erased sentinel. -/
+def erasedParameterSinkType (type : Expr) : Bool :=
+  type == LCNF.ImpureType.erased || type == LCNF.ImpureType.void
+
+/-- Compiler-selected object carriers which may be refined to an erased
+physical lane after structural use checking. `tagged` is included only for
+Lean's explicit-boxing wrappers; this is not a global tagged/erased ABI rule. -/
+def erasedParameterCarrierType (type : Expr) : Bool :=
+  type == LCNF.ImpureType.tobject || type == LCNF.ImpureType.tagged
+
 /-- One argument position either does not mention the tracked parameter or
-forwards it exactly to a raw-erased parameter. This is the base case consumed
-by the transitive declaration/parameter query below. -/
+forwards it exactly to a raw physical-erased parameter. This is the base case
+consumed by the transitive declaration/parameter query below. -/
 def argUsesOnlyAtErasedParameter (tracked : FVarId)
     (param : LCNF.Param .impure) (arg : LCNF.Arg .impure) : Bool :=
   match arg with
   | .erased => true
   | .fvar fvarId =>
-      !sameFVar tracked fvarId || param.type == LCNF.ImpureType.erased
+      !sameFVar tracked fvarId || erasedParameterSinkType param.type
   | .type _ h => nomatch h
 
 /-- A finite upper bound for simple declaration/parameter forwarding paths.
@@ -457,10 +469,11 @@ private def erasedParameterNodeVisited (decl : LCNF.Decl .impure)
 
 /-
 One conservative query is shared by the universal use condition and the
-existential raw-erased-sink condition. A raw-erased target is the base case;
-a `tobject` target is admitted only by recursively classifying that exact
-declaration/parameter node. Unknown declarations, arity mismatches, exhausted
-fuel, revisited nodes, and external `tobject` parameters all fail closed.
+existential physical-erased-sink condition. A raw `erased` or `void` target is
+the base case; a `tobject` or `tagged` carrier is admitted only by recursively
+classifying that exact declaration/parameter node. Unknown declarations,
+arity mismatches, exhausted fuel, revisited nodes, and external carrier
+parameters all fail closed.
 -/
 mutual
 
@@ -471,7 +484,7 @@ private partial def erasedOnlyParameterAux
   match fuel with
   | 0 => false
   | fuel + 1 =>
-      param.type == LCNF.ImpureType.tobject &&
+      erasedParameterCarrierType param.type &&
         !erasedParameterNodeVisited decl param visited &&
         match decl.value with
         | .code code =>
@@ -484,9 +497,9 @@ private partial def parameterAcceptsErasedForwardingAux
     (program : Fir.LeanIR.ImpureProgram) (fuel : Nat)
     (visited : List (Name × Name)) (decl : LCNF.Decl .impure)
     (param : LCNF.Param .impure) : Bool :=
-  if param.type == LCNF.ImpureType.erased then
+  if erasedParameterSinkType param.type then
     true
-  else if param.type == LCNF.ImpureType.tobject then
+  else if erasedParameterCarrierType param.type then
     erasedOnlyParameterAux program fuel visited decl param
   else
     false
@@ -626,8 +639,8 @@ private partial def fvarForwardedToErasedParameterAltAux
 end
 
 /-- Check the tracked parameter's uses in one statically named call. Every
-tracked occurrence must reach either a raw-erased target or a transitively
-erased-only `tobject` target. -/
+tracked occurrence must reach either a raw physical-erased target or a
+transitively erased-only object carrier. -/
 def namedArgsUseOnlyAtErasedParameters (program : Fir.LeanIR.ImpureProgram)
     (tracked : FVarId) (name : Name) (args : Array (LCNF.Arg .impure)) : Bool :=
   namedArgsUseOnlyAtErasedParametersAux program
@@ -656,8 +669,8 @@ def fvarUsesOnlyAtErasedParametersAlt (program : Fir.LeanIR.ImpureProgram)
   fvarUsesOnlyAtErasedParametersAltAux program
     (erasedParameterTraversalFuel program) [] tracked alt
 
-/-- Some tracked occurrence reaches a raw-erased parameter through zero or
-more transitively erased-only `tobject` declaration parameters. -/
+/-- Some tracked occurrence reaches a raw `erased` or `void` parameter through
+zero or more transitively erased-only object-carrier declaration parameters. -/
 def namedArgsForwardToErasedParameter (program : Fir.LeanIR.ImpureProgram)
     (tracked : FVarId) (name : Name) (args : Array (LCNF.Arg .impure)) : Bool :=
   namedArgsForwardToErasedParameterAux program
@@ -678,12 +691,12 @@ def fvarForwardedToErasedParameterAlt (program : Fir.LeanIR.ImpureProgram)
   fvarForwardedToErasedParameterAltAux program
     (erasedParameterTraversalFuel program) [] tracked alt
 
-/-- A compiler-declared `tobject` parameter which is semantically erased by
-every use in its declaration body, with at least one finite forwarding path to
-a raw-erased parameter. -/
+/-- A compiler-declared `tobject` or `tagged` parameter which is semantically
+erased by every use in its declaration body, with at least one finite
+forwarding path to a raw `erased` or `void` parameter. -/
 def erasedOnlyParameter (program : Fir.LeanIR.ImpureProgram)
     (decl : LCNF.Decl .impure) (param : LCNF.Param .impure) : Bool :=
-  param.type == LCNF.ImpureType.tobject &&
+  erasedParameterCarrierType param.type &&
     match decl.value with
     | .code code =>
         fvarUsesOnlyAtErasedParameters program param.fvarId code &&
@@ -697,7 +710,7 @@ theorem erasedOnlyParameter_code_eq_true_iff
     (param : LCNF.Param .impure) (code : LCNF.Code .impure)
     (value : decl.value = .code code) :
     erasedOnlyParameter program decl param = true ↔
-      (param.type == LCNF.ImpureType.tobject) = true ∧
+      erasedParameterCarrierType param.type = true ∧
         fvarUsesOnlyAtErasedParameters program param.fvarId code = true ∧
         fvarForwardedToErasedParameter program param.fvarId code = true := by
   simp [erasedOnlyParameter, value]
@@ -934,15 +947,15 @@ def effectiveLetValueKind (program : Fir.LeanIR.ImpureProgram)
 
 /-- Proof-relevant physical parameter kind selected for one complete declaration.
 Source `void` parameters retain Lean's physical erased argument lane, while
-compiler-declared `tobject` parameters whose uses are structurally erased are
-refined to that same `.erased` lane. Every other parameter retains its declared
-ABI kind. -/
+compiler-declared `tobject` or `tagged` parameters whose uses are structurally
+erased are refined to that same `.erased` lane. Every other parameter retains
+its declared ABI kind. -/
 def declarationParamKind? (program : Fir.LeanIR.ImpureProgram)
     (decl : LCNF.Decl .impure) (param : LCNF.Param .impure) : Option AbiKind :=
   match abiKind? param.type with
   | .ok none => some .erased
   | .ok (some kind) =>
-      if kind == .tobject && erasedOnlyParameter program decl param then
+      if erasedOnlyParameter program decl param then
         some .erased
       else
         some kind
@@ -954,7 +967,7 @@ def checkedDeclarationParamKind (program : Fir.LeanIR.ImpureProgram)
   match ← checkedAbiKind? param.type with
   | none => return .erased
   | some kind =>
-      return if kind == .tobject && erasedOnlyParameter program decl param then
+      return if erasedOnlyParameter program decl param then
         .erased
       else
         kind
@@ -969,9 +982,9 @@ def checkedDeclarationParameterKinds (program : Fir.LeanIR.ImpureProgram)
 
 /-- The refined erased ABI is selected exactly at the structural admission
 boundary: the compiler declared an ordinary `tobject` lane, while this
-declaration uses it only by forwarding it to a genuinely erased parameter.
-This is the proof-facing contract; no declaration-name convention and no
-global ABI subtyping rule is involved. -/
+declaration uses it only by forwarding it to a physical-erased parameter. This
+is the proof-facing contract; no declaration-name convention and no global ABI
+subtyping rule is involved. -/
 theorem declarationParamKind?_eq_erased_iff
     (program : Fir.LeanIR.ImpureProgram) (decl : LCNF.Decl .impure)
     (param : LCNF.Param .impure)
@@ -980,12 +993,25 @@ theorem declarationParamKind?_eq_erased_iff
       erasedOnlyParameter program decl param = true := by
   unfold declarationParamKind?
   rw [declared]
-  change (if ((AbiKind.tobject == AbiKind.tobject) &&
-      erasedOnlyParameter program decl param) = true then
+  change (if erasedOnlyParameter program decl param = true then
       some AbiKind.erased else some AbiKind.tobject) = some AbiKind.erased ↔
     erasedOnlyParameter program decl param = true
-  have same : (AbiKind.tobject == AbiKind.tobject) = true := by decide
-  rw [same]
+  simp
+
+/-- The same structural admission boundary for Lean's explicit-boxing
+`tagged` carrier. Ordinary tagged parameters are unaffected because the
+classifier also requires forwarding-only use and a finite erased sink. -/
+theorem declarationParamKind?_eq_erased_iff_of_tagged
+    (program : Fir.LeanIR.ImpureProgram) (decl : LCNF.Decl .impure)
+    (param : LCNF.Param .impure)
+    (declared : abiKind? param.type = .ok (some .tagged)) :
+    declarationParamKind? program decl param = some .erased ↔
+      erasedOnlyParameter program decl param = true := by
+  unfold declarationParamKind?
+  rw [declared]
+  change (if erasedOnlyParameter program decl param = true then
+      some AbiKind.erased else some AbiKind.tagged) = some AbiKind.erased ↔
+    erasedOnlyParameter program decl param = true
   simp
 
 def addParams (locals : LocalKinds) (params : Array (LCNF.Param .impure)) :
@@ -1733,9 +1759,9 @@ def compileDeclarationArguments (context : Context)
     return (instructions ++ argument, kinds.push actual)
 
 /-- Compile one fixed argument against the effective parameter slot it will
-occupy in a closure. Compiler-declared `tobject` parameters which are
-structurally erased have already been refined to `.erased`; no global
-`erased ≤ tobject` compatibility is introduced here. -/
+occupy in a closure. Compiler-declared object carriers which are structurally
+erased have already been refined to `.erased`; no global object-family/erased
+compatibility is introduced here. -/
 def compilePartialArgument (context : Context) (param : LCNF.Param .impure)
     (expected : AbiKind) (arg : LCNF.Arg .impure) :
     Except CompileError (List Instruction × AbiKind) := do
