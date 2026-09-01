@@ -79,20 +79,20 @@ function createFakeHost() {
     }),
     "react.props.setKey": (props, key) => {
       valueOf(props).key = key;
-      return props;
+      return undefined;
     },
     "react.props.setRef": (props, ref) => {
       valueOf(props).ref = ref;
-      return props;
+      return undefined;
     },
     "react.props.setProperty": (props, property) => {
       valueOf(props).properties.push(valueOf(property));
-      return props;
+      return undefined;
     },
     "react.props.setEventHandler": (props, handler) => {
       valueOf(props).handlers.push(valueOf(handler));
       events.push(valueOf(handler));
-      return props;
+      return undefined;
     },
     "react.elementType.tag": (tag) => resource("elementType", valueOf(tag)),
     "react.node.text": (text) => resource("node", {
@@ -119,7 +119,7 @@ function createFakeHost() {
     "react.deps.empty": () => resource("deps", []),
     "react.deps.push": (deps, value) => {
       valueOf(deps).push(value);
-      return deps;
+      return undefined;
     },
     "react.useLeanEffect": (setup) => {
       effects.push(setup());
