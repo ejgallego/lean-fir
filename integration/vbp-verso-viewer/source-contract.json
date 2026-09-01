@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "fir.vbp-verso-viewer.sources/v1",
+  "vbp": {
+    "repository": "https://github.com/leanprover/verso-blueprint.git",
+    "revision": "cad90a2f59544833a81a456b72a0fd52d8f28b1c",
+    "sourceView": ".deps/source-views/vbp-widget-cad90a2f",
+    "leanTree": {
+      "path": "src/VersoBlueprintVir/Preview",
+      "files": 7,
+      "sha256": "54da36f89310040f95aae79b4439bb2a40bb5e7713c36a84d4804b0aa1569190"
+    },
+    "files": {
+      "src/VersoBlueprintVir/Preview/Model.lean": "37b6fa86af76098a996fb0c3247ed9ba506ab5e0f1593531f2ab1c5f50a8045f",
+      "src/VersoBlueprintVir/Preview/Renderer.lean": "fbd209798d931a037ea1d9c1eafdc66183a20bac4706b43e0a19c6d6605cce21",
+      "src/VersoBlueprintVir/Preview/Component/Style.lean": "f2c274e76321bbcd8515347e4b27fdc52d97f4241ae48b37f19981592169f634",
+      "src/VersoBlueprintVir/Preview/Component/Session.lean": "9d7aeb0d4d0aa221fd5466481991f3264d1c3484c6c836052892cc968a3419aa",
+      "src/VersoBlueprintVir/Preview/Component/Content.lean": "62bb23ef830a30cbf0ca38a457c55d0ec8699a03af586ab72e443dc06edd1a85",
+      "src/VersoBlueprintVir/Preview/Component.lean": "bfd1cf055d7b5c24acb5e81921eb16741e3998bc8fe53e2dac92c4bf93794d4e",
+      "src/VersoBlueprintVir/Preview/Widget.lean": "3390c4bf4f1765828b2dd19d76a014ae15a8521959b1ccaa8405db643775f39b"
+    }
+  },
+  "vir": {
+    "repository": "https://github.com/ejgallego/lean-vir.git",
+    "revision": "90aa3f4938152d455ce4d5ddb79073729fc2df71",
+    "sourceView": ".deps/source-views/vir-generic-90aa3f49",
+    "leanTree": {
+      "path": "Vir",
+      "files": 66,
+      "sha256": "7d4e95312b7efd2f2a99942485179ee7927c0a584ee5f27ba2de7e5d51f0291b"
+    },
+    "files": {
+      "Vir/Runtime.lean": "cf5898060eb3bca23b89a00959ed6e735d076d2f9e7ee43e6d4e9a1744a37c99",
+      "Vir/React.lean": "b5817047c2cb4626b414fff474c6acab3ee1b7f56efb014ccb043a28060c161d",
+      "Vir/Infoview.lean": "c3c64334457182f36173626018bacb2dcef364f11df7f479c5df62225f3f5b30"
+    }
+  },
+  "verso": {
+    "repository": "https://github.com/leanprover/verso.git",
+    "revision": "99e9df791e46ec647f81d98b109965f166b9b6b4"
+  },
+  "referenceAcceptance": {
+    "repository": "https://github.com/leanprover/verso-blueprint.git",
+    "commit": "410d9087d3b05e32864eb0d6f53c3404e51f6d52",
+    "campaign": "cursor RPC smoke plus ten-edit Chromium React state/identity campaign"
+  }
+}
