@@ -433,7 +433,8 @@ def letValueReferencesFVar (target : FVarId) : LCNF.LetValue .impure → Bool
       sameFVar target fvarId || argsReferenceFVar target args
 
 /-- One argument position either does not mention the tracked parameter or
-forwards it exactly to a parameter whose final-LCNF type is erased. -/
+forwards it exactly to a raw-erased parameter. This is the base case consumed
+by the transitive declaration/parameter query below. -/
 def argUsesOnlyAtErasedParameter (tracked : FVarId)
     (param : LCNF.Param .impure) (arg : LCNF.Arg .impure) : Bool :=
   match arg with
@@ -442,9 +443,69 @@ def argUsesOnlyAtErasedParameter (tracked : FVarId)
       !sameFVar tracked fvarId || param.type == LCNF.ImpureType.erased
   | .type _ h => nomatch h
 
-/-- Check the tracked parameter's uses in one statically named call. -/
-def namedArgsUseOnlyAtErasedParameters (program : Fir.LeanIR.ImpureProgram)
-    (tracked : FVarId) (name : Name) (args : Array (LCNF.Arg .impure)) : Bool :=
+/-- A finite upper bound for simple declaration/parameter forwarding paths.
+Every recursive edge consumes one unit, so malformed cycles cannot make the
+classifier diverge or manufacture erased admission. -/
+private def erasedParameterTraversalFuel
+    (program : Fir.LeanIR.ImpureProgram) : Nat :=
+  program.decls.foldl (init := 1) fun fuel decl => fuel + decl.params.size
+
+private def erasedParameterNodeVisited (decl : LCNF.Decl .impure)
+    (param : LCNF.Param .impure) (visited : List (Name × Name)) : Bool :=
+  visited.any fun node =>
+    node.fst == decl.name && node.snd == param.fvarId.name
+
+/-
+One conservative query is shared by the universal use condition and the
+existential raw-erased-sink condition. A raw-erased target is the base case;
+a `tobject` target is admitted only by recursively classifying that exact
+declaration/parameter node. Unknown declarations, arity mismatches, exhausted
+fuel, revisited nodes, and external `tobject` parameters all fail closed.
+-/
+mutual
+
+private partial def erasedOnlyParameterAux
+    (program : Fir.LeanIR.ImpureProgram) (fuel : Nat)
+    (visited : List (Name × Name)) (decl : LCNF.Decl .impure)
+    (param : LCNF.Param .impure) : Bool :=
+  match fuel with
+  | 0 => false
+  | fuel + 1 =>
+      param.type == LCNF.ImpureType.tobject &&
+        !erasedParameterNodeVisited decl param visited &&
+        match decl.value with
+        | .code code =>
+            let visited := (decl.name, param.fvarId.name) :: visited
+            fvarUsesOnlyAtErasedParametersAux program fuel visited param.fvarId code &&
+              fvarForwardedToErasedParameterAux program fuel visited param.fvarId code
+        | .extern _ => false
+
+private partial def parameterAcceptsErasedForwardingAux
+    (program : Fir.LeanIR.ImpureProgram) (fuel : Nat)
+    (visited : List (Name × Name)) (decl : LCNF.Decl .impure)
+    (param : LCNF.Param .impure) : Bool :=
+  if param.type == LCNF.ImpureType.erased then
+    true
+  else if param.type == LCNF.ImpureType.tobject then
+    erasedOnlyParameterAux program fuel visited decl param
+  else
+    false
+
+private partial def argUsesOnlyAtErasedParameterAux
+    (program : Fir.LeanIR.ImpureProgram) (fuel : Nat)
+    (visited : List (Name × Name)) (target : LCNF.Decl .impure)
+    (tracked : FVarId) (param : LCNF.Param .impure) :
+    LCNF.Arg .impure → Bool
+  | .erased => true
+  | .fvar fvarId =>
+      !sameFVar tracked fvarId ||
+        parameterAcceptsErasedForwardingAux program fuel visited target param
+  | .type _ h => nomatch h
+
+private partial def namedArgsUseOnlyAtErasedParametersAux
+    (program : Fir.LeanIR.ImpureProgram) (fuel : Nat)
+    (visited : List (Name × Name)) (tracked : FVarId) (name : Name)
+    (args : Array (LCNF.Arg .impure)) : Bool :=
   if !argsReferenceFVar tracked args then
     true
   else
@@ -452,98 +513,98 @@ def namedArgsUseOnlyAtErasedParameters (program : Fir.LeanIR.ImpureProgram)
     | some target =>
         args.size <= target.params.size &&
           ((target.params.extract 0 args.size).zip args |>.all fun pair =>
-            argUsesOnlyAtErasedParameter tracked pair.fst pair.snd)
+            argUsesOnlyAtErasedParameterAux program fuel visited target tracked
+              pair.fst pair.snd)
     | none => false
 
-/-- A let-value use is admissible for an erased-only parameter exactly when
-it is forwarded through a statically named erased parameter. -/
-def letValueUsesOnlyAtErasedParameters (program : Fir.LeanIR.ImpureProgram)
-    (tracked : FVarId) : LCNF.LetValue .impure → Bool
+private partial def letValueUsesOnlyAtErasedParametersAux
+    (program : Fir.LeanIR.ImpureProgram) (fuel : Nat)
+    (visited : List (Name × Name)) (tracked : FVarId) :
+    LCNF.LetValue .impure → Bool
   | .fap name args | .pap name args =>
-      namedArgsUseOnlyAtErasedParameters program tracked name args
+      namedArgsUseOnlyAtErasedParametersAux program fuel visited tracked name args
   | value => !letValueReferencesFVar tracked value
 
-/-
-Conservative structural recognizer for the compiler's erased type-parameter
-facade. A tracked parameter may be absent or forwarded through named erased
-parameters, but may not participate in a value operation, ownership effect,
-closure call, branch, case, or return.
--/
-mutual
-
-partial def fvarUsesOnlyAtErasedParameters
-    (program : Fir.LeanIR.ImpureProgram) (tracked : FVarId) :
+private partial def fvarUsesOnlyAtErasedParametersAux
+    (program : Fir.LeanIR.ImpureProgram) (fuel : Nat)
+    (visited : List (Name × Name)) (tracked : FVarId) :
     LCNF.Code .impure → Bool
   | .let decl continuation =>
       !sameFVar decl.fvarId tracked &&
-        letValueUsesOnlyAtErasedParameters program tracked decl.value &&
-        fvarUsesOnlyAtErasedParameters program tracked continuation
+        letValueUsesOnlyAtErasedParametersAux program fuel visited tracked decl.value &&
+        fvarUsesOnlyAtErasedParametersAux program fuel visited tracked continuation
   | .fun _ _ h => nomatch h
   | .jp decl continuation =>
       !decl.params.any (fun param => sameFVar param.fvarId tracked) &&
-        fvarUsesOnlyAtErasedParameters program tracked decl.value &&
-        fvarUsesOnlyAtErasedParameters program tracked continuation
+        fvarUsesOnlyAtErasedParametersAux program fuel visited tracked decl.value &&
+        fvarUsesOnlyAtErasedParametersAux program fuel visited tracked continuation
   | .jmp _ args => !argsReferenceFVar tracked args
   | .cases cases =>
       !sameFVar tracked cases.discr &&
-        cases.alts.all (fvarUsesOnlyAtErasedParametersAlt program tracked)
+        cases.alts.all
+          (fvarUsesOnlyAtErasedParametersAltAux program fuel visited tracked)
   | .return fvarId => !sameFVar tracked fvarId
   | .unreach _ => true
   | .oset objectId _ arg continuation =>
       !(sameFVar tracked objectId || argReferencesFVar tracked arg) &&
-        fvarUsesOnlyAtErasedParameters program tracked continuation
+        fvarUsesOnlyAtErasedParametersAux program fuel visited tracked continuation
   | .uset objectId _ fieldId continuation
   | .sset objectId _ _ fieldId _ continuation =>
       !(sameFVar tracked objectId || sameFVar tracked fieldId) &&
-        fvarUsesOnlyAtErasedParameters program tracked continuation
+        fvarUsesOnlyAtErasedParametersAux program fuel visited tracked continuation
   | .setTag objectId _ continuation
   | .inc objectId _ _ _ continuation
   | .dec objectId _ _ _ _ continuation
   | .del objectId continuation =>
       !sameFVar tracked objectId &&
-        fvarUsesOnlyAtErasedParameters program tracked continuation
+        fvarUsesOnlyAtErasedParametersAux program fuel visited tracked continuation
 
-partial def fvarUsesOnlyAtErasedParametersAlt
-    (program : Fir.LeanIR.ImpureProgram) (tracked : FVarId) :
+private partial def fvarUsesOnlyAtErasedParametersAltAux
+    (program : Fir.LeanIR.ImpureProgram) (fuel : Nat)
+    (visited : List (Name × Name)) (tracked : FVarId) :
     LCNF.Alt .impure → Bool
   | .ctorAlt _ code | .default code =>
-      fvarUsesOnlyAtErasedParameters program tracked code
+      fvarUsesOnlyAtErasedParametersAux program fuel visited tracked code
   | .alt _ _ _ h => nomatch h
 
-end
-
-def namedArgsForwardToErasedParameter (program : Fir.LeanIR.ImpureProgram)
-    (tracked : FVarId) (name : Name) (args : Array (LCNF.Arg .impure)) : Bool :=
+private partial def namedArgsForwardToErasedParameterAux
+    (program : Fir.LeanIR.ImpureProgram) (fuel : Nat)
+    (visited : List (Name × Name)) (tracked : FVarId) (name : Name)
+    (args : Array (LCNF.Arg .impure)) : Bool :=
   match program.findDecl? name with
   | some target =>
-      ((target.params.extract 0 args.size).zip args).any fun pair =>
-        match pair.snd with
-        | .fvar fvarId =>
-            sameFVar tracked fvarId && pair.fst.type == LCNF.ImpureType.erased
-        | .erased => false
-        | .type _ h => nomatch h
+      args.size <= target.params.size &&
+        ((target.params.extract 0 args.size).zip args).any fun pair =>
+          match pair.snd with
+          | .fvar fvarId =>
+              sameFVar tracked fvarId &&
+                parameterAcceptsErasedForwardingAux program fuel visited target pair.fst
+          | .erased => false
+          | .type _ h => nomatch h
   | none => false
 
-def letValueForwardsToErasedParameter (program : Fir.LeanIR.ImpureProgram)
-    (tracked : FVarId) : LCNF.LetValue .impure → Bool
+private partial def letValueForwardsToErasedParameterAux
+    (program : Fir.LeanIR.ImpureProgram) (fuel : Nat)
+    (visited : List (Name × Name)) (tracked : FVarId) :
+    LCNF.LetValue .impure → Bool
   | .fap name args | .pap name args =>
-      namedArgsForwardToErasedParameter program tracked name args
+      namedArgsForwardToErasedParameterAux program fuel visited tracked name args
   | _ => false
 
-mutual
-
-partial def fvarForwardedToErasedParameter
-    (program : Fir.LeanIR.ImpureProgram) (tracked : FVarId) :
+private partial def fvarForwardedToErasedParameterAux
+    (program : Fir.LeanIR.ImpureProgram) (fuel : Nat)
+    (visited : List (Name × Name)) (tracked : FVarId) :
     LCNF.Code .impure → Bool
   | .let decl continuation =>
-      letValueForwardsToErasedParameter program tracked decl.value ||
-        fvarForwardedToErasedParameter program tracked continuation
+      letValueForwardsToErasedParameterAux program fuel visited tracked decl.value ||
+        fvarForwardedToErasedParameterAux program fuel visited tracked continuation
   | .fun _ _ h => nomatch h
   | .jp decl continuation =>
-      fvarForwardedToErasedParameter program tracked decl.value ||
-        fvarForwardedToErasedParameter program tracked continuation
+      fvarForwardedToErasedParameterAux program fuel visited tracked decl.value ||
+        fvarForwardedToErasedParameterAux program fuel visited tracked continuation
   | .cases cases =>
-      cases.alts.any (fvarForwardedToErasedParameterAlt program tracked)
+      cases.alts.any
+        (fvarForwardedToErasedParameterAltAux program fuel visited tracked)
   | .oset _ _ _ continuation
   | .uset _ _ _ continuation
   | .sset _ _ _ _ _ continuation
@@ -551,20 +612,75 @@ partial def fvarForwardedToErasedParameter
   | .inc _ _ _ _ continuation
   | .dec _ _ _ _ _ continuation
   | .del _ continuation =>
-      fvarForwardedToErasedParameter program tracked continuation
+      fvarForwardedToErasedParameterAux program fuel visited tracked continuation
   | .jmp .. | .return .. | .unreach .. => false
 
-partial def fvarForwardedToErasedParameterAlt
-    (program : Fir.LeanIR.ImpureProgram) (tracked : FVarId) :
+private partial def fvarForwardedToErasedParameterAltAux
+    (program : Fir.LeanIR.ImpureProgram) (fuel : Nat)
+    (visited : List (Name × Name)) (tracked : FVarId) :
     LCNF.Alt .impure → Bool
   | .ctorAlt _ code | .default code =>
-      fvarForwardedToErasedParameter program tracked code
+      fvarForwardedToErasedParameterAux program fuel visited tracked code
   | .alt _ _ _ h => nomatch h
 
 end
 
+/-- Check the tracked parameter's uses in one statically named call. Every
+tracked occurrence must reach either a raw-erased target or a transitively
+erased-only `tobject` target. -/
+def namedArgsUseOnlyAtErasedParameters (program : Fir.LeanIR.ImpureProgram)
+    (tracked : FVarId) (name : Name) (args : Array (LCNF.Arg .impure)) : Bool :=
+  namedArgsUseOnlyAtErasedParametersAux program
+    (erasedParameterTraversalFuel program) [] tracked name args
+
+/-- A let-value use is admissible for an erased-only parameter exactly when
+it is forwarded through a statically named transitive erased lane. -/
+def letValueUsesOnlyAtErasedParameters (program : Fir.LeanIR.ImpureProgram)
+    (tracked : FVarId) (value : LCNF.LetValue .impure) : Bool :=
+  letValueUsesOnlyAtErasedParametersAux program
+    (erasedParameterTraversalFuel program) [] tracked value
+
+/-
+Conservative structural recognizer for the compiler's erased type-parameter
+facade. A tracked parameter may be absent or forwarded through named
+transitively erased parameters, but may not participate in a value operation,
+ownership effect, closure call, branch, case, or return.
+-/
+def fvarUsesOnlyAtErasedParameters (program : Fir.LeanIR.ImpureProgram)
+    (tracked : FVarId) (code : LCNF.Code .impure) : Bool :=
+  fvarUsesOnlyAtErasedParametersAux program
+    (erasedParameterTraversalFuel program) [] tracked code
+
+def fvarUsesOnlyAtErasedParametersAlt (program : Fir.LeanIR.ImpureProgram)
+    (tracked : FVarId) (alt : LCNF.Alt .impure) : Bool :=
+  fvarUsesOnlyAtErasedParametersAltAux program
+    (erasedParameterTraversalFuel program) [] tracked alt
+
+/-- Some tracked occurrence reaches a raw-erased parameter through zero or
+more transitively erased-only `tobject` declaration parameters. -/
+def namedArgsForwardToErasedParameter (program : Fir.LeanIR.ImpureProgram)
+    (tracked : FVarId) (name : Name) (args : Array (LCNF.Arg .impure)) : Bool :=
+  namedArgsForwardToErasedParameterAux program
+    (erasedParameterTraversalFuel program) [] tracked name args
+
+def letValueForwardsToErasedParameter (program : Fir.LeanIR.ImpureProgram)
+    (tracked : FVarId) (value : LCNF.LetValue .impure) : Bool :=
+  letValueForwardsToErasedParameterAux program
+    (erasedParameterTraversalFuel program) [] tracked value
+
+def fvarForwardedToErasedParameter (program : Fir.LeanIR.ImpureProgram)
+    (tracked : FVarId) (code : LCNF.Code .impure) : Bool :=
+  fvarForwardedToErasedParameterAux program
+    (erasedParameterTraversalFuel program) [] tracked code
+
+def fvarForwardedToErasedParameterAlt (program : Fir.LeanIR.ImpureProgram)
+    (tracked : FVarId) (alt : LCNF.Alt .impure) : Bool :=
+  fvarForwardedToErasedParameterAltAux program
+    (erasedParameterTraversalFuel program) [] tracked alt
+
 /-- A compiler-declared `tobject` parameter which is semantically erased by
-every use in its declaration body. -/
+every use in its declaration body, with at least one finite forwarding path to
+a raw-erased parameter. -/
 def erasedOnlyParameter (program : Fir.LeanIR.ImpureProgram)
     (decl : LCNF.Decl .impure) (param : LCNF.Param .impure) : Bool :=
   param.type == LCNF.ImpureType.tobject &&
@@ -573,6 +689,18 @@ def erasedOnlyParameter (program : Fir.LeanIR.ImpureProgram)
         fvarUsesOnlyAtErasedParameters program param.fvarId code &&
           fvarForwardedToErasedParameter program param.fvarId code
     | .extern _ => false
+
+/-- Proof-facing inversion for a code declaration. Clients need not unfold
+the traversal fuel or visited-node implementation. -/
+theorem erasedOnlyParameter_code_eq_true_iff
+    (program : Fir.LeanIR.ImpureProgram) (decl : LCNF.Decl .impure)
+    (param : LCNF.Param .impure) (code : LCNF.Code .impure)
+    (value : decl.value = .code code) :
+    erasedOnlyParameter program decl param = true ↔
+      (param.type == LCNF.ImpureType.tobject) = true ∧
+        fvarUsesOnlyAtErasedParameters program param.fvarId code = true ∧
+        fvarForwardedToErasedParameter program param.fvarId code = true := by
+  simp [erasedOnlyParameter, value]
 
 /-
 Check the source-level control invariant emitted by Lean 4.33's

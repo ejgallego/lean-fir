@@ -398,6 +398,110 @@ def abiClosureErasedCaptureProgram : Fir.LeanIR.ImpureProgram :=
         | _ => true
   | .error _ => false
 
+/-!
+The erased lane may pass through more than one compiler-generated facade
+before reaching the raw-erased declaration parameter. Classification follows
+the declaration and exact parameter position; it does not inspect generated
+names.
+-/
+
+def transitiveRawAlpha : FVarId := ⟨`transitiveRawAlpha⟩
+def transitiveRawCaptured : FVarId := ⟨`transitiveRawCaptured⟩
+def transitiveRawValue : FVarId := ⟨`transitiveRawValue⟩
+def transitiveRawResult : FVarId := ⟨`transitiveRawResult⟩
+def transitiveMiddleAlpha : FVarId := ⟨`transitiveMiddleAlpha⟩
+def transitiveMiddleCaptured : FVarId := ⟨`transitiveMiddleCaptured⟩
+def transitiveMiddleValue : FVarId := ⟨`transitiveMiddleValue⟩
+def transitiveMiddleResult : FVarId := ⟨`transitiveMiddleResult⟩
+def transitiveFacadeAlpha : FVarId := ⟨`transitiveFacadeAlpha⟩
+def transitiveFacadeCaptured : FVarId := ⟨`transitiveFacadeCaptured⟩
+def transitiveFacadeValue : FVarId := ⟨`transitiveFacadeValue⟩
+def transitiveFacadeResult : FVarId := ⟨`transitiveFacadeResult⟩
+def transitiveFacadeClosure : FVarId := ⟨`transitiveFacadeClosure⟩
+
+def transitiveErasedRawDecl : LCNF.Decl .impure :=
+  decl `transitiveErasedRaw #[
+      param transitiveRawAlpha LCNF.ImpureType.erased,
+      param transitiveRawCaptured LCNF.ImpureType.tobject,
+      param transitiveRawValue LCNF.ImpureType.tobject]
+    LCNF.ImpureType.tobject (.code (.return transitiveRawCaptured))
+
+def transitiveErasedMiddleDecl : LCNF.Decl .impure :=
+  decl `transitiveErasedMiddle #[
+      param transitiveMiddleAlpha LCNF.ImpureType.tobject,
+      param transitiveMiddleCaptured LCNF.ImpureType.tobject,
+      param transitiveMiddleValue LCNF.ImpureType.tobject]
+    LCNF.ImpureType.tobject (.code <|
+      .let (letDecl transitiveMiddleResult LCNF.ImpureType.tobject
+        (.fap `transitiveErasedRaw #[
+          .fvar transitiveMiddleAlpha,
+          .fvar transitiveMiddleCaptured,
+          .fvar transitiveMiddleValue])) <|
+      .return transitiveMiddleResult)
+
+def transitiveErasedFacadeDecl : LCNF.Decl .impure :=
+  decl `transitiveErasedFacade #[
+      param transitiveFacadeAlpha LCNF.ImpureType.tobject,
+      param transitiveFacadeCaptured LCNF.ImpureType.tobject,
+      param transitiveFacadeValue LCNF.ImpureType.tobject]
+    LCNF.ImpureType.tobject (.code <|
+      .let (letDecl transitiveFacadeResult LCNF.ImpureType.tobject
+        (.fap `transitiveErasedMiddle #[
+          .fvar transitiveFacadeAlpha,
+          .fvar transitiveFacadeCaptured,
+          .fvar transitiveFacadeValue])) <|
+      .return transitiveFacadeResult)
+
+def transitiveErasedCallerDecl : LCNF.Decl .impure :=
+  decl `transitiveErasedCaller #[] LCNF.ImpureType.tobject (.code <|
+    .let (letDecl transitiveFacadeClosure LCNF.ImpureType.tobject
+      (.pap `transitiveErasedFacade #[.erased])) <|
+    .return transitiveFacadeClosure)
+
+def transitiveErasedFacadeProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[transitiveErasedRawDecl, transitiveErasedMiddleDecl,
+      transitiveErasedFacadeDecl, transitiveErasedCallerDecl] }
+
+#guard erasedOnlyParameter transitiveErasedFacadeProgram
+  transitiveErasedMiddleDecl transitiveErasedMiddleDecl.params[0]!
+
+#guard erasedOnlyParameter transitiveErasedFacadeProgram
+  transitiveErasedFacadeDecl transitiveErasedFacadeDecl.params[0]!
+
+#guard declarationParameterKinds? transitiveErasedFacadeProgram
+  transitiveErasedFacadeDecl == some #[.erased, .tobject, .tobject]
+
+#guard match lowerSupported transitiveErasedFacadeProgram with
+  | .ok module =>
+      module.runtimeOperations.contains <|
+        .partialApply transitiveErasedFacadeDecl.name 3 1 #[.erased] .tobject
+  | .error _ => false
+
+def erasedCycleAlphaA : FVarId := ⟨`erasedCycleAlphaA⟩
+def erasedCycleAlphaB : FVarId := ⟨`erasedCycleAlphaB⟩
+def erasedCycleResultA : FVarId := ⟨`erasedCycleResultA⟩
+def erasedCycleResultB : FVarId := ⟨`erasedCycleResultB⟩
+
+def erasedCycleDeclA : LCNF.Decl .impure :=
+  decl `erasedCycleA #[param erasedCycleAlphaA LCNF.ImpureType.tobject]
+    LCNF.ImpureType.tobject (.code <|
+      .let (letDecl erasedCycleResultA LCNF.ImpureType.tobject
+        (.fap `erasedCycleB #[.fvar erasedCycleAlphaA])) <|
+      .return erasedCycleResultA)
+
+def erasedCycleDeclB : LCNF.Decl .impure :=
+  decl `erasedCycleB #[param erasedCycleAlphaB LCNF.ImpureType.tobject]
+    LCNF.ImpureType.tobject (.code <|
+      .let (letDecl erasedCycleResultB LCNF.ImpureType.tobject
+        (.fap `erasedCycleA #[.fvar erasedCycleAlphaB])) <|
+      .return erasedCycleResultB)
+
+def erasedCycleProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[erasedCycleDeclA, erasedCycleDeclB] }
+
+#guard !erasedOnlyParameter erasedCycleProgram erasedCycleDeclA
+  erasedCycleDeclA.params[0]!
+
 def underClosure : FVarId := ⟨`underClosure⟩
 def underClosure2 : FVarId := ⟨`underClosure2⟩
 def underThird : FVarId := ⟨`underThird⟩
