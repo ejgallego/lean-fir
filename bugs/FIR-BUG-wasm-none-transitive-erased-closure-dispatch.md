@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-transitive-erased-closure-dispatch
-status: candidate
+status: fixed
 classification: compiler
 lean-toolchain: leanprover/lean4:v4.34.0-rc2
 lean-revision: 6a10ac8c22beadecabdbb0919c2b50214762f91d
@@ -9,7 +9,7 @@ pass: none
 discovered-by: differential-test
 first-seen: 2026-09-01
 reproduction: integration/vbp-verso-viewer/check.sh
-regression: none
+regression: integration/vbp-verso-viewer/check.sh
 ---
 
 # Summary
@@ -110,5 +110,19 @@ none
 
 ## Resolution and regression
 
-Unresolved. The immutable package publisher refuses to move the canonical
-pointer unless the synchronous mount/update/unmount smoke passes.
+The shared lowering classifier now follows only compiler-generated `tobject`
+and explicit-boxing `tagged` carriers through statically named declaration
+parameters to raw `erased` or `void` sinks. The query is bounded and
+cycle-safe; unknown declarations, external carrier parameters, arity
+mismatches, cycles, and exhausted fuel fail closed. No global
+object/erased or tagged/erased compatibility was added.
+
+W6's declaration-aware cache, structured-validation, and final-LCNF typing
+proofs consume the same effective classifier. The production-shaped
+`tobject -> tagged -> void` regression passes, and the exact VBP package
+regenerates deterministically with 2,399 captured declarations, 2,247 source
+functions, 5,360 resident helpers, 41 host imports, and 6,239,344 Wasm bytes
+at SHA-256
+`d738584215ea9c4b3eabef3aa290245c49fc54e2128d0dddf303db82cdc26a66`.
+Its synchronous mount, callback/event, effect, update, and unmount lifecycle
+passes.
