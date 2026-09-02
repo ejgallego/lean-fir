@@ -187,6 +187,10 @@ export async function checkResidentByteArray(bytes) {
     "copySlice retained a destination that required growth");
   equal(new DataView(exports.memory.buffer).getUint32(exactDestination, true),
     KIND_FREED, "copySlice did not consume grown exclusive destination");
+  const recycledExactDestination =
+    exports.fir_ext_ByteArray_emptyWithCapacity(nat(3)) >>> 0;
+  equal(recycledExactDestination, exactDestination,
+    "copySlice retirement did not recycle the transferred allocation");
 
   const geometricDestination = makeByteArray([1, 2, 3]);
   const geometric = exports.fir_ext_ByteArray_copySlice(

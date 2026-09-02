@@ -464,6 +464,8 @@ private def releaseConsumedFunctionFor (validation : InputValidation) : Function
     .localGet addressLocal,
     .i32Const .uint32 0,
     .i32Store .uint32 (u32 headerAux3Offset),
+    .localGet addressLocal,
+    .call (.declaration ResidentAllocator.recycleName),
     .ret] }
 
 def releaseConsumedFunction : Function := releaseConsumedFunctionFor .checked
@@ -1306,7 +1308,8 @@ private def internalizeSelected (module : Module) (declarations : Array Name)
     | .error error => throw (.invalidInput error)
   unless module.memory == some ResidentRuntime.residentMemory do
     throw .incompatibleMemory
-  unless module.functions.any (·.name == ResidentAllocator.allocateName) do
+  unless module.functions.any (·.name == ResidentAllocator.allocateName) &&
+      module.functions.any (·.name == ResidentAllocator.recycleName) do
     throw .missingAllocator
   if declarations.contains `ByteArray.emptyWithCapacity ||
       declarations.contains `ByteArray.copySlice ||

@@ -294,6 +294,10 @@ export async function checkResidentArrays(bytes) {
     "Array.push grown elements");
   equal(new DataView(exports.memory.buffer).getUint32(roomy, true), KIND_FREED,
     "Array.push did not consume the grown exclusive input");
+  const recycledRoomy = emptyWithCapacity(0, immediateNatural(4));
+  equal(recycledRoomy, roomy,
+    "Array.push retirement did not recycle the transferred allocation");
+  release(recycledRoomy);
 
   const original = replicate(0, immediateNatural(3), value);
   expect(original >= 1024 && original % 8 === 0,

@@ -941,7 +941,13 @@ private def selectExclusive (validation : InputValidation) : List Instruction :=
   | .checked => checkedSelectExclusive
   | .trusted => trustedSelectExclusive
 
-private def retireTransferredArray : List Instruction := [
+/--
+Retire an exclusive Array whose element ownership has moved to a replacement
+allocation.  This is header-only retirement: the payload must not be released
+recursively, but the complete dead allocation remains eligible for resident
+exact-size reuse.
+-/
+def retireTransferredArray : List Instruction := [
   .localGet inputAddressLocal,
   .i32Const .uint32 ObjectKind.freed.code,
   .i32Store .uint32 (u32 headerKindOffset),
@@ -962,7 +968,9 @@ private def retireTransferredArray : List Instruction := [
   .i32Store .uint32 (u32 headerAux2Offset),
   .localGet inputAddressLocal,
   .i32Const .uint32 0,
-  .i32Store .uint32 (u32 headerAux3Offset)]
+  .i32Store .uint32 (u32 headerAux3Offset),
+  .localGet inputAddressLocal,
+  .call (.declaration ResidentAllocator.recycleName)]
 
 private def consumeSharedArray : List Instruction := [
   .localGet arrayParam,
@@ -1775,7 +1783,8 @@ private def internalizeSelected (module : Module) (declarations : Array Name)
     match Fir.Wasm.validateModule module with
     | .ok () => pure ()
     | .error error => throw (.invalidInput error)
-  unless module.functions.any (·.name == ResidentAllocator.allocateName) do
+  unless module.functions.any (·.name == ResidentAllocator.allocateName) &&
+      module.functions.any (·.name == ResidentAllocator.recycleName) do
     throw .missingAllocator
   unless module.memory == some ResidentRuntime.residentMemory do
     throw .incompatibleMemory
