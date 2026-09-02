@@ -1,7 +1,7 @@
 ---
 id: FIR-BUG-wasm-none-isolated-export-ownership
 status: fixed
-classification: lcnf-capture
+classification: compiler
 lean-toolchain: leanprover/lean4:v4.34.0-rc2
 lean-revision: 6a10ac8c22beadecabdbb0919c2b50214762f91d
 phase: lcnf
@@ -32,6 +32,16 @@ def ownedEntry (_value : Array Nat) : Unit := ()
 The ordinary Lean C pipeline emits a `lean_dec_ref` for `_value`. Before this
 repair, FIR's captured final LCNF instead contains an `@&_value` parameter and
 no decrement.
+
+## Exact commands
+
+```bash
+make check
+```
+
+The focused regression is elaborated by
+`Fir/Wasm/Emit/SourceExamples.lean`; the repository gate also validates all
+bug cards and its downstream source-emission cone.
 
 ## Expected semantics
 

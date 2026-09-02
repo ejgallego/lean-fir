@@ -26,6 +26,16 @@ alternating original/edited updates. Release each obsolete component, event,
 state, and effect callback through the ordinary generic VIR React host, then
 scan the resident heap immediately after unmount.
 
+## Exact commands
+
+```bash
+bash integration/vbp-verso-viewer/check.sh
+```
+
+The package gate independently emits the exact Lean 4.34 closure twice,
+asserts the five owned release bodies and five borrowed invocation bodies,
+verifies checksums, and runs the mount/update/unmount smoke.
+
 ## Expected semantics
 
 The host owns one physical Lean closure reference for each retained callback

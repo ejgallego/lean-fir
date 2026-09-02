@@ -26,6 +26,17 @@ preserved, then scan the module-owned heap after unmount. The functional
 campaign passes, but 421,839 blocks / 26,137,728 bytes are marked freed while
 only 1,282 blocks / 504,048 bytes are reachable from the reuse index.
 
+## Exact commands
+
+```bash
+bash integration/vbp-verso-viewer/check.sh
+```
+
+On the affected revisions, run the retained VBP update campaign against the
+published package and inspect the module-owned heap after unmount. The
+functional package gate remains green while the dead-block census shows the
+unindexed storage described below.
+
 ## Expected semantics
 
 Every allocator-backed path that consumes an allocation without recursively
