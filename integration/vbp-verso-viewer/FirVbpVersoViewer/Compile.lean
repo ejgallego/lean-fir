@@ -88,9 +88,8 @@ def captureSource : CoreM Fir.Validation.Lcnf.Artifact := do
 def compileBaseModule : CoreM (Except Fir.Wasm.Emit.Source.CompileError
     Fir.Wasm.Emit.Source.ModuleArtifact) := do
   let source ← captureSource
-  let result ← Fir.Wasm.Emit.Source.compileModuleArtifactWithExports
+  Fir.Wasm.Emit.Source.compileModuleArtifactWithExports
     source publicEntries .ok
-  return result.bind Fir.Wasm.Emit.ResidentLinker.prepareArenaArtifact
 
 def residentPolicy (module : Fir.Wasm.Module) :
     Fir.Wasm.Emit.ResidentLinker.Policy := {
