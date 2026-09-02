@@ -29,6 +29,7 @@ import {
   VBP_VERSO_VIEWER_INPUT_LAYOUT_VERSION,
   VBP_VERSO_VIEWER_MOUNT_ENTRY,
   VBP_VERSO_VIEWER_OWNERSHIP_VERSION,
+  VBP_VERSO_VIEWER_RELEASE_OWNED_ENTRY,
   VBP_VERSO_VIEWER_UNMOUNT_ENTRY,
 } from "./vbp-verso-viewer-browser-adapter.mjs";
 import {
@@ -243,6 +244,7 @@ assert.deepEqual(functionExports, [
   VBP_VERSO_VIEWER_MOUNT_ENTRY,
   VBP_VERSO_VIEWER_UNMOUNT_ENTRY,
   ...VBP_VERSO_VIEWER_BRIDGE_ENTRIES,
+  VBP_VERSO_VIEWER_RELEASE_OWNED_ENTRY,
   "fir_heap_frontier",
   "fir_heap_set_frontier",
   "fir_heap_rewind",
@@ -289,6 +291,7 @@ const firRelevantPaths = [
   "Fir/Wasm/Emit/ResidentAllocator.lean",
   "Fir/Wasm/Emit/ResidentLinker.lean",
   "Fir/Wasm/Emit/ResidentRelease.lean",
+  "Fir/Wasm/Emit/ResidentRuntime.lean",
   "Fir/Wasm/Emit/Source.lean",
 ];
 const hostFrontier = inventory.imports.map((import_) => ({
@@ -331,6 +334,7 @@ const build = {
     mount: VBP_VERSO_VIEWER_MOUNT_ENTRY,
     unmount: VBP_VERSO_VIEWER_UNMOUNT_ENTRY,
     bridges: VBP_VERSO_VIEWER_BRIDGE_ENTRIES,
+    releaseOwned: VBP_VERSO_VIEWER_RELEASE_OWNED_ENTRY,
     publicSignatures: inventory.publicSignatures,
   },
   upstreamPackageShape: {
@@ -423,10 +427,10 @@ const build = {
       lazySingletons: "module-owned compiler flag/value globals; first miss recursively persists the closed graph",
       input: "fresh-transferred-Lean-graph-per-call",
       output: "copied-JavaScript-Boolean",
-      callbacks: "retained-by-explicit-JavaScript-leases-and-borrowed-by-each-Lean-bridge-call-until-release-or-dispose",
+      callbacks: "retained-by-explicit-JavaScript-leases; borrowed-by-each-Lean-bridge-call; final release invokes the checked resident decrement",
       hostResources: "adapter-owned-opaque-handle-table-until-dispose",
       rawAddressesExposed: false,
-      reclamation: "recursive release returns exact-size blocks to the private resident reuse index; rewind invalidates the index; unmount releases root leases; dispose invalidates callbacks and drops the instance",
+      reclamation: "final callback leases decrement their owned Lean closures; recursive release returns exact-size blocks to the private resident reuse index; rewind invalidates the index; dispose drops the instance",
     },
   },
   referenceAcceptance: sourceContract.referenceAcceptance,

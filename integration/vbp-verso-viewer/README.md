@@ -47,8 +47,10 @@ Each opened runtime owns one Wasm instance, one module-owned monotonic arena,
 and one opaque host-resource table. Inputs are freshly transferred into module
 memory. No Wasm address escapes. Retained callbacks use explicit JavaScript
 leases, and every neutral Lean bridge borrows its closure before application so
-repeat React renders do not consume the retained root. Callbacks become invalid
-after release or runtime disposal. `unmount` releases
+repeat React renders do not consume the retained root. Releasing the final
+JavaScript lease invokes the adapter-private checked resident decrement and
+returns the owned closure graph to the recycler. Callbacks become invalid after
+release or runtime disposal. `unmount` releases
 the root lifecycle; `dispose` invalidates all remaining callbacks, releases
 host resources, and drops the instance, reclaiming the entire arena.
 

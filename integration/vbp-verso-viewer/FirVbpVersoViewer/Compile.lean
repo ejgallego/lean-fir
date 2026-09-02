@@ -23,6 +23,14 @@ def bridgeEntries : Array Name := #[
 def publicEntries : Array Name :=
   #[mountEntry, unmountEntry] ++ bridgeEntries
 
+/-- Adapter-private physical release for one host-owned retained callback. -/
+def releaseOwnedEntry : Name :=
+  Fir.Wasm.Emit.ResidentRelease.decrementOnceName
+
+def residentPublicExports : Array Name :=
+  publicEntries ++ #[releaseOwnedEntry] ++
+    Fir.Wasm.Emit.ResidentLinker.allocatorExports
+
 /-- The exact reviewed VIR React/browser host frontier used by this widget. -/
 def hostNames : Array Name := #[
   `Lean.Vir.JsValue.ofString,
@@ -95,6 +103,7 @@ def residentPolicy (module : Fir.Wasm.Module) :
     Fir.Wasm.Emit.ResidentLinker.Policy := {
   Fir.Wasm.Emit.ResidentLinker.closedApplicationAvailablePolicy
     module publicEntries with
+  publicExports := some residentPublicExports
   allowedExternalImports := some hostNames
   requireZeroImports := false }
 

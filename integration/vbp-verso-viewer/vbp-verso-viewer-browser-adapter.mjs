@@ -13,6 +13,7 @@ export const VBP_VERSO_VIEWER_MOUNT_ENTRY =
   "VersoBlueprint.Experimental.VirPreview.Widget.mount";
 export const VBP_VERSO_VIEWER_UNMOUNT_ENTRY =
   "VersoBlueprint.Experimental.VirPreview.Widget.unmount";
+export const VBP_VERSO_VIEWER_RELEASE_OWNED_ENTRY = "fir_dec_once";
 
 const BRIDGE = Object.freeze({
   component: "FirVbpVersoViewer.Bridge.invokeComponent",
@@ -794,6 +795,8 @@ class FirVbpRuntime {
       if (root.leases === 0) {
         root.live = false;
         this.callbackRoots.delete(root);
+        this.requiredFunction(VBP_VERSO_VIEWER_RELEASE_OWNED_ENTRY)(
+          root.closure, 1);
       }
       return true;
     };
@@ -986,6 +989,7 @@ function validateManifest(manifest, module) {
   const exports = new Set(WebAssembly.Module.exports(module).map(({ name }) => name));
   for (const name of [VBP_VERSO_VIEWER_MOUNT_ENTRY,
     VBP_VERSO_VIEWER_UNMOUNT_ENTRY, ...Object.values(BRIDGE),
+    VBP_VERSO_VIEWER_RELEASE_OWNED_ENTRY,
     "fir_heap_frontier", "fir_heap_set_frontier", "fir_heap_rewind",
     "fir_heap_alloc", "memory"]) {
     requireCondition(exports.has(name), `module is missing export ${name}`);
