@@ -1,4 +1,4 @@
-import Fir.Wasm.Emit.ResidentRuntime
+import Fir.Wasm.Emit.ResidentAllocator
 import Fir.Wasm.Emit.ResidentContainerLayout
 
 namespace Fir.Wasm.Emit.ResidentRelease
@@ -73,17 +73,7 @@ def equalsConst (kind : AbiKind) (value : UInt32) :
 def checkedNoop : List Instruction :=
   [.localGet checkParam, .ifElse [.ret] [.unreachable]]
 
-/--
-The production header-release helper installed by `internalizeReleases`.
-This definition is public so the concrete-runtime proof can unfold the exact
-generated callee rather than duplicate its body.
--/
-def releaseHeaderFunction : Function := {
-  name := releaseHeaderName
-  params := #[(addressLocal, .uint32)]
-  results := #[]
-  locals := #[]
-  body := [
+def releaseHeaderBody (recycle : Bool) : List Instruction := [
     .localGet addressLocal,
     .i32Const .uint32 ObjectKind.freed.code,
     .i32Store .uint32 (u32 headerKindOffset),
@@ -104,8 +94,34 @@ def releaseHeaderFunction : Function := {
     .i32Store .uint32 (u32 headerAux2Offset),
     .localGet addressLocal,
     .i32Const .uint32 0,
-    .i32Store .uint32 (u32 headerAux3Offset),
-    .ret] }
+    .i32Store .uint32 (u32 headerAux3Offset)] ++
+  (if recycle then [
+    .localGet addressLocal,
+    .call (.declaration ResidentAllocator.recycleName)]
+  else []) ++ [.ret]
+
+/--
+The standalone header-release helper used when no resident allocator has been
+installed. This definition remains public for the existing concrete proof.
+-/
+def releaseHeaderFunction : Function := {
+  name := releaseHeaderName
+  params := #[(addressLocal, .uint32)]
+  results := #[]
+  locals := #[]
+  body := releaseHeaderBody false }
+
+/--
+The production allocator-aware header release. It first establishes the same
+canonical dead header used for recursive cycle termination, then offers the
+allocation to the private exact-size reuse index.
+-/
+def recyclingReleaseHeaderFunction : Function := {
+  name := releaseHeaderName
+  params := #[(addressLocal, .uint32)]
+  results := #[]
+  locals := #[]
+  body := releaseHeaderBody true }
 
 def releaseChild (index : Nat) : List Instruction :=
   [.localGet addressLocal,
@@ -615,9 +631,14 @@ def internalizeReleases (module : Module) (validate : Bool := true) :
   let decrementOnce ← decrementOnceFunction module.closureDescriptors
   let wrappers ← operations.toList.zipIdx.mapM fun (operation, ordinal) =>
     operationFunction ordinal operation
+  let releaseHeader :=
+    if specialized.functions.any (·.name == ResidentAllocator.recycleName) then
+      recyclingReleaseHeaderFunction
+    else
+      releaseHeaderFunction
   let functions :=
     (specializedFunctions.map (rewriteFunction rewrites)) ++
-      #[releaseHeaderFunction, decrementOnce] ++ wrappers.toArray
+      #[releaseHeader, decrementOnce] ++ wrappers.toArray
   let runtimeOperations := Fir.Wasm.collectRuntimeOps functions
   let externalImports := specialized.imports.filter (·.operation?.isNone)
   let imports := runtimeOperations.mapIdx Fir.Wasm.runtimeImport ++ externalImports
@@ -735,6 +756,13 @@ def residentExampleModule : Except String Module :=
   internalizeReleases exampleModule
     |>.mapError fun error => s!"releases: {repr error}"
 
+/-- Production-order allocator plus release fixture for exact dead-block reuse. -/
+def residentRecyclingExampleModule : Except String Module := do
+  let allocated ← ResidentAllocator.install exampleModule
+    |>.mapError fun error => s!"allocator: {repr error}"
+  internalizeReleases allocated
+    |>.mapError fun error => s!"recycling releases: {repr error}"
+
 def manifest : Json :=
   Json.mkObj [
     ("entries", Json.arr #[
@@ -751,6 +779,10 @@ def manifest : Json :=
   .localGet addressLocal,
   .i32Load .uint32 (u32 headerAux3Offset),
   .localSet descriptorLocal]
+
+#guard recyclingReleaseHeaderFunction.body == releaseHeaderBody true
+#guard recyclingReleaseHeaderFunction.body.contains
+  (Instruction.call (.declaration ResidentAllocator.recycleName))
 
 #guard match liveReleaseBody exampleDescriptors with
   | .ok body => body.take probeCompleteHeader.length == probeCompleteHeader

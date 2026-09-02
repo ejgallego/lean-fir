@@ -424,7 +424,7 @@ def manifest : Json :=
       module.imports.isEmpty &&
       module.runtimeOperations.isEmpty &&
       module.functions.size ==
-        6 + ResidentAllocator.helperNames.size +
+        6 + ResidentAllocator.installedFunctionNames.size +
           partialApplicationHelperCount exampleOperations &&
       partialApplicationHelperCount exampleOperations == 4 &&
       module.exports.contains exampleEmptyCaller.name &&

@@ -851,7 +851,7 @@ def manifest : Json :=
   | .ok module =>
       module.imports.isEmpty && module.runtimeOperations.isEmpty &&
       module.functions.size ==
-        8 + helperNames.size + ResidentAllocator.helperNames.size &&
+        8 + helperNames.size + ResidentAllocator.installedFunctionNames.size &&
       helperNames.all module.exports.contains &&
       (Fir.Wasm.validateModule module).isOk && (Fir.Wasm.Emit.encode module).isOk
   | .error _ => false

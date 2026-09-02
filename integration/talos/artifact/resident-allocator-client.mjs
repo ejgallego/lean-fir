@@ -4,6 +4,11 @@ function expect(condition, message) {
   }
 }
 
+function equal(actual, expected, message) {
+  expect(actual === expected,
+    `${message}: expected ${expected}, got ${actual}`);
+}
+
 function exportedFunction(instance, name) {
   const value = instance.exports[name];
   expect(typeof value === "function", `${name} export is not callable`);
@@ -21,6 +26,12 @@ function expectTrap(action, message) {
   throw new Error(`${message}: call unexpectedly returned`);
 }
 
+function writeFreedHeader(memory, address, bytes) {
+  const view = new DataView(memory.buffer);
+  [255, 0, 0, bytes, 0, 0, 0, 0].forEach((value, index) =>
+    view.setUint32(address + 4 * index, value, true));
+}
+
 export async function checkResidentAllocator(bytes) {
   expect(WebAssembly.validate(bytes),
     "resident allocator module failed WebAssembly validation");
@@ -34,7 +45,9 @@ export async function checkResidentAllocator(bytes) {
 
   const frontier = exportedFunction({ exports }, "fir_heap_frontier");
   const setFrontier = exportedFunction({ exports }, "fir_heap_set_frontier");
+  const rewind = exportedFunction({ exports }, "fir_heap_rewind");
   const allocate = exportedFunction({ exports }, "fir_heap_alloc");
+  const recycle = exportedFunction({ exports }, "fir_heap_recycle");
   const store8 = exportedFunction({ exports }, "fir_heap_store8");
   const store16 = exportedFunction({ exports }, "fir_heap_store16");
   const store32 = exportedFunction({ exports }, "fir_heap_store32");
@@ -92,6 +105,46 @@ export async function checkResidentAllocator(bytes) {
     "resident allocator store failed after memory growth");
   expectTrap(() => store8(memory.buffer.byteLength, 1),
     "resident raw store did not preserve Wasm bounds traps");
+
+  const { exports: reuse } = await WebAssembly.instantiate(module, {});
+  const reuseFrontier = exportedFunction({ exports: reuse }, "fir_heap_frontier");
+  const reuseAllocate = exportedFunction({ exports: reuse }, "fir_heap_alloc");
+  const reuseRecycle = exportedFunction({ exports: reuse }, "fir_heap_recycle");
+  const reuseRewind = exportedFunction({ exports: reuse }, "fir_heap_rewind");
+
+  const exact = reuseAllocate(40) >>> 0;
+  const exactEnd = reuseFrontier() >>> 0;
+  writeFreedHeader(reuse.memory, exact, 40);
+  reuseRecycle(exact);
+  equal(reuseAllocate(40) >>> 0, exact,
+    "resident allocator did not reuse an exact-extent dead block");
+  equal(reuseFrontier() >>> 0, exactEnd,
+    "exact-extent reuse advanced the bump frontier");
+
+  const collision = reuseAllocate(2088) >>> 0;
+  writeFreedHeader(reuse.memory, collision, 2088);
+  reuseRecycle(collision);
+  const mismatched = reuseAllocate(40) >>> 0;
+  expect(mismatched !== collision,
+    "resident allocator reused a hash-colliding extent");
+  equal(reuseAllocate(2088) >>> 0, collision,
+    "resident allocator lost an exact extent behind a hash collision");
+
+  const retainedDead = reuseAllocate(40) >>> 0;
+  writeFreedHeader(reuse.memory, retainedDead, 40);
+  reuseRecycle(retainedDead);
+  reuseAllocate(48);
+  const checkpoint = reuseFrontier() >>> 0;
+  reuseAllocate(40);
+  reuseRewind(checkpoint);
+  equal(reuseAllocate(40) >>> 0, checkpoint,
+    "rewind retained a stale free-list address below its checkpoint");
+
+  const live = reuseAllocate(40) >>> 0;
+  writeFreedHeader(reuse.memory, live, 40);
+  new DataView(reuse.memory.buffer).setUint32(live + 4, 2, true);
+  expectTrap(() => reuseRecycle(live),
+    "resident recycler accepted a live block");
 
   return "PASS zero-import Wasm-resident allocator, frontier, growth, and raw stores";
 }

@@ -311,6 +311,16 @@ def emitResidentReleases (path : System.FilePath) : IO Unit := do
   IO.println
     s!"resident-releases: wrote {bytes.size} bytes to {path} and {manifestPath}"
 
+def emitResidentRecyclingReleases (path : System.FilePath) : IO Unit := do
+  let module ← IO.ofExcept <|
+    Fir.Wasm.Emit.ResidentRelease.residentRecyclingExampleModule
+  let bytes ← IO.ofExcept <| (Fir.Wasm.Emit.encode module).mapError fun error =>
+    s!"resident recycling release encoding failed: {repr error}"
+  if let some parent := path.parent then
+    IO.FS.createDirAll parent
+  IO.FS.writeBinFile path bytes
+  IO.println s!"resident-recycling-releases: wrote {bytes.size} bytes to {path}"
+
 def emitResidentCache (path : System.FilePath) : IO Unit := do
   let module ← IO.ofExcept <|
     Fir.Wasm.Emit.ResidentCache.residentExampleModule
@@ -564,6 +574,9 @@ def main (args : List String) : IO UInt32 := do
         return 0
     | ["resident-releases", output] =>
         emitResidentReleases output
+        return 0
+    | ["resident-recycling-releases", output] =>
+        emitResidentRecyclingReleases output
         return 0
     | ["resident-cache", output] =>
         emitResidentCache output

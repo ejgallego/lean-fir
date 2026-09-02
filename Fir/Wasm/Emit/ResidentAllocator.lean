@@ -10,6 +10,7 @@ def frontierName : Name := `fir_heap_frontier
 def setFrontierName : Name := `fir_heap_set_frontier
 def rewindName : Name := `fir_heap_rewind
 def allocateName : Name := `fir_heap_alloc
+def recycleName : Name := `fir_heap_recycle
 def store8Name : Name := `fir_heap_store8
 def store16Name : Name := `fir_heap_store16
 def store32Name : Name := `fir_heap_store32
@@ -25,6 +26,9 @@ def helperNames : Array Name := #[
   store32Name,
   store64Name]
 
+/-- Public helpers plus the private release-to-allocator bridge. -/
+def installedFunctionNames : Array Name := helperNames.push recycleName
+
 private def requestedBytes : FVarId := ⟨`requestedBytes⟩
 private def address : FVarId := ⟨`address⟩
 private def value32 : FVarId := ⟨`value32⟩
@@ -35,8 +39,25 @@ private def allocationEnd : FVarId := ⟨`allocationEnd⟩
 private def requiredPages : FVarId := ⟨`requiredPages⟩
 private def currentPages : FVarId := ⟨`currentPages⟩
 private def growResult : FVarId := ⟨`growResult⟩
+private def allocationBytesLocal : FVarId := ⟨`allocationBytes⟩
+private def bucketAddress : FVarId := ⟨`bucketAddress⟩
+private def candidate : FVarId := ⟨`candidate⟩
+private def previous : FVarId := ⟨`previous⟩
+private def next : FVarId := ⟨`next⟩
+private def freeListCursor : FVarId := ⟨`freeListCursor⟩
+private def freeListClearLoop : FVarId := ⟨`freeListClearLoop⟩
+private def freeListSearchLoop : FVarId := ⟨`freeListSearchLoop⟩
 
 private def u32 (value : Nat) : UInt32 := UInt32.ofNat value
+
+/--
+The lower reserved memory prefix stores a private segregated-head table. The
+heap begins at `heapBase`, so no live Lean object can overlap these words.
+Aligned extents hash by their eight-byte size class; collisions retain an
+exact-extent check in the linked list.
+-/
+def freeListBucketCount : Nat := heapBase / 4
+def freeListBucketMask : Nat := freeListBucketCount - 1
 
 private def trapWhenTrue (condition : List Instruction) : List Instruction :=
   condition ++ [.ifElse [.unreachable] []]
@@ -55,6 +76,36 @@ private def pagesForEnd (fvarId : FVarId) : List Instruction := [
   .i32ShrU,
   .i32Const .uint32 1,
   .i32Add]
+
+def bucketAddressBody (bytes result : FVarId) : List Instruction := [
+  .localGet bytes,
+  .i32Const .uint32 3,
+  .i32ShrU,
+  .i32Const .uint32 1,
+  .i32Sub,
+  .i32Const .uint32 (u32 freeListBucketMask),
+  .i32And,
+  .i32Const .uint32 4,
+  .i32Mul,
+  .localSet result]
+
+/-- Conservatively invalidate every reuse entry after an arena rewind. -/
+def clearFreeListsBody : List Instruction := [
+  .i32Const .uint32 0,
+  .localSet freeListCursor,
+  .loop freeListClearLoop [
+    .localGet freeListCursor,
+    .i32Const .uint32 (u32 heapBase),
+    .i32LtU,
+    .ifElse [
+      .localGet freeListCursor,
+      .i32Const .uint32 0,
+      .i32Store .uint32 0,
+      .localGet freeListCursor,
+      .i32Const .uint32 4,
+      .i32Add,
+      .localSet freeListCursor,
+      .br freeListClearLoop] []]]
 
 def frontierFunction (frontierIndex : Nat) : Function := {
   name := frontierName
@@ -104,7 +155,7 @@ def rewindFunction (frontierIndex : Nat) : Function := {
   name := rewindName
   params := #[(address, .uint32)]
   results := #[]
-  locals := #[(current, .uint32)]
+  locals := #[(current, .uint32), (freeListCursor, .uint32)]
   body :=
     [.globalGet frontierIndex .uint32,
       .localSet current] ++
@@ -116,7 +167,7 @@ def rewindFunction (frontierIndex : Nat) : Function := {
       .localGet address,
       .i32Const .uint32 (u32 heapBase),
       .i32LtU] ++
-    requireAligned address ++
+    requireAligned address ++ clearFreeListsBody ++
     [.localGet address,
       .globalSet frontierIndex .uint32,
       .ret] }
@@ -132,7 +183,8 @@ def cacheAwareRewindFunction
   name := rewindName
   params := #[(address, .uint32)]
   results := #[]
-  locals := #[(current, .uint32), (persistentFloor, .uint32)]
+  locals := #[(current, .uint32), (persistentFloor, .uint32),
+    (freeListCursor, .uint32)]
   body :=
     [.globalGet frontierIndex .uint32,
       .localSet current,
@@ -156,10 +208,93 @@ def cacheAwareRewindFunction
       .localGet address,
       .i32Const .uint32 (u32 heapBase),
       .i32LtU] ++
-    requireAligned address ++
+    requireAligned address ++ clearFreeListsBody ++
     [.localGet address,
       .globalSet frontierIndex .uint32,
       .ret] }
+
+/--
+Fail closed unless a free-list entry denotes a complete, aligned, canonically
+dead allocation within the current arena. Its recorded extent remains the
+authoritative exact-size discriminator.
+-/
+def validateCandidateBody : List Instruction :=
+  trapWhenTrue [
+    .localGet candidate,
+    .i32Const .uint32 (u32 heapBase),
+    .i32LtU] ++
+  requireAligned candidate ++
+  [.localGet candidate,
+    .i32Const .uint32 (u32 headerBytes),
+    .i32Add,
+    .localSet allocationEnd] ++
+  trapWhenTrue [
+    .localGet allocationEnd,
+    .localGet candidate,
+    .i32LtU] ++
+  trapWhenTrue [
+    .localGet current,
+    .localGet allocationEnd,
+    .i32LtU] ++
+  trapWhenTrue [
+    .localGet candidate,
+    .i32Load .uint32 (u32 headerKindOffset),
+    .i32Const .uint32 ObjectKind.freed.code,
+    .i32Ne] ++
+  trapWhenTrue [
+    .localGet candidate,
+    .i32Load .uint32 (u32 headerFlagsOffset)] ++
+  trapWhenTrue [
+    .localGet candidate,
+    .i32Load .uint32 (u32 headerRefCountOffset)] ++
+  [.localGet candidate,
+    .i32Load .uint32 (u32 headerAllocationBytesOffset),
+    .localSet allocationBytesLocal] ++
+  trapWhenTrue [
+    .localGet allocationBytesLocal,
+    .i32Const .uint32 (u32 headerBytes),
+    .i32LtU] ++
+  requireAligned allocationBytesLocal
+
+/-- The exact production free-list search preceding the bump fallback. -/
+def reuseSearchBody : List Instruction :=
+  bucketAddressBody requestedBytes bucketAddress ++ [
+    .localGet bucketAddress,
+    .i32Load .uint32 0,
+    .localSet candidate,
+    .i32Const .uint32 0,
+    .localSet previous,
+    .loop freeListSearchLoop [
+      .localGet candidate,
+      .ifElse
+        (validateCandidateBody ++ [
+          .localGet candidate,
+          .i32Load .uint32 (u32 headerAux0Offset),
+          .localSet next,
+          .localGet allocationBytesLocal,
+          .localGet requestedBytes,
+          .i32Eq,
+          .ifElse [
+            .localGet previous,
+            .i32Eqz,
+            .ifElse [
+              .localGet bucketAddress,
+              .localGet next,
+              .i32Store .uint32 0] [
+              .localGet previous,
+              .localGet next,
+              .i32Store .uint32 (u32 headerAux0Offset)],
+            .localGet candidate,
+            .i32Const .uint32 0,
+            .i32Store .uint32 (u32 headerAux0Offset),
+            .localGet candidate,
+            .ret] [
+            .localGet candidate,
+            .localSet previous,
+            .localGet next,
+            .localSet candidate,
+            .br freeListSearchLoop]])
+        []]]
 
 def allocateFunction (frontierIndex : Nat) : Function := {
   name := allocateName
@@ -170,7 +305,12 @@ def allocateFunction (frontierIndex : Nat) : Function := {
     (allocationEnd, .uint32),
     (requiredPages, .uint32),
     (currentPages, .uint32),
-    (growResult, .uint32)]
+    (growResult, .uint32),
+    (allocationBytesLocal, .uint32),
+    (bucketAddress, .uint32),
+    (candidate, .uint32),
+    (previous, .uint32),
+    (next, .uint32)]
   body :=
     trapWhenTrue [
       .localGet requestedBytes,
@@ -183,7 +323,7 @@ def allocateFunction (frontierIndex : Nat) : Function := {
       .localGet current,
       .i32Const .uint32 (u32 heapBase),
       .i32LtU] ++
-    requireAligned current ++
+    requireAligned current ++ reuseSearchBody ++
     [.localGet current,
       .localGet requestedBytes,
       .i32Add,
@@ -212,6 +352,36 @@ def allocateFunction (frontierIndex : Nat) : Function := {
       .localGet allocationEnd,
       .globalSet frontierIndex .uint32,
       .localGet current,
+      .ret] }
+
+/--
+Link one canonically dead allocation into the private reuse index. This helper
+is deliberately not part of the public application export surface; the
+resident release helper is its only production caller.
+-/
+def recycleFunction (frontierIndex : Nat) : Function := {
+  name := recycleName
+  params := #[(address, .uint32)]
+  results := #[]
+  locals := #[(current, .uint32), (allocationEnd, .uint32),
+    (allocationBytesLocal, .uint32), (bucketAddress, .uint32),
+    (candidate, .uint32), (next, .uint32)]
+  body :=
+    [.globalGet frontierIndex .uint32,
+      .localSet current,
+      .localGet address,
+      .localSet candidate] ++
+    validateCandidateBody ++
+    bucketAddressBody allocationBytesLocal bucketAddress ++ [
+      .localGet bucketAddress,
+      .i32Load .uint32 0,
+      .localSet next,
+      .localGet address,
+      .localGet next,
+      .i32Store .uint32 (u32 headerAux0Offset),
+      .localGet bucketAddress,
+      .localGet address,
+      .i32Store .uint32 0,
       .ret] }
 
 def store8Function : Function := {
@@ -263,6 +433,7 @@ def functions (frontierIndex : Nat) : Array Function := #[
   setFrontierFunction frontierIndex,
   rewindFunction frontierIndex,
   allocateFunction frontierIndex,
+  recycleFunction frontierIndex,
   store8Function,
   store16Function,
   store32Function,
@@ -271,7 +442,7 @@ def functions (frontierIndex : Nat) : Array Function := #[
 def allocatorModule : Module := {
   imports := #[]
   functions := functions 0
-  exports := helperNames
+  exports := installedFunctionNames
   initializers := #[]
   runtimeOperations := #[]
   memory := some ResidentRuntime.residentMemory
@@ -302,7 +473,7 @@ def install (module : Module) (validate : Bool := true) : Except LinkError Modul
         unless memory == ResidentRuntime.residentMemory do
           throw .incompatibleMemory
         pure memory
-  for name in helperNames do
+  for name in installedFunctionNames do
     if module.imports.any (·.declaration? == some name) ||
         module.functions.any (·.name == name) ||
         module.exports.contains name then
@@ -328,6 +499,8 @@ def manifest : Json :=
     ("heapBase", heapBase),
     ("alignment", target.heapAlignment),
     ("minimumAllocationBytes", headerBytes),
+    ("freeListBuckets", freeListBucketCount),
+    ("privateEntries", Json.arr #[recycleName.toString]),
     ("imports", Json.arr #[]),
     ("status", "generation-only; W6 allocator contract proof pending")]
 
@@ -335,6 +508,8 @@ def manifest : Json :=
 #guard allocatorModule.globals ==
   #[{ kind := .uint32, init := .i32 (u32 heapBase) }]
 #guard allocatorModule.memory == some ResidentRuntime.residentMemory
+#guard freeListBucketCount == 256
+#guard freeListBucketMask == 255
 #guard Fir.Wasm.validateModule allocatorModule |>.isOk
 #guard Fir.Wasm.Emit.encode allocatorModule |>.isOk
 

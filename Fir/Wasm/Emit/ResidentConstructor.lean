@@ -281,7 +281,8 @@ def manifest (operations : Array RuntimeOp) : Json :=
       module.imports.isEmpty &&
       module.runtimeOperations.isEmpty &&
       module.functions.size ==
-        2 + ResidentAllocator.helperNames.size + exampleOperations.size &&
+        2 + ResidentAllocator.installedFunctionNames.size +
+          exampleOperations.size &&
       module.exports.contains exampleEmptyCaller.name &&
       module.exports.contains examplePairCaller.name &&
       module.memory == some ResidentRuntime.residentMemory &&

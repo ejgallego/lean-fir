@@ -354,7 +354,7 @@ def manifest : Json :=
       module.imports.isEmpty &&
       module.runtimeOperations.isEmpty &&
       module.functions.size ==
-        exampleFunctions.size + ResidentAllocator.helperNames.size +
+        exampleFunctions.size + ResidentAllocator.installedFunctionNames.size +
           exampleOperations.size &&
       exampleFunctions.all fun function => module.exports.contains function.name &&
       module.memory == some ResidentRuntime.residentMemory &&

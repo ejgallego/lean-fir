@@ -123,6 +123,10 @@ node run-resident-increments.mjs _build/resident-increments.wasm
 "$artifact_generator" resident-releases \
   _build/resident-releases.wasm
 node run-resident-releases.mjs _build/resident-releases.wasm
+"$artifact_generator" resident-recycling-releases \
+  _build/resident-recycling-releases.wasm
+node run-resident-recycling-releases.mjs \
+  _build/resident-recycling-releases.wasm
 "$artifact_generator" resident-cache \
   _build/resident-cache.wasm
 node run-resident-cache.mjs _build/resident-cache.wasm
