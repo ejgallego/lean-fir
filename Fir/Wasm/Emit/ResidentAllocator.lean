@@ -54,10 +54,13 @@ private def u32 (value : Nat) : UInt32 := UInt32.ofNat value
 The lower reserved memory prefix stores a private segregated-head table. The
 heap begins at `heapBase`, so no live Lean object can overlap these words.
 Aligned extents hash by their eight-byte size class; collisions retain an
-exact-extent check in the linked list.
+exact-extent check in the linked list. A dead block's private link occupies its
+first ignored payload word, keeping every semantic dead-header field zero.
 -/
 def freeListBucketCount : Nat := heapBase / 4
 def freeListBucketMask : Nat := freeListBucketCount - 1
+def freeListLinkOffset : Nat := headerBytes
+def minimumReusableAllocationBytes : Nat := headerBytes + 4
 
 private def trapWhenTrue (condition : List Instruction) : List Instruction :=
   condition ++ [.ifElse [.unreachable] []]
@@ -247,6 +250,18 @@ def validateCandidateBody : List Instruction :=
   trapWhenTrue [
     .localGet candidate,
     .i32Load .uint32 (u32 headerRefCountOffset)] ++
+  trapWhenTrue [
+    .localGet candidate,
+    .i32Load .uint32 (u32 headerAux0Offset)] ++
+  trapWhenTrue [
+    .localGet candidate,
+    .i32Load .uint32 (u32 headerAux1Offset)] ++
+  trapWhenTrue [
+    .localGet candidate,
+    .i32Load .uint32 (u32 headerAux2Offset)] ++
+  trapWhenTrue [
+    .localGet candidate,
+    .i32Load .uint32 (u32 headerAux3Offset)] ++
   [.localGet candidate,
     .i32Load .uint32 (u32 headerAllocationBytesOffset),
     .localSet allocationBytesLocal] ++
@@ -254,7 +269,19 @@ def validateCandidateBody : List Instruction :=
     .localGet allocationBytesLocal,
     .i32Const .uint32 (u32 headerBytes),
     .i32LtU] ++
-  requireAligned allocationBytesLocal
+  requireAligned allocationBytesLocal ++
+  [.localGet candidate,
+    .localGet allocationBytesLocal,
+    .i32Add,
+    .localSet allocationEnd] ++
+  trapWhenTrue [
+    .localGet allocationEnd,
+    .localGet candidate,
+    .i32LtU] ++
+  trapWhenTrue [
+    .localGet current,
+    .localGet allocationEnd,
+    .i32LtU]
 
 /-- The exact production free-list search preceding the bump fallback. -/
 def reuseSearchBody : List Instruction :=
@@ -269,7 +296,7 @@ def reuseSearchBody : List Instruction :=
       .ifElse
         (validateCandidateBody ++ [
           .localGet candidate,
-          .i32Load .uint32 (u32 headerAux0Offset),
+          .i32Load .uint32 (u32 freeListLinkOffset),
           .localSet next,
           .localGet allocationBytesLocal,
           .localGet requestedBytes,
@@ -283,10 +310,7 @@ def reuseSearchBody : List Instruction :=
               .i32Store .uint32 0] [
               .localGet previous,
               .localGet next,
-              .i32Store .uint32 (u32 headerAux0Offset)],
-            .localGet candidate,
-            .i32Const .uint32 0,
-            .i32Store .uint32 (u32 headerAux0Offset),
+              .i32Store .uint32 (u32 freeListLinkOffset)],
             .localGet candidate,
             .ret] [
             .localGet candidate,
@@ -371,14 +395,18 @@ def recycleFunction (frontierIndex : Nat) : Function := {
       .localSet current,
       .localGet address,
       .localSet candidate] ++
-    validateCandidateBody ++
+    validateCandidateBody ++ [
+      .localGet allocationBytesLocal,
+      .i32Const .uint32 (u32 minimumReusableAllocationBytes),
+      .i32LtU,
+      .ifElse [.ret] []] ++
     bucketAddressBody allocationBytesLocal bucketAddress ++ [
       .localGet bucketAddress,
       .i32Load .uint32 0,
       .localSet next,
       .localGet address,
       .localGet next,
-      .i32Store .uint32 (u32 headerAux0Offset),
+      .i32Store .uint32 (u32 freeListLinkOffset),
       .localGet bucketAddress,
       .localGet address,
       .i32Store .uint32 0,
@@ -500,6 +528,8 @@ def manifest : Json :=
     ("alignment", target.heapAlignment),
     ("minimumAllocationBytes", headerBytes),
     ("freeListBuckets", freeListBucketCount),
+    ("freeListLinkOffset", freeListLinkOffset),
+    ("minimumReusableAllocationBytes", minimumReusableAllocationBytes),
     ("privateEntries", Json.arr #[recycleName.toString]),
     ("imports", Json.arr #[]),
     ("status", "generation-only; W6 allocator contract proof pending")]
@@ -510,6 +540,8 @@ def manifest : Json :=
 #guard allocatorModule.memory == some ResidentRuntime.residentMemory
 #guard freeListBucketCount == 256
 #guard freeListBucketMask == 255
+#guard freeListLinkOffset == headerBytes
+#guard minimumReusableAllocationBytes == 36
 #guard Fir.Wasm.validateModule allocatorModule |>.isOk
 #guard Fir.Wasm.Emit.encode allocatorModule |>.isOk
 

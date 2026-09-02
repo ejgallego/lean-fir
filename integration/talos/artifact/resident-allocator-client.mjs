@@ -116,10 +116,20 @@ export async function checkResidentAllocator(bytes) {
   const exactEnd = reuseFrontier() >>> 0;
   writeFreedHeader(reuse.memory, exact, 40);
   reuseRecycle(exact);
+  for (const offset of [16, 20, 24, 28]) {
+    equal(new DataView(reuse.memory.buffer).getUint32(exact + offset, true), 0,
+      `resident recycler changed canonical dead-header word ${offset}`);
+  }
   equal(reuseAllocate(40) >>> 0, exact,
     "resident allocator did not reuse an exact-extent dead block");
   equal(reuseFrontier() >>> 0, exactEnd,
     "exact-extent reuse advanced the bump frontier");
+
+  const headerOnly = reuseAllocate(32) >>> 0;
+  writeFreedHeader(reuse.memory, headerOnly, 32);
+  reuseRecycle(headerOnly);
+  expect(reuseAllocate(32) >>> 0 !== headerOnly,
+    "resident allocator indexed a header-only block without a private link lane");
 
   const collision = reuseAllocate(2088) >>> 0;
   writeFreedHeader(reuse.memory, collision, 2088);
@@ -145,6 +155,12 @@ export async function checkResidentAllocator(bytes) {
   new DataView(reuse.memory.buffer).setUint32(live + 4, 2, true);
   expectTrap(() => reuseRecycle(live),
     "resident recycler accepted a live block");
+
+  const noncanonical = reuseAllocate(40) >>> 0;
+  writeFreedHeader(reuse.memory, noncanonical, 40);
+  new DataView(reuse.memory.buffer).setUint32(noncanonical + 16, 1, true);
+  expectTrap(() => reuseRecycle(noncanonical),
+    "resident recycler accepted a noncanonical dead header");
 
   return "PASS zero-import Wasm-resident allocator, frontier, growth, and raw stores";
 }

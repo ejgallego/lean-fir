@@ -73,7 +73,7 @@ def equalsConst (kind : AbiKind) (value : UInt32) :
 def checkedNoop : List Instruction :=
   [.localGet checkParam, .ifElse [.ret] [.unreachable]]
 
-def releaseHeaderBody (recycle : Bool) : List Instruction := [
+def releaseHeaderBody (_recycle : Bool := false) : List Instruction := [
     .localGet addressLocal,
     .i32Const .uint32 ObjectKind.freed.code,
     .i32Store .uint32 (u32 headerKindOffset),
@@ -94,11 +94,8 @@ def releaseHeaderBody (recycle : Bool) : List Instruction := [
     .i32Store .uint32 (u32 headerAux2Offset),
     .localGet addressLocal,
     .i32Const .uint32 0,
-    .i32Store .uint32 (u32 headerAux3Offset)] ++
-  (if recycle then [
-    .localGet addressLocal,
-    .call (.declaration ResidentAllocator.recycleName)]
-  else []) ++ [.ret]
+    .i32Store .uint32 (u32 headerAux3Offset),
+    .ret]
 
 /--
 The standalone header-release helper used when no resident allocator has been
@@ -112,9 +109,9 @@ def releaseHeaderFunction : Function := {
   body := releaseHeaderBody false }
 
 /--
-The production allocator-aware header release. It first establishes the same
-canonical dead header used for recursive cycle termination, then offers the
-allocation to the private exact-size reuse index.
+Compatibility shape for the allocator-aware path. Recycling happens only
+after recursive child descent, because the allocator-private link occupies an
+ignored dead payload word that may still contain an owned child before descent.
 -/
 def recyclingReleaseHeaderFunction : Function := {
   name := releaseHeaderName
@@ -122,6 +119,16 @@ def recyclingReleaseHeaderFunction : Function := {
   results := #[]
   locals := #[]
   body := releaseHeaderBody true }
+
+/-- Complete one last-reference release after every owned payload lane has
+been consumed. The standalone proof path retains its original return; the
+allocator-aware production path offers the now-ignored payload to the private
+reuse index first. -/
+def finishReleaseBody (recycle : Bool := false) : List Instruction :=
+  (if recycle then [
+    .localGet addressLocal,
+    .call (.declaration ResidentAllocator.recycleName)]
+  else []) ++ [.ret]
 
 def releaseChild (index : Nat) : List Instruction :=
   [.localGet addressLocal,
@@ -136,15 +143,15 @@ def releaseConstructorFields : List Instruction :=
       .i32LtU,
       .ifElse (releaseChild index) []]
 
-def constructorReleaseBody : List Instruction :=
+def constructorReleaseBody (recycle : Bool := false) : List Instruction :=
   [.i32Const .uint32 (u32 constructorFieldLimit),
     .localGet countLocal,
     .i32LtU,
     .ifElse
       [.unreachable]
-      (releaseConstructorFields ++ [.ret])]
+      (releaseConstructorFields ++ finishReleaseBody recycle)]
 
-def arrayReleaseBody : List Instruction := [
+def arrayReleaseBody (recycle : Bool := false) : List Instruction := [
   .localGet addressLocal,
   .i32Const .uint32 (u32 headerBytes),
   .i32Add,
@@ -168,26 +175,25 @@ def arrayReleaseBody : List Instruction := [
       .i32Const .uint32 1,
       .i32Add,
       .localSet arrayIndexLocal,
-      .br arrayReleaseLoop] []],
-  .ret]
+      .br arrayReleaseLoop] []]] ++ finishReleaseBody recycle
 
-def opaqueReleaseBody : List Instruction :=
+def opaqueReleaseBody (recycle : Bool := false) : List Instruction :=
   [.localGet markerLocal] ++
   equalsConst .uint32 ResidentContainerLayout.arrayMarker ++
-  [.ifElse arrayReleaseBody [.ret]]
+  [.ifElse (arrayReleaseBody recycle) (finishReleaseBody recycle)]
 
 def descriptorOwnedFields (descriptor : Array AbiKind) :
     List Instruction :=
   descriptor.toList.zipIdx.flatMap fun (kind, index) =>
     if kind.isObjectField then releaseChild index else []
 
-def descriptorReleaseBody :
+def descriptorReleaseBody (recycle : Bool := false) :
     List (Array AbiKind) → Nat → Except LinkError (List Instruction)
   | [], _ => pure [.unreachable]
   | descriptor :: descriptors, index => do
     let descriptorIndex ← checkedWord index
     let captureCount ← checkedWord descriptor.size
-    let rest ← descriptorReleaseBody descriptors (index + 1)
+    let rest ← descriptorReleaseBody recycle descriptors (index + 1)
     return (
       [.localGet descriptorLocal] ++
       equalsConst .uint32 descriptorIndex ++
@@ -195,24 +201,26 @@ def descriptorReleaseBody :
         ([.localGet captureCountLocal] ++
           equalsConst .uint32 captureCount ++
           [.ifElse
-            (descriptorOwnedFields descriptor ++ [.ret])
+            (descriptorOwnedFields descriptor ++ finishReleaseBody recycle)
             [.unreachable]])
         rest])
 
-def ownedReleaseBody (descriptors : Array (Array AbiKind)) :
+def ownedReleaseBody (descriptors : Array (Array AbiKind))
+    (recycle : Bool := false) :
     Except LinkError (List Instruction) := do
-  let closureBody ← descriptorReleaseBody descriptors.toList 0
+  let closureBody ← descriptorReleaseBody recycle descriptors.toList 0
   return (
     [.localGet kindLocal] ++
     equalsConst .uint32 ObjectKind.constructor.code ++
     [.ifElse
-      constructorReleaseBody
+      (constructorReleaseBody recycle)
       ([.localGet kindLocal] ++
         equalsConst .uint32 ObjectKind.closure.code ++
         [.ifElse closureBody
           ([.localGet kindLocal] ++
             equalsConst .uint32 ObjectKind.opaque.code ++
-            [.ifElse opaqueReleaseBody [.ret]])])])
+            [.ifElse (opaqueReleaseBody recycle)
+              (finishReleaseBody recycle)])])])
 
 def decrementAboveOneBody : List Instruction :=
   [.localGet addressLocal,
@@ -234,9 +242,9 @@ def probeCompleteHeader : List Instruction :=
     .localSet descriptorLocal]
 
 def lastReferenceReleaseBody
-    (descriptors : Array (Array AbiKind)) :
+    (descriptors : Array (Array AbiKind)) (recycle : Bool := false) :
     Except LinkError (List Instruction) := do
-  let owned ← ownedReleaseBody descriptors
+  let owned ← ownedReleaseBody descriptors recycle
   return (
     [.localGet addressLocal,
       .i32Load .uint32 (u32 headerKindOffset),
@@ -254,9 +262,9 @@ def lastReferenceReleaseBody
       .call (.declaration releaseHeaderName)] ++ owned)
 
 def ordinaryReleaseBody
-    (descriptors : Array (Array AbiKind)) :
+    (descriptors : Array (Array AbiKind)) (recycle : Bool := false) :
     Except LinkError (List Instruction) := do
-  let lastReference ← lastReferenceReleaseBody descriptors
+  let lastReference ← lastReferenceReleaseBody descriptors recycle
   return (
     [.localGet addressLocal,
       .i32Load .uint32 (u32 headerRefCountOffset),
@@ -289,9 +297,9 @@ def persistentReleaseBody : List Instruction :=
     [.ret]]
 
 def liveReleaseBody
-    (descriptors : Array (Array AbiKind)) :
+    (descriptors : Array (Array AbiKind)) (recycle : Bool := false) :
     Except LinkError (List Instruction) := do
-  let ordinary ← ordinaryReleaseBody descriptors
+  let ordinary ← ordinaryReleaseBody descriptors recycle
   return (
     probeCompleteHeader ++
     [.localGet flagsLocal,
@@ -301,9 +309,9 @@ def liveReleaseBody
     [.ifElse persistentReleaseBody ordinary])
 
 def alignedReleaseBody
-    (descriptors : Array (Array AbiKind)) :
+    (descriptors : Array (Array AbiKind)) (recycle : Bool := false) :
     Except LinkError (List Instruction) := do
-  let live ← liveReleaseBody descriptors
+  let live ← liveReleaseBody descriptors recycle
   return (
     [.localGet objectParam,
       .i32Const .uint32 0,
@@ -325,9 +333,9 @@ the same staged builders as the executable emitter and remains parameterized by
 the supplied closure-descriptor table.
 -/
 def decrementOnceBody
-    (descriptors : Array (Array AbiKind)) :
+    (descriptors : Array (Array AbiKind)) (recycle : Bool := false) :
     Except LinkError (List Instruction) := do
-  let aligned ← alignedReleaseBody descriptors
+  let aligned ← alignedReleaseBody descriptors recycle
   return [.localGet objectParam,
       .i32Const .uint32 1,
       .i32And,
@@ -349,11 +357,11 @@ Build the production nonrecursive decrement helper installed by
 can unfold the exact generated function rather than duplicate its body.
 -/
 def decrementOnceFunction
-    (descriptors : Array (Array AbiKind)) :
+    (descriptors : Array (Array AbiKind)) (recycle : Bool := false) :
     Except LinkError Function := do
   if UInt32.size ≤ descriptors.size then
     throw (.descriptorOverflow descriptors.size)
-  let body ← decrementOnceBody descriptors
+  let body ← decrementOnceBody descriptors recycle
   return {
     name := decrementOnceName
     params := #[(objectParam, .tobject), (checkParam, .uint32)]
@@ -507,12 +515,11 @@ private def decrementWrapper (ordinal amount : Nat) (check : Bool) :
     locals := #[]
     body := body ++ [.ret] }
 
-private def deleteReleasedBody : List Instruction :=
+private def deleteReleasedBody (recycle : Bool := false) : List Instruction :=
   [.localGet addressLocal,
-    .call (.declaration releaseHeaderName),
-    .ret]
+    .call (.declaration releaseHeaderName)] ++ finishReleaseBody recycle
 
-private def deleteLiveBody : List Instruction :=
+private def deleteLiveBody (recycle : Bool := false) : List Instruction :=
   [.localGet addressLocal,
     .i32Load .uint32 (u32 headerKindOffset)] ++
   equalsConst .uint32 ObjectKind.natural.code ++
@@ -526,11 +533,11 @@ private def deleteLiveBody : List Instruction :=
         ([.localGet addressLocal,
           .i32Load .uint32 (u32 headerAux0Offset)] ++
           equalsConst .uint32 promotedTagMarker ++
-          [.ifElse [.unreachable] deleteReleasedBody])
-        deleteReleasedBody])
-    deleteReleasedBody]
+          [.ifElse [.unreachable] (deleteReleasedBody recycle)])
+        (deleteReleasedBody recycle)])
+    (deleteReleasedBody recycle)]
 
-private def deleteAlignedBody : List Instruction :=
+private def deleteAlignedBody (recycle : Bool := false) : List Instruction :=
   [.localGet objectParam,
     .i32Const .uint32 0,
     .i32Add,
@@ -538,11 +545,11 @@ private def deleteAlignedBody : List Instruction :=
     .localGet addressLocal,
     .i32Load .uint32 (u32 headerFlagsOffset),
     .i32Const .uint32 liveFlag,
-    .i32And] ++
+  .i32And] ++
   equalsConst .uint32 liveFlag ++
-  [.ifElse deleteLiveBody [.unreachable]]
+  [.ifElse (deleteLiveBody recycle) [.unreachable]]
 
-private def deleteWrapper (ordinal : Nat) : Function := {
+private def deleteWrapper (ordinal : Nat) (recycle : Bool := false) : Function := {
   name := releaseName ordinal
   params := #[(objectParam, .object)]
   results := #[]
@@ -561,13 +568,14 @@ private def deleteWrapper (ordinal : Nat) : Function := {
             .i32Const .uint32 (u32 (target.heapAlignment - 1)),
             .i32And] ++
             equalsConst .uint32 0 ++
-            [.ifElse deleteAlignedBody [.unreachable]])])] }
+            [.ifElse (deleteAlignedBody recycle) [.unreachable]])])] }
 
-private def operationFunction (ordinal : Nat) (operation : RuntimeOp) :
+private def operationFunction (ordinal : Nat) (operation : RuntimeOp)
+    (recycle : Bool := false) :
     Except LinkError Function :=
   match operation with
   | .dec amount check _ => decrementWrapper ordinal amount check
-  | .delete => pure (deleteWrapper ordinal)
+  | .delete => pure (deleteWrapper ordinal recycle)
   | _ => throw .unsupportedOperation
 
 private partial def rewriteInstruction
@@ -628,14 +636,12 @@ def internalizeReleases (module : Module) (validate : Bool := true) :
     releaseHeaderName :: decrementOnceName :: rewrites.map (·.2)
   if let some name := reservedNames.find? (reserved module) then
     throw (.reservedDeclaration name)
-  let decrementOnce ← decrementOnceFunction module.closureDescriptors
+  let recycle := specialized.functions.any
+    (·.name == ResidentAllocator.recycleName)
+  let decrementOnce ← decrementOnceFunction module.closureDescriptors recycle
   let wrappers ← operations.toList.zipIdx.mapM fun (operation, ordinal) =>
-    operationFunction ordinal operation
-  let releaseHeader :=
-    if specialized.functions.any (·.name == ResidentAllocator.recycleName) then
-      recyclingReleaseHeaderFunction
-    else
-      releaseHeaderFunction
+    operationFunction ordinal operation recycle
+  let releaseHeader := releaseHeaderFunction
   let functions :=
     (specializedFunctions.map (rewriteFunction rewrites)) ++
       #[releaseHeader, decrementOnce] ++ wrappers.toArray
@@ -781,7 +787,9 @@ def manifest : Json :=
   .localSet descriptorLocal]
 
 #guard recyclingReleaseHeaderFunction.body == releaseHeaderBody true
-#guard recyclingReleaseHeaderFunction.body.contains
+#guard !recyclingReleaseHeaderFunction.body.contains
+  (Instruction.call (.declaration ResidentAllocator.recycleName))
+#guard (finishReleaseBody true).contains
   (Instruction.call (.declaration ResidentAllocator.recycleName))
 
 #guard match liveReleaseBody exampleDescriptors with
