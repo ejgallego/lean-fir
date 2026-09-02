@@ -47,20 +47,26 @@ private def next : FVarId := ⟨`next⟩
 private def freeListCursor : FVarId := ⟨`freeListCursor⟩
 private def freeListClearLoop : FVarId := ⟨`freeListClearLoop⟩
 private def freeListSearchLoop : FVarId := ⟨`freeListSearchLoop⟩
+private def headerOnlyCursor : FVarId := ⟨`headerOnlyCursor⟩
+private def headerOnlyTakeLoop : FVarId := ⟨`headerOnlyTakeLoop⟩
+private def headerOnlyOfferLoop : FVarId := ⟨`headerOnlyOfferLoop⟩
 
 private def u32 (value : Nat) : UInt32 := UInt32.ofNat value
 
 /--
-The lower reserved memory prefix stores a private segregated-head table. The
-last reserved word is a single slot for header-only blocks, which have no
-ignored payload lane in which to store a link. The heap begins at `heapBase`,
-so no live Lean object can overlap this metadata. Aligned extents hash by their
-eight-byte size class; collisions retain an exact-extent check in the linked
-list. A larger dead block's private link occupies its first ignored payload
-word, keeping every semantic dead-header field zero.
+The lower reserved memory prefix stores a private segregated-head table and a
+bounded address pool for header-only blocks, which have no ignored payload lane
+in which to store a link. The heap begins at `heapBase`, so no live Lean object
+can overlap this metadata. Aligned extents hash by their eight-byte size class;
+collisions retain an exact-extent check in the linked list. A larger dead
+block's private link occupies its first ignored payload word, keeping every
+semantic dead-header field zero.
 -/
-def headerOnlySlotAddress : Nat := heapBase - 4
-def freeListBucketCount : Nat := headerOnlySlotAddress / 4
+def freeListBucketCount : Nat := heapBase / 8
+def freeListBucketMask : Nat := freeListBucketCount - 1
+def headerOnlyPoolAddress : Nat := freeListBucketCount * 4
+def headerOnlyPoolSlotCount : Nat :=
+  (heapBase - headerOnlyPoolAddress) / 4
 def freeListLinkOffset : Nat := headerBytes
 def minimumReusableAllocationBytes : Nat := headerBytes + 4
 
@@ -88,8 +94,8 @@ def bucketAddressBody (bytes result : FVarId) : List Instruction := [
   .i32ShrU,
   .i32Const .uint32 1,
   .i32Sub,
-  .i32Const .uint32 (u32 freeListBucketCount),
-  .i32RemU,
+  .i32Const .uint32 (u32 freeListBucketMask),
+  .i32And,
   .i32Const .uint32 4,
   .i32Mul,
   .localSet result]
@@ -290,22 +296,35 @@ def reuseSearchBody : List Instruction :=
   [.localGet requestedBytes,
     .i32Const .uint32 (u32 headerBytes),
     .i32Eq,
-    .ifElse [
-      .i32Const .uint32 (u32 headerOnlySlotAddress),
-      .i32Load .uint32 0,
-      .localSet candidate,
-      .localGet candidate,
-      .ifElse
-        (validateCandidateBody ++ trapWhenTrue [
-          .localGet allocationBytesLocal,
-          .i32Const .uint32 (u32 headerBytes),
-          .i32Ne] ++ [
-          .i32Const .uint32 (u32 headerOnlySlotAddress),
-          .i32Const .uint32 0,
-          .i32Store .uint32 0,
+    .ifElse ([
+      .i32Const .uint32 (u32 headerOnlyPoolAddress),
+      .localSet headerOnlyCursor,
+      .loop headerOnlyTakeLoop [
+        .localGet headerOnlyCursor,
+        .i32Const .uint32 (u32 heapBase),
+        .i32LtU,
+        .ifElse [
+          .localGet headerOnlyCursor,
+          .i32Load .uint32 0,
+          .localSet candidate,
           .localGet candidate,
-          .ret])
-        []]
+          .ifElse
+            (validateCandidateBody ++ trapWhenTrue [
+              .localGet allocationBytesLocal,
+              .i32Const .uint32 (u32 headerBytes),
+              .i32Ne] ++ [
+              .localGet headerOnlyCursor,
+              .i32Const .uint32 0,
+              .i32Store .uint32 0,
+              .localGet candidate,
+              .ret])
+            [
+              .localGet headerOnlyCursor,
+              .i32Const .uint32 4,
+              .i32Add,
+              .localSet headerOnlyCursor,
+              .br headerOnlyTakeLoop]]
+          []]])
       []] ++
   bucketAddressBody requestedBytes bucketAddress ++ [
     .localGet bucketAddress,
@@ -356,7 +375,8 @@ def allocateFunction (frontierIndex : Nat) : Function := {
     (bucketAddress, .uint32),
     (candidate, .uint32),
     (previous, .uint32),
-    (next, .uint32)]
+    (next, .uint32),
+    (headerOnlyCursor, .uint32)]
   body :=
     trapWhenTrue [
       .localGet requestedBytes,
@@ -411,7 +431,7 @@ def recycleFunction (frontierIndex : Nat) : Function := {
   results := #[]
   locals := #[(current, .uint32), (allocationEnd, .uint32),
     (allocationBytesLocal, .uint32), (bucketAddress, .uint32),
-    (candidate, .uint32), (next, .uint32)]
+    (candidate, .uint32), (next, .uint32), (headerOnlyCursor, .uint32)]
   body :=
     [.globalGet frontierIndex .uint32,
       .localSet current,
@@ -421,16 +441,29 @@ def recycleFunction (frontierIndex : Nat) : Function := {
       .localGet allocationBytesLocal,
       .i32Const .uint32 (u32 headerBytes),
       .i32Eq,
-      .ifElse [
-        .i32Const .uint32 (u32 headerOnlySlotAddress),
-        .i32Load .uint32 0,
-        .i32Eqz,
-        .ifElse [
-          .i32Const .uint32 (u32 headerOnlySlotAddress),
-          .localGet address,
-          .i32Store .uint32 0]
-          [],
-        .ret]
+      .ifElse ([
+        .i32Const .uint32 (u32 headerOnlyPoolAddress),
+        .localSet headerOnlyCursor,
+        .loop headerOnlyOfferLoop [
+          .localGet headerOnlyCursor,
+          .i32Const .uint32 (u32 heapBase),
+          .i32LtU,
+          .ifElse [
+            .localGet headerOnlyCursor,
+            .i32Load .uint32 0,
+            .i32Eqz,
+            .ifElse [
+              .localGet headerOnlyCursor,
+              .localGet address,
+              .i32Store .uint32 0,
+              .ret]
+              [
+                .localGet headerOnlyCursor,
+                .i32Const .uint32 4,
+                .i32Add,
+                .localSet headerOnlyCursor,
+                .br headerOnlyOfferLoop]]
+            [.ret]]])
         []] ++
     bucketAddressBody allocationBytesLocal bucketAddress ++ [
       .localGet bucketAddress,
@@ -560,7 +593,8 @@ def manifest : Json :=
     ("alignment", target.heapAlignment),
     ("minimumAllocationBytes", headerBytes),
     ("freeListBuckets", freeListBucketCount),
-    ("headerOnlySlotAddress", headerOnlySlotAddress),
+    ("headerOnlyPoolAddress", headerOnlyPoolAddress),
+    ("headerOnlyPoolSlots", headerOnlyPoolSlotCount),
     ("freeListLinkOffset", freeListLinkOffset),
     ("minimumReusableAllocationBytes", minimumReusableAllocationBytes),
     ("privateEntries", Json.arr #[recycleName.toString]),
@@ -571,8 +605,10 @@ def manifest : Json :=
 #guard allocatorModule.globals ==
   #[{ kind := .uint32, init := .i32 (u32 heapBase) }]
 #guard allocatorModule.memory == some ResidentRuntime.residentMemory
-#guard headerOnlySlotAddress == 1020
-#guard freeListBucketCount == 255
+#guard freeListBucketCount == 128
+#guard freeListBucketMask == 127
+#guard headerOnlyPoolAddress == 512
+#guard headerOnlyPoolSlotCount == 128
 #guard freeListLinkOffset == headerBytes
 #guard minimumReusableAllocationBytes == 36
 #guard Fir.Wasm.validateModule allocatorModule |>.isOk

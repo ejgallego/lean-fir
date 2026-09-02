@@ -133,6 +133,16 @@ export async function checkResidentAllocator(bytes) {
     "resident allocator did not reuse its cached header-only block");
   equal(reuseFrontier() >>> 0, headerOnlyEnd,
     "header-only reuse advanced the bump frontier");
+  const headerOnlyPair = [reuseAllocate(32) >>> 0,
+    reuseAllocate(32) >>> 0];
+  for (const block of headerOnlyPair) {
+    writeFreedHeader(reuse.memory, block, 32);
+    reuseRecycle(block);
+  }
+  equal(reuseAllocate(32) >>> 0, headerOnlyPair[0],
+    "resident allocator lost the first pooled header-only block");
+  equal(reuseAllocate(32) >>> 0, headerOnlyPair[1],
+    "resident allocator retained only one header-only block");
 
   const collision = reuseAllocate(2080) >>> 0;
   writeFreedHeader(reuse.memory, collision, 2080);
