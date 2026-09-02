@@ -29,7 +29,6 @@ import {
   VBP_VERSO_VIEWER_INPUT_LAYOUT_VERSION,
   VBP_VERSO_VIEWER_MOUNT_ENTRY,
   VBP_VERSO_VIEWER_OWNERSHIP_VERSION,
-  VBP_VERSO_VIEWER_RELEASE_OWNED_ENTRY,
   VBP_VERSO_VIEWER_UNMOUNT_ENTRY,
 } from "./vbp-verso-viewer-browser-adapter.mjs";
 import {
@@ -244,7 +243,6 @@ assert.deepEqual(functionExports, [
   VBP_VERSO_VIEWER_MOUNT_ENTRY,
   VBP_VERSO_VIEWER_UNMOUNT_ENTRY,
   ...VBP_VERSO_VIEWER_BRIDGE_ENTRIES,
-  VBP_VERSO_VIEWER_RELEASE_OWNED_ENTRY,
   "fir_heap_frontier",
   "fir_heap_set_frontier",
   "fir_heap_rewind",
@@ -334,7 +332,6 @@ const build = {
     mount: VBP_VERSO_VIEWER_MOUNT_ENTRY,
     unmount: VBP_VERSO_VIEWER_UNMOUNT_ENTRY,
     bridges: VBP_VERSO_VIEWER_BRIDGE_ENTRIES,
-    releaseOwned: VBP_VERSO_VIEWER_RELEASE_OWNED_ENTRY,
     publicSignatures: inventory.publicSignatures,
   },
   upstreamPackageShape: {

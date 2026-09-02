@@ -58,9 +58,11 @@ without bound.
 
 ## Classification and triage
 
-Expose the existing checked resident decrement as an adapter-private physical
-release entry. Invoke it exactly once when a callback root's final JavaScript
-lease is released. Do not make callbacks persistent, insert application-name
+Add typed Lean façades that consume each retained callback type and return
+`Unit`. Invoke the corresponding façade exactly once when a callback root's
+final JavaScript lease is released, letting Lean's ordinary ownership pass and
+FIR's generic release internalization provide the checked decrement. Do not
+make callbacks persistent, expose a raw runtime helper, insert application-name
 shims, or weaken repeated invocation's borrowed boundary.
 
 ## Workaround

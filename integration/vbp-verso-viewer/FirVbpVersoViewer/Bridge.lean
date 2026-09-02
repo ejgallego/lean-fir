@@ -32,4 +32,20 @@ def invokeEffectSetup
 def invokeEffectCleanup (callback : @& (DomM Unit)) : DomM Unit :=
   callback
 
+/-- Release the host's final owned component callback lease. -/
+def releaseComponent (_callback : Unit → ReactM (Js Node)) : Unit := ()
+
+/-- Release the host's final owned DOM event callback lease. -/
+def releaseEvent (_callback : Js Event → DomM Unit) : Unit := ()
+
+/-- Release the host's final owned string-state updater lease. -/
+def releaseStringStateUpdate
+    (_callback : Js String → RuntimeM (Js String)) : Unit := ()
+
+/-- Release the host's final owned effect-setup lease. -/
+def releaseEffectSetup (_callback : DomM (Option (DomM Unit))) : Unit := ()
+
+/-- Release the host's final owned effect-cleanup lease. -/
+def releaseEffectCleanup (_callback : DomM Unit) : Unit := ()
+
 end FirVbpVersoViewer.Bridge
