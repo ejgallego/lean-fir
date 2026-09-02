@@ -815,27 +815,31 @@ def readResidentArrayElementBorrowed (state : MemoryState) (object : Word32)
     (object.value + headerBytes + target.semanticSlotBytes * index)
 
 /-- Replace one live resident-Array slot without performing ownership
-transitions. Generated helpers surround this primitive with the retain/release
-protocol appropriate to unique or copy-on-write mutation. -/
+transitions. Object words occupy the low half of an eight-byte semantic slot;
+the full-width store also restores its canonical zero high padding. Generated
+helpers surround this primitive with the retain/release protocol appropriate
+to unique or copy-on-write mutation. -/
 def writeResidentArrayElementRaw (state : MemoryState) (object : Word32)
     (index : Nat) (element : Word32) : Except ConcreteError MemoryState := do
   let header ← readResidentArrayHeader state object
   unless index < header.aux1.toNat do
     throw (.source (.objectFieldOutOfBounds index header.aux1.toNat))
-  let memory ← liftMemory <| state.memory.writeWord32
-    (object.value + headerBytes + target.semanticSlotBytes * index) element
+  let memory ← liftMemory <| state.memory.writeUInt64
+    (object.value + headerBytes + target.semanticSlotBytes * index)
+    (UInt32.ofNat element.value).toUInt64
   return { state with memory }
 
-/-- Write one physical Array slot below capacity, including a currently-spare
-slot. This does not change logical size; callers must establish ownership
-before making a spare slot live. -/
+/-- Write one complete physical Array slot below capacity, including a
+currently-spare slot. This does not change logical size; callers must establish
+ownership before making a spare slot live. -/
 def writeResidentArrayCapacityElementRaw (state : MemoryState) (object : Word32)
     (index : Nat) (element : Word32) : Except ConcreteError MemoryState := do
   let header ← readResidentArrayHeader state object
   unless index < header.aux2.toNat do
     throw (.source (.objectFieldOutOfBounds index header.aux2.toNat))
-  let memory ← liftMemory <| state.memory.writeWord32
-    (object.value + headerBytes + target.semanticSlotBytes * index) element
+  let memory ← liftMemory <| state.memory.writeUInt64
+    (object.value + headerBytes + target.semanticSlotBytes * index)
+    (UInt32.ofNat element.value).toUInt64
   return { state with memory }
 
 /-- Change only the live-prefix length of a resident Array. Growing transfers

@@ -5,9 +5,29 @@ namespace Fir.Wasm.Concrete
 
 open Fir.LeanIR.Impure
 
-/-- Every semantic live Array slot occupies a complete in-bounds 32-bit low
-word.  The retained slot is eight bytes wide, but element replacement touches
-only this ownership-bearing `tobject` lane. -/
+/-- Every semantic live Array slot occupies one complete in-bounds eight-byte
+physical lane. This is the canonical bound for replacement stores that clear
+the high padding word together with the ownership-bearing `tobject` word. -/
+theorem ResidentArrayObjectRel.liveElementSlotInBounds
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {elements : Array Value} {capacity : Nat} {header : Header}
+    (related :
+      ResidentArrayObjectRel state witness address elements capacity header)
+    (valid : state.FrontierInvariant) (index : Nat)
+    (indexValid : index < elements.size) :
+    address.value + headerBytes + target.semanticSlotBytes * index + 7 <
+      state.memory.size := by
+  have allocationInMemory :
+      address.value + residentArrayAllocationBytes capacity ≤ state.memory.size :=
+    Nat.le_trans related.extent valid.cursorInBounds
+  have aligned := align8_ge
+    (headerBytes + target.semanticSlotBytes * capacity)
+  have sizeCapacity := related.sizeCapacity
+  simp [residentArrayAllocationBytes, target] at allocationInMemory aligned ⊢
+  omega
+
+/-- The low ownership word inherits its four-byte bound from the complete
+resident Array slot. -/
 theorem ResidentArrayObjectRel.liveElementWordInBounds
     {state : MemoryState} {witness : RefinementWitness} {address : Word32}
     {elements : Array Value} {capacity : Nat} {header : Header}
@@ -17,13 +37,7 @@ theorem ResidentArrayObjectRel.liveElementWordInBounds
     (indexValid : index < elements.size) :
     address.value + headerBytes + target.semanticSlotBytes * index + 3 <
       state.memory.size := by
-  have allocationInMemory :
-      address.value + residentArrayAllocationBytes capacity ≤ state.memory.size :=
-    Nat.le_trans related.extent valid.cursorInBounds
-  have aligned := align8_ge
-    (headerBytes + target.semanticSlotBytes * capacity)
-  have sizeCapacity := related.sizeCapacity
-  simp [residentArrayAllocationBytes, target] at allocationInMemory aligned ⊢
+  have := related.liveElementSlotInBounds valid index indexValid
   omega
 
 /-- Recover the canonical resident Array object relation from the whole-heap
@@ -78,9 +92,9 @@ theorem LiveHeapRel.residentArrayObjectRel_of_mapped
       rw [objectEq] at storedObjectEq
       contradiction
 
-/-- One ownership-neutral low-word replacement updates exactly one live Array
-element, preserves the complete retained allocation boundary, and leaves the
-frontier invariant intact. -/
+/-- One ownership-neutral full-slot replacement updates exactly one live Array
+element, restores canonical zero high padding, preserves the complete retained
+allocation boundary, and leaves the frontier invariant intact. -/
 theorem ResidentArrayObjectRel.writeElementRaw_targetFrame
     {state : MemoryState} {witness : RefinementWitness} {address : Word32}
     {elements : Array Value} {capacity : Nat} {header : Header}
@@ -97,19 +111,23 @@ theorem ResidentArrayObjectRel.writeElementRaw_targetFrame
       ResidentArrayObjectRel result witness address
         (elements.set index value indexValid) capacity header := by
   let offset := address.value + headerBytes + target.semanticSlotBytes * index
-  have writeInBounds : offset + 3 < state.memory.size := by
-    have allocationInMemory :
-        address.value + residentArrayAllocationBytes capacity ≤ state.memory.size :=
-      Nat.le_trans related.extent valid.cursorInBounds
-    have sizeCapacity := related.sizeCapacity
-    have aligned := align8_ge
-      (headerBytes + target.semanticSlotBytes * capacity)
-    simp [offset, residentArrayAllocationBytes, target] at allocationInMemory aligned ⊢
-    omega
-  obtain ⟨memory, written, memorySize, _, _, _, _, _⟩ :=
-    LinearMemory.writeUInt32_spec state.memory offset (UInt32.ofNat word.value)
-      writeInBounds
-  have wordWritten : state.memory.writeWord32 offset word = .ok memory := written
+  have writeInBounds : offset + 7 < state.memory.size := by
+    simpa [offset] using related.liveElementSlotInBounds valid index indexValid
+  obtain ⟨middle, lowWrite, middleSize, _, _, _, _, _⟩ :=
+    LinearMemory.writeUInt32_spec state.memory offset
+      (UInt32.ofNat word.value).toUInt64.toUInt32 (by omega)
+  obtain ⟨memory, highWrite, _memorySize, _, _, _, _, _⟩ :=
+    LinearMemory.writeUInt32_spec middle (offset + 4)
+      ((UInt32.ofNat word.value).toUInt64 >>> (32 : UInt64)).toUInt32
+      (by omega)
+  have slotWritten : state.memory.writeUInt64 offset
+      (UInt32.ofNat word.value).toUInt64 = .ok memory := by
+    unfold LinearMemory.writeUInt64
+    rw [lowWrite]
+    change middle.writeUInt32 (offset + 4)
+      ((UInt32.ofNat word.value).toUInt64 >>> (32 : UInt64)).toUInt32 =
+        .ok memory
+    exact highWrite
   let result : MemoryState := { state with memory }
   have operation :
       writeResidentArrayElementRaw state address index word = .ok result := by
@@ -118,14 +136,15 @@ theorem ResidentArrayObjectRel.writeElementRaw_targetFrame
     simp only [Bind.bind, Except.bind]
     rw [if_pos (by simpa [related.logicalSize] using indexValid)]
     change (do
-      let nextMemory ← liftMemory (state.memory.writeWord32 offset word)
+      let nextMemory ← liftMemory
+        (state.memory.writeUInt64 offset (UInt32.ofNat word.value).toUInt64)
       return ({ state with memory := nextMemory } : MemoryState)) = .ok result
-    rw [wordWritten]
+    rw [slotWritten]
     rfl
   have afterHeader : address.value + headerBytes ≤ offset := by
     simp [offset]
   have insideTarget :
-      offset + 4 ≤ address.value + header.allocationBytes.toNat := by
+      offset + 8 ≤ address.value + header.allocationBytes.toNat := by
     rw [related.allocationBytes]
     have sizeCapacity := related.sizeCapacity
     have aligned := align8_ge
@@ -134,15 +153,15 @@ theorem ResidentArrayObjectRel.writeElementRaw_targetFrame
     omega
   have targetFrame :
       state.TargetMutationFrame result address header.allocationBytes.toNat :=
-    MemoryState.TargetMutationFrame.ofWriteUInt32 rfl writeInBounds written
+    MemoryState.TargetMutationFrame.ofWriteUInt64 rfl writeInBounds slotWritten
       afterHeader insideTarget
   have finalValid : result.FrontierInvariant :=
-    valid.writeUInt32 (Nat.le_trans insideTarget (by
+    valid.writeUInt64 (Nat.le_trans insideTarget (by
       rw [related.allocationBytes]
-      exact related.extent)) written
+      exact related.extent)) slotWritten
   have targetRead : memory.readWord32 offset = .ok word :=
-    LinearMemory.readWord32_of_writeWord32_eq_ok state.memory memory offset word
-      writeInBounds wordWritten
+    LinearMemory.readWord32_of_writeUInt64_word32_eq_ok state.memory memory
+      offset word writeInBounds slotWritten
   have readOther : ∀ other, other ≠ index →
       memory.readWord32
           (address.value + headerBytes + target.semanticSlotBytes * other) =
@@ -150,11 +169,16 @@ theorem ResidentArrayObjectRel.writeElementRaw_targetFrame
           (address.value + headerBytes + target.semanticSlotBytes * other) := by
     intro other different
     unfold LinearMemory.readWord32
-    rw [LinearMemory.readUInt32_of_writeUInt32_eq_ok_other state.memory memory
+    rw [LinearMemory.readUInt32_of_writeUInt64_eq_ok_other state.memory memory
       offset (address.value + headerBytes + target.semanticSlotBytes * other)
-      (UInt32.ofNat word.value) writeInBounds written (by
-        simp [offset, target]
-        omega)]
+      (UInt32.ofNat word.value).toUInt64 writeInBounds slotWritten (by
+        by_cases before : other < index
+        · right
+          simp [offset, target]
+          omega
+        · left
+          simp [offset, target]
+          omega)]
   refine ⟨result, operation, targetFrame, finalValid, ?_⟩
   refine {
     headerRead := by rw [targetFrame.targetLiveHeader]; exact related.headerRead
@@ -183,10 +207,10 @@ theorem ResidentArrayObjectRel.writeElementRaw_targetFrame
       related.liveElements other semanticValue oldValueAt
     exact ⟨oldWord, by rw [readOther other same]; exact oldRead, oldRelated⟩
 
-/-- A successful raw live-element replacement is exactly one mathematical
-32-bit memory write at the resident Array slot.  This decomposition is the
-bridge used by resident Wasm store proofs before ownership of the displaced
-value is released. -/
+/-- A successful raw live-element replacement is exactly one zero-extended
+64-bit write at the resident Array slot. This decomposition is the bridge used
+by resident Wasm store proofs before ownership of the displaced value is
+released. -/
 theorem ResidentArrayObjectRel.writeElementRaw_decompose
     {state result : MemoryState} {witness : RefinementWitness}
     {address : Word32} {elements : Array Value} {capacity : Nat}
@@ -196,9 +220,9 @@ theorem ResidentArrayObjectRel.writeElementRaw_decompose
     (operation :
       writeResidentArrayElementRaw state address index word = .ok result) :
     ∃ memory,
-      state.memory.writeWord32
-          (address.value + headerBytes + target.semanticSlotBytes * index) word =
-        .ok memory ∧
+      state.memory.writeUInt64
+          (address.value + headerBytes + target.semanticSlotBytes * index)
+          (UInt32.ofNat word.value).toUInt64 = .ok memory ∧
       result = { state with memory := memory } := by
   let offset := address.value + headerBytes + target.semanticSlotBytes * index
   unfold writeResidentArrayElementRaw at operation
@@ -206,9 +230,11 @@ theorem ResidentArrayObjectRel.writeElementRaw_decompose
   simp only [Bind.bind, Except.bind] at operation
   rw [if_pos (by simpa [related.logicalSize] using indexValid)] at operation
   change (do
-    let memory ← liftMemory (state.memory.writeWord32 offset word)
+    let memory ← liftMemory
+      (state.memory.writeUInt64 offset (UInt32.ofNat word.value).toUInt64)
     return ({ state with memory := memory } : MemoryState)) = .ok result at operation
-  cases written : state.memory.writeWord32 offset word with
+  cases written : state.memory.writeUInt64 offset
+      (UInt32.ofNat word.value).toUInt64 with
   | error failure =>
       rw [written] at operation
       change (Except.error (ConcreteError.ofMemory failure) :
@@ -238,22 +264,21 @@ theorem ResidentArrayObjectRel.writeElementRaw_exactWords
   obtain ⟨memory, written, resultEq⟩ :=
     related.writeElementRaw_decompose index word indexValid operation
   subst result
-  have writeInBounds := related.liveElementWordInBounds valid index indexValid
-  unfold LinearMemory.writeWord32 at written
+  have writeInBounds := related.liveElementSlotInBounds valid index indexValid
   refine ⟨?_⟩
   intro headerIndex headerWord wordAt
   have headerIndexLt := (List.getElem?_eq_some_iff.mp wordAt).1
   have disjoint :
-      address.value + headerBytes + target.semanticSlotBytes * index + 3 <
+      address.value + headerBytes + target.semanticSlotBytes * index + 7 <
           address.value + 4 * headerIndex ∨
         address.value + 4 * headerIndex + 3 <
           address.value + headerBytes + target.semanticSlotBytes * index := by
     right
     simp [Header.words, headerBytes, target] at headerIndexLt ⊢
     omega
-  rw [LinearMemory.readUInt32_of_writeUInt32_eq_ok_other state.memory memory
+  rw [LinearMemory.readUInt32_of_writeUInt64_eq_ok_other state.memory memory
     (address.value + headerBytes + target.semanticSlotBytes * index)
-    (address.value + 4 * headerIndex) (UInt32.ofNat word.value)
+    (address.value + 4 * headerIndex) (UInt32.ofNat word.value).toUInt64
     writeInBounds written disjoint]
   exact exact.wordAt headerIndex headerWord wordAt
 
@@ -276,7 +301,7 @@ theorem ResidentArrayObjectRel.writeCapacityElementRaw_targetFrame
           (address.value + headerBytes + target.semanticSlotBytes * index) =
         .ok word := by
   let offset := address.value + headerBytes + target.semanticSlotBytes * index
-  have writeInBounds : offset + 3 < state.memory.size := by
+  have writeInBounds : offset + 7 < state.memory.size := by
     have allocationInMemory :
         address.value + residentArrayAllocationBytes capacity ≤ state.memory.size :=
       Nat.le_trans related.extent valid.cursorInBounds
@@ -284,10 +309,21 @@ theorem ResidentArrayObjectRel.writeCapacityElementRaw_targetFrame
       (headerBytes + target.semanticSlotBytes * capacity)
     simp [offset, residentArrayAllocationBytes, target] at allocationInMemory aligned ⊢
     omega
-  obtain ⟨memory, written, _, _, _, _, _, _⟩ :=
-    LinearMemory.writeUInt32_spec state.memory offset (UInt32.ofNat word.value)
-      writeInBounds
-  have wordWritten : state.memory.writeWord32 offset word = .ok memory := written
+  obtain ⟨middle, lowWrite, middleSize, _, _, _, _, _⟩ :=
+    LinearMemory.writeUInt32_spec state.memory offset
+      (UInt32.ofNat word.value).toUInt64.toUInt32 (by omega)
+  obtain ⟨memory, highWrite, _, _, _, _, _, _⟩ :=
+    LinearMemory.writeUInt32_spec middle (offset + 4)
+      ((UInt32.ofNat word.value).toUInt64 >>> (32 : UInt64)).toUInt32
+      (by omega)
+  have slotWritten : state.memory.writeUInt64 offset
+      (UInt32.ofNat word.value).toUInt64 = .ok memory := by
+    unfold LinearMemory.writeUInt64
+    rw [lowWrite]
+    change middle.writeUInt32 (offset + 4)
+      ((UInt32.ofNat word.value).toUInt64 >>> (32 : UInt64)).toUInt32 =
+        .ok memory
+    exact highWrite
   let result : MemoryState := { state with memory }
   have operation :
       writeResidentArrayCapacityElementRaw state address index word = .ok result := by
@@ -296,13 +332,14 @@ theorem ResidentArrayObjectRel.writeCapacityElementRaw_targetFrame
     simp only [Bind.bind, Except.bind]
     rw [if_pos (by simpa [related.physicalCapacity] using beforeCapacity)]
     change (do
-      let nextMemory ← liftMemory (state.memory.writeWord32 offset word)
+      let nextMemory ← liftMemory
+        (state.memory.writeUInt64 offset (UInt32.ofNat word.value).toUInt64)
       return ({ state with memory := nextMemory } : MemoryState)) = .ok result
-    rw [wordWritten]
+    rw [slotWritten]
     rfl
   have afterHeader : address.value + headerBytes ≤ offset := by simp [offset]
   have insideTarget :
-      offset + 4 ≤ address.value + header.allocationBytes.toNat := by
+      offset + 8 ≤ address.value + header.allocationBytes.toNat := by
     rw [related.allocationBytes]
     have aligned := align8_ge
       (headerBytes + target.semanticSlotBytes * capacity)
@@ -310,15 +347,15 @@ theorem ResidentArrayObjectRel.writeCapacityElementRaw_targetFrame
     omega
   have targetFrame :
       state.TargetMutationFrame result address header.allocationBytes.toNat :=
-    MemoryState.TargetMutationFrame.ofWriteUInt32 rfl writeInBounds written
+    MemoryState.TargetMutationFrame.ofWriteUInt64 rfl writeInBounds slotWritten
       afterHeader insideTarget
   have finalValid : result.FrontierInvariant :=
-    valid.writeUInt32 (Nat.le_trans insideTarget (by
+    valid.writeUInt64 (Nat.le_trans insideTarget (by
       rw [related.allocationBytes]
-      exact related.extent)) written
+      exact related.extent)) slotWritten
   have targetRead : memory.readWord32 offset = .ok word :=
-    LinearMemory.readWord32_of_writeWord32_eq_ok state.memory memory offset word
-      writeInBounds wordWritten
+    LinearMemory.readWord32_of_writeUInt64_word32_eq_ok state.memory memory
+      offset word writeInBounds slotWritten
   have liveRelated :
       ResidentArrayObjectRel result witness address elements capacity header := by
     refine {
@@ -344,11 +381,16 @@ theorem ResidentArrayObjectRel.writeCapacityElementRaw_targetFrame
         state.memory.readWord32
           (address.value + headerBytes + target.semanticSlotBytes * other) := by
       unfold LinearMemory.readWord32
-      rw [LinearMemory.readUInt32_of_writeUInt32_eq_ok_other state.memory memory
+      rw [LinearMemory.readUInt32_of_writeUInt64_eq_ok_other state.memory memory
         offset (address.value + headerBytes + target.semanticSlotBytes * other)
-        (UInt32.ofNat word.value) writeInBounds written (by
-          simp [offset, target]
-          omega)]
+        (UInt32.ofNat word.value).toUInt64 writeInBounds slotWritten (by
+          by_cases before : other < index
+          · right
+            simp [offset, target]
+            omega
+          · left
+            simp [offset, target]
+            omega)]
     exact ⟨oldWord, by rw [readFrame]; exact oldRead, oldRelated⟩
   exact ⟨result, operation, targetFrame, finalValid, liveRelated,
     by simpa [offset] using targetRead⟩

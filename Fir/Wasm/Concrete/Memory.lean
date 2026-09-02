@@ -518,6 +518,30 @@ theorem readWord32_of_writeWord32_eq_ok (memory result : LinearMemory)
   rw [Word32.ofNat_uint32_value]
   rfl
 
+/-- A zero-extended physical object-lane write reads back the exact logical
+word from its low half. This is the shared boundary for resident helpers that
+clear all eight bytes of a `tobject` slot in one `i64.store`. -/
+theorem readWord32_of_writeUInt64_word32_eq_ok
+    (memory result : LinearMemory) (address : Nat) (value : Word32)
+    (inBounds : address + 7 < memory.size)
+    (written : writeUInt64 memory address
+      (UInt32.ofNat value.value).toUInt64 =
+      .ok result) :
+    readWord32 result address = .ok value := by
+  have lowRead :=
+    (readUInt32_pair_of_writeUInt64_eq_ok memory result address
+      (UInt32.ofNat value.value).toUInt64 inBounds written).1
+  unfold readWord32
+  rw [show (UInt32.ofNat value.value).toUInt64.toUInt32 =
+      UInt32.ofNat value.value by simp] at lowRead
+  rw [lowRead]
+  change ((do
+    let some word := Word32.ofNat? (UInt32.ofNat value.value).toNat |
+      throw (.addressSpaceExhausted (UInt32.ofNat value.value).toNat)
+    return word) : Except MemoryError Word32) = Except.ok value
+  rw [Word32.ofNat_uint32_value]
+  rfl
+
 end LinearMemory
 
 def ObjectKind.ofCode? (code : UInt32) : Option ObjectKind :=
