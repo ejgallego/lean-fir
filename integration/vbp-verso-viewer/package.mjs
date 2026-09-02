@@ -193,6 +193,7 @@ const packageGenerationMs = performance.now() - generationStarted;
 
 const wasm = readFileSync(residentStem);
 const baseWasm = readFileSync(baseStem);
+const baseLcnf = readFileSync(`${baseStem}.lcnf`, "utf8");
 const inventoryPath = join(buildDirectory, "vbp-verso-viewer.inventory.json");
 const inventoryBytes = readFileSync(inventoryPath);
 const inventory = JSON.parse(inventoryBytes);
@@ -251,6 +252,24 @@ assert.deepEqual(functionExports, [
 assert.deepEqual(memoryExports, ["memory"]);
 assert.deepEqual(inventory.publicFunctions, functionExports);
 assert.equal(inventory.runtimeOperations, 0);
+function sourceDeclarationBody(name) {
+  const marker = `def ${name} `;
+  const start = baseLcnf.indexOf(marker);
+  assert.notEqual(start, -1, `final LCNF lost ${name}`);
+  const next = baseLcnf.indexOf("\ndef ", start + marker.length);
+  return baseLcnf.slice(start, next === -1 ? undefined : next);
+}
+for (const name of VBP_VERSO_VIEWER_BRIDGE_ENTRIES.slice(0, 5)) {
+  assert.ok(sourceDeclarationBody(name).includes("@&callback"),
+    `${name} lost its repeated-invocation borrow`);
+}
+for (const name of VBP_VERSO_VIEWER_BRIDGE_ENTRIES.slice(5)) {
+  const body = sourceDeclarationBody(name);
+  assert.ok(!body.includes("@&_callback"),
+    `${name} incorrectly borrowed its final owned callback lease`);
+  assert.ok(body.includes("dec[ref] _callback;"),
+    `${name} lost its final callback decrement`);
+}
 assertOptional(inventory.capturedDeclarations,
   expectedClosure.capturedDeclarations, "captured declaration count");
 assertOptional(inventory.reviewedExternalsBeforeLink,

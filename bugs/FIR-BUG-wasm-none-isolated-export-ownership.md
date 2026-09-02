@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-isolated-export-ownership
-status: candidate
+status: fixed
 classification: lcnf-capture
 lean-toolchain: leanprover/lean4:v4.34.0-rc2
 lean-revision: 6a10ac8c22beadecabdbb0919c2b50214762f91d
@@ -9,7 +9,7 @@ pass: inferBorrow
 discovered-by: differential-test
 first-seen: 2026-09-02
 reproduction: Fir/Wasm/Emit/SourceExamples.lean
-regression: none
+regression: Fir/Wasm/Emit/SourceExamples.lean
 ---
 
 # Summary
@@ -78,4 +78,13 @@ none; this is caused by FIR's synthetic source-unit cache reset.
 
 ## Resolution and regression
 
-unresolved
+`resetCompilerCaches` now snapshots imported source roots' exact export names
+before hiding their module mappings, then installs those names in the
+synthetic unit's local `exportAttr` state. Lean's unchanged `InferBorrow` and
+explicit-RC passes therefore own and decrement exported parameters normally.
+
+`SourceOwnershipFixture` checks both sides of the boundary: an imported
+`@[export]` entry remains owned, while an explicit `@&` logical root remains
+borrowed. The exact Lean 4.34 VBP closure additionally checks that all five
+release facades contain `dec[ref]` and all five repeat-invocation facades retain
+their source borrows.

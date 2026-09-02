@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-retained-callback-release-leak
-status: candidate
+status: fixed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.34.0-rc2
 lean-revision: 6a10ac8c22beadecabdbb0919c2b50214762f91d
@@ -9,7 +9,7 @@ pass: none
 discovered-by: differential-test
 first-seen: 2026-09-02
 reproduction: integration/vbp-verso-viewer/check.sh
-regression: none
+regression: integration/vbp-verso-viewer/package.mjs
 ---
 
 # Summary
@@ -76,4 +76,15 @@ none
 
 ## Resolution and regression
 
-unresolved
+The VBP adapter now sends a final callback lease through one of five typed Lean
+release facades. The generic isolated-entry capture repair preserves those
+facades' `@[export]` ownership, so Lean 4.34 final LCNF contains one
+`dec[ref]` in every release body while repeated invocation remains explicitly
+borrowed.
+
+The immutable package gate asserts both source shapes. In the thirty-edit FLT
+campaign, the host made 1,698 lease releases, including 193 final releases.
+The post-campaign frontier fell from 6,311,536 to 3,266,272 bytes, and all
+6,312 dead blocks / 738,792 dead bytes were present in the resident reuse
+index. The remaining 576 callback roots still had live host leases and were
+not eligible for release.
