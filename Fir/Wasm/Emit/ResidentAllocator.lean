@@ -52,13 +52,15 @@ private def u32 (value : Nat) : UInt32 := UInt32.ofNat value
 
 /--
 The lower reserved memory prefix stores a private segregated-head table. The
-heap begins at `heapBase`, so no live Lean object can overlap these words.
-Aligned extents hash by their eight-byte size class; collisions retain an
-exact-extent check in the linked list. A dead block's private link occupies its
-first ignored payload word, keeping every semantic dead-header field zero.
+last reserved word is a single slot for header-only blocks, which have no
+ignored payload lane in which to store a link. The heap begins at `heapBase`,
+so no live Lean object can overlap this metadata. Aligned extents hash by their
+eight-byte size class; collisions retain an exact-extent check in the linked
+list. A larger dead block's private link occupies its first ignored payload
+word, keeping every semantic dead-header field zero.
 -/
-def freeListBucketCount : Nat := heapBase / 4
-def freeListBucketMask : Nat := freeListBucketCount - 1
+def headerOnlySlotAddress : Nat := heapBase - 4
+def freeListBucketCount : Nat := headerOnlySlotAddress / 4
 def freeListLinkOffset : Nat := headerBytes
 def minimumReusableAllocationBytes : Nat := headerBytes + 4
 
@@ -86,8 +88,8 @@ def bucketAddressBody (bytes result : FVarId) : List Instruction := [
   .i32ShrU,
   .i32Const .uint32 1,
   .i32Sub,
-  .i32Const .uint32 (u32 freeListBucketMask),
-  .i32And,
+  .i32Const .uint32 (u32 freeListBucketCount),
+  .i32RemU,
   .i32Const .uint32 4,
   .i32Mul,
   .localSet result]
@@ -285,6 +287,26 @@ def validateCandidateBody : List Instruction :=
 
 /-- The exact production free-list search preceding the bump fallback. -/
 def reuseSearchBody : List Instruction :=
+  [.localGet requestedBytes,
+    .i32Const .uint32 (u32 headerBytes),
+    .i32Eq,
+    .ifElse [
+      .i32Const .uint32 (u32 headerOnlySlotAddress),
+      .i32Load .uint32 0,
+      .localSet candidate,
+      .localGet candidate,
+      .ifElse
+        (validateCandidateBody ++ trapWhenTrue [
+          .localGet allocationBytesLocal,
+          .i32Const .uint32 (u32 headerBytes),
+          .i32Ne] ++ [
+          .i32Const .uint32 (u32 headerOnlySlotAddress),
+          .i32Const .uint32 0,
+          .i32Store .uint32 0,
+          .localGet candidate,
+          .ret])
+        []]
+      []] ++
   bucketAddressBody requestedBytes bucketAddress ++ [
     .localGet bucketAddress,
     .i32Load .uint32 0,
@@ -397,9 +419,19 @@ def recycleFunction (frontierIndex : Nat) : Function := {
       .localSet candidate] ++
     validateCandidateBody ++ [
       .localGet allocationBytesLocal,
-      .i32Const .uint32 (u32 minimumReusableAllocationBytes),
-      .i32LtU,
-      .ifElse [.ret] []] ++
+      .i32Const .uint32 (u32 headerBytes),
+      .i32Eq,
+      .ifElse [
+        .i32Const .uint32 (u32 headerOnlySlotAddress),
+        .i32Load .uint32 0,
+        .i32Eqz,
+        .ifElse [
+          .i32Const .uint32 (u32 headerOnlySlotAddress),
+          .localGet address,
+          .i32Store .uint32 0]
+          [],
+        .ret]
+        []] ++
     bucketAddressBody allocationBytesLocal bucketAddress ++ [
       .localGet bucketAddress,
       .i32Load .uint32 0,
@@ -528,6 +560,7 @@ def manifest : Json :=
     ("alignment", target.heapAlignment),
     ("minimumAllocationBytes", headerBytes),
     ("freeListBuckets", freeListBucketCount),
+    ("headerOnlySlotAddress", headerOnlySlotAddress),
     ("freeListLinkOffset", freeListLinkOffset),
     ("minimumReusableAllocationBytes", minimumReusableAllocationBytes),
     ("privateEntries", Json.arr #[recycleName.toString]),
@@ -538,8 +571,8 @@ def manifest : Json :=
 #guard allocatorModule.globals ==
   #[{ kind := .uint32, init := .i32 (u32 heapBase) }]
 #guard allocatorModule.memory == some ResidentRuntime.residentMemory
-#guard freeListBucketCount == 256
-#guard freeListBucketMask == 255
+#guard headerOnlySlotAddress == 1020
+#guard freeListBucketCount == 255
 #guard freeListLinkOffset == headerBytes
 #guard minimumReusableAllocationBytes == 36
 #guard Fir.Wasm.validateModule allocatorModule |>.isOk

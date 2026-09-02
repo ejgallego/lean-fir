@@ -126,18 +126,21 @@ export async function checkResidentAllocator(bytes) {
     "exact-extent reuse advanced the bump frontier");
 
   const headerOnly = reuseAllocate(32) >>> 0;
+  const headerOnlyEnd = reuseFrontier() >>> 0;
   writeFreedHeader(reuse.memory, headerOnly, 32);
   reuseRecycle(headerOnly);
-  expect(reuseAllocate(32) >>> 0 !== headerOnly,
-    "resident allocator indexed a header-only block without a private link lane");
+  equal(reuseAllocate(32) >>> 0, headerOnly,
+    "resident allocator did not reuse its cached header-only block");
+  equal(reuseFrontier() >>> 0, headerOnlyEnd,
+    "header-only reuse advanced the bump frontier");
 
-  const collision = reuseAllocate(2088) >>> 0;
-  writeFreedHeader(reuse.memory, collision, 2088);
+  const collision = reuseAllocate(2080) >>> 0;
+  writeFreedHeader(reuse.memory, collision, 2080);
   reuseRecycle(collision);
   const mismatched = reuseAllocate(40) >>> 0;
   expect(mismatched !== collision,
     "resident allocator reused a hash-colliding extent");
-  equal(reuseAllocate(2088) >>> 0, collision,
+  equal(reuseAllocate(2080) >>> 0, collision,
     "resident allocator lost an exact extent behind a hash collision");
 
   const retainedDead = reuseAllocate(40) >>> 0;
