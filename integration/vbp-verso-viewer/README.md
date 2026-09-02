@@ -46,7 +46,9 @@ ordinary call stack and lifecycle semantics.
 Each opened runtime owns one Wasm instance, one module-owned monotonic arena,
 and one opaque host-resource table. Inputs are freshly transferred into module
 memory. No Wasm address escapes. Retained callbacks use explicit JavaScript
-leases and become invalid after release or runtime disposal. `unmount` releases
+leases, and every neutral Lean bridge borrows its closure before application so
+repeat React renders do not consume the retained root. Callbacks become invalid
+after release or runtime disposal. `unmount` releases
 the root lifecycle; `dispose` invalidates all remaining callbacks, releases
 host resources, and drops the instance, reclaiming the entire arena.
 
@@ -70,7 +72,8 @@ their exact source-tree and relevant-file hashes match `source-contract.json`.
 The gate builds FIR through a clean source archive so Lean 4.34 products do not
 enter W7's ordinary `.lake`, regenerates twice, checks immutable identity and
 `SHA256SUMS`, verifies the exact 41-import and 12-export physical surface, and
-runs two mounts, an update, unmount, retained callbacks, Unicode RpcJson,
+runs loading mounts, a representative ready-document mount, repeated use of
+the same retained callback, updates, unmounts, Unicode RpcJson,
 timing, memory-frontier, and disposal checks against a deterministic fake host.
 
 Immutable packages are published below `_build/vbp-verso-viewer-packages/`.
@@ -80,3 +83,5 @@ package for the external Chromium state/DOM-identity campaign.
 The callback smoke is also the permanent regression for
 `FIR-BUG-wasm-none-transitive-erased-closure-dispatch`: publication fails if a
 compiler-generated boxed callback is missing from generic closure dispatch.
+It also covers `FIR-BUG-wasm-none-retained-callback-borrow-boundary` by invoking
+one retained ready-document component callback twice before releasing it.

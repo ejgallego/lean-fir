@@ -281,6 +281,8 @@ assert.ok(leanVersion.includes("4.34.0-rc2"), "wrong Lean version");
 assert.ok(leanVersion.includes("6a10ac8c22beadecabdbb0919c2b50214762f91d"),
   "wrong Lean Git commit");
 const firRelevantPaths = [
+  "integration/vbp-verso-viewer/FirVbpVersoViewer/Bridge.lean",
+  "integration/vbp-verso-viewer/FirVbpVersoViewer/Compile.lean",
   "Fir/Wasm/Lower.lean",
   "Fir/Wasm/Emit/CompilerPrivate.lean",
   "Fir/Wasm/Emit/Manifest.lean",
@@ -341,7 +343,7 @@ const build = {
     logical: {
       mount: "String -> Lean.Vir.Infoview.RpcJson -> DomM Bool",
       unmount: "String -> DomM Bool",
-      callbacks: "synchronous retained React/event/state/effect closures",
+      callbacks: "borrowed synchronous retained React/event/state/effect closures",
     },
     physical: inventory.publicSignatures,
     runtimeResult: "Lean EStateM.Result object",
@@ -419,7 +421,7 @@ const build = {
       arena: "monotonic-instance-lifetime",
       input: "fresh-transferred-Lean-graph-per-call",
       output: "copied-JavaScript-Boolean",
-      callbacks: "retained-by-explicit-JavaScript-leases-until-release-or-dispose",
+      callbacks: "retained-by-explicit-JavaScript-leases-and-borrowed-by-each-Lean-bridge-call-until-release-or-dispose",
       hostResources: "adapter-owned-opaque-handle-table-until-dispose",
       rawAddressesExposed: false,
       reclamation: "unmount-releases-root-leases; dispose-invalidates-callbacks-and-drops-instance",

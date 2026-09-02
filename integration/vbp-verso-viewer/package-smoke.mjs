@@ -24,6 +24,22 @@ function rpcJsonFromValue(value, depth = 0) {
   assert.ok(depth <= 64, "smoke RpcJson nesting is bounded");
   if (value === null) return { kind: "null" };
   if (typeof value === "boolean") return { kind: "bool", value };
+  if (typeof value === "number") {
+    assert.ok(Number.isFinite(value), "smoke JSON numbers must be finite");
+    const source = String(Object.is(value, -0) ? 0 : value);
+    const match = /^(-?)(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/u.exec(source);
+    assert.notEqual(match, null, "smoke JSON number must have decimal syntax");
+    const [, sign, whole, fraction = "", scientific = "0"] = match;
+    const decimalPlaces = fraction.length - Number(scientific);
+    let mantissa = BigInt(`${sign}${whole}${fraction}`);
+    let exponent = decimalPlaces;
+    if (decimalPlaces < 0) {
+      mantissa *= 10n ** BigInt(-decimalPlaces);
+      exponent = 0;
+    }
+    return { kind: "number",
+      fields: { mantissa: mantissa.toString(), exponent } };
+  }
   if (typeof value === "string") return { kind: "string", value };
   if (Array.isArray(value)) {
     return { kind: "array",
@@ -205,6 +221,27 @@ const first = rpcJsonFromValue({
 const second = rpcJsonFromValue({
   loading: { message: "FIR smoke update two" },
 });
+const ready = rpcJsonFromValue({
+  ready: {
+    document: {
+      correlationId: "fir-ready-smoke",
+      cursorToken: "1:1",
+      focus: null,
+      version: 1,
+      document: {
+        title: [{ text: "Retained callback smoke" }],
+        titleString: "Retained callback smoke",
+        metadata: null,
+        content: [{ para: [
+          { text: "A representative ready document" },
+          { linebreak: "\n" },
+          { text: "renders the same retained component twice." },
+        ] }],
+        subParts: [],
+      },
+    },
+  },
+});
 assert.equal(runtime.invoke(VBP_VERSO_VIEWER_MOUNT_ENTRY,
   ["#preview", first]), true);
 assert.equal(fake.roots.has("#preview"), true);
@@ -213,6 +250,14 @@ assert.ok(firstCall.memory.frontierAfter >= firstCall.memory.frontierBefore);
 assert.equal(runtime.invoke(VBP_VERSO_VIEWER_MOUNT_ENTRY,
   ["#preview", second]), true);
 assert.equal(fake.roots.size, 1);
+assert.equal(runtime.invoke(VBP_VERSO_VIEWER_UNMOUNT_ENTRY,
+  ["#preview"]), true);
+assert.equal(fake.roots.size, 0);
+assert.equal(runtime.invoke(VBP_VERSO_VIEWER_MOUNT_ENTRY,
+  ["#preview", ready]), true);
+const readyRoot = fake.roots.get("#preview");
+assert.notEqual(readyRoot, undefined);
+readyRoot.rendered = readyRoot.component();
 assert.equal(runtime.invoke(VBP_VERSO_VIEWER_UNMOUNT_ENTRY,
   ["#preview"]), true);
 assert.equal(fake.roots.size, 0);
@@ -234,8 +279,8 @@ for (const field of ["encodeMs", "executeMs", "decodeMs", "totalMs",
 
 console.log(JSON.stringify({
   ok: true,
-  mounts: 2,
-  unmounts: 1,
+  mounts: 3,
+  unmounts: 2,
   effects: fake.effects.length,
   eventHandlers: fake.events.length,
   hostResources: fake.resources.length,
