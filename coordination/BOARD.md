@@ -32,6 +32,16 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   exact consumer-ratchet, transactional resident-linker, and erased-widget
   stacks are integrated. Tooling's bounded work changed no W7 implementation
   file and granted no standing W7 ownership.
+- Accepted retained-callback boundary: W7 checkpoint `a38899ab` marks all five
+  provider-neutral VBP callback bridges borrowed with Lean's `@&` convention.
+  The exact Lean 4.34 package regenerates deterministically at 6,239,369 bytes
+  with SHA-256 `c4e3080a008fbfe20d490db281bcafb655444cf08b175f0d36a0bdf098726a81`;
+  its representative ready-document smoke invokes one retained component
+  twice before unmounting. `make check`, the 3,190-job Talos gate, and the
+  complete W7 artifact gate pass. The full FLT campaign now exposes the
+  separate generic released-block reuse debt recorded by
+  `FIR-BUG-wasm-none-resident-arena-released-block-reuse`; W6 owns proof thread
+  `W7-W6-20260902-001` while W7 owns the executable allocator slice.
 - Accepted shared-lowering and widget convergence: root classifier head
   `f8954036` replaces one-hop erased forwarding with one bounded, cycle-safe
   declaration/parameter query shared by universal-use and raw-sink
