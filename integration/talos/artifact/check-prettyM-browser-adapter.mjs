@@ -152,6 +152,35 @@ function checkTimings(result) {
     requireCondition(Number.isFinite(value) && value >= 0,
       `timing ${name} is invalid`);
   }
+  const memory = result.memory;
+  requireCondition(Array.isArray(memory.inputAllocations) &&
+    memory.inputAllocations.length === memory.residentAllocationCalls,
+  "input allocation inventory changed");
+  requireCondition(memory.frontierGrowthPrepare ===
+    memory.frontierAfterPrepare - memory.frontierBefore,
+  "prepare frontier growth accounting changed");
+  requireCondition(memory.inputAllocations.reduce(
+    (total, allocation) => total + allocation.bytes, 0) === memory.inputBytes,
+  "input allocation byte accounting changed");
+  for (const allocation of memory.inputAllocations) {
+    requireCondition(Number.isSafeInteger(allocation.address) &&
+      allocation.address >= 1024 && allocation.address % 8 === 0 &&
+      allocation.end === allocation.address + allocation.bytes &&
+      allocation.end <= allocation.frontierAfter,
+    "input allocation extent is invalid");
+    requireCondition(allocation.frontierGrowth ===
+      allocation.frontierAfter - allocation.frontierBefore,
+    "input allocation frontier growth changed");
+    if (allocation.reused) {
+      requireCondition(allocation.address < allocation.frontierBefore &&
+        allocation.frontierGrowth === 0,
+      "reused input allocation changed the monotone frontier");
+    } else {
+      requireCondition(allocation.address === allocation.frontierBefore &&
+        allocation.frontierGrowth === allocation.bytes,
+      "fresh input allocation did not use the bump frontier");
+    }
+  }
 }
 
 function checkResult(result, previous) {
@@ -162,10 +191,8 @@ function checkResult(result, previous) {
   checkTimings(result);
   requireCondition(result.memory.residentAllocationCalls === 1,
     "adapter did not use one bulk resident allocation");
-  requireCondition(result.memory.inputBytes > 0 &&
-    result.memory.frontierAfterPrepare ===
-      result.memory.frontierBefore + result.memory.inputBytes,
-  "adapter input frontier accounting changed");
+  requireCondition(result.memory.inputBytes > 0,
+    "adapter did not encode a nonempty input graph");
   requireCondition(result.memory.frontierAfterDecode >=
     result.memory.frontierAfterExecute,
   "decode rewound the resident frontier");

@@ -114,15 +114,11 @@ function encodeStringValue(adapter, view, take, value, payloadBytes, bytes) {
 
 class PrettyMHtmlAdapter extends PrettyMHtmlBaseAdapter {
   encodeAnnotations(normalized) {
-    const frontierBefore = this.synchronizeFrontier();
-    const allocateStarted = this.now();
-    const block = u32(this.allocate(normalized.totalBytes));
-    const allocateMs = elapsed(this.now, allocateStarted);
-    requireCondition(block === frontierBefore,
-      "resident annotation allocator returned an unexpected address");
-    const frontierAfter = this.synchronizeFrontier();
-    requireCondition(frontierAfter === frontierBefore + normalized.totalBytes,
-      "resident annotation allocator advanced by the wrong size");
+    const allocation = this.allocateBulk(
+      normalized.totalBytes, "annotations input");
+    const block = allocation.address;
+    const allocateMs = allocation.allocateMs;
+    const frontierAfter = allocation.frontierAfter;
     const encodeStarted = this.now();
     const view = new DataView(this.memory.buffer);
     let cursor = block;
@@ -194,6 +190,7 @@ class PrettyMHtmlAdapter extends PrettyMHtmlBaseAdapter {
       allocateMs,
       encodeMs: elapsed(this.now, encodeStarted),
       frontierAfter,
+      allocation,
       inputBytes: normalized.totalBytes,
       rawObjects,
     };
@@ -213,9 +210,20 @@ class PrettyMHtmlAdapter extends PrettyMHtmlBaseAdapter {
     prepared.timings.encodeMs += encodedAnnotations.encodeMs;
     prepared.timings.prepareMs = elapsed(this.now, started);
     prepared.memory.frontierAfterPrepare = encodedAnnotations.frontierAfter;
+    prepared.memory.frontierGrowthPrepare =
+      encodedAnnotations.frontierAfter - prepared.memory.frontierBefore;
     prepared.memory.pagesAfterPrepare = this.memory.buffer.byteLength / PAGE_BYTES;
     prepared.memory.inputBytes += encodedAnnotations.inputBytes;
     prepared.memory.residentAllocationCalls += 1;
+    prepared.memory.inputAllocations.push({
+      address: encodedAnnotations.allocation.address,
+      end: encodedAnnotations.allocation.end,
+      bytes: encodedAnnotations.allocation.bytes,
+      reused: encodedAnnotations.allocation.reused,
+      frontierBefore: encodedAnnotations.allocation.frontierBefore,
+      frontierAfter: encodedAnnotations.allocation.frontierAfter,
+      frontierGrowth: encodedAnnotations.allocation.frontierGrowth,
+    });
     prepared.memory.rawObjects += encodedAnnotations.rawObjects;
     prepared.memory.annotationEntries = normalizedAnnotations.entries.length;
     return prepared;

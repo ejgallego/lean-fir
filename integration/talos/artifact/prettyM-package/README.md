@@ -93,10 +93,13 @@ frontier-synchronized calls on the same adapter instance.
 The adapter borrows the JavaScript input and never mutates it. Each call
 encodes a fresh owned Lean graph and transfers it to the entry point. Returned
 raw addresses are not exposed: `decode` copies the text and exact event stream
-into JavaScript values. Module memory is a monotone bump arena for the lifetime
-of the adapter instance. The adapter reads and validates the resident frontier
-before and after every phase, and uses one `fir_heap_alloc` call for the entire
-input graph. Discard the adapter instance to reclaim its arena.
+into JavaScript values. Module memory has a monotone frontier for the lifetime
+of the adapter instance, while canonically released exact-size blocks may be
+reused below that frontier. The adapter reads and validates the resident
+frontier before and after every phase, uses one `fir_heap_alloc` call for the
+entire input graph, and reports whether that allocation grew the frontier or
+reused a released extent. Discard the adapter instance to reclaim the complete
+arena.
 
 ## Build the package
 
@@ -189,11 +192,12 @@ generic `instInhabitedOfMonad._redArg` declaration is no longer a fallback:
 the package compiles its real Lean body into the source closure.
 
 The smoke clients prepare ordinary Lean values directly in the exported
-memory, advance the monotone resident frontier, decode the raw trace graph, and
+memory, preserve the monotone resident frontier, decode the raw trace graph, and
 check both rendered text and exact tag boundaries against an event oracle also
 guarded by native Lean 4.33. The browser-adapter smoke reuses the same compact
 input, checks multi-limb Nat/Int values, verifies one resident bulk allocation
-per input, and checks frontier synchronization. Its stack-safety stress case
+per input while accepting both bump and exact-size reuse paths, and checks frontier
+synchronization. Its stack-safety stress case
 additionally covers 8,192-limb Nat/Int inputs, 1 MiB of UTF-8 text, memory
 growth, exact styling, and 32 repeated calls. Keeping this package separate
 provides a coherent integration snapshot while allocation families move

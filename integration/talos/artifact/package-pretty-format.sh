@@ -297,7 +297,7 @@ const build = {
     memoryOwner: "module",
     frontierProtocol: {
       status: "experimental",
-      policy: "shared-monotone-frontier",
+      policy: "shared-monotone-frontier-with-exact-size-reuse",
       read: "fir_heap_frontier",
       advance: "fir_heap_set_frontier",
       allocate: "fir_heap_alloc",
@@ -357,7 +357,8 @@ const build = {
       memoryOwner: "module",
       allocator: "single-bulk-resident-allocation-per-render",
       frontier: "monotone-resynchronized-before-and-after-each-phase",
-      reclamation: "instance-lifetime-bump-arena",
+      releasedBlocks: "checked-exact-size-resident-reuse",
+      reclamation: "instance-lifetime-arena-with-resident-reuse",
     },
     output: {
       semantic: "PrettyTrace",

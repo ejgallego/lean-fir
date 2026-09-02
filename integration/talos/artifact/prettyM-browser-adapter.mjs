@@ -639,6 +639,39 @@ export class PrettyMAdapter {
     return resident;
   }
 
+  allocateBulk(bytes, label) {
+    requireCondition(Number.isSafeInteger(bytes) && bytes >= 0 &&
+      bytes <= MAX_UINT32 && bytes % 8 === 0,
+    `${label} bulk allocation size ${bytes} is invalid`);
+    const frontierBefore = this.synchronizeFrontier();
+    const allocateStarted = this.now();
+    const address = bytes === 0 ? frontierBefore : u32(this.allocate(bytes));
+    const allocateMs = elapsed(this.now, allocateStarted);
+    const frontierAfter = this.synchronizeFrontier();
+    const end = address + bytes;
+    requireCondition(address >= HEAP_BASE && address % 8 === 0 &&
+      Number.isSafeInteger(end) && end <= frontierAfter,
+    `${label} allocator returned invalid extent [${address}, ${end}) ` +
+      `below frontier ${frontierAfter}`);
+    requireCondition(address <= frontierBefore,
+      `${label} allocator skipped frontier ${frontierBefore} to ${address}`);
+    const reused = bytes !== 0 && address < frontierBefore;
+    const expectedGrowth = reused ? 0 : bytes;
+    requireCondition(frontierAfter === frontierBefore + expectedGrowth,
+      `${label} allocator changed frontier by ` +
+        `${frontierAfter - frontierBefore}, expected ${expectedGrowth}`);
+    return {
+      address,
+      end,
+      bytes,
+      reused,
+      frontierBefore,
+      frontierAfter,
+      frontierGrowth: expectedGrowth,
+      allocateMs,
+    };
+  }
+
   prepare({
     format,
     width,
@@ -659,15 +692,12 @@ export class PrettyMAdapter {
 
     const frontierBefore = this.synchronizeFrontier();
     const pagesBefore = this.memory.buffer.byteLength / PAGE_BYTES;
-    const allocateStarted = this.now();
-    const block = totalBytes === 0 ? frontierBefore :
-      u32(this.allocate(totalBytes));
-    const allocateMs = elapsed(this.now, allocateStarted);
-    requireCondition(block === frontierBefore,
-      `resident allocator returned ${block}, expected frontier ${frontierBefore}`);
-    const frontierAfterAllocation = this.synchronizeFrontier();
-    requireCondition(frontierAfterAllocation === frontierBefore + totalBytes,
-      "resident allocator advanced by the wrong bulk input size");
+    const allocation = this.allocateBulk(totalBytes, "prettyM input");
+    requireCondition(allocation.frontierBefore === frontierBefore,
+      "resident frontier changed before bulk input allocation");
+    const block = allocation.address;
+    const allocateMs = allocation.allocateMs;
+    const frontierAfterAllocation = allocation.frontierAfter;
 
     const encodeStarted = this.now();
     const view = new DataView(this.memory.buffer);
@@ -817,10 +847,20 @@ export class PrettyMAdapter {
       memory: {
         frontierBefore,
         frontierAfterPrepare: frontierAfterAllocation,
+        frontierGrowthPrepare: frontierAfterAllocation - frontierBefore,
         pagesBefore,
         pagesAfterPrepare,
         inputBytes: totalBytes,
         residentAllocationCalls: totalBytes === 0 ? 0 : 1,
+        inputAllocations: totalBytes === 0 ? [] : [{
+          address: allocation.address,
+          end: allocation.end,
+          bytes: allocation.bytes,
+          reused: allocation.reused,
+          frontierBefore: allocation.frontierBefore,
+          frontierAfter: allocation.frontierAfter,
+          frontierGrowth: allocation.frontierGrowth,
+        }],
         rawObjects,
         formatNodes: normalized.nodes.length,
       },

@@ -55,6 +55,10 @@ assert.equal(
   build.capabilities.ownership.allocator,
   "single-bulk-resident-allocation-per-render",
 );
+assert.equal(
+  build.capabilities.ownership.releasedBlocks,
+  "checked-exact-size-resident-reuse",
+);
 assert.equal(build.functionImports, functionImportCount);
 assert.equal(build.memoryImports, 0);
 assert.equal(build.memoryExports, 1);
