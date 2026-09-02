@@ -135,6 +135,18 @@ private def trapWhenTrue (condition : List Instruction) : List Instruction :=
 private def load32 (object : FVarId) (offset : Nat) : List Instruction :=
   [.localGet object, .i32Load .uint32 (u32 offset)]
 
+/--
+Publish one complete eight-byte FIR object lane. The wasm32 object word is
+zero-extended before the physical store so allocation reuse cannot preserve a
+stale high padding word from the block's previous contents.
+-/
+def storeObjectWord (address value : FVarId) (offset : Nat := 0) :
+    List Instruction := [
+  .localGet address,
+  .localGet value,
+  .i64ExtendI32U .uint64,
+  .i64Store .uint64 (u32 offset)]
+
 private inductive InputValidation where
   /-- Validate a raw/public Array address before inspecting its header. -/
   | checked
@@ -477,13 +489,10 @@ def allocateListConsFunction : Function := {
     storeHeaderWord headerAux0Offset [.i32Const .uint32 1] ++
     storeHeaderWord headerAux1Offset [.i32Const .uint32 2] ++
     storeHeaderWord headerAux2Offset [.i32Const .uint32 0] ++
-    storeHeaderWord headerAux3Offset [.i32Const .uint32 0] ++ [
-    .localGet addressLocal,
-    .localGet valueParam,
-    .i32Store .tobject (u32 headerBytes),
-    .localGet addressLocal,
-    .localGet tailParam,
-    .i32Store .tobject (u32 (headerBytes + target.semanticSlotBytes))] ++
+    storeHeaderWord headerAux3Offset [.i32Const .uint32 0] ++
+    storeObjectWord addressLocal valueParam headerBytes ++
+    storeObjectWord addressLocal tailParam
+      (headerBytes + target.semanticSlotBytes) ++
     retypeAddressTObject }
 
 private def sizeFunctionFor (validation : InputValidation) : Function := {
@@ -567,10 +576,8 @@ private def consumeListIntoArray : List Instruction := [
       .call (.declaration ResidentReferenceCount.incrementOnceName),
       .localGet tailLocal,
       .call (.declaration ResidentReferenceCount.incrementOnceName)] ++
-      ResidentRelease.checkedDecrementLocal listLocal ++ [
-      .localGet targetCursorLocal,
-      .localGet elementLocal,
-      .i32Store .tobject 0,
+      ResidentRelease.checkedDecrementLocal listLocal ++
+      storeObjectWord targetCursorLocal elementLocal ++ [
       .localGet targetCursorLocal,
       .i32Const .uint32 (u32 target.semanticSlotBytes),
       .i32Add,
@@ -890,10 +897,7 @@ private def copyElementsBody (retain : Bool)
       (if retain then [
         .localGet elementLocal,
         .call (.declaration ResidentReferenceCount.incrementOnceName)]
-      else []) ++ [
-      .localGet targetCursorLocal,
-      .localGet elementLocal,
-      .i32Store .tobject 0,
+      else []) ++ storeObjectWord targetCursorLocal elementLocal ++ [
       .localGet sourceCursorLocal,
       .i32Const .uint32 (u32 target.semanticSlotBytes),
       .i32Add,
@@ -1032,10 +1036,8 @@ private def selectReusablePush : List Instruction := [
 
 private def pushInPlaceValue : List Instruction := [
   .localGet sizeLocal,
-  .localSet indexLocal] ++ elementAddress ++ [
-  .localGet sourceCursorLocal,
-  .localGet valueParam,
-  .i32Store .tobject 0,
+  .localSet indexLocal] ++ elementAddress ++
+  storeObjectWord sourceCursorLocal valueParam ++ [
   .localGet inputAddressLocal,
   .localGet sizeLocal,
   .i32Const .uint32 1,
@@ -1058,10 +1060,8 @@ private def pushAllocatedValue : List Instruction := [
   .localGet exclusiveLocal,
   .ifElse
     (copyElementsBody false ++ retireTransferredArray)
-    (copyElementsBody true retainedCopyLoopLabel ++ consumeSharedArray),
-  .localGet targetCursorLocal,
-  .localGet valueParam,
-  .i32Store .tobject 0] ++
+    (copyElementsBody true retainedCopyLoopLabel ++ consumeSharedArray)] ++
+  storeObjectWord targetCursorLocal valueParam ++
   retypeAddressValue ++ [.localSet objectResultLocal]
 
 private def pushFunctionFor (validation : InputValidation) : Function := {
@@ -1162,15 +1162,12 @@ private def copyUpdatedElementsBody : List Instruction := [
       .localGet countLocal,
       .localGet indexLocal,
       .i32Eq,
-      .ifElse [
-        .localGet targetCursorLocal,
-        .localGet valueParam,
-        .i32Store .tobject 0] [
+      .ifElse
+        (storeObjectWord targetCursorLocal valueParam)
+        ([
         .localGet elementLocal,
-        .call (.declaration ResidentReferenceCount.incrementOnceName),
-        .localGet targetCursorLocal,
-        .localGet elementLocal,
-        .i32Store .tobject 0],
+        .call (.declaration ResidentReferenceCount.incrementOnceName)] ++
+        storeObjectWord targetCursorLocal elementLocal),
       .localGet sourceCursorLocal,
       .i32Const .uint32 (u32 target.semanticSlotBytes),
       .i32Add,
@@ -1190,10 +1187,8 @@ private def replaceExclusiveElementBody : List Instruction :=
     .localGet sourceCursorLocal,
     .i32Load .tobject 0,
     .localSet elementLocal] ++
-    ResidentRelease.checkedDecrementLocal elementLocal ++ [
-    .localGet sourceCursorLocal,
-    .localGet valueParam,
-    .i32Store .tobject 0,
+    ResidentRelease.checkedDecrementLocal elementLocal ++
+    storeObjectWord sourceCursorLocal valueParam ++ [
     .localGet arrayParam,
     .ret]
 
@@ -1204,10 +1199,8 @@ private def replaceExclusiveElementBody : List Instruction :=
     .localGet sourceCursorLocal,
     .i32Load .tobject 0,
     .localSet elementLocal] ++
-    ResidentRelease.checkedDecrementLocal elementLocal ++ [
-    .localGet sourceCursorLocal,
-    .localGet valueParam,
-    .i32Store .tobject 0,
+    ResidentRelease.checkedDecrementLocal elementLocal ++
+    storeObjectWord sourceCursorLocal valueParam ++ [
     .localGet arrayParam,
     .ret]
 
@@ -1315,9 +1308,7 @@ private def trustedSetCallSiteRewrite : ResidentCallSite.Rewrite := {
         .localGet inlineSetCursorLocal,
         .i32Load .tobject 0,
         .localSet inlineSetElementLocal,
-        .localGet inlineSetCursorLocal,
-        .localGet inlineSetValueLocal,
-        .i32Store .tobject 0] ++
+        ] ++ storeObjectWord inlineSetCursorLocal inlineSetValueLocal ++
         ResidentRelease.checkedDecrementLocal inlineSetElementLocal ++ [
         .localGet inlineSetArrayLocal,
         .localSet inlineSetResultLocal])
@@ -1491,13 +1482,9 @@ private def swapDecodedElementsFunction : Function := {
     .localSet elementLocal,
     .localGet targetCursorLocal,
     .i32Load .tobject 0,
-    .localSet element2Local,
-    .localGet sourceCursorLocal,
-    .localGet element2Local,
-    .i32Store .tobject 0,
-    .localGet targetCursorLocal,
-    .localGet elementLocal,
-    .i32Store .tobject 0,
+    .localSet element2Local] ++
+    storeObjectWord sourceCursorLocal element2Local ++
+    storeObjectWord targetCursorLocal elementLocal ++ [
     .ret] }
 
 private def callSwapDecodedElements (array : FVarId) : List Instruction := [
@@ -1645,10 +1632,8 @@ private def fillElementsBody : List Instruction := [
       ([.localGet countLocal] ++ equalsConst .uint32 0 ++ [
         .ifElse [] [
           .localGet valueParam,
-          .call (.declaration ResidentReferenceCount.incrementOnceName)],
-        .localGet targetCursorLocal,
-        .localGet valueParam,
-        .i32Store .tobject 0,
+          .call (.declaration ResidentReferenceCount.incrementOnceName)]] ++
+        storeObjectWord targetCursorLocal valueParam ++ [
         .localGet targetCursorLocal,
         .i32Const .uint32 (u32 target.semanticSlotBytes),
         .i32Add,

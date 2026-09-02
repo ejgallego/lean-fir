@@ -45,13 +45,18 @@ function arrayState(memory, address) {
   expect(size <= capacity, "array size exceeds capacity");
   equal(view.getUint32(address + 12, true), 32 + 8 * capacity,
     "array allocation size");
+  const words = Array.from({ length: size }, (_, index) => {
+    const slot = address + 32 + 8 * index;
+    equal(view.getUint32(slot + 4, true), 0,
+      `array element ${index} high padding`);
+    return view.getUint32(slot, true);
+  });
   return {
     flags,
     refCount,
     size,
     capacity,
-    words: Array.from({ length: size }, (_, index) =>
-      view.getUint32(address + 32 + 8 * index, true)),
+    words,
   };
 }
 
@@ -87,6 +92,10 @@ function listState(memory, root) {
     equal(view.getUint32(cursor + 28, true), 0,
       "List.cons scalar byte count");
     addresses.push(cursor);
+    equal(view.getUint32(cursor + 36, true), 0,
+      `List.cons head high padding at ${addresses.length - 1}`);
+    equal(view.getUint32(cursor + 44, true), 0,
+      `List.cons tail high padding at ${addresses.length - 1}`);
     words.push(view.getUint32(cursor + 32, true));
     cursor = view.getUint32(cursor + 40, true);
   }
