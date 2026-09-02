@@ -288,6 +288,7 @@ const firRelevantPaths = [
   "Fir/Wasm/Emit/Manifest.lean",
   "Fir/Wasm/Emit/ResidentAllocator.lean",
   "Fir/Wasm/Emit/ResidentLinker.lean",
+  "Fir/Wasm/Emit/ResidentRelease.lean",
   "Fir/Wasm/Emit/Source.lean",
 ];
 const hostFrontier = inventory.imports.map((import_) => ({
@@ -418,13 +419,14 @@ const build = {
     ownership: {
       version: VBP_VERSO_VIEWER_OWNERSHIP_VERSION,
       memoryOwner: "module",
-      arena: "monotonic-instance-lifetime",
+      arena: "instance-lifetime-bump-with-exact-size-released-block-reuse",
+      lazySingletons: "module-owned compiler flag/value globals; first miss recursively persists the closed graph",
       input: "fresh-transferred-Lean-graph-per-call",
       output: "copied-JavaScript-Boolean",
       callbacks: "retained-by-explicit-JavaScript-leases-and-borrowed-by-each-Lean-bridge-call-until-release-or-dispose",
       hostResources: "adapter-owned-opaque-handle-table-until-dispose",
       rawAddressesExposed: false,
-      reclamation: "unmount-releases-root-leases; dispose-invalidates-callbacks-and-drops-instance",
+      reclamation: "recursive release returns exact-size blocks to the private resident reuse index; rewind invalidates the index; unmount releases root leases; dispose invalidates callbacks and drops the instance",
     },
   },
   referenceAcceptance: sourceContract.referenceAcceptance,
