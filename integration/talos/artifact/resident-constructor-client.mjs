@@ -19,8 +19,8 @@ function u32(memory, address) {
  * Exercise the generation-only resident constructor family without any host
  * imports. The fixture covers an immediate constructor, a heap constructor,
  * exact header/object-slot layout, zeroed packed storage after poisoned arena
- * reuse, frontier movement, and proof that typed result reclassification does
- * not touch the reserved word below the heap base.
+ * reuse, frontier movement, and proof that ordinary allocation does not touch
+ * the private reuse metadata below the heap base while rewind invalidates it.
  */
 export async function checkResidentConstructors(bytes) {
   const module = await WebAssembly.compile(bytes);
@@ -111,8 +111,8 @@ export async function checkResidentConstructors(bytes) {
   expect(reusedWords.every((value, index) =>
     value === expectedReusedWords[index]),
     `constructor poisoned-reuse layout drifted: ${reusedWords}`);
-  equal(u32(exports.memory, 0), 0xdecafbad,
-    "rewound allocation changed the reserved word");
+  equal(u32(exports.memory, 0), 0,
+    "rewind did not clear the private reuse metadata");
 
   const { exports: growing } = await WebAssembly.instantiate(module, {});
   const host = new ConcreteHost();
