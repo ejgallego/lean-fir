@@ -37,6 +37,7 @@ import FirTalos.ConcreteResidentFixedWidth
 import FirTalos.ConcreteResidentPrimitives
 import FirTalos.ConcreteResidentReplacement
 import FirTalos.ConcreteResidentArray
+import FirTalos.ConcreteResidentReleasedBlockReuse
 import FirTalos.ConcreteReuseCapacityCorrectness
 import FirTalos.ConcreteCacheCorrectness
 import FirTalos.ConcreteDeclarationCorrectness

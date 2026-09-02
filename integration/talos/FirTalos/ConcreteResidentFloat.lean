@@ -807,13 +807,14 @@ theorem canonicalBoxHeaderStore_refines
     (related : ResidentAllocatorRel heap store frontierIndex)
     {address : Word32} {marker payloadBytes : UInt32}
     {result : LinearMemory}
+    (addressBase : heapBase ≤ address.value)
     (inBounds : address.value + headerBytes ≤ heap.memory.size)
     (written : (canonicalBoxHeader marker payloadBytes).write
       heap.memory address = .ok result) :
     ResidentAllocatorRel { heap with memory := result }
       (canonicalBoxHeaderStore store (UInt32.ofNat address.value)
         marker payloadBytes) frontierIndex := by
-  have refined := related.writeHeader inBounds written
+  have refined := related.writeHeader addressBase inBounds written
   rw [canonicalBoxHeaderStore_eq_words,
     ResidentMemoryRel.writeUInt32sStore_eq,
     ← canonicalBoxHeader_words]
@@ -1782,6 +1783,9 @@ theorem wp_float32BoxProgram_of_allocateBoxedScalar
     have endInBounds := rawPost.endInBounds
     simp [headerBytes] at endInBounds ⊢
     omega
+  have addressBase : heapBase ≤ address.value := by
+    rw [rawPost.addressValue]
+    exact Nat.le_trans related.frontierBase (align8_ge before.heapCursor)
   let physicalAddress := UInt32.ofNat address.value
   have addressFits : address.value < UInt32.size := by
     simpa [wordModulus, UInt32.size] using address.isLt
@@ -1864,7 +1868,8 @@ theorem wp_float32BoxProgram_of_allocateBoxedScalar
       ResidentAllocatorRel objectState
         (canonicalBoxHeaderStore allocatedStore physicalAddress
           BoxedScalarKind.float32.code 4) frontierIndex := by
-    have refined := canonicalBoxHeaderStore_refines rawRelated headerInBounds
+    have refined := canonicalBoxHeaderStore_refines rawRelated addressBase
+      headerInBounds
       canonicalWrite
     rw [headerStateEq] at refined
     simpa only [physicalAddress] using refined
@@ -1882,7 +1887,7 @@ theorem wp_float32BoxProgram_of_allocateBoxedScalar
     simp [target, headerBytes, align8] at cursorInBounds ⊢
     omega
   let finalStore := float32BoxStore allocatedStore physicalAddress bits
-  have payloadRelatedRaw := headerRelated.writeUInt64 payloadInBounds
+  have payloadRelatedRaw := headerRelated.writeUInt64 (by omega) payloadInBounds
     payloadWrite
   have payloadPhysicalAddress :
       UInt32.ofNat (address.value + headerBytes) = payloadAddress := by
@@ -1983,6 +1988,9 @@ theorem wp_floatBoxProgram_of_allocateBoxedScalar
     have endInBounds := rawPost.endInBounds
     simp [headerBytes] at endInBounds ⊢
     omega
+  have addressBase : heapBase ≤ address.value := by
+    rw [rawPost.addressValue]
+    exact Nat.le_trans related.frontierBase (align8_ge before.heapCursor)
   let physicalAddress := UInt32.ofNat address.value
   have addressFits : address.value < UInt32.size := by
     simpa [wordModulus, UInt32.size] using address.isLt
@@ -2027,7 +2035,8 @@ theorem wp_floatBoxProgram_of_allocateBoxedScalar
       ResidentAllocatorRel objectState
         (canonicalBoxHeaderStore allocatedStore physicalAddress
           BoxedScalarKind.float.code 8) frontierIndex := by
-    have refined := canonicalBoxHeaderStore_refines rawRelated headerInBounds
+    have refined := canonicalBoxHeaderStore_refines rawRelated addressBase
+      headerInBounds
       canonicalWrite
     rw [headerStateEq] at refined
     simpa only [physicalAddress] using refined
@@ -2046,7 +2055,7 @@ theorem wp_floatBoxProgram_of_allocateBoxedScalar
     simp [target, headerBytes, align8] at cursorInBounds ⊢
     omega
   let finalStore := floatBoxStore allocatedStore physicalAddress bits
-  have payloadRelatedRaw := headerRelated.writeUInt64 payloadInBounds
+  have payloadRelatedRaw := headerRelated.writeUInt64 (by omega) payloadInBounds
     payloadWrite
   have finalStateEq :
       ({ objectState with memory := after.memory } : MemoryState) = after := by

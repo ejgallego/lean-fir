@@ -48,10 +48,8 @@ def exclusiveReplacementSourceProgram
     .localGet cursor,
     .i32Load .tobject 0,
     .localSet element] ++
-    Fir.Wasm.Emit.ResidentRelease.checkedDecrementLocal element ++ [
-    .localGet cursor,
-    .localGet value,
-    .i32Store .tobject 0,
+    Fir.Wasm.Emit.ResidentRelease.checkedDecrementLocal element ++
+    Fir.Wasm.Emit.ResidentArray.storeObjectWord cursor value ++ [
     .localGet array,
     .ret]
 
@@ -1038,8 +1036,8 @@ theorem wp_elementAddressProgram
   simp only [Wasm.wp_localSet_cons, finalSet]
   exact continued
 
-/-- A related live Array slot is accepted by Talos's checked `i32.store`
-boundary at the exact resident low-word address. -/
+/-- A related live Array slot is accepted by Talos's checked low-word load
+boundary at the exact resident address. -/
 theorem liveElementWasmInBounds
     {host : Type} {state : MemoryState} {witness : RefinementWitness}
     {address : Word32} {elements : Array Value} {capacity : Nat}
@@ -1058,8 +1056,28 @@ theorem liveElementWasmInBounds
   rw [← memoryRelated.size_eq]
   omega
 
+/-- The same related slot admits W7's complete zero-extending `i64.store`. -/
+theorem liveElementSlotWasmInBounds
+    {host : Type} {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {elements : Array Value} {capacity : Nat}
+    {header : Header} {store : Wasm.Store host}
+    (objectRelated :
+      ResidentArrayObjectRel state witness address elements capacity header)
+    (frontier : state.FrontierInvariant)
+    (memoryRelated : ResidentMemoryRel state store.mem)
+    (index : Nat) (indexValid : index < elements.size) :
+    (UInt32.ofNat
+        (address.value + headerBytes + target.semanticSlotBytes * index)).toNat +
+        8 ≤ store.mem.pages * wasmPageBytes := by
+  have inBounds :=
+    objectRelated.liveElementSlotInBounds frontier index indexValid
+  rw [memoryRelated.address_roundtrip inBounds]
+  rw [← memoryRelated.size_eq]
+  omega
+
 /-- One successful concrete raw Array replacement and the matching Talos
-`i32.store` preserve the byte-for-byte resident-memory relation. -/
+zero-extending `i64.store` preserve the byte-for-byte resident-memory
+relation. -/
 theorem writeElementRaw_preservesMemory
     {host : Type} {state result : MemoryState}
     {witness : RefinementWitness} {address word : Word32}
@@ -1073,17 +1091,16 @@ theorem writeElementRaw_preservesMemory
     (operation :
       writeResidentArrayElementRaw state address index word = .ok result) :
     ResidentMemoryRel result
-      (store.mem.write32
+      (store.mem.write64
         (UInt32.ofNat
           (address.value + headerBytes + target.semanticSlotBytes * index))
-        (UInt32.ofNat word.value)) := by
+        (UInt32.ofNat word.value).toUInt64) := by
   obtain ⟨memory, written, resultEq⟩ :=
     objectRelated.writeElementRaw_decompose index word indexValid operation
   subst result
   have inBounds :=
-    objectRelated.liveElementWordInBounds frontier index indexValid
-  unfold LinearMemory.writeWord32 at written
-  exact memoryRelated.writeUInt32 inBounds written
+    objectRelated.liveElementSlotInBounds frontier index indexValid
+  exact memoryRelated.writeUInt64 inBounds written
 
 /-- A resident Array payload replacement preserves canonical raw headers for
 every mapped allocation.  The target uses the exact-word payload-write lemma;
@@ -1208,7 +1225,8 @@ decrement has completed. -/
 def writeReplacementProgram (cursorIndex valueIndex : Nat) : Wasm.Program := [
   .localGet cursorIndex,
   .localGet valueIndex,
-  .store32 0]
+  .extendUI32,
+  .store64 0]
 
 /-- Execute the final replacement store and expose its exact updated Talos
 memory to the continuation. -/
@@ -1220,20 +1238,28 @@ theorem wp_writeReplacementProgram
     {rest : Wasm.Program}
     (cursorFound : locals.get cursorIndex = some (.i32 cursor))
     (valueFound : locals.get valueIndex = some (.i32 newWord))
-    (inBounds : cursor.toNat + 4 ≤ store.mem.pages * wasmPageBytes)
+    (inBounds : cursor.toNat + 8 ≤ store.mem.pages * wasmPageBytes)
     (continued : Wasm.wp module rest Q
-      (ResidentMemoryRel.write32Store store cursor newWord)
+      (ResidentMemoryRel.write64Store store cursor newWord.toUInt64)
       { locals with values := tail } env) :
     Wasm.wp module
       (writeReplacementProgram cursorIndex valueIndex ++ rest)
       Q store { locals with values := tail } env := by
-  have continued' : Wasm.wp module rest Q
-      (ResidentMemoryRel.write32Store store (cursor + 0) newWord)
-      { locals with values := tail } env := by
-    simpa only [UInt32.add_zero] using continued
   unfold writeReplacementProgram
-  exact ResidentMemoryRel.wp_store32_localGet_of_inBounds cursorFound valueFound
-    inBounds continued'
+  simp only [List.cons_append, List.nil_append, Wasm.wp_localGet_cons]
+  have cursorAt :
+      ({ locals with values := tail } : Wasm.Locals).get cursorIndex =
+        some (.i32 cursor) := by
+    simpa [Wasm.Locals.get] using cursorFound
+  simp only [cursorAt]
+  have valueAt :
+      ({ locals with values := .i32 cursor :: tail } : Wasm.Locals).get
+          valueIndex = some (.i32 newWord) := by
+    simpa [Wasm.Locals.get] using valueFound
+  simp only [valueAt]
+  simp only [Wasm.wp_extendUI32_cons, Wasm.wp_store64_cons]
+  rw [if_neg (Nat.not_lt.mpr (by simpa [wasmPageBytes] using inBounds))]
+  simpa [ResidentMemoryRel.write64Store] using continued
 
 /-- Native-order ownership core of trusted Array replacement: borrow the old
 word, run the shared checked decrement, and only then overwrite the slot. -/
@@ -1266,9 +1292,9 @@ theorem wp_replaceElementOwnershipProgram_heap
       [.i32 1, .i32 (UInt32.ofNat oldWord.value)]
       (fun next values => next = middleStore ∧ values = []))
     (writeInBounds :
-      cursor.toNat + 4 ≤ middleStore.mem.pages * wasmPageBytes)
+      cursor.toNat + 8 ≤ middleStore.mem.pages * wasmPageBytes)
     (continued : Wasm.wp module rest Q
-      (ResidentMemoryRel.write32Store middleStore cursor newWord)
+      (ResidentMemoryRel.write64Store middleStore cursor newWord.toUInt64)
       { afterOld with values := [] } env) :
     Wasm.wp module
       (replaceElementOwnershipProgram cursorIndex valueIndex elementIndex
@@ -1315,18 +1341,18 @@ theorem wp_replaceElementOwnershipProgram_tobject
     (cursorAfter : afterOld.get cursorIndex = some (.i32 cursor))
     (valueAfter : afterOld.get valueIndex = some (.i32 newWord))
     (noopWriteInBounds :
-      cursor.toNat + 4 ≤ store.mem.pages * wasmPageBytes)
+      cursor.toNat + 8 ≤ store.mem.pages * wasmPageBytes)
     (noopContinued : Wasm.wp module rest Q
-      (ResidentMemoryRel.write32Store store cursor newWord)
+      (ResidentMemoryRel.write64Store store cursor newWord.toUInt64)
       { afterOld with values := [] } env)
     (heapEffect : oldWord.classify = .heap →
       ∃ middleStore,
         Wasm.TerminatesWith env module decrementIndex store
           [.i32 1, .i32 (UInt32.ofNat oldWord.value)]
           (fun next values => next = middleStore ∧ values = []) ∧
-        cursor.toNat + 4 ≤ middleStore.mem.pages * wasmPageBytes ∧
+        cursor.toNat + 8 ≤ middleStore.mem.pages * wasmPageBytes ∧
         Wasm.wp module rest Q
-          (ResidentMemoryRel.write32Store middleStore cursor newWord)
+          (ResidentMemoryRel.write64Store middleStore cursor newWord.toUInt64)
           { afterOld with values := [] } env) :
     Wasm.wp module
       (replaceElementOwnershipProgram cursorIndex valueIndex elementIndex
@@ -1595,16 +1621,18 @@ theorem wp_replaceElementOwnershipProgram_heap_refines
           rw [semanticSet] at semanticWrite
           exact (Except.ok.inj semanticWrite).symm
         subst actualRuntime
-        have writeInBounds := liveElementWasmInBounds releasedObject
+        have writeInBounds := liveElementSlotWasmInBounds releasedObject
           releasedRelated.frontier releasedMemory index indexValid
         have finalMemory : ResidentMemoryRel result
-            (ResidentMemoryRel.write32Store middleStore
+            (ResidentMemoryRel.write64Store middleStore
               (UInt32.ofNat
                 (address.value + headerBytes +
                   target.semanticSlotBytes * index))
-              (UInt32.ofNat newWord.value)).mem :=
-          writeElementRaw_preservesMemory releasedObject releasedRelated.frontier
-            releasedMemory index indexValid concreteWrite
+              (UInt32.ofNat newWord.value).toUInt64).mem := by
+          simpa only [ResidentMemoryRel.write64Store_mem] using
+            writeElementRaw_preservesMemory releasedObject
+              releasedRelated.frontier releasedMemory index indexValid
+              concreteWrite
         have finalCanonical :
             ResidentRelease.CanonicalMappedHeadersRel result witness := by
           intro nextLocation nextAddress nextMapped
@@ -1618,10 +1646,10 @@ theorem wp_replaceElementOwnershipProgram_heap_refines
           payloadFrame.capacity.trans writeCapacity
         have finalCursor : result.heapCursor = state.heapCursor :=
           writeCursor.trans payloadFrame.cursor
-        let finalStore := ResidentMemoryRel.write32Store middleStore
+        let finalStore := ResidentMemoryRel.write64Store middleStore
           (UInt32.ofNat
             (address.value + headerBytes + target.semanticSlotBytes * index))
-          (UInt32.ofNat newWord.value)
+          (UInt32.ofNat newWord.value).toUInt64
         have success : ReplacementSuccess fuel state witness nextRuntime
             address index oldWord newWord result finalStore :=
           ⟨released, concreteRelease, concreteWrite, finalRelated,
@@ -1692,14 +1720,16 @@ theorem instructions_exclusiveReplacementSourceProgram
     ResidentRelease.instructions_checkedDecrementLocal
       (labels := labels) elementFound decrementFound
   have tailAdapted :
-      FirTalos.instructions sourceModule sourceFunction labels [
-        .localGet cursor, .localGet value, .i32Store .tobject 0,
-        .localGet array, .ret] =
+      FirTalos.instructions sourceModule sourceFunction labels
+        (Fir.Wasm.Emit.ResidentArray.storeObjectWord cursor value ++
+          [.localGet array, .ret]) =
           .ok (writeReplacementProgram cursorIndex valueIndex ++ [
             .localGet arrayIndex, .ret]) := by
-    simp [writeReplacementProgram, FirTalos.instructions,
+    simp [Fir.Wasm.Emit.ResidentArray.storeObjectWord,
+      writeReplacementProgram, FirTalos.instructions,
       FirTalos.instruction, cursorFound, valueFound, arrayFound, Bind.bind,
       Except.bind, pure, Except.pure]
+    native_decide
   rw [exclusiveReplacementSourceProgram]
   simp only [List.append_assoc]
   rw [FirTalos.Correctness.instructions_append, addressAdapted,

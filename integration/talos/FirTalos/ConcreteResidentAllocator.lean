@@ -3,6 +3,7 @@ import Fir.Wasm.Concrete.FreshAllocationCorrectness
 import FirTalos.ConcreteResidentMemory
 import FirTalos.Correctness.Adapter
 import FirTalos.Correctness.Function
+import Interpreter.Wasm.Wp.Loop
 
 namespace FirTalos.Concrete
 
@@ -27,6 +28,12 @@ structure ResidentAllocatorRel (heap : MemoryState) (store : Wasm.Store host)
   frontierFits : heap.heapCursor < wordModulus
   frontier : store.globals.globals[frontierIndex]? =
     some (.i32 (UInt32.ofNat heap.heapCursor))
+  /-- The legacy exact-byte relation represents the empty reuse-index
+  subrelation.  Production reuse uses the separately indexed/masked relation;
+  this field keeps existing bump-only helper theorems honest while that
+  attachment is developed. -/
+  reservedPrefixZero : ∀ address, address < heapBase →
+    store.mem.bytes address = 0
   zeroAfterExtent : ∀ address, heap.memory.size ≤ address →
     store.mem.bytes address = 0
 
@@ -45,10 +52,13 @@ theorem initial
     frontierBase := by decide
     frontierFits := by decide
     frontier := ?_
+    reservedPrefixZero := ?_
     zeroAfterExtent := ?_ }
   · rw [memory]
     exact ResidentMemoryRel.initial
   · simpa [MemoryState.initial] using frontier
+  · intro address _
+    simp [memory, Wasm.Mem.empty]
   · intro address _
     simp [memory, Wasm.Mem.empty]
 
@@ -58,6 +68,7 @@ theorem writeUInt32
     {heap : MemoryState} {store : Wasm.Store host} {frontierIndex : Nat}
     (related : ResidentAllocatorRel heap store frontierIndex)
     {address : Nat} {value : UInt32} {result : LinearMemory}
+    (addressBase : heapBase ≤ address)
     (inBounds : address + 3 < heap.memory.size)
     (written : heap.memory.writeUInt32 address value = .ok result) :
     ResidentAllocatorRel { heap with memory := result }
@@ -67,17 +78,23 @@ theorem writeUInt32
     LinearMemory.writeUInt32_spec heap.memory address value inBounds
   rw [actualWrite] at written
   cases written
+  have roundtrip : (UInt32.ofNat address).toNat = address :=
+    UInt32.toNat_ofNat_of_lt' (related.toResidentMemoryRel.address_lt_uint32
+      inBounds)
   refine {
     toResidentMemoryRel := related.toResidentMemoryRel.writeUInt32
       inBounds actualWrite
     frontierBase := related.frontierBase
     frontierFits := related.frontierFits
     frontier := by simpa using related.frontier
+    reservedPrefixZero := ?_
     zeroAfterExtent := ?_ }
+  · intro other otherBound
+    rw [ResidentMemoryRel.bytes_write32_of_disjoint]
+    · exact related.reservedPrefixZero other otherBound
+    · left
+      simpa [roundtrip] using (show other < address by omega)
   intro other afterExtent
-  have roundtrip : (UInt32.ofNat address).toNat = address :=
-    UInt32.toNat_ofNat_of_lt' (related.toResidentMemoryRel.address_lt_uint32
-      inBounds)
   have afterOld : heap.memory.size ≤ other := by
     simpa [actualSize] using afterExtent
   have disjoint : address + 3 < other := by omega
@@ -94,6 +111,7 @@ theorem writeUInt64
     {heap : MemoryState} {store : Wasm.Store host} {frontierIndex : Nat}
     (related : ResidentAllocatorRel heap store frontierIndex)
     {address : Nat} {value : UInt64} {result : LinearMemory}
+    (addressBase : heapBase ≤ address)
     (inBounds : address + 7 < heap.memory.size)
     (written : heap.memory.writeUInt64 address value = .ok result) :
     ResidentAllocatorRel { heap with memory := result }
@@ -101,18 +119,30 @@ theorem writeUInt64
       frontierIndex := by
   have sizeEq := LinearMemory.size_of_writeUInt64_eq_ok heap.memory result
     address value inBounds written
+  have roundtrip : (UInt32.ofNat address).toNat = address :=
+    related.toResidentMemoryRel.address_roundtrip inBounds
   refine {
     toResidentMemoryRel :=
       related.toResidentMemoryRel.writeUInt64 inBounds written
     frontierBase := related.frontierBase
     frontierFits := related.frontierFits
     frontier := by simpa using related.frontier
+    reservedPrefixZero := ?_
     zeroAfterExtent := ?_ }
+  · intro other otherBound
+    have ne0 : other ≠ address := by omega
+    have ne1 : other ≠ address + 1 := by omega
+    have ne2 : other ≠ address + 2 := by omega
+    have ne3 : other ≠ address + 3 := by omega
+    have ne4 : other ≠ address + 4 := by omega
+    have ne5 : other ≠ address + 5 := by omega
+    have ne6 : other ≠ address + 6 := by omega
+    have ne7 : other ≠ address + 7 := by omega
+    simp [Wasm.Mem.write64, roundtrip, ne0, ne1, ne2, ne3, ne4, ne5,
+      ne6, ne7, related.reservedPrefixZero other otherBound]
   intro other afterExtent
   have afterOld : heap.memory.size ≤ other := by
     simpa [sizeEq] using afterExtent
-  have roundtrip : (UInt32.ofNat address).toNat = address :=
-    related.toResidentMemoryRel.address_roundtrip inBounds
   have afterLane : address + 7 < other := by omega
   simp only [Wasm.Mem.write64, roundtrip]
   have ne0 : other ≠ address := by omega
@@ -233,6 +263,7 @@ theorem writeUInt32s
     {heap : MemoryState} {store : Wasm.Store host} {frontierIndex : Nat}
     (related : ResidentAllocatorRel heap store frontierIndex)
     {address : Nat} {values : List UInt32} {result : LinearMemory}
+    (addressBase : heapBase ≤ address)
     (inBounds : address + 4 * values.length ≤ heap.memory.size)
     (written : heap.memory.writeUInt32s address values = .ok result) :
     ResidentAllocatorRel { heap with memory := result }
@@ -252,10 +283,11 @@ theorem writeUInt32s
         LinearMemory.writeUInt32_spec heap.memory address value headInBounds
       unfold LinearMemory.writeUInt32s at written
       rw [headWrite] at written
-      have middleRelated := related.writeUInt32 headInBounds headWrite
+      have middleRelated := related.writeUInt32 addressBase headInBounds
+        headWrite
       have tailInBounds : address + 4 + 4 * rest.length ≤ middle.size := by
         omega
-      have tailRelated := ih middleRelated tailInBounds written
+      have tailRelated := ih middleRelated (by omega) tailInBounds written
       simpa [ResidentMemoryRel.writeUInt32sMemory, UInt32.ofNat_add] using
         tailRelated
 
@@ -265,6 +297,7 @@ theorem writeHeader
     {heap : MemoryState} {store : Wasm.Store host} {frontierIndex : Nat}
     (related : ResidentAllocatorRel heap store frontierIndex)
     {address : Word32} {header : Header} {result : LinearMemory}
+    (addressBase : heapBase ≤ address.value)
     (inBounds : address.value + headerBytes ≤ heap.memory.size)
     (written : header.write heap.memory address = .ok result) :
     ResidentAllocatorRel { heap with memory := result }
@@ -272,7 +305,7 @@ theorem writeHeader
           (ResidentMemoryRel.writeUInt32sMemory store.mem
             (UInt32.ofNat address.value) header.words) }
       frontierIndex := by
-  apply related.writeUInt32s
+  apply related.writeUInt32s addressBase
   · simpa [Header.words, headerBytes] using inBounds
   · exact written
 
@@ -304,10 +337,9 @@ def pagesForEndSource (localId : Lean.FVarId) :
   .i32Const .uint32 1,
   .i32Add]
 
-/-- Public W6 spelling of the complete symbolic allocator body. -/
-def allocateSourceProgram (frontierIndex : Nat)
-    (requested current allocationEnd requiredPages currentPages growResult :
-      Lean.FVarId) : List Fir.Wasm.Instruction :=
+/-- Symbolic allocator prefix preceding the reuse-index search. -/
+def allocateSourcePrefix (frontierIndex : Nat)
+    (requested current : Lean.FVarId) : List Fir.Wasm.Instruction :=
   trapWhenTrueSource [
     .localGet requested,
     .i32Const .uint32 (UInt32.ofNat headerBytes),
@@ -318,7 +350,12 @@ def allocateSourceProgram (frontierIndex : Nat)
     .localGet current,
     .i32Const .uint32 (UInt32.ofNat heapBase),
     .i32LtU] ++
-  requireAlignedSource current ++
+  requireAlignedSource current
+
+/-- Symbolic bump-allocation suffix used when reuse search falls through. -/
+def allocateSourceSuffix (frontierIndex : Nat)
+    (requested current allocationEnd requiredPages currentPages growResult :
+      Lean.FVarId) : List Fir.Wasm.Instruction :=
   [.localGet current,
     .localGet requested,
     .i32Add,
@@ -350,6 +387,15 @@ def allocateSourceProgram (frontierIndex : Nat)
     .localGet current,
     .ret]
 
+/-- Public W6 spelling of the complete symbolic allocator body. -/
+def allocateSourceProgram (frontierIndex : Nat)
+    (requested current allocationEnd requiredPages currentPages growResult :
+      Lean.FVarId) : List Fir.Wasm.Instruction :=
+  allocateSourcePrefix frontierIndex requested current ++
+  Fir.Wasm.Emit.ResidentAllocator.reuseSearchBody ++
+  allocateSourceSuffix frontierIndex requested current allocationEnd
+    requiredPages currentPages growResult
+
 /-- The public emitter definition has exactly the W6-spelled source shape. -/
 theorem allocateFunction_shape (frontierIndex : Nat) :
     (Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex).body =
@@ -380,15 +426,234 @@ def pagesForEndProgram (localIndex : Nat) : Wasm.Program := [
   .const 1,
   .add]
 
-/-- Exact adapted body of `fir_heap_alloc`.  Local zero is the requested
-byte count; locals one through five are respectively current frontier,
-allocation end, required pages, current pages, and the grow result. -/
-def allocateProgram (frontierIndex : Nat) : Wasm.Program :=
+/-- The validation/unlink branch retained inside the exact adapted loop.
+It is computed from the public source builder under the exact loop/if label
+context, so W6 does not duplicate W7's private representation. -/
+def requestedBytesId : Lean.FVarId := ⟨`requestedBytes⟩
+def currentId : Lean.FVarId := ⟨`current⟩
+def allocationEndId : Lean.FVarId := ⟨`allocationEnd⟩
+def allocationBytesId : Lean.FVarId := ⟨`allocationBytes⟩
+def bucketAddressId : Lean.FVarId := ⟨`bucketAddress⟩
+def candidateId : Lean.FVarId := ⟨`candidate⟩
+def previousId : Lean.FVarId := ⟨`previous⟩
+def nextId : Lean.FVarId := ⟨`next⟩
+def freeListSearchLoopId : Lean.FVarId := ⟨`freeListSearchLoop⟩
+
+/-- W6-visible spelling of W7's canonical dead-block validator. -/
+def validateCandidateSource : List Fir.Wasm.Instruction :=
+  trapWhenTrueSource [
+    .localGet candidateId,
+    .i32Const .uint32 (UInt32.ofNat heapBase),
+    .i32LtU] ++
+  requireAlignedSource candidateId ++
+  [.localGet candidateId,
+    .i32Const .uint32 (UInt32.ofNat headerBytes),
+    .i32Add,
+    .localSet allocationEndId] ++
+  trapWhenTrueSource [
+    .localGet allocationEndId,
+    .localGet candidateId,
+    .i32LtU] ++
+  trapWhenTrueSource [
+    .localGet currentId,
+    .localGet allocationEndId,
+    .i32LtU] ++
+  trapWhenTrueSource [
+    .localGet candidateId,
+    .i32Load .uint32 (UInt32.ofNat headerKindOffset),
+    .i32Const .uint32 ObjectKind.freed.code,
+    .i32Ne] ++
+  trapWhenTrueSource [
+    .localGet candidateId,
+    .i32Load .uint32 (UInt32.ofNat headerFlagsOffset)] ++
+  trapWhenTrueSource [
+    .localGet candidateId,
+    .i32Load .uint32 (UInt32.ofNat headerRefCountOffset)] ++
+  trapWhenTrueSource [
+    .localGet candidateId,
+    .i32Load .uint32 (UInt32.ofNat headerAux0Offset)] ++
+  trapWhenTrueSource [
+    .localGet candidateId,
+    .i32Load .uint32 (UInt32.ofNat headerAux1Offset)] ++
+  trapWhenTrueSource [
+    .localGet candidateId,
+    .i32Load .uint32 (UInt32.ofNat headerAux2Offset)] ++
+  trapWhenTrueSource [
+    .localGet candidateId,
+    .i32Load .uint32 (UInt32.ofNat headerAux3Offset)] ++
+  [.localGet candidateId,
+    .i32Load .uint32 (UInt32.ofNat headerAllocationBytesOffset),
+    .localSet allocationBytesId] ++
+  trapWhenTrueSource [
+    .localGet allocationBytesId,
+    .i32Const .uint32 (UInt32.ofNat headerBytes),
+    .i32LtU] ++
+  requireAlignedSource allocationBytesId ++
+  [.localGet candidateId,
+    .localGet allocationBytesId,
+    .i32Add,
+    .localSet allocationEndId] ++
+  trapWhenTrueSource [
+    .localGet allocationEndId,
+    .localGet candidateId,
+    .i32LtU] ++
+  trapWhenTrueSource [
+    .localGet currentId,
+    .localGet allocationEndId,
+    .i32LtU]
+
+/-- Exact source branch guarded by the reuse loop's nonzero candidate test. -/
+def reuseCandidateSource : List Fir.Wasm.Instruction :=
+  validateCandidateSource ++ [
+    .localGet candidateId,
+    .i32Load .uint32 (UInt32.ofNat
+      Fir.Wasm.Emit.ResidentAllocator.freeListLinkOffset),
+    .localSet nextId,
+    .localGet allocationBytesId,
+    .localGet requestedBytesId,
+    .i32Eq,
+    .ifElse [
+      .localGet previousId,
+      .i32Eqz,
+      .ifElse [
+        .localGet bucketAddressId,
+        .localGet nextId,
+        .i32Store .uint32 0] [
+        .localGet previousId,
+        .localGet nextId,
+        .i32Store .uint32 (UInt32.ofNat
+          Fir.Wasm.Emit.ResidentAllocator.freeListLinkOffset)],
+      .localGet candidateId,
+      .ret] [
+      .localGet candidateId,
+      .localSet previousId,
+      .localGet nextId,
+      .localSet candidateId,
+      .br freeListSearchLoopId]]
+
+def reuseCandidateProgram (sourceModule : Fir.Wasm.Module)
+    (frontierIndex : Nat) : Wasm.Program :=
+  match FirTalos.instructions sourceModule
+      (Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex)
+      [none, some freeListSearchLoopId] reuseCandidateSource with
+  | .ok program => program
+  | .error _ => []
+
+/-- Public source spelling of the outer free-list search.  Private emitter
+identifiers are mirrored only by their stable names; the validator itself is
+kept behind `reuseCandidateSource`. -/
+theorem reuseSearchBody_shape :
+    Fir.Wasm.Emit.ResidentAllocator.reuseSearchBody =
+      Fir.Wasm.Emit.ResidentAllocator.bucketAddressBody
+        requestedBytesId bucketAddressId ++ [
+        .localGet bucketAddressId,
+        .i32Load .uint32 0,
+        .localSet candidateId,
+        .i32Const .uint32 0,
+        .localSet previousId,
+        .loop freeListSearchLoopId [
+          .localGet candidateId,
+          .ifElse reuseCandidateSource []]] := by
+  rfl
+
+/-- Exact Talos adaptation of W7's private free-list search.  The no-entry
+path is transparent while the representation-sized validation branch stays
+factored through `reuseCandidateProgram`. -/
+def reuseSearchProgram (sourceModule : Fir.Wasm.Module)
+    (frontierIndex : Nat) : Wasm.Program := [
+  .localGet 0, .const 3, .shrU, .const 1, .sub, .const 255, .and,
+  .const 4, .mul, .localSet 7,
+  .localGet 7, .load32 0, .localSet 8,
+  .const 0, .localSet 9,
+  .loop 0 0 [
+    .localGet 8,
+    .iff 0 0 (reuseCandidateProgram sourceModule frontierIndex) []]]
+
+/-- The empty-head path is a closed, transparent prefix even though the
+candidate validator remains representation-private. -/
+theorem reuseSearchProgram_shape (sourceModule : Fir.Wasm.Module)
+    (frontierIndex : Nat) :
+    reuseSearchProgram sourceModule frontierIndex = [
+      .localGet 0, .const 3, .shrU, .const 1, .sub, .const 255, .and,
+      .const 4, .mul, .localSet 7,
+      .localGet 7, .load32 0, .localSet 8,
+      .const 0, .localSet 9,
+      .loop 0 0 [
+        .localGet 8,
+        .iff 0 0 (reuseCandidateProgram sourceModule frontierIndex) []]] := by
+  rfl
+
+/-- A zero bucket head makes W7's reuse loop fall through without entering
+the representation-sensitive candidate validator.  This is the exact loop
+fact needed by the legacy bump-only allocator relation. -/
+theorem wp_reuseSearchLoop_empty
+    {sourceModule : Fir.Wasm.Module} {frontierIndex : Nat}
+    {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {Q : Wasm.Assertion host} {store : Wasm.Store host}
+    {locals : Wasm.Locals} {rest : Wasm.Program}
+    (candidateZero : locals.get 8 = some (.i32 0))
+    (continued : Wasm.wp module rest Q store locals env) :
+    Wasm.wp module
+      (.loop 0 0 [
+        .localGet 8,
+        .iff 0 0 (reuseCandidateProgram sourceModule frontierIndex) []] ::
+          rest)
+      Q store locals env := by
+  apply Wasm.wp_loop_cons
+    (Inv := fun store' locals' => store' = store ∧ locals' = locals)
+    (μ := fun _ _ => 0)
+  · exact ⟨rfl, rfl⟩
+  · rintro store' locals' ⟨rfl, rfl⟩
+    rw [Wasm.wp_localGet_cons, candidateZero]
+    apply Wasm.wp_iff_cons rfl
+    simpa only [if_neg (by decide : ¬(0 : UInt32) ≠ 0), Wasm.wp_nil,
+      List.take_zero, List.drop_zero, List.nil_append] using continued
+
+/-- Physical free-list head selected by W7's eight-byte size-class hash. -/
+def bucketAddressWord (bytes : UInt32) : UInt32 :=
+  (((bytes >>> 3) - 1) &&& 255) * 4
+
+theorem bucketAddressWord_before_heapBase (bytes : UInt32) :
+    (bucketAddressWord bytes).toNat + 3 < heapBase := by
+  have maskedLe : ((((bytes >>> 3) - 1) &&& 255 : UInt32).toNat) ≤ 255 := by
+    rw [UInt32.toNat_and]
+    exact Nat.and_le_right
+  unfold bucketAddressWord
+  rw [UInt32.toNat_mul]
+  simp only [UInt32.toNat_ofNat, Nat.reducePow, Nat.reduceMod]
+  rw [Nat.mod_eq_of_lt (by omega)]
+  simpa [heapBase] using (show
+    ((((bytes >>> 3) - 1) &&& 255 : UInt32).toNat) * 4 + 3 < 1024 by
+      omega)
+
+theorem bucketHeadZero
+    {heap : MemoryState} {store : Wasm.Store host} {frontierIndex : Nat}
+    (related : ResidentAllocatorRel heap store frontierIndex)
+    (bytes : UInt32) :
+    store.mem.read32 (bucketAddressWord bytes) = 0 := by
+  have bound := bucketAddressWord_before_heapBase bytes
+  have byte0 := related.reservedPrefixZero
+    (bucketAddressWord bytes).toNat (by omega)
+  have byte1 := related.reservedPrefixZero
+    ((bucketAddressWord bytes).toNat + 1) (by omega)
+  have byte2 := related.reservedPrefixZero
+    ((bucketAddressWord bytes).toNat + 2) (by omega)
+  have byte3 := related.reservedPrefixZero
+    ((bucketAddressWord bytes).toNat + 3) (by omega)
+  unfold Wasm.Mem.read32
+  rw [byte0, byte1, byte2, byte3]
+  decide
+
+/-- Adapted allocator prefix preceding the reuse-index search. -/
+def allocatePrefixProgram (frontierIndex : Nat) : Wasm.Program :=
   trapWhenTrueProgram [.localGet 0, .const 32, .ltU] ++
   requireAlignedProgram 0 ++
   [.globalGet frontierIndex, .localSet 1] ++
   trapWhenTrueProgram [.localGet 1, .const 1024, .ltU] ++
-  requireAlignedProgram 1 ++
+  requireAlignedProgram 1
+
+/-- Adapted bump-allocation suffix used when reuse search falls through. -/
+def allocateSuffixProgram (frontierIndex : Nat) : Wasm.Program :=
   [.localGet 1, .localGet 0, .add, .localSet 2] ++
   trapWhenTrueProgram [.localGet 2, .localGet 1, .ltU] ++
   pagesForEndProgram 2 ++
@@ -411,14 +676,23 @@ def allocateProgram (frontierIndex : Nat) : Wasm.Program :=
     .localGet 1,
     .ret]
 
+/-- Exact adapted body of `fir_heap_alloc`.  Local zero is the requested
+byte count; locals one through five are respectively current frontier,
+allocation end, required pages, current pages, and the grow result. -/
+def allocateProgram (sourceModule : Fir.Wasm.Module)
+    (frontierIndex : Nat) : Wasm.Program :=
+  allocatePrefixProgram frontierIndex ++
+  reuseSearchProgram sourceModule frontierIndex ++
+  allocateSuffixProgram frontierIndex
+
 /-- Machine value computed by `pagesForEndProgram`. -/
 def pagesForEndWord (allocationEnd : UInt32) : UInt32 :=
   ((allocationEnd - 1) >>> 16) + 1
 
-/-- Concrete call frame of the one-parameter/five-local allocator body. -/
+/-- Concrete call frame of the one-parameter/ten-local allocator body. -/
 def allocateEntry (requestedBytes : UInt32) : Wasm.Locals := {
   params := [.i32 requestedBytes]
-  locals := List.replicate 5 (.i32 0)
+  locals := List.replicate 10 (.i32 0)
   values := [] }
 
 /-- Store update performed after a successful optional memory growth. -/
@@ -438,6 +712,8 @@ theorem setFrontierStore_related
     (memoryRelated : ResidentMemoryRel after memory)
     (frontierBase : heapBase ≤ after.heapCursor)
     (frontierFits : after.heapCursor < wordModulus)
+    (reservedPrefixZero : ∀ address, address < heapBase →
+      memory.bytes address = 0)
     (zeroAfterExtent : ∀ address, after.memory.size ≤ address →
       memory.bytes address = 0) :
     ResidentAllocatorRel after
@@ -450,6 +726,8 @@ theorem setFrontierStore_related
     frontierBase
     frontierFits
     frontier := by simp [setFrontierStore, indexInBounds]
+    reservedPrefixZero := by
+      simpa [setFrontierStore] using reservedPrefixZero
     zeroAfterExtent := by simpa [setFrontierStore] using zeroAfterExtent }
 
 /-- Eight-byte natural alignment transfers exactly to the wasm32 mask check
@@ -469,6 +747,7 @@ already fits in the current linear-memory extent.  The theorem exposes only
 the machine checks performed by the emitter; W6 refinement discharges them
 from allocation and frontier invariants below. -/
 theorem wp_allocateProgram_noGrow
+    {sourceModule : Fir.Wasm.Module}
     {module : Wasm.Module} {env : Wasm.HostEnv host}
     {Q : Wasm.Assertion host} {store : Wasm.Store host}
     {frontierIndex : Nat} {requested current : UInt32}
@@ -478,13 +757,16 @@ theorem wp_allocateProgram_noGrow
     (requestedAligned : requested &&& 7 = 0)
     (currentBase : ¬ current < 1024)
     (currentAligned : current &&& 7 = 0)
+    (bucketInBounds : ¬ (bucketAddressWord requested).toNat + 4 >
+      store.mem.pages * wasmPageBytes)
+    (headZero : store.mem.read32 (bucketAddressWord requested) = 0)
     (noWrap : ¬ current + requested < current)
     (noGrow : ¬ UInt32.ofNat store.mem.pages <
       pagesForEndWord (current + requested))
     (returned : Q (.Return
       (setFrontierStore store frontierIndex (current + requested))
       [.i32 current])) :
-    Wasm.wp module (allocateProgram frontierIndex) Q store
+    Wasm.wp module (allocateProgram sourceModule frontierIndex) Q store
       (allocateEntry requested) env := by
   have requestedAligned' : 7 &&& requested = 0 := by
     simpa [UInt32.and_comm] using requestedAligned
@@ -492,11 +774,20 @@ theorem wp_allocateProgram_noGrow
     simpa [UInt32.and_comm] using currentAligned
   have noWrap' : ¬ requested + current < current := by
     simpa [UInt32.add_comm] using noWrap
+  have bucketInBounds' := bucketInBounds
+  simp [bucketAddressWord, UInt32.mul_comm] at bucketInBounds'
+  have bucketInBounds'' : ¬ store.mem.pages * 65536 <
+      4 * (255 &&& (requested >>> 3 - 1).toNat) % 4294967296 + 4 := by
+    simpa [wasmPageBytes, Nat.and_comm] using bucketInBounds'
+  have headZero' : store.mem.read32
+      ((4 : UInt32) * ((255 : UInt32) &&& (requested >>> 3 - 1))) = 0 := by
+    simpa [bucketAddressWord, UInt32.mul_comm, UInt32.and_comm] using headZero
   simp [pagesForEndWord, UInt32.add_comm] at noGrow
   have noGrow' : ¬ UInt32.ofNat store.mem.pages <
       (1 : UInt32) + ((requested + current - 1) >>> 16) :=
     UInt32.not_lt.mpr noGrow
-  unfold allocateProgram requireAlignedProgram pagesForEndProgram allocateEntry
+  unfold allocateProgram allocatePrefixProgram allocateSuffixProgram
+    requireAlignedProgram pagesForEndProgram allocateEntry
   simp only [trapWhenTrueProgram, List.cons_append, List.nil_append]
   wp_run
   simp [requestedMinimum]
@@ -519,6 +810,11 @@ theorem wp_allocateProgram_noGrow
   apply Wasm.wp_iff_cons rfl
   simp only [if_neg (by decide : ¬(0 : UInt32) ≠ 0), Wasm.wp_nil,
     List.take_zero, List.drop_zero, List.nil_append]
+  rw [reuseSearchProgram_shape]
+  simp only [List.cons_append, List.nil_append]
+  wp_run
+  simp [bucketInBounds'', headZero']
+  apply wp_reuseSearchLoop_empty (candidateZero := by rfl)
   wp_run
   simp [noWrap']
   apply Wasm.wp_iff_cons rfl
@@ -537,6 +833,7 @@ theorem wp_allocateProgram_noGrow
 memory.  `grown` is Talos's atomic `memory.grow` contract; the W6 corollary
 constructs it from the page arithmetic and module capacity. -/
 theorem wp_allocateProgram_grow
+    {sourceModule : Fir.Wasm.Module}
     {module : Wasm.Module} {env : Wasm.HostEnv host}
     {Q : Wasm.Assertion host} {store : Wasm.Store host}
     {frontierIndex : Nat} {requested current : UInt32}
@@ -547,6 +844,9 @@ theorem wp_allocateProgram_grow
     (requestedAligned : requested &&& 7 = 0)
     (currentBase : ¬ current < 1024)
     (currentAligned : current &&& 7 = 0)
+    (bucketInBounds : ¬ (bucketAddressWord requested).toNat + 4 >
+      store.mem.pages * wasmPageBytes)
+    (headZero : store.mem.read32 (bucketAddressWord requested) = 0)
     (noWrap : ¬ current + requested < current)
     (grow : UInt32.ofNat store.mem.pages <
       pagesForEndWord (current + requested))
@@ -558,7 +858,7 @@ theorem wp_allocateProgram_grow
       (setFrontierStore { store with mem := grownMemory } frontierIndex
         (current + requested))
       [.i32 current])) :
-    Wasm.wp module (allocateProgram frontierIndex) Q store
+    Wasm.wp module (allocateProgram sourceModule frontierIndex) Q store
       (allocateEntry requested) env := by
   have requestedAligned' : 7 &&& requested = 0 := by
     simpa [UInt32.and_comm] using requestedAligned
@@ -566,8 +866,17 @@ theorem wp_allocateProgram_grow
     simpa [UInt32.and_comm] using currentAligned
   have noWrap' : ¬ requested + current < current := by
     simpa [UInt32.add_comm] using noWrap
+  have bucketInBounds' := bucketInBounds
+  simp [bucketAddressWord, UInt32.mul_comm] at bucketInBounds'
+  have bucketInBounds'' : ¬ store.mem.pages * 65536 <
+      4 * (255 &&& (requested >>> 3 - 1).toNat) % 4294967296 + 4 := by
+    simpa [wasmPageBytes, Nat.and_comm] using bucketInBounds'
+  have headZero' : store.mem.read32
+      ((4 : UInt32) * ((255 : UInt32) &&& (requested >>> 3 - 1))) = 0 := by
+    simpa [bucketAddressWord, UInt32.mul_comm, UInt32.and_comm] using headZero
   simp [pagesForEndWord, UInt32.add_comm] at grow grown
-  unfold allocateProgram requireAlignedProgram pagesForEndProgram allocateEntry
+  unfold allocateProgram allocatePrefixProgram allocateSuffixProgram
+    requireAlignedProgram pagesForEndProgram allocateEntry
   simp only [trapWhenTrueProgram, List.cons_append, List.nil_append]
   wp_run
   simp [requestedMinimum]
@@ -590,6 +899,11 @@ theorem wp_allocateProgram_grow
   apply Wasm.wp_iff_cons rfl
   simp only [if_neg (by decide : ¬(0 : UInt32) ≠ 0), Wasm.wp_nil,
     List.take_zero, List.drop_zero, List.nil_append]
+  rw [reuseSearchProgram_shape]
+  simp only [List.cons_append, List.nil_append]
+  wp_run
+  simp [bucketInBounds'', headZero']
+  apply wp_reuseSearchLoop_empty (candidateZero := by rfl)
   wp_run
   simp [noWrap']
   apply Wasm.wp_iff_cons rfl
@@ -613,6 +927,7 @@ allocator.  The strict endpoint premise exposes the sole current discrepancy
 between the two contracts: W6 still admits the unrepresentable cursor `2^32`,
 whereas the resident wasm32 allocator must reject it. -/
 theorem wp_allocateProgram_of_allocate
+    {sourceModule : Fir.Wasm.Module}
     {module : Wasm.Module} {env : Wasm.HostEnv host}
     {before after : MemoryState} {store : Wasm.Store host}
     {frontierIndex requestedBytes : Nat} {address : Word32}
@@ -626,7 +941,7 @@ theorem wp_allocateProgram_of_allocate
       store.memoryCap module 0) :
     ∃ finalStore,
       ResidentAllocatorRel after finalStore frontierIndex ∧
-      Wasm.wp module (allocateProgram frontierIndex)
+      Wasm.wp module (allocateProgram sourceModule frontierIndex)
         (fun completion => completion = .Return finalStore
           [.i32 (UInt32.ofNat address.value)])
         store (allocateEntry (UInt32.ofNat requestedBytes)) env := by
@@ -682,6 +997,20 @@ theorem wp_allocateProgram_of_allocate
     alignedWord_of_mod8 requestedFits32 requestAligned8
   have currentWordAligned : UInt32.ofNat before.heapCursor &&& 7 = 0 :=
     alignedWord_of_mod8 beforeFits32 beforeAligned8
+  have bucketInBounds :
+      ¬ (bucketAddressWord (UInt32.ofNat requestedBytes)).toNat + 4 >
+        store.mem.pages * wasmPageBytes := by
+    have bucketBefore := bucketAddressWord_before_heapBase
+      (UInt32.ofNat requestedBytes)
+    have bucketEnd :
+        (bucketAddressWord (UInt32.ofNat requestedBytes)).toNat + 4 ≤
+          heapBase := by omega
+    have heapBaseInMemory : heapBase ≤ before.memory.size :=
+      Nat.le_trans related.frontierBase valid.cursorInBounds
+    have residentSize : before.memory.size =
+        store.mem.pages * wasmPageBytes :=
+      related.toResidentMemoryRel.size_eq
+    omega
   have additionWord : UInt32.ofNat before.heapCursor +
       UInt32.ofNat requestedBytes = UInt32.ofNat after.heapCursor := by
     rw [← UInt32.ofNat_add, cursorEq]
@@ -749,11 +1078,15 @@ theorem wp_allocateProgram_of_allocate
     have beforeExtent : before.memory.size ≤ other :=
       Nat.le_trans extension.memorySize afterExtent
     simpa [finalMemory] using related.zeroAfterExtent other beforeExtent
+  have prefixZero : ∀ other, other < heapBase →
+      finalMemory.bytes other = 0 := by
+    intro other beforeBase
+    simpa [finalMemory] using related.reservedPrefixZero other beforeBase
   have finalBase : heapBase ≤ after.heapCursor := by
     exact Nat.le_trans related.frontierBase (by omega)
   have finalRelated : ResidentAllocatorRel after finalStore frontierIndex := by
     simpa [finalStore] using setFrontierStore_related related memoryRelated
-      finalBase strictEnd zeroAfter
+      finalBase strictEnd prefixZero zeroAfter
   refine ⟨finalStore, finalRelated, ?_⟩
   by_cases grows : store.mem.pages < requiredPages
   · have growsWord : UInt32.ofNat store.mem.pages <
@@ -781,7 +1114,8 @@ theorem wp_allocateProgram_of_allocate
       rw [sentinel] at equalNats
       omega
     apply wp_allocateProgram_grow memory32 related.frontier requestedMinimum
-      requestedWordAligned currentBase currentWordAligned noWrap growsWord
+      requestedWordAligned currentBase currentWordAligned
+      bucketInBounds (bucketHeadZero related _) noWrap growsWord
       grownFinal growResultValid
     simp only [addressEq]
     rw [additionWord]
@@ -797,19 +1131,106 @@ theorem wp_allocateProgram_of_allocate
         store.mem
       rw [Nat.max_eq_left (Nat.le_of_not_gt grows)]
     apply wp_allocateProgram_noGrow memory32 related.frontier requestedMinimum
-      requestedWordAligned currentBase currentWordAligned noWrap noGrowsWord
+      requestedWordAligned currentBase currentWordAligned
+      bucketInBounds (bucketHeadZero related _) noWrap noGrowsWord
     simp only [finalStore, finalMemoryEq, addressEq]
     rw [additionWord]
 
 /-- Canonical Talos function shape of the resident raw allocator.  Keeping
 the optional physical suffix explicit lets execution proofs compose with the
 adapter without assuming how its terminal-marker policy evolves. -/
-def allocateTargetFunction (frontierIndex : Nat)
+def allocateTargetFunction (sourceModule : Fir.Wasm.Module) (frontierIndex : Nat)
     (suffix : Wasm.Program := []) : Wasm.Function := {
   params := [.i32]
-  locals := [.i32, .i32, .i32, .i32, .i32]
+  locals := [.i32, .i32, .i32, .i32, .i32,
+    .i32, .i32, .i32, .i32, .i32]
   results := [.i32]
-  body := allocateProgram frontierIndex ++ suffix }
+  body := allocateProgram sourceModule frontierIndex ++ suffix }
+
+set_option maxRecDepth 2048 in
+/-- The representation-sensitive candidate branch adapts without consulting
+module calls.  Factoring this equation prevents the outer loop proof from
+expanding the complete dead-header validator. -/
+theorem instructions_reuseCandidateSource
+    {sourceModule : Fir.Wasm.Module} {frontierIndex : Nat} :
+    FirTalos.instructions sourceModule
+      (Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex)
+      [none, some freeListSearchLoopId] reuseCandidateSource =
+        .ok (reuseCandidateProgram sourceModule frontierIndex) := by
+  let source := Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex
+  have requestedFound : FirTalos.findFVar?
+      (source.params.toList ++ source.locals.toList) requestedBytesId =
+        some 0 := by rfl
+  have currentFound : FirTalos.findFVar?
+      (source.params.toList ++ source.locals.toList) currentId =
+        some 1 := by rfl
+  have allocationEndFound : FirTalos.findFVar?
+      (source.params.toList ++ source.locals.toList) allocationEndId =
+        some 2 := by rfl
+  have allocationBytesFound : FirTalos.findFVar?
+      (source.params.toList ++ source.locals.toList) allocationBytesId =
+        some 6 := by rfl
+  have bucketFound : FirTalos.findFVar?
+      (source.params.toList ++ source.locals.toList) bucketAddressId =
+        some 7 := by rfl
+  have candidateFound : FirTalos.findFVar?
+      (source.params.toList ++ source.locals.toList) candidateId =
+        some 8 := by rfl
+  have previousFound : FirTalos.findFVar?
+      (source.params.toList ++ source.locals.toList) previousId =
+        some 9 := by rfl
+  have nextFound : FirTalos.findFVar?
+      (source.params.toList ++ source.locals.toList) nextId =
+        some 10 := by rfl
+  dsimp only [source] at requestedFound currentFound allocationEndFound
+  dsimp only [source] at allocationBytesFound bucketFound candidateFound
+  dsimp only [source] at previousFound nextFound
+  unfold reuseCandidateProgram
+  generalize adaptedEq : FirTalos.instructions sourceModule
+      (Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex)
+      [none, some freeListSearchLoopId] reuseCandidateSource = adapted
+  cases adapted with
+  | error error =>
+      simp [reuseCandidateSource, validateCandidateSource,
+        trapWhenTrueSource, requireAlignedSource, FirTalos.instructions,
+        FirTalos.instruction, requestedFound, currentFound,
+        allocationEndFound, allocationBytesFound, bucketFound,
+        candidateFound, previousFound, nextFound,
+        Bind.bind, Except.bind, pure, Except.pure] at adaptedEq
+      cases adaptedEq
+  | ok program => simp
+
+set_option maxRecDepth 2048 in
+/-- W7's public reuse-search builder adapts without consulting module calls. -/
+theorem instructions_reuseSearchBody
+    {sourceModule : Fir.Wasm.Module} {frontierIndex : Nat} :
+    FirTalos.instructions sourceModule
+      (Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex) []
+      Fir.Wasm.Emit.ResidentAllocator.reuseSearchBody =
+        .ok (reuseSearchProgram sourceModule frontierIndex) := by
+  have requestedFound : FirTalos.findFVar?
+      ((Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex).params.toList ++
+        (Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex).locals.toList)
+      requestedBytesId = some 0 := by rfl
+  have bucketFound : FirTalos.findFVar?
+      ((Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex).params.toList ++
+        (Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex).locals.toList)
+      bucketAddressId = some 7 := by rfl
+  have candidateFound : FirTalos.findFVar?
+      ((Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex).params.toList ++
+        (Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex).locals.toList)
+      candidateId = some 8 := by rfl
+  have previousFound : FirTalos.findFVar?
+      ((Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex).params.toList ++
+        (Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex).locals.toList)
+      previousId = some 9 := by rfl
+  rw [reuseSearchBody_shape, FirTalos.Correctness.instructions_append]
+  simp [reuseSearchProgram, FirTalos.instructions, FirTalos.instruction,
+    Fir.Wasm.Emit.ResidentAllocator.bucketAddressBody,
+    instructions_reuseCandidateSource, requestedFound, bucketFound,
+    candidateFound, previousFound,
+    Bind.bind, Except.bind, pure, Except.pure]
+  rfl
 
 set_option maxRecDepth 2048 in
 /-- The symbolic allocator adapts exactly to the target body above.  This
@@ -820,7 +1241,7 @@ theorem instructions_allocateFunction
     FirTalos.instructions sourceModule
       (Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex) []
       (Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex).body =
-        .ok (allocateProgram frontierIndex) := by
+        .ok (allocateProgram sourceModule frontierIndex) := by
   let source := Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex
   have requestedFound : FirTalos.findFVar?
       (source.params.toList ++ source.locals.toList) source.params[0]!.1 =
@@ -840,16 +1261,40 @@ theorem instructions_allocateFunction
   have growResultFound : FirTalos.findFVar?
       (source.params.toList ++ source.locals.toList) source.locals[4]!.1 =
         some 5 := by rfl
+  have prefixAdapted : FirTalos.instructions sourceModule source []
+      (allocateSourcePrefix frontierIndex source.params[0]!.1
+        source.locals[0]!.1) = .ok (allocatePrefixProgram frontierIndex) := by
+    simp [allocateSourcePrefix, allocatePrefixProgram, source,
+      requireAlignedSource, trapWhenTrueSource, requireAlignedProgram,
+      trapWhenTrueProgram, FirTalos.instructions, FirTalos.instruction,
+      requestedFound, currentFound, Bind.bind, Except.bind, pure,
+      Except.pure, headerBytes, heapBase]
+    rfl
+  have reuseAdapted : FirTalos.instructions sourceModule source []
+      Fir.Wasm.Emit.ResidentAllocator.reuseSearchBody =
+        .ok (reuseSearchProgram sourceModule frontierIndex) := by
+    simpa [source] using
+      (instructions_reuseSearchBody (sourceModule := sourceModule)
+        (frontierIndex := frontierIndex))
+  have suffixAdapted : FirTalos.instructions sourceModule source []
+      (allocateSourceSuffix frontierIndex source.params[0]!.1
+        source.locals[0]!.1 source.locals[1]!.1 source.locals[2]!.1
+        source.locals[3]!.1 source.locals[4]!.1) =
+        .ok (allocateSuffixProgram frontierIndex) := by
+    simp [allocateSourceSuffix, allocateSuffixProgram, source,
+      pagesForEndSource, trapWhenTrueSource, pagesForEndProgram,
+      trapWhenTrueProgram, FirTalos.instructions, FirTalos.instruction,
+      requestedFound, currentFound, endFound, requiredPagesFound,
+      currentPagesFound, growResultFound, Bind.bind, Except.bind, pure,
+      Except.pure]
   change FirTalos.instructions sourceModule source [] source.body = _
   rw [allocateFunction_shape]
-  simp [source, allocateSourceProgram, requireAlignedSource,
-    pagesForEndSource, trapWhenTrueSource, allocateProgram,
-    requireAlignedProgram, pagesForEndProgram, trapWhenTrueProgram,
-    FirTalos.instructions, FirTalos.instruction,
-    requestedFound, currentFound, endFound, requiredPagesFound,
-    currentPagesFound, growResultFound, Bind.bind, Except.bind, pure,
-    Except.pure]
-  decide
+  unfold allocateSourceProgram allocateProgram
+  have prefixReuseAdapted :=
+    FirTalos.Correctness.instructions_append_of_success prefixAdapted
+      reuseAdapted
+  exact FirTalos.Correctness.instructions_append_of_success
+    prefixReuseAdapted suffixAdapted
 
 /-- Successful adaptation produces the complete canonical target function,
 not merely a body fragment.  Call-level proofs can therefore recover the
@@ -860,7 +1305,7 @@ theorem adaptedAllocateFunction_eq
     (adapted : FirTalos.function sourceModule
       (Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex) =
         .ok targetFunction) :
-    targetFunction = allocateTargetFunction frontierIndex
+    targetFunction = allocateTargetFunction sourceModule frontierIndex
       (FirTalos.functionTerminal sourceModule
         (Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex)) := by
   unfold FirTalos.function at adapted
@@ -879,7 +1324,7 @@ theorem adaptedAllocateFunction_body
     (adapted : FirTalos.function sourceModule
       (Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex) =
         .ok targetFunction) :
-    targetFunction.body = allocateProgram frontierIndex ++
+    targetFunction.body = allocateProgram sourceModule frontierIndex ++
       FirTalos.functionTerminal sourceModule
         (Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex) := by
   rw [adaptedAllocateFunction_eq adapted]
@@ -924,14 +1369,14 @@ theorem terminatesWith_allocateFunction_of_allocate
   rw [targetShape] at found
   let suffix := FirTalos.functionTerminal sourceModule
     (Fir.Wasm.Emit.ResidentAllocator.allocateFunction frontierIndex)
-  let targetFunction' := allocateTargetFunction frontierIndex suffix
+  let targetFunction' := allocateTargetFunction sourceModule frontierIndex suffix
   refine FirTalos.Correctness.terminatesWith_of_wp_body_at
     (function := targetFunction')
     (Post := fun final values =>
       final = finalStore ∧
         values = [.i32 (UInt32.ofNat address.value)])
     notImport (by simpa [targetFunction', suffix] using found) ?_
-  have coreWP' : Wasm.wp module (allocateProgram frontierIndex)
+  have coreWP' : Wasm.wp module (allocateProgram sourceModule frontierIndex)
       (fun completion => completion = .Return finalStore
         [.i32 (UInt32.ofNat address.value)]) store
       (targetFunction'.toLocals
@@ -946,7 +1391,8 @@ theorem terminatesWith_allocateFunction_of_allocate
       (targetFunction'.toLocals
         (([.i32 (UInt32.ofNat requestedBytes)] : List Wasm.Value).take
           targetFunction'.numParams).reverse) env := by
-    change Wasm.wp module (allocateProgram frontierIndex ++ suffix) _ _ _ _
+    change Wasm.wp module
+      (allocateProgram sourceModule frontierIndex ++ suffix) _ _ _ _
     exact FirTalos.Correctness.Wasm.wp_append_of_no_fallthrough
       (by intros; simp) coreWP'
   apply Wasm.wp.conseq _ physicalWP

@@ -270,12 +270,13 @@ theorem writeHeaderStore_refines
     {address : Word32} {header : Header} {result : LinearMemory}
     {kind marker sign count : UInt32}
     (words : header.words = headerWords kind marker sign count)
+    (addressBase : heapBase ≤ address.value)
     (inBounds : address.value + headerBytes ≤ heap.memory.size)
     (written : header.write heap.memory address = .ok result) :
     ResidentAllocatorRel { heap with memory := result }
       (writeHeaderStore store (UInt32.ofNat address.value)
         kind marker sign count) frontierIndex := by
-  have refined := related.writeHeader inBounds written
+  have refined := related.writeHeader addressBase inBounds written
   rw [writeHeaderStore_eq_words, ResidentMemoryRel.writeUInt32sStore_eq,
     ← words]
   exact refined
@@ -289,6 +290,7 @@ theorem writeAllocationHeaderStore_refines
     {allocationBytes : Nat} {marker sign count : UInt32}
     (allocationWord : UInt32.ofNat allocationBytes =
       UInt32.ofNat headerBytes + scale8Word count)
+    (addressBase : heapBase ≤ address.value)
     (inBounds : address.value + headerBytes ≤ heap.memory.size)
     (written : (Header.forAllocation kind allocationBytes false marker count
       sign 0).write heap.memory address = .ok result) :
@@ -298,6 +300,7 @@ theorem writeAllocationHeaderStore_refines
   apply writeHeaderStore_refines related
   · exact forAllocation_words kind allocationBytes marker sign count
       allocationWord
+  · exact addressBase
   · exact inBounds
   · exact written
 
@@ -513,6 +516,9 @@ theorem wp_allocateObjectProgram_of_allocateObject
     have minimum := align8_ge
       (headerBytes + target.semanticSlotBytes * limbCount)
     omega
+  have addressBase : heapBase ≤ address.value := by
+    rw [rawPost.addressValue]
+    exact Nat.le_trans related.frontierBase (align8_ge before.heapCursor)
   have addressFits : address.value < UInt32.size := by
     simpa [wordModulus, UInt32.size] using address.isLt
   have physicalHeaderInBounds :
@@ -525,7 +531,7 @@ theorem wp_allocateObjectProgram_of_allocateObject
     (UInt32.ofNat address.value) kind.code marker sign
       (UInt32.ofNat limbCount)
   have finalRelatedRaw := writeAllocationHeaderStore_refines middleRelated
-    allocationWord headerInBounds headerWritten
+    allocationWord addressBase headerInBounds headerWritten
   have stateEq : ({ middle with memory := after.memory } : MemoryState) =
       after := by
     cases middle

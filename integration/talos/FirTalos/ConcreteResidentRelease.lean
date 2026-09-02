@@ -378,6 +378,7 @@ theorem instructions_releaseHeaderFunction
       Fir.Wasm.Emit.ResidentRelease.releaseHeaderFunction.body =
         .ok releaseHeaderProgram := by
   simp [Fir.Wasm.Emit.ResidentRelease.releaseHeaderFunction,
+    Fir.Wasm.Emit.ResidentRelease.releaseHeaderBody,
     releaseHeaderProgram, FirTalos.instructions, FirTalos.instruction,
     FirTalos.findFVar?, Bind.bind, Except.bind, pure, Except.pure]
   native_decide
@@ -2402,7 +2403,7 @@ theorem instructions_ownedReleaseBody_eq
         .ok sourceFunction)
     (closureGenerated :
       Fir.Wasm.Emit.ResidentRelease.descriptorReleaseBody
-          descriptors.toList 0 = .ok closureSource)
+          (recycle := false) descriptors.toList 0 = .ok closureSource)
     (ownedGenerated :
       Fir.Wasm.Emit.ResidentRelease.ownedReleaseBody descriptors =
         .ok ownedSource) :
@@ -2445,7 +2446,8 @@ theorem instructions_ownedReleaseBody_eq
         subst sourceFunction
         unfold Fir.Wasm.Emit.ResidentRelease.ownedReleaseBody at ownedGenerated
         rw [closureGenerated] at ownedGenerated
-        simpa [Fir.Wasm.Emit.ResidentRelease.equalsConst] using
+        simpa [Fir.Wasm.Emit.ResidentRelease.equalsConst,
+          Fir.Wasm.Emit.ResidentRelease.finishReleaseBody] using
           ownedGenerated.symm
   have opaqueEq := instructions_localEqDispatch_eq
     (sourceModule := sourceModule)
@@ -2507,7 +2509,7 @@ theorem instructions_ownedReleaseBody
         .ok sourceFunction)
     (closureGenerated :
       Fir.Wasm.Emit.ResidentRelease.descriptorReleaseBody
-          descriptors.toList 0 = .ok closureSource)
+          (recycle := false) descriptors.toList 0 = .ok closureSource)
     (ownedGenerated :
       Fir.Wasm.Emit.ResidentRelease.ownedReleaseBody descriptors =
         .ok ownedSource)
@@ -4385,7 +4387,7 @@ theorem instructions_descriptorReleaseBody
     (table : List (Array Fir.Wasm.AbiKind)) (ordinal : Nat)
     {sourceBody : List Fir.Wasm.Instruction}
     (bodyGenerated : Fir.Wasm.Emit.ResidentRelease.descriptorReleaseBody
-      table ordinal = .ok sourceBody) :
+      (recycle := false) table ordinal = .ok sourceBody) :
     FirTalos.instructions sourceModule sourceFunction labels sourceBody =
       .ok (closureDescriptorReleaseProgram decrementIndex table ordinal) := by
   induction table generalizing ordinal sourceBody labels with
@@ -4419,8 +4421,8 @@ theorem instructions_descriptorReleaseBody
             contradiction
         | ok countWord =>
           cases restGenerated :
-              Fir.Wasm.Emit.ResidentRelease.descriptorReleaseBody table
-                (ordinal + 1) with
+              Fir.Wasm.Emit.ResidentRelease.descriptorReleaseBody
+                (recycle := false) table (ordinal + 1) with
           | error error =>
               rw [ordinalGenerated, countGenerated, restGenerated]
                 at bodyGenerated
@@ -4469,7 +4471,8 @@ theorem instructions_descriptorReleaseBody
                 · simp only [pure, Except.pure, Except.ok.injEq]
                     at generatedEq
                   subst sourceFunction
-                  simpa [Fir.Wasm.Emit.ResidentRelease.equalsConst] using
+                  simpa [Fir.Wasm.Emit.ResidentRelease.equalsConst,
+                    Fir.Wasm.Emit.ResidentRelease.finishReleaseBody] using
                     bodyGenerated.symm
             have fieldsAdapted := instructions_descriptorOwnedFields
               (sourceModule := sourceModule)
@@ -4568,7 +4571,7 @@ theorem DecrementOnceInstallation.body_exact
             unfold Fir.Wasm.Emit.ResidentRelease.ownedReleaseBody at ownedSuccess
             cases closureGenerated :
                 Fir.Wasm.Emit.ResidentRelease.descriptorReleaseBody
-                  descriptors.toList 0 with
+                  (recycle := false) descriptors.toList 0 with
             | error error =>
                 rw [closureGenerated] at ownedSuccess
                 contradiction

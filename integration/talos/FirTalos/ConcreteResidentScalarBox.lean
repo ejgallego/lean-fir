@@ -336,11 +336,12 @@ theorem writeHeaderStore_refines
     {heap : MemoryState} {store : Wasm.Store host} {frontierIndex : Nat}
     (related : ResidentAllocatorRel heap store frontierIndex)
     {address : Word32} {result : LinearMemory}
+    (addressBase : heapBase ≤ address.value)
     (inBounds : address.value + headerBytes ≤ heap.memory.size)
     (written : uint64Header.write heap.memory address = .ok result) :
     ResidentAllocatorRel { heap with memory := result }
       (writeHeaderStore store (UInt32.ofNat address.value)) frontierIndex := by
-  have refined := related.writeHeader inBounds written
+  have refined := related.writeHeader addressBase inBounds written
   rw [writeHeaderStore_eq_words, ResidentMemoryRel.writeUInt32sStore_eq,
     ← uint64Header_words]
   exact refined
@@ -1730,6 +1731,9 @@ theorem wp_boxUInt64Program_of_allocateBoxedScalar
     have endInBounds := rawPost.endInBounds
     simp [headerBytes] at endInBounds ⊢
     omega
+  have addressBase : heapBase ≤ address.value := by
+    rw [rawPost.addressValue]
+    exact Nat.le_trans related.frontierBase (align8_ge before.heapCursor)
   let physicalAddress := UInt32.ofNat address.value
   let headerStore := writeHeaderStore allocatedStore physicalAddress
   have headerStateEq :
@@ -1743,7 +1747,7 @@ theorem wp_boxUInt64Program_of_allocateBoxedScalar
     have headerWrite' : uint64Header.write rawState.memory address =
         .ok objectState.memory := by
       simpa [uint64Header, target, headerBytes, align8] using headerWrite
-    have refined := writeHeaderStore_refines rawRelated headerInBounds
+    have refined := writeHeaderStore_refines rawRelated addressBase headerInBounds
       headerWrite'
     rw [headerStateEq] at refined
     simpa only [headerStore, physicalAddress] using refined
@@ -1757,7 +1761,7 @@ theorem wp_boxUInt64Program_of_allocateBoxedScalar
     omega
   let finalStore := writePayloadStore allocatedStore physicalAddress payload
   have payloadRelatedRaw :=
-    headerRelated.writeUInt64 payloadInBounds payloadWrite
+    headerRelated.writeUInt64 (by omega) payloadInBounds payloadWrite
   have finalStateEq :
       ({ objectState with memory := after.memory } : MemoryState) = after := by
     cases objectState
