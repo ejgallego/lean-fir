@@ -146,9 +146,31 @@ private def resetFinalImpureCapture : CoreM Unit := do
 
 private def resetCompilerCaches (moduleIndices : Array ModuleIdx)
     (sourceRoots : Array Name) : CoreM Unit := do
-  modifyEnv fun environment =>
+  let environment ← getEnv
+  /-
+  Synthetic source compilation removes each imported root's module mapping so
+  Lean cannot satisfy the fresh unit with a stale imported LCNF body. Lean's
+  parametric attributes use that same mapping to find imported entries. In
+  particular, `InferBorrow` asks `isExport` after the reset and would otherwise
+  lose the exported-entry ownership convention.
+
+  Move the exact upstream export name into the synthetic unit's local
+  attribute state before invoking Lean's ordinary pipeline. Explicit `@&`
+  annotations remain authoritative inside `InferBorrow`; this only restores
+  the ABI fact that the cache reset made unreachable.
+  -/
+  let exportedRoots := sourceRoots.filterMap fun root => do
+    guard (environment.getModuleIdxFor? root).isSome
+    let exportName ← getExportNameFor? environment root
+    return (root, exportName)
+  let mut resetEnvironment :=
     Fir.Wasm.Emit.CompilerPrivate.forgetGeneratedCompilerModuleMappings
       environment moduleIndices sourceRoots
+  for (root, exportName) in exportedRoots do
+    resetEnvironment ← match exportAttr.setParam resetEnvironment root exportName with
+      | .ok environment => pure environment
+      | .error message => throwError message
+  setEnv resetEnvironment
 
 private def recordFinalImpureGroup (decls : Array (LCNF.Decl .impure)) :
     LCNF.CompilerM Unit := do

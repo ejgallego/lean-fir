@@ -4,6 +4,7 @@ import Fir.Wasm.Emit.ScalarBoxingExamples
 import Fir.Wasm.Emit.Source
 import Fir.Wasm.Emit.SourceArrayAppendFixture
 import Fir.Wasm.Emit.SourceClosedFixture
+import Fir.Wasm.Emit.SourceOwnershipFixture
 import Fir.Wasm.PrettyFormat
 import Lean.Elab.Command
 
@@ -79,6 +80,26 @@ run_cmd do
     name.toString.contains "Lean.PrettyPrinter"
   unless leaked.isEmpty do
     throwError "Option Nat specialization reused an imported pretty-printer helper: {leaked}"
+
+run_cmd do
+  let owned ← liftCoreM <|
+    compileEntryIndividuallyInternalized
+      ``Fir.Wasm.Emit.SourceOwnershipFixture.ownedEntry
+  let some ownedEntry := owned.program.findDecl?
+      ``Fir.Wasm.Emit.SourceOwnershipFixture.ownedEntry |
+    throwError "isolated ownership fixture lost its exported root"
+  unless ownedEntry.params.map (·.borrow) == #[false] do
+    throwError
+      "isolated capture lost exported-entry ownership: {repr <| ownedEntry.params.map (·.borrow)}"
+  let borrowed ← liftCoreM <|
+    compileEntryIndividuallyInternalized
+      ``Fir.Wasm.Emit.SourceOwnershipFixture.borrowedEntry
+  let some borrowedEntry := borrowed.program.findDecl?
+      ``Fir.Wasm.Emit.SourceOwnershipFixture.borrowedEntry |
+    throwError "isolated ownership fixture lost its borrowed root"
+  unless borrowedEntry.params.map (·.borrow) == #[true] do
+    throwError
+      "isolated capture overrode an explicit source borrow: {repr <| borrowedEntry.params.map (·.borrow)}"
 
 #guard validationSchemaAcceptsAbiKind .float32 .float32
 #guard validationSchemaAcceptsAbiKind .float64 .float
