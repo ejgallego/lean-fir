@@ -17,6 +17,12 @@ def getTagName : Name := `fir_getTag
 
 def isSharedName : Name := `fir_isShared
 
+/-- Private allocator bridge used only after a semantic owner has finished
+transferring or releasing every payload lane. ResidentRuntime owns the name so
+early closure helpers can refer to it without creating an allocator import
+cycle. -/
+def releasedBlockRecyclerName : Name := `fir_heap_recycle
+
 def objectParam : FVarId := ⟨`object⟩
 
 def resultLocal : FVarId := ⟨`result⟩
@@ -773,7 +779,8 @@ private def clearClosureApplication
 /-- Mark only the closure header dead, preserving its retained allocation and
 every capture lane. The application has transferred those lanes to the callee,
 so recursively releasing them here would consume the same ownership twice. -/
-private def canonicalClosureApplicationRelease : List Instruction := [
+def canonicalClosureApplicationRelease (recycle : Bool := false) :
+    List Instruction := [
   .localGet objectParam,
   .i32Const .uint32 0,
   .i32Add,
@@ -808,10 +815,17 @@ private def canonicalClosureApplicationRelease : List Instruction := [
   .i32Const .uint32 0,
   .i32Add,
   .i32Const .uint32 0,
-  .i32Store .uint32 (offset headerAux3Offset)]
+  .i32Store .uint32 (offset headerAux3Offset)] ++
+  if recycle then [
+    .localGet objectParam,
+    .i64ExtendI32U .uint64,
+    .i32WrapI64 .uint32,
+    .call (.declaration releasedBlockRecyclerName)]
+  else []
 
 private def finishClosureProjection
-    (globals : ClosureApplicationGlobals) : List Instruction :=
+    (globals : ClosureApplicationGlobals) (recycle : Bool := false) :
+    List Instruction :=
   [.globalGet globals.remaining .uint32,
     .i32Const .uint32 1,
     .i32Sub,
@@ -827,12 +841,13 @@ private def finishClosureProjection
         ([.localGet objectParam,
           .i32Load .uint32 (offset headerRefCountOffset)] ++
           equalsConst .uint32 0 ++
-          [.ifElse canonicalClosureApplicationRelease []])] ++
+          [.ifElse (canonicalClosureApplicationRelease recycle) []])] ++
       clearClosureApplication globals)
     []]
 
 private def closureProjectionFunction (globals : ClosureApplicationGlobals)
-    (applicationOwnership : Bool) (index : Nat) (result : AbiKind) :
+    (applicationOwnership : Bool) (index : Nat) (result : AbiKind)
+    (recycle : Bool := false) :
     Except LinkError Function := do
   let probe : RuntimeOp :=
     .closureProj `resident (index + 2) (index + 1) index result
@@ -843,7 +858,7 @@ private def closureProjectionFunction (globals : ClosureApplicationGlobals)
   let applicationPrefix :=
     if applicationOwnership then requireActiveClosureApplication globals else []
   let applicationSuffix :=
-    if applicationOwnership then finishClosureProjection globals else []
+    if applicationOwnership then finishClosureProjection globals recycle else []
   return {
     name
     params := #[(objectParam, .tobject)]
@@ -867,13 +882,15 @@ def internalizeClosureProjections (module : Module) (validate : Bool := true) :
   let (module, globals) :=
     if hasApplicationOperations then installClosureApplicationGlobals module
     else (module, { object := 0, remaining := 1 })
+  let recycle := module.functions.any
+    (·.name == releasedBlockRecyclerName)
   let operations := module.runtimeOperations.filter supportsClosureProjection
   let bindings ← operations.mapM fun operation => do
     let some name := closureProjectionName? operation |
       throw (.unsupportedClosureProjection 0 .erased)
     let some (index, kind) := closureProjectionCoordinate? operation |
       throw (.unsupportedClosureProjection 0 .erased)
-    let function ← closureProjectionFunction globals true index kind
+    let function ← closureProjectionFunction globals true index kind recycle
     return { operation, name, function : RuntimeBinding }
   let result ← internalizeOperationsUnchecked bindings module
   validateOutput validate result
@@ -973,14 +990,15 @@ private def retainClosureCaptures (descriptor : Array AbiKind) :
     if kind.isObjectLike then retainClosureCapture index else []
 
 private def beginClosureApplication
-    (globals : ClosureApplicationGlobals) (descriptor : Array AbiKind) :
+    (globals : ClosureApplicationGlobals) (descriptor : Array AbiKind)
+    (recycle : Bool := false) :
     Except LinkError (List Instruction) := do
   let projectionCount ← checkedClosureWord (projectedCaptureCount descriptor)
   let clearIfComplete :=
     if projectionCount == 0 then clearClosureApplication globals else []
   let exclusiveBody :=
     if projectionCount == 0 then
-      canonicalClosureApplicationRelease ++ clearClosureApplication globals
+      canonicalClosureApplicationRelease recycle ++ clearClosureApplication globals
     else
       [.localGet objectParam,
         .i32Const .uint32 0,
@@ -1022,14 +1040,16 @@ private def beginClosureApplication
 
 private partial def closureDescriptorApplicationBody
     (descriptors : Array (Array AbiKind))
-    (globals : ClosureApplicationGlobals) (index : Nat) :
+    (globals : ClosureApplicationGlobals) (index : Nat)
+    (recycle : Bool := false) :
     Except LinkError (List Instruction) := do
   if h : index < descriptors.size then
     let descriptor := descriptors[index]
     let descriptorId ← checkedClosureWord index
     let fixed ← checkedClosureWord descriptor.size
-    let body ← beginClosureApplication globals descriptor
-    let rest ← closureDescriptorApplicationBody descriptors globals (index + 1)
+    let body ← beginClosureApplication globals descriptor recycle
+    let rest ← closureDescriptorApplicationBody descriptors globals
+      (index + 1) recycle
     return (
       [.localGet objectParam,
         .i32Load .uint32 (offset headerAux3Offset)] ++
@@ -1047,8 +1067,9 @@ private def takeClosureApplicationName : Name := `fir_take_closure_application
 
 private def takeClosureApplicationFunction
     (descriptors : Array (Array AbiKind))
-    (globals : ClosureApplicationGlobals) : Except LinkError Function := do
-  let descriptorBody ← closureDescriptorApplicationBody descriptors globals 0
+    (globals : ClosureApplicationGlobals) (recycle : Bool := false) :
+    Except LinkError Function := do
+  let descriptorBody ← closureDescriptorApplicationBody descriptors globals 0 recycle
   return {
     name := takeClosureApplicationName
     params := #[(objectParam, .tobject)]
@@ -1114,12 +1135,14 @@ def internalizeClosureMatches (module : Module) (validate : Bool := true) :
   if operations.isEmpty then
     return module
   let globals ← existingClosureApplicationGlobals module
+  let recycle := module.functions.any
+    (·.name == releasedBlockRecyclerName)
   if module.imports.any (·.declaration? == some takeClosureApplicationName) ||
       module.functions.any (·.name == takeClosureApplicationName) ||
       module.exports.contains takeClosureApplicationName then
     throw (.reservedDeclaration takeClosureApplicationName)
   let applicationFunction ←
-    takeClosureApplicationFunction module.closureDescriptors globals
+    takeClosureApplicationFunction module.closureDescriptors globals recycle
   let module := { module with functions := module.functions.push applicationFunction }
   let bindings ← operations.mapM fun operation => do
     let some name := closureMatchName? module.closureDispatch operation |

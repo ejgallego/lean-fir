@@ -14,10 +14,10 @@ regression: none
 
 # Summary
 
-Resident Array growth and ByteArray replacement consume an exclusive source
-allocation by writing a canonical freed header directly. After the resident
-allocator gained released-block reuse, these paths still omit the private
-recycler call and leave their storage permanently unreachable.
+Resident Array growth, ByteArray replacement, and closure application consume
+an exclusive source allocation by writing a canonical freed header directly.
+After the resident allocator gained released-block reuse, these paths still
+omit the private recycler call and leave their storage permanently unreachable.
 
 ## Minimal reproduction
 
@@ -35,10 +35,12 @@ last-reference release.
 
 ## Actual behavior
 
-The Array and ByteArray replacement helpers duplicate the dead-header stores
-but do not call `fir_heap_recycle`. A diagnostic census finds 420,685 freed
-blocks whose private next word remains zero. The dominant extents are 40, 48,
-56, and 64 bytes, matching the container-heavy retained widget workload.
+The container replacement and closure-application helpers duplicate the
+dead-header stores but do not call `fir_heap_recycle`. A diagnostic census
+finds hundreds of thousands of freed 40--64-byte blocks outside the reuse
+index. After the Array/ByteArray paths were repaired, the same VBP campaign
+still left 474,985 freed blocks / 27.06 MiB, isolating closure transfer as the
+dominant remaining direct-retirement path.
 
 ## Proof or differential evidence
 
