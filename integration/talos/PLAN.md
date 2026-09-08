@@ -39,7 +39,7 @@ This layering separates three claims:
 The first proof should establish claims 1 and 2 without prematurely fixing a
 production heap layout.
 
-## Current verification frontier — 2026-08-30
+## Current verification frontier — 2026-09-09
 
 This section through **Premises deliberately retained** is the authoritative
 W6 roadmap. It supersedes every later chronological use of "next",
@@ -51,15 +51,26 @@ The repository-wide theorem-contract and assumption-budget tables live in
 20-branch PA0 review surface lives in
 [`docs/w6-source-admission-audit.md`](../../docs/w6-source-admission-audit.md).
 
+The review follow-up in
+[`W6-OBSERVABLE-CONTRACT-AND-TRUST.md`](W6-OBSERVABLE-CONTRACT-AND-TRUST.md)
+strengthens the destination to include represented terminal results and faults
+alongside finite external-event prefixes. It records exact compiled axiom
+dependencies, including existing native-evaluation debt, and specification
+sensitivity tests using the current return/fault contracts. PA3 must expose
+the terminal consequence as well as eliminate compiler-owned client premises.
+
 ### Intended result
 
 The production theorem is a compiler simulation, not a program-verification
 theorem.  For a compiler-produced supported export, related entry arguments,
 correct runtime implementations, and adequate finite wasm32 resources, every
 finite observable final-LCNF execution prefix must have a matching generated
-Wasm prefix.  The theorem does not require source termination, a property of
-the returned value, a per-program execution certificate, or a caller-chosen
-future trace.
+Wasm prefix. For source executions that terminate, the accompanying terminal
+theorem must preserve the returned value or semantic fault through the
+executable target semantics. The source program need not terminate on every
+input. Compiler correctness preserves its result without establishing an
+independent application postcondition. Execution resource and external
+contracts stay explicit.
 
 The complete proof product has three independently reviewable links:
 
