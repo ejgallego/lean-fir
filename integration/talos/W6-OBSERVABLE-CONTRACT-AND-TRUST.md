@@ -148,11 +148,11 @@ temporary compiled theorem depending on an unregistered axiom, and a temporary
 theorem depending on `sorryAx`; the latter two restore the environment. Source
 tests reject integration axioms/placeholders and accept comments/strings.
 
-The integration owner should wire the Python source scan and its tests into
-the shared root gate. The compiled endpoint checks already participate in the
-default Talos build through the W6-owned umbrella. The root `Makefile`, source
-audit script, and repository-wide roadmap are integration-owned and are not
-edited by this slice.
+Integration at main `1121f917` wires the expanded source scan and its tests into
+the shared root gate, and forces the compiled audit in `make talos-check`.
+The endpoint checks also participate in the default Talos build through the
+W6-owned umbrella. The root `Makefile`, source audit script, and repository-wide
+roadmap remain integration-owned and are not edited by the terminal-proof slice.
 
 ## Next proof checkpoint
 
