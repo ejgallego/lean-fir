@@ -12,7 +12,7 @@ FIR_BINARYEN_DIR ?= $(CURDIR)/.deps/lcnf-c-wasm/emsdk/upstream/bin
 FIR_CHECK_JOBS ?= 8
 export FIR_CHECK_JOBS
 
-.PHONY: build examples scalar-surface-check inspect validate-harness validate validate-direct-lcnf validate-v8 validate-source-from-v8 validate-native-oracle-attestations validate-coverage-index bug-cards trusted-assumptions no-placeholders mailbox-check mailbox-list mailbox-deliver mailbox-test tooling-unit-check tooling-check check beam talos-setup talos-check clean
+.PHONY: build examples scalar-surface-check inspect validate-harness validate validate-direct-lcnf validate-v8 validate-source-from-v8 validate-native-oracle-attestations validate-coverage-index bug-cards trusted-assumptions proof-trust-sources proof-trust-tests proof-trust no-placeholders mailbox-check mailbox-list mailbox-deliver mailbox-test tooling-unit-check tooling-check check beam talos-setup talos-check clean
 
 build:
 	lake build
@@ -89,6 +89,16 @@ bug-cards:
 trusted-assumptions:
 	python3 scripts/validate_trusted_assumptions.py
 
+proof-trust-sources:
+	python3 integration/talos/check-proof-trust.py --sources-only
+
+proof-trust-tests:
+	python3 integration/talos/test_proof_trust.py
+
+# Requires talos-setup; forces elaboration of the exact compiled inventories.
+proof-trust:
+	python3 integration/talos/check-proof-trust.py
+
 mailbox-check:
 	scripts/mailbox check
 
@@ -108,7 +118,7 @@ tooling-unit-check:
 tooling-check:
 	$(MAKE) -C tooling check FIR_BINARYEN_DIR="$(FIR_BINARYEN_DIR)"
 
-check: tooling-unit-check build examples scalar-surface-check validate-coverage-index bug-cards trusted-assumptions no-placeholders mailbox-test
+check: tooling-unit-check build examples scalar-surface-check validate-coverage-index bug-cards trusted-assumptions proof-trust-sources proof-trust-tests no-placeholders mailbox-test
 
 beam:
 	lean-beam sync Fir/LeanIR.lean
@@ -136,6 +146,7 @@ talos-setup:
 
 talos-check:
 	lake -d integration/talos build
+	python3 integration/talos/check-proof-trust.py
 	python3 scripts/talos_build_attestation.py record \
 		--receipt _build/talos-check/build-receipt.json
 

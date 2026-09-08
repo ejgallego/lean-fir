@@ -125,7 +125,8 @@ def main() -> int:
 
     print(
         "Validated Lean 4.33 AlphaEqv/SimpCase/ElimDead source hashes and exactly one "
-        "registered trusted axiom."
+        "registered textual alpha-bridge axiom under Fir/. "
+        "Generated endpoint dependencies are checked separately by make proof-trust."
     )
     return 0
 

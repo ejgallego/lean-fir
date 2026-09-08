@@ -15,6 +15,28 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Active integration lease
 
+- Current milestone: `CANONICAL-RECYCLER-AND-COMPILED-TRUST`, owner `root`,
+  branch `integration/recycler-trust-gate`, worktree
+  `.worktrees/integration-recycler-trust-gate`, base main `08e0a763`.
+  Authoritative threads are `W7-ROOT-20260902-003` and its successor
+  `W6-ROOT-20260909-001`. The serialized candidate preserves immutable W7
+  `e488c816` and W6 recycler `7affa1d2`, replays W7 package ratchet `8848d822`,
+  then W6 proof/audit checkpoint `2d62fce5`. Root owns shared check wiring and
+  trust/roadmap wording; W6 and W7 source changes are consumed from their
+  checkpoints. State: active; combined root/Talos/artifact gates precede
+  local-main landing.
+- Current trust interpretation: historical references below to "exactly one
+  trusted axiom" describe the textual alpha-bridge registry only. Compiled
+  inventories now expose 57 generated axioms in each public source-invariant
+  W6 export endpoint, 20 in the sampled UInt64 installation theorem, and 27
+  in the literal export example, in addition to standard logical axioms.
+  These remain recorded debt. The 19-endpoint gate and ten result/fault/style
+  sensitivity lemmas do not complete the closed compiler-derived result
+  theorem. See `integration/talos/W6-OBSERVABLE-CONTRACT-AND-TRUST.md` and
+  `docs/pass-correctness-plan.md` for the current acceptance boundary.
+
+## Previous integration milestones
+
 - Milestone: `W7-CONSUMER-RATCHETS-AND-PROOF-CONVERGENCE`; selected-closure
   lowering, typed Nat caller paths, S20 ByteArray mutual-tail fidelity, the
   ElimDead Array proof recovery, both production release proof surfaces, and

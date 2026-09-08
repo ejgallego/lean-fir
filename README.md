@@ -38,8 +38,10 @@ implemented foundation and the remaining proof order.
 make check
 ```
 
-`make check` runs the build, examples, native-vs-LCNF validation, and
-placeholder and bug-card scans. Use `make examples`, `make validate`,
+`make check` runs the build, examples, native/LCNF/V8 validation, bug-card
+checks, and source trust/placeholder scans including the Talos proof tree and
+their negative tests. The source scan needs no Talos dependency build.
+Use `make examples`, `make validate`,
 `make inspect`, or `make bug-cards` for an individual layer. `make beam` checks
 the consolidated Lean entrypoints and fixtures through Lean Beam. `make inspect`
 remains a pass-checkpoint diagnostic; it is not the semantic oracle.
@@ -51,7 +53,19 @@ integration decisions remain under `coordination/`.
 
 The optional Talos bridge is deliberately outside the default dependency
 graph. After cloning its pinned revision with `make talos-setup`, validate the
-adapter and executable scalar example with `make talos-check`.
+proofs and adapter with `make talos-check`. That gate also forces elaboration
+of the exact compiled axiom inventories for 19 named theorem endpoints before
+recording a successful build receipt; `make proof-trust` runs the audit alone.
+
+Trust remains an explicit research obligation. The source registry contains
+one textual upstream alpha-equivalence bridge axiom. Separately, the two
+public W6 source-invariant export theorems each depend on 57 generated axioms
+plus three standard logical axioms. These dependencies are pinned as existing
+debt, not removed or approved by a green gate. See the
+[compiled trust audit](integration/talos/W6-OBSERVABLE-CONTRACT-AND-TRUST.md).
+The destination includes represented terminal results and semantic faults as
+well as finite event prefixes; the closed compiler-derived result theorem is
+still pending.
 
 The repository has two native Wasm artifact generators. The FIR-native path
 under `integration/talos/artifact` exposes the symbolic lowering and
