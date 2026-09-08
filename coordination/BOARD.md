@@ -23,8 +23,37 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `e488c816` and W6 recycler `7affa1d2`, replays W7 package ratchet `8848d822`,
   then W6 proof/audit checkpoint `2d62fce5`. Root owns shared check wiring and
   trust/roadmap wording; W6 and W7 source changes are consumed from their
-  checkpoints. State: active; combined root/Talos/artifact gates precede
-  local-main landing.
+  checkpoints. Functional integration head: `0fd61e16`. State: released;
+  linked/accepted after the combined gates below. This containing board commit
+  is the final local-main integration checkpoint; the immutable mailbox
+  completions name its full Git object. No producer branch, remote, or client
+  package pointer is rewritten.
+- Acceptance on functional integration head `0fd61e16`: `git diff --check`
+  and `make check` pass (730 cases, 2,172/2,172 equal comparisons). After local
+  `make talos-setup`, `make talos-check` passes the 3,205-job combined build,
+  3,161-job focused trust build, and forced direct audit of all 19 endpoints;
+  receipt `6ecbf5989af34a52377e809b528b577fe803c1158bd78b6464abb1890d565ce9`.
+  The expanded source scan covers 236 maintained Lean files and all six
+  regression tests pass. Root `check` now includes both; `talos-check` forces
+  the compiled audit before recording a successful build receipt.
+- The complete W7 artifact gate passes with deterministic paired emissions.
+  The integration-local prettyM package is
+  `.worktrees/integration-recycler-trust-gate/integration/talos/artifact/_build/prettyM-current-releases/0fd61e16dc87-707579510969a025`,
+  87,840 bytes, SHA-256
+  `ffc980d8981a4bea7f5455426728653254c131e1d7ca612df6d371eb65332d09`.
+  W7 runtime, artifact, and VBP package source trees exactly match reviewed
+  `8848d822`; W6 concrete/Talos proof trees exactly match `2d62fce5`. The
+  unchanged immutable VBP package from `W7-ROOT-20260902-003` passes fresh
+  complete checksum verification and Node smoke (three mounts, two unmounts,
+  eight effects, sixteen event handlers). No new browser campaign is claimed.
+- Canonical recycler boundary: 256 extent heads, first dead payload-word
+  links, unchanged canonical dead headers, indexed extents at least 36 bytes,
+  and conservative bump allocation for exact 32-byte header-only blocks.
+  The optional header-only pool and W6's independently started terminal-proof
+  successor are not part of this landing. Whole-machine nonempty recycler
+  refinement and removal of generated endpoint trust dependencies remain
+  separate proof work. Audit bug card:
+  `FIR-BUG-wasm-none-endpoint-native-axiom-audit` (confirmed).
 - Current trust interpretation: historical references below to "exactly one
   trusted axiom" describe the textual alpha-bridge registry only. Compiled
   inventories now expose 57 generated axioms in each public source-invariant
