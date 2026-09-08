@@ -58,6 +58,11 @@ alongside finite external-event prefixes. It records exact compiled axiom
 dependencies, including existing native-evaluation debt, and specification
 sensitivity tests using the current return/fault contracts. PA3 must expose
 the terminal consequence as well as eliminate compiler-owned client premises.
+The structured return bridge now discharges final target label unwinding and
+Talos execution adequacy from the existing yielded-value/frame relation.
+Global terminal extraction and precise root-result provenance remain open;
+trap support needs a separate structured-machine extension. See the linked
+review follow-up for exact theorem dependencies and the remaining boundary.
 
 ### Intended result
 

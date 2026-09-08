@@ -2,7 +2,9 @@
 
 Review follow-up, 2026-09-09. Baseline: W6 `7affa1d2`, which includes the
 conservative W7 recycler source at `e488c816`. The external review inspected
-ancestor `a5449905`. This slice changes proof tests and audit tooling only.
+ancestor `a5449905`. The first checkpoint adds proof tests and audit tooling;
+its successor adds the structured terminal-return bridge below. Neither
+changes runtime behavior or a shared semantic relation.
 
 ## Destination and current evidence
 
@@ -41,6 +43,57 @@ its compilation. Resource exhaustion still has no general matching-failure
 theorem; current resource preconditions remain explicit. This slice does not
 change the schema, source/target relation, compiler admission, or runtime ABI.
 
+## Structured return bridge
+
+`ConcreteTerminalCorrectness.lean` now connects the already represented result
+to actual Talos execution. Its main assembly helper is
+`ConcreteSupportedExport.terminatesWith_of_structuredYield`:
+
+```text
+supported export + exact entry-argument count
+  + finite structured prefix from that export's entry
+  + existing yielded-value relation and checked frame stack
+  + no remaining source continuation
+  => executable export termination with RefinedReturnPost
+```
+
+This is an internal assembly lemma, not the closed compiler theorem. The
+ranked simulation must produce the target prefix; clients must not be asked
+to prove it. No new simulation, invariant, or certificate is introduced.
+
+The reusable proof derives rather than assumes:
+
+- terminal target label unwinding from
+  `ConcreteStructuredSupportedFrameStack.returning_halts`;
+- full heap/world/trace/value refinement and a clear failure channel from
+  `ConcreteStructuredYieldFocus.refinedReturnPost`;
+- a finite path to the exact halted store and stack from
+  `ConcreteStructuredYieldFocus.finitePath_halted`;
+- loop-arity safety from successful adaptation, using the existing
+  `StructuredWasmStep.finitePath_run_of_adapt`;
+- one sufficient fuel bound, singleton result selection, and caller-tail
+  restoration. The function form supports an arbitrary caller operand tail;
+  the export form specializes it to empty.
+
+The yielding function's context is deliberately independent of the entry
+function's context. Execution adequacy needs the actual target prefix, not an
+extra equality between these compiler identities.
+
+### Remaining terminal assembly obligations
+
+| Obligation | Exact current evidence | Remaining work |
+|---|---|---|
+| Recover the terminal yield | `ConcreteStructuredValidatedCodeGlobalOutcome.returned` carries `ConcreteStructuredValidatedReturnedOutcome.yielded` and `.frames.supported` | Invert successful source termination against the maintained global relation and feed the recovered facts to the bridge. |
+| Preserve the export's selected result ABI | `ConcreteStructuredCodeCoreRel.advance_return_at_functionResult` produces the exact kind; `ConcreteStructuredValidatedReturnedOutcome.activeResult` records the active function's result | The returned outcome's independent `kind` index is not equated to `functionResult`; compatibility with no caller is only `True`. Recover or retain the producer fact and the root result identity before existential packaging, without adding a client assumption. |
+| Connect source termination to the prefix | `ConcreteRankedTraceSimulation.execSteps` gives the related target prefix for successful source transitions | Combine the terminal source observation with that specific relation, rather than destructing the lossy public existential package. |
+| Match faults | `StructuredWasmControl` has running/breaking/returning/halted states, and `StructuredWasmOutcome` describes successful control only | A trap-aware extension and its adequacy proof are a separately coordinated semantic change. Existing `ConcreteFaultSimulation` results do not automatically supply this missing structured-machine branch. |
+
+These are interface obligations, not evidence of incorrect generated code.
+In particular, the current return rule does produce the precise result kind;
+the audit identifies where its general relation forgets that precision.
+Resource exhaustion remains governed by explicit preconditions, not an
+unproved general matching-failure claim.
+
 ## Measured trust budget
 
 `TrustAudit.lean` is imported by the default `FirTalos` umbrella and compares
@@ -61,6 +114,7 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | sampled `UInt64ObjectInstallation` termination theorem | 3 | 20 |
 | concrete `abiLiteralMain_export_correct` | 3 | 27 |
 | all ten new sensitivity lemmas | 0–3 | 0 |
+| all five structured terminal-return bridge lemmas | 2–3 | 0 |
 
 The standard set is `propext`, `Classical.choice`, and `Quot.sound`. The exact
 generated names live in `TrustInventory.lean`. Most dependencies in the two
@@ -102,12 +156,12 @@ edited by this slice.
 
 ## Next proof checkpoint
 
-Retain PA1/PA2 compiler provenance as the admission work. Add a terminal
-correspondence requirement to PA3: from the internally constructed relation
-and a terminating source observation, derive the existing executable
-refined-return or refined-fault contract. Start by auditing the structured
-machine's top-level return and trap endpoints and their Talos adequacy bridge.
-Do not reintroduce a client source invariant in this corollary.
+Retain PA1/PA2 compiler provenance as the admission work. For PA3's terminal
+corollary, connect the maintained global relation to the return bridge above:
+recover its terminal yielded state, precise selected result kind, and the
+prefix constructed by simulation. Handle the trap-model extension separately.
+Do not reintroduce a client source invariant, target path, or ABI-provenance
+assumption in the final corollary.
 
 Separately remove native-evaluation dependencies in small owner-scoped batches,
 starting with the fixed scalar/boxing facts, and update the measured inventory

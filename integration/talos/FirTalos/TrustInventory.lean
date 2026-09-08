@@ -157,6 +157,16 @@ def endpointInventory : Array (Lean.Name × Array String) := #[
   (`FirTalos.Concrete.ObservationSensitivity.prettyObservation_injective,
     #["propext"]),
   (`FirTalos.Concrete.ObservationSensitivity.prettyObservation_distinguishes_styling,
-    #["propext"])]
+    #["propext"]),
+  (`FirTalos.Concrete.ConcreteStructuredSupportedFrameStack.returning_halts,
+    standardAxioms),
+  (`FirTalos.Concrete.ConcreteStructuredYieldFocus.refinedReturnPost,
+    #["propext", "Quot.sound"]),
+  (`FirTalos.Concrete.ConcreteStructuredYieldFocus.finitePath_halted,
+    standardAxioms),
+  (`FirTalos.Concrete.ConcreteSupportedFunction.terminatesWith_of_structuredYield,
+    standardAxioms),
+  (`FirTalos.Concrete.ConcreteSupportedExport.terminatesWith_of_structuredYield,
+    standardAxioms)]
 
 end FirTalos.TrustAudit
