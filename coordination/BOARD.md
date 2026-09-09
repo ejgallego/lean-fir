@@ -19,8 +19,8 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `integration/terminal-return-review`, worktree
   `.worktrees/integration-recycler-trust-gate`, base main `1121f917`.
   User authorized landing the independently reviewed W6 checkpoint `3fc74692`
-  (functional `c4466855`) on thread `W6-ROOT-20260909-004`. State: active;
-  final root/Talos gates precede local-main fast-forward. Root edits only this
+  (functional `c4466855`) on thread `W6-ROOT-20260909-004`. State: released;
+  accepted after final root/Talos gates on `a4bbfe35`. Root edits only this
   board and non-hardcoded README audit wording. No runtime, representation,
   admission, W7 source, or generated artifact changes are included.
 - The five standard-axiom-only return-bridge lemmas discharge target label
@@ -29,6 +29,22 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   now has 24 endpoints. Global terminal extraction and precise root-result
   provenance remain open; trap-aware structured semantics is separate work.
   Existing generated trust debt is unchanged.
+- Acceptance: `git diff --check`, `make check` (730 cases, 2,172 equal
+  comparisons), and `make talos-check` pass, including all 24 compiled
+  endpoint inventories. Exact Talos receipt:
+  `08865322188504abdf8e19e9dc4e22711bca364011d7a026c45e7a52458f0b8e`.
+  No emitter or artifact source changed; no new artifact/browser run is
+  claimed for this proof-only slice. Local-main landing only, no push.
+- Next bounded lease: `CG-01-PRODUCTION-CAPTURE`, implementer `wasm-gen` on
+  `wasm/generation` in `.worktrees/wasm-generation`, rebased after this
+  landing. Root grants the narrow extraction of production capture/artifact
+  definitions from `Fir/Validation/LCNF.lean` into `Fir/Compiler/LCNF.lean`,
+  validation-only emitter invocations into `Fir/Validation/WasmSource.lean`,
+  and necessary importer/regression updates. Preserve source-unit boundaries,
+  capture algorithms, semantic definitions, and emitted bytes. Existing APIs
+  retain compatibility aliases; no W6 implementation/proof files are leased.
+  This is a module-dependency refactor, not a semantic-contract change. W7
+  publishes a clean tested checkpoint before root integrates it.
 
 ## Accepted integration checkpoints
 
