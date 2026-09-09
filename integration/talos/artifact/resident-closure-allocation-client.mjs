@@ -24,10 +24,7 @@ function header(memory, address) {
     u32(memory, address + 4 * index));
 }
 
-function checkPoisonedReallocation(exports) {
-  // Keep a real object below the rewind checkpoint for the mixed object capture.
-  const retained = exports.resident_closure_empty();
-  const checkpoint = exports.fir_heap_frontier();
+function allocationCases(retained) {
   const floatBits = [
     [0, 0n],
     [0x80000000, 0x8000000000000000n],
@@ -38,20 +35,46 @@ function checkPoisonedReallocation(exports) {
     [0x7f812345, 0x7ff0123456789abcn],
     [0xff812345, 0xfff0123456789abcn],
   ];
-  const cases = [
+  return [
     ["resident_closure_empty", [], [2, 2, 1, 32, 1, 3, 0, 1]],
     ["resident_closure_tagged", [], [2, 2, 1, 32, 1, 3, 0, 1]],
     ["resident_closure_shared_shape", [], [2, 2, 1, 32, 0, 5, 0, 1]],
     ["resident_closure_captured", [43, 255, 0x0123456789abcdefn],
       [2, 2, 1, 56, 1, 4, 3, 2]],
-    ...floatBits.map(([f32, f64]) => [
-      "resident_closure_mixed_bits",
+    ...["resident_closure_mixed_bits", "resident_closure_mixed_tobject_bits",
+      "resident_closure_mixed_tagged_bits"].flatMap((entry) =>
+      floatBits.map(([f32, f64]) => [
+      entry,
       [retained, 43, 9, 0, 255, 65535, 0xfedcba98,
         0xfedcba9876543210n, 0x0123456789abcdefn, f32, f64],
       [2, 2, 1, 120, 1, 12, 11, 4],
-    ]),
+    ])),
   ];
-  for (const [entry, args, words] of cases) {
+}
+
+function expectedAllocation(args, words) {
+  const expected = new Uint8Array(words[3]);
+  const view = new DataView(expected.buffer);
+  words.forEach((word, index) => view.setUint32(4 * index, word, true));
+  args.forEach((value, index) => {
+    const offset = 32 + 8 * index;
+    if (typeof value === "bigint") view.setBigUint64(offset, value, true);
+    else view.setUint32(offset, value, true);
+  });
+  return expected;
+}
+
+function expectBytes(memory, address, expected, message) {
+  expect(expected.every((byte, index) => memory[address + index] === byte),
+    message);
+}
+
+function checkPoisonedReallocation(exports) {
+  // Keep a real object below the rewind checkpoint for the mixed object capture.
+  const retained = exports.resident_closure_empty();
+  const checkpoint = exports.fir_heap_frontier();
+  const snapshots = [];
+  for (const [entry, args, words] of allocationCases(retained)) {
     const extent = words[3];
     const memory = new Uint8Array(exports.memory.buffer);
     // Only bucket zero gets a sentinel: other reserved words are live recycler
@@ -59,17 +82,7 @@ function checkPoisonedReallocation(exports) {
     new DataView(memory.buffer).setUint32(0, 0xdecafbad, true);
     const before = memory.slice(0, checkpoint);
     memory.fill(0xa5, checkpoint, checkpoint + extent + 16);
-    const expected = new Uint8Array(extent);
-    const expectedView = new DataView(expected.buffer);
-    words.forEach((word, index) => expectedView.setUint32(4 * index, word, true));
-    args.forEach((value, index) => {
-      const offset = 32 + 8 * index;
-      if (typeof value === "bigint") {
-        expectedView.setBigUint64(offset, value, true);
-      } else {
-        expectedView.setUint32(offset, value, true);
-      }
-    });
+    const expected = expectedAllocation(args, words);
     equal(exports[entry](...args), checkpoint, `${entry}: reused address`);
     equal(exports.fir_heap_frontier(), checkpoint + extent,
       `${entry}: allocation extent`);
@@ -79,10 +92,85 @@ function checkPoisonedReallocation(exports) {
       `${entry}: reserved memory or retained object changed`);
     expect(memory.subarray(checkpoint + extent, checkpoint + extent + 16)
       .every((byte) => byte === 0xa5), `${entry}: wrote beyond its allocation`);
+    snapshots.push(Array.from(memory.slice(checkpoint, checkpoint + extent)));
     // All output bytes have been inspected/copied; no new graph is retained.
     exports.fir_heap_rewind(checkpoint);
     equal(exports.fir_heap_frontier(), checkpoint, `${entry}: rewind frontier`);
   }
+  return snapshots;
+}
+
+function checkReleasedReallocation(exports) {
+  equal(typeof exports.resident_dec_checked, "function",
+    "fixture is missing the real resident release entry");
+  equal(exports.fir_heap_recycle, undefined,
+    "fixture exposed the private recycler instead of using resident release");
+  const retained = exports.resident_closure_empty();
+  // A persistent input makes repeated owning mixed closures valid without
+  // manufacturing dead headers or changing the retained object's reference count.
+  new DataView(exports.memory.buffer).setUint32(retained + 4, 3, true);
+  const checkpoint = exports.fir_heap_frontier();
+  const snapshots = [];
+  for (const [entry, args, words] of allocationCases(retained)) {
+    const extent = words[3];
+    const expected = expectedAllocation(args, words);
+    const memory = new Uint8Array(exports.memory.buffer);
+    const prefix = memory.slice(0, checkpoint);
+    const first = exports[entry](...args);
+    equal(first, checkpoint, `${entry}: initial arena address`);
+    if (extent === 32) {
+      // Header-only blocks are deliberately ineligible in the accepted recycler.
+      exports.resident_dec_checked(first);
+      expect(header(exports.memory, first).every((word, i) =>
+        word === [255, 0, 0, extent, 0, 0, 0, 0][i]),
+      `${entry}: header-only retirement is not canonical`);
+      memory.fill(0xa5, checkpoint + extent, checkpoint + 2 * extent + 16);
+      const next = exports[entry](...args);
+      equal(next, checkpoint + extent, `${entry}: recycled a header-only block`);
+      equal(exports.fir_heap_frontier(), checkpoint + 2 * extent,
+        `${entry}: header-only fallback frontier`);
+      expectBytes(memory, next, expected, `${entry}: header-only initialized bytes`);
+      snapshots.push(Array.from(memory.slice(next, next + extent)));
+      exports.resident_dec_checked(next);
+    } else {
+      const second = exports[entry](...args);
+      equal(second, first + extent, `${entry}: second arena address`);
+      const frontier = exports.fir_heap_frontier();
+      exports.resident_dec_checked(first);
+      exports.resident_dec_checked(second);
+      const bucket = (((extent / 8) - 1) & 255) * 4;
+      equal(u32(exports.memory, bucket), second, `${entry}: release missed reuse list`);
+      equal(u32(exports.memory, second + 32), first, `${entry}: nonempty reuse link`);
+      for (const address of [first, second]) {
+        expect(header(exports.memory, address).every((word, i) =>
+          word === [255, 0, 0, extent, 0, 0, 0, 0][i]),
+        `${entry}: release did not leave a canonical dead header`);
+        // Only dead payload is poisoned; preserve both the canonical header
+        // and the real first-word free-list link. No index/header fabrication.
+        memory.fill(0xa5, address + 36, address + extent);
+      }
+      memory.fill(0xa5, frontier, frontier + 16);
+      for (const address of [second, first]) {
+        equal(exports[entry](...args), address, `${entry}: exact recycled address`);
+        equal(exports.fir_heap_frontier(), frontier,
+          `${entry}: recycled allocation grew frontier`);
+        expectBytes(memory, address, expected,
+          `${entry}: recycled header/capture/padding bytes`);
+        snapshots.push(Array.from(memory.slice(address, address + extent)));
+      }
+      equal(u32(exports.memory, bucket), 0, `${entry}: reuse list was not consumed`);
+      exports.resident_dec_checked(second);
+      exports.resident_dec_checked(first);
+    }
+    expect(memory.subarray(checkpoint + 2 * extent, checkpoint + 2 * extent + 16)
+      .every((byte) => byte === 0xa5), `${entry}: recycled allocation crossed canary`);
+    // Every output was copied, every scratch closure released, and only the
+    // persistent input lies below the checkpoint. Rewind clears the reuse index.
+    exports.fir_heap_rewind(checkpoint);
+    equal(exports.fir_heap_frontier(), checkpoint, `${entry}: final checkpoint`);
+    expectBytes(memory, 0, prefix, `${entry}: retained prefix changed after reuse`);
+  }
+  return snapshots;
 }
 
 /**
@@ -90,7 +178,7 @@ function checkPoisonedReallocation(exports) {
  * imports. The raw checks freeze W6's closure header and semantic slot layout;
  * ConcreteHost then independently decodes the same Wasm-resident allocations.
  */
-export async function checkResidentClosureAllocation(bytes) {
+export async function checkResidentClosureAllocation(bytes, referenceBytes) {
   const module = await WebAssembly.compile(bytes);
   equal(WebAssembly.Module.imports(module).length, 0,
     "resident closure-allocation module retained an import");
@@ -253,9 +341,24 @@ export async function checkResidentClosureAllocation(bytes) {
   "ConcreteHost usize capture projection drifted");
 
   const poisoned = await WebAssembly.instantiate(module, {});
-  checkPoisonedReallocation(poisoned.exports);
+  const checkpointSnapshots = checkPoisonedReallocation(poisoned.exports);
+  const recycled = await WebAssembly.instantiate(module, {});
+  const recycledSnapshots = checkReleasedReallocation(recycled.exports);
 
-  return "PASS zero-import resident closure allocation and poisoned reuse";
+  if (referenceBytes !== undefined) {
+    const reference = await WebAssembly.compile(referenceBytes);
+    equal(WebAssembly.Module.imports(reference).length, 0, "reference retained an import");
+    const baselineCheckpoint = await WebAssembly.instantiate(reference, {});
+    const baselineRecycled = await WebAssembly.instantiate(reference, {});
+    equal(JSON.stringify(checkpointSnapshots),
+      JSON.stringify(checkPoisonedReallocation(baselineCheckpoint.exports)),
+      "full initialized extents differ from the accepted full-zero checkpoint path");
+    equal(JSON.stringify(recycledSnapshots),
+      JSON.stringify(checkReleasedReallocation(baselineRecycled.exports)),
+      "full initialized extents differ from the accepted full-zero recycler path");
+  }
+
+  return "PASS zero-import closure allocation, poisoned checkpoint and released-block reuse";
 }
 
 export async function checkFetchedResidentClosureAllocation(url) {

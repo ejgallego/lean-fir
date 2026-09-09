@@ -47,9 +47,16 @@ private def store32 (kind : AbiKind) (value : List Instruction)
     (offset : UInt32) : List Instruction :=
   [.localGet addressLocal] ++ value ++ [.i32Store kind offset]
 
-private def zeroAllocation (allocationBytes : Nat) : List Instruction :=
-  (List.range (allocationBytes / 4)).flatMap fun index =>
-    store32 .uint32 [.i32Const .uint32 0] (u32 (4 * index))
+/-- The header and full-width captures are completely overwritten below.
+Only the upper word of a physical i32/f32 capture slot remains unwritten.
+The current 32-byte header plus eight-byte slots has no alignment suffix. -/
+private def zeroUnwrittenBytes (fields : Array AbiKind) : List Instruction :=
+  fields.toList.zipIdx.flatMap fun (kind, index) =>
+    match kind.valueType with
+    | .i32 | .f32 =>
+        store32 .uint32 [.i32Const .uint32 0]
+          (u32 (headerBytes + target.semanticSlotBytes * index + 4))
+    | .i64 | .f64 => []
 
 private def headerStores (fixed descriptorId allocationBytes : UInt32) :
     List Instruction :=
@@ -162,7 +169,7 @@ private def partialApplicationFunctionForKey
       [.i32Const .uint32 allocationBytes,
         .call (.declaration ResidentAllocator.allocateName),
         .localSet addressLocal] ++
-      zeroAllocation layout.allocationBytes ++
+      zeroUnwrittenBytes fields ++
       headerStores fixedField descriptorId allocationBytes ++
       stores ++
       typedAddressResult result }
@@ -302,7 +309,9 @@ def exampleOperations : Array RuntimeOp := #[
   .partialApply exampleTarget 3 2 #[.float32, .float] .object,
   .partialApply exampleTarget 3 0 #[] .tagged,
   .partialApply exampleUnrelatedTarget 5 0 #[] .object,
-  .partialApply exampleTarget 12 11 exampleMixedCaptureKinds .object]
+  .partialApply exampleTarget 12 11 exampleMixedCaptureKinds .object,
+  .partialApply exampleTarget 12 11 exampleMixedCaptureKinds .tobject,
+  .partialApply exampleTarget 12 11 exampleMixedCaptureKinds .tagged]
 
 def exampleClosureDispatch : Array Name := #[
   exampleUnrelatedTarget,
@@ -378,29 +387,41 @@ def exampleSharedShapeCaller : Function := {
   body := [.call (.runtime exampleOperations[4]!), .ret] }
 
 /-- Integer-lane facade keeps floating capture bits out of JavaScript arithmetic. -/
-def exampleMixedBitsCaller : Function := {
-  name := `resident_closure_mixed_bits
+private def exampleMixedBitsCallerFor (name : Name) (operation : Nat)
+    (result : AbiKind) : Function := {
+  name
   params := exampleMixedCaptureKinds.mapIdx fun index kind =>
     (captureId index, match kind with
       | .float32 => .uint32
       | .float => .uint64
       | _ => kind)
-  results := #[.object]
+  results := #[result]
   locals := #[]
   body := (exampleMixedCaptureKinds.toList.zipIdx.flatMap fun (kind, index) =>
     [.localGet (captureId index)] ++ (match kind with
       | .float32 => [.f32ReinterpretI32 .float32]
       | .float => [.f64ReinterpretI64 .float]
-      | _ => [])) ++ [.call (.runtime exampleOperations[5]!), .ret] }
+      | _ => [])) ++ [.call (.runtime exampleOperations[operation]!), .ret] }
+
+def exampleMixedBitsCaller : Function :=
+  exampleMixedBitsCallerFor `resident_closure_mixed_bits 5 .object
+
+def exampleMixedTobjectBitsCaller : Function :=
+  exampleMixedBitsCallerFor `resident_closure_mixed_tobject_bits 6 .tobject
+
+def exampleMixedTaggedBitsCaller : Function :=
+  exampleMixedBitsCallerFor `resident_closure_mixed_tagged_bits 7 .tagged
 
 def exampleModule : Module := {
   imports := exampleOperations.mapIdx Fir.Wasm.runtimeImport
   functions := #[exampleEmptyCaller, exampleCapturedCaller, exampleLoopCaller,
     exampleFloatCaller, exampleTaggedCaller, exampleSharedShapeCaller,
-    exampleMixedBitsCaller]
+    exampleMixedBitsCaller, exampleMixedTobjectBitsCaller,
+    exampleMixedTaggedBitsCaller]
   exports := #[exampleEmptyCaller.name, exampleCapturedCaller.name,
     exampleLoopCaller.name, exampleFloatCaller.name, exampleTaggedCaller.name,
-    exampleSharedShapeCaller.name, exampleMixedBitsCaller.name]
+    exampleSharedShapeCaller.name, exampleMixedBitsCaller.name,
+    exampleMixedTobjectBitsCaller.name, exampleMixedTaggedBitsCaller.name]
   initializers := #[]
   runtimeOperations := exampleOperations
   closureDispatch := exampleClosureDispatch
@@ -425,6 +446,7 @@ def manifest : Json :=
     ("closureDescriptors", Json.arr <|
       exampleClosureDescriptors.map Fir.Wasm.Emit.Manifest.abiKindsJson),
     ("scratchPolicy", "unused; typed-extend-wrap-result"),
+    ("initializationPolicy", "header-and-captures-plus-i32-f32-slot-high-words"),
     ("status", "generation-only; W6 closure-allocation contract proof pending")]
 
 #guard match residentExampleModule with
@@ -432,9 +454,9 @@ def manifest : Json :=
       module.imports.isEmpty &&
       module.runtimeOperations.isEmpty &&
       module.functions.size ==
-        7 + ResidentAllocator.installedFunctionNames.size +
+        9 + ResidentAllocator.installedFunctionNames.size +
           partialApplicationHelperCount exampleOperations &&
-      partialApplicationHelperCount exampleOperations == 5 &&
+      partialApplicationHelperCount exampleOperations == 7 &&
       module.exports.contains exampleEmptyCaller.name &&
       module.exports.contains exampleCapturedCaller.name &&
       module.exports.contains exampleLoopCaller.name &&
@@ -442,6 +464,8 @@ def manifest : Json :=
       module.exports.contains exampleTaggedCaller.name &&
       module.exports.contains exampleSharedShapeCaller.name &&
       module.exports.contains exampleMixedBitsCaller.name &&
+      module.exports.contains exampleMixedTobjectBitsCaller.name &&
+      module.exports.contains exampleMixedTaggedBitsCaller.name &&
       (partialApplicationHelperNames exampleOperations).all
         module.exports.contains &&
       module.closureDispatch == exampleClosureDispatch &&
@@ -460,8 +484,16 @@ def manifest : Json :=
       | none => false
   | .error _ => false
 
-/- Every typed helper keeps its exact initialization/capture prefix and ends
-in the memory-free address bridge. This fails if scratch transport returns. -/
+/- These are the exact unwritten words, not a whole-extent zeroing ratchet. -/
+#guard headerBytes == 32 && target.semanticSlotBytes == 8
+#guard zeroUnwrittenBytes #[] == []
+#guard zeroUnwrittenBytes #[.uint64, .usize, .float] == []
+#guard zeroUnwrittenBytes exampleMixedCaptureKinds ==
+  ([36, 44, 52, 60, 68, 76, 84, 108] : List Nat).flatMap fun offset =>
+    store32 .uint32 [.i32Const .uint32 0] (u32 offset)
+
+/- Every typed helper keeps its exact allocator/header/capture/result stages;
+only the zeroing stage initializes the independently enumerated upper words. -/
 #guard match residentExampleModule with
   | .ok module => (collectHelperKeys exampleOperations).toList.zipIdx.all fun (key, ordinal) =>
       match module.functions.find? (·.name == partialApplicationName ordinal),
@@ -475,7 +507,7 @@ in the memory-free address bridge. This fails if scratch transport returns. -/
             [.i32Const .uint32 (u32 layout.allocationBytes),
               .call (.declaration ResidentAllocator.allocateName),
               .localSet addressLocal] ++
-            zeroAllocation layout.allocationBytes ++
+            zeroUnwrittenBytes key.fields ++
             headerStores (u32 key.fields.size) (u32 descriptor)
               (u32 layout.allocationBytes) ++ stores ++
             [.localGet addressLocal, .i64ExtendI32U .uint64,

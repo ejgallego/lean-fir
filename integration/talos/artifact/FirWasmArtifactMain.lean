@@ -215,6 +215,18 @@ def emitResidentConstructors (path : System.FilePath) : IO Unit := do
 def emitResidentClosureAllocation (path : System.FilePath) : IO Unit := do
   let module ← IO.ofExcept <|
     Fir.Wasm.Emit.ResidentClosureAllocation.residentExampleModule
+  -- Fixture-only linkage exercises real last-reference retirement/reuse without
+  -- adding a release dependency to the production closure allocation emitter.
+  let releaseCaller := Fir.Wasm.Emit.ResidentRelease.exampleCheckedCaller
+  let functions := module.functions.push releaseCaller
+  let operations := Fir.Wasm.collectRuntimeOps functions
+  let module ← IO.ofExcept <| (Fir.Wasm.Emit.ResidentRelease.internalizeReleases {
+    module with
+    functions
+    imports := operations.mapIdx Fir.Wasm.runtimeImport
+    runtimeOperations := operations
+    exports := module.exports.push releaseCaller.name }).mapError fun error =>
+      s!"closure fixture release linkage failed: {repr error}"
   let bytes ← IO.ofExcept <| (Fir.Wasm.Emit.encode module).mapError fun error =>
     s!"resident closure-allocation encoding failed: {repr error}"
   if let some parent := path.parent then

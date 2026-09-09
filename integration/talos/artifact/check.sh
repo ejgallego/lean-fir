@@ -105,6 +105,11 @@ node run-resident-constructors.mjs _build/resident-constructors.wasm
   _build/resident-closure-allocation.wasm
 node run-resident-closure-allocation.mjs \
   _build/resident-closure-allocation.wasm
+node "$root/integration/wasm-runtime/optimize-closed-module.mjs" \
+  _build/resident-closure-allocation.wasm \
+  _build/resident-closure-allocation-opt.wasm
+node run-resident-closure-allocation.mjs \
+  _build/resident-closure-allocation-opt.wasm
 "$artifact_generator" resident-scalar-box \
   _build/resident-scalar-box.wasm
 node run-resident-scalar-box.mjs _build/resident-scalar-box.wasm

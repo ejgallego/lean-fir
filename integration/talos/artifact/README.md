@@ -148,15 +148,25 @@ node run-resident-fallbacks.mjs _build/resident-fallbacks.wasm
 ```
 
 The closure-allocation fixture checks all three object-family result lanes,
-stable target/arity/descriptor fields, and shared helper shapes. It also
-poisons checkpoint-reused allocations and compares every initialized byte for
-object/erased/integer/Float32/Float captures, including signed zero, subnormal,
-infinity and NaN payload bits supplied through integer-lane facades. Reserved
-memory, a retained object and a suffix canary must remain unchanged. Allocation
-results use the same memory-free typed extend/wrap bridge as constructors;
-full-allocation zeroing remains deliberately unchanged for the separate
-selective-initialization slice. These are executable checks, not a W6 helper
-refinement theorem or a workload-speedup claim.
+including mixed captures, stable target/arity/descriptor fields, and shared
+helper shapes. It compares every initialized byte for object/erased/integer/
+Float32/Float captures, including signed zero, subnormal, infinity and NaN
+payload bits supplied through integer-lane facades. Both checkpoint-poisoned
+allocations and actual last-reference release/reallocation are tested. The
+fixture alone links the existing resident release helper: two same-size dead
+blocks preserve their real nonempty free-list link while unused payload bytes
+are poisoned. Reallocation must consume that list with a flat frontier,
+preserve a persistent input and canaries, and completely initialize each
+extent. Header-only blocks must still use the accepted bump fallback.
+
+Allocation results retain the memory-free typed extend/wrap bridge. Only the
+upper word of each physical i32/f32 capture slot is zeroed; the header and
+full-width captures are overwritten by their existing stores. `check.sh` runs
+the checks on raw and pinned-optimized Wasm. The runner optionally accepts a
+second, full-zero reference Wasm path and compares all 81 allocation snapshots
+(28 checkpoint, 53 retirement/reuse) across the two implementations. These
+are physical executable checks, not whole W6 closure-allocation refinement,
+resolution of the known tagged-result proof gap, or a workload-speedup claim.
 
 The source Float artifact compiles upstream `Float.ofNat` and
 `Float.ofScientific` rather than installing declaration-named conversion
@@ -238,7 +248,7 @@ object slots, `USize` slots, packed scalar bytes, zero padding, repeated
 allocation, frontier movement, and preservation of the temporary retagging
 scratch word.
 
-The 1,253-byte closure-allocation module likewise owns memory and has zero
+The closure-allocation module likewise owns memory and has zero
 imports. It freezes the W6 closure header, stable target and descriptor IDs,
 zero-capture and mixed `tobject`/`UInt8`/`USize` capture slots, frontier
 movement, and scratch preservation. Its deliberately shifted dispatch and

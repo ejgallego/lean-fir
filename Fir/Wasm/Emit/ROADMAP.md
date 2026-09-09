@@ -95,6 +95,40 @@ zero imports and memory/ownership contract are unchanged. No workload timing
 or fresh browser campaign is claimed. The immutable local package is recorded
 in the W7 handoff; external client pointers are not moved by this slice.
 
+CG-05B (2026-09-09) removes only closure zero stores overwritten by the
+unchanged header/capture stages. The 32-byte header is completely written;
+physical i64/f64 captures fill their eight-byte slots. Only physical i32/f32
+slot high words need explicit zeroing. Helper signatures, allocation extent,
+metadata, ownership and the accepted scratch-free suffix are unchanged.
+Independent guards enumerate the remaining offsets, including the mixed
+capture's eight high words. This is separate from W6's CG-05A suffix decision.
+
+The expanded standalone fixture compares 81 full allocation snapshots against
+the accepted full-zero path, including real last-reference release into a
+two-block reuse chain. Header-only exclusion, canonical dead headers, private
+nonempty links, flat recycled frontier, retained inputs, canaries, all result
+lanes and bit-exact float patterns are checked. Raw and pinned-optimized
+variants pass; removing one required high-word store in an ignored negative
+control makes the poison check fail. Existing release helpers are linked only
+in the artifact fixture, not imported by the production allocation emitter.
+
+With identical fixture/export inventory, raw Wasm shrinks 6,286 -> 5,128 bytes
+and optimized Wasm 3,353 -> 2,980. Distinct optimized helper shapes are:
+
+| Capture shape | Body bytes before -> after | Store instructions before -> after |
+| --- | --- | --- |
+| empty | 122 -> 66 | 16 -> 8 |
+| tobject/UInt8/USize | 185 -> 101 | 25 -> 13 |
+| Float32/Float | 164 -> 87 | 22 -> 11 |
+| mixed eleven captures | 355 -> 201 | 49 -> 27 |
+
+Binaryen already merges physically identical result-lane helpers in both
+versions; do not sum alias rows as distinct optimized bodies. These are
+instruction/size measurements, not runtime speed claims. Exact standalone
+baseline/candidate binaries and toolkit-derived shape inventories are retained
+under `.deps/cg05b/`; the standard full gates and narrow W6 initialization
+review remain the acceptance boundary. No shared layout or W6 file changes.
+
 ### G1. Consolidated closure allocation (accepted)
 
 The generic stack was accepted on `main` at `85481c67` with functional head
