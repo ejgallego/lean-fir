@@ -109,10 +109,28 @@ bounded integration lease when a producer submits its next clean checkpoint.
   captured LCNF, zero imports, exports and ownership capabilities. No runtime
   speed or fresh browser claim. Full allocator/capture ownership refinement
   and FIR-BUG-wasm-none-partial-apply-tagged-result remain open.
-  Next, W6-W7-20260909-008 is released for the already claimed, isolated
-  proof-facing source-equation successor: connect minimal public equations to
-  the production initializer, with no emitted-byte, instruction-order, layout,
-  helper-signature or W6 source change. W6 owns the later footprint proof.
+  The isolated source-equation successor is now accepted under
+  W7-ROOT-20260909-014 at exact `329fd254477e59c1906b72fcec40c9554895ba73`,
+  functional `8e68650d`, base `3ddb98e8`. Root verified both original patches
+  from `bd3761e5..23a12abd` rebase identically; the extra commit is status-only.
+  Independent exact-head diff-check, make check (730/2172, 38 mailbox tests),
+  make talos-check (3204 jobs, 3165 audit cone, 52 endpoints) and the complete
+  artifact gate pass. Receipt:
+  `2e792171b6346ea3ec027beacf548327da613029e25483736076123e2c1c99f9`.
+  Root's read-only Beam probe in an importing module independently uses the
+  public builder equation and checks all six equation axiom sets: no generated
+  dependency. No source edit or Beam checkpoint was needed. Logs/probe:
+  root worktree `.deps/root-closure-equations-{check,talos,artifact}.log` and
+  `.deps/root-closure-equations-probe.{txt,json}`.
+  Root's clean-source immutable release is
+  `integration/talos/artifact/_build/prettyM-current-releases/329fd254477e-91d911767f4bf0dd`
+  in that worktree. Raw/optimized closure bytes, prettyM Wasm/LCNF/manifest
+  and capabilities/ownership are identical to accepted CG-05B; original producer
+  packages and immutable completion remain intact. Root releases this serial
+  integration slot. W6 owns requester acceptance and later footprint proof;
+  source equations do not discharge whole-helper or tagged-result debt.
+  W7 next finishes the already-owned actual return-node ABI census
+  W6-W7-20260830-001, keeping deeper projection/join provenance separate.
 - Both lanes rebase on accepted main before handoff and submit clean exact
   checkpoints to root. These tasks are authorized without another per-slice
   user approval. Remote publication and destructive cleanup stay separate.
