@@ -72,9 +72,14 @@ initial relation internally. The root-result foundation now reuses the existing
 checked caller ABI spine: export entry establishes its own selected root kind,
 the common call push/pop equation retains it across heterogeneous result kinds,
 and an empty continuation recovers exact root precision for a precise return.
+The root-preserving return transition now retains that same root index and
+the exact active result kind through one successful return, reusing the existing
+two-step target path. Its empty-continuation corollary derives a yield at the
+root ABI without an extra result-kind equality premise.
 The general global relation still existentially hides the represented kind;
-preserving the new root index and producer precision through its dispatcher
-remains open. The universal compiler classifier also
+preserving the root index and producer precision through the remaining
+dispatcher branches and composing the strengthened global relation remain open.
+The universal compiler classifier also
 remains an explicit compiler-proof obligation; this is not PA3 closure. Trap
 support needs a separate structured-machine extension. See the linked review
 follow-up for exact theorem dependencies and the remaining boundary.

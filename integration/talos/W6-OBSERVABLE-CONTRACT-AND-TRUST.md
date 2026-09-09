@@ -208,12 +208,39 @@ The heterogeneous-call regression distinguishes a `UInt64` root from its
 `UInt8` nested helper. All ten new lemmas are in the exact compiled trust
 inventory: two are axiom-free, and eight use only the standard three axioms.
 
+### Root-preserving return transition
+
+`ConcreteStructuredValidatedCodeOutcome.advance_returnPreciseAtRoot_of_step`
+retains the compiler-owned root index through one successful source return.
+It composes `advance_returnPrecise_of_step` with
+`ConcreteStructuredValidationAgreesAtRoot.reindex`, reusing the exact two-step
+target path, the current witness, and the unchanged source/target frame
+equations. The returned outcome still represents its value at `functionResult`,
+not a fresh existential kind. A dependent existential names that precise
+returned proof so its root agreement remains available to the consumer.
+
+`advance_returnYieldAtRoot_of_step` exercises the producer at an empty source
+continuation and derives the yield at exactly `rootResult`. Neither theorem
+asks for a final-client equality between root and active result kinds. The
+regression is sensitive to losing either the represented-kind precision or the
+root index. The negative same-lane regression also distinguishes an `.object`
+root from `.tobject`; an i32 carrier alone cannot identify these semantic kinds.
+Both new theorems have exactly the three standard axioms and no generated
+native-evaluation dependency in the compiled inventory.
+
+This closes the local return transition, not the global preservation theorem.
+The rooted premise is internal proof metadata established by the actual export
+entry; it must next be retained through ordinary code and caller push/pop and
+administrative transitions. Current-node return admission, the universal
+classifier, and the public existential result-kind boundary remain unchanged.
+No shared relation, runtime semantics, W7 source or client contract is changed.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
 |---|---|---|
 | Recover the terminal yield | `sourceExecReturned_terminal`, `ConcreteStructuredValidatedCodeGlobalOutcome.terminalYield_of_control`, and the function/export `terminatesWith_of_validatedReturn` lemmas | Discharged for the existing global relation and a successful final source step. |
-| Preserve the export's selected result ABI | Precise pointwise/validated return producers; `validatedCodeRoot_rootResult` establishes root identity from the export; `yieldAtRoot_of_empty` consumes it at precise terminal returns | The general returned outcome still permits an independent `kind`; compatibility with no caller is only `True`. Preserve the root-indexed checked spine and producer precision through the global dispatcher, without adding a client assumption. |
+| Preserve the export's selected result ABI | `validatedCodeRoot_rootResult` establishes root identity; `advance_returnPreciseAtRoot_of_step` preserves it through a precise return; `advance_returnYieldAtRoot_of_step` derives the exact root-ABI yield at an empty continuation | The general returned outcome still permits an independent `kind`; compatibility with no caller is only `True`. Preserve the root-indexed checked spine and producer precision through the remaining global branches and assembly, without adding a client assumption. |
 | Connect source termination to executable return | `terminatesWith_of_classifiedExecSteps`, `terminatesWith_of_classifiedExecEvaluates`, and `terminatesWith_of_classifiedRun` compose the existing ranked prefix with terminal extraction and adequacy | Discharged conditional on the existing universal classifier and entry contracts, with existential represented kind. Compiler admission closure and root-kind provenance are not discharged. |
 | Match faults | `StructuredWasmControl` has running/breaking/returning/halted states, and `StructuredWasmOutcome` describes successful control only | A trap-aware extension and its adequacy proof are a separately coordinated semantic change. Existing `ConcreteFaultSimulation` results do not automatically supply this missing structured-machine branch. |
 
@@ -247,6 +274,7 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | all five terminal-extraction and validated-return lemmas | 3 | 0 |
 | both precise-return producer lemmas | 3 | 0 |
 | all three classified terminal-simulation lemmas | 3 | 0 |
+| root-preserving return producer and exact-root yield corollary | 3 | 0 |
 
 The standard set is `propext`, `Classical.choice`, and `Quot.sound`. The exact
 generated names live in `TrustInventory.lean`. Most dependencies in the two

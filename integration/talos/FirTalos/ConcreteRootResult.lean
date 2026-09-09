@@ -10,9 +10,10 @@ ABI without changing that root. Case labels do not change the caller spine.
 
 This is an internal, root-indexed refinement of the existing stack agreement,
 not a new source invariant or an application-supplied provenance map. The real
-export entry constructs it below. Preserving this index through the global
-simulation is deliberately a separate step; the unindexed global relation
-cannot recover root identity after existentially hiding the caller spine.
+export entry constructs it below, and the precise return transition retains it.
+Preservation through the other global transitions is still separate; the
+unindexed global relation cannot recover root identity after existentially
+hiding the caller spine.
 -/
 
 namespace FirTalos.Concrete
@@ -195,15 +196,106 @@ theorem ConcreteStructuredValidatedReturnedOutcome.yieldAtRoot_of_empty
   have resultEq := rooted.functionResult_eq_of_empty empty
   simpa only [resultEq] using related.yielded
 
+/-- Preserve the compiler-owned root index through one successful return.
+The represented kind stays exactly `functionResult`; the dependent existential
+retains the returned stack proof needed to state its root agreement. This adds
+no execution assumption to the precise return rule: `rooted` is internal
+metadata constructed at export entry and transported by the simulation.
+The target path, witness, and unchanged-frame equations are reused verbatim. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_returnPreciseAtRoot_of_step
+    {program : Fir.LeanIR.ImpureProgram} {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure} {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function} {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl} {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState} {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness} {functionResult rootResult : AbiKind}
+    {callerExpectedResult : Option AbiKind} {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat} {sourceEnv : Env} {result : Lean.FVarId}
+    {targetLocals : Wasm.Locals} {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState} {target : StructuredWasmState Host}
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts remainingBytes sourceRuntime sourceEnv (.return result)
+      targetStore targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (admitted : ConcreteStructuredCodeStepAdmission context sourceModule
+      externals functionResult facts sourceRuntime sourceEnv 0 (.return result))
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter sourceValue physical,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target targetAfter ∧
+      ∃ returned : ConcreteStructuredValidatedReturnedOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult callerExpectedResult
+          facts remainingBytes sourceRuntime sourceEnv sourceValue targetStore targetLocals
+          witness functionResult physical sourceAfter targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          returned.agrees returned.frames.validation ∧
+        sourceAfter.frames = source.frames ∧ targetAfter.frames = target.frames := by
+  obtain ⟨targetAfter, sourceValue, physical, path, returned, sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_returnPrecise_of_step activeResult admitted sourceStep
+  exact ⟨targetAfter, sourceValue, physical, path, returned,
+    rooted.reindex sourceFramesEq targetFramesEq returned.agrees returned.frames.validation,
+    sourceFramesEq, targetFramesEq⟩
+
+/-- Exact-root regression and terminal consumer for the return transition.
+An empty source continuation derives an exact root-ABI yield from the producer;
+no `functionResult = rootResult` or caller-supplied result-precision premise is
+needed. This composition would fail if the producer existentially hid either
+the represented kind or the root. Target-only labels may remain for the
+existing terminal bridge to unwind. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_returnYieldAtRoot_of_step
+    {program : Fir.LeanIR.ImpureProgram} {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure} {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function} {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl} {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState} {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness} {functionResult rootResult : AbiKind}
+    {callerExpectedResult : Option AbiKind} {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat} {sourceEnv : Env} {result : Lean.FVarId}
+    {targetLocals : Wasm.Locals} {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState} {target : StructuredWasmState Host}
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts remainingBytes sourceRuntime sourceEnv (.return result)
+      targetStore targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (admitted : ConcreteStructuredCodeStepAdmission context sourceModule
+      externals functionResult facts sourceRuntime sourceEnv 0 (.return result))
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : source.frames = []) :
+    ∃ targetAfter sourceValue physical,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target targetAfter ∧
+      ConcreteStructuredYieldFocus context sourceFunction sourceRuntime sourceEnv sourceValue
+        targetStore targetLocals witness rootResult physical sourceAfter targetAfter ∧
+      sourceAfter.frames = [] ∧ targetAfter.frames = target.frames := by
+  obtain ⟨targetAfter, sourceValue, physical, path, returned, rootedAfter,
+      sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_returnPreciseAtRoot_of_step activeResult rooted admitted sourceStep
+  have emptyAfter : sourceAfter.frames = [] := sourceFramesEq.trans empty
+  exact ⟨targetAfter, sourceValue, physical, path,
+    returned.yieldAtRoot_of_empty rootedAfter emptyAfter, emptyAfter, targetFramesEq⟩
+
 /-- Heterogeneous nested calls retain the original result, not the deepest
 callee's kind or the immediate consumer's kind. -/
 example : concreteStructuredRootResultKind .uint8
     [(.object, some .tobject), (.uint64, none)] = .uint64 := rfl
 
 /-- Root precision is meaningful: a different selected result is rejected even
-though some physical lanes are shared. -/
+when both root kinds use the same physical i32 lane. -/
 example : concreteStructuredRootResultKind .uint8
-    [(.object, some .tobject), (.uint64, none)] ≠ .uint8 := by
+    [(.uint64, some .tobject), (.object, none)] ≠ .tobject := by
   intro impossible
   cases impossible
 
