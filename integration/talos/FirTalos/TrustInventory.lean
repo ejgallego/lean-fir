@@ -127,6 +127,12 @@ def directLetNativeDebt : Array String := #[
   "FirTalos.Concrete.ConcreteRuntimeRel.boxScalarAtResultKind._native.native_decide.ax_1_7",
   "_private.Fir.Wasm.Concrete.Memory.0.Fir.Wasm.Concrete.LinearMemory.assembleByte32._native.bv_decide.ax_1_6"]
 
+/-- Existing scalar-case debt, measured before root transport at `3ddb98e8`.
+The exact inventories below require the original and new producers to agree. -/
+def scalarCaseNativeDebt : Array String := #[
+  "FirTalos.Concrete.scalarUInt8Local_eq_of_related._native.native_decide.ax_1_1",
+  "FirTalos.Correctness.constructorTag_uint8_eq_iff._native.native_decide.ax_1_1"]
+
 def scalarInstallationNativeDebt : Array String := #[
   "FirTalos.Concrete.ResidentMemoryRel.read32_write32_self._native.bv_decide.ax_1_7",
   "FirTalos.Concrete.ResidentMemoryRel.write32_restore._native.bv_decide.ax_1_12",
@@ -282,6 +288,18 @@ def endpointInventory : Array (Lean.Name × Array String) := #[
   (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_defaultOnlyCase_of_step,
     standardAxioms),
   (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_defaultOnlyCaseAtRoot_of_step,
-    standardAxioms)]
+    standardAxioms),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_objectCasesWithFrames_of_step,
+    standardAxioms),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_objectCases_of_step,
+    standardAxioms),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_objectCasesAtRoot_of_step,
+    standardAxioms),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_scalarUInt8CasesWithFrames_of_step,
+    standardAxioms ++ scalarCaseNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_scalarUInt8Cases_of_step,
+    standardAxioms ++ scalarCaseNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_scalarUInt8CasesAtRoot_of_step,
+    standardAxioms ++ scalarCaseNativeDebt)]
 
 end FirTalos.TrustAudit

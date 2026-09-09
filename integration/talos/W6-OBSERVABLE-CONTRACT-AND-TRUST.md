@@ -286,8 +286,39 @@ changes. The original rule's measured axiom set and all three resulting
 endpoints are exactly `propext`, `Classical.choice` and `Quot.sound`.
 No generated dependency or new axiom is introduced.
 
-Tested object/scalar cases, other local families, caller push/pop and global
-root-preserving assembly remain open. W7 source-equation work stays separate.
+The tested-case successor below extends this boundary; other local families,
+caller push/pop and global root-preserving assembly remain open.
+
+### Root-preserving tested object and UInt8 cases
+
+`advance_objectCasesWithFrames_of_step` and
+`advance_scalarUInt8CasesWithFrames_of_step` expose the source branch selection,
+unchanged source frames, and the precise target-only case-label suffix already
+proved by their original producers. The old signatures remain compatibility
+projections. The two `AtRoot_of_step` counterparts in `ConcreteRootResult`
+apply the established rooted `case` and `reindex` facts to a named successor.
+There is no new common relation or generic transport framework.
+
+The exact path lengths remain `5 * testCount` for objects and `4 * testCount`
+for UInt8. Both retain `List.replicate testCount none ++ labels`, the same
+runtime/witness/budget and active/caller result kinds, and the strict rank
+decrease conditional on a zero path count. Source caller frames do not grow;
+target case labels do. Their correspondence is not frame-list equality.
+
+Each kernel regression uses its actual rooted producer at an empty source
+continuation. It recovers exact active/root equality from the successor;
+zero tests imply an unchanged target and strict source-rank decrease; nonempty
+tests give exactly the inner labels followed by the outer suffix-saving label.
+These are conditional shapes of the produced path, not new assumptions that
+force a particular number of tests or enumerate program executions.
+
+The original object rule and its new endpoints use the three standard axioms.
+The original UInt8 rule and its new endpoints additionally use exactly the two
+named dependencies in `TrustInventory.scalarCaseNativeDebt`. Those existing
+local-value/tag-comparison native axioms are recorded, not newly approved or
+discharged. All six endpoints are audited. No admission/client/runtime/W7
+contract changed. Global assembly, other local families and caller transitions
+remain open; W7 source-equation work remains independent.
 
 ### Remaining terminal assembly obligations
 
@@ -331,6 +362,8 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | root-preserving return producer and exact-root yield corollary | 3 | 0 |
 | original direct-let wrapper, frame-exposing helper and root-preserving successor | 3 | 54 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
+| original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
+| original UInt8-case wrapper, frame-exposing helper and rooted successor | 3 | 2 |
 
 The standard set is `propext`, `Classical.choice`, and `Quot.sound`. The exact
 generated names live in `TrustInventory.lean`. Most dependencies in the two

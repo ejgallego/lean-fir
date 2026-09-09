@@ -11,7 +11,7 @@ ABI without changing that root. Case labels do not change the caller spine.
 This is an internal, root-indexed refinement of the existing stack agreement,
 not a new source invariant or an application-supplied provenance map. The real
 export entry constructs it below. Precise returns, direct lets and erased
-default-only cases retain it.
+default-only and tested object/UInt8 cases retain it.
 Preservation through the other global transitions is still separate; the
 unindexed global relation cannot recover root identity after existentially
 hiding the caller spine.
@@ -502,6 +502,217 @@ example
   obtain ⟨path, _, nextRooted, rank, sourceFramesEq⟩ :=
     related.advance_defaultOnlyCaseAtRoot_of_step rooted supported sourceStep
   exact ⟨path, rank, nextRooted.functionResult_eq_of_empty (sourceFramesEq.trans empty)⟩
+
+section RootedTestedCases
+
+variable
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult rootResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {admittedSelected : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+
+/-- Preserve root identity through object case tests. Keep the exact 5-step
+cost per test, selected branch, target-only labels and existing zero-rank
+condition; do not equate source callers with target case labels. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_objectCasesAtRoot_of_step
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.cases cases) targetStore targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (supported : ObjectConstructorCasesSupported context sourceRuntime
+      sourceEnv cases admittedSelected)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ testCount targetAfter selected selectedTarget,
+      ∃ targetSuffix : Wasm.Program,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          (5 * testCount) target targetAfter ∧
+        ∃ nextRelated : ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals
+          (List.replicate testCount none ++ labels)
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+          selected targetStore
+          { targetLocals with values := targetLocals.values } selectedTarget
+          witness sourceAfter targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextRelated.agrees nextRelated.frames.validation ∧
+        SourceCaseResult sourceRuntime sourceEnv cases selected ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames =
+          structuredWasmCaseLabels (targetLocals.values.drop 0) targetSuffix
+            testCount ++ target.frames ∧
+        (5 * testCount = 0 →
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source) := by
+  obtain ⟨testCount, targetAfter, selected, selectedTarget, targetSuffix, path,
+      nextRelated, selectedResult, sourceFramesEq, targetFramesEq, zeroRank⟩ :=
+    related.advance_objectCasesWithFrames_of_step supported sourceStep
+  have pushed := rooted.case (belowStack := targetLocals.values.drop 0)
+    (targetRest := targetSuffix) (testCount := testCount)
+  exact ⟨testCount, targetAfter, selected, selectedTarget, targetSuffix, path,
+    nextRelated, pushed.reindex sourceFramesEq targetFramesEq
+      nextRelated.agrees nextRelated.frames.validation,
+    selectedResult, sourceFramesEq, targetFramesEq, zeroRank⟩
+
+/-- Regression over the actual object producer: an empty source caller
+stack still determines the root, even with target-only labels. Exercise both
+the zero-test rank result and the nonempty nested/outer-label frame shape. -/
+example
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.cases cases) targetStore targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (supported : ObjectConstructorCasesSupported context sourceRuntime
+      sourceEnv cases admittedSelected)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : source.frames = []) :
+    ∃ testCount targetAfter selected, ∃ targetSuffix : Wasm.Program,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          (5 * testCount) target targetAfter ∧
+        SourceCaseResult sourceRuntime sourceEnv cases selected ∧
+        sourceAfter.frames = source.frames ∧
+        functionResult = rootResult ∧
+        (testCount = 0 →
+          targetAfter = target ∧
+          targetAfter.frames = target.frames ∧
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source) ∧
+        (∀ count, testCount = count + 1 →
+          targetAfter.frames =
+            List.replicate count (.label 0 (targetLocals.values.drop 0) []) ++
+              .label 0 (targetLocals.values.drop 0) targetSuffix :: target.frames) := by
+  obtain ⟨testCount, targetAfter, selected, _, targetSuffix, path,
+      _, nextRooted, selectedResult, sourceFramesEq, targetFramesEq, zeroRank⟩ :=
+    related.advance_objectCasesAtRoot_of_step rooted supported sourceStep
+  refine ⟨testCount, targetAfter, selected, targetSuffix, path, selectedResult,
+    sourceFramesEq, nextRooted.functionResult_eq_of_empty (sourceFramesEq.trans empty),
+    ?_, ?_⟩
+  · intro zero
+    have emptyPath : FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+        0 target targetAfter := by simpa [zero] using path
+    refine ⟨emptyPath.eq_of_zero.symm, ?_, zeroRank (by simp [zero])⟩
+    simpa [zero, structuredWasmCaseLabels] using targetFramesEq
+  · intro count nonzero
+    simpa [nonzero, structuredWasmCaseLabels, List.append_assoc] using targetFramesEq
+
+/-- Preserve root identity through UInt8 case tests. Keep the exact 4-step
+cost per test, selected branch, target-only labels and existing zero-rank
+condition; do not equate source callers with target case labels. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_scalarUInt8CasesAtRoot_of_step
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.cases cases) targetStore targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (supported : ScalarUInt8CasesSupported context sourceRuntime sourceEnv cases
+      admittedSelected)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ testCount targetAfter selected selectedTarget,
+      ∃ targetSuffix : Wasm.Program,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          (4 * testCount) target targetAfter ∧
+        ∃ nextRelated : ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals
+          (List.replicate testCount none ++ labels)
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+          selected targetStore
+          { targetLocals with values := targetLocals.values } selectedTarget
+          witness sourceAfter targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextRelated.agrees nextRelated.frames.validation ∧
+        SourceCaseResult sourceRuntime sourceEnv cases selected ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames =
+          structuredWasmCaseLabels (targetLocals.values.drop 0) targetSuffix
+            testCount ++ target.frames ∧
+        (4 * testCount = 0 →
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source) := by
+  obtain ⟨testCount, targetAfter, selected, selectedTarget, targetSuffix, path,
+      nextRelated, selectedResult, sourceFramesEq, targetFramesEq, zeroRank⟩ :=
+    related.advance_scalarUInt8CasesWithFrames_of_step supported sourceStep
+  have pushed := rooted.case (belowStack := targetLocals.values.drop 0)
+    (targetRest := targetSuffix) (testCount := testCount)
+  exact ⟨testCount, targetAfter, selected, selectedTarget, targetSuffix, path,
+    nextRelated, pushed.reindex sourceFramesEq targetFramesEq
+      nextRelated.agrees nextRelated.frames.validation,
+    selectedResult, sourceFramesEq, targetFramesEq, zeroRank⟩
+
+/-- Regression over the actual UInt8 producer: an empty source caller
+stack still determines the root, even with target-only labels. Exercise both
+the zero-test rank result and the nonempty nested/outer-label frame shape. -/
+example
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.cases cases) targetStore targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (supported : ScalarUInt8CasesSupported context sourceRuntime sourceEnv cases
+      admittedSelected)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : source.frames = []) :
+    ∃ testCount targetAfter selected, ∃ targetSuffix : Wasm.Program,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          (4 * testCount) target targetAfter ∧
+        SourceCaseResult sourceRuntime sourceEnv cases selected ∧
+        sourceAfter.frames = source.frames ∧
+        functionResult = rootResult ∧
+        (testCount = 0 →
+          targetAfter = target ∧
+          targetAfter.frames = target.frames ∧
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source) ∧
+        (∀ count, testCount = count + 1 →
+          targetAfter.frames =
+            List.replicate count (.label 0 (targetLocals.values.drop 0) []) ++
+              .label 0 (targetLocals.values.drop 0) targetSuffix :: target.frames) := by
+  obtain ⟨testCount, targetAfter, selected, _, targetSuffix, path,
+      _, nextRooted, selectedResult, sourceFramesEq, targetFramesEq, zeroRank⟩ :=
+    related.advance_scalarUInt8CasesAtRoot_of_step rooted supported sourceStep
+  refine ⟨testCount, targetAfter, selected, targetSuffix, path, selectedResult,
+    sourceFramesEq, nextRooted.functionResult_eq_of_empty (sourceFramesEq.trans empty),
+    ?_, ?_⟩
+  · intro zero
+    have emptyPath : FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+        0 target targetAfter := by simpa [zero] using path
+    refine ⟨emptyPath.eq_of_zero.symm, ?_, zeroRank (by simp [zero])⟩
+    simpa [zero, structuredWasmCaseLabels] using targetFramesEq
+  · intro count nonzero
+    simpa [nonzero, structuredWasmCaseLabels, List.append_assoc] using targetFramesEq
+
+end RootedTestedCases
 
 /-- Heterogeneous nested calls retain the original result, not the deepest
 callee's kind or the immediate consumer's kind. -/

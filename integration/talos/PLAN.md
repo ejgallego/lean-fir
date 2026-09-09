@@ -89,7 +89,15 @@ locals, budget and active/caller result kinds remain unchanged. Its old API
 is preserved; the rooted successor uses the existing frame reindex lemma.
 The original wrapper and both new case endpoints use only the three standard
 axioms. The kernel regression checks root precision, zero-step simulation and
-the strict decrease together; tested object/scalar cases are still separate.
+the strict decrease together.
+Tested object and UInt8 case successors now retain the root through their
+target-only case-label push and frame reindexing. Their exact target counts
+remain `5 * testCount` and `4 * testCount`, with the selected source branch,
+replicated label context and zero-count rank condition exposed. Regressions
+recover root precision with an empty source caller stack, unchanged target at
+zero tests, and exact inner/outer label frames for nonempty tests. Original
+APIs remain unchanged; object endpoints retain the three standard axioms,
+and UInt8 endpoints inherit only their two existing native-evaluation axioms.
 The general global relation still existentially hides the represented kind;
 preserving the root index and producer precision through the remaining
 dispatcher branches and composing the strengthened global relation remain open.

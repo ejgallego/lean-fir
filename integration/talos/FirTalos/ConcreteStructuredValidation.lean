@@ -10591,6 +10591,57 @@ variable
 
 /-- Normalized object cases preserve closed validation and push one matching
 target-only case label per executed constructor test. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_objectCasesWithFrames_of_step
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.cases cases) targetStore targetLocals targetCode witness source target)
+    (supported : ObjectConstructorCasesSupported context sourceRuntime
+      sourceEnv cases admittedSelected)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ testCount targetAfter selected selectedTarget,
+      ∃ targetSuffix : Wasm.Program,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          (5 * testCount) target targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals
+          (List.replicate testCount none ++ labels)
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+          selected targetStore
+          { targetLocals with values := targetLocals.values } selectedTarget
+          witness sourceAfter targetAfter ∧
+        SourceCaseResult sourceRuntime sourceEnv cases selected ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames =
+          structuredWasmCaseLabels (targetLocals.values.drop 0) targetSuffix
+            testCount ++ target.frames ∧
+        (5 * testCount = 0 →
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source) := by
+  obtain ⟨chosen, sourceResult, sourceAfterEq⟩ :=
+    related.core.core.focus.caseResult_of_step sourceStep
+  have pointwise := related.toPointwise
+    (ConcreteStructuredCodeStepAdmission.objectCases supported) (by omega)
+  obtain ⟨testCount, targetAfter, selected, selectedTarget, targetSuffix,
+      targetPath, sourceFramesEq, targetFramesEq, nextCore, zeroRank⟩ :=
+    pointwise.advance_objectCases_of_step supported sourceStep
+  have selectedEq : selected = chosen := by
+    have controlEq := nextCore.focus.sourceControlEq
+    rw [sourceAfterEq] at controlEq
+    have chosenEq : chosen = selected := by
+      simpa using Control.code.inj controlEq
+    exact chosenEq.symm
+  subst selected
+  exact ⟨testCount, targetAfter, chosen, selectedTarget, targetSuffix, targetPath,
+    related.withCaseSuccessor nextCore
+      (related.core.validation.selectedCase sourceResult)
+      sourceFramesEq targetFramesEq,
+    sourceResult, sourceFramesEq, targetFramesEq, zeroRank⟩
+
+/-- Compatibility projection preserving the original tested-case API. The
+stronger producer exposes only already-proved branch and frame evidence. -/
 theorem ConcreteStructuredValidatedCodeOutcome.advance_objectCases_of_step
     (related : ConcreteStructuredValidatedCodeOutcome program context
       functionCode sourceModule sourceFunction targetModule hosts spec externals
@@ -10614,13 +10665,49 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_objectCases_of_step
         (5 * testCount = 0 →
           compilerStructuredControlRank sourceAfter <
             compilerStructuredControlRank source) := by
+  obtain ⟨testCount, targetAfter, selected, selectedTarget, _, path,
+      nextRelated, _, _, _, zeroRank⟩ :=
+    related.advance_objectCasesWithFrames_of_step supported sourceStep
+  exact ⟨testCount, targetAfter, selected, selectedTarget, path, nextRelated, zeroRank⟩
+
+/-- Normalized scalar `UInt8` cases have the same closed branch semantics;
+their resident comparisons cost four target steps per test. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_scalarUInt8CasesWithFrames_of_step
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.cases cases) targetStore targetLocals targetCode witness source target)
+    (supported : ScalarUInt8CasesSupported context sourceRuntime sourceEnv cases
+      admittedSelected)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ testCount targetAfter selected selectedTarget,
+      ∃ targetSuffix : Wasm.Program,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          (4 * testCount) target targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals
+          (List.replicate testCount none ++ labels)
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+          selected targetStore
+          { targetLocals with values := targetLocals.values } selectedTarget
+          witness sourceAfter targetAfter ∧
+        SourceCaseResult sourceRuntime sourceEnv cases selected ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames =
+          structuredWasmCaseLabels (targetLocals.values.drop 0) targetSuffix
+            testCount ++ target.frames ∧
+        (4 * testCount = 0 →
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source) := by
   obtain ⟨chosen, sourceResult, sourceAfterEq⟩ :=
     related.core.core.focus.caseResult_of_step sourceStep
   have pointwise := related.toPointwise
-    (ConcreteStructuredCodeStepAdmission.objectCases supported) (by omega)
+    (ConcreteStructuredCodeStepAdmission.scalarUInt8Cases supported) (by omega)
   obtain ⟨testCount, targetAfter, selected, selectedTarget, targetSuffix,
       targetPath, sourceFramesEq, targetFramesEq, nextCore, zeroRank⟩ :=
-    pointwise.advance_objectCases_of_step supported sourceStep
+    pointwise.advance_scalarUInt8Cases_of_step supported sourceStep
   have selectedEq : selected = chosen := by
     have controlEq := nextCore.focus.sourceControlEq
     rw [sourceAfterEq] at controlEq
@@ -10628,14 +10715,14 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_objectCases_of_step
       simpa using Control.code.inj controlEq
     exact chosenEq.symm
   subst selected
-  exact ⟨testCount, targetAfter, chosen, selectedTarget, targetPath,
+  exact ⟨testCount, targetAfter, chosen, selectedTarget, targetSuffix, targetPath,
     related.withCaseSuccessor nextCore
       (related.core.validation.selectedCase sourceResult)
       sourceFramesEq targetFramesEq,
-    zeroRank⟩
+    sourceResult, sourceFramesEq, targetFramesEq, zeroRank⟩
 
-/-- Normalized scalar `UInt8` cases have the same closed branch semantics;
-their resident comparisons cost four target steps per test. -/
+/-- Compatibility projection preserving the original tested-case API. The
+stronger producer exposes only already-proved branch and frame evidence. -/
 theorem ConcreteStructuredValidatedCodeOutcome.advance_scalarUInt8Cases_of_step
     (related : ConcreteStructuredValidatedCodeOutcome program context
       functionCode sourceModule sourceFunction targetModule hosts spec externals
@@ -10659,25 +10746,10 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_scalarUInt8Cases_of_step
         (4 * testCount = 0 →
           compilerStructuredControlRank sourceAfter <
             compilerStructuredControlRank source) := by
-  obtain ⟨chosen, sourceResult, sourceAfterEq⟩ :=
-    related.core.core.focus.caseResult_of_step sourceStep
-  have pointwise := related.toPointwise
-    (ConcreteStructuredCodeStepAdmission.scalarUInt8Cases supported) (by omega)
-  obtain ⟨testCount, targetAfter, selected, selectedTarget, targetSuffix,
-      targetPath, sourceFramesEq, targetFramesEq, nextCore, zeroRank⟩ :=
-    pointwise.advance_scalarUInt8Cases_of_step supported sourceStep
-  have selectedEq : selected = chosen := by
-    have controlEq := nextCore.focus.sourceControlEq
-    rw [sourceAfterEq] at controlEq
-    have chosenEq : chosen = selected := by
-      simpa using Control.code.inj controlEq
-    exact chosenEq.symm
-  subst selected
-  exact ⟨testCount, targetAfter, chosen, selectedTarget, targetPath,
-    related.withCaseSuccessor nextCore
-      (related.core.validation.selectedCase sourceResult)
-      sourceFramesEq targetFramesEq,
-    zeroRank⟩
+  obtain ⟨testCount, targetAfter, selected, selectedTarget, _, path,
+      nextRelated, _, _, _, zeroRank⟩ :=
+    related.advance_scalarUInt8CasesWithFrames_of_step supported sourceStep
+  exact ⟨testCount, targetAfter, selected, selectedTarget, path, nextRelated, zeroRank⟩
 
 end ClosedTestedCases
 
