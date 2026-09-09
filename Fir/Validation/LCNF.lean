@@ -1,8 +1,17 @@
+import Fir.Compiler.LCNF
 import Fir.Validation.Corpus
 import Fir.LeanIR.Checkpoint
 import Fir.LeanIR.Interpreter
-import Lean.Compiler.LCNF
-import Lean.Compiler.LCNF.EmitUtil
+
+namespace Fir.Compiler.Lcnf.Artifact
+
+def missingForms (artifact : Artifact) (required : Array String) : Array String :=
+  required.filter (!artifact.forms.contains ·)
+
+def missingExternals (artifact : Artifact) (required : Array Lean.Name) : Array Lean.Name :=
+  required.filter (!artifact.externalNames.contains ·)
+
+end Fir.Compiler.Lcnf.Artifact
 
 namespace Fir.Validation.Lcnf
 
@@ -11,82 +20,15 @@ open Lean.Compiler
 open Fir.LeanIR
 open Fir.LeanIR.Impure
 
-/-- Compiler output retained by the validation harness for execution and coverage reporting. -/
-structure Artifact where
-  entry : Name
-  program : ImpureProgram
-  externalNames : Array Name
-  forms : Array String
+namespace Artifact
+export Fir.Compiler.Lcnf.Artifact (missingForms missingExternals)
+end Artifact
 
 private def pushUnique (forms : Array String) (form : String) : Array String :=
   if forms.contains form then forms else forms.push form
 
 private def pushUniqueName (names : Array Name) (name : Name) : Array Name :=
   if names.contains name then names else names.push name
-
-private def addForms (forms : Array String) (more : Array String) : Array String :=
-  more.foldl (init := forms) pushUnique
-
-private def letValueForm : LCNF.LetValue .impure -> String
-  | .lit _ => "lit"
-  | .erased => "erased"
-  | .proj .. => "proj"
-  | .const .. => "const"
-  | .fvar .. => "fvar"
-  | .ctor .. => "ctor"
-  | .oproj .. => "oproj"
-  | .uproj .. => "uproj"
-  | .sproj .. => "sproj"
-  | .fap .. => "fap"
-  | .pap .. => "pap"
-  | .reset .. => "reset"
-  | .reuse .. => "reuse"
-  | .box .. => "box"
-  | .unbox .. => "unbox"
-  | .isShared .. => "isShared"
-
-private def codeHeadForm : LCNF.Code .impure → String
-  | .let decl _ => letValueForm decl.value
-  | .fun .. => "fun"
-  | .jp .. => "join"
-  | .jmp .. => "jump"
-  | .cases .. => "cases"
-  | .return .. => "return"
-  | .unreach .. => "unreach"
-  | .oset .. => "oset"
-  | .uset .. => "uset"
-  | .sset .. => "sset"
-  | .setTag .. => "setTag"
-  | .inc .. => "inc"
-  | .dec .. => "dec"
-  | .del .. => "del"
-
-private partial def codeForms (code : LCNF.Code .impure) : Array String :=
-  let own := #[codeHeadForm code]
-  match code with
-  | .let _ k => addForms own (codeForms k)
-  | .fun decl k _ => addForms own (addForms (codeForms decl.value) (codeForms k))
-  | .jp decl k => addForms own (addForms (codeForms decl.value) (codeForms k))
-  | .jmp .. => own
-  | .cases cases =>
-      cases.alts.foldl (init := own) fun forms alt =>
-        addForms forms (codeForms alt.getCode)
-  | .return _ | .unreach _ => own
-  | .oset (k := k) .. | .uset (k := k) .. | .sset (k := k) .. |
-      .setTag (k := k) .. | .inc (k := k) .. | .dec (k := k) .. | .del (k := k) .. =>
-      addForms own (codeForms k)
-
-def collectForms (program : ImpureProgram) : Array String :=
-  program.decls.foldl (init := #[]) fun forms decl =>
-    match decl.value with
-    | .code code => addForms forms (codeForms code)
-    | .extern _ => pushUnique forms "extern"
-
-def Artifact.missingForms (artifact : Artifact) (required : Array String) : Array String :=
-  required.filter (!artifact.forms.contains ·)
-
-def Artifact.missingExternals (artifact : Artifact) (required : Array Name) : Array Name :=
-  required.filter (!artifact.externalNames.contains ·)
 
 private def externalRequest? (state : MachineState) : Option ExternalRequest :=
   match state.control with
@@ -98,7 +40,7 @@ private def externalRequest? (state : MachineState) : Option ExternalRequest :=
 
 private def executedForm? (state : MachineState) : Option String :=
   match state.control with
-  | .code code => some (codeHeadForm code)
+  | .code code => some (Fir.Compiler.Lcnf.codeHeadForm code)
   | .yielded .. => none
   | .invokeName .. | .invokeValue .. =>
       if (externalRequest? state).isSome then some "extern" else none
@@ -3453,38 +3395,6 @@ private def validationExternals : ExternalImpl where
       | none =>
           .error (.externalFailure request.name
             "external is not in the validation allowlist")
-
-/-- Stable human-readable compiler artifact retained beside the machine result. -/
-def Artifact.format (artifact : Artifact) : CoreM String := do
-  let declarations ← artifact.program.decls.mapM fun decl => do
-    return toString (← LCNF.ppDecl' decl .impure)
-  return String.intercalate "\n\n" declarations.toList
-
-private def externDecl (sig : LCNF.Signature .impure) (data : ExternAttrData) :
-    LCNF.Decl .impure :=
-  { name := sig.name
-    levelParams := sig.levelParams
-    type := sig.type
-    params := sig.params
-    safe := sig.safe
-    value := .extern data
-    inlineAttr? := none }
-
-/-- Compile an entry and retain its complete local dependency closure plus imported extern stubs. -/
-def compileEntry (entry : Name) (dependencies : Array Name := #[]) : CoreM Artifact := do
-  let roots := #[entry] ++ dependencies
-  LCNF.main roots (← getOptions)
-  let (localDecls, externalSigs) ← LCNF.collectUsedDecls roots
-  let env ← getEnv
-  let externalDecls := externalSigs.map fun sig =>
-    let data := getExternAttrData? env sig.name |>.getD { entries := [.opaque] }
-    externDecl sig data
-  let program : ImpureProgram := { decls := localDecls ++ externalDecls }
-  return {
-    entry
-    program
-    externalNames := externalSigs.map (·.name)
-    forms := collectForms program }
 
 private def mismatch (expected : ValidationSchema) (actual : ValidationDatum) : Except String α :=
   .error s!"datum does not match schema: expected {repr expected}, got {repr actual}"

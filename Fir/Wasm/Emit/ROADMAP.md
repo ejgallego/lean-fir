@@ -53,6 +53,25 @@ generic compiler quality.
 
 ## Ordered queue
 
+### Compiler organization refresh (2026-09-09)
+
+Keep final impure LCNF, symbolic Wasm, resident helpers, and Binaryen. The
+reviewed CG sequence is: production/validation dependency extraction (CG-01),
+canonical driver preserving source-unit providers (CG-02), indexed existing
+analyses (CG-03), then incremental explicit resident contributions (CG-04).
+The first generated-code experiment is separately scoped CG-05: apply the
+constructor allocator's established scratch-free return, then selective
+initialization, to closures. Poisoned recycled-memory tests and W6 review
+precede acceptance; no performance gain is assumed from source shape alone.
+
+CG-01 begins from accepted main `d5e0b5ca`. See `Fir/Compiler/README.md` for
+the production/validation boundary and compatibility policy. Capture algorithms,
+source-unit identities, eager diagnostic formatting, helper bodies, and all
+semantic contracts remain unchanged. The source import graph drops from 21
+FIR modules to 16 (including the source module); this is dependency evidence,
+not a measured build-time or runtime improvement. Byte-identical emission and
+the complete existing W7 gates are the acceptance boundary for the extraction.
+
 ### G1. Consolidated closure allocation (accepted)
 
 The generic stack was accepted on `main` at `85481c67` with functional head

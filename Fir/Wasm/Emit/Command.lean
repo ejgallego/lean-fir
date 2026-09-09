@@ -1,4 +1,4 @@
-import Fir.Wasm.Emit.Source
+import Fir.Validation.WasmSource
 import Lean.Elab.Command
 
 namespace Fir.Wasm.Emit.Source

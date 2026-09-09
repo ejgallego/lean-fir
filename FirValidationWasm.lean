@@ -1,6 +1,4 @@
-import Fir.Validation.Corpus
-import Fir.Validation.LCNF
-import Fir.Wasm.Emit.Source
+import Fir.Validation.WasmSource
 import Lean.Elab.Command
 
 open Lean Elab Command

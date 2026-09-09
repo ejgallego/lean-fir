@@ -1,4 +1,4 @@
-import Fir.Validation.LCNF
+import Fir.Compiler.LCNF
 import Fir.Wasm.Emit.BitExactFloat
 import Fir.Wasm.Emit.ClosureDispatch
 import Fir.Wasm.Emit.CompilerPrivate
@@ -19,7 +19,7 @@ inductive CompileError where
   deriving Inhabited, Repr
 
 structure ModuleArtifact where
-  source : Fir.Validation.Lcnf.Artifact
+  source : Fir.Compiler.Lcnf.Artifact
   module : Fir.Wasm.Module
   bytes : ByteArray
   formattedLcnf : String
@@ -236,9 +236,9 @@ plus their transitive named-call closure. This removes source ancestors pulled
 in while internalizing final LCNF when no generated declaration actually
 references them.
 -/
-def pruneUnreachableDeclarations (artifact : Fir.Validation.Lcnf.Artifact)
+def pruneUnreachableDeclarations (artifact : Fir.Compiler.Lcnf.Artifact)
     (retainedRoots : Array Name := #[]) :
-    Except String Fir.Validation.Lcnf.Artifact := do
+    Except String Fir.Compiler.Lcnf.Artifact := do
   let reachable ← reachableDeclarations artifact.program
     ([artifact.entry] ++ retainedRoots.toList)
   let program : Fir.LeanIR.ImpureProgram := {
@@ -248,7 +248,7 @@ def pruneUnreachableDeclarations (artifact : Fir.Validation.Lcnf.Artifact)
   return { artifact with
     program
     externalNames := artifact.externalNames.filter reachable.contains
-    forms := Fir.Validation.Lcnf.collectForms program }
+    forms := Fir.Compiler.Lcnf.collectForms program }
 
 private def capturedExternDecl (sig : LCNF.Signature .impure)
     (data : ExternAttrData) : LCNF.Decl .impure :=
@@ -279,8 +279,8 @@ captured raw signatures and replace only matching unresolved adapters. This
 keeps boxed ABI policy upstream-owned and does not teach FIR about a producer's
 custom attribute.
 -/
-def internalizeExternalBoxedAdapters (artifact : Fir.Validation.Lcnf.Artifact)
-    (externalNames : Array Name) : CoreM Fir.Validation.Lcnf.Artifact := do
+def internalizeExternalBoxedAdapters (artifact : Fir.Compiler.Lcnf.Artifact)
+    (externalNames : Array Name) : CoreM Fir.Compiler.Lcnf.Artifact := do
   let boxedSource? := declaredExternalBehindBoxedAdapter? externalNames
   let boxedExternalNames := artifact.externalNames.filter (boxedSource? · |>.isSome)
   if boxedExternalNames.isEmpty then
@@ -328,7 +328,7 @@ def internalizeExternalBoxedAdapters (artifact : Fir.Validation.Lcnf.Artifact)
   return { artifact with
     program
     externalNames := externalNames.filter (!boxedExternalNames.contains ·)
-    forms := Fir.Validation.Lcnf.collectForms program }
+    forms := Fir.Compiler.Lcnf.collectForms program }
 
 private def appendCapturedDecl (decls : Array (LCNF.Decl .impure))
     (decl : LCNF.Decl .impure) : Array (LCNF.Decl .impure) :=
@@ -364,7 +364,7 @@ continues to supply imported signatures, but a captured body always wins over
 an external stub with the same generated name.
 -/
 private def compileEntryFinalCaptured (entry : Name) (dependencies : Array Name := #[]) :
-    CoreM Fir.Validation.Lcnf.Artifact := do
+    CoreM Fir.Compiler.Lcnf.Artifact := do
   -- Internalization grows the root set and recompiles the complete synthetic
   -- unit. Generated specialization and closed-term names are only meaningful
   -- within one such compiler run: retaining either the cache or earlier
@@ -443,10 +443,10 @@ private def compileEntryFinalCaptured (entry : Name) (dependencies : Array Name 
     entry
     program
     externalNames
-    forms := Fir.Validation.Lcnf.collectForms program }
+    forms := Fir.Compiler.Lcnf.collectForms program }
 
 private def mergeSeparatelyCompiledArtifacts (entry : Name)
-    (artifacts : Array Fir.Validation.Lcnf.Artifact) : CoreM Fir.Validation.Lcnf.Artifact := do
+    (artifacts : Array Fir.Compiler.Lcnf.Artifact) : CoreM Fir.Compiler.Lcnf.Artifact := do
   let localNames : NameSet := artifacts.foldl (init := {}) fun names artifact =>
     artifact.program.decls.foldl (init := names) fun names decl =>
       if artifact.externalNames.contains decl.name then names else names.insert decl.name
@@ -481,9 +481,9 @@ private def mergeSeparatelyCompiledArtifacts (entry : Name)
     entry
     program
     externalNames
-    forms := Fir.Validation.Lcnf.collectForms program }
+    forms := Fir.Compiler.Lcnf.collectForms program }
 
-private def discoveredOrdinarySourceRoots (artifact : Fir.Validation.Lcnf.Artifact)
+private def discoveredOrdinarySourceRoots (artifact : Fir.Compiler.Lcnf.Artifact)
     (retainedExternalNames : Array String) (excluded : Array Name) :
     CoreM (Array Name) := do
   let env ← getEnv
@@ -497,7 +497,7 @@ private def discoveredOrdinarySourceRoots (artifact : Fir.Validation.Lcnf.Artifa
           else addUniqueName additions ancestor
       | none => additions
 
-private def discoveredFinalSourceRoots (artifact : Fir.Validation.Lcnf.Artifact)
+private def discoveredFinalSourceRoots (artifact : Fir.Compiler.Lcnf.Artifact)
     (retainedExternalNames : Array String) (excluded : Array Name) :
     CoreM (Array SourceCompilationRoot) := do
   let env ← getEnv
@@ -511,12 +511,12 @@ private def discoveredFinalSourceRoots (artifact : Fir.Validation.Lcnf.Artifact)
 
 private partial def compileEntrySeparatelyInternalizedAux (entry : Name)
     (retainedExternalNames : Array String)
-    (entryArtifact : Fir.Validation.Lcnf.Artifact) (dependencies : Array Name) :
-    CoreM Fir.Validation.Lcnf.Artifact := do
+    (entryArtifact : Fir.Compiler.Lcnf.Artifact) (dependencies : Array Name) :
+    CoreM Fir.Compiler.Lcnf.Artifact := do
   if dependencies.isEmpty then
     return entryArtifact
   let dependencyArtifact ← withoutModifyingEnv <|
-    Fir.Validation.Lcnf.compileEntry dependencies[0]!
+    Fir.Compiler.Lcnf.compileEntry dependencies[0]!
       (dependencies.extract 1 dependencies.size)
   let additions ← discoveredOrdinarySourceRoots dependencyArtifact retainedExternalNames
     (#[entry] ++ dependencies)
@@ -534,9 +534,9 @@ while the entry boundary mirrors Lean's ordinary cross-module compilation and
 prevents imported helpers from joining its specialization/SCC unit.
 -/
 def compileEntrySeparatelyInternalized (entry : Name)
-    (retainedExternalNames : Array String := #[]) : CoreM Fir.Validation.Lcnf.Artifact := do
+    (retainedExternalNames : Array String := #[]) : CoreM Fir.Compiler.Lcnf.Artifact := do
   let entryArtifact ← withoutModifyingEnv <|
-    Fir.Validation.Lcnf.compileEntry entry
+    Fir.Compiler.Lcnf.compileEntry entry
   let dependencies ← discoveredOrdinarySourceRoots entryArtifact retainedExternalNames #[entry]
   compileEntrySeparatelyInternalizedAux entry retainedExternalNames entryArtifact dependencies
 
@@ -550,7 +550,7 @@ private def enqueueSourceRoot (completed pending : Array SourceCompilationRoot)
   else addSourceCompilationRoot pending root
 
 private def compileIndividualSourceRoot (root : SourceCompilationRoot) :
-    CoreM Fir.Validation.Lcnf.Artifact := do
+    CoreM Fir.Compiler.Lcnf.Artifact := do
   Core.prependError m!"Failed to compile individual source root `{root.name}`" do
     withoutModifyingEnv do
       resetFinalImpureCapture
@@ -560,8 +560,8 @@ private def compileIndividualSourceRoot (root : SourceCompilationRoot) :
 private partial def compileEntryIndividuallyInternalizedAux (entry : Name)
     (retainedExternalNames : Array String)
     (completed pending : Array SourceCompilationRoot)
-    (artifacts : Array Fir.Validation.Lcnf.Artifact) :
-    CoreM Fir.Validation.Lcnf.Artifact := do
+    (artifacts : Array Fir.Compiler.Lcnf.Artifact) :
+    CoreM Fir.Compiler.Lcnf.Artifact := do
   let some root := pending[0]? | do
     let merged ← mergeSeparatelyCompiledArtifacts entry artifacts
     match pruneUnreachableDeclarations merged with
@@ -637,7 +637,7 @@ private def installFinalImpureCaptureDirect : CoreM Unit := do
   modifyEnv fun environment => LCNF.passManagerExt.setState environment
     (installers, { manager with impurePasses })
 
-private def artifactFromCapturedModule (entry : Name) : CoreM Fir.Validation.Lcnf.Artifact := do
+private def artifactFromCapturedModule (entry : Name) : CoreM Fir.Compiler.Lcnf.Artifact := do
   let capturedGroups := finalImpureCaptureExt.getState (← getEnv)
   let mut localDecls : Array (LCNF.Decl .impure) := #[]
   for group in capturedGroups do
@@ -670,10 +670,10 @@ private def artifactFromCapturedModule (entry : Name) : CoreM Fir.Validation.Lcn
     entry
     program
     externalNames := externalDecls.map (·.name)
-    forms := Fir.Validation.Lcnf.collectForms program }
+    forms := Fir.Compiler.Lcnf.collectForms program }
 
 private def replayDeferredModuleFinalCaptured (moduleName entry : Name)
-    (options : Options) : CoreM Fir.Validation.Lcnf.Artifact := do
+    (options : Options) : CoreM Fir.Compiler.Lcnf.Artifact := do
   let environment ← getEnv
   let some moduleIndex := environment.getModuleIdx? moduleName |
     throwError "deferred final-LCNF target module `{moduleName}` is unavailable"
@@ -693,7 +693,7 @@ private def replayDeferredModuleFinalCaptured (moduleName entry : Name)
   artifactFromCapturedModule entry
 
 private def compileDeferredModuleFinalCaptured (moduleName entry : Name) :
-    CoreM (Option Fir.Validation.Lcnf.Artifact) := do
+    CoreM (Option Fir.Compiler.Lcnf.Artifact) := do
   let options := compiler.inLeanIR.set (← getOptions) true
   let environment ← Lean.Core.liftIOCore <|
     importPrivateModuleEnvironment moduleName options
@@ -741,8 +741,8 @@ private def postponedEntryModuleFor? (environment : Environment) (entry : Name) 
 private partial def compileEntryDeferredModulesInternalizedAux (entry : Name)
     (retainedExternalNames : Array String) (environment : Environment)
     (pending : Array (Name × Name × Bool)) (seenModules : Array Name)
-    (artifacts : Array Fir.Validation.Lcnf.Artifact) :
-    CoreM Fir.Validation.Lcnf.Artifact := do
+    (artifacts : Array Fir.Compiler.Lcnf.Artifact) :
+    CoreM Fir.Compiler.Lcnf.Artifact := do
   let some (moduleName, sourceRoot, required) := pending[0]? | do
     let merged ← mergeSeparatelyCompiledArtifacts entry artifacts
     match pruneUnreachableDeclarations merged with
@@ -786,7 +786,7 @@ package façade remain independent of the source module's native IR artifacts.
 def compileEntryModuleWiseInternalizedFrom
     (moduleName sourceRoot entry : Name)
     (retainedExternalNames : Array String := #[]) :
-    CoreM Fir.Validation.Lcnf.Artifact := do
+    CoreM Fir.Compiler.Lcnf.Artifact := do
   let environment ← getEnv
   compileEntryDeferredModulesInternalizedAux entry retainedExternalNames environment
     #[(moduleName, sourceRoot, true)] #[] #[]
@@ -794,7 +794,7 @@ def compileEntryModuleWiseInternalizedFrom
 /-- Derive an imported entry's source module, then replay its postponed final LCNF. -/
 def compileEntryModuleWiseInternalized (entry : Name)
     (retainedExternalNames : Array String := #[]) :
-    CoreM Fir.Validation.Lcnf.Artifact := do
+    CoreM Fir.Compiler.Lcnf.Artifact := do
   let environment ← getEnv
   let sourceModule? ← sourceModuleFor? environment entry
   let some (moduleName, sourceRoot) :=
@@ -812,7 +812,7 @@ while exposing several logical roots from one physical Wasm package.
 -/
 def compileEntriesModuleWiseInternalized (entries : Array Name)
     (retainedExternalNames : Array String := #[]) :
-    CoreM Fir.Validation.Lcnf.Artifact := do
+    CoreM Fir.Compiler.Lcnf.Artifact := do
   let some entry := entries[0]? |
     throwError "module-wise multi-entry capture requires at least one entry"
   unless (entries.foldl (init := #[]) addUniqueName).size == entries.size do
@@ -841,7 +841,7 @@ unit around macro-inlined helpers.
 -/
 def compileEntryIndividuallyInternalized (entry : Name)
     (retainedExternalNames : Array String := #[]) :
-    CoreM Fir.Validation.Lcnf.Artifact := do
+    CoreM Fir.Compiler.Lcnf.Artifact := do
   let environment ← getEnv
   let signatureModule? ← sourceModuleFor? environment entry
   let sourceModule? := signatureModule?.orElse
@@ -877,7 +877,7 @@ modules.
 -/
 def compileEntriesIndividuallyInternalized (entries : Array Name)
     (retainedExternalNames : Array String := #[]) :
-    CoreM Fir.Validation.Lcnf.Artifact := do
+    CoreM Fir.Compiler.Lcnf.Artifact := do
   let some entry := entries[0]? |
     throwError "individual-source multi-entry capture requires at least one entry"
   unless (entries.foldl (init := #[]) addUniqueName).size == entries.size do
@@ -903,7 +903,7 @@ identifiers and retains private specializations as ordinary local declarations.
 -/
 private partial def discoverFinalCapturedRoots (roots frontier : Array Name)
     (retainedExternalNames : Array String) :
-    CoreM (Array Name × Option Fir.Validation.Lcnf.Artifact) := do
+    CoreM (Array Name × Option Fir.Compiler.Lcnf.Artifact) := do
   let some entry := frontier[0]? | return (roots, none)
   let artifact ← withoutModifyingEnv <|
     compileEntryFinalCaptured entry (frontier.extract 1 frontier.size)
@@ -917,7 +917,7 @@ private partial def discoverFinalCapturedRoots (roots frontier : Array Name)
 
 private partial def compileEntryFinalCapturedInternalizedAux (entry : Name)
     (roots frontier : Array Name) (retainedExternalNames : Array String) :
-    CoreM Fir.Validation.Lcnf.Artifact := do
+    CoreM Fir.Compiler.Lcnf.Artifact := do
   let (roots, completeArtifact?) ←
     discoverFinalCapturedRoots roots frontier retainedExternalNames
   let artifact ← match completeArtifact? with
@@ -935,7 +935,7 @@ private partial def compileEntryFinalCapturedInternalizedAux (entry : Name)
 
 def compileEntryFinalCapturedInternalized (entry : Name)
     (dependencies : Array Name := #[]) (retainedExternalNames : Array String := #[]) :
-    CoreM Fir.Validation.Lcnf.Artifact := withoutModifyingEnv do
+    CoreM Fir.Compiler.Lcnf.Artifact := withoutModifyingEnv do
   resetFinalImpureCapture
   LCNF.addPass ``finalImpureCaptureInstaller
   let roots := #[entry] ++ dependencies
@@ -949,7 +949,7 @@ the artifact's canonical entry; all entries remain ordinary local declarations.
 -/
 def compileEntriesFinalCapturedInternalized (entries : Array Name)
     (retainedExternalNames : Array String := #[]) :
-    CoreM Fir.Validation.Lcnf.Artifact := do
+    CoreM Fir.Compiler.Lcnf.Artifact := do
   let some entry := entries[0]? |
     throwError "final-LCNF multi-entry capture requires at least one entry"
   unless (entries.foldl (init := #[]) addUniqueName).size == entries.size do
@@ -966,7 +966,7 @@ def compileEntriesFinalCapturedInternalized (entries : Array Name)
   | .error message => throwError message
 
 private def sourceOwnersCallingUnresolvedDeclarations
-    (artifact : Fir.Validation.Lcnf.Artifact)
+    (artifact : Fir.Compiler.Lcnf.Artifact)
     (retainedExternalNames : Array String) :
     CoreM (Array SourceCompilationRoot) := do
   let environment ← getEnv
@@ -1055,7 +1055,7 @@ regenerates those while compiling the source root, and forcing their generic
 callees into the root set can suppress the nested specialization itself.
 -/
 private def sourceSpecializationBridgeRoots (environment : Environment)
-    (artifact : Fir.Validation.Lcnf.Artifact)
+    (artifact : Fir.Compiler.Lcnf.Artifact)
     (roots : Array SourceCompilationRoot) :
     CoreM (Array SourceCompilationRoot) := do
   let pending := roots.foldl (init := []) fun pending root =>
@@ -1127,10 +1127,10 @@ native specialization/SCC identities; only unresolved declarations from
 prebuilt modules without postponed groups are recompiled. Explicit runtime
 frontier names remain external.
 -/
-def internalizeFinalDependencies (artifact : Fir.Validation.Lcnf.Artifact)
+def internalizeFinalDependencies (artifact : Fir.Compiler.Lcnf.Artifact)
     (retainedExternalNames : Array String := #[])
     (retainedRoots : Array Name := #[]) :
-    CoreM Fir.Validation.Lcnf.Artifact := do
+    CoreM Fir.Compiler.Lcnf.Artifact := do
   /- An unresolved generated declaration can belong to a source caller that is
   already local. Do not exclude that caller here: the coherent source-unit
   overlay below is what replaces its stale imported body. -/
@@ -1171,7 +1171,7 @@ def internalizeFinalDependencies (artifact : Fir.Validation.Lcnf.Artifact)
   let retainedArtifact := { artifact with
     program := retainedProgram
     externalNames := artifact.externalNames.filter (!replacementNames.contains ·)
-    forms := Fir.Validation.Lcnf.collectForms retainedProgram }
+    forms := Fir.Compiler.Lcnf.collectForms retainedProgram }
   let merged ← mergeSeparatelyCompiledArtifacts artifact.entry
     #[retainedArtifact, dependencies]
   match pruneUnreachableDeclarations merged retainedRoots with
@@ -1185,9 +1185,9 @@ nearest source declaration; retaining a name leaves that helper as an explicit
 semantic Wasm import.
 -/
 partial def compileEntryInternalized (entry : Name) (dependencies : Array Name := #[])
-    (retainedExternalNames : Array String := #[]) : CoreM Fir.Validation.Lcnf.Artifact := do
+    (retainedExternalNames : Array String := #[]) : CoreM Fir.Compiler.Lcnf.Artifact := do
   let artifact ← withoutModifyingEnv <|
-    Fir.Validation.Lcnf.compileEntry entry dependencies
+    Fir.Compiler.Lcnf.compileEntry entry dependencies
   let additions ← discoveredOrdinarySourceRoots artifact retainedExternalNames
     (#[entry] ++ dependencies)
   if additions.isEmpty then
@@ -1206,7 +1206,7 @@ private def installBitExactFloatExports (module : Fir.Wasm.Module) :
       installBitExactFloatExports module entries
 
 private def compileModuleArtifactWithExportsUsing
-    (source : Fir.Validation.Lcnf.Artifact)
+    (source : Fir.Compiler.Lcnf.Artifact)
     (exports : Array Name)
     (lowerProgram : Fir.LeanIR.ImpureProgram →
       Except Fir.Wasm.SupportedLoweringError Fir.Wasm.Module)
@@ -1239,7 +1239,7 @@ private def compileModuleArtifactWithExportsUsing
   let formattedLcnf ← source.format
   return .ok { source, module, bytes, formattedLcnf }
 
-def compileModuleArtifactWithExports (source : Fir.Validation.Lcnf.Artifact)
+def compileModuleArtifactWithExports (source : Fir.Compiler.Lcnf.Artifact)
     (exports : Array Name)
     (transform : Fir.Wasm.Module → Except CompileError Fir.Wasm.Module) :
     CoreM (Except CompileError ModuleArtifact) :=
@@ -1250,7 +1250,7 @@ Lower an already captured compiler artifact with its canonical entry as the
 only public source export, apply one symbolic-module pipeline, and encode the
 result.
 -/
-def compileModuleArtifactWith (source : Fir.Validation.Lcnf.Artifact)
+def compileModuleArtifactWith (source : Fir.Compiler.Lcnf.Artifact)
     (transform : Fir.Wasm.Module → Except CompileError Fir.Wasm.Module) :
     CoreM (Except CompileError ModuleArtifact) :=
   compileModuleArtifactWithExports source #[source.entry] transform
@@ -1269,7 +1269,7 @@ structural pass validates that no non-source target survived before the
 caller's resident-link transform runs.
 -/
 def compileModuleArtifactWithClosedClosuresAndExports
-    (source : Fir.Validation.Lcnf.Artifact) (exports : Array Name)
+    (source : Fir.Compiler.Lcnf.Artifact) (exports : Array Name)
     (transform : Fir.Wasm.Module → Except CompileError Fir.Wasm.Module) :
     CoreM (Except CompileError ModuleArtifact) :=
   let targets := Fir.Wasm.Emit.ClosureDispatch.partialApplicationTargets source.program
@@ -1284,18 +1284,18 @@ def compileModuleArtifactWithClosedClosuresAndExports
 
 /-- Single-entry form of `compileModuleArtifactWithClosedClosuresAndExports`. -/
 def compileModuleArtifactWithClosedClosures
-    (source : Fir.Validation.Lcnf.Artifact)
+    (source : Fir.Compiler.Lcnf.Artifact)
     (transform : Fir.Wasm.Module → Except CompileError Fir.Wasm.Module) :
     CoreM (Except CompileError ModuleArtifact) :=
   compileModuleArtifactWithClosedClosuresAndExports source #[source.entry] transform
 
 /-- Lower and encode one source artifact with a closed heap-closure boundary. -/
-def compileClosedClosureModuleArtifact (source : Fir.Validation.Lcnf.Artifact) :
+def compileClosedClosureModuleArtifact (source : Fir.Compiler.Lcnf.Artifact) :
     CoreM (Except CompileError ModuleArtifact) :=
   compileModuleArtifactWithClosedClosures source .ok
 
 /-- Lower and encode an already captured compiler artifact. -/
-def compileModuleArtifact (source : Fir.Validation.Lcnf.Artifact) :
+def compileModuleArtifact (source : Fir.Compiler.Lcnf.Artifact) :
     CoreM (Except CompileError ModuleArtifact) :=
   compileModuleArtifactWith source .ok
 
@@ -1306,7 +1306,7 @@ module. Invocation data is attached separately with `withInvocation`.
 def compileModule (entry : Name) (dependencies : Array Name := #[]) :
     CoreM (Except CompileError ModuleArtifact) := do
   let source ← withoutModifyingEnv <|
-    Fir.Validation.Lcnf.compileEntry entry dependencies
+    Fir.Compiler.Lcnf.compileEntry entry dependencies
   compileModuleArtifact source
 
 /-- Build the invocation-free descriptor for a reusable compiled module. -/
@@ -1344,80 +1344,6 @@ def ModuleArtifact.withRuntimeInvocation (artifact : ModuleArtifact) (artifactNa
     formattedLcnf := artifact.formattedLcnf
     manifest }
 
-/-- Check that a backend-neutral validation result schema agrees with the emitted ABI lane. -/
-def validationSchemaAcceptsAbiKind : Fir.Validation.ValidationSchema → Fir.Wasm.AbiKind → Bool
-  | .usize, .usize => true
-  | .bits 8, .uint8 => true
-  | .bits 16, .uint16 => true
-  | .bits 32, .uint32 => true
-  | .bits 64, .uint64 => true
-  | .float32, .float32 => true
-  | .float64, .float => true
-  | .bool, .uint8 => true
-  | .unit, kind
-  | .bool, kind
-  | .nat, kind
-  | .int, kind
-  | .string, kind
-  | .bytes, kind
-  | .array _, kind
-  | .seq _, kind
-  | .boxed _, kind
-  | .ctor .., kind => kind.isObjectLike
-  | _, _ => false
-
-/-- Normalize a backend-neutral validation value to the checked parameter ABI.
-The validation protocol represents `Bool` as a tagged object, while Lean 4.33
-uses scalar `UInt8` for compiler-produced Boolean parameters. -/
-def validationArgumentForAbi (schema : Fir.Validation.ValidationSchema)
-    (kind : Fir.Wasm.AbiKind) (value : Value) : Except String Value := do
-  unless validationSchemaAcceptsAbiKind schema kind do
-    throw s!"argument schema {repr schema} does not match ABI kind {repr kind}"
-  match schema, kind, value with
-  | .bool, .uint8, .object (.tagged payload) =>
-      if payload == 0 || payload == 1 then
-        return .scalar (.uint8 (UInt8.ofNat payload.toNat))
-      else
-        throw s!"Boolean argument tag must be zero or one, got {payload}"
-  | _, _, value =>
-      unless kind.acceptsValue value do
-        throw s!"argument {repr value} does not match ABI kind {repr kind}"
-      return value
-
-/--
-Attach an invocation encoded from the validation protocol. This is the common
-boundary for corpus-driven emitters: schemas check both the source arguments
-and the emitted result lane, while validation datums construct the initial FIR
-runtime and semantic argument values.
--/
-def ModuleArtifact.withValidationInvocation (artifact : ModuleArtifact)
-    (artifactName : String) (sourceEntry entry : Name)
-    (argSchemas : Array Fir.Validation.ValidationSchema)
-    (data : Array Fir.Validation.ValidationDatum)
-    (resultSchema : Fir.Validation.ValidationSchema)
-    (argumentAliases : Array Fir.Validation.ArgumentAlias := #[])
-    (nestedArgumentAliases : Array Fir.Validation.NestedArgumentAlias := #[]) :
-    Except CompileError Artifact := do
-  let function ← Manifest.entryFunction artifact.module entry |>.mapError .manifest
-  let resultKind ← Manifest.entryResultKind entry function |>.mapError .manifest
-  unless validationSchemaAcceptsAbiKind resultSchema resultKind do
-    throw (.manifest s!"result schema {repr resultSchema} does not match ABI kind {repr resultKind}")
-  let paramKinds := function.params.map (·.snd)
-  unless paramKinds.size == argSchemas.size do
-    throw (.manifest
-      s!"entry {entry} expects {paramKinds.size} argument schemas, got {argSchemas.size}")
-  let (runtime, args) ← Fir.Validation.Lcnf.encodeArgs argSchemas data argumentAliases
-    nestedArgumentAliases
-    |>.mapError .manifest
-  let args ← (paramKinds.toList.zip (argSchemas.toList.zip args.toList)).mapM
-    fun (kind, schema, value) =>
-      validationArgumentForAbi schema kind value |>.mapError .manifest
-  let args := args.toArray
-  if runtime.heap.isEmpty then
-    artifact.withInvocation artifactName sourceEntry entry args
-  else
-    artifact.withRuntimeInvocation artifactName sourceEntry entry runtime args
-
 /--
 Compile a Lean declaration and attach one checked semantic invocation. The
 arguments affect only the manifest, never capture, lowering, or Wasm bytes.
@@ -1434,20 +1360,6 @@ def compileWithRuntime (entry : Name) (runtime : RuntimeState) (args : Array Val
   let result ← compileModule entry dependencies
   return result.bind fun artifact =>
     artifact.withRuntimeInvocation entry.toString entry entry runtime args
-
-/-- Compile a source declaration and attach one validation-protocol invocation. -/
-def compileValidationInvocation (artifactName : String) (entry : Name)
-    (argSchemas : Array Fir.Validation.ValidationSchema)
-    (data : Array Fir.Validation.ValidationDatum)
-    (resultSchema : Fir.Validation.ValidationSchema)
-    (dependencies : Array Name := #[])
-    (argumentAliases : Array Fir.Validation.ArgumentAlias := #[])
-    (nestedArgumentAliases : Array Fir.Validation.NestedArgumentAlias := #[]) :
-    CoreM (Except CompileError Artifact) := do
-  let result ← compileModule entry dependencies
-  return result.bind fun artifact =>
-    artifact.withValidationInvocation artifactName entry entry argSchemas data resultSchema
-      argumentAliases nestedArgumentAliases
 
 /-- Compile a zero-argument Lean declaration and record its closed invocation. -/
 def compileClosed (entry : Name) (dependencies : Array Name := #[]) :

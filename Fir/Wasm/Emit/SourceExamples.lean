@@ -1,9 +1,10 @@
-import Fir.Validation.Corpus
+import Fir.Validation.WasmSource
 import Fir.Wasm.Emit.PrettyFormat
 import Fir.Wasm.Emit.ScalarBoxingExamples
 import Fir.Wasm.Emit.Source
 import Fir.Wasm.Emit.SourceArrayAppendFixture
 import Fir.Wasm.Emit.SourceClosedFixture
+import Fir.Wasm.Emit.SourceDependencyExamples
 import Fir.Wasm.Emit.SourceOwnershipFixture
 import Fir.Wasm.PrettyFormat
 import Lean.Elab.Command
