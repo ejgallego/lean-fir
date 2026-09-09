@@ -7,6 +7,8 @@ its successor adds the structured terminal-return bridge below. Neither
 changes runtime behavior or a shared semantic relation.
 The following terminal-extraction slice recovers the bridge inputs from the
 unchanged validated global relation.
+The precise-return successor retains the exact active-function result kind
+at the two producer interfaces that previously hid it existentially.
 
 ## Destination and current evidence
 
@@ -114,12 +116,36 @@ goal. The finite target prefix is still an internal simulation assembly input,
 not a new application-client certificate. No admission predicate, simulation
 relation, runtime behavior, or trusted axiom was added or changed.
 
+## Precise return producers
+
+The return rule already proves the exact active-function result ABI. The new
+`ConcreteStructuredCodePointwiseRel.advance_return_precise` exposes that fact
+instead of existentially hiding the result kind. It uses the same current-node
+admission and successful source step as `advance_return`; the old theorem is
+now a compatibility wrapper around the precise one.
+
+`ConcreteStructuredValidatedCodeOutcome.advance_returnPrecise_of_step`
+transports the same precision through suspended-frame validation. Its returned
+outcome has both its `functionResult` and its represented `kind` indexed by the
+same active-function result. It also exposes the unchanged source/target frame
+equalities. The existing `advance_returnAt_of_step` keeps its public signature
+by packaging this stronger local outcome into the witness-indexed global
+relation.
+
+This is a hidden-interface repair, not a new provenance assumption: no premise
+was added, and the existing source-semantic return admission is still required.
+In particular, physical lane compatibility alone is not treated as semantic
+result refinement. The new producer lemmas do not change the global relation,
+which can still hide the precise kind, or establish that the active function
+is the root export. Retaining those facts across the whole simulation remains
+the next obligation.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
 |---|---|---|
 | Recover the terminal yield | `sourceExecReturned_terminal`, `ConcreteStructuredValidatedCodeGlobalOutcome.terminalYield_of_control`, and the function/export `terminatesWith_of_validatedReturn` lemmas | Discharged for the existing global relation and a successful final source step; finite-prefix composition and root result-kind provenance remain separate. |
-| Preserve the export's selected result ABI | `ConcreteStructuredCodeCoreRel.advance_return_at_functionResult` produces the exact kind; `ConcreteStructuredValidatedReturnedOutcome.activeResult` records the active function's result | The returned outcome's independent `kind` index is not equated to `functionResult`; compatibility with no caller is only `True`. Recover or retain the producer fact and the root result identity before existential packaging, without adding a client assumption. |
+| Preserve the export's selected result ABI | `ConcreteStructuredCodePointwiseRel.advance_return_precise` and `ConcreteStructuredValidatedCodeOutcome.advance_returnPrecise_of_step` now retain the exact active-function kind through local return production | The general returned outcome still permits an independent `kind`; compatibility with no caller is only `True`. Retain producer precision and root result identity across the global relation, without adding a client assumption. |
 | Connect source termination to the prefix | `ConcreteRankedTraceSimulation.execSteps` gives the related target prefix for successful source transitions | Combine the terminal source observation with that specific relation, rather than destructing the lossy public existential package. |
 | Match faults | `StructuredWasmControl` has running/breaking/returning/halted states, and `StructuredWasmOutcome` describes successful control only | A trap-aware extension and its adequacy proof are a separately coordinated semantic change. Existing `ConcreteFaultSimulation` results do not automatically supply this missing structured-machine branch. |
 
@@ -151,6 +177,7 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | all ten new sensitivity lemmas | 0–3 | 0 |
 | all five structured terminal-return bridge lemmas | 2–3 | 0 |
 | all five terminal-extraction and validated-return lemmas | 3 | 0 |
+| both precise-return producer lemmas | 3 | 0 |
 
 The standard set is `propext`, `Classical.choice`, and `Quot.sound`. The exact
 generated names live in `TrustInventory.lean`. Most dependencies in the two
@@ -194,8 +221,10 @@ roadmap remain integration-owned and are not edited by the terminal-proof slice.
 
 Retain PA1/PA2 compiler provenance as the admission work. For PA3's terminal
 corollary, the maintained global relation now supplies the terminal yielded
-state. Recover or retain the precise selected root result kind and compose
-the prefix constructed by simulation with the validated-return corollary.
+state, and the local return producers now retain the exact active-function
+result kind. Carry that precision and the root result identity through global
+simulation, then compose its constructed prefix with the validated-return
+corollary.
 Handle the trap-model extension separately.
 Do not reintroduce a client source invariant, target path, or ABI-provenance
 assumption in the final corollary.

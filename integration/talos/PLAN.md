@@ -62,11 +62,14 @@ The structured return bridge now discharges final target label unwinding and
 Talos execution adequacy from the existing yielded-value/frame relation.
 Terminal extraction now derives that yielded-value/frame evidence from the
 validated global relation and successful source completion, and feeds it to
-the executable function/export bridge. Precise root-result provenance and
-finite-prefix assembly remain open: the new corollaries existentially retain
-the represented kind, without equating it to the root export ABI. Trap support
-needs a separate structured-machine extension. See the linked review follow-up
-for exact theorem dependencies and the remaining boundary.
+the executable function/export bridge. The precise-return successor now
+retains the active function's exact result kind in both pointwise and validated
+return producers, with the old global-facing APIs kept as compatibility
+wrappers. Precise root-result provenance and finite-prefix assembly remain
+open: the general global relation still existentially hides the represented
+kind, without equating it to the root export ABI. Trap support needs a separate
+structured-machine extension. See the linked review follow-up for exact theorem
+dependencies and the remaining boundary.
 
 ### Intended result
 

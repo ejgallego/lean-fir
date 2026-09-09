@@ -25372,10 +25372,67 @@ theorem ConcreteStructuredCodeCoreRel.advance_return_at_functionResult
         yieldedAtFunctionResult, related.resources.suspended.resultCompatible,
         resourcesAfter, sourceFramesEq, targetFramesEq⟩
 
-/-- An admitted return is classified pointwise as either a terminal result or
-the appropriate direct/saturated bind protocol from the hereditary frame
-stack.  Production carrier compatibility fixes the physical calling lane;
-the source-semantic premise prevents an unsound reverse object-family cast. -/
+/-- An admitted return retains the active function's exact result ABI, as well
+as its terminal or direct/saturated bind protocol from the hereditary frame
+stack. Production carrier compatibility fixes the physical calling lane;
+existing source-semantic admission prevents an unsound reverse object-family
+cast. No additional result-kind premise is required. -/
+theorem ConcreteStructuredCodePointwiseRel.advance_return_precise
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {requiredBytes : Nat}
+    {remainingBytes : Nat}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {result : Lean.FVarId}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts)
+    (related : ConcreteStructuredCodePointwiseRel program context functionCode
+      sourceModule sourceFunction targetModule hosts spec externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts requiredBytes remainingBytes sourceRuntime sourceEnv
+      (.return result) targetStore targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter sourceValue physical,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+        targetAfter ∧
+      ConcreteStructuredYieldFocus context sourceFunction sourceRuntime
+        sourceEnv sourceValue targetStore targetLocals witness functionResult
+        physical sourceAfter targetAfter ∧
+      ConcreteStructuredResultCompatible functionResult callerExpectedResult ∧
+      ConcreteStructuredResourceStack program context sourceModule
+        sourceFunction externals entryRuntime sourceRuntime entryStore
+        targetStore entryWitness witness facts remainingBytes sourceEnv
+        targetLocals functionResult callerExpectedResult sourceAfter.frames
+        targetAfter.frames ∧
+      sourceAfter.frames = source.frames ∧
+      targetAfter.frames = target.frames := by
+  obtain ⟨_admittedResult, resultCompiled, _resultCompatible,
+      resultSemantic, _requiredEq⟩ := related.admitted.return_cases
+  exact related.core.advance_return_at_functionResult spec resultCompiled
+    resultSemantic sourceStep
+
+/-- Compatibility view of `advance_return_precise`. Only this wrapper hides
+the already established active-function result representation. -/
 theorem ConcreteStructuredCodePointwiseRel.advance_return
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
@@ -25425,13 +25482,9 @@ theorem ConcreteStructuredCodePointwiseRel.advance_return
         targetAfter.frames ∧
       sourceAfter.frames = source.frames ∧
       targetAfter.frames = target.frames := by
-  obtain ⟨_admittedResult, resultCompiled, _resultCompatible,
-      resultSemantic, _requiredEq⟩ :=
-    related.admitted.return_cases
   obtain ⟨targetAfter, sourceValue, physical, targetPath, yielded,
       compatible, resources, sourceFramesEq, targetFramesEq⟩ :=
-    related.core.advance_return_at_functionResult spec resultCompiled
-      resultSemantic sourceStep
+    related.advance_return_precise spec sourceStep
   exact ⟨targetAfter, sourceValue, functionResult, physical, targetPath,
     yielded, compatible, resources, sourceFramesEq, targetFramesEq⟩
 

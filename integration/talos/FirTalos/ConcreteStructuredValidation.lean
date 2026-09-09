@@ -5346,11 +5346,91 @@ theorem
   apply sourceSafe related.core.core.focus.sourceControlEq
   simpa only [related.core.core.focus.sourceEnvEq] using sourceLookup
 
-/-- A validated return enters the closed yielded branch at exactly the current
-refinement witness. Current-node admission supplies only the compiled result
-kind; the concrete theorem derives the semantic/physical result and both
-machine paths, while suspended caller validation is transported across the
-unchanged-frame equalities. -/
+/-- A validated return retains both the current witness and the active
+function's exact result ABI before the global wrapper hides its indices.
+The existing current-node admission includes semantic result safety; no new
+precision or resource premise is added. Suspended caller validation is
+transported across the unchanged-frame equalities. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_returnPrecise_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {result : Lean.FVarId}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.return result) targetStore targetLocals targetCode witness source target)
+    (admitted : ConcreteStructuredCodeStepAdmission context sourceModule
+      externals functionResult facts sourceRuntime sourceEnv 0
+      (.return result))
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter sourceValue physical,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        ConcreteStructuredValidatedReturnedOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+          sourceValue targetStore targetLocals witness functionResult physical
+          sourceAfter targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames := by
+  have pointwise := related.toPointwise admitted (by omega)
+  obtain ⟨targetAfter, sourceValue, physical, targetPath, yielded,
+      compatible, resources, sourceFramesEq, targetFramesEq⟩ :=
+    pointwise.advance_return_precise spec sourceStep
+  obtain ⟨supportedAfter, agreesAfter⟩ := related.agrees.reindex
+    sourceFramesEq targetFramesEq resources.suspended
+  have validationAfter :
+      ConcreteStructuredSuspendedValidation program functionResult
+        callerExpectedResult sourceAfter.frames := by
+    rw [sourceFramesEq]
+    exact related.frames.validation
+  have framesAfter :
+      ConcreteStructuredValidatedFrameStack program sourceModule targetModule
+        hosts functionResult callerExpectedResult sourceAfter.frames
+        targetAfter.frames :=
+    ⟨supportedAfter, validationAfter⟩
+  have validationAgreesAfter :
+      ConcreteStructuredValidationAgrees agreesAfter validationAfter :=
+    related.validationAgrees.reindex sourceFramesEq targetFramesEq agreesAfter
+      validationAfter
+  have returned :
+      ConcreteStructuredValidatedReturnedOutcome program context functionCode
+        sourceModule sourceFunction targetModule hosts spec externals labels
+        entryRuntime entryStore entryWitness functionResult
+        callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+        sourceValue targetStore targetLocals witness functionResult physical
+        sourceAfter targetAfter :=
+    ⟨activeResult, related.contextCaches, yielded, compatible, resources,
+      framesAfter, agreesAfter, validationAgreesAfter⟩
+  exact ⟨targetAfter, sourceValue, physical, targetPath, returned,
+    sourceFramesEq, targetFramesEq⟩
+
+/-- Existing witness-indexed global view of the precise return producer.
+The compatibility boundary, not the local proof, hides the selected kind. -/
 theorem ConcreteStructuredValidatedCodeOutcome.advance_returnAt_of_step
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
@@ -5391,35 +5471,8 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_returnAt_of_step
           targetAfter ∧
         ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
           targetModule hosts externals witness sourceAfter targetAfter := by
-  have pointwise := related.toPointwise admitted (by omega)
-  obtain ⟨targetAfter, sourceValue, actualKind, physical, targetPath, yielded,
-      compatible, resources, sourceFramesEq, targetFramesEq⟩ :=
-    pointwise.advance_return spec sourceStep
-  obtain ⟨supportedAfter, agreesAfter⟩ := related.agrees.reindex
-    sourceFramesEq targetFramesEq resources.suspended
-  have validationAfter :
-      ConcreteStructuredSuspendedValidation program functionResult
-        callerExpectedResult sourceAfter.frames := by
-    rw [sourceFramesEq]
-    exact related.frames.validation
-  have framesAfter :
-      ConcreteStructuredValidatedFrameStack program sourceModule targetModule
-        hosts functionResult callerExpectedResult sourceAfter.frames
-        targetAfter.frames :=
-    ⟨supportedAfter, validationAfter⟩
-  have validationAgreesAfter :
-      ConcreteStructuredValidationAgrees agreesAfter validationAfter :=
-    related.validationAgrees.reindex sourceFramesEq targetFramesEq agreesAfter
-      validationAfter
-  have returned :
-      ConcreteStructuredValidatedReturnedOutcome program context functionCode
-        sourceModule sourceFunction targetModule hosts spec externals labels
-        entryRuntime entryStore entryWitness functionResult
-        callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
-        sourceValue targetStore targetLocals witness actualKind physical
-        sourceAfter targetAfter :=
-    ⟨activeResult, related.contextCaches, yielded, compatible, resources,
-      framesAfter, agreesAfter, validationAgreesAfter⟩
+  obtain ⟨targetAfter, _, _, targetPath, returned, _, _⟩ :=
+    related.advance_returnPrecise_of_step activeResult admitted sourceStep
   exact ⟨targetAfter, targetPath,
     ConcreteStructuredValidatedCodeGlobalOutcomeAt.returned returned⟩
 
