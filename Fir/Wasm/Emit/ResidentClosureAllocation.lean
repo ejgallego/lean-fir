@@ -7,9 +7,10 @@ open Fir.Wasm
 open Fir.Wasm.Concrete
 open Lean
 
-private def addressLocal : FVarId := ⟨`address⟩
-private def targetIdLocal : FVarId := ⟨`targetId⟩
-private def arityLocal : FVarId := ⟨`arity⟩
+/-- Production helper local identities, shared with the source equations below. -/
+def addressLocal : FVarId := ⟨`address⟩
+def targetIdLocal : FVarId := ⟨`targetId⟩
+def arityLocal : FVarId := ⟨`arity⟩
 
 inductive LinkError where
   | invalidInput (error : SymbolicError)
@@ -33,7 +34,7 @@ def isPartialApplication : RuntimeOp → Bool
 def partialApplicationName (ordinal : Nat) : Name :=
   Name.mkSimple s!"fir_alloc_closure_{ordinal}"
 
-private def captureId (index : Nat) : FVarId :=
+def captureId (index : Nat) : FVarId :=
   ⟨Name.mkSimple s!"capture_{index}"⟩
 
 private def checkedWord (label : String) (value : Nat) :
@@ -50,7 +51,7 @@ private def store32 (kind : AbiKind) (value : List Instruction)
 /-- The header and full-width captures are completely overwritten below.
 Only the upper word of a physical i32/f32 capture slot remains unwritten.
 The current 32-byte header plus eight-byte slots has no alignment suffix. -/
-private def zeroUnwrittenBytes (fields : Array AbiKind) : List Instruction :=
+def zeroUnwrittenBytes (fields : Array AbiKind) : List Instruction :=
   fields.toList.zipIdx.flatMap fun (kind, index) =>
     match kind.valueType with
     | .i32 | .f32 =>
@@ -58,7 +59,7 @@ private def zeroUnwrittenBytes (fields : Array AbiKind) : List Instruction :=
           (u32 (headerBytes + target.semanticSlotBytes * index + 4))
     | .i64 | .f64 => []
 
-private def headerStores (fixed descriptorId allocationBytes : UInt32) :
+def headerStores (fixed descriptorId allocationBytes : UInt32) :
     List Instruction :=
   store32 .uint32 [.i32Const .uint32 ObjectKind.closure.code]
       (u32 headerKindOffset) ++
@@ -77,7 +78,7 @@ private def headerStores (fixed descriptorId allocationBytes : UInt32) :
     store32 .uint32 [.i32Const .uint32 descriptorId]
       (u32 headerAux3Offset)
 
-private def captureStore (kind : AbiKind) (index : Nat) :
+def captureStore (kind : AbiKind) (index : Nat) :
     Except LinkError (List Instruction) := do
   let offset := u32 (headerBytes + target.semanticSlotBytes * index)
   match kind.valueType with
@@ -101,7 +102,7 @@ private def captureStore (kind : AbiKind) (index : Nat) :
         .i64ReinterpretF64 .uint64,
         .i64Store .uint64 offset]
 
-private def captureStores (fields : Array AbiKind) :
+def captureStores (fields : Array AbiKind) :
     Except LinkError (List Instruction) := do
   let stores ← fields.toList.zipIdx.mapM fun (kind, index) =>
     captureStore kind index
@@ -112,7 +113,7 @@ Return the allocator's already-valid wasm32 closure address in the declared
 object-family lane. As in ResidentConstructor, unsigned extend followed by
 typed wrap preserves every address bit without borrowing linear-memory scratch.
 -/
-private def typedAddressResult (result : AbiKind) : List Instruction := [
+def typedAddressResult (result : AbiKind) : List Instruction := [
   .localGet addressLocal,
   .i64ExtendI32U .uint64,
   .i32WrapI64 result,
@@ -173,6 +174,88 @@ private def partialApplicationFunctionForKey
       headerStores fixedField descriptorId allocationBytes ++
       stores ++
       typedAddressResult result }
+
+/-- Public-input entry to the same checked builder used by installation.
+The helper-sharing key remains private; this is an evolvable source/proof
+boundary, not a new runtime ABI or an allocation-refinement theorem. -/
+def partialApplicationFunction
+    (descriptorIndices : Std.HashMap (Array AbiKind) Nat) (ordinal : Nat)
+    (fields : Array AbiKind) (result : AbiKind) : Except LinkError Function :=
+  partialApplicationFunctionForKey descriptorIndices ordinal { fields, result }
+
+/-! Closed production source equations. Their instruction lists mention only
+public inputs/local identities, not private mangled names or `HelperKey`. -/
+
+theorem zeroUnwrittenBytes_eq (fields : Array AbiKind) :
+    zeroUnwrittenBytes fields = fields.toList.zipIdx.flatMap (fun (kind, index) =>
+      match kind.valueType with
+      | .i32 | .f32 => [
+          .localGet addressLocal, .i32Const .uint32 0,
+          .i32Store .uint32 (UInt32.ofNat (32 + 8 * index + 4))]
+      | .i64 | .f64 => []) := rfl
+
+theorem headerStores_eq (fixed descriptorId allocationBytes : UInt32) :
+    headerStores fixed descriptorId allocationBytes = [
+      .localGet addressLocal, .i32Const .uint32 2, .i32Store .uint32 0,
+      .localGet addressLocal, .i32Const .uint32 2, .i32Store .uint32 4,
+      .localGet addressLocal, .i32Const .uint32 1, .i32Store .uint32 8,
+      .localGet addressLocal, .i32Const .uint32 allocationBytes, .i32Store .uint32 12,
+      .localGet addressLocal, .localGet targetIdLocal, .i32Store .uint32 16,
+      .localGet addressLocal, .localGet arityLocal, .i32Store .uint32 20,
+      .localGet addressLocal, .i32Const .uint32 fixed, .i32Store .uint32 24,
+      .localGet addressLocal, .i32Const .uint32 descriptorId, .i32Store .uint32 28] := rfl
+
+theorem captureStore_eq (kind : AbiKind) (index : Nat) :
+    captureStore kind index = .ok (
+      match kind.valueType with
+      | .i32 => [.localGet addressLocal, .localGet (captureId index),
+          .i32Store kind (UInt32.ofNat (32 + 8 * index))]
+      | .i64 => [.localGet addressLocal, .localGet (captureId index),
+          .i64Store kind (UInt32.ofNat (32 + 8 * index))]
+      | .f32 => [.localGet addressLocal, .localGet (captureId index),
+          .i32ReinterpretF32 .uint32, .i32Store .uint32 (UInt32.ofNat (32 + 8 * index))]
+      | .f64 => [.localGet addressLocal, .localGet (captureId index),
+          .i64ReinterpretF64 .uint64, .i64Store .uint64 (UInt32.ofNat (32 + 8 * index))]) := by
+  cases kind <;> rfl
+
+theorem captureStores_eq (fields : Array AbiKind) :
+    captureStores fields = (do
+      let stores ← fields.toList.zipIdx.mapM fun (kind, index) => captureStore kind index
+      pure stores.flatten) := rfl
+
+theorem typedAddressResult_eq (result : AbiKind) :
+    typedAddressResult result = [
+      .localGet addressLocal, .i64ExtendI32U .uint64, .i32WrapI64 result, .ret] := rfl
+
+/-- Successful checked construction exposes the whole production function,
+including parameter order, its sole local, and all initialization stages.
+The hypotheses are the existing builder checks, not new admission premises. -/
+theorem partialApplicationFunction_eq_ok
+    (descriptorIndices : Std.HashMap (Array AbiKind) Nat) (ordinal : Nat)
+    (fields : Array AbiKind) (result : AbiKind) (descriptor : Nat)
+    (stores : List Instruction)
+    (hresult : result.isObjectLike = true)
+    (hdescriptor : descriptorIndices[fields]? = some descriptor)
+    (hdescriptorBound : descriptor < UInt32.size)
+    (hfixed : fields.size < UInt32.size)
+    (hextent : (ClosureLayout.ofCaptures fields).allocationBytes < UInt32.size)
+    (hstores : captureStores fields = .ok stores) :
+    partialApplicationFunction descriptorIndices ordinal fields result = .ok {
+      name := partialApplicationName ordinal
+      params := fields.mapIdx (fun index kind => (captureId index, kind)) ++ #[
+        (targetIdLocal, .uint32), (arityLocal, .uint32)]
+      results := #[result]
+      locals := #[(addressLocal, .uint32)]
+      body := [
+        .i32Const .uint32 (UInt32.ofNat (ClosureLayout.ofCaptures fields).allocationBytes),
+        .call (.declaration ResidentAllocator.allocateName), .localSet addressLocal] ++
+        zeroUnwrittenBytes fields ++
+        headerStores (UInt32.ofNat fields.size) (UInt32.ofNat descriptor)
+          (UInt32.ofNat (ClosureLayout.ofCaptures fields).allocationBytes) ++
+        stores ++ typedAddressResult result } := by
+  simp [partialApplicationFunction, partialApplicationFunctionForKey, hresult,
+    hdescriptor, checkedWord, hdescriptorBound, hfixed, hextent, hstores]
+  rfl
 
 private structure Binding where
   key : HelperKey
@@ -258,7 +341,7 @@ def internalizePartialApplications (module : Module) (validate : Bool := true) :
     if importedDeclarations.contains name || functionNames.contains name ||
         exportedNames.contains name then
       throw (.reservedDeclaration name)
-    let function ← partialApplicationFunctionForKey descriptorIndices ordinal key
+    let function ← partialApplicationFunction descriptorIndices ordinal key.fields key.result
     return { key, name, function : Binding }
   let helperNames := bindings.foldl
     (init := Std.HashMap.emptyWithCapacity bindings.size)

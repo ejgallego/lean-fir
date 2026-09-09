@@ -136,6 +136,16 @@ imports, captured LCNF and capabilities/ownership metadata are unchanged.
 The local immutable package and all gate results are pinned in the W7 handoff.
 No external package pointer is changed and no runtime speedup is asserted.
 
+The separately requested post-CG-05B proof-facing surface exposes the actual
+initializer fragments and local identities, with six closed source equations.
+`partialApplicationFunction` is the public-input wrapper now used by production
+installation; helper-sharing keys stay private. Its successful-construction
+equation includes the exact parameter order, sole local and complete body,
+under the existing metadata/result/capture-success checks. This is source
+decomposition, not allocation or memory-footprint refinement. It introduces no
+new runtime invariant, instruction sequence or proof axiom; W6 owns the later
+footprint theorem. Emitted-byte equality and the full gates remain required.
+
 ### G1. Consolidated closure allocation (accepted)
 
 The generic stack was accepted on `main` at `85481c67` with functional head
