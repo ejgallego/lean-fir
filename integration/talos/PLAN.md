@@ -68,9 +68,13 @@ return producers, with the old global-facing APIs kept as compatibility
 wrappers. Terminal-simulation composition now derives the target prefix from
 the existing classifier and exposes executable return correctness from ordinary
 source evaluation or a successful interpreter run, constructing the export's
-initial relation internally. Precise root-result provenance remains open: the
-general global relation still existentially hides the represented kind, without
-equating it to the root export ABI. The universal compiler classifier also
+initial relation internally. The root-result foundation now reuses the existing
+checked caller ABI spine: export entry establishes its own selected root kind,
+the common call push/pop equation retains it across heterogeneous result kinds,
+and an empty continuation recovers exact root precision for a precise return.
+The general global relation still existentially hides the represented kind;
+preserving the new root index and producer precision through its dispatcher
+remains open. The universal compiler classifier also
 remains an explicit compiler-proof obligation; this is not PA3 closure. Trap
 support needs a separate structured-machine extension. See the linked review
 follow-up for exact theorem dependencies and the remaining boundary.

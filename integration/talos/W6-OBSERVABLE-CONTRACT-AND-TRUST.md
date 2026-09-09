@@ -177,12 +177,43 @@ The result kind is still existential; the theorem does not yet justify
 decoding at the root export's selected ABI. Global root-kind provenance and
 trap semantics remain separate. No existing relation is redesigned.
 
+### Root-result boundary from the existing caller spine
+
+`ConcreteRootResult.lean` reuses the non-proof caller ABI spine already indexed
+by `ConcreteStructuredValidatedStackAgreement`. Its oldest caller identifies
+the root result kind; with no callers, the active function is the root.
+`concreteStructuredRootResultKind_push` is the same push/pop equation for direct,
+saturated closure, and lazy initializer calls, including calls whose callee
+result kind differs from the caller's. Target-only case labels and ordinary
+frame reindexing retain the index without introducing runtime state.
+
+The internal relation `ConcreteStructuredValidationAgreesAtRoot` retains this
+one root index while existentially hiding the existing checked spine. It is
+not an application-supplied invariant. In particular,
+`ConcreteSupportedExport.validatedCodeRoot_rootResult` constructs it from the
+actual supported export entry with precisely the existing runtime premises.
+`ConcreteStructuredValidationAgreesAtRoot.functionResult_eq_of_empty` recovers
+the exact selected root ABI at a source terminal continuation, even if target
+case labels remain. `ConcreteStructuredValidatedReturnedOutcome.yieldAtRoot_of_empty`
+connects that fact to the preceding slice's precise local return evidence.
+
+This checkpoint establishes the entry and terminal boundaries, not global
+preservation. The call equation alone is not a dispatcher preservation theorem.
+The successor must retain this index and exact producer kind through every
+global branch and its push/pop transitions, then use the strengthened relation
+in the existing finite-prefix and terminal assembly. The public classified
+terminal theorem still has an existential result kind until that wiring is
+proved; the rooted-stack premise must not be exported to clients instead.
+The heterogeneous-call regression distinguishes a `UInt64` root from its
+`UInt8` nested helper. All ten new lemmas are in the exact compiled trust
+inventory: two are axiom-free, and eight use only the standard three axioms.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
 |---|---|---|
 | Recover the terminal yield | `sourceExecReturned_terminal`, `ConcreteStructuredValidatedCodeGlobalOutcome.terminalYield_of_control`, and the function/export `terminatesWith_of_validatedReturn` lemmas | Discharged for the existing global relation and a successful final source step. |
-| Preserve the export's selected result ABI | `ConcreteStructuredCodePointwiseRel.advance_return_precise` and `ConcreteStructuredValidatedCodeOutcome.advance_returnPrecise_of_step` now retain the exact active-function kind through local return production | The general returned outcome still permits an independent `kind`; compatibility with no caller is only `True`. Retain producer precision and root result identity across the global relation, without adding a client assumption. |
+| Preserve the export's selected result ABI | Precise pointwise/validated return producers; `validatedCodeRoot_rootResult` establishes root identity from the export; `yieldAtRoot_of_empty` consumes it at precise terminal returns | The general returned outcome still permits an independent `kind`; compatibility with no caller is only `True`. Preserve the root-indexed checked spine and producer precision through the global dispatcher, without adding a client assumption. |
 | Connect source termination to executable return | `terminatesWith_of_classifiedExecSteps`, `terminatesWith_of_classifiedExecEvaluates`, and `terminatesWith_of_classifiedRun` compose the existing ranked prefix with terminal extraction and adequacy | Discharged conditional on the existing universal classifier and entry contracts, with existential represented kind. Compiler admission closure and root-kind provenance are not discharged. |
 | Match faults | `StructuredWasmControl` has running/breaking/returning/halted states, and `StructuredWasmOutcome` describes successful control only | A trap-aware extension and its adequacy proof are a separately coordinated semantic change. Existing `ConcreteFaultSimulation` results do not automatically supply this missing structured-machine branch. |
 
@@ -266,8 +297,10 @@ Retain PA1/PA2 compiler provenance as the admission work. For PA3's terminal
 corollary, the maintained global relation now supplies the terminal yielded
 state, and the local return producers now retain the exact active-function
 result kind. The classifier's simulation now also supplies the complete target
-prefix internally. Carry precise producer and root result identity through
-global simulation so the new classified terminal corollaries can state the
+prefix internally. The root-result foundation now supplies compiler-derived
+entry evidence, a shared caller push/pop law, and exact terminal consumption.
+Carry precise producer and root result identity through global simulation so
+the new classified terminal corollaries can state the
 root export's selected ABI, then discharge the universal compiler classifier
 through the ongoing admission work.
 Handle the trap-model extension separately.
