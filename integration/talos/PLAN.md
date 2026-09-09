@@ -76,6 +76,13 @@ The root-preserving return transition now retains that same root index and
 the exact active result kind through one successful return, reusing the existing
 two-step target path. Its empty-continuation corollary derives a yield at the
 root ABI without an extra result-kind equality premise.
+The ordinary direct-let successor now preserves the same root index through
+the existing positive target path and exact allocation-budget subtraction.
+Its frame-exposing helper leaves the old dispatcher API intact; the rooted
+wrapper reuses the established reindex lemma. An empty-stack regression
+recovers the root ABI from the successor, without assuming result-kind equality.
+All three direct-let endpoints retain exactly the original rule's three
+standard and 54 recorded native-evaluation axioms; root transport adds none.
 The general global relation still existentially hides the represented kind;
 preserving the root index and producer precision through the remaining
 dispatcher branches and composing the strengthened global relation remain open.

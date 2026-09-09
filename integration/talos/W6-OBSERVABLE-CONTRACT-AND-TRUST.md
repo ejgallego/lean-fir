@@ -235,6 +235,34 @@ administrative transitions. Current-node return admission, the universal
 classifier, and the public existential result-kind boundary remain unchanged.
 No shared relation, runtime semantics, W7 source or client contract is changed.
 
+### Root-preserving ordinary direct-let transition
+
+`ConcreteStructuredValidatedCodeOutcome.advance_directLetWithFrames_of_step`
+exposes the source/target frame equations already proved by the existing
+direct-let rule. The original `advance_directLet_of_step` remains a wrapper
+with its unchanged signature, so existing dispatchers need no adaptation.
+
+`advance_directLetAtRoot_of_step` uses those equations and the existing
+`ConcreteStructuredValidationAgreesAtRoot.reindex` lemma to retain the same
+root index on the named successor relation. It preserves the exact active and
+caller result indices, next witness and locals, positive target path, and
+`remainingBytes - directLetAllocationCost decl` budget. The source `let` binds
+its result and continues with the original continuation. An empty-stack
+regression derives `functionResult = rootResult` from this successor; that
+equality is not an added premise.
+
+This is local transport over the existing `ReuseBudgetedDirectSupported`,
+allocation-headroom and successful-source-step premises, not a new admission
+theorem or a client-supplied invariant. Other local families, calls, caller
+push/pop, administrative transitions and global assembly remain open.
+
+All three direct-let endpoints have the same exact dependency set as the
+original validated direct-let proof: three standard axioms and 54 existing
+generated native-evaluation axioms. `TrustInventory.directLetNativeDebt`
+records their individual names and audits the compatibility wrapper as well
+as the two new endpoints. This slice adds no axiom and does not discharge the
+existing native-evaluation debt.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
@@ -275,6 +303,7 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | both precise-return producer lemmas | 3 | 0 |
 | all three classified terminal-simulation lemmas | 3 | 0 |
 | root-preserving return producer and exact-root yield corollary | 3 | 0 |
+| original direct-let wrapper, frame-exposing helper and root-preserving successor | 3 | 54 |
 
 The standard set is `propext`, `Classical.choice`, and `Quot.sound`. The exact
 generated names live in `TrustInventory.lean`. Most dependencies in the two

@@ -10,7 +10,7 @@ ABI without changing that root. Case labels do not change the caller spine.
 
 This is an internal, root-indexed refinement of the existing stack agreement,
 not a new source invariant or an application-supplied provenance map. The real
-export entry constructs it below, and the precise return transition retains it.
+export entry constructs it below, and precise returns and direct lets retain it.
 Preservation through the other global transitions is still separate; the
 unindexed global relation cannot recover root identity after existentially
 hiding the caller spine.
@@ -286,6 +286,119 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_returnYieldAtRoot_of_step
   have emptyAfter : sourceAfter.frames = [] := sourceFramesEq.trans empty
   exact ⟨targetAfter, sourceValue, physical, path,
     returned.yieldAtRoot_of_empty rootedAfter emptyAfter, emptyAfter, targetFramesEq⟩
+
+/-- A direct local binding preserves the compiler-owned root agreement.
+The successor keeps the exact active/caller result indices, evolved witness
+and runtime, bound environment, and allocation-budget subtraction. The same
+positive target path and frame equations come from the existing producer;
+only its root metadata is reindexed. No global relation or admission changes. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_directLetAtRoot_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult rootResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.let decl continuation) targetStore targetLocals targetCode witness source
+      target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (supported : ReuseBudgetedDirectSupported context facts decl)
+    (budget : directLetAllocationCost decl ≤ remainingBytes)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextRuntime sourceValue nextStore resumedLocals nextWitness
+        nextFacts nextTargetCode targetCount,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetCount target targetAfter ∧
+        0 < targetCount ∧
+        ∃ nextRelated : ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult nextFacts
+          (remainingBytes - directLetAllocationCost decl) nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation nextStore
+          resumedLocals nextTargetCode nextWitness sourceAfter targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextRelated.agrees nextRelated.frames.validation ∧
+        sourceAfter.frames = source.frames ∧ targetAfter.frames = target.frames := by
+  obtain ⟨targetAfter, nextRuntime, sourceValue, nextStore, resumedLocals,
+      nextWitness, nextFacts, nextTargetCode, targetCount, targetPath,
+      targetPositive, nextRelated, sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_directLetWithFrames_of_step supported budget sourceStep
+  exact ⟨targetAfter, nextRuntime, sourceValue, nextStore, resumedLocals,
+    nextWitness, nextFacts, nextTargetCode, targetCount, targetPath, targetPositive,
+    nextRelated, rooted.reindex sourceFramesEq targetFramesEq
+      nextRelated.agrees nextRelated.frames.validation, sourceFramesEq, targetFramesEq⟩
+
+/-- Regression: recover the exact active/root equality from the *successor*
+of the direct let when there is no caller. This exercises the retained root
+index and source-frame equation, with no result-kind equality premise. The
+existing heterogeneous-spine and same-i32-lane negative tests below remain
+independent of this empty-continuation specialization. -/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult rootResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.let decl continuation) targetStore targetLocals targetCode witness source
+      target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (supported : ReuseBudgetedDirectSupported context facts decl)
+    (budget : directLetAllocationCost decl ≤ remainingBytes)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : source.frames = []) : functionResult = rootResult := by
+  obtain ⟨_, _, _, _, _, _, _, _, _, _, _, _, nextRooted, sourceFramesEq, _⟩ :=
+    related.advance_directLetAtRoot_of_step rooted supported budget sourceStep
+  exact nextRooted.functionResult_eq_of_empty (sourceFramesEq.trans empty)
 
 /-- Heterogeneous nested calls retain the original result, not the deepest
 callee's kind or the immediate consumer's kind. -/

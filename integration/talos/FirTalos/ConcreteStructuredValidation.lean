@@ -3758,7 +3758,73 @@ theorem ConcreteStructuredValidatedCodeCoreRel.letSuccessor
 supplies the exact residual local-kind and guarded-sharing update, current
 admission comes from the source/compiler direct-value predicate, and the
 existing concrete theorem reconstructs the dynamic runtime, heap facts,
-remaining allocation budget, locals, witness, and positive target path. -/
+remaining allocation budget, locals, witness, and positive target path.
+Retain the already-derived source/target frame equations for root-index
+transport; the compatibility wrapper below keeps the earlier API. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_directLetWithFrames_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.let decl continuation) targetStore targetLocals targetCode witness source
+      target)
+    (supported : ReuseBudgetedDirectSupported context facts decl)
+    (budget : directLetAllocationCost decl ≤ remainingBytes)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextRuntime sourceValue nextStore resumedLocals nextWitness
+        nextFacts nextTargetCode targetCount,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetCount target targetAfter ∧
+        0 < targetCount ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult nextFacts
+          (remainingBytes - directLetAllocationCost decl) nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation nextStore
+          resumedLocals nextTargetCode nextWitness sourceAfter targetAfter ∧
+        sourceAfter.frames = source.frames ∧ targetAfter.frames = target.frames := by
+  have pointwise := related.toPointwise
+    (ConcreteStructuredCodeStepAdmission.directLet supported) budget
+  obtain ⟨targetAfter, nextRuntime, sourceValue, nextStore, resumedLocals,
+      nextWitness, nextFacts, nextTargetCode, targetCount, targetPath,
+      targetPositive, sourceFramesEq, targetFramesEq, nextCore⟩ :=
+    pointwise.advance_directLet_of_step spec supported rfl sourceStep
+  have validatedCore := related.core.letSuccessor
+    supported.resultCompiledForValidation nextCore
+  exact ⟨targetAfter, nextRuntime, sourceValue, nextStore, resumedLocals,
+    nextWitness, nextFacts, nextTargetCode, targetCount, targetPath,
+    targetPositive,
+    related.withSuccessor validatedCore sourceFramesEq targetFramesEq,
+    sourceFramesEq, targetFramesEq⟩
+
+/-- Compatibility projection of the direct-let producer with explicit frame
+equations. Existing dispatchers retain their original signature. -/
 theorem ConcreteStructuredValidatedCodeOutcome.advance_directLet_of_step
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
@@ -3806,18 +3872,13 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_directLet_of_step
           (remainingBytes - directLetAllocationCost decl) nextRuntime
           (bind sourceEnv decl.fvarId sourceValue) continuation nextStore
           resumedLocals nextTargetCode nextWitness sourceAfter targetAfter := by
-  have pointwise := related.toPointwise
-    (ConcreteStructuredCodeStepAdmission.directLet supported) budget
   obtain ⟨targetAfter, nextRuntime, sourceValue, nextStore, resumedLocals,
       nextWitness, nextFacts, nextTargetCode, targetCount, targetPath,
-      targetPositive, sourceFramesEq, targetFramesEq, nextCore⟩ :=
-    pointwise.advance_directLet_of_step spec supported rfl sourceStep
-  have validatedCore := related.core.letSuccessor
-    supported.resultCompiledForValidation nextCore
+      targetPositive, nextRelated, _, _⟩ :=
+    related.advance_directLetWithFrames_of_step supported budget sourceStep
   exact ⟨targetAfter, nextRuntime, sourceValue, nextStore, resumedLocals,
     nextWitness, nextFacts, nextTargetCode, targetCount, targetPath,
-    targetPositive,
-    related.withSuccessor validatedCore sourceFramesEq targetFramesEq⟩
+    targetPositive, nextRelated⟩
 
 /-- A successful constructor/reuse direct binding advances the closed
 validated relation and evolves the existential constructor schema in lockstep
