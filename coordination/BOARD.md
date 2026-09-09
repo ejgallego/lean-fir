@@ -71,10 +71,21 @@ bounded integration lease when a producer submits its next clean checkpoint.
   nor discharge of FIR-BUG-wasm-none-endpoint-native-axiom-audit. No runtime,
   emitter, admission or final-client premise changed. Root's serial bounded
   integration lease for this checkpoint is released with this acceptance.
-  Next, ROOT-W6-20260909-111 assigns default-only case root transport: retain
-  the existing zero-target-step path, source-rank decrease and old API,
-  exposing only the existing frame equation needed for rooted reindexing.
-  No global relation redesign or new generic transport framework.
+  ROOT-W6-20260909-111 is accepted at exact default-only checkpoint
+  `ff42a07edcb95403d6b531c7a4acdb07417042ab` (functional `27ee8f46`, base
+  `bd3761e5`). Independent diff-check, make check (730 cases, 2172 comparisons,
+  38 mailbox tests) and make talos-check (3204 jobs, 3165 audit cone, 52
+  endpoints) pass. Exact receipt:
+  `b503a2f784f1077b5c135a101fd8eb40d81e47694ca4fbf9a05ee7b7861e338f`.
+  Logs: root worktree `.deps/root-default-only-{check,talos}.log`. Root also
+  mechanically verified the unchanged original API; zero target steps, strict
+  source-rank decrease and exact root identity are retained. All three
+  endpoints use only the three standard axioms. No other trust debt is closed.
+  Root's serial integration lease for this checkpoint is released.
+  Next, ROOT-W6-20260909-113 assigns root transport for the tested object/UInt8
+  case family, retaining exact case-label stacks and respective 5/4 steps per
+  test with the existing zero-step rank condition. No global relation redesign
+  or new generic transport framework; caller push/pop remain separate.
 - W7: ROOT-W7-20260909-107 is accepted at exact CG-05B checkpoint
   `cdfc6e44cefcf11ae5c7a27e99b227841005ba4e` (functional `6402d306`, base
   `14a2b07f`). Root serialized this candidate alone on
