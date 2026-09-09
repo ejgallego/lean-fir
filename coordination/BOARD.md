@@ -15,12 +15,66 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Active integration lease
 
-- Current milestone: `STRUCTURED-TERMINAL-RETURN`, owner `root`, branch
+No active integration lease. CG-01 is accepted below; the containing board
+commit is its local-main checkpoint. W7 returns to generation-only work.
+W6's independent terminal-extraction checkpoint `f1a5c789` is queued for
+separate review and is not part of this landing.
+
+## Accepted integration checkpoints
+
+- Milestone: `CG-01-PRODUCTION-CAPTURE`, integration owner `root`, branch
+  `integration/cg01-production-capture`, worktree
+  `.worktrees/integration-recycler-trust-gate`, base main `d5e0b5ca`.
+  Authoritative thread `W7-ROOT-20260909-002` pins clean W7 checkpoint
+  `0895d974` (functional `7e1ee053`). State: released, linked/accepted.
+  Root granted the narrow production/validation module extraction and its
+  importer/regression changes; root adds only this acceptance and a closed
+  operational bug card. No W6 source, shared semantics, resident-helper body,
+  source-unit boundary, capture algorithm, or lowering policy changes.
+- Production capture and formatting now live in `Fir.Compiler.LCNF`;
+  corpus/schema invocations live above Source in `Fir.Validation.WasmSource`.
+  Legacy artifact/capture names remain definitional aliases. Production
+  Source's FIR import closure falls from 21 modules to 16, removing the corpus,
+  protocol, instrumented interpreter, checkpoint and pipeline dependencies.
+  A Lean import-environment regression guards this boundary. Eager forms and
+  textual formatting are preserved; this is not a runtime-speedup claim.
+- W7 acceptance: Lean Beam production/adapter checks, final 67-job dependency
+  cone after local clean, `git diff --check`, `make check` (730 cases and
+  2,172 equal comparisons), `make talos-setup`, and `make talos-check`
+  (3,201 combined jobs, 3,162 focused, forced 24-endpoint audit) pass.
+  Exact Talos receipt:
+  `6dcf0bae76f2bb1265a5ebafa3832bdec75edc9383b294786af4aa87a72ff30b`.
+  The complete W7 artifact gate passes paired deterministic emissions, Node
+  and package checks. All 239 existing Wasm/LCNF outputs compare unchanged.
+  Mechanical comparison confirms exact capture/formatting and moved adapter
+  bodies. No fresh browser or performance campaign is claimed.
+- Regenerated immutable package:
+  `.worktrees/wasm-generation/integration/talos/artifact/_build/prettyM-current-releases/7e1ee053b315-b1090a3bad749828`.
+  Wasm is unchanged: 87,840 bytes, SHA-256
+  `ffc980d8981a4bea7f5455426728653254c131e1d7ca612df6d371eb65332d09`;
+  captured LCNF SHA-256
+  `712521f31f7516542154b4c4da5973a246d2e4f3da6acdb4f0b9563b0e2b2736`.
+  Complete checksum verification passes. Zero imports and module-owned memory
+  remain unchanged. No external consumer pointer or remote is updated.
+- Independent integration `make check` passes, again 730 cases / 2,172
+  comparisons. Its first attempt used an uncreated worktree-local TMPDIR;
+  strace/backtrace localized the crash to Lake's temporary setup-file creation,
+  not compilation. All 23 imported FIR module artifacts matched W7 exactly.
+  Creating the directory fixes the invocation without source changes.
+  `FIR-BUG-wasm-none-missing-tmpdir-lake-launch` records this closed
+  operational finding. Logs: `.deps/cg01-integration-recheck.log`; W7
+  evidence and comparison snapshot: `.deps/cg01-*`.
+- Next generated-code slice remains separate: CG-05A scratch-free closure
+  allocation result transport, then CG-05B selective initialization, with
+  poisoned recycled-memory regressions and W6 refinement coordination.
+  Canonical capture-provider consolidation and indexed analyses stay separate.
+
+- Milestone: `STRUCTURED-TERMINAL-RETURN`, owner `root`, branch
   `integration/terminal-return-review`, worktree
   `.worktrees/integration-recycler-trust-gate`, base main `1121f917`.
   User authorized landing the independently reviewed W6 checkpoint `3fc74692`
   (functional `c4466855`) on thread `W6-ROOT-20260909-004`. State: released;
-  accepted after final root/Talos gates on `a4bbfe35`. Root edits only this
+  accepted on main `d5e0b5ca` after root/Talos gates on `a4bbfe35`. Root edits only this
   board and non-hardcoded README audit wording. No runtime, representation,
   admission, W7 source, or generated artifact changes are included.
 - The five standard-axiom-only return-bridge lemmas discharge target label
@@ -35,7 +89,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `08865322188504abdf8e19e9dc4e22711bca364011d7a026c45e7a52458f0b8e`.
   No emitter or artifact source changed; no new artifact/browser run is
   claimed for this proof-only slice. Local-main landing only, no push.
-- Next bounded lease: `CG-01-PRODUCTION-CAPTURE`, implementer `wasm-gen` on
+- Completed bounded lease: `CG-01-PRODUCTION-CAPTURE`, implementer `wasm-gen` on
   `wasm/generation` in `.worktrees/wasm-generation`, rebased after this
   landing. Root grants the narrow extraction of production capture/artifact
   definitions from `Fir/Validation/LCNF.lean` into `Fir/Compiler/LCNF.lean`,
@@ -44,9 +98,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   capture algorithms, semantic definitions, and emitted bytes. Existing APIs
   retain compatibility aliases; no W6 implementation/proof files are leased.
   This is a module-dependency refactor, not a semantic-contract change. W7
-  publishes a clean tested checkpoint before root integrates it.
-
-## Accepted integration checkpoints
+  published clean tested checkpoint `0895d974`, accepted above.
 
 - Milestone: `CANONICAL-RECYCLER-AND-COMPILED-TRUST`, owner `root`,
   branch `integration/recycler-trust-gate`, worktree
