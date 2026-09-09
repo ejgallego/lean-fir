@@ -48,11 +48,18 @@ bounded integration lease when a producer submits its next clean checkpoint.
 
 ### Authorized next lane work
 
-- W6: ROOT-W6-20260909-107 assigns the precise root-preserving return
-  transition, composing existing precise return and rooted reindex theorems.
-  Preserve exact root/result indices through the existing two-step path,
-  with a kernel regression and axiom audit. No new final-client premise,
-  global relation redesign, or W7 write.
+- W6: ROOT-W6-20260909-107 is accepted at exact checkpoint `a5076b0f`
+  (functional `c30baa51`, base `918ed40c`). The precise root-preserving return
+  and empty-continuation consumer retain the exact root/result indices and
+  existing two-step path. Root independently passed diff-check, make check
+  (730 cases, 2172 comparisons, 38 mailbox tests), and make talos-check
+  (3204 jobs, 3165 audit cone, 46 endpoints). Exact receipt:
+  `f46f0c714374c4db074511e83e9cd8c6fbbb9ffa6ce56b957b5c5c7afbe82881`.
+  Logs: root worktree `.deps/root-return-{check,talos}.log`. The bounded
+  integration lease for this request is released with this acceptance.
+  ROOT-W6-20260909-109 assigns one next ordinary local-transition transport
+  slice, preferring the existing direct-let transition. Preserve the same
+  root index without changing global relations or final-client premises.
 - W7: ROOT-W7-20260909-107 assigns CG-05B after this CG-05A acceptance:
   selective closure initialization retaining complete initialized-extent
   equality, layout, capture/header stores and the result suffix. Require
