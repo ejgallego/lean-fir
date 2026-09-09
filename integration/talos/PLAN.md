@@ -65,11 +65,15 @@ validated global relation and successful source completion, and feeds it to
 the executable function/export bridge. The precise-return successor now
 retains the active function's exact result kind in both pointwise and validated
 return producers, with the old global-facing APIs kept as compatibility
-wrappers. Precise root-result provenance and finite-prefix assembly remain
-open: the general global relation still existentially hides the represented
-kind, without equating it to the root export ABI. Trap support needs a separate
-structured-machine extension. See the linked review follow-up for exact theorem
-dependencies and the remaining boundary.
+wrappers. Terminal-simulation composition now derives the target prefix from
+the existing classifier and exposes executable return correctness from ordinary
+source evaluation or a successful interpreter run, constructing the export's
+initial relation internally. Precise root-result provenance remains open: the
+general global relation still existentially hides the represented kind, without
+equating it to the root export ABI. The universal compiler classifier also
+remains an explicit compiler-proof obligation; this is not PA3 closure. Trap
+support needs a separate structured-machine extension. See the linked review
+follow-up for exact theorem dependencies and the remaining boundary.
 
 ### Intended result
 
@@ -113,6 +117,14 @@ The strongest convenient export theorem is nevertheless still conditional:
 caller for an arbitrary source predicate, its `ready`/`preserved` laws, and an
 initial proof.  The schema-indexed form has the same logical gap while
 correctly avoiding the legacy arbitrary-witness field premise.
+
+The new companion
+`ConcreteSupportedExport.terminatesWith_of_classifiedExecEvaluates` derives
+actual target return correctness from successful source evaluation and the
+existing universal classifier. It no longer asks for a target prefix or an
+initial simulation witness, but retains an existential result kind. Deriving
+the classifier and identifying that kind with the root ABI remain necessary
+before this can become the closed application-facing terminal theorem.
 
 The remaining compiler-proof obligation is narrower than a new proof of the
 whole interpreter's type safety:

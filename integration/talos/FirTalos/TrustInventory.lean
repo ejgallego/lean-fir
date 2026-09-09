@@ -181,6 +181,12 @@ def endpointInventory : Array (Lean.Name × Array String) := #[
   (`FirTalos.Concrete.ConcreteStructuredCodePointwiseRel.advance_return_precise,
     standardAxioms),
   (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_returnPrecise_of_step,
+    standardAxioms),
+  (`FirTalos.Concrete.ConcreteSupportedFunction.terminatesWith_of_classifiedExecSteps,
+    standardAxioms),
+  (`FirTalos.Concrete.ConcreteSupportedExport.terminatesWith_of_classifiedExecEvaluates,
+    standardAxioms),
+  (`FirTalos.Concrete.ConcreteSupportedExport.terminatesWith_of_classifiedRun,
     standardAxioms)]
 
 end FirTalos.TrustAudit

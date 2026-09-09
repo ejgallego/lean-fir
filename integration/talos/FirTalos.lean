@@ -59,4 +59,5 @@ import FirTalos.ConcreteFaultCorrectness
 import FirTalos.ConcreteRuntimeExamples
 import FirTalos.ConcreteTerminalCorrectness
 import FirTalos.ConcreteTerminalExtraction
+import FirTalos.ConcreteTerminalSimulation
 import FirTalos.TrustAudit

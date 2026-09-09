@@ -9,6 +9,8 @@ The following terminal-extraction slice recovers the bridge inputs from the
 unchanged validated global relation.
 The precise-return successor retains the exact active-function result kind
 at the two producer interfaces that previously hid it existentially.
+The terminal-simulation successor then removes the separately supplied target
+prefix by composing the existing classifier's ranked simulation.
 
 ## Destination and current evidence
 
@@ -140,13 +142,48 @@ which can still hide the precise kind, or establish that the active function
 is the root export. Retaining those facts across the whole simulation remains
 the next obligation.
 
+## Source termination through the compiler simulation
+
+`ConcreteTerminalSimulation.lean` closes the target-prefix assembly boundary:
+
+```text
+supported export + universal current-step classifier
+  + ordinary concrete entry contracts + correct argument count
+  + successful source evaluation returning v
+  => executable Wasm export termination with RefinedReturnPost for v
+     at some represented kind k
+```
+
+`ConcreteSupportedFunction.terminatesWith_of_classifiedExecSteps` obtains the
+target prefix and terminal related state from the existing
+`ConcreteRankedTraceSimulation.execSteps`, then applies terminal extraction.
+It preserves arbitrary caller operand tails. The export-facing
+`terminatesWith_of_classifiedExecEvaluates` constructs the initial relation
+from production validation and the concrete entry frame; its caller supplies
+neither a simulation relation nor a target path. It also identifies the source
+observation exactly as `ReturnedObservation resultRuntime value`, retaining
+heap, world, and external trace alongside the represented value.
+`terminatesWith_of_classifiedRun` accepts an ordinary successful executable
+interpreter run via the existing `run_done_sound` theorem. Target execution
+and a sufficient target fuel bound are derived, not assumed.
+
+These are conditional result theorems, not the closed PA3 endpoint. The
+universal `ConcreteStructuredCurrentStepClassifier` remains a compiler-proof
+obligation. Its general derivation still depends on unfinished admission work
+and explicit runtime/resource safety. No caller-chosen source invariant or
+per-program execution certificate is added, and source evaluation is simply
+the antecedent of partial correctness, not a termination claim for all inputs.
+The result kind is still existential; the theorem does not yet justify
+decoding at the root export's selected ABI. Global root-kind provenance and
+trap semantics remain separate. No existing relation is redesigned.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
 |---|---|---|
-| Recover the terminal yield | `sourceExecReturned_terminal`, `ConcreteStructuredValidatedCodeGlobalOutcome.terminalYield_of_control`, and the function/export `terminatesWith_of_validatedReturn` lemmas | Discharged for the existing global relation and a successful final source step; finite-prefix composition and root result-kind provenance remain separate. |
+| Recover the terminal yield | `sourceExecReturned_terminal`, `ConcreteStructuredValidatedCodeGlobalOutcome.terminalYield_of_control`, and the function/export `terminatesWith_of_validatedReturn` lemmas | Discharged for the existing global relation and a successful final source step. |
 | Preserve the export's selected result ABI | `ConcreteStructuredCodePointwiseRel.advance_return_precise` and `ConcreteStructuredValidatedCodeOutcome.advance_returnPrecise_of_step` now retain the exact active-function kind through local return production | The general returned outcome still permits an independent `kind`; compatibility with no caller is only `True`. Retain producer precision and root result identity across the global relation, without adding a client assumption. |
-| Connect source termination to the prefix | `ConcreteRankedTraceSimulation.execSteps` gives the related target prefix for successful source transitions | Combine the terminal source observation with that specific relation, rather than destructing the lossy public existential package. |
+| Connect source termination to executable return | `terminatesWith_of_classifiedExecSteps`, `terminatesWith_of_classifiedExecEvaluates`, and `terminatesWith_of_classifiedRun` compose the existing ranked prefix with terminal extraction and adequacy | Discharged conditional on the existing universal classifier and entry contracts, with existential represented kind. Compiler admission closure and root-kind provenance are not discharged. |
 | Match faults | `StructuredWasmControl` has running/breaking/returning/halted states, and `StructuredWasmOutcome` describes successful control only | A trap-aware extension and its adequacy proof are a separately coordinated semantic change. Existing `ConcreteFaultSimulation` results do not automatically supply this missing structured-machine branch. |
 
 These are interface obligations, not evidence of incorrect generated code.
@@ -178,12 +215,18 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | all five structured terminal-return bridge lemmas | 2–3 | 0 |
 | all five terminal-extraction and validated-return lemmas | 3 | 0 |
 | both precise-return producer lemmas | 3 | 0 |
+| all three classified terminal-simulation lemmas | 3 | 0 |
 
 The standard set is `propext`, `Classical.choice`, and `Quot.sound`. The exact
 generated names live in `TrustInventory.lean`. Most dependencies in the two
 export theorems arise through fixed scalar/boxing facts; two arise through
 byte-assembly `bv_decide` proofs. Imported axioms are counted only if the named
 theorem actually depends on them.
+
+The classified terminal theorems are generic in the existing classifier. Their
+standard-only inventories do not remove the generated dependencies of a
+particular classifier construction or application instance; such instances
+must still receive their own exact audits.
 
 This inventory records existing debt, not new approval of those assumptions.
 `FIR-BUG-wasm-none-endpoint-native-axiom-audit` stays confirmed until that debt
@@ -222,9 +265,11 @@ roadmap remain integration-owned and are not edited by the terminal-proof slice.
 Retain PA1/PA2 compiler provenance as the admission work. For PA3's terminal
 corollary, the maintained global relation now supplies the terminal yielded
 state, and the local return producers now retain the exact active-function
-result kind. Carry that precision and the root result identity through global
-simulation, then compose its constructed prefix with the validated-return
-corollary.
+result kind. The classifier's simulation now also supplies the complete target
+prefix internally. Carry precise producer and root result identity through
+global simulation so the new classified terminal corollaries can state the
+root export's selected ABI, then discharge the universal compiler classifier
+through the ongoing admission work.
 Handle the trap-model extension separately.
 Do not reintroduce a client source invariant, target path, or ABI-provenance
 assumption in the final corollary.
