@@ -15,7 +15,24 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Active integration lease
 
-- Current milestone: `CANONICAL-RECYCLER-AND-COMPILED-TRUST`, owner `root`,
+- Current milestone: `STRUCTURED-TERMINAL-RETURN`, owner `root`, branch
+  `integration/terminal-return-review`, worktree
+  `.worktrees/integration-recycler-trust-gate`, base main `1121f917`.
+  User authorized landing the independently reviewed W6 checkpoint `3fc74692`
+  (functional `c4466855`) on thread `W6-ROOT-20260909-004`. State: active;
+  final root/Talos gates precede local-main fast-forward. Root edits only this
+  board and non-hardcoded README audit wording. No runtime, representation,
+  admission, W7 source, or generated artifact changes are included.
+- The five standard-axiom-only return-bridge lemmas discharge target label
+  unwinding, full result/runtime refinement, actual Talos execution adequacy,
+  singleton result selection, and caller-tail restoration. The exact inventory
+  now has 24 endpoints. Global terminal extraction and precise root-result
+  provenance remain open; trap-aware structured semantics is separate work.
+  Existing generated trust debt is unchanged.
+
+## Accepted integration checkpoints
+
+- Milestone: `CANONICAL-RECYCLER-AND-COMPILED-TRUST`, owner `root`,
   branch `integration/recycler-trust-gate`, worktree
   `.worktrees/integration-recycler-trust-gate`, base main `08e0a763`.
   Authoritative threads are `W7-ROOT-20260902-003` and its successor

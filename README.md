@@ -54,7 +54,7 @@ integration decisions remain under `coordination/`.
 The optional Talos bridge is deliberately outside the default dependency
 graph. After cloning its pinned revision with `make talos-setup`, validate the
 proofs and adapter with `make talos-check`. That gate also forces elaboration
-of the exact compiled axiom inventories for 19 named theorem endpoints before
+of the exact compiled axiom inventories for the maintained theorem endpoints before
 recording a successful build receipt; `make proof-trust` runs the audit alone.
 
 Trust remains an explicit research obligation. The source registry contains
