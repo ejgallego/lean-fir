@@ -1,7 +1,7 @@
 # wasm-gen lane
 
-The generation roadmap lives in `Fir/Wasm/Emit/ROADMAP.md`; accepted history
-remains on `coordination/BOARD.md`. This is the current clean W7-1 handoff.
+Generation roadmap: `Fir/Wasm/Emit/ROADMAP.md`. Accepted history remains on
+`coordination/BOARD.md`; this is the separate CG-05A generation handoff.
 
 ```text
 lane: wasm-gen
@@ -9,28 +9,51 @@ owner: wasm-gen
 branch: wasm/generation
 worktree: .worktrees/wasm-generation
 state: ready
-base: d5e0b5caa087954cdd094df3bfbd8408826db8c0
-functional-head: 7e1ee053b315aa35803ad015acf7d0839adb550a
-contract-base: d5e0b5caa087954cdd094df3bfbd8408826db8c0
+base: c4eefca5942cd8f6abb584fb8820b1a262c21449
+functional-head: 87d766a1bf881bda1c430af7a93950e2b662d672
+contract-base: c4eefca5942cd8f6abb584fb8820b1a262c21449
 clean-at-update: true
-slice: CG-01 production capture extraction. Fir.Compiler.LCNF owns the reusable artifact, capture and formatting implementation. Validation schemas/invocations move above Source into Fir.Validation.WasmSource; coverage/execution stay in validation. Legacy capture names remain aliases. No source-unit, capture-policy, runtime, lowering, or artifact behavior changes.
-files: Fir/Compiler/{LCNF.lean,README.md}; Fir/Validation/{LCNF.lean,WasmSource.lean}; Fir/Wasm/Emit/{Source.lean,Command.lean,SourceExamples.lean,SourceDependencyExamples.lean,ROADMAP.md}; FirValidationWasm.lean; this status
-contracts: none; root's narrow module/importer extraction lease is recorded in the board at base d5e0b5ca. No W6 or resident-helper source is edited.
-checks: git diff --check passes. Lean Beam accepts Compiler.LCNF, refreshed Source, SourceDependencyExamples and WasmSource with zero blocking diagnostics; stale importer barriers were not treated as green. After stopping Beam and a local Lake clean, the final focused lake build passes all 67 jobs. make check passes 730 unique cases / 2172 equal comparisons and 38 mailbox tests. make talos-setup passes; make talos-check passes 3201 combined and 3162 focused jobs plus forced 24-endpoint audit, receipt 6dcf0bae76f2bb1265a5ebafa3832bdec75edc9383b294786af4aa87a72ff30b. bash integration/talos/artifact/check.sh passes, including paired deterministic emissions, Node checks and immutable package checksums. No browser campaign was requested or run. All 239 existing Wasm/LCNF output files compare unchanged against the pre-refactor snapshot. Regenerated prettyM Wasm and LCNF exactly match the previously accepted package. A mechanical source check confirms unchanged capture/formatting and moved invocation bodies.
+slice: CG-05A scratch-free closure allocation result transport, using the constructor allocator's typed unsigned extend/wrap bridge. Remove two scratch-only locals and all scratch memory traffic; retain exact allocation/zero/header/capture prefix and typed signatures. Add full mixed-capture poisoned reallocation checks.
+files: Fir/Wasm/Emit/{ResidentClosureAllocation.lean,ROADMAP.md}; integration/talos/artifact/{resident-closure-allocation-client.mjs,README.md}; this status
+contracts: none changed. Same heap layout, initializer footprint, capture ownership, target/arity/descriptor IDs, helper sharing keys and result ABI. No W6 source, root gate, manifest or symbolic surface edits.
+checks: git diff --check passes. Lean Beam update/sync/save accepts the emitter and guards with zero diagnostics. After stopping Beam and lake clean Fir, the focused 51-job dependency build and forced direct Lean pass. make check on functional head passes 730 cases / 2172 equal comparisons, 240-file source trust audit and 38 mailbox tests. make talos-check passes 3201 jobs, 3162-job audit cone and forced 24-endpoint audit; exact functional receipt 72d9514a5530e01a34fb4a988df7f63d08ee9a642f1d1eba3e60f62d6c617ba9 verifies. Talos setup was already completed in this worktree for accepted CG-01; toolchain/manifests are unchanged. FIR_CHECK_JOBS=2 bash integration/talos/artifact/check.sh passes, including paired deterministic emissions, Node differentials and immutable package checksums. Standalone raw and pinned-Binaryen-optimized closure modules both pass poisoned-memory tests. No browser or workload timing campaign is claimed.
 bug-cards: none; no semantic discrepancy
-blockers: none
-handoff: Clean output-neutral CG-01 slice ready for root fast-forward after the board acceptance. No remote push or external consumer-pointer update requested.
-next: Keep CG-02 provider consolidation separate. The next generated-code slice is CG-05A scratch-free closure allocator result transport, then CG-05B selective initialization, with poisoned recycled-memory tests and W6 coordination before helper acceptance.
+blockers: no generation blocker; W6 delta review is requested separately before helper acceptance. Full closure-allocation refinement remains recorded proof debt, not claimed here.
+handoff: Consume this clean generation checkpoint only; do not fold in pending W6 extraction, precision or terminal-simulation checkpoints. Root alone schedules acceptance. No main advance, push or external client-pointer update by W7.
+next: CG-05B selective initialization, separately from this result-transport change. Keep the initialization byte contract and poisoned-memory tests; do not edit W6's pending proof work.
 ```
 
-Production Source's FIR dependency graph falls from 21 modules to 16,
-including Source itself: Checkpoint, Pipeline, Interpreter, Validation.Corpus,
-Validation.LCNF and Validation.Protocol leave; Compiler.LCNF is added. This
-is measured dependency reduction, not a build-time or runtime speedup claim.
+## Code-shape evidence
 
-Immutable local acceptance package:
-`integration/talos/artifact/_build/prettyM-current-releases/7e1ee053b315-b1090a3bad749828`.
-The worktree-local `prettyM-current` pointer resolves there. Wasm is 87,840
-bytes, SHA-256 `ffc980d8981a4bea7f5455426728653254c131e1d7ca612df6d371eb65332d09`;
-LCNF SHA-256 `712521f31f7516542154b4c4da5973a246d2e4f3da6acdb4f0b9563b0e2b2736`.
-Gate logs and the comparison snapshot are under `.deps/cg01-*`.
+The return suffix shrinks from 14 instructions to 4, with locals 3 -> 1.
+Across the old standalone helper shapes, raw bodies shrink by 46 bytes each;
+the pinned closed-module Binaryen profile yields 24 bytes saved per surviving
+body and removes two loads/two stores that survived optimization previously.
+The enlarged standalone test module includes a new mixed-capture facade/helper,
+so its total size is not used as an old/new performance comparison.
+
+The external-engine regression covers all three object-family result lanes,
+object/erased captures, seven scalar kinds, Float32/Float signed zero,
+subnormals, infinities and quiet/signaling NaN payloads via integer lanes.
+It verifies the whole initialized extent, zero slot padding, target/arity/
+descriptor/refcount fields, a retained prefix, reserved words and a suffix
+canary across checkpoint rewind and poisoned reallocation.
+
+## Immutable local package
+
+`integration/talos/artifact/_build/prettyM-current-releases/87d766a1bf88-e9a15005f95644f0`
+is the worktree-local `prettyM-current` target. BUILD.json records clean
+functional source `87d766a1`. Wasm: 86,690 bytes, SHA-256
+`e65000ff59279ec7eec37a4f43d8e398a35c56f8c85dc42c26e23c33533f75b4`.
+
+Versus CG-01's package, exactly 25 closure helper body sizes decrease by 46
+bytes each: 1,150 bytes saved (about 1.3%). The 322 functions, all 269 function
+export names/indices, zero imports, module-owned memory and ownership metadata
+are unchanged. Captured LCNF is byte-identical. This is a package-size and
+instruction-shape result, not a workload speedup measurement.
+
+Logs and raw/optimized standalone comparisons: `.deps/cg05a/`. The first
+attempt at module-scoped `lake clean` was rejected (clean accepts packages);
+the successful `lake clean Fir` and subsequent batch/direct checks are the
+reported clean validation. Earlier malformed test-facade probes were fixed
+before Beam save and are not counted as passing checks.

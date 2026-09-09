@@ -88,6 +88,13 @@ whole-module size comparison because it adds a mixed-capture facade/helper.
 These are code-shape measurements, not workload timing results. CG-05B selective
 initialization stays separate, as does W6's implementation refinement review.
 
+The complete artifact gate on functional `87d766a1` regenerates prettyM at
+86,690 bytes (previously 87,840): exactly 25 closure bodies lose 46 bytes each.
+The captured LCNF, 322-function inventory, 269 function export names/indices,
+zero imports and memory/ownership contract are unchanged. No workload timing
+or fresh browser campaign is claimed. The immutable local package is recorded
+in the W7 handoff; external client pointers are not moved by this slice.
+
 ### G1. Consolidated closure allocation (accepted)
 
 The generic stack was accepted on `main` at `85481c67` with functional head
