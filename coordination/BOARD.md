@@ -23,9 +23,9 @@ session mapping is maintained with `scripts/mailbox route` and does not fall
 back to W7 when root is idle. Routine integration within these boundaries is
 authorized; remote publication and destructive cleanup are separate actions.
 
-## Active integration lease
+## Integration queue settled (2026-09-09)
 
-- Milestone: `ROOT-QUEUE-20260909`; owner `fir/root`, branch
+- Milestone: `ROOT-QUEUE-20260909`; state released; owner `fir/root`, branch
   `integration/root-queue-20260909`, worktree `.worktrees/root-integration`,
   base main `c4eefca5942cd8f6abb584fb8820b1a262c21449`.
 - Accepted first candidate: W6 extraction `4d6915b4` (rebased from reviewed
@@ -35,15 +35,110 @@ authorized; remote publication and destructive cleanup are separate actions.
   `W6-ROOT-20260909-008`, `-010`, `-011`, and `-012`. Root validates the
   accumulated candidate using its own worktree-local build state. All four
   reviews pass; their combined acceptance is recorded below.
-- Next candidate: W7 CG-05A `e7c955af`, after the narrow W6 suffix review on
-  `W7-W6-20260909-002` and a W7-owned rebase following the W6 landing.
-  Generation-ready is distinct from full closure-allocation refinement.
+- Accepted second candidate: W7 CG-05A `7bc5620f`, rebased from `e7c955af`
+  after the W6 landing and narrow suffix approval on `W7-W6-20260909-002`.
+  Generation-ready remains distinct from full closure-allocation refinement.
 - Root's write scope is this board and `AGENTS.md`, plus integration of
   reviewed producer commits. No producer-owned source change is leased to
   root. The lane instructions and queue triage are recorded on
   `ROOT-W7-20260909-100` and `ROOT-W6-20260909-100`.
 
+The standing root role continues after this milestone. Root activates the next
+bounded integration lease when a producer submits its next clean checkpoint.
+
+### Authorized next lane work
+
+- W6: ROOT-W6-20260909-107 assigns the precise root-preserving return
+  transition, composing existing precise return and rooted reindex theorems.
+  Preserve exact root/result indices through the existing two-step path,
+  with a kernel regression and axiom audit. No new final-client premise,
+  global relation redesign, or W7 write.
+- W7: ROOT-W7-20260909-107 assigns CG-05B after this CG-05A acceptance:
+  selective closure initialization retaining complete initialized-extent
+  equality, layout, capture/header stores and the result suffix. Require
+  poisoned memory with actual released-block reuse, bit-exact captures, all
+  W7 gates, and a separate W6 initialization-footprint review.
+- Both lanes rebase on accepted main before handoff and submit clean exact
+  checkpoints to root. These tasks are authorized without another per-slice
+  user approval. Remote publication and destructive cleanup stay separate.
+
+### Reconciled requests and residual obligations
+
+Root settled old lean-zip and full-width tag integration requests using stable
+patch IDs and main ancestry: 175324a1 maps to ebd91d02; c56680f3 / e19d86d5
+map to 775db949 / 2ade9ef2, followed by W6 c26ff528. No stale branch needs
+another landing. W7/W6 settled normalized-case and declaration-aware proof
+handoffs. Portable resolver and retained-viewer packages are completed with
+fresh checksum/Node evidence and await VBP requester acceptance.
+
+W7 owns two remaining read-only diagnostics: W6-W7-20260830-001 (actual
+return-node ABI census), and W6-W7-20260831-006 (deeper projection-owner /
+all-incoming-join provenance). Nearest-origin and named-call reports do not
+discharge these. Prioritize one ahead of more optimization if W6 needs it for
+admission. Both lane triage reports are accepted in ROOT-W7-20260909-100 and
+ROOT-W6-20260909-100.
+
+W6's 14 older W72 requests remain proof debt behind the root-result critical
+path. Primitive/helper proofs do not establish complete caller rewrites or
+compiler fact propagation. None is silently closed by this triage.
+
+| W72-W6 request suffix | Remaining proof boundary |
+| --- | --- |
+| 20260822-001 | Trusted ByteArray representation, bounds, header/ownership admission and exact bodies. |
+| 20260822-002 | Arbitrary-amount decrement wrapper/module attachment; one-decrement local gate is proved. |
+| 20260823-001 | Exact ByteArray size load, range trap and tagging attachment. |
+| 20260823-002 | Array push/pop/swap and admission availability; replacement branches are conditionally proved. |
+| 20260823-003 | USize.ofNat caller rewrite and saved-local/fallback stack attachment. |
+| 20260823-004 | USize.toNat caller rewrite, wide branch and fallback attachment. |
+| 20260824-002 | Nat.shiftRight count boundary, reboxing and caller/fallback composition. |
+| 20260824-003 | Actual add/mod/land/Array.set caller rewrites and traversal composition. |
+| 20260824-004 | decLt/sub/mul registry attachments and overflow/fallback preservation. |
+| 20260825-001 | Exact i64 direct/ reinterpret-return wrapper source attachment. |
+| 20260826-001 | Old uint32 ABI superseded; modern uint64 tag caller/header/fallback proof remains. |
+| 20260826-004 | Recursive adjacent-instruction decrement specialization, including promoted tags. |
+| 20260826-005 | Nat.land bound, mixed canonicalization and conditional provider attachment. |
+| 20260826-006 | Both fitsTaggedNat providers and local-fact propagation soundness. |
+
+Detailed theorem evidence is retained in W6's worktree-local
+.deps/reviews/w72-proof-queue-triage-20260909.md, SHA-256
+51b1700088d9bdb9ee3b71d54612b0e0a5143eeca78e675f0f48787f1eba0876,
+and summarized in immutable W6-ROOT-20260909-022. Take one needed attachment
+at a time; keep a general linker framework out of the current root-return slice.
+
 ## Accepted integration checkpoints
+
+- Milestone: ROOT-QUEUE-20260909-CG05A, owner fir/root, integration branch
+  integration/root-queue-20260909, base main 4f8d111c. Exact W7 checkpoint
+  7bc5620f248ba6c4e9cd0f0db937afd1781c3909 (functional
+  32524c14c2ffa5668d0219b765c540bf795de60e) is pinned by
+  W7-ROOT-20260909-007. State: released, linked/accepted in this containing
+  board commit. W7 alone rebased and refreshed its handoff; root changed this
+  board for acceptance. W7 source/artifact delta is identical to e7c955af.
+- Review: closure allocation returns through localGet / unsigned i64 extend /
+  typed i32 wrap / ret, dropping two locals and scratch traffic. Allocation,
+  zeroing, header and capture initialization, signatures and ownership remain
+  unchanged. W6 decision W6-W7-20260909-002, accepted by W7-W6-20260909-009,
+  reuses ResidentPrimitives.wp_unsignedI32RoundTrip. Complete allocator,
+  capture and installed-helper refinement remains debt;
+  FIR-BUG-wasm-none-partial-apply-tagged-result remains open.
+- Independent root gates at the exact checkpoint: git diff --check,
+  make check (730 cases, 2,172 equal comparisons, zero findings),
+  make talos-check (3,204 combined / 3,165 focused jobs and all 44 compiled
+  inventories), and complete FIR_CHECK_JOBS=2 W7 artifact validation pass.
+  Talos setup is retained from the preceding W6 acceptance. Receipt:
+  1053686c3e1a942d854fff32e75fc04b8bce22d1c6dd46ee1e736660681c69d2.
+  Logs: .deps/cg05a-root-{check,talos,artifact}.log. Artifact validation
+  rebuilt its Differential dependency when an older receipt was encountered;
+  that supported rebuild passed. No fresh browser campaign is claimed.
+- Root independently regenerated the immutable prettyM package at
+  integration/talos/artifact/_build/prettyM-current-releases/7bc5620f248b-668d1d80eeecaa30
+  within the root integration worktree. Clean source identity is 7bc5620f.
+  Wasm: 86,690 bytes, SHA-256
+  e65000ff59279ec7eec37a4f43d8e398a35c56f8c85dc42c26e23c33533f75b4,
+  identical to W7's package, 1,150 bytes smaller than CG-01. Paired
+  deterministic emissions, full checksums and linked external-engine checks
+  pass. This is code-size evidence, not a workload speed claim. CG-05B is the
+  separate authorized successor above.
 
 - Milestone: `ROOT-QUEUE-20260909-W6`, owner `fir/root`, integration branch
   `integration/root-queue-20260909`, base `c4eefca5`. Exact producer objects:
