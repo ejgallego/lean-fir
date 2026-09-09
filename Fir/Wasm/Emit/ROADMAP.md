@@ -145,6 +145,10 @@ under the existing metadata/result/capture-success checks. This is source
 decomposition, not allocation or memory-footprint refinement. It introduces no
 new runtime invariant, instruction sequence or proof axiom; W6 owns the later
 footprint theorem. Emitted-byte equality and the full gates remain required.
+The completed successor passes those gates: raw/optimized closure Wasm and
+prettyM's 83,737-byte Wasm, captured LCNF and manifest are byte-identical to
+accepted CG-05B. Importer checks use only the public surface; the six equations
+depend on standard Lean axioms only. The clean checkpoint is in the W7 handoff.
 
 ### G1. Consolidated closure allocation (accepted)
 
