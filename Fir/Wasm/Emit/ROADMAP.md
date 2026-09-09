@@ -129,6 +129,13 @@ baseline/candidate binaries and toolkit-derived shape inventories are retained
 under `.deps/cg05b/`; the standard full gates and narrow W6 initialization
 review remain the acceptance boundary. No shared layout or W6 file changes.
 
+The complete prettyM gate passes with 83,737 bytes versus CG-05A's 86,690
+(2,953 bytes smaller, about 3.4%). Exactly 25 closure helper body sizes
+decrease; the 322 functions, 269 function exports and their indices, zero
+imports, captured LCNF and capabilities/ownership metadata are unchanged.
+The local immutable package and all gate results are pinned in the W7 handoff.
+No external package pointer is changed and no runtime speedup is asserted.
+
 ### G1. Consolidated closure allocation (accepted)
 
 The generic stack was accepted on `main` at `85481c67` with functional head

@@ -1,7 +1,8 @@
 # wasm-gen lane
 
-Generation roadmap: `Fir/Wasm/Emit/ROADMAP.md`. Accepted history remains on
-`coordination/BOARD.md`; this is the separate CG-05A generation handoff.
+Generation roadmap: `Fir/Wasm/Emit/ROADMAP.md`. CG-05A is accepted on main;
+this is the separate CG-05B selective-initialization handoff to standing
+integration owner `fir/root`.
 
 ```text
 lane: wasm-gen
@@ -9,54 +10,64 @@ owner: wasm-gen
 branch: wasm/generation
 worktree: .worktrees/wasm-generation
 state: ready
-base: 4f8d111c2f436f7ac63f253bf0c575dd1f2799fb
-functional-head: 32524c14c2ffa5668d0219b765c540bf795de60e
-contract-base: 4f8d111c2f436f7ac63f253bf0c575dd1f2799fb
+base: 14a2b07f3f0ef849de150b714c77a84dd923805f
+functional-head: 6402d306d77425e5cc3e6e91d0a120826a82c823
+contract-base: 14a2b07f3f0ef849de150b714c77a84dd923805f
 clean-at-update: true
-slice: CG-05A scratch-free closure allocation result transport, using the constructor allocator's typed unsigned extend/wrap bridge. Remove two scratch-only locals and all scratch memory traffic; retain exact allocation/zero/header/capture prefix and typed signatures. Add full mixed-capture poisoned reallocation checks.
-files: Fir/Wasm/Emit/{ResidentClosureAllocation.lean,ROADMAP.md}; integration/talos/artifact/{resident-closure-allocation-client.mjs,README.md}; this status
-contracts: none changed. Same heap layout, initializer footprint, capture ownership, target/arity/descriptor IDs, helper sharing keys and result ABI. No W6 source, root gate, manifest or symbolic surface edits.
-checks: git diff --check and patch-identical git range-diff pass. Before rebase, Lean Beam update/sync/save accepted the emitter and guards with zero diagnostics, followed by lake clean Fir, a clean 51-job build and forced direct Lean. No Lean source changed in the rebase. Post-rebase make check passes 730 cases / 2172 equal comparisons, 243-file source trust audit and 38 mailbox tests. make talos-check passes 3204 jobs, 3165-job audit cone and forced 44-endpoint audit. Talos setup was already completed in this worktree for accepted CG-01; toolchain/manifests are unchanged. FIR_CHECK_JOBS=2 bash integration/talos/artifact/check.sh passes, including paired deterministic emissions, Node differentials and immutable package checksums. Forced direct Lean and final focused 66-job build pass. Raw closure Wasm and prettyM LCNF/Wasm are byte-identical to pre-rebase CG-05A; the retained pinned-Binaryen-optimized closure module passes the poisoned-memory test again. Exact containing-head receipt is supplied in the immutable mailbox handoff. No new browser or workload timing campaign is claimed.
-bug-cards: none; no semantic discrepancy
-blockers: none for the narrow result-transport delta. W6 accepted existing unsignedI32RoundTrip coverage in W6-W7-20260909-002; requester closure W7-W6-20260909-009. Full allocation/initialization/capture ownership and installed-helper replacement refinement remain debt. The unchanged tagged physical result path is not a ValueRel tagged theorem; FIR-BUG-wasm-none-partial-apply-tagged-result remains open.
-handoff: Root independently accepted the four separate W6 slices at 4f8d111c and requested this isolated CG-05A rebase. Consume the new exact clean mailbox checkpoint, not the superseded pre-rebase e7c955af. The two CG-05A patches are unchanged; CG-05B is not included. Standing fir/root alone owns integration. No main advance, push or external client-pointer update by W7.
-next: CG-05B selective initialization, separately from this result-transport change. Keep the initialization byte contract and poisoned-memory tests; do not edit W6's pending proof work.
+slice: CG-05B initializes only unwritten closure capture words. Existing stores fill the complete header and full-width slots; physical i32/f32 slot upper words remain explicitly zeroed. Expand the fixture to compare whole initialized allocations through poisoned checkpoint reuse and actual resident last-reference release/reuse.
+files: Fir/Wasm/Emit/{ResidentClosureAllocation.lean,ROADMAP.md}; integration/talos/artifact/{FirWasmArtifactMain.lean,resident-closure-allocation-client.mjs,run-resident-closure-allocation.mjs,check.sh,README.md}; this status
+contracts: none changed. Same allocator call, eight header stores, capture stores, extent, layout, target/arity/descriptor IDs, helper keys/signatures and scratch-free result suffix. Only redundant zero stores are removed. No W6, root gate, manifest, toolchain or symbolic surface changes. Release linkage is fixture-only.
+checks: git diff --check; Lean Beam emitter update/sync/save and artifact-main sync, zero blocking diagnostics; stopped Beam, lake clean Fir, then clean artifact dependency build (95 jobs); forced direct Lean; make check (730 cases, 2172 equal comparisons, 38 mailbox tests); make talos-check (3204 jobs, 3165-job audit cone, 46 forced trust endpoints); FIR_CHECK_JOBS=2 bash integration/talos/artifact/check.sh (paired deterministic emissions, raw and pinned-optimized closure reuse, Node differentials, prettyM adapter stress, checksums); final focused lake -d integration/talos/artifact build fir-wasm-artifact fir-prettyM-artifact (124 jobs). Talos setup already completed in this worktree; toolchain/manifests unchanged. Exact containing-head Talos receipt is supplied in the authoritative completion. No fresh browser or balanced runtime timing campaign.
+bug-cards: none new; no semantic workaround. Known FIR-BUG-wasm-none-partial-apply-tagged-result remains unchanged.
+blockers: separate narrow W6 initialization-footprint review requested before root acceptance. CG-05A's result-suffix compatibility is not initialization approval. Full allocation/capture ownership and installed-helper refinement remain explicit debt; physical tagged-result fixture checks do not prove ValueRel tagged.
+handoff: generation-ready only. Consume the exact clean containing integrationCheckpoint from the authoritative completion on ROOT-W7-20260909-107, then serialize the W6 footprint review. No main advance, remote push or external client-pointer publication by W7.
+next: W6 narrow footprint review and root integration. Return-node ABI census W6-W7-20260830-001 and deeper projection-owner/all-jump provenance W6-W7-20260831-006 remain queued; neither is replaced by earlier named-call census work. Prioritize a requested diagnostic before more optimization if needed by W6 admission work.
 ```
 
-## Code-shape evidence
+## Exact reuse and code-shape evidence
 
-The return suffix shrinks from 14 instructions to 4, with locals 3 -> 1.
-Across the old standalone helper shapes, raw bodies shrink by 46 bytes each;
-the pinned closed-module Binaryen profile yields 24 bytes saved per surviving
-body and removes two loads/two stores that survived optimization previously.
-The enlarged standalone test module includes a new mixed-capture facade/helper,
-so its total size is not used as an old/new performance comparison.
+The accepted full-zero baseline was retained after expanding the fixture, but
+before changing production initialization. Baseline/candidate inventories are
+identical. Both raw and pinned-optimized variants match all 81 full allocation
+snapshots: 28 poisoned checkpoint allocations and 53 retirement/reuse results.
+Checks include all result lanes, mixed kinds, exact floating payload bits,
+retained prefix, canaries, canonical dead headers, real nonempty payload links,
+header-only bump fallback and flat recycled frontier. A negative control that
+omits one required upper-word store is rejected by the poison test.
 
-The external-engine regression covers all three object-family result lanes,
-object/erased captures, seven scalar kinds, Float32/Float signed zero,
-subnormals, infinities and quiet/signaling NaN payloads via integer lanes.
-It verifies the whole initialized extent, zero slot padding, target/arity/
-descriptor/refcount fields, a retained prefix, reserved words and a suffix
-canary across checkpoint rewind and poisoned reallocation.
+| Standalone variant | Before bytes | After bytes |
+| --- | ---: | ---: |
+| Raw (29 functions each) | 6286 | 5128 |
+| Pinned optimized (21 functions each) | 3353 | 2980 |
 
-## Immutable local package
+Raw candidate SHA-256:
+`940922161c0d2226ea541cac80a60563b292aa41bd8878e3258aac5cc3e5ea1c`.
+Optimized candidate SHA-256:
+`d02d93d5b446eecb8e58d50e3cec57cebd4c9aff08feaa92ee20986aa6340f07`.
+Same helper-body/store-count comparison is recorded in the roadmap. Binaryen
+merges physical aliases in both versions; do not sum aliases as unique bodies.
 
-`integration/talos/artifact/_build/prettyM-current-releases/b9780a80cda4-49ab2b7bde34de3c`
-is the worktree-local `prettyM-current` target. BUILD.json records clean
-rebased source `b9780a80` (functional `32524c14`). The original immutable
-`87d766a1bf88-e9a15005f95644f0` package is retained as pre-rebase evidence.
-Wasm: 86,690 bytes, SHA-256
-`e65000ff59279ec7eec37a4f43d8e398a35c56f8c85dc42c26e23c33533f75b4`.
+## Immutable local prettyM package
 
-Versus CG-01's package, exactly 25 closure helper body sizes decrease by 46
-bytes each: 1,150 bytes saved (about 1.3%). The 322 functions, all 269 function
-export names/indices, zero imports, module-owned memory and ownership metadata
-are unchanged. Captured LCNF is byte-identical. This is a package-size and
-instruction-shape result, not a workload speedup measurement.
+Worktree-local `integration/talos/artifact/_build/prettyM-current` selects:
 
-Original logs and raw/optimized standalone comparisons: `.deps/cg05a/`.
-Post-rebase gate logs: `.deps/cg05a-rebase/`. The first
-attempt at module-scoped `lake clean` was rejected (clean accepts packages);
-the successful `lake clean Fir` and subsequent batch/direct checks are the
-reported clean validation. Earlier malformed test-facade probes were fixed
-before Beam save and are not counted as passing checks.
+`integration/talos/artifact/_build/prettyM-current-releases/6402d306d774-96f827377ebc7972`
+
+BUILD.json records exact clean functional source `6402d306d77425e5cc3e6e91d0a120826a82c823`.
+Wasm: **83,737 bytes**, SHA-256
+`f8593cbb727e212b1846886145b35cd85b1503aea92149c53c115f4b01997f43`.
+Versus accepted CG-05A's 86,690 bytes: 2,953 bytes smaller (about 3.4%).
+Exactly 25 closure body sizes decrease (2,948 body bytes plus 5 length-encoding
+bytes). The 322 functions, 269 function export names/indices, captured LCNF,
+zero imports, module memory and complete capability/ownership metadata match.
+This is size/shape evidence, not a runtime speedup measurement.
+
+## Evidence and limits
+
+Logs, baseline/candidate binaries, exact toolkit shape inventories and commands
+are retained under `.deps/cg05b/`, including `READOUT.md`, `shapes.json`,
+`make-check.log`, `artifact-check.log` and `talos-check.log`.
+The nested artifact main's Beam save was rejected because it is not a root
+workspace module; its successful sync plus clean batch build are the evidence,
+not a claimed Beam save. Fixture-authoring mistakes were corrected against the
+accepted runtime before changing initialization. No new proof theorem is claimed.
