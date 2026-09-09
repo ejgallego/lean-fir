@@ -83,6 +83,13 @@ wrapper reuses the established reindex lemma. An empty-stack regression
 recovers the root ABI from the successor, without assuming result-kind equality.
 All three direct-let endpoints retain exactly the original rule's three
 standard and 54 recorded native-evaluation axioms; root transport adds none.
+The erased default-only case now retains that same root index with a target
+path of length zero and a strict source-rank decrease. Runtime, witness,
+locals, budget and active/caller result kinds remain unchanged. Its old API
+is preserved; the rooted successor uses the existing frame reindex lemma.
+The original wrapper and both new case endpoints use only the three standard
+axioms. The kernel regression checks root precision, zero-step simulation and
+the strict decrease together; tested object/scalar cases are still separate.
 The general global relation still existentially hides the represented kind;
 preserving the root index and producer precision through the remaining
 dispatcher branches and composing the strengthened global relation remain open.

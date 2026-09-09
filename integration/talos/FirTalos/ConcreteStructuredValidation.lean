@@ -10451,7 +10451,69 @@ private theorem ConcreteStructuredValidatedCodeOutcome.withCaseSuccessor
     nextValidationAgrees⟩
 
 /-- A compiler-erased default-only case is a closed zero-target-step
-transition and strictly decreases the structured source rank. -/
+transition and strictly decreases the structured source rank. Retain the
+already-derived source-frame equation for root transport; the unchanged
+target is indexed directly in the conclusion. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_defaultOnlyCaseWithFrames_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {selected : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.cases cases) targetStore targetLocals targetCode witness source target)
+    (supported : DefaultOnlyCaseSupported sourceRuntime sourceEnv cases selected)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 0 target
+        target ∧
+      ConcreteStructuredValidatedCodeOutcome program context functionCode
+        sourceModule sourceFunction targetModule hosts spec externals labels
+        entryRuntime entryStore entryWitness functionResult callerExpectedResult
+        facts remainingBytes sourceRuntime sourceEnv selected targetStore
+        targetLocals targetCode witness sourceAfter target ∧
+      compilerStructuredControlRank sourceAfter <
+        compilerStructuredControlRank source ∧
+      sourceAfter.frames = source.frames := by
+  have sourceResult := related.core.core.focus.defaultOnlyCaseResult_of_step
+    supported sourceStep
+  have pointwise := related.toPointwise
+    (ConcreteStructuredCodeStepAdmission.defaultOnlyCase supported) (by omega)
+  obtain ⟨targetPath, sourceFramesEq, nextCore, rank⟩ :=
+    pointwise.advance_defaultOnlyCase_of_step supported sourceStep
+  have validatedCore : ConcreteStructuredValidatedCodeCoreRel program context
+      sourceModule sourceFunction externals labels entryRuntime entryStore
+      entryWitness functionResult callerExpectedResult facts remainingBytes
+      sourceRuntime sourceEnv selected targetStore targetLocals targetCode
+      witness sourceAfter target :=
+    ⟨nextCore, related.core.validation.selectedCase sourceResult⟩
+  exact ⟨targetPath,
+    related.withSuccessor validatedCore sourceFramesEq rfl, rank, sourceFramesEq⟩
+
+/-- Compatibility projection of the default-only case producer with its
+source-frame equation. Existing dispatchers retain the original signature. -/
 theorem ConcreteStructuredValidatedCodeOutcome.advance_defaultOnlyCase_of_step
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
@@ -10494,20 +10556,9 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_defaultOnlyCase_of_step
         targetLocals targetCode witness sourceAfter target ∧
       compilerStructuredControlRank sourceAfter <
         compilerStructuredControlRank source := by
-  have sourceResult := related.core.core.focus.defaultOnlyCaseResult_of_step
-    supported sourceStep
-  have pointwise := related.toPointwise
-    (ConcreteStructuredCodeStepAdmission.defaultOnlyCase supported) (by omega)
-  obtain ⟨targetPath, sourceFramesEq, nextCore, rank⟩ :=
-    pointwise.advance_defaultOnlyCase_of_step supported sourceStep
-  have validatedCore : ConcreteStructuredValidatedCodeCoreRel program context
-      sourceModule sourceFunction externals labels entryRuntime entryStore
-      entryWitness functionResult callerExpectedResult facts remainingBytes
-      sourceRuntime sourceEnv selected targetStore targetLocals targetCode
-      witness sourceAfter target :=
-    ⟨nextCore, related.core.validation.selectedCase sourceResult⟩
-  exact ⟨targetPath,
-    related.withSuccessor validatedCore sourceFramesEq rfl, rank⟩
+  obtain ⟨path, nextRelated, rank, _⟩ :=
+    related.advance_defaultOnlyCaseWithFrames_of_step supported sourceStep
+  exact ⟨path, nextRelated, rank⟩
 
 section ClosedTestedCases
 

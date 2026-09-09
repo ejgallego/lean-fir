@@ -263,6 +263,32 @@ records their individual names and audits the compatibility wrapper as well
 as the two new endpoints. This slice adds no axiom and does not discharge the
 existing native-evaluation debt.
 
+### Root-preserving zero-step default-only case
+
+`ConcreteStructuredValidatedCodeOutcome.advance_defaultOnlyCaseWithFrames_of_step`
+retains the source-frame equation already derived by the original default-only
+case rule. Its old `advance_defaultOnlyCase_of_step` API remains an unchanged
+compatibility projection.
+
+`advance_defaultOnlyCaseAtRoot_of_step` reindexes the compiler-owned root
+agreement onto the named validated successor. The target state stays exactly
+the same, with a `FinitePath` of length zero; the source control rank strictly
+decreases. This is the existing progress argument for compiler-erased control,
+not a termination assumption. Runtime, witness, locals, environment, budget
+and active/caller result indices remain unchanged. Only the source code
+advances to the selected default branch.
+
+The kernel regression obtains exact active/root result equality from the
+successor at an empty source continuation, together with the zero-step path
+and strict rank result. Existing `DefaultOnlyCaseSupported` and successful
+source-step premises remain; no global relation, admission or client contract
+changes. The original rule's measured axiom set and all three resulting
+endpoints are exactly `propext`, `Classical.choice` and `Quot.sound`.
+No generated dependency or new axiom is introduced.
+
+Tested object/scalar cases, other local families, caller push/pop and global
+root-preserving assembly remain open. W7 source-equation work stays separate.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
@@ -304,6 +330,7 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | all three classified terminal-simulation lemmas | 3 | 0 |
 | root-preserving return producer and exact-root yield corollary | 3 | 0 |
 | original direct-let wrapper, frame-exposing helper and root-preserving successor | 3 | 54 |
+| original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 
 The standard set is `propext`, `Classical.choice`, and `Quot.sound`. The exact
 generated names live in `TrustInventory.lean`. Most dependencies in the two

@@ -10,7 +10,8 @@ ABI without changing that root. Case labels do not change the caller spine.
 
 This is an internal, root-indexed refinement of the existing stack agreement,
 not a new source invariant or an application-supplied provenance map. The real
-export entry constructs it below, and precise returns and direct lets retain it.
+export entry constructs it below. Precise returns, direct lets and erased
+default-only cases retain it.
 Preservation through the other global transitions is still separate; the
 unindexed global relation cannot recover root identity after existentially
 hiding the caller spine.
@@ -399,6 +400,108 @@ example
   obtain ⟨_, _, _, _, _, _, _, _, _, _, _, _, nextRooted, sourceFramesEq, _⟩ :=
     related.advance_directLetAtRoot_of_step rooted supported budget sourceStep
   exact nextRooted.functionResult_eq_of_empty (sourceFramesEq.trans empty)
+
+/-- An erased default-only case preserves the exact root index while taking
+zero target steps. The validated successor retains runtime, witness, locals,
+budget and active/caller result indices. Reindex only the source frames; the
+target is unchanged. The existing strict source-rank decrease is retained. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_defaultOnlyCaseAtRoot_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult rootResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {selected : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.cases cases) targetStore targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (supported : DefaultOnlyCaseSupported sourceRuntime sourceEnv cases selected)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 0 target
+        target ∧
+      ∃ nextRelated : ConcreteStructuredValidatedCodeOutcome program context functionCode
+        sourceModule sourceFunction targetModule hosts spec externals labels
+        entryRuntime entryStore entryWitness functionResult callerExpectedResult
+        facts remainingBytes sourceRuntime sourceEnv selected targetStore
+        targetLocals targetCode witness sourceAfter target,
+      ConcreteStructuredValidationAgreesAtRoot rootResult
+        nextRelated.agrees nextRelated.frames.validation ∧
+      compilerStructuredControlRank sourceAfter <
+        compilerStructuredControlRank source ∧
+      sourceAfter.frames = source.frames := by
+  obtain ⟨path, nextRelated, rank, sourceFramesEq⟩ :=
+    related.advance_defaultOnlyCaseWithFrames_of_step supported sourceStep
+  exact ⟨path, nextRelated, rooted.reindex sourceFramesEq rfl
+    nextRelated.agrees nextRelated.frames.validation, rank, sourceFramesEq⟩
+
+/-- Regression: the rooted successor supplies exact active/root precision
+with no caller, alongside the zero-step target path and strict rank decrease.
+No root/active-kind equality premise is assumed. -/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult rootResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {selected : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.cases cases) targetStore targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (supported : DefaultOnlyCaseSupported sourceRuntime sourceEnv cases selected)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : source.frames = []) :
+    FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 0 target target ∧
+      compilerStructuredControlRank sourceAfter < compilerStructuredControlRank source ∧
+      functionResult = rootResult := by
+  obtain ⟨path, _, nextRooted, rank, sourceFramesEq⟩ :=
+    related.advance_defaultOnlyCaseAtRoot_of_step rooted supported sourceStep
+  exact ⟨path, rank, nextRooted.functionResult_eq_of_empty (sourceFramesEq.trans empty)⟩
 
 /-- Heterogeneous nested calls retain the original result, not the deepest
 callee's kind or the immediate consumer's kind. -/
