@@ -60,11 +60,33 @@ bounded integration lease when a producer submits its next clean checkpoint.
   ROOT-W6-20260909-109 assigns one next ordinary local-transition transport
   slice, preferring the existing direct-let transition. Preserve the same
   root index without changing global relations or final-client premises.
-- W7: ROOT-W7-20260909-107 assigns CG-05B after this CG-05A acceptance:
-  selective closure initialization retaining complete initialized-extent
-  equality, layout, capture/header stores and the result suffix. Require
-  poisoned memory with actual released-block reuse, bit-exact captures, all
-  W7 gates, and a separate W6 initialization-footprint review.
+- W7: ROOT-W7-20260909-107 is accepted at exact CG-05B checkpoint
+  `cdfc6e44cefcf11ae5c7a27e99b227841005ba4e` (functional `6402d306`, base
+  `14a2b07f`). Root serialized this candidate alone on
+  `integration/root-queue-20260909`; its bounded integration lease is released
+  with this acceptance. W6-W7-20260909-007 gives the narrow compatible
+  initialization-footprint decision, accepted in W7-W6-20260909-011. This is
+  not a maintained whole-helper refinement theorem.
+  Root independently passed diff-check, make check (730 cases, 2172 equal
+  comparisons, 38 mailbox tests), make talos-check (3204 jobs, 3165 audit cone,
+  46 endpoints), and the complete artifact gate on exact `cdfc6e44`.
+  Receipt: `b80607f3d74bb55b64ea0cbb604c71b89cace033c76e39bc049c2a01012f1e45`.
+  Root's raw/optimized comparisons against the retained same-fixture full-zero
+  baseline each pass 81 complete allocation snapshots, including actual
+  released-block reuse; the missing-high-word negative control fails as
+  intended. Logs: root worktree `.deps/cg05b-root-{check,talos,artifact}.log`.
+  Root's immutable prettyM release is
+  `integration/talos/artifact/_build/prettyM-current-releases/cdfc6e44cefc-5caca71ebd2ceb19`
+  within that worktree: 83,737 bytes, SHA256
+  `f8593cbb727e212b1846886145b35cd85b1503aea92149c53c115f4b01997f43`.
+  This is 2,953 bytes (about 3.4%) smaller than accepted CG-05A, with identical
+  captured LCNF, zero imports, exports and ownership capabilities. No runtime
+  speed or fresh browser claim. Full allocator/capture ownership refinement
+  and FIR-BUG-wasm-none-partial-apply-tagged-result remain open.
+  Next, W6-W7-20260909-008 is released for the already claimed, isolated
+  proof-facing source-equation successor: connect minimal public equations to
+  the production initializer, with no emitted-byte, instruction-order, layout,
+  helper-signature or W6 source change. W6 owns the later footprint proof.
 - Both lanes rebase on accepted main before handoff and submit clean exact
   checkpoints to root. These tasks are authorized without another per-slice
   user approval. Remote publication and destructive cleanup stay separate.
