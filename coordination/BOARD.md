@@ -13,14 +13,70 @@ specific behavior to prevent.
 
 Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
+## Standing integration owner
+
+`fir/root` (the meta lane) is the maintainer-appointed standing integration
+owner from 2026-09-09 until explicitly reassigned. Root owns serial green
+local-main landings, shared-contract coordination, this board, and queue
+settlement. W7 owns generation; W6 owns concrete-runtime proofs. Root's local
+session mapping is maintained with `scripts/mailbox route` and does not fall
+back to W7 when root is idle. Routine integration within these boundaries is
+authorized; remote publication and destructive cleanup are separate actions.
+
 ## Active integration lease
 
-No active integration lease. CG-01 is accepted below; the containing board
-commit is its local-main checkpoint. W7 returns to generation-only work.
-W6's independent terminal-extraction checkpoint `f1a5c789` is queued for
-separate review and is not part of this landing.
+- Milestone: `ROOT-QUEUE-20260909`; owner `fir/root`, branch
+  `integration/root-queue-20260909`, worktree `.worktrees/root-integration`,
+  base main `c4eefca5942cd8f6abb584fb8820b1a262c21449`.
+- Accepted first candidate: W6 extraction `4d6915b4` (rebased from reviewed
+  `f1a5c789`), precise return `337c4b0b` (rebased from `f5315157`), classified
+  terminal simulation `94706da7`, then root-result foundation `0b8b3c83`.
+  These retain four separate review boundaries on threads
+  `W6-ROOT-20260909-008`, `-010`, `-011`, and `-012`. Root validates the
+  accumulated candidate using its own worktree-local build state. All four
+  reviews pass; their combined acceptance is recorded below.
+- Next candidate: W7 CG-05A `e7c955af`, after the narrow W6 suffix review on
+  `W7-W6-20260909-002` and a W7-owned rebase following the W6 landing.
+  Generation-ready is distinct from full closure-allocation refinement.
+- Root's write scope is this board and `AGENTS.md`, plus integration of
+  reviewed producer commits. No producer-owned source change is leased to
+  root. The lane instructions and queue triage are recorded on
+  `ROOT-W7-20260909-100` and `ROOT-W6-20260909-100`.
 
 ## Accepted integration checkpoints
+
+- Milestone: `ROOT-QUEUE-20260909-W6`, owner `fir/root`, integration branch
+  `integration/root-queue-20260909`, base `c4eefca5`. Exact producer objects:
+  extraction `4d6915b4ae6e1b90b3817ea56f7e41256dcc9a7b`, precision
+  `337c4b0b7a805a3d295bb4e5e81ff4bd05c23230`, simulation
+  `94706da74855be8bbcbbbff6df7c0bc874f71b36`, root foundation
+  `0b8b3c8361c762552d48666e33c75d90fcc544ce`. W6 republished these as clean
+  immutable updates `W6-ROOT-20260909-014` through `-017`. State: released,
+  linked/accepted in this containing coordination commit.
+- Review: extraction inverts successful source termination and the existing
+  global relation; precision retains the active function's ABI before
+  existential packaging; simulation derives target execution from ordinary
+  source evaluation and the existing classifier; root foundation proves the
+  checked caller-spine entry, case/reindex, and empty-stack terminal laws.
+  Extraction and precision Talos trees are identical to their earlier
+  individually reviewed objects across rebase. All changes are W6 proofs,
+  proof inventories, and W6 documentation; root adds ownership and acceptance
+  documentation only. Existing source/target semantics, admission predicates,
+  runtime contracts, W7 emitter and artifact sources are unchanged.
+- Independent acceptance in `.worktrees/root-integration`: `git diff --check`,
+  `make check` (730 cases, 2,172 equal comparisons, zero findings, 38 mailbox
+  tests), `make talos-setup`, and `make talos-check` pass (3,210 combined jobs,
+  3,165 focused jobs, 243 proof-source files, forced 44-endpoint inventory).
+  Functional-checkpoint receipt:
+  `f62a7e9276ce68b5c4ad94ec25469ab27ee9738f7cef9f342ebeaf951ced0a2b`.
+  Logs: `.deps/root-check.log`, `.deps/root-talos-setup.log`, and
+  `.deps/root-talos-check.log`. No new bug card or artifact/browser gate is
+  required for this proof-only stack. Existing generated trust debt remains.
+- Remaining proof boundary: preserve exact root identity and producer kind
+  through the global dispatcher, derive the universal classifier, and address
+  trap semantics separately. The classified export theorem still has an
+  existential result kind; this acceptance does not claim the closed compiler
+  theorem. W6 proceeds with one bounded propagation slice after rebasing.
 
 - Milestone: `CG-01-PRODUCTION-CAPTURE`, integration owner `root`, branch
   `integration/cg01-production-capture`, worktree

@@ -68,7 +68,22 @@ These rules apply to every agent and worktree in this repository.
   rule. These mailboxes are the sole exception to integration ownership of
   cross-lane coordination files.
 
-## Milestone-scoped integration lease
+## Standing integration owner and milestone leases
+
+- `fir/root` is the standing integration owner, assigned by the maintainer to
+  the meta lane on 2026-09-09 until explicitly reassigned. It owns queue
+  triage, shared-contract decisions, independent validation, the coordination
+  board, and green local-main landings. Routine in-scope integration does not
+  require a new maintainer approval for each slice.
+- `fir/wasm-gen` owns generation and `fir/wasm-proof` owns W6 proofs. Neither
+  implicitly inherits root ownership when root is idle. Route `fir/root` to
+  the current root session through `scripts/mailbox route`; session UUIDs
+  remain local routing state, not portable policy.
+- Root keeps one serial integration candidate at a time, records exact
+  producer checkpoints and acceptance evidence, settles completed requests,
+  and gives each lane a bounded next action. A milestone ending releases its
+  file lease, not the standing root role. Remote publication and destructive
+  cleanup still need separate maintainer authorization.
 
 - `coordination/BOARD.md` names one integration owner and integration branch
   for each active cross-lane milestone. The lease ends when that milestone is
@@ -158,7 +173,8 @@ accepted package:
 4. discard a loser, or hand a repeatable performance or size winner to
    `wasm-gen` for the complete W7 gate and integration.
 
-`wasm-gen` remains the stable generation and integration owner. Experimental
+`wasm-gen` remains the stable generation owner and accepts performance winners
+into the W7 generation lane; `fir/root` owns their integration onto main. Experimental
 candidates do not open W6 proof requests. Only a winner accepted for generation
 integration creates its corresponding W6 refinement request.
 
