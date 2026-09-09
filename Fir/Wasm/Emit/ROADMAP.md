@@ -72,6 +72,22 @@ FIR modules to 16 (including the source module); this is dependency evidence,
 not a measured build-time or runtime improvement. Byte-identical emission and
 the complete existing W7 gates are the acceptance boundary for the extraction.
 
+CG-05A (2026-09-09) removes only closure allocator scratch result transport,
+reusing the constructor helper's typed unsigned extend/wrap bridge. Capture
+stores, full-allocation zeroing, headers, descriptors, signatures and ownership
+remain unchanged. A generated-body guard freezes that prefix and the one-local
+memory-free result suffix. The external-engine fixture now includes bit-exact
+mixed captures and poisoned checkpoint reallocation with full extent, reserved
+memory, retained-prefix and suffix-canary checks.
+
+On the existing standalone helper shapes, raw bodies shrink by 46 bytes each;
+the pinned closed-module Binaryen profile removes the bridge and the optimized
+bodies shrink by 24 bytes each. The old optimized bodies still contained two
+scratch loads and two scratch stores. The enlarged test module is not a fair
+whole-module size comparison because it adds a mixed-capture facade/helper.
+These are code-shape measurements, not workload timing results. CG-05B selective
+initialization stays separate, as does W6's implementation refinement review.
+
 ### G1. Consolidated closure allocation (accepted)
 
 The generic stack was accepted on `main` at `85481c67` with functional head

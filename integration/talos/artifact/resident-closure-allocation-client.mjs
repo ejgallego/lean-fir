@@ -24,6 +24,67 @@ function header(memory, address) {
     u32(memory, address + 4 * index));
 }
 
+function checkPoisonedReallocation(exports) {
+  // Keep a real object below the rewind checkpoint for the mixed object capture.
+  const retained = exports.resident_closure_empty();
+  const checkpoint = exports.fir_heap_frontier();
+  const floatBits = [
+    [0, 0n],
+    [0x80000000, 0x8000000000000000n],
+    [1, 1n],
+    [0x7f800000, 0x7ff0000000000000n],
+    [0xff800000, 0xfff0000000000000n],
+    [0x7fc12345, 0x7ff8123456789abcn],
+    [0x7f812345, 0x7ff0123456789abcn],
+    [0xff812345, 0xfff0123456789abcn],
+  ];
+  const cases = [
+    ["resident_closure_empty", [], [2, 2, 1, 32, 1, 3, 0, 1]],
+    ["resident_closure_tagged", [], [2, 2, 1, 32, 1, 3, 0, 1]],
+    ["resident_closure_shared_shape", [], [2, 2, 1, 32, 0, 5, 0, 1]],
+    ["resident_closure_captured", [43, 255, 0x0123456789abcdefn],
+      [2, 2, 1, 56, 1, 4, 3, 2]],
+    ...floatBits.map(([f32, f64]) => [
+      "resident_closure_mixed_bits",
+      [retained, 43, 9, 0, 255, 65535, 0xfedcba98,
+        0xfedcba9876543210n, 0x0123456789abcdefn, f32, f64],
+      [2, 2, 1, 120, 1, 12, 11, 4],
+    ]),
+  ];
+  for (const [entry, args, words] of cases) {
+    const extent = words[3];
+    const memory = new Uint8Array(exports.memory.buffer);
+    // Only bucket zero gets a sentinel: other reserved words are live recycler
+    // heads and must remain empty. None of these extents hashes to bucket zero.
+    new DataView(memory.buffer).setUint32(0, 0xdecafbad, true);
+    const before = memory.slice(0, checkpoint);
+    memory.fill(0xa5, checkpoint, checkpoint + extent + 16);
+    const expected = new Uint8Array(extent);
+    const expectedView = new DataView(expected.buffer);
+    words.forEach((word, index) => expectedView.setUint32(4 * index, word, true));
+    args.forEach((value, index) => {
+      const offset = 32 + 8 * index;
+      if (typeof value === "bigint") {
+        expectedView.setBigUint64(offset, value, true);
+      } else {
+        expectedView.setUint32(offset, value, true);
+      }
+    });
+    equal(exports[entry](...args), checkpoint, `${entry}: reused address`);
+    equal(exports.fir_heap_frontier(), checkpoint + extent,
+      `${entry}: allocation extent`);
+    expect(expected.every((byte, index) => memory[checkpoint + index] === byte),
+      `${entry}: exact header/capture/padding bytes differ after poisoned reuse`);
+    expect(before.every((byte, index) => memory[index] === byte),
+      `${entry}: reserved memory or retained object changed`);
+    expect(memory.subarray(checkpoint + extent, checkpoint + extent + 16)
+      .every((byte) => byte === 0xa5), `${entry}: wrote beyond its allocation`);
+    // All output bytes have been inspected/copied; no new graph is retained.
+    exports.fir_heap_rewind(checkpoint);
+    equal(exports.fir_heap_frontier(), checkpoint, `${entry}: rewind frontier`);
+  }
+}
+
 /**
  * Exercise the generation-only resident `partialApply` family without host
  * imports. The raw checks freeze W6's closure header and semantic slot layout;
@@ -47,6 +108,8 @@ export async function checkResidentClosureAllocation(bytes) {
     "resident tagged-closure export is missing");
   equal(typeof exports.resident_closure_shared_shape, "function",
     "resident shared-shape closure export is missing");
+  equal(typeof exports.resident_closure_mixed_bits, "function",
+    "resident bit-exact mixed-capture export is missing");
   equal(typeof exports.fir_heap_frontier, "function",
     "resident closure-allocation frontier export is missing");
 
@@ -61,7 +124,7 @@ export async function checkResidentClosureAllocation(bytes) {
     value === [2, 2, 1, 32, 1, 3, 0, 1][index]),
   `empty closure header drifted: ${header(exports.memory, empty)}`);
   equal(u32(exports.memory, 0), 0xdecafbad,
-    "empty closure failed to restore the scratch word");
+    "empty closure changed the reserved word");
 
   const captured = exports.resident_closure_captured(
     43,
@@ -85,7 +148,7 @@ export async function checkResidentClosureAllocation(bytes) {
   equal(u64(exports.memory, captured + 48), 0x0123456789abcdefn,
     "captured usize slot drifted");
   equal(u32(exports.memory, 0), 0xdecafbad,
-    "captured closure failed to restore the scratch word");
+    "captured closure changed the reserved word");
 
   const insideLoop = exports.resident_closure_inside_loop();
   equal(insideLoop, 1112, "loop-nested closure returned the wrong address");
@@ -113,7 +176,7 @@ export async function checkResidentClosureAllocation(bytes) {
     value === [2, 2, 1, 32, 0, 5, 0, 1][index]),
   `shared-shape closure metadata drifted: ${header(exports.memory, sharedShape)}`);
   equal(u32(exports.memory, 0), 0xdecafbad,
-    "shared-shape closure failed to restore the scratch word");
+    "shared-shape closure changed the reserved word");
 
   const { exports: concrete } = await WebAssembly.instantiate(module, {});
   const host = new ConcreteHost(
@@ -189,7 +252,10 @@ export async function checkResidentClosureAllocation(bytes) {
   ), 0x0123456789abcdefn,
   "ConcreteHost usize capture projection drifted");
 
-  return "PASS zero-import resident closure allocation";
+  const poisoned = await WebAssembly.instantiate(module, {});
+  checkPoisonedReallocation(poisoned.exports);
+
+  return "PASS zero-import resident closure allocation and poisoned reuse";
 }
 
 export async function checkFetchedResidentClosureAllocation(url) {

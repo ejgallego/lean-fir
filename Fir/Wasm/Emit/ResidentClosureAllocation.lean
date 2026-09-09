@@ -8,8 +8,6 @@ open Fir.Wasm.Concrete
 open Lean
 
 private def addressLocal : FVarId := ⟨`address⟩
-private def savedScratchLocal : FVarId := ⟨`savedScratch⟩
-private def resultLocal : FVarId := ⟨`result⟩
 private def targetIdLocal : FVarId := ⟨`targetId⟩
 private def arityLocal : FVarId := ⟨`arity⟩
 
@@ -103,23 +101,14 @@ private def captureStores (fields : Array AbiKind) :
   return stores.flatten
 
 /--
-Retag one raw wasm32 address as the statically declared object-like result.
-The scratch word below `heapBase` is saved and restored exactly.
+Return the allocator's already-valid wasm32 closure address in the declared
+object-family lane. As in ResidentConstructor, unsigned extend followed by
+typed wrap preserves every address bit without borrowing linear-memory scratch.
 -/
-private def retagAddress (result : AbiKind) : List Instruction := [
-  .i32Const .uint32 0,
-  .i32Load .uint32 0,
-  .localSet savedScratchLocal,
-  .i32Const .uint32 0,
+private def typedAddressResult (result : AbiKind) : List Instruction := [
   .localGet addressLocal,
-  .i32Store .uint32 0,
-  .i32Const .uint32 0,
-  .i32Load result 0,
-  .localSet resultLocal,
-  .i32Const .uint32 0,
-  .localGet savedScratchLocal,
-  .i32Store .uint32 0,
-  .localGet resultLocal,
+  .i64ExtendI32U .uint64,
+  .i32WrapI64 result,
   .ret]
 
 private structure HelperKey where
@@ -168,10 +157,7 @@ private def partialApplicationFunctionForKey
       (targetIdLocal, .uint32),
       (arityLocal, .uint32)]
     results := #[result]
-    locals := #[
-      (addressLocal, .uint32),
-      (savedScratchLocal, .uint32),
-      (resultLocal, result)]
+    locals := #[(addressLocal, .uint32)]
     body :=
       [.i32Const .uint32 allocationBytes,
         .call (.declaration ResidentAllocator.allocateName),
@@ -179,7 +165,7 @@ private def partialApplicationFunctionForKey
       zeroAllocation layout.allocationBytes ++
       headerStores fixedField descriptorId allocationBytes ++
       stores ++
-      retagAddress result }
+      typedAddressResult result }
 
 private structure Binding where
   key : HelperKey
@@ -306,12 +292,17 @@ def internalizePartialApplications (module : Module) (validate : Bool := true) :
 def exampleUnrelatedTarget : Name := `ResidentClosureAllocation.unrelated
 def exampleTarget : Name := `ResidentClosureAllocation.target
 
+def exampleMixedCaptureKinds : Array AbiKind := #[
+  .object, .tobject, .tagged, .erased, .uint8, .uint16, .uint32,
+  .uint64, .usize, .float32, .float]
+
 def exampleOperations : Array RuntimeOp := #[
   .partialApply exampleTarget 3 0 #[] .object,
   .partialApply exampleTarget 4 3 #[.tobject, .uint8, .usize] .tobject,
   .partialApply exampleTarget 3 2 #[.float32, .float] .object,
   .partialApply exampleTarget 3 0 #[] .tagged,
-  .partialApply exampleUnrelatedTarget 5 0 #[] .object]
+  .partialApply exampleUnrelatedTarget 5 0 #[] .object,
+  .partialApply exampleTarget 12 11 exampleMixedCaptureKinds .object]
 
 def exampleClosureDispatch : Array Name := #[
   exampleUnrelatedTarget,
@@ -321,7 +312,8 @@ def exampleClosureDescriptors : Array (Array AbiKind) := #[
   #[.uint32],
   #[],
   #[.tobject, .uint8, .usize],
-  #[.float32, .float]]
+  #[.float32, .float],
+  exampleMixedCaptureKinds]
 
 def exampleEmptyCaller : Function := {
   name := `resident_closure_empty
@@ -385,13 +377,30 @@ def exampleSharedShapeCaller : Function := {
   locals := #[]
   body := [.call (.runtime exampleOperations[4]!), .ret] }
 
+/-- Integer-lane facade keeps floating capture bits out of JavaScript arithmetic. -/
+def exampleMixedBitsCaller : Function := {
+  name := `resident_closure_mixed_bits
+  params := exampleMixedCaptureKinds.mapIdx fun index kind =>
+    (captureId index, match kind with
+      | .float32 => .uint32
+      | .float => .uint64
+      | _ => kind)
+  results := #[.object]
+  locals := #[]
+  body := (exampleMixedCaptureKinds.toList.zipIdx.flatMap fun (kind, index) =>
+    [.localGet (captureId index)] ++ (match kind with
+      | .float32 => [.f32ReinterpretI32 .float32]
+      | .float => [.f64ReinterpretI64 .float]
+      | _ => [])) ++ [.call (.runtime exampleOperations[5]!), .ret] }
+
 def exampleModule : Module := {
   imports := exampleOperations.mapIdx Fir.Wasm.runtimeImport
   functions := #[exampleEmptyCaller, exampleCapturedCaller, exampleLoopCaller,
-    exampleFloatCaller, exampleTaggedCaller, exampleSharedShapeCaller]
+    exampleFloatCaller, exampleTaggedCaller, exampleSharedShapeCaller,
+    exampleMixedBitsCaller]
   exports := #[exampleEmptyCaller.name, exampleCapturedCaller.name,
     exampleLoopCaller.name, exampleFloatCaller.name, exampleTaggedCaller.name,
-    exampleSharedShapeCaller.name]
+    exampleSharedShapeCaller.name, exampleMixedBitsCaller.name]
   initializers := #[]
   runtimeOperations := exampleOperations
   closureDispatch := exampleClosureDispatch
@@ -415,8 +424,7 @@ def manifest : Json :=
       exampleClosureDispatch.map fun name => (name.toString : Json)),
     ("closureDescriptors", Json.arr <|
       exampleClosureDescriptors.map Fir.Wasm.Emit.Manifest.abiKindsJson),
-    ("scratchAddress", 0),
-    ("scratchPolicy", "saved-and-restored"),
+    ("scratchPolicy", "unused; typed-extend-wrap-result"),
     ("status", "generation-only; W6 closure-allocation contract proof pending")]
 
 #guard match residentExampleModule with
@@ -424,15 +432,16 @@ def manifest : Json :=
       module.imports.isEmpty &&
       module.runtimeOperations.isEmpty &&
       module.functions.size ==
-        6 + ResidentAllocator.installedFunctionNames.size +
+        7 + ResidentAllocator.installedFunctionNames.size +
           partialApplicationHelperCount exampleOperations &&
-      partialApplicationHelperCount exampleOperations == 4 &&
+      partialApplicationHelperCount exampleOperations == 5 &&
       module.exports.contains exampleEmptyCaller.name &&
       module.exports.contains exampleCapturedCaller.name &&
       module.exports.contains exampleLoopCaller.name &&
       module.exports.contains exampleFloatCaller.name &&
       module.exports.contains exampleTaggedCaller.name &&
       module.exports.contains exampleSharedShapeCaller.name &&
+      module.exports.contains exampleMixedBitsCaller.name &&
       (partialApplicationHelperNames exampleOperations).all
         module.exports.contains &&
       module.closureDispatch == exampleClosureDispatch &&
@@ -449,6 +458,29 @@ def manifest : Json :=
       | some helper =>
           helper.params == #[(targetIdLocal, .uint32), (arityLocal, .uint32)]
       | none => false
+  | .error _ => false
+
+/- Every typed helper keeps its exact initialization/capture prefix and ends
+in the memory-free address bridge. This fails if scratch transport returns. -/
+#guard match residentExampleModule with
+  | .ok module => (collectHelperKeys exampleOperations).toList.zipIdx.all fun (key, ordinal) =>
+      match module.functions.find? (·.name == partialApplicationName ordinal),
+          exampleClosureDescriptors.toList.idxOf? key.fields,
+          captureStores key.fields with
+      | some helper, some descriptor, .ok stores =>
+          let layout := ClosureLayout.ofCaptures key.fields
+          helper.locals == #[(addressLocal, .uint32)] &&
+          helper.results == #[key.result] &&
+          helper.body ==
+            [.i32Const .uint32 (u32 layout.allocationBytes),
+              .call (.declaration ResidentAllocator.allocateName),
+              .localSet addressLocal] ++
+            zeroAllocation layout.allocationBytes ++
+            headerStores (u32 key.fields.size) (u32 descriptor)
+              (u32 layout.allocationBytes) ++ stores ++
+            [.localGet addressLocal, .i64ExtendI32U .uint64,
+              .i32WrapI64 key.result, .ret]
+      | _, _, _ => false
   | .error _ => false
 
 end Fir.Wasm.Emit.ResidentClosureAllocation

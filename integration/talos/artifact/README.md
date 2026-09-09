@@ -147,6 +147,17 @@ lake exe fir-wasm-artifact resident-fallbacks \
 node run-resident-fallbacks.mjs _build/resident-fallbacks.wasm
 ```
 
+The closure-allocation fixture checks all three object-family result lanes,
+stable target/arity/descriptor fields, and shared helper shapes. It also
+poisons checkpoint-reused allocations and compares every initialized byte for
+object/erased/integer/Float32/Float captures, including signed zero, subnormal,
+infinity and NaN payload bits supplied through integer-lane facades. Reserved
+memory, a retained object and a suffix canary must remain unchanged. Allocation
+results use the same memory-free typed extend/wrap bridge as constructors;
+full-allocation zeroing remains deliberately unchanged for the separate
+selective-initialization slice. These are executable checks, not a W6 helper
+refinement theorem or a workload-speedup claim.
+
 The source Float artifact compiles upstream `Float.ofNat` and
 `Float.ofScientific` rather than installing declaration-named conversion
 shims. Its two ordinary exports are accompanied by integer-lane bit-exact
