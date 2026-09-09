@@ -57,9 +57,24 @@ bounded integration lease when a producer submits its next clean checkpoint.
   `f46f0c714374c4db074511e83e9cd8c6fbbb9ffa6ce56b957b5c5c7afbe82881`.
   Logs: root worktree `.deps/root-return-{check,talos}.log`. The bounded
   integration lease for this request is released with this acceptance.
-  ROOT-W6-20260909-109 assigns one next ordinary local-transition transport
-  slice, preferring the existing direct-let transition. Preserve the same
-  root index without changing global relations or final-client premises.
+  ROOT-W6-20260909-109 is also accepted at exact direct-let checkpoint
+  `2abc5e62311fd175d3af03945bfb5acedb0b05de` (functional `971bd45c`, base
+  `4366086b`). Root independently verified the unchanged original direct-let
+  signature, reviewed the retained frame equations and rooted reindex wrapper,
+  and passed diff-check, make check (730 cases, 2172 comparisons, 38 mailbox
+  tests) and make talos-check (3204 jobs, 3165 audit cone, 49 endpoints).
+  Exact receipt:
+  `8363b562a4e4462a5b4bba66862b0527ac0cd6b0e08998ca23f783473718f90e`.
+  Logs: root worktree `.deps/root-direct-let-{check,talos}.log`. The three
+  direct-let endpoints retain the three standard axioms plus 54 individually
+  recorded existing native dependencies; this is neither new trust approval
+  nor discharge of FIR-BUG-wasm-none-endpoint-native-axiom-audit. No runtime,
+  emitter, admission or final-client premise changed. Root's serial bounded
+  integration lease for this checkpoint is released with this acceptance.
+  Next, ROOT-W6-20260909-111 assigns default-only case root transport: retain
+  the existing zero-target-step path, source-rank decrease and old API,
+  exposing only the existing frame equation needed for rooted reindexing.
+  No global relation redesign or new generic transport framework.
 - W7: ROOT-W7-20260909-107 is accepted at exact CG-05B checkpoint
   `cdfc6e44cefcf11ae5c7a27e99b227841005ba4e` (functional `6402d306`, base
   `14a2b07f`). Root serialized this candidate alone on
