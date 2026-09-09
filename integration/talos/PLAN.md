@@ -60,9 +60,13 @@ sensitivity tests using the current return/fault contracts. PA3 must expose
 the terminal consequence as well as eliminate compiler-owned client premises.
 The structured return bridge now discharges final target label unwinding and
 Talos execution adequacy from the existing yielded-value/frame relation.
-Global terminal extraction and precise root-result provenance remain open;
-trap support needs a separate structured-machine extension. See the linked
-review follow-up for exact theorem dependencies and the remaining boundary.
+Terminal extraction now derives that yielded-value/frame evidence from the
+validated global relation and successful source completion, and feeds it to
+the executable function/export bridge. Precise root-result provenance and
+finite-prefix assembly remain open: the new corollaries existentially retain
+the represented kind, without equating it to the root export ABI. Trap support
+needs a separate structured-machine extension. See the linked review follow-up
+for exact theorem dependencies and the remaining boundary.
 
 ### Intended result
 

@@ -5,6 +5,8 @@ conservative W7 recycler source at `e488c816`. The external review inspected
 ancestor `a5449905`. The first checkpoint adds proof tests and audit tooling;
 its successor adds the structured terminal-return bridge below. Neither
 changes runtime behavior or a shared semantic relation.
+The following terminal-extraction slice recovers the bridge inputs from the
+unchanged validated global relation.
 
 ## Destination and current evidence
 
@@ -79,11 +81,44 @@ The yielding function's context is deliberately independent of the entry
 function's context. Execution adequacy needs the actual target prefix, not an
 extra equality between these compiler identities.
 
+## Terminal extraction from the global relation
+
+`ConcreteTerminalExtraction.lean` removes the separately supplied yielded-value
+relation and checked-frame arguments from the assembly boundary:
+
+```text
+supported export + exact entry-argument count + finite target prefix
+  + existing validated global relation
+  + successful final source step returning v
+  => there exists a represented kind k such that executable Wasm returns v
+     with RefinedReturnPost at k
+```
+
+`sourceCoreReturned_terminal` and `sourceExecReturned_terminal` show that a
+successful final observation can arise only from a yielded value with no
+remaining source continuation. An external response resumes execution rather
+than creating a successful terminal observation. The source observation is
+also identified exactly, including its heap, world and external-event trace.
+
+`ConcreteStructuredValidatedCodeGlobalOutcome.terminalYield_of_control`
+recovers the existing yielded-value relation and supported frame stack. A
+staged external result cannot be mistaken for a terminal return: it still has
+its bind frame. All other non-return branches have different source control.
+The function and export `terminatesWith_of_validatedReturn` corollaries then
+apply the reviewed executable return bridge, including arbitrary caller-tail
+restoration for the function form.
+
+The result kind remains existential. This slice does **not** establish that
+it equals the root export's selected ABI, and does not weaken that remaining
+goal. The finite target prefix is still an internal simulation assembly input,
+not a new application-client certificate. No admission predicate, simulation
+relation, runtime behavior, or trusted axiom was added or changed.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
 |---|---|---|
-| Recover the terminal yield | `ConcreteStructuredValidatedCodeGlobalOutcome.returned` carries `ConcreteStructuredValidatedReturnedOutcome.yielded` and `.frames.supported` | Invert successful source termination against the maintained global relation and feed the recovered facts to the bridge. |
+| Recover the terminal yield | `sourceExecReturned_terminal`, `ConcreteStructuredValidatedCodeGlobalOutcome.terminalYield_of_control`, and the function/export `terminatesWith_of_validatedReturn` lemmas | Discharged for the existing global relation and a successful final source step; finite-prefix composition and root result-kind provenance remain separate. |
 | Preserve the export's selected result ABI | `ConcreteStructuredCodeCoreRel.advance_return_at_functionResult` produces the exact kind; `ConcreteStructuredValidatedReturnedOutcome.activeResult` records the active function's result | The returned outcome's independent `kind` index is not equated to `functionResult`; compatibility with no caller is only `True`. Recover or retain the producer fact and the root result identity before existential packaging, without adding a client assumption. |
 | Connect source termination to the prefix | `ConcreteRankedTraceSimulation.execSteps` gives the related target prefix for successful source transitions | Combine the terminal source observation with that specific relation, rather than destructing the lossy public existential package. |
 | Match faults | `StructuredWasmControl` has running/breaking/returning/halted states, and `StructuredWasmOutcome` describes successful control only | A trap-aware extension and its adequacy proof are a separately coordinated semantic change. Existing `ConcreteFaultSimulation` results do not automatically supply this missing structured-machine branch. |
@@ -115,6 +150,7 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | concrete `abiLiteralMain_export_correct` | 3 | 27 |
 | all ten new sensitivity lemmas | 0–3 | 0 |
 | all five structured terminal-return bridge lemmas | 2–3 | 0 |
+| all five terminal-extraction and validated-return lemmas | 3 | 0 |
 
 The standard set is `propext`, `Classical.choice`, and `Quot.sound`. The exact
 generated names live in `TrustInventory.lean`. Most dependencies in the two
@@ -157,9 +193,10 @@ roadmap remain integration-owned and are not edited by the terminal-proof slice.
 ## Next proof checkpoint
 
 Retain PA1/PA2 compiler provenance as the admission work. For PA3's terminal
-corollary, connect the maintained global relation to the return bridge above:
-recover its terminal yielded state, precise selected result kind, and the
-prefix constructed by simulation. Handle the trap-model extension separately.
+corollary, the maintained global relation now supplies the terminal yielded
+state. Recover or retain the precise selected root result kind and compose
+the prefix constructed by simulation with the validated-return corollary.
+Handle the trap-model extension separately.
 Do not reintroduce a client source invariant, target path, or ABI-provenance
 assumption in the final corollary.
 

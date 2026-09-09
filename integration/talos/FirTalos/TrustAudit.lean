@@ -2,6 +2,7 @@ import FirTalos.TrustInventory
 import FirTalos.TrustAuditTests
 import FirTalos.ConcreteObservationSensitivity
 import FirTalos.ConcreteTerminalCorrectness
+import FirTalos.ConcreteTerminalExtraction
 import FirTalos.ConcreteResumableWasm
 import FirTalos.ConcretePassComposition
 import FirTalos.ConcreteCompilerCorrectness

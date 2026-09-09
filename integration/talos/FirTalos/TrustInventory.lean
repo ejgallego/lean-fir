@@ -167,6 +167,16 @@ def endpointInventory : Array (Lean.Name × Array String) := #[
   (`FirTalos.Concrete.ConcreteSupportedFunction.terminatesWith_of_structuredYield,
     standardAxioms),
   (`FirTalos.Concrete.ConcreteSupportedExport.terminatesWith_of_structuredYield,
+    standardAxioms),
+  (`FirTalos.Concrete.sourceCoreReturned_terminal,
+    standardAxioms),
+  (`FirTalos.Concrete.sourceExecReturned_terminal,
+    standardAxioms),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeGlobalOutcome.terminalYield_of_control,
+    standardAxioms),
+  (`FirTalos.Concrete.ConcreteSupportedFunction.terminatesWith_of_validatedReturn,
+    standardAxioms),
+  (`FirTalos.Concrete.ConcreteSupportedExport.terminatesWith_of_validatedReturn,
     standardAxioms)]
 
 end FirTalos.TrustAudit
