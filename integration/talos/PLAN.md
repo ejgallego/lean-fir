@@ -130,6 +130,16 @@ unchanged environment, result indices, witness and budget. Three kernel
 regressions recover precision from those successors without supplied effect
 facts. The expanded 79-endpoint inventory checks equal original/helper/rooted
 axiom sets: only the same existing byte-assembly dependency is inherited.
+Constructor-tag mutation now retains the root through a focused WithFrames
+helper, rooted effect producer and validation-derived rooted entry point.
+Production validation supplies tag-width/local facts; successful source
+execution supplies heap-shape/effect facts, without a new caller premise.
+The same named successor retains the exact two-step target path, next runtime/
+store/code, source environment, result indices, witness, budget and both frame
+equations. Its kernel regression recovers root precision from that successor.
+Both old APIs remain unchanged. All five original/helper/rooted tag endpoints
+share exactly the existing byte-assembly dependency, checked in the expanded
+84-endpoint inventory. Field mutation and other families remain separate.
 The general global relation still existentially hides the represented kind;
 preserving the root index and producer precision through the remaining
 dispatcher branches and composing the strengthened global relation remain open.

@@ -414,6 +414,35 @@ a new refcount/release/ownership proof. Other mutations, caller push/pop,
 global root assembly, public result-kind/admission closure, trap semantics and
 closure-footprint/tagged-result/W72 work remain separate.
 
+### Root-preserving constructor-tag mutation
+
+`advance_constructorTagWithFrames_of_step` exposes frame equations from the
+existing pointwise mutation proof and attaches retained validation with the
+unchanged `withSuccessor`. The old `advance_constructorTag_of_step` signature
+is preserved as a compatibility wrapper. `advance_constructorTagAtRoot_of_step`
+uses the established `reindex` lemma on that actual named successor.
+
+`advance_constructorTagAtRoot_of_validated_step` reconstructs tag-width/local
+facts via `setTag_compiler`, and heap-shape/effect facts via
+`setTag_source_of_step`. It calls the rooted effect producer, adding no caller
+effect, admission, width or heap-shape premise. Its old validation-derived
+counterpart remains unchanged, including its proof body.
+
+Both rooted producers retain exact two-step target paths, next runtime/store/
+code, source environment, active/caller result indices, witness and budget,
+plus both frame equations. A kernel regression invokes the actual validated
+rooted producer without supplied effect facts, recovering active/root precision
+from its successor when the source caller stack is empty.
+
+All five original/helper/rooted tag endpoints have the same measured axiom set
+as baseline `23bccf86`: the three standard axioms and the existing byte-assembly
+dependency in `referenceCountNativeDebt`. Five added entries bring the exact
+inventory to 84; no new axiom or trust approval. This is root transport over
+the existing `ConstructorTagEffectSupported` contract, not a changed layout
+or mutation semantics. Field mutation, other families, caller push/pop, global
+assembly, public result-kind/admission closure and trap semantics stay open;
+closure-footprint, whole-helper/tagged-result and W72 work remain separate.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
@@ -456,6 +485,7 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | root-preserving return producer and exact-root yield corollary | 3 | 0 |
 | original direct-let wrapper, frame-exposing helper and root-preserving successor | 3 | 54 |
 | original and rooted validation-derived inc/dec/delete, plus delete helper/transport | 3 | 1 |
+| original tag mutation/validated rules, frame helper and both rooted producers | 3 | 1 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original UInt8-case wrapper, frame-exposing helper and rooted successor | 3 | 2 |

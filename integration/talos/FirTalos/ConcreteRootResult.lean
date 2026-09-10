@@ -19,6 +19,8 @@ reindexing their existing zero-step and two-step successors, respectively.
 Validation-derived ordinary increment, decrement and explicit delete derive
 their effect facts internally; increment retains its exact refcount headroom
 premise. Delete includes erased physical zero through the existing rule.
+Constructor-tag mutation likewise derives compiler/heap-shape facts and
+retains the root through its existing exact two-step effect rule.
 Preservation through the other global transitions is still separate; the
 unindexed global relation cannot recover root identity after existentially
 hiding the caller spine.
@@ -1336,6 +1338,142 @@ example
     nextRooted.functionResult_eq_of_empty (sourceFramesEq.trans empty)⟩
 
 end RootedReferenceCounts
+
+section RootedConstructorTags
+
+variable
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime nextRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult rootResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+
+/-- Constructor-tag mutation retains the same root on its actual named
+successor through the existing two-step effect rule and frame reindexing. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_constructorTagAtRoot_of_step
+    {objectId : Lean.FVarId} {tag : Nat}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.setTag objectId tag continuation) targetStore targetLocals targetCode
+      witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (supported : ConstructorTagEffectSupported context sourceRuntime sourceEnv
+      (.setTag objectId tag continuation) continuation nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        ∃ nextRelated : ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextRelated.agrees nextRelated.frames.validation ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames := by
+  obtain ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated,
+      sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_constructorTagWithFrames_of_step supported sourceStep
+  exact ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated,
+    rooted.reindex sourceFramesEq targetFramesEq
+      nextRelated.agrees nextRelated.frames.validation,
+    sourceFramesEq, targetFramesEq⟩
+
+/-- Constructor-tag mutation derives width/local facts from production
+validation and heap-shape/effect facts from the successful source step. No
+caller effect or admission premise is needed to retain the original root. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_constructorTagAtRoot_of_validated_step
+    {objectId : Lean.FVarId} {tag : Nat}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.setTag objectId tag continuation) targetStore targetLocals targetCode
+      witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ resultRuntime targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        ∃ nextRelated : ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes resultRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextRelated.agrees nextRelated.frames.validation ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames := by
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees, localAlignment⟩ :=
+    related.core.validation
+  obtain ⟨tagFits, objectCompiled⟩ := validated.setTag_compiler agrees
+  obtain ⟨location, cell, semantic, resultRuntime, objectLookup, updated,
+      found, live, objectEq⟩ :=
+    related.core.core.focus.setTag_source_of_step sourceStep
+  let supported : ConstructorTagEffectSupported context sourceRuntime sourceEnv
+      (.setTag objectId tag continuation) continuation resultRuntime :=
+    .setTag sourceRuntime resultRuntime sourceEnv objectId tag continuation
+      location cell semantic objectCompiled objectLookup updated found live
+      objectEq tagFits
+  obtain ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated,
+      nextRooted, sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_constructorTagAtRoot_of_step rooted supported sourceStep
+  exact ⟨resultRuntime, targetAfter, nextStore, nextTargetCode, path, nextRelated,
+    nextRooted, sourceFramesEq, targetFramesEq⟩
+
+/-- The actual validation-derived tag producer recovers root precision from
+its successor without caller-supplied effect facts or result-kind equality.
+Its exact two-step path and both frame equations remain visible. -/
+example
+    {objectId : Lean.FVarId} {tag : Nat}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.setTag objectId tag continuation) targetStore targetLocals targetCode
+      witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : source.frames = []) :
+    ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames ∧
+        functionResult = rootResult := by
+  obtain ⟨_, targetAfter, _, _, path, _, nextRooted, sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_constructorTagAtRoot_of_validated_step rooted sourceStep
+  exact ⟨targetAfter, path, sourceFramesEq, targetFramesEq,
+    nextRooted.functionResult_eq_of_empty (sourceFramesEq.trans empty)⟩
+
+end RootedConstructorTags
 
 /-- Heterogeneous nested calls retain the original result, not the deepest
 callee's kind or the immediate consumer's kind. -/

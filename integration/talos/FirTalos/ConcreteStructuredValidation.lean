@@ -9712,6 +9712,39 @@ variable
 
 /-- Constructor-tag mutation preserves the closed active-and-suspended
 validation relation across its exact generated two-step prefix. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_constructorTagWithFrames_of_step
+    {objectId : Lean.FVarId} {tag : Nat}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.setTag objectId tag continuation) targetStore targetLocals targetCode
+      witness source target)
+    (supported : ConstructorTagEffectSupported context sourceRuntime sourceEnv
+      (.setTag objectId tag continuation) continuation nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames := by
+  have pointwise := related.toPointwise
+    (ConcreteStructuredCodeStepAdmission.constructorTag supported) (by omega)
+  obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath,
+      sourceFramesEq, targetFramesEq, nextCore⟩ :=
+    pointwise.advance_constructorTag_of_step supported sourceStep
+  exact ⟨targetAfter, nextStore, nextTargetCode, targetPath,
+    related.withSuccessor ⟨nextCore, related.core.validation.setTagContinuation⟩
+      sourceFramesEq targetFramesEq, sourceFramesEq, targetFramesEq⟩
+
+/-- Constructor-tag mutation preserves the closed active-and-suspended
+validation relation across its exact generated two-step prefix. -/
 theorem ConcreteStructuredValidatedCodeOutcome.advance_constructorTag_of_step
     {objectId : Lean.FVarId} {tag : Nat}
     (related : ConcreteStructuredValidatedCodeOutcome program context
@@ -9732,10 +9765,9 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_constructorTag_of_step
           callerExpectedResult facts remainingBytes nextRuntime sourceEnv
           continuation nextStore targetLocals nextTargetCode witness sourceAfter
           targetAfter := by
-  have pointwise := related.toPointwise
-    (ConcreteStructuredCodeStepAdmission.constructorTag supported) (by omega)
-  exact related.advanceCode related.core.validation.setTagContinuation
-    (pointwise.advance_constructorTag_of_step supported sourceStep)
+  obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, nextRelated, _, _⟩ :=
+    related.advance_constructorTagWithFrames_of_step supported sourceStep
+  exact ⟨targetAfter, nextStore, nextTargetCode, targetPath, nextRelated⟩
 
 /-- Closed constructor-tag mutation with static width/local facts recovered
 from production validation and heap-shape facts recovered from the source

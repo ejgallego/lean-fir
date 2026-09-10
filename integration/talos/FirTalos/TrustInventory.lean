@@ -137,7 +137,8 @@ def scalarCaseNativeDebt : Array String := #[
 
 /-- Existing ordinary increment/decrement debt, measured at `2baabade` before
 frame/root transport. Explicit delete and all three validation-derived rules
-have the same measured dependency at `97b25f06`. The focused wrappers retain
+have the same measured dependency at `97b25f06`. Constructor-tag mutation
+and its validation-derived rule share it at `23bccf86`. The focused wrappers retain
 precisely this dependency; this is an exact inventory, not a new trust approval. -/
 def referenceCountNativeDebt : Array String := #[
   "_private.Fir.Wasm.Concrete.Memory.0.Fir.Wasm.Concrete.LinearMemory.assembleByte32._native.bv_decide.ax_1_6"]
@@ -351,6 +352,16 @@ def endpointInventory : Array (Lean.Name × Array String) := #[
   (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_ordinaryDelete_of_validated_step,
     standardAxioms ++ referenceCountNativeDebt),
   (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_ordinaryDeleteAtRoot_of_validated_step,
+    standardAxioms ++ referenceCountNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_constructorTag_of_step,
+    standardAxioms ++ referenceCountNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_constructorTagWithFrames_of_step,
+    standardAxioms ++ referenceCountNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_constructorTagAtRoot_of_step,
+    standardAxioms ++ referenceCountNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_constructorTag_of_validated_step,
+    standardAxioms ++ referenceCountNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_constructorTagAtRoot_of_validated_step,
     standardAxioms ++ referenceCountNativeDebt)]
 
 end FirTalos.TrustAudit
