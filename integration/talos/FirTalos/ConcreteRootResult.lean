@@ -16,6 +16,9 @@ dispatcher derives the applicable family from production validation and
 composes those rooted producers without a caller-supplied case classifier.
 Persistent and ordinary reference-count operations retain the same root by
 reindexing their existing zero-step and two-step successors, respectively.
+Validation-derived ordinary increment, decrement and explicit delete derive
+their effect facts internally; increment retains its exact refcount headroom
+premise. Delete includes erased physical zero through the existing rule.
 Preservation through the other global transitions is still separate; the
 unindexed global relation cannot recover root identity after existentially
 hiding the caller spine.
@@ -1082,6 +1085,253 @@ example
         functionResult = rootResult := by
   obtain ⟨targetAfter, _, _, path, _, nextRooted, sourceFramesEq, targetFramesEq⟩ :=
     related.advance_ordinaryDecrementAtRoot_of_step rooted supported sourceStep
+  exact ⟨targetAfter, path, sourceFramesEq, targetFramesEq,
+    nextRooted.functionResult_eq_of_empty (sourceFramesEq.trans empty)⟩
+
+/-- Explicit delete transports the same root through the existing two-step
+rule, including erased physical zero, without changing its effect contract. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_ordinaryDeleteAtRoot_of_step
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.del objectId continuation) targetStore
+      targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (supported : OrdinaryDeleteEffectSupported context sourceRuntime
+      sourceEnv (.del objectId continuation)
+      continuation nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        ∃ nextRelated : ConcreteStructuredValidatedCodeOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec externals
+          labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextRelated.agrees nextRelated.frames.validation ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames := by
+  obtain ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated,
+      sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_ordinaryDeleteWithFrames_of_step supported sourceStep
+  exact ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated,
+    rooted.reindex sourceFramesEq targetFramesEq
+      nextRelated.agrees nextRelated.frames.validation,
+    sourceFramesEq, targetFramesEq⟩
+
+/-- Compiler-validated increment derives its local/effect facts and retains
+root identity on the named successor. The only extra execution premise is the
+unchanged finite-wasm32 reference-count headroom condition. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_ordinaryIncrementAtRoot_of_validated_step
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.inc objectId amount check false continuation) targetStore
+      targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (fits : ∀ (sourceObject : Value) (location : Location) (cell : HeapCell),
+      lookupValue sourceEnv objectId = .ok sourceObject →
+        sourceObject = .object (.heap location) →
+          findCell? sourceRuntime.heap location = some cell →
+            cell.rc + amount < UInt32.size)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ nextRuntime targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        ∃ nextRelated : ConcreteStructuredValidatedCodeOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec externals
+          labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextRelated.agrees nextRelated.frames.validation ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames := by
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees, localAlignment⟩ :=
+    related.core.validation
+  obtain ⟨objectKind, objectCompiled, objectRefines⟩ :=
+    validated.incOrdinary_compiler agrees
+  obtain ⟨sourceObject, nextRuntime, objectLookup, updated⟩ :=
+    related.core.core.focus.incOrdinary_source_of_step sourceStep
+  let supported : OrdinaryIncrementEffectSupported context sourceRuntime
+      sourceEnv (.inc objectId amount check false continuation) continuation
+      nextRuntime :=
+    .inc sourceRuntime nextRuntime sourceEnv objectId amount check continuation
+      objectKind sourceObject objectCompiled objectRefines objectLookup updated
+      (fun location cell sourceObjectEq found =>
+        fits sourceObject location cell objectLookup sourceObjectEq found)
+  obtain ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated,
+      nextRooted, sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_ordinaryIncrementAtRoot_of_step rooted supported sourceStep
+  exact ⟨nextRuntime, targetAfter, nextStore, nextTargetCode, path, nextRelated,
+    nextRooted, sourceFramesEq, targetFramesEq⟩
+
+/-- The validation-derived increment producer needs no caller-supplied
+effect facts. Root precision is recovered from its actual successor, retaining
+the exact two-step path and both frame equations. -/
+example
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.inc objectId amount check false continuation) targetStore
+      targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (fits : ∀ (sourceObject : Value) (location : Location) (cell : HeapCell),
+      lookupValue sourceEnv objectId = .ok sourceObject →
+        sourceObject = .object (.heap location) →
+          findCell? sourceRuntime.heap location = some cell →
+            cell.rc + amount < UInt32.size)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : source.frames = []) :
+    ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames ∧
+        functionResult = rootResult := by
+  obtain ⟨_, targetAfter, _, _, path, _, nextRooted, sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_ordinaryIncrementAtRoot_of_validated_step rooted fits sourceStep
+  exact ⟨targetAfter, path, sourceFramesEq, targetFramesEq,
+    nextRooted.functionResult_eq_of_empty (sourceFramesEq.trans empty)⟩
+
+/-- Compiler-validated decrement derives all current-node effect facts from
+validation and the successful source step, with no additional caller premise. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_ordinaryDecrementAtRoot_of_validated_step
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.dec objectId amount check false objectFields? continuation) targetStore
+      targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ nextRuntime targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        ∃ nextRelated : ConcreteStructuredValidatedCodeOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec externals
+          labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextRelated.agrees nextRelated.frames.validation ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames := by
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees, localAlignment⟩ :=
+    related.core.validation
+  obtain ⟨objectKind, objectCompiled, objectRefines⟩ :=
+    validated.decOrdinary_compiler agrees
+  obtain ⟨sourceObject, nextRuntime, objectLookup, updated⟩ :=
+    related.core.core.focus.decOrdinary_source_of_step sourceStep
+  let supported : OrdinaryDecrementEffectSupported context sourceRuntime
+      sourceEnv
+      (.dec objectId amount check false objectFields? continuation)
+      continuation nextRuntime :=
+    .dec sourceRuntime nextRuntime sourceEnv objectId amount check objectFields?
+      continuation objectKind sourceObject objectCompiled objectRefines
+      objectLookup updated
+  obtain ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated,
+      nextRooted, sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_ordinaryDecrementAtRoot_of_step rooted supported sourceStep
+  exact ⟨nextRuntime, targetAfter, nextStore, nextTargetCode, path, nextRelated,
+    nextRooted, sourceFramesEq, targetFramesEq⟩
+
+/-- The validation-derived decrement producer needs no caller-supplied
+effect facts. Root precision is recovered from its actual successor, retaining
+the exact two-step path and both frame equations. -/
+example
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.dec objectId amount check false objectFields? continuation) targetStore
+      targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : source.frames = []) :
+    ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames ∧
+        functionResult = rootResult := by
+  obtain ⟨_, targetAfter, _, _, path, _, nextRooted, sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_ordinaryDecrementAtRoot_of_validated_step rooted sourceStep
+  exact ⟨targetAfter, path, sourceFramesEq, targetFramesEq,
+    nextRooted.functionResult_eq_of_empty (sourceFramesEq.trans empty)⟩
+
+/-- Compiler-validated explicit deletion retains root identity on its named
+successor. Physical-zero deletion is covered by the same existing rule; no new
+effect, admission or nonzero premise is introduced. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_ordinaryDeleteAtRoot_of_validated_step
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.del objectId continuation) targetStore
+      targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ nextRuntime targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        ∃ nextRelated : ConcreteStructuredValidatedCodeOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec externals
+          labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextRelated.agrees nextRelated.frames.validation ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames := by
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees, localAlignment⟩ :=
+    related.core.validation
+  have objectCompiled := validated.del_compiler agrees
+  obtain ⟨sourceObject, nextRuntime, objectLookup, updated⟩ :=
+    related.core.core.focus.del_source_of_step sourceStep
+  let supported : OrdinaryDeleteEffectSupported context sourceRuntime sourceEnv
+      (.del objectId continuation) continuation nextRuntime :=
+    .del sourceRuntime nextRuntime sourceEnv objectId continuation .object
+      sourceObject objectCompiled objectLookup updated
+  obtain ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated,
+      nextRooted, sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_ordinaryDeleteAtRoot_of_step rooted supported sourceStep
+  exact ⟨nextRuntime, targetAfter, nextStore, nextTargetCode, path, nextRelated,
+    nextRooted, sourceFramesEq, targetFramesEq⟩
+
+/-- The validation-derived delete producer needs no caller-supplied
+effect facts. Root precision is recovered from its actual successor, retaining
+the exact two-step path and both frame equations. -/
+example
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.del objectId continuation) targetStore
+      targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : source.frames = []) :
+    ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames ∧
+        functionResult = rootResult := by
+  obtain ⟨_, targetAfter, _, _, path, _, nextRooted, sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_ordinaryDeleteAtRoot_of_validated_step rooted sourceStep
   exact ⟨targetAfter, path, sourceFramesEq, targetFramesEq,
     nextRooted.functionResult_eq_of_empty (sourceFramesEq.trans empty)⟩
 

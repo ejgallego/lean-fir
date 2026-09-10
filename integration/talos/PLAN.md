@@ -118,6 +118,18 @@ retain the zero/two-step distinction. All ten original/helper/rooted endpoints
 are measured in the 70-endpoint audit: persistent rules are standard-only;
 ordinary rules retain one individually recorded existing byte-assembly native
 dependency. This is root transport, not a new ownership or release proof.
+Validation-derived rooted ordinary increment, decrement and explicit delete
+now reconstruct their current-node compiler/effect facts from retained
+production validation and successful source execution. Increment retains
+exactly the existing finite-wasm32 refcount headroom premise; decrement/delete
+need no caller effect or admission premise. The delete WithFrames/AtRoot
+interface reuses its existing proof, including erased physical-zero deletion,
+and preserves the old API and effect contract. All three producers name the
+rooted successor with exact two-step path, runtime/store/code evolution,
+unchanged environment, result indices, witness and budget. Three kernel
+regressions recover precision from those successors without supplied effect
+facts. The expanded 79-endpoint inventory checks equal original/helper/rooted
+axiom sets: only the same existing byte-assembly dependency is inherited.
 The general global relation still existentially hides the represented kind;
 preserving the root index and producer precision through the remaining
 dispatcher branches and composing the strengthened global relation remain open.

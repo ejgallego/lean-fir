@@ -378,9 +378,41 @@ Original/helper/rooted axiom sets agree exactly, measured before transport at
 `2baabade`. Persistent endpoints use the three standard axioms. Ordinary
 endpoints additionally use the one existing byte-assembly dependency named in
 `TrustInventory.referenceCountNativeDebt`. All ten endpoints are included in
-the 70-endpoint inventory; there is no new axiom or trust approval. Global
-assembly, other mutations/delete, caller push/pop, public result-kind and
-admission closure, trap semantics and closure-footprint/W72 work remain separate.
+the initial 70-endpoint inventory; there is no new axiom or trust approval.
+
+### Validation-derived rooted ownership transitions
+
+`advance_ordinaryIncrementAtRoot_of_validated_step`,
+`advance_ordinaryDecrementAtRoot_of_validated_step` and
+`advance_ordinaryDeleteAtRoot_of_validated_step` now mirror the existing
+validation-derived rules while naming successors that retain the original
+root. Compiler local/refinement facts come from retained production validation;
+the semantic effect comes from the successful source step. The increment and
+decrement rules reuse their accepted rooted effect producers. Explicit delete
+adds only `advance_ordinaryDeleteWithFrames_of_step` and
+`advance_ordinaryDeleteAtRoot_of_step` over the existing pointwise proof,
+preserving the old delete API and effect contract.
+
+The only extra increment premise is exactly the existing condition that any
+looked-up heap cell satisfies `cell.rc + amount < UInt32.size`. This is finite
+target headroom, not a consequence of successful unbounded source execution.
+Decrement and delete need no caller effect, admission or nonzero premise;
+erased physical-zero deletion remains inside the existing delete rule.
+
+All three rules preserve exact two-step target paths, named next runtime/store/
+code, source environment, active/caller result indices, witness and budget.
+They expose both frame equations and retain root evidence on the same named
+successor. Three kernel regressions invoke these actual validation-derived
+producers without caller-supplied effect facts and recover active/root equality
+from their successors at an empty source caller stack.
+
+Original/helper/rooted axiom sets agree with those measured at `97b25f06`:
+the three standard axioms plus the single existing byte-assembly dependency in
+`referenceCountNativeDebt`. Nine added entries bring the exact inventory to 79;
+no new axiom or trust approval. This closes one bounded local composition, not
+a new refcount/release/ownership proof. Other mutations, caller push/pop,
+global root assembly, public result-kind/admission closure, trap semantics and
+closure-footprint/tagged-result/W72 work remain separate.
 
 ### Remaining terminal assembly obligations
 
@@ -423,6 +455,7 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | all three classified terminal-simulation lemmas | 3 | 0 |
 | root-preserving return producer and exact-root yield corollary | 3 | 0 |
 | original direct-let wrapper, frame-exposing helper and root-preserving successor | 3 | 54 |
+| original and rooted validation-derived inc/dec/delete, plus delete helper/transport | 3 | 1 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original UInt8-case wrapper, frame-exposing helper and rooted successor | 3 | 2 |

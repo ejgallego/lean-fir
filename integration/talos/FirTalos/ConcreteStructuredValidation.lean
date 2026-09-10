@@ -9517,6 +9517,63 @@ theorem ConcreteStructuredAlignedValidationState.delContinuation
     localAlignment.reindexCode (by
       simp [Fir.Wasm.collectEffectiveLocalKindUpdates])⟩
 
+/-- Explicit delete also exposes the unchanged source and target frames.
+The existing effect contract includes erased physical-zero deletion. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_ordinaryDeleteWithFrames_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime nextRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.del objectId continuation) targetStore targetLocals targetCode witness
+      source target)
+    (supported : OrdinaryDeleteEffectSupported context sourceRuntime sourceEnv
+      (.del objectId continuation) continuation nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames := by
+  have pointwise := related.toPointwise
+    (ConcreteStructuredCodeStepAdmission.ordinaryDelete supported) (by omega)
+  obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath,
+      sourceFramesEq, targetFramesEq, nextCore⟩ :=
+    pointwise.advance_ordinaryDelete_of_step supported sourceStep
+  exact ⟨targetAfter, nextStore, nextTargetCode, targetPath,
+    related.withSuccessor ⟨nextCore, related.core.validation.delContinuation⟩
+      sourceFramesEq targetFramesEq, sourceFramesEq, targetFramesEq⟩
+
 /-- Explicit delete, including erased physical zero, preserves the closed
 relation across the exact two-instruction generated host prefix. -/
 theorem ConcreteStructuredValidatedCodeOutcome.advance_ordinaryDelete_of_step
@@ -9563,11 +9620,9 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_ordinaryDelete_of_step
           callerExpectedResult facts remainingBytes nextRuntime sourceEnv
           continuation nextStore targetLocals nextTargetCode witness sourceAfter
           targetAfter := by
-  have pointwise := related.toPointwise
-    (ConcreteStructuredCodeStepAdmission.ordinaryDelete supported)
-    (by omega)
-  exact related.advanceCode related.core.validation.delContinuation
-    (pointwise.advance_ordinaryDelete_of_step supported sourceStep)
+  obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, nextRelated, _, _⟩ :=
+    related.advance_ordinaryDeleteWithFrames_of_step supported sourceStep
+  exact ⟨targetAfter, nextStore, nextTargetCode, targetPath, nextRelated⟩
 
 /-- Closed explicit deletion with its compiler local and semantic transition
 reconstructed from retained validation and the successful source step. -/
