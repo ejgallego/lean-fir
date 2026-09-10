@@ -134,10 +134,25 @@ bounded integration lease when a producer submits its next clean checkpoint.
   frame equations and exact two-step paths, including physical-zero deletion.
   All nine inventoried endpoints retain precisely the existing byte-assembly
   native dependency; no new trust approval or ownership/refinement closure.
-  Root releases this bounded serial integration lease. Next,
-  ROOT-W6-20260910-010 assigns constructor-tag root transport and its existing
-  validation-derived entry point only, preserving the old API and effect
-  contract. Field mutations, global assembly and caller push/pop stay separate.
+  Root releases this bounded serial integration lease.
+  ROOT-W6-20260910-010 is accepted at exact constructor-tag checkpoint
+  `1eb5916a30b1bba7eed54cde0bd519ece1a40765`, functional `57395e7b`, base
+  `23bccf86`. Independent diff-check, make check (730/2172, 38 mailbox tests)
+  and make talos-check (3204 jobs, 3165 audit cone, 84 endpoints) pass.
+  Exact verified receipt:
+  `0b577fcab2116bc4614a87254ad46093f93ce700e2eb09aa9c76a8859dea723b`.
+  Logs: root worktree `.deps/root-constructor-tag-{check,talos}.log`.
+  Root mechanically verified the old effect API and original validated
+  declaration/body unchanged. The rooted validated producer derives existing
+  width/local and heap/effect facts without new caller premises, retaining
+  exact two-step paths, both frame equations and root identity. All five
+  tag endpoints retain exactly the existing byte-assembly native dependency;
+  no new trust approval or mutation/layout refinement claim. This serial
+  integration lease is released. Next, ROOT-W6-20260910-012 assigns USize and
+  packed-scalar field root transport plus their validated entry points,
+  retaining the scalar rule's exact existing descriptor-layout premise.
+  Object-reference fields/schema bridges, global assembly and caller push/pop
+  stay separate.
 - W7: ROOT-W7-20260909-107 is accepted at exact CG-05B checkpoint
   `cdfc6e44cefcf11ae5c7a27e99b227841005ba4e` (functional `6402d306`, base
   `14a2b07f`). Root serialized this candidate alone on
