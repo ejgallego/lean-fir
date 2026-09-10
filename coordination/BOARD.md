@@ -163,10 +163,23 @@ bounded integration lease when a producer submits its next clean checkpoint.
   descriptor-layout boundary. USize retains the existing byte32 dependency;
   packed-scalar retains the existing byte16/byte32 pair. No new trust approval
   or mutation/layout refinement claim. This serial lease is released.
-  Next, ROOT-W6-20260910-014 assigns object-reference/erased-field root
-  transport through the active-witness effect rules and existing schema entry
-  points, retaining exact schema-agreement/typing premises. Arbitrary-witness
-  wrappers, global assembly and caller push/pop stay separate.
+  ROOT-W6-20260910-014 is accepted at exact active-witness object-field
+  checkpoint `272fd0a2cf3197a32ec4b20749bed81dae879e5b`, functional `e829b28c`,
+  base `e5ea3914`. Independent diff-check, make check (730/2172, 38 mailbox
+  tests) and make talos-check (3204 jobs, 3165 audit cone, 104 endpoints) pass.
+  Exact verified receipt:
+  `df30dc87e974e4cc256ec921fa64a99ae4df5730252370860f1c2069007ec7fa`.
+  Logs: root worktree `.deps/root-object-fields-{check,talos}.log`.
+  Root mechanically verified both old At signatures and both schema
+  declarations/bodies unchanged. The active-witness bridge and exact original
+  schema agreement/typing premises remain intact, with three-step named rooted
+  successors, both frame equations and erased physical-zero behavior. All ten
+  endpoints retain exactly the existing byte32 dependency; no new trust or
+  field ownership/layout refinement claim. This serial lease is released.
+  Next, ROOT-W6-20260910-016 assigns direct-call staging root transport only,
+  retaining root evidence on the actual ready outcome's saved caller stack,
+  exact argument-prefix path and existing strict rank decrease. Callee entry,
+  caller push/pop, other staging families and global assembly stay separate.
 - W7: ROOT-W7-20260909-107 is accepted at exact CG-05B checkpoint
   `cdfc6e44cefcf11ae5c7a27e99b227841005ba4e` (functional `6402d306`, base
   `14a2b07f`). Root serialized this candidate alone on
