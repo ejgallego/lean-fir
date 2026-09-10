@@ -282,10 +282,23 @@ bounded integration lease when a producer submits its next clean checkpoint.
   exercises the actual producer with differing caller/callee kinds. All three
   endpoints retain exactly the original byte-assembly dependency; no new trust
   approval or wider debt closure. This serial integration lease is released.
-  Next, ROOT-W6-20260910-032 assigns lazy-cache miss entry/root transport and
-  its existing checked lazy push only: exact three steps, original non-heap
-  admission and suspended cache-publication continuation. Executing publication,
-  caller pop/return and global assembly stay separate.
+  ROOT-W6-20260910-032 is accepted at exact lazy-miss entry checkpoint
+  `c6d2e27090a9b217810a6938a4909073fcc02292`, functional `d5a54d06`, base
+  `17de790b`. Independent diff-check, make check (730/2172, 38 mailbox tests)
+  and make talos-check (3204 jobs, 3165 audit cone, 130 forced endpoints) pass.
+  Exact verified receipt:
+  `82648131d8d2d1e308f9ba3051376942445fb853a1e449bd2334f873d04a7ead`.
+  Logs: root worktree `.deps/root-lazy-miss-entry-{check,talos}.log`.
+  Original signature, core/generated/push and complete callee construction are
+  byte-identical. The same checked lazy push preserves root on the actual
+  initializer, exact three-step path, non-heap admission and suspended publication
+  protocol. Actual-producer regression retains one checked ABI entry despite two
+  source frames and a different initializer ABI. All three endpoints retain only
+  standard axioms; no new trust or wider debt closure. This lease is released.
+  Next, ROOT-W6-20260910-034 assigns root transport through the existing
+  bind-caller pop producer: direct/saturated branches and target-only case-label
+  unwinding, preserving named caller outcome and exact existing path accounting.
+  Lazy publication, terminal/global assembly and other families stay separate.
 - W7: ROOT-W7-20260909-107 is accepted at exact CG-05B checkpoint
   `cdfc6e44cefcf11ae5c7a27e99b227841005ba4e` (functional `6402d306`, base
   `14a2b07f`). Root serialized this candidate alone on
