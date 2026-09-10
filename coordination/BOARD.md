@@ -119,11 +119,25 @@ bounded integration lease when a producer submits its next clean checkpoint.
   predicates and two-step runtime/store evolution. Persistent endpoints are
   standard-only; ordinary endpoints retain exactly the existing byte-assembly
   native dependency. No new trust approval or ownership/refinement claim.
-  This bounded serial integration lease is released. Next,
-  ROOT-W6-20260910-008 assigns validation-derived rooted increment/decrement
-  and explicit deletion, retaining increment's existing headroom condition and
-  deriving the existing local effect evidence from validation/source execution.
-  Other mutations, global assembly and caller push/pop stay separate.
+  This bounded serial integration lease is released.
+  ROOT-W6-20260910-008 is accepted at exact validation-derived ownership
+  checkpoint `40e4239d4b30a396c3e0bd07907ebbd8583ff216`, functional `3769c8cc`,
+  base `97b25f06`. Root independently passed diff-check, make check (730/2172,
+  38 mailbox tests) and make talos-check (3204 jobs, 3165 audit cone, 79
+  endpoints). Exact verified receipt:
+  `b5396f8c499c5333ac959409120c0c303943b87d685db6f8dd27617b73a6fd5b`.
+  Logs: root worktree `.deps/root-validated-ownership-{check,talos}.log`.
+  Root mechanically verified the old delete signature and all three original
+  validated declarations/bodies unchanged. Increment retains its exact
+  finite-wasm32 headroom premise; decrement/delete introduce no caller effect,
+  admission or nonzero premise. Named successors retain root identity, both
+  frame equations and exact two-step paths, including physical-zero deletion.
+  All nine inventoried endpoints retain precisely the existing byte-assembly
+  native dependency; no new trust approval or ownership/refinement closure.
+  Root releases this bounded serial integration lease. Next,
+  ROOT-W6-20260910-010 assigns constructor-tag root transport and its existing
+  validation-derived entry point only, preserving the old API and effect
+  contract. Field mutations, global assembly and caller push/pop stay separate.
 - W7: ROOT-W7-20260909-107 is accepted at exact CG-05B checkpoint
   `cdfc6e44cefcf11ae5c7a27e99b227841005ba4e` (functional `6402d306`, base
   `14a2b07f`). Root serialized this candidate alone on
