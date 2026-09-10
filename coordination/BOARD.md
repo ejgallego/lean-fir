@@ -295,10 +295,24 @@ bounded integration lease when a producer submits its next clean checkpoint.
   protocol. Actual-producer regression retains one checked ABI entry despite two
   source frames and a different initializer ABI. All three endpoints retain only
   standard axioms; no new trust or wider debt closure. This lease is released.
-  Next, ROOT-W6-20260910-034 assigns root transport through the existing
-  bind-caller pop producer: direct/saturated branches and target-only case-label
-  unwinding, preserving named caller outcome and exact existing path accounting.
-  Lazy publication, terminal/global assembly and other families stay separate.
+  ROOT-W6-20260910-034 is accepted at exact bind-caller pop checkpoint
+  `ec13dd21d20c94388d1586670148b63255cb24bd`, functional `0a6b7512`, base
+  `0130fa76`. Independent diff-check, make check (730/2172, 38 mailbox tests)
+  and make talos-check (3204 jobs, 3165 audit cone, 133 forced endpoints) pass.
+  Exact verified receipt:
+  `722ab7687bb4be4e70bb3665de36ba5483cbd596b4bd06a204d843caf212c987`.
+  Logs: root worktree `.deps/root-bind-caller-pop-{check,talos}.log`.
+  Original signature, case target/yield and complete direct/saturated core and
+  caller constructions are byte-identical. The same checked input spine yields
+  its actual popped tail and original root on the named restored caller. Exact
+  direct cost 2, saturated matcherCount+5 and additive case prefix are retained,
+  with original resource/refinement and destination-only fact erasure. Producer
+  regressions cover heterogeneous empty-tail restoration and case unwind.
+  All three endpoints retain standard axioms only; no new trust or wider debt
+  closure. This serial integration lease is released.
+  Next, ROOT-W6-20260910-036 assigns root transport through existing lazy-cache
+  publication to the named bind outcome, preserving seven-step publication plus
+  case unwind and the actual checked tail. Terminal/global assembly stays separate.
 - W7: ROOT-W7-20260909-107 is accepted at exact CG-05B checkpoint
   `cdfc6e44cefcf11ae5c7a27e99b227841005ba4e` (functional `6402d306`, base
   `14a2b07f`). Root serialized this candidate alone on
