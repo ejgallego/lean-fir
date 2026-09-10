@@ -148,11 +148,25 @@ bounded integration lease when a producer submits its next clean checkpoint.
   exact two-step paths, both frame equations and root identity. All five
   tag endpoints retain exactly the existing byte-assembly native dependency;
   no new trust approval or mutation/layout refinement claim. This serial
-  integration lease is released. Next, ROOT-W6-20260910-012 assigns USize and
-  packed-scalar field root transport plus their validated entry points,
-  retaining the scalar rule's exact existing descriptor-layout premise.
-  Object-reference fields/schema bridges, global assembly and caller push/pop
-  stay separate.
+  integration lease is released.
+  ROOT-W6-20260910-012 is accepted at exact USize/scalar checkpoint
+  `7779ea42d8173a3b2f6b2167ae61cb67ef7c269c`, functional `e630293f`, base
+  `c42bc5d2`. Independent diff-check, make check (730/2172, 38 mailbox tests)
+  and make talos-check (3204 jobs, 3165 audit cone, 94 endpoints) pass.
+  Exact verified receipt:
+  `8b20feb0d0e7dc34a9a8f6e6403e6032954f68baabea78b072678a5d0a20d538`.
+  Logs: root worktree `.deps/root-scalar-fields-{check,talos}.log`.
+  Root mechanically verified both old effect signatures and both original
+  validated declarations/bodies unchanged. Rooted successors retain three-step
+  paths, both frame equations and all existing indices/resources. USize adds
+  no layout premise; packed-scalar retains exactly its existing fieldTyped
+  descriptor-layout boundary. USize retains the existing byte32 dependency;
+  packed-scalar retains the existing byte16/byte32 pair. No new trust approval
+  or mutation/layout refinement claim. This serial lease is released.
+  Next, ROOT-W6-20260910-014 assigns object-reference/erased-field root
+  transport through the active-witness effect rules and existing schema entry
+  points, retaining exact schema-agreement/typing premises. Arbitrary-witness
+  wrappers, global assembly and caller push/pop stay separate.
 - W7: ROOT-W7-20260909-107 is accepted at exact CG-05B checkpoint
   `cdfc6e44cefcf11ae5c7a27e99b227841005ba4e` (functional `6402d306`, base
   `14a2b07f`). Root serialized this candidate alone on
