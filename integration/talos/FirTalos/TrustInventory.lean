@@ -140,7 +140,9 @@ frame/root transport. Explicit delete and all three validation-derived rules
 have the same measured dependency at `97b25f06`. Constructor-tag mutation
 and its validation-derived rule share it at `23bccf86`; USize field mutation
 shares it at `c42bc5d2`. Active-witness FVar/erased object-field effects and
-their schema producers share it at `e5ea3914`. The focused wrappers retain
+their schema producers share it at `e5ea3914`. The external-ready host step
+shares it at `a56c88ef`; its named-bind helper and rooted producer retain the
+same exact set. The focused wrappers retain
 precisely this dependency; this is an exact inventory, not a new trust approval. -/
 def referenceCountNativeDebt : Array String := #[
   "_private.Fir.Wasm.Concrete.Memory.0.Fir.Wasm.Concrete.LinearMemory.assembleByte32._native.bv_decide.ax_1_6"]
@@ -427,6 +429,12 @@ def endpointInventory : Array (Lean.Name × Array String) := #[
   (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_pureExternal_stage,
     standardAxioms),
   (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_pureExternal_stageAtRoot,
-    standardAxioms)]
+    standardAxioms),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedExternalCallReadyOutcome.advance_of_step,
+    standardAxioms ++ referenceCountNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedExternalCallReadyOutcome.advance_bind_of_step,
+    standardAxioms ++ referenceCountNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedExternalCallReadyOutcome.advance_bindAtRoot_of_step,
+    standardAxioms ++ referenceCountNativeDebt)]
 
 end FirTalos.TrustAudit

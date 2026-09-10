@@ -643,6 +643,43 @@ cache writes, global root/schema assembly, universal compiler admission and
 traps remain separate, as do footprint/whole-helper/tagged-result and all 14
 W72 obligations.
 
+### Root-preserving resolved host step
+
+`ConcreteStructuredValidatedExternalCallReadyOutcome.advance_bind_of_step`
+exposes the named `ConcreteStructuredValidatedExternalBindOutcome` already
+constructed by the original host-step producer. `advance_of_step` keeps its
+original signature as a compatibility wrapper. The ready/bind relations and
+core host proof are unchanged.
+
+`advance_bindAtRoot_of_step` attaches root evidence to that actual named bind's
+`agrees` and `frames.validation`, using the existing saved-caller `reindex`
+lemma. Its only premises are the original ready evidence and successful source
+step, plus compiler-internal root evidence. It adds no host-correctness,
+headroom, result-classification, final-client or caller/host ABI-equality premise.
+This is transport over the existing host contract, not a new host refinement.
+
+Both producers retain exactly one target step, `witness.Extends nextWitness`,
+the same core-chosen `nextStore`, `nextWitness` and `physicalResult`,
+`nextRuntime`, `sourceValue`, `remainingBytes - stepCost`, `site.resultKind`,
+`resultIndex` and `decl.fvarId`. Caller environment/continuation/joins, saved
+source/target frames, caller remainder/rest, active/caller result indices and
+the exact resource payload persist. The root/caller ABI is not equated with
+`site.resultKind` or `resolvedResultKind`.
+
+The kernel regression calls the actual rooted producer, then recovers caller/
+root precision from the produced bind's saved empty caller stack while retaining
+its one-step path and witness extension. Baseline original at `a56c88ef`, final
+compatibility wrapper, helper and rooted producer have the same exact four-axiom
+set: the three standard axioms and the already-inventoried byte32 assembly
+dependency. The inventory now covers 115 endpoints; this records inherited
+debt, not new trust approval. No axiom or shared semantic/admission/runtime
+definition is added or changed.
+
+Destination binding, callee entry, caller push/pop, lazy execution/cache writes,
+global root/schema assembly, universal compiler admission and traps remain
+separate. Footprint/whole-helper/tagged-result and all 14 W72 obligations are
+unchanged.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
@@ -692,6 +729,7 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | original named direct-call staging and rooted ready-outcome producer | 3 | 0 |
 | original saturated/lazy staging and rooted ready-outcome producers | 3 | 0 |
 | original pure-external staging and rooted ready-outcome producer | 3 | 0 |
+| original external-ready host step, named-bind helper and rooted bind producer | 3 | 1 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original UInt8-case wrapper, frame-exposing helper and rooted successor | 3 | 2 |

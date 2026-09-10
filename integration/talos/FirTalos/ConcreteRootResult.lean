@@ -2449,6 +2449,113 @@ example
 
 end RootedPureExternalStaging
 
+section RootedExternalHostStep
+
+variable
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceValue : Value}
+    {stepCost : Nat}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {site : PureExternalCallShape context externals sourceRuntime sourceEnv decl
+      nextRuntime sourceValue stepCost}
+    {operation : ExternalOperation}
+    {resolvedResultKind : AbiKind}
+    {targetImport : Wasm.ImportDecl}
+    {labels : LabelContext}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {entryRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult rootResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {callerLocals : Wasm.Locals}
+    {callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {physicalArgs : List Wasm.Value}
+    {callIndex resultIndex : Nat}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+
+/-- Retain the caller/root ABI on the actual named bind outcome of the existing
+resolved host step, before destination binding. The core-chosen store, extended
+witness, physical result and exact budget subtraction are unchanged. Root
+transport uses only the saved caller indices, not the host result ABI. -/
+theorem ConcreteStructuredValidatedExternalCallReadyOutcome.advance_bindAtRoot_of_step
+    (related : ConcreteStructuredValidatedExternalCallReadyOutcome program
+      context functionCode sourceModule sourceFunction targetModule hosts spec
+      externals site operation resolvedResultKind targetImport labels
+      continuation callerJoins sourceFrames entryRuntime entryStore
+      entryWitness functionResult callerExpectedResult facts remainingBytes
+      targetStore callerLocals callerRemainder targetRest targetFrames witness
+      physicalArgs callIndex resultIndex source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ nextStore nextWitness physicalResult targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 1
+          target targetAfter ∧
+        witness.Extends nextWitness ∧
+        ∃ bindRelated : ConcreteStructuredValidatedExternalBindOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec
+          externals labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts (remainingBytes - stepCost) nextRuntime
+          sourceEnv sourceValue decl.fvarId continuation callerJoins sourceFrames
+          nextStore callerLocals callerRemainder targetRest targetFrames
+          nextWitness site.resultKind physicalResult resultIndex sourceAfter
+          targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          bindRelated.agrees bindRelated.frames.validation := by
+  obtain ⟨nextStore, nextWitness, physicalResult, targetAfter, targetPath,
+      witnessExtension, bindRelated⟩ :=
+    related.advance_bind_of_step sourceStep
+  exact ⟨nextStore, nextWitness, physicalResult, targetAfter, targetPath,
+    witnessExtension, bindRelated,
+    rooted.reindex rfl rfl bindRelated.agrees bindRelated.frames.validation⟩
+
+/-- Recover caller/root precision from the actual host successor's saved empty
+caller stack. The one-step path and witness extension persist; neither the
+physical host result nor its ABI is identified with the caller/root ABI. -/
+example
+    (related : ConcreteStructuredValidatedExternalCallReadyOutcome program
+      context functionCode sourceModule sourceFunction targetModule hosts spec
+      externals site operation resolvedResultKind targetImport labels
+      continuation callerJoins sourceFrames entryRuntime entryStore
+      entryWitness functionResult callerExpectedResult facts remainingBytes
+      targetStore callerLocals callerRemainder targetRest targetFrames witness
+      physicalArgs callIndex resultIndex source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : sourceFrames = []) :
+    ∃ nextWitness targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 1
+          target targetAfter ∧
+        witness.Extends nextWitness ∧
+        functionResult = rootResult := by
+  obtain ⟨_nextStore, nextWitness, _physicalResult, targetAfter, targetPath,
+      witnessExtension, _bindRelated, nextRooted⟩ :=
+    related.advance_bindAtRoot_of_step rooted sourceStep
+  exact ⟨nextWitness, targetAfter, targetPath, witnessExtension,
+    nextRooted.functionResult_eq_of_empty empty⟩
+
+end RootedExternalHostStep
+
 /-- Heterogeneous nested calls retain the original result, not the deepest
 callee's kind or the immediate consumer's kind. -/
 example : concreteStructuredRootResultKind .uint8

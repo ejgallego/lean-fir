@@ -199,6 +199,20 @@ path/rank and derives saved-empty-caller precision plus empty-prefix target
 identity. Both original/rooted endpoints are standard-axiom-only; the inventory
 now checks 112 endpoints. Host execution, destination bind and global root
 assembly remain separate.
+The subsequent resolved host step now retains root evidence on the actual
+named external-bind outcome, before destination binding. A minimal
+`advance_bind_of_step` exposes the old producer's bind; `advance_of_step`
+keeps its original signature, and `advance_bindAtRoot_of_step` attaches the
+root to that bind's checked saved-caller spine. Exactly one target step,
+the core-chosen store/witness/physical result, witness extension, source result,
+`remainingBytes - stepCost`, `site.resultKind` and all caller indices persist.
+No host-result/caller-result ABI equality or new host/resource premise is added.
+An actual-producer kernel regression derives saved-empty-caller precision while
+retaining the one-step path and witness extension. Baseline original, helper
+and rooted producer have identical standard-plus-byte32 dependencies; the
+inventory now checks 115 endpoints, with no new axiom or trust approval.
+Destination binding, entry/push/pop, lazy execution/cache writes and global
+root/schema assembly remain separate.
 The general global relation still existentially hides the represented kind;
 preserving the root index and producer precision through the remaining
 dispatcher branches and composing the strengthened global relation remain open.

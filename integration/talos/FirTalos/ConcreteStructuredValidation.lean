@@ -5141,6 +5141,94 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_pureExternal_stage
 
 /-- Execute the one resolved host call and close at the already-validated
 common destination-bind boundary. -/
+theorem ConcreteStructuredValidatedExternalCallReadyOutcome.advance_bind_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceValue : Value}
+    {stepCost : Nat}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {site : PureExternalCallShape context externals sourceRuntime sourceEnv decl
+      nextRuntime sourceValue stepCost}
+    {operation : ExternalOperation}
+    {resolvedResultKind : AbiKind}
+    {targetImport : Wasm.ImportDecl}
+    {labels : LabelContext}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {entryRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {callerLocals : Wasm.Locals}
+    {callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {physicalArgs : List Wasm.Value}
+    {callIndex resultIndex : Nat}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedExternalCallReadyOutcome program
+      context functionCode sourceModule sourceFunction targetModule hosts spec
+      externals site operation resolvedResultKind targetImport labels
+      continuation callerJoins sourceFrames entryRuntime entryStore
+      entryWitness functionResult callerExpectedResult facts remainingBytes
+      targetStore callerLocals callerRemainder targetRest targetFrames witness
+      physicalArgs callIndex resultIndex source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ nextStore nextWitness physicalResult targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 1
+          target targetAfter ∧
+        witness.Extends nextWitness ∧
+        ConcreteStructuredValidatedExternalBindOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec
+          externals labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts (remainingBytes - stepCost) nextRuntime
+          sourceEnv sourceValue decl.fvarId continuation callerJoins sourceFrames
+          nextStore callerLocals callerRemainder targetRest targetFrames
+          nextWitness site.resultKind physicalResult resultIndex sourceAfter
+          targetAfter := by
+  obtain ⟨nextStore, nextWitness, physicalResult, targetAfter, targetPath,
+      witnessExtension, bindCore⟩ :=
+    related.core.advance_of_step sourceStep
+  have nextAgrees :
+      related.frames.supported.Agrees bindCore.resources.suspended := by
+    simpa using related.agrees
+  have nextValidationAgrees :
+      ConcreteStructuredValidationAgrees nextAgrees
+        related.frames.validation := by
+    obtain ⟨spine, aligned⟩ := related.validationAgrees
+    exact ⟨spine, aligned⟩
+  let bindValidated :
+      ConcreteStructuredValidatedExternalBindOutcome program context
+        functionCode sourceModule sourceFunction targetModule hosts spec
+        externals labels entryRuntime entryStore entryWitness functionResult
+        callerExpectedResult facts (remainingBytes - stepCost) nextRuntime
+        sourceEnv sourceValue decl.fvarId continuation callerJoins sourceFrames
+        nextStore callerLocals callerRemainder targetRest targetFrames
+        nextWitness site.resultKind physicalResult resultIndex sourceAfter
+        targetAfter :=
+    ⟨related.activeResult, related.contextCaches, bindCore,
+      related.continuationValidation, related.frames, nextAgrees,
+      nextValidationAgrees⟩
+  exact ⟨nextStore, nextWitness, physicalResult, targetAfter, targetPath,
+    witnessExtension, bindValidated⟩
+
+/-- Compatibility endpoint: hide the named external bind only after producing
+it with the exact host successor, one-step path, and witness extension. -/
 theorem ConcreteStructuredValidatedExternalCallReadyOutcome.advance_of_step
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
@@ -5196,28 +5284,8 @@ theorem ConcreteStructuredValidatedExternalCallReadyOutcome.advance_of_step
         ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
           targetModule hosts externals nextWitness sourceAfter targetAfter := by
   obtain ⟨nextStore, nextWitness, physicalResult, targetAfter, targetPath,
-      witnessExtension, bindCore⟩ :=
-    related.core.advance_of_step sourceStep
-  have nextAgrees :
-      related.frames.supported.Agrees bindCore.resources.suspended := by
-    simpa using related.agrees
-  have nextValidationAgrees :
-      ConcreteStructuredValidationAgrees nextAgrees
-        related.frames.validation := by
-    obtain ⟨spine, aligned⟩ := related.validationAgrees
-    exact ⟨spine, aligned⟩
-  let bindValidated :
-      ConcreteStructuredValidatedExternalBindOutcome program context
-        functionCode sourceModule sourceFunction targetModule hosts spec
-        externals labels entryRuntime entryStore entryWitness functionResult
-        callerExpectedResult facts (remainingBytes - stepCost) nextRuntime
-        sourceEnv sourceValue decl.fvarId continuation callerJoins sourceFrames
-        nextStore callerLocals callerRemainder targetRest targetFrames
-        nextWitness site.resultKind physicalResult resultIndex sourceAfter
-        targetAfter :=
-    ⟨related.activeResult, related.contextCaches, bindCore,
-      related.continuationValidation, related.frames, nextAgrees,
-      nextValidationAgrees⟩
+      witnessExtension, bindValidated⟩ :=
+    related.advance_bind_of_step sourceStep
   exact ⟨nextWitness, targetAfter, targetPath, witnessExtension,
     ConcreteStructuredValidatedCodeGlobalOutcomeAt.externalBind bindValidated⟩
 
