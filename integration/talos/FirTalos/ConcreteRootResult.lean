@@ -11,7 +11,9 @@ ABI without changing that root. Case labels do not change the caller spine.
 This is an internal, root-indexed refinement of the existing stack agreement,
 not a new source invariant or an application-supplied provenance map. The real
 export entry constructs it below. Precise returns, direct lets and erased
-default-only and tested object/UInt8 cases retain it.
+default-only and tested object/UInt8 cases retain it. The validated case
+dispatcher derives the applicable family from production validation and
+composes those rooted producers without a caller-supplied case classifier.
 Preservation through the other global transitions is still separate; the
 unindexed global relation cannot recover root identity after existentially
 hiding the caller spine.
@@ -711,6 +713,94 @@ example
     simpa [zero, structuredWasmCaseLabels] using targetFramesEq
   · intro count nonzero
     simpa [nonzero, structuredWasmCaseLabels, List.append_assoc] using targetFramesEq
+
+/-- Production validation selects the default-only, object or UInt8 protocol;
+the successful source step supplies its dynamic branch. Compose the accepted
+rooted rules without a caller-supplied classifier, branch or target path.
+
+Like `advance_cases_of_validated_step`, this uniform interface existentially
+hides the target-step count and successor labels. The specialized producers
+retain their exact zero/5*n/4*n costs. The named successor also retains the
+compiler-internal root index, source branch and unchanged source frames. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_casesAtRoot_of_validated_step
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.cases cases) targetStore targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetSteps targetAfter selected selectedTarget nextLabels,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetSteps target targetAfter ∧
+        ∃ nextRelated : ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals
+          nextLabels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+          selected targetStore
+          { targetLocals with values := targetLocals.values } selectedTarget
+          witness sourceAfter targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextRelated.agrees nextRelated.frames.validation ∧
+        SourceCaseResult sourceRuntime sourceEnv cases selected ∧
+        sourceAfter.frames = source.frames ∧
+        (targetSteps = 0 →
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source) := by
+  obtain ⟨selected, sourceResult, _sourceAfterEq⟩ :=
+    related.core.core.focus.caseResult_of_step sourceStep
+  rcases related.productionCasesSupported_of_validation sourceResult with
+      defaultOnly | objectCases | scalarCases
+  · obtain ⟨targetPath, nextRelated, nextRooted, rank, sourceFramesEq⟩ :=
+      related.advance_defaultOnlyCaseAtRoot_of_step rooted defaultOnly sourceStep
+    exact ⟨0, target, selected, targetCode, labels, targetPath,
+      nextRelated, nextRooted, sourceResult, sourceFramesEq, fun _ => rank⟩
+  · obtain ⟨testCount, targetAfter, selected, selectedTarget, _, targetPath,
+        nextRelated, nextRooted, selectedResult, sourceFramesEq, _, zeroRank⟩ :=
+      related.advance_objectCasesAtRoot_of_step rooted objectCases sourceStep
+    exact ⟨5 * testCount, targetAfter, selected, selectedTarget,
+      List.replicate testCount none ++ labels, targetPath, nextRelated,
+      nextRooted, selectedResult, sourceFramesEq, zeroRank⟩
+  · obtain ⟨testCount, targetAfter, selected, selectedTarget, _, targetPath,
+        nextRelated, nextRooted, selectedResult, sourceFramesEq, _, zeroRank⟩ :=
+      related.advance_scalarUInt8CasesAtRoot_of_step rooted scalarCases sourceStep
+    exact ⟨4 * testCount, targetAfter, selected, selectedTarget,
+      List.replicate testCount none ++ labels, targetPath, nextRelated,
+      nextRooted, selectedResult, sourceFramesEq, zeroRank⟩
+
+/-- Regression through the actual validation-derived dispatcher: the successor
+retains exact root precision with no source caller, regardless of which family
+validation selected. No case-admission or selected-branch premise is supplied.
+Zero target steps still imply an unchanged target and strict source progress. -/
+example
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.cases cases) targetStore targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : source.frames = []) :
+    ∃ targetSteps targetAfter selected,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetSteps target targetAfter ∧
+        SourceCaseResult sourceRuntime sourceEnv cases selected ∧
+        functionResult = rootResult ∧
+        (targetSteps = 0 →
+          targetAfter = target ∧
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source) := by
+  obtain ⟨targetSteps, targetAfter, selected, _, _, path,
+      _, nextRooted, selectedResult, sourceFramesEq, zeroRank⟩ :=
+    related.advance_casesAtRoot_of_validated_step rooted sourceStep
+  refine ⟨targetSteps, targetAfter, selected, path, selectedResult,
+    nextRooted.functionResult_eq_of_empty (sourceFramesEq.trans empty), ?_⟩
+  intro zero
+  have emptyPath : FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+      0 target targetAfter := by simpa [zero] using path
+  exact ⟨emptyPath.eq_of_zero.symm, zeroRank zero⟩
 
 end RootedTestedCases
 

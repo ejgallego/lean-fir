@@ -39,7 +39,7 @@ This layering separates three claims:
 The first proof should establish claims 1 and 2 without prematurely fixing a
 production heap layout.
 
-## Current verification frontier — 2026-09-09
+## Current verification frontier — 2026-09-10
 
 This section through **Premises deliberately retained** is the authoritative
 W6 roadmap. It supersedes every later chronological use of "next",
@@ -98,6 +98,15 @@ recover root precision with an empty source caller stack, unchanged target at
 zero tests, and exact inner/outer label frames for nonempty tests. Original
 APIs remain unchanged; object endpoints retain the three standard axioms,
 and UInt8 endpoints inherit only their two existing native-evaluation axioms.
+The rooted validated-case dispatcher now composes all three accepted families
+using production validation and the successful source step to select the rule.
+It keeps the uniform existential target-step count and successor label context,
+while retaining a named root-indexed successor, selected branch, unchanged
+source frames and the zero-step rank condition. Its regression recovers exact
+root precision from that successor with no caller classifier or branch premise.
+The original dispatcher API and specialized exact costs remain unchanged.
+Both dispatcher endpoints have the same three standard and two existing
+scalar-case native dependencies, checked by the exact 60-endpoint inventory.
 The general global relation still existentially hides the represented kind;
 preserving the root index and producer precision through the remaining
 dispatcher branches and composing the strengthened global relation remain open.

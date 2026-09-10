@@ -128,6 +128,8 @@ def directLetNativeDebt : Array String := #[
   "_private.Fir.Wasm.Concrete.Memory.0.Fir.Wasm.Concrete.LinearMemory.assembleByte32._native.bv_decide.ax_1_6"]
 
 /-- Existing scalar-case debt, measured before root transport at `3ddb98e8`.
+The original validation-derived dispatcher was also measured at `381d915a`;
+the rooted composition retains that exact set, with no new trust approval.
 The exact inventories below require the original and new producers to agree. -/
 def scalarCaseNativeDebt : Array String := #[
   "FirTalos.Concrete.scalarUInt8Local_eq_of_related._native.native_decide.ax_1_1",
@@ -300,6 +302,10 @@ def endpointInventory : Array (Lean.Name × Array String) := #[
   (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_scalarUInt8Cases_of_step,
     standardAxioms ++ scalarCaseNativeDebt),
   (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_scalarUInt8CasesAtRoot_of_step,
+    standardAxioms ++ scalarCaseNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_cases_of_validated_step,
+    standardAxioms ++ scalarCaseNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_casesAtRoot_of_validated_step,
     standardAxioms ++ scalarCaseNativeDebt)]
 
 end FirTalos.TrustAudit

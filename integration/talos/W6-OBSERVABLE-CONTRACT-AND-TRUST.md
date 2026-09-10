@@ -320,6 +320,33 @@ discharged. All six endpoints are audited. No admission/client/runtime/W7
 contract changed. Global assembly, other local families and caller transitions
 remain open; W7 source-equation work remains independent.
 
+### Root-preserving validation-derived case dispatcher
+
+`ConcreteStructuredValidatedCodeOutcome.advance_casesAtRoot_of_validated_step`
+composes the three accepted case families. The successful source step gives
+the dynamic branch; `productionCasesSupported_of_validation` derives the
+default-only/object/UInt8 admission from existing production validation.
+No caller-supplied classifier, selected branch, target path or result-kind
+equality is introduced. Root agreement remains compiler-internal metadata.
+
+The uniform existential target-step presentation matches the existing
+`advance_cases_of_validated_step`; the specialized rules keep their exact
+zero/5*n/4*n costs. A named validated successor retains the original root,
+active/caller result indices, runtime, witness and budget at its successor
+label context. The theorem also exposes the selected `SourceCaseResult`,
+unchanged source frames and strict rank decrease when the target path is empty.
+Its kernel regression recovers exact active/root precision from this produced
+successor with no source caller, plus an unchanged target and strict source
+progress for zero target steps. It supplies no extra case-admission premise.
+
+The original dispatcher file/API is unchanged. Its measured axiom set and
+that of the rooted composition agree exactly: the three standard axioms and
+the two existing names in `scalarCaseNativeDebt`. Both endpoints are included
+in the 60-endpoint inventory. No new axiom or trust approval. This closes one
+validation-derived local dispatcher, not global root preservation, caller
+push/pop, other local families, universal compiler admission or public
+result-kind closure. Later closure-footprint and W72 obligations stay separate.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
@@ -364,6 +391,7 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original UInt8-case wrapper, frame-exposing helper and rooted successor | 3 | 2 |
+| original validation-derived case dispatcher and rooted composition | 3 | 2 |
 
 The standard set is `propext`, `Classical.choice`, and `Quot.sound`. The exact
 generated names live in `TrustInventory.lean`. Most dependencies in the two
