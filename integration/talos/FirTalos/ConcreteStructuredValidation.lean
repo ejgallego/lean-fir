@@ -7490,6 +7490,66 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_decPersistent_of_step
 /-- Ordinary increment derives its current-node admission from the successful
 source/compiler predicate, executes the exact two-instruction generated host
 prefix, and preserves the closed active-and-suspended validation relation. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_ordinaryIncrementWithFrames_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime nextRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.inc objectId amount check false continuation) targetStore targetLocals
+      targetCode witness source target)
+    (supported : OrdinaryIncrementEffectSupported context sourceRuntime
+      sourceEnv (.inc objectId amount check false continuation) continuation
+      nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames := by
+  have pointwise := related.toPointwise
+    (ConcreteStructuredCodeStepAdmission.ordinaryIncrement supported)
+    (by omega)
+  obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, sourceFramesEq,
+      targetFramesEq, nextCore⟩ :=
+    pointwise.advance_ordinaryIncrement_of_step supported sourceStep
+  exact ⟨targetAfter, nextStore, nextTargetCode, targetPath,
+    related.withSuccessor ⟨nextCore, related.core.validation.incContinuation⟩
+      sourceFramesEq targetFramesEq, sourceFramesEq, targetFramesEq⟩
+
+/-- Compatibility wrapper retaining the original ordinary increment API.
+The frame-exposing producer uses the same pointwise/validated-core composition
+as `advanceCode`; only the already-proved frame equations are exposed. -/
 theorem ConcreteStructuredValidatedCodeOutcome.advance_ordinaryIncrement_of_step
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
@@ -7535,14 +7595,73 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_ordinaryIncrement_of_step
           callerExpectedResult facts remainingBytes nextRuntime sourceEnv
           continuation nextStore targetLocals nextTargetCode witness sourceAfter
           targetAfter := by
-  have pointwise := related.toPointwise
-    (ConcreteStructuredCodeStepAdmission.ordinaryIncrement supported)
-    (by omega)
-  exact related.advanceCode related.core.validation.incContinuation
-    (pointwise.advance_ordinaryIncrement_of_step supported sourceStep)
+  obtain ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated, _, _⟩ :=
+    related.advance_ordinaryIncrementWithFrames_of_step supported sourceStep
+  exact ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated⟩
 
 /-- Ordinary recursive decrement preserves the same closed relation across its
 exact two-instruction generated host prefix. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_ordinaryDecrementWithFrames_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime nextRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
+    {objectFields? : Option Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.dec objectId amount check false objectFields? continuation) targetStore
+      targetLocals targetCode witness source target)
+    (supported : OrdinaryDecrementEffectSupported context sourceRuntime
+      sourceEnv (.dec objectId amount check false objectFields? continuation)
+      continuation nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames := by
+  have pointwise := related.toPointwise
+    (ConcreteStructuredCodeStepAdmission.ordinaryDecrement supported)
+    (by omega)
+  obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, sourceFramesEq,
+      targetFramesEq, nextCore⟩ :=
+    pointwise.advance_ordinaryDecrement_of_step supported sourceStep
+  exact ⟨targetAfter, nextStore, nextTargetCode, targetPath,
+    related.withSuccessor ⟨nextCore, related.core.validation.decContinuation⟩
+      sourceFramesEq targetFramesEq, sourceFramesEq, targetFramesEq⟩
+
+/-- Compatibility wrapper retaining the original ordinary decrement API.
+The frame-exposing producer uses the same pointwise/validated-core composition
+as `advanceCode`; only the already-proved frame equations are exposed. -/
 theorem ConcreteStructuredValidatedCodeOutcome.advance_ordinaryDecrement_of_step
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
@@ -7589,11 +7708,9 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_ordinaryDecrement_of_step
           callerExpectedResult facts remainingBytes nextRuntime sourceEnv
           continuation nextStore targetLocals nextTargetCode witness sourceAfter
           targetAfter := by
-  have pointwise := related.toPointwise
-    (ConcreteStructuredCodeStepAdmission.ordinaryDecrement supported)
-    (by omega)
-  exact related.advanceCode related.core.validation.decContinuation
-    (pointwise.advance_ordinaryDecrement_of_step supported sourceStep)
+  obtain ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated, _, _⟩ :=
+    related.advance_ordinaryDecrementWithFrames_of_step supported sourceStep
+  exact ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated⟩
 
 section ClosedValidatorDerivedOrdinaryOwnership
 

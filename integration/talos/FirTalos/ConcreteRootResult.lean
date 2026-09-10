@@ -14,6 +14,8 @@ export entry constructs it below. Precise returns, direct lets and erased
 default-only and tested object/UInt8 cases retain it. The validated case
 dispatcher derives the applicable family from production validation and
 composes those rooted producers without a caller-supplied case classifier.
+Persistent and ordinary reference-count operations retain the same root by
+reindexing their existing zero-step and two-step successors, respectively.
 Preservation through the other global transitions is still separate; the
 unindexed global relation cannot recover root identity after existentially
 hiding the caller spine.
@@ -803,6 +805,287 @@ example
   exact ⟨emptyPath.eq_of_zero.symm, zeroRank zero⟩
 
 end RootedTestedCases
+
+section RootedReferenceCounts
+
+variable
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime nextRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult rootResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
+    {objectFields? : Option Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+
+/-- Persistent increment derives its own admission and retains the root on
+its named successor. The target, runtime, witness and budget stay unchanged;
+the target takes zero steps while the source rank strictly decreases. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_incPersistentAtRoot_of_step
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.inc objectId amount check true continuation) targetStore
+      targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+        functionResult facts sourceRuntime sourceEnv 0
+        (.inc objectId amount check true continuation) ∧
+      FinitePath (StructuredWasmStep module hostEnv) 0 target target ∧
+      sourceAfter.frames = source.frames ∧
+      ∃ nextRelated : ConcreteStructuredValidatedCodeOutcome program context
+        functionCode sourceModule sourceFunction targetModule hosts spec externals
+        labels entryRuntime entryStore entryWitness functionResult
+        callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+        continuation targetStore targetLocals targetCode witness sourceAfter target,
+      ConcreteStructuredValidationAgreesAtRoot rootResult
+        nextRelated.agrees nextRelated.frames.validation ∧
+      compilerStructuredControlRank sourceAfter <
+        compilerStructuredControlRank source := by
+  obtain ⟨admitted, path, framesEq, nextRelated, rank⟩ :=
+    related.advance_incPersistent_of_step
+      (module := module) (hostEnv := hostEnv) sourceStep
+  exact ⟨admitted, path, framesEq, nextRelated,
+    rooted.reindex framesEq rfl nextRelated.agrees nextRelated.frames.validation,
+    rank⟩
+
+/-- The actual persistent increment producer derives admission, takes zero
+target steps and recovers exact root precision from its successor. -/
+example
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.inc objectId amount check true continuation) targetStore
+      targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : source.frames = []) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+        functionResult facts sourceRuntime sourceEnv 0
+        (.inc objectId amount check true continuation) ∧
+      FinitePath (StructuredWasmStep module hostEnv) 0 target target ∧
+      compilerStructuredControlRank sourceAfter <
+        compilerStructuredControlRank source ∧
+      functionResult = rootResult := by
+  obtain ⟨admitted, path, framesEq, _, nextRooted, rank⟩ :=
+    related.advance_incPersistentAtRoot_of_step
+      (module := module) (hostEnv := hostEnv) rooted sourceStep
+  exact ⟨admitted, path, rank,
+    nextRooted.functionResult_eq_of_empty (framesEq.trans empty)⟩
+
+/-- Persistent decrement retains the same zero-cost, admission-producing
+transition and exact root index, without a persistent-admission premise. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_decPersistentAtRoot_of_step
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.dec objectId amount check true objectFields? continuation) targetStore
+      targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+        functionResult facts sourceRuntime sourceEnv 0
+        (.dec objectId amount check true objectFields? continuation) ∧
+      FinitePath (StructuredWasmStep module hostEnv) 0 target target ∧
+      sourceAfter.frames = source.frames ∧
+      ∃ nextRelated : ConcreteStructuredValidatedCodeOutcome program context
+        functionCode sourceModule sourceFunction targetModule hosts spec externals
+        labels entryRuntime entryStore entryWitness functionResult
+        callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+        continuation targetStore targetLocals targetCode witness sourceAfter target,
+      ConcreteStructuredValidationAgreesAtRoot rootResult
+        nextRelated.agrees nextRelated.frames.validation ∧
+      compilerStructuredControlRank sourceAfter <
+        compilerStructuredControlRank source := by
+  obtain ⟨admitted, path, framesEq, nextRelated, rank⟩ :=
+    related.advance_decPersistent_of_step
+      (module := module) (hostEnv := hostEnv) sourceStep
+  exact ⟨admitted, path, framesEq, nextRelated,
+    rooted.reindex framesEq rfl nextRelated.agrees nextRelated.frames.validation,
+    rank⟩
+
+/-- The actual persistent decrement producer derives admission, takes zero
+target steps and recovers exact root precision from its successor. -/
+example
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.dec objectId amount check true objectFields? continuation) targetStore
+      targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : source.frames = []) :
+    ConcreteStructuredCodeStepAdmission context sourceModule externals
+        functionResult facts sourceRuntime sourceEnv 0
+        (.dec objectId amount check true objectFields? continuation) ∧
+      FinitePath (StructuredWasmStep module hostEnv) 0 target target ∧
+      compilerStructuredControlRank sourceAfter <
+        compilerStructuredControlRank source ∧
+      functionResult = rootResult := by
+  obtain ⟨admitted, path, framesEq, _, nextRooted, rank⟩ :=
+    related.advance_decPersistentAtRoot_of_step
+      (module := module) (hostEnv := hostEnv) rooted sourceStep
+  exact ⟨admitted, path, rank,
+    nextRooted.functionResult_eq_of_empty (framesEq.trans empty)⟩
+
+/-- Ordinary increment retains the root across the existing exact two-step
+path. Keep its effect predicate, runtime/store evolution, witness and budget;
+only transport compiler-internal metadata through the exposed frame equations. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_ordinaryIncrementAtRoot_of_step
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.inc objectId amount check false continuation) targetStore
+      targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (supported : OrdinaryIncrementEffectSupported context sourceRuntime
+      sourceEnv (.inc objectId amount check false continuation)
+      continuation nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        ∃ nextRelated : ConcreteStructuredValidatedCodeOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec externals
+          labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextRelated.agrees nextRelated.frames.validation ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames := by
+  obtain ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated,
+      sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_ordinaryIncrementWithFrames_of_step supported sourceStep
+  exact ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated,
+    rooted.reindex sourceFramesEq targetFramesEq
+      nextRelated.agrees nextRelated.frames.validation,
+    sourceFramesEq, targetFramesEq⟩
+
+/-- Unlike persistent operations, the actual ordinary increment
+producer retains an exact two-step path while recovering successor root precision.
+Its existing effect predicate and runtime evolution are not weakened. -/
+example
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.inc objectId amount check false continuation) targetStore
+      targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (supported : OrdinaryIncrementEffectSupported context sourceRuntime
+      sourceEnv (.inc objectId amount check false continuation)
+      continuation nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : source.frames = []) :
+    ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames ∧
+        functionResult = rootResult := by
+  obtain ⟨targetAfter, _, _, path, _, nextRooted, sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_ordinaryIncrementAtRoot_of_step rooted supported sourceStep
+  exact ⟨targetAfter, path, sourceFramesEq, targetFramesEq,
+    nextRooted.functionResult_eq_of_empty (sourceFramesEq.trans empty)⟩
+
+/-- Ordinary decrement uses the same rooted reindexing over its existing
+recursive-decrement contract and two-step path. This adds no release,
+allocation or ownership theorem, and does not weaken its effect predicate. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_ordinaryDecrementAtRoot_of_step
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.dec objectId amount check false objectFields? continuation) targetStore
+      targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (supported : OrdinaryDecrementEffectSupported context sourceRuntime
+      sourceEnv (.dec objectId amount check false objectFields? continuation)
+      continuation nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        ∃ nextRelated : ConcreteStructuredValidatedCodeOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec externals
+          labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextRelated.agrees nextRelated.frames.validation ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames := by
+  obtain ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated,
+      sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_ordinaryDecrementWithFrames_of_step supported sourceStep
+  exact ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated,
+    rooted.reindex sourceFramesEq targetFramesEq
+      nextRelated.agrees nextRelated.frames.validation,
+    sourceFramesEq, targetFramesEq⟩
+
+/-- Unlike persistent operations, the actual ordinary decrement
+producer retains an exact two-step path while recovering successor root precision.
+Its existing effect predicate and runtime evolution are not weakened. -/
+example
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.dec objectId amount check false objectFields? continuation) targetStore
+      targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (supported : OrdinaryDecrementEffectSupported context sourceRuntime
+      sourceEnv (.dec objectId amount check false objectFields? continuation)
+      continuation nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : source.frames = []) :
+    ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames ∧
+        functionResult = rootResult := by
+  obtain ⟨targetAfter, _, _, path, _, nextRooted, sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_ordinaryDecrementAtRoot_of_step rooted supported sourceStep
+  exact ⟨targetAfter, path, sourceFramesEq, targetFramesEq,
+    nextRooted.functionResult_eq_of_empty (sourceFramesEq.trans empty)⟩
+
+end RootedReferenceCounts
 
 /-- Heterogeneous nested calls retain the original result, not the deepest
 callee's kind or the immediate consumer's kind. -/

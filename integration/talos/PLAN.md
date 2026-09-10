@@ -106,7 +106,18 @@ source frames and the zero-step rank condition. Its regression recovers exact
 root precision from that successor with no caller classifier or branch premise.
 The original dispatcher API and specialized exact costs remain unchanged.
 Both dispatcher endpoints have the same three standard and two existing
-scalar-case native dependencies, checked by the exact 60-endpoint inventory.
+scalar-case native dependencies, checked by the exact inventory.
+Persistent increment/decrement now retain root identity while deriving their
+zero-cost admission, keeping target/runtime/witness/budget unchanged and
+strictly decreasing source rank. Ordinary increment/decrement preserve the
+root through their existing exact two-step path and runtime/store evolution,
+using only the frame equations exposed by focused compatibility-preserving
+helpers. Their effect predicates and resource bounds are unchanged. Four
+kernel regressions recover root precision from the produced successors and
+retain the zero/two-step distinction. All ten original/helper/rooted endpoints
+are measured in the 70-endpoint audit: persistent rules are standard-only;
+ordinary rules retain one individually recorded existing byte-assembly native
+dependency. This is root transport, not a new ownership or release proof.
 The general global relation still existentially hides the represented kind;
 preserving the root index and producer precision through the remaining
 dispatcher branches and composing the strengthened global relation remain open.

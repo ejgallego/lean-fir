@@ -135,6 +135,12 @@ def scalarCaseNativeDebt : Array String := #[
   "FirTalos.Concrete.scalarUInt8Local_eq_of_related._native.native_decide.ax_1_1",
   "FirTalos.Correctness.constructorTag_uint8_eq_iff._native.native_decide.ax_1_1"]
 
+/-- Existing ordinary increment/decrement debt, measured at `2baabade` before
+frame/root transport. The focused wrappers retain precisely this dependency;
+this is an exact inventory, not a new trust approval. -/
+def referenceCountNativeDebt : Array String := #[
+  "_private.Fir.Wasm.Concrete.Memory.0.Fir.Wasm.Concrete.LinearMemory.assembleByte32._native.bv_decide.ax_1_6"]
+
 def scalarInstallationNativeDebt : Array String := #[
   "FirTalos.Concrete.ResidentMemoryRel.read32_write32_self._native.bv_decide.ax_1_7",
   "FirTalos.Concrete.ResidentMemoryRel.write32_restore._native.bv_decide.ax_1_12",
@@ -306,6 +312,26 @@ def endpointInventory : Array (Lean.Name × Array String) := #[
   (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_cases_of_validated_step,
     standardAxioms ++ scalarCaseNativeDebt),
   (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_casesAtRoot_of_validated_step,
-    standardAxioms ++ scalarCaseNativeDebt)]
+    standardAxioms ++ scalarCaseNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_incPersistent_of_step,
+    standardAxioms),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_incPersistentAtRoot_of_step,
+    standardAxioms),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_decPersistent_of_step,
+    standardAxioms),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_decPersistentAtRoot_of_step,
+    standardAxioms),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_ordinaryIncrement_of_step,
+    standardAxioms ++ referenceCountNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_ordinaryIncrementWithFrames_of_step,
+    standardAxioms ++ referenceCountNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_ordinaryIncrementAtRoot_of_step,
+    standardAxioms ++ referenceCountNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_ordinaryDecrement_of_step,
+    standardAxioms ++ referenceCountNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_ordinaryDecrementWithFrames_of_step,
+    standardAxioms ++ referenceCountNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_ordinaryDecrementAtRoot_of_step,
+    standardAxioms ++ referenceCountNativeDebt)]
 
 end FirTalos.TrustAudit

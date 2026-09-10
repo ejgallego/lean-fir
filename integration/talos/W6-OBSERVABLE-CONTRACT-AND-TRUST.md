@@ -342,10 +342,45 @@ progress for zero target steps. It supplies no extra case-admission premise.
 The original dispatcher file/API is unchanged. Its measured axiom set and
 that of the rooted composition agree exactly: the three standard axioms and
 the two existing names in `scalarCaseNativeDebt`. Both endpoints are included
-in the 60-endpoint inventory. No new axiom or trust approval. This closes one
+in the exact inventory. No new axiom or trust approval. This closes one
 validation-derived local dispatcher, not global root preservation, caller
 push/pop, other local families, universal compiler admission or public
 result-kind closure. Later closure-footprint and W72 obligations stay separate.
+
+### Root-preserving reference-count transitions
+
+`advance_incPersistentAtRoot_of_step` and `advance_decPersistentAtRoot_of_step`
+retain the root on named successors using the existing persistent producers
+and `ConcreteStructuredValidationAgreesAtRoot.reindex`. They derive rather
+than assume current-node admission, preserve source frames, leave the target,
+runtime, witness and budget unchanged, take zero target steps and strictly
+decrease source rank. Their original producer APIs/bodies are unchanged.
+
+`advance_ordinaryIncrementWithFrames_of_step` and
+`advance_ordinaryDecrementWithFrames_of_step` expose the source/target frame
+equations already present in the pointwise/`advanceCode` composition. They use
+the existing validated `withSuccessor` attachment; the old APIs remain exact
+compatibility wrappers. No generic transport framework is added.
+`advance_ordinaryIncrementAtRoot_of_step` and
+`advance_ordinaryDecrementAtRoot_of_step` then reindex the same root onto those
+named successors. They keep `OrdinaryIncrementEffectSupported` and
+`OrdinaryDecrementEffectSupported`, their exact two-step target path,
+runtime/store evolution, witness and budget. This adds no refcount, release,
+allocation or ownership refinement and weakens no resource bound.
+
+Four kernel regressions invoke the actual rooted producers and recover exact
+active/root equality from the produced successor when the source caller stack
+is empty. The persistent regressions retain derived admission, zero steps and
+strict source progress; the ordinary regressions retain two steps and both
+frame equations. Neither assumes the result-kind equality being established.
+
+Original/helper/rooted axiom sets agree exactly, measured before transport at
+`2baabade`. Persistent endpoints use the three standard axioms. Ordinary
+endpoints additionally use the one existing byte-assembly dependency named in
+`TrustInventory.referenceCountNativeDebt`. All ten endpoints are included in
+the 70-endpoint inventory; there is no new axiom or trust approval. Global
+assembly, other mutations/delete, caller push/pop, public result-kind and
+admission closure, trap semantics and closure-footprint/W72 work remain separate.
 
 ### Remaining terminal assembly obligations
 
@@ -392,6 +427,8 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original UInt8-case wrapper, frame-exposing helper and rooted successor | 3 | 2 |
 | original validation-derived case dispatcher and rooted composition | 3 | 2 |
+| original persistent increment/decrement and rooted successors | 3 | 0 |
+| original ordinary increment/decrement, frame helpers and rooted successors | 3 | 1 |
 
 The standard set is `propext`, `Classical.choice`, and `Quot.sound`. The exact
 generated names live in `TrustInventory.lean`. Most dependencies in the two
