@@ -82,10 +82,25 @@ bounded integration lease when a producer submits its next clean checkpoint.
   source-rank decrease and exact root identity are retained. All three
   endpoints use only the three standard axioms. No other trust debt is closed.
   Root's serial integration lease for this checkpoint is released.
-  Next, ROOT-W6-20260909-113 assigns root transport for the tested object/UInt8
-  case family, retaining exact case-label stacks and respective 5/4 steps per
-  test with the existing zero-step rank condition. No global relation redesign
-  or new generic transport framework; caller push/pop remain separate.
+  ROOT-W6-20260909-113 and its isolated refresh ROOT-W6-20260910-001 are
+  accepted at exact `86832616c7d40787cda06b0ec989faa53f454559`, functional
+  `fee5d613`, base `1ea81797`. Root verified the original proof/status pair
+  from `3ddb98e8..bb960797` replay identically; only the final status refresh
+  is additional. Original completion and evidence are preserved. The tested
+  object/UInt8 family retains exact case-label stacks, 5/4 steps per test,
+  zero-step rank conditions, selected branch and unchanged compatibility APIs.
+  Independent diff-check, make check (730/2172, 38 mailbox tests) and
+  make talos-check (3204 jobs, 3165 audit cone, 58 forced endpoints) pass.
+  Exact receipt:
+  `cff3bbbe6337b777e71d9efd4a8968b66f3ae8b1485db8ce2734546b358ed693`.
+  Logs: root worktree `.deps/root-tested-cases-{check,talos}.log`. Object
+  endpoints are standard-only; UInt8 retains exactly its two inventoried
+  existing native dependencies. No new trust approval or other debt closure.
+  The reserved serial integration slot is released with this acceptance.
+  Next, ROOT-W6-20260910-004 assigns composition of these accepted case-family
+  results into a root-preserving validated-case dispatcher, using existing
+  validation-derived branch classification without a new caller premise.
+  Global assembly, caller push/pop and other local families remain separate.
 - W7: ROOT-W7-20260909-107 is accepted at exact CG-05B checkpoint
   `cdfc6e44cefcf11ae5c7a27e99b227841005ba4e` (functional `6402d306`, base
   `14a2b07f`). Root serialized this candidate alone on
