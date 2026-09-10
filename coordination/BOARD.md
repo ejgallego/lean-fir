@@ -189,10 +189,23 @@ bounded integration lease when a producer submits its next clean checkpoint.
   caller precision and zero-prefix target identity. Both inventoried endpoints
   use only the three standard axioms; no new trust approval or wider debt
   closure. This serial integration lease is released.
-  Next, ROOT-W6-20260910-018 assigns saturated/lazy staging root transport,
-  retaining exact zero-step paths, strict source rank and existing retain-
-  capacity/hit-miss admission premises. Callee entry, caller push/pop,
-  external staging and global assembly stay separate.
+  ROOT-W6-20260910-018 is accepted at exact saturated/lazy staging checkpoint
+  `79022194e90483fd0186e331932edbb9eda1127a`, functional `f0170471`, base
+  `7529041f`. Independent diff-check, make check (730/2172, 38 mailbox tests)
+  and make talos-check (3204 jobs, 3165 audit cone, 110 endpoints) pass.
+  Exact verified receipt:
+  `42d7b8199eb16de801507caaa20dd616a6a600e720efd9f8f6ed0ec5b382c657`.
+  Logs: root worktree `.deps/root-saturated-lazy-stage-{check,talos}.log`.
+  The original staging/ready-relation file is unchanged. Direct reindex keeps
+  caller root on both actual ready outcomes, zero-step target identity and
+  strict source rank. Exact retain-capacity and both lazy hit/miss admission
+  boundaries remain intact. Actual-producer regressions recover saved-empty-
+  caller precision; all four endpoints retain only the three standard axioms.
+  No new trust approval or wider debt closure. This serial lease is released.
+  Next, ROOT-W6-20260910-020 assigns pure-external staging root transport only,
+  retaining the exact supported-call and budget premises, argument-prefix path
+  and strict source rank. Host execution, destination bind, callee entry,
+  caller push/pop and global assembly stay separate.
 - W7: ROOT-W7-20260909-107 is accepted at exact CG-05B checkpoint
   `cdfc6e44cefcf11ae5c7a27e99b227841005ba4e` (functional `6402d306`, base
   `14a2b07f`). Root serialized this candidate alone on
