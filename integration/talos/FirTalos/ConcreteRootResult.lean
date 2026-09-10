@@ -33,6 +33,8 @@ Saturated closure and lazy staging likewise preserve the caller root across
 zero target steps, retaining their capacity and hit/miss admission premises.
 Named saturated entry retains it through the checked saturated push, including
 the distinct active/expected callee indices and exact matcher/call frame protocol.
+Named lazy-miss entry retains it through the checked lazy push, keeping one
+caller ABI entry for the source cache/bind frames and suspended publication.
 Pure-external staging preserves it before the host call, retaining the exact
 supported-call/budget premises and keeping caller and host result ABIs distinct.
 Preservation through the other global transitions is still separate; the
@@ -3126,6 +3128,195 @@ example
   · simpa only [empty] using sourceFramesEq
 
 end RootedSaturatedCallEntry
+
+section RootedLazyMissEntry
+
+variable
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {declaration : Lean.Name}
+    {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
+    {resultKind : AbiKind}
+    {call : LazyCacheCallSupported context decl declaration sourceDeclaration
+      resultKind}
+    {generated : LazyCacheGeneratedEnvironment context sourceModule}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult rootResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {callerEnv : Env}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {callerLocals : Wasm.Locals}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {cacheIndex declarationId cacheSetId resultIndex : Nat}
+    {calleeCode : Lean.Compiler.LCNF.Code .impure}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+
+/-- Preserve the original root through the production named lazy initializer
+entry. The same checked caller spine survives the existing lazy push and its
+actual cache/bind and call/label frame equations. This retains the suspended
+publication protocol; it does not execute publication or return/pop. All
+non-heap miss, cache lookup and resource premises remain unchanged. -/
+theorem ConcreteStructuredValidatedLazyCallReadyOutcome.advance_missAtRoot_of_step
+    (related : ConcreteStructuredValidatedLazyCallReadyOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec call
+      generated externals labels entryRuntime entryStore entryWitness
+      functionResult callerExpectedResult facts remainingBytes sourceRuntime
+      callerEnv continuation callerJoins sourceFrames targetStore callerLocals
+      targetRest targetFrames witness cacheIndex declarationId cacheSetId
+      resultIndex source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (internal : LazyCacheInternalMissSupported context decl declaration
+      sourceDeclaration resultKind calleeCode)
+    (resultClassified :
+      Fir.Wasm.abiKind? sourceDeclaration.type = .ok (some resultKind))
+    (notObject : resultKind ≠ .object)
+    (notTObject : resultKind ≠ .tobject)
+    (semanticEmpty :
+      findGlobal? sourceRuntime.globals declaration = none)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ calleeContext calleeFunction,
+      ∃ row : ConcreteGeneratedInternalDeclaration program sourceDeclaration
+          calleeContext calleeCode sourceModule calleeFunction targetModule,
+      ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3
+          target targetAfter ∧
+        ∃ calleeSpec : ConcreteSupportedFunction program calleeContext calleeCode
+          sourceModule calleeFunction targetModule hosts,
+        calleeSpec.sourceResultKind = resultKind ∧
+        ∃ nextOutcome : ConcreteStructuredValidatedCodeOutcome program calleeContext calleeCode
+          sourceModule calleeFunction targetModule hosts calleeSpec externals []
+          sourceRuntime targetStore witness resultKind (some resultKind) []
+          remainingBytes sourceRuntime [] calleeCode targetStore
+          (row.targetFunction.toLocals []) row.targetFunction.body witness
+          sourceAfter targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextOutcome.agrees nextOutcome.frames.validation ∧
+        ∃ callerSpine,
+        ConcreteStructuredValidatedStackAgreement callerSpine
+          related.agrees related.frames.validation ∧
+        ConcreteStructuredValidatedStackAgreement
+          ((functionResult, callerExpectedResult) :: callerSpine)
+          nextOutcome.agrees nextOutcome.frames.validation ∧
+        sourceAfter.frames =
+          .cache declaration ::
+            .bind decl.fvarId continuation callerEnv callerJoins :: sourceFrames ∧
+        targetAfter.frames =
+          .call 1 callerLocals.values callerLocals [
+            .call cacheSetId,
+            .globalSet (2 * cacheIndex + 1),
+            .const 1,
+            .globalSet (2 * cacheIndex)] ::
+          .label 0 callerLocals.values
+            ([.globalGet (2 * cacheIndex + 1), .localSet resultIndex] ++ targetRest) ::
+            targetFrames := by
+  obtain ⟨callerSpine, callerChecked, callerRoot⟩ := rooted
+  have pushedRoot :
+      concreteStructuredRootResultKind resultKind
+          ((functionResult, callerExpectedResult) :: callerSpine) = rootResult :=
+    (concreteStructuredRootResultKind_push resultKind functionResult
+      callerExpectedResult callerSpine).trans callerRoot
+  obtain ⟨calleeContext, calleeFunction, row, targetAfter, targetPath,
+      calleeSpec, calleeResultAt, nextOutcome, nextChecked,
+      sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_missWithSpine_of_step callerChecked internal resultClassified
+      notObject notTObject semanticEmpty sourceStep
+  exact ⟨calleeContext, calleeFunction, row, targetAfter, targetPath,
+    calleeSpec, calleeResultAt, nextOutcome, ⟨_, nextChecked, pushedRoot⟩,
+    callerSpine, callerChecked, nextChecked, sourceFramesEq, targetFramesEq⟩
+
+/-- Actual-producer regression: a lazy push has two source frame constructors
+but only one checked caller ABI entry. Empty saved caller frames identify the
+original root before entry; the initializer keeps it even when its active and
+immediate expected result kind differs from the original caller. -/
+example
+    (related : ConcreteStructuredValidatedLazyCallReadyOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec call
+      generated externals labels entryRuntime entryStore entryWitness
+      functionResult callerExpectedResult facts remainingBytes sourceRuntime
+      callerEnv continuation callerJoins sourceFrames targetStore callerLocals
+      targetRest targetFrames witness cacheIndex declarationId cacheSetId
+      resultIndex source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (internal : LazyCacheInternalMissSupported context decl declaration
+      sourceDeclaration resultKind calleeCode)
+    (resultClassified :
+      Fir.Wasm.abiKind? sourceDeclaration.type = .ok (some resultKind))
+    (notObject : resultKind ≠ .object)
+    (notTObject : resultKind ≠ .tobject)
+    (semanticEmpty :
+      findGlobal? sourceRuntime.globals declaration = none)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : sourceFrames = [])
+    (different : resultKind ≠ functionResult) :
+    ∃ calleeContext calleeFunction,
+      ∃ row : ConcreteGeneratedInternalDeclaration program sourceDeclaration
+          calleeContext calleeCode sourceModule calleeFunction targetModule,
+      ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3
+          target targetAfter ∧
+        ∃ calleeSpec : ConcreteSupportedFunction program calleeContext calleeCode
+          sourceModule calleeFunction targetModule hosts,
+        calleeSpec.sourceResultKind = resultKind ∧
+        ∃ nextOutcome : ConcreteStructuredValidatedCodeOutcome program calleeContext calleeCode
+          sourceModule calleeFunction targetModule hosts calleeSpec externals []
+          sourceRuntime targetStore witness resultKind (some resultKind) []
+          remainingBytes sourceRuntime [] calleeCode targetStore
+          (row.targetFunction.toLocals []) row.targetFunction.body witness
+          sourceAfter targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextOutcome.agrees nextOutcome.frames.validation ∧
+        functionResult = rootResult ∧
+        resultKind ≠ rootResult ∧
+        ConcreteStructuredValidatedStackAgreement
+          [(functionResult, callerExpectedResult)]
+          nextOutcome.agrees nextOutcome.frames.validation ∧
+        sourceAfter.frames =
+          [.cache declaration, .bind decl.fvarId continuation callerEnv callerJoins] ∧
+        targetAfter.frames =
+          .call 1 callerLocals.values callerLocals [
+            .call cacheSetId,
+            .globalSet (2 * cacheIndex + 1),
+            .const 1,
+            .globalSet (2 * cacheIndex)] ::
+          .label 0 callerLocals.values
+            ([.globalGet (2 * cacheIndex + 1), .localSet resultIndex] ++ targetRest) ::
+            targetFrames := by
+  have callerRoot : functionResult = rootResult :=
+    rooted.functionResult_eq_of_empty empty
+  obtain ⟨calleeContext, calleeFunction, row, targetAfter, targetPath,
+      calleeSpec, calleeResultAt, nextOutcome, nextRooted,
+      callerSpine, callerChecked, nextChecked, sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_missAtRoot_of_step rooted internal resultClassified
+      notObject notTObject semanticEmpty sourceStep
+  have callerNil := callerChecked.spine_eq_nil_of_empty empty
+  subst callerSpine
+  refine ⟨calleeContext, calleeFunction, row, targetAfter, targetPath,
+    calleeSpec, calleeResultAt, nextOutcome, nextRooted, callerRoot,
+    ?_, nextChecked, ?_, targetFramesEq⟩
+  · simpa only [← callerRoot] using different
+  · simpa only [empty] using sourceFramesEq
+
+end RootedLazyMissEntry
 
 /-- Heterogeneous nested calls retain the original result, not the deepest
 callee's kind or the immediate consumer's kind. -/

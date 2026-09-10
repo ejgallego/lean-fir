@@ -5124,6 +5124,199 @@ theorem
 /-- An empty lazy slot enters the generated initializer while preserving the
 validated caller continuation in the exact cache-publication frame. -/
 theorem
+    ConcreteStructuredValidatedLazyCallReadyOutcome.advance_missWithSpine_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {declaration : Lean.Name}
+    {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
+    {resultKind : AbiKind}
+    {call : LazyCacheCallSupported context decl declaration sourceDeclaration
+      resultKind}
+    {generated : LazyCacheGeneratedEnvironment context sourceModule}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {callerEnv : Env}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {callerLocals : Wasm.Locals}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {cacheIndex declarationId cacheSetId resultIndex : Nat}
+    {calleeCode : Lean.Compiler.LCNF.Code .impure}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedLazyCallReadyOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec call
+      generated externals labels entryRuntime entryStore entryWitness
+      functionResult callerExpectedResult facts remainingBytes sourceRuntime
+      callerEnv continuation callerJoins sourceFrames targetStore callerLocals
+      targetRest targetFrames witness cacheIndex declarationId cacheSetId
+      resultIndex source target)
+    {callerSpine : List (AbiKind × Option AbiKind)}
+    (callerValidationAgrees : ConcreteStructuredValidatedStackAgreement
+      callerSpine related.agrees related.frames.validation)
+    (internal : LazyCacheInternalMissSupported context decl declaration
+      sourceDeclaration resultKind calleeCode)
+    (resultClassified :
+      Fir.Wasm.abiKind? sourceDeclaration.type = .ok (some resultKind))
+    (notObject : resultKind ≠ .object)
+    (notTObject : resultKind ≠ .tobject)
+    (semanticEmpty :
+      findGlobal? sourceRuntime.globals declaration = none)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ calleeContext calleeFunction,
+      ∃ row : ConcreteGeneratedInternalDeclaration program sourceDeclaration
+          calleeContext calleeCode sourceModule calleeFunction targetModule,
+      ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3
+          target targetAfter ∧
+        ∃ calleeSpec : ConcreteSupportedFunction program calleeContext calleeCode
+          sourceModule calleeFunction targetModule hosts,
+        calleeSpec.sourceResultKind = resultKind ∧
+        ∃ nextOutcome : ConcreteStructuredValidatedCodeOutcome program calleeContext calleeCode
+          sourceModule calleeFunction targetModule hosts calleeSpec externals []
+          sourceRuntime targetStore witness resultKind (some resultKind) []
+          remainingBytes sourceRuntime [] calleeCode targetStore
+          (row.targetFunction.toLocals []) row.targetFunction.body witness
+          sourceAfter targetAfter,
+        ConcreteStructuredValidatedStackAgreement
+          ((functionResult, callerExpectedResult) :: callerSpine)
+          nextOutcome.agrees nextOutcome.frames.validation ∧
+        sourceAfter.frames =
+          .cache declaration ::
+            .bind decl.fvarId continuation callerEnv callerJoins :: sourceFrames ∧
+        targetAfter.frames =
+          .call 1 callerLocals.values callerLocals [
+            .call cacheSetId,
+            .globalSet (2 * cacheIndex + 1),
+            .const 1,
+            .globalSet (2 * cacheIndex)] ::
+          .label 0 callerLocals.values
+            ([.globalGet (2 * cacheIndex + 1), .localSet resultIndex] ++ targetRest) ::
+            targetFrames := by
+  obtain ⟨calleeContext, calleeFunction, row, targetAfter, targetPath,
+      nextCore, sourceFramesEq, targetFramesEq⟩ :=
+    related.core.advance_miss_of_step (functionCode := functionCode)
+      (targetModule := targetModule) (hosts := hosts) (spec := spec)
+      internal resultClassified notObject notTObject semanticEmpty
+      related.contextCaches sourceStep
+  let calleeSpec : ConcreteSupportedFunction program calleeContext calleeCode
+      sourceModule calleeFunction targetModule hosts :=
+    row.toSupportedFunctionOfFunction spec
+  have calleeResultAt : calleeSpec.sourceResultKind = resultKind := by
+    change row.sourceResultKind = resultKind
+    simpa [call.effectiveResult] using row.sourceResultSelected.symm
+  have validatedCore :
+      ConcreteStructuredValidatedCodeCoreRel program calleeContext sourceModule
+        calleeFunction externals [] sourceRuntime targetStore witness resultKind
+        (some resultKind) [] remainingBytes sourceRuntime [] calleeCode
+        targetStore (row.targetFunction.toLocals []) row.targetFunction.body
+        witness sourceAfter targetAfter :=
+    nextCore.withRootValidation calleeSpec calleeResultAt
+  let pushedFrames :=
+    ConcreteStructuredValidatedFrameStack.lazy
+      (declaration := declaration) (callerEnv := callerEnv)
+      (callerJoins := callerJoins) (callerLocals := callerLocals)
+      (cacheIndex := cacheIndex) (cacheSetId := cacheSetId)
+      (calleeResult := resultKind) (callerResult := functionResult)
+      (kind := resultKind) (tailResult := callerExpectedResult)
+      spec related.activeResult related.contextCaches
+      related.core.ready.continuationAdapted related.core.ready.resultFound
+      related.core.ready.resultKindAt related.core.ready.initializerFound
+      related.core.ready.signature related.core.ready.cacheSetCall notObject
+      notTObject (by cases resultKind <;> decide)
+      related.continuationValidation related.frames
+  let pushedResources :=
+    ConcreteStructuredSuspendedResourceStack.lazy
+      (declaration := declaration) (callerEnv := callerEnv)
+      (callerJoins := callerJoins) (callerLocals := callerLocals)
+      (cacheIndex := cacheIndex) (cacheSetId := cacheSetId)
+      (calleeResult := resultKind) (callerResult := functionResult)
+      (kind := resultKind) (tailResult := callerExpectedResult)
+      related.core.resources.current spec.contextProgram.symm
+      related.core.ready.continuationAdapted related.core.ready.resultFound
+      related.core.ready.resultKindAt related.core.ready.initializerFound
+      related.core.ready.signature related.core.ready.cacheSetCall notObject
+      notTObject (by cases resultKind <;> decide)
+      related.core.resources.suspended
+  have pushedAgrees : pushedFrames.supported.Agrees pushedResources := by
+    exact ConcreteStructuredSupportedFrameStack.Agrees.lazy
+      spec related.activeResult related.contextCaches
+      related.core.resources.current spec.contextProgram.symm
+      related.core.ready.continuationAdapted related.core.ready.resultFound
+      related.core.ready.resultKindAt related.core.ready.initializerFound
+      related.core.ready.signature related.core.ready.cacheSetCall notObject
+      notTObject (by cases resultKind <;> decide) related.frames.supported
+      related.core.resources.suspended related.agrees
+  have pushedChecked :
+      ConcreteStructuredValidatedStackAgreement
+        ((functionResult, callerExpectedResult) :: callerSpine) pushedAgrees
+        pushedFrames.validation :=
+      .lazy (callerJoins := callerJoins) (cacheIndex := cacheIndex)
+        (cacheSetId := cacheSetId) spec related.activeResult
+        related.contextCaches related.core.resources.current
+        spec.contextProgram.symm related.core.ready.continuationAdapted
+        related.core.ready.resultFound related.core.ready.resultKindAt
+        related.core.ready.initializerFound related.core.ready.signature
+        related.core.ready.cacheSetCall notObject notTObject
+        (by cases resultKind <;> decide) related.continuationValidation
+        callerValidationAgrees
+  have pushedValidationAgrees :
+      ConcreteStructuredValidationAgrees pushedAgrees
+        pushedFrames.validation :=
+    ⟨(functionResult, callerExpectedResult) :: callerSpine, pushedChecked⟩
+  obtain ⟨supportedAfter, agreesAfter⟩ := pushedAgrees.reindex
+    sourceFramesEq targetFramesEq validatedCore.core.resources.suspended
+  have validationAfter :
+      ConcreteStructuredSuspendedValidation program resultKind
+        (some resultKind) sourceAfter.frames := by
+    rw [sourceFramesEq]
+    exact pushedFrames.validation
+  have nextFrames :
+      ConcreteStructuredValidatedFrameStack program sourceModule targetModule
+        hosts resultKind (some resultKind) sourceAfter.frames
+        targetAfter.frames :=
+    ⟨supportedAfter, validationAfter⟩
+  have nextValidationAgrees :
+      ConcreteStructuredValidationAgrees agreesAfter validationAfter :=
+    pushedValidationAgrees.reindex sourceFramesEq targetFramesEq agreesAfter
+      validationAfter
+  have nextOutcome :
+      ConcreteStructuredValidatedCodeOutcome program calleeContext calleeCode
+        sourceModule calleeFunction targetModule hosts calleeSpec externals []
+        sourceRuntime targetStore witness resultKind (some resultKind) []
+        remainingBytes sourceRuntime [] calleeCode targetStore
+        (row.targetFunction.toLocals []) row.targetFunction.body witness
+        sourceAfter targetAfter :=
+    ⟨row.contextCaches, validatedCore, nextFrames, agreesAfter,
+      nextValidationAgrees⟩
+  have nextChecked :
+      ConcreteStructuredValidatedStackAgreement
+        ((functionResult, callerExpectedResult) :: callerSpine)
+        nextOutcome.agrees nextOutcome.frames.validation :=
+    pushedChecked.reindex sourceFramesEq targetFramesEq agreesAfter validationAfter
+  exact ⟨calleeContext, calleeFunction, row, targetAfter, targetPath,
+    calleeSpec, calleeResultAt, nextOutcome, nextChecked, sourceFramesEq, targetFramesEq⟩
+
+/-- Compatibility endpoint: select the existing checked caller spine and hide
+the named initializer only after the exact lazy push and entry are exposed. -/
+theorem
     ConcreteStructuredValidatedLazyCallReadyOutcome.advance_miss_of_step
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
@@ -5182,103 +5375,14 @@ theorem
           target targetAfter ∧
         ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
           targetModule hosts externals witness sourceAfter targetAfter := by
+  obtain ⟨callerSpine, callerValidationAgrees⟩ := related.validationAgrees
   obtain ⟨calleeContext, calleeFunction, row, targetAfter, targetPath,
-      nextCore, sourceFramesEq, targetFramesEq⟩ :=
-    related.core.advance_miss_of_step (functionCode := functionCode)
-      (targetModule := targetModule) (hosts := hosts) (spec := spec)
-      internal resultClassified notObject notTObject semanticEmpty
-      related.contextCaches sourceStep
-  let calleeSpec : ConcreteSupportedFunction program calleeContext calleeCode
-      sourceModule calleeFunction targetModule hosts :=
-    row.toSupportedFunctionOfFunction spec
-  have calleeResultAt : calleeSpec.sourceResultKind = resultKind := by
-    change row.sourceResultKind = resultKind
-    simpa [call.effectiveResult] using row.sourceResultSelected.symm
-  have validatedCore :
-      ConcreteStructuredValidatedCodeCoreRel program calleeContext sourceModule
-        calleeFunction externals [] sourceRuntime targetStore witness resultKind
-        (some resultKind) [] remainingBytes sourceRuntime [] calleeCode
-        targetStore (row.targetFunction.toLocals []) row.targetFunction.body
-        witness sourceAfter targetAfter :=
-    nextCore.withRootValidation calleeSpec calleeResultAt
-  let pushedFrames :=
-    ConcreteStructuredValidatedFrameStack.lazy
-      (declaration := declaration) (callerEnv := callerEnv)
-      (callerJoins := callerJoins) (callerLocals := callerLocals)
-      (cacheIndex := cacheIndex) (cacheSetId := cacheSetId)
-      (calleeResult := resultKind) (callerResult := functionResult)
-      (kind := resultKind) (tailResult := callerExpectedResult)
-      spec related.activeResult related.contextCaches
-      related.core.ready.continuationAdapted related.core.ready.resultFound
-      related.core.ready.resultKindAt related.core.ready.initializerFound
-      related.core.ready.signature related.core.ready.cacheSetCall notObject
-      notTObject (by cases resultKind <;> decide)
-      related.continuationValidation related.frames
-  let pushedResources :=
-    ConcreteStructuredSuspendedResourceStack.lazy
-      (declaration := declaration) (callerEnv := callerEnv)
-      (callerJoins := callerJoins) (callerLocals := callerLocals)
-      (cacheIndex := cacheIndex) (cacheSetId := cacheSetId)
-      (calleeResult := resultKind) (callerResult := functionResult)
-      (kind := resultKind) (tailResult := callerExpectedResult)
-      related.core.resources.current spec.contextProgram.symm
-      related.core.ready.continuationAdapted related.core.ready.resultFound
-      related.core.ready.resultKindAt related.core.ready.initializerFound
-      related.core.ready.signature related.core.ready.cacheSetCall notObject
-      notTObject (by cases resultKind <;> decide)
-      related.core.resources.suspended
-  have pushedAgrees : pushedFrames.supported.Agrees pushedResources := by
-    exact ConcreteStructuredSupportedFrameStack.Agrees.lazy
-      spec related.activeResult related.contextCaches
-      related.core.resources.current spec.contextProgram.symm
-      related.core.ready.continuationAdapted related.core.ready.resultFound
-      related.core.ready.resultKindAt related.core.ready.initializerFound
-      related.core.ready.signature related.core.ready.cacheSetCall notObject
-      notTObject (by cases resultKind <;> decide) related.frames.supported
-      related.core.resources.suspended related.agrees
-  obtain ⟨callerSpine, callerValidationAgrees⟩ :=
-    related.validationAgrees
-  have pushedValidationAgrees :
-      ConcreteStructuredValidationAgrees pushedAgrees
-        pushedFrames.validation :=
-    ⟨(functionResult, callerExpectedResult) :: callerSpine,
-      .lazy (callerJoins := callerJoins) (cacheIndex := cacheIndex)
-        (cacheSetId := cacheSetId) spec related.activeResult
-        related.contextCaches related.core.resources.current
-        spec.contextProgram.symm related.core.ready.continuationAdapted
-        related.core.ready.resultFound related.core.ready.resultKindAt
-        related.core.ready.initializerFound related.core.ready.signature
-        related.core.ready.cacheSetCall notObject notTObject
-        (by cases resultKind <;> decide) related.continuationValidation
-        callerValidationAgrees⟩
-  obtain ⟨supportedAfter, agreesAfter⟩ := pushedAgrees.reindex
-    sourceFramesEq targetFramesEq validatedCore.core.resources.suspended
-  have validationAfter :
-      ConcreteStructuredSuspendedValidation program resultKind
-        (some resultKind) sourceAfter.frames := by
-    rw [sourceFramesEq]
-    exact pushedFrames.validation
-  have nextFrames :
-      ConcreteStructuredValidatedFrameStack program sourceModule targetModule
-        hosts resultKind (some resultKind) sourceAfter.frames
-        targetAfter.frames :=
-    ⟨supportedAfter, validationAfter⟩
-  have nextValidationAgrees :
-      ConcreteStructuredValidationAgrees agreesAfter validationAfter :=
-    pushedValidationAgrees.reindex sourceFramesEq targetFramesEq agreesAfter
-      validationAfter
-  have nextOutcome :
-      ConcreteStructuredValidatedCodeOutcome program calleeContext calleeCode
-        sourceModule calleeFunction targetModule hosts calleeSpec externals []
-        sourceRuntime targetStore witness resultKind (some resultKind) []
-        remainingBytes sourceRuntime [] calleeCode targetStore
-        (row.targetFunction.toLocals []) row.targetFunction.body witness
-        sourceAfter targetAfter :=
-    ⟨row.contextCaches, validatedCore, nextFrames, agreesAfter,
-      nextValidationAgrees⟩
+      calleeSpec, calleeResultAt, nextOutcome, _nextChecked,
+      _sourceFramesEq, _targetFramesEq⟩ :=
+    related.advance_missWithSpine_of_step callerValidationAgrees internal
+      resultClassified notObject notTObject semanticEmpty sourceStep
   exact ⟨targetAfter, targetPath,
-    ConcreteStructuredValidatedCodeGlobalOutcomeAt.code calleeResultAt
-      nextOutcome⟩
+    ConcreteStructuredValidatedCodeGlobalOutcomeAt.code calleeResultAt nextOutcome⟩
 
 /-- Stage an admitted pure external while retaining precisely the validation
 of its destination continuation and unchanged suspended caller stack.  Static

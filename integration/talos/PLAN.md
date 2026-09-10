@@ -270,6 +270,23 @@ checked caller spine, using empty-stack precision only before entry. The origina
 helper and rooted endpoint retain the same existing byte-assembly dependency;
 127 endpoints are audited. Lazy entry/cache publication, pop/return and global
 root/schema assembly remain separate; no new axiom or trust approval.
+Lazy-cache miss entry now preserves the original root through its checked
+`.lazy` push. `advance_missWithSpine_of_step` exposes the production-selected
+initializer context/function/row/spec and actual named callee, preserving the
+original `advance_miss_of_step` signature. The rooted producer reuses the same
+checked caller spine, accepted indexed reindex and root-push law. It retains
+exactly three target steps, empty callee arguments/environment/labels/facts,
+active `resultKind` and expected `some resultKind`, and the unchanged entry
+runtime/store/witness and budget. The source pushes `.cache` then `.bind`, but
+the checked ABI spine gains only one caller entry. Exact target call/label
+frames retain the suspended cache-set/value/flag publication sequence; this
+slice does not execute publication. The original non-heap miss, classification,
+empty-cache and resource/admission premises remain unchanged. An actual-producer
+regression preserves root with a different initializer kind and singleton ABI
+spine, using empty-stack precision only before entry. Baseline original and all
+three final endpoints use exactly the three standard axioms; 130 endpoints are
+audited. Publication execution, return/pop and global root/schema assembly
+remain separate; no new axiom or trust approval.
 The general global relation still existentially hides the represented kind;
 preserving the root index and producer precision through the remaining
 dispatcher branches and composing the strengthened global relation remain open.

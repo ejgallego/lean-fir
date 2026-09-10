@@ -854,6 +854,52 @@ Baseline original and all three final entry/interface endpoints have exactly
 Lazy entry/cache publication, caller pop/return, global root/schema assembly,
 closure-footprint and whole-helper/tagged-result obligations remain separate.
 
+### Original-root preservation through lazy-cache miss entry
+
+`ConcreteStructuredValidatedLazyCallReadyOutcome.advance_missWithSpine_of_step`
+exposes the actual production-selected initializer context/function/generated
+row, callee spec and named code outcome before the old global wrapper hides
+them. The original `advance_miss_of_step` signature and core/generated-row/spec/
+frame/resource/callee construction are unchanged. The helper names the existing
+checked `.lazy` push and uses the accepted indexed checked-stack reindex.
+
+`advance_missAtRoot_of_step` extracts the same checked caller spine from internal
+input root evidence and applies the existing root-push law. It attaches the
+original root to the actual named initializer, without an unrelated existential
+spine or desired-successor premise. Ready/code/stack relations and runtime
+semantics are unchanged; no layout, capacity, scope, ABI equality, admission or
+final-client premise is added.
+
+The exact entry contract is retained:
+
+- Three target steps; selected generated row and initializer code; empty
+  arguments, callee environment, labels and facts, with locals given by
+  `row.targetFunction.toLocals []` and code by `row.targetFunction.body`.
+- Entry runtime/store/witness are `sourceRuntime`/`targetStore`/`witness`;
+  remaining budget and witness are unchanged. Active result is `resultKind`
+  and immediate expected result is `some resultKind`, not the original root.
+- Source frames push `.cache declaration` followed by the caller `.bind`.
+  The target pushes the existing call frame with suspended calls to
+  `cacheSetId`, value global `2 * cacheIndex + 1` and flag global
+  `2 * cacheIndex`, then the existing label/global-get/local-set continuation.
+  Both actual frame equations are exposed, not replaced by unchanged frames.
+- `internal`, `resultClassified`, `notObject`, `notTObject`, `semanticEmpty`
+  and existing ready/context-cache/resource/admission evidence are retained.
+  The non-heap miss boundary is not broadened.
+
+The actual-producer regression starts with empty saved caller frames and an
+initializer kind different from the caller. It retains original root, the exact
+three-step path, both pushed-frame equations and the immediate expected index.
+The checked ABI spine is a singleton even though the source pushes two frame
+constructors. Empty-stack active=root is used only before entry.
+
+Baseline original and all three final endpoints have exactly `propext`,
+`Classical.choice` and `Quot.sound`, with no generated dependency or new trust.
+The inventory now checks 130 endpoints. This proves initializer **entry** only:
+the suspended publication protocol is retained, not executed. Cache publication,
+return/pop, global root/schema assembly, closure-footprint and whole-helper/
+tagged-result obligations remain separate.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
@@ -908,6 +954,7 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | original lazy-cache hit and rooted bind-outcome producer | 3 | 0 |
 | indexed checked-spine reindex, original direct entry, spine helper and rooted callee producer | 3 | 0 |
 | original saturated entry, checked-spine helper and rooted callee producer | 3 | 1 |
+| original lazy-miss entry, checked-spine helper and rooted initializer producer | 3 | 0 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original UInt8-case wrapper, frame-exposing helper and rooted successor | 3 | 2 |
