@@ -228,10 +228,23 @@ bounded integration lease when a producer submits its next clean checkpoint.
   subtraction and runtime/result indices. No caller/host ABI equality or new
   premise. All three endpoints retain exactly the inherited byte32 dependency;
   no new trust approval or wider debt closure. This serial lease is released.
-  Next, ROOT-W6-20260910-024 assigns external destination-bind root transport
-  to the named active-code successor, preserving one-step local.set, exact
-  destination reuse-fact erasure, frame equations and unchanged witness/budget.
-  Callee entry, caller push/pop, lazy execution and global assembly stay separate.
+  ROOT-W6-20260910-024 is accepted at exact destination-bind checkpoint
+  `e2852d2001526e0acaeb31fcb8bbe5adf088d745`, functional `641af309`, base
+  `552784cb`. Independent diff-check, make check (730/2172, 38 mailbox tests)
+  and make talos-check (3204 jobs, 3165 audit cone, 118 endpoints) pass.
+  Exact verified receipt:
+  `796f0bd2c3c0348637581b85fb61dacdf25f44f948e9e389b97caf6db5f2649b`.
+  Logs: root worktree `.deps/root-external-destination-bind-{check,talos}.log`.
+  Root mechanically verified the original signature and complete core/nextActive
+  construction byte-identical. The helper exposes the actual frame equations;
+  rooted transport retains one local.set step, destination-only reuse-fact
+  erasure and unchanged budget/witness/runtime. No new premise or bound/caller
+  ABI equality. All three endpoints use only standard axioms; no new trust or
+  wider debt closure. This serial integration lease is released.
+  Next, ROOT-W6-20260910-026 assigns lazy-cache hit root transport to the named
+  bind outcome with exact four-step path and semantic lookup premise, plus a
+  focused composition regression through the accepted one-step bind. Lazy
+  misses/cache writes, callee entry, caller push/pop and global assembly stay separate.
 - W7: ROOT-W7-20260909-107 is accepted at exact CG-05B checkpoint
   `cdfc6e44cefcf11ae5c7a27e99b227841005ba4e` (functional `6402d306`, base
   `14a2b07f`). Root serialized this candidate alone on
