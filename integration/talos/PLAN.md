@@ -305,6 +305,24 @@ target-only case unwinding without changing the input spine/root. Baseline and
 all three final endpoints use exactly the three standard axioms; 133 endpoints
 are audited. Lazy publication and global root/schema/precision assembly remain
 separate; no new axiom or trust approval.
+Lazy publication now preserves the original root on its actual named bind
+outcome and the same checked input spine's popped tail. Its focused
+`advance_lazyCacheWithSpine_of_step` retains the original API, case unwind and
+complete cache publication/resource/scope/bind construction. The rooted producer
+uses the accepted root-push law in reverse. Exact runtime evolution is
+`sourceRuntime.setGlobal declaration sourceValue`; the target store follows
+cacheSet, value-global write, then flag-global write. Publication costs seven
+steps plus the actual case-prefix length, removes only the source cache marker
+and reaches the target local-set boundary with caller facts intact. Caller
+indices/entry anchors, witness and budget are retained without stronger kind
+or new client/resource/admission premises. Actual-producer regressions recover
+root precision for a heterogeneous initializer and empty saved tail, retain
+case-unwind accounting on the same spine, and compose the unchanged accepted
+destination bind for eight steps plus the prefix. Only that bind erases the
+destination fact. Baseline/original/helper/rooted axiom sets are identical:
+standard three plus the existing recorded byte-assembly dependency; 136 endpoints
+are audited. Global root/schema/precision assembly remains separate; no new
+trust is approved.
 The general global relation still existentially hides the represented kind;
 preserving the root index and producer precision through the remaining
 dispatcher branches and composing the strengthened global relation remain open.

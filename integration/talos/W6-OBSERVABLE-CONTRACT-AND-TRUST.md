@@ -947,6 +947,55 @@ returned-kind premise is added. Lazy cache publication, global root/schema/
 precision assembly, universal compiler admission and traps remain separate,
 as do closure-footprint, whole-helper/tagged-result and all 14 W72 obligations.
 
+### Original-root preservation through lazy-cache publication
+
+`ConcreteStructuredValidatedReturnedOutcome.advance_lazyCacheWithSpine_of_step`
+exposes the actual named `bindValidated` and the checked popped tail of the
+same input ABI spine. The old `advance_lazyCache_of_step` keeps its exact
+signature. Its case unwind, physical-value refinement, `cacheSetStep` proof,
+complete publication/resource/scope/transports and complete bind construction
+are unchanged. This transports root evidence through the existing cache
+semantics; it is not a new cache implementation or refinement contract.
+
+`advance_lazyCacheAtRoot_of_step` extracts the checked input spine from internal
+root evidence and reverses the accepted root-push law on
+`spine = (callerResult, tailResult) :: tailSpine`. The actual bind retains the
+original root and that exact checked tail. The caller context/spec/function,
+labels, entry anchors, callerResult/tailResult, caller environment/locals and
+continuation remain named. Witness, remaining budget and callerFacts are
+unchanged; destination fact erasure has not happened yet.
+
+Publication does change the current runtime and store. The source becomes
+`sourceRuntime.setGlobal declaration sourceValue`; the output exposes the
+actual `cacheSetStep` result and concrete store equation with cacheSet first,
+value-global write second and flag-global write last. The source removes only
+`.cache`, retaining the caller `.bind`. The target consumes the original
+call/cacheSet/value/flag/label protocol and stops at `.localSet`. Exact frame
+equations and the seven-step base path plus actual target case-prefix length
+are exposed, with strict positivity. All original non-heap, compatibility,
+capacity, ordinary-persistence, external/closure-table and cache-relation
+transports are retained. No stronger actual-kind or new scope/layout/capacity/
+ABI equality/admission/client/successor-root premise is added.
+
+One actual-producer regression derives caller/root equality for a heterogeneous
+initializer and empty saved tail, with that same checked tail empty and the
+source bind still retained. It recovers the exact seven-step path without case
+labels and composes additional accepted case unwinding on the same spine/root.
+A second invokes the already accepted rooted destination bind unchanged:
+publication plus binding costs eight steps plus the accumulated case prefix.
+Both actual named bind/active outcomes retain root and exact frame equations;
+the active outcome alone has destination-only fact erasure and the bound source
+environment. Its runtime/store remain the **published** ones, not the old ones.
+No runtime semantics or application execution certificate is duplicated.
+
+Measured baseline and final original/helper/rooted dependencies are identical:
+`propext`, `Classical.choice`, `Quot.sound` and the already recorded byte32
+assembly native dependency. The exact inventory now checks 136 endpoints.
+No new axiom or trust approval is introduced; existing native debt remains open.
+Global returned dispatch, root/schema/precision and terminal assembly, universal
+compiler admission and traps remain separate, as do closure-footprint,
+whole-helper/tagged-result and all 14 W72 obligations.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
@@ -1003,6 +1052,7 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | original saturated entry, checked-spine helper and rooted callee producer | 3 | 1 |
 | original lazy-miss entry, checked-spine helper and rooted initializer producer | 3 | 0 |
 | original bind-caller pop, same-spine/tail helper and rooted restored-caller producer | 3 | 0 |
+| original lazy publication, same-spine/tail helper and rooted named-bind producer | 3 | 1 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original UInt8-case wrapper, frame-exposing helper and rooted successor | 3 | 2 |

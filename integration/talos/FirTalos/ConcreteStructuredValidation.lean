@@ -6462,7 +6462,7 @@ validated external-bind boundary.  Target-only case labels may precede the
 lazy call frame; publication itself is the established seven-step Wasm path.
 The cache marker disappears, while validation of the caller continuation and
 its hereditary tail is retained exactly. -/
-theorem ConcreteStructuredValidatedReturnedOutcome.advance_lazyCache_of_step
+theorem ConcreteStructuredValidatedReturnedOutcome.advance_lazyCacheWithSpine_of_step
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {functionCode : Lean.Compiler.LCNF.Code .impure}
@@ -6493,23 +6493,64 @@ theorem ConcreteStructuredValidatedReturnedOutcome.advance_lazyCache_of_step
       callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
       sourceValue targetStore targetLocals witness actualKind physical source
       target)
+    {spine : List (AbiKind × Option AbiKind)}
+    (aligned : ConcreteStructuredValidatedStackAgreement spine
+      related.agrees related.frames.validation)
     (lazyCaller : ConcreteStructuredLazyCallerAtHead source.frames)
     (sourceStep : executeStep externals source = .next sourceAfter) :
     ∃ targetCount targetAfter,
       FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
           targetCount target targetAfter ∧
         0 < targetCount ∧
-        ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
-          targetModule hosts externals witness sourceAfter targetAfter := by
+        ∃ callerContext callerCode callerFunction callerLabels
+          callerEntryRuntime callerEntryStore callerEntryWitness callerResult
+          tailResult callerFacts callerEnv callerLocals declaration result
+          continuation callerJoins sourceTail targetRest targetTail kind
+          cacheIndex cacheSetId resultIndex runtimeAfter nextStore,
+        ∃ caseFrames : List StructuredWasmFrame,
+        ∃ tailSpine,
+        ∃ callerSpec : ConcreteSupportedFunction program callerContext callerCode
+          sourceModule callerFunction targetModule hosts,
+        ∃ nextBind : ConcreteStructuredValidatedExternalBindOutcome program
+          callerContext callerCode sourceModule callerFunction targetModule hosts
+          callerSpec externals callerLabels callerEntryRuntime callerEntryStore
+          callerEntryWitness callerResult tailResult callerFacts remainingBytes
+          (sourceRuntime.setGlobal declaration sourceValue) callerEnv sourceValue
+          result continuation callerJoins sourceTail nextStore callerLocals
+          callerLocals.values targetRest targetTail witness kind physical
+          resultIndex sourceAfter targetAfter,
+        ConcreteStructuredValidatedStackAgreement tailSpine
+          nextBind.agrees nextBind.frames.validation ∧
+        spine = (callerResult, tailResult) :: tailSpine ∧
+        source.frames = .cache declaration ::
+          .bind result continuation callerEnv callerJoins :: sourceTail ∧
+        sourceAfter.frames =
+          .bind result continuation callerEnv callerJoins :: sourceTail ∧
+        targetAfter.frames = targetTail ∧
+        target.frames = caseFrames ++
+          (.call 1 callerLocals.values callerLocals [
+              .call cacheSetId, .globalSet (2 * cacheIndex + 1),
+              .const 1, .globalSet (2 * cacheIndex)] ::
+            .label 0 callerLocals.values
+              ([.globalGet (2 * cacheIndex + 1), .localSet resultIndex] ++
+                targetRest) :: targetTail) ∧
+        sourceAfter.runtime = sourceRuntime.setGlobal declaration sourceValue ∧
+        cacheSetStep declaration kind targetStore [physical] =
+          .Return [physical] (replaceRuntime targetStore runtimeAfter) ∧
+        nextStore = writeWasmGlobal
+          (writeWasmGlobal (replaceRuntime targetStore runtimeAfter)
+            (2 * cacheIndex + 1) physical) (2 * cacheIndex) (.i32 1) ∧
+        targetCount = caseFrames.length + 7 := by
   rcases related with ⟨activeResult, _contextCaches, yielded, compatible,
     resources, frames, agrees, validationAgrees⟩
-  generalize sourceFramesEq : source.frames = sourceFrames at resources frames agrees validationAgrees
-  generalize targetFramesEq : target.frames = targetFrames at resources frames agrees validationAgrees
+  change ConcreteStructuredValidatedStackAgreement spine agrees frames.validation at aligned
+  clear validationAgrees
+  generalize sourceFramesEq : source.frames = sourceFrames at resources frames agrees aligned
+  generalize targetFramesEq : target.frames = targetFrames at resources frames agrees aligned
   rcases resources with ⟨currentScope, resourceStack⟩
   rcases frames with ⟨supported, validation⟩
   change supported.Agrees resourceStack at agrees
-  change ConcreteStructuredValidationAgrees agrees validation at validationAgrees
-  rcases validationAgrees with ⟨spine, aligned⟩
+  change ConcreteStructuredValidatedStackAgreement spine agrees validation at aligned
   induction aligned generalizing target with
   | @case spine _ _ _ _ _ sourceFrames targetFrames belowStack targetRest
       testCount supportedTail resourceTail tailAgrees validation tailAligned
@@ -6552,11 +6593,36 @@ theorem ConcreteStructuredValidatedReturnedOutcome.advance_lazyCache_of_step
         stateRelated := yielded.stateRelated
         frameAligned := yielded.frameAligned
         valueRelated := yielded.valueRelated }
-      obtain ⟨tailCount, targetAfter, tailPath, tailPositive, nextGlobal⟩ :=
+      obtain ⟨tailCount, targetAfter, tailPath, tailPositive,
+          callerContext, callerCode, callerFunction, callerLabels,
+          callerEntryRuntime, callerEntryStore, callerEntryWitness, callerResult,
+          tailResult, callerFacts, callerEnv, callerLocals, declaration, result,
+          continuation, callerJoins, sourceTail, restoredRest, targetTail, kind,
+          cacheIndex, cacheSetId, resultIndex, runtimeAfter, publishedStore,
+          tailCaseFrames, tailSpine, callerSpec, nextBind, nextChecked, spineEq,
+          callerSourceFramesEq, sourceFramesAfter, targetFramesAfter,
+          callerTargetFramesEq, sourceRuntimeAfter, operationEq, nextStoreEq,
+          countEq⟩ :=
         ih activeResult yieldedPopped compatible (by rfl)
           (by simp [targetPopped]) currentScope
-      exact ⟨testCount + tailCount, targetAfter,
-        unwindTarget.trans tailPath, by omega, nextGlobal⟩
+      refine ⟨testCount + tailCount, targetAfter,
+        unwindTarget.trans tailPath, by omega,
+          callerContext, callerCode, callerFunction, callerLabels,
+          callerEntryRuntime, callerEntryStore, callerEntryWitness, callerResult,
+          tailResult, callerFacts, callerEnv, callerLocals, declaration, result,
+          continuation, callerJoins, sourceTail, restoredRest, targetTail, kind,
+          cacheIndex, cacheSetId, resultIndex, runtimeAfter, publishedStore,
+          (structuredWasmCaseLabels belowStack targetRest testCount ++ tailCaseFrames),
+          tailSpine, callerSpec, nextBind, nextChecked, spineEq,
+          callerSourceFramesEq, sourceFramesAfter, targetFramesAfter,
+          ?_, sourceRuntimeAfter, operationEq, nextStoreEq, ?_⟩
+      · rw [callerTargetFramesEq, List.append_assoc]
+      · have caseLength :
+            (structuredWasmCaseLabels belowStack targetRest testCount).length =
+              testCount := by
+          cases testCount <;> simp [structuredWasmCaseLabels]
+        simp only [List.length_append, caseLength]
+        omega
   | nil =>
       rcases lazyCaller with
         ⟨declaration, result, continuation, callerEnv, callerJoins, tail,
@@ -6907,9 +6973,75 @@ theorem ConcreteStructuredValidatedReturnedOutcome.advance_lazyCache_of_step
             targetAfter :=
         ⟨callerResultAt, contextCaches, bindCore, continuationValidation,
           validatedFrames, nextAgrees, nextValidationAgrees⟩
+      have nextChecked :
+          ConcreteStructuredValidatedStackAgreement spine
+            bindValidated.agrees bindValidated.frames.validation := by
+        simpa only [bindValidated, validatedFrames, nextAgrees] using tailAligned
       exact ⟨7, targetAfter, targetPath, by omega,
-        ConcreteStructuredValidatedCodeGlobalOutcomeAt.externalBind
-          bindValidated⟩
+        callerContext, callerCode, callerFunction, callerLabels,
+        callerEntryRuntime, callerEntryStore, callerEntryWitness, callerResult,
+        tailResult, callerFacts, callerEnv, callerLocals, declaration, result,
+        continuation, callerJoins, sourceFrames, targetRest, targetFrames, kind,
+        cacheIndex, cacheSetId, resultIndex, runtimeAfter, nextStore, [], spine,
+        callerSpec, bindValidated, nextChecked, rfl, rfl,
+        bindFocus.sourceFramesEq, bindFocus.targetFramesEq, rfl,
+        bindFocus.sourceRuntimeEq, operationEq, rfl, rfl⟩
+
+/-- Compatibility endpoint: hide the actual published bind only after the
+same checked input spine and its popped caller tail have been exposed. -/
+theorem ConcreteStructuredValidatedReturnedOutcome.advance_lazyCache_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult actualKind : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {sourceValue : Value}
+    {targetLocals : Wasm.Locals}
+    {physical : Wasm.Value}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedReturnedOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      sourceValue targetStore targetLocals witness actualKind physical source
+      target)
+    (lazyCaller : ConcreteStructuredLazyCallerAtHead source.frames)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetCount targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetCount target targetAfter ∧
+        0 < targetCount ∧
+        ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+          targetModule hosts externals witness sourceAfter targetAfter := by
+  obtain ⟨spine, aligned⟩ := related.validationAgrees
+  obtain ⟨targetCount, targetAfter, targetPath, positive,
+          _callerContext, _callerCode, _callerFunction, _callerLabels,
+          _callerEntryRuntime, _callerEntryStore, _callerEntryWitness,
+          _callerResult, _tailResult, _callerFacts, _callerEnv, _callerLocals,
+          _declaration, _result, _continuation, _callerJoins, _sourceTail,
+          _targetRest, _targetTail, _kind, _cacheIndex, _cacheSetId, _resultIndex,
+          _runtimeAfter, _nextStore, _caseFrames, _tailSpine, _callerSpec,
+          nextBind, _nextChecked, _spineEq, _callerSourceFramesEq,
+          _sourceFramesAfter, _targetFramesAfter, _callerTargetFramesEq,
+          _sourceRuntimeAfter, _operationEq, _nextStoreEq, _countEq⟩ :=
+    related.advance_lazyCacheWithSpine_of_step aligned lazyCaller sourceStep
+  exact ⟨targetCount, targetAfter, targetPath, positive,
+    ConcreteStructuredValidatedCodeGlobalOutcomeAt.externalBind nextBind⟩
 
 /-- Constructor-complete pop for a validated yielded state.
 
