@@ -287,6 +287,24 @@ spine, using empty-stack precision only before entry. Baseline original and all
 three final endpoints use exactly the three standard axioms; 130 endpoints are
 audited. Publication execution, return/pop and global root/schema assembly
 remain separate; no new axiom or trust approval.
+Bind-caller pop now preserves the original root through the same checked input
+spine and its actual popped tail. `advance_bindCallerWithSpine_of_step` exposes
+the actual named restored caller before the unchanged public wrapper hides it;
+the rooted producer uses indexed reindex and the accepted root-push law in
+reverse. The original direct/saturated core and complete caller constructions,
+case-label unwind, saved-scope/resource/refinement transports and public
+signature are unchanged. Producer-output frame/cost metadata retains direct
+cost two, saturated matcher count plus five, and the length of the actual case
+prefix, with strict positivity. Exact saved/restored frame equations, caller
+entry anchors/result/tail expected result, destination-only fact erasure and
+unchanged current runtime/store/witness/budget persist. No stronger returned-kind
+or new client/admission/resource premise is added. Actual-producer regressions
+derive restored-caller/root equality from an empty saved tail despite differing
+callee/caller kinds, recover both exact branch costs, and compose additional
+target-only case unwinding without changing the input spine/root. Baseline and
+all three final endpoints use exactly the three standard axioms; 133 endpoints
+are audited. Lazy publication and global root/schema/precision assembly remain
+separate; no new axiom or trust approval.
 The general global relation still existentially hides the represented kind;
 preserving the root index and producer precision through the remaining
 dispatcher branches and composing the strengthened global relation remain open.

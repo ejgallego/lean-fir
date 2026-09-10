@@ -900,6 +900,53 @@ the suspended publication protocol is retained, not executed. Cache publication,
 return/pop, global root/schema assembly, closure-footprint and whole-helper/
 tagged-result obligations remain separate.
 
+### Original-root preservation through bind-caller pop
+
+`ConcreteStructuredValidatedReturnedOutcome.advance_bindCallerWithSpine_of_step`
+exposes the actual named restored caller and the checked tail of the **same**
+input ABI spine. The original `advance_bindCaller_of_step` signature remains
+unchanged. Its direct/saturated `advance_popCore` calls, complete `nextActive`
+constructions, saved-scope/resource/refinement transports and target-only case
+unwind are reused unchanged. The induction now receives its checked spine
+explicitly instead of choosing a new existential witness internally.
+
+`advance_bindCallerAtRoot_of_step` obtains that checked spine from internal
+input root evidence. The exposed equation
+`spine = (callerResult, tailResult) :: tailSpine` and the existing root-push law
+in reverse establish the original root on the actual restored caller. Accepted
+indexed reindex retains the actual checked tail across both frame equations.
+No callee actual kind, caller result, immediate expected result or root kind is
+equated as a premise. The rooted theorem adds only internal input root evidence
+to the original related/bindCaller/successful-source-step inputs.
+
+The narrow output metadata records the actual target case-frame prefix and
+the direct (`none`) or saturated (`some matcherCount`) pop mode. These are
+outputs of the existing induction, not new caller-supplied certificates or a
+general framework. The exact before/after frame equations tie them to the
+removed call/label protocol. Direct pop costs two steps, saturated pop costs
+`matcherCount + 5`, and case unwinding adds the prefix length; positivity is
+retained. The restored context/spec/function, labels, entry runtime/store/
+witness, caller result and tail expected result are exposed. The successor
+retains `eraseReuseCapacityFact callerFacts result`, unchanged remaining budget
+and current runtime/store/witness, actual resumed locals, bound caller
+environment and original continuation.
+
+An actual-producer regression assumes only a heterogeneous active/caller result
+and empty saved tail, then derives restored-caller/root equality and an empty
+checked tail. It retains both branch-exact finite paths. A second regression
+composes the accepted target case-unwind path with the actual pop result,
+retaining that very input spine/root, actual restored outcome and additive
+test-count cost. Neither duplicates runtime semantics or supplies successor
+root evidence.
+
+Baseline original and final compatibility/helper/rooted endpoints have exactly
+`propext`, `Classical.choice` and `Quot.sound`. The inventory now checks 133
+endpoints; no generated dependency, new axiom or trust approval is introduced.
+No scope/capacity/layout/ABI equality/admission/final-client or stronger
+returned-kind premise is added. Lazy cache publication, global root/schema/
+precision assembly, universal compiler admission and traps remain separate,
+as do closure-footprint, whole-helper/tagged-result and all 14 W72 obligations.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
@@ -955,6 +1002,7 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | indexed checked-spine reindex, original direct entry, spine helper and rooted callee producer | 3 | 0 |
 | original saturated entry, checked-spine helper and rooted callee producer | 3 | 1 |
 | original lazy-miss entry, checked-spine helper and rooted initializer producer | 3 | 0 |
+| original bind-caller pop, same-spine/tail helper and rooted restored-caller producer | 3 | 0 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original UInt8-case wrapper, frame-exposing helper and rooted successor | 3 | 2 |
