@@ -267,10 +267,25 @@ bounded integration lease when a producer submits its next clean checkpoint.
   The actual-producer regression retains the original root with a different
   active callee ABI and exact one-step path. All four audited entry/interface
   endpoints are standard-axiom-only; no new trust or wider debt closure.
-  This serial integration lease is released. Next, ROOT-W6-20260910-030
-  assigns saturated-call entry/root transport only, retaining its checked
-  saturated push, exact positive path, capacity premise and callee indices.
-  Lazy entry, cache publication, caller pop and global assembly stay separate.
+  This serial integration lease is released.
+  ROOT-W6-20260910-030 is accepted at exact saturated-entry checkpoint
+  `9893348666d75638df229fbcb452e6f90c8dea49`, functional `4c04bd14`, base
+  `d4a047e2`. Independent diff-check, make check (730/2172, 38 mailbox tests)
+  and make talos-check (3204 jobs, 3165 audit cone, 127 forced endpoints) pass.
+  Exact verified receipt:
+  `795fd05dc5f78f06d1259040d42a4d66a7a230bd139a6080ed32c2b24aff116b`.
+  Logs: root worktree `.deps/root-saturated-call-entry-{check,talos}.log`.
+  Original signature, core/caller/push and complete callee construction are
+  byte-identical. The same checked saturated push retains original root on the
+  actual named callee, exact positive matcher/argument path, frame protocol,
+  capacity/refinement and distinct active/expected/root indices. The regression
+  exercises the actual producer with differing caller/callee kinds. All three
+  endpoints retain exactly the original byte-assembly dependency; no new trust
+  approval or wider debt closure. This serial integration lease is released.
+  Next, ROOT-W6-20260910-032 assigns lazy-cache miss entry/root transport and
+  its existing checked lazy push only: exact three steps, original non-heap
+  admission and suspended cache-publication continuation. Executing publication,
+  caller pop/return and global assembly stay separate.
 - W7: ROOT-W7-20260909-107 is accepted at exact CG-05B checkpoint
   `cdfc6e44cefcf11ae5c7a27e99b227841005ba4e` (functional `6402d306`, base
   `14a2b07f`). Root serialized this candidate alone on
