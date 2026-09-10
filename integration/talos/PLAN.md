@@ -189,6 +189,16 @@ No helper or original staging/ready-relation edit was needed. All four staging
 endpoints are standard-axiom-only; the inventory now has 110 total endpoints.
 Closure consumption, lazy hit execution/miss entry/cache write, caller push/pop,
 external staging and global assembly remain separate.
+Pure-external staging now retains the caller/root on its actual named ready
+outcome, reusing the unchanged producer and saved caller indices. The selected
+call shape, physical arguments, operation/result ABI/import, call/result indices,
+exact argument-prefix-length path and unconditional strict rank stay intact.
+The exact supported-call and allocation-budget premises remain explicit; no
+caller/host result ABI equality is added. The actual-producer regression retains
+path/rank and derives saved-empty-caller precision plus empty-prefix target
+identity. Both original/rooted endpoints are standard-axiom-only; the inventory
+now checks 112 endpoints. Host execution, destination bind and global root
+assembly remain separate.
 The general global relation still existentially hides the represented kind;
 preserving the root index and producer precision through the remaining
 dispatcher branches and composing the strengthened global relation remain open.

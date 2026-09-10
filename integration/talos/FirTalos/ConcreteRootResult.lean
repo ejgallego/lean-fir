@@ -29,6 +29,8 @@ Named direct-call staging retains that root on its actual ready outcome and
 saved caller stack, before callee entry or any caller push.
 Saturated closure and lazy staging likewise preserve the caller root across
 zero target steps, retaining their capacity and hit/miss admission premises.
+Pure-external staging preserves it before the host call, retaining the exact
+supported-call/budget premises and keeping caller and host result ABIs distinct.
 Preservation through the other global transitions is still separate; the
 unindexed global relation cannot recover root identity after existentially
 hiding the caller spine.
@@ -2333,6 +2335,119 @@ example
   exact ⟨targetPath, nextRooted.functionResult_eq_of_empty empty, rank⟩
 
 end RootedLazyCallStaging
+
+section RootedPureExternalStaging
+
+variable
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime nextRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult rootResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes stepCost : Nat}
+    {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceValue : Value}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+
+/-- Pure-external staging retains the caller/root ABI on the actual ready
+outcome before the host call or destination bind. Supported-call and allocation
+budget premises remain unchanged, as do the selected host ABI and exact prefix
+path. Root transport uses the saved caller indices, not a new ABI equality. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_pureExternal_stageAtRoot
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.let decl continuation) targetStore targetLocals targetCode witness source
+      target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (supported : PureExternalSupported context externals sourceRuntime sourceEnv
+      decl continuation nextRuntime sourceValue stepCost)
+    (budget : stepCost ≤ remainingBytes)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ (site : PureExternalCallShape context externals sourceRuntime sourceEnv
+        decl nextRuntime sourceValue stepCost)
+      (physicalArgs : List Wasm.Value) (operation : ExternalOperation)
+      (resolvedResultKind : AbiKind) (targetImport : Wasm.ImportDecl)
+      (callIndex resultIndex : Nat) (targetArguments targetRest : Wasm.Program)
+      (targetAfter : StructuredWasmState Host),
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetArguments.length target targetAfter ∧
+        ∃ ready : ConcreteStructuredValidatedExternalCallReadyOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec
+          externals site operation resolvedResultKind targetImport labels
+          continuation source.joins source.frames entryRuntime entryStore
+          entryWitness functionResult callerExpectedResult facts remainingBytes
+          targetStore targetLocals targetLocals.values targetRest target.frames
+          witness physicalArgs callIndex resultIndex sourceAfter targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          ready.agrees ready.frames.validation ∧
+        compilerStructuredControlRank sourceAfter <
+          compilerStructuredControlRank source := by
+  obtain ⟨site, physicalArgs, operation, resolvedResultKind, targetImport,
+      callIndex, resultIndex, targetArguments, targetRest, targetAfter,
+      targetPath, ready, rank⟩ :=
+    related.advance_pureExternal_stage activeResult supported budget sourceStep
+  exact ⟨site, physicalArgs, operation, resolvedResultKind, targetImport,
+    callIndex, resultIndex, targetArguments, targetRest, targetAfter,
+    targetPath, ready,
+    rooted.reindex rfl rfl ready.agrees ready.frames.validation, rank⟩
+
+/-- The actual pure-external staging producer recovers the caller/root ABI
+from its saved empty caller stack, without equating it with the host result
+ABI. Its exact prefix path and strict rank persist even for an empty prefix. -/
+example
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.let decl continuation) targetStore targetLocals targetCode witness source
+      target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (supported : PureExternalSupported context externals sourceRuntime sourceEnv
+      decl continuation nextRuntime sourceValue stepCost)
+    (budget : stepCost ≤ remainingBytes)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : source.frames = []) :
+    ∃ (targetArguments : Wasm.Program) (targetAfter : StructuredWasmState Host),
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetArguments.length target targetAfter ∧
+        functionResult = rootResult ∧
+        compilerStructuredControlRank sourceAfter <
+          compilerStructuredControlRank source ∧
+        (targetArguments = [] → targetAfter = target) := by
+  obtain ⟨_, _, _, _, _, _, _, targetArguments, _, targetAfter,
+      targetPath, _ready, nextRooted, rank⟩ :=
+    related.advance_pureExternal_stageAtRoot activeResult rooted supported budget sourceStep
+  refine ⟨targetArguments, targetAfter, targetPath,
+    nextRooted.functionResult_eq_of_empty empty, rank, ?_⟩
+  intro zero
+  have emptyPath : FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+      0 target targetAfter := by simpa [zero] using targetPath
+  exact emptyPath.eq_of_zero.symm
+
+end RootedPureExternalStaging
 
 /-- Heterogeneous nested calls retain the original result, not the deepest
 callee's kind or the immediate consumer's kind. -/

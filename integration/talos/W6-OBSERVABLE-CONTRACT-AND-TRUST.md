@@ -607,6 +607,42 @@ global root/schema assembly, universal compiler admission and traps remain
 separate. Footprint, whole-helper/tagged-result and all 14 W72 obligations are
 unchanged.
 
+### Root-preserving pure-external staging
+
+`ConcreteStructuredValidatedCodeOutcome.advance_pureExternal_stageAtRoot`
+reuses the unchanged `advance_pureExternal_stage` and existing `reindex`
+lemma on its saved caller indices. The original caller/root ABI is attached
+to the actual named `ConcreteStructuredValidatedExternalCallReadyOutcome`'s
+`agrees` and `frames.validation`. No helper or central staging/ready-relation
+edit is needed.
+
+Its premises remain exactly `activeResult`, `PureExternalSupported context
+externals sourceRuntime sourceEnv decl continuation nextRuntime sourceValue
+stepCost`, `budget : stepCost ≤ remainingBytes` and a successful source step,
+alongside compiler-internal root evidence. Supported-call and finite allocation
+headroom are not inferred from execution. No classifier, import-closure, ABI
+equality or final-client premise is introduced.
+
+The producer retains the selected `PureExternalCallShape`, physical arguments,
+`ExternalOperation`, `resolvedResultKind`, `targetImport`, call/result indices,
+argument prefix/rest and exact `targetArguments.length` path. Strict source
+rank decreases unconditionally, including an empty prefix. Its ready payload
+retains caller continuation validation, saved frames, active/caller result
+indices, witness, budget and the exact runtime/store indices. The caller/root
+ABI is not equated with the host operation's resolved result ABI.
+
+A kernel regression invokes the actual rooted producer and derives caller/
+root precision from the saved empty caller stack while retaining path/rank.
+Its empty-prefix clause derives target identity; no result-kind equality is
+supplied. Baseline `fd3fc701` and both original/rooted endpoints use exactly
+the three standard axioms. The inventory expands to 112 endpoints, with no
+generated dependency, new axiom or trust approval. The entire original staging
+file and shared semantic/admission/runtime definitions remain unchanged.
+Host-call execution, destination bind, callee entry, caller push/pop, lazy
+cache writes, global root/schema assembly, universal compiler admission and
+traps remain separate, as do footprint/whole-helper/tagged-result and all 14
+W72 obligations.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
@@ -655,6 +691,7 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | original active-witness FVar/erased field effects and schema rules, frame helpers and rooted producers | 3 | 1 |
 | original named direct-call staging and rooted ready-outcome producer | 3 | 0 |
 | original saturated/lazy staging and rooted ready-outcome producers | 3 | 0 |
+| original pure-external staging and rooted ready-outcome producer | 3 | 0 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original UInt8-case wrapper, frame-exposing helper and rooted successor | 3 | 2 |
