@@ -680,6 +680,42 @@ global root/schema assembly, universal compiler admission and traps remain
 separate. Footprint/whole-helper/tagged-result and all 14 W72 obligations are
 unchanged.
 
+### Root-preserving external destination bind
+
+`ConcreteStructuredValidatedExternalBindOutcome.advance_code_of_step` exposes
+the original producer's named `ConcreteStructuredValidatedCodeOutcome`
+(`nextActive`) and the actual `sourceAfter.frames = sourceFrames` and
+`targetAfter.frames = targetFrames` equations. `advance_of_step` retains its
+original signature as a compatibility wrapper. The core bind proof, complete
+active-state construction and bind/code relations remain unchanged.
+
+`advance_codeAtRoot_of_step` uses those exact frame equations with the existing
+root `reindex` lemma, attaching evidence to the produced `nextActive.agrees`
+and `nextActive.frames.validation`. The only premises are existing bind evidence
+and a successful source step, plus compiler-internal root evidence. No semantic
+typing, admission, capacity, host or final-client premise is added; the bound
+value's `kind` is not equated with the caller/root result kind.
+
+The step retains exactly one target `local.set`, core-chosen `resumedLocals`,
+`bind callerEnv result sourceValue`, `continuation`/`targetRest` and
+`eraseReuseCapacityFact facts result` (only the destination fact is erased).
+`remainingBytes`, `sourceRuntime`, `targetStore`, `witness`, entry state,
+active/caller result indices, caller remainder and joins remain as in the
+original rule. There is no additional budget subtraction or witness extension.
+This is transport over the existing bind semantics, not a new bind rule.
+
+The actual-producer kernel regression derives caller/root precision from the
+produced active successor and an empty saved caller stack, retaining the exact
+one-step path and both frame equations. Baseline original at `552784cb` and
+all three final original/helper/rooted endpoints have exactly `propext`,
+`Classical.choice` and `Quot.sound`. The inventory expands to 118 endpoints;
+no generated dependency, new axiom or trust approval is introduced. Existing
+native-evaluation debt elsewhere remains open.
+
+Callee entry, caller push/pop, lazy execution/cache writes, global root/schema
+assembly, universal compiler admission and traps remain separate, as do
+footprint/whole-helper/tagged-result and all 14 W72 obligations.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
@@ -730,6 +766,7 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | original saturated/lazy staging and rooted ready-outcome producers | 3 | 0 |
 | original pure-external staging and rooted ready-outcome producer | 3 | 0 |
 | original external-ready host step, named-bind helper and rooted bind producer | 3 | 1 |
+| original external destination bind, named-active/frame helper and rooted active producer | 3 | 0 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original UInt8-case wrapper, frame-exposing helper and rooted successor | 3 | 2 |

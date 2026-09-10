@@ -2556,6 +2556,108 @@ example
 
 end RootedExternalHostStep
 
+section RootedExternalDestinationBind
+
+variable
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult rootResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {callerEnv : Env}
+    {sourceValue : Value}
+    {result : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {callerLocals : Wasm.Locals}
+    {callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {kind : AbiKind}
+    {physical : Wasm.Value}
+    {resultIndex : Nat}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+
+/-- Retain the caller/root ABI on the actual active-code successor of destination
+binding. Only the destination reuse fact is erased; the core-chosen locals and
+exact unchanged-frame equations are retained. Root transport spends no further
+budget, extends no witness and adds no bound/caller result-kind equality. -/
+theorem ConcreteStructuredValidatedExternalBindOutcome.advance_codeAtRoot_of_step
+    (related : ConcreteStructuredValidatedExternalBindOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec
+      externals labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime callerEnv
+      sourceValue result continuation callerJoins sourceFrames targetStore
+      callerLocals callerRemainder targetRest targetFrames witness kind physical
+      resultIndex source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter resumedLocals,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 1
+          target targetAfter ∧
+        ∃ nextActive : ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult (eraseReuseCapacityFact facts result)
+          remainingBytes sourceRuntime (bind callerEnv result sourceValue)
+          continuation targetStore resumedLocals targetRest witness sourceAfter
+          targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextActive.agrees nextActive.frames.validation ∧
+        sourceAfter.frames = sourceFrames ∧ targetAfter.frames = targetFrames := by
+  obtain ⟨targetAfter, resumedLocals, targetPath, nextActive,
+      sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_code_of_step sourceStep
+  exact ⟨targetAfter, resumedLocals, targetPath, nextActive,
+    rooted.reindex sourceFramesEq targetFramesEq
+      nextActive.agrees nextActive.frames.validation, sourceFramesEq, targetFramesEq⟩
+
+/-- Recover caller/root precision from the actual active successor of the bind,
+using its saved-frame equation and an empty caller stack. The exact one-step
+path and both frame equations remain visible; no bound/root ABI equality is
+supplied. -/
+example
+    (related : ConcreteStructuredValidatedExternalBindOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec
+      externals labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime callerEnv
+      sourceValue result continuation callerJoins sourceFrames targetStore
+      callerLocals callerRemainder targetRest targetFrames witness kind physical
+      resultIndex source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : sourceFrames = []) :
+    ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 1
+          target targetAfter ∧
+        functionResult = rootResult ∧
+        sourceAfter.frames = sourceFrames ∧ targetAfter.frames = targetFrames := by
+  obtain ⟨targetAfter, _resumedLocals, targetPath, _nextActive,
+      nextRooted, sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_codeAtRoot_of_step rooted sourceStep
+  exact ⟨targetAfter, targetPath,
+    nextRooted.functionResult_eq_of_empty (sourceFramesEq.trans empty),
+    sourceFramesEq, targetFramesEq⟩
+
+end RootedExternalDestinationBind
+
 /-- Heterogeneous nested calls retain the original result, not the deepest
 callee's kind or the immediate consumer's kind. -/
 example : concreteStructuredRootResultKind .uint8

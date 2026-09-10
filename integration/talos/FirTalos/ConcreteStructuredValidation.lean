@@ -6520,6 +6520,103 @@ validated external-bind boundary to ordinary validated compiler code.  The
 source bind and target `local.set` each take one step; only the destination's
 reuse fact is erased, while the validated caller tail is transported across
 the exact frame equalities supplied by the production core theorem. -/
+theorem ConcreteStructuredValidatedExternalBindOutcome.advance_code_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {callerEnv : Env}
+    {sourceValue : Value}
+    {result : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {callerLocals : Wasm.Locals}
+    {callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {kind : AbiKind}
+    {physical : Wasm.Value}
+    {resultIndex : Nat}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedExternalBindOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec
+      externals labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime callerEnv
+      sourceValue result continuation callerJoins sourceFrames targetStore
+      callerLocals callerRemainder targetRest targetFrames witness kind physical
+      resultIndex source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter resumedLocals,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 1
+          target targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult (eraseReuseCapacityFact facts result)
+          remainingBytes sourceRuntime (bind callerEnv result sourceValue)
+          continuation targetStore resumedLocals targetRest witness sourceAfter
+          targetAfter ∧
+        sourceAfter.frames = sourceFrames ∧ targetAfter.frames = targetFrames := by
+  obtain ⟨targetAfter, resumedLocals, targetPath, nextCore, sourceFramesEq,
+      targetFramesEq⟩ :=
+    related.core.advance_of_step (targetModule := targetModule) (hosts := hosts)
+      sourceStep
+  obtain ⟨supportedAfter, agreesAfter⟩ :=
+    related.agrees.reindex sourceFramesEq targetFramesEq
+      nextCore.resources.suspended
+  have validationAfter :
+      ConcreteStructuredSuspendedValidation program functionResult
+        callerExpectedResult sourceAfter.frames := by
+    rw [sourceFramesEq]
+    exact related.frames.validation
+  have validationAgreesAfter :
+      ConcreteStructuredValidationAgrees agreesAfter validationAfter :=
+    related.validationAgrees.reindex sourceFramesEq targetFramesEq agreesAfter
+      validationAfter
+  let validatedCore :
+      ConcreteStructuredValidatedCodeCoreRel program context sourceModule
+        sourceFunction externals labels entryRuntime entryStore entryWitness
+        functionResult callerExpectedResult (eraseReuseCapacityFact facts result)
+        remainingBytes sourceRuntime (bind callerEnv result sourceValue)
+        continuation targetStore resumedLocals targetRest witness sourceAfter
+        targetAfter :=
+    ⟨nextCore, related.continuationValidation⟩
+  let validatedFrames :
+      ConcreteStructuredValidatedFrameStack program sourceModule targetModule
+        hosts functionResult callerExpectedResult sourceAfter.frames
+        targetAfter.frames :=
+    ⟨supportedAfter, validationAfter⟩
+  let nextActive :
+      ConcreteStructuredValidatedCodeOutcome program context functionCode
+        sourceModule sourceFunction targetModule hosts spec externals labels
+        entryRuntime entryStore entryWitness functionResult
+        callerExpectedResult (eraseReuseCapacityFact facts result)
+        remainingBytes sourceRuntime (bind callerEnv result sourceValue)
+        continuation targetStore resumedLocals targetRest witness sourceAfter
+        targetAfter :=
+    ⟨related.contextCaches, validatedCore, validatedFrames, agreesAfter,
+      validationAgreesAfter⟩
+  exact ⟨targetAfter, resumedLocals, targetPath, nextActive,
+    sourceFramesEq, targetFramesEq⟩
+
+/-- Compatibility endpoint: hide the named active-code successor only after
+exposing the exact destination bind, one-step path and saved-frame equations. -/
 theorem ConcreteStructuredValidatedExternalBindOutcome.advance_of_step
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
@@ -6567,45 +6664,9 @@ theorem ConcreteStructuredValidatedExternalBindOutcome.advance_of_step
           target targetAfter ∧
         ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
           targetModule hosts externals witness sourceAfter targetAfter := by
-  obtain ⟨targetAfter, resumedLocals, targetPath, nextCore, sourceFramesEq,
-      targetFramesEq⟩ :=
-    related.core.advance_of_step (targetModule := targetModule) (hosts := hosts)
-      sourceStep
-  obtain ⟨supportedAfter, agreesAfter⟩ :=
-    related.agrees.reindex sourceFramesEq targetFramesEq
-      nextCore.resources.suspended
-  have validationAfter :
-      ConcreteStructuredSuspendedValidation program functionResult
-        callerExpectedResult sourceAfter.frames := by
-    rw [sourceFramesEq]
-    exact related.frames.validation
-  have validationAgreesAfter :
-      ConcreteStructuredValidationAgrees agreesAfter validationAfter :=
-    related.validationAgrees.reindex sourceFramesEq targetFramesEq agreesAfter
-      validationAfter
-  let validatedCore :
-      ConcreteStructuredValidatedCodeCoreRel program context sourceModule
-        sourceFunction externals labels entryRuntime entryStore entryWitness
-        functionResult callerExpectedResult (eraseReuseCapacityFact facts result)
-        remainingBytes sourceRuntime (bind callerEnv result sourceValue)
-        continuation targetStore resumedLocals targetRest witness sourceAfter
-        targetAfter :=
-    ⟨nextCore, related.continuationValidation⟩
-  let validatedFrames :
-      ConcreteStructuredValidatedFrameStack program sourceModule targetModule
-        hosts functionResult callerExpectedResult sourceAfter.frames
-        targetAfter.frames :=
-    ⟨supportedAfter, validationAfter⟩
-  let nextActive :
-      ConcreteStructuredValidatedCodeOutcome program context functionCode
-        sourceModule sourceFunction targetModule hosts spec externals labels
-        entryRuntime entryStore entryWitness functionResult
-        callerExpectedResult (eraseReuseCapacityFact facts result)
-        remainingBytes sourceRuntime (bind callerEnv result sourceValue)
-        continuation targetStore resumedLocals targetRest witness sourceAfter
-        targetAfter :=
-    ⟨related.contextCaches, validatedCore, validatedFrames, agreesAfter,
-      validationAgreesAfter⟩
+  obtain ⟨targetAfter, _resumedLocals, targetPath, nextActive,
+      _sourceFramesEq, _targetFramesEq⟩ :=
+    related.advance_code_of_step sourceStep
   exact ⟨targetAfter, targetPath,
     ConcreteStructuredValidatedCodeGlobalOutcomeAt.code related.activeResult
       nextActive⟩

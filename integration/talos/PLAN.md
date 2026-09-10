@@ -213,6 +213,19 @@ and rooted producer have identical standard-plus-byte32 dependencies; the
 inventory now checks 115 endpoints, with no new axiom or trust approval.
 Destination binding, entry/push/pop, lazy execution/cache writes and global
 root/schema assembly remain separate.
+External destination binding now retains root evidence on the actual named
+active-code successor. `advance_code_of_step` exposes the old producer's
+`nextActive` and both frame equations; `advance_of_step` keeps its original
+signature. `advance_codeAtRoot_of_step` reuses those exact equations for root
+transport. It retains one target `local.set` step, core-chosen `resumedLocals`,
+the bound source environment and destination-only reuse-fact erasure. Budget,
+runtime/store/witness and caller/result indices are unchanged, with no new
+typing/admission/resource/host/client premise or bound/caller ABI equality.
+The actual-producer regression derives saved-empty-caller precision while
+retaining path and frame equations. Baseline original and all three final
+endpoints use exactly the three standard axioms; the inventory now checks 118
+endpoints. Entry/push/pop, lazy execution/cache writes and global root/schema
+assembly remain separate; no new axiom or trust approval.
 The general global relation still existentially hides the represented kind;
 preserving the root index and producer precision through the remaining
 dispatcher branches and composing the strengthened global relation remain open.
