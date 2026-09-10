@@ -215,10 +215,23 @@ bounded integration lease when a producer submits its next clean checkpoint.
   distinct. Regression covers saved-empty-caller precision and empty-prefix
   target identity. Both endpoints are standard-axiom-only; no new trust or
   wider debt closure. This serial integration lease is released.
-  Next, ROOT-W6-20260910-022 assigns external-ready host-step root transport to
-  the actual named ExternalBind outcome, retaining its one-step path, witness
-  extension and exact budget/runtime/result indices. Destination binding,
-  callee entry, caller push/pop and global assembly stay separate.
+  ROOT-W6-20260910-022 is accepted at exact host-step checkpoint
+  `1b7dfed1cd1d49a514aec252340189ee42ac2dc3`, functional `4387732b`, base
+  `a56c88ef`. Independent diff-check, make check (730/2172, 38 mailbox tests)
+  and make talos-check (3204 jobs, 3165 audit cone, 115 endpoints) pass.
+  Exact verified receipt:
+  `b82c87d36bb1d73fc6c7bdf94b0c12726755e0fc63bbf3e76605c4f64be2efb0`.
+  Logs: root worktree `.deps/root-external-host-step-{check,talos}.log`.
+  Root mechanically verified the old public signature and core-call/bind
+  construction byte-identical. The named-bind helper exposes existing evidence;
+  rooted reindex retains the exact one-step path, witness extension, budget
+  subtraction and runtime/result indices. No caller/host ABI equality or new
+  premise. All three endpoints retain exactly the inherited byte32 dependency;
+  no new trust approval or wider debt closure. This serial lease is released.
+  Next, ROOT-W6-20260910-024 assigns external destination-bind root transport
+  to the named active-code successor, preserving one-step local.set, exact
+  destination reuse-fact erasure, frame equations and unchanged witness/budget.
+  Callee entry, caller push/pop, lazy execution and global assembly stay separate.
 - W7: ROOT-W7-20260909-107 is accepted at exact CG-05B checkpoint
   `cdfc6e44cefcf11ae5c7a27e99b227841005ba4e` (functional `6402d306`, base
   `14a2b07f`). Root serialized this candidate alone on
