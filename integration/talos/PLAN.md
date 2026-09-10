@@ -226,6 +226,19 @@ retaining path and frame equations. Baseline original and all three final
 endpoints use exactly the three standard axioms; the inventory now checks 118
 endpoints. Entry/push/pop, lazy execution/cache writes and global root/schema
 assembly remain separate; no new axiom or trust approval.
+Lazy-cache hits now retain root on their actual named bind outcome through
+`advance_hitAtRoot_of_step`, directly reusing the old hit producer and saved
+caller `reindex`. No helper or original producer/relation edit is needed.
+The explicit semantic lookup, four-step target path, cached physical value,
+caller/result indices and unchanged budget/runtime/store/witness/facts persist.
+One actual-producer regression recovers saved-empty-caller precision. A second
+invokes the accepted rooted bind unchanged and composes exactly `4 + 1 = 5`
+target steps, retaining the resulting named active state's root, both frame
+equations and destination-only reuse-fact erasure. No lookup, typing or ABI
+equality is inferred. Baseline and both original/rooted hit endpoints use
+exactly the three standard axioms; the inventory now checks 120 endpoints.
+Lazy misses/initializer entry/cache publication, callee entry/push/pop and
+global root/schema assembly remain separate; no new axiom or trust approval.
 The general global relation still existentially hides the represented kind;
 preserving the root index and producer precision through the remaining
 dispatcher branches and composing the strengthened global relation remain open.

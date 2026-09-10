@@ -716,6 +716,46 @@ Callee entry, caller push/pop, lazy execution/cache writes, global root/schema
 assembly, universal compiler admission and traps remain separate, as do
 footprint/whole-helper/tagged-result and all 14 W72 obligations.
 
+### Root-preserving lazy-cache hit and bind composition
+
+`ConcreteStructuredValidatedLazyCallReadyOutcome.advance_hitAtRoot_of_step`
+reuses `advance_hit_of_step` unchanged and attaches the root to the actual
+named external-bind outcome's `agrees` and `frames.validation` through the
+existing saved-caller `reindex`. No helper or ready/bind relation edit is needed.
+The complete central producer file and accepted rooted destination-bind proof
+remain unchanged.
+
+Its only premises are existing ready evidence, explicit
+`semanticFound : findGlobal? sourceRuntime.globals declaration = some sourceValue`
+and a successful source step, plus compiler-internal root evidence. Semantic
+lookup is not inferred; no value typing, ABI equality, capacity, admission or
+final-client premise is added. The cached value's `resultKind` remains distinct
+from the caller/root ABI.
+
+The producer retains exactly four target steps, the original core-chosen
+physical value and target successor, `sourceValue`/`decl.fvarId`, result kind/
+index, caller locals/values/rest, continuation/joins, saved frames and all
+active/caller result indices. Budget, runtime/store/witness and reuse facts are
+unchanged at hit-to-bind. No cache write or initializer entry occurs on this hit.
+
+One kernel regression invokes the actual rooted hit and recovers root precision
+at an empty saved caller stack while retaining the four-step path. A second
+invokes that hit followed by the accepted
+`ConcreteStructuredValidatedExternalBindOutcome.advance_codeAtRoot_of_step`
+for a second successful source step. `FinitePath.trans` composes exactly
+`4 + 1 = 5` steps; the result retains the named active successor, its checked
+root, recovered root precision, both frame equations, bound environment and
+`eraseReuseCapacityFact facts decl.fvarId`. The existing bind proof is reused
+unchanged; this is a focused composition test, not global simulation assembly.
+
+Baseline original at `c5f80579` and both final original/rooted hit endpoints
+have exactly `propext`, `Classical.choice` and `Quot.sound`. The inventory
+expands to 120 endpoints with no generated dependency, new axiom or trust
+approval. Existing native-evaluation debt elsewhere remains open. Lazy misses,
+initializer entry/cache publication, callee entry/push/pop, global root/schema
+assembly, compiler admission and traps remain separate, as do footprint/
+whole-helper/tagged-result and all 14 W72 obligations.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
@@ -767,6 +807,7 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | original pure-external staging and rooted ready-outcome producer | 3 | 0 |
 | original external-ready host step, named-bind helper and rooted bind producer | 3 | 1 |
 | original external destination bind, named-active/frame helper and rooted active producer | 3 | 0 |
+| original lazy-cache hit and rooted bind-outcome producer | 3 | 0 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original UInt8-case wrapper, frame-exposing helper and rooted successor | 3 | 2 |

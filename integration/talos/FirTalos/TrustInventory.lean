@@ -441,6 +441,10 @@ def endpointInventory : Array (Lean.Name × Array String) := #[
   (`FirTalos.Concrete.ConcreteStructuredValidatedExternalBindOutcome.advance_code_of_step,
     standardAxioms),
   (`FirTalos.Concrete.ConcreteStructuredValidatedExternalBindOutcome.advance_codeAtRoot_of_step,
+    standardAxioms),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedLazyCallReadyOutcome.advance_hit_of_step,
+    standardAxioms),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedLazyCallReadyOutcome.advance_hitAtRoot_of_step,
     standardAxioms)]
 
 end FirTalos.TrustAudit

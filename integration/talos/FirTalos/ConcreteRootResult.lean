@@ -2658,6 +2658,151 @@ example
 
 end RootedExternalDestinationBind
 
+section RootedLazyCacheHit
+
+variable
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {declaration : Lean.Name}
+    {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
+    {resultKind : AbiKind}
+    {call : LazyCacheCallSupported context decl declaration sourceDeclaration
+      resultKind}
+    {generated : LazyCacheGeneratedEnvironment context sourceModule}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult rootResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {callerEnv : Env}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {callerLocals : Wasm.Locals}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {cacheIndex declarationId cacheSetId resultIndex : Nat}
+    {sourceValue : Value}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+
+/-- Retain the caller/root ABI on the actual named bind outcome of a populated
+lazy-cache read. Reuse the existing four-step hit proof without a helper.
+The lookup premise, selected cached result and complete saved caller payload
+stay exact; the hit does not enter an initializer or write the cache. -/
+theorem ConcreteStructuredValidatedLazyCallReadyOutcome.advance_hitAtRoot_of_step
+    (related : ConcreteStructuredValidatedLazyCallReadyOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec call
+      generated externals labels entryRuntime entryStore entryWitness
+      functionResult callerExpectedResult facts remainingBytes sourceRuntime
+      callerEnv continuation callerJoins sourceFrames targetStore callerLocals
+      targetRest targetFrames witness cacheIndex declarationId cacheSetId
+      resultIndex source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (semanticFound :
+      findGlobal? sourceRuntime.globals declaration = some sourceValue)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ physical targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 4
+          target targetAfter ∧
+        ∃ nextBind : ConcreteStructuredValidatedExternalBindOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec
+          externals labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes sourceRuntime callerEnv
+          sourceValue decl.fvarId continuation callerJoins sourceFrames
+          targetStore callerLocals callerLocals.values targetRest targetFrames
+          witness resultKind physical resultIndex sourceAfter targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextBind.agrees nextBind.frames.validation := by
+  obtain ⟨physical, targetAfter, targetPath, nextBind⟩ :=
+    related.advance_hit_of_step semanticFound sourceStep
+  exact ⟨physical, targetAfter, targetPath, nextBind,
+    rooted.reindex rfl rfl nextBind.agrees nextBind.frames.validation⟩
+
+/-- The actual cache-hit producer recovers caller/root precision from its saved
+empty caller stack, retaining all four target steps. It does not identify the
+cached result ABI with the caller/root ABI. -/
+example
+    (related : ConcreteStructuredValidatedLazyCallReadyOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec call
+      generated externals labels entryRuntime entryStore entryWitness
+      functionResult callerExpectedResult facts remainingBytes sourceRuntime
+      callerEnv continuation callerJoins sourceFrames targetStore callerLocals
+      targetRest targetFrames witness cacheIndex declarationId cacheSetId
+      resultIndex source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (semanticFound :
+      findGlobal? sourceRuntime.globals declaration = some sourceValue)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : sourceFrames = []) :
+    ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 4
+          target targetAfter ∧
+        functionResult = rootResult := by
+  obtain ⟨_physical, targetAfter, targetPath, _nextBind, nextRooted⟩ :=
+    related.advance_hitAtRoot_of_step rooted semanticFound sourceStep
+  exact ⟨targetAfter, targetPath, nextRooted.functionResult_eq_of_empty empty⟩
+
+/-- Focused composition regression: the actual rooted hit followed by the
+accepted destination-bind producer gives exactly five target steps. Recover
+precision from the produced active state, retaining its checked root, both
+frame equations and destination-only reuse-fact erasure. No miss, publication
+or global dispatcher is involved. -/
+example
+    {sourceFinal : MachineState}
+    (related : ConcreteStructuredValidatedLazyCallReadyOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec call
+      generated externals labels entryRuntime entryStore entryWitness
+      functionResult callerExpectedResult facts remainingBytes sourceRuntime
+      callerEnv continuation callerJoins sourceFrames targetStore callerLocals
+      targetRest targetFrames witness cacheIndex declarationId cacheSetId
+      resultIndex source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (semanticFound :
+      findGlobal? sourceRuntime.globals declaration = some sourceValue)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (bindStep : executeStep externals sourceAfter = .next sourceFinal)
+    (empty : sourceFrames = []) :
+    ∃ targetFinal resumedLocals,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 5
+          target targetFinal ∧
+        ∃ nextActive : ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult (eraseReuseCapacityFact facts decl.fvarId)
+          remainingBytes sourceRuntime (bind callerEnv decl.fvarId sourceValue)
+          continuation targetStore resumedLocals targetRest witness sourceFinal
+          targetFinal,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextActive.agrees nextActive.frames.validation ∧
+        functionResult = rootResult ∧
+        sourceFinal.frames = sourceFrames ∧ targetFinal.frames = targetFrames := by
+  obtain ⟨_physical, _targetAfter, hitPath, nextBind, bindRooted⟩ :=
+    related.advance_hitAtRoot_of_step rooted semanticFound sourceStep
+  obtain ⟨targetFinal, resumedLocals, bindPath, nextActive, activeRooted,
+      sourceFramesEq, targetFramesEq⟩ :=
+    nextBind.advance_codeAtRoot_of_step bindRooted bindStep
+  exact ⟨targetFinal, resumedLocals, hitPath.trans bindPath, nextActive,
+    activeRooted, activeRooted.functionResult_eq_of_empty (sourceFramesEq.trans empty),
+    sourceFramesEq, targetFramesEq⟩
+
+end RootedLazyCacheHit
+
 /-- Heterogeneous nested calls retain the original result, not the deepest
 callee's kind or the immediate consumer's kind. -/
 example : concreteStructuredRootResultKind .uint8
