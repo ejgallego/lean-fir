@@ -107,10 +107,23 @@ bounded integration lease when a producer submits its next clean checkpoint.
   Logs: root worktree `.deps/root-case-dispatcher-{check,talos}.log`. Original
   and rooted dispatchers retain identical standard plus two existing native
   dependencies. No new classifier/client premise or wider proof-debt closure.
-  Root releases this bounded serial integration lease. Next,
-  ROOT-W6-20260910-006 assigns root transport through persistent and ordinary
-  increment/decrement, preserving exact zero/two-step paths and existing
-  effect/admission boundaries. Global assembly and caller push/pop stay separate.
+  Root releases this bounded serial integration lease.
+  ROOT-W6-20260910-006 is accepted at exact refcount checkpoint
+  `35ea09c53f26b27fd1c4123a4b5a423093904a80`, functional `44c73b52`, base
+  `2baabade`. Independent diff-check, make check (730/2172, 38 mailbox tests)
+  and make talos-check (3204 jobs, 3165 audit cone, 70 endpoints) pass.
+  Receipt: `d25b7c9dade85a19a12ac3a62ad728afa81a5294f216b8d3765bba77aa20797e`.
+  Logs: root worktree `.deps/root-refcount-{check,talos}.log`. Root mechanically
+  verified all four old APIs unchanged. Persistent branches derive admission
+  and retain zero-step/rank results; ordinary branches retain existing effect
+  predicates and two-step runtime/store evolution. Persistent endpoints are
+  standard-only; ordinary endpoints retain exactly the existing byte-assembly
+  native dependency. No new trust approval or ownership/refinement claim.
+  This bounded serial integration lease is released. Next,
+  ROOT-W6-20260910-008 assigns validation-derived rooted increment/decrement
+  and explicit deletion, retaining increment's existing headroom condition and
+  deriving the existing local effect evidence from validation/source execution.
+  Other mutations, global assembly and caller push/pop stay separate.
 - W7: ROOT-W7-20260909-107 is accepted at exact CG-05B checkpoint
   `cdfc6e44cefcf11ae5c7a27e99b227841005ba4e` (functional `6402d306`, base
   `14a2b07f`). Root serialized this candidate alone on
