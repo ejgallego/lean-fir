@@ -1018,6 +1018,48 @@ theorem ConcreteStructuredValidationAgrees.reindex
   subst targetValidation
   exact aligned
 
+/-- Preserve a specified checked caller spine through frame reindexing instead
+of existentially hiding it. Used by direct entry to expose its actual push. -/
+theorem ConcreteStructuredValidatedStackAgreement.reindex
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : ExternalImpl}
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness}
+    {functionResult : AbiKind}
+    {expectedResult : Option AbiKind}
+    {sourceFrames targetSourceFrames : List Frame}
+    {targetFrames targetTargetFrames : List StructuredWasmFrame}
+    {supported : ConcreteStructuredSupportedFrameStack program sourceModule
+      targetModule hosts functionResult expectedResult sourceFrames
+      targetFrames}
+    {resources : ConcreteStructuredSuspendedResourceStack externals program
+      entryRuntime entryStore entryWitness functionResult expectedResult
+      sourceFrames targetFrames}
+    {agrees : supported.Agrees resources}
+    {validation : ConcreteStructuredSuspendedValidation program functionResult
+      expectedResult sourceFrames}
+    {spine : List (AbiKind × Option AbiKind)}
+    (aligned : ConcreteStructuredValidatedStackAgreement spine agrees validation)
+    (sourceFramesEq : targetSourceFrames = sourceFrames)
+    (targetFramesEq : targetTargetFrames = targetFrames)
+    {targetSupported : ConcreteStructuredSupportedFrameStack program
+      sourceModule targetModule hosts functionResult expectedResult
+      targetSourceFrames targetTargetFrames}
+    {targetResources : ConcreteStructuredSuspendedResourceStack externals
+      program entryRuntime entryStore entryWitness functionResult
+      expectedResult targetSourceFrames targetTargetFrames}
+    (targetAgrees : targetSupported.Agrees targetResources)
+    (targetValidation : ConcreteStructuredSuspendedValidation program
+      functionResult expectedResult targetSourceFrames) :
+    ConcreteStructuredValidatedStackAgreement spine targetAgrees targetValidation := by
+  subst targetSourceFrames
+  subst targetTargetFrames
+  exact aligned
+
 /-- Admission-free compiler/resource core strengthened by the exact residual
 validation state of its current source node and its agreement with the
 production compiler's local row.  This companion relation is the incremental
@@ -4346,7 +4388,7 @@ The accepted callee declaration reconstructs root validation; the ready state
 pushes the previously validated caller continuation in lockstep with the
 production call frame and hereditary resource stack. -/
 theorem
-    ConcreteStructuredValidatedDirectCallReadyOutcome.advance_enter_of_step
+    ConcreteStructuredValidatedDirectCallReadyOutcome.advance_enterWithSpine_of_step
     {program : Fir.LeanIR.ImpureProgram}
     {callerContext calleeContext : Fir.Wasm.Context}
     {callerCode : Lean.Compiler.LCNF.Code .impure}
@@ -4389,12 +4431,32 @@ theorem
       facts remainingBytes sourceRuntime continuation callerJoins sourceFrames
       targetStore callerLocals callerRemainder targetRest targetFrames witness
       physicalArgs resultIndex source target)
+    {callerSpine : List (AbiKind × Option AbiKind)}
+    (callerValidationAgrees : ConcreteStructuredValidatedStackAgreement
+      callerSpine related.agrees related.frames.validation)
     (sourceStep : executeStep externals source = .next sourceAfter) :
     ∃ targetAfter,
       FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 1 target
           targetAfter ∧
-        ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
-          targetModule hosts externals witness sourceAfter targetAfter := by
+        ∃ calleeSpec : ConcreteSupportedFunction program calleeContext site.calleeCode
+          sourceModule calleeFunction targetModule hosts,
+        calleeSpec.sourceResultKind = site.calleeResultKind ∧
+        ∃ nextOutcome : ConcreteStructuredValidatedCodeOutcome program calleeContext
+          site.calleeCode sourceModule calleeFunction targetModule hosts
+          calleeSpec externals [] sourceRuntime targetStore witness
+          site.calleeResultKind (some site.calleeResultKind) [] remainingBytes
+          sourceRuntime site.calleeEnv site.calleeCode targetStore
+          (row.targetFunction.toLocals physicalArgs) row.targetFunction.body
+          witness sourceAfter targetAfter,
+        ConcreteStructuredValidatedStackAgreement
+          ((functionResult, callerExpectedResult) :: callerSpine)
+          nextOutcome.agrees nextOutcome.frames.validation ∧
+        sourceAfter.frames =
+          .bind decl.fvarId continuation callerEnv callerJoins :: sourceFrames ∧
+        targetAfter.frames =
+          .call 1 callerRemainder
+            { callerLocals with values := physicalArgs.reverse ++ callerRemainder }
+            (.localSet resultIndex :: targetRest) :: targetFrames := by
   obtain ⟨targetAfter, targetPath, nextCore, callerScope, entry⟩ :=
     related.core.advance_enter_of_step (hostEnv := hosts.env)
       spec.contextProgram sourceStep
@@ -4450,18 +4512,20 @@ theorem
       spec.contextProgram.symm entry.continuationAdapted entry.resultFound
       entry.resultKindAt (by simp [AbiKind.refines]) related.frames.supported
       related.core.resources.suspended related.agrees
-  obtain ⟨callerSpine, callerValidationAgrees⟩ :=
-    related.validationAgrees
-  have pushedValidationAgrees :
-      ConcreteStructuredValidationAgrees pushedAgrees
+  have pushedChecked :
+      ConcreteStructuredValidatedStackAgreement
+        ((functionResult, callerExpectedResult) :: callerSpine) pushedAgrees
         pushedFrames.validation :=
-    ⟨(functionResult, callerExpectedResult) :: callerSpine,
       .direct (callerJoins := callerJoins)
         (callerRemainder := callerRemainder) spec related.activeResult
         related.contextCaches callerScope spec.contextProgram.symm
         entry.continuationAdapted entry.resultFound entry.resultKindAt
         (by simp [AbiKind.refines]) related.continuationValidation
-        callerValidationAgrees⟩
+        callerValidationAgrees
+  have pushedValidationAgrees :
+      ConcreteStructuredValidationAgrees pushedAgrees
+        pushedFrames.validation :=
+    ⟨(functionResult, callerExpectedResult) :: callerSpine, pushedChecked⟩
   obtain ⟨supportedAfter, agreesAfter⟩ := pushedAgrees.reindex
     entry.sourceFramesEq entry.targetFramesEq
     validatedCore.core.resources.suspended
@@ -4489,6 +4553,71 @@ theorem
         witness sourceAfter targetAfter :=
     ⟨rowAtProgram.contextCaches, validatedCore, nextFrames, agreesAfter,
       nextValidationAgrees⟩
+  have nextChecked :
+      ConcreteStructuredValidatedStackAgreement
+        ((functionResult, callerExpectedResult) :: callerSpine)
+        nextOutcome.agrees nextOutcome.frames.validation :=
+    pushedChecked.reindex entry.sourceFramesEq entry.targetFramesEq
+      agreesAfter validationAfter
+  exact ⟨targetAfter, targetPath, calleeSpec, calleeResultAt, nextOutcome,
+    nextChecked, entry.sourceFramesEq, entry.targetFramesEq⟩
+
+/-- Compatibility endpoint: select the existing checked caller spine and hide
+the named callee only after the exact direct push and entry have been exposed. -/
+theorem
+    ConcreteStructuredValidatedDirectCallReadyOutcome.advance_enter_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {callerContext calleeContext : Fir.Wasm.Context}
+    {callerCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program callerContext callerCode
+      sourceModule callerFunction targetModule hosts}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {callerEnv : Env}
+    {site : DirectInternalCallSite callerContext decl callerEnv}
+    {row : ConcreteGeneratedInternalDeclaration callerContext.program
+      site.sourceDeclaration calleeContext site.calleeCode sourceModule
+      calleeFunction targetModule}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {callerLocals : Wasm.Locals}
+    {callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {physicalArgs : List Wasm.Value}
+    {resultIndex : Nat}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedDirectCallReadyOutcome program
+      callerContext calleeContext callerCode sourceModule callerFunction
+      calleeFunction targetModule hosts spec site row externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts remainingBytes sourceRuntime continuation callerJoins sourceFrames
+      targetStore callerLocals callerRemainder targetRest targetFrames witness
+      physicalArgs resultIndex source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 1 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+          targetModule hosts externals witness sourceAfter targetAfter := by
+  obtain ⟨callerSpine, callerValidationAgrees⟩ := related.validationAgrees
+  obtain ⟨targetAfter, targetPath, _calleeSpec, calleeResultAt, nextOutcome,
+      _nextChecked, _sourceFramesEq, _targetFramesEq⟩ :=
+    related.advance_enterWithSpine_of_step callerValidationAgrees sourceStep
   exact ⟨targetAfter, targetPath,
     ConcreteStructuredValidatedCodeGlobalOutcomeAt.code calleeResultAt
       nextOutcome⟩

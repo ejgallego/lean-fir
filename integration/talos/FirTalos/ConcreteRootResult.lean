@@ -27,6 +27,8 @@ Active-witness FVar and erased object-field writes use the unchanged source
 schema bridge and retain its exact typing/agreement premises during root transport.
 Named direct-call staging retains that root on its actual ready outcome and
 saved caller stack, before callee entry or any caller push.
+Named direct entry preserves it through the checked caller push and actual
+pushed-frame reindex, even when the active callee has a different result ABI.
 Saturated closure and lazy staging likewise preserve the caller root across
 zero target steps, retaining their capacity and hit/miss admission premises.
 Pure-external staging preserves it before the host call, retaining the exact
@@ -2802,6 +2804,159 @@ example
     sourceFramesEq, targetFramesEq⟩
 
 end RootedLazyCacheHit
+
+section RootedDirectCallEntry
+
+variable
+    {program : Fir.LeanIR.ImpureProgram}
+    {callerContext calleeContext : Fir.Wasm.Context}
+    {callerCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program callerContext callerCode
+      sourceModule callerFunction targetModule hosts}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {callerEnv : Env}
+    {site : DirectInternalCallSite callerContext decl callerEnv}
+    {row : ConcreteGeneratedInternalDeclaration callerContext.program
+      site.sourceDeclaration calleeContext site.calleeCode sourceModule
+      calleeFunction targetModule}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult rootResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {callerLocals : Wasm.Locals}
+    {callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {physicalArgs : List Wasm.Value}
+    {resultIndex : Nat}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+
+/-- Preserve the original root through the production named direct entry.
+The checked caller spine comes from the input root evidence; the existing
+direct constructor pushes that very spine and reindexes it onto the actual
+named callee. The active callee ABI may differ from the root. No extra caller
+scope, resource, ABI-classification or admission premise is introduced. -/
+theorem ConcreteStructuredValidatedDirectCallReadyOutcome.advance_enterAtRoot_of_step
+    (related : ConcreteStructuredValidatedDirectCallReadyOutcome program
+      callerContext calleeContext callerCode sourceModule callerFunction
+      calleeFunction targetModule hosts spec site row externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts remainingBytes sourceRuntime continuation callerJoins sourceFrames
+      targetStore callerLocals callerRemainder targetRest targetFrames witness
+      physicalArgs resultIndex source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 1 target
+          targetAfter ∧
+        ∃ calleeSpec : ConcreteSupportedFunction program calleeContext site.calleeCode
+          sourceModule calleeFunction targetModule hosts,
+        calleeSpec.sourceResultKind = site.calleeResultKind ∧
+        ∃ nextOutcome : ConcreteStructuredValidatedCodeOutcome program calleeContext
+          site.calleeCode sourceModule calleeFunction targetModule hosts
+          calleeSpec externals [] sourceRuntime targetStore witness
+          site.calleeResultKind (some site.calleeResultKind) [] remainingBytes
+          sourceRuntime site.calleeEnv site.calleeCode targetStore
+          (row.targetFunction.toLocals physicalArgs) row.targetFunction.body
+          witness sourceAfter targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextOutcome.agrees nextOutcome.frames.validation ∧
+        ∃ callerSpine,
+        ConcreteStructuredValidatedStackAgreement callerSpine
+          related.agrees related.frames.validation ∧
+        ConcreteStructuredValidatedStackAgreement
+          ((functionResult, callerExpectedResult) :: callerSpine)
+          nextOutcome.agrees nextOutcome.frames.validation ∧
+        sourceAfter.frames =
+          .bind decl.fvarId continuation callerEnv callerJoins :: sourceFrames ∧
+        targetAfter.frames =
+          .call 1 callerRemainder
+            { callerLocals with values := physicalArgs.reverse ++ callerRemainder }
+            (.localSet resultIndex :: targetRest) :: targetFrames := by
+  obtain ⟨callerSpine, callerChecked, callerRoot⟩ := rooted
+  have pushedRoot :
+      concreteStructuredRootResultKind site.calleeResultKind
+          ((functionResult, callerExpectedResult) :: callerSpine) = rootResult :=
+    (concreteStructuredRootResultKind_push site.calleeResultKind functionResult
+      callerExpectedResult callerSpine).trans callerRoot
+  obtain ⟨targetAfter, targetPath, calleeSpec, calleeResultAt, nextOutcome,
+      nextChecked, sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_enterWithSpine_of_step callerChecked sourceStep
+  exact ⟨targetAfter, targetPath, calleeSpec, calleeResultAt, nextOutcome,
+    ⟨_, nextChecked, pushedRoot⟩, callerSpine, callerChecked, nextChecked,
+    sourceFramesEq, targetFramesEq⟩
+
+/-- Actual-producer regression for heterogeneous caller/callee result kinds.
+The empty-stack equality is used only for the original caller, before entry.
+The produced callee has a singleton checked caller spine and retains the
+original root, while its own active result kind differs from that root. -/
+example
+    (related : ConcreteStructuredValidatedDirectCallReadyOutcome program
+      callerContext calleeContext callerCode sourceModule callerFunction
+      calleeFunction targetModule hosts spec site row externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts remainingBytes sourceRuntime continuation callerJoins sourceFrames
+      targetStore callerLocals callerRemainder targetRest targetFrames witness
+      physicalArgs resultIndex source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : sourceFrames = [])
+    (different : site.calleeResultKind ≠ functionResult) :
+    ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 1 target
+          targetAfter ∧
+        ∃ calleeSpec : ConcreteSupportedFunction program calleeContext site.calleeCode
+          sourceModule calleeFunction targetModule hosts,
+        calleeSpec.sourceResultKind = site.calleeResultKind ∧
+        ∃ nextOutcome : ConcreteStructuredValidatedCodeOutcome program calleeContext
+          site.calleeCode sourceModule calleeFunction targetModule hosts
+          calleeSpec externals [] sourceRuntime targetStore witness
+          site.calleeResultKind (some site.calleeResultKind) [] remainingBytes
+          sourceRuntime site.calleeEnv site.calleeCode targetStore
+          (row.targetFunction.toLocals physicalArgs) row.targetFunction.body
+          witness sourceAfter targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextOutcome.agrees nextOutcome.frames.validation ∧
+        functionResult = rootResult ∧
+        site.calleeResultKind ≠ rootResult ∧
+        ConcreteStructuredValidatedStackAgreement
+          [(functionResult, callerExpectedResult)]
+          nextOutcome.agrees nextOutcome.frames.validation ∧
+        sourceAfter.frames =
+          [.bind decl.fvarId continuation callerEnv callerJoins] ∧
+        targetAfter.frames =
+          .call 1 callerRemainder
+            { callerLocals with values := physicalArgs.reverse ++ callerRemainder }
+            (.localSet resultIndex :: targetRest) :: targetFrames := by
+  have callerRoot : functionResult = rootResult :=
+    rooted.functionResult_eq_of_empty empty
+  obtain ⟨targetAfter, targetPath, calleeSpec, calleeResultAt, nextOutcome,
+      nextRooted, callerSpine, callerChecked, nextChecked,
+      sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_enterAtRoot_of_step rooted sourceStep
+  have callerNil := callerChecked.spine_eq_nil_of_empty empty
+  subst callerSpine
+  refine ⟨targetAfter, targetPath, calleeSpec, calleeResultAt, nextOutcome,
+    nextRooted, callerRoot, ?_, nextChecked, ?_, targetFramesEq⟩
+  · simpa only [← callerRoot] using different
+  · simpa only [empty] using sourceFramesEq
+
+end RootedDirectCallEntry
 
 /-- Heterogeneous nested calls retain the original result, not the deepest
 callee's kind or the immediate consumer's kind. -/

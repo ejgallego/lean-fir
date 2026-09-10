@@ -239,6 +239,20 @@ equality is inferred. Baseline and both original/rooted hit endpoints use
 exactly the three standard axioms; the inventory now checks 120 endpoints.
 Lazy misses/initializer entry/cache publication, callee entry/push/pop and
 global root/schema assembly remain separate; no new axiom or trust approval.
+Named direct-call entry now preserves the original root through its checked
+caller push. `advance_enterWithSpine_of_step` carries the same input checked
+spine to the actual named callee; `advance_enter_of_step` keeps its original
+signature. The rooted producer extracts that spine from internal root evidence,
+uses the existing root-push law, and retains its indexed agreement through the
+actual pushed-frame equations. Production core/caller-scope/push and callee
+construction stay unchanged, including one target step and exact entry indices.
+No caller/callee ABI equality or new resource/admission/client premise is added.
+The actual-producer regression keeps a singleton checked caller spine after
+entry and a callee result kind different from the original root; empty-stack
+precision is used only before the push. Original/helper/rooted entry and indexed
+reindex use exactly the baseline's standard axioms; 124 endpoints are audited.
+Other entry/push/pop families, cache publication and global root/schema assembly
+remain separate; no new axiom or trust approval.
 The general global relation still existentially hides the represented kind;
 preserving the root index and producer precision through the remaining
 dispatcher branches and composing the strengthened global relation remain open.

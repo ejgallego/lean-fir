@@ -756,6 +756,57 @@ initializer entry/cache publication, callee entry/push/pop, global root/schema
 assembly, compiler admission and traps remain separate, as do footprint/
 whole-helper/tagged-result and all 14 W72 obligations.
 
+### Original-root preservation through named direct entry
+
+`ConcreteStructuredValidatedDirectCallReadyOutcome.advance_enterWithSpine_of_step`
+exposes the actual named callee outcome and its checked pushed spine. Its spine
+argument is already-checked internal metadata: the compatibility wrapper gets
+it from `related.validationAgrees`, while the rooted producer gets the same
+spine and alignment from the caller's internal root evidence. No application
+client supplies a new spine, caller scope or resource proof.
+
+`advance_enter_of_step` keeps its exact original signature. The production
+core call, generated-row/callee-spec/core construction, checked caller scope,
+stored argument locals and direct supported/resource frame construction are
+unchanged. So is the reindexed callee-outcome construction. Only the existing
+checked `.direct` agreement is named before hiding its spine; the focused
+`ConcreteStructuredValidatedStackAgreement.reindex` preserves that index across
+the same `entry.sourceFramesEq`/`entry.targetFramesEq`.
+
+`advance_enterAtRoot_of_step` extracts the caller's checked spine, applies
+`concreteStructuredRootResultKind_push`, and attaches root evidence to the
+actual named callee's `agrees` and `frames.validation` using its reindexed
+checked push. It also exposes the source caller alignment and pushed target
+alignment on that same spine. It does not attach an unrelated existential
+stack or assume the successor root.
+
+The result retains one target step, the selected row/callee spec and code,
+`row.targetFunction.toLocals physicalArgs` and body, saved caller continuation/
+remainder, unchanged witness and remaining budget. Callee labels and reuse
+facts are empty; active/expected results are exactly `site.calleeResultKind`
+and `some site.calleeResultKind`. The callee entry snapshot is the current
+source runtime/target store/witness; the prior caller entry snapshot and
+resources are preserved in the checked direct frame, as in the original proof.
+The exposed frame equations push a source `.bind` and target `.call` with its
+saved `local.set` continuation; they are not unchanged-frame equations.
+
+Only ready evidence and a successful source step plus compiler-internal root
+evidence are public producer premises. No caller/callee result equality, scope,
+resource, ABI classification, admission or final-client root premise is added.
+The actual-producer regression assumes differing caller/callee result kinds
+and an empty *saved caller* stack. It retains the one-step path, actual callee
+and root, singleton checked caller spine and exact pushed-frame equations,
+while proving that the callee's active result differs from the original root.
+The empty-stack active/root corollary is used only for the original caller,
+never for the nonempty post-push stack.
+
+Baseline original at `debc463d`, final compatibility/helper/rooted entry and
+indexed reindex all have exactly `propext`, `Classical.choice`, `Quot.sound`.
+The inventory covers 124 endpoints; no generated dependency, new axiom or trust
+approval is introduced. Other direct-return/pop, saturated/lazy entry,
+cache publication, global root/schema assembly, admission and traps remain
+separate, as do footprint/whole-helper/tagged-result and all 14 W72 obligations.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
@@ -808,6 +859,7 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | original external-ready host step, named-bind helper and rooted bind producer | 3 | 1 |
 | original external destination bind, named-active/frame helper and rooted active producer | 3 | 0 |
 | original lazy-cache hit and rooted bind-outcome producer | 3 | 0 |
+| indexed checked-spine reindex, original direct entry, spine helper and rooted callee producer | 3 | 0 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original UInt8-case wrapper, frame-exposing helper and rooted successor | 3 | 2 |
