@@ -241,10 +241,23 @@ bounded integration lease when a producer submits its next clean checkpoint.
   erasure and unchanged budget/witness/runtime. No new premise or bound/caller
   ABI equality. All three endpoints use only standard axioms; no new trust or
   wider debt closure. This serial integration lease is released.
-  Next, ROOT-W6-20260910-026 assigns lazy-cache hit root transport to the named
-  bind outcome with exact four-step path and semantic lookup premise, plus a
-  focused composition regression through the accepted one-step bind. Lazy
-  misses/cache writes, callee entry, caller push/pop and global assembly stay separate.
+  ROOT-W6-20260910-026 is accepted at exact lazy-hit checkpoint
+  `7d2cf2f7da3570b2ae023ef7ba2c490ffa70193c`, functional `d44360e6`, base
+  `c5f80579`. Independent diff-check, make check (730/2172, 38 mailbox tests)
+  and make talos-check (3204 jobs, 3165 audit cone, 120 endpoints) pass.
+  Exact verified receipt:
+  `bb6067c26892bca48643ebcc459a68f854a9186ab4c4fb6d0e4b5a760eb8ec03`.
+  Logs: root worktree `.deps/root-lazy-cache-hit-{check,talos}.log`.
+  Original producer file and accepted rooted-bind section are unchanged.
+  Direct reindex retains exact lookup, four-step hit and saved caller/root
+  evidence; the actual-producer composition gives 4+1=5 steps to the named
+  active successor with root, frame equations and destination-only fact erasure.
+  Both hit endpoints are standard-axiom-only; no new trust approval or wider
+  debt closure. This serial integration lease is released.
+  Next, ROOT-W6-20260910-028 assigns named direct-call entry root transport,
+  including only its existing checked direct caller push and exact one-step
+  callee successor. Preserve heterogeneous caller/callee ABIs. Saturated/lazy
+  entry, cache publication, caller pop and global assembly stay separate.
 - W7: ROOT-W7-20260909-107 is accepted at exact CG-05B checkpoint
   `cdfc6e44cefcf11ae5c7a27e99b227841005ba4e` (functional `6402d306`, base
   `14a2b07f`). Root serialized this candidate alone on
