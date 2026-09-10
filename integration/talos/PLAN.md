@@ -167,6 +167,16 @@ unchanged. Ten exact entries expand the inventory to 104, all matching the
 originals' single existing byte-assembly dependency; no new trust is approved.
 Arbitrary-witness wrappers, global schema dispatch, other transition families
 and global assembly remain separate.
+Named direct-call staging now retains the root on its actual validated ready
+outcome and saved caller stack, reusing the old staging producer and existing
+reindex lemma without an additional helper. The selected row/callee, physical
+arguments, result index, exact argument-prefix-length path and strict source
+rank decrease are preserved, as are continuation validation and resources.
+The regression recovers caller/root precision from an empty saved caller stack
+and target identity at an empty prefix. Caller and callee result kinds are not
+equated. Both original/rooted endpoints are standard-axiom-only; the inventory
+now checks 106 endpoints. Callee entry, caller push/pop, other staging families
+and global root assembly remain separate.
 The general global relation still existentially hides the represented kind;
 preserving the root index and producer precision through the remaining
 dispatcher branches and composing the strengthened global relation remain open.

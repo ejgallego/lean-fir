@@ -25,6 +25,8 @@ USize and packed-scalar field mutations retain it through their three-step
 rules; the packed-scalar rule keeps its existing descriptor-layout premise.
 Active-witness FVar and erased object-field writes use the unchanged source
 schema bridge and retain its exact typing/agreement premises during root transport.
+Named direct-call staging retains that root on its actual ready outcome and
+saved caller stack, before callee entry or any caller push.
 Preservation through the other global transitions is still separate; the
 unindexed global relation cannot recover root identity after existentially
 hiding the caller spine.
@@ -2006,6 +2008,114 @@ example
     nextRooted.functionResult_eq_of_empty (sourceFramesEq.trans empty)⟩
 
 end RootedActiveObjectFields
+
+section RootedDirectCallStaging
+
+variable
+    {program : Fir.LeanIR.ImpureProgram}
+    {callerContext : Fir.Wasm.Context}
+    {callerCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program callerContext callerCode
+      sourceModule callerFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {callerEnv : Env}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult rootResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+
+/-- Named direct-call staging retains the caller's root on the actual ready
+outcome. No callee entry or caller push occurs here. The exact production row,
+argument-prefix path and strict source-rank decrease come from the unchanged
+staging producer; its saved caller stack is reindexed without a new premise. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_directCall_stageAtRoot_of_step
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program callerContext
+      callerCode sourceModule callerFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime callerEnv
+      (.let decl continuation) targetStore targetLocals targetCode witness source
+      target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (site : DirectInternalCallSite callerContext decl callerEnv)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ calleeContext calleeFunction,
+      ∃ row : ConcreteGeneratedInternalDeclaration callerContext.program
+        site.sourceDeclaration calleeContext site.calleeCode sourceModule
+        calleeFunction targetModule,
+      ∃ (physicalArgs : List Wasm.Value) (resultIndex : Nat)
+          (targetArguments targetRest : Wasm.Program)
+          (targetAfter : StructuredWasmState Host),
+        FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+            targetArguments.length target targetAfter ∧
+          ∃ ready : ConcreteStructuredValidatedDirectCallReadyOutcome program
+            callerContext calleeContext callerCode sourceModule callerFunction
+            calleeFunction targetModule hosts spec site row externals labels
+            entryRuntime entryStore entryWitness functionResult
+            callerExpectedResult facts remainingBytes sourceRuntime continuation
+            source.joins source.frames targetStore targetLocals
+            targetLocals.values targetRest target.frames witness physicalArgs
+            resultIndex sourceAfter targetAfter,
+          ConcreteStructuredValidationAgreesAtRoot rootResult
+            ready.agrees ready.frames.validation ∧
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source := by
+  obtain ⟨calleeContext, calleeFunction, row, physicalArgs, resultIndex,
+      targetArguments, targetRest, targetAfter, path, ready, rank⟩ :=
+    related.advance_directCall_stage_of_step activeResult site sourceStep
+  exact ⟨calleeContext, calleeFunction, row, physicalArgs, resultIndex,
+    targetArguments, targetRest, targetAfter, path, ready,
+    rooted.reindex rfl rfl ready.agrees ready.frames.validation, rank⟩
+
+/-- The actual staging producer recovers the caller/root ABI from its saved
+empty caller stack, not from the selected callee's result. It retains the exact
+prefix path and strict rank decrease, even when the prefix is empty. -/
+example
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program callerContext
+      callerCode sourceModule callerFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime callerEnv
+      (.let decl continuation) targetStore targetLocals targetCode witness source
+      target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (site : DirectInternalCallSite callerContext decl callerEnv)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : source.frames = []) :
+    ∃ (targetArguments : Wasm.Program) (targetAfter : StructuredWasmState Host),
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetArguments.length target targetAfter ∧
+        functionResult = rootResult ∧
+        compilerStructuredControlRank sourceAfter <
+          compilerStructuredControlRank source ∧
+        (targetArguments = [] → targetAfter = target) := by
+  obtain ⟨_, _, _, _, _, targetArguments, _, targetAfter, path, _ready,
+      nextRooted, rank⟩ :=
+    related.advance_directCall_stageAtRoot_of_step activeResult rooted site sourceStep
+  refine ⟨targetArguments, targetAfter, path,
+    nextRooted.functionResult_eq_of_empty empty, rank, ?_⟩
+  intro zero
+  have emptyPath : FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+      0 target targetAfter := by simpa [zero] using path
+  exact emptyPath.eq_of_zero.symm
+
+end RootedDirectCallStaging
 
 /-- Heterogeneous nested calls retain the original result, not the deepest
 callee's kind or the immediate consumer's kind. -/

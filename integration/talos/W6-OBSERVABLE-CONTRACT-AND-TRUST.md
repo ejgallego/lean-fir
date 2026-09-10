@@ -532,6 +532,38 @@ dispatch, other local families, caller push/pop, global root/precision
 assembly, universal compiler admission and traps remain separate. Closure
 footprint, whole-helper/tagged-result and all 14 W72 obligations are unchanged.
 
+### Root-preserving named direct-call staging
+
+`ConcreteStructuredValidatedCodeOutcome.advance_directCall_stageAtRoot_of_step`
+calls the original `advance_directCall_stage_of_step` unchanged, then applies
+the existing `ConcreteStructuredValidationAgreesAtRoot.reindex` to that exact
+named `ConcreteStructuredValidatedDirectCallReadyOutcome`. Its `agrees` and
+`frames.validation` retain the original caller/root ABI. The ready outcome
+already exposes the saved caller frame indices, so no additional frame helper
+or central staging edit is needed.
+
+The old `activeResult` and `DirectInternalCallSite` premises are unchanged.
+The rule retains the selected generated row and callee context/function,
+physical arguments, result index, target argument prefix/rest, exact
+`targetArguments.length` path and strict source control-rank decrease. Its
+ready payload still holds caller continuation validation, saved source/target
+frames, active/caller result indices, runtime/store, witness and resource
+budget. No callee entry or caller push occurs here; there is no equality
+between caller and callee result kinds, or a new client/classifier premise.
+
+A kernel regression invokes the actual rooted producer and derives caller/
+root precision from its saved empty caller stack. It retains the exact path
+and unconditional rank decrease, including when an empty argument prefix
+implies an unchanged target. No result-kind equality is assumed.
+
+Baseline `07b34775` and both original/rooted endpoints have exactly the three
+standard axioms; the exact inventory expands to 106 endpoints. No new axiom,
+generated dependency or trust approval. The original staging declaration and
+body, ready relation and shared semantic/admission definitions are untouched.
+This is one local staging boundary, not callee entry, caller push/pop, other
+staging families or global root assembly. Footprint, whole-helper/tagged-result
+and all 14 W72 obligations remain separate.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
@@ -578,6 +610,7 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | original USize mutation/validated rules, frame helper and both rooted producers | 3 | 1 |
 | original packed-scalar mutation/validated rules, frame helper and both rooted producers | 3 | 2 |
 | original active-witness FVar/erased field effects and schema rules, frame helpers and rooted producers | 3 | 1 |
+| original named direct-call staging and rooted ready-outcome producer | 3 | 0 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original UInt8-case wrapper, frame-exposing helper and rooted successor | 3 | 2 |
