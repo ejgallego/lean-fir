@@ -443,6 +443,47 @@ or mutation semantics. Field mutation, other families, caller push/pop, global
 assembly, public result-kind/admission closure and trap semantics stay open;
 closure-footprint, whole-helper/tagged-result and W72 work remain separate.
 
+### Root-preserving USize and packed-scalar field mutation
+
+`advance_usizeFieldWithFrames_of_step` and
+`advance_scalarFieldWithFrames_of_step` expose frame equations already proved
+by the existing pointwise mutations, attaching validation with unchanged
+`withSuccessor`. Their old effect-rule signatures remain exact compatibility
+wrappers. The corresponding `AtRoot_of_step` rules reindex the same root on
+the actual named successors; no generic framework is introduced.
+
+`advance_usizeFieldAtRoot_of_validated_step` reconstructs compiled operands
+and dynamic slot/heap facts through `uset_compiler` and `uset_source_of_step`.
+It needs no additional source-layout, caller effect or admission premise.
+`advance_scalarFieldAtRoot_of_validated_step` derives compiler/dynamic facts
+through `sset_compiler` and `sset_source_of_step`, but retains EXACTLY:
+
+```lean
+fieldTyped : ConcreteScalarFieldMutationTyped context sourceRuntime sourceEnv
+  objectId fieldId slotIndex byteOffset
+```
+
+This source descriptor-layout invariant is neither strengthened nor weakened,
+and is not claimed to follow from validation or successful source execution.
+Neither rooted rule adds a width, descriptor, effect or admission premise.
+Both original validated declarations and proof bodies remain unchanged.
+
+All rooted successors retain exact three-step target paths, next runtime/
+store/code, source environment, active/caller result indices, witness, budget
+and both frame equations. Two kernel regressions invoke the actual validated
+rooted producers with only their existing premises, recovering active/root
+precision from their successors at an empty source caller stack.
+
+All ten original/helper/rooted axiom sets equal baseline `c42bc5d2`. USize
+retains three standard axioms plus the existing byte32-assembly dependency;
+packed-scalar retains the standard three plus the existing byte16/byte32 pair,
+individually named in `packedScalarFieldNativeDebt`. The exact inventory now
+has 94 endpoints, with no new axiom or trust approval. This is root transport,
+not new mutation/layout refinement. Object-reference/erased fields, schema
+bridges, other families, caller push/pop, global assembly, public result-kind/
+admission closure and trap semantics remain separate. Closure-footprint,
+whole-helper/tagged-result and W72 obligations are unchanged.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
@@ -486,6 +527,8 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | original direct-let wrapper, frame-exposing helper and root-preserving successor | 3 | 54 |
 | original and rooted validation-derived inc/dec/delete, plus delete helper/transport | 3 | 1 |
 | original tag mutation/validated rules, frame helper and both rooted producers | 3 | 1 |
+| original USize mutation/validated rules, frame helper and both rooted producers | 3 | 1 |
+| original packed-scalar mutation/validated rules, frame helper and both rooted producers | 3 | 2 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original UInt8-case wrapper, frame-exposing helper and rooted successor | 3 | 2 |

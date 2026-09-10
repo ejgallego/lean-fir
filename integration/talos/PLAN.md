@@ -139,7 +139,20 @@ store/code, source environment, result indices, witness, budget and both frame
 equations. Its kernel regression recovers root precision from that successor.
 Both old APIs remain unchanged. All five original/helper/rooted tag endpoints
 share exactly the existing byte-assembly dependency, checked in the expanded
-84-endpoint inventory. Field mutation and other families remain separate.
+84-endpoint inventory.
+USize and packed-scalar field mutation now retain the root through focused
+WithFrames helpers and their effect/validation-derived AtRoot wrappers. Their
+named successors preserve exact three-step paths, runtime/store/code evolution,
+source environment, result indices, witness, budget and both frame equations.
+USize reconstructs all required compiler/dynamic facts without an extra source
+layout premise. Packed-scalar keeps exactly its existing
+`ConcreteScalarFieldMutationTyped` premise; descriptor-layout evidence is not
+inferred from validation or successful execution. Two kernel regressions use
+the actual validated rooted producers to recover successor precision. Old
+APIs and validated producer bodies remain unchanged. Ten exact entries expand
+the inventory to 94: USize retains one existing byte-assembly dependency,
+packed-scalar two. Object-reference/erased fields and schema bridges remain
+separate, as do all other transition families and global assembly.
 The general global relation still existentially hides the represented kind;
 preserving the root index and producer precision through the remaining
 dispatcher branches and composing the strengthened global relation remain open.

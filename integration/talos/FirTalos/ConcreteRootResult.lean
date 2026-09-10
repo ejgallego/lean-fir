@@ -21,6 +21,8 @@ their effect facts internally; increment retains its exact refcount headroom
 premise. Delete includes erased physical zero through the existing rule.
 Constructor-tag mutation likewise derives compiler/heap-shape facts and
 retains the root through its existing exact two-step effect rule.
+USize and packed-scalar field mutations retain it through their three-step
+rules; the packed-scalar rule keeps its existing descriptor-layout premise.
 Preservation through the other global transitions is still separate; the
 unindexed global relation cannot recover root identity after existentially
 hiding the caller spine.
@@ -1474,6 +1476,263 @@ example
     nextRooted.functionResult_eq_of_empty (sourceFramesEq.trans empty)⟩
 
 end RootedConstructorTags
+
+section RootedScalarFields
+
+variable
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime nextRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult rootResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+
+/-- `USize` field mutation retains the original root through its existing
+three-step effect proof and the unchanged source/target frame equations. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_usizeFieldAtRoot_of_step
+    {objectId fieldId : Lean.FVarId} {index : Nat}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.uset objectId index fieldId continuation) targetStore targetLocals
+      targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (supported : USizeFieldEffectSupported context sourceRuntime sourceEnv
+      (.uset objectId index fieldId continuation) continuation nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        ∃ nextRelated : ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextRelated.agrees nextRelated.frames.validation ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames := by
+  obtain ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated,
+      sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_usizeFieldWithFrames_of_step supported sourceStep
+  exact ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated,
+    rooted.reindex sourceFramesEq targetFramesEq
+      nextRelated.agrees nextRelated.frames.validation,
+    sourceFramesEq, targetFramesEq⟩
+
+/-- `USize` field mutation reconstructs compiler and dynamic facts from
+validation and successful source execution. No extra caller effect, admission
+or source-layout premise is needed for root transport. -/
+theorem
+    ConcreteStructuredValidatedCodeOutcome.advance_usizeFieldAtRoot_of_validated_step
+    {objectId fieldId : Lean.FVarId} {index : Nat}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.uset objectId index fieldId continuation) targetStore targetLocals
+      targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ resultRuntime targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        ∃ nextRelated : ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes resultRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextRelated.agrees nextRelated.frames.validation ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames := by
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees, localAlignment⟩ :=
+    related.core.validation
+  obtain ⟨objectCompiled, fieldCompiled⟩ := validated.uset_compiler agrees
+  obtain ⟨location, cell, semantic, field, resultRuntime, objectLookup,
+      fieldLookup, updated, found, live, objectEq, slotStart, slotEnd⟩ :=
+    related.core.core.focus.uset_source_of_step sourceStep
+  let supported : USizeFieldEffectSupported context sourceRuntime sourceEnv
+      (.uset objectId index fieldId continuation) continuation resultRuntime :=
+    .uset sourceRuntime resultRuntime sourceEnv objectId fieldId index
+      continuation location cell semantic field objectCompiled fieldCompiled
+      objectLookup fieldLookup updated found live objectEq slotStart slotEnd
+  obtain ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated,
+      nextRooted, sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_usizeFieldAtRoot_of_step rooted supported sourceStep
+  exact ⟨resultRuntime, targetAfter, nextStore, nextTargetCode, path, nextRelated,
+    nextRooted, sourceFramesEq, targetFramesEq⟩
+
+/-- The actual validated USize producer recovers precision from its
+successor with only its existing premises. No caller effect facts or
+result-kind equality are supplied; the exact three-step path is retained. -/
+example
+    {objectId fieldId : Lean.FVarId} {index : Nat}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.uset objectId index fieldId continuation) targetStore targetLocals
+      targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : source.frames = []) :
+    ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames ∧
+        functionResult = rootResult := by
+  obtain ⟨_, targetAfter, _, _, path, _, nextRooted, sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_usizeFieldAtRoot_of_validated_step rooted sourceStep
+  exact ⟨targetAfter, path, sourceFramesEq, targetFramesEq,
+    nextRooted.functionResult_eq_of_empty (sourceFramesEq.trans empty)⟩
+
+/-- Packed-scalar mutation retains the original root through the existing
+layout-checked three-step effect proof. Its effect contract is unchanged. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_scalarFieldAtRoot_of_step
+    {objectId fieldId : Lean.FVarId} {slotIndex byteOffset : Nat}
+    {type : Lean.Expr}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.sset objectId slotIndex byteOffset fieldId type continuation) targetStore
+      targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (supported : ScalarFieldEffectSupported context sourceRuntime sourceEnv
+      (.sset objectId slotIndex byteOffset fieldId type continuation)
+      continuation nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        ∃ nextRelated : ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextRelated.agrees nextRelated.frames.validation ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames := by
+  obtain ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated,
+      sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_scalarFieldWithFrames_of_step supported sourceStep
+  exact ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated,
+    rooted.reindex sourceFramesEq targetFramesEq
+      nextRelated.agrees nextRelated.frames.validation,
+    sourceFramesEq, targetFramesEq⟩
+
+/-- Packed-scalar mutation derives compiler/dynamic facts and retains the
+root, keeping exactly the existing source descriptor-layout `fieldTyped`
+premise. That invariant is not derived from validation or source execution. -/
+theorem
+    ConcreteStructuredValidatedCodeOutcome.advance_scalarFieldAtRoot_of_validated_step
+    {objectId fieldId : Lean.FVarId} {slotIndex byteOffset : Nat}
+    {type : Lean.Expr}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.sset objectId slotIndex byteOffset fieldId type continuation) targetStore
+      targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (fieldTyped : ConcreteScalarFieldMutationTyped context sourceRuntime
+      sourceEnv objectId fieldId slotIndex byteOffset)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ resultRuntime targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        ∃ nextRelated : ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes resultRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextRelated.agrees nextRelated.frames.validation ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames := by
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees, localAlignment⟩ :=
+    related.core.validation
+  obtain ⟨fieldKind, objectCompiled, fieldCompiled, _annotationFound,
+      _scalarSupported⟩ := validated.sset_compiler agrees
+  obtain ⟨location, cell, semantic, field, resultRuntime, objectLookup,
+      fieldLookup, updated, found, live, objectEq⟩ :=
+    related.core.core.focus.sset_source_of_step sourceStep
+  let supported : ScalarFieldEffectSupported context sourceRuntime sourceEnv
+      (.sset objectId slotIndex byteOffset fieldId type continuation)
+      continuation resultRuntime :=
+    .sset sourceRuntime resultRuntime sourceEnv objectId fieldId slotIndex
+      byteOffset type continuation location cell semantic field fieldKind
+      objectCompiled fieldCompiled objectLookup fieldLookup updated found live
+      objectEq (fun objectRelated descriptorFound =>
+        fieldTyped fieldCompiled objectLookup found live objectEq objectRelated
+          descriptorFound)
+  obtain ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated,
+      nextRooted, sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_scalarFieldAtRoot_of_step rooted supported sourceStep
+  exact ⟨resultRuntime, targetAfter, nextStore, nextTargetCode, path, nextRelated,
+    nextRooted, sourceFramesEq, targetFramesEq⟩
+
+/-- The actual validated packed-scalar producer recovers precision from its
+successor with only its existing premises. No caller effect facts or
+result-kind equality are supplied; the exact three-step path is retained. -/
+example
+    {objectId fieldId : Lean.FVarId} {slotIndex byteOffset : Nat}
+    {type : Lean.Expr}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.sset objectId slotIndex byteOffset fieldId type continuation) targetStore
+      targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (fieldTyped : ConcreteScalarFieldMutationTyped context sourceRuntime
+      sourceEnv objectId fieldId slotIndex byteOffset)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : source.frames = []) :
+    ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames ∧
+        functionResult = rootResult := by
+  obtain ⟨_, targetAfter, _, _, path, _, nextRooted, sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_scalarFieldAtRoot_of_validated_step rooted fieldTyped sourceStep
+  exact ⟨targetAfter, path, sourceFramesEq, targetFramesEq,
+    nextRooted.functionResult_eq_of_empty (sourceFramesEq.trans empty)⟩
+
+end RootedScalarFields
 
 /-- Heterogeneous nested calls retain the original result, not the deepest
 callee's kind or the immediate consumer's kind. -/

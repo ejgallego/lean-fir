@@ -9914,6 +9914,39 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_objectFieldErasedAt_of_st
 
 /-- `USize` slot mutation preserves the closed relation across its exact
 generated three-step prefix. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_usizeFieldWithFrames_of_step
+    {objectId fieldId : Lean.FVarId} {index : Nat}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.uset objectId index fieldId continuation) targetStore targetLocals
+      targetCode witness source target)
+    (supported : USizeFieldEffectSupported context sourceRuntime sourceEnv
+      (.uset objectId index fieldId continuation) continuation nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames := by
+  have pointwise := related.toPointwise
+    (ConcreteStructuredCodeStepAdmission.usizeField supported) (by omega)
+  obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath,
+      sourceFramesEq, targetFramesEq, nextCore⟩ :=
+    pointwise.advance_usizeField_of_step supported sourceStep
+  exact ⟨targetAfter, nextStore, nextTargetCode, targetPath,
+    related.withSuccessor ⟨nextCore, related.core.validation.usetContinuation⟩
+      sourceFramesEq targetFramesEq, sourceFramesEq, targetFramesEq⟩
+
+/-- `USize` slot mutation preserves the closed relation across its exact
+generated three-step prefix. -/
 theorem ConcreteStructuredValidatedCodeOutcome.advance_usizeField_of_step
     {objectId fieldId : Lean.FVarId} {index : Nat}
     (related : ConcreteStructuredValidatedCodeOutcome program context
@@ -9934,10 +9967,44 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_usizeField_of_step
           callerExpectedResult facts remainingBytes nextRuntime sourceEnv
           continuation nextStore targetLocals nextTargetCode witness sourceAfter
           targetAfter := by
+  obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, nextRelated, _, _⟩ :=
+    related.advance_usizeFieldWithFrames_of_step supported sourceStep
+  exact ⟨targetAfter, nextStore, nextTargetCode, targetPath, nextRelated⟩
+
+/-- Packed-integer scalar mutation preserves the closed relation across its
+descriptor/layout-checked three-step prefix. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_scalarFieldWithFrames_of_step
+    {objectId fieldId : Lean.FVarId} {slotIndex byteOffset : Nat}
+    {type : Lean.Expr}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.sset objectId slotIndex byteOffset fieldId type continuation) targetStore
+      targetLocals targetCode witness source target)
+    (supported : ScalarFieldEffectSupported context sourceRuntime sourceEnv
+      (.sset objectId slotIndex byteOffset fieldId type continuation)
+      continuation nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames := by
   have pointwise := related.toPointwise
-    (ConcreteStructuredCodeStepAdmission.usizeField supported) (by omega)
-  exact related.advanceCode related.core.validation.usetContinuation
-    (pointwise.advance_usizeField_of_step supported sourceStep)
+    (ConcreteStructuredCodeStepAdmission.scalarField supported) (by omega)
+  obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath,
+      sourceFramesEq, targetFramesEq, nextCore⟩ :=
+    pointwise.advance_scalarField_of_step supported sourceStep
+  exact ⟨targetAfter, nextStore, nextTargetCode, targetPath,
+    related.withSuccessor ⟨nextCore, related.core.validation.ssetContinuation⟩
+      sourceFramesEq targetFramesEq, sourceFramesEq, targetFramesEq⟩
 
 /-- Packed-integer scalar mutation preserves the closed relation across its
 descriptor/layout-checked three-step prefix. -/
@@ -9963,10 +10030,9 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_scalarField_of_step
           callerExpectedResult facts remainingBytes nextRuntime sourceEnv
           continuation nextStore targetLocals nextTargetCode witness sourceAfter
           targetAfter := by
-  have pointwise := related.toPointwise
-    (ConcreteStructuredCodeStepAdmission.scalarField supported) (by omega)
-  exact related.advanceCode related.core.validation.ssetContinuation
-    (pointwise.advance_scalarField_of_step supported sourceStep)
+  obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, nextRelated, _, _⟩ :=
+    related.advance_scalarFieldWithFrames_of_step supported sourceStep
+  exact ⟨targetAfter, nextStore, nextTargetCode, targetPath, nextRelated⟩
 
 /-- Closed object-reference field mutation.  Production validation supplies
 the compiled operands, the successful source step supplies the live mutation,
