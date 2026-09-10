@@ -484,6 +484,54 @@ bridges, other families, caller push/pop, global assembly, public result-kind/
 admission closure and trap semantics remain separate. Closure-footprint,
 whole-helper/tagged-result and W72 obligations are unchanged.
 
+### Root-preserving active-witness object-field mutations
+
+`advance_objectFieldFVarAtWithFrames_of_step` and
+`advance_objectFieldErasedAtWithFrames_of_step` expose the frame equations
+already proved by the active-witness core effects, attaching retained
+validation with unchanged `withSuccessor`. They do not pass through the older
+arbitrary-witness admission wrappers. Both old At effect signatures remain
+exact compatibility wrappers. Their `AtRoot_of_step` successors retain the
+same root with the existing `reindex` lemma.
+
+`advance_objectFieldFVarAtRoot_of_schema_step` and
+`advance_objectFieldErasedAtRoot_of_schema_step` reconstruct compiler and
+dynamic source facts just as the original schema producers do. They use the
+unchanged `ConcreteObjectFieldKindAlignedAt.of_schema` bridge at the current
+witness. Their premise boundary remains exactly:
+
+```lean
+schemaAgrees : schema.WitnessAgrees witness
+-- FVar producer:
+fieldTyped : schema.ObjectFieldFVarTyped context sourceEnv objectId fieldId index
+-- Erased producer:
+fieldTyped : schema.ObjectFieldKindAt sourceEnv objectId index .erased
+```
+
+Source typing and schema agreement are not claimed to follow from validation
+or successful source execution. No arbitrary-witness, caller effect or
+admission premise is added. The original schema declarations and proof bodies,
+older arbitrary-witness wrappers, and schema bridge are unchanged. The effect
+rules retain `ObjectFieldFVarEffectSupportedAt` and
+`ObjectFieldErasedEffectSupportedAt`; erased writes preserve their existing
+physical-zero behavior.
+
+Each rooted rule names its actual successor, retaining the exact three-step
+target path, next runtime/store/code, source environment, active/caller result
+indices, witness, budget and both frame equations. Two kernel regressions
+invoke the actual rooted schema producers with only the original schema
+premises and recover root precision from the successors at an empty source
+caller stack. Neither supplies effect facts nor assumes result-kind equality.
+
+All ten original/helper/rooted axiom sets equal those measured at `e5ea3914`:
+the standard three plus the existing byte32-assembly dependency recorded in
+`referenceCountNativeDebt`. The exact inventory expands to 104 endpoints,
+with no new axiom or trust approval. This is root transport, not new field
+ownership/layout refinement. Arbitrary-witness wrappers, global schema
+dispatch, other local families, caller push/pop, global root/precision
+assembly, universal compiler admission and traps remain separate. Closure
+footprint, whole-helper/tagged-result and all 14 W72 obligations are unchanged.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
@@ -529,6 +577,7 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | original tag mutation/validated rules, frame helper and both rooted producers | 3 | 1 |
 | original USize mutation/validated rules, frame helper and both rooted producers | 3 | 1 |
 | original packed-scalar mutation/validated rules, frame helper and both rooted producers | 3 | 2 |
+| original active-witness FVar/erased field effects and schema rules, frame helpers and rooted producers | 3 | 1 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original UInt8-case wrapper, frame-exposing helper and rooted successor | 3 | 2 |

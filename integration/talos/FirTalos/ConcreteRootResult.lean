@@ -23,6 +23,8 @@ Constructor-tag mutation likewise derives compiler/heap-shape facts and
 retains the root through its existing exact two-step effect rule.
 USize and packed-scalar field mutations retain it through their three-step
 rules; the packed-scalar rule keeps its existing descriptor-layout premise.
+Active-witness FVar and erased object-field writes use the unchanged source
+schema bridge and retain its exact typing/agreement premises during root transport.
 Preservation through the other global transitions is still separate; the
 unindexed global relation cannot recover root identity after existentially
 hiding the caller spine.
@@ -1733,6 +1735,277 @@ example
     nextRooted.functionResult_eq_of_empty (sourceFramesEq.trans empty)⟩
 
 end RootedScalarFields
+
+section RootedActiveObjectFields
+
+variable
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime nextRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult rootResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+
+/-- Active-witness FVar field mutation retains the original root on
+the actual named successor, preserving the existing three-step effect rule. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_objectFieldFVarAtRoot_of_step
+    {objectId fieldId : Lean.FVarId} {index : Nat}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.oset objectId index (.fvar fieldId) continuation) targetStore
+      targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (supported : ObjectFieldFVarEffectSupportedAt context witness sourceRuntime
+      sourceEnv (.oset objectId index (.fvar fieldId) continuation) continuation
+      nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        ∃ nextRelated : ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextRelated.agrees nextRelated.frames.validation ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames := by
+  obtain ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated,
+      sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_objectFieldFVarAtWithFrames_of_step supported sourceStep
+  exact ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated,
+    rooted.reindex sourceFramesEq targetFramesEq
+      nextRelated.agrees nextRelated.frames.validation,
+    sourceFramesEq, targetFramesEq⟩
+
+/-- Source schema typing and agreement with the active witness retain the
+root across the FVar field write. The schema bridge and its premises are
+unchanged; no arbitrary-witness or caller admission condition is introduced. -/
+theorem
+    ConcreteStructuredValidatedCodeOutcome.advance_objectFieldFVarAtRoot_of_schema_step
+    {objectId fieldId : Lean.FVarId} {index : Nat}
+    {schema : ConstructorSchema}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.oset objectId index (.fvar fieldId) continuation) targetStore
+      targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (schemaAgrees : schema.WitnessAgrees witness)
+    (fieldTyped : schema.ObjectFieldFVarTyped context sourceEnv objectId
+      fieldId index)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ resultRuntime targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        ∃ nextRelated : ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes resultRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextRelated.agrees nextRelated.frames.validation ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames := by
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees, localAlignment⟩ :=
+    related.core.validation
+  obtain ⟨fieldKind, objectCompiled, fieldCompiled, fieldObjectKind⟩ :=
+    validated.oset_fvar_compiler agrees
+  obtain ⟨location, cell, semantic, field, resultRuntime, objectLookup,
+      fieldLookup, updated, found, live, objectEq, indexValid⟩ :=
+    related.core.core.focus.oset_fvar_source_of_step sourceStep
+  have activeAligned :
+      ConcreteObjectFieldKindAlignedAt witness location index fieldKind :=
+    ConcreteObjectFieldKindAlignedAt.of_schema schemaAgrees
+      (fieldTyped fieldCompiled objectLookup)
+  let supported : ObjectFieldFVarEffectSupportedAt context witness
+      sourceRuntime sourceEnv
+      (.oset objectId index (.fvar fieldId) continuation) continuation
+      resultRuntime :=
+    .oset sourceRuntime resultRuntime sourceEnv objectId fieldId index
+      continuation location cell semantic field fieldKind objectCompiled
+      fieldCompiled fieldObjectKind objectLookup fieldLookup updated found live
+      objectEq indexValid activeAligned
+  obtain ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated,
+      nextRooted, sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_objectFieldFVarAtRoot_of_step rooted supported sourceStep
+  exact ⟨resultRuntime, targetAfter, nextStore, nextTargetCode, path, nextRelated,
+    nextRooted, sourceFramesEq, targetFramesEq⟩
+
+/-- The actual FVar schema producer recovers root precision from its
+successor with exactly the existing schema premises. No effect facts or
+result-kind equality are supplied; the three-step path remains explicit. -/
+example
+    {objectId fieldId : Lean.FVarId} {index : Nat}
+    {schema : ConstructorSchema}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.oset objectId index (.fvar fieldId) continuation) targetStore
+      targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (schemaAgrees : schema.WitnessAgrees witness)
+    (fieldTyped : schema.ObjectFieldFVarTyped context sourceEnv objectId
+      fieldId index)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : source.frames = []) :
+    ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames ∧
+        functionResult = rootResult := by
+  obtain ⟨_, targetAfter, _, _, path, _, nextRooted, sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_objectFieldFVarAtRoot_of_schema_step rooted schemaAgrees fieldTyped sourceStep
+  exact ⟨targetAfter, path, sourceFramesEq, targetFramesEq,
+    nextRooted.functionResult_eq_of_empty (sourceFramesEq.trans empty)⟩
+
+/-- Active-witness erased field mutation retains the original root on
+the actual named successor, preserving the existing three-step effect rule. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_objectFieldErasedAtRoot_of_step
+    {objectId : Lean.FVarId} {index : Nat}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.oset objectId index .erased continuation) targetStore targetLocals
+      targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (supported : ObjectFieldErasedEffectSupportedAt context witness
+      sourceRuntime sourceEnv (.oset objectId index .erased continuation)
+      continuation nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        ∃ nextRelated : ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextRelated.agrees nextRelated.frames.validation ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames := by
+  obtain ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated,
+      sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_objectFieldErasedAtWithFrames_of_step supported sourceStep
+  exact ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated,
+    rooted.reindex sourceFramesEq targetFramesEq
+      nextRelated.agrees nextRelated.frames.validation,
+    sourceFramesEq, targetFramesEq⟩
+
+/-- Source schema typing and agreement with the active witness retain the
+root across the erased field write. The schema bridge and its premises are
+unchanged; no arbitrary-witness or caller admission condition is introduced. -/
+theorem
+    ConcreteStructuredValidatedCodeOutcome.advance_objectFieldErasedAtRoot_of_schema_step
+    {objectId : Lean.FVarId} {index : Nat} {schema : ConstructorSchema}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.oset objectId index .erased continuation) targetStore targetLocals
+      targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (schemaAgrees : schema.WitnessAgrees witness)
+    (fieldTyped : schema.ObjectFieldKindAt sourceEnv objectId index .erased)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ resultRuntime targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        ∃ nextRelated : ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes resultRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextRelated.agrees nextRelated.frames.validation ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames := by
+  obtain ⟨_joins, _locals, _validatorFacts, _sharing, validated, agrees, localAlignment⟩ :=
+    related.core.validation
+  have objectCompiled := validated.oset_erased_compiler agrees
+  obtain ⟨location, cell, semantic, resultRuntime, objectLookup, updated,
+      found, live, objectEq, indexValid⟩ :=
+    related.core.core.focus.oset_erased_source_of_step sourceStep
+  have activeAligned :
+      ConcreteObjectFieldKindAlignedAt witness location index .erased :=
+    ConcreteObjectFieldKindAlignedAt.of_schema schemaAgrees
+      (fieldTyped objectLookup)
+  let supported : ObjectFieldErasedEffectSupportedAt context witness
+      sourceRuntime sourceEnv (.oset objectId index .erased continuation)
+      continuation resultRuntime :=
+    .oset sourceRuntime resultRuntime sourceEnv objectId index continuation
+      location cell semantic objectCompiled objectLookup updated found live
+      objectEq indexValid activeAligned
+  obtain ⟨targetAfter, nextStore, nextTargetCode, path, nextRelated,
+      nextRooted, sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_objectFieldErasedAtRoot_of_step rooted supported sourceStep
+  exact ⟨resultRuntime, targetAfter, nextStore, nextTargetCode, path, nextRelated,
+    nextRooted, sourceFramesEq, targetFramesEq⟩
+
+/-- The actual erased schema producer recovers root precision from its
+successor with exactly the existing schema premises. No effect facts or
+result-kind equality are supplied; the three-step path remains explicit. -/
+example
+    {objectId : Lean.FVarId} {index : Nat} {schema : ConstructorSchema}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.oset objectId index .erased continuation) targetStore targetLocals
+      targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (schemaAgrees : schema.WitnessAgrees witness)
+    (fieldTyped : schema.ObjectFieldKindAt sourceEnv objectId index .erased)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : source.frames = []) :
+    ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames ∧
+        functionResult = rootResult := by
+  obtain ⟨_, targetAfter, _, _, path, _, nextRooted, sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_objectFieldErasedAtRoot_of_schema_step rooted schemaAgrees fieldTyped sourceStep
+  exact ⟨targetAfter, path, sourceFramesEq, targetFramesEq,
+    nextRooted.functionResult_eq_of_empty (sourceFramesEq.trans empty)⟩
+
+end RootedActiveObjectFields
 
 /-- Heterogeneous nested calls retain the original result, not the deepest
 callee's kind or the immediate consumer's kind. -/

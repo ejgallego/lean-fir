@@ -139,7 +139,8 @@ def scalarCaseNativeDebt : Array String := #[
 frame/root transport. Explicit delete and all three validation-derived rules
 have the same measured dependency at `97b25f06`. Constructor-tag mutation
 and its validation-derived rule share it at `23bccf86`; USize field mutation
-shares it at `c42bc5d2`. The focused wrappers retain
+shares it at `c42bc5d2`. Active-witness FVar/erased object-field effects and
+their schema producers share it at `e5ea3914`. The focused wrappers retain
 precisely this dependency; this is an exact inventory, not a new trust approval. -/
 def referenceCountNativeDebt : Array String := #[
   "_private.Fir.Wasm.Concrete.Memory.0.Fir.Wasm.Concrete.LinearMemory.assembleByte32._native.bv_decide.ax_1_6"]
@@ -390,6 +391,26 @@ def endpointInventory : Array (Lean.Name × Array String) := #[
   (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_scalarField_of_validated_step,
     standardAxioms ++ packedScalarFieldNativeDebt),
   (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_scalarFieldAtRoot_of_validated_step,
-    standardAxioms ++ packedScalarFieldNativeDebt)]
+    standardAxioms ++ packedScalarFieldNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_objectFieldFVarAt_of_step,
+    standardAxioms ++ referenceCountNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_objectFieldFVarAtWithFrames_of_step,
+    standardAxioms ++ referenceCountNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_objectFieldFVarAtRoot_of_step,
+    standardAxioms ++ referenceCountNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_objectFieldFVar_of_schema_step,
+    standardAxioms ++ referenceCountNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_objectFieldFVarAtRoot_of_schema_step,
+    standardAxioms ++ referenceCountNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_objectFieldErasedAt_of_step,
+    standardAxioms ++ referenceCountNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_objectFieldErasedAtWithFrames_of_step,
+    standardAxioms ++ referenceCountNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_objectFieldErasedAtRoot_of_step,
+    standardAxioms ++ referenceCountNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_objectFieldErased_of_schema_step,
+    standardAxioms ++ referenceCountNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_objectFieldErasedAtRoot_of_schema_step,
+    standardAxioms ++ referenceCountNativeDebt)]
 
 end FirTalos.TrustAudit

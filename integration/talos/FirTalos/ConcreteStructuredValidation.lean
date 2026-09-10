@@ -9862,6 +9862,38 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_objectFieldErased_of_step
   exact related.advanceCode related.core.validation.osetContinuation
     (pointwise.advance_objectFieldErased_of_step supported sourceStep)
 
+/-- Active-witness FVar object-field mutation exposes its existing source
+and target frame equations without a witness-independent admission wrapper. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_objectFieldFVarAtWithFrames_of_step
+    {objectId fieldId : Lean.FVarId} {index : Nat}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.oset objectId index (.fvar fieldId) continuation) targetStore
+      targetLocals targetCode witness source target)
+    (supported : ObjectFieldFVarEffectSupportedAt context witness sourceRuntime
+      sourceEnv (.oset objectId index (.fvar fieldId) continuation) continuation
+      nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames := by
+  obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath,
+      sourceFramesEq, targetFramesEq, nextCore⟩ :=
+    related.core.core.advance_objectFieldFVarAt_of_step spec supported sourceStep
+  exact ⟨targetAfter, nextStore, nextTargetCode, targetPath,
+    related.withSuccessor ⟨nextCore, related.core.validation.osetContinuation⟩
+      sourceFramesEq targetFramesEq, sourceFramesEq, targetFramesEq⟩
+
 theorem ConcreteStructuredValidatedCodeOutcome.advance_objectFieldFVarAt_of_step
     {objectId fieldId : Lean.FVarId} {index : Nat}
     (related : ConcreteStructuredValidatedCodeOutcome program context
@@ -9883,9 +9915,41 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_objectFieldFVarAt_of_step
           callerExpectedResult facts remainingBytes nextRuntime sourceEnv
           continuation nextStore targetLocals nextTargetCode witness sourceAfter
           targetAfter := by
-  exact related.advanceCode related.core.validation.osetContinuation
-    (related.core.core.advance_objectFieldFVarAt_of_step spec supported
-      sourceStep)
+  obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, nextRelated, _, _⟩ :=
+    related.advance_objectFieldFVarAtWithFrames_of_step supported sourceStep
+  exact ⟨targetAfter, nextStore, nextTargetCode, targetPath, nextRelated⟩
+
+/-- Active-witness erased object-field mutation exposes its existing source
+and target frame equations without a witness-independent admission wrapper. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_objectFieldErasedAtWithFrames_of_step
+    {objectId : Lean.FVarId} {index : Nat}
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      (.oset objectId index .erased continuation) targetStore targetLocals
+      targetCode witness source target)
+    (supported : ObjectFieldErasedEffectSupportedAt context witness
+      sourceRuntime sourceEnv (.oset objectId index .erased continuation)
+      continuation nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore nextTargetCode,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+          targetAfter ∧
+        ConcreteStructuredValidatedCodeOutcome program context functionCode
+          sourceModule sourceFunction targetModule hosts spec externals labels
+          entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult facts remainingBytes nextRuntime sourceEnv
+          continuation nextStore targetLocals nextTargetCode witness sourceAfter
+          targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames := by
+  obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath,
+      sourceFramesEq, targetFramesEq, nextCore⟩ :=
+    related.core.core.advance_objectFieldErasedAt_of_step spec supported sourceStep
+  exact ⟨targetAfter, nextStore, nextTargetCode, targetPath,
+    related.withSuccessor ⟨nextCore, related.core.validation.osetContinuation⟩
+      sourceFramesEq targetFramesEq, sourceFramesEq, targetFramesEq⟩
 
 theorem ConcreteStructuredValidatedCodeOutcome.advance_objectFieldErasedAt_of_step
     {objectId : Lean.FVarId} {index : Nat}
@@ -9908,9 +9972,9 @@ theorem ConcreteStructuredValidatedCodeOutcome.advance_objectFieldErasedAt_of_st
           callerExpectedResult facts remainingBytes nextRuntime sourceEnv
           continuation nextStore targetLocals nextTargetCode witness sourceAfter
           targetAfter := by
-  exact related.advanceCode related.core.validation.osetContinuation
-    (related.core.core.advance_objectFieldErasedAt_of_step spec supported
-      sourceStep)
+  obtain ⟨targetAfter, nextStore, nextTargetCode, targetPath, nextRelated, _, _⟩ :=
+    related.advance_objectFieldErasedAtWithFrames_of_step supported sourceStep
+  exact ⟨targetAfter, nextStore, nextTargetCode, targetPath, nextRelated⟩
 
 /-- `USize` slot mutation preserves the closed relation across its exact
 generated three-step prefix. -/

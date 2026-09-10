@@ -151,8 +151,22 @@ inferred from validation or successful execution. Two kernel regressions use
 the actual validated rooted producers to recover successor precision. Old
 APIs and validated producer bodies remain unchanged. Ten exact entries expand
 the inventory to 94: USize retains one existing byte-assembly dependency,
-packed-scalar two. Object-reference/erased fields and schema bridges remain
-separate, as do all other transition families and global assembly.
+packed-scalar two.
+Active-witness FVar and erased object-field mutations now retain the root
+through focused WithFrames helpers and their effect/schema-derived AtRoot
+producers. They reuse the existing At core proofs and unchanged
+`ConcreteObjectFieldKindAlignedAt.of_schema` bridge, without an arbitrary-witness
+condition. Schema agreement with the active witness and the exact original
+FVar/erased source-field typing premises remain explicit; they are not derived
+from validation or successful execution. Named successors retain exact
+three-step paths, runtime/store/code evolution, environment, result indices,
+witness, budget and both frame equations. Erased writes keep physical zero.
+Two kernel regressions invoke the actual rooted schema producers and recover
+successor root precision. Original APIs and schema producer bodies remain
+unchanged. Ten exact entries expand the inventory to 104, all matching the
+originals' single existing byte-assembly dependency; no new trust is approved.
+Arbitrary-witness wrappers, global schema dispatch, other transition families
+and global assembly remain separate.
 The general global relation still existentially hides the represented kind;
 preserving the root index and producer precision through the remaining
 dispatcher branches and composing the strengthened global relation remain open.
