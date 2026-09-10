@@ -31,6 +31,8 @@ Named direct entry preserves it through the checked caller push and actual
 pushed-frame reindex, even when the active callee has a different result ABI.
 Saturated closure and lazy staging likewise preserve the caller root across
 zero target steps, retaining their capacity and hit/miss admission premises.
+Named saturated entry retains it through the checked saturated push, including
+the distinct active/expected callee indices and exact matcher/call frame protocol.
 Pure-external staging preserves it before the host call, retaining the exact
 supported-call/budget premises and keeping caller and host result ABIs distinct.
 Preservation through the other global transitions is still separate; the
@@ -2957,6 +2959,173 @@ example
   · simpa only [empty] using sourceFramesEq
 
 end RootedDirectCallEntry
+
+section RootedSaturatedCallEntry
+
+variable
+    {program : Fir.LeanIR.ImpureProgram}
+    {context calleeContext : Fir.Wasm.Context}
+    {callerCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction calleeFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context callerCode sourceModule
+      sourceFunction targetModule hosts}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {callerEnv : Env}
+    {site : SaturatedClosureCallSite context decl callerEnv}
+    {sourceRuntime : RuntimeState}
+    {resolution : SaturatedClosureCallResolution context sourceRuntime site}
+    {row : ConcreteGeneratedInternalDeclaration context.program
+      resolution.target calleeContext resolution.calleeCode sourceModule
+      calleeFunction targetModule}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult rootResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {callerLocals : Wasm.Locals}
+    {targetValue targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {resultIndex : Nat}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+
+/-- Preserve the original root through the production named saturated entry.
+The existing checked saturated push carries the same caller spine onto the
+actual callee through its matcher/call frame equations. Active callee result,
+immediate expected result and original root remain distinct indices; the
+existing refinement and closure-consumption contracts are unchanged. -/
+theorem ConcreteStructuredValidatedSaturatedCallReadyOutcome.advance_enterAtRoot_of_step
+    (related : ConcreteStructuredValidatedSaturatedCallReadyOutcome program
+      context calleeContext callerCode sourceModule sourceFunction
+      calleeFunction targetModule hosts spec site resolution row externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes continuation callerJoins
+      sourceFrames targetStore callerLocals targetValue targetRest targetFrames
+      witness resultIndex source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore physicalArgs matcherCount argumentCount callRuntime,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          (3 * (matcherCount + 1) + argumentCount + 1) target targetAfter ∧
+        0 < 3 * (matcherCount + 1) + argumentCount + 1 ∧
+        ∃ calleeSpec : ConcreteSupportedFunction program calleeContext
+          resolution.calleeCode sourceModule calleeFunction targetModule hosts,
+        calleeSpec.sourceResultKind = resolution.targetResultKind ∧
+        ∃ nextOutcome : ConcreteStructuredValidatedCodeOutcome program calleeContext
+          resolution.calleeCode sourceModule calleeFunction targetModule hosts
+          calleeSpec externals [] callRuntime nextStore witness
+          resolution.targetResultKind (some site.resultKind) [] remainingBytes
+          callRuntime resolution.calleeEnv resolution.calleeCode nextStore
+          (row.targetFunction.toLocals physicalArgs) row.targetFunction.body
+          witness sourceAfter targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextOutcome.agrees nextOutcome.frames.validation ∧
+        ∃ callerSpine,
+        ConcreteStructuredValidatedStackAgreement callerSpine
+          related.agrees related.frames.validation ∧
+        ConcreteStructuredValidatedStackAgreement
+          ((functionResult, callerExpectedResult) :: callerSpine)
+          nextOutcome.agrees nextOutcome.frames.validation ∧
+        sourceAfter.frames =
+          .bind decl.fvarId continuation callerEnv callerJoins :: sourceFrames ∧
+        targetAfter.frames =
+          .call 1 callerLocals.values
+            { callerLocals with values := physicalArgs.reverse ++ callerLocals.values }
+            [.localSet resultIndex] ::
+          (List.replicate matcherCount (.label 0 callerLocals.values []) ++
+            .label 0 callerLocals.values
+              ([.localGet resultIndex, .localSet resultIndex] ++ targetRest) ::
+              targetFrames) := by
+  obtain ⟨callerSpine, callerChecked, callerRoot⟩ := rooted
+  have pushedRoot :
+      concreteStructuredRootResultKind resolution.targetResultKind
+          ((functionResult, callerExpectedResult) :: callerSpine) = rootResult :=
+    (concreteStructuredRootResultKind_push resolution.targetResultKind
+      functionResult callerExpectedResult callerSpine).trans callerRoot
+  obtain ⟨targetAfter, nextStore, physicalArgs, matcherCount, argumentCount,
+      callRuntime, targetPath, positive, calleeSpec, calleeResultAt, nextOutcome,
+      nextChecked, sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_enterWithSpine_of_step callerChecked sourceStep
+  exact ⟨targetAfter, nextStore, physicalArgs, matcherCount, argumentCount,
+    callRuntime, targetPath, positive, calleeSpec, calleeResultAt, nextOutcome,
+    ⟨_, nextChecked, pushedRoot⟩, callerSpine, callerChecked, nextChecked,
+    sourceFramesEq, targetFramesEq⟩
+
+/-- Actual-producer regression: the empty saved caller stack identifies the
+original root only before entry. The named callee keeps that root on its
+checked singleton caller spine, while its active result differs and its
+immediate expected result remains `some site.resultKind`. -/
+example
+    (related : ConcreteStructuredValidatedSaturatedCallReadyOutcome program
+      context calleeContext callerCode sourceModule sourceFunction
+      calleeFunction targetModule hosts spec site resolution row externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes continuation callerJoins
+      sourceFrames targetStore callerLocals targetValue targetRest targetFrames
+      witness resultIndex source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : sourceFrames = [])
+    (different : resolution.targetResultKind ≠ functionResult) :
+    ∃ targetAfter nextStore physicalArgs matcherCount argumentCount callRuntime,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          (3 * (matcherCount + 1) + argumentCount + 1) target targetAfter ∧
+        0 < 3 * (matcherCount + 1) + argumentCount + 1 ∧
+        ∃ calleeSpec : ConcreteSupportedFunction program calleeContext
+          resolution.calleeCode sourceModule calleeFunction targetModule hosts,
+        calleeSpec.sourceResultKind = resolution.targetResultKind ∧
+        ∃ nextOutcome : ConcreteStructuredValidatedCodeOutcome program calleeContext
+          resolution.calleeCode sourceModule calleeFunction targetModule hosts
+          calleeSpec externals [] callRuntime nextStore witness
+          resolution.targetResultKind (some site.resultKind) [] remainingBytes
+          callRuntime resolution.calleeEnv resolution.calleeCode nextStore
+          (row.targetFunction.toLocals physicalArgs) row.targetFunction.body
+          witness sourceAfter targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextOutcome.agrees nextOutcome.frames.validation ∧
+        functionResult = rootResult ∧
+        resolution.targetResultKind ≠ rootResult ∧
+        ConcreteStructuredValidatedStackAgreement
+          [(functionResult, callerExpectedResult)]
+          nextOutcome.agrees nextOutcome.frames.validation ∧
+        sourceAfter.frames =
+          [.bind decl.fvarId continuation callerEnv callerJoins] ∧
+        targetAfter.frames =
+          .call 1 callerLocals.values
+            { callerLocals with values := physicalArgs.reverse ++ callerLocals.values }
+            [.localSet resultIndex] ::
+          (List.replicate matcherCount (.label 0 callerLocals.values []) ++
+            .label 0 callerLocals.values
+              ([.localGet resultIndex, .localSet resultIndex] ++ targetRest) ::
+              targetFrames) := by
+  have callerRoot : functionResult = rootResult :=
+    rooted.functionResult_eq_of_empty empty
+  obtain ⟨targetAfter, nextStore, physicalArgs, matcherCount, argumentCount,
+      callRuntime, targetPath, positive, calleeSpec, calleeResultAt, nextOutcome,
+      nextRooted, callerSpine, callerChecked, nextChecked,
+      sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_enterAtRoot_of_step rooted sourceStep
+  have callerNil := callerChecked.spine_eq_nil_of_empty empty
+  subst callerSpine
+  refine ⟨targetAfter, nextStore, physicalArgs, matcherCount, argumentCount,
+    callRuntime, targetPath, positive, calleeSpec, calleeResultAt, nextOutcome,
+    nextRooted, callerRoot, ?_, nextChecked, ?_, targetFramesEq⟩
+  · simpa only [← callerRoot] using different
+  · simpa only [empty] using sourceFramesEq
+
+end RootedSaturatedCallEntry
 
 /-- Heterogeneous nested calls retain the original result, not the deepest
 callee's kind or the immediate consumer's kind. -/

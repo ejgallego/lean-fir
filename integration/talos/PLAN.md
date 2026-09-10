@@ -253,6 +253,23 @@ precision is used only before the push. Original/helper/rooted entry and indexed
 reindex use exactly the baseline's standard axioms; 124 endpoints are audited.
 Other entry/push/pop families, cache publication and global root/schema assembly
 remain separate; no new axiom or trust approval.
+Named saturated-call entry now preserves the original root through the same
+checked caller spine and the existing `.saturated` push. Its focused
+`advance_enterWithSpine_of_step` exposes the actual callee outcome before the
+unchanged public wrapper hides it. The rooted producer reuses the accepted
+indexed reindex and root-push law; no new framework or caller premise is needed.
+The exact positive path length remains
+`3 * (matcherCount + 1) + argumentCount + 1`, including the original call frame,
+failed-matcher labels and selected-matcher label. Core-selected `callRuntime`
+and `nextStore` become the callee entry snapshot; witness/budget are unchanged.
+Active `resolution.targetResultKind`, expected `some site.resultKind` and root
+remain distinct, with `resolution.targetResultRefines`, shared capacity and
+checked saved caller resources retained unchanged. An actual-producer regression
+keeps the original root with a different active callee kind on the singleton
+checked caller spine, using empty-stack precision only before entry. The original,
+helper and rooted endpoint retain the same existing byte-assembly dependency;
+127 endpoints are audited. Lazy entry/cache publication, pop/return and global
+root/schema assembly remain separate; no new axiom or trust approval.
 The general global relation still existentially hides the represented kind;
 preserving the root index and producer precision through the remaining
 dispatcher branches and composing the strengthened global relation remain open.

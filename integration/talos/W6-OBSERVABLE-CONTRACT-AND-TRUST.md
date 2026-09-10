@@ -807,6 +807,53 @@ approval is introduced. Other direct-return/pop, saturated/lazy entry,
 cache publication, global root/schema assembly, admission and traps remain
 separate, as do footprint/whole-helper/tagged-result and all 14 W72 obligations.
 
+### Original-root preservation through named saturated entry
+
+`ConcreteStructuredValidatedSaturatedCallReadyOutcome.advance_enterWithSpine_of_step`
+exposes the production-selected callee spec and actual named code outcome,
+retaining the same input checked caller spine through `.saturated` and the
+accepted indexed `ConcreteStructuredValidatedStackAgreement.reindex`. The
+compatibility `advance_enter_of_step` keeps its original public signature and
+selects the spine from the already-validated caller agreement.
+
+`advance_enterAtRoot_of_step` instead gets that same checked spine from internal
+input root evidence and uses `concreteStructuredRootResultKind_push` to preserve
+the original root on the actual callee. It adds no caller scope, layout,
+capacity, ABI equality, admission, final-client or desired-successor premise.
+Existing ready/code/stack relations and runtime semantics are unchanged.
+
+The core entry call, generated row/spec, saved caller scope, frame/resource and
+complete callee construction are retained. In particular:
+
+- The target path has exactly `3 * (matcherCount + 1) + argumentCount + 1`
+  steps, with strict positivity exposed.
+- The source pushes the original bind continuation. The target pushes the
+  saturated call frame with `callerLocals.values` as its remainder and only
+  `[.localSet resultIndex]` as its call continuation, followed by the original
+  replicated failed-matcher labels and selected-matcher label/rest. This is
+  not the direct-call frame protocol.
+- The core-selected `callRuntime` and `nextStore` become the callee entry
+  snapshot, including closure consumption already justified by the old proof.
+  Witness, remaining budget and physical argument locals/body are unchanged.
+- Callee labels/facts are empty. Active result is
+  `resolution.targetResultKind`; immediate expected result is
+  `some site.resultKind`. Neither is identified with root. The original
+  `resolution.targetResultRefines`, `related.sharedCapacity` and checked saved
+  caller resources are retained exactly; refinement is not replaced by equality.
+
+The actual-producer regression starts with saved empty caller frames and a
+callee active kind different from the caller. It obtains the real named callee,
+exact positive path, singleton checked caller spine, both pushed-frame equations
+and original root, with the immediate expected index unchanged. Empty-stack
+active=root is used only before the push, never for the nonempty callee stack.
+
+Baseline original and all three final entry/interface endpoints have exactly
+`propext`, `Classical.choice`, `Quot.sound` and the existing private
+`LinearMemory.assembleByte32._native.bv_decide.ax_1_6` dependency. The expanded
+127-endpoint audit records that inherited debt; it is not a new trust approval.
+Lazy entry/cache publication, caller pop/return, global root/schema assembly,
+closure-footprint and whole-helper/tagged-result obligations remain separate.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
@@ -860,6 +907,7 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | original external destination bind, named-active/frame helper and rooted active producer | 3 | 0 |
 | original lazy-cache hit and rooted bind-outcome producer | 3 | 0 |
 | indexed checked-spine reindex, original direct entry, spine helper and rooted callee producer | 3 | 0 |
+| original saturated entry, checked-spine helper and rooted callee producer | 3 | 1 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original UInt8-case wrapper, frame-exposing helper and rooted successor | 3 | 2 |
