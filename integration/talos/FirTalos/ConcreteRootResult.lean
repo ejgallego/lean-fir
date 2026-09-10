@@ -39,6 +39,8 @@ Bind-caller pop retains it through the existing direct/saturated restoration
 and target-only case unwinding, exposing the same checked input spine's tail.
 Lazy publication retains it on the actual published bind and popped tail while
 preserving the existing cache-set/value/flag state changes and seven-step path.
+Returned-state dispatch now chooses those two named rooted successors from
+validation alone, retaining their distinct states, checked spines and costs.
 Pure-external staging preserves it before the host call, retaining the exact
 supported-call/budget premises and keeping caller and host result ABIs distinct.
 Preservation through the other global transitions is still separate; the
@@ -4026,6 +4028,447 @@ example
   simpa only [noCases, List.length_nil, Nat.zero_add] using composed
 
 end RootedLazyPublication
+
+section RootedReturnedDispatch
+
+variable
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult actualKind rootResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {sourceValue : Value}
+    {targetLocals : Wasm.Locals}
+    {physical : Wasm.Value}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+
+/-- Exact named already-bound caller payload of the accepted rooted
+bind-pop producer. The checked input spine, popped tail and
+all frame/cost equations remain attached to this actual successor. -/
+def ConcreteStructuredValidatedReturnedOutcome.BindSuccessorAtRoot
+    (related : ConcreteStructuredValidatedReturnedOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      sourceValue targetStore targetLocals witness actualKind physical source
+      target)
+    (rootResult : AbiKind) (sourceAfter : MachineState)
+    (targetCount : Nat) (targetAfter : StructuredWasmState Host) : Prop :=
+  ∃ callerContext callerCode callerFunction callerLabels
+    callerEntryRuntime callerEntryStore callerEntryWitness callerResult
+    tailResult callerFacts callerEnv result continuation callerJoins
+    sourceTail targetRest targetTail resumedLocals savedCallerLocals
+    callerRemainder resultIndex,
+  ∃ caseFrames : List StructuredWasmFrame,
+  ∃ matcherCount : Option Nat,
+  ∃ tailSpine,
+  ∃ callerSpec : ConcreteSupportedFunction program callerContext callerCode
+    sourceModule callerFunction targetModule hosts,
+  callerSpec.sourceResultKind = callerResult ∧
+  ∃ nextActive : ConcreteStructuredValidatedCodeOutcome program callerContext
+    callerCode sourceModule callerFunction targetModule hosts
+    callerSpec externals callerLabels callerEntryRuntime callerEntryStore
+    callerEntryWitness callerResult tailResult
+    (eraseReuseCapacityFact callerFacts result) remainingBytes sourceRuntime
+    (bind callerEnv result sourceValue) continuation targetStore resumedLocals
+    targetRest witness sourceAfter targetAfter,
+  ConcreteStructuredValidationAgreesAtRoot rootResult
+    nextActive.agrees nextActive.frames.validation ∧
+  ∃ spine,
+  ConcreteStructuredValidatedStackAgreement spine
+    related.agrees related.frames.validation ∧
+  ConcreteStructuredValidatedStackAgreement tailSpine
+    nextActive.agrees nextActive.frames.validation ∧
+  spine = (callerResult, tailResult) :: tailSpine ∧
+  source.frames =
+    .bind result continuation callerEnv callerJoins :: sourceTail ∧
+  sourceAfter.frames = sourceTail ∧
+  targetAfter.frames = targetTail ∧
+  target.frames = caseFrames ++
+    (match matcherCount with
+    | none =>
+      .call 1 callerRemainder savedCallerLocals
+        (.localSet resultIndex :: targetRest) :: targetTail
+    | some count =>
+      .call 1 callerRemainder savedCallerLocals [.localSet resultIndex] ::
+        (List.replicate count (.label 0 callerRemainder []) ++
+          .label 0 callerRemainder
+            ([.localGet resultIndex, .localSet resultIndex] ++ targetRest) ::
+            targetTail)) ∧
+  targetCount = caseFrames.length +
+    (match matcherCount with | none => 2 | some count => count + 5)
+
+/-- Exact named published, still-unbound caller payload of the accepted rooted
+lazy-cache publication producer. The checked input spine, popped tail and
+all frame/cost equations remain attached to this actual successor. -/
+def ConcreteStructuredValidatedReturnedOutcome.LazySuccessorAtRoot
+    (related : ConcreteStructuredValidatedReturnedOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      sourceValue targetStore targetLocals witness actualKind physical source
+      target)
+    (rootResult : AbiKind) (sourceAfter : MachineState)
+    (targetCount : Nat) (targetAfter : StructuredWasmState Host) : Prop :=
+  ∃ callerContext callerCode callerFunction callerLabels
+    callerEntryRuntime callerEntryStore callerEntryWitness callerResult
+    tailResult callerFacts callerEnv callerLocals declaration result
+    continuation callerJoins sourceTail targetRest targetTail kind
+    cacheIndex cacheSetId resultIndex runtimeAfter nextStore,
+  ∃ caseFrames : List StructuredWasmFrame,
+  ∃ tailSpine,
+  ∃ callerSpec : ConcreteSupportedFunction program callerContext callerCode
+    sourceModule callerFunction targetModule hosts,
+  ∃ nextBind : ConcreteStructuredValidatedExternalBindOutcome program
+    callerContext callerCode sourceModule callerFunction targetModule hosts
+    callerSpec externals callerLabels callerEntryRuntime callerEntryStore
+    callerEntryWitness callerResult tailResult callerFacts remainingBytes
+    (sourceRuntime.setGlobal declaration sourceValue) callerEnv sourceValue
+    result continuation callerJoins sourceTail nextStore callerLocals
+    callerLocals.values targetRest targetTail witness kind physical
+    resultIndex sourceAfter targetAfter,
+  ConcreteStructuredValidationAgreesAtRoot rootResult
+    nextBind.agrees nextBind.frames.validation ∧
+  ∃ spine,
+  ConcreteStructuredValidatedStackAgreement spine
+    related.agrees related.frames.validation ∧
+  ConcreteStructuredValidatedStackAgreement tailSpine
+    nextBind.agrees nextBind.frames.validation ∧
+  spine = (callerResult, tailResult) :: tailSpine ∧
+  source.frames = .cache declaration ::
+    .bind result continuation callerEnv callerJoins :: sourceTail ∧
+  sourceAfter.frames =
+    .bind result continuation callerEnv callerJoins :: sourceTail ∧
+  targetAfter.frames = targetTail ∧
+  target.frames = caseFrames ++
+    (.call 1 callerLocals.values callerLocals [
+        .call cacheSetId, .globalSet (2 * cacheIndex + 1),
+        .const 1, .globalSet (2 * cacheIndex)] ::
+      .label 0 callerLocals.values
+        ([.globalGet (2 * cacheIndex + 1), .localSet resultIndex] ++
+          targetRest) :: targetTail) ∧
+  sourceAfter.runtime = sourceRuntime.setGlobal declaration sourceValue ∧
+  cacheSetStep declaration kind targetStore [physical] =
+    .Return [physical] (replaceRuntime targetStore runtimeAfter) ∧
+  nextStore = writeWasmGlobal
+    (writeWasmGlobal (replaceRuntime targetStore runtimeAfter)
+      (2 * cacheIndex + 1) physical) (2 * cacheIndex) (.i32 1) ∧
+  targetCount = caseFrames.length + 7
+
+/-- Only the two named successors of returned-state dispatch. This does not
+extend or replace the shared global relation, and erasure is explicit. -/
+def ConcreteStructuredValidatedReturnedOutcome.SuccessorAtRoot
+    (related : ConcreteStructuredValidatedReturnedOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      sourceValue targetStore targetLocals witness actualKind physical source
+      target)
+    (rootResult : AbiKind) (sourceAfter : MachineState)
+    (targetCount : Nat) (targetAfter : StructuredWasmState Host) : Prop :=
+  related.BindSuccessorAtRoot rootResult sourceAfter targetCount targetAfter ∨
+    related.LazySuccessorAtRoot rootResult sourceAfter targetCount targetAfter
+
+variable
+    {related : ConcreteStructuredValidatedReturnedOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      sourceValue targetStore targetLocals witness actualKind physical source
+      target}
+    {targetCount : Nat} {targetAfter : StructuredWasmState Host}
+
+/-- Forget root/branch metadata only after retaining the actual named outcome. -/
+theorem ConcreteStructuredValidatedReturnedOutcome.BindSuccessorAtRoot.toCodeGlobal
+    (next : related.BindSuccessorAtRoot rootResult sourceAfter targetCount
+      targetAfter) :
+    ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+      targetModule hosts externals witness sourceAfter targetAfter := by
+  rcases next with ⟨
+      _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _,
+      callerResultAt, nextActive, _, _, _, _, _, _, _, _, _, _⟩
+  exact .code callerResultAt nextActive
+
+/-- The branch's exact frame equation determines its source head. -/
+theorem ConcreteStructuredValidatedReturnedOutcome.BindSuccessorAtRoot.bindCallerAtHead
+    (next : related.BindSuccessorAtRoot rootResult sourceAfter targetCount
+      targetAfter) :
+    ConcreteStructuredBindCallerAtHead source.frames := by
+  rcases next with ⟨
+      _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _,
+      _, _, _, _, _, _, callerSourceFramesEq, _, _, _, _⟩
+  exact ⟨_, _, _, _, _, callerSourceFramesEq⟩
+
+/-- Forget root/branch metadata only after retaining the actual named outcome. -/
+theorem ConcreteStructuredValidatedReturnedOutcome.LazySuccessorAtRoot.toCodeGlobal
+    (next : related.LazySuccessorAtRoot rootResult sourceAfter targetCount
+      targetAfter) :
+    ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+      targetModule hosts externals witness sourceAfter targetAfter := by
+  rcases next with ⟨
+      _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _,
+      _, _, nextBind, _, _, _, _, _, _, _, _, _, _, _, _, _⟩
+  exact .externalBind nextBind
+
+/-- The branch's exact frame equation determines its source head. -/
+theorem ConcreteStructuredValidatedReturnedOutcome.LazySuccessorAtRoot.lazyCallerAtHead
+    (next : related.LazySuccessorAtRoot rootResult sourceAfter targetCount
+      targetAfter) :
+    ConcreteStructuredLazyCallerAtHead source.frames := by
+  rcases next with ⟨
+      _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _,
+      _, _, _, _, _, _, _, _, callerSourceFramesEq, _, _, _, _, _, _, _⟩
+  exact ⟨_, _, _, _, _, _, callerSourceFramesEq⟩
+
+/-- Both branches erase to the unchanged witness-indexed global relation. -/
+theorem ConcreteStructuredValidatedReturnedOutcome.SuccessorAtRoot.toCodeGlobal
+    (next : related.SuccessorAtRoot rootResult sourceAfter targetCount
+      targetAfter) :
+    ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+      targetModule hosts externals witness sourceAfter targetAfter := by
+  rcases next with next | next
+  · exact next.toCodeGlobal
+  · exact next.toCodeGlobal
+
+/-- Recover the full ordinary-pop payload from a bind-headed dispatch result. -/
+theorem ConcreteStructuredValidatedReturnedOutcome.SuccessorAtRoot.bind_of_head
+    (next : related.SuccessorAtRoot rootResult sourceAfter targetCount
+      targetAfter)
+    (bindCaller : ConcreteStructuredBindCallerAtHead source.frames) :
+    related.BindSuccessorAtRoot rootResult sourceAfter targetCount targetAfter := by
+  rcases next with next | next
+  · exact next
+  · obtain ⟨_, _, _, _, _, _, cacheEq⟩ := next.lazyCallerAtHead
+    obtain ⟨_, _, _, _, _, bindEq⟩ := bindCaller
+    rw [cacheEq] at bindEq
+    cases bindEq
+
+/-- Recover publication, without performing destination bind, from a lazy head. -/
+theorem ConcreteStructuredValidatedReturnedOutcome.SuccessorAtRoot.lazy_of_head
+    (next : related.SuccessorAtRoot rootResult sourceAfter targetCount
+      targetAfter)
+    (lazyCaller : ConcreteStructuredLazyCallerAtHead source.frames) :
+    related.LazySuccessorAtRoot rootResult sourceAfter targetCount targetAfter := by
+  rcases next with next | next
+  · obtain ⟨_, _, _, _, _, bindEq⟩ := next.bindCallerAtHead
+    obtain ⟨_, _, _, _, _, _, cacheEq⟩ := lazyCaller
+    rw [cacheEq] at bindEq
+    cases bindEq
+  · exact next
+
+/-- A yielded state with no caller has no successful source successor. -/
+theorem ConcreteStructuredValidatedReturnedOutcome.frames_ne_nil_of_step
+    (related : ConcreteStructuredValidatedReturnedOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      sourceValue targetStore targetLocals witness actualKind physical source
+      target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    source.frames ≠ [] := by
+  intro sourceFramesEq
+  rcases source with
+    ⟨sourceProgram, sourceControl, stateEnv, stateJoins, stateFrames, runtime⟩
+  have controlEq := related.yielded.sourceControlEq
+  change sourceControl = .yielded sourceValue at controlEq
+  subst sourceControl
+  change stateFrames = [] at sourceFramesEq
+  subst stateFrames
+  simp [executeStep, coreStep] at sourceStep
+
+/-- Constructor-complete returned dispatch retaining the original root on its
+actual named successor. Production stack validation supplies the classification;
+all transition paths, checked spines and exact costs are reused unchanged. -/
+theorem ConcreteStructuredValidatedReturnedOutcome.advance_atRoot_of_step
+    (related : ConcreteStructuredValidatedReturnedOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      sourceValue targetStore targetLocals witness actualKind physical source
+      target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetCount targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetCount target targetAfter ∧
+        0 < targetCount ∧
+        related.SuccessorAtRoot rootResult sourceAfter targetCount targetAfter := by
+  generalize sourceFramesEq : source.frames = sourceFrames
+  have validationAt :
+      ConcreteStructuredSuspendedValidation program functionResult
+        callerExpectedResult sourceFrames := by
+    rw [← sourceFramesEq]
+    exact related.frames.validation
+  cases validationAt with
+  | nil =>
+      exact False.elim (related.frames_ne_nil_of_step sourceStep sourceFramesEq)
+  | bind continuationValidation tail =>
+      obtain ⟨count, after, path, positive, next⟩ :=
+        related.advance_bindCallerAtRoot_of_step rooted
+          (bindCaller := ⟨_, _, _, _, _, sourceFramesEq⟩) sourceStep
+      exact ⟨count, after, path, positive, Or.inl next⟩
+  | lazy continuationValidation tail =>
+      obtain ⟨count, after, path, positive, next⟩ :=
+        related.advance_lazyCacheAtRoot_of_step rooted
+          (lazyCaller := ⟨_, _, _, _, _, _, sourceFramesEq⟩) sourceStep
+      exact ⟨count, after, path, positive, Or.inr next⟩
+
+/-- Actual-dispatch regression: a bind head selects the already-bound caller
+branch and exposes its named successor, root and exact direct/saturated/case
+accounting. Classification is not a premise of the dispatcher. -/
+example
+    (related : ConcreteStructuredValidatedReturnedOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      sourceValue targetStore targetLocals witness actualKind physical source
+      target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (bindCaller : ConcreteStructuredBindCallerAtHead source.frames)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetCount targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetCount target targetAfter ∧
+        0 < targetCount ∧
+        ∃ callerContext callerCode callerFunction callerLabels
+          callerEntryRuntime callerEntryStore callerEntryWitness callerResult
+          tailResult callerFacts callerEnv result continuation targetRest resumedLocals,
+        ∃ caseFrames : List StructuredWasmFrame,
+        ∃ matcherCount : Option Nat,
+        ∃ callerSpec : ConcreteSupportedFunction program callerContext callerCode
+          sourceModule callerFunction targetModule hosts,
+        callerSpec.sourceResultKind = callerResult ∧
+        ∃ nextActive : ConcreteStructuredValidatedCodeOutcome program callerContext
+          callerCode sourceModule callerFunction targetModule hosts
+          callerSpec externals callerLabels callerEntryRuntime callerEntryStore
+          callerEntryWitness callerResult tailResult
+          (eraseReuseCapacityFact callerFacts result) remainingBytes sourceRuntime
+          (bind callerEnv result sourceValue) continuation targetStore resumedLocals
+          targetRest witness sourceAfter targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextActive.agrees nextActive.frames.validation ∧
+        targetCount = caseFrames.length +
+          (match matcherCount with | none => 2 | some count => count + 5) := by
+  obtain ⟨targetCount, targetAfter, targetPath, positive, next⟩ :=
+    related.advance_atRoot_of_step rooted sourceStep
+  obtain ⟨
+      callerContext, callerCode, callerFunction, callerLabels, callerEntryRuntime,
+      callerEntryStore, callerEntryWitness, callerResult, tailResult, callerFacts,
+      callerEnv, result, continuation, callerJoins, sourceTail, targetRest,
+      targetTail, resumedLocals, savedCallerLocals, callerRemainder, resultIndex,
+      caseFrames, matcherCount, tailSpine, callerSpec, callerResultAt, nextActive,
+      nextRooted, spine, aligned, nextChecked, spineEq, callerSourceFramesEq,
+      sourceFramesAfter, targetFramesAfter, callerTargetFramesEq, countEq⟩ := next.bind_of_head bindCaller
+  exact ⟨targetCount, targetAfter, targetPath, positive,
+      callerContext, callerCode, callerFunction, callerLabels, callerEntryRuntime,
+      callerEntryStore, callerEntryWitness, callerResult, tailResult, callerFacts,
+      callerEnv, result, continuation, targetRest, resumedLocals, caseFrames,
+      matcherCount, callerSpec, callerResultAt, nextActive, nextRooted, countEq⟩
+
+/-- Actual-dispatch regression: a cache/bind head selects the still-unbound publication
+branch and exposes its named successor, root and exact publication/case
+accounting. Classification is not a premise of the dispatcher. -/
+example
+    (related : ConcreteStructuredValidatedReturnedOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      sourceValue targetStore targetLocals witness actualKind physical source
+      target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (lazyCaller : ConcreteStructuredLazyCallerAtHead source.frames)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetCount targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetCount target targetAfter ∧
+        0 < targetCount ∧
+        ∃ callerContext callerCode callerFunction callerLabels
+          callerEntryRuntime callerEntryStore callerEntryWitness callerResult
+          tailResult callerFacts callerEnv callerLocals declaration result continuation
+          callerJoins sourceTail targetRest targetTail kind cacheIndex
+          resultIndex runtimeAfter nextStore,
+        ∃ caseFrames : List StructuredWasmFrame,
+        ∃ callerSpec : ConcreteSupportedFunction program callerContext callerCode
+          sourceModule callerFunction targetModule hosts,
+        ∃ nextBind : ConcreteStructuredValidatedExternalBindOutcome program
+          callerContext callerCode sourceModule callerFunction targetModule hosts
+          callerSpec externals callerLabels callerEntryRuntime callerEntryStore
+          callerEntryWitness callerResult tailResult callerFacts remainingBytes
+          (sourceRuntime.setGlobal declaration sourceValue) callerEnv sourceValue
+          result continuation callerJoins sourceTail nextStore callerLocals
+          callerLocals.values targetRest targetTail witness kind physical
+          resultIndex sourceAfter targetAfter,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          nextBind.agrees nextBind.frames.validation ∧
+        sourceAfter.runtime = sourceRuntime.setGlobal declaration sourceValue ∧
+        cacheSetStep declaration kind targetStore [physical] =
+          .Return [physical] (replaceRuntime targetStore runtimeAfter) ∧
+        nextStore = writeWasmGlobal
+          (writeWasmGlobal (replaceRuntime targetStore runtimeAfter)
+            (2 * cacheIndex + 1) physical) (2 * cacheIndex) (.i32 1) ∧
+        targetCount = caseFrames.length + 7 := by
+  obtain ⟨targetCount, targetAfter, targetPath, positive, next⟩ :=
+    related.advance_atRoot_of_step rooted sourceStep
+  obtain ⟨
+      callerContext, callerCode, callerFunction, callerLabels, callerEntryRuntime,
+      callerEntryStore, callerEntryWitness, callerResult, tailResult, callerFacts,
+      callerEnv, callerLocals, declaration, result, continuation, callerJoins,
+      sourceTail, targetRest, targetTail, kind, cacheIndex, cacheSetId, resultIndex,
+      runtimeAfter, nextStore, caseFrames, tailSpine, callerSpec, nextBind,
+      nextRooted, spine, aligned, nextChecked, spineEq, callerSourceFramesEq,
+      sourceFramesAfter, targetFramesAfter, callerTargetFramesEq, sourceRuntimeAfter,
+      operationEq, nextStoreEq, countEq⟩ := next.lazy_of_head lazyCaller
+  exact ⟨targetCount, targetAfter, targetPath, positive,
+      callerContext, callerCode, callerFunction, callerLabels, callerEntryRuntime,
+      callerEntryStore, callerEntryWitness, callerResult, tailResult, callerFacts,
+      callerEnv, callerLocals, declaration, result, continuation, callerJoins,
+      sourceTail, targetRest, targetTail, kind, cacheIndex, resultIndex,
+      runtimeAfter, nextStore, caseFrames, callerSpec, nextBind, nextRooted,
+      sourceRuntimeAfter, operationEq, nextStoreEq, countEq⟩
+
+/-- Actual-dispatch negative regression: neither named successor can come from
+an empty source stack, even without any equality on the returned ABI kind. -/
+example
+    (related : ConcreteStructuredValidatedReturnedOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      sourceValue targetStore targetLocals witness actualKind physical source
+      target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (empty : source.frames = []) :
+    executeStep externals source ≠ .next sourceAfter := by
+  intro sourceStep
+  obtain ⟨_, _, _, _, next⟩ :=
+    related.advance_atRoot_of_step rooted sourceStep
+  rcases next with next | next
+  · obtain ⟨_, _, _, _, _, headEq⟩ := next.bindCallerAtHead
+    rw [empty] at headEq
+    cases headEq
+  · obtain ⟨_, _, _, _, _, _, headEq⟩ := next.lazyCallerAtHead
+    rw [empty] at headEq
+    cases headEq
+
+end RootedReturnedDispatch
 
 /-- Heterogeneous nested calls retain the original result, not the deepest
 callee's kind or the immediate consumer's kind. -/

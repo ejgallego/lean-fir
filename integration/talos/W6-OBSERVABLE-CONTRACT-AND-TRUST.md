@@ -996,6 +996,47 @@ Global returned dispatch, root/schema/precision and terminal assembly, universal
 compiler admission and traps remain separate, as do closure-footprint,
 whole-helper/tagged-result and all 14 W72 obligations.
 
+### Bounded rooted returned-state dispatcher
+
+`ConcreteStructuredValidatedReturnedOutcome.advance_atRoot_of_step` composes
+the accepted rooted bind-pop and lazy-publication producers. Its only addition
+to the old dispatcher's inputs is compiler-internal root evidence for the
+input agreement and validation. The suspended validation itself selects bind
+versus cache/bind; a successful source successor excludes the empty stack.
+There is no client classification, stronger `actualKind` equality, new
+scope/resource/admission contract, or successor/root certificate.
+
+`BindSuccessorAtRoot` and `LazySuccessorAtRoot` name the accepted producers'
+exact existential payloads. Their two-branch `SuccessorAtRoot` disjunction is
+confined to returned dispatch. Both retain the actual named outcome and its
+root before `toCodeGlobal` explicitly erases to the unchanged shared relation.
+This is not a universal rooted sum for the other compiler focuses.
+
+The ordinary branch retains the restored `CodeOutcome`, bound environment and
+destination-only fact erasure, with unchanged current runtime/store. The lazy
+branch retains the published `ExternalBindOutcome`, changed `setGlobal`
+runtime and cacheSet/value/flag store, unbound destination and intact caller
+facts. It does not execute the later bind. Both carry the same actual checked
+input spine and its popped tail, caller indices/entry anchors, witness/budget,
+and exact source/target frame equations. The dispatcher's positive finite path
+has the accepted direct cost two, saturated matcher count plus five, or lazy
+publication cost seven, each plus the actual target case-prefix length.
+
+Two actual-dispatch regressions select bind and cache/bind heads and project
+the named successor, its root and exact cost; the lazy regression also projects
+the changed runtime and publication store equations. A negative regression
+invokes the same dispatcher and shows neither successor can have an empty
+input source stack. All accepted producer bodies and the old dispatcher remain
+unchanged. No runtime transition or application certificate is duplicated.
+
+Exact measured old/rooted dispatcher dependencies match: the standard three
+plus the existing recorded byte32 assembly native dependency. The eight new
+erasure/classification/nil-exclusion helpers use only the standard three.
+The inventory now checks 146 endpoints, not 146 axioms. No new axiom or trust
+approval is introduced. Global root/schema/precision and terminal assembly,
+universal compiler admission and traps remain separate, as do closure-footprint,
+whole-helper/tagged-result and all 14 W72 obligations.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
@@ -1053,6 +1094,8 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | original lazy-miss entry, checked-spine helper and rooted initializer producer | 3 | 0 |
 | original bind-caller pop, same-spine/tail helper and rooted restored-caller producer | 3 | 0 |
 | original lazy publication, same-spine/tail helper and rooted named-bind producer | 3 | 1 |
+| original returned dispatcher and bounded rooted dispatcher | 3 | 1 |
+| returned-successor erasure/classification and nil-exclusion helpers | 3 | 0 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original UInt8-case wrapper, frame-exposing helper and rooted successor | 3 | 2 |

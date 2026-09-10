@@ -323,6 +323,22 @@ destination fact. Baseline/original/helper/rooted axiom sets are identical:
 standard three plus the existing recorded byte-assembly dependency; 136 endpoints
 are audited. Global root/schema/precision assembly remains separate; no new
 trust is approved.
+Returned-state dispatch now composes the accepted rooted bind-pop and lazy
+publication producers. `advance_atRoot_of_step` derives its branch solely from
+the input suspended validation, excluding an empty stack from a successful
+source step. A bounded `SuccessorAtRoot` disjunction keeps the actual named
+already-bound caller or still-unbound published bind, with its root, same
+checked input/popped spines, caller indices/entry anchors, frame equations and
+exact direct/saturated/publication/case costs. Its explicit projection erases
+to the existing global relation; the old dispatcher and all accepted producer
+bodies remain unchanged. Actual-dispatch regressions select both source heads,
+project the named successor/root and costs, and reject an empty-stack successor.
+Only internal input root evidence is added to the old dispatcher premises;
+arbitrary returned-kind compatibility is retained. Baseline and rooted
+dispatchers have the same three standard axioms plus existing byte32 assembly
+dependency; eight new projection/classification helpers use only the standard
+three. The exact inventory checks 146 endpoints. This is only returned-state
+dispatch, not a global rooted relation or terminal assembly; no new trust.
 The general global relation still existentially hides the represented kind;
 preserving the root index and producer precision through the remaining
 dispatcher branches and composing the strengthened global relation remain open.
