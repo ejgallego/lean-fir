@@ -97,10 +97,20 @@ bounded integration lease when a producer submits its next clean checkpoint.
   endpoints are standard-only; UInt8 retains exactly its two inventoried
   existing native dependencies. No new trust approval or other debt closure.
   The reserved serial integration slot is released with this acceptance.
-  Next, ROOT-W6-20260910-004 assigns composition of these accepted case-family
-  results into a root-preserving validated-case dispatcher, using existing
-  validation-derived branch classification without a new caller premise.
-  Global assembly, caller push/pop and other local families remain separate.
+  ROOT-W6-20260910-004 is accepted at exact rooted case-dispatcher checkpoint
+  `c52cb71165c73b7f4002eb47b4417ab78321815e`, functional `fa388b97`, base
+  `381d915a`. Root reviewed validation-derived classification and composition
+  of the accepted AtRoot producers; the original dispatcher file/API and W7
+  tree are unchanged. Independent diff-check, make check (730/2172, 38 mailbox
+  tests) and make talos-check (3204 jobs, 3165 audit cone, 60 endpoints) pass.
+  Receipt: `64ae8cb3d73262ac2e70427267923217a4e45bb0b1013e421f878be753f48ba5`.
+  Logs: root worktree `.deps/root-case-dispatcher-{check,talos}.log`. Original
+  and rooted dispatchers retain identical standard plus two existing native
+  dependencies. No new classifier/client premise or wider proof-debt closure.
+  Root releases this bounded serial integration lease. Next,
+  ROOT-W6-20260910-006 assigns root transport through persistent and ordinary
+  increment/decrement, preserving exact zero/two-step paths and existing
+  effect/admission boundaries. Global assembly and caller push/pop stay separate.
 - W7: ROOT-W7-20260909-107 is accepted at exact CG-05B checkpoint
   `cdfc6e44cefcf11ae5c7a27e99b227841005ba4e` (functional `6402d306`, base
   `14a2b07f`). Root serialized this candidate alone on
