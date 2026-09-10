@@ -564,6 +564,49 @@ This is one local staging boundary, not callee entry, caller push/pop, other
 staging families or global root assembly. Footprint, whole-helper/tagged-result
 and all 14 W72 obligations remain separate.
 
+### Root-preserving saturated and lazy staging
+
+`advance_saturatedCall_stageAtRoot_of_step` and
+`advance_lazy_stageAtRoot_of_step` reuse the unchanged staging producers and
+the existing `reindex` lemma directly. The original caller/root ABI is attached
+to each actual named ready outcome's `agrees` and `frames.validation`, before
+any callee entry, caller push or closure consumption. No extra helper or
+central staging/ready-relation edit is needed.
+
+Both producers keep exact zero-step target identity and unconditional strict
+source control-rank decrease. Their ready payloads retain caller continuation
+validation, saved source/target frames, active/caller result indices, runtime/
+store, witness and budget. Saturated staging also retains the selected row/
+callee, targetValue/rest and result index; lazy staging retains cacheIndex,
+declarationId, cacheSetId, resultIndex and rest. Caller and callee result kinds
+are not equated.
+
+The original `activeResult`, saturated site/resolution and `sharedCapacity`
+premises are unchanged. In particular, capacity remains required for every
+`parentRuntime` obtained by successful `setCell` after decrementing
+`resolution.cell.rc`, and is `ClosureRetainCapacity parentRuntime
+resolution.captures.toList`. Finite retain capacity is not derived from source
+execution. Lazy staging keeps `LazyCacheCallSupported`,
+`LazyCacheGeneratedEnvironment` and the exact `ConcreteStructuredLazyReadyAdmission`
+path. Hits retain semantic lookup; misses retain the internal initializer,
+classified result, non-object/non-tobject restrictions and empty lookup. Root
+transport neither derives admission nor broadens supported result kinds.
+
+Two kernel regressions invoke the actual rooted producers and recover caller/
+root precision from their saved empty caller stacks while keeping zero target
+steps and strict source progress. The lazy regression accepts an arbitrary
+existing admission path, covering both hit and miss without a hit-only premise.
+No result-kind equality or new client/classifier premise is supplied.
+
+Both originals at baseline `7529041f` and all four final original/rooted
+endpoints have exactly the three standard axioms. The inventory now checks 110
+endpoints; no generated dependency, new axiom or trust approval. The entire
+original staging file is unchanged. Saturated entry/closure consumption, lazy
+hit execution or miss entry/cache write, caller push/pop, external staging,
+global root/schema assembly, universal compiler admission and traps remain
+separate. Footprint, whole-helper/tagged-result and all 14 W72 obligations are
+unchanged.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
@@ -611,6 +654,7 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | original packed-scalar mutation/validated rules, frame helper and both rooted producers | 3 | 2 |
 | original active-witness FVar/erased field effects and schema rules, frame helpers and rooted producers | 3 | 1 |
 | original named direct-call staging and rooted ready-outcome producer | 3 | 0 |
+| original saturated/lazy staging and rooted ready-outcome producers | 3 | 0 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original UInt8-case wrapper, frame-exposing helper and rooted successor | 3 | 2 |

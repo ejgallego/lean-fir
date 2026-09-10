@@ -177,6 +177,18 @@ and target identity at an empty prefix. Caller and callee result kinds are not
 equated. Both original/rooted endpoints are standard-axiom-only; the inventory
 now checks 106 endpoints. Callee entry, caller push/pop, other staging families
 and global root assembly remain separate.
+Saturated closure and lazy staging now retain the caller/root on their actual
+named ready outcomes using the same reindex lemma and unchanged saved stacks.
+Both preserve exact zero-step target identity, unconditional strict source
+rank decrease, caller continuation validation, selected indices and resources.
+Saturated staging keeps the exact post-decrement retain-capacity premise;
+lazy staging keeps the existing hit/miss admission and result restrictions.
+Two actual-producer regressions recover root precision at an empty saved caller
+stack while retaining path/rank; the lazy one accepts either admission branch.
+No helper or original staging/ready-relation edit was needed. All four staging
+endpoints are standard-axiom-only; the inventory now has 110 total endpoints.
+Closure consumption, lazy hit execution/miss entry/cache write, caller push/pop,
+external staging and global assembly remain separate.
 The general global relation still existentially hides the represented kind;
 preserving the root index and producer precision through the remaining
 dispatcher branches and composing the strengthened global relation remain open.

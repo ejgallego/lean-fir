@@ -27,6 +27,8 @@ Active-witness FVar and erased object-field writes use the unchanged source
 schema bridge and retain its exact typing/agreement premises during root transport.
 Named direct-call staging retains that root on its actual ready outcome and
 saved caller stack, before callee entry or any caller push.
+Saturated closure and lazy staging likewise preserve the caller root across
+zero target steps, retaining their capacity and hit/miss admission premises.
 Preservation through the other global transitions is still separate; the
 unindexed global relation cannot recover root identity after existentially
 hiding the caller spine.
@@ -2116,6 +2118,221 @@ example
   exact emptyPath.eq_of_zero.symm
 
 end RootedDirectCallStaging
+
+section RootedSaturatedCallStaging
+
+variable
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {callerCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context callerCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {callerEnv : Env}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult rootResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+
+/-- Saturated closure staging preserves the caller/root ABI on the actual
+ready outcome before closure consumption or callee entry. The original site,
+resolution and post-decrement retain-capacity premise are unchanged. -/
+theorem
+    ConcreteStructuredValidatedCodeOutcome.advance_saturatedCall_stageAtRoot_of_step
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      callerCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime callerEnv
+      (.let decl continuation) targetStore targetLocals targetCode witness source
+      target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (site : SaturatedClosureCallSite context decl callerEnv)
+    (resolution : SaturatedClosureCallResolution context sourceRuntime site)
+    (sharedCapacity : ∀ parentRuntime,
+      setCell sourceRuntime resolution.location
+          { resolution.cell with rc := resolution.cell.rc - 1 } =
+            .ok parentRuntime →
+        ClosureRetainCapacity parentRuntime resolution.captures.toList)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ calleeContext calleeFunction,
+      ∃ row : ConcreteGeneratedInternalDeclaration context.program
+        resolution.target calleeContext resolution.calleeCode sourceModule
+        calleeFunction targetModule,
+      ∃ (targetValue targetRest : Wasm.Program) (resultIndex : Nat),
+        FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 0
+            target target ∧
+          ∃ ready : ConcreteStructuredValidatedSaturatedCallReadyOutcome program context
+            calleeContext callerCode sourceModule sourceFunction calleeFunction
+            targetModule hosts spec site resolution row externals labels
+            entryRuntime entryStore entryWitness functionResult
+            callerExpectedResult facts remainingBytes continuation source.joins
+            source.frames targetStore targetLocals targetValue targetRest
+            target.frames witness resultIndex sourceAfter target,
+          ConcreteStructuredValidationAgreesAtRoot rootResult
+            ready.agrees ready.frames.validation ∧
+          compilerStructuredControlRank sourceAfter <
+            compilerStructuredControlRank source := by
+  obtain ⟨calleeContext, calleeFunction, row, targetValue, targetRest,
+      resultIndex, targetPath, ready, rank⟩ :=
+    related.advance_saturatedCall_stage_of_step activeResult site resolution
+      sharedCapacity sourceStep
+  exact ⟨calleeContext, calleeFunction, row, targetValue, targetRest,
+    resultIndex, targetPath, ready,
+    rooted.reindex rfl rfl ready.agrees ready.frames.validation, rank⟩
+
+/-- The actual saturated staging producer retains the original post-decrement
+retain-capacity premise. Its saved empty caller stack recovers root
+precision while preserving zero target steps and strict source progress. -/
+example
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      callerCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime callerEnv
+      (.let decl continuation) targetStore targetLocals targetCode witness source
+      target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (site : SaturatedClosureCallSite context decl callerEnv)
+    (resolution : SaturatedClosureCallResolution context sourceRuntime site)
+    (sharedCapacity : ∀ parentRuntime,
+      setCell sourceRuntime resolution.location
+          { resolution.cell with rc := resolution.cell.rc - 1 } =
+            .ok parentRuntime →
+        ClosureRetainCapacity parentRuntime resolution.captures.toList)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : source.frames = []) :
+    FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 0
+        target target ∧
+      functionResult = rootResult ∧
+      compilerStructuredControlRank sourceAfter <
+        compilerStructuredControlRank source := by
+  obtain ⟨_, _, _, _, _, _, targetPath, _ready, nextRooted, rank⟩ :=
+    related.advance_saturatedCall_stageAtRoot_of_step activeResult rooted site
+      resolution sharedCapacity sourceStep
+  exact ⟨targetPath, nextRooted.functionResult_eq_of_empty empty, rank⟩
+
+end RootedSaturatedCallStaging
+
+section RootedLazyCallStaging
+
+variable
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult rootResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {callerEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {declaration : Lean.Name}
+    {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
+    {resultKind : AbiKind}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+
+/-- Lazy staging preserves the caller/root ABI on the actual ready outcome
+for either existing hit/miss admission. The caller supplies exactly the old
+admission; root transport neither derives it nor broadens supported results. -/
+theorem ConcreteStructuredValidatedCodeOutcome.advance_lazy_stageAtRoot_of_step
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec
+      externals labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime callerEnv
+      (.let decl continuation) targetStore targetLocals targetCode witness source
+      target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (call : LazyCacheCallSupported context decl declaration sourceDeclaration
+      resultKind)
+    (generated : LazyCacheGeneratedEnvironment context sourceModule)
+    (path : ConcreteStructuredLazyReadyAdmission context sourceModule call
+      generated sourceRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ cacheIndex declarationId cacheSetId resultIndex targetRest,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 0
+          target target ∧
+        ∃ ready : ConcreteStructuredValidatedLazyCallReadyOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec call
+          generated externals labels entryRuntime entryStore entryWitness
+          functionResult callerExpectedResult facts remainingBytes sourceRuntime
+          callerEnv continuation source.joins source.frames targetStore
+          targetLocals targetRest target.frames witness cacheIndex declarationId
+          cacheSetId resultIndex sourceAfter target,
+        ConcreteStructuredValidationAgreesAtRoot rootResult
+          ready.agrees ready.frames.validation ∧
+        compilerStructuredControlRank sourceAfter <
+          compilerStructuredControlRank source := by
+  obtain ⟨cacheIndex, declarationId, cacheSetId, resultIndex, targetRest,
+      targetPath, ready, rank⟩ :=
+    related.advance_lazy_stage_of_step activeResult call generated path sourceStep
+  exact ⟨cacheIndex, declarationId, cacheSetId, resultIndex, targetRest,
+    targetPath, ready,
+    rooted.reindex rfl rfl ready.agrees ready.frames.validation, rank⟩
+
+/-- The actual lazy staging producer handles either existing admission path;
+no hit-only premise is imposed. Its saved empty caller stack recovers root
+precision while preserving zero target steps and strict source progress. -/
+example
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec
+      externals labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime callerEnv
+      (.let decl continuation) targetStore targetLocals targetCode witness source
+      target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (call : LazyCacheCallSupported context decl declaration sourceDeclaration
+      resultKind)
+    (generated : LazyCacheGeneratedEnvironment context sourceModule)
+    (path : ConcreteStructuredLazyReadyAdmission context sourceModule call
+      generated sourceRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (empty : source.frames = []) :
+    FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 0
+        target target ∧
+      functionResult = rootResult ∧
+      compilerStructuredControlRank sourceAfter <
+        compilerStructuredControlRank source := by
+  obtain ⟨_, _, _, _, _, targetPath, _ready, nextRooted, rank⟩ :=
+    related.advance_lazy_stageAtRoot_of_step activeResult rooted call generated
+      path sourceStep
+  exact ⟨targetPath, nextRooted.functionResult_eq_of_empty empty, rank⟩
+
+end RootedLazyCallStaging
 
 /-- Heterogeneous nested calls retain the original result, not the deepest
 callee's kind or the immediate consumer's kind. -/
