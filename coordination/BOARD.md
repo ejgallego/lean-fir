@@ -254,10 +254,23 @@ bounded integration lease when a producer submits its next clean checkpoint.
   active successor with root, frame equations and destination-only fact erasure.
   Both hit endpoints are standard-axiom-only; no new trust approval or wider
   debt closure. This serial integration lease is released.
-  Next, ROOT-W6-20260910-028 assigns named direct-call entry root transport,
-  including only its existing checked direct caller push and exact one-step
-  callee successor. Preserve heterogeneous caller/callee ABIs. Saturated/lazy
-  entry, cache publication, caller pop and global assembly stay separate.
+  ROOT-W6-20260910-028 is accepted at exact direct-entry checkpoint
+  `39e40b1fba2366250540ee47345e961301f99d8b`, functional `14977d40`, base
+  `debc463d`. Independent diff-check,
+  make check (730/2172, 38 mailbox tests) and make talos-check (3204 jobs,
+  3165 audit cone, 124 forced endpoints) pass. Exact verified receipt:
+  `ab42a9611859144e025ac3d0a28567d9b99d0e211aae97f0c3914cba60c36a3d`.
+  Logs: root worktree `.deps/root-direct-call-entry-{check,talos}.log`.
+  Original public signature, core/push and complete callee construction are
+  byte-identical. The narrow interface carries the same indexed checked caller
+  spine through the push and frame equations onto the actual named callee.
+  The actual-producer regression retains the original root with a different
+  active callee ABI and exact one-step path. All four audited entry/interface
+  endpoints are standard-axiom-only; no new trust or wider debt closure.
+  This serial integration lease is released. Next, ROOT-W6-20260910-030
+  assigns saturated-call entry/root transport only, retaining its checked
+  saturated push, exact positive path, capacity premise and callee indices.
+  Lazy entry, cache publication, caller pop and global assembly stay separate.
 - W7: ROOT-W7-20260909-107 is accepted at exact CG-05B checkpoint
   `cdfc6e44cefcf11ae5c7a27e99b227841005ba4e` (functional `6402d306`, base
   `14a2b07f`). Root serialized this candidate alone on
