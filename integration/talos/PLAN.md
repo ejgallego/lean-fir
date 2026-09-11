@@ -358,13 +358,39 @@ zero-count rank and active-witness legacy-write checks use the dispatcher;
 negative sensitivity rejects loss of represented-return precision.
 Old and new dispatchers have identical measured dependencies: three standard
 axioms plus 57 already recorded generated dependencies. Erasure uses only
-the standard three; 149 endpoints are now inventoried. No new trust, runtime,
-admission or original producer change is involved.
-This is ordinary admission composition, not admission derivation: non-code
-composition into this precise companion, joint root/schema direct-let transport,
-the schema dispatcher and global classifier/prefix/terminal assembly remain
-separate. In particular, existing family semantic/resource premises are not
-discharged, and no new join/jump admission is claimed.
+the standard three; that checkpoint inventories 149 endpoints. No new trust,
+runtime, admission or original producer change is involved.
+
+Seven-focus one-step closure is now
+`ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt.advance_of_step`.
+It retains the SAME accepted companion and root after one successful source
+step, with the actual successor witness and zero-count strict rank. Only code
+consults the existing `ConcreteStructuredCompilerCurrentStepAdmission` and
+SEPARATE `ConcreteStructuredCurrentStepAddressSpaceSafety`; neither law is
+derived or replaced by a client target-path classifier. The other six focuses
+use only their accepted rooted producers and stored validation/path evidence.
+Direct entry costs one; saturated entry keeps its positive matcher/argument
+formula; stored lazy hit/miss costs four/three; host and destination bind cost
+one. Returned pop/publication retains its positive case-prefix cost and uses
+`SuccessorAtRoot.toRootedPreciseGlobal` to package the same named successor.
+Publication remains unbound; no second source step is silently taken.
+The accepted precise returned constructor, caller/callee indices, anchors,
+budgets/facts and actual runtime/store/witness changes remain untouched.
+
+Actual-composition regressions retain root, positive non-code progress, the
+code zero-count rank and erasure at the very same successor witness. External
+responses do not assume the incoming witness is reusable; lazy readiness
+supplies its own hit/miss path. Returned-composition regressions preserve the
+distinct complete bound-pop and unbound-publication payloads without code
+admission or duplicate operational proofs. Existing precision sensitivity and
+accounting remain unchanged. Old classifier and new closure have identical
+three-standard-plus-57-generated dependencies; the projection uses only the
+standard three. The exact inventory now checks 152 endpoints, with no new trust.
+
+This is one-step composition, not compiler admission derivation or PA3 closure.
+Joint root/schema direct-let transport, schema dispatch, rooted initial/prefix/
+terminal assembly and general semantic/resource premises remain separate;
+there is no new join/jump admission or trap support.
 The old global relation still existentially hides the represented kind;
 the additive companion is not yet assembled into the whole simulation.
 The universal compiler classifier also

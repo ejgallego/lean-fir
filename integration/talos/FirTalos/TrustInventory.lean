@@ -208,6 +208,14 @@ def literalExampleNativeDebt : Array String := #[
   "FirTalos.Correctness.abiLiteralSupportedExport._native.native_decide.ax_1"]
 
 def endpointInventory : Array (Lean.Name × Array String) := #[
+  -- Seven-focus one-step composition measured against the accepted classifier
+  -- at 4cbddd9c: the same 57 generated dependencies, with no new trust.
+  (`FirTalos.Concrete.ConcreteStructuredCompilerCurrentStepAdmission.toCurrentStepClassifier,
+    standardAxioms ++ compilerExportNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt.advance_of_step,
+    standardAxioms ++ compilerExportNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredValidatedReturnedOutcome.SuccessorAtRoot.toRootedPreciseGlobal,
+    standardAxioms),
   -- Both ordinary-code dispatchers measured exactly at base 5106a1d8.
   -- Root/precision packaging adds no dependency to the accepted producer union.
   (`FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome.advance_of_admission,

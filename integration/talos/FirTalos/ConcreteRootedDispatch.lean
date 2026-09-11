@@ -1,16 +1,19 @@
 import FirTalos.ConcreteRootResult
+import FirTalos.ConcreteResumableWasm
 
 /-!
-# Rooted, precise ordinary-code admission dispatch
+# Rooted, precise one-step compiler dispatch
 
 This additive proof companion retains the actual witness and each named
 successor's checked caller spine. Only a returned focus identifies its represented
 kind with the active function result. That active result can differ from the
 original root inside a call; ready and bind temporaries retain their own ABIs.
 
-The dispatcher consumes the existing admission once and packages one accepted
-rooted producer per branch. It does not derive admission, change runtime state,
-or assemble non-code, schema, finite-prefix or terminal simulation.
+The ordinary dispatcher consumes existing admission once and packages one
+accepted rooted producer per branch. Seven-focus one-step closure then reuses
+the independent compiler-admission and address-space laws for code only, and
+the stored ready/bind/return evidence otherwise. Neither theorem derives those
+laws, changes runtime state, or assembles schema, finite-prefix or terminal simulation.
 -/
 
 namespace FirTalos.Concrete
@@ -995,5 +998,409 @@ example
       targetModule hosts externals rootResult witness source target ∧
       kind ≠ functionResult ∧ kind ≠ rootResult :=
   ⟨.externalBind related rooted, differentActive, differentRoot⟩
+
+/-- Repackage the accepted returned dispatch payload, retaining its actual
+already-bound code or still-unbound published bind. No pop, publication or
+subsequent source transition is executed by this metadata projection. -/
+theorem ConcreteStructuredValidatedReturnedOutcome.SuccessorAtRoot.toRootedPreciseGlobal
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult actualKind rootResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {sourceValue : Value}
+    {targetLocals : Wasm.Locals}
+    {physical : Wasm.Value}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+
+    {related : ConcreteStructuredValidatedReturnedOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      sourceValue targetStore targetLocals witness actualKind physical source
+      target}
+    {targetCount : Nat} {targetAfter : StructuredWasmState Host}
+    (next : related.SuccessorAtRoot rootResult sourceAfter targetCount targetAfter) :
+    ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt program sourceModule
+      targetModule hosts externals rootResult witness sourceAfter targetAfter := by
+  rcases next with next | next
+  · rcases next with ⟨
+      _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _,
+      callerResultAt, nextActive, rooted, _⟩
+    exact .code callerResultAt nextActive rooted
+  · rcases next with ⟨
+      _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _,
+      _, _, nextBind, rooted, _⟩
+    exact .externalBind nextBind rooted
+
+/-- One successful source step closes the accepted seven-focus rooted/precise
+companion. Only ordinary code consumes compiler admission and the independent
+address-space law; ready/bind/returned cases use their stored validated evidence.
+This is one-step closure, not a prefix simulator or a proof of either law. -/
+theorem ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt.advance_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module} {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts} {externals : ExternalImpl}
+    {rootResult : AbiKind} {witness : RefinementWitness}
+    {source sourceAfter : MachineState} {target : StructuredWasmState Host}
+    (admission : ConcreteStructuredCompilerCurrentStepAdmission program
+      sourceModule targetModule hosts externals)
+    (addressSpaceSafety : ConcreteStructuredCurrentStepAddressSpaceSafety program
+      sourceModule targetModule hosts externals)
+    (related : ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt program sourceModule
+      targetModule hosts externals rootResult witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetCount targetAfter nextWitness,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+        targetCount target targetAfter ∧
+      ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt program sourceModule
+        targetModule hosts externals rootResult nextWitness sourceAfter targetAfter ∧
+      (targetCount = 0 → compilerStructuredControlRank sourceAfter <
+        compilerStructuredControlRank source) := by
+  cases related with
+  | code activeResult related rooted =>
+      obtain ⟨requiredBytes, admitted⟩ := admission.code _ activeResult related sourceStep
+      have budget := addressSpaceSafety.code related.core.core sourceStep admitted
+      exact related.advance_atRoot_of_admission activeResult rooted admitted budget sourceStep
+  | directReady related rooted =>
+      obtain ⟨after, path, calleeSpec, activeResult, next, nextRoot, _⟩ :=
+        related.advance_enterAtRoot_of_step rooted sourceStep
+      exact ⟨1, after, witness, path, .code activeResult next nextRoot, by omega⟩
+  | saturatedReady related rooted =>
+      obtain ⟨after, nextStore, physicalArgs, matcherCount, argumentCount, callRuntime,
+          path, positive, calleeSpec, activeResult, next, nextRoot, _⟩ :=
+        related.advance_enterAtRoot_of_step rooted sourceStep
+      exact ⟨3 * (matcherCount + 1) + argumentCount + 1, after, witness,
+        path, .code activeResult next nextRoot, by omega⟩
+  | lazyReady related rooted =>
+      cases related.path with
+      | hit sourceValue semanticFound =>
+          obtain ⟨physical, after, path, next, nextRoot⟩ :=
+            related.advance_hitAtRoot_of_step rooted semanticFound sourceStep
+          exact ⟨4, after, witness, path, .externalBind next nextRoot, by omega⟩
+      | miss calleeCode internal resultClassified notObject notTObject semanticEmpty =>
+          obtain ⟨calleeContext, calleeFunction, row, after, path,
+              calleeSpec, activeResult, next, nextRoot, _⟩ :=
+            related.advance_missAtRoot_of_step rooted internal resultClassified
+              notObject notTObject semanticEmpty sourceStep
+          exact ⟨3, after, witness, path, .code activeResult next nextRoot, by omega⟩
+  | externalReady related rooted =>
+      obtain ⟨nextStore, nextWitness, physicalResult, after, path, _extends, next, nextRoot⟩ :=
+        related.advance_bindAtRoot_of_step rooted sourceStep
+      exact ⟨1, after, nextWitness, path, .externalBind next nextRoot, by omega⟩
+  | externalBind related rooted =>
+      obtain ⟨after, resumedLocals, path, next, nextRoot, _⟩ :=
+        related.advance_codeAtRoot_of_step rooted sourceStep
+      exact ⟨1, after, witness, path, .code related.activeResult next nextRoot, by omega⟩
+  | returned related rooted =>
+      obtain ⟨count, after, path, positive, next⟩ :=
+        related.advance_atRoot_of_step rooted sourceStep
+      exact ⟨count, after, witness, path, next.toRootedPreciseGlobal, by omega⟩
+
+section SevenFocusRegressions
+
+variable
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module} {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts} {externals : ExternalImpl}
+    {rootResult : AbiKind} {witness : RefinementWitness}
+    {source sourceAfter : MachineState} {target : StructuredWasmState Host}
+    (admission : ConcreteStructuredCompilerCurrentStepAdmission program
+      sourceModule targetModule hosts externals)
+    (addressSpaceSafety : ConcreteStructuredCurrentStepAddressSpaceSafety program
+      sourceModule targetModule hosts externals)
+
+/-- Actual-composition regression for all non-code inputs. Their source rank
+is zero, so the new theorem's rank condition rules out a zero-step target match.
+No instruction admission or operation-specific successor is supplied here. -/
+example
+    (related : ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt program sourceModule
+      targetModule hosts externals rootResult witness source target)
+    (notCode : ∀ code, source.control ≠ .code code)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ count after nextWitness,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+        count target after ∧
+      ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt program sourceModule
+        targetModule hosts externals rootResult nextWitness sourceAfter after ∧
+      ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+        targetModule hosts externals nextWitness sourceAfter after ∧ 0 < count := by
+  obtain ⟨count, after, nextWitness, path, next, rank⟩ :=
+    related.advance_of_step admission addressSpaceSafety sourceStep
+  have beforeRank : compilerStructuredControlRank source = 0 := by
+    cases control : source.control <;>
+      simp_all [compilerStructuredControlRank, compilerCodeSilenceRank]
+  exact ⟨count, after, nextWitness, path, next, next.toValidatedGlobalAt, by
+    have zeroImpossible : count ≠ 0 := by
+      intro zero
+      have decrease := rank zero
+      omega
+    omega⟩
+
+/-- The actual host response may extend the witness. Both views below use that
+successor witness, not a forced copy of the incoming witness. -/
+example
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    {spec : ConcreteSupportedFunction program context functionCode
+      sourceModule sourceFunction targetModule hosts}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceValue : Value}
+    {stepCost : Nat}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {site : PureExternalCallShape context externals sourceRuntime sourceEnv
+      decl nextRuntime sourceValue stepCost}
+    {operation : ExternalOperation}
+    {resolvedResultKind : AbiKind}
+    {targetImport : Wasm.ImportDecl}
+    {labels : LabelContext}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {entryRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {callerLocals : Wasm.Locals}
+    {callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {physicalArgs : List Wasm.Value}
+    {callIndex resultIndex : Nat}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedExternalCallReadyOutcome program
+      context functionCode sourceModule sourceFunction targetModule hosts spec
+      externals site operation resolvedResultKind targetImport labels
+      continuation callerJoins sourceFrames entryRuntime entryStore
+      entryWitness functionResult callerExpectedResult facts remainingBytes
+      targetStore callerLocals callerRemainder targetRest targetFrames witness
+      physicalArgs callIndex resultIndex source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ count after nextWitness,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+        count target after ∧
+      ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt program sourceModule
+        targetModule hosts externals rootResult nextWitness sourceAfter after ∧
+      ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+        targetModule hosts externals nextWitness sourceAfter after ∧
+      (count = 0 → compilerStructuredControlRank sourceAfter <
+        compilerStructuredControlRank source) := by
+  have current : ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt program sourceModule
+      targetModule hosts externals rootResult witness source target :=
+    .externalReady related rooted
+  obtain ⟨count, after, nextWitness, path, next, rank⟩ :=
+    current.advance_of_step admission addressSpaceSafety sourceStep
+  fail_if_success
+    have reusedWitness : ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+        targetModule hosts externals witness sourceAfter after := next.toValidatedGlobalAt
+  exact ⟨count, after, nextWitness, path, next, next.toValidatedGlobalAt, rank⟩
+
+/-- Lazy hit/miss is read from ready.path by the actual composition; this
+caller supplies neither a hit/miss classifier nor separate lookup evidence. -/
+example
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    {spec : ConcreteSupportedFunction program context functionCode
+      sourceModule sourceFunction targetModule hosts}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {declaration : Lean.Name}
+    {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
+    {resultKind : AbiKind}
+    {call : LazyCacheCallSupported context decl declaration
+      sourceDeclaration resultKind}
+    {generated : LazyCacheGeneratedEnvironment context sourceModule}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {callerEnv : Env}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {callerLocals : Wasm.Locals}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {cacheIndex declarationId cacheSetId resultIndex : Nat}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredValidatedLazyCallReadyOutcome program
+      context functionCode sourceModule sourceFunction targetModule hosts spec
+      call generated externals labels entryRuntime entryStore entryWitness
+      functionResult callerExpectedResult facts remainingBytes sourceRuntime
+      callerEnv continuation callerJoins sourceFrames targetStore callerLocals
+      targetRest targetFrames witness cacheIndex declarationId cacheSetId
+      resultIndex source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ count after nextWitness,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+        count target after ∧
+      ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt program sourceModule
+        targetModule hosts externals rootResult nextWitness sourceAfter after ∧
+      ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+        targetModule hosts externals nextWitness sourceAfter after ∧
+      (count = 0 → compilerStructuredControlRank sourceAfter <
+        compilerStructuredControlRank source) := by
+  have current : ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt program sourceModule
+      targetModule hosts externals rootResult witness source target :=
+    .lazyReady related rooted
+  obtain ⟨count, after, nextWitness, path, next, rank⟩ :=
+    current.advance_of_step admission addressSpaceSafety sourceStep
+  exact ⟨count, after, nextWitness, path, next, next.toValidatedGlobalAt, rank⟩
+
+/-- Code's conditional strict rank survives the seven-focus assembly, rather
+than being replaced by a positive-target-step requirement. -/
+example
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    {spec : ConcreteSupportedFunction program context functionCode
+      sourceModule sourceFunction targetModule hosts}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (activeResult : spec.sourceResultKind = functionResult)
+    (related : ConcreteStructuredValidatedCodeOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec
+      externals labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      sourceCode targetStore targetLocals targetCode witness source target)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ count after nextWitness,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+        count target after ∧
+      ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt program sourceModule
+        targetModule hosts externals rootResult nextWitness sourceAfter after ∧
+      ConcreteStructuredValidatedCodeGlobalOutcomeAt program sourceModule
+        targetModule hosts externals nextWitness sourceAfter after ∧
+      (count = 0 → compilerStructuredControlRank sourceAfter <
+        compilerStructuredControlRank source) := by
+  have current : ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt program sourceModule
+      targetModule hosts externals rootResult witness source target :=
+    .code activeResult related rooted
+  obtain ⟨count, after, nextWitness, path, next, rank⟩ :=
+    current.advance_of_step admission addressSpaceSafety sourceStep
+  exact ⟨count, after, nextWitness, path, next, next.toValidatedGlobalAt, rank⟩
+
+end SevenFocusRegressions
+
+section ReturnedCompositionRegressions
+
+variable
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : LabelContext}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult rootResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {sourceValue : Value}
+    {targetLocals : Wasm.Locals}
+    {physical : Wasm.Value}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+
+variable
+    {related : ConcreteStructuredValidatedReturnedOutcome program context
+      functionCode sourceModule sourceFunction targetModule hosts spec externals
+      labels entryRuntime entryStore entryWitness functionResult
+      callerExpectedResult facts remainingBytes sourceRuntime sourceEnv
+      sourceValue targetStore targetLocals witness functionResult physical source
+      target}
+    {targetCount : Nat} {targetAfter : StructuredWasmState Host}
+
+
+/-- Actual returned composition retains the already-bound caller payload,
+including its exact restored environment, indices and case-prefix cost. -/
+example
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (head : ConcreteStructuredBindCallerAtHead source.frames) :
+    ∃ count after,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) count target after ∧
+      0 < count ∧
+      related.BindSuccessorAtRoot rootResult sourceAfter count after ∧
+      ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt program sourceModule
+        targetModule hosts externals rootResult witness sourceAfter after := by
+  obtain ⟨count, after, path, positive, next⟩ :=
+    related.advance_atRoot_of_step rooted sourceStep
+  exact ⟨count, after, path, positive, next.bind_of_head head,
+    next.toRootedPreciseGlobal⟩
+
+/-- Actual returned composition retains publication as a distinct unbound
+ExternalBindOutcome, including the changed cache store and seven-step cost.
+It neither executes destination binding nor requires compiler code admission. -/
+example
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (sourceStep : executeStep externals source = .next sourceAfter)
+    (head : ConcreteStructuredLazyCallerAtHead source.frames) :
+    ∃ count after,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) count target after ∧
+      0 < count ∧
+      related.LazySuccessorAtRoot rootResult sourceAfter count after ∧
+      ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt program sourceModule
+        targetModule hosts externals rootResult witness sourceAfter after := by
+  obtain ⟨count, after, path, positive, next⟩ :=
+    related.advance_atRoot_of_step rooted sourceStep
+  exact ⟨count, after, path, positive, next.lazy_of_head head,
+    next.toRootedPreciseGlobal⟩
+
+end ReturnedCompositionRegressions
 
 end FirTalos.Concrete

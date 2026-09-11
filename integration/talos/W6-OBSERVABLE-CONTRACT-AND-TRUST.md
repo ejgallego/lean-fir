@@ -1058,20 +1058,46 @@ zero-count rank and active-witness legacy-write checks use the dispatcher;
 negative sensitivity rejects loss of represented-return precision.
 Old and new dispatchers have identical measured dependencies: three standard
 axioms plus 57 already recorded generated dependencies. Erasure uses only
-the standard three; 149 endpoints are now inventoried. No new trust, runtime,
-admission or original producer change is involved.
-This is ordinary admission composition, not admission derivation: non-code
-composition into this precise companion, joint root/schema direct-let transport,
-the schema dispatcher and global classifier/prefix/terminal assembly remain
-separate. In particular, existing family semantic/resource premises are not
-discharged, and no new join/jump admission is claimed.
+the standard three; that checkpoint inventories 149 endpoints. No new trust,
+runtime, admission or original producer change is involved.
+
+Seven-focus one-step closure is now
+`ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt.advance_of_step`.
+It retains the SAME accepted companion and root after one successful source
+step, with the actual successor witness and zero-count strict rank. Only code
+consults the existing `ConcreteStructuredCompilerCurrentStepAdmission` and
+SEPARATE `ConcreteStructuredCurrentStepAddressSpaceSafety`; neither law is
+derived or replaced by a client target-path classifier. The other six focuses
+use only their accepted rooted producers and stored validation/path evidence.
+Direct entry costs one; saturated entry keeps its positive matcher/argument
+formula; stored lazy hit/miss costs four/three; host and destination bind cost
+one. Returned pop/publication retains its positive case-prefix cost and uses
+`SuccessorAtRoot.toRootedPreciseGlobal` to package the same named successor.
+Publication remains unbound; no second source step is silently taken.
+The accepted precise returned constructor, caller/callee indices, anchors,
+budgets/facts and actual runtime/store/witness changes remain untouched.
+
+Actual-composition regressions retain root, positive non-code progress, the
+code zero-count rank and erasure at the very same successor witness. External
+responses do not assume the incoming witness is reusable; lazy readiness
+supplies its own hit/miss path. Returned-composition regressions preserve the
+distinct complete bound-pop and unbound-publication payloads without code
+admission or duplicate operational proofs. Existing precision sensitivity and
+accounting remain unchanged. Old classifier and new closure have identical
+three-standard-plus-57-generated dependencies; the projection uses only the
+standard three. The exact inventory now checks 152 endpoints, with no new trust.
+
+This is one-step composition, not compiler admission derivation or PA3 closure.
+Joint root/schema direct-let transport, schema dispatch, rooted initial/prefix/
+terminal assembly and general semantic/resource premises remain separate;
+there is no new join/jump admission or trap support.
 
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
 |---|---|---|
 | Recover the terminal yield | `sourceExecReturned_terminal`, `ConcreteStructuredValidatedCodeGlobalOutcome.terminalYield_of_control`, and the function/export `terminatesWith_of_validatedReturn` lemmas | Discharged for the existing global relation and a successful final source step. |
-| Preserve the export's selected result ABI | `validatedCodeRoot_rootResult` establishes root identity; `advance_returnPreciseAtRoot_of_step` preserves it through a precise return; `advance_returnYieldAtRoot_of_step` derives the exact root-ABI yield at an empty continuation | The general returned outcome still permits an independent `kind`; compatibility with no caller is only `True`. Preserve the root-indexed checked spine and producer precision through the remaining global branches and assembly, without adding a client assumption. |
+| Preserve the export's selected result ABI | Entry root identity and precise return are established; `ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt.advance_of_step` preserves both through all seven focuses under the two separate existing laws | Lift this accepted companion to rooted initial/prefix and terminal assembly, without a client provenance assumption. The old global relation still hides represented-kind precision; compiler admission and resource premises remain explicit. |
 | Connect source termination to executable return | `terminatesWith_of_classifiedExecSteps`, `terminatesWith_of_classifiedExecEvaluates`, and `terminatesWith_of_classifiedRun` compose the existing ranked prefix with terminal extraction and adequacy | Discharged conditional on the existing universal classifier and entry contracts, with existential represented kind. Compiler admission closure and root-kind provenance are not discharged. |
 | Match faults | `StructuredWasmControl` has running/breaking/returning/halted states, and `StructuredWasmOutcome` describes successful control only | A trap-aware extension and its adequacy proof are a separately coordinated semantic change. Existing `ConcreteFaultSimulation` results do not automatically supply this missing structured-machine branch. |
 
@@ -1127,6 +1153,8 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | returned-successor erasure/classification and nil-exclusion helpers | 3 | 0 |
 | original ordinary-code dispatcher and rooted precise admission composition | 3 | 57 |
 | rooted precise companion erasure | 3 | 0 |
+| original current-step classifier and seven-focus rooted precise closure | 3 | 57 |
+| returned-successor projection into the rooted precise companion | 3 | 0 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original UInt8-case wrapper, frame-exposing helper and rooted successor | 3 | 2 |
