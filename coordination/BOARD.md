@@ -338,10 +338,21 @@ bounded integration lease when a producer submits its next clean checkpoint.
   projection/classification helpers use standard axioms only; rooted and original
   dispatcher dependencies match, including existing byte-assembly debt. No new
   trust or wider debt closure. This serial integration lease is released.
-  Next, ROOT-W6-20260911-002 requests a read-only root/precision coverage audit
-  against accepted global focuses and admission branches, distinguishing missing
-  producers from packaging/assembly and selecting one smallest next slice.
-  No further implementation or global/schema/terminal redesign is assigned yet.
+  ROOT-W6-20260911-002 audit accepted against exact `eb8d6960`; report at
+  W6 `.deps/reviews/root-precision-coverage-20260911.md`, verified SHA-256
+  `63fe347341e46d1c7c0d0809af84a0d8f663bf332696a057e3233a6698336b43`.
+  Source review confirms 20 actual admission constructors and seven global
+  focuses, covered by local root-preserving producers under existing premises.
+  No code/build claim: this was a read-only audit. Ordinary-code dispatch still
+  erases root and precise returned-kind metadata. Root identity alone does not
+  prove arbitrary returned actualKind precise. Joint schema/root direct-let
+  metadata and general admission/resource limits remain separate; jump/join are
+  outside current admission, not missing dispatcher arms.
+  Next, ROOT-W6-20260911-004 assigns ordinary-code root/precise admission
+  composition using accepted producers and an additive witness-indexed proof-only
+  companion. Preserve exact returned functionResult only on returned outcomes;
+  temporary call/cache/external result kinds need not equal root. No non-code
+  global, joint schema, prefix or terminal assembly in this slice.
 - W7: ROOT-W7-20260909-107 is accepted at exact CG-05B checkpoint
   `cdfc6e44cefcf11ae5c7a27e99b227841005ba4e` (functional `6402d306`, base
   `14a2b07f`). Root serialized this candidate alone on
