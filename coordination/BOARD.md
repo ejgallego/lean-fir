@@ -348,11 +348,24 @@ bounded integration lease when a producer submits its next clean checkpoint.
   prove arbitrary returned actualKind precise. Joint schema/root direct-let
   metadata and general admission/resource limits remain separate; jump/join are
   outside current admission, not missing dispatcher arms.
-  Next, ROOT-W6-20260911-004 assigns ordinary-code root/precise admission
-  composition using accepted producers and an additive witness-indexed proof-only
-  companion. Preserve exact returned functionResult only on returned outcomes;
-  temporary call/cache/external result kinds need not equal root. No non-code
-  global, joint schema, prefix or terminal assembly in this slice.
+  ROOT-W6-20260911-004 is accepted at exact ordinary-code checkpoint
+  `87d641f411118f3cc6d7358eba3603da5accd5b2`, functional `db632d4f`, base
+  `5106a1d8`. Independent diff-check, make check (730/2172, 38 mailbox tests)
+  and make talos-check (3205 jobs, 3166 audit cone, 149 forced endpoints) pass.
+  Exact verified receipt:
+  `0f798cd8da8dded98d0c54c19904fdef1dd35456ea4edba746f63ea7356d1430`.
+  Logs: root worktree `.deps/root-rooted-code-dispatch-{check,talos}.log`.
+  All 20 admission branches compose accepted producers with their actual witness,
+  path, state and rank; existing producer/runtime files are unchanged. The
+  additive companion retains precise active-function kind only for returned
+  outcomes, not temporary call/cache/external values. Actual-dispatch exact-root
+  return and negative precision sensitivity pass. Old/new dispatcher dependencies
+  match exactly (3 standard plus 57 inherited generated); erasure standard-only.
+  No new trust or general admission closure. This integration lease is released.
+  Next, ROOT-W6-20260911-006 assigns seven-focus one-step root/precision closure,
+  reusing this code dispatcher and accepted non-code producers under the existing
+  separate current-admission/address-space laws. No schema, finite-prefix or
+  terminal assembly in that slice.
 - W7: ROOT-W7-20260909-107 is accepted at exact CG-05B checkpoint
   `cdfc6e44cefcf11ae5c7a27e99b227841005ba4e` (functional `6402d306`, base
   `14a2b07f`). Root serialized this candidate alone on
