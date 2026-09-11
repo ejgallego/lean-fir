@@ -362,10 +362,27 @@ bounded integration lease when a producer submits its next clean checkpoint.
   return and negative precision sensitivity pass. Old/new dispatcher dependencies
   match exactly (3 standard plus 57 inherited generated); erasure standard-only.
   No new trust or general admission closure. This integration lease is released.
-  Next, ROOT-W6-20260911-006 assigns seven-focus one-step root/precision closure,
-  reusing this code dispatcher and accepted non-code producers under the existing
-  separate current-admission/address-space laws. No schema, finite-prefix or
-  terminal assembly in that slice.
+  ROOT-W6-20260911-006 is accepted at exact seven-focus checkpoint
+  `8855c670ea0c713e175ce6d28ff0ac8781c7646f`, functional `b673481f`, base
+  `4cbddd9c`. Independent diff-check, make check (730/2172, 38 mailbox tests)
+  and make talos-check (3205 jobs, 3166 audit cone, 152 forced endpoints) pass.
+  Exact verified receipt:
+  `1e4a4d6eccf29959076da9cf43ac55bfe21a8bfdcef6dfc4cb1539349fbc1250`.
+  Logs: root worktree `.deps/root-seven-focus-{check,talos}.log`.
+  All seven focuses preserve the same rooted/precise companion through one
+  successful source step, with actual successor witness and conditional strict
+  rank. Only code consumes the existing separate admission/address-space laws.
+  Returned publication remains unbound; accepted producers, ordinary dispatcher,
+  companion and runtime are unchanged. Old/new exact dependencies match
+  (3 standard plus 57 inherited generated); returned projection standard-only.
+  No new trust, universal admission, finite-prefix, schema or terminal closure.
+  This integration lease is released.
+  **W6 proof work is parked (paused by user, 2026-09-11) at this checkpoint.**
+  No successor assignment, self-started audit or proof implementation until the
+  user explicitly resumes. Preserve the clean lane, immutable checkpoint and
+  evidence; no cleanup, deletion, push or session termination is requested.
+  Rooted initial/prefix/terminal assembly, joint schema metadata, admission and
+  resource obligations, traps, helper/tagged-result and W72 debt remain open.
 - W7: ROOT-W7-20260909-107 is accepted at exact CG-05B checkpoint
   `cdfc6e44cefcf11ae5c7a27e99b227841005ba4e` (functional `6402d306`, base
   `14a2b07f`). Root serialized this candidate alone on
