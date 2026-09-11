@@ -324,10 +324,24 @@ bounded integration lease when a producer submits its next clean checkpoint.
   actual-producer composition has eight-plus-case cost and destination-only fact
   erasure. All three endpoints retain exactly the original byte-assembly debt;
   no new trust approval or wider debt closure. This lease is released.
-  Next, ROOT-W6-20260910-038 assigns only the rooted returned-state dispatcher,
-  composing accepted bind-caller pop and lazy publication from existing frame
-  validation. A narrow two-branch proof-only output may retain actual named
-  successors; full global/root/schema and terminal assembly remain separate.
+  ROOT-W6-20260910-038 is accepted at exact returned-dispatch checkpoint
+  `8094ae227df6d6cc7d92b277f6bd6568de4f869d`, functional `dfe530e0`, base
+  `0f8b2572`. Independent diff-check, make check (730/2172, 38 mailbox tests)
+  and make talos-check (3204 jobs, 3165 audit cone, 146 forced endpoints) pass.
+  Exact verified receipt:
+  `5fc60321941ad4b35ac912f5383380d0ecba0f1a33f22eeb78fa4ab92cf08afe`.
+  Logs: root worktree `.deps/root-returned-dispatch-{check,talos}.log`.
+  Entire central file/old dispatcher and all accepted rooted proofs are unchanged.
+  Both named successor payloads exactly match accepted producer conclusions;
+  validation-derived dispatch retains distinct bound/published states, same
+  checked spines/root and exact costs before explicit global erasure. Eight
+  projection/classification helpers use standard axioms only; rooted and original
+  dispatcher dependencies match, including existing byte-assembly debt. No new
+  trust or wider debt closure. This serial integration lease is released.
+  Next, ROOT-W6-20260911-002 requests a read-only root/precision coverage audit
+  against accepted global focuses and admission branches, distinguishing missing
+  producers from packaging/assembly and selecting one smallest next slice.
+  No further implementation or global/schema/terminal redesign is assigned yet.
 - W7: ROOT-W7-20260909-107 is accepted at exact CG-05B checkpoint
   `cdfc6e44cefcf11ae5c7a27e99b227841005ba4e` (functional `6402d306`, base
   `14a2b07f`). Root serialized this candidate alone on
