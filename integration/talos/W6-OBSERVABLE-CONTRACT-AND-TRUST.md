@@ -1037,6 +1037,35 @@ approval is introduced. Global root/schema/precision and terminal assembly,
 universal compiler admission and traps remain separate, as do closure-footprint,
 whole-helper/tagged-result and all 14 W72 obligations.
 
+### Ordinary-code root and precise-return admission composition
+
+Ordinary-code dispatch now has the additive
+`ConcreteStructuredValidatedCodeOutcome.advance_atRoot_of_admission` in
+`ConcreteRootedDispatch.lean`. Its witness-indexed
+`ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt` keeps the seven existing
+named outcomes and each outcome's own checked root evidence; only returned
+values are indexed by their active function's precise result kind. All 20
+existing admission constructors use one accepted rooted producer, preserving
+its actual witness/store/runtime evolution, entry anchors, selected indices
+and zero-step rank. Legacy object writes use support for the active witness.
+Costs remain two for return, positive for direct lets, argument-prefix lengths
+for staged named/external calls, zero for saturated/lazy staging and
+persistent/default operations, 5*n/4*n for tested cases, and two/three for
+mutations. Explicit erasure recovers the unchanged witness-indexed relation.
+The actual-dispatch regression derives exact-root yield at empty return;
+heterogeneous caller/root, cache and external ABIs remain legal. Witness-change,
+zero-count rank and active-witness legacy-write checks use the dispatcher;
+negative sensitivity rejects loss of represented-return precision.
+Old and new dispatchers have identical measured dependencies: three standard
+axioms plus 57 already recorded generated dependencies. Erasure uses only
+the standard three; 149 endpoints are now inventoried. No new trust, runtime,
+admission or original producer change is involved.
+This is ordinary admission composition, not admission derivation: non-code
+composition into this precise companion, joint root/schema direct-let transport,
+the schema dispatcher and global classifier/prefix/terminal assembly remain
+separate. In particular, existing family semantic/resource premises are not
+discharged, and no new join/jump admission is claimed.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
@@ -1096,6 +1125,8 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | original lazy publication, same-spine/tail helper and rooted named-bind producer | 3 | 1 |
 | original returned dispatcher and bounded rooted dispatcher | 3 | 1 |
 | returned-successor erasure/classification and nil-exclusion helpers | 3 | 0 |
+| original ordinary-code dispatcher and rooted precise admission composition | 3 | 57 |
+| rooted precise companion erasure | 3 | 0 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original UInt8-case wrapper, frame-exposing helper and rooted successor | 3 | 2 |

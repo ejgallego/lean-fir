@@ -339,9 +339,34 @@ dispatchers have the same three standard axioms plus existing byte32 assembly
 dependency; eight new projection/classification helpers use only the standard
 three. The exact inventory checks 146 endpoints. This is only returned-state
 dispatch, not a global rooted relation or terminal assembly; no new trust.
-The general global relation still existentially hides the represented kind;
-preserving the root index and producer precision through the remaining
-dispatcher branches and composing the strengthened global relation remain open.
+Ordinary-code dispatch now has the additive
+`ConcreteStructuredValidatedCodeOutcome.advance_atRoot_of_admission` in
+`ConcreteRootedDispatch.lean`. Its witness-indexed
+`ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt` keeps the seven existing
+named outcomes and each outcome's own checked root evidence; only returned
+values are indexed by their active function's precise result kind. All 20
+existing admission constructors use one accepted rooted producer, preserving
+its actual witness/store/runtime evolution, entry anchors, selected indices
+and zero-step rank. Legacy object writes use support for the active witness.
+Costs remain two for return, positive for direct lets, argument-prefix lengths
+for staged named/external calls, zero for saturated/lazy staging and
+persistent/default operations, 5*n/4*n for tested cases, and two/three for
+mutations. Explicit erasure recovers the unchanged witness-indexed relation.
+The actual-dispatch regression derives exact-root yield at empty return;
+heterogeneous caller/root, cache and external ABIs remain legal. Witness-change,
+zero-count rank and active-witness legacy-write checks use the dispatcher;
+negative sensitivity rejects loss of represented-return precision.
+Old and new dispatchers have identical measured dependencies: three standard
+axioms plus 57 already recorded generated dependencies. Erasure uses only
+the standard three; 149 endpoints are now inventoried. No new trust, runtime,
+admission or original producer change is involved.
+This is ordinary admission composition, not admission derivation: non-code
+composition into this precise companion, joint root/schema direct-let transport,
+the schema dispatcher and global classifier/prefix/terminal assembly remain
+separate. In particular, existing family semantic/resource premises are not
+discharged, and no new join/jump admission is claimed.
+The old global relation still existentially hides the represented kind;
+the additive companion is not yet assembled into the whole simulation.
 The universal compiler classifier also
 remains an explicit compiler-proof obligation; this is not PA3 closure. Trap
 support needs a separate structured-machine extension. See the linked review
