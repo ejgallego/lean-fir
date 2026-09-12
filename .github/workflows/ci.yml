@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Repository checks
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    env:
+      FIR_CHECK_JOBS: 2
+      LEAN_NUM_THREADS: 2
+      TMPDIR: ${{ github.workspace }}/.deps/tmp
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Prepare worktree-local scratch
+        run: mkdir -p "$TMPDIR"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install check dependencies
+        run: |
+          mkdir -p "$TMPDIR"
+          sudo apt-get update
+          sudo apt-get install -y ripgrep strace bubblewrap
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -o .deps/elan-init.sh
+          sh .deps/elan-init.sh -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Validate exact checkout
+        run: |
+          git diff --check
+          make check
+
+  talos:
+    name: Talos proofs and trust audit
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      LEAN_NUM_THREADS: 2
+      TMPDIR: ${{ github.workspace }}/.deps/tmp
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Install Lean
+        run: |
+          mkdir -p "$TMPDIR"
+          sudo apt-get update
+          sudo apt-get install -y ripgrep
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -o .deps/elan-init.sh
+          sh .deps/elan-init.sh -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Set up pinned Talos dependencies
+        run: make talos-setup
+      - name: Restore Mathlib build cache
+        run: |
+          LAKE_CACHE_DIR="$(bash scripts/fir-lake-cache-path.sh)"
+          export LAKE_CACHE_DIR LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true
+          lake -d integration/talos exe cache get
+      - name: Check proofs and exact trust inventory
+        run: make talos-check

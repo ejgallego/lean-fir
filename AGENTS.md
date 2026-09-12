@@ -193,6 +193,12 @@ integration creates its corresponding W6 refinement request.
 
 ## Required checks
 
+- GitHub Actions is the durable validation run record. Local validation trees
+  and receipts are disposable working state, not a permanent approval registry.
+  `make check` starts fresh and removes validation scratch on success; failed
+  scratch remains until the next run. Use `FIR_KEEP_VALIDATION=1` only for a
+  specific investigation. Exact checkpoint/check reporting still applies, but
+  acceptance does not require retaining captured binaries or historical traces.
 - Every slice: `git diff --check` and `make check`.
 - Wasm/Talos slices: also `make talos-check` after `make talos-setup` has been
   run in that worktree.

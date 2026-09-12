@@ -1,5 +1,32 @@
 # Interpreter validation
 
+## Disposable local output
+
+GitHub Actions is the durable validation run record. Local validation output is
+scratch, not a permanent registry of accepted checkpoints. `make check` removes
+the five standard validation output directories before starting, runs the same
+comparison, provenance, coverage and trust checks, and removes that scratch
+after success. Failure leaves the current run available for diagnosis until the
+next check. Logs are printed normally; CI does not upload the bulky evidence tree.
+
+Use `make check FIR_KEEP_VALIDATION=1` only when investigating a specific issue.
+It still starts fresh but keeps the completed run. Individual validation targets
+and direct harness commands retain their output for inspection; run
+`make clean-validation` when finished. Do not run cleanup or overlapping validation
+commands concurrently in the same worktree. Release packages, `.deps`, Lean build
+state and Talos proof outputs are outside this cleanup's fixed scope.
+
+The evidence formats below remain implementation details of checking a run, and
+optional debugging/replay interfaces. They do not impose a retention obligation.
+Deleting a run also retires its old receipts: hashes alone do not permit historical
+replay or verification after their referenced blobs are gone. Rebuild and rerun
+the checks when fresh validation is needed; do not maintain a second local CI ledger.
+`make talos-check` likewise builds and audits the exact checkout without issuing
+a persistent acceptance receipt. The old attestation utility remains available
+only for explicit investigations; its historical receipts are not live approval records.
+
+## Validation model
+
 FIR validates its executable semantics against Lean programs compiled by the
 normal native backend.  The native executable is the source-language oracle;
 the first candidate is FIR's interpreter for the final impure LCNF emitted for

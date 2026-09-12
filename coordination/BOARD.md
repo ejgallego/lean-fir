@@ -15,6 +15,14 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Standing integration owner
 
+Validation retention policy (maintainer decision, 2026-09-12): GitHub Actions
+is the durable run record; local validation is disposable. Historical receipt
+hashes below describe past acceptance, not a live registry or storage obligation.
+W6's accumulated `_build` validation trees have been retired; their old receipts
+cannot be replayed after deletion. Source checkpoints, packages and lightweight
+logs remain. Fresh `make check` and Talos checks retain their existing gates;
+proof work remains parked until explicitly resumed. See `docs/validation.md`.
+
 `fir/root` (the meta lane) is the maintainer-appointed standing integration
 owner from 2026-09-09 until explicitly reassigned. Root owns serial green
 local-main landings, shared-contract coordination, this board, and queue
