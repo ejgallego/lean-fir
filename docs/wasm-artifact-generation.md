@@ -8,6 +8,11 @@ The thin [build-example catalog](build-examples.md) lists the accepted
 consumer packages and points to the authoritative fixture registries. It does
 not duplicate their inventories.
 
+For browser/JavaScript consumers, the shared physical host boundary is defined
+separately by the [FIR Wasm host-binding render-core profile](wasm-host-binding-profile-v0.md).
+It complements each package's manifest; it does not make the FIR-native and
+compiler-native Wasm paths interchangeable.
+
 Here, **native Wasm generation** means that the repository produces a `.wasm`
 artifact directly from Lean compiler output. It does not mean the host-native
 executables used as differential-test oracles.
