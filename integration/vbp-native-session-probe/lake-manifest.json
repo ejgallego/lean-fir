@@ -1,0 +1,99 @@
+{
+  "version": "1.2.0",
+  "packagesDir": ".lake/packages",
+  "packages": [
+    {
+      "type": "path",
+      "scope": "",
+      "name": "«verso-react»",
+      "manifestFile": "lake-manifest.json",
+      "inherited": false,
+      "dir": "../../.deps/native-session-probe/sources/vbp/packages/verso-react",
+      "configFile": "lakefile.lean"
+    },
+    {
+      "type": "path",
+      "scope": "",
+      "name": "proofwidgets",
+      "manifestFile": "lake-manifest.json",
+      "inherited": true,
+      "dir": "../../.deps/native-session-probe/sources/proofwidgets",
+      "configFile": "lakefile.lean"
+    },
+    {
+      "type": "path",
+      "scope": "",
+      "name": "subverso",
+      "manifestFile": "lake-manifest.json",
+      "inherited": true,
+      "dir": "../../.deps/native-session-probe/sources/subverso",
+      "configFile": "lakefile.lean"
+    },
+    {
+      "type": "path",
+      "scope": "",
+      "name": "«verso-slides»",
+      "manifestFile": "lake-manifest.json",
+      "inherited": true,
+      "dir": "../../.deps/native-session-probe/sources/verso-slides",
+      "configFile": "lakefile.lean"
+    },
+    {
+      "type": "path",
+      "scope": "",
+      "name": "verso",
+      "manifestFile": "lake-manifest.json",
+      "inherited": false,
+      "dir": "../../.deps/native-session-probe/sources/verso",
+      "configFile": "lakefile.lean"
+    },
+    {
+      "type": "path",
+      "scope": "",
+      "name": "lean_vir",
+      "manifestFile": "lake-manifest.json",
+      "inherited": false,
+      "dir": "../../.deps/native-session-probe/sources/lean_vir",
+      "configFile": "lakefile.lean"
+    },
+    {
+      "type": "path",
+      "scope": "",
+      "name": "illuminate",
+      "manifestFile": "lake-manifest.json",
+      "inherited": true,
+      "dir": "../../.deps/native-session-probe/sources/illuminate",
+      "configFile": "lakefile.lean"
+    },
+    {
+      "type": "path",
+      "scope": "",
+      "name": "plausible",
+      "manifestFile": "lake-manifest.json",
+      "inherited": true,
+      "dir": "../../.deps/native-session-probe/sources/plausible",
+      "configFile": "lakefile.toml"
+    },
+    {
+      "type": "path",
+      "scope": "",
+      "name": "MD4Lean",
+      "manifestFile": "lake-manifest.json",
+      "inherited": true,
+      "dir": "../../.deps/native-session-probe/sources/MD4Lean",
+      "configFile": "lakefile.lean"
+    },
+    {
+      "type": "path",
+      "scope": "",
+      "name": "Fir",
+      "manifestFile": "lake-manifest.json",
+      "inherited": false,
+      "dir": "../../.deps/native-session-probe/sources/fir",
+      "configFile": "lakefile.toml"
+    }
+  ],
+  "name": "FirVbpNativeSessionProbe",
+  "lakeDir": ".lake",
+  "fixedToolchain": true
+}
