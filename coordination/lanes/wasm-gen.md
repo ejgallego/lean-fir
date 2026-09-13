@@ -1,86 +1,53 @@
 # wasm-gen lane
 
-Generation roadmap: `Fir/Wasm/Emit/ROADMAP.md`. CG-05B was independently
-accepted by root at `4366086b`. This is its separate, byte-neutral
-production source-equation successor requested by W6.
+Current bounded probe: `ROOT-W7-20260913-001`, revised by
+`ROOT-W7-20260913-002..003`. Root owns integration; W6 remains parked.
+The earlier CG-05A/CG-05B/source-equation stack was accepted, with both source
+equation threads closed at main `1ea81797`; no package was replaced here.
 
 ```text
 lane: wasm-gen
 owner: wasm-gen
 branch: wasm/generation
 worktree: .worktrees/wasm-generation
-state: ready
-base: 3ddb98e88788d0a02c1d03f577aa801dd905ce88
-functional-head: 8e68650df0f2aafa4b7d5d7570c971d1e1464d61
-contract-base: 3ddb98e88788d0a02c1d03f577aa801dd905ce88
+state: blocked
+base: dc94cd4f0aa716aad5e79a7f77bafa752e9994a9
+functional-head: a7722bf2ca4a2c1d79621d041930492ee9d340a0
+contract-base: dc94cd4f0aa716aad5e79a7f77bafa752e9994a9
 clean-at-update: true
-slice: Expose existing closure initializer fragments/local identities and six closed production source equations. Public-input partialApplicationFunction delegates to the unchanged checked private-key builder and is used by actual installation. No duplicate shadow implementation.
-files: Fir/Wasm/Emit/{ResidentClosureAllocation.lean,ROADMAP.md}; this status
-contracts: Additive proof-facing Lean source access only, authorized by W6-W7-20260909-008 and ROOT-W7-20260909-109. No instruction, runtime signature, layout, metadata, ownership, allocation, symbolic ABI, W6 file, root gate, toolchain or manifest change.
-checks: git diff --check; both rebased patches identical by range-diff and stable patch IDs. Original Lean Beam update/sync/save (zero diagnostics) and clean 124-job build remain valid unchanged-source evidence; no new Lean edit. On exact 3ddb98e8 base: make check (730 cases, 2172 equal comparisons, 38 mailbox tests); make talos-check (3204 jobs, 3165-job cone, 52 forced trust endpoints); FIR_CHECK_JOBS=2 bash integration/talos/artifact/check.sh (complete deterministic/Node/adapter/checksum gates); final 124-job dependency cone and forced direct emitter/public importer. Talos setup is unchanged. Exact containing-head receipt is in the new authoritative update. Raw/optimized closure and prettyM Wasm/LCNF/manifest remain identical to accepted CG-05B and the retained pre-rebase package. No fresh browser or timing campaign.
-bug-cards: none new; no semantic discrepancy or workaround
-blockers: none for this source-equation handoff. W6 owns later byte-footprint/allocation refinement and remains separate.
-handoff: Ready for standing fir/root to integrate the exact clean containing checkpoint from the new update on W7-ROOT-20260909-014, as requested by ROOT-W7-20260909-110. The original immutable completion remains unchanged; refresh includes only the patch-identical source-equation stack on root's reserved 3ddb98e8 default-only-case base and this status update. No W6 edit, main advance, push or external package-pointer move by W7.
-next: W6 consumes the public equations for its reusable footprint proof after root integration. Keep return-node ABI census W6-W7-20260830-001 and deeper projection-owner/all-jump provenance W6-W7-20260831-006 separately queued; no further optimization bundled here.
+slice: Isolated exact-Lean-4.34 renderer-core probe; stopped at reproducible prerequisite compilation failure before FIR capture.
+files: integration/vbp-native-session-probe/; coordination/lanes/wasm-gen.md
+contracts: none changed; consumes root's draft fir.wasm-host-binding/render-core/v0
+checks: Source/archive identity checks pass; FIR ResidentLinker dependency builds on Lean 4.34.0-rc2; initial source dependency build fails and was interrupted after first failure; exact focused VersoBlueprint.Html build exits 1 both before and after renderer retarget. Read-only Beam update/sync of that source is green, zero diagnostics, saveReady; no save, session stopped. Node syntax checks, bash syntax check, git diff --check, mailbox check pass. Broad make check/Talos/artifact campaigns not run under root's explicit first-blocker stop rule; no generation-ready claim.
+bug-cards: none; build failure, no established semantic discrepancy or workaround
+blockers: Lean 4.34 leanir reports unknown String.Slice.posGE._redArg while compiling VersoBlueprint.Html.escapeText. Fixture postponement/source-unit interaction versus upstream issue remains unclassified.
+handoff: One clean immutable failed-probe checkpoint for root review, not artifact acceptance. Consume exact completion on ROOT-W7-20260913-001. No main advance, push, consumer write, old package or pointer change.
+next: Await root review of a fixture-only postponement/capture-boundary follow-up. Actual return-node ABI census and deeper projection/join diagnostics remain separately queued; no optimization or proof change bundled.
 ```
 
-## Public source boundary
+## Exact boundary and result
 
-The existing definitions `addressLocal`, `targetIdLocal`, `arityLocal`,
-`captureId`, `zeroUnwrittenBytes`, `headerStores`, `captureStore`,
-`captureStores`, and `typedAddressResult` are public without implementation
-changes. `partialApplicationFunction` takes public descriptor-map/ordinal/
-capture/result inputs; clients do not depend on the private `HelperKey`.
+The sole current target is
+`VersoBlueprint.Experimental.VirPreview.Renderer.render`. NativeSession
+component/session roots were superseded before capture. The original initial
+dependency build selected the broader source; the first failing module is also
+on the renderer's dependency chain through `Informal.ExternalMarkupView`.
+The focused reproduction was repeated after the retarget/contract rebase.
 
-Maintained equations are `zeroUnwrittenBytes_eq`, `headerStores_eq`,
-`captureStore_eq`, `captureStores_eq`, `typedAddressResult_eq`, and
-`partialApplicationFunction_eq_ok`. The last exposes the exact parameter
-ordering, sole local, allocator prefix, initialization fragments and suffix
-under the existing checked-builder hypotheses.
+FIR's compiler archive remains the originally requested `fdef2c1e`; the
+accepted successor `dc94cd4f` changes only contract documentation and board
+state. Lean is 4.34.0-rc2, commit `6a10ac8c22beadecabdbb0919c2b50214762f91d`.
+VBP `c4430bfe` plus its exact hash-checked dirty RPC delta, VIR `9fafe9cf`,
+Verso `52c8c955`, and all consumer-manifest dependency revisions are archived
+into worktree-local state. No consumer or ordinary FIR 4.33 build input is used.
 
-The importer test uses these names and the successful-function equation
-without privileged access to private names. Axiom inspection reports no
-axioms for zero/header/result equations; capture/traversal use only
-`propext`; the success equation uses only `propext` and `Quot.sound`.
-No project-generated or native-evaluation axiom is introduced.
+See `integration/vbp-native-session-probe/RESULT.md` for exact identities,
+diagnostic, commands, and explicitly unrun acceptance. Local source inventory
+and logs are under `.deps/native-session-probe/`; they are disposable diagnostic
+working state, not a permanent approval registry.
 
-These are source equations, not memory-footprint, full allocation/capture
-ownership, installed-helper or linker correctness theorems.
-`FIR-BUG-wasm-none-partial-apply-tagged-result` remains open.
-
-## Byte-neutral artifact
-
-Immutable worktree-local package:
-
-`integration/talos/artifact/_build/prettyM-current-releases/5b8addc4a5e8-f8f633fd679a1d0e`
-
-This is the local `prettyM-current` target, with BUILD.json recording clean
-rebased source `5b8addc4a5e88f722898f720cf1e9e6af656704f` (functional
-`8e68650df0f2aafa4b7d5d7570c971d1e1464d61`). Wasm remains
-**83,737 bytes**, SHA-256
-`f8593cbb727e212b1846886145b35cd85b1503aea92149c53c115f4b01997f43`.
-Byte identity preserves the 322 functions, 269 function exports, zero imports
-and module-owned memory; capabilities/ownership and adapter are unchanged.
-There is no runtime performance change claimed.
-
-The closure fixture remains 5,128 raw / 2,980 optimized bytes, respectively:
-`940922161c0d2226ea541cac80a60563b292aa41bd8878e3258aac5cc3e5ea1c`,
-`d02d93d5b446eecb8e58d50e3cec57cebd4c9aff08feaa92ee20986aa6340f07`.
-Existing poisoned-checkpoint and real release/reuse checks still pass.
-
-Evidence: `.deps/cg05-equations/` contains the clean build/gate logs,
-`Consumer.lean`, and `READOUT.md`; accepted CG-05B comparisons remain
-in `.deps/cg05b/`. Root's separate acceptance of CG-05B and W6's narrow
-footprint decision are not widened by these equations.
-
-## Frozen-base refresh provenance
-
-| Original commit | Rebased commit | Stable patch ID |
-| --- | --- | --- |
-| 468b86b6 | 8e68650d | 6309849f186591faad0e73e4bef4975340d33420 |
-| 23a12abd | 5b8addc4 | 852f0dcc4ffefd9a816a1241ad1a7b86df2835bc |
-
-This final handoff refresh changes only this mailbox document. New full-gate
-logs are under `.deps/cg05-equations-rebase/`; the unchanged emitter and public
-importer were also directly recompiled after the rebase. The original immutable
-package `468b86b6c746-72be991f163fdf00` is preserved, not retargeted or overwritten.
+No final-LCNF closure, Wasm, import/export inventory or binding-profile verdict
+was obtained. The capture/link drivers are not yet Lean-validated because the
+dependency cone fails first. Conditional token/dispatch conformance work did
+not start; the structural scaffold fails closed pending actual frontier review.
+Full allocation/ownership/tagged-result proof debt remains unchanged.
