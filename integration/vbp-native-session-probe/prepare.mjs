@@ -47,6 +47,13 @@ function archive(name, repo, commit) {
   return dest;
 }
 archive('fir', fir, base);
+// Narrow reviewed compiler overlay; all consumer/dependency source pins stay fixed.
+const compilerOverlayPath = 'Fir/Wasm/Emit/CompilerPrivate.lean';
+const compilerOverlaySha256 = '3136b2a037ffa18ca83505f93ed9b08fac67e5f37d8d5a32a5927f9d78c1d916';
+const compilerOverlay = readFileSync(join(fir, compilerOverlayPath));
+assert.equal(sha(compilerOverlay), compilerOverlaySha256,
+  'review the constructor-metadata compiler overlay before changing it');
+copyFileSync(join(fir, compilerOverlayPath), join(source, 'fir', compilerOverlayPath));
 const vbp = archive('vbp', consumer, vbpCommit);
 copyFileSync(join(consumer, rpcPath), join(vbp, rpcPath));
 const manifest = json(join(consumer, 'lake-manifest.json'));
@@ -83,6 +90,7 @@ put(join(here, 'lake-manifest.json'), { version: '1.2.0', packagesDir: '.lake/pa
   packages, name: 'FirVbpNativeSessionProbe', lakeDir: '.lake', fixedToolchain: true });
 put(join(state, 'SOURCE.json'), {
   firBase: base, fixtureHead: run('git', ['rev-parse', 'HEAD'], fir),
+  compilerOverlay: { path: compilerOverlayPath, sha256: compilerOverlaySha256 },
   fixtureDirty: run('git', ['status', '--porcelain'], fir) !== '',
   leanToolchain: 'leanprover/lean4:v4.34.0-rc2',
   leanVersion: run('elan', ['run', 'leanprover/lean4:v4.34.0-rc2', 'lean', '--version']),

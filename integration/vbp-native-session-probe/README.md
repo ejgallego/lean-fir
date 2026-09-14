@@ -7,8 +7,11 @@ NativeSession component/session roots are no longer selected.
 It does not implement a browser adapter or exercise React/callback lifetimes.
 The historical `integration/vbp-verso-viewer/` package is untouched.
 
-Current state: **ordinary-source capture stops during dependency rebuilding**;
-see [CAPTURE_RESULT.md](CAPTURE_RESULT.md). [CONTROL.md](CONTROL.md) isolates the
+Current state: **constructor metadata repair passes; ordinary-source capture now
+stops at an unknown generated specialization**. See
+[REPAIR_RESULT.md](REPAIR_RESULT.md) for the current result and exact ordinary
+capture commands. [CAPTURE_RESULT.md](CAPTURE_RESULT.md) records the earlier
+constructor failure. [CONTROL.md](CONTROL.md) isolates the
 earlier postponement failure, and [RESULT.md](RESULT.md) preserves that original
 negative checkpoint. `Probe.lean` and the capture-only driver compile in
 ordinary mode, but actual capture throws before returning a complete closure.
@@ -18,7 +21,8 @@ frontier classification and conformance. No guessed profile is emitted.
 
 [METADATA_RESULT.md](METADATA_RESULT.md) narrows the failure: all required
 `Int`/`Int.ofNat` metadata is intact immediately before the final dependency
-rebuild. The next investigation is inside that fresh compilation stage.
+rebuild. The repair preserves constructor/type module mappings during that
+stage; it does not seed metadata or merge source units.
 
 ## Reproduce
 
@@ -30,7 +34,8 @@ bash integration/vbp-native-session-probe/check.sh
 
 `prepare.mjs` checks the frozen consumer identity, archives the accepted FIR
 base and every manifest-pinned dependency from local Git objects, and overlays
-only the exact hash-checked dirty RPC file. No consumer `.lake` is read as
+the exact hash-checked dirty RPC file and the one-file, hash-checked
+`CompilerPrivate.lean` metadata repair. No consumer `.lake` is read as
 compiler input. Archives and private build trees live in
 `.deps/native-session-probe/`; the fixture has its own `.lake`, Beam session
 and exact 4.34 toolchain. Ordinary FIR remains on 4.33. The cache is explicitly
@@ -40,7 +45,8 @@ Default source repositories are the fixed consumer and matched read-only
 source trees from `VBP-FIR-20260913-003`; `VBP_ROOT`, `VBP_MATCHED_ROOT`, and
 `VIR_ROOT` can supply equivalent local repositories. Source revisions, the
 consumer's dirty state, archive hashes, renderer/RPC/manifest hashes and
-fixture head are recorded in `.deps/native-session-probe/SOURCE.json`.
+fixture head and compiler overlay hash are recorded in
+`.deps/native-session-probe/SOURCE.json`.
 The RPC overlay identifies the requested consumer snapshot; it does not add
 RPC, StringPreview or component roots to this renderer-only probe.
 
@@ -51,9 +57,10 @@ FIR's existing individual-source-unit capture and boxed-adapter recovery.
 The bounded control exposes `-KpostponeCompile=false` without changing that
 default. Ordinary module metadata satisfies the existing source-unit lookup
 criteria and contains no postponed groups. Actual capture through the existing
-fixture reaches its final dependency rebuilding stage, which fails on missing
-compiled `Int.ofNat` metadata.
-It does not synthesize a replacement root or change FIR's compiler.
+fixture reaches its final dependency rebuilding stage. With the generic
+metadata repair it passes the missing compiled `Int.ofNat` boundary and fails
+on an unknown generated `Array.mapMUnsafe` specialization owned by
+`Verso.Doc.ListItem.toJson`. It does not synthesize a replacement root.
 VIR's own extern-symbol decoder identifies candidate host boundaries; the
 captured reachable externals select the actual host frontier. Historical
 41/46-import lists are not used as either inputs or assertions.

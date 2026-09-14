@@ -137,9 +137,17 @@ def forgetGeneratedCompilerModuleMappings (env : Environment)
     (init := Std.HashSet.emptyWithCapacity (moduleIndices.size * 128))
     fun names moduleIndex =>
       env.header.moduleData[moduleIndex]!.constNames.foldl (·.insert ·) names
-  let isOwned := generatedNameOwnedBy env sourceRootSet sourceNames
+  -- Inductives/constructors own persisted representation metadata, not cached
+  -- function bodies. A constructor can also be an extern source root (e.g. for
+  -- boxed-wrapper generation); retain its defining-module identity in every
+  -- erasure path so upstream metadata queries still resolve imported entries.
+  let hasTypeMetadata := fun name => match env.find? name with
+    | some (.inductInfo _) | some (.ctorInfo _) => true
+    | _ => false
+  let isOwned := fun name =>
+    !hasTypeMetadata name && generatedNameOwnedBy env sourceRootSet sourceNames name
   let mappings := sourceRoots.foldl (init := env.base.private.const2ModIdx)
-    fun mappings name => mappings.erase name
+    fun mappings name => if hasTypeMetadata name then mappings else mappings.erase name
   let mappings := moduleIndices.foldl (init := mappings)
     fun mappings moduleIndex =>
       let moduleData := env.header.moduleData[moduleIndex]!
