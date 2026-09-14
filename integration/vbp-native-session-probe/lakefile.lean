@@ -14,7 +14,8 @@ lean_lib NativeSessionSource where
   srcDir := "../../.deps/native-session-probe/sources/vbp/src"
   roots := #[`VersoBlueprint, `VersoBlueprintVir]
   requiresModuleSystem := true
-  leanOptions := #[⟨`compiler.postponeCompile, true⟩]
+  leanOptions := #[⟨`compiler.postponeCompile,
+    (get_config? postponeCompile |>.getD "true") != "false"⟩]
 
 @[default_target]
 lean_lib Probe
