@@ -1,6 +1,6 @@
 # wasm-gen lane
 
-Current slice: `ROOT-W7-20260915-001`, read-only constructor-metadata comparison.
+Current slice: `ROOT-W7-20260915-002`, generic constructor metadata preservation.
 Root owns integration; W6 remains parked. Existing packages are untouched.
 
 ```text
@@ -8,38 +8,44 @@ lane: wasm-gen
 owner: wasm-gen
 branch: wasm/generation
 worktree: .worktrees/wasm-generation
-state: waiting
-base: b1cbd6677806fd4122368025cdefd9d410aadd38
-functional-head: 7a563a6dd227737d812298cdc7bb8a1265875735
+state: ready
+base: 6c604d41f18b42db6e19059c8f4d954686b6cbe9
+functional-head: d49b65c1005270c9e91f269a9e74d9e4437ee19b
 contract-base: dc94cd4f0aa716aad5e79a7f77bafa752e9994a9
 clean-at-update: true
-slice: Public Int/Int.ofNat metadata queries succeed unchanged before and after existing first two capture stages; failure narrowed inside later fresh-unit rebuild.
-files: integration/vbp-native-session-probe/{Probe.lean,Metadata.lean,METADATA_RESULT.md,README.md}; coordination/lanes/wasm-gen.md
-contracts: none changed; fir.wasm-host-binding/render-core/v0 unchanged
-checks: Beam Probe/Metadata sync zero blocking diagnostics and saveReady; session stopped. Focused ordinary lake build Probe passes. FIR_RENDERER_METADATA=1 ordinary-mode batch query exits 0; imported and pre-final metadata equal. Node/bash syntax, git diff --check and scripts/mailbox check pass. No initializer, final-rebuild/full-capture retry, lower/link/encoding or broad gates under root's bounded scope.
-bug-cards: none; no semantic discrepancy established and no workaround added
-blockers: Earlier capture still fails inside internalizeFinalDependencies. No public-query failure at the requested outer boundaries; exact internal loss remains untraced.
-handoff: Clean local-only diagnostic checkpoint on ROOT-W7-20260915-001; root review and narrow repair scope requested. No main/push, consumer edit, package or pointer change.
-next: Trace fresh-unit discovery/reset within compileEntryFinalCapturedInternalized, then ownership-aware generic repair. User prioritizes renderer compilation; no unrelated architecture work. Return-node ABI and projection/join diagnostics remain separate.
+slice: Preserve imported inductive/constructor module identity during fresh source reset; exact renderer capture passes Int metadata failure and stops at a new unknown generated specialization.
+files: Fir/Wasm/Emit/CompilerPrivate.lean; integration/vbp-native-session-probe/{prepare.mjs,ConstructorMetadata.lean,REPAIR_RESULT.md,README.md}; bugs/FIR-BUG-wasm-none-source-reset-inductive-metadata.md; coordination/lanes/wasm-gen.md
+contracts: none changed; source-unit/deferred routing and fir.wasm-host-binding/render-core/v0 unchanged
+checks: Beam CompilerPrivate on 4.33/4.34 and regression on 4.34 zero blocking diagnostics/saveReady; no Beam save as batch evidence. Negative pre-fix regression rejects; positive direct 4.33/4.34 regression passes. Ordinary build Probe 677 jobs; exact actual capture reaches documented successor. make check passes 730 cases/2172 comparisons. make talos-setup and talos-check pass, 3205 jobs and trust audits. artifact/check.sh exit 0 including deterministic generation/Node differentials; browser/exhaustive not selected. Final SourceExamples build passes 66 jobs. prepare, syntax, 229 bug cards, diff and mailbox checks pass.
+bug-cards: FIR-BUG-wasm-none-source-reset-inductive-metadata
+blockers: Renderer capture still does not return a complete closure; unknown Array.mapMUnsafe specialization owned by Verso.Doc.ListItem.toJson is the new first diagnostic.
+handoff: Clean local-only generation fix for root review on ROOT-W7-20260915-002; canonical completion pins containing status commit. No main/push or package/pointer change.
+next: Stop for root review. Separate bounded generated-specialization provenance investigation; no named seeding, broader source-unit grouping or runtime/consumer changes. Return-node ABI and projection/join diagnostics remain separate.
 ```
 
 ## Evidence
 
-Both `Int` and `Int.ofNat` keep their `Init.Data.Int.Basic` module mapping.
-Public base/mono type queries succeed at both boundaries; `nameToImpureType Int`
-returns `tobj`; `getCtorLayout Int.ofNat` returns tag 0, one object field,
-zero USize/scalar bytes. Constructor native IR is present. Snapshots are equal.
-No metadata-initialization API was invoked.
+Real renderer tracing confirms `Int.ofNat` imported before reset and local
+afterward. The generic reset had hidden upstream's defining-module metadata.
+`ConstantInfo` classification now preserves types and constructors, while
+ordinary function/generated-helper reset retains its previous behavior.
+The regression checks three inductives, six constructors and a negative
+ordinary-function control. Temporary tracing is removed; `Source.lean` has no
+delta. Production change is 10 added/2 removed lines in CompilerPrivate.
 
-The partial pre-final artifact contains 1,895 declarations and 125 externals,
-including `Int.ofNat` and `Int.negSucc`. Of the earlier error's 78 source
-roots, 36 already occur as declarations and none as exact externals; unresolved
-generated descendants still exist. These are not completed-closure or host
-acceptance counts. Do not skip dependency rebuilding based on this result.
+The actual ordinary renderer retry now fails at:
 
-See `integration/vbp-native-session-probe/METADATA_RESULT.md` for commands,
-query outcomes, diagnostic hash and the proposed W7-owned investigation location.
-Earlier `CAPTURE_RESULT.md`, `CONTROL.md` and `RESULT.md` remain valid history.
-All frozen Lean 4.34/VBP/VIR/Verso/FIR identities and source-unit constraints
-are unchanged. No W6/runtime/proof change, host classification, Wasm artifact,
-browser result or performance claim.
+```text
+Unknown constant `_private.Init.Data.Array.Basic.0.Array.mapMUnsafe.map._at_._private.Verso.Doc.0.Verso.Doc.ListItem.toJson.spec_0`
+```
+
+Capture log SHA256:
+`2d38d0fa644b6258f5b16793ed0d1ec00ff74ffc18f94d80eda9b34fdfa0ce0b`.
+No complete declaration/external/host inventory, lower/link/encoding, browser
+execution or performance result is claimed. No successor compiler repair is
+included. The new diagnostic's cause is not yet classified.
+
+See `integration/vbp-native-session-probe/REPAIR_RESULT.md` for exact commands,
+frozen source identities and the hash-checked one-file compiler overlay.
+Earlier metadata/capture/control reports remain historical evidence. Production
+FIR stays on Lean 4.33; the consumer/source-view probe stays exactly 4.34.0-rc2.
