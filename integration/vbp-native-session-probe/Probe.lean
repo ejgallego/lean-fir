@@ -15,7 +15,7 @@ def hostTarget? (env : Environment) (name : Name) : Option String := do
     | .standard _ symbol => (Vir.HostMetadata.decodeExternSymbol? symbol).map (·.target)
     | _ => none
 
-def capture : CoreM (Fir.Compiler.Lcnf.Artifact × Array Name) := do
+def captureBeforeFinal : CoreM (Fir.Compiler.Lcnf.Artifact × Array Name) := do
   let env ← getEnv
   let candidates := env.constants.toList.toArray.filterMap fun (name, _) =>
     if (hostTarget? env name).isSome then some name else none
@@ -25,6 +25,11 @@ def capture : CoreM (Fir.Compiler.Lcnf.Artifact × Array Name) := do
     Fir.Wasm.Emit.ResidentLinker.closedApplicationRetainedExternalNames
   let captured ← Fir.Wasm.Emit.Source.compileEntriesIndividuallyInternalized entries retained
   let captured ← Fir.Wasm.Emit.Source.internalizeExternalBoxedAdapters captured candidates
+  return (captured, candidates)
+
+def capture : CoreM (Fir.Compiler.Lcnf.Artifact × Array Name) := do
+  let env ← getEnv
+  let (captured, candidates) ← captureBeforeFinal
   let captured ← Fir.Wasm.Emit.Source.internalizeFinalDependencies captured
     (candidates.map Name.toString ++
       Fir.Wasm.Emit.ResidentLinker.closedApplicationRetainedExternalNames)

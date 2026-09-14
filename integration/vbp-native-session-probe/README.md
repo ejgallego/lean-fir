@@ -16,6 +16,10 @@ ordinary mode, but actual capture throws before returning a complete closure.
 accept the new binding profile: it explicitly stops pending actual captured
 frontier classification and conformance. No guessed profile is emitted.
 
+[METADATA_RESULT.md](METADATA_RESULT.md) narrows the failure: all required
+`Int`/`Int.ofNat` metadata is intact immediately before the final dependency
+rebuild. The next investigation is inside that fresh compilation stage.
+
 ## Reproduce
 
 From the W7 worktree, with Lean `leanprover/lean4:v4.34.0-rc2` installed:
