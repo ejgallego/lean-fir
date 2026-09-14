@@ -1,53 +1,50 @@
 # wasm-gen lane
 
-Current bounded probe: `ROOT-W7-20260913-001`, revised by
-`ROOT-W7-20260913-002..003`. Root owns integration; W6 remains parked.
-The earlier CG-05A/CG-05B/source-equation stack was accepted, with both source
-equation threads closed at main `1ea81797`; no package was replaced here.
+Bounded control: `ROOT-W7-20260913-004`, following the accepted negative probe
+`ROOT-W7-20260913-001..003`. Root owns integration; W6 remains parked.
+CG-05A/CG-05B/source equations and previous consumer packages are untouched.
 
 ```text
 lane: wasm-gen
 owner: wasm-gen
 branch: wasm/generation
 worktree: .worktrees/wasm-generation
-state: blocked
-base: dc94cd4f0aa716aad5e79a7f77bafa752e9994a9
-functional-head: a7722bf2ca4a2c1d79621d041930492ee9d340a0
+state: waiting
+base: 65360510826b50939a7731c2cdb397a3368bfd97
+functional-head: 0cfd10174035992f25b6933a99a885f7e8d0dbaa
 contract-base: dc94cd4f0aa716aad5e79a7f77bafa752e9994a9
 clean-at-update: true
-slice: Isolated exact-Lean-4.34 renderer-core probe; stopped at reproducible prerequisite compilation failure before FIR capture.
-files: integration/vbp-native-session-probe/; coordination/lanes/wasm-gen.md
-contracts: none changed; consumes root's draft fir.wasm-host-binding/render-core/v0
-checks: Source/archive identity checks pass; FIR ResidentLinker dependency builds on Lean 4.34.0-rc2; initial source dependency build fails and was interrupted after first failure; exact focused VersoBlueprint.Html build exits 1 both before and after renderer retarget. Read-only Beam update/sync of that source is green, zero diagnostics, saveReady; no save, session stopped. Node syntax checks, bash syntax check, git diff --check, mailbox check pass. Broad make check/Talos/artifact campaigns not run under root's explicit first-blocker stop rule; no generation-ready claim.
-bug-cards: none; build failure, no established semantic discrepancy or workaround
-blockers: Lean 4.34 leanir reports unknown String.Slice.posGE._redArg while compiling VersoBlueprint.Html.escapeText. Fixture postponement/source-unit interaction versus upstream issue remains unclassified.
-handoff: One clean immutable failed-probe checkpoint for root review, not artifact acceptance. Consume exact completion on ROOT-W7-20260913-001. No main advance, push, consumer write, old package or pointer change.
-next: Await root review of a fixture-only postponement/capture-boundary follow-up. Actual return-node ABI census and deeper projection/join diagnostics remain separately queued; no optimization or proof change bundled.
+slice: Fixture-only A/B isolates postponed compilation failure; ordinary renderer source metadata is visible. Investigation complete, not generation-ready.
+files: integration/vbp-native-session-probe/{lakefile.lean,control.mjs,Classify.lean,README.md,CONTROL.md}; coordination/lanes/wasm-gen.md
+contracts: none changed; retains root's draft fir.wasm-host-binding/render-core/v0
+checks: control.mjs passes: true fails with expected missing helper, false succeeds; actual option maps differ only in postponement and source SHA unchanged. Ordinary +Probe:deps and Probe pass (676/677 jobs). Beam lakefile/metadata sync zero blocking diagnostics; direct batch metadata agrees, exit 0; Beam stopped. Node/bash syntax, git diff --check and scripts/mailbox check pass. No broad make/Talos/artifact/browser gates under root's explicit bounded-control scope.
+bug-cards: none; compilation investigation, no established semantic discrepancy or workaround
+blockers: No ordinary source-preparation blocker. Actual capture, lower/link and profile conformance remain unexecuted, not accepted.
+handoff: Clean local-only diagnostic checkpoint on ROOT-W7-20260913-004; root may review this evidence separately from artifact acceptance. No main advance, push, consumer edit, package or pointer change.
+next: Root review, then separately authorize actual renderer capture through the existing ordinary-source fallback. Return-node ABI census and deeper projection/join diagnostics remain separately queued.
 ```
 
-## Exact boundary and result
+## Result and preserved boundary
 
-The sole current target is
-`VersoBlueprint.Experimental.VirPreview.Renderer.render`. NativeSession
-component/session roots were superseded before capture. The original initial
-dependency build selected the broader source; the first failing module is also
-on the renderer's dependency chain through `Informal.ExternalMarkupView`.
-The focused reproduction was repeated after the retarget/contract rebase.
+With exact Lean 4.34.0-rc2, the same `VersoBlueprint.Html` source fails under
+experimental postponed compilation (`String.Slice.posGE._redArg` missing in
+`leanir`) but builds under ordinary compilation. The generated setup files
+have identical options except `compiler.postponeCompile`. The true default is
+preserved; only the control invocation overrides it.
 
-FIR's compiler archive remains the originally requested `fdef2c1e`; the
-accepted successor `dc94cd4f` changes only contract documentation and board
-state. Lean is 4.34.0-rc2, commit `6a10ac8c22beadecabdbb0919c2b50214762f91d`.
-VBP `c4430bfe` plus its exact hash-checked dirty RPC delta, VIR `9fafe9cf`,
-Verso `52c8c955`, and all consumer-manifest dependency revisions are archived
-into worktree-local state. No consumer or ordinary FIR 4.33 build input is used.
+The ordinary renderer module contains the real source root
+`VersoBlueprint.Experimental.VirPreview.Renderer.render`, its impure signature
+and native IR. Deferred groups are empty. These satisfy the source resolver's
+metadata inputs; the existing individual-source driver has an ordinary-source
+fallback. This is not proof that executing that capture will succeed.
 
-See `integration/vbp-native-session-probe/RESULT.md` for exact identities,
-diagnostic, commands, and explicitly unrun acceptance. Local source inventory
-and logs are under `.deps/native-session-probe/`; they are disposable diagnostic
-working state, not a permanent approval registry.
+See `integration/vbp-native-session-probe/CONTROL.md` for commands, setup/source
+hashes, exact metadata, interpretation and unrun acceptance. `RESULT.md`
+preserves the earlier negative checkpoint. Frozen FIR `fdef2c1e`, VBP
+`c4430bfe` plus the exact RPC delta, VIR `9fafe9cf`, Verso `52c8c955`, all
+manifest dependencies, renderer-only target and host-profile scope are unchanged.
+No consumer `.lake` or ordinary FIR 4.33 artifacts were consumed.
 
-No final-LCNF closure, Wasm, import/export inventory or binding-profile verdict
-was obtained. The capture/link drivers are not yet Lean-validated because the
-dependency cone fails first. Conditional token/dispatch conformance work did
-not start; the structural scaffold fails closed pending actual frontier review.
-Full allocation/ownership/tagged-result proof debt remains unchanged.
+`Probe.lean` compiles in ordinary mode; `Emit.lean` and actual capture/link have
+not run. No closure, Wasm, host frontier, profile verdict or browser result is
+claimed. Full allocation/ownership/tagged-result proof debt is unchanged.
