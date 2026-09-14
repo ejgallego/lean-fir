@@ -1031,7 +1031,9 @@ private partial def sourceRuntimeValueClosure (environment : Environment)
   unless environment.constants.contains name && !isExtern environment name &&
       (← sourceDeclarationIsCompilable environment name) do
     return ← sourceRuntimeValueClosure environment pending seen names
-  let references := match environment.find? name with
+  -- Match toDecl's executable body choice for imported partial definitions;
+  -- their logical opaque body can be only an Inhabited default.
+  let references := match ← LCNF.getDeclInfo? name with
     | some declaration => match declaration.value? (allowOpaque := true) with
       | some value => value.getUsedConstants
       | none => #[]

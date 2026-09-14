@@ -7,8 +7,10 @@ NativeSession component/session roots are no longer selected.
 It does not implement a browser adapter or exercise React/callback lifetimes.
 The historical `integration/vbp-verso-viewer/` package is untouched.
 
-Current state: **constructor metadata repair passes; ordinary-source capture now
-stops at an unknown generated specialization**. See
+Current state: **constructor metadata and executable-body discovery regressions
+pass; ordinary-source capture still stops at the same unknown specialization**.
+[PROVENANCE_RESULT.md](PROVENANCE_RESULT.md) explains the repaired discovery
+omission and remaining compiler-rebuild failure. See
 [REPAIR_RESULT.md](REPAIR_RESULT.md) for the current result and exact ordinary
 capture commands. [CAPTURE_RESULT.md](CAPTURE_RESULT.md) records the earlier
 constructor failure. [CONTROL.md](CONTROL.md) isolates the
@@ -34,8 +36,8 @@ bash integration/vbp-native-session-probe/check.sh
 
 `prepare.mjs` checks the frozen consumer identity, archives the accepted FIR
 base and every manifest-pinned dependency from local Git objects, and overlays
-the exact hash-checked dirty RPC file and the one-file, hash-checked
-`CompilerPrivate.lean` metadata repair. No consumer `.lake` is read as
+the exact hash-checked dirty RPC file and the hash-checked FIR
+`CompilerPrivate.lean` metadata and `Source.lean` body-selection repairs. No consumer `.lake` is read as
 compiler input. Archives and private build trees live in
 `.deps/native-session-probe/`; the fixture has its own `.lake`, Beam session
 and exact 4.34 toolchain. Ordinary FIR remains on 4.33. The cache is explicitly
@@ -45,7 +47,7 @@ Default source repositories are the fixed consumer and matched read-only
 source trees from `VBP-FIR-20260913-003`; `VBP_ROOT`, `VBP_MATCHED_ROOT`, and
 `VIR_ROOT` can supply equivalent local repositories. Source revisions, the
 consumer's dirty state, archive hashes, renderer/RPC/manifest hashes and
-fixture head and compiler overlay hash are recorded in
+fixture head and both compiler overlay hashes are recorded in
 `.deps/native-session-probe/SOURCE.json`.
 The RPC overlay identifies the requested consumer snapshot; it does not add
 RPC, StringPreview or component roots to this renderer-only probe.
@@ -60,7 +62,8 @@ criteria and contains no postponed groups. Actual capture through the existing
 fixture reaches its final dependency rebuilding stage. With the generic
 metadata repair it passes the missing compiled `Int.ofNat` boundary and fails
 on an unknown generated `Array.mapMUnsafe` specialization owned by
-`Verso.Doc.ListItem.toJson`. It does not synthesize a replacement root.
+`Verso.Doc.ListItem.toJson`. Executable-body discovery now includes that caller,
+but the rebuild still fails on the same helper. It does not synthesize a replacement root.
 VIR's own extern-symbol decoder identifies candidate host boundaries; the
 captured reachable externals select the actual host frontier. Historical
 41/46-import lists are not used as either inputs or assertions.
