@@ -1,8 +1,7 @@
 # wasm-gen lane
 
-Bounded capture: `ROOT-W7-20260914-001`, after accepted ordinary/postponed
-control `ROOT-W7-20260913-004`. Root owns integration; W6 remains parked.
-CG-05A/CG-05B/source equations and existing consumer packages are untouched.
+Current slice: `ROOT-W7-20260915-001`, read-only constructor-metadata comparison.
+Root owns integration; W6 remains parked. Existing packages are untouched.
 
 ```text
 lane: wasm-gen
@@ -10,38 +9,37 @@ owner: wasm-gen
 branch: wasm/generation
 worktree: .worktrees/wasm-generation
 state: waiting
-base: 174d5aee1f4023e8251c98cd6e5502e90949641c
-functional-head: 3a656559915326d17ff85b1330f4e29012b2741b
+base: b1cbd6677806fd4122368025cdefd9d410aadd38
+functional-head: 7a563a6dd227737d812298cdc7bb8a1265875735
 contract-base: dc94cd4f0aa716aad5e79a7f77bafa752e9994a9
 clean-at-update: true
-slice: Ordinary-source renderer capture executed; stopped at Int.ofNat inductive-metadata failure in existing final dependency rebuild.
-files: integration/vbp-native-session-probe/{Capture.lean,CAPTURE_RESULT.md,README.md}; coordination/lanes/wasm-gen.md
+slice: Public Int/Int.ofNat metadata queries succeed unchanged before and after existing first two capture stages; failure narrowed inside later fresh-unit rebuild.
+files: integration/vbp-native-session-probe/{Probe.lean,Metadata.lean,METADATA_RESULT.md,README.md}; coordination/lanes/wasm-gen.md
 contracts: none changed; fir.wasm-host-binding/render-core/v0 unchanged
-checks: Ordinary lake build Probe passes (677 jobs including replays). Beam Capture.lean update/sync zero diagnostics and saveReady, session stopped. Exact FIR_RENDERER_CAPTURE=1 ordinary-mode batch invocation exits 1 at documented dependency-rebuild diagnostic. Renderer setup and frozen renderer/RPC hashes verified. Node/bash syntax, git diff --check and scripts/mailbox check pass. No lower/link/encoding or broad make/Talos/artifact/browser gates under root's explicit first-diagnostic scope.
+checks: Beam Probe/Metadata sync zero blocking diagnostics and saveReady; session stopped. Focused ordinary lake build Probe passes. FIR_RENDERER_METADATA=1 ordinary-mode batch query exits 0; imported and pre-final metadata equal. Node/bash syntax, git diff --check and scripts/mailbox check pass. No initializer, final-rebuild/full-capture retry, lower/link/encoding or broad gates under root's bounded scope.
 bug-cards: none; no semantic discrepancy established and no workaround added
-blockers: internalizeFinalDependencies reports Int.ofNat was not compiled; compileDecls must run on inductive types first. No complete closure returned, so final counts/LCNF hash/host inventory/profile verdict unavailable.
-handoff: Clean local-only failed-capture evidence for root review on ROOT-W7-20260914-001, not generation-ready. No main advance, push, consumer edit, package or pointer change.
-next: Root review; narrow fresh-environment inductive-metadata/source-unit investigation before any compiler fix. Return-node ABI census and deeper projection/join diagnostics remain separate.
+blockers: Earlier capture still fails inside internalizeFinalDependencies. No public-query failure at the requested outer boundaries; exact internal loss remains untraced.
+handoff: Clean local-only diagnostic checkpoint on ROOT-W7-20260915-001; root review and narrow repair scope requested. No main/push, consumer edit, package or pointer change.
+next: Trace fresh-unit discovery/reset within compileEntryFinalCapturedInternalized, then ownership-aware generic repair. User prioritizes renderer compilation; no unrelated architecture work. Return-node ABI and projection/join diagnostics remain separate.
 ```
 
-## Result and boundary
+## Evidence
 
-The same exact Lean 4.34 source still builds in ordinary mode, as established
-by the previous control. The capture-only driver now executes the existing
-`NativeSessionProbe.capture`. Its first failure is in the third stage,
-`internalizeFinalDependencies`, after individual-entry and boxed-adapter
-processing. The diagnostic names 78 requested dependency roots, then reports
-missing compiled `Int.ofNat` metadata. That count is not a final closure or
-host-import count. No complete capture inventory was written.
+Both `Int` and `Int.ofNat` keep their `Init.Data.Int.Basic` module mapping.
+Public base/mono type queries succeed at both boundaries; `nameToImpureType Int`
+returns `tobj`; `getCtorLayout Int.ofNat` returns tag 0, one object field,
+zero USize/scalar bytes. Constructor native IR is present. Snapshots are equal.
+No metadata-initialization API was invoked.
 
-See `integration/vbp-native-session-probe/CAPTURE_RESULT.md` for exact command,
-diagnostic hash, stage attribution, identities and stopping point. Earlier
-`CONTROL.md` and `RESULT.md` remain historical evidence. Frozen FIR `fdef2c1e`,
-VBP `c4430bfe` plus exact RPC delta, VIR `9fafe9cf`, Verso `52c8c955`, all
-manifest dependencies, renderer-only target and profile scope are unchanged.
-No consumer `.lake` or ordinary FIR 4.33 artifact was consumed.
+The partial pre-final artifact contains 1,895 declarations and 125 externals,
+including `Int.ofNat` and `Int.negSucc`. Of the earlier error's 78 source
+roots, 36 already occur as declarations and none as exact externals; unresolved
+generated descendants still exist. These are not completed-closure or host
+acceptance counts. Do not skip dependency rebuilding based on this result.
 
-No source-unit workaround, generated-name shim, production compiler/runtime
-edit, lowering, resident linking, Wasm encoding, profile descriptor or browser
-result. The cause within Lean's type metadata/environment preparation is not
-yet established. Full allocation/ownership/tagged-result proof debt is unchanged.
+See `integration/vbp-native-session-probe/METADATA_RESULT.md` for commands,
+query outcomes, diagnostic hash and the proposed W7-owned investigation location.
+Earlier `CAPTURE_RESULT.md`, `CONTROL.md` and `RESULT.md` remain valid history.
+All frozen Lean 4.34/VBP/VIR/Verso/FIR identities and source-unit constraints
+are unchanged. No W6/runtime/proof change, host classification, Wasm artifact,
+browser result or performance claim.
