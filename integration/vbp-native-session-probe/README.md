@@ -30,6 +30,13 @@ Run `bash integration/vbp-native-session-probe/installed-module-check.sh` to
 refresh the frontier, capture those owners and check deterministic repeats and
 negative provenance controls. No recursive assembly or Wasm linking is performed.
 
+[MODULE_PRODUCT.md](MODULE_PRODUCT.md) records the subsequent source-only
+worklist: 26 owning-module captures, 1,201 bodies and 111 remaining signatures.
+It stops deterministically at duplicate extension registration in
+`VersoManual.Basic`; the closure remains incomplete. Run
+`bash integration/vbp-native-session-probe/module-product-check.sh` to reproduce
+the checked partial product and exact diagnostic boundary, not a Wasm acceptance.
+
 The historical reset-based source provider is unchanged and still stops at the
 same unknown specialization. Constructor metadata and executable-body discovery
 regressions pass.

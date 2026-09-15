@@ -22,7 +22,7 @@ export function unique(xs, label) {
   return xs[0];
 }
 
-export function deriveInputs(frontier, repo = process.env.LEAN_SOURCE_REPO ?? '/home/egallego/lean/lean4') {
+export function deriveInputs(frontier, repo = process.env.LEAN_SOURCE_REPO ?? '/home/egallego/lean/lean4', selectedOwners = owners) {
   assert.equal(run('elan', ['run', toolchain, 'lean', '--githash']), revision, 'Lean revision mismatch');
   assert.equal(process.platform, 'linux', 'only the reviewed Linux bootstrap derivation is supported');
   const prefix = realpathSync(run('elan', ['run', toolchain, 'lean', '--print-prefix']));
@@ -44,7 +44,7 @@ export function deriveInputs(frontier, repo = process.env.LEAN_SOURCE_REPO ?? '/
   }));
   options[option[1]] = option[2] === 'true';
   assert.deepEqual(options, { 'interpreter.prefer_native': false, 'pp.rawOnError': true, 'linter.coreInternal': true });
-  const modules = [...owners].map(([name, entries]) => {
+  const modules = [...selectedOwners].map(([name, entries]) => {
     const relative = name.replaceAll('.', '/');
     const source = realpathSync(join(prefix, 'src/lean', relative + '.lean'));
     for (const entry of entries) {
@@ -93,15 +93,15 @@ export function deriveInputs(frontier, repo = process.env.LEAN_SOURCE_REPO ?? '/
 }
 
 // Recheck immediately before every frontend invocation, including repeats.
-export function validateInputs(inputs) {
+export function validateInputs(inputs, selectedOwners = owners) {
   assert.equal(inputs.kind, 'pinned-bootstrap-derived-capture-inputs/v1');
   assert.equal(inputs.recoveredReleaseSetup, false);
   assert.equal(inputs.revision, revision, 'stale revision');
-  assert.equal(inputs.modules.length, owners.size);
-  assert.equal(new Set(inputs.modules.map(m => m.name)).size, owners.size, 'ambiguous module');
+  assert.equal(inputs.modules.length, selectedOwners.size);
+  assert.equal(new Set(inputs.modules.map(m => m.name)).size, selectedOwners.size, 'ambiguous module');
   assert.deepEqual(inputs.options, { 'interpreter.prefer_native': false, 'pp.rawOnError': true, 'linter.coreInternal': true });
   for (const m of inputs.modules) {
-    assert.deepEqual(m.entries, owners.get(m.name), 'wrong module/entry mapping');
+    assert.deepEqual(m.entries, selectedOwners.get(m.name), 'wrong module/entry mapping');
     assert.ok(existsSync(m.source), 'missing source');
     assert.equal(sha(readFileSync(m.source)), m.sourceSha256, 'stale source');
     assert.equal(realpathSync(m.source), resolve(inputs.prefix, 'src/lean', m.name.replaceAll('.', '/') + '.lean'));

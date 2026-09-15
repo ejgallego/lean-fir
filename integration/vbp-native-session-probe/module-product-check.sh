@@ -7,9 +7,8 @@ export LAKE_CACHE_DIR="$(dirname "$LAKE_CACHE_DIR")/leanprover--lean4---v4.34.0-
 export TMPDIR="$fir/.deps/native-session-probe/tmp"
 mkdir -p "$TMPDIR" "$LAKE_CACHE_DIR"
 chmod 700 "$LAKE_CACHE_DIR"
-# Refresh the actual renderer frontier first; never promote a stale inventory.
-bash "$here/module-assembly-check.sh"
 cd "$here"
-lake --keep-toolchain -KpostponeCompile=false build Probe.InstalledInputs
-lake --keep-toolchain -KpostponeCompile=false env lean InstalledModuleCapture.lean
-node installed-module-check.mjs
+node prepare.mjs
+lake --keep-toolchain -KpostponeCompile=false build Fir.Wasm.Emit.ModuleSource Probe.InstalledInputs +VersoBlueprintVir.Preview.Renderer
+lake --keep-toolchain -KpostponeCompile=false env lean ModuleProduct.lean
+node module-product-check.mjs
