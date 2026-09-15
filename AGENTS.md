@@ -232,6 +232,14 @@ Every handoff to the integration owner reports:
 - bug-card IDs, or `none`;
 - known follow-ups.
 
+Keep the handoff itself review-sized: a short outcome, one line per check
+family, and an exact path plus digest for large logs, inventories, or reports.
+Do not paste command transcripts, raw JSON, repeated artifact inventories, or
+facts already carried by the mailbox header. State the exact failing symbol or
+invariant inline when blocked; keep its full reproducer in the referenced
+evidence. `scripts/mailbox list` is the normal first read; open a full event or
+evidence report only when making the corresponding decision.
+
 The worktree must be clean at handoff.
 
 For a parallel milestone, commit the same information in the lane's assigned

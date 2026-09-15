@@ -345,6 +345,24 @@ Record only the review-relevant checks and artifact identities.
 State explicit follow-up or `None`.
 ```
 
+## Concise Operational Reports
+
+Mailbox events are an index into immutable checkpoints and evidence, not a
+command transcript. Keep the operational body short by default:
+
+- **Outcome:** at most three short bullets describing the behavior, exact
+  checkpoint, and compatibility boundary.
+- **Validation:** one line per command family or consumer result, with its
+  pass/fail status. Name a report path and digest when detailed logs, an import
+  inventory, or a large JSON result matters to review.
+- **Remaining work:** one explicit next action or `None`.
+
+Do not paste build logs, repeated inventories, source excerpts, raw JSON, or
+the same checkpoint facts already present in front matter. A reviewer opens the
+named evidence only when the decision needs it. Exceptions and blocked states
+still state the precise failing declaration, signature, or invariant inline;
+the reproducer and full diagnostic belong in the linked evidence file.
+
 Completion does not authorize pushing, opening a PR, deleting a worktree, or
 deleting a branch. Those remain explicit maintainer actions. Public PR bodies
 must not include local mailbox paths, worktree names, command transcripts, or
