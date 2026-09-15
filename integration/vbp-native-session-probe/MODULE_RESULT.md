@@ -63,6 +63,13 @@ and non-module setup. All assertions pass. The 4.34 source cone is 629 Lake jobs
 Beam reports zero blocking diagnostics for both the production adapter and driver.
 The production adapter's direct 4.33 cone is five jobs.
 
+At functional commit `ca0b0a406fd8ef33eb9fa7ceed0294ecbd147394`, the exact
+real-source repeat gate, `make check` (730 cases / 2172 comparisons),
+`make talos-check` (3205 jobs plus 3166-job trust stage after existing setup),
+and `bash integration/talos/artifact/check.sh` all pass. The latter is the
+default non-browser deterministic gate; no renderer Wasm or browser execution
+is part of this slice. The containing handoff adds documentation only.
+
 Generated evidence lives under `.deps/native-session-probe/ordinary-module/`:
 each `first/` and `repeat/` contains `verso-doc/` and `renderer/`, each with
 `entry.lcnf` and `module-capture.json`. The latter includes the exact declaration

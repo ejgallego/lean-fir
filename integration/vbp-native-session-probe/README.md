@@ -24,12 +24,12 @@ regressions pass.
 check and records a shared-specialization reader left visible by root-local reset.
 [PROVENANCE_RESULT.md](PROVENANCE_RESULT.md) explains the repaired discovery
 omission and remaining compiler-rebuild failure. See
-[REPAIR_RESULT.md](REPAIR_RESULT.md) for the current result and exact ordinary
+[REPAIR_RESULT.md](REPAIR_RESULT.md) for that earlier result and its ordinary
 capture commands. [CAPTURE_RESULT.md](CAPTURE_RESULT.md) records the earlier
 constructor failure. [CONTROL.md](CONTROL.md) isolates the
 earlier postponement failure, and [RESULT.md](RESULT.md) preserves that original
-negative checkpoint. `Probe.lean` and the capture-only driver compile in
-ordinary mode, but actual capture throws before returning a complete closure.
+negative checkpoint. The historical `Probe.lean` and `Capture.lean` compile in
+ordinary mode, but their reset-based capture throws before returning a complete closure.
 `Emit.lean` and actual lower/link execution remain unvalidated. The structural validator cannot
 accept the new binding profile: it explicitly stops pending actual captured
 frontier classification and conformance. No guessed profile is emitted.
@@ -39,7 +39,7 @@ frontier classification and conformance. No guessed profile is emitted.
 rebuild. The repair preserves constructor/type module mappings during that
 stage; it does not seed metadata or merge source units.
 
-## Reproduce
+## Historical reset-based reproducer (still failing)
 
 From the W7 worktree, with Lean `leanprover/lean4:v4.34.0-rc2` installed:
 
@@ -50,7 +50,8 @@ bash integration/vbp-native-session-probe/check.sh
 `prepare.mjs` checks the frozen consumer identity, archives the accepted FIR
 base and every manifest-pinned dependency from local Git objects, and overlays
 the exact hash-checked dirty RPC file and the hash-checked FIR
-`CompilerPrivate.lean` metadata and `Source.lean` body-selection repairs. No consumer `.lake` is read as
+`CompilerPrivate.lean` metadata, `Source.lean` body-selection repairs and the
+new `ModuleSource.lean` provider. No consumer `.lake` is read as
 compiler input. Archives and private build trees live in
 `.deps/native-session-probe/`; the fixture has its own `.lake`, Beam session
 and exact 4.34 toolchain. Ordinary FIR remains on 4.33. The cache is explicitly
@@ -60,12 +61,12 @@ Default source repositories are the fixed consumer and matched read-only
 source trees from `VBP-FIR-20260913-003`; `VBP_ROOT`, `VBP_MATCHED_ROOT`, and
 `VIR_ROOT` can supply equivalent local repositories. Source revisions, the
 consumer's dirty state, archive hashes, renderer/RPC/manifest hashes and
-fixture head and both compiler overlay hashes are recorded in
+fixture head and all three compiler overlay hashes are recorded in
 `.deps/native-session-probe/SOURCE.json`.
 The RPC overlay identifies the requested consumer snapshot; it does not add
 RPC, StringPreview or component roots to this renderer-only probe.
 
-## Compilation boundary
+## Historical compilation boundary
 
 By default the fixture builds VBP source modules with postponed final LCNF, then uses
 FIR's existing individual-source-unit capture and boxed-adapter recovery.
