@@ -1,8 +1,8 @@
 # wasm-gen lane
 
-Current slice: `ROOT-W7-20260915-012` with scope clarified by root event -017.
-One-module assembly and the user-requested feasibility report are complete.
-Root owns integration. No complete renderer/Wasm or host-profile claim.
+Current slice: `ROOT-W7-20260915-020`, clarified by root event `-021`.
+Five installed-module inputs and seven renderer-frontier entry captures are
+ready. Root owns integration; no recursive assembly or Wasm claim is made.
 
 ```text
 lane: wasm-gen
@@ -10,37 +10,48 @@ owner: wasm-gen
 branch: wasm/generation
 worktree: .worktrees/wasm-generation
 state: ready
-base: 794b64fecec47d068c4400abe6213808081ba583
-functional-head: 7b60a8dadd848e523fa4efc1d7bdb173c0793d5e
+base: 854f8d1505d96721ae5252f94493b7b11e199e56
+functional-head: 6afe2ef860091e8c9706fc671da4f66c0e363835
 contract-base: dc94cd4f0aa716aad5e79a7f77bafa752e9994a9
 clean-at-update: true
-slice: Compose one actual owning-module capture into Renderer.render with signature checks, unchanged root groups and deterministic repeats. Inventory all 41 original external signatures by actual metadata/source/setup provenance and publish FEASIBILITY.md.
-files: integration/vbp-native-session-probe/{ModuleAssembly.lean,module-assembly-check.sh,module-assembly-check.mjs,FEASIBILITY.md,README.md}; coordination/lanes/wasm-gen.md
-contracts: none changed; production adapter, reset/importer policies, toolchains, consumer source, W6/runtime/ABI and packages untouched
-checks: Beam zero blocking diagnostics; direct Lean and 629-job focused dependency cone pass. Exact functional-head assembly repeat gate passes (512 locals/103 external signatures; unchanged 28 root groups/164 declarations; selected body present; signature mismatch, missing and ambiguous setup controls reject). Original 41-row taxonomy ratchet passes. Exact functional-head make check passes 730 cases/2172 comparisons and talos-check passes 3205 jobs plus 3166 trust stage after existing setup. Authoritative root checks use explicit production-toolchain cache; fixture checks use isolated 4.34 cache. Diff/mailbox checks pass. No new artifact/browser gate: fixture-only capture/report, no production or runtime edit. Status successor is documentation only.
-bug-cards: none new; initial frontend initializer error was caller API misuse, corrected with root authorization and upstream lifecycle semantics. Legacy shared-specialization reset defect remains separate.
-blockers: none for this bounded slice. Seven original source signatures lack setup inputs in the isolated fixture; complete dependency closure/lowering/linking/profile/execution remain unproven.
-handoff: Clean local-only checkpoint for root review; canonical completion pins containing status commit. No main/push/package/pointer changes. Stop at successful one-module assembly/report boundary.
-next: Root reviews and accepts, then scopes faithful toolchain-module inputs for seven signatures in five installed Lean modules. Further source capture remains non-recursive in this checkpoint. No generated-name shim or default-setup invention.
+slice: Pinned-bootstrap-derived capture inputs for five installed Lean modules; verify source/options/artifact/import provenance, capture seven actual renderer-frontier entries twice, refresh the original frontier taxonomy.
+files: integration/vbp-native-session-probe/{InstalledModuleCapture.lean,installed-module-inputs.mjs,installed-module-check.mjs,installed-module-check.sh,INSTALLED_INPUTS.md,README.md}; coordination/lanes/wasm-gen.md
+contracts: none; production ModuleSource, importer/reset/source-unit policy, selected toolchains, runtime/W6/ABI, consumer code and packages unchanged
+checks: Beam zero blocking diagnostics; focused production 4.33 ModuleSource build (5 jobs) and fixture Lean typecheck pass; isolated 4.34 direct Lean and 629-job real-source dependency cone pass; fresh renderer assembly and five-owner/seven-entry deterministic capture gate pass; negative provenance controls pass; make check passes 730 cases/2172 comparisons; make talos-check passes 3205 jobs plus 3166-job trust stage after existing setup; FIR_CHECK_JOBS=2 bash integration/talos/artifact/check.sh passes, including deterministic repeats; diff and mailbox checks pass. No browser run or package retarget was requested. Containing status successor changes documentation only.
+bug-cards: none new; no target compiler diagnostic or semantic discrepancy. Existing legacy reset defect remains separate.
+blockers: none for this bounded slice; full renderer closure/assembly/lowering/linking/host profile/execution remain unproven
+handoff: Clean local-only immutable checkpoint in canonical completion; root may review and land this bounded provider. No main advance or push by W7.
+next: Stop. Root scopes the next dependency assembly/capture request; do not start recursive capture or runtime work implicitly.
 ```
 
-## Results
+## Results and provenance
 
-The selected `VersoReact.Renderer.render` owner is resolved from actual compiler
-provenance and Lake inputs. Its complete owning module has 141 groups and 565
-declarations; the selected local closure has 361 declarations. Combined with the
-root's 151 locals, the partial product has 512 locals and 103 typed externals.
-Assembly LCNF SHA-256:
-`7e09d684407485b58ba2dbbe25d8e20605b5e9b76dbdff42639c83c4ce019c7a`.
+The original 41-signature frontier is now **31 capture-resolvable owning-module
+inputs, six runtime/primitive boundaries and four VIR boundaries**. All seven
+former setup gaps were captured after compiling their real owning modules:
 
-Original 41-signature source taxonomy: 24 capture-resolvable inputs, six actual
-native primitives, four VIR metadata bindings, seven unavailable setup inputs
-(source exists; none ambiguous). These are not final Wasm imports or profile
-admission. See `integration/vbp-native-session-probe/FEASIBILITY.md` for every row,
-limitations, source hashes and remaining work.
+- `Init.Data.Repr`: 121 groups / 268 declarations; `Nat.reprFast`.
+- `Init.Data.Array.Basic`: 351 / 673; `Array.append._redArg`.
+- `Init.Prelude`: 747 / 1177; `Lean.Name.mkStr3`, `Lean.Name.mkStr4`.
+- `Init.Data.ToString.Name`: 23 / 74; `Lean.Name.toString` and the observed
+  `toStringWithToken` specialization.
+- `Lean.DocString.Types`: 141 / 314; `Lean.Doc.instBEqMathMode.beq`.
 
-Reproduce with `bash integration/vbp-native-session-probe/module-assembly-check.sh`.
-Ignored evidence under `.deps/native-session-probe/assembly/` is disposable.
-Authoritative gate logs: `control/assembly-final-focused.log`,
-`control/assembly-root-scoped-make-check.log`, and
-`control/assembly-root-scoped-talos-check.log` under the same state root.
+These are **derived capture inputs**, not recovered release setup metadata.
+They use pinned 4.34.0-rc2 revision `6a10ac8c22beadecabdbb0919c2b50214762f91d`,
+exact bootstrap template and stage options, matching installed sources/imports,
+and hashes of all six artifact parts for the selected owners and 325 installed
+import-DAG modules. The DAG is inventoried, not recursively captured. No synthetic
+Lake setup JSON is written. See `integration/vbp-native-session-probe/INSTALLED_INPUTS.md`
+for the precise provider boundary, configuration and reproducer.
+
+The previous one-dependency assembly remains 512 locals / 103 signatures, with
+LCNF SHA-256 `7e09d684407485b58ba2dbbe25d8e20605b5e9b76dbdff42639c83c4ce019c7a`.
+The five new captures have not been merged into it.
+
+Reproduce: `bash integration/vbp-native-session-probe/installed-module-check.sh`.
+Disposable evidence: `.deps/native-session-probe/installed-inputs/`.
+Current derived-input manifest SHA-256:
+`09f5950ffc9b292af6ff665297c8b949d825ecc797149022729e2a4858bf8f92`.
+Gate logs are `.deps/native-session-probe/control/installed-module-final.log`
+and `installed-inputs-{433-cone,make-check,talos-check,artifact-check}.log`.
