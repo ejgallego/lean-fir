@@ -17,6 +17,11 @@ remaining transitive-dependency work. Run the bounded current acceptance with:
 bash integration/vbp-native-session-probe/module-capture-check.sh
 ```
 
+[FEASIBILITY.md](FEASIBILITY.md) records the next one-module dependency
+experiment, its independently successful capture, and the currently exposed
+same-process frontend lifecycle precondition. It does not claim an assembled
+renderer or a Wasm package.
+
 The historical reset-based source provider is unchanged and still stops at the
 same unknown specialization. Constructor metadata and executable-body discovery
 regressions pass.
