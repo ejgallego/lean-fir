@@ -37,6 +37,30 @@ structure Product where
   modules : Array CapturedModule := #[]
   selections : Array Json := #[]
 
+/-- Pure compiler data only. Selection is performed by upstream while the
+actual owning environment is alive, never by reconstructing a foreign env. -/
+structure WorkerSelection where
+  entry : Name
+  decls : Array (Decl .impure)
+  externalNames : Array Name
+
+structure WorkerProduct where
+  moduleName : Name
+  sourceFile : System.FilePath
+  identity : String
+  groups : Array (Array (Decl .impure))
+  selections : Array WorkerSelection
+  externals : Array External
+
+def manualImages : IO (Array String) := do
+  let maps ← IO.FS.readFile "/proc/self/maps"
+  let mut paths := #[]
+  for line in maps.splitOn "\n" do
+    if let some path := (line.splitOn " ").getLast? then
+      if path.endsWith ".so" && (path.splitOn "VersoManual").length > 1 && !paths.contains path then
+        paths := paths.push path
+  return paths.qsort (· < ·)
+
 def Product.artifact (p : Product) : Fir.Compiler.Lcnf.Artifact := {
   entry
   program := { decls := p.bodies.map (·.decl) ++ p.externals.map (·.decl) }
@@ -77,6 +101,84 @@ def external (c : CapturedModule) (decl : Decl .impure) : IO External := do
       if !sources.contains real then sources := sources.push real
   return { decl, owner, symbols, targets, sources }
 
+def captureWorker (identityFile out : System.FilePath) : IO Unit := do
+  let identity ← IO.FS.readFile identityFile
+  let request ← IO.ofExcept <| Json.parse identity
+  let resolved : Json ← InstalledInputs.get request "resolved"
+  let route : String ← InstalledInputs.get resolved "route"
+  let (source, setup) ← if route == "lake" then do
+      let source : System.FilePath ← InstalledInputs.get resolved "source"
+      let path : System.FilePath ← InstalledInputs.get resolved "setup"
+      pure (source, ← ModuleSetup.load path)
+    else if route == "installed" then do
+      let inputs : Json ← InstalledInputs.get resolved "inputs"
+      let rows : Array Json ← InstalledInputs.get inputs "modules"
+      unless rows.size == 1 do throw <| IO.userError "ambiguous installed owner"
+      InstalledInputs.verify inputs rows[0]!
+    else throw <| IO.userError "unknown worker input route"
+  let c ← compileChecked source setup
+  let expected : String ← InstalledInputs.get request "module"
+  unless c.moduleName.toString == expected do throw <| IO.userError "worker owner mismatch"
+  let mut selections := #[]
+  let mut externals : Array External := #[]
+  for decl in c.groups.flatten do
+    let a ← c.artifact decl.name
+    selections := selections.push {
+      entry := decl.name
+      decls := a.program.decls
+      externalNames := a.externalNames : WorkerSelection }
+    for d in a.program.decls do
+      if (match d.value with | .extern _ => true | _ => false) &&
+          !externals.any (·.decl.name == d.name) then
+        externals := externals.push (← external c d)
+  let p : WorkerProduct := {
+    moduleName := c.moduleName
+    sourceFile := c.sourceFile
+    identity
+    groups := c.groups
+    selections
+    externals }
+  let _ ← unsafe CompactedRegion.save out `firModuleWorker p #[] none (allowClosures := false)
+  IO.FS.writeFile (out.addExtension "json") <| (Json.mkObj [
+    ("module", toJson c.moduleName.toString), ("groups", toJson c.groups.size),
+    ("declarations", toJson c.groups.flatten.size), ("selections", toJson selections.size),
+    ("images", toJson (← manualImages))]).pretty
+
+def admitWorker (p : Product) (w : WorkerProduct) (name : Name) : IO Product := do
+  let some a := w.selections.find? (·.entry == name) |
+    throw <| IO.userError s!"entry absent from owning compiler product: {name}"
+  let mut p := p
+  for d in a.decls do
+    if let .extern _ := d.value then continue
+    let some canonical := w.groups.flatten.find? (·.name == d.name) |
+      throw <| IO.userError s!"worker body absent from owning groups: {d.name}"
+    unless canonical == d do throw <| IO.userError s!"worker body differs from capture: {d.name}"
+    if let some prior := p.bodies.find? (·.decl.name == d.name) then
+      unless prior.owner == w.moduleName && prior.decl == d do
+        throw <| IO.userError s!"conflicting body provider: {d.name}"
+    else p := { p with bodies := p.bodies.push { owner := w.moduleName, decl := d } }
+  for d in a.decls do
+    unless (match d.value with | .extern _ => true | _ => false) do continue
+    unless a.externalNames.contains d.name || w.groups.flatten.any (· == d) do
+      throw <| IO.userError s!"worker external absent from imported signatures and own groups: {d.name}"
+    let some e := w.externals.find? (·.decl.name == d.name) |
+      throw <| IO.userError s!"worker external provenance absent: {d.name}"
+    unless signatureMatches e.decl d && e.decl.value == d.value do
+      throw <| IO.userError s!"worker external differs: {d.name}"
+    if let some prior := p.externals.find? (·.decl.name == d.name) then
+      unless prior.owner == e.owner && signatureMatches prior.decl d &&
+          prior.decl.value == d.value && prior.symbols == e.symbols && prior.targets == e.targets &&
+          prior.sources == e.sources do
+        throw <| IO.userError s!"worker interface disagreement: {d.name}"
+    else p := { p with externals := p.externals.push e }
+  let mut remaining := #[]
+  for e in p.externals do
+    if let some b := p.bodies.find? (·.decl.name == e.decl.name) then
+      unless b.owner == e.owner && signatureMatches b.decl e.decl && !e.isBoundary do
+        throw <| IO.userError s!"worker body/interface disagreement: {e.decl.name}"
+    else remaining := remaining.push e
+  return { p with externals := remaining }
+
 /-- Admission uses one canonical recorded body per module/name. Re-selecting
 that same module product may reuse its body; a second provider may not define it.
 Every external edge is checked even if its body was admitted earlier. -/
@@ -112,17 +214,22 @@ def admit (p : Product) (c : CapturedModule) (a : Fir.Compiler.Lcnf.Artifact) : 
     else unresolved := unresolved.push e
   return { p with externals := unresolved }
 
-def save (p : Product) (out : System.FilePath) (complete : Bool) (failure : Option String) : IO Unit := do
+def save (p : Product) (out : System.FilePath) (complete : Bool) (failure : Option String)
+    (workers : Array WorkerProduct := #[]) : IO Unit := do
   IO.FS.createDirAll out
   let some root := p.modules[0]? | throw <| IO.userError "empty module product"
   IO.FS.writeFile (out / "product.lcnf") (← format root p.artifact)
+  let moduleRows := p.modules.map fun c => Json.mkObj [
+    ("name", toJson c.moduleName.toString), ("source", toJson c.sourceFile.toString),
+    ("groups", toJson (c.groups.map (·.map (·.name.toString))))]
+  let workerRows := workers.map fun c => Json.mkObj [
+    ("name", toJson c.moduleName.toString), ("source", toJson c.sourceFile.toString),
+    ("groups", toJson (c.groups.map (·.map (·.name.toString))))]
   IO.FS.writeFile (out / "product.json") <| (Json.mkObj [
     ("entry", toJson entry.toString), ("complete", toJson complete), ("failure", toJson failure),
     ("negativeControls", toJson true),
     ("lowered", toJson false), ("hostProfileAdmitted", toJson false),
-    ("modules", toJson (p.modules.map fun c => Json.mkObj [
-      ("name", toJson c.moduleName.toString), ("source", toJson c.sourceFile.toString),
-      ("groups", toJson (c.groups.map (·.map (·.name.toString))))])),
+    ("modules", toJson (moduleRows ++ workerRows)),
     ("bodies", toJson (p.bodies.map fun b => Json.mkObj [
       ("name", toJson b.decl.name.toString), ("owner", toJson b.owner.toString)])),
     ("selections", toJson p.selections),
@@ -212,9 +319,74 @@ def run (rootSource rootSetup resolver out : System.FilePath) : IO Unit := do
   unless stopped do save p out true none
   IO.println s!"Module product: {p.modules.size} captures, {p.bodies.size} bodies, {p.externals.size} boundaries/pending"
 
+def runIsolated (rootSource rootSetup worker out : System.FilePath) : IO Unit := do
+  let root ← compileChecked rootSource (← ModuleSetup.load rootSetup)
+  let mut p ← admit { modules := #[root] } root (← root.artifact entry)
+  controls root p
+  let original ← format root (← root.artifact entry)
+  let images ← manualImages
+  IO.FS.createDirAll out
+  IO.FS.writeFile (out / "root.lcnf") original
+  let mut workers : Array WorkerProduct := #[]
+  -- No explicit free: all imported regions remain allocated through this
+  -- assembler process's lifetime, including products referenced by p.
+  let mut regions : Array CompactedRegion := #[]
+  let mut stopped := false
+  while !stopped do
+    let some next := p.externals.find? (fun e => !e.isBoundary) | break
+    try
+      let w ← if let some w := workers.find? (·.moduleName == next.owner) then pure w else do
+        let request := out / "request.json"
+        IO.FS.writeFile request next.row.pretty
+        let response ← IO.Process.output { cmd := "node", args := #[worker.toString, request.toString] }
+        unless response.exitCode == 0 do
+          throw <| IO.userError s!"worker failed for {next.owner}: {response.stderr.trimAscii}"
+        let record ← IO.ofExcept <| Json.parse response.stdout
+        let path : System.FilePath ← InstalledInputs.get record "product"
+        let identityFile : System.FilePath ← InstalledInputs.get record "identity"
+        let expected ← IO.FS.readFile identityFile
+        let (w, region) ← unsafe CompactedRegion.read (α := WorkerProduct) path #[]
+        unless w.moduleName == next.owner && w.identity == expected do
+          throw <| IO.userError "worker product identity mismatch"
+        let mut names : Array Name := #[]
+        for d in w.groups.flatten do
+          if names.contains d.name then throw <| IO.userError "duplicate captured declaration"
+          names := names.push d.name
+        unless w.selections.map (·.entry) == names do
+          throw <| IO.userError "worker selection inventory mismatch"
+        workers := workers.push w
+        regions := regions.push region
+        IO.eprintln s!"Captured isolated {w.moduleName}: {w.groups.size} groups"
+        pure w
+      p ← admitWorker p w next.decl.name
+      unless p.bodies.any (·.decl.name == next.decl.name) &&
+          !p.externals.any (·.decl.name == next.decl.name) do
+        throw <| IO.userError "worker selection did not close source edge"
+      p := { p with selections := p.selections.push (Json.mkObj [
+        ("name", toJson next.decl.name.toString), ("module", toJson next.owner.toString),
+        ("bodies", toJson p.bodies.size), ("externals", toJson p.externals.size)]) }
+      unless original == (← format root (← root.artifact entry)) && images == (← manualImages) do
+        throw <| IO.userError "renderer context changed during isolated assembly"
+      save p out false none workers
+    catch error =>
+      IO.eprintln s!"STOP {error}"
+      save p out false (some error.toString) workers
+      stopped := true
+  unless stopped do
+    save p out true none workers
+    let _ ← unsafe CompactedRegion.save (out / "product.region") `firClosedSource
+      p.artifact #[] none (allowClosures := false)
+  IO.FS.writeFile (out / "isolation.json") <| (Json.mkObj [
+    ("regions", toJson regions.size), ("imagesBefore", toJson images),
+    ("imagesAfter", toJson (← manualImages))]).pretty
+  IO.println s!"Isolated closure: {workers.size + 1} modules, {p.bodies.size} bodies, {p.externals.size} remaining"
+
 end RendererModuleProduct
 
 def main (args : List String) : IO Unit := do
-  let [source, setup, resolver, out] := args |
-    throw <| IO.userError "usage: ModuleProduct.lean root.lean root.setup.json resolver.mjs output"
-  RendererModuleProduct.run source setup resolver out
+  match args with
+  | ["--worker", identity, out] => RendererModuleProduct.captureWorker identity out
+  | ["--isolated", source, setup, worker, out] =>
+    RendererModuleProduct.runIsolated source setup worker out
+  | [source, setup, resolver, out] => RendererModuleProduct.run source setup resolver out
+  | _ => throw <| IO.userError "usage: ModuleProduct.lean [--worker|--isolated] ..."

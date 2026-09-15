@@ -11,4 +11,8 @@ cd "$here"
 node prepare.mjs
 lake --keep-toolchain -KpostponeCompile=false build Fir.Wasm.Emit.ModuleSource Probe.InstalledInputs +VersoBlueprintVir.Preview.Renderer
 lake --keep-toolchain -KpostponeCompile=false env lean ModuleProduct.lean
-node module-product-check.mjs
+if [[ " $* " == *" --lower "* ]]; then
+  lake --keep-toolchain -KpostponeCompile=false build Fir.Wasm.Emit.ResidentLinker
+  lake --keep-toolchain -KpostponeCompile=false env lean LowerModuleProduct.lean
+fi
+node module-product-check.mjs "$@"

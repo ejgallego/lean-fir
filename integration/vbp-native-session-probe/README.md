@@ -7,9 +7,70 @@ NativeSession component/session roots are no longer selected.
 It does not implement a browser adapter or exercise React/callback lifetimes.
 The historical `integration/vbp-verso-viewer/` package is untouched.
 
-Current state: **the new owning-module production adapter captures the real
-renderer successfully**: 151 local entry declarations and 41 explicit external
-signatures. These are not final Wasm host imports. See
+## Current end-to-end boundary
+
+The original renderer traversal now completes through isolated owning-module
+compiler products: **47 modules, 1,506 bodies, 138 selections, no pending
+Lean-name source edges**. Two fresh traversals agree on the complete product,
+including its trusted-local compacted bytes. The renderer's original final LCNF
+and loaded native images remain unchanged. No VBP source is copied or modified.
+
+```sh
+bash integration/vbp-native-session-probe/module-product-check.sh --isolated --lower
+```
+
+This feeds the assembled product into the existing FIR lowerer and resident
+linker. The base Wasm is **777,173 bytes** and passes Node's binary validation.
+Both initial lowering attempts agree. **Resident admission fails; this is not a
+published renderer package or a browser execution result.** The diagnostic
+link view retains the failure and only reports imports; it installs no fallback.
+
+The initial linked frontier has 28 imports:
+
+- 12 deliberate VIR host operations.
+- One arbitrary-precision Nat literal, `18446744073709551616` (`2^64`).
+- `UInt64.ofNatLT`.
+- `Substring.Raw.Internal.{front,isEmpty,drop,takeWhile,extract,prev,get,toString}`.
+- `String.Pos.Raw.Internal.min` and
+  `String.Internal.{atEnd,get,front,drop,dropRight}`.
+
+Important: an extern is not necessarily implemented in C. Twelve of these
+String/Substring symbols have upstream Lean `@[export]` providers. The next
+compiler repair is generic symbol resolution using actual export metadata and
+checked compiled interfaces—not hand-written substitutes or `Impl` suffix
+guessing. See `FIR-BUG-wasm-none-native-export-source-provider`. Resolving those
+edges may reveal additional dependencies; the 47-module product is not yet a
+complete native-symbol closure.
+
+The real renderer environment independently confirms all twelve matches through
+`getExternNameFor` (C backend) and `getExportNameFor?`. Imported and provider final
+LCNF signatures agree on result type, parameter types/borrows, safety and universe
+parameters. The intended extension is a unique native-symbol provider table,
+owning-module capture of those providers, then checked linkage and continued
+dependency traversal. Ambiguity or interface disagreement must fail, and absent
+providers must remain explicit. This follows upstream native linking; it does not
+select the Lean reference body of an arbitrary extern as a fallback.
+
+Outputs live under `.deps/native-session-probe/isolated-module-product/`:
+`first/` and `repeat/` contain the captured product, per-owner identity records,
+native-image checks, and `lower/` contains the base Wasm and strict link verdict.
+`summary.json` records exact inventories and digests. This remains same-toolchain,
+trusted-local fixture transport; no persistent/untrusted format is introduced.
+
+Recorded source-product SHA-256 values:
+
+| Product | SHA-256 |
+| --- | --- |
+| Original renderer LCNF | `819fed859b7d21f3988072f7be53969705614de8d047f41b6c8b8bc488704073` |
+| Assembled LCNF | `10de0efcf96759466f796881d9ddf886f9f6f6e20ac17cbc770d929ad08396c4` |
+| Assembly metadata | `9b867bf71265f332837e1892de0f8ffc5dcb6fd27bdf53206ee564b1e23db4b1` |
+| Compacted artifact | `c6b10d3e1d216292a36b3499e92772be85565a32d3e0c13f720f93ca0dba30d7` |
+
+## Earlier diagnostic checkpoints
+
+These reports preserve the route to the current boundary, not separate active
+approval milestones. The owning-module production adapter first captured the
+renderer's 151 local entry declarations and 41 external signatures. See
 [MODULE_RESULT.md](MODULE_RESULT.md) for the repaired boundary, regression and
 remaining transitive-dependency work. Run the bounded current acceptance with:
 
@@ -70,7 +131,8 @@ constructor failure. [CONTROL.md](CONTROL.md) isolates the
 earlier postponement failure, and [RESULT.md](RESULT.md) preserves that original
 negative checkpoint. The historical `Probe.lean` and `Capture.lean` compile in
 ordinary mode, but their reset-based capture throws before returning a complete closure.
-`Emit.lean` and actual lower/link execution remain unvalidated. The structural validator cannot
+The historical `Emit.lean` route remains unvalidated; the current lower/link
+result above instead consumes the isolated module product. The structural validator cannot
 accept the new binding profile: it explicitly stops pending actual captured
 frontier classification and conformance. No guessed profile is emitted.
 
