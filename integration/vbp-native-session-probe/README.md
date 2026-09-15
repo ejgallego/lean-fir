@@ -44,6 +44,14 @@ pass; a plugin-only aggregate-then-`Ext` reproducer fails. Run
 bounded five-case repeated diagnostic. No lifecycle workaround or continued
 module-product assembly is implemented.
 
+[PRODUCT_TRANSPORT.md](PRODUCT_TRANSPORT.md) demonstrates the next isolated
+experiment: two fresh Basic captures transport identical final-LCNF products
+through Lean's existing object compactor into two fresh renderer contexts.
+Source/setup/plugin and compiler-data verification pass without overlapping
+native images. Run `bash integration/vbp-native-session-probe/product-transport-check.sh`.
+This is trusted-local feasibility, not a durable format, production driver,
+continued module worklist or Wasm artifact.
+
 The historical reset-based source provider is unchanged and still stops at the
 same unknown specialization. Constructor metadata and executable-body discovery
 regressions pass.
