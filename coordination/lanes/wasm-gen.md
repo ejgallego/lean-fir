@@ -1,8 +1,8 @@
 # wasm-gen lane
 
-Current slice: `ROOT-W7-20260915-025`. The module-capture lifecycle diagnosis
-is complete and ready for root review. No repair or continued renderer closure
-is implemented; root retains integration and the next design decision.
+Current slice: `ROOT-W7-20260915-027`. Process-isolated one-product transport
+feasibility is complete and ready for root review. Root retains integration and
+the decision to introduce a broader driver.
 
 ```text
 lane: wasm-gen
@@ -10,54 +10,58 @@ owner: wasm-gen
 branch: wasm/generation
 worktree: .worktrees/wasm-generation
 state: ready
-base: f7dfd06c5aac860c7562dfbfc7a2ef37984c2678
-functional-head: f23f74118adadae144a12b5fea2a32456c01ebe3
+base: 9b5696e4aef69d26a086e781c88993eb0a1286eb
+functional-head: c35754530099c3ff5533a51c8c05349eaee9bfd6
 contract-base: dc94cd4f0aa716aad5e79a7f77bafa752e9994a9
 clean-at-update: true
-slice: Isolate overlapping aggregate/per-module native plugin initialization with fresh/serial capture and plugin-only controls; retain exact source/setup/plugin identities and reduced reproducer.
-files: integration/vbp-native-session-probe/{ExtensionLifecycle.lean,extension-lifecycle-check.mjs,extension-lifecycle-check.sh,EXTENSION_LIFECYCLE.md,README.md}; bugs/FIR-BUG-wasm-none-module-product-extension-registration.md; coordination/lanes/wasm-gen.md
-contracts: none; no production capture/importer/reset changes, source/plugin mutation, toolchain change, runtime/W6/ABI change, closure transport or Wasm work
-checks: Lean Beam read-only registry probe and diagnostic fixture sync pass with zero blocking diagnostics; exact functional-head extension-lifecycle-check.sh passes 629-job source cone, direct Lean, five controls twice in fresh processes with identical JSON, expected failure-step/registry/library/symbol assertions and unchanged input hashes; exact functional-head make check passes 730 cases/2172 equal comparisons and 232 active bug cards; Node/bash syntax checks and base-to-head diff check pass. Fixture/report-only scope: no Talos/artifact/browser acceptance claimed. Containing status successor changes this document only.
-bug-cards: FIR-BUG-wasm-none-module-product-extension-registration (existing card classified, not repaired)
-blockers: aggregate libverso_VersoManual.so and standalone verso_VersoManual_Ext.so initialize overlapping native code in one process; compatible image/process policy remains a separate decision
-handoff: Clean local-only immutable checkpoint in canonical completion; review fixture/report only. No main advance, push or package publication by W7.
-next: Stop. Root separately scopes a compatible native-image policy or process-boundary/product-transport design; no worklist resume or initializer suppression is authorized.
+slice: Demonstrate exact trusted-local upstream CompactedRegion transport of actual VersoManual.Basic final LCNF into an isolated renderer context, without overlapping native plugins.
+files: integration/vbp-native-session-probe/{ProductTransport.lean,product-transport-check.mjs,product-transport-check.sh,PRODUCT_TRANSPORT.md,README.md}; coordination/lanes/wasm-gen.md
+contracts: none; no production compiler, source policy, plugin list, runtime/W6/ABI/toolchain/consumer or package change; no general driver or durable format
+checks: Lean Beam fixture sync passes with zero diagnostics; exact functional-head product-transport-check.sh passes 629-job source cone, direct Lean, two fresh producer exports and two fresh renderer consumers, full-data equality, byte determinism, signature/owner/body/integrity negative controls and unchanged native-image inventories; exact functional-head make check passes 730 cases/2172 comparisons and 232 active bug cards; Node/bash syntax and base-to-head diff checks pass. Fixture/report-only scope: no Talos/artifact/browser acceptance claimed. Containing status successor changes this document only.
+bug-cards: no new card; FIR-BUG-wasm-none-module-product-extension-registration remains open for the production pipeline
+blockers: no blocker for this experiment; broader isolation and complete renderer source closure require root's separately bounded decision
+handoff: Clean local-only immutable checkpoint in canonical completion. Review fixture/report only; no main advance, push or package publication by W7.
+next: Stop at requested boundary; root decides whether to generalize a trusted-local capture worker. Do not resume full worklist or lower/link/Wasm.
 ```
 
-## Causal result
+## Result
 
-The actual renderer setup loads aggregate `libverso_VersoManual.so`; the actual
-`VersoManual.Basic` setup loads standalone `verso_VersoManual_Ext.so`. Both
-define `initialize_verso_VersoManual_Ext` and the inline/block extension storage
-symbols. The aggregate registers both extensions before the standalone plugin
-tries to register the same name again. Lean's documented overlapping-plugin
-restriction applies; this is not a demonstrated new upstream compiler defect.
+Real Basic capture records 841 groups / 2,443 declarations. The selected
+`Verso.Genre.Manual.instToJsonInline.toJson` product has seven local bodies and
+six external interfaces. Both exports have exact size 2,365,200 bytes and SHA-256
+`bc0a220abd5ae07f9e3cb2fc049214004d4394ad015847733260535edca545c5`
+at the clean functional head above. The payload embeds source/fixture identity,
+so relocation or a new head may change that digest; identical-input repeats
+must match.
 
-| Fresh process experiment | Result |
-| --- | --- |
-| Basic capture | Pass: 841 groups; requested entry 7 locals / 6 signatures |
-| Renderer then Basic | Exact duplicate inlineExtensionExt diagnostic |
-| Basic twice | Pass |
-| Renderer plugin list twice | Pass |
-| Renderer plugin list then standalone Ext | Same duplicate, without any source capture |
+Lean's existing `CompactedRegion.save/read` preserves compiler data with
+`allowClosures := false` and no dependency regions. No environment, executable
+closure, native handle or plugin is transferred. The unsafe erased-type reader
+is gated by exact locally generated schema/toolchain/source/setup/plugin/blob
+identity; this is not an untrusted binary format or cross-version API.
 
-Each row was repeated independently; full observation JSON matches. Registry
-counts stay one after duplicate rejection. Read-only process maps identify the
-two loaded images. Native generated-C guards are file-local, not a process-wide
-module identity registry. No 26-module prefix or interpreted replay is needed.
+Entry and external signatures are mandatory. Six non-public generated
+definitions have no imported signature, as expected from upstream's public-only
+signature export. Their complete declarations match the canonical owning
+capture, and all owners match the renderer environment. A private-body mutation
+is rejected, as are borrow, owner, inventory, duplicate and identity mutations.
 
-The earlier module product remains 26 captures / 1201 bodies / 111 signatures
-(74 primitive, 12 VIR, 25 source pending). It was not resumed.
+Both producer processes map standalone `verso_VersoManual_Ext.so`, not the
+aggregate. Both renderer consumers map only `libverso_VersoManual.so` before
+and after reads/admission. The conflicting images never coexist in a tested
+process. No registry reset or initializer suppression is used.
 
-## Evidence
+## Evidence and remaining scope
 
-Report and reproducer: `integration/vbp-native-session-probe/EXTENSION_LIFECYCLE.md`.
-Exact identities and observations:
-`.deps/native-session-probe/lifecycle/{inputs.json,summary.json,first/,repeat/}`.
-Final logs: `.deps/native-session-probe/control/lifecycle-committed-final.log`
-and `lifecycle-committed-make-check.log`.
+Report: `integration/vbp-native-session-probe/PRODUCT_TRANSPORT.md`.
+Exact input identities, inventories and repeated results:
+`.deps/native-session-probe/transport/{identity.json,summary.json}`.
+Final logs: `.deps/native-session-probe/control/transport-committed-final.log`
+and `transport-committed-make-check.log`.
 
-Lean remains isolated 4.34.0-rc2 at
+Isolated Lean remains 4.34.0-rc2, revision
 `6a10ac8c22beadecabdbb0919c2b50214762f91d`; production FIR remains 4.33.
-All frozen consumer sources and actual Lake setups are unchanged. No consumer
-build products, system /tmp, registry reset, suppression or closure injection.
+The earlier worklist remains incomplete at 26 modules / 1,201 bodies / 111
+remaining signatures. Its lifecycle diagnosis is retained in
+`integration/vbp-native-session-probe/EXTENSION_LIFECYCLE.md`; this experiment
+does not silently repair or resume it. No renderer Wasm result is claimed.
