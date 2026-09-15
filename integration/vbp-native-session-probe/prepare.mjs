@@ -59,6 +59,11 @@ const sourceOverlaySha256 = '26667687f22cc9092b5194121ac9a8ab27b713bd196107ea2c7
 assert.equal(sha(readFileSync(join(fir, sourceOverlayPath))), sourceOverlaySha256,
   'review the executable-body source-discovery overlay before changing it');
 copyFileSync(join(fir, sourceOverlayPath), join(source, 'fir', sourceOverlayPath));
+const moduleOverlayPath = 'Fir/Wasm/Emit/ModuleSource.lean';
+const moduleOverlaySha256 = '6f4c8e4c6935f6ff26a981e9c348797acdfc1f601c9f4b92c13f9d7591fda99c';
+assert.equal(sha(readFileSync(join(fir, moduleOverlayPath))), moduleOverlaySha256,
+  'review the ordinary module capture adapter before changing it');
+copyFileSync(join(fir, moduleOverlayPath), join(source, 'fir', moduleOverlayPath));
 const vbp = archive('vbp', consumer, vbpCommit);
 copyFileSync(join(consumer, rpcPath), join(vbp, rpcPath));
 const manifest = json(join(consumer, 'lake-manifest.json'));
@@ -97,6 +102,7 @@ put(join(state, 'SOURCE.json'), {
   firBase: base, fixtureHead: run('git', ['rev-parse', 'HEAD'], fir),
   compilerOverlay: { path: compilerOverlayPath, sha256: compilerOverlaySha256 },
   sourceOverlay: { path: sourceOverlayPath, sha256: sourceOverlaySha256 },
+  moduleOverlay: { path: moduleOverlayPath, sha256: moduleOverlaySha256 },
   fixtureDirty: run('git', ['status', '--porcelain'], fir) !== '',
   leanToolchain: 'leanprover/lean4:v4.34.0-rc2',
   leanVersion: run('elan', ['run', 'leanprover/lean4:v4.34.0-rc2', 'lean', '--version']),

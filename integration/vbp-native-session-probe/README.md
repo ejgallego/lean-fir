@@ -7,8 +7,19 @@ NativeSession component/session roots are no longer selected.
 It does not implement a browser adapter or exercise React/callback lifetimes.
 The historical `integration/vbp-verso-viewer/` package is untouched.
 
-Current state: **constructor metadata and executable-body discovery regressions
-pass; ordinary-source capture still stops at the same unknown specialization**.
+Current state: **the new owning-module production adapter captures the real
+renderer successfully**: 151 local entry declarations and 41 explicit external
+signatures. These are not final Wasm host imports. See
+[MODULE_RESULT.md](MODULE_RESULT.md) for the repaired boundary, regression and
+remaining transitive-dependency work. Run the bounded current acceptance with:
+
+```sh
+bash integration/vbp-native-session-probe/module-capture-check.sh
+```
+
+The historical reset-based source provider is unchanged and still stops at the
+same unknown specialization. Constructor metadata and executable-body discovery
+regressions pass.
 [REBUILD_BOUNDARY.md](REBUILD_BOUNDARY.md) locates it at the mandatory post-saveBase
 check and records a shared-specialization reader left visible by root-local reset.
 [PROVENANCE_RESULT.md](PROVENANCE_RESULT.md) explains the repaired discovery
@@ -61,7 +72,7 @@ FIR's existing individual-source-unit capture and boxed-adapter recovery.
 The bounded control exposes `-KpostponeCompile=false` without changing that
 default. Ordinary module metadata satisfies the existing source-unit lookup
 criteria and contains no postponed groups. Actual capture through the existing
-fixture reaches its final dependency rebuilding stage. With the generic
+historical fixture reaches its final dependency rebuilding stage. With the generic
 metadata repair it passes the missing compiled `Int.ofNat` boundary and fails
 on an unknown generated `Array.mapMUnsafe` specialization owned by
 `Verso.Doc.ListItem.toJson`. Executable-body discovery now includes that caller,

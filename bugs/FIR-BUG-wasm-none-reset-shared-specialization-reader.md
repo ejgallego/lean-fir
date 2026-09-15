@@ -9,7 +9,7 @@ pass: none
 discovered-by: invariant-check
 first-seen: 2026-09-15
 reproduction: integration/vbp-native-session-probe/ResetSharing.lean
-regression: none
+regression: integration/vbp-native-session-probe/module-capture-check.sh
 ---
 
 # Summary
@@ -78,5 +78,14 @@ none; comparing the owning-module pipeline remains part of the investigation.
 
 ## Resolution and regression
 
-Open. ResetSharing is a positive diagnostic of the defect, not a fixed-regression
-claim. No production compiler behavior is changed by this slice.
+The legacy reset path remains open: ResetSharing is a positive diagnostic of
+that defect, not a claim that mapping invalidation is repaired.
+
+The opt-in production ModuleSource provider avoids the inconsistent context by
+compiling the owning ordinary module through upstream header/command processing.
+Its real Verso.Doc regression captures DescItem's final body and both calls to
+the ListItem-owned shared helper together with that helper's body. The real
+renderer entry also captures successfully. Repeat final-LCNF inventories/text
+are identical; missing-entry and non-module setup controls reject. See
+integration/vbp-native-session-probe/MODULE_RESULT.md. No generated-name seed,
+reader invalidation workaround or weakened compiler checkpoint is used.
