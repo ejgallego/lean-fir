@@ -12,6 +12,12 @@ These rules apply to every agent and worktree in this repository.
   `.worktrees/wasm-talos`.
 - W7 resident-runtime generation work uses branch `wasm/generation` in
   `.worktrees/wasm-generation`.
+- Lean 4.34 compatibility/tooling work uses branch `tooling/lean-4.34` in
+  `.worktrees/tooling-lean-4.34`. Workers compiling a user project whose Lake
+  setup requires 4.34 start from this official lane (or a short-lived
+  track-owned child rebased on it), rather than an ad-hoc source view or local
+  toolchain override. The tooling lane owns its pin and compatibility surface;
+  feature ownership is unchanged and a migration to `main` remains root-owned.
 - Lean-zip performance work uses branch `perf/lean-zip-loop` in
   `.worktrees/lean-zip-perf`. This is the existing W7-2 optimization role under
   a narrower name; it is not a second general generation lane.
@@ -53,8 +59,9 @@ These rules apply to every agent and worktree in this repository.
 - The integration owner controls `Fir/LeanIR/Phase.lean`,
   `Fir/LeanIR/Runtime.lean`, `Fir/LeanIR/Interpreter.lean`,
   `Fir/LeanIR/PassCorrectness.lean`, shared examples, root umbrella modules,
-  toolchains, manifests outside `integration/talos`, root build files, the
-  symbolic Wasm instruction/module surface, and cross-lane coordination files.
+  the `main` toolchain and migration decisions, manifests outside
+  `integration/talos`, root build files, the symbolic Wasm instruction/module
+  surface, and cross-lane coordination files.
 - Documentation within a track may be updated by that track. Changes to
   `README.md`, `docs/pass-correctness-plan.md`, or this file are coordinated
   through the integration owner.
