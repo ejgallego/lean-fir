@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-native-export-source-provider
-status: confirmed
+status: fixed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.34.0-rc2
 lean-revision: 6a10ac8c22beadecabdbb0919c2b50214762f91d
@@ -76,5 +76,17 @@ None. The extern/export pairing is intentional upstream bootstrap architecture.
 
 ## Resolution and regression
 
-Pending generic metadata-based provider selection and exact interface-checked
-linking. Keep source-unit and explicit native/VIR boundary tests intact.
+`Fir.Wasm.Emit.NativeSymbol` implements generic metadata-based provider selection
+and exact interface-checked linking through typed forwarding functions. The
+renderer closes 16 native-symbol edges; all twelve previously missing exported
+Lean providers disappear from the linker frontier (28 -> 17 imports, including
+one newly exposed raw atEnd alias). Two fresh products/lowerings agree, metadata
+and symbolic rejection controls pass, and the standalone Node forwarding test
+passes. Remaining native primitives and host execution are separate.
+
+The real traversal also confirms that an importing
+environment need not expose the implementation expression (for example
+`String.Internal.containsImpl`, exported by `Init.Data.String.Search`). Do not
+require a `defnInfo` view in the importer: require its compiled signature, then
+check actual captured code and export metadata in the owning module. Keep
+source-unit and explicit native/VIR boundary tests intact.

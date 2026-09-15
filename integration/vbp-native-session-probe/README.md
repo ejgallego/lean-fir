@@ -9,62 +9,80 @@ The historical `integration/vbp-verso-viewer/` package is untouched.
 
 ## Current end-to-end boundary
 
-The original renderer traversal now completes through isolated owning-module
-compiler products: **47 modules, 1,506 bodies, 138 selections, no pending
-Lean-name source edges**. Two fresh traversals agree on the complete product,
-including its trusted-local compacted bytes. The renderer's original final LCNF
-and loaded native images remain unchanged. No VBP source is copied or modified.
+The generic `Fir.Wasm.Emit.NativeSymbol` resolver now extends the owning-module
+closure through real upstream native export providers: **52 modules, 1,535
+bodies, 158 selections and 16 native-symbol links**. It retains 128 pre-link
+external interfaces, of which 16 are resolved by those links. There are no
+pending Lean-name source edges or unresolved exported Lean providers after
+linking. The original renderer LCNF remains unchanged. No VBP source is modified.
+
+The implementation uses upstream C-backend extern selection and export metadata,
+checks exact compiled interfaces (including borrowing), and requires actual code
+and matching export metadata in each provider's owning capture. Importers may
+hide implementation expressions; imported `defnInfo` is not required. Duplicate,
+self/external-provider and mismatched resolutions fail closed. Ordinary recursion
+in captured implementations is not an alias-resolution cycle.
+
+Linking uses the existing pre-encoding transform hook and adds ABI-exact
+forwarders, preserving original LCNF, call identities and closure target names.
+It neither guesses `Impl` suffixes nor compiles arbitrary extern fallback bodies.
+`NativeSymbolTests.lean` exercises actual extern/export metadata and rejection
+controls independently of this renderer; the generic module also has symbolic
+linker shape controls. Both compile under FIR 4.33 and the isolated 4.34 toolchain.
 
 ```sh
 bash integration/vbp-native-session-probe/module-product-check.sh --isolated --lower
 ```
 
 This feeds the assembled product into the existing FIR lowerer and resident
-linker. The base Wasm is **777,173 bytes** and passes Node's binary validation.
-Both initial lowering attempts agree. **Resident admission fails; this is not a
+linker. The base Wasm is **839,735 bytes** and passes Node's binary validation.
+Two fresh traversals and lowerings agree on the source product, metadata,
+compacted artifact, Wasm bytes, strict link verdict and host-boundary audit.
+The isolated typed-forwarder Node execution control also passes (argument order
+and UInt32 wraparound). **Resident admission fails; this is not a
 published renderer package or a browser execution result.** The diagnostic
 link view retains the failure and only reports imports; it installs no fallback.
 
-The initial linked frontier has 28 imports:
+The diagnostic linked frontier has **17 imports**, down from 28:
 
 - 12 deliberate VIR host operations.
 - One arbitrary-precision Nat literal, `18446744073709551616` (`2^64`).
 - `UInt64.ofNatLT`.
-- `Substring.Raw.Internal.{front,isEmpty,drop,takeWhile,extract,prev,get,toString}`.
-- `String.Pos.Raw.Internal.min` and
-  `String.Internal.{atEnd,get,front,drop,dropRight}`.
+- `String.Internal.atEnd`, `String.Internal.get`, and `String.Pos.Raw.atEnd`.
 
-Important: an extern is not necessarily implemented in C. Twelve of these
-String/Substring symbols have upstream Lean `@[export]` providers. The next
-compiler repair is generic symbol resolution using actual export metadata and
-checked compiled interfaces—not hand-written substitutes or `Impl` suffix
-guessing. See `FIR-BUG-wasm-none-native-export-source-provider`. Resolving those
-edges may reveal additional dependencies; the 47-module product is not yet a
-complete native-symbol closure.
+All twelve formerly missing String/Substring provider imports disappear. The
+generic traversal also resolves `String.Internal.{contains,pushn,posOf,offsetOfPos}`
+without a name-specific list. Its additional dependencies expose the raw `atEnd`
+alias. The remaining work is existing-layout Nat literal/primitive coverage,
+then actual JS adapter execution; no new native replacement for those sixteen
+Lean implementations was added.
 
-The real renderer environment independently confirms all twelve matches through
-`getExternNameFor` (C backend) and `getExportNameFor?`. Imported and provider final
-LCNF signatures agree on result type, parameter types/borrows, safety and universe
-parameters. The intended extension is a unique native-symbol provider table,
-owning-module capture of those providers, then checked linkage and continued
-dependency traversal. Ambiguity or interface disagreement must fail, and absent
-providers must remain explicit. This follows upstream native linking; it does not
-select the Lean reference body of an arbitrary extern as a fallback.
+`lower/host-boundary.json` records the 12 actual VIR targets, conversion markers,
+physical signatures and borrowing flags, using VIR's own metadata decoder.
+It is explicitly not host admission or execution. In particular Bool and Float
+arguments are scalars, while `Callback.ofUnary` transfers a closure: these cannot
+all use the old viewer adapter's generic resource-handle argument path.
 
-Outputs live under `.deps/native-session-probe/isolated-module-product/`:
+Outputs live under `.deps/native-session-probe/native-provider-product/`:
 `first/` and `repeat/` contain the captured product, per-owner identity records,
 native-image checks, and `lower/` contains the base Wasm and strict link verdict.
 `summary.json` records exact inventories and digests. This remains same-toolchain,
 trusted-local fixture transport; no persistent/untrusted format is introduced.
+For already executed phases, `node module-product-check.mjs --isolated --lower
+--check-only` validates both products, including current worker input hashes;
+it explicitly does not claim a new capture or execution. The default shell gate
+still performs fresh captures and lowerings. The old 47-module baseline remains
+separate under `isolated-module-product/`.
 
 Recorded source-product SHA-256 values:
 
 | Product | SHA-256 |
 | --- | --- |
 | Original renderer LCNF | `819fed859b7d21f3988072f7be53969705614de8d047f41b6c8b8bc488704073` |
-| Assembled LCNF | `10de0efcf96759466f796881d9ddf886f9f6f6e20ac17cbc770d929ad08396c4` |
-| Assembly metadata | `9b867bf71265f332837e1892de0f8ffc5dcb6fd27bdf53206ee564b1e23db4b1` |
-| Compacted artifact | `c6b10d3e1d216292a36b3499e92772be85565a32d3e0c13f720f93ca0dba30d7` |
+| Assembled LCNF | `678c0471328fc0f6a0b11f844b6499b68c7bf06a2ae7df75d7340449342e1376` |
+| Assembly metadata | `267f07c2bba4ae202c45031e08f2aa74d7dd9a59649773a4fea0c42487bad1d4` |
+| Compacted artifact | `7d3124e258fe8e17964bb9a6d6c7b609bffddcf1669b12fdced077b0cb40d482` |
+| Base Wasm | `b154b7169d63c3aa02098b0f5936f0dee4d2fa5cc40a234ffcfaa8d602a0af9b` |
 
 ## Earlier diagnostic checkpoints
 
@@ -163,7 +181,7 @@ Default source repositories are the fixed consumer and matched read-only
 source trees from `VBP-FIR-20260913-003`; `VBP_ROOT`, `VBP_MATCHED_ROOT`, and
 `VIR_ROOT` can supply equivalent local repositories. Source revisions, the
 consumer's dirty state, archive hashes, renderer/RPC/manifest hashes and
-fixture head and all three compiler overlay hashes are recorded in
+fixture head and all four compiler overlay hashes are recorded in
 `.deps/native-session-probe/SOURCE.json`.
 The RPC overlay identifies the requested consumer snapshot; it does not add
 RPC, StringPreview or component roots to this renderer-only probe.

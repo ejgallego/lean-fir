@@ -1,5 +1,7 @@
 import Fir.Wasm.Emit.ResidentLinker
 import Fir.Wasm.Emit.ModuleSource
+import Fir.Wasm.Emit.NativeSymbol
+import Vir.HostMetadata
 
 open Lean Fir.Wasm.Emit
 
@@ -47,15 +49,53 @@ def main (args : List String) : IO Unit := do
     unless a.program.decls.any (· == d) do
       throw <| IO.userError s!"closed artifact changed renderer body: {d.name}"
   let metadata ← IO.ofExcept <| Json.parse (← IO.FS.readFile metadataFile)
+  let links : Array Json ← IO.ofExcept <| metadata.getObjValAs? (Array Json) "nativeLinks"
+  let exports := NativeSymbol.exportIndex c.environment
+  let mut providers := #[]
+  for row in links do
+    let name : String ← IO.ofExcept <| row.getObjValAs? String "declaration"
+    let some decl := a.program.decls.find? (·.name == name.toName) |
+      throw <| IO.userError s!"native-link declaration missing: {name}"
+    let some p ← (NativeSymbol.resolve exports decl).toIO'
+        { fileName := source, fileMap := default, options := c.options } { env := c.environment } |
+      throw <| IO.userError s!"native-link metadata no longer resolves: {name}"
+    for (field, expected) in [("provider", p.name.toString), ("symbol", p.symbol),
+        ("owner", p.owner.toString)] do
+      let actual : String ← IO.ofExcept <| row.getObjValAs? String field
+      unless actual == expected do throw <| IO.userError s!"native-link {field} changed: {name}"
+    let some body := a.program.decls.find? (·.name == p.name) |
+      throw <| IO.userError s!"native provider body missing: {p.name}"
+    IO.ofExcept <| NativeSymbol.checkBody p p.owner body
+    providers := providers.push p
   let frontier : Array Json ← IO.ofExcept <| metadata.getObjValAs? (Array Json) "frontier"
   let mut hosts := #[]
+  let mut hostRows := #[]
   for row in frontier do
     let targets : Array String ← IO.ofExcept <| row.getObjValAs? (Array String) "virTargets"
     if !targets.isEmpty then
       let name : String ← IO.ofExcept <| row.getObjValAs? String "name"
       hosts := hosts.push name.toName
+      let some decl := a.program.decls.find? (·.name == name.toName) |
+        throw <| IO.userError s!"host signature missing: {name}"
+      let some symbol := getExternNameFor c.environment `c decl.name |
+        throw <| IO.userError s!"host extern metadata missing: {name}"
+      let some host := Vir.HostMetadata.decodeExternSymbol? symbol |
+        throw <| IO.userError s!"host extern metadata not recognized by VIR: {name}"
+      unless targets == #[host.target] do
+        throw <| IO.userError s!"host target provenance mismatch: {name}"
+      let imported ← IO.ofExcept <| (Fir.Wasm.externalImport decl).mapError reprStr
+      hostRows := hostRows.push <| Json.mkObj [
+        ("declaration", toJson name), ("target", toJson host.target),
+        ("marker", toJson host.marker.attributeName.toString),
+        ("borrowedParameters", toJson (decl.params.map (·.borrow))),
+        ("physicalImport", importJson imported)]
   IO.FS.createDirAll out
-  let result ← (Source.compileModuleArtifactWithExports a #[a.entry] .ok).toIO'
+  IO.FS.writeFile (out ++ "/host-boundary.json") <| (Json.mkObj [
+    ("schema", "fir.vir-host-boundary-audit/v1"),
+    ("admitted", toJson false), ("executed", toJson false),
+    ("imports", toJson hostRows)]).pretty
+  let result ← (Source.compileModuleArtifactWithExports a #[a.entry]
+    (fun m => (NativeSymbol.link providers m).mapError Source.CompileError.manifest)).toIO'
     { fileName := source, fileMap := default, options := c.options } { env := c.environment }
   match result with
   | .error error =>
@@ -78,10 +118,10 @@ def main (args : List String) : IO Unit := do
         requireNoRuntimeOperations := false } base.module
       let frontier ← match inspection with
         | .ok module => do
-          let providers ← (exportedProviderRows c.environment module.imports).toIO'
+          let remainingProviders ← (exportedProviderRows c.environment module.imports).toIO'
             { fileName := source, fileMap := default, options := c.options } { env := c.environment }
           pure <| Json.mkObj [("imports", toJson (module.imports.map importJson)),
-            ("leanExportProviders", toJson providers)]
+            ("leanExportProviders", toJson remainingProviders)]
         | .error err => pure <| Json.mkObj [("inspectionError", toJson (reprStr err))]
       IO.FS.writeFile (out ++ "/result.json") <| (Json.mkObj [
         ("stage", "resident-link"), ("success", toJson false), ("error", toJson (reprStr error)),

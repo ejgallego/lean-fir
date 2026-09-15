@@ -1,9 +1,12 @@
 import Probe.InstalledInputs
+import Fir.Wasm.Emit.NativeSymbol
 import Vir.HostMetadata
 
 open Lean Lean.Compiler.LCNF Fir.Wasm.Emit.ModuleSource
 
 namespace RendererModuleProduct
+
+open Fir.Wasm.Emit
 
 def entry := `VersoBlueprint.Experimental.VirPreview.Renderer.render
 
@@ -36,6 +39,7 @@ structure Product where
   externals : Array External := #[]
   modules : Array CapturedModule := #[]
   selections : Array Json := #[]
+  nativeLinks : Array NativeSymbol.Provider := #[]
 
 /-- Pure compiler data only. Selection is performed by upstream while the
 actual owning environment is alive, never by reconstructing a foreign env. -/
@@ -51,6 +55,7 @@ structure WorkerProduct where
   groups : Array (Array (Decl .impure))
   selections : Array WorkerSelection
   externals : Array External
+  exports : NativeSymbol.ExportIndex
 
 def manualImages : IO (Array String) := do
   let maps ← IO.FS.readFile "/proc/self/maps"
@@ -137,7 +142,8 @@ def captureWorker (identityFile out : System.FilePath) : IO Unit := do
     identity
     groups := c.groups
     selections
-    externals }
+    externals
+    exports := NativeSymbol.exportIndex c.environment }
   let _ ← unsafe CompactedRegion.save out `firModuleWorker p #[] none (allowClosures := false)
   IO.FS.writeFile (out.addExtension "json") <| (Json.mkObj [
     ("module", toJson c.moduleName.toString), ("groups", toJson c.groups.size),
@@ -233,6 +239,9 @@ def save (p : Product) (out : System.FilePath) (complete : Bool) (failure : Opti
     ("bodies", toJson (p.bodies.map fun b => Json.mkObj [
       ("name", toJson b.decl.name.toString), ("owner", toJson b.owner.toString)])),
     ("selections", toJson p.selections),
+    ("nativeLinks", toJson (p.nativeLinks.map fun link => Json.mkObj [
+      ("declaration", toJson link.declaration.toString), ("symbol", toJson link.symbol),
+      ("provider", toJson link.name.toString), ("owner", toJson link.owner.toString)])),
     ("frontier", toJson (p.externals.map (·.row)))]).pretty ++ "\n"
 
 def mustReject (label : String) (action : IO Unit) : IO Unit := do
@@ -332,9 +341,30 @@ def runIsolated (rootSource rootSetup worker out : System.FilePath) : IO Unit :=
   -- assembler process's lifetime, including products referenced by p.
   let mut regions : Array CompactedRegion := #[]
   let mut stopped := false
+  let exports := NativeSymbol.exportIndex root.environment
+  let resolveProvider (e : External) := (NativeSymbol.resolve exports e.decl).toIO'
+    { fileName := root.sourceFile.toString, fileMap := default, options := root.options }
+    { env := root.environment }
   while !stopped do
-    let some next := p.externals.find? (fun e => !e.isBoundary) | break
     try
+      let mut next? := p.externals.find? (fun e => !e.isBoundary)
+      let mut link? : Option NativeSymbol.Provider := none
+      if next?.isNone then
+        for e in p.externals do
+          if p.nativeLinks.any (·.declaration == e.decl.name) then continue
+          if let some link ← resolveProvider e then
+            let providerDecl : Decl .impure := {
+              name := link.name, levelParams := link.signature.levelParams,
+              params := link.signature.params, type := link.signature.type,
+              safe := link.signature.safe, value := .extern { entries := [.opaque] },
+              inlineAttr? := none }
+            let target ← external root providerDecl
+            unless target.owner == link.owner do
+              throw <| IO.userError s!"native provider source owner differs: {link.name}"
+            next? := some target
+            link? := some link
+            break
+      let some next := next? | break
       let w ← if let some w := workers.find? (·.moduleName == next.owner) then pure w else do
         let request := out / "request.json"
         IO.FS.writeFile request next.row.pretty
@@ -359,6 +389,13 @@ def runIsolated (rootSource rootSetup worker out : System.FilePath) : IO Unit :=
         IO.eprintln s!"Captured isolated {w.moduleName}: {w.groups.size} groups"
         pure w
       p ← admitWorker p w next.decl.name
+      if let some link := link? then
+        unless w.exports.contains (link.symbol, link.name) do
+          throw <| IO.userError s!"owning module did not export provider symbol: {link.name}"
+        let some body := p.bodies.find? (·.decl.name == link.name) |
+          throw <| IO.userError s!"native provider was not captured: {link.name}"
+        IO.ofExcept <| NativeSymbol.checkBody link body.owner body.decl
+        p := { p with nativeLinks := p.nativeLinks.push link }
       unless p.bodies.any (·.decl.name == next.decl.name) &&
           !p.externals.any (·.decl.name == next.decl.name) do
         throw <| IO.userError "worker selection did not close source edge"

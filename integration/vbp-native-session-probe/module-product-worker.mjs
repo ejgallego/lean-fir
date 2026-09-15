@@ -30,6 +30,7 @@ if (resolved.route === 'lake') {
   assert.equal(resolved.route, 'installed');
   validateInputs(resolved.inputs, new Map([[request.module, [request.name]]]));
 }
+inputs.push(file(join(here, '../../Fir/Wasm/Emit/NativeSymbol.lean')));
 function verify() {
   const actual = execFileSync('lake', ['--keep-toolchain', 'env', 'lean', '--githash'],
     { cwd: here, encoding: 'utf8' }).trim();

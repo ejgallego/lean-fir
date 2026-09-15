@@ -10,9 +10,13 @@ const state = resolve(here, '../../.deps/native-session-probe');
 const isolated = process.argv.includes('--isolated');
 const once = process.argv.includes('--once');
 const lower = process.argv.includes('--lower');
+// Validation-only mode never claims a new capture or execution. It checks
+// products from explicitly run phases, including their current input hashes.
+const checkOnly = process.argv.includes('--check-only');
 assert.ok(!lower || isolated);
-assert.ok(process.argv.slice(2).every(a => ['--isolated', '--once', '--lower'].includes(a)));
-const out = join(state, isolated ? 'isolated-module-product' : 'module-product');
+assert.ok(!checkOnly || isolated);
+assert.ok(process.argv.slice(2).every(a => ['--isolated', '--once', '--lower', '--check-only'].includes(a)));
+const out = join(state, isolated ? 'native-provider-product' : 'module-product');
 mkdirSync(out, { recursive: true });
 const resolver = join(here, 'module-product-inputs.mjs');
 execFileSync('node', [resolver, '--prepare'], { stdio: 'inherit' });
@@ -20,7 +24,7 @@ const catalog = JSON.parse(readFileSync(join(state, 'module-product/catalog.json
 const rootModule = 'VersoBlueprintVir.Preview.Renderer';
 const setup = unique(catalog.setups[rootModule], rootModule);
 const source = join(state, 'sources/vbp/src/VersoBlueprintVir/Preview/Renderer.lean');
-for (const round of once ? ['first'] : ['first', 'repeat']) {
+if (!checkOnly) for (const round of once ? ['first'] : ['first', 'repeat']) {
   execFileSync('lake', ['--keep-toolchain', '-KpostponeCompile=false', 'env', 'lean', '--run',
     'ModuleProduct.lean', ...(isolated ? ['--isolated'] : []), source, setup.path,
     isolated ? join(here, 'module-product-worker.mjs') : resolver, join(out, round)],
@@ -69,12 +73,24 @@ if (isolated) {
     assert.deepEqual(maps.imagesBefore, maps.imagesAfter);
     assert.ok(!maps.imagesAfter.some(p => p.endsWith('/verso_VersoManual_Ext.so')));
     assert.equal(maps.regions + 1, result.modules.length);
+    for (const module of result.modules.slice(1)) {
+      const identity = JSON.parse(readFileSync(join(out, round, 'workers', module.name, 'identity.json')));
+      for (const input of identity.inputs) assert.equal(sha(readFileSync(input.path)), input.sha256,
+        `captured input changed: ${input.path}`);
+      assert.ok(identity.inputs.some(i => i.path.endsWith('/Fir/Wasm/Emit/NativeSymbol.lean')));
+    }
   }
   if (result.complete) {
-    assert.equal(result.modules.length, 47);
-    assert.equal(result.bodies.length, 1506);
-    assert.deepEqual(counts, { 'runtime/primitive boundary': 113, 'VIR boundary': 12 });
-    assert.equal(hashes['product.lcnf'], '10de0efcf96759466f796881d9ddf886f9f6f6e20ac17cbc770d929ad08396c4');
+    assert.equal(result.modules.length, 52);
+    assert.equal(result.bodies.length, 1535);
+    assert.deepEqual(counts, { 'runtime/primitive boundary': 116, 'VIR boundary': 12 });
+    assert.equal(hashes['product.lcnf'], '678c0471328fc0f6a0b11f844b6499b68c7bf06a2ae7df75d7340449342e1376');
+    assert.equal(result.nativeLinks.length, 16);
+    assert.equal(new Set(result.nativeLinks.map(p => p.declaration)).size, 16);
+    for (const p of result.nativeLinks) {
+      assert.ok(result.frontier.some(e => e.name === p.declaration && e.externSymbols.includes(p.symbol)));
+      assert.ok(result.bodies.some(b => b.name === p.provider && b.owner === p.owner));
+    }
     const localNative = result.frontier.find(e => e.name === 'USize.repr');
     assert.equal(localNative?.category, 'runtime/primitive boundary');
     assert.deepEqual(localNative?.externSymbols, ['lean_string_of_usize']);
@@ -87,7 +103,7 @@ if (isolated) {
         const dir = join(out, round);
         // Both products were produced by this invocation and checked above.
         assert.equal(sha(readFileSync(join(dir, 'product.region'))), regionHash);
-        execFileSync('lake', ['--keep-toolchain', '-KpostponeCompile=false', 'env', 'lean', '--run',
+        if (!checkOnly) execFileSync('lake', ['--keep-toolchain', '-KpostponeCompile=false', 'env', 'lean', '--run',
           'LowerModuleProduct.lean', source, setup.path, join(dir, 'product.region'),
           join(dir, 'product.json'), join(dir, 'lower')], { cwd: here, stdio: 'inherit' });
         reports.push(JSON.parse(readFileSync(join(dir, 'lower/result.json'))));
@@ -95,7 +111,8 @@ if (isolated) {
       if (!once) assert.deepEqual(reports[0], reports[1]);
       for (const round of once ? ['first'] : ['first', 'repeat']) {
         const binary = readFileSync(join(out, round, 'lower/renderer-base.wasm'));
-        assert.equal(binary.length, 777173);
+        assert.equal(binary.length, 839735);
+        assert.equal(sha(binary), 'b154b7169d63c3aa02098b0f5936f0dee4d2fa5cc40a234ffcfaa8d602a0af9b');
         assert.ok(WebAssembly.validate(binary), 'base Wasm must validate independently');
         if (round === 'repeat') assert.deepEqual(binary,
           readFileSync(join(out, 'first/lower/renderer-base.wasm')));
@@ -107,7 +124,7 @@ if (isolated) {
       assert.equal(linked.error,
         'Fir.Wasm.Emit.Source.CompileError.manifest "resident linker retained a non-external import"');
       const frontier = linked.diagnosticFrontier.imports;
-      assert.equal(frontier.length, 28);
+      assert.equal(frontier.length, 17);
       assert.ok(frontier.every(i => !i.manifestError));
       assert.deepEqual(frontier.filter(i => i.operation.kind !== 'external'), [{
         module: 'fir', name: 'literal_0', operation: {
@@ -115,11 +132,37 @@ if (isolated) {
         },
       }]);
       assert.equal(frontier.filter(i => i.operation.declaration?.startsWith('Lean.Vir.')).length, 12);
+      assert.deepEqual(frontier.filter(i => i.operation.kind === 'external' &&
+        !i.operation.declaration.startsWith('Lean.Vir.')).map(i => i.operation.declaration), [
+        'String.Internal.atEnd', 'String.Internal.get', 'UInt64.ofNatLT', 'String.Pos.Raw.atEnd',
+      ]);
       const providers = linked.diagnosticFrontier.leanExportProviders;
-      assert.equal(providers.length, 12);
-      assert.equal(new Set(providers.map(p => p.declaration)).size, 12);
-      for (const p of providers) assert.deepEqual(p.signatures,
-        { type: true, safe: true, levels: true, params: true });
+      assert.deepEqual(providers, []);
+      const host = JSON.parse(readFileSync(join(out, 'first/lower/host-boundary.json')));
+      assert.equal(host.schema, 'fir.vir-host-boundary-audit/v1');
+      assert.equal(host.admitted, false);
+      assert.equal(host.executed, false);
+      assert.equal(host.imports.length, 12);
+      for (const row of host.imports) {
+        const source = result.frontier.find(e => e.name === row.declaration);
+        assert.deepEqual(source.virTargets, [row.target]);
+        assert.equal(row.borrowedParameters.length, row.physicalImport.operation.params.length);
+      }
+      for (const [name, kind, target] of [
+        ['ofBool', 'uint8', 'js.bool'], ['ofFloat', 'float', 'js.float'],
+        ['ofString', 'object', 'js.string'],
+      ]) {
+        const row = host.imports.find(r => r.declaration === `Lean.Vir.JsValue.${name}`);
+        assert.equal(row.marker, 'vir_js_explicit_conversion');
+        assert.equal(row.target, target);
+        assert.deepEqual(row.physicalImport.operation.params, [kind, 'erased']);
+      }
+      const callback = host.imports.find(r => r.declaration === 'Lean.Vir.React.Callback.ofUnary');
+      assert.equal(callback.target, 'js.value.react.callback');
+      assert.equal(callback.marker, 'vir_js_explicit_conversion');
+      assert.deepEqual(callback.physicalImport.operation.params, ['erased', 'object', 'erased']);
+      assert.equal(callback.borrowedParameters[1], false, 'callback is transferred, not borrowed');
+      if (!once) assert.deepEqual(host, JSON.parse(readFileSync(join(out, 'repeat/lower/host-boundary.json'))));
       console.log(JSON.stringify(reports[0], null, 2));
     }
   }
@@ -129,5 +172,5 @@ writeFileSync(join(out, 'summary.json'), JSON.stringify({ complete: result.compl
   selections: result.selections.length, counts, hashes }, null, 2) + '\n');
 console.log(JSON.stringify({ complete: result.complete, failure: result.failure, modules: result.modules.length,
   bodies: result.bodies.length, frontier: result.frontier.length, counts }, null, 2));
-console.log(once ? 'DIAGNOSTIC single worklist attempt' :
+console.log(checkOnly ? 'PASS validation of existing products (no new capture or execution)' : once ? 'DIAGNOSTIC single worklist attempt' :
   'PASS deterministic fail-closed module-product experiment (not a Wasm acceptance)');
