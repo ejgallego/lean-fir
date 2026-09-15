@@ -11,7 +11,8 @@ Toolchain routing update (`ROOT-W7-20260915-036`): subsequent VBP work must
 start from official `tooling/lean-4.34` at
 `348f42f832983949dd1514ed700820cf9c6c05c3`, or a W7-owned child of that lane.
 The source-view commands below record the preceding diagnostic setup, including
-the runtime-frontier run already in flight when that directive arrived. They
+the runtime-frontier run already in flight when that directive arrived (stopped
+before completing the fresh two-run gate). They
 are not the approved starting point for a new 4.34 experiment. Main remains
 4.33; migrating this fixture to the official lane is the next setup action.
 
@@ -44,8 +45,12 @@ bash integration/vbp-native-session-probe/module-product-check.sh --isolated --l
 
 This feeds the assembled product into the existing FIR lowerer and resident
 linker. The base Wasm is **839,735 bytes** and passes Node's binary validation.
-Two fresh traversals and lowerings agree on the source product, metadata,
-compacted artifact, Wasm bytes, strict link verdict and host-boundary audit.
+The accepted provider-link checkpoint established agreement of two fresh
+traversals and lowerings on the source product, metadata, compacted artifact,
+Wasm bytes, strict link verdict and host-boundary audit. The primitive successor
+has one fresh lowering of that unchanged source product to the 15-import
+boundary below, plus raw/optimized primitive tests and the production gates.
+It does not claim a new two-run renderer gate or an official-4.34-lane result.
 The isolated typed-forwarder Node execution control also passes (argument order
 and UInt32 wraparound). **Resident admission fails; this is not a
 published renderer package or a browser execution result.** The diagnostic
@@ -84,6 +89,11 @@ Outputs live under `.deps/native-session-probe/native-provider-product/`:
 native-image checks, and `lower/` contains the base Wasm and strict link verdict.
 `summary.json` records exact inventories and digests. This remains same-toolchain,
 trusted-local fixture transport; no persistent/untrusted format is introduced.
+The completed primitive successor's single lowering is preserved separately at
+`.deps/native-session-probe/runtime-frontier-lowering/`. Its input identity is
+the accepted `native-provider-product/repeat/product.region` hash below. The
+stopped new traversal left `first/` incomplete; do not describe that directory
+as a new completed capture or run the old two-product checker against it.
 For already executed phases, `node module-product-check.mjs --isolated --lower
 --check-only` validates both products, including current worker input hashes;
 it explicitly does not claim a new capture or execution. The default shell gate
