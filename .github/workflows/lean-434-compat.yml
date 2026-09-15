@@ -1,0 +1,44 @@
+name: Lean 4.34 compatibility smoke
+
+on:
+  push:
+    branches: [tooling/lean-4.34]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile-smoke:
+    name: Compile smoke (not the full FIR gate)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    env:
+      TMPDIR: ${{ github.workspace }}/.deps/tmp
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Prepare pinned toolchain and local scratch
+        run: |
+          mkdir -p "$TMPDIR"
+          sudo apt-get update
+          sudo apt-get install -y ripgrep
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -o .deps/elan-init.sh
+          sh .deps/elan-init.sh -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Confirm exact Lean and isolated Lake cache
+        run: |
+          test "$(cat lean-toolchain)" = 'leanprover/lean4:v4.34.0-rc2'
+          lean --version
+          lake --version
+          bash scripts/fir-lake-cache-path.sh
+      - name: Run focused compatibility gate
+        run: |
+          git diff --check
+          make tooling-unit-check
+          make build examples scalar-surface-check
