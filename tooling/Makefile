@@ -5,6 +5,9 @@ FIR_BINARYEN_DIR ?= $(REPO_ROOT)/.deps/lcnf-c-wasm/emsdk/upstream/bin
 FIR_TOOLING_TMPDIR ?= $(REPO_ROOT)/.deps/tooling-tmp
 FIR_LAKE_CACHE_DIR ?= $(shell bash "$(REPO_ROOT)/scripts/fir-lake-cache-path.sh")
 BINARYEN_REVISION := version 128 (version_127-18-g2eb472cd6)
+FIR_VERBOSE ?= 0
+FIR_TOOL_LOG_DIR ?= $(REPO_ROOT)/.deps/tool-logs
+export FIR_VERBOSE FIR_TOOL_LOG_DIR
 
 .PHONY: no-skips runtime-check unit-check binaryen-check wasm-check profile-check array-probe-check check
 
@@ -16,12 +19,12 @@ no-skips:
 	fi
 
 runtime-check:
-	cd "$(REPO_ROOT)" && node tooling/ci-contract.mjs
+	@cd "$(REPO_ROOT)" && bash scripts/quiet-run.sh tooling-runtime -- node tooling/ci-contract.mjs
 
 unit-check: no-skips
-	cd "$(REPO_ROOT)" && \
+	@cd "$(REPO_ROOT)" && \
 		FIR_TOOLING_TMPDIR="$(FIR_TOOLING_TMPDIR)" \
-		node --test \
+		bash scripts/quiet-run.sh tooling-unit -- node --test \
 			tooling/ci-contract-unit.test.mjs \
 			tooling/worktree-temp-unit.test.mjs \
 			tooling/wasm/function-index-unit.test.mjs \
@@ -48,16 +51,16 @@ binaryen-check:
 	done
 
 wasm-check: binaryen-check
-	cd "$(REPO_ROOT)" && \
+	@cd "$(REPO_ROOT)" && \
 		FIR_BINARYEN_DIR="$(FIR_BINARYEN_DIR)" \
 		FIR_TOOLING_TMPDIR="$(FIR_TOOLING_TMPDIR)" \
-		node --test tooling/wasm/function-index.test.mjs
+		bash scripts/quiet-run.sh tooling-wasm -- node --test tooling/wasm/function-index.test.mjs
 
 profile-check: binaryen-check
-	cd "$(REPO_ROOT)" && \
+	@cd "$(REPO_ROOT)" && \
 		FIR_BINARYEN_DIR="$(FIR_BINARYEN_DIR)" \
 		FIR_TOOLING_TMPDIR="$(FIR_TOOLING_TMPDIR)" \
-		node --test tooling/profile/node-profile.test.mjs
+		bash scripts/quiet-run.sh tooling-profile -- node --test tooling/profile/node-profile.test.mjs
 
 array-probe-check: binaryen-check
 	cd "$(ARRAY_PROBE_DIR)" && \

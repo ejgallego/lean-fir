@@ -200,6 +200,11 @@ integration creates its corresponding W6 refinement request.
 
 ## Required checks
 
+- Root `make` and `tooling/Makefile` entry points are concise by default:
+  successful command families emit one `PASS` line, while failed logs are kept
+  under ignored `.deps/tool-logs/` and their tail is printed. Set
+  `FIR_VERBOSE=1` for live compiler/test output. Direct one-off commands may
+  use `bash scripts/quiet-run.sh <label> -- <command...>` for the same policy.
 - GitHub Actions is the durable validation run record. Local validation trees
   and receipts are disposable working state, not a permanent approval registry.
   `make check` starts fresh and removes validation scratch on success; failed

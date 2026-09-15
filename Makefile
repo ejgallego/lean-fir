@@ -15,71 +15,81 @@ export FIR_CHECK_JOBS
 # Keep only the current failed run for diagnosis. Opt in to keeping successful
 # scratch for a specific investigation; CI logs are the durable run record.
 FIR_KEEP_VALIDATION ?= 0
+FIR_VERBOSE ?= 0
+FIR_TOOL_LOG_DIR ?= $(CURDIR)/.deps/tool-logs
+export FIR_VERBOSE FIR_TOOL_LOG_DIR
 
-.PHONY: build examples scalar-surface-check inspect validate-harness validate validate-direct-lcnf validate-v8 validate-source-from-v8 validate-native-oracle-attestations validate-coverage-index bug-cards trusted-assumptions proof-trust-sources proof-trust-tests proof-trust no-placeholders mailbox-check mailbox-list mailbox-deliver mailbox-test tooling-unit-check tooling-check check beam talos-setup talos-check clean
+.PHONY: help build examples scalar-surface-check inspect validate-harness validate validate-direct-lcnf validate-v8 validate-source-from-v8 validate-native-oracle-attestations validate-coverage-index bug-cards trusted-assumptions proof-trust-sources proof-trust-tests proof-trust no-placeholders mailbox-check mailbox-list mailbox-deliver mailbox-test tooling-unit-check tooling-check check beam talos-setup talos-check clean
+
+help:
+	@printf '%s\n' 'FIR commands are concise by default; use FIR_VERBOSE=1 for live tool output.' \
+		'  make check              full repository gate' \
+		'  make talos-check        Talos proof gate (after talos-setup)' \
+		'  make mailbox-list       actionable coordination threads' \
+		'  scripts/mailbox brief ID  compact event review'
 
 build:
-	lake build
+	@bash scripts/quiet-run.sh build -- lake build
 
 examples:
-	lake build Fir.LeanIR.LegacyExamples Fir.LeanIR.HygieneExamples \
+	@bash scripts/quiet-run.sh examples -- lake build Fir.LeanIR.LegacyExamples Fir.LeanIR.HygieneExamples \
 		Fir.LeanIR.InterpreterExamples \
 		Fir.LeanIR.Passes.SimpCaseExamples Fir.Wasm.Examples \
 		Fir.Wasm.Emit.Examples
 
 scalar-surface-check:
-	lake exe fir-wasm-scalar-surface _build/wasm-scalar-surface.wasm
-	node scripts/test_wasm_scalar_surface.mjs _build/wasm-scalar-surface.wasm
+	@bash scripts/quiet-run.sh scalar-surface-build -- lake exe fir-wasm-scalar-surface _build/wasm-scalar-surface.wasm
+	@bash scripts/quiet-run.sh scalar-surface-check -- node scripts/test_wasm_scalar_surface.mjs _build/wasm-scalar-surface.wasm
 
 inspect:
-	lake lean Inspect
+	@bash scripts/quiet-run.sh inspect -- lake lean Inspect
 
 validate-harness:
-	python3 scripts/test_clean_validation.py
-	python3 scripts/test_validate_interpreters.py
-	python3 scripts/test_validation_reuse.py
-	python3 scripts/test_talos_build_attestation.py
-	python3 scripts/test_validation_parallel.py
-	node scripts/test_wasm_bit_exact_float_transport.mjs
-	node scripts/test_wasm_validation_externals.mjs
+	@bash scripts/quiet-run.sh validate-clean -- python3 scripts/test_clean_validation.py
+	@bash scripts/quiet-run.sh validate-interpreters-test -- python3 scripts/test_validate_interpreters.py
+	@bash scripts/quiet-run.sh validate-reuse-test -- python3 scripts/test_validation_reuse.py
+	@bash scripts/quiet-run.sh talos-attestation-test -- python3 scripts/test_talos_build_attestation.py
+	@bash scripts/quiet-run.sh validation-parallel-test -- python3 scripts/test_validation_parallel.py
+	@bash scripts/quiet-run.sh float-transport-test -- node scripts/test_wasm_bit_exact_float_transport.mjs
+	@bash scripts/quiet-run.sh wasm-externals-test -- node scripts/test_wasm_validation_externals.mjs
 
 validate: validate-harness
-	python3 scripts/validate_interpreters.py --plan validation-plans/native-lcnf.json
-	python3 scripts/validate_interpreters.py --verify-matrix _build/validation/matrix.json
+	@bash scripts/quiet-run.sh validate-native-lcnf -- python3 scripts/validate_interpreters.py --plan validation-plans/native-lcnf.json
+	@bash scripts/quiet-run.sh validate-native-lcnf-receipt -- python3 scripts/validate_interpreters.py --verify-matrix _build/validation/matrix.json
 
 validate-direct-lcnf:
-	python3 scripts/validate_interpreters.py \
+	@bash scripts/quiet-run.sh validate-direct-lcnf -- python3 scripts/validate_interpreters.py \
 		--plan validation-plans/direct-lcnf.json \
 		--out-dir _build/validation-direct-lcnf
-	python3 scripts/validate_interpreters.py \
+	@bash scripts/quiet-run.sh validate-direct-lcnf-receipt -- python3 scripts/validate_interpreters.py \
 		--verify-matrix _build/validation-direct-lcnf/matrix.json
 
 validate-v8:
-	python3 scripts/validate_interpreters.py \
+	@bash scripts/quiet-run.sh validate-v8 -- python3 scripts/validate_interpreters.py \
 		--plan validation-plans/native-lcnf-v8-scalars.json \
 		--out-dir _build/validation-v8
-	python3 scripts/validate_interpreters.py \
+	@bash scripts/quiet-run.sh validate-v8-receipt -- python3 scripts/validate_interpreters.py \
 		--verify-matrix _build/validation-v8/matrix.json
 
 validate-source-from-v8: validate-v8
-	python3 scripts/verify_validation_reuse.py \
+	@bash scripts/quiet-run.sh validate-source-reuse -- python3 scripts/verify_validation_reuse.py \
 		--receipt _build/validation-v8/evidence-receipt.json \
 		--plan validation-plans/native-lcnf.json
 
 validate-native-oracle-attestations: validate-v8
-	python3 scripts/record_backend_comparisons.py \
+	@bash scripts/quiet-run.sh oracle-attestations -- python3 scripts/record_backend_comparisons.py \
 		--evidence-receipt _build/validation-v8/evidence-receipt.json \
 		--policy validation-plans/native-oracle-attestations.json
-	python3 scripts/record_backend_comparisons.py \
+	@bash scripts/quiet-run.sh oracle-attestations-receipt -- python3 scripts/record_backend_comparisons.py \
 		--verify-attestations \
 		_build/validation-comparison-attestations/attestations.json \
 		--policy validation-plans/native-oracle-attestations.json
 
 validate-coverage-index: validate-harness validate-source-from-v8 validate-direct-lcnf validate-native-oracle-attestations
-	python3 scripts/validation_coverage_index.py \
+	@bash scripts/quiet-run.sh validation-coverage-index -- python3 scripts/validation_coverage_index.py \
 		--plan validation-plans/coverage-index.json \
 		--out _build/validation-coverage/index.json
-	python3 scripts/validation_coverage_index.py \
+	@bash scripts/quiet-run.sh validation-coverage-receipt -- python3 scripts/validation_coverage_index.py \
 		--verify-index _build/validation-coverage/index.json
 
 no-placeholders:
@@ -89,49 +99,49 @@ no-placeholders:
 	fi
 
 bug-cards:
-	python3 scripts/validate_bug_cards.py
+	@bash scripts/quiet-run.sh bug-cards -- python3 scripts/validate_bug_cards.py
 
 trusted-assumptions:
-	python3 scripts/validate_trusted_assumptions.py
+	@bash scripts/quiet-run.sh trusted-assumptions -- python3 scripts/validate_trusted_assumptions.py
 
 proof-trust-sources:
-	python3 integration/talos/check-proof-trust.py --sources-only
+	@bash scripts/quiet-run.sh proof-trust-sources -- python3 integration/talos/check-proof-trust.py --sources-only
 
 proof-trust-tests:
-	python3 integration/talos/test_proof_trust.py
+	@bash scripts/quiet-run.sh proof-trust-tests -- python3 integration/talos/test_proof_trust.py
 
 # Requires talos-setup; forces elaboration of the exact compiled inventories.
 proof-trust:
-	python3 integration/talos/check-proof-trust.py
+	@bash scripts/quiet-run.sh proof-trust -- python3 integration/talos/check-proof-trust.py
 
 mailbox-check:
-	scripts/mailbox check
+	@scripts/mailbox check
 
 mailbox-list:
-	scripts/mailbox list
+	@scripts/mailbox list
 
 mailbox-deliver:
 	@test -n "$(DRAFT)" || { echo "usage: make mailbox-deliver DRAFT=/path/to/message.md [NOTIFY_SESSION=session]"; exit 2; }
-	scripts/mailbox deliver "$(DRAFT)" $(if $(NOTIFY_SESSION),--notify-session "$(NOTIFY_SESSION)")
+	@scripts/mailbox deliver "$(DRAFT)" $(if $(NOTIFY_SESSION),--notify-session "$(NOTIFY_SESSION)")
 
 mailbox-test:
-	node --test scripts/mailbox.test.mjs
+	@bash scripts/quiet-run.sh mailbox-test -- node --test scripts/mailbox.test.mjs
 
 tooling-unit-check:
-	$(MAKE) -C tooling unit-check
+	@$(MAKE) --no-print-directory -C tooling unit-check
 
 tooling-check:
-	$(MAKE) -C tooling check FIR_BINARYEN_DIR="$(FIR_BINARYEN_DIR)"
+	@$(MAKE) --no-print-directory -C tooling check FIR_BINARYEN_DIR="$(FIR_BINARYEN_DIR)"
 
 .PHONY: clean-validation check-run
 
 clean-validation:
-	python3 scripts/clean_validation.py
+	@bash scripts/quiet-run.sh clean-validation -- python3 scripts/clean_validation.py
 
 check:
-	$(MAKE) clean-validation
-	$(MAKE) check-run
-	@if test "$(FIR_KEEP_VALIDATION)" != 1; then $(MAKE) clean-validation; fi
+	@$(MAKE) --no-print-directory clean-validation
+	@$(MAKE) --no-print-directory check-run
+	@if test "$(FIR_KEEP_VALIDATION)" != 1; then $(MAKE) --no-print-directory clean-validation; fi
 
 # Internal gate graph: consumers finish verifying the same run before cleanup.
 check-run: tooling-unit-check build examples scalar-surface-check validate-coverage-index bug-cards trusted-assumptions proof-trust-sources proof-trust-tests no-placeholders mailbox-test
@@ -157,12 +167,12 @@ beam:
 	lean-beam sync Inspect
 
 talos-setup:
-	bash scripts/setup-talos.sh
-	lake -d integration/talos update
+	@bash scripts/quiet-run.sh talos-setup -- bash scripts/setup-talos.sh
+	@bash scripts/quiet-run.sh talos-update -- lake -d integration/talos update
 
 talos-check:
-	lake -d integration/talos build
-	python3 integration/talos/check-proof-trust.py
+	@bash scripts/quiet-run.sh talos-build -- lake -d integration/talos build
+	@bash scripts/quiet-run.sh talos-proof-trust -- python3 integration/talos/check-proof-trust.py
 
 clean:
-	lake clean
+	@bash scripts/quiet-run.sh clean -- lake clean

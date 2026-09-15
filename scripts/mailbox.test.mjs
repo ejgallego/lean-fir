@@ -1132,6 +1132,64 @@ test("CLI rejects a missing mailbox option value", () => {
   assert.match(result.stderr, /`--mailbox` requires a path/);
 });
 
+test("brief prints bounded review fields without dumping an event", async () => {
+  await withMailbox(async (mailbox) => {
+    const thread = "ROOT-FIR-20260813-008";
+    await put(mailbox, thread, message({
+      id: thread,
+      fields: { "requires-ack": "false" },
+      body: "## Request\n\nProduce a compact handoff.",
+    }));
+    const completion = "FIR-ROOT-20260813-008";
+    await put(mailbox, completion, message({
+      id: completion,
+      thread,
+      reply: thread,
+      from: "fir/wasm-gen",
+      to: "lean-zip/root",
+      kind: "completion",
+      state: "completed",
+      subject: "compact handoff ready",
+      fields: {
+        base: "1234567",
+        head: "abcdef0123456789abcdef0123456789abcdef01",
+        worktree: ".worktrees/wasm-generation",
+        branch: "wasm/generation",
+        "worktree-state": "clean",
+        disposition: "ready-for-review",
+      },
+      body: [
+        "## Outcome",
+        "",
+        "The exact checkpoint implements the requested compact result.",
+        "",
+        "## Validation",
+        "",
+        "Focused checks pass; full diagnostic is at `.deps/evidence.json`.",
+        "",
+        "## Remaining Work",
+        "",
+        "None.",
+        "",
+        "## Transcript",
+        "",
+        "UNIQUE_FULL_TRANSCRIPT_SHOULD_NOT_APPEAR ".repeat(40),
+      ].join("\n"),
+    }));
+    const result = spawnSync(script, ["brief", completion, "--mailbox", mailbox], {
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, new RegExp(`${completion} completion/completed`));
+    assert.match(result.stdout, /base=1234567 .*head=abcdef0123456789abcdef0123456789abcdef01/);
+    assert.match(result.stdout, /outcome: The exact checkpoint implements/);
+    assert.match(result.stdout, /validation: Focused checks pass/);
+    assert.match(result.stdout, /next: None/);
+    assert.doesNotMatch(result.stdout, /UNIQUE_FULL_TRANSCRIPT_SHOULD_NOT_APPEAR/);
+    assert.ok(result.stdout.split("\n").filter(Boolean).length <= 5);
+  });
+});
+
 test("CLI rejects a nonexistent explicit mailbox", async () => {
   await mkdir(scratchRoot, { recursive: true });
   const mailbox = join(scratchRoot, `missing-${process.pid}`);

@@ -430,6 +430,16 @@ state, and maintainer approval.
 
 ## Commands
 
+Read one event without emitting its complete Markdown body:
+
+```bash
+scripts/mailbox brief W7-ROOT-20260916-002
+```
+
+It prints the message identity/checkpoint plus capped outcome, validation, and
+next-boundary lines. Use the event file only when that summary requires a
+decision or the named evidence must be inspected.
+
 Validate and atomically publish one complete draft:
 
 ```bash

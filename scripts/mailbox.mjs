@@ -23,6 +23,7 @@ function usage(print = console.error) {
     "usage:",
     "  scripts/mailbox list [--for ADDRESS] [--state STATE] " +
       "[--verbose|--json] [--all] [--mailbox PATH]",
+    "  scripts/mailbox brief MESSAGE-ID [--mailbox PATH]",
     "  scripts/mailbox check [--mailbox PATH]",
     "  scripts/mailbox deliver DRAFT [--no-notify|--notify-session SESSION] " +
       "[--mailbox PATH]",
@@ -36,8 +37,8 @@ function usage(print = console.error) {
 
 function parseArgs(argv) {
   const [command, ...arguments_] = argv;
-  if (!new Set(["check", "list", "deliver", "route"]).has(command)) {
-    throw new Error("expected `check`, `list`, `deliver`, or `route`");
+  if (!new Set(["brief", "check", "list", "deliver", "route"]).has(command)) {
+    throw new Error("expected `brief`, `check`, `list`, `deliver`, or `route`");
   }
   const rest = [...arguments_];
   const routeAction = command === "route" ? rest.shift() : null;
@@ -57,6 +58,7 @@ function parseArgs(argv) {
     address: null,
     routeAddress: null,
     routeSession: null,
+    messageId: null,
     states: new Set(),
   };
   for (let index = 0; index < rest.length; index += 1) {
@@ -95,7 +97,8 @@ function parseArgs(argv) {
       index += 1;
     } else if (argument === "--no-notify") {
       options.noNotify = true;
-    } else if (command === "deliver" && !options.draft) options.draft = argument;
+    } else if (command === "brief" && !options.messageId) options.messageId = argument;
+    else if (command === "deliver" && !options.draft) options.draft = argument;
     else if (command === "route" && routeAction !== "list" && !options.routeAddress) {
       options.routeAddress = argument;
     } else if (command === "route" && routeAction === "bind" && !options.routeSession) {
@@ -122,6 +125,10 @@ function parseArgs(argv) {
     throw new Error("`--notify-session` and `--no-notify` cannot be combined");
   }
   if (command === "deliver" && !options.draft) throw new Error("deliver requires a draft path");
+  if (command === "brief" && !options.messageId) throw new Error("brief requires a message ID");
+  if (options.messageId && !/^[A-Z][A-Z0-9]*-[A-Z][A-Z0-9]*-[0-9]{8}-[0-9]{3}$/.test(options.messageId)) {
+    throw new Error(`invalid mailbox message ID ${JSON.stringify(options.messageId)}`);
+  }
   if (command === "route" && routeAction !== "list" && !options.routeAddress) {
     throw new Error(`route ${routeAction} requires an address`);
   }
@@ -132,6 +139,59 @@ function parseArgs(argv) {
     throw new Error("route bind requires a session UUID or exact name");
   }
   return options;
+}
+
+function compactText(text, limit = 240) {
+  const normalized = text
+    .replace(/```[\s\S]*?```/g, "[code omitted]")
+    .replace(/^\s*[-*]\s+/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return normalized.length <= limit ? normalized : `${normalized.slice(0, limit - 1)}…`;
+}
+
+function sections(body) {
+  const headings = [...body.matchAll(/^##\s+(.+?)\s*$/gm)];
+  return headings.map((heading, index) => {
+    const start = heading.index + heading[0].length;
+    const end = headings[index + 1]?.index ?? body.length;
+    return { title: heading[1].trim(), text: body.slice(start, end).trim() };
+  });
+}
+
+function matchingSection(parts, pattern) {
+  return parts.find(({ title }) => pattern.test(title))?.text ?? "";
+}
+
+function brief(result, messageId) {
+  if (result.errors.length > 0) {
+    for (const error of result.errors) console.error(`error: ${error}`);
+    console.error("mailbox brief requires a valid mailbox; run `scripts/mailbox check`");
+    process.exitCode = 1;
+    return;
+  }
+  const message = result.messages.find(({ header }) => header["message-id"] === messageId);
+  if (!message) {
+    console.error(`error: mailbox message not found: ${messageId}`);
+    process.exitCode = 1;
+    return;
+  }
+  const { header, body } = message;
+  const identity = [
+    `base=${header.base}`,
+    `head=${header.head}`,
+    `branch=${header.branch}`,
+    `worktree=${header.worktree}`,
+  ].filter((entry) => !entry.endsWith("=undefined"));
+  console.log(`${header["message-id"]} ${header.kind}/${header.state}: ${header.subject}`);
+  if (identity.length > 0) console.log(identity.join(" "));
+  const parts = sections(body);
+  const outcome = matchingSection(parts, /outcome|result|decision|scope|blocker/i) || body;
+  const validation = matchingSection(parts, /validation|checks|evidence/i);
+  const next = matchingSection(parts, /remaining|next|stop|follow-up/i);
+  console.log(`outcome: ${compactText(outcome)}`);
+  if (validation) console.log(`validation: ${compactText(validation)}`);
+  if (next) console.log(`next: ${compactText(next)}`);
 }
 
 function printWarnings(result) {
@@ -286,6 +346,7 @@ if (options) {
     } else {
       const result = inspectMailbox(mailboxPath);
       if (options.command === "check") check(result);
+      else if (options.command === "brief") brief(result, options.messageId);
       else list(result, options);
     }
   } catch (error) {
