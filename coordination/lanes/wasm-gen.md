@@ -1,8 +1,10 @@
 # wasm-gen lane
 
-Current slice: `ROOT-W7-20260915-029`. The bounded trusted-local worker and
-two-module assembly fixture is ready for root review. Root owns integration;
-W7 stops before wider worklist continuation or lowering.
+Current investigation: `ROOT-W7-20260915-031`, continued by root events `-032..033`
+and the native-provider decision on main `ee4f8060`.
+The full Lean-name source traversal and base lowering checkpoint is ready for
+integration. The investigation remains active: the next generic FIR gap is
+native-symbol resolution to upstream Lean export providers.
 
 ```text
 lane: wasm-gen
@@ -10,60 +12,47 @@ owner: wasm-gen
 branch: wasm/generation
 worktree: .worktrees/wasm-generation
 state: ready
-base: 7c5cacd681b1884de56924acd45447ccb354ff0c
-functional-head: fb08ada2c1e524bd859df3aec5ad130681005ec0
-contract-base: dc94cd4f0aa716aad5e79a7f77bafa752e9994a9
+base: ee4f80608c20a345d7bf50616ebd1f481af0d36b
+functional-head: a6f138cc1b6cd49f70ce07053534658b1e7a94f1
+contract-base: ee4f80608c20a345d7bf50616ebd1f481af0d36b
 clean-at-update: true
-slice: Reuse the accepted upstream object transport to assemble exactly the real renderer and isolated Basic selected closures; preserve renderer capture, check exact frontier and native-image isolation.
-files: integration/vbp-native-session-probe/{ProductTransport.lean,product-transport-check.mjs,product-transport-check.sh,TWO_MODULE_WORKER.md,README.md}; coordination/lanes/wasm-gen.md
-contracts: none; fixture/report only, no production compiler/source/plugin/runtime/W6/ABI/toolchain/consumer or package change
-checks: Lean Beam sync version 4 zero diagnostics, stopped before final batch; exact functional-head product-transport-check.sh --assemble and default transport regression both pass 629-job cone/direct Lean and two producers/two consumers, exact blob and assembled declaration equality, original-root preservation, source hashes, 158/45 inventory, identity/body/interface/owner/merge negative controls and native maps; exact functional-head make check passes 730 cases/2172 comparisons, source-trust checks and 232 active cards; Node/bash syntax and base-to-final diff checks pass. Status successor changes this document only. No Talos/artifact/browser acceptance claimed for fixture-only scope.
-bug-cards: none new; FIR-BUG-wasm-none-module-product-extension-registration remains open for production capture
-blockers: none for requested two-module fixture; general worker integration/full closure is separately scoped
-handoff: Clean immutable local-only checkpoint in canonical completion. Root review only; no main advance, push or package publication by W7.
-next: Stop after exactly two requested entry closures. No recursive worklist, cache/durable format, lower/link/Wasm or runtime changes.
+slice: Complete the original renderer owner worklist with trusted-local isolated compiler products, lower its exact assembled LCNF, and identify unresolved native/VIR symbols and actual Lean export providers.
+files: integration/vbp-native-session-probe/{ModuleProduct.lean,LowerModuleProduct.lean,module-product-worker.mjs,module-product-check.mjs,module-product-check.sh,README.md}; two W7 bug cards; coordination/lanes/wasm-gen.md
+contracts: none; no production compiler/runtime, ABI, W6, toolchain, consumer or package-pointer change
+checks: module-product-check.sh --isolated --lower passes the 630/51-job cones, direct Lean checks, two fresh owner traversals, exact source/metadata/compacted-byte equality, original-root/native-image preservation, independent Node base-Wasm validation, identical base bytes and strict link diagnostics, and twelve exact native/export signature matches. make check passes 730 cases/2172 comparisons and 234 bug cards. make talos-check passes 3205 jobs and forced trust audit. integration/talos/artifact/check.sh passes. Beam ModuleProduct version 4 and LowerModuleProduct version 3 have zero diagnostics; stopped before final batch. Node/bash syntax and diff-check pass. Gates ran on 008d111b's content; the final focused gate completed after that commit. Rebase onto coordination-only main ee4f8060 changes no fixture/bug-card content (git diff verifies equality); final diff/syntax/card checks pass. No browser or renderer execution acceptance claimed.
+bug-cards: FIR-BUG-wasm-none-module-local-extern-frontier (fixed); FIR-BUG-wasm-none-native-export-source-provider (confirmed)
+blockers: strict resident linking retains one large Nat literal, fifteen native externs and twelve intended VIR hosts; twelve native externs actually have upstream Lean export providers, so resolve that generic linking gap before considering replacement runtime implementations
+handoff: Root may review/land the immutable clean checkpoint; main unchanged by W7, no push or package publication. This is not terminal completion of the broader renderer investigation.
+next: Resolve actual C extern symbols against unique upstream export metadata, capture providers in their real owning modules and check compiled interfaces before linking; continue traversal. Genuine unprovided runtime/host requirements remain explicit and coordinated.
 ```
 
 ## Result
 
-The renderer contributes 151 bodies / 41 signatures, Basic seven bodies / six
-signatures. The assembly contains 158 bodies / 45 remaining signatures. Two
-shared external interfaces deduplicate after signature and implementation-metadata
-agreement. The selected Basic entry is not an immediate renderer import; this
-is explicitly the requested two-entry composition, not the missing intermediate
-dependency modules.
+The original renderer now reaches 47 modules, 1,506 bodies and 138 source
+selections. All remaining 125 signatures have native or VIR metadata: there are
+no pending Lean-name edges. This is not yet complete native-symbol closure.
+The first worker bug was distinguishing module-local extern implementations
+from upstream's separate imported-signature list; classification now follows
+the actual declaration value, without named exceptions.
 
-Root LCNF SHA-256 stays
-`819fed859b7d21f3988072f7be53969705614de8d047f41b6c8b8bc488704073`.
-Combined LCNF SHA-256:
-`8753415f035416839614b9596472b0a13dcd5c939a4f9300d7b6908a1446953d`.
-Both clean functional-head producer blobs are 2,365,200 bytes, SHA-256
-`86753ad894311159ba0fb68a1601717f9430e1bcf55760dbf03ebc05f81d28f7`.
-Blob identity includes exact fixture/source provenance, so a later commit or
-relocation may change the blob digest; identical-input repeats must match.
+The existing FIR lowerer emits a valid 777,173-byte base Wasm module, SHA-256
+`4a025e1c9adafb34065f962368b5c27f15b218990c72f7660dd4fb895f2c30d0`.
+Strict resident admission fails consistently. The diagnostic open view is not
+published or executed as an accepted artifact. Its 28 imports comprise twelve
+deliberate VIR host functions, literal `2^64`, `UInt64.ofNatLT`, and fourteen
+String/Substring functions.
 
-All original 41 signatures remain. The four additional ones are
-`Lean.JsonNumber.fromNat`, `Array.toList`,
-`List.foldl._at_.Array.appendList.spec_0._redArg`, and `Lean.Json.mkObj`.
-These are source-level interfaces, not final Wasm imports.
+Actual upstream `getExternNameFor`/`getExportNameFor?` metadata identifies twelve
+Lean providers among those String/Substring functions. All twelve compiled
+interfaces agree exactly on types, borrows, safety and universe parameters.
+Thus these are missing native-symbol source edges, not twelve runtime functions
+to reimplement. No provider names are guessed from suffixes.
 
-Basic children map standalone Ext without the Manual aggregate. Renderer
-assemblers map only the aggregate, unchanged through reads and assembly.
-No registry reset, plugin editing, Environment transfer or initializer
-suppression occurs. The accepted trusted-local, same-schema/toolchain unsafe
-compactor boundary is unchanged; loaded regions remain allocated through
-process exit. This is not an untrusted or durable interchange API.
-
-## Evidence and remaining scope
-
-Report: `integration/vbp-native-session-probe/TWO_MODULE_WORKER.md`.
-Reproduce: `bash integration/vbp-native-session-probe/product-transport-check.sh --assemble`.
-Exact input identities, full remaining signature rows, source text and repeats:
-`.deps/native-session-probe/two-module-worker/`.
-Logs: `.deps/native-session-probe/control/worker-committed-{final,transport,make-check}.log`.
-
+Durable report and exact source-product hashes:
+`integration/vbp-native-session-probe/README.md`.
+Disposable work: `.deps/native-session-probe/isolated-module-product/`.
+Gate logs: `.deps/native-session-probe/control/closure-final-{focused,check,talos,artifact}.log`.
 Isolated Lean remains 4.34.0-rc2 at
 `6a10ac8c22beadecabdbb0919c2b50214762f91d`; production FIR remains 4.33.
-The earlier 26-module / 1,201-body worklist is not resumed. No complete renderer
-closure or Wasm result is claimed. Prior lifecycle/transport reports remain
-in this fixture directory.
+The accepted unsafe compactor remains same-toolchain/schema/trusted-local only;
+all imported regions stay allocated through the assembler process lifetime.
