@@ -7,7 +7,9 @@ import { sha } from './installed-module-inputs.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const state = resolve(here, '../../.deps/native-session-probe');
-const out = join(state, 'transport');
+assert.ok(process.argv.length === 2 || (process.argv.length === 3 && process.argv[2] === '--assemble'));
+const assemble = process.argv[2] === '--assemble';
+const out = join(state, assemble ? 'two-module-worker' : 'transport');
 mkdirSync(out, { recursive: true });
 const rootSource = join(state, 'sources/vbp/src/VersoBlueprintVir/Preview/Renderer.lean');
 const rootSetup = join(here, '.lake/build/ir/VersoBlueprintVir/Preview/Renderer.setup.json');
@@ -73,7 +75,8 @@ for (const round of ['first', 'repeat']) {
   verifyIdentity(read(identityPath));
   verifyProducts(products); // Reject before invoking type-erased CompactedRegion.read.
   const path = join(out, round + '-assembly.json');
-  run(['import', rootSource, rootSetup, identityPath, products[0].path, products[1].path, path]);
+  run([assemble ? 'assemble' : 'import', rootSource, rootSetup, identityPath,
+    products[0].path, products[1].path, path]);
   const result = read(path);
   assert.equal(result.accepted, true);
   assert.equal(result.structuralEquality, true);
@@ -83,6 +86,27 @@ for (const round of ['first', 'repeat']) {
   assert.deepEqual(result.imagesBefore, result.imagesAfter);
   assert.equal(result.imagesAfter.length, 1);
   assert.ok(result.imagesAfter[0].endsWith('/libverso_VersoManual.so'));
+  if (assemble) {
+    assert.equal(result.rendererUnchanged, true);
+    assert.equal(result.rendererBodies, 151);
+    assert.equal(result.rendererSignatures.length, 41);
+    assert.deepEqual(result.assembly.modules, ['VersoBlueprintVir.Preview.Renderer', 'VersoManual.Basic']);
+    assert.equal(result.assembly.complete, false);
+    assert.equal(result.assembly.lowered, false);
+    const bodies = result.assembly.declarations.filter(d => !d.external);
+    assert.equal(bodies.length, 158);
+    for (const entry of result.assembly.entries) assert.ok(bodies.some(d => d.name === entry));
+    assert.equal(new Set(result.assembly.declarations.map(d => d.name)).size,
+      result.assembly.declarations.length);
+    const expected = [...new Set([...result.rendererSignatures, ...products[0].report.externals])]
+      .filter(n => !bodies.some(d => d.name === n));
+    assert.deepEqual(result.assembly.remainingSignatures, expected);
+    assert.equal(expected.length, 45);
+    result.rootText = file(path + '.root.lcnf').sha256;
+    result.productText = file(path + '.product.lcnf').sha256;
+    assert.equal(result.rootText, '819fed859b7d21f3988072f7be53969705614de8d047f41b6c8b8bc488704073');
+    assert.equal(result.productText, '8753415f035416839614b9596472b0a13dcd5c939a4f9300d7b6908a1446953d');
+  }
   assembled.push(result);
 }
 assert.deepEqual(assembled[0], assembled[1]);
@@ -91,3 +115,4 @@ verifyProducts(products);
 writeFileSync(join(out, 'summary.json'), JSON.stringify({ products, assembled,
   integrityNegativeControls: true, trustedLocalOnly: true, durableFormat: false }, null, 2) + '\n');
 console.log('PASS exact one-product compacted-region transport; no standalone Ext plugin in assembler');
+if (assemble) console.log('PASS deterministic two-module assembly; unchanged renderer; exact remaining signatures');

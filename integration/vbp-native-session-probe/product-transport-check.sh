@@ -11,4 +11,4 @@ cd "$here"
 node prepare.mjs
 lake --keep-toolchain -KpostponeCompile=false build Fir.Wasm.Emit.ModuleSource +VersoBlueprintVir.Preview.Renderer
 lake --keep-toolchain -KpostponeCompile=false env lean ProductTransport.lean
-node product-transport-check.mjs
+node product-transport-check.mjs "$@"

@@ -52,6 +52,11 @@ native images. Run `bash integration/vbp-native-session-probe/product-transport-
 This is trusted-local feasibility, not a durable format, production driver,
 continued module worklist or Wasm artifact.
 
+[TWO_MODULE_WORKER.md](TWO_MODULE_WORKER.md) records the bounded successor:
+`product-transport-check.sh --assemble` constructs the renderer and selected
+Basic source product (158 bodies / 45 signatures) with unchanged renderer
+capture and isolated native images. It stops after those two entry closures.
+
 The historical reset-based source provider is unchanged and still stops at the
 same unknown specialization. Constructor metadata and executable-body discovery
 regressions pass.
