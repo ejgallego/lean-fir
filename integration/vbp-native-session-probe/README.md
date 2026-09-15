@@ -23,6 +23,13 @@ signatures), and the provenance-based taxonomy of all 41 original externals.
 Run `bash integration/vbp-native-session-probe/module-assembly-check.sh` for that
 capture-only gate. A complete renderer closure and Wasm package remain unclaimed.
 
+[INSTALLED_INPUTS.md](INSTALLED_INPUTS.md) records the next bounded provider:
+verified bootstrap-derived capture inputs for the five installed Lean modules
+behind the seven former setup gaps. These are not recovered release setup files.
+Run `bash integration/vbp-native-session-probe/installed-module-check.sh` to
+refresh the frontier, capture those owners and check deterministic repeats and
+negative provenance controls. No recursive assembly or Wasm linking is performed.
+
 The historical reset-based source provider is unchanged and still stops at the
 same unknown specialization. Constructor metadata and executable-body discovery
 regressions pass.
