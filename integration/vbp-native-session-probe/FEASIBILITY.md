@@ -209,9 +209,12 @@ lake --keep-toolchain -KpostponeCompile=false env lean --run ModuleAssembly.lean
 This now exits 0 and writes a partial capture product. Beam and direct Lean are
 green; the final source dependency cone is 629 jobs. The repeat gate confirms
 the signature, source/setup, root-preservation and determinism controls above.
-`make check` (730 cases / 2172 comparisons) and Talos (3205 jobs plus 3166 trust
-stage) passed on the earlier diagnostic content; post-correction checks are
-recorded in the final lane handoff. No production adapter or runtime was edited.
+At functional head `7b60a8dadd848e523fa4efc1d7bdb173c0793d5e`, the focused
+repeat/direct gate passes, `make check` passes 730 cases / 2172 comparisons, and
+Talos passes 3205 jobs plus its 3166-job trust stage. Root checks were repeated
+with the explicit production-toolchain cache scope; the fixture uses its separate
+4.34 scope. No production adapter or runtime was edited, so no new artifact or
+browser gate is claimed. Final diff and mailbox checks pass.
 
 Exact source pins and hash-checked compiler overlays are in `prepare.mjs` and
 `MODULE_RESULT.md`, with generated `SOURCE.json` in the ignored source view.
