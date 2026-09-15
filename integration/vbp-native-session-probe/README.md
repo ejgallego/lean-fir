@@ -18,9 +18,10 @@ bash integration/vbp-native-session-probe/module-capture-check.sh
 ```
 
 [FEASIBILITY.md](FEASIBILITY.md) records the next one-module dependency
-experiment, its independently successful capture, and the currently exposed
-same-process frontend lifecycle precondition. It does not claim an assembled
-renderer or a Wasm package.
+experiment, successful deterministic assembly (512 locals / 103 remaining source
+signatures), and the provenance-based taxonomy of all 41 original externals.
+Run `bash integration/vbp-native-session-probe/module-assembly-check.sh` for that
+capture-only gate. A complete renderer closure and Wasm package remain unclaimed.
 
 The historical reset-based source provider is unchanged and still stops at the
 same unknown specialization. Constructor metadata and executable-body discovery

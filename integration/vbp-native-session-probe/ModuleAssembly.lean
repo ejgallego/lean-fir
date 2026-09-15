@@ -1,4 +1,5 @@
 import Fir.Wasm.Emit.ModuleSource
+import Vir.HostMetadata
 
 open Lean Lean.Compiler.LCNF Fir.Wasm.Emit.ModuleSource
 
@@ -40,6 +41,9 @@ private def assemble (root dependency : Fir.Compiler.Lcnf.Artifact) :
     forms := Fir.Compiler.Lcnf.collectForms program }
 
 private def compileChecked (source : System.FilePath) (setup : ModuleSetup) : IO CapturedModule := do
+  -- Each withImporting clears this flag. These frontend invocations are serial,
+  -- use one pinned native/imported source version, and retain their environments.
+  unsafe enableInitializersExecution
   match ← compile source setup with
   | .ok captured => return captured
   | .error messages =>
@@ -57,6 +61,27 @@ private def groupsArtifact (captured : CapturedModule) : Fir.Compiler.Lcnf.Artif
   program := { decls := captured.groups.flatten }
   externalNames := #[]
   forms := #[] }
+
+private def frontierRow (captured : CapturedModule) (name : Name) : IO Json := do
+  let owner := (captured.environment.getModuleIdxFor? name).map fun idx =>
+    captured.environment.header.moduleNames[idx.toNat]!
+  let symbols := (getExternAttrData? captured.environment name).toArray.flatMap fun data =>
+    data.entries.toArray.filterMap fun e => match e with
+      | .standard _ symbol => some symbol
+      | _ => none
+  let targets := symbols.filterMap fun symbol =>
+    (Vir.HostMetadata.decodeExternSymbol? symbol).map (·.target)
+  let mut sources : Array String := #[]
+  if let some owner := owner then
+    for dir in ← getSrcSearchPath do
+      let path := modToFilePath dir owner "lean"
+      if ← path.pathExists then
+        let real := (← IO.FS.realPath path).toString
+        if !sources.contains real then sources := sources.push real
+  return Json.mkObj [
+    ("name", toJson name.toString), ("module", toJson (owner.map Name.toString)),
+    ("externSymbols", toJson symbols), ("virTargets", toJson targets),
+    ("sources", toJson sources)]
 
 def run (rootSource rootSetup dependencySetup out : System.FilePath) : IO Unit := do
   let root ← compileChecked rootSource (← ModuleSetup.load rootSetup)
@@ -94,6 +119,7 @@ def run (rootSource rootSetup dependencySetup out : System.FilePath) : IO Unit :
   IO.FS.writeFile (out / "root-groups.lcnf") groupsText
   IO.FS.writeFile (out / "dependency.lcnf") (← format dependency selectedArtifact)
   IO.FS.writeFile (out / "assembled.lcnf") (← format root product)
+  let frontier ← initial.externalNames.mapM (frontierRow root)
   let imports := product.externalNames.map fun name => Json.mkObj [
     ("name", toJson name.toString),
     ("module", toJson <| ((root.environment.getModuleIdxFor? name).map fun idx =>
@@ -109,6 +135,7 @@ def run (rootSource rootSetup dependencySetup out : System.FilePath) : IO Unit :
     ("localDeclarations", toJson <| product.program.decls.filterMap fun d =>
       if product.externalNames.contains d.name then none else some d.name.toString),
     ("imports", toJson imports),
+    ("rootFrontier", toJson frontier),
     ("rootUnchanged", toJson true), ("signatureMismatchRejected", toJson true),
     ("recursiveCapture", toJson false), ("lowered", toJson false)]).pretty ++ "\n"
   IO.eprintln s!"Assembly: {product.program.decls.size - product.externalNames.size} locals / {product.externalNames.size} external signatures"
@@ -116,7 +143,6 @@ def run (rootSource rootSetup dependencySetup out : System.FilePath) : IO Unit :
 end ModuleAssembly
 
 def main (args : List String) : IO Unit := do
-  unsafe enableInitializersExecution
   let [source, setup, dependencySetup, out] := args |
     throw <| IO.userError "usage: ModuleAssembly.lean root.lean root.setup.json dependency.setup.json out"
   ModuleAssembly.run source setup dependencySetup out

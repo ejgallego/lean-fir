@@ -3,12 +3,13 @@
 Date: 2026-09-15. Source boundary: the real
 `VersoBlueprint.Experimental.VirPreview.Renderer.render`, not NativeSession,
 component factories or a substitute renderer. Investigation base:
-`e9040629423305c81f6e924b0761c66113dfa209`.
+`794b64fecec47d068c4400abe6213808081ba583`.
 
 ## Assessment
 
-**The owning-module final-LCNF capture approach is viable for the two real
-renderer modules tested. An executable FIR Wasm renderer is not yet demonstrated.**
+**The owning-module final-LCNF capture and one-module composition approach works
+for the two real renderer modules tested. An executable FIR Wasm renderer is not
+yet demonstrated.**
 We can retain Lean's module compiler and final LCNF; there is no evidence from
 this experiment requiring an IR-backend migration or a copied renderer.
 
@@ -54,31 +55,109 @@ compiler environment. Lake's source search path resolves that module's unchanged
 source; its actual setup must name the same owner. Both modules are compiled
 through the accepted `ModuleSource` provider, not imported final-LCNF bodies.
 
-The drafted fixture checks parameter/result types, borrowing, safety and universe
+The fixture checks parameter/result types, borrowing, safety and universe
 parameters before replacing a signature. It rejects duplicate local definitions
 and inconsistent duplicate externals. The root's full captured groups and entry
 text must remain unchanged; remaining dependencies stay typed external signatures.
-A negative control corrupts the selected signature's borrow bit. These assembly
-checks have not executed: the second frontend currently fails first.
+A negative control corrupts the selected signature's borrow bit and is rejected.
+Assembly succeeds with **512 local declarations and 103 external signatures**.
+The selected body is present; all 28 root groups (164 declarations) are unchanged.
+Two complete runs produce identical inventories and LCNF text. The actual input
+selector also rejects missing and ambiguous setup candidates before use.
 
 Initial same-process run stopped before assembly: the second import lacked Lean's
 initializer-execution precondition. Upstream `withImporting` resets that flag in
 its `finally` block. Upstream `Elab/Frontend.lean` restores it before another
 import in the incremental frontend. A single enable call in CLI `main` is therefore
-insufficient for two serial frontend invocations. This is a driver lifecycle
-obligation, not a failing LCNF transformation. A per-invocation restoration is
-proposed to root; it must preserve exact native/imported versions, serial imports
-and loaded compacted regions. No compiler mapping reset is involved.
+insufficient for two serial frontend invocations. This was a driver lifecycle
+obligation, not a failing LCNF transformation. Root approved per-invocation
+restoration in `ROOT-W7-20260915-017`; the fixture now does so, preserving exact
+native/imported versions, serial imports and loaded environments. Production
+ModuleSource's caller-duty contract is unchanged. No compiler mapping reset is involved.
 
-No assembled closure, emitted Wasm, import-profile conformance or browser result
-is claimed at this initial checkpoint. The assembly experiment is intentionally
-not recursive; root's lease covers one immediate defining module.
+This is a partial capture product, not a closed renderer: the larger frontier
+reflects the newly exposed dependencies and is not a regression or an import
+count to optimize yet. No emitted Wasm, import-profile conformance or browser
+result is claimed. The experiment is intentionally not recursive; root's lease
+covers one immediate defining module.
+
+## Taxonomy of the original 41 signatures
+
+Classification uses actual final-LCNF extern attributes, VIR's own symbol
+decoder, defining-module provenance, Lean's Lake-provided source search path,
+and actual Lake-produced setup files. No historical host list is used.
+
+| Category | Count | What the evidence establishes |
+| --- | ---: | --- |
+| Capture-resolvable owning module | 24 | One source and one matching Lake setup exist; only the selected owning module was compiled here. |
+| Runtime/primitive boundary | 6 | Actual native extern symbol; resident availability/signature acceptance is not tested here. |
+| VIR boundary | 4 | Actual encoded extern decoded by VIR metadata; no physical ABI or v0 conformance claim. |
+| Unavailable/ambiguous input | 7 | All seven have source, but no owning setup in this fixture; none is ambiguous. |
+
+Capture-resolvable signatures (24, in seven owning modules):
+
+- `Vir.React.Builders` (10): `Lean.Vir.React.Props.{string,fromEntries,stylePairs,className}`;
+  `Lean.Vir.React.Node.{codeText,divWith,pWith,elementWith,preWith,strongWith}`.
+- `VersoReact.Renderer` (8): `VersoReact.Renderer.Style.{inlineCode,unsupported,codeBackground,borderColor,background,muted}`;
+  `VersoReact.Renderer.{renderMath,render}`.
+- `VersoBlueprint.Data` (2): `Informal.Data.instToStringLabel._lam_0`,
+  `Informal.Data.ExternalMarkupLanguage.key`.
+- `VersoBlueprint.Informal.Code.Data` (1):
+  `Informal.instFromJsonExternalMarkupBlockData.fromJson`.
+- `VersoBlueprint.Informal.Block.Model` (1): `Informal.instFromJsonBlockOccurrence.fromJson`.
+- `VersoBlueprint.Informal.ExternalMarkupView` (1): `Informal.ExternalMarkupView.displaySummary`.
+- `VersoBlueprint.Math.Data` (1): `Informal.Math.instFromJsonBpMathData.fromJson`.
+
+Runtime/primitive signatures (6):
+
+| Declaration | Actual native symbol |
+| --- | --- |
+| `Array.mkEmpty` | `lean_mk_empty_array_with_capacity` |
+| `Array.push` | `lean_array_push` |
+| `Lean.Name.beq` | `lean_name_eq` |
+| `String.append` | `lean_string_append` |
+| `String.utf8ByteSize` | `lean_string_utf8_byte_size` |
+| `Nat.decEq` | `lean_nat_dec_eq` |
+
+VIR signatures (4):
+
+| Declaration | Decoded logical target |
+| --- | --- |
+| `Lean.Vir.Js.Array.empty` | `js.array.empty` |
+| `Lean.Vir.React.Node.fragment` | `react.node.fragment` |
+| `Lean.Vir.JsValue.ofString` | `js.string` |
+| `Lean.Vir.React.Node.text` | `react.node.text` |
+
+Missing setup inputs (7):
+
+| Declaration | Recorded owning module |
+| --- | --- |
+| `Nat.reprFast` | `Init.Data.Repr` |
+| `Array.append._redArg` | `Init.Data.Array.Basic` |
+| `Lean.Name.mkStr3` | `Init.Prelude` |
+| `Lean.Name.mkStr4` | `Init.Prelude` |
+| `Lean.Name.toString` | `Init.Data.ToString.Name` |
+| `Lean.Name.toStringWithToken._at_.Lean.Name.toString.spec_0` | `Init.Data.ToString.Name` |
+| `Lean.Doc.instBEqMathMode.beq` | `Lean.DocString.Types` |
+
+These last seven expose a **toolchain-module input gap**, not absent Lean source
+or proved missing Wasm primitives. Installed Lean provides their source and
+compiled imports, but this Lake project has no corresponding module setups.
+A faithful toolchain-module provider needs its own reviewed source/options/import
+provenance; inventing default setup JSON or rebuilding individual generated names
+would evade that requirement. This is the clearest remaining capture prerequisite.
+
+Full expanded rows, source/setup hashes, and all 103 remaining signatures are
+reproducible in `assembly/feasibility.json` and `assembly/first/assembly.json`
+under `.deps/native-session-probe/`. This taxonomy is of the original 41 only;
+it must not be mistaken for classification of the complete dependency graph.
 
 ## Remaining work and acceptance
 
-1. **Checked module composition.** Complete the bounded assembly control,
-   validate signature rejection and unchanged root groups, and repeat it exactly.
-2. **Reachable dependency closure.** Generalize only after the control passes:
+1. **Toolchain module inputs.** Decide the faithful owning-module provider for
+   the seven observed signatures in five installed Lean modules. Reuse real
+   compiler/build provenance; do not synthesize named adapters.
+2. **Reachable dependency closure.** Generalize the now-passing composition control:
    resolve real source/setup identities, capture each owning unit once, preserve
    generated-name provenance, and resolve the remaining graph. Missing inputs,
    incompatible signatures or duplicate bodies are explicit blockers—not reasons
@@ -110,8 +189,13 @@ Accepted module controls:
 bash integration/vbp-native-session-probe/module-capture-check.sh
 ```
 
-The same-process diagnostic, after the source preparation/cache setup documented
-in `MODULE_RESULT.md`, is:
+The complete one-module repeat/negative-control and taxonomy gate is:
+
+```sh
+bash integration/vbp-native-session-probe/module-assembly-check.sh
+```
+
+The underlying same-process driver, after source preparation/cache setup, is:
 
 ```sh
 cd integration/vbp-native-session-probe
@@ -122,8 +206,12 @@ lake --keep-toolchain -KpostponeCompile=false env lean --run ModuleAssembly.lean
   ../../.deps/native-session-probe/assembly/first
 ```
 
-This currently exits 1 at the second import's initializer precondition; no
-assembly files are published. `ModuleAssembly.lean` itself is Beam-clean.
+This now exits 0 and writes a partial capture product. Beam and direct Lean are
+green; the final source dependency cone is 629 jobs. The repeat gate confirms
+the signature, source/setup, root-preservation and determinism controls above.
+`make check` (730 cases / 2172 comparisons) and Talos (3205 jobs plus 3166 trust
+stage) passed on the earlier diagnostic content; post-correction checks are
+recorded in the final lane handoff. No production adapter or runtime was edited.
 
 Exact source pins and hash-checked compiler overlays are in `prepare.mjs` and
 `MODULE_RESULT.md`, with generated `SOURCE.json` in the ignored source view.
@@ -135,6 +223,8 @@ delta, VIR `9fafe9cfd594213ee39dc8205b08084c31101816`, and Verso
 
 The independent VersoReact entry LCNF SHA-256 is
 `210232420f95470371ff1234b0b1097788b863815ef2120aa715842904a9f138`.
+The assembled partial LCNF SHA-256 is
+`7e09d684407485b58ba2dbbe25d8e20605b5e9b76dbdff42639c83c4ce019c7a`.
 The initial assembly diagnostic log SHA-256 is
 `81e59c77136cebc0fea7cf58e14593625e3fe03a3a99af5fa33b1e401b11e4f1`.
 Ignored outputs are disposable; immutable sources and tracked drivers are the
