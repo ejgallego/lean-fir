@@ -64,3 +64,31 @@ should be added only with an explicit, truthful gate policy after those
 contracts are reviewed. The branch smoke workflow is expressly not a replacement
 for `make check` or `make talos-check`. Feature workers may consume this compatibility branch
 for focused 4.34 work but must report these outstanding repository-wide gates.
+
+## Full-gate migration policy to decide
+
+These are owner decisions, not changes made by the tooling lane:
+
+1. The shared corpus owner should bind an **exact** external inventory and
+   executed trace to each accepted Lean toolchain identity. For this fixture,
+   keep the 4.33 sequence `[instInhabitedUInt8, Array.get!Internal]` unchanged;
+   a reviewed 4.34 entry would require exactly `[Array.get!Internal]`, once,
+   while preserving the result, boxing/projection forms, and ownership checks.
+   An unknown Lean revision or any third sequence must fail closed. Add both
+   version-selection and wrong-trace negative tests before calling the 4.34
+   differential gate green.
+2. Root and the proof owner should decide whether the existing textual
+   `lean433UpstreamBridge` can be certified for 4.34 or needs a separately
+   named bridge. Equal upstream source bytes for three audited files are useful
+   evidence, not by themselves a theorem that the 4.34 compiled pass and
+   imported declarations satisfy the 4.33 proof contract. The trust validator
+   may accept 4.34 only after that proof/conformance decision is recorded.
+3. Root/W6 should pin a Talos interpreter compatible with the **same** 4.34
+   toolchain before a 4.34 `make talos-check` is claimed. The current Talos
+   interpreter's 4.33 `lean-toolchain` and setup guard are real package
+   boundaries, not merely cosmetic strings; no cross-version `.olean` reuse
+   or shared mutable `.lake` is permitted.
+4. The focused branch smoke may be green independently. A full 4.34 CI job
+   should run unmodified `make check` and `make talos-check` only after the
+   preceding contracts are reviewed and their exact gates pass locally. A
+   migration of `main` remains a separate root decision with green evidence.
