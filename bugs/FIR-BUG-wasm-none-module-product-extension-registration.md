@@ -59,9 +59,13 @@ invalid environment extension, 'Verso.Genre.Manual.inlineExtensionExt' has alrea
 The actual setup names 16 plugins, including `verso_VersoManual_Ext.so`.
 `VersoManual.Ext` defines `inlineExtensionExt` with `initialize` and
 `registerPersistentEnvExtension`. Upstream `Lean.Environment` rejects an already
-registered extension name. The precise duplicate loading path is not yet
-isolated; plugin/interpreted initializer interaction is a hypothesis, not a
-confirmed upstream defect. The target source module is not self-imported.
+registered extension name. The lifecycle successor isolates a collision between
+the renderer setup's aggregate `libverso_VersoManual.so` and the Basic setup's
+standalone `verso_VersoManual_Ext.so`. Both define the same native initializer
+and extension storage symbols. A plugin-only load sequence reproduces the error;
+fresh Basic, Basic twice, and the same renderer plugin list twice all pass.
+This is not an interpreted-replay diagnosis or a claimed upstream defect.
+The target source module is not self-imported.
 
 ## Proof or differential evidence
 
@@ -97,3 +101,10 @@ None; no standalone upstream reproducer or upstream bug claim yet.
 
 Open. The diagnostic regression records the current stop; it does not certify
 complete renderer capture or permit continuation past this module.
+
+The causal lifecycle regression is
+`bash integration/vbp-native-session-probe/extension-lifecycle-check.sh`.
+It compares five fresh/serial/plugin-only controls, repeated in independent
+processes, without changing the registry, sources or plugin inputs. See
+`integration/vbp-native-session-probe/EXTENSION_LIFECYCLE.md` for exact inputs and
+the reduced native-plugin reproducer. Repair/design remains separately scoped.

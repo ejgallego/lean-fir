@@ -37,6 +37,13 @@ It stops deterministically at duplicate extension registration in
 `bash integration/vbp-native-session-probe/module-product-check.sh` to reproduce
 the checked partial product and exact diagnostic boundary, not a Wasm acceptance.
 
+[EXTENSION_LIFECYCLE.md](EXTENSION_LIFECYCLE.md) isolates that stop to overlapping
+aggregate/per-module native plugins. Fresh and same-context repeated captures
+pass; a plugin-only aggregate-then-`Ext` reproducer fails. Run
+`bash integration/vbp-native-session-probe/extension-lifecycle-check.sh` for the
+bounded five-case repeated diagnostic. No lifecycle workaround or continued
+module-product assembly is implemented.
+
 The historical reset-based source provider is unchanged and still stops at the
 same unknown specialization. Constructor metadata and executable-body discovery
 regressions pass.
