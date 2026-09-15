@@ -23,10 +23,9 @@ inductive LinkError where
 private def u32 (value : Nat) : UInt32 := UInt32.ofNat value
 
 /--
-The resident literal slice deliberately supports the exact representation
-families it can construct without a host: immediate and promoted tagged
-naturals plus UTF-8 string objects. Naturals above Lean's semantic tagged limit
-retain their semantic import until the big-natural allocator is internalized.
+The resident literal slice constructs the existing concrete representation:
+immediate and promoted tagged naturals, arbitrary-limb heap naturals, and
+UTF-8 string objects.
 -/
 def isImmediateNatural : RuntimeOp → Bool
   | .literal (.nat value) result =>
@@ -41,8 +40,14 @@ def isPromotedNatural : RuntimeOp → Bool
         (result == .tagged || result == .tobject)
   | _ => false
 
+def isBigNatural : RuntimeOp → Bool
+  | .literal (.nat value) result =>
+      decide (Fir.LeanIR.Impure.maxTaggedPayload < value) &&
+        (result == .object || result == .tobject)
+  | _ => false
+
 def isNaturalLiteral (operation : RuntimeOp) : Bool :=
-  isImmediateNatural operation || isPromotedNatural operation
+  isImmediateNatural operation || isPromotedNatural operation || isBigNatural operation
 
 def isStringLiteral : RuntimeOp → Bool
   | .literal (.str _) result =>
@@ -125,8 +130,7 @@ private def retagAddress (result : AbiKind) : List Instruction := [
 
 private def naturalFunction (name : Name) (value : Nat)
     (result : AbiKind) : Except LinkError Function := do
-  unless value ≤ Fir.LeanIR.Impure.maxTaggedPayload &&
-      (result == .tagged || result == .tobject) do
+  unless isNaturalLiteral (.literal (.nat value) result) do
     throw .unsupportedOperation
   if value ≤ maxImmediatePayload then
     let encoded ← checkedWord "immediate natural literal" (value * 2 + 1)
@@ -137,8 +141,10 @@ private def naturalFunction (name : Name) (value : Nat)
       locals := #[]
       body := [.i32Const result encoded, .ret] }
   else
-    let payload := UInt64.ofNat value
-    let allocationSize := align8 (headerBytes + target.semanticSlotBytes)
+    let big := Fir.LeanIR.Impure.maxTaggedPayload < value
+    let limbs := naturalLimbs value
+    let limbCount ← checkedWord "natural literal limb count" limbs.length
+    let allocationSize := align8 (headerBytes + target.semanticSlotBytes * limbs.length)
     let allocationBytes ← checkedWord "promoted natural allocation bytes"
       allocationSize
     return {
@@ -154,18 +160,20 @@ private def naturalFunction (name : Name) (value : Nat)
         zeroAllocation allocationSize ++
         store32 [.i32Const .uint32 ObjectKind.natural.code]
           (u32 headerKindOffset) ++
-        store32 [.i32Const .uint32 (liveFlag + persistentFlag)]
+        store32 [.i32Const .uint32 (if big then liveFlag else liveFlag + persistentFlag)]
           (u32 headerFlagsOffset) ++
-        store32 [.i32Const .uint32 0] (u32 headerRefCountOffset) ++
+        store32 [.i32Const .uint32 (if big then 1 else 0)] (u32 headerRefCountOffset) ++
         store32 [.i32Const .uint32 allocationBytes]
           (u32 headerAllocationBytesOffset) ++
-        store32 [.i32Const .uint32 promotedTagMarker] (u32 headerAux0Offset) ++
-        store32 [.i32Const .uint32 1] (u32 headerAux1Offset) ++
+        store32 [.i32Const .uint32 (if big then bigNaturalMarker else promotedTagMarker)]
+          (u32 headerAux0Offset) ++
+        store32 [.i32Const .uint32 limbCount] (u32 headerAux1Offset) ++
         store32 [.i32Const .uint32 0] (u32 headerAux2Offset) ++
-        store32 [.i32Const .uint32 0] (u32 headerAux3Offset) ++ [
+        store32 [.i32Const .uint32 0] (u32 headerAux3Offset) ++
+        (limbs.zipIdx.flatMap fun (limb, index) => [
           .localGet addressLocal,
-          .i64Const .uint64 payload,
-          .i64Store .uint64 (u32 headerBytes)] ++
+          .i64Const .uint64 limb,
+          .i64Store .uint64 (u32 (headerBytes + target.semanticSlotBytes * index))]) ++
         retagAddress result }
 
 private def stringFunction (name : Name) (value : String)
@@ -280,9 +288,9 @@ private def internalizeMatching (predicate : RuntimeOp → Bool)
   else return result
 
 /--
-Internalize natural literals through Lean's semantic tagged limit. The
+Internalize natural literals using the existing concrete representation. The
 historical name is retained for policy/API compatibility; generated helpers
-select an immediate word or promoted natural from the literal value.
+select an immediate word, promoted natural, or arbitrary-limb heap natural.
 -/
 def internalizeImmediateNaturals (module : Module) (validate : Bool := true) :
     Except LinkError Module :=
@@ -300,7 +308,10 @@ def exampleOperations : Array RuntimeOp := #[
   .literal (.nat 1) .tobject,
   .literal (.nat 4294967296) .tagged,
   .literal (.str "") .object,
-  .literal (.str "λ\n") .object]
+  .literal (.str "λ\n") .object,
+  .literal (.nat (2^63)) .tobject,
+  .literal (.nat (2^64)) .tobject,
+  .literal (.nat (2^193 + 2^129 + 0x0123456789abcdef)) .object]
 
 private def exampleCaller (index : Nat) (name : Name)
     (result : AbiKind) : Function := {
@@ -315,7 +326,10 @@ def exampleFunctions : Array Function := #[
   exampleCaller 1 `resident_literal_nat_one .tobject,
   exampleCaller 2 `resident_literal_nat_promoted .tagged,
   exampleCaller 3 `resident_literal_empty_string .object,
-  exampleCaller 4 `resident_literal_unicode_string .object]
+  exampleCaller 4 `resident_literal_unicode_string .object,
+  exampleCaller 5 `resident_literal_nat_big_one_limb .tobject,
+  exampleCaller 6 `resident_literal_nat_two_limbs .tobject,
+  exampleCaller 7 `resident_literal_nat_four_limbs .object]
 
 def exampleModule : Module := {
   imports := exampleOperations.mapIdx Fir.Wasm.runtimeImport
@@ -342,13 +356,21 @@ def manifest : Json :=
       Json.mkObj [("entry", "resident_literal_empty_string"), ("kind", "string"),
         ("value", "")],
       Json.mkObj [("entry", "resident_literal_unicode_string"), ("kind", "string"),
-        ("value", "λ\n")]]),
+        ("value", "λ\n")],
+      Json.mkObj [("entry", "resident_literal_nat_big_one_limb"), ("kind", "nat"),
+        ("value", toString (2^63 : Nat))],
+      Json.mkObj [("entry", "resident_literal_nat_two_limbs"), ("kind", "nat"),
+        ("value", toString (2^64 : Nat))],
+      Json.mkObj [("entry", "resident_literal_nat_four_limbs"), ("kind", "nat"),
+        ("value", toString (2^193 + 2^129 + 0x0123456789abcdef : Nat))]]),
     ("stringEncoding", "UTF-8"),
     ("stringMarker", stringUtf8Marker.toNat),
     ("scratchAddress", 0),
     ("scratchPolicy", "saved-and-restored"),
     ("status", "generation-only; W6 literal contract proofs pending")]
 
+#guard !(isNaturalLiteral (.literal (.nat (2^64)) .tagged))
+#guard !(literalFunction 0 (.literal (.nat (2^64)) .tagged)).isOk
 #guard match residentExampleModule with
   | .ok module =>
       module.imports.isEmpty &&

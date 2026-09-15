@@ -122,19 +122,15 @@ if (isolated) {
       assert.equal(linked.success, false);
       assert.equal(linked.stage, 'resident-link');
       assert.equal(linked.error,
-        'Fir.Wasm.Emit.Source.CompileError.manifest "resident linker retained a non-external import"');
+        'Fir.Wasm.Emit.Source.CompileError.manifest "resident linker retained unsupported external String.Internal.atEnd"');
       const frontier = linked.diagnosticFrontier.imports;
-      assert.equal(frontier.length, 17);
+      assert.equal(frontier.length, 15);
       assert.ok(frontier.every(i => !i.manifestError));
-      assert.deepEqual(frontier.filter(i => i.operation.kind !== 'external'), [{
-        module: 'fir', name: 'literal_0', operation: {
-          kind: 'naturalLiteral', result: 'tobject', value: '18446744073709551616',
-        },
-      }]);
+      assert.deepEqual(frontier.filter(i => i.operation.kind !== 'external'), []);
       assert.equal(frontier.filter(i => i.operation.declaration?.startsWith('Lean.Vir.')).length, 12);
       assert.deepEqual(frontier.filter(i => i.operation.kind === 'external' &&
         !i.operation.declaration.startsWith('Lean.Vir.')).map(i => i.operation.declaration), [
-        'String.Internal.atEnd', 'String.Internal.get', 'UInt64.ofNatLT', 'String.Pos.Raw.atEnd',
+        'String.Internal.atEnd', 'String.Internal.get', 'String.Pos.Raw.atEnd',
       ]);
       const providers = linked.diagnosticFrontier.leanExportProviders;
       assert.deepEqual(providers, []);

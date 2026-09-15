@@ -82,6 +82,7 @@ def externalDeclarations : Array Name := #[
   `UInt32.mul,
   `UInt64.ofBitVec,
   `UInt64.ofNat,
+  `UInt64.ofNatLT,
   `UInt64.toUInt8,
   `UInt64.toUInt16,
   `UInt64.toUSize,
@@ -517,6 +518,12 @@ def uint64OfBitVecFunction : Function :=
 def uint64OfNatFunction : Function :=
   uint64OfNaturalFunction `UInt64.ofNat
 
+/-- Upstream uses `lean_uint64_of_nat` for both entries. The bound proof is
+erased; preserve its final-LCNF ABI slot without inspecting it at runtime. -/
+def uint64OfNatLTFunction : Function :=
+  { uint64OfNaturalFunction `UInt64.ofNatLT with
+    params := #[(valueParam, .tobject), (proofParam, .erased)] }
+
 private def narrowUInt64Function (declaration : Name) (result : AbiKind)
     (mask : UInt32) : Function :=
   retypedI32Function declaration #[(valueParam, .uint64)] result [
@@ -659,6 +666,7 @@ def functions : Array Function := #[
   uint32MulFunction,
   uint64OfBitVecFunction,
   uint64OfNatFunction,
+  uint64OfNatLTFunction,
   uint64ToUInt8Function,
   uint64ToUInt16Function,
   uint64ToUSizeFunction,
@@ -744,6 +752,8 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
     some { params := #[.uint64, .uint64], results := #[.uint8] }
   else if declaration == `UInt64.ofBitVec || declaration == `UInt64.ofNat then
     some { params := #[.tobject], results := #[.uint64] }
+  else if declaration == `UInt64.ofNatLT then
+    some { params := #[.tobject, .erased], results := #[.uint64] }
   else if declaration == `UInt64.toUInt8 then
     some { params := #[.uint64], results := #[.uint8] }
   else if declaration == `UInt64.toUInt16 then
@@ -785,11 +795,11 @@ private def internalizeSelected (module : Module) (declarations : Array Name)
   let needsFromNat := declarations.any fun declaration =>
     #[`UInt8.ofBitVec, `UInt8.ofNat, `UInt8.ofNatLT, `UInt16.ofNat,
       `UInt32.ofBitVec, `UInt32.ofNat, `UInt32.ofNatLT,
-      `UInt64.ofBitVec, `UInt64.ofNat].contains declaration
+      `UInt64.ofBitVec, `UInt64.ofNat, `UInt64.ofNatLT].contains declaration
   let needsToNat := declarations.any fun declaration =>
     #[`UInt8.toBitVec, `UInt8.toNat, `UInt16.toNat, `UInt32.toNat].contains declaration
   let needsHigh := declarations.contains `UInt64.ofBitVec ||
-    declarations.contains `UInt64.ofNat
+    declarations.contains `UInt64.ofNat || declarations.contains `UInt64.ofNatLT
   let numericHelpers :=
     (if needsFromNat then
       #[ResidentBigNumeric.validateNaturalName, ResidentBigNumeric.naturalLowName]

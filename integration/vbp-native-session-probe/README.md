@@ -7,6 +7,14 @@ NativeSession component/session roots are no longer selected.
 It does not implement a browser adapter or exercise React/callback lifetimes.
 The historical `integration/vbp-verso-viewer/` package is untouched.
 
+Toolchain routing update (`ROOT-W7-20260915-036`): subsequent VBP work must
+start from official `tooling/lean-4.34` at
+`348f42f832983949dd1514ed700820cf9c6c05c3`, or a W7-owned child of that lane.
+The source-view commands below record the preceding diagnostic setup, including
+the runtime-frontier run already in flight when that directive arrived. They
+are not the approved starting point for a new 4.34 experiment. Main remains
+4.33; migrating this fixture to the official lane is the next setup action.
+
 ## Current end-to-end boundary
 
 The generic `Fir.Wasm.Emit.NativeSymbol` resolver now extends the owning-module
@@ -43,19 +51,27 @@ and UInt32 wraparound). **Resident admission fails; this is not a
 published renderer package or a browser execution result.** The diagnostic
 link view retains the failure and only reports imports; it installs no fallback.
 
-The diagnostic linked frontier has **17 imports**, down from 28:
+The diagnostic linked frontier has **15 imports**, down from 17 after native
+provider linkage (the preceding source-closure frontier was 28):
 
 - 12 deliberate VIR host operations.
-- One arbitrary-precision Nat literal, `18446744073709551616` (`2^64`).
-- `UInt64.ofNatLT`.
 - `String.Internal.atEnd`, `String.Internal.get`, and `String.Pos.Raw.atEnd`.
+
+There are **zero remaining runtime operations**. Generic `ResidentLiteral`
+coverage now constructs canonical arbitrary-limb Naturals, including `2^64`,
+using the existing nonpersistent/reference-counted big-Nat layout. Immediate
+and promoted values preserve their previous representations. `UInt64.ofNatLT`
+uses the existing conversion body with the erased proof parameter retained;
+the installed extern symbol, result, argument types and borrowing are checked
+under both toolchains by `integration/talos/artifact/RuntimeFrontierTests.lean`.
+No new shared helper signature, layout, effect or host policy is introduced.
 
 All twelve formerly missing String/Substring provider imports disappear. The
 generic traversal also resolves `String.Internal.{contains,pushn,posOf,offsetOfPos}`
 without a name-specific list. Its additional dependencies expose the raw `atEnd`
-alias. The remaining work is existing-layout Nat literal/primitive coverage,
-then actual JS adapter execution; no new native replacement for those sixteen
-Lean implementations was added.
+alias. The remaining native work is the three raw String declarations. JS
+adapter execution requires an explicit host-boundary review before enabling it;
+no new native replacement for those sixteen Lean implementations was added.
 
 `lower/host-boundary.json` records the 12 actual VIR targets, conversion markers,
 physical signatures and borrowing flags, using VIR's own metadata decoder.

@@ -34,6 +34,7 @@ node instruction-provenance-fixture/check.mjs \
   "$root/.deps/lcnf-c-wasm/emsdk/upstream/bin" \
   "$here/_build/instruction-provenance-fixture"
 lake build fir-wasm-artifact fir-wasm-float-source
+lake env lean RuntimeFrontierTests.lean
 artifact_generator="$here/.lake/build/bin/fir-wasm-artifact"
 float_source_generator="$here/.lake/build/bin/fir-wasm-float-source"
 if [[ ! -x "$artifact_generator" || ! -x "$float_source_generator" ]]; then

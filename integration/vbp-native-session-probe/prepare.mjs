@@ -69,6 +69,17 @@ const nativeSymbolOverlaySha256 = '84b9d039c6fa4caea06fd0652023f2a66adfe1b550c0f
 assert.equal(sha(readFileSync(join(fir, nativeSymbolOverlayPath))), nativeSymbolOverlaySha256,
   'review the generic native-symbol resolver before changing it');
 copyFileSync(join(fir, nativeSymbolOverlayPath), join(source, 'fir', nativeSymbolOverlayPath));
+const runtimeOverlays = [
+  { path: 'Fir/Wasm/Emit/ResidentLiteral.lean',
+    sha256: '9622c36caa6f8dad70a1973338a20dcdec3d8a556af13d7b63687f01c8649c97' },
+  { path: 'Fir/Wasm/Emit/ResidentFixedWidth.lean',
+    sha256: '21224359099ad9d0a8056f6ac16b480a1b3684edd4d182b7a8c63c942bd70199' },
+];
+for (const overlay of runtimeOverlays) {
+  assert.equal(sha(readFileSync(join(fir, overlay.path))), overlay.sha256,
+    `review the existing-contract runtime overlay: ${overlay.path}`);
+  copyFileSync(join(fir, overlay.path), join(source, 'fir', overlay.path));
+}
 const vbp = archive('vbp', consumer, vbpCommit);
 copyFileSync(join(consumer, rpcPath), join(vbp, rpcPath));
 const manifest = json(join(consumer, 'lake-manifest.json'));
@@ -109,6 +120,7 @@ put(join(state, 'SOURCE.json'), {
   sourceOverlay: { path: sourceOverlayPath, sha256: sourceOverlaySha256 },
   moduleOverlay: { path: moduleOverlayPath, sha256: moduleOverlaySha256 },
   nativeSymbolOverlay: { path: nativeSymbolOverlayPath, sha256: nativeSymbolOverlaySha256 },
+  runtimeOverlays,
   fixtureDirty: run('git', ['status', '--porcelain'], fir) !== '',
   leanToolchain: 'leanprover/lean4:v4.34.0-rc2',
   leanVersion: run('elan', ['run', 'leanprover/lean4:v4.34.0-rc2', 'lean', '--version']),

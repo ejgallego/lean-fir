@@ -88,6 +88,7 @@ export async function checkResidentFixedWidth(bytes) {
     "fir_ext_UInt32_mul",
     "fir_ext_UInt64_ofBitVec",
     "fir_ext_UInt64_ofNat",
+    "fir_ext_UInt64_ofNatLT",
     "fir_ext_UInt64_toUInt8",
     "fir_ext_UInt64_toUInt16",
     "fir_ext_UInt64_toUSize",
@@ -250,6 +251,16 @@ export async function checkResidentFixedWidth(bytes) {
   const wideNatural = exports.fir_numeric_make_natural(0x89abcdef, 0x01234567);
   const wide = 0x0123456789abcdefn;
   equal(exports.fir_ext_UInt64_ofNat(wideNatural), wide, "UInt64.ofNat");
+  equal(exports.fir_ext_UInt64_ofNatLT(wideNatural, 0), wide, "UInt64.ofNatLT");
+  for (const value of [0n, 1n, 0x7fffffffn, 0x80000000n,
+    0x7fffffffffffffffn, 0x8000000000000000n, 0xffffffffffffffffn]) {
+    const input = value <= 0x7fffffffn ? Number(value * 2n + 1n) :
+      value <= 0x7fffffffffffffffn ?
+        exports.fir_numeric_make_natural(Number(value & 0xffffffffn), Number(value >> 32n)) :
+        arbitraryNatural(exports, value);
+    equal(u64(exports.fir_ext_UInt64_ofNatLT(input, 0)), value,
+      `UInt64.ofNatLT valid bound ${value}`);
+  }
   equal(exports.fir_ext_UInt64_ofBitVec(wideNatural), wide,
     "UInt64.ofBitVec");
   const arbitrary = (1n << 193n) + (1n << 129n) +

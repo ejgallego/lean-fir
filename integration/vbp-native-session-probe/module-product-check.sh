@@ -16,6 +16,7 @@ FIR_NATIVE_SYMBOL_TEST_OUTPUT="$TMPDIR/native-symbol-test.wasm" \
 node native-symbol-test.mjs "$TMPDIR/native-symbol-test.wasm"
 if [[ " $* " == *" --lower "* ]]; then
   lake --keep-toolchain -KpostponeCompile=false build Fir.Wasm.Emit.ResidentLinker
+  lake --keep-toolchain -KpostponeCompile=false env lean ../talos/artifact/RuntimeFrontierTests.lean
   lake --keep-toolchain -KpostponeCompile=false env lean LowerModuleProduct.lean
 fi
 node module-product-check.mjs "$@"
