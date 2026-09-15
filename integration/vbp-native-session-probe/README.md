@@ -9,6 +9,8 @@ The historical `integration/vbp-verso-viewer/` package is untouched.
 
 Current state: **constructor metadata and executable-body discovery regressions
 pass; ordinary-source capture still stops at the same unknown specialization**.
+[REBUILD_BOUNDARY.md](REBUILD_BOUNDARY.md) locates it at the mandatory post-saveBase
+check and records a shared-specialization reader left visible by root-local reset.
 [PROVENANCE_RESULT.md](PROVENANCE_RESULT.md) explains the repaired discovery
 omission and remaining compiler-rebuild failure. See
 [REPAIR_RESULT.md](REPAIR_RESULT.md) for the current result and exact ordinary
