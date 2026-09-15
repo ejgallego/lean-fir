@@ -1,10 +1,8 @@
 # wasm-gen lane
 
-Current investigation: `ROOT-W7-20260915-031`, continued by root events `-032..033`
-and the native-provider decision on main `ee4f8060`.
-The full Lean-name source traversal and base lowering checkpoint is ready for
-integration. The investigation remains active: the next generic FIR gap is
-native-symbol resolution to upstream Lean export providers.
+Current investigation: `ROOT-W7-20260915-031`, continued by root `-032..034`.
+Native-export linking is ready for integration. Runtime closure and JS execution
+remain separate unfinished parts of the continuous renderer investigation.
 
 ```text
 lane: wasm-gen
@@ -12,47 +10,52 @@ owner: wasm-gen
 branch: wasm/generation
 worktree: .worktrees/wasm-generation
 state: ready
-base: ee4f80608c20a345d7bf50616ebd1f481af0d36b
-functional-head: a6f138cc1b6cd49f70ce07053534658b1e7a94f1
-contract-base: ee4f80608c20a345d7bf50616ebd1f481af0d36b
+base: 5b73ec4303f4ce169ce03e69f07c62782ddd8c50
+functional-head: fd77cba88a3efbd266f8308c9d2d6d6bee7309ef
+contract-base: 5b73ec4303f4ce169ce03e69f07c62782ddd8c50
 clean-at-update: true
-slice: Complete the original renderer owner worklist with trusted-local isolated compiler products, lower its exact assembled LCNF, and identify unresolved native/VIR symbols and actual Lean export providers.
-files: integration/vbp-native-session-probe/{ModuleProduct.lean,LowerModuleProduct.lean,module-product-worker.mjs,module-product-check.mjs,module-product-check.sh,README.md}; two W7 bug cards; coordination/lanes/wasm-gen.md
-contracts: none; no production compiler/runtime, ABI, W6, toolchain, consumer or package-pointer change
-checks: module-product-check.sh --isolated --lower passes the 630/51-job cones, direct Lean checks, two fresh owner traversals, exact source/metadata/compacted-byte equality, original-root/native-image preservation, independent Node base-Wasm validation, identical base bytes and strict link diagnostics, and twelve exact native/export signature matches. make check passes 730 cases/2172 comparisons and 234 bug cards. make talos-check passes 3205 jobs and forced trust audit. integration/talos/artifact/check.sh passes. Beam ModuleProduct version 4 and LowerModuleProduct version 3 have zero diagnostics; stopped before final batch. Node/bash syntax and diff-check pass. Gates ran on 008d111b's content; the final focused gate completed after that commit. Rebase onto coordination-only main ee4f8060 changes no fixture/bug-card content (git diff verifies equality); final diff/syntax/card checks pass. No browser or renderer execution acceptance claimed.
-bug-cards: FIR-BUG-wasm-none-module-local-extern-frontier (fixed); FIR-BUG-wasm-none-native-export-source-provider (confirmed)
-blockers: strict resident linking retains one large Nat literal, fifteen native externs and twelve intended VIR hosts; twelve native externs actually have upstream Lean export providers, so resolve that generic linking gap before considering replacement runtime implementations
-handoff: Root may review/land the immutable clean checkpoint; main unchanged by W7, no push or package publication. This is not terminal completion of the broader renderer investigation.
-next: Resolve actual C extern symbols against unique upstream export metadata, capture providers in their real owning modules and check compiled interfaces before linking; continue traversal. Genuine unprovided runtime/host requirements remain explicit and coordinated.
+slice: Generic native-symbol provider resolution, owning-module capture, ABI-exact forwarders, and the actual VIR host-boundary audit.
+files: Fir/Wasm/Emit/NativeSymbol.lean; integration/vbp-native-session-probe capture/lowering drivers, native-symbol tests, input preparation, checker and README; native-export bug card; this lane status
+contracts: none; no ABI/layout/runtime semantics, W6, toolchain, consumer source or package-pointer changes
+checks: Two fresh captures and two lowerings agree on source/metadata/compacted bytes, base Wasm, strict-link report and host audit. module-product-check.mjs --isolated --lower --check-only validates those explicitly executed phases and current worker input hashes (not a fresh-generation claim). Final 4.34 dependency cone: 634 jobs; direct ModuleProduct/LowerModuleProduct pass. Generic module builds on 4.33 and 4.34; real extern/export rejection controls and emitted forwarding Node tests pass on both. Beam NativeSymbol v5, ModuleProduct v2, LowerModuleProduct v3, NativeSymbolTests v4: zero errors. make check: 730 cases/2172 comparisons; make talos-check: 3205 jobs plus forced audit; bash integration/talos/artifact/check.sh: pass. The final forwarding execution fixture was checked separately after the broad gates. Bug-card validation (234), syntax and diff-check pass. No browser or complete renderer execution acceptance claimed.
+bug-cards: FIR-BUG-wasm-none-native-export-source-provider (fixed)
+blockers: strict resident admission retains Nat literal 2^64, String.Internal.atEnd, String.Internal.get, UInt64.ofNatLT, String.Pos.Raw.atEnd and 12 intentional VIR hosts
+handoff: Root owns review and main landing. This clean vertical checkpoint is not terminal completion. No W7 push/publication.
+next: Existing-layout literal/primitive coverage, then actual current JS adapter execution using existing resource/callback infrastructure. No String/Substring source-provider reimplementations or host fallback. No new W6 request for existing-contract consumption.
 ```
 
 ## Result
 
-The original renderer now reaches 47 modules, 1,506 bodies and 138 source
-selections. All remaining 125 signatures have native or VIR metadata: there are
-no pending Lean-name edges. This is not yet complete native-symbol closure.
-The first worker bug was distinguishing module-local extern implementations
-from upstream's separate imported-signature list; classification now follows
-the actual declaration value, without named exceptions.
+The real `VersoBlueprint.Experimental.VirPreview.Renderer.render` reaches 52
+modules, 1535 bodies, 158 selections and 16 native-symbol links. The 128 pre-link
+external interfaces include those 16 resolved source links. The strict-link
+frontier shrinks from 28 to 17 imports: all twelve formerly missing Lean export
+providers disappear. No exported Lean provider remains unresolved.
 
-The existing FIR lowerer emits a valid 777,173-byte base Wasm module, SHA-256
-`4a025e1c9adafb34065f962368b5c27f15b218990c72f7660dd4fb895f2c30d0`.
-Strict resident admission fails consistently. The diagnostic open view is not
-published or executed as an accepted artifact. Its 28 imports comprise twelve
-deliberate VIR host functions, literal `2^64`, `UInt64.ofNatLT`, and fourteen
-String/Substring functions.
+Providers come from actual upstream metadata and exact compiled signatures,
+then actual code/export metadata in the owning capture. Importers may hide
+implementation expressions; requiring imported `defnInfo` incorrectly rejects
+real providers such as `containsImpl`. Linking uses the existing pre-encoding
+transform hook with typed forwarders; original LCNF and call/closure identities
+are retained. No instruction-pattern recovery or fallback-body compilation.
 
-Actual upstream `getExternNameFor`/`getExportNameFor?` metadata identifies twelve
-Lean providers among those String/Substring functions. All twelve compiled
-interfaces agree exactly on types, borrows, safety and universe parameters.
-Thus these are missing native-symbol source edges, not twelve runtime functions
-to reimplement. No provider names are guessed from suffixes.
+The additional source interfaces are `String.extract`, `UInt8.land` and
+`String.Pos.Raw.atEnd`; only the last becomes an additional runtime gap.
+The VIR audit records actual targets, markers, ABI and borrowing. Bool/Float
+are scalar arguments; `Callback.ofUnary` transfers a retained closure. It is
+explicitly `admitted: false`, `executed: false`.
 
-Durable report and exact source-product hashes:
+Base Wasm: 839735 bytes, SHA-256
+`b154b7169d63c3aa02098b0f5936f0dee4d2fa5cc40a234ffcfaa8d602a0af9b`.
+Original renderer LCNF remains
+`819fed859b7d21f3988072f7be53969705614de8d047f41b6c8b8bc488704073`.
+All source-product hashes and reproduction instructions are in
 `integration/vbp-native-session-probe/README.md`.
-Disposable work: `.deps/native-session-probe/isolated-module-product/`.
-Gate logs: `.deps/native-session-probe/control/closure-final-{focused,check,talos,artifact}.log`.
-Isolated Lean remains 4.34.0-rc2 at
-`6a10ac8c22beadecabdbb0919c2b50214762f91d`; production FIR remains 4.33.
-The accepted unsafe compactor remains same-toolchain/schema/trusted-local only;
-all imported regions stay allocated through the assembler process lifetime.
+
+Disposable results: `.deps/native-session-probe/native-provider-product/{first,repeat}`.
+Logs: `.deps/native-session-probe/control/native-provider-*` and
+`native-symbol-cone.log`. The default shell gate still generates fresh products;
+validation-only mode makes no new capture/execution claim. Isolated Lean remains
+4.34.0-rc2 at `6a10ac8c22beadecabdbb0919c2b50214762f91d`; production FIR remains
+4.33. Consumer/source pins and the trusted-local transport restriction are
+unchanged. Root may consume the exact clean checkpoint in the canonical event.
