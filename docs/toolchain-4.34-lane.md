@@ -44,7 +44,7 @@ separate `leanprover--lean4---v4.34.0-rc2` directory. No mutable `.lake`,
 | `make check` | Fails in V8 validation | All 721 native/LCNF/V8 values agree, but one 4.33-specific external-trace requirement produces four findings. |
 | Trust-source audit | Not reached by `make check`; focused command rejects the 4.34 pin | Upstream `AlphaEqv`, `SimpCase`, and `ElimDead` source SHA-256 values are unchanged from 4.33; the audit still requires the literal 4.33 toolchain. |
 | Talos package/driver | Not yet tested on 4.34 | `integration/talos/lean-toolchain` and the pinned Talos interpreter remain 4.33. |
-| CI | No 4.34 branch trigger | Existing workflow targets `main`; no durable 4.34 run is claimed. |
+| CI | Focused branch smoke is staged; no hosted run claimed | `.github/workflows/lean-434-compat.yml` checks compilation and scalar execution only. Existing full workflow still targets `main`. |
 
 The observed validation drift is confined to
 `Fir/Validation/Corpus.lean`'s `generic-uint8-array-get`: Lean 4.34 emits
@@ -61,5 +61,6 @@ The first tooling conclusion is therefore: the basic Lake/library and Wasm
 driver path already works under 4.34; the blocker is version-pinned validation
 and proof-package contracts, not a package-manager failure. A 4.34 CI trigger
 should be added only with an explicit, truthful gate policy after those
-contracts are reviewed. Feature workers may consume this compatibility branch
+contracts are reviewed. The branch smoke workflow is expressly not a replacement
+for `make check` or `make talos-check`. Feature workers may consume this compatibility branch
 for focused 4.34 work but must report these outstanding repository-wide gates.
