@@ -57,14 +57,15 @@ These commands perform different jobs. Their existing wrappers should offer
 concise progress and preserve full failure logs, but a single global build
 command would not resolve source identity or ABI differences.
 
-One verified correctness issue needs attention before relying on quiet command
-exit status: `scripts/quiet-run.sh` reads `$?` after the completed `if` statement,
-not in its failed-command branch. `bash scripts/quiet-run.sh
-config-audit-negative -- false` prints `FAIL` but exits **0**. Capture the actual
-command status in the failure branch and add a negative regression. This audit
-records the defect; it does not change the wrapper.
-Bounded correction and direct negative regression are assigned to tooling in
-`ROOT-TOOLING-20260916-001`; no broad build refactor or relaxed 4.34 audit is needed.
+The quiet-wrapper false-success defect is fixed in `ed77b41f`: the failed
+command's status is captured immediately in the failure branch. Nine direct
+regressions cover failure exits, retained logs, bounded tails, success cleanup
+and verbose passthrough. Root's independent full `make check` passed before
+landing; no broad build refactor or relaxed 4.34 audit was needed.
+Create any explicitly supplied worktree-local `TMPDIR` before running checks:
+a missing directory triggered an upstream Lake setup-tempfile SIGSEGV during
+this review, independently isolated by tooling. Creating the directory restored
+the unchanged full gate; this was not a wrapper or strace defect.
 
 `browser-benchmarks/source-package/v1` already exists in FIR's
 [source-package discovery contract](../integration/package-tools/SOURCE_PACKAGE.md).
@@ -191,8 +192,9 @@ a local path as an input. Directory labels alone are insufficient.
 
 ## Consolidation: the smallest useful next steps
 
-1. Fix and negatively test quiet-wrapper failure propagation. Concise output
-   must preserve the original exit status, not merely print a failure label.
+1. Keep the accepted quiet-wrapper negative regressions in the tooling gate.
+   Concise output must preserve the original exit status, not merely print a
+   failure label. Route the same fix through the official 4.34 tooling branch.
 2. Keep [build-examples.md](build-examples.md) as FIR's package navigation index
    and the VIR catalog as the existing browser campaign manifest. Expand the
    index from reviewed package policies, without duplicating their inventories
