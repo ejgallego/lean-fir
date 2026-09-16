@@ -195,6 +195,14 @@ self share fell 46.21% to 20.56%; this is a consumer result only. Package
 identity `1138101e…`/`5fc1acd2…`, source/setup and Wasm remain unchanged; source
 landing is parked because main lacks the complete 4.34 prototype baseline.
 
+The matched VIR control is also qualified in `VBP-FIR-20260916-V2-VIR-PAIRED-001`:
+two fresh browsers, two warmups and four AB/BA rounds per batch give pooled
+content-phase medians of 1,308.5 ms for VIR versus 835.7 ms for FIR (29.6%
+paired reduction, all eight pairs improving). DOM and retained-article parity
+hold for the same full-FLT inputs. This remains a content-only cross-backend
+measurement—decode, identity preparation, React commit, total-widget latency
+and newer VIR sources are excluded—and does not change producer or live pins.
+
 Source/build/acceptance reports currently live in W7's ignored `.deps` and VBP's
 `.worktrees/_meta`, including `VBP-FIR-CURRENT-ACCEPTANCE-20260916-001.md`.
 These are local working evidence; GitHub CI is the durable validation run
