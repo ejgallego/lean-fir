@@ -24,9 +24,10 @@ if "$@" >"$log" 2>&1; then
   rm -f "$log"
   printf 'PASS %s\n' "$label"
   exit 0
+else
+  status=$?
 fi
 
-status=$?
 printf 'FAIL %s (full log: %s)\n' "$label" "$log" >&2
 tail -n 120 "$log" >&2 || true
 exit "$status"

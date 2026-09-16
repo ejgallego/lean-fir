@@ -25,6 +25,7 @@ unit-check: no-skips
 	@cd "$(REPO_ROOT)" && \
 		FIR_TOOLING_TMPDIR="$(FIR_TOOLING_TMPDIR)" \
 		bash scripts/quiet-run.sh tooling-unit -- node --test \
+			tooling/quiet-run-unit.test.mjs \
 			tooling/ci-contract-unit.test.mjs \
 			tooling/worktree-temp-unit.test.mjs \
 			tooling/wasm/function-index-unit.test.mjs \
