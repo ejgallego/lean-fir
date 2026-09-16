@@ -89,7 +89,7 @@ The linked recipe/policy and its exact checkpoint remain authoritative.
 | VBP manifest resolver | [Resolver integration](../integration/vbp-manifest-resolver/README.md); `VersoBlueprint.Runtime.ManifestResolver.resolveBatchJson` | String-in/String-out invocation adapter; zero React/RPC closure, separate from the viewer |
 | VBP older full viewer/widget | [Viewer integration](../integration/vbp-verso-viewer/README.md); `Widget.mount` / `unmount` | Older pinned source, 41 host operations and component/hook lifecycle; `.open({hostBindings})`, `.invoke(...)`, `.dispose()` |
 | VBP current Document JSON renderer | Official 4.34 generation branch, `integration/vbp-native-session-probe/CURRENT_HOST.md`; compiled `Document.decode` → `Renderer.render` | `createCurrentRendererHostPrototype({module, manifest, bindings})`; `session.renderDocumentJson(encodedDocument)`; VBP `tests/vir_preview/*` assembles React/provider/SDK bootstrap |
-| VBP encoded-document options factory, in progress | Same generation owner; requested `createEncodedDocumentComponent(mathComponent?)` | Consumer owns component/options protocol. Frozen private setup gate must pass before capture; this is not yet the current renderer API |
+| VBP encoded-document options factory, in progress | Same generation owner; requested `createEncodedDocumentComponent(mathComponent?)` | Frozen private setup/capture/lower/link now pass for `none`; component execution awaits generic function/callback SDK and explicit invocation roots. This is not yet the current renderer API |
 
 Additional C/LLVM experiments exist, notably
 [Illuminate's alternative player](../integration/illuminate-player-llvm/README.md).
@@ -137,10 +137,19 @@ consumer qualification is not a claim that the full 4.34 repository gate is gree
 The factory follow-up has a complete frozen source closure (`2c1ef0f6`, archive
 `41b88ae7`) and external setup/toolchain authority (`6bbd2b32`). The first
 private preparation attempt was correctly rejected: Lake rematerialized a Git
-dependency and changed an authorized source file. W7's active follow-up tests
-official Lake package overrides plus a mutation guard, rather than accepting
-mutable original artifacts or silently replacing source. This is a preparation
-problem, not evidence that the requested factory cannot be compiled.
+dependency and changed an authorized source file. The successor at clean
+`f055e0ff` passes with official Lake `--packages` overrides and an active mutation
+guard, preserving every source byte. Real `createEncodedDocumentComponent none`
+captures/assembles/lowers/links; root independently verified all 404 indexed
+payloads and the actual Wasm interface.
+
+The 64,858-byte linked factory has one import, generic `Js.Function.ofLean`,
+but no callback invocation export. Its captured source frontier has 31 host
+rows (19 added, one removed, 12 unchanged against the accepted renderer).
+Factory-only dead-code elimination does not qualify callback execution.
+`ROOT-W7-20260916-017` continues through the generic typed SDK and explicit
+callback roots to actual `none` component execution. Full consumer parity,
+optional math and the working renderer pins remain separate.
 
 Source/build/acceptance reports currently live in W7's ignored `.deps` and VBP's
 `.worktrees/_meta`, including `VBP-FIR-CURRENT-ACCEPTANCE-20260916-001.md`.
