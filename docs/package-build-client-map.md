@@ -63,6 +63,8 @@ not in its failed-command branch. `bash scripts/quiet-run.sh
 config-audit-negative -- false` prints `FAIL` but exits **0**. Capture the actual
 command status in the failure branch and add a negative regression. This audit
 records the defect; it does not change the wrapper.
+Bounded correction and direct negative regression are assigned to tooling in
+`ROOT-TOOLING-20260916-001`; no broad build refactor or relaxed 4.34 audit is needed.
 
 `browser-benchmarks/source-package/v1` already exists in FIR's
 [source-package discovery contract](../integration/package-tools/SOURCE_PACKAGE.md).
@@ -89,7 +91,7 @@ The linked recipe/policy and its exact checkpoint remain authoritative.
 | VBP manifest resolver | [Resolver integration](../integration/vbp-manifest-resolver/README.md); `VersoBlueprint.Runtime.ManifestResolver.resolveBatchJson` | String-in/String-out invocation adapter; zero React/RPC closure, separate from the viewer |
 | VBP older full viewer/widget | [Viewer integration](../integration/vbp-verso-viewer/README.md); `Widget.mount` / `unmount` | Older pinned source, 41 host operations and component/hook lifecycle; `.open({hostBindings})`, `.invoke(...)`, `.dispose()` |
 | VBP current Document JSON renderer | Official 4.34 generation branch, `integration/vbp-native-session-probe/CURRENT_HOST.md`; compiled `Document.decode` → `Renderer.render` | `createCurrentRendererHostPrototype({module, manifest, bindings})`; `session.renderDocumentJson(encodedDocument)`; VBP `tests/vir_preview/*` assembles React/provider/SDK bootstrap |
-| VBP encoded-document options factory, in progress | Same generation owner; requested `createEncodedDocumentComponent(mathComponent?)` | Frozen private setup/capture/lower/link now pass for `none`; component execution awaits generic function/callback SDK and explicit invocation roots. This is not yet the current renderer API |
+| VBP encoded-document options component, qualified prototype | Official generation child `5fefee0c`; actual `createEncodedDocumentComponent none` plus typed callback roots | Actual Wasm/React SSR and Chrome options/state/effect lifecycle pass. Local portable packaging and full consumer parity remain separate; no live pin adoption |
 
 Additional C/LLVM experiments exist, notably
 [Illuminate's alternative player](../integration/illuminate-player-llvm/README.md).
@@ -134,33 +136,38 @@ the options factory. Older `a48bbb4a` output is deliberately preserved.
 The official 4.34 child also retains four known repository audit findings;
 consumer qualification is not a claim that the full 4.34 repository gate is green.
 
-The factory follow-up has a complete frozen source closure (`2c1ef0f6`, archive
-`41b88ae7`) and external setup/toolchain authority (`6bbd2b32`). The first
-private preparation attempt was correctly rejected: Lake rematerialized a Git
-dependency and changed an authorized source file. The successor at clean
-`f055e0ff` passes with official Lake `--packages` overrides and an active mutation
-guard, preserving every source byte. Real `createEncodedDocumentComponent none`
-captures/assembles/lowers/links; root independently verified all 404 indexed
-payloads and the actual Wasm interface.
+The options component uses frozen source closure `2c1ef0f6` (archive `41b88ae7`)
+and setup/toolchain authority `6bbd2b32`. Private upstream Lake `--packages`
+mapping and an active mutation guard preserve all supplied source bytes;
+historical cross-workspace setups and Git rematerialization remain inadmissible.
 
-The 64,858-byte linked factory has one import, generic `Js.Function.ofLean`,
-but no callback invocation export. Its captured source frontier has 31 host
-rows (19 added, one removed, 12 unchanged against the accepted renderer).
-Factory-only dead-code elimination does not qualify callback execution.
-`ROOT-W7-20260916-017` continues through the generic typed SDK and explicit
-callback roots to actual `none` component execution. Full consumer parity,
-optional math and the working renderer pins remain separate.
+Exact clean prototype `5fefee0c`, functional `618a67d2`, executes the actual
+`createEncodedDocumentComponent none` and returned React function. Complete
+Wasm is 1,968,612 bytes (`98504ee7…`), with 31 intentional VIR function imports,
+zero native/memory imports, owned memory and fifteen function exports. Actual
+SSR and Chrome validate Document updates, native options state/DOM identity,
+effect cleanup, malformed recovery, retained callbacks and disposal. This is
+stronger than the earlier small factory-only link: callbacks have explicit
+invocation/reachability roots, not merely captured source metadata.
 
-Progress `W7-ROOT-20260916-016` implements additive SDK/callback roots and
-passes nine compiled callback signatures plus the accepted renderer controls.
-The callback-rooted component now stops at native `Float.toString`, before
-linked component execution. Root chooses the thin pinned native formatter
-with an explicit existing-layout FIR String bridge (`ROOT-W7-20260916-018`).
-[Pinned Lean's native implementation](https://github.com/leanprover/lean4/blob/6a10ac8c22beadecabdbb0919c2b50214762f91d/src/runtime/object.cpp#L1905)
-normalizes NaNs and otherwise uses `std::to_string`. This is not a JS fallback
-or permission to extend the binary64-only libm contract silently. Any reusable
-provider/String-linking contract is isolated for root acceptance; the producer
-update is not a clean completion.
+Native `Float.toString` is closed by isolated proposal `a642e356` plus rounding
+tests `1c45f00d`, using
+[pinned Lean's native formatter](https://github.com/leanprover/lean4/blob/6a10ac8c22beadecabdbb0919c2b50214762f91d/src/runtime/object.cpp#L1905)
+and an explicit fresh existing-layout FIR String allocation/copy. Native scratch
+and stack are bounded; exclusive low-memory reservation is 262,144 bytes.
+Root reviewed code/provenance and independently replayed 6,288 native-oracle
+comparisons, String/padding/growth/scratch/allocator controls and actual Wasm
+SSR/logical conversion/error identity/callback survival/disposal. Root reviewed
+Chrome evidence but did not independently rerun that campaign.
+
+`ROOT-W7-20260916-019` accepts the bounded session-retained prototype, not GC
+equivalence, runtime refinement, universal cross-libc equality, general/combined
+native-provider production adoption or full 4.34 migration. Consumer owns full
+matched parity; optional native math and nullable/form-value branch coverage
+remain separate. `ROOT-W7-20260916-020` assigns a minimal self-contained LOCAL
+package using existing verification/publication tools, without publication,
+canonical-pointer changes or live pin adoption. Old `4776f86e`/`a48bbb4a`
+outputs remain preserved.
 
 Source/build/acceptance reports currently live in W7's ignored `.deps` and VBP's
 `.worktrees/_meta`, including `VBP-FIR-CURRENT-ACCEPTANCE-20260916-001.md`.
