@@ -1,6 +1,6 @@
 # Package, build, and client configuration map
 
-Inspection snapshot: 2026-09-16, FIR `main` at `b589ac98`, with the official
+Inspection snapshot: 2026-09-16, FIR `main` at `b6111c1c`, with the official
 4.34 generation worktree inspected separately. VIR and client worktrees were
 read without modification. This document consolidates navigation and analysis;
 it is not a new package manifest, consumer registry, or acceptance record.
