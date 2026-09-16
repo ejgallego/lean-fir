@@ -28,6 +28,7 @@ unit-check: no-skips
 			tooling/quiet-run-unit.test.mjs \
 			tooling/ci-contract-unit.test.mjs \
 			tooling/worktree-temp-unit.test.mjs \
+			tooling/example-navigation-unit.test.mjs \
 			tooling/source-prepare-unit.test.mjs \
 			tooling/wasm/function-index-unit.test.mjs \
 			tooling/profile/node-profile-unit.test.mjs \
