@@ -204,6 +204,10 @@ a local path as an input. Directory labels alone are insufficient.
 
 ## Consolidation: the smallest useful next steps
 
+The [consumer cleanup audit](consumer-cleanup-audit.md) traces actual catalog,
+client and regression references before proposing retirement. Generated pointer
+age or absence from the VIR catalog alone is not removal evidence.
+
 1. Keep the accepted quiet-wrapper negative regressions in the tooling gate.
    Concise output must preserve the original exit status, not merely print a
    failure label. The exact fix is also present in official 4.34 child

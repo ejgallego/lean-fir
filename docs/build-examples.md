@@ -9,6 +9,8 @@ consumer repositories, see the [configuration map and analysis](package-build-cl
 The index below distinguishes accepted outputs, recipe-level integrations and
 branch-only work. A build directory or a generated pointer alone is not an
 acceptance claim.
+For evidence-first retirement decisions, see the
+[consumer cleanup audit](consumer-cleanup-audit.md).
 
 ## Consumer packages
 
@@ -38,7 +40,7 @@ do not infer it from this navigation table.
 | Verso complete HTML | Real formatting entry; escaped HTML and tag events, a distinct output oracle | [README](../integration/verso-html/README.md) |
 | Illuminate SpatialHitScene | Prepared spatial query, separate from linear HitScene | [README and gate](../integration/illuminate-spatial-hit-scene/README.md) |
 | VBP manifest resolver | Local retained-session manifest/path boundary | [README](../integration/vbp-manifest-resolver/README.md) |
-| VBP older Verso viewer | Local renderer/update campaign; retained as a separate boundary, not the options factory | [README](../integration/vbp-verso-viewer/README.md) |
+| VBP older Verso viewer | Historical mount/unmount and retained-callback regression boundary; not current-code parity or the options factory | [README](../integration/vbp-verso-viewer/README.md) |
 
 ## Branch-only packages and experiments
 
@@ -52,9 +54,12 @@ These are not interchangeable with a main-based package recipe:
   the same directory at that commit contains
   `OPTIONS_PATH_CAPTURE_20260916.md`. Neither recipe is on main or claimed
   remotely published by this index.
-- Verso search remains branch-only in the FIR worktree named
-  `~/lean/verso/.worktrees/fir-verso-search`; resolve its branch and policy
-  before use. It is not a main recipe or a new canonical package pointer.
+- Verso search remains branch-only. The client experiment uses scalar priority
+  factors from FIR branch `perf/verso-search-qsort` at
+  `~/lean/verso/.worktrees/fir-verso-search-qsort`. Earlier full-ranker, bulk
+  and packed branches are distinct historical experiments, not interchangeable
+  APIs. Resolve the consumer's package and source policy before use; none is a
+  main recipe or a new main canonical pointer.
 
 ## Compiler and runtime fixture catalogs
 
