@@ -151,6 +151,17 @@ Factory-only dead-code elimination does not qualify callback execution.
 callback roots to actual `none` component execution. Full consumer parity,
 optional math and the working renderer pins remain separate.
 
+Progress `W7-ROOT-20260916-016` implements additive SDK/callback roots and
+passes nine compiled callback signatures plus the accepted renderer controls.
+The callback-rooted component now stops at native `Float.toString`, before
+linked component execution. Root chooses the thin pinned native formatter
+with an explicit existing-layout FIR String bridge (`ROOT-W7-20260916-018`).
+[Pinned Lean's native implementation](https://github.com/leanprover/lean4/blob/6a10ac8c22beadecabdbb0919c2b50214762f91d/src/runtime/object.cpp#L1905)
+normalizes NaNs and otherwise uses `std::to_string`. This is not a JS fallback
+or permission to extend the binary64-only libm contract silently. Any reusable
+provider/String-linking contract is isolated for root acceptance; the producer
+update is not a clean completion.
+
 Source/build/acceptance reports currently live in W7's ignored `.deps` and VBP's
 `.worktrees/_meta`, including `VBP-FIR-CURRENT-ACCEPTANCE-20260916-001.md`.
 These are local working evidence; GitHub CI is the durable validation run
