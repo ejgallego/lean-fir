@@ -6,8 +6,9 @@ their acceptance checks reject drift.
 
 For the wider source/build/adapter/client relationship across FIR, VIR and
 consumer repositories, see the [configuration map and analysis](package-build-client-map.md).
-That inventory also identifies integrations missing from this accepted-package
-index and distinguishes current packages from branch-only experiments.
+The index below distinguishes accepted outputs, recipe-level integrations and
+branch-only work. A build directory or a generated pointer alone is not an
+acceptance claim.
 
 ## Consumer packages
 
@@ -23,6 +24,37 @@ An accepted package has a real source entry, immutable publication,
 `BUILD.json`, complete checksums, a packaged smoke test, an explicit ABI and
 ownership contract, and a deterministic acceptance gate. Generated `_build`
 pointers are conveniences; their package metadata is authoritative.
+
+## Additional package recipes
+
+These integrations have their own source pins, policies and gates. Consult
+the linked policy and the selected package's `BUILD.json` for acceptance;
+do not infer it from this navigation table.
+
+| Integration | Boundary and status | Recipe / policy |
+| --- | --- | --- |
+| lean-zip | Stored control, Level-1 and production raw levels 1–10; distinct ByteArray oracles | [README](../integration/lean-zip/README.md), [raw generator and assertions](../integration/lean-zip/package-raw.mjs) |
+| Verso Flat formatting | Real `formatRenderedForRuntime`; Flat text/events, separate from PrettyTrace; unpublished-source builds remain provisional | [README and source gate](../integration/verso-flat/README.md), [source pin](../integration/verso-flat/verso-source.json) |
+| Verso complete HTML | Real formatting entry; escaped HTML and tag events, a distinct output oracle | [README](../integration/verso-html/README.md) |
+| Illuminate SpatialHitScene | Prepared spatial query, separate from linear HitScene | [README and gate](../integration/illuminate-spatial-hit-scene/README.md) |
+| VBP manifest resolver | Local retained-session manifest/path boundary | [README](../integration/vbp-manifest-resolver/README.md) |
+| VBP older Verso viewer | Local renderer/update campaign; retained as a separate boundary, not the options factory | [README](../integration/vbp-verso-viewer/README.md) |
+
+## Branch-only packages and experiments
+
+These are not interchangeable with a main-based package recipe:
+
+- VBP current Document renderer and options component live on the official
+  4.34 W7 child. The none-factory prototype `5fefee0c` and portable package
+  `c560f6a4` have matched frozen SSR/Chromium consumer qualification, not live
+  adoption or full 4.34 migration. Read the local object with
+  `git show c560f6a4:integration/vbp-native-session-probe/COMPONENT_PACKAGE_20260916.md`;
+  the same directory at that commit contains
+  `OPTIONS_PATH_CAPTURE_20260916.md`. Neither recipe is on main or claimed
+  remotely published by this index.
+- Verso search remains branch-only in the FIR worktree named
+  `~/lean/verso/.worktrees/fir-verso-search`; resolve its branch and policy
+  before use. It is not a main recipe or a new canonical package pointer.
 
 ## Compiler and runtime fixture catalogs
 
@@ -42,17 +74,6 @@ index ratchets the aggregate, while the artifact gate emits twice, compares
 bytes, and runs the registered products in real engines. Do not copy those
 inventories into this page.
 
-## Queued experiments
-
-These are not accepted catalog entries and must not be presented through a
-canonical package pointer:
-
-- Verso Flat has strong disposable native, Node, and browser evidence, but
-  publication waits for the recorded generic join/box admission fixes and a
-  clean, accepted Verso source revision.
-- Illuminate's timing-free selection dispatch is an adapter experiment over
-  the accepted v4 semantics; it remains distinct from the diagnostic API until
-  its interleaved benchmark and consumer gate pass.
 ## Lifecycle
 
 Add a package here only after its immutable acceptance artifact passes. Keep
@@ -60,3 +81,10 @@ an older package when it remains a distinct semantic oracle, deployment path,
 or regression boundary. Remove it when no consumer or unique gate remains;
 dated plans and bug cards remain historical evidence rather than active build
 entries.
+
+The old PrettyTrace/full-action/linear-HitScene and older VBP outputs have
+distinct gates or consumers; do not remove them simply because a newer
+representation exists. Superseded pending-publication text has been removed
+from this index. No package or staging directory is designated disposable
+here: resolve actual consumer staging scripts and pins first, then send any
+uncertain removal proposal to the integration owner.

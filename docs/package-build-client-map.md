@@ -163,12 +163,24 @@ Chrome evidence but did not independently rerun that campaign.
 
 `ROOT-W7-20260916-019` accepts the bounded session-retained prototype, not GC
 equivalence, runtime refinement, universal cross-libc equality, general/combined
-native-provider production adoption or full 4.34 migration. Consumer owns full
-matched parity; optional native math and nullable/form-value branch coverage
-remain separate. `ROOT-W7-20260916-020` assigns a minimal self-contained LOCAL
-package using existing verification/publication tools, without publication,
-canonical-pointer changes or live pin adoption. Old `4776f86e`/`a48bbb4a`
-outputs remain preserved.
+native-provider production adoption or full 4.34 migration. The portable local
+package at `c560f6a4` completes the bounded packaging request
+`ROOT-W7-20260916-020`: BUILD digest `33b3ad90…`, unchanged Wasm digest
+`98504ee7…`, included bootstrap/helpers and explicit external VIR/React
+providers. It needs no compiler or source setup to open. There is no canonical
+pointer or live pin adoption.
+
+Consumer `VBP-FIR-20260916-NONE-PARITY-001` establishes matched frozen
+none-factory SSR/Chromium qualification. This is not qualification of optional
+math, broader nullable/form/debug branches, GC, production native integration
+or the full 4.34 migration. The small measured content-phase consumer sample
+is not a producer optimization assignment. Old `4776f86e`/`a48bbb4a` outputs
+remain preserved as distinct regression boundaries, not obsolete staging by
+assumption. Read the local pinned portable handoff with
+`git show c560f6a4:integration/vbp-native-session-probe/COMPONENT_PACKAGE_20260916.md`.
+It documents the package boundary; its historical next-action language
+predates the subsequent consumer qualification. This is a branch-only local
+object, not a claim of remote publication.
 
 Source/build/acceptance reports currently live in W7's ignored `.deps` and VBP's
 `.worktrees/_meta`, including `VBP-FIR-CURRENT-ACCEPTANCE-20260916-001.md`.
@@ -194,7 +206,8 @@ a local path as an input. Directory labels alone are insufficient.
 
 1. Keep the accepted quiet-wrapper negative regressions in the tooling gate.
    Concise output must preserve the original exit status, not merely print a
-   failure label. Route the same fix through the official 4.34 tooling branch.
+   failure label. The exact fix is also present in official 4.34 child
+   `7cbd2978`; the four full-gate audit findings remain open separately.
 2. Keep [build-examples.md](build-examples.md) as FIR's package navigation index
    and the VIR catalog as the existing browser campaign manifest. Expand the
    index from reviewed package policies, without duplicating their inventories
@@ -217,3 +230,53 @@ a local path as an input. Directory labels alone are insufficient.
 
 The resulting division is simple: **source projects define what to build;
 producers define the executable and safe calls; clients define how to use it.**
+
+## Supported private source preparation
+
+`scripts/fir-source-prepare` prepares selected module setups using the supplied
+project's original Lake configuration and dependency authority. It does not
+compile a Wasm package, validate entry declaration existence, update sources,
+download a toolchain or replace a producer's acceptance gate.
+
+```sh
+scripts/fir-source-prepare \
+  --toolchain-dir /absolute/path/to/installed/exact/lean \
+  --lean-commit FULL_40_CHARACTER_LEAN_COMMIT \
+  --source /absolute/path/to/supplied/project \
+  --packages /absolute/path/to/dependency-paths.json \
+  --module Project.Module --entry Project.Module.function
+```
+
+The dependency file is only a JSON object mapping Lake package names to
+supplied directories; relative paths resolve beside that file. Supply every
+dependency named in the root and supplied dependency manifests. Original
+manifests/configurations are preserved; the private `--packages` file maps
+those identities to private source copies. No new source archive format is
+required. Inputs are trusted executable Lake projects, not hostile-config
+sandboxing. This first slice accepts regular files and rejects source symlinks.
+
+Each invocation creates a mode-700 workspace and `TMPDIR` below the current
+tooling worktree's ignored `.deps/tooling-tmp` before invoking Lake. Git
+mutation/rematerialization commands are rejected, Git network protocols are
+disabled, and setup preparation disables artifact-cache restoration. Existing
+`.git`, `.lake`, `.beam`, `.deps` and `_build` trees are not copied. Supply
+dependencies explicitly rather than using another checkout's mutable build
+state. Source file bytes/modes are checked before and after, both in supplied
+directories and private copies. Added non-build files also fail preservation.
+
+Success prints one line with the workspace path. `PREPARED.json` records source
+identities, exact toolchain/version/executable identities, the path-map hash,
+selected roots and consumed setup/artifact/plugin identities. Setup JSON is
+upstream Lake output, not a hand-authored replacement. Failure retains the
+full `lake.log` and propagates the child's nonzero exit status; `--verbose`
+prints full output after each command. Workspaces are disposable local state, not a run
+registry or immutable published package.
+
+Focused tests: `node --test tooling/source-prepare-unit.test.mjs`. An explicit
+installed-toolchain smoke, including a supplied Git dependency with an
+unreachable URL, is
+`node tooling/source-prepare-smoke.mjs TOOLCHAIN_DIRECTORY LEAN_COMMIT`.
+An optional third argument names the frozen W7 options workspace for a
+read-only setup-identity replay; it does not run Lake there or reuse its build
+state. Keep official 4.34 tests on its exact installed toolchain; this command
+does not move FIR's root pin or qualify the separate full-gate audit findings.
