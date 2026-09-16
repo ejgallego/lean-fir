@@ -128,6 +128,8 @@ re-exported.
   to direct C emission.
 - `docs/wasm-artifact-generation.md`: comparison and selection guide for the
   FIR-native and compiler-native Wasm artifact paths.
+- [Package/build/client map](docs/package-build-client-map.md): configuration
+  ownership and existing producer/client infrastructure across FIR and VIR.
 - `docs/pass-correctness-plan.md`: phase-aware semantics and compiler-pass
   correctness roadmap.
 - `docs/parallel-development.md`: worktree ownership, synchronization, and

@@ -4,6 +4,11 @@ This page is a navigation index, not another manifest. The linked Lean and
 JavaScript registries remain the sources of truth for exact inventories, and
 their acceptance checks reject drift.
 
+For the wider source/build/adapter/client relationship across FIR, VIR and
+consumer repositories, see the [configuration map and analysis](package-build-client-map.md).
+That inventory also identifies integrations missing from this accepted-package
+index and distinguishes current packages from branch-only experiments.
+
 ## Consumer packages
 
 | Package | Status | Lean entry | Build and acceptance gate | Canonical pointer |
