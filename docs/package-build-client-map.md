@@ -182,6 +182,19 @@ It documents the package boundary; its historical next-action language
 predates the subsequent consumer qualification. This is a branch-only local
 object, not a claim of remote publication.
 
+Consumer `VBP-FIR-20260916-ADAPTER-V2-ACCEPTANCE-001` qualifies the immutable
+W7 adapter candidate package `15fae0eb` for a bounded provisional experiment:
+32 producer controls (including scalar header snapshots, memory growth and
+nested-provider reentry) remain green, and same-input SSR/Chromium DOM parity
+holds. Across two unsampled production batches (four AB/BA rounds each), the
+decoded-document-to-React-elements phase improved from pooled median 2,538.50ms
+to 1,554.40ms (38.34% paired reduction; every pair improved). This excludes
+Document.decode, identity preparation and React commit, and is not a whole-
+widget or general runtime speedup claim. The candidate's FIR adapter sampled
+self share fell 46.21% to 20.56%; this is a consumer result only. Package
+identity `1138101e…`/`5fc1acd2…`, source/setup and Wasm remain unchanged; source
+landing is parked because main lacks the complete 4.34 prototype baseline.
+
 Source/build/acceptance reports currently live in W7's ignored `.deps` and VBP's
 `.worktrees/_meta`, including `VBP-FIR-CURRENT-ACCEPTANCE-20260916-001.md`.
 These are local working evidence; GitHub CI is the durable validation run
