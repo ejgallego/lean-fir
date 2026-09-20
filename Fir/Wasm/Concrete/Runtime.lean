@@ -1,4 +1,5 @@
 import Fir.Wasm.Concrete.Memory
+import Fir.Wasm.Concrete.RuntimeLayout
 
 namespace Fir.Wasm.Concrete
 
@@ -72,19 +73,6 @@ def uint32Field (field : String) (value : Nat) : Except ConcreteError UInt32 :=
     .ok (UInt32.ofNat value)
   else
     .error (.target (.headerValueOverflow field value))
-
-def promotedTagMarker : UInt32 := 1
-
-def bigNaturalMarker : UInt32 := 2
-
-/-- Experimental version marker for the current arbitrary-precision heap-Int
-layout. Clients may rely on the checked API, not on long-term layout stability. -/
-def integerSignMagnitudeMarker : UInt32 := 1
-
-/-- Version marker for the W6 string payload. Strings store their canonical
-UTF-8 bytes contiguously after the common header; `aux1` records the exact byte
-count and `aux2`/`aux3` remain reserved. -/
-def stringUtf8Marker : UInt32 := 1
 
 /-- Allocate the persistent heap representation of a semantic tagged payload
 that cannot fit in the wasm32 immediate word. -/
@@ -585,20 +573,6 @@ def writeScalarUInt64Field (state : MemoryState) (object : Word32)
   let address ← scalarFieldAddress object header slotIndex byteOffset 8
   let memory ← liftMemory <| state.memory.writeUInt64 address value
   return { state with memory }
-
-/-- Canonical little-endian base-`2^64` limbs. This is well-founded rather
-than `partial` so allocation correctness can use its equation theorem. -/
-def naturalLimbs (value : Nat) : List UInt64 :=
-  if _h : value < UInt64.size then
-    [UInt64.ofNat value]
-  else
-    UInt64.ofNat (value % UInt64.size) :: naturalLimbs (value / UInt64.size)
-termination_by value
-decreasing_by
-  apply Nat.div_lt_self
-  · have sizePositive : 0 < UInt64.size := by decide
-    omega
-  · decide
 
 /-- Install little-endian natural limbs.  It is public so allocation
 refinement can state and prove exact payload postconditions. -/

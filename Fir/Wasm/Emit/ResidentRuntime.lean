@@ -1,4 +1,4 @@
-import Fir.Wasm.Concrete.Runtime
+import Fir.Wasm.Concrete.RuntimeLayout
 import Fir.Wasm.Emit.Binary
 import Fir.Wasm.Emit.ResidentCallSite
 

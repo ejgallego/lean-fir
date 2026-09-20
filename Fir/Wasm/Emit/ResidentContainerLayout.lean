@@ -1,4 +1,4 @@
-import Fir.Wasm.Concrete.Runtime
+import Fir.Wasm.Concrete.RuntimeLayout
 
 namespace Fir.Wasm.Emit.ResidentContainerLayout
 

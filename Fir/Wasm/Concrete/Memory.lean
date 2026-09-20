@@ -1,4 +1,5 @@
 import Fir.Wasm.Concrete.Refinement
+import Fir.Wasm.Concrete.RuntimeLayout
 import Std.Tactic.BVDecide
 
 namespace Fir.Wasm.Concrete
@@ -35,8 +36,6 @@ inductive MemoryError where
 abbrev LinearMemory := Array UInt8
 
 def wasmPageBytes : Nat := 65536
-
-def heapBase : Nat := 1024
 
 namespace LinearMemory
 
