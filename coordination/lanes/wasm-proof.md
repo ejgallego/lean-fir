@@ -6,18 +6,18 @@ owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
 state: ready
-base: e1b41b10259edf9158a9dbb92550341737a46815
-functional-head: 7fb4787cb0ed4a5bd7def2b2c1cf60887fd70226
-contract-base: e1b41b10259edf9158a9dbb92550341737a46815
+base: bd09501eecb1104e172d76dc375f816a04dd3df1
+functional-head: 0fb6d9d7ec80e611dd4d5bc158ef1dabcf71a01a
+contract-base: bd09501eecb1104e172d76dc375f816a04dd3df1
 clean-at-update: true
-slice: Exact-root terminal extraction and executable return assembly. Successful source evaluation or interpreter completion yields executable Talos export termination with RefinedReturnPost at spec.sourceResultKind, rather than an existential ABI.
-files: integration/talos/FirTalos/ConcreteRootedTerminal.lean; integration/talos/FirTalos/TrustAudit.lean; integration/talos/FirTalos/TrustInventory.lean; integration/talos/PLAN.md; integration/talos/W6-OBSERVABLE-CONTRACT-AND-TRUST.md; integration/talos/W6-LEAN-ZIP-FIRST-EXAMPLE.md; coordination/lanes/wasm-proof.md
-contracts: none changed. Original runtime, ABI, relation, rank, dispatcher and W7 sources unchanged. Compiler admission, address-space safety, entry-runtime invariant and arity remain explicit. No target-path or client root/provenance premise added.
-checks: Beam update/sync/save and refreshed 159-endpoint audit pass. Beam stopped; lake -d integration/talos clean FirTalos and focused ConcreteRootedTerminal/TrustAudit batch build pass. Forced direct Lean passes. make check and make talos-check pass, including forced exact dependency audit; git diff --check passes. Local main rebase is current. Final containing-checkpoint checks are reported in the canonical review request.
-trust: Extraction uses exactly the standard three axioms. Three executable return endpoints inherit exactly the accepted three plus 57 individually recorded generated dependencies. No new axioms or trust approval.
-regressions: Actual extraction supplies target completion despite possible target-only case labels. Exact-root endpoint entails existential-kind compatibility but rejects unjustified arbitrary-kind substitution. The function theorem retains an arbitrary caller operand tail.
+slice: Generic production supported-export construction with exact declaration identity; derive concrete host key order, indexed key selection and table count, then adaptation/resolution alignment and exact host invocation-contract satisfaction.
+files: integration/talos/FirTalos/ConcreteSupportedPipeline.lean; integration/talos/FirTalos/ConcreteResolver.lean; integration/talos/FirTalos/TrustAudit.lean; integration/talos/FirTalos/TrustInventory.lean; integration/talos/PLAN.md; integration/talos/W6-OBSERVABLE-CONTRACT-AND-TRUST.md; integration/talos/W6-LEAN-ZIP-FIRST-EXAMPLE.md; coordination/lanes/wasm-proof.md
+contracts: none changed. Resolver executable definitions, runtime, ABI, relation, dispatcher, capture and W7 sources unchanged. The constructor derives handwritten context/function/index/body/layout and import-count fields. Supported-program/names checks, runtime/external contract alignment and named export lookup remain static premises; dynamic admission/resource/entry premises are untouched.
+checks: Beam probes/update/sync/save and refreshed 166-endpoint audit pass. Beam stopped; lake -d integration/talos clean FirTalos and focused ConcreteSupportedPipeline/TrustAudit batch build pass. Forced direct Lean for ConcreteResolver and ConcreteSupportedPipeline passes. make check and make talos-check pass, including forced exact audit; git diff --check passes. Local main rebase is current. Final containing-checkpoint gates are reported in the canonical request.
+trust: All seven new static endpoints have exactly the standard three axioms. Existing dynamic endpoint native dependencies unchanged. No new axioms or trust approval.
+regressions: Actual static constructor recovers selected declaration equality, function name, canonical cache row and effective result ABI. Resolver key-order theorem retains positions, multiplicity and exact import identity; no semantic operation contract is inferred merely from key identity.
 bug-cards: none new; FIR-BUG-wasm-none-endpoint-native-axiom-audit remains open.
-blockers: none for this slice. Compiler admission closure, fault correspondence, resident linking and encoded-byte correspondence are not claimed.
-handoff: Ready for standing fir/root; branch remains frozen at the clean containing status commit named by the canonical review request. Local-only; no main/board/W7 edits or push.
-next: Fresh proof-usable captureStored subject and static export/module-route census for the user-selected final-LCNF lean-zip milestone, coordinated with root/W7. ByteArray representation, operation coverage, object-result lazy misses and dynamic admission remain explicit follow-ups; no frontend/base semantics campaign started.
+blockers: none for this slice. Not full success-only compiler admission, capture fidelity, resident linking or encoded bytes.
+handoff: Ready for standing fir/root; frozen at clean containing checkpoint in canonical review request. Local-only; no main/board/W7 edit or push.
+next: Derive remaining runtime/external contract alignment and named export lookup generically. Root's ROOT-LZ-20260922-001 owns input nomination; kernel-referable captured-program reification and closed-closure/pruning correspondence remain separately coordinated. No ByteArray contract or frontend/base framework started.
 ```
