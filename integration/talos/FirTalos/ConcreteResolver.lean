@@ -351,4 +351,70 @@ theorem resolveHosts_runtime_at
   subst hosts
   exact resolveImports_runtime_at selected (by simpa using found) runtime
 
+private theorem resolveImports_external_at {offset : Nat}
+    {imports : List Import} {resolved : List ResolvedHost}
+    (h : resolveImports offset imports = .ok resolved)
+    {index : Nat} {sourceImport : Import} {name : Lean.Name}
+    (found : imports[index]? = some sourceImport)
+    (external : sourceImport.key = .external name) :
+    ∃ types resultKind host,
+      sourceImport.externalTypes? = some types ∧
+      sourceImport.signature.results = #[resultKind] ∧
+      types.params.size = sourceImport.signature.params.size ∧
+      resolved[index]? = some host ∧
+      host.function = externalFn {
+        name
+        paramTypes := types.params
+        resultType := types.result
+        signature := sourceImport.signature } resultKind := by
+  induction imports generalizing offset resolved index with
+  | nil => simp at found
+  | cons imp rest ih =>
+    simp only [resolveImports, Bind.bind, Except.bind, pure, Except.pure,
+      throw] at h
+    repeat' split at h
+    all_goals simp_all
+    all_goals
+      subst resolved
+      cases index with
+      | zero =>
+          simp only [List.getElem?_cons_zero, Option.some.injEq] at found
+          subst sourceImport
+          simp_all
+          all_goals
+            have resultSize : imp.signature.results.size = 1 := by omega
+            obtain ⟨single, singleEq⟩ := Array.size_eq_one_iff.mp resultSize
+            refine ⟨single, singleEq, ?_⟩
+            simp_all
+      | succ index =>
+          simp only [List.getElem?_cons_succ] at found ⊢
+          exact ih (by assumption) found
+
+/-- Successful resolution selects the external host built from the exact
+source import metadata at its original position. The singleton result and
+parameter-count facts are consequences of the resolver's validation. -/
+theorem resolveHosts_external_at
+    {source : Fir.Wasm.Module} {hosts : ResolvedHosts}
+    (resolved : resolveHosts source = .ok hosts)
+    {index : Nat} {sourceImport : Import} {name : Lean.Name}
+    (found : source.imports[index]? = some sourceImport)
+    (external : sourceImport.key = .external name) :
+    ∃ types resultKind host,
+      sourceImport.externalTypes? = some types ∧
+      sourceImport.signature.results = #[resultKind] ∧
+      types.params.size = sourceImport.signature.params.size ∧
+      hosts.hosts[index]? = some host ∧
+      host.function = externalFn {
+        name
+        paramTypes := types.params
+        resultType := types.result
+        signature := sourceImport.signature } resultKind := by
+  cases valid : validateModule source <;>
+    simp [resolveHosts, valid, Bind.bind, Except.bind, pure, Except.pure,
+      throw] at resolved
+  cases selected : resolveImports 0 source.imports.toList <;>
+    simp [selected] at resolved
+  subst hosts
+  exact resolveImports_external_at selected (by simpa using found) external
+
 end FirTalos.Concrete

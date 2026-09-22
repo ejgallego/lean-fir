@@ -1160,12 +1160,21 @@ it with exact runtime call-index selection and positional import adaptation.
 The supported-export constructor now derives runtime contract alignment from
 its existing adaptation/resolution equations, without a client premise.
 
-Static external contract alignment and named export lookup remain explicit.
+The external-contract successor proves exact declaration/import provenance in
+`LoweredInternalDeclaration.externalImport_at_of_callIndex`, excluding the
+named-function fallback. `externalImport_metadata` and `resolveHosts_external_at`
+retain the original source types, computed ABI, singleton result and installed
+host. `concreteExternalCallsAligned_ofPipeline` then derives the full existing
+alignment predicate from name uniqueness and the three pipeline equations.
+The export constructor and its regression no longer take `externalAligned`.
+This does not replace the source-semantic external implementation contract.
+
+Named export lookup remains explicit.
 `WasmSupported` is stronger than the current `validateSupported`
 gate; success of `lowerSupported` alone is not claimed to discharge it. This
 is not a capture-fidelity, closed-closure pruning, resident-linking or binary
-encoder theorem. The eleven static infrastructure endpoints use exactly the
-standard three axioms; the exact compiled inventory now checks 170 endpoints.
+encoder theorem. The fifteen static infrastructure endpoints use only standard
+axioms; the exact compiled inventory now checks 174 endpoints.
 
 ### Remaining terminal assembly obligations
 
@@ -1237,6 +1246,7 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | concrete resolver positional keys, count and indexed key lookup | 3 | 0 |
 | adaptation/resolution alignment and exact host-contract satisfaction | 3 | 0 |
 | selected runtime host/signature, import lookup/adaptation and derived runtime contracts | 3 | 0 |
+| exact external declaration/import metadata, resolver selection and derived external contracts | 3 | 0 |
 | production supported-export construction and selected declaration/result projection | 3 | 0 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |

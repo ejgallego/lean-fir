@@ -1,5 +1,4 @@
-import FirTalos.ConcreteReuseCapacityCacheCorrectness
-import FirTalos.ConcreteRuntimeAlignment
+import FirTalos.ConcreteExternalAlignment
 
 namespace FirTalos.Concrete
 
@@ -36,9 +35,9 @@ numeric index, local layout, or adapted body. The selected declaration identity
 is retained in the conclusion; its effective result ABI comes from lowering,
 and need not equal the declaration's unrefined public ABI classification.
 
-The supported-program/name checks, external contract alignment, and named
-export lookup remain explicit static obligations. Import count and runtime
-contract alignment are derived from successful adaptation and resolution.
+The supported-program/name checks and named export lookup remain explicit
+static obligations. Import count and runtime/external contract alignment are
+derived from the same successful lowering, adaptation and resolution pipeline.
 This constructor adds no source execution,
 target execution, current-step admission, address-space safety, or entry-frame
 premise; those belong to the subsequent runtime correctness theorem. The input
@@ -58,8 +57,6 @@ theorem ConcreteSupportedExport.exists_ofSupportedPipeline
     (lowered : Fir.Wasm.lowerSupported program = .ok sourceModule)
     (adapted : adapt sourceModule = .ok target)
     (resolved : resolveHosts sourceModule = .ok hosts)
-    (externalAligned :
-      ConcreteExternalCallsAligned program sourceModule target hosts)
     (found : program.findDecl? declaration.name = some declaration)
     (body : declaration.value = .code code)
     (classified :
@@ -92,7 +89,8 @@ theorem ConcreteSupportedExport.exists_ofSupportedPipeline
     hostsResolved := resolved
     hostsAligned := resolveHosts_aligned_of_adapt adapted resolved
     runtimeCallsAligned := concreteRuntimeCallsAligned_ofPipeline adapted resolved
-    externalCallsAligned := externalAligned
+    externalCallsAligned :=
+      concreteExternalCallsAligned_ofPipeline namesUnique lowered adapted resolved
     exported := exported.trans row.callIndexEq }
   exact ⟨context, sourceFunction, spec, row.contextCaches, rfl⟩
 
@@ -118,8 +116,8 @@ theorem ConcreteSupportedExport.selectedDeclarationResult
 
 /-- Regression through the actual constructor: the selected declaration's
 identity, cache row and effective result survive the whole static assembly.
-Neither a handwritten function/index, import-count premise, nor runtime-contract
-alignment premise is supplied. -/
+Neither a handwritten function/index, import-count premise, nor runtime/external
+contract alignment premise is supplied. -/
 example
     {program : Fir.LeanIR.ImpureProgram} {sourceModule : Fir.Wasm.Module}
     {target : AdaptedModule} {hosts : ResolvedHosts}
@@ -130,7 +128,6 @@ example
     (lowered : Fir.Wasm.lowerSupported program = .ok sourceModule)
     (adapted : adapt sourceModule = .ok target)
     (resolved : resolveHosts sourceModule = .ok hosts)
-    (externalAligned : ConcreteExternalCallsAligned program sourceModule target hosts)
     (found : program.findDecl? declaration.name = some declaration)
     (body : declaration.value = .code code)
     (classified : Fir.Wasm.abiKind? declaration.type = .ok (some resultKind))
@@ -146,7 +143,7 @@ example
           some spec.sourceResultKind := by
   obtain ⟨context, sourceFunction, spec, caches, selected⟩ :=
     ConcreteSupportedExport.exists_ofSupportedPipeline supported namesUnique
-      lowered adapted resolved externalAligned found body
+      lowered adapted resolved found body
       classified exported
   exact ⟨context, sourceFunction, spec, caches, selected,
     spec.selectedDeclarationResult selected⟩

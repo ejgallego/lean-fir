@@ -14002,6 +14002,129 @@ theorem LoweredInternalDeclaration.callSignatureResult_of_external
                         externalImported resultSelected
           simp [Fir.Wasm.Module.callSignature?, foundEq, foundResult]
 
+/-- An external declaration call selects the exact import emitted from that
+declaration by production lowering. Successful external traversal first proves
+that the import lookup succeeds, excluding the adapter's function fallback.
+Name uniqueness then identifies the selected import's source declaration; no
+client-supplied signature, metadata, or numeric layout certificate is needed. -/
+theorem LoweredInternalDeclaration.externalImport_at_of_callIndex
+    {program : Fir.LeanIR.ImpureProgram}
+    {source : Fir.Wasm.Module}
+    {declarationName : Name}
+    {declaration : LCNF.Decl .impure}
+    {index : Nat}
+    (namesUnique : program.NamesUnique)
+    (lowered : Fir.Wasm.lower program = .ok source)
+    (declarationFound :
+      program.findDecl? declarationName = some declaration)
+    (external : ∃ metadata, declaration.value = .extern metadata)
+    (called : callIndex? source (.declaration declarationName) = some index) :
+    ∃ imp, Fir.Wasm.externalImport declaration = .ok imp ∧
+      source.imports[index]? = some imp := by
+  obtain ⟨metadata, bodyEq⟩ := external
+  obtain ⟨externalImports, importsEq, externalMappedArray⟩ :=
+    LoweredInternalDeclaration.imports_of_lower lowered
+  have externalMappedList :
+      (program.decls.toList.filterMapM (fun sourceDeclaration =>
+            match sourceDeclaration.value with
+            | .extern _ => do
+                match Fir.Wasm.externalImport sourceDeclaration with
+                | .ok import_ => return some import_
+                | .error error =>
+                    throw (Fir.Wasm.CompileError.abi error)
+            | .code _ => pure none) :
+        Except Fir.Wasm.CompileError (List Fir.Wasm.Import)) =
+          Except.ok externalImports.toList := by
+    rw [← Array.toList_filterMapM]
+    rw [externalMappedArray]
+    rfl
+  have declarationMember : declaration ∈ program.decls.toList := by
+    obtain ⟨_, declarationIndex, inBounds, selected, _⟩ :=
+      Array.find?_eq_some_iff_getElem.mp declarationFound
+    have member : declaration ∈ program.decls := by
+      rw [← selected]
+      exact Array.getElem_mem inBounds
+    simpa using member
+  obtain ⟨result, declarationMapped⟩ :=
+    exceptListFilterMapM_ok_of_mem externalMappedList declarationMember
+  cases imported : Fir.Wasm.externalImport declaration with
+  | error error => simp [bodyEq, imported] at declarationMapped
+  | ok targetImport =>
+      have targetSelected :
+          (match declaration.value with
+            | .extern _ => do
+                match Fir.Wasm.externalImport declaration with
+                | .ok import_ => return some import_
+                | .error error =>
+                    throw (Fir.Wasm.CompileError.abi error)
+            | .code _ => pure none) =
+            (Except.ok (some targetImport) :
+              Except Fir.Wasm.CompileError (Option Fir.Wasm.Import)) := by
+        simp [bodyEq, imported, pure, Except.pure]
+      have targetExternalMember : targetImport ∈ externalImports.toList :=
+        exceptListFilterMapM_mem_of_mem externalMappedList declarationMember
+          targetSelected
+      have targetImportMember : targetImport ∈ source.imports := by
+        rw [importsEq]
+        apply Array.mem_append.mpr
+        exact .inr (by simpa using targetExternalMember)
+      have targetName : targetImport.declaration? = some declarationName :=
+        (externalImport_declaration? imported).trans
+          (congrArg some (declarationName_of_findDecl? declarationFound))
+      have importFound :
+          findImportTarget? source (.declaration declarationName) = some index := by
+        cases selected : findImportTarget? source (.declaration declarationName) with
+        | none =>
+            have rejected := Array.findIdx?_eq_none_iff.mp selected
+              targetImport targetImportMember
+            simp [targetName] at rejected
+        | some selectedIndex =>
+            simpa [callIndex?, selected] using called
+      obtain ⟨inBounds, matching, _⟩ :=
+        Array.findIdx?_eq_some_iff_getElem.mp importFound
+      let imp := source.imports[index]
+      have impFound : source.imports[index]? = some imp :=
+        Array.getElem?_eq_getElem inBounds
+      have impName : imp.declaration? = some declarationName :=
+        beq_iff_eq.mp matching
+      have impMember : imp ∈ source.imports := Array.getElem_mem inBounds
+      refine ⟨imp, ?_, impFound⟩
+      rw [importsEq] at impMember
+      rcases Array.mem_append.mp impMember with runtimeMember | externalMember
+      · obtain ⟨operationIndex, operationInBounds, runtimeEq⟩ :=
+          Array.exists_of_mem_mapIdx runtimeMember
+        have noDeclaration : imp.declaration? = none := by
+          rw [← runtimeEq]
+          rfl
+        rw [noDeclaration] at impName
+        contradiction
+      · have externalMemberList : imp ∈ externalImports.toList := by
+          simpa using externalMember
+        obtain ⟨externalDeclaration, externalDeclarationMember, externalSelected⟩ :=
+          exceptListFilterMapM_source_of_mem externalMappedList externalMemberList
+        cases externalValue : externalDeclaration.value with
+        | code externalCode =>
+            simp [externalValue, pure, Except.pure] at externalSelected
+        | extern externalMetadata =>
+            cases externalImported : Fir.Wasm.externalImport externalDeclaration with
+            | error error =>
+                simp [externalValue, externalImported] at externalSelected
+            | ok externalImport =>
+                simp only [externalValue, externalImported, pure, Except.pure,
+                  Except.ok.injEq, Option.some.injEq] at externalSelected
+                subst externalImport
+                have externalName := externalImport_declaration? externalImported
+                have namesEq : externalDeclaration.name = declaration.name := by
+                  rw [externalName] at impName
+                  exact (Option.some.inj impName).trans
+                    (declarationName_of_findDecl? declarationFound).symm
+                have declarationsEq : externalDeclaration = declaration :=
+                  declaration_eq_of_namesUnique namesUnique
+                    externalDeclarationMember declarationMember namesEq
+                have importedAt : Fir.Wasm.externalImport declaration = .ok imp := by
+                  simpa [declarationsEq] using externalImported
+                exact imported.symm.trans importedAt
+
 /-- Supported whole-module lowering determines every generated lazy-cache
 result lane from the selected source declaration.  Internal rows use the
 effective result stored on the generated function; external rows use the

@@ -437,19 +437,26 @@ successful adaptation and concrete host resolution. Runtime call-index lookup
 selects the exact symbolic identity; `resolveHosts_runtime_at` exposes the
 selected executable host and exact semantic signature; adaptation retains its
 numeric import slot. The supported-export constructor no longer asks clients
-for runtime contract alignment. These four new endpoints also use only the
-standard three axioms; the exact audit contains 170 endpoints.
+for runtime contract alignment. These four endpoints use only standard axioms.
+
+`ConcreteExternalAlignment.lean` now derives `ConcreteExternalCallsAligned`
+from name uniqueness and successful lowering/adaptation/resolution. The exact
+lowered declaration produces the selected import, excluding an internal-function
+fallback. Resolution retains its original source parameter/result expressions,
+singleton result and executable external host at the same numeric slot. The
+constructor no longer asks clients for external contract alignment either.
+The four external-alignment endpoints use only standard axioms; the exact audit
+contains 174 endpoints. These are contract-selection theorems, not new proofs
+that arbitrary external implementations satisfy source-semantic contracts.
 
 This removes static assembly work, not dynamic admission. `WasmSupported`, name
-uniqueness, external contract alignment, selected ABI classification,
+uniqueness, selected ABI classification,
 pipeline equations and named export lookup remain explicit static obligations.
 In particular `lowerSupported` success alone does not currently imply the
 stronger `WasmSupported` closure-flow check. Exact import keys alone do not
 establish semantic contract alignment; the new theorem additionally proves
-which function the resolver selected. The external successor needs exact
-declaration metadata at the selected import slot (including ruling out the
-named-function fallback), not just a matching external name. Captured-program
-reification and the distinct
+which function the resolver selected. Named export lookup remains the next
+static table obligation. Captured-program reification and the distinct
 closed-closure/pruning production route remain separately coordinated.
 
 ### Intended result
