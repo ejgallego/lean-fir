@@ -9,7 +9,11 @@ bash tooling/talos-434/check.sh
 
 `check.sh` repeats the identity-checked setup, then builds
 `FirTalos.ConcreteResidentFloat` and the full `FirTalos` umbrella (including
-`TrustAudit`). All mutable source and Lake state stays under
+`TrustAudit`). Before building, it runs the fail-closed profile negatives and
+the trusted-assumption validator against the overlay project's explicit
+toolchain. It authenticates the exact compiler version and commit plus the
+W6-reviewed upstream and local checker source hashes. The ordinary no-argument
+validator remains the Lean 4.33 audit. All mutable source and Lake state stays under
 `.deps/talos-434/` in this worktree. The normal 4.33
 `integration/talos` setup, toolchain, manifest, and package directory are
 untouched.
@@ -26,6 +30,7 @@ the complete FIR Talos Lean-source tree before and after this insertion.
 It fails if a later FIR/W6 edit changes that reviewed source identity; update
 the overlay explicitly after the new proof checkpoint is integrated.
 
-This is a compatibility proof build, not an official migration of FIR or
-Talos to 4.34. The separate trusted-assumption/bridge gate remains for root
-and W6 to decide; `make check` is not claimed green by this overlay.
+This is audited compatibility evidence, not a kernel proof of the universal
+bridge proposition and not an official migration of FIR or Talos to 4.34.
+The legacy `lean433UpstreamBridge` name is intentionally retained for the one
+audited assumption reviewed under both authenticated compiler identities.

@@ -156,3 +156,22 @@ proof normalization in an isolated `.deps/talos-434` project. It rejects
 unreviewed FIR source, overlay files, and dependency identities. The full
 `ConcreteResidentFloat` and `FirTalos` cone passes through this recipe;
 the official 4.33 `talos-setup`/`talos-check` path has not been changed.
+
+## Versioned trusted-assumption audit (2026-09-22)
+
+Following W6's exact-RC2 compatibility review, the trusted-assumption
+validator now has two closed profiles. Its no-argument/default profile remains
+Lean 4.33. The 4.34 profile is invoked only by
+`tooling/talos-434/check.sh`, with the generated overlay project supplied
+explicitly. Both profiles authenticate the toolchain pin, compiler version
+and commit, the reviewed `AlphaEqv`, `Basic`, `SimpCase`, and `ElimDead`
+source hashes, the local transparent checker and trusted-wrapper hashes, and
+exactly the existing single registered axiom. Unknown and crossed compiler
+identities, changed or missing sources, and extra or missing axioms fail
+closed in focused negative tests.
+
+The legacy `lean433UpstreamBridge` name is intentionally retained. W6
+certified compatibility of that same audited assumption with exact Lean
+4.34.0-rc2; neither source hashes nor finite conformance probes constitute a
+kernel proof of its universal proposition. This is 4.34 gate plumbing, not a
+pin move or approval to migrate `main`.
