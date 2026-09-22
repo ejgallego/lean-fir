@@ -1169,12 +1169,18 @@ alignment predicate from name uniqueness and the three pipeline equations.
 The export constructor and its regression no longer take `externalAligned`.
 This does not replace the source-semantic external implementation contract.
 
-Named export lookup remains explicit.
+Canonical named-export lookup is now derived too. `ConcreteExportRows.lean`
+recovers the declaration's exact source export and function index;
+`Correctness/Exports.lean` derives public string-name uniqueness from successful
+Talos validation and exact `findExport` from membership. The constructor's
+export name is the actual `declaration.name.toString`; no caller export-table
+equation or injectivity assumption on name rendering is required.
+
 `WasmSupported` is stronger than the current `validateSupported`
 gate; success of `lowerSupported` alone is not claimed to discharge it. This
 is not a capture-fidelity, closed-closure pruning, resident-linking or binary
-encoder theorem. The fifteen static infrastructure endpoints use only standard
-axioms; the exact compiled inventory now checks 174 endpoints.
+encoder theorem. The twenty-three static infrastructure endpoints use only
+standard axioms; the exact compiled inventory now checks 182 endpoints.
 
 ### Remaining terminal assembly obligations
 
@@ -1247,6 +1253,8 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | adaptation/resolution alignment and exact host-contract satisfaction | 3 | 0 |
 | selected runtime host/signature, import lookup/adaptation and derived runtime contracts | 3 | 0 |
 | exact external declaration/import metadata, resolver selection and derived external contracts | 3 | 0 |
+| production source export rows, target validity, adapter/canonical export lookup | 3 | 0 |
+| target validation implies unique public function-export names | 2 | 0 |
 | production supported-export construction and selected declaration/result projection | 3 | 0 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |

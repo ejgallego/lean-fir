@@ -1,4 +1,6 @@
 import FirTalos.ConcreteExternalAlignment
+import FirTalos.ConcreteExportRows
+import FirTalos.Correctness.Exports
 
 namespace FirTalos.Concrete
 
@@ -27,6 +29,26 @@ theorem resolveHosts_satisfy_of_adapt
     hosts.env.Satisfies target.wasmModule hosts.spec :=
   hosts.satisfies target.wasmModule (resolveHosts_aligned_of_adapt adapted resolved)
 
+/-- The selected production declaration has its actual canonical export at
+the generated target index. String-name uniqueness is derived from target
+validation, not assumed of `Name.toString`. -/
+theorem ConcreteGeneratedInternalDeclaration.canonicalExport
+    {program : Fir.LeanIR.ImpureProgram} {declaration : LCNF.Decl .impure}
+    {context : Fir.Wasm.Context} {code : LCNF.Code .impure}
+    {source : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    (row : ConcreteGeneratedInternalDeclaration program declaration context code
+      source sourceFunction target)
+    (namesUnique : program.NamesUnique)
+    (lowered : Fir.Wasm.lowerSupported program = .ok source)
+    (adapted : adapt source = .ok target) :
+    target.wasmModule.findExport declaration.name.toString =
+      some row.targetFunctionIndex := by
+  have ordinary := LazyCacheGeneratedEnvironment.lower_of_lowerSupported lowered
+  rw [row.targetFunctionIndex_eq]
+  exact adapt_findExport_of_sourceExport adapted (row.sourceExport_mem ordinary)
+    (row.sourceFunctionIndex_of_lower namesUnique ordinary)
+
 /-- Construct a supported export from the production-generated row, without
 requiring an existing export witness.
 
@@ -35,9 +57,11 @@ numeric index, local layout, or adapted body. The selected declaration identity
 is retained in the conclusion; its effective result ABI comes from lowering,
 and need not equal the declaration's unrefined public ABI classification.
 
-The supported-program/name checks and named export lookup remain explicit
-static obligations. Import count and runtime/external contract alignment are
-derived from the same successful lowering, adaptation and resolution pipeline.
+The supported-program/name checks remain explicit static obligations. Import
+count, runtime/external contract alignment and canonical named export lookup
+are derived from the same successful lowering, adaptation and resolution
+pipeline. The export name is the selected declaration's actual printed name,
+not an arbitrary caller-provided alias.
 This constructor adds no source execution,
 target execution, current-step admission, address-space safety, or entry-frame
 premise; those belong to the subsequent runtime correctness theorem. The input
@@ -51,7 +75,6 @@ theorem ConcreteSupportedExport.exists_ofSupportedPipeline
     {declaration : LCNF.Decl .impure}
     {code : LCNF.Code .impure}
     {resultKind : AbiKind}
-    {exportName : String}
     (supported : Fir.Wasm.WasmSupported program)
     (namesUnique : program.NamesUnique)
     (lowered : Fir.Wasm.lowerSupported program = .ok sourceModule)
@@ -60,13 +83,10 @@ theorem ConcreteSupportedExport.exists_ofSupportedPipeline
     (found : program.findDecl? declaration.name = some declaration)
     (body : declaration.value = .code code)
     (classified :
-      Fir.Wasm.abiKind? declaration.type = .ok (some resultKind))
-    (exported :
-      target.wasmModule.findExport exportName =
-        callIndex? sourceModule (.declaration declaration.name)) :
+      Fir.Wasm.abiKind? declaration.type = .ok (some resultKind)) :
     ∃ context sourceFunction,
       ∃ spec : ConcreteSupportedExport program context code sourceModule
-          sourceFunction target hosts exportName,
+          sourceFunction target hosts declaration.name.toString,
       context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program ∧
         spec.sourceDeclaration = declaration := by
   let caller : Fir.Wasm.Context := {
@@ -77,7 +97,7 @@ theorem ConcreteSupportedExport.exists_ofSupportedPipeline
     ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipeline
       (caller := caller) rfl rfl namesUnique lowered adapted found body classified
   let spec : ConcreteSupportedExport program context code sourceModule
-      sourceFunction target hosts exportName := {
+      sourceFunction target hosts declaration.name.toString := {
     row with
     programSupported := supported
     programNamesUnique := namesUnique
@@ -91,7 +111,7 @@ theorem ConcreteSupportedExport.exists_ofSupportedPipeline
     runtimeCallsAligned := concreteRuntimeCallsAligned_ofPipeline adapted resolved
     externalCallsAligned :=
       concreteExternalCallsAligned_ofPipeline namesUnique lowered adapted resolved
-    exported := exported.trans row.callIndexEq }
+    exported := row.canonicalExport namesUnique lowered adapted }
   exact ⟨context, sourceFunction, spec, row.contextCaches, rfl⟩
 
 /-- Regression for the selector's identity-carrying result: both the function
@@ -116,13 +136,13 @@ theorem ConcreteSupportedExport.selectedDeclarationResult
 
 /-- Regression through the actual constructor: the selected declaration's
 identity, cache row and effective result survive the whole static assembly.
-Neither a handwritten function/index, import-count premise, nor runtime/external
-contract alignment premise is supplied. -/
+Neither a handwritten function/index, import-count premise, runtime/external
+contract alignment premise, nor named export lookup is supplied. -/
 example
     {program : Fir.LeanIR.ImpureProgram} {sourceModule : Fir.Wasm.Module}
     {target : AdaptedModule} {hosts : ResolvedHosts}
     {declaration : LCNF.Decl .impure} {code : LCNF.Code .impure}
-    {resultKind : AbiKind} {exportName : String}
+    {resultKind : AbiKind}
     (supported : Fir.Wasm.WasmSupported program)
     (namesUnique : program.NamesUnique)
     (lowered : Fir.Wasm.lowerSupported program = .ok sourceModule)
@@ -130,22 +150,22 @@ example
     (resolved : resolveHosts sourceModule = .ok hosts)
     (found : program.findDecl? declaration.name = some declaration)
     (body : declaration.value = .code code)
-    (classified : Fir.Wasm.abiKind? declaration.type = .ok (some resultKind))
-    (exported : target.wasmModule.findExport exportName =
-      callIndex? sourceModule (.declaration declaration.name)) :
+    (classified : Fir.Wasm.abiKind? declaration.type = .ok (some resultKind)) :
     ∃ context sourceFunction,
       ∃ spec : ConcreteSupportedExport program context code sourceModule
-          sourceFunction target hosts exportName,
+          sourceFunction target hosts declaration.name.toString,
       context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program ∧
         spec.sourceDeclaration = declaration ∧
         sourceFunction.name = declaration.name ∧
         Fir.Wasm.effectiveDeclarationResultKind? declaration =
-          some spec.sourceResultKind := by
+          some spec.sourceResultKind ∧
+        target.wasmModule.findExport declaration.name.toString =
+          some spec.targetFunctionIndex := by
   obtain ⟨context, sourceFunction, spec, caches, selected⟩ :=
     ConcreteSupportedExport.exists_ofSupportedPipeline supported namesUnique
       lowered adapted resolved found body
-      classified exported
-  exact ⟨context, sourceFunction, spec, caches, selected,
-    spec.selectedDeclarationResult selected⟩
+      classified
+  obtain ⟨named, result⟩ := spec.selectedDeclarationResult selected
+  exact ⟨context, sourceFunction, spec, caches, selected, named, result, spec.exported⟩
 
 end FirTalos.Concrete

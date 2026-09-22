@@ -89,24 +89,36 @@ premise now. This does not prove arbitrary external implementations correct.
 
 Remaining constructor premises are static: `WasmSupported`, `NamesUnique`,
 actual lowering/adaptation/resolution equations, selected declaration/body/ABI
-classification, and a named export lookup.
+classification. Canonical export lookup is now derived internally as well.
 The current `validateSupported` gate does not by itself provide the additional
 closure-flow condition in `WasmSupported`. These premises must not be disguised
 as execution certificates. Dynamic current-step admission, resource safety and
-entry-runtime refinement are separate subsequent obligations. All fifteen
+entry-runtime refinement are separate subsequent obligations. All twenty-three
 static infrastructure endpoints depend only on Lean's three standard axioms.
 
-The next static proof is named export lookup from the actual adapted table.
-It must identify the selected export and its numeric declaration target without
-assuming that `Name.toString` is injective. Successful adaptation validates
-uniqueness of the target's string export names; that checked fact should
-justify the first-match lookup. A reusable adapter lemma should derive
-`findExport name.toString = some (source.imports.size + index)` from source
-export membership and the selected source-function index. Production lowering
-exports every generated function; its exact export-table equation is the
-remaining bridge to the selected declaration row. Source admission, entry/resource
-contracts and capture fidelity remain separate; the shared simulation relation
-and production admission set are unchanged.
+`lower_exports_eq_functionNames` exposes production lowering's exact export
+table; the generated row retains its source index and declaration name.
+`adapt_findExport_of_sourceExport` derives
+`findExport name.toString = some (source.imports.size + index)` from the actual
+source export and function lookup. It uses target validation's checked string
+name uniqueness, not `Name.toString` injectivity. `row.canonicalExport` then
+connects the lookup to that row's target index. The constructor returns an
+export at `declaration.name.toString`, not an arbitrary caller-selected alias.
+Its regression also recovers the concrete export lookup without supplying it.
+
+The next static boundary is the exact relationship between the remaining
+source-check premises and the production checker. Do not claim the stronger
+closure-flow condition follows from `lowerSupported` without a theorem.
+The bounded target is to expose successful `validateSupported` as supported
+declarations plus reuse-capacity safety, then prove that its remaining
+`WasmSupported` obligation is precisely `closureFlowSafeProgram = true`.
+That extra check is not currently performed by `validateSupported`.
+`NamesUnique` is likewise not checked there: it may be supplied by the existing
+checked-program boundary, or eventually derived from declaration traversal and
+successful symbolic validation. Neither implication is assumed by this slice.
+Source admission, entry/resource contracts and capture fidelity remain
+separate; the shared simulation relation and production admission set are
+unchanged.
 
 Capture review found that the production `Artifact.program` and olean capture
 cache already retain full AST data, but as elaborator environment state, not

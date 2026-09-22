@@ -445,18 +445,28 @@ lowered declaration produces the selected import, excluding an internal-function
 fallback. Resolution retains its original source parameter/result expressions,
 singleton result and executable external host at the same numeric slot. The
 constructor no longer asks clients for external contract alignment either.
-The four external-alignment endpoints use only standard axioms; the exact audit
-contains 174 endpoints. These are contract-selection theorems, not new proofs
+The four external-alignment endpoints use only standard axioms. These are
+contract-selection theorems, not new proofs
 that arbitrary external implementations satisfy source-semantic contracts.
+
+The canonical-export successor in `ConcreteExportRows.lean` and
+`Correctness/Exports.lean` proves the source export row and exact target lookup.
+Successful target validation supplies uniqueness of public string names; no
+injectivity assumption on `Name.toString` is used. The export constructor now
+selects `declaration.name.toString` itself and derives its numeric lookup,
+removing the caller's `exported` premise. Eight new endpoints use only standard
+axioms (the validator uniqueness lemma needs only `propext` and `Quot.sound`);
+the exact audit contains 182 endpoints.
 
 This removes static assembly work, not dynamic admission. `WasmSupported`, name
 uniqueness, selected ABI classification,
-pipeline equations and named export lookup remain explicit static obligations.
+and pipeline equations remain explicit static obligations.
 In particular `lowerSupported` success alone does not currently imply the
 stronger `WasmSupported` closure-flow check. Exact import keys alone do not
 establish semantic contract alignment; the new theorem additionally proves
-which function the resolver selected. Named export lookup remains the next
-static table obligation. Captured-program reification and the distinct
+which function the resolver selected. Remaining static source checks must be
+derived at their actual checker boundary, without silently strengthening
+`lowerSupported` success. Captured-program reification and the distinct
 closed-closure/pruning production route remain separately coordinated.
 
 ### Intended result
