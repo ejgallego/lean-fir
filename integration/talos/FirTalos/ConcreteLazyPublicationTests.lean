@@ -73,13 +73,9 @@ private theorem publication_initial_retainedToken_ordinary :
   rw [cellEq]
   simp [retainedCell]
 
-theorem publication_preserves_distinctRetainedTokenFacts :
-    ReuseTokenOrdinaryBindTransport retainedFacts resultId
-      publicationRuntime (publicationRuntime.setGlobal `cache publishedRoot)
-      retainedEnv publishedRoot := by
-  apply ReuseTokenOrdinaryBindTransport.precompose
-    (beforePublication := OrdinaryPersistenceTransport.refl publicationRuntime)
-  apply ReuseTokenOrdinaryBindTransport.ofPublicationDisjoint
+private theorem publication_disjoint :
+    ReuseTokenPublicationDisjoint retainedFacts publicationRuntime retainedEnv
+      publishedRoot := by
   intro tokenId available location tracked tokenLookup reachable
   have tokenLookup' := tokenLookup
   simp [retainedEnv, retainedToken, retainedLocation, lookup] at tokenLookup'
@@ -107,6 +103,80 @@ theorem publication_preserves_distinctRetainedTokenFacts :
     intro locationEqZero
     apply rootNe
     exact locationEq.symm.trans locationEqZero)) reachable
+
+theorem publication_preserves_distinctRetainedTokenFacts :
+    ReuseTokenOrdinaryBindTransport retainedFacts resultId
+      publicationRuntime (publicationRuntime.setGlobal `cache publishedRoot)
+      retainedEnv publishedRoot := by
+  apply ReuseTokenOrdinaryBindTransport.precompose
+    (beforePublication := OrdinaryPersistenceTransport.refl publicationRuntime)
+  exact ReuseTokenOrdinaryBindTransport.ofPublicationDisjoint `cache
+    publication_disjoint
+
+/-- The same publication which refutes all-location transport above is a
+valid prefix for the fixed caller's nonempty retained-token frame. -/
+theorem publication_retainedTransport :
+    ReuseTokenOrdinaryTransport retainedFacts retainedEnv publicationRuntime
+      (publicationRuntime.setGlobal `cache publishedRoot) :=
+  ReuseTokenOrdinaryTransport.ofPublicationDisjoint `cache publication_disjoint
+
+private theorem publication_after_disjoint :
+    ReuseTokenPublicationDisjoint retainedFacts
+      (publicationRuntime.setGlobal `cache publishedRoot) retainedEnv
+      publishedRoot := by
+  intro tokenId available location tracked tokenLookup reachable
+  have tokenLookup' := tokenLookup
+  simp [retainedEnv, retainedToken, retainedLocation, lookup] at tokenLookup'
+  have locationEq : location = retainedLocation := tokenLookup'.2.symm
+  have noOtherReach :
+      ∀ {loc : Location}, loc ≠ publishedLocation →
+        ¬ Reachable (publicationRuntime.setGlobal `cache publishedRoot).heap
+          [publishedRoot] loc := by
+    intro loc locNe reachable
+    induction reachable with
+    | root member =>
+        apply locNe
+        simpa [publishedRoot] using member
+    | child parentReachable found member reference ih =>
+        rename_i parent child cell value
+        have noChildren : cell.object.ownedValues = #[] := by
+          change findCell? [(0, { publishedCell with rc := 0, persistent := true }),
+            (1, retainedCell)] parent = some cell at found
+          simp only [findCell?] at found
+          split at found
+          · cases Option.some.inj found
+            rfl
+          · split at found
+            · cases Option.some.inj found
+              rfl
+            · contradiction
+        rw [noChildren] at member
+        simp at member
+  exact noOtherReach (by simp [locationEq, retainedLocation, publishedLocation])
+    reachable
+
+/-- Nested heap-cache publication followed by destination binding preserves
+the caller frame even though its first prefix lacks all-location transport. -/
+theorem twoPublications_preserve_retainedTokenFacts :
+    ReuseTokenOrdinaryBindTransport retainedFacts resultId publicationRuntime
+      ((publicationRuntime.setGlobal `cache publishedRoot).setGlobal
+        `outerCache publishedRoot) retainedEnv publishedRoot := by
+  exact ReuseTokenOrdinaryBindTransport.precomposeRetained
+    publication_retainedTransport
+    (ReuseTokenOrdinaryTransport.eraseBind
+      (ReuseTokenOrdinaryTransport.ofPublicationDisjoint `outerCache
+        publication_after_disjoint))
+
+/-- Non-vacuous use of the composed transport, starting with an actual
+ordinary retained token and ending with both cache publications installed. -/
+theorem twoPublications_post_retainedToken_ordinary :
+    ReuseTokenOrdinaryRel (eraseReuseCapacityFact retainedFacts resultId)
+      ((publicationRuntime.setGlobal `cache publishedRoot).setGlobal
+        `outerCache publishedRoot) (bind retainedEnv resultId publishedRoot) := by
+  have complete := publication_retainedTransport.trans
+    (ReuseTokenOrdinaryTransport.ofPublicationDisjoint `outerCache
+      publication_after_disjoint)
+  exact complete.eraseBind publication_initial_retainedToken_ordinary
 
 theorem publication_post_retainedToken_ordinary :
     ReuseTokenOrdinaryRel (eraseReuseCapacityFact retainedFacts resultId)

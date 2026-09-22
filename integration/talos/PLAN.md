@@ -61,6 +61,16 @@ The successor must preserve the caller's retained tokens through an appropriate
 stack transport and derive their disjointness from the published graph. No
 runtime contract, central relation, or admission restriction changes here.
 
+The same helper now provides `ReuseTokenOrdinaryTransport` for a fixed
+suspended caller's facts and environment. Reflexivity, composition, ordinary
+operation compatibility, publication from explicit graph disjointness, and
+destination binding compose without requiring a heap-publishing callee prefix
+to preserve every ordinary cell. `precomposeRetained` is the facts-aware
+replacement boundary; the earlier `precompose` remains a compatibility lemma.
+The two-publication regression preserves a nonempty token map despite a prefix
+that refutes all-location transport. These are local source-frame laws, not yet
+a replacement of `ReuseCapacityCodeEntryTransports` or its stack consumers.
+
 The review follow-up in
 [`W6-OBSERVABLE-CONTRACT-AND-TRUST.md`](W6-OBSERVABLE-CONTRACT-AND-TRUST.md)
 strengthens the destination to include represented terminal results and faults

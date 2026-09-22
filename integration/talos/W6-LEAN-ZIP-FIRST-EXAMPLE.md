@@ -182,6 +182,13 @@ surface and its W7/package wiring; W6 does not duplicate it locally.
   invalidates that stronger condition. A separate facts-aware stack transport
   and derivation of publication disjointness are still needed before changing
   the current admission boundary.
+  The helper-level `ReuseTokenOrdinaryTransport` now supplies fixed-caller
+  prefix composition and binding, including prefixes that publish heap values.
+  `precomposeRetained` removes the all-location premise from this local
+  composition, not from the current hereditary declaration/stack packages.
+  A two-cache publication regression checks the weaker frame with a nonempty
+  retained-token map. Wiring the suspended frames and deriving disjointness
+  remain the next semantic work; no actual lean-zip admission is claimed yet.
 - Apply the existing rooted finite-trace/terminal theorem only after its
   explicit compiler-current-step admission, address-space/resource safety,
   entry/runtime contracts and argument arity have been constructed for this
@@ -191,14 +198,23 @@ surface and its W7/package wiring; W6 does not duplicate it locally.
 
 ## Next bounded action
 
-First make a fresh, reproducible actual `captureStored` checkpoint in the
-appropriate owner lane and retain proof-usable static evidence: the captured
-program/entry identity; complete reachable declaration, external, cache,
-result-kind and call inventory; and the two production module routes' exact
-accept/reject or mismatch results. Check this evidence against the pinned
-source views and record hashes. W6 can then select the first real missing
-ByteArray/Array/`UInt16` operation or lazy-result case and prove one reusable
-law, without shrinking the workload to fit the current gate. W7 owns capture,
-emitter and package changes; W6 owns relation and proof changes; root owns
-shared contracts and integration. Keep existing audited native-evaluation
-debt visible; this plan grants no new trust approval.
+The authoritative `ROOT-W6-20260922-021` input is now retained
+`RetainedStored.olean`, SHA-256
+`e71219ab8443177481cfee3d940810942b165a61c7179e940664aba1b835119b`.
+Independent import recovers `Zip.Wasm.compressStored`, 21 declarations,
+14 external names and four object-valued cached initializers. Importability
+is established, but the artifact stores its program only in an environment
+extension and declares no kernel-referable program constant. Root must
+coordinate structural reification and the same-input lowering boundary;
+neither printed LCNF nor a fresh substitute capture closes this obligation.
+The diagnostic closure-flow Boolean also needs kernel proof evidence for
+the actual opaque production checker. No new native axiom is authorized.
+
+Meanwhile, the independent W6 prefix-transport laws prepare the semantic
+obstacle demonstrated by those object-valued initializers. The next bounded
+proof work is to connect fixed-caller facts-aware transport to suspended
+frames, retaining explicit publication disjointness, then derive that
+disjointness from ownership. Do not remove the current admission exclusion
+before those consumers are justified. W7 owns capture/emitter/package changes,
+W6 owns these proof helpers, and root owns shared contracts and integration.
+Existing audited native-evaluation debt remains explicit.

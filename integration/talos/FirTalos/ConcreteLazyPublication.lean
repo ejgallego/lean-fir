@@ -1,7 +1,7 @@
 import FirTalos.ConcreteReuseCapacityCacheCorrectness
 
 /-!
-Facts-aware source transport for a complete internal lazy-cache miss.
+Facts-aware source transport for callee prefixes and complete internal misses.
 
 Publication deliberately makes the returned ownership graph persistent. It
 need not preserve ordinaryness at every heap location; it must preserve the
@@ -15,6 +15,77 @@ namespace FirTalos.Concrete
 open Lean Lean.Compiler Fir.Wasm Fir.LeanIR.Impure Fir.Wasm.Concrete
 open FirTalos.Correctness
 
+/-- A callee prefix preserves the suspended caller's retained-token facts.
+The environment is the caller's fixed environment, not the callee's active
+locals. Publishing unrelated heap graphs is allowed. This proof-side boundary
+does not assert that arbitrary executions satisfy publication disjointness. -/
+def ReuseTokenOrdinaryTransport (facts : ReuseCapacityFacts) (sourceEnv : Env)
+    (before after : RuntimeState) : Prop :=
+  ReuseTokenOrdinaryRel facts before sourceEnv →
+    ReuseTokenOrdinaryRel facts after sourceEnv
+
+theorem ReuseTokenOrdinaryTransport.refl
+    (facts : ReuseCapacityFacts) (sourceEnv : Env) (runtime : RuntimeState) :
+    ReuseTokenOrdinaryTransport facts sourceEnv runtime runtime :=
+  fun ordinary => ordinary
+
+/-- Prefixes compose at the same suspended caller, including prefixes that
+themselves publish heap-valued lazy results. -/
+theorem ReuseTokenOrdinaryTransport.trans
+    {facts : ReuseCapacityFacts} {sourceEnv : Env}
+    {before middle after : RuntimeState}
+    (left : ReuseTokenOrdinaryTransport facts sourceEnv before middle)
+    (right : ReuseTokenOrdinaryTransport facts sourceEnv middle after) :
+    ReuseTokenOrdinaryTransport facts sourceEnv before after :=
+  fun ordinary => right (left ordinary)
+
+/-- Existing ordinary runtime-operation proofs provide the narrower caller
+frame without modification. -/
+theorem ReuseTokenOrdinaryTransport.ofOrdinaryPersistence
+    {facts : ReuseCapacityFacts} {sourceEnv : Env}
+    {before after : RuntimeState}
+    (transport : OrdinaryPersistenceTransport before after) :
+    ReuseTokenOrdinaryTransport facts sourceEnv before after :=
+  fun ordinary => ordinary.transport transport
+
+/-- Publication preserves a suspended caller when its tracked tokens are
+outside the published ownership graph. The published root need not remain
+ordinary; the premise concerns only the caller's retained locations. -/
+theorem ReuseTokenOrdinaryTransport.ofPublicationDisjoint
+    {facts : ReuseCapacityFacts} {sourceEnv : Env}
+    {runtime : RuntimeState} {result : Value}
+    (name : Name)
+    (disjoint : ReuseTokenPublicationDisjoint facts runtime sourceEnv result) :
+    ReuseTokenOrdinaryTransport facts sourceEnv runtime
+      (runtime.setGlobal name result) := by
+  intro ordinary tokenId available location cell tracked tokenLookup found
+  apply ordinary.markPersistent_of_publicationDisjoint disjoint
+    tokenId available location cell tracked tokenLookup
+  simpa [RuntimeState.setGlobal] using found
+
+/-- At return, erase the destination's old fact and bind the result using
+only the suspended caller's facts-aware transport. -/
+theorem ReuseTokenOrdinaryTransport.eraseBind
+    {facts : ReuseCapacityFacts} {sourceEnv : Env}
+    {before after : RuntimeState} {resultId : FVarId} {result : Value}
+    (transport : ReuseTokenOrdinaryTransport facts sourceEnv before after) :
+    ReuseTokenOrdinaryBindTransport facts resultId before after sourceEnv
+      result := by
+  intro ordinary
+  exact (transport ordinary).eraseBind (OrdinaryPersistenceTransport.refl after)
+
+/-- A facts-aware callee prefix and a facts-aware publication/binding step
+compose without demanding all-location ordinaryness of the prefix. -/
+theorem ReuseTokenOrdinaryBindTransport.precomposeRetained
+    {facts : ReuseCapacityFacts} {resultId : FVarId}
+    {before middle after : RuntimeState} {sourceEnv : Env} {result : Value}
+    (calleePrefix : ReuseTokenOrdinaryTransport facts sourceEnv before middle)
+    (publication : ReuseTokenOrdinaryBindTransport facts resultId middle after
+      sourceEnv result) :
+    ReuseTokenOrdinaryBindTransport facts resultId before after sourceEnv
+      result :=
+  fun ordinary => publication (calleePrefix ordinary)
+
 /-- An ordinary callee prefix followed by facts-aware publication preserves
 exactly the caller's retained facts after binding, without requiring the
 published graph itself to remain ordinary. -/
@@ -25,9 +96,9 @@ theorem ReuseTokenOrdinaryBindTransport.precompose
     (publication : ReuseTokenOrdinaryBindTransport facts resultId middle after
       sourceEnv result) :
     ReuseTokenOrdinaryBindTransport facts resultId before after sourceEnv
-      result := by
-  intro ordinary
-  exact publication (ordinary.transport beforePublication)
+      result :=
+  publication.precomposeRetained
+    (ReuseTokenOrdinaryTransport.ofOrdinaryPersistence beforePublication)
 
 section InternalMiss
 

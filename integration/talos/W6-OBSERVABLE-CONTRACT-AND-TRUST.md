@@ -1227,6 +1227,36 @@ The exact inventory includes all three new transport lemmas and all four
 public sensitivity tests, bringing the maintained audit to 200 endpoints.
 No generated dependency or trusted assumption is added.
 
+### Facts-aware callee-prefix composition
+
+`ReuseTokenOrdinaryTransport facts callerEnv before after` preserves exactly
+the suspended caller's ordinary retained-token relation, keeping its fact map
+and environment fixed while a callee executes. It permits the callee to make
+unrelated returned graphs persistent. It is a source-frame interface, not an
+assertion that arbitrary callee executions satisfy that interface.
+
+Its `refl`, `trans`, and `ofOrdinaryPersistence` laws and
+`ReuseTokenOrdinaryBindTransport.precomposeRetained` are axiom-free.
+`ofPublicationDisjoint` derives the frame from the existing graph-disjointness
+premise using only the standard three axioms; `eraseBind` uses `propext` and
+`Quot.sound`. The original all-location `precompose` delegates to the narrower
+composition and remains axiom-free.
+
+Three additional standard-only regressions establish a publication prefix's
+retained transport and compose two real cache publications of the same heap
+root, followed by destination binding. They retain a distinct nonempty token
+map and establish its postcondition from an actual ordinary initial state.
+The existing negative regression proves that the first prefix does not satisfy
+all-location transport. Six new helper theorems and these three regressions
+bring the exact maintained inventory to 209 endpoints, with no new native or
+semantic axiom.
+
+The current declaration and structured-stack packages still store stronger
+all-location transport. This slice neither changes them nor derives arbitrary
+publication disjointness; both are explicit successors. No object/tobject
+admission exclusion, runtime contract, central relation, or public theorem
+premise is silently removed by adding this helper interface.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
