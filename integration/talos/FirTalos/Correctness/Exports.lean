@@ -4,6 +4,20 @@ namespace FirTalos.Correctness
 
 open Fir.Wasm
 
+/-- Adaptation first validates the exact symbolic input; consumers need not
+provide a separate successful source-validator equation. -/
+theorem adapt_source_valid
+    {source : Fir.Wasm.Module} {target : FirTalos.AdaptedModule}
+    (adapted : FirTalos.adapt source = .ok target) :
+    Fir.Wasm.validateModule source = .ok () := by
+  cases checked : Fir.Wasm.validateModule source with
+  | error error =>
+      simp only [FirTalos.adapt, checked] at adapted
+      contradiction
+  | ok value =>
+      cases value
+      rfl
+
 /-- A successfully adapted module passed Talos's own structural validator. -/
 theorem adapt_target_valid
     {source : Fir.Wasm.Module} {target : FirTalos.AdaptedModule}

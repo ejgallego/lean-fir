@@ -1179,16 +1179,22 @@ equation or injectivity assumption on name rendering is required.
 `ConcreteSourceValidation.lean` now proves what successful source validation
 supplies: supported declarations and reuse-capacity safety. Under successful
 lowering, `WasmSupported` is equivalent to `closureFlowSafeProgram = true`.
-The constructor derives the checked components internally and retains only
-that explicit closure-flow condition, alongside the separate name-uniqueness
-premise. Neither closure-flow safety nor name uniqueness is claimed to follow
-from `validateSupported` alone. This
+The constructor derives the checked components internally and retains that
+explicit closure-flow condition. Name uniqueness is now derived separately:
+lowering preserves the complete declaration-name population, symbolic validation
+checks the combined external/internal names with its actual hash-set algorithm,
+and successful adaptation supplies the validation equation. Neither closure-flow
+safety nor name uniqueness is claimed to follow from `validateSupported` alone. This
 is not a capture-fidelity, closed-closure pruning, resident-linking or binary
-encoder theorem. The twenty-seven static infrastructure endpoints use only
-standard axioms; the exact compiled inventory now checks 186 endpoints.
+encoder theorem. The thirty-four static infrastructure endpoints use only
+standard axioms; the exact compiled inventory now checks 193 endpoints.
 Executable dictionary-underapplication guards additionally distinguish
 successful validation/lowering from the stronger closure-flow condition. They
 are not theorem premises and introduce no native-evaluation proof dependencies.
+Additional internal/internal and external/internal collision guards show
+successful lowering rejected by symbolic validation and adaptation. The generic
+duplicate-check theorem unfolds the existing private implementation through a
+proof-side import; it does not substitute a shadow checker or change production.
 
 ### Remaining terminal assembly obligations
 
@@ -1264,6 +1270,7 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | production source export rows, target validity, adapter/canonical export lookup | 3 | 0 |
 | target validation implies unique public function-export names | 2 | 0 |
 | source-validation facts, lowering-to-validation and exact residual closure-flow equivalences | 3 | 0 |
+| declaration-name population, actual duplicate-check soundness and validation-derived source uniqueness | 3 | 0 |
 | production supported-export construction and selected declaration/result projection | 3 | 0 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |

@@ -464,23 +464,31 @@ Under successful lowering, `WasmSupported` is equivalent to the additional
 `closureFlowSafeProgram = true` check. The export constructor now derives the
 checked components internally and requests only that residual closure-flow
 condition, not the bundled `WasmSupported` premise.
-Four standard-only endpoints raise the exact trust inventory to 186.
+That checkpoint's four standard-only endpoints raised the exact inventory to 186.
 The existing dictionary-underapplication fixture confirms that validation and
 lowering can succeed while closure-flow safety fails; executable guards record
 this distinction without being used as theorem evidence.
 
+`ConcreteDeclarationNames.lean` retains the complete source name population
+through lowering, including duplicates. `ConcreteDeclarationValidation.lean`
+proves soundness of the actual two-pass hash-set duplicate checker and extracts
+uniqueness of the combined external/internal declaration table from successful
+symbolic validation. `ConcreteDeclarationAdmission.lean` composes these facts
+with adaptation's checked input, so the export constructor no longer requests
+`NamesUnique`. Internal/internal and external/internal collision regressions
+confirm that lowering can succeed while validation and adaptation reject.
+
 This removes static assembly work, not dynamic admission. Closure-flow safety,
-name uniqueness, selected ABI classification and pipeline equations remain
+selected ABI classification and pipeline equations remain
 explicit static obligations. `lowerSupported` success alone does not imply
 the stronger closure-flow check. Exact import keys alone do not
 establish semantic contract alignment; the new theorem additionally proves
 which function the resolver selected. Remaining static source checks must be
 derived at their actual checker boundary, without silently strengthening
-`lowerSupported` success. The next source-boundary target is name uniqueness
-from successful lowering plus symbolic validation: expose duplicate-name
-rejection and transport all declaration names through lowering. Merely wrapping
-the input in `CheckedProgram` would retain the same caller obligation.
-This slice does not pretend the lowering gate checks name uniqueness.
+`lowerSupported` success. Source name uniqueness is derived from lowering plus
+symbolic validation, not assumed through a `CheckedProgram` wrapper or claimed
+from lowering alone. The nominated immutable lean-zip capture's remaining
+closure-flow condition still needs an exact check before planning its proof.
 Captured-program reification and the distinct closed-closure/pruning production
 route remain separately coordinated.
 

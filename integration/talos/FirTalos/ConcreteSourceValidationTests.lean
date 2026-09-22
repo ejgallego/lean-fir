@@ -1,4 +1,5 @@
 import FirTalos.ConcreteSourceValidation
+import FirTalos.Adapter
 import Fir.Wasm.Examples
 
 /-!
@@ -16,3 +17,25 @@ open Fir.Wasm
 #guard lowerSupported dictionaryPureUnderApplyProgram matches .ok _
 #guard !closureFlowSafeProgram dictionaryPureUnderApplyProgram
 #guard !supportedProgram dictionaryPureUnderApplyProgram
+
+/- Lowering retains duplicate names. Symbolic validation, reached by adaptation,
+rejects them even when the collision crosses the external/internal partition. -/
+private def duplicateInternalNamesProgram : Fir.LeanIR.ImpureProgram :=
+  { scalarIdProgram with decls := scalarIdProgram.decls ++ scalarIdProgram.decls }
+
+private def mixedDuplicateNamesProgram : Fir.LeanIR.ImpureProgram :=
+  { scalarIdProgram with decls := scalarIdProgram.decls ++
+      scalarIdProgram.decls.map fun decl =>
+        { decl with value := .extern { entries := [] } } }
+
+#guard match lowerSupported duplicateInternalNamesProgram with
+  | .ok source =>
+      (validateModule source matches .error (.duplicateFunction `scalarId)) &&
+      (FirTalos.adapt source matches .error (.invalidModule (.duplicateFunction `scalarId)))
+  | .error _ => false
+
+#guard match lowerSupported mixedDuplicateNamesProgram with
+  | .ok source =>
+      (validateModule source matches .error (.duplicateDeclaration `scalarId)) &&
+      (FirTalos.adapt source matches .error (.invalidModule (.duplicateDeclaration `scalarId)))
+  | .error _ => false

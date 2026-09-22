@@ -88,14 +88,14 @@ that same slot. Neither runtimeAligned nor externalAligned is a constructor
 premise now. This does not prove arbitrary external implementations correct.
 
 Remaining constructor premises are static: `closureFlowSafeProgram = true`,
-`NamesUnique`, actual lowering/adaptation/resolution equations, selected
+actual lowering/adaptation/resolution equations, selected
 declaration/body/ABI classification. Canonical export lookup is derived internally.
 The current `validateSupported` gate does not by itself provide the additional
 closure-flow condition in `WasmSupported`; its supported-declaration and
 reuse-capacity components are now derived from successful lowering. These
 premises must not be disguised as execution certificates. Dynamic current-step
 admission, resource safety and
-entry-runtime refinement are separate subsequent obligations. All twenty-seven
+entry-runtime refinement are separate subsequent obligations. All thirty-four
 static infrastructure endpoints depend only on Lean's three standard axioms.
 
 `lower_exports_eq_functionNames` exposes production lowering's exact export
@@ -120,12 +120,17 @@ Separate executable guards reuse the dictionary-underapplication fixture:
 validation and lowering succeed, but closure-flow safety and `supportedProgram`
 fail. These are specification-sensitivity tests, not proof witnesses; fixture
 imports stay outside the reusable proof and constructor modules.
-`NamesUnique` is likewise not checked there. The next reusable elimination
-target is `lower program = .ok source` plus `validateModule source = .ok ()`
-implying `program.NamesUnique`: derive duplicate-name rejection and transport
-the complete declaration-name population through lowering. Merely taking a
-`CheckedProgram` would hide the same caller proof, not discharge it. This
-lowering/validation implication is not yet proved.
+`NamesUnique` is not checked there either, but is now derived at the later
+symbolic-validation boundary. `declarationNames_perm_of_lower` preserves every
+source name, including duplicates, in the combined external/internal table.
+`declarationNames_nodup_of_validateModule` proves that the actual production
+hash-set check rejects duplicates in that combined table. Their composition,
+`namesUnique_of_lower_validateModule`, reflects uniqueness back to the source.
+`adapt_source_valid` supplies the check equation from successful adaptation;
+`namesUnique_of_supportedPipeline` removes the constructor's client premise.
+Separate regressions reject duplicated internal declarations and cross-table
+external/internal collisions after successful lowering. No checker change,
+caller certificate, `CheckedProgram` wrapper or new trust is involved.
 The exact nominated lean-zip capture must also be checked for closure-flow
 safety; no result for that capture is inferred from successful compilation.
 Source admission, entry/resource contracts and capture fidelity remain
