@@ -4,6 +4,8 @@ namespace FirTalos.Concrete
 
 open Fir.Wasm
 
+deriving instance ReflBEq, LawfulBEq for Signature
+
 /-- Heap boxing uses the concrete boxed-scalar layout below. Floating lanes,
 captures, caches, projections, and packed fields remain bit-exact; only an
 explicit source `box` or `unbox` passes their bits through this enum. -/
@@ -304,5 +306,49 @@ theorem resolveHosts_import_key_at
   | none => simp [selected] at keyAt
   | some host =>
     exact ⟨host, rfl, by simpa [selected] using keyAt⟩
+
+private theorem resolveImports_runtime_at {offset : Nat}
+    {imports : List Import} {resolved : List ResolvedHost}
+    (h : resolveImports offset imports = .ok resolved)
+    {index : Nat} {sourceImport : Import} {operation : RuntimeOp}
+    (found : imports[index]? = some sourceImport)
+    (runtime : sourceImport.key = .runtime operation) :
+    ∃ host, resolved[index]? = some host ∧
+      hostFn? operation = some host.function ∧
+      sourceImport.signature = operation.signature := by
+  induction imports generalizing offset resolved index with
+  | nil => simp at found
+  | cons imp rest ih =>
+    simp only [resolveImports, Bind.bind, Except.bind, pure, Except.pure,
+      throw] at h
+    repeat' split at h
+    all_goals simp_all
+    all_goals
+      subst resolved
+      cases index with
+      | zero => simp_all
+      | succ index =>
+        simp only [List.getElem?_cons_succ] at found ⊢
+        exact ih (by assumption) found
+
+/-- Successful concrete resolution selects the actual executable runtime host
+at the original import slot, with the exact semantic signature. This is the
+contract-selection fact beyond positional key preservation. -/
+theorem resolveHosts_runtime_at
+    {source : Fir.Wasm.Module} {hosts : ResolvedHosts}
+    (resolved : resolveHosts source = .ok hosts)
+    {index : Nat} {sourceImport : Import} {operation : RuntimeOp}
+    (found : source.imports[index]? = some sourceImport)
+    (runtime : sourceImport.key = .runtime operation) :
+    ∃ host, hosts.hosts[index]? = some host ∧
+      hostFn? operation = some host.function ∧
+      sourceImport.signature = operation.signature := by
+  cases valid : validateModule source <;>
+    simp [resolveHosts, valid, Bind.bind, Except.bind, pure, Except.pure,
+      throw] at resolved
+  cases selected : resolveImports 0 source.imports.toList <;>
+    simp [selected] at resolved
+  subst hosts
+  exact resolveImports_runtime_at selected (by simpa using found) runtime
 
 end FirTalos.Concrete

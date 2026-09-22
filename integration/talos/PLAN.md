@@ -430,14 +430,26 @@ declaration and canonical cache row; its ABI is the production effective result
 kind. `ConcreteResolver` now proves exact positional key preservation and host
 count for successful resolution, so adaptation/resolution derive host-table
 alignment and `HostEnv.Satisfies` internally. The seven added endpoints use only
-the standard three axioms; the exact audit contains 166 endpoints.
+the standard three axioms.
+
+`ConcreteRuntimeAlignment.lean` now derives `ConcreteRuntimeCallsAligned` from
+successful adaptation and concrete host resolution. Runtime call-index lookup
+selects the exact symbolic identity; `resolveHosts_runtime_at` exposes the
+selected executable host and exact semantic signature; adaptation retains its
+numeric import slot. The supported-export constructor no longer asks clients
+for runtime contract alignment. These four new endpoints also use only the
+standard three axioms; the exact audit contains 170 endpoints.
 
 This removes static assembly work, not dynamic admission. `WasmSupported`, name
-uniqueness, runtime/external contract alignment, selected ABI classification,
+uniqueness, external contract alignment, selected ABI classification,
 pipeline equations and named export lookup remain explicit static obligations.
 In particular `lowerSupported` success alone does not currently imply the
-stronger `WasmSupported` closure-flow check. Exact import keys do not establish
-semantic contract alignment. Captured-program reification and the distinct
+stronger `WasmSupported` closure-flow check. Exact import keys alone do not
+establish semantic contract alignment; the new theorem additionally proves
+which function the resolver selected. The external successor needs exact
+declaration metadata at the selected import slot (including ruling out the
+named-function fallback), not just a matching external name. Captured-program
+reification and the distinct
 closed-closure/pruning production route remain separately coordinated.
 
 ### Intended result

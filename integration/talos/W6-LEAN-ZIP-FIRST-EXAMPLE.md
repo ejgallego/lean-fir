@@ -76,17 +76,35 @@ choice, not assumed equal to the declaration's unrefined public kind.
 Successful concrete resolution preserves every import key in order and its
 count. Together with adaptation this derives host-table alignment and the
 host environment's exact invocation-contract satisfaction. No application
-supplies a table-length proof. This does **not** yet derive correspondence to
-the compiler's semantic runtime/external contracts.
+supplies a table-length proof. `concreteRuntimeCallsAligned_ofPipeline` now also
+derives the runtime contract table from successful adaptation and resolution:
+it identifies the executable host function and semantic signature at every
+runtime call slot. This is independent of lean-zip and adds no execution or
+resource assumptions. External declaration contracts remain separate.
 
 Remaining constructor premises are static: `WasmSupported`, `NamesUnique`,
 actual lowering/adaptation/resolution equations, selected declaration/body/ABI
-classification, runtime/external contract alignment, and a named export lookup.
+classification, external contract alignment, and a named export lookup.
 The current `validateSupported` gate does not by itself provide the additional
 closure-flow condition in `WasmSupported`. These premises must not be disguised
 as execution certificates. Dynamic current-step admission, resource safety and
-entry-runtime refinement are separate subsequent obligations. All seven new
-static endpoints depend only on Lean's three standard axioms.
+entry-runtime refinement are separate subsequent obligations. All eleven
+static infrastructure endpoints depend only on Lean's three standard axioms.
+
+The next static proof is external declaration alignment: select the exact
+`externalImport declaration` row using lowering and name uniqueness, retain
+its original parameter/result expressions, and connect it to the resolver's
+actual `externalFn`. A named-call index alone is insufficient because lookup
+can fall back to an internal function. Existing import-generation and
+declaration-uniqueness lemmas supply the structural boundary; no new hereditary
+application invariant is needed for this static obligation.
+
+Its target is `ConcreteExternalCallsAligned program source target hosts` from
+`program.NamesUnique` and the existing successful `lowerSupported`, `adapt`,
+and `resolveHosts` equations. Acceptance removes `externalAligned` from
+`ConcreteSupportedExport.exists_ofSupportedPipeline` while leaving source
+admission, entry/resource contracts, and capture fidelity explicit. No change
+to the shared simulation relation or the production admission set is needed.
 
 Capture review found that the production `Artifact.program` and olean capture
 cache already retain full AST data, but as elaborator environment state, not

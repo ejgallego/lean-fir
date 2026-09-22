@@ -1154,12 +1154,18 @@ host-count alignment and `HostEnv.Satisfies`, not semantic operation refinement.
 The regression invokes the actual constructor and recovers the selected
 declaration, function name, canonical cache row and effective result ABI.
 
-Static runtime/external contract alignment and named export lookup remain
-explicit. `WasmSupported` is stronger than the current `validateSupported`
+The runtime-contract successor proves the additional selected-function fact
+in `resolveHosts_runtime_at`. `concreteRuntimeCallsAligned_ofPipeline` composes
+it with exact runtime call-index selection and positional import adaptation.
+The supported-export constructor now derives runtime contract alignment from
+its existing adaptation/resolution equations, without a client premise.
+
+Static external contract alignment and named export lookup remain explicit.
+`WasmSupported` is stronger than the current `validateSupported`
 gate; success of `lowerSupported` alone is not claimed to discharge it. This
 is not a capture-fidelity, closed-closure pruning, resident-linking or binary
-encoder theorem. The seven new static endpoints use exactly the standard
-three axioms; the exact compiled inventory now checks 166 endpoints.
+encoder theorem. The eleven static infrastructure endpoints use exactly the
+standard three axioms; the exact compiled inventory now checks 170 endpoints.
 
 ### Remaining terminal assembly obligations
 
@@ -1230,6 +1236,7 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | exact-root function/export/interpreter executable return assembly | 3 | 57 |
 | concrete resolver positional keys, count and indexed key lookup | 3 | 0 |
 | adaptation/resolution alignment and exact host-contract satisfaction | 3 | 0 |
+| selected runtime host/signature, import lookup/adaptation and derived runtime contracts | 3 | 0 |
 | production supported-export construction and selected declaration/result projection | 3 | 0 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
