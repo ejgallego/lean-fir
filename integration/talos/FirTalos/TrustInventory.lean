@@ -208,6 +208,14 @@ def literalExampleNativeDebt : Array String := #[
   "FirTalos.Correctness.abiLiteralSupportedExport._native.native_decide.ax_1"]
 
 def endpointInventory : Array (Lean.Name × Array String) := #[
+  -- Rooted initial/prefix composition inherits the accepted seven-focus debt;
+  -- the actual export entry adds only the standard axioms.
+  (`FirTalos.Concrete.ConcreteSupportedExport.rootedPreciseCodeGlobalRoot,
+    standardAxioms),
+  (`FirTalos.Concrete.ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt.execSteps,
+    standardAxioms ++ compilerExportNativeDebt),
+  (`FirTalos.Concrete.ConcreteSupportedExport.rootedExecSteps_of_currentStepAdmission,
+    standardAxioms ++ compilerExportNativeDebt),
   -- Seven-focus one-step composition measured against the accepted classifier
   -- at 4cbddd9c: the same 57 generated dependencies, with no new trust.
   (`FirTalos.Concrete.ConcreteStructuredCompilerCurrentStepAdmission.toCurrentStepClassifier,

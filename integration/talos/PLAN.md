@@ -39,7 +39,7 @@ This layering separates three claims:
 The first proof should establish claims 1 and 2 without prematurely fixing a
 production heap layout.
 
-## Current verification frontier — 2026-09-10
+## Current verification frontier — 2026-09-22
 
 This section through **Premises deliberately retained** is the authoritative
 W6 roadmap. It supersedes every later chronological use of "next",
@@ -387,16 +387,27 @@ accounting remain unchanged. Old classifier and new closure have identical
 three-standard-plus-57-generated dependencies; the projection uses only the
 standard three. The exact inventory now checks 152 endpoints, with no new trust.
 
-This is one-step composition, not compiler admission derivation or PA3 closure.
-Joint root/schema direct-let transport, schema dispatch, rooted initial/prefix/
-terminal assembly and general semantic/resource premises remain separate;
-there is no new join/jump admission or trap support.
-The old global relation still existentially hides the represented kind;
-the additive companion is not yet assembled into the whole simulation.
-The universal compiler classifier also
-remains an explicit compiler-proof obligation; this is not PA3 closure. Trap
-support needs a separate structured-machine extension. See the linked review
-follow-up for exact theorem dependencies and the remaining boundary.
+The rooted initial/prefix slice in `ConcreteRootedSimulation.lean` now lifts
+that accepted one-step companion through the existing ranked trace framework.
+`ConcreteSupportedExport.rootedPreciseCodeGlobalRoot` constructs it at the
+actual production export entry, with no extra root/provenance premise.
+`rootedExecSteps_of_currentStepAdmission` preserves the export's selected
+result ABI over every finite source execution. Its endpoint retains the
+actual successor witness, named precise relation, target path and world/trace
+agreement. The common finite-prefix theorem supplies path composition;
+the original control rank and all seven step producers remain unchanged.
+Kernel regressions cover two successive prefixes with exact target-count
+addition, witness freedom, and erasure at that same successor witness.
+The initial theorem uses only the three standard axioms; the two prefix
+endpoints inherit exactly the existing 57 generated dependencies. The
+compiled audit now checks 155 endpoints, with no new axiom or trust approval.
+
+Next is terminal extraction from this preserved rooted companion, followed by
+executable return assembly at the export's exact result ABI rather than an
+existential kind. Compiler admission and address-space laws remain explicit:
+this is not PA3 closure. Joint root/schema transport, schema dispatch and
+trap support remain separate; there is no new join/jump admission. The older
+global relation and all shared runtime/ABI contracts remain unchanged.
 
 ### Intended result
 

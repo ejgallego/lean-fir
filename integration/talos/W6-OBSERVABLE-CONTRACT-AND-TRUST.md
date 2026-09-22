@@ -1087,17 +1087,40 @@ accounting remain unchanged. Old classifier and new closure have identical
 three-standard-plus-57-generated dependencies; the projection uses only the
 standard three. The exact inventory now checks 152 endpoints, with no new trust.
 
-This is one-step composition, not compiler admission derivation or PA3 closure.
-Joint root/schema direct-let transport, schema dispatch, rooted initial/prefix/
-terminal assembly and general semantic/resource premises remain separate;
-there is no new join/jump admission or trap support.
+### Rooted export entry and finite-prefix composition
+
+`ConcreteRootedSimulation.lean` reuses the existing ranked trace framework
+with the accepted seven-focus companion as its relation. Only the evolving
+heap witness is existentially hidden; the original export result ABI stays
+fixed. The one-step producers and strict zero-count rank are unchanged.
+
+`ConcreteSupportedExport.rootedPreciseCodeGlobalRoot` constructs the initial
+companion from the production validated entry and its existing checked root
+spine. `rootedExecSteps_of_currentStepAdmission` then retains that exact root
+ABI, the actual final witness, named precise outcome and world/trace agreement
+after an arbitrary finite source execution. The common prefix theorem supplies
+the target path; no caller-chosen relation, root equality, target execution,
+schema or new source invariant is required. Existing compiler admission,
+address-space safety and entry-runtime compatibility remain explicit.
+
+Regressions compose two real prefix applications at the intermediate witness,
+retain the exact sum of target counts and erase at the same final witness.
+A negative check rejects replacing the current witness by an arbitrary one;
+the simulation's rank is definitionally the accepted control rank.
+The entry theorem uses only the standard three axioms. Both prefix endpoints
+inherit exactly the accepted three plus 57 recorded generated dependencies;
+the compiled inventory now checks 155 endpoints. There are no new axioms.
+
+This is not compiler admission derivation or PA3 closure. Rooted terminal
+extraction/adequacy is the next separate slice. Joint root/schema transport,
+schema dispatch, general semantic/resource premises and traps remain separate.
 
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
 |---|---|---|
 | Recover the terminal yield | `sourceExecReturned_terminal`, `ConcreteStructuredValidatedCodeGlobalOutcome.terminalYield_of_control`, and the function/export `terminatesWith_of_validatedReturn` lemmas | Discharged for the existing global relation and a successful final source step. |
-| Preserve the export's selected result ABI | Entry root identity and precise return are established; `ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt.advance_of_step` preserves both through all seven focuses under the two separate existing laws | Lift this accepted companion to rooted initial/prefix and terminal assembly, without a client provenance assumption. The old global relation still hides represented-kind precision; compiler admission and resource premises remain explicit. |
+| Preserve the export's selected result ABI | `rootedPreciseCodeGlobalRoot` constructs the actual export entry; `rootedExecSteps_of_currentStepAdmission` preserves the selected root and precise relation over finite executions | Extract the terminal yield from this companion and feed it to executable adequacy at the exact export ABI. Compiler admission and resource premises remain explicit. |
 | Connect source termination to executable return | `terminatesWith_of_classifiedExecSteps`, `terminatesWith_of_classifiedExecEvaluates`, and `terminatesWith_of_classifiedRun` compose the existing ranked prefix with terminal extraction and adequacy | Discharged conditional on the existing universal classifier and entry contracts, with existential represented kind. Compiler admission closure and root-kind provenance are not discharged. |
 | Match faults | `StructuredWasmControl` has running/breaking/returning/halted states, and `StructuredWasmOutcome` describes successful control only | A trap-aware extension and its adequacy proof are a separately coordinated semantic change. Existing `ConcreteFaultSimulation` results do not automatically supply this missing structured-machine branch. |
 
@@ -1155,6 +1178,8 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | rooted precise companion erasure | 3 | 0 |
 | original current-step classifier and seven-focus rooted precise closure | 3 | 57 |
 | returned-successor projection into the rooted precise companion | 3 | 0 |
+| actual export rooted precise entry | 3 | 0 |
+| rooted finite-prefix and export-prefix composition | 3 | 57 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original UInt8-case wrapper, frame-exposing helper and rooted successor | 3 | 2 |

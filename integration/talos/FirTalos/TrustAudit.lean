@@ -6,6 +6,7 @@ import FirTalos.ConcreteTerminalExtraction
 import FirTalos.ConcreteTerminalSimulation
 import FirTalos.ConcreteRootResult
 import FirTalos.ConcreteRootedDispatch
+import FirTalos.ConcreteRootedSimulation
 import FirTalos.ConcreteResumableWasm
 import FirTalos.ConcretePassComposition
 import FirTalos.ConcreteCompilerCorrectness
