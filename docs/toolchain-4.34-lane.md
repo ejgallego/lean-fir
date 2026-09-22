@@ -175,3 +175,26 @@ certified compatibility of that same audited assumption with exact Lean
 4.34.0-rc2; neither source hashes nor finite conformance probes constitute a
 kernel proof of its universal proposition. This is 4.34 gate plumbing, not a
 pin move or approval to migrate `main`.
+
+## Root migration candidate (2026-09-22)
+
+The root-owned migration branch `integration/lean-4.34-migration` now carries
+the reviewed corpus/profile selection, tracked Talos overlay, and the current
+main-source identity refresh. On that branch:
+
+- `make check` passes, including the versioned 4.34 corpus expectation and the
+  exact RC2 trusted-assumption profile;
+- the isolated `tooling/talos-434/check.sh` route passes the full 3,246-job
+  FirTalos cone, including `TrustAudit`; and
+- the branch's RC2 compatibility CI smoke remains green by construction, but
+  is not a substitute for the repository's normal full workflow.
+
+The remaining migration boundary is deliberate: the default
+`make talos-setup`/`make talos-check` path still provisions
+`integration/talos` at Lean 4.33 and the 4.33 Talos interpreter. The RC2
+overlay pins a separate Talos/mathlib revision and a tracked setup recipe, but
+has not yet replaced that default package path. Before flipping `main`, root
+must either make the default Talos route select this authenticated RC2 overlay
+or land an equivalent official 4.34 Talos package/setup, then run the full
+default gates and hosted CI on that path. Until that decision is landed, the
+candidate is migration-ready evidence, not a completed main-toolchain flip.
