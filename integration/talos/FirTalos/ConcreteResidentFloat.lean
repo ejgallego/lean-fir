@@ -726,6 +726,7 @@ theorem write64_toUInt64_eq_write32_of_high_zero
   have h6 : memory.bytes (address.toNat + 6) = 0 := by bv_decide
   have h7 : memory.bytes (address.toNat + 7) = 0 := by bv_decide
   cases memory
+  dsimp only at h4 h5 h6 h7
   simp only [Wasm.Mem.write64, Wasm.Mem.write32]
   congr 1
   funext other
