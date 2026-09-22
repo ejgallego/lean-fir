@@ -87,13 +87,15 @@ import and original source types, then the resolver's actual `externalFn` at
 that same slot. Neither runtimeAligned nor externalAligned is a constructor
 premise now. This does not prove arbitrary external implementations correct.
 
-Remaining constructor premises are static: `WasmSupported`, `NamesUnique`,
-actual lowering/adaptation/resolution equations, selected declaration/body/ABI
-classification. Canonical export lookup is now derived internally as well.
+Remaining constructor premises are static: `closureFlowSafeProgram = true`,
+`NamesUnique`, actual lowering/adaptation/resolution equations, selected
+declaration/body/ABI classification. Canonical export lookup is derived internally.
 The current `validateSupported` gate does not by itself provide the additional
-closure-flow condition in `WasmSupported`. These premises must not be disguised
-as execution certificates. Dynamic current-step admission, resource safety and
-entry-runtime refinement are separate subsequent obligations. All twenty-three
+closure-flow condition in `WasmSupported`; its supported-declaration and
+reuse-capacity components are now derived from successful lowering. These
+premises must not be disguised as execution certificates. Dynamic current-step
+admission, resource safety and
+entry-runtime refinement are separate subsequent obligations. All twenty-seven
 static infrastructure endpoints depend only on Lean's three standard axioms.
 
 `lower_exports_eq_functionNames` exposes production lowering's exact export
@@ -106,16 +108,26 @@ connects the lookup to that row's target index. The constructor returns an
 export at `declaration.name.toString`, not an arbitrary caller-selected alias.
 Its regression also recovers the concrete export lookup without supplying it.
 
-The next static boundary is the exact relationship between the remaining
-source-check premises and the production checker. Do not claim the stronger
-closure-flow condition follows from `lowerSupported` without a theorem.
-The bounded target is to expose successful `validateSupported` as supported
-declarations plus reuse-capacity safety, then prove that its remaining
+`ConcreteSourceValidation.lean` now proves that exact source-check boundary:
+`validateSupported_facts` extracts supported declarations and
+reuse-capacity safety, while
+`wasmSupported_iff_closureFlowSafe_of_lowerSupported` proves that the remaining
 `WasmSupported` obligation is precisely `closureFlowSafeProgram = true`.
-That extra check is not currently performed by `validateSupported`.
-`NamesUnique` is likewise not checked there: it may be supplied by the existing
-checked-program boundary, or eventually derived from declaration traversal and
-successful symbolic validation. Neither implication is assumed by this slice.
+The constructor uses this equivalence instead of asking clients to repeat the
+checks the compiler already performed. That extra closure-flow check is not
+currently performed by `validateSupported`, and remains a visible premise.
+Separate executable guards reuse the dictionary-underapplication fixture:
+validation and lowering succeed, but closure-flow safety and `supportedProgram`
+fail. These are specification-sensitivity tests, not proof witnesses; fixture
+imports stay outside the reusable proof and constructor modules.
+`NamesUnique` is likewise not checked there. The next reusable elimination
+target is `lower program = .ok source` plus `validateModule source = .ok ()`
+implying `program.NamesUnique`: derive duplicate-name rejection and transport
+the complete declaration-name population through lowering. Merely taking a
+`CheckedProgram` would hide the same caller proof, not discharge it. This
+lowering/validation implication is not yet proved.
+The exact nominated lean-zip capture must also be checked for closure-flow
+safety; no result for that capture is inferred from successful compilation.
 Source admission, entry/resource contracts and capture fidelity remain
 separate; the shared simulation relation and production admission set are
 unchanged.

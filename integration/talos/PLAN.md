@@ -456,18 +456,33 @@ injectivity assumption on `Name.toString` is used. The export constructor now
 selects `declaration.name.toString` itself and derives its numeric lookup,
 removing the caller's `exported` premise. Eight new endpoints use only standard
 axioms (the validator uniqueness lemma needs only `propext` and `Quot.sound`);
-the exact audit contains 182 endpoints.
+that checkpoint raised the exact audit to 182 endpoints.
 
-This removes static assembly work, not dynamic admission. `WasmSupported`, name
-uniqueness, selected ABI classification,
-and pipeline equations remain explicit static obligations.
-In particular `lowerSupported` success alone does not currently imply the
-stronger `WasmSupported` closure-flow check. Exact import keys alone do not
+`ConcreteSourceValidation.lean` separates the source-check boundary precisely:
+successful validation supplies supported declarations and reuse-capacity safety.
+Under successful lowering, `WasmSupported` is equivalent to the additional
+`closureFlowSafeProgram = true` check. The export constructor now derives the
+checked components internally and requests only that residual closure-flow
+condition, not the bundled `WasmSupported` premise.
+Four standard-only endpoints raise the exact trust inventory to 186.
+The existing dictionary-underapplication fixture confirms that validation and
+lowering can succeed while closure-flow safety fails; executable guards record
+this distinction without being used as theorem evidence.
+
+This removes static assembly work, not dynamic admission. Closure-flow safety,
+name uniqueness, selected ABI classification and pipeline equations remain
+explicit static obligations. `lowerSupported` success alone does not imply
+the stronger closure-flow check. Exact import keys alone do not
 establish semantic contract alignment; the new theorem additionally proves
 which function the resolver selected. Remaining static source checks must be
 derived at their actual checker boundary, without silently strengthening
-`lowerSupported` success. Captured-program reification and the distinct
-closed-closure/pruning production route remain separately coordinated.
+`lowerSupported` success. The next source-boundary target is name uniqueness
+from successful lowering plus symbolic validation: expose duplicate-name
+rejection and transport all declaration names through lowering. Merely wrapping
+the input in `CheckedProgram` would retain the same caller obligation.
+This slice does not pretend the lowering gate checks name uniqueness.
+Captured-program reification and the distinct closed-closure/pruning production
+route remain separately coordinated.
 
 ### Intended result
 

@@ -1,6 +1,7 @@
 import FirTalos.ConcreteExternalAlignment
 import FirTalos.ConcreteExportRows
 import FirTalos.Correctness.Exports
+import FirTalos.ConcreteSourceValidation
 
 namespace FirTalos.Concrete
 
@@ -57,7 +58,9 @@ numeric index, local layout, or adapted body. The selected declaration identity
 is retained in the conclusion; its effective result ABI comes from lowering,
 and need not equal the declaration's unrefined public ABI classification.
 
-The supported-program/name checks remain explicit static obligations. Import
+Successful lowering supplies supported declarations and reuse-capacity safety;
+only the additional closure-flow check and name uniqueness remain explicit
+program-wide static obligations. Import
 count, runtime/external contract alignment and canonical named export lookup
 are derived from the same successful lowering, adaptation and resolution
 pipeline. The export name is the selected declaration's actual printed name,
@@ -75,7 +78,7 @@ theorem ConcreteSupportedExport.exists_ofSupportedPipeline
     {declaration : LCNF.Decl .impure}
     {code : LCNF.Code .impure}
     {resultKind : AbiKind}
-    (supported : Fir.Wasm.WasmSupported program)
+    (closureFlow : Fir.Wasm.closureFlowSafeProgram program = true)
     (namesUnique : program.NamesUnique)
     (lowered : Fir.Wasm.lowerSupported program = .ok sourceModule)
     (adapted : adapt sourceModule = .ok target)
@@ -99,7 +102,8 @@ theorem ConcreteSupportedExport.exists_ofSupportedPipeline
   let spec : ConcreteSupportedExport program context code sourceModule
       sourceFunction target hosts declaration.name.toString := {
     row with
-    programSupported := supported
+    programSupported :=
+      (wasmSupported_iff_closureFlowSafe_of_lowerSupported lowered).mpr closureFlow
     programNamesUnique := namesUnique
     lowered
     sourceDeclaration := declaration
@@ -137,13 +141,15 @@ theorem ConcreteSupportedExport.selectedDeclarationResult
 /-- Regression through the actual constructor: the selected declaration's
 identity, cache row and effective result survive the whole static assembly.
 Neither a handwritten function/index, import-count premise, runtime/external
-contract alignment premise, nor named export lookup is supplied. -/
+contract alignment premise, named export lookup, nor repeated supported-declaration
+or reuse-capacity checks are supplied. Closure flow remains explicit because
+the production validation gate does not check it. -/
 example
     {program : Fir.LeanIR.ImpureProgram} {sourceModule : Fir.Wasm.Module}
     {target : AdaptedModule} {hosts : ResolvedHosts}
     {declaration : LCNF.Decl .impure} {code : LCNF.Code .impure}
     {resultKind : AbiKind}
-    (supported : Fir.Wasm.WasmSupported program)
+    (closureFlow : Fir.Wasm.closureFlowSafeProgram program = true)
     (namesUnique : program.NamesUnique)
     (lowered : Fir.Wasm.lowerSupported program = .ok sourceModule)
     (adapted : adapt sourceModule = .ok target)
@@ -162,7 +168,7 @@ example
         target.wasmModule.findExport declaration.name.toString =
           some spec.targetFunctionIndex := by
   obtain ⟨context, sourceFunction, spec, caches, selected⟩ :=
-    ConcreteSupportedExport.exists_ofSupportedPipeline supported namesUnique
+    ConcreteSupportedExport.exists_ofSupportedPipeline closureFlow namesUnique
       lowered adapted resolved found body
       classified
   obtain ⟨named, result⟩ := spec.selectedDeclarationResult selected

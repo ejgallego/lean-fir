@@ -1176,11 +1176,19 @@ Talos validation and exact `findExport` from membership. The constructor's
 export name is the actual `declaration.name.toString`; no caller export-table
 equation or injectivity assumption on name rendering is required.
 
-`WasmSupported` is stronger than the current `validateSupported`
-gate; success of `lowerSupported` alone is not claimed to discharge it. This
+`ConcreteSourceValidation.lean` now proves what successful source validation
+supplies: supported declarations and reuse-capacity safety. Under successful
+lowering, `WasmSupported` is equivalent to `closureFlowSafeProgram = true`.
+The constructor derives the checked components internally and retains only
+that explicit closure-flow condition, alongside the separate name-uniqueness
+premise. Neither closure-flow safety nor name uniqueness is claimed to follow
+from `validateSupported` alone. This
 is not a capture-fidelity, closed-closure pruning, resident-linking or binary
-encoder theorem. The twenty-three static infrastructure endpoints use only
-standard axioms; the exact compiled inventory now checks 182 endpoints.
+encoder theorem. The twenty-seven static infrastructure endpoints use only
+standard axioms; the exact compiled inventory now checks 186 endpoints.
+Executable dictionary-underapplication guards additionally distinguish
+successful validation/lowering from the stronger closure-flow condition. They
+are not theorem premises and introduce no native-evaluation proof dependencies.
 
 ### Remaining terminal assembly obligations
 
@@ -1255,6 +1263,7 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | exact external declaration/import metadata, resolver selection and derived external contracts | 3 | 0 |
 | production source export rows, target validity, adapter/canonical export lookup | 3 | 0 |
 | target validation implies unique public function-export names | 2 | 0 |
+| source-validation facts, lowering-to-validation and exact residual closure-flow equivalences | 3 | 0 |
 | production supported-export construction and selected declaration/result projection | 3 | 0 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |

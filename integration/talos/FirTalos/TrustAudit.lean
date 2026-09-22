@@ -9,6 +9,7 @@ import FirTalos.ConcreteRootedDispatch
 import FirTalos.ConcreteRootedSimulation
 import FirTalos.ConcreteRootedTerminal
 import FirTalos.ConcreteSupportedPipeline
+import FirTalos.ConcreteSourceValidationTests
 import FirTalos.ConcreteResumableWasm
 import FirTalos.ConcretePassComposition
 import FirTalos.ConcreteCompilerCorrectness
