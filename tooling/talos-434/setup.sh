@@ -28,9 +28,9 @@ check_hash 3d72490f4bf785799082a70b5aabb1c4f86fd3ebd56ac897aed6f96e53652a64 "$ov
 check_hash b45cdb52a2573023f0b3ce8e8e2bf15c799993ee91fb511dc65cf884ef647f6f "$overlay/float-normalization.patch"
 check_hash aed2e6cd0c594647d27c951936236740d6fd19ccd2e49eb6a647b0650d905c4b "$overlay/interpreter-lake-manifest.json"
 check_hash 722547c0b87f68efb046c33224d4429ae7bd02df774b456709f91120505defe2 "$overlay/lake-manifest.json"
-check_hash a9413e752e6d64339fcc713a312a0e7d25ff5f26ce361a0f7a7e0af2a76b9a74 "$root/integration/talos/FirTalos/ConcreteResidentFloat.lean"
+check_hash f140b3a3e32620c8bc6d581bd649aac11bafb6f210d48b070b43bfe9c93de6cd "$root/integration/talos/FirTalos/ConcreteResidentFloat.lean"
 check_hash f367a0809cd57630f9f907da84ba4bc91661c22b52f401f03b7922e08185c454 "$root/integration/talos/FirTalos.lean"
-if [[ "$(hash_lean_tree "$root/integration/talos/FirTalos")" != 05ae89aa5c3014b13041f72606e3ba67abf9d0ede7cdb85fd2311aceb5aef2fb ]]; then
+if [[ "$(hash_lean_tree "$root/integration/talos/FirTalos")" != e73b0c60c0bb1264504bcb47cebd4bd673486eee45eb3e70d7043a430d0e078f ]]; then
   echo "FIR Talos source tree differs from the reviewed overlay base" >&2
   exit 1
 fi
@@ -66,9 +66,12 @@ done < <(git -C "$talos" diff --name-only -z)
 mkdir -p "$project"
 cp -a "$root/integration/talos/FirTalos" "$root/integration/talos/FirTalos.lean" "$project/"
 cp "$overlay/lakefile.toml" "$overlay/lean-toolchain" "$overlay/lake-manifest.json" "$project/"
-patch --batch -d "$project" -p1 -i "$overlay/float-normalization.patch"
+if ! grep -Fqx '  dsimp only at h4 h5 h6 h7' \
+    "$project/FirTalos/ConcreteResidentFloat.lean"; then
+  patch --batch -d "$project" -p1 -i "$overlay/float-normalization.patch"
+fi
 check_hash f140b3a3e32620c8bc6d581bd649aac11bafb6f210d48b070b43bfe9c93de6cd "$project/FirTalos/ConcreteResidentFloat.lean"
-if [[ "$(hash_lean_tree "$project/FirTalos")" != c259656af13935588764e1b44cb5ea62ee657ed1679fdbe212eaa38d722768e9 ]]; then
+if [[ "$(hash_lean_tree "$project/FirTalos")" != e73b0c60c0bb1264504bcb47cebd4bd673486eee45eb3e70d7043a430d0e078f ]]; then
   echo "FIR Talos overlay source tree differs from the reviewed result" >&2
   exit 1
 fi
