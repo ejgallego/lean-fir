@@ -4,6 +4,10 @@ import { readFileSync } from "node:fs";
 import { createArrayProbe } from "./adapter.mjs";
 
 const path = process.argv[2] ?? "_build/array-probe.raw.wasm";
+const toolchain = readFileSync(new URL("../../lean-toolchain", import.meta.url),
+  "utf8").trim();
+assert.ok(["leanprover/lean4:v4.33.0", "leanprover/lean4:v4.34.0-rc2"]
+  .includes(toolchain), `unsupported Array-probe toolchain ${toolchain}`);
 const values = Array.from({ length: 32 }, (_, index) => 3 * index + 1);
 let tick = 0;
 const probe = await createArrayProbe({
@@ -35,8 +39,10 @@ for (const rounds of [0, 1, 64]) {
 }
 for (const rounds of [0, 1, 4, 16]) {
   const shared = probe.updateShared(size, 7, rounds);
-  assert.equal(shared.memory.allocatedBytes, allocationBytes * (rounds + 1),
-    `shared update copy growth for ${rounds} rounds`);
+  const expectedCopies = toolchain === "leanprover/lean4:v4.33.0"
+    ? rounds + 1 : rounds === 0 ? 1 : 2;
+  assert.equal(shared.memory.allocatedBytes, allocationBytes * expectedCopies,
+    `shared update copy growth for ${rounds} rounds on ${toolchain}`);
 }
 
 assert.throws(() => probe.updateUnique(0x7fffffff, 0, 1),

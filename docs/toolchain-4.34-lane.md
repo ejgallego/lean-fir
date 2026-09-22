@@ -43,7 +43,7 @@ separate `leanprover--lean4---v4.34.0-rc2` directory. No mutable `.lake`,
 | Validation harness unit checks | Pass | 4 + 126 + 6 + 3 + 3 Python tests, Float/external Node tests. |
 | `make check` | Fails in V8 validation | All 721 native/LCNF/V8 values agree, but one 4.33-specific external-trace requirement produces four findings. |
 | Trust-source audit | Not reached by `make check`; focused command rejects the 4.34 pin | Upstream `AlphaEqv`, `SimpCase`, and `ElimDead` source SHA-256 values are unchanged from 4.33; the audit still requires the literal 4.33 toolchain. |
-| Talos package/driver | Not yet tested on 4.34 | `integration/talos/lean-toolchain` and the pinned Talos interpreter remain 4.33. |
+| Talos package/driver | Isolated full proof cone passes with one W6-approved proof normalization; official gate still pending | `integration/talos/lean-toolchain` and the pinned Talos interpreter remain 4.33; no `make talos-check` under the official pin is claimed. |
 | CI | Focused branch smoke is staged; no hosted run claimed | `.github/workflows/lean-434-compat.yml` checks compilation and scalar execution only. Existing full workflow still targets `main`. |
 
 The observed validation drift is confined to
@@ -64,6 +64,42 @@ should be added only with an explicit, truthful gate policy after those
 contracts are reviewed. The branch smoke workflow is expressly not a replacement
 for `make check` or `make talos-check`. Feature workers may consume this compatibility branch
 for focused 4.34 work but must report these outstanding repository-wide gates.
+
+## Full-cone probe update (2026-09-22)
+
+At clean tooling head `7cbd297872913816f444b81239c648d753130c34`, an
+ignored source view compiled the real pinned Talos interpreter at
+`0e05edbcfbb105b33e90c60b4f50e2cf193d9254` with Lean
+`4.34.0-rc2` and matching mathlib revision
+`85e3a25e006c35636f0e53b0e9296caca2685bc0`. Its only Lean-source
+change was W6's reviewed `dsimp only at h4 h5 h6 h7` immediately after
+`cases memory` in the byte-memory lemma of `ConcreteResidentFloat.lean`.
+The actual `FirTalos.ConcreteResidentFloat` cone passed (3,155 jobs), followed
+by the full `FirTalos` umbrella including `TrustAudit` (3,231 jobs). This is
+strong 4.34 proof-compatibility evidence, not an official Talos pin update or
+an unmodified `make talos-check` result. The worktree-local report and log
+hashes are in `.deps/float-434-full-cone-report.md`.
+
+A fresh `make check` on the same tracked head still fails the exact four
+`generic-uint8-array-get` external-trace findings: all 721 native, LCNF, and
+V8 results agree, but 4.34 observes only `Array.get!Internal`, while the
+accepted 4.33 contract requires `instInhabitedUInt8` before it. A focused
+`scripts/validate_trusted_assumptions.py` run rejects only the literal 4.33
+toolchain pin; SHA-256 of each audited upstream `AlphaEqv`, `SimpCase`, and
+`ElimDead` source file is byte-for-byte unchanged in the installed 4.34
+toolchain. Neither result authorizes silently broadening the corpus or
+renaming/recertifying the `lean433UpstreamBridge` axiom. Both remain explicit
+root/proof-owner decisions under the full-gate policy below.
+
+The broader tooling gate exposed a separate allocation-ratchet drift in the
+ordinary Array probe: 4.34 preserves every returned value but allocates one
+copy on the first shared update, then reuses the new Array. The tooling-owned
+check now retains its exact 4.33 copy-count expectation and applies an exact,
+fail-closed 4.34 expectation. `make -C tooling check` passes with the pinned
+Binaryen tools; both raw and packaged Array probes pass. See
+`bugs/FIR-BUG-tooling-array-probe-434-copy-ratchet.md`. A subsequent full
+`make check` still has only the four corpus findings above (721/721 values
+equal), so this tooling repair does not mask the shared-fixture gate.
 
 ## Full-gate migration policy to decide
 
