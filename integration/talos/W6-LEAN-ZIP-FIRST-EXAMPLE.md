@@ -171,6 +171,17 @@ surface and its W7/package wiring; W6 does not duplicate it locally.
   `.tobject`. Current `ConcreteStructuredLazyMissBackendCoverageAt` explicitly
   excludes those result kinds. Preserve the actual cache publication,
   persistence and root-result provenance rather than assuming a warm cache.
+  `ConcreteLazyPublication` now composes the compiler-selected initializer's
+  ordinary transport with facts-aware publication for the complete miss,
+  including heap-valued results. Its preferred entry consumes the existing
+  `LazyCacheInternalPublicationInduction` disjointness postcondition; it does
+  not infer alias safety from ABI typing. Physical cache publication already
+  supports arbitrary related values. The remaining restriction is the
+  all-location `ReuseCapacityCodeEntryTransports.ordinary` and its suspended
+  resource-stack consumers: publishing an ordinary returned graph genuinely
+  invalidates that stronger condition. A separate facts-aware stack transport
+  and derivation of publication disjointness are still needed before changing
+  the current admission boundary.
 - Apply the existing rooted finite-trace/terminal theorem only after its
   explicit compiler-current-step admission, address-space/resource safety,
   entry/runtime contracts and argument arity have been constructed for this

@@ -51,6 +51,16 @@ The repository-wide theorem-contract and assumption-budget tables live in
 20-branch PA0 review surface lives in
 [`docs/w6-source-admission-audit.md`](../../docs/w6-source-admission-audit.md).
 
+The independent lazy-publication helper in `ConcreteLazyPublication.lean`
+now composes compiler-selected initializer execution and facts-aware cache
+publication without excluding heap results. This is a local source-transport
+lemma, not closure of `ConcreteStructuredLazyMissBackendCoverageAt`: the
+structured resource stack still requires all-location ordinaryness, while
+publication intentionally makes the returned ownership graph persistent.
+The successor must preserve the caller's retained tokens through an appropriate
+stack transport and derive their disjointness from the published graph. No
+runtime contract, central relation, or admission restriction changes here.
+
 The review follow-up in
 [`W6-OBSERVABLE-CONTRACT-AND-TRUST.md`](W6-OBSERVABLE-CONTRACT-AND-TRUST.md)
 strengthens the destination to include represented terminal results and faults

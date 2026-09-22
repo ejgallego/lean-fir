@@ -1196,6 +1196,37 @@ successful lowering rejected by symbolic validation and adaptation. The generic
 duplicate-check theorem unfolds the existing private implementation through a
 proof-side import; it does not substitute a shadow checker or change production.
 
+### Facts-aware complete lazy-cache miss transport
+
+`ConcreteLazyPublication.lean` supplies
+`SourceLazyLetResult.miss_ordinaryBindTransport_of_internalCompiler` and the
+preferred `miss_ordinaryBindTransport_of_publicationInduction` entry. Actual
+lowering and adaptation choose the initializer; its existing hereditary proof
+supplies the callee ordinary transport and publication postcondition. The
+complete source miss then preserves the retained reuse-token facts after
+binding, including when the returned value has `.object` or `.tobject` ABI.
+The composition helper `ReuseTokenOrdinaryBindTransport.precompose` is
+axiom-free; both complete-miss theorems use only the standard three axioms.
+
+This discharges the composition from callee entry through publication, not
+the ownership analysis itself: disjointness between retained tokens and the
+published ownership graph remains an explicit semantic obligation of the
+recursive induction. No new global invariant or caller-chosen target path is
+introduced. Neither the structured resource stack nor its stronger
+all-location ordinaryness transport is changed. Therefore the current
+structured object/tobject miss exclusion remains; this checkpoint is not PA3
+or a claim about linked/encoded applications.
+
+Kernel regressions in `ConcreteLazyPublicationTests.lean` publish an actual
+heap object. They distinguish the false all-location transport from preserved
+nonempty retained-token facts, establish the initial ordinary-token relation
+and its post-publication consequence, and reject an alias into the published
+root. These are semantic boundary tests, not a claim that the fixture is a
+complete admitted compiler export or an application proof.
+The exact inventory includes all three new transport lemmas and all four
+public sensitivity tests, bringing the maintained audit to 200 endpoints.
+No generated dependency or trusted assumption is added.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
