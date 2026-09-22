@@ -385,10 +385,17 @@ bounded integration lease when a producer submits its next clean checkpoint.
   (3 standard plus 57 inherited generated); returned projection standard-only.
   No new trust, universal admission, finite-prefix, schema or terminal closure.
   This integration lease is released.
-  **W6 proof work is parked (paused by user, 2026-09-11) at this checkpoint.**
-  No successor assignment, self-started audit or proof implementation until the
-  user explicitly resumes. Preserve the clean lane, immutable checkpoint and
-  evidence; no cleanup, deletion, push or session termination is requested.
+  W6 proof work was parked (paused by user, 2026-09-11) at this checkpoint and
+  was explicitly resumed by the maintainer on 2026-09-22. The first resumed
+  slice, ROOT-W6-20260922-031, is linked/accepted at exact clean checkpoint
+  `e8c9b7e85b173f287752c1e90abcd45017582d92` (functional `3a3fd0c4`),
+  fast-forwarded onto `main` after independent `make check` and
+  `make talos-check`. It composes facts-aware callee-prefix transport for
+  fixed-caller ordinary publication while retaining the existing relation,
+  admission, runtime, ABI and trust boundaries. Structured suspended frames,
+  arbitrary publication disjointness, retained Stored reification,
+  object/tobject exclusion and the 4.34 bridge decisions remain separate
+  follow-ups; no broad closure or shared-contract change is implied.
   Rooted initial/prefix/terminal assembly, joint schema metadata, admission and
   resource obligations, traps, helper/tagged-result and W72 debt remain open.
 - W7: ROOT-W7-20260909-107 is accepted at exact CG-05B checkpoint
