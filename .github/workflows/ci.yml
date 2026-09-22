@@ -70,6 +70,6 @@ jobs:
         run: |
           LAKE_CACHE_DIR="$(bash scripts/fir-lake-cache-path.sh)"
           export LAKE_CACHE_DIR LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true
-          lake -d integration/talos exe cache get
+          lake -d .deps/talos-434/project exe cache get
       - name: Check proofs and exact trust inventory
         run: make talos-check
