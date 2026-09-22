@@ -102,7 +102,12 @@ bug-cards:
 	@bash scripts/quiet-run.sh bug-cards -- python3 scripts/validate_bug_cards.py
 
 trusted-assumptions:
-	@bash scripts/quiet-run.sh trusted-assumptions -- python3 scripts/validate_trusted_assumptions.py
+	@if grep -qx 'leanprover/lean4:v4.34.0-rc2' lean-toolchain; then \
+		bash scripts/quiet-run.sh trusted-assumptions -- python3 scripts/validate_trusted_assumptions.py \
+			--profile lean-4.34-rc2 --lean-project "$(CURDIR)"; \
+	else \
+		bash scripts/quiet-run.sh trusted-assumptions -- python3 scripts/validate_trusted_assumptions.py; \
+	fi
 
 proof-trust-sources:
 	@bash scripts/quiet-run.sh proof-trust-sources -- python3 integration/talos/check-proof-trust.py --sources-only
