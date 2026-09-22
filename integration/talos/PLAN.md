@@ -114,6 +114,22 @@ the missing ByteArray concrete relation. General owned graphs and the stronger
 historical resource scope remain the next obligations; do not introduce a
 mirrored stack companion whose future pushes still require the old scope.
 
+Fresh owned graphs now have a compositional source-heap boundary:
+`HeapRegionClosed` states that owned edges above an allocation cutoff do not
+point into the older heap. The existing entry relation establishes the empty
+region; `HeapRegionClosed.alloc` preserves it from the new object's immediate
+fields, and `HeapRegionClosed.reachable` derives the transitive bound without
+an acyclicity premise. `of_freshRegion` and `freshRegion_setGlobal` recover
+caller-specific publication and binding safety. The actual two-allocation
+`freshSharedGraph_publication` regression builds a parent owning the same new
+string twice, derives all field bounds, and preserves the nonempty token map;
+`freshSharedGraph_reaches_leaf` confirms a genuine owned child. The older-token
+negative regression remains. This is not a proof of arbitrary compiled
+initializers: deriving these local construction facts for their bodies,
+handling permitted references outside the fresh region, and strengthening
+historical resource scopes remain open. No source-admission premise is hidden
+inside this local heap property.
+
 The review follow-up in
 [`W6-OBSERVABLE-CONTRACT-AND-TRUST.md`](W6-OBSERVABLE-CONTRACT-AND-TRUST.md)
 strengthens the destination to include represented terminal results and faults

@@ -182,6 +182,95 @@ theorem ReuseTokenOrdinaryBindTransport.allocLeaf_setGlobal
     (.of_allocLeaf related allocation leaf)).precompose
       (alloc_ordinaryPersistenceTransport allocation)
 
+/-- An allocation region owns no edge into the older heap. This local heap
+property is independent of caller facts and is preserved by allocating objects
+whose heap-valued fields stay in the region. It is not a source-machine invariant
+or a claim that arbitrary initializer bodies respect this allocation policy. -/
+def HeapRegionClosed (cutoff : Location) (heap : Heap) : Prop :=
+  ∀ parent cell child, cutoff ≤ parent → findCell? heap parent = some cell →
+    Value.object (.heap child) ∈ cell.object.ownedValues.toList → cutoff ≤ child
+
+/-- Before the first allocation, the region above the source frontier is empty. -/
+theorem ReuseCapacityStateRelated.freshRegionClosed
+    {facts : ReuseCapacityFacts} {function : Fir.Wasm.Function}
+    {runtime : RuntimeState} {env : Env} {store : Wasm.Store Host}
+    {locals : Wasm.Locals} {witness : RefinementWitness}
+    (related : ReuseCapacityStateRelated facts function runtime env store locals
+      witness) :
+    HeapRegionClosed runtime.nextLocation runtime.heap := by
+  intro parent cell child above found member
+  exact False.elim ((Nat.not_le_of_lt
+    (related.1.1.heap.locationsBeforeNext _ _ found)) above)
+
+/-- Allocation preserves the region using only its new object's immediate
+owned fields; clients need not supply transitive reachability separation. -/
+theorem HeapRegionClosed.alloc
+    {cutoff : Location} {before after : RuntimeState}
+    {object : HeapObject} {reference : ObjectRef} {persistent : Bool}
+    (closed : HeapRegionClosed cutoff before.heap)
+    (allocation : Fir.LeanIR.Impure.alloc before object persistent =
+      (after, reference))
+    (fields : ∀ child, Value.object (.heap child) ∈ object.ownedValues.toList →
+      cutoff ≤ child) :
+    HeapRegionClosed cutoff after.heap := by
+  cases allocation
+  intro parent cell child above found member
+  by_cases atNew : before.nextLocation = parent
+  · simp [Fir.LeanIR.Impure.alloc, findCell?, atNew] at found
+    cases found
+    exact fields _ member
+  · simp [Fir.LeanIR.Impure.alloc, findCell?, atNew] at found
+    exact closed _ _ _ above found member
+
+/-- All paths from region roots stay in the region, including shared graphs
+and cycles. There is no acyclicity or traversal-fuel premise. -/
+theorem HeapRegionClosed.reachable
+    {cutoff : Location} {heap : Heap} {roots : List Value} {location : Location}
+    (closed : HeapRegionClosed cutoff heap)
+    (rootBound : ∀ root, Value.object (.heap root) ∈ roots → cutoff ≤ root)
+    (reachable : Reachable heap roots location) :
+    cutoff ≤ location := by
+  induction reachable with
+  | root member => exact rootBound _ member
+  | child parentReachable found member reference ih =>
+    subst_vars
+    exact closed _ _ _ ih found member
+
+/-- The original concrete caller relation places its tokens below the region;
+allocation-local closure places every published reachable node above it. -/
+theorem ReuseTokenPublicationDisjoint.of_freshRegion
+    {facts : ReuseCapacityFacts} {function : Fir.Wasm.Function}
+    {before after : RuntimeState} {env : Env} {store : Wasm.Store Host}
+    {locals : Wasm.Locals} {witness : RefinementWitness} {root : Location}
+    (related : ReuseCapacityStateRelated facts function before env store locals
+      witness)
+    (closed : HeapRegionClosed before.nextLocation after.heap)
+    (rootBound : before.nextLocation ≤ root) :
+    ReuseTokenPublicationDisjoint facts after env (.object (.heap root)) := by
+  intro id available location tracked tokenLookup reachable
+  have below := related.retainedToken_beforeNext tracked tokenLookup
+  have above := closed.reachable
+    (by intro candidate member; simpa using
+      (show candidate = root from by simpa using member) ▸ rootBound) reachable
+  exact (Nat.not_le_of_lt below) above
+
+/-- Consume a locally established region at publication and bind. The prefix
+transport is explicit; this theorem does not certify arbitrary callee code. -/
+theorem ReuseTokenOrdinaryBindTransport.freshRegion_setGlobal
+    {facts : ReuseCapacityFacts} {function : Fir.Wasm.Function}
+    {before after : RuntimeState} {env : Env} {store : Wasm.Store Host}
+    {locals : Wasm.Locals} {witness : RefinementWitness} {root : Location}
+    (related : ReuseCapacityStateRelated facts function before env store locals
+      witness)
+    (calleePrefix : ReuseTokenOrdinaryTransport facts env before after)
+    (closed : HeapRegionClosed before.nextLocation after.heap)
+    (rootBound : before.nextLocation ≤ root)
+    (name : Name) (result : FVarId) :
+    ReuseTokenOrdinaryBindTransport facts result before
+      (after.setGlobal name (.object (.heap root))) env (.object (.heap root)) :=
+  (ReuseTokenOrdinaryBindTransport.ofPublicationDisjoint name
+    (.of_freshRegion related closed rootBound)).precomposeRetained calleePrefix
+
 section InternalMiss
 
 variable

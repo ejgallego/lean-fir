@@ -424,4 +424,65 @@ theorem freshString_advance_popRetainedCache
   exact related.advance_popRetainedCache callerScope callee witnessTransport
     capacityTransport ordinaryTransport programEq tail
 
+/-- A new parent owns the same new leaf twice. Publication must preserve the
+old retained token despite this nonempty, shared ownership graph. -/
+private def sharedStringParent (reference : ObjectRef) : HeapObject :=
+  .ctor { tag := 0, objectFields := #[.object reference, .object reference], usizeFields := #[], scalarFields := [] }
+
+private def freshSharedAllocation (text : String) : RuntimeState × ObjectRef :=
+  let leaf := freshStringAllocation text
+  alloc leaf.1 (sharedStringParent leaf.2) false
+
+/-- The positive fixture genuinely reaches an owned child distinct from its
+published root; it does not reduce to the previous leaf-only test. -/
+theorem freshSharedGraph_reaches_leaf (text : String) :
+    Reachable (freshSharedAllocation text).1.heap
+      [.object (freshSharedAllocation text).2] publicationRuntime.nextLocation := by
+  apply Reachable.child (parent := publicationRuntime.nextLocation + 1)
+    (cell := { object := sharedStringParent (freshStringAllocation text).2 })
+    (value := .object (.heap publicationRuntime.nextLocation))
+  · exact .root (by simp [freshSharedAllocation, freshStringAllocation, alloc])
+  · simp [freshSharedAllocation, freshStringAllocation, alloc, findCell?]
+  · simp [sharedStringParent, HeapObject.ownedValues, freshStringAllocation, alloc]
+  · rfl
+
+/-- Actual two-allocation publication discharges graph safety from local field
+construction and the existing entry relation, with no supplied freshness,
+disjointness, or ordinary-binding premise. The caller fact map is nonempty.
+This is source-runtime ownership transport, not execution of a compiled body. -/
+theorem freshSharedGraph_publication
+    (text : String)
+    {function : Fir.Wasm.Function} {store : Wasm.Store Host}
+    {locals : Wasm.Locals} {witness : RefinementWitness}
+    (related : ReuseCapacityStateRelated retainedFacts function publicationRuntime
+      retainedEnv store locals witness) :
+    ReuseTokenOrdinaryBindTransport retainedFacts resultId publicationRuntime
+      ((freshSharedAllocation text).1.setGlobal `sharedCache
+        (.object (freshSharedAllocation text).2))
+      retainedEnv (.object (freshSharedAllocation text).2) := by
+  have leafClosed : HeapRegionClosed publicationRuntime.nextLocation
+      (freshStringAllocation text).1.heap :=
+    related.freshRegionClosed.alloc
+      (object := .string text) (persistent := false) rfl
+      (by simp [HeapObject.ownedValues])
+  have graphClosed : HeapRegionClosed publicationRuntime.nextLocation
+      (freshSharedAllocation text).1.heap :=
+    leafClosed.alloc (object := sharedStringParent (freshStringAllocation text).2)
+      (persistent := false) rfl (by
+        intro child member
+        have same : child = publicationRuntime.nextLocation := by
+          simpa [sharedStringParent, HeapObject.ownedValues, freshStringAllocation,
+            alloc] using member
+        exact same.ge)
+  have leafTransport : OrdinaryPersistenceTransport publicationRuntime
+      (freshStringAllocation text).1 :=
+    alloc_ordinaryPersistenceTransport (object := .string text) rfl
+  have graphTransport : OrdinaryPersistenceTransport
+      (freshStringAllocation text).1 (freshSharedAllocation text).1 :=
+    alloc_ordinaryPersistenceTransport
+      (object := sharedStringParent (freshStringAllocation text).2) rfl
+  exact ReuseTokenOrdinaryBindTransport.freshRegion_setGlobal related
+    (.ofOrdinaryPersistence (leafTransport.trans graphTransport)) graphClosed
+    (by simp [freshSharedAllocation, freshStringAllocation, alloc]) `sharedCache resultId
+
 end FirTalos.Concrete

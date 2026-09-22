@@ -215,6 +215,12 @@ surface and its W7/package wiring; W6 does not duplicate it locally.
   Source ByteArray objects are leaves too, but this does not add the missing
   concrete ByteArray refinement or prove the retained initializer bodies.
   A fresh constructor containing an old token is an explicit negative test.
+  `HeapRegionClosed` now extends the source ownership producer to fresh graphs:
+  closure is established at entry and preserved per allocation using immediate
+  field bounds; transitive separation is derived. The two-allocation shared
+  string/constructor test supplies those bounds from actual field construction
+  and reaches a genuine owned child. This still does not certify the retained
+  Stored initializer bodies or add a new general source-machine invariant.
 - Apply the existing rooted finite-trace/terminal theorem only after its
   explicit compiler-current-step admission, address-space/resource safety,
   entry/runtime contracts and argument arity have been constructed for this
