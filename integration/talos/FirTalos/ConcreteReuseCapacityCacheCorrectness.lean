@@ -3859,6 +3859,62 @@ def ConcreteReuseCapacityCacheFrame
     LazyCacheGlobalsRel witness sourceModule sourceRuntime targetStore ∧
     ClosureTablesAgree targetStore witness
 
+/-- Restore a suspended caller's complete cache frame after the checked result
+binding. Only that caller's retained-token facts must survive; a callee may
+publish other heap graphs. The final callee frame supplies the remaining
+budget, implementation laws, descriptors, globals and closure tables.
+
+This does not reconstruct the stronger historical entry-transport package.
+In particular, no all-location ordinary-persistence premise is hidden here. -/
+theorem ConcreteReuseCapacityCacheFrame.restoreCaller_of_retainedTransport
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {externals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {initial afterCall : Wasm.Store Host}
+    {initialWitness resultWitness : RefinementWitness}
+    {facts calleeFacts : ReuseCapacityFacts}
+    {callerBytes resultBytes : Nat}
+    {sourceEnv calleeEnv : Env}
+    {callerLocals calleeLocals resumedLocals : Wasm.Locals}
+    {result : FVarId} {resultIndex : Nat}
+    {sourceValue : Value} {physical : Wasm.Value}
+    (caller : ConcreteReuseCapacityCacheFrame sourceModule callerFunction
+      externals facts callerBytes sourceRuntime sourceEnv initial callerLocals
+      initialWitness)
+    (callee : ConcreteReuseCapacityCacheFrame sourceModule calleeFunction
+      externals calleeFacts resultBytes nextRuntime calleeEnv afterCall
+      calleeLocals resultWitness)
+    (witnessTransport : WitnessTransport initialWitness resultWitness)
+    (capacityTransport : HeaderCapacityTransport initial.host.runtime.heap
+      afterCall.host.runtime.heap initialWitness)
+    (ordinaryTransport : ReuseTokenOrdinaryBindTransport facts result
+      sourceRuntime nextRuntime sourceEnv sourceValue)
+    (finalRelated : StateRelated callerFunction nextRuntime
+      (bind sourceEnv result sourceValue) afterCall resumedLocals resultWitness)
+    (finalAligned : ConcreteLocalFrameAligned callerFunction nextRuntime
+      (bind sourceEnv result sourceValue) afterCall resumedLocals resultWitness)
+    (resultFound :
+      findFVar? (functionBindings callerFunction) result = some resultIndex)
+    (localUpdate : FirTalos.Correctness.LocalUpdate callerLocals resumedLocals
+      resultIndex physical) :
+    ConcreteReuseCapacityCacheFrame sourceModule callerFunction externals
+      (eraseReuseCapacityFact facts result) resultBytes nextRuntime
+      (bind sourceEnv result sourceValue) afterCall resumedLocals
+      resultWitness := by
+  rcases caller with
+    ⟨⟨⟨⟨callerRelated, callerOrdinary, _callerAligned, _callerBudget⟩,
+      _callerInteger, _callerNatural, _callerScalar⟩, _callerDescriptors⟩,
+      _callerCache, _callerClosureTables⟩
+  rcases callee with
+    ⟨⟨⟨⟨_calleeRelated, _calleeOrdinary, _calleeAligned, resultBudget⟩,
+      resultInteger, resultNatural, resultScalar⟩, resultDescriptors⟩,
+      resultCache, resultClosureTables⟩
+  exact ⟨⟨⟨⟨callerRelated.eraseResult finalRelated resultFound localUpdate
+      witnessTransport capacityTransport, ordinaryTransport callerOrdinary,
+      finalAligned, resultBudget⟩, resultInteger, resultNatural, resultScalar⟩,
+      resultDescriptors⟩, resultCache, resultClosureTables⟩
+
 /-- The hereditary-call frame adds exactly the program-indexed closure ABI
 invariant needed to assemble captured arguments at generated callee entry.
 Keeping it as a wrapper leaves operation-family proofs that do not allocate

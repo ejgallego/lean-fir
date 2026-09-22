@@ -12171,54 +12171,16 @@ theorem ReuseCapacityEntryRelativeFrame.restoreDirectCaller
       entryRuntime entryStore entryWitness (eraseReuseCapacityFact facts result)
       resultBytes nextRuntime (bind sourceEnv result sourceValue) afterCall
       resumedLocals resultWitness := by
-  rcases caller.1 with
-    ⟨⟨⟨⟨callerRelated, callerOrdinary, _callerAligned, _callerBudget⟩,
-      _callerInteger, _callerNatural, _callerScalar⟩, _callerDescriptors⟩,
-      _callerCache, _callerClosureTables⟩
-  rcases callee.1 with
-    ⟨⟨⟨⟨_calleeRelated, _calleeOrdinary, _calleeAligned, resultBudget⟩,
-      resultInteger, resultNatural, resultScalar⟩, resultDescriptors⟩,
-      resultCache, resultClosureTables⟩
-  have resultRelated :
-      ReuseCapacityStateRelated (eraseReuseCapacityFact facts result)
-        callerFunction nextRuntime (bind sourceEnv result sourceValue)
-        afterCall resumedLocals resultWitness :=
-    callerRelated.eraseResult finalRelated resultFound localUpdate
-      callee.2.witness callee.2.capacity
-  have resultOrdinary :
-      ReuseTokenOrdinaryRel (eraseReuseCapacityFact facts result) nextRuntime
-        (bind sourceEnv result sourceValue) :=
-    callerOrdinary.eraseBind callee.2.ordinary
+  have resultFrame := caller.1.restoreCaller_of_retainedTransport callee.1
+    callee.2.witness callee.2.capacity
+    (ReuseTokenOrdinaryBindTransport.ofOrdinaryPersistence callee.2.ordinary)
+    finalRelated finalAligned resultFound localUpdate
   have resultTransports :
       ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
         afterCall entryWitness resultWitness :=
     caller.2.step callee.2.witness callee.2.closureAllocationsPersistent
       callee.2.capacity callee.2.ordinary callee.2.externals
       callee.2.toClosureTablesTransport
-  have resultBase :
-      ConcreteReuseCapacityFrame callerFunction
-        (eraseReuseCapacityFact facts result) resultBytes nextRuntime
-        (bind sourceEnv result sourceValue) afterCall resumedLocals
-        resultWitness :=
-    ⟨resultRelated, resultOrdinary, finalAligned, resultBudget⟩
-  have resultPure :
-      ConcreteReuseCapacityPureExternalFrame callerFunction externals
-        (eraseReuseCapacityFact facts result) resultBytes nextRuntime
-        (bind sourceEnv result sourceValue) afterCall resumedLocals
-        resultWitness :=
-    ⟨resultBase, resultInteger, resultNatural, resultScalar⟩
-  have resultOwnership :
-      ConcreteReuseCapacityPureExternalOwnershipFrame callerFunction externals
-        (eraseReuseCapacityFact facts result) resultBytes nextRuntime
-        (bind sourceEnv result sourceValue) afterCall resumedLocals
-        resultWitness :=
-    ⟨resultPure, resultDescriptors⟩
-  have resultFrame :
-      ConcreteReuseCapacityCacheFrame sourceModule callerFunction externals
-        (eraseReuseCapacityFact facts result) resultBytes nextRuntime
-        (bind sourceEnv result sourceValue) afterCall resumedLocals
-        resultWitness :=
-    ⟨resultOwnership, resultCache, resultClosureTables⟩
   exact ⟨resultFrame, resultTransports⟩
 
 /-- Exact-boundary form of caller restoration, used by the recursive resource

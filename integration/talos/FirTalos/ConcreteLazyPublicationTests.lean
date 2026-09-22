@@ -178,6 +178,57 @@ theorem twoPublications_post_retainedToken_ordinary :
       publication_after_disjoint)
   exact complete.eraseBind publication_initial_retainedToken_ordinary
 
+/-- A conditional consumer regression for the facts-aware caller-frame
+    restoration boundary. This is deliberately a frame theorem with explicit
+    checked transport premises, not a compiled-call or structured-stack
+    execution claim. -/
+theorem twoPublications_restoreCallerFrame
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {externals : ExternalImpl}
+    {initial afterCall : Wasm.Store Host}
+    {initialWitness resultWitness : RefinementWitness}
+    {calleeFacts : ReuseCapacityFacts}
+    {calleeEnv : Env}
+    {callerBytes resultBytes : Nat}
+    {callerLocals calleeLocals resumedLocals : Wasm.Locals}
+    {resultIndex : Nat} {physical : Wasm.Value}
+    (caller : ConcreteReuseCapacityCacheFrame sourceModule callerFunction
+      externals retainedFacts callerBytes publicationRuntime retainedEnv
+      initial callerLocals initialWitness)
+    (callee : ConcreteReuseCapacityCacheFrame sourceModule calleeFunction
+      externals calleeFacts resultBytes
+      ((publicationRuntime.setGlobal `cache publishedRoot).setGlobal
+        `outerCache publishedRoot)
+      calleeEnv afterCall calleeLocals resultWitness)
+    (witnessTransport : WitnessTransport initialWitness resultWitness)
+    (capacityTransport : HeaderCapacityTransport initial.host.runtime.heap
+      afterCall.host.runtime.heap initialWitness)
+    (finalRelated : StateRelated callerFunction
+      ((publicationRuntime.setGlobal `cache publishedRoot).setGlobal
+        `outerCache publishedRoot)
+      (bind retainedEnv resultId publishedRoot) afterCall resumedLocals
+      resultWitness)
+    (finalAligned : ConcreteLocalFrameAligned callerFunction
+      ((publicationRuntime.setGlobal `cache publishedRoot).setGlobal
+        `outerCache publishedRoot)
+      (bind retainedEnv resultId publishedRoot) afterCall resumedLocals
+      resultWitness)
+    (resultFound :
+      findFVar? (functionBindings callerFunction) resultId = some resultIndex)
+    (localUpdate : FirTalos.Correctness.LocalUpdate callerLocals resumedLocals
+      resultIndex physical) :
+    ConcreteReuseCapacityCacheFrame sourceModule callerFunction externals
+      (eraseReuseCapacityFact retainedFacts resultId) resultBytes
+      ((publicationRuntime.setGlobal `cache publishedRoot).setGlobal
+        `outerCache publishedRoot)
+      (bind retainedEnv resultId publishedRoot) afterCall resumedLocals
+      resultWitness := by
+  exact ConcreteReuseCapacityCacheFrame.restoreCaller_of_retainedTransport
+    caller callee witnessTransport capacityTransport
+    twoPublications_preserve_retainedTokenFacts finalRelated finalAligned
+    resultFound localUpdate
+
 theorem publication_post_retainedToken_ordinary :
     ReuseTokenOrdinaryRel (eraseReuseCapacityFact retainedFacts resultId)
       (publicationRuntime.setGlobal `cache publishedRoot)

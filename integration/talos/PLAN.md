@@ -71,6 +71,21 @@ The two-publication regression preserves a nonempty token map despite a prefix
 that refutes all-location transport. These are local source-frame laws, not yet
 a replacement of `ReuseCapacityCodeEntryTransports` or its stack consumers.
 
+The next consumer seam is now factored:
+`ConcreteReuseCapacityCacheFrame.restoreCaller_of_retainedTransport`
+reconstructs the full saved caller frame from the final callee frame, checked
+destination update, witness/capacity transports, and facts-aware result-binding
+transport. The existing `ReuseCapacityEntryRelativeFrame.restoreDirectCaller`
+uses this lemma; only its stronger historical entry package still requires
+all-location ordinaryness. `twoPublications_restoreCallerFrame` exercises the
+new consumer with the concrete nonempty caller-token map and two publications,
+while leaving physical frame/update premises explicit. It is not a nested
+compiled-call execution proof. Full historical-stack transport and ownership-
+derived publication disjointness remain the next semantic obligations.
+Consequently this is a consumer factoring checkpoint, not completion of the
+strategy review's W1 gate: the actual historical stack pop must eventually
+consume facts-aware transport without recovering blanket ordinaryness.
+
 The review follow-up in
 [`W6-OBSERVABLE-CONTRACT-AND-TRUST.md`](W6-OBSERVABLE-CONTRACT-AND-TRUST.md)
 strengthens the destination to include represented terminal results and faults

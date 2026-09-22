@@ -189,6 +189,14 @@ surface and its W7/package wiring; W6 does not duplicate it locally.
   A two-cache publication regression checks the weaker frame with a nonempty
   retained-token map. Wiring the suspended frames and deriving disjointness
   remain the next semantic work; no actual lean-zip admission is claimed yet.
+  Full caller-cache-frame reconstruction is now separated from the historical
+  entry invariant: `ConcreteReuseCapacityCacheFrame.restoreCaller_of_retainedTransport`
+  consumes the exact caller's binding transport, plus the existing checked
+  local update and witness/capacity evidence. The original structured
+  `restoreDirectCaller` uses it without changing its signature or its remaining
+  stronger entry-transport obligation. A conditional two-publication regression
+  reaches this complete frame consumer; it is not compiled-call execution and
+  does not close the historical suspended-stack or ownership obligations.
 - Apply the existing rooted finite-trace/terminal theorem only after its
   explicit compiler-current-step admission, address-space/resource safety,
   entry/runtime contracts and argument arity have been constructed for this

@@ -1257,6 +1257,40 @@ publication disjointness; both are explicit successors. No object/tobject
 admission exclusion, runtime contract, central relation, or public theorem
 premise is silently removed by adding this helper interface.
 
+### Facts-aware caller-frame consumer
+
+`ConcreteReuseCapacityCacheFrame.restoreCaller_of_retainedTransport` restores
+the actual caller's full cache frame after the checked destination binding.
+It consumes caller and final callee frames, witness growth, header-capacity
+transport, the checked local update, final representation/alignment, and
+`ReuseTokenOrdinaryBindTransport` for the saved caller's facts/environment.
+The result retains the callee's remaining budget, implementation laws,
+descriptors, cache globals and closure-table agreement. Its dependency set is
+exactly `propext` and `Quot.sound`, with no new generated or semantic axiom.
+
+The existing `ReuseCapacityEntryRelativeFrame.restoreDirectCaller` delegates
+its current-frame reconstruction to this consumer. Its signature is unchanged:
+the historical entry-to-current transport still requires all-location
+ordinaryness. This factoring does not claim that the complete callee theorem
+or structured stack has dropped that premise.
+
+`twoPublications_restoreCallerFrame` instantiates the new consumer with the
+existing concrete two-publication source heap and nonempty retained-token map.
+The ordinary binding premise is discharged, not assumed; representation,
+capacity, physical frames and local-update premises remain explicit. It is a
+conditional consumer regression, not a compiled nested-call execution proof.
+The independent non-vacuous initial ordinary-token witness and aliasing
+rejection tests remain. These three audited endpoints bring the inventory to
+212; this does not remove existing native debt from the executable endpoints.
+
+This follows the strategy review's instruction to consume the retained-frame
+law without designing another universal invariant. The remaining ownership
+lemma must establish publication disjointness for entry-compatible suspended
+callers. The later historical-stack change must preserve each saved caller's
+own facts and environment; neither ABI typing nor a convenient post-hoc frame
+may supply that obligation. Capture reification, frontend source certificates,
+and production-pipeline correspondence remain separate work packages.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
