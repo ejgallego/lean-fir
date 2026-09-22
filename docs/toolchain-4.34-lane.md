@@ -189,12 +189,14 @@ main-source identity refresh. On that branch:
 - the branch's RC2 compatibility CI smoke remains green by construction, but
   is not a substitute for the repository's normal full workflow.
 
-The remaining migration boundary is deliberate: the default
-`make talos-setup`/`make talos-check` path still provisions
-`integration/talos` at Lean 4.33 and the 4.33 Talos interpreter. The RC2
-overlay pins a separate Talos/mathlib revision and a tracked setup recipe, but
-has not yet replaced that default package path. Before flipping `main`, root
-must either make the default Talos route select this authenticated RC2 overlay
-or land an equivalent official 4.34 Talos package/setup, then run the full
-default gates and hosted CI on that path. Until that decision is landed, the
-candidate is migration-ready evidence, not a completed main-toolchain flip.
+The migration candidate now routes the ordinary `make talos-setup` and
+`make talos-check` targets through the authenticated overlay. Both commands
+pass, and the latter builds the full 3,246-job `FirTalos` cone including
+`TrustAudit`. The old `integration/talos` manifest is retained for 4.33
+compatibility work; it is no longer the default Talos target on this branch.
+
+Before flipping `main`, run the full artifact suite and the existing hosted CI
+workflow on this candidate branch. The separate RC2 compatibility smoke is not
+a substitute for those gates. Consumer acceptance of the cached-prelude
+adapter is recorded separately and does not authorize changing a consumer pin
+or publishing a package.

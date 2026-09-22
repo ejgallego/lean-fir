@@ -1,11 +1,14 @@
-# Isolated Talos proof cone for Lean 4.34
+# Talos proof cone for Lean 4.34
 
-From FIR's `tooling/lean-4.34` worktree, run:
+On the root-owned Lean 4.34 migration candidate, the standard targets use this
+tracked Talos overlay:
 
 ```sh
-bash tooling/talos-434/setup.sh
-bash tooling/talos-434/check.sh
+make talos-setup
+make talos-check
 ```
+
+The scripts can also be run directly when debugging the migration gate.
 
 `check.sh` repeats the identity-checked setup, then builds
 `FirTalos.ConcreteResidentFloat` and the full `FirTalos` umbrella (including
@@ -14,9 +17,9 @@ the trusted-assumption validator against the overlay project's explicit
 toolchain. It authenticates the exact compiler version and commit plus the
 W6-reviewed upstream and local checker source hashes. The ordinary no-argument
 validator remains the Lean 4.33 audit. All mutable source and Lake state stays under
-`.deps/talos-434/` in this worktree. The normal 4.33
-`integration/talos` setup, toolchain, manifest, and package directory are
-untouched.
+`.deps/talos-434/` in this worktree. The historical `integration/talos` package
+manifest remains available for 4.33 compatibility work; the migration
+candidate's standard Talos targets select the authenticated 4.34 overlay.
 
 The immutable inputs are Talos
 `0e05edbcfbb105b33e90c60b4f50e2cf193d9254`, mathlib
@@ -33,6 +36,7 @@ changes that reviewed source identity; update the overlay explicitly after a
 new proof checkpoint is integrated.
 
 This is audited compatibility evidence, not a kernel proof of the universal
-bridge proposition and not an official migration of FIR or Talos to 4.34.
+bridge proposition. It is the migration candidate's official Talos gate for
+Lean 4.34; it does not change the upstream Talos repository.
 The legacy `lean433UpstreamBridge` name is intentionally retained for the one
 audited assumption reviewed under both authenticated compiler identities.

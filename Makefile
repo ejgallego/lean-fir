@@ -172,12 +172,10 @@ beam:
 	lean-beam sync Inspect
 
 talos-setup:
-	@bash scripts/quiet-run.sh talos-setup -- bash scripts/setup-talos.sh
-	@bash scripts/quiet-run.sh talos-update -- lake -d integration/talos update
+	@bash scripts/quiet-run.sh talos-setup -- bash tooling/talos-434/setup.sh
 
 talos-check:
-	@bash scripts/quiet-run.sh talos-build -- lake -d integration/talos build
-	@bash scripts/quiet-run.sh talos-proof-trust -- python3 integration/talos/check-proof-trust.py
+	@bash scripts/quiet-run.sh talos-check -- bash tooling/talos-434/check.sh
 
 clean:
 	@bash scripts/quiet-run.sh clean -- lake clean
