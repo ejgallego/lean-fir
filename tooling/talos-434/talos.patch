@@ -1,0 +1,18 @@
+diff --git a/interpreter/lakefile.toml b/interpreter/lakefile.toml
+--- a/interpreter/lakefile.toml
++++ b/interpreter/lakefile.toml
+@@ -6,7 +6,7 @@ packagesDir = "../.lake/packages"
+ [[require]]
+ name = "mathlib"
+ scope = "leanprover-community"
+-rev = "v4.33.0"
++rev = "v4.34.0-rc2"
+ 
+ [[lean_lib]]
+ name = "Interpreter"
+diff --git a/interpreter/lean-toolchain b/interpreter/lean-toolchain
+--- a/interpreter/lean-toolchain
++++ b/interpreter/lean-toolchain
+@@ -1 +1 @@
+-leanprover/lean4:v4.33.0
++leanprover/lean4:v4.34.0-rc2

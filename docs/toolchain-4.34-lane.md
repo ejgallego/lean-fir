@@ -146,3 +146,13 @@ native, LCNF, and V8, all 2,163 backend results and 2,172 comparisons equal,
 with zero findings. The full command still exits at the **unchanged**
 trusted-assumption validator, which accepts only the 4.33 toolchain. Thus the
 4.34 differential gate is green, while full migration readiness is not.
+
+## Reproducible Talos 4.34 overlay (2026-09-22)
+
+The tooling-only recipe in `tooling/talos-434/README.md` pins the real Talos
+interpreter and mathlib source revisions, tracks both resolved Lake
+manifests, and applies exactly the reviewed toolchain switch and W6 float
+proof normalization in an isolated `.deps/talos-434` project. It rejects
+unreviewed FIR source, overlay files, and dependency identities. The full
+`ConcreteResidentFloat` and `FirTalos` cone passes through this recipe;
+the official 4.33 `talos-setup`/`talos-check` path has not been changed.
