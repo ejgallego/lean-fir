@@ -396,6 +396,16 @@ bounded integration lease when a producer submits its next clean checkpoint.
   arbitrary publication disjointness, retained Stored reification,
   object/tobject exclusion and the 4.34 bridge decisions remain separate
   follow-ups; no broad closure or shared-contract change is implied.
+  ROOT-W6-20260922-037 is now linked/accepted at exact clean checkpoint
+  `93217f0d1ef972196e3595b8888d9c2d24815209` (functional `c9bb8add`),
+  based on `6207996f3`. It factors facts-aware suspended caller-frame
+  restoration through the landed ordinary transport while preserving the old
+  `restoreDirectCaller` signature and stronger all-location entry premise.
+  Independent diff-check, make check, make talos-check and the exact 212-endpoint
+  audit pass; report SHA-256 is
+  `10d39c2a5c07ea20e8add6202e046efeca6a164712a90bcf3cd2bb0005042730`.
+  Full historical-stack generalization, retained Stored reification and the
+  actual stack-pop ordinaryness boundary remain open.
   Rooted initial/prefix/terminal assembly, joint schema metadata, admission and
   resource obligations, traps, helper/tagged-result and W72 debt remain open.
 - W7: ROOT-W7-20260909-107 is accepted at exact CG-05B checkpoint
