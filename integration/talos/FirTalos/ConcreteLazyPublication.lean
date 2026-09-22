@@ -100,6 +100,88 @@ theorem ReuseTokenOrdinaryBindTransport.precompose
   publication.precomposeRetained
     (ReuseTokenOrdinaryTransport.ofOrdinaryPersistence beforePublication)
 
+/-- A retained token resolved through the existing concrete state relation
+names an allocated source cell, hence precedes the next allocation frontier.
+Ordinaryness alone would not suffice: it permits absent token locations. -/
+theorem ReuseCapacityStateRelated.retainedToken_beforeNext
+    {facts : ReuseCapacityFacts} {function : Fir.Wasm.Function}
+    {runtime : RuntimeState} {env : Env} {store : Wasm.Store Host}
+    {locals : Wasm.Locals} {witness : RefinementWitness}
+    (related : ReuseCapacityStateRelated facts function runtime env store locals
+      witness)
+    {id : FVarId} {available location : Nat}
+    (tracked : findReuseCapacityEvidence? facts id = some (.retainedAtLeast available))
+    (tokenLookup : lookup env id = some (.reuseToken (some location))) :
+    location < runtime.nextLocation := by
+  obtain ⟨index, kind, lane, semantic, found, _, _, _, capacity⟩ :=
+    related.2.resolve tracked
+  rw [tokenLookup] at found
+  cases Option.some.inj found
+  cases capacity with
+  | retainedToken value header owned minimum =>
+    cases value with
+    | reuseSome reference =>
+      cases reference with
+      | mapped mapped =>
+        obtain ⟨cell, found, _⟩ := related.1.1.heap.concreteToSemantic _ _ mapped
+        exact related.1.1.heap.locationsBeforeNext _ _ found
+
+/-- A heap object without owned values has a singleton reachable graph.
+This is a semantic object-shape fact, not a restriction on its ABI kind. -/
+theorem reachable_eq_leafRoot
+    {heap : Heap} {root location : Location} {cell : HeapCell}
+    (found : findCell? heap root = some cell)
+    (leaf : cell.object.ownedValues = #[])
+    (reachable : Reachable heap [.object (.heap root)] location) :
+    location = root := by
+  induction reachable with
+  | root member => simpa using member
+  | child parentReachable childFound member reference ih =>
+    subst_vars
+    rw [found] at childFound
+    cases Option.some.inj childFound
+    simp [leaf] at member
+
+/-- Fresh leaf allocation derives publication disjointness from the normal
+entry relation. Neither freshness nor reachability separation is supplied by
+the caller. Nonempty owned graphs require a separate ownership argument. -/
+theorem ReuseTokenPublicationDisjoint.of_allocLeaf
+    {facts : ReuseCapacityFacts} {function : Fir.Wasm.Function}
+    {before after : RuntimeState} {env : Env} {store : Wasm.Store Host}
+    {locals : Wasm.Locals} {witness : RefinementWitness}
+    {object : HeapObject} {reference : ObjectRef}
+    (related : ReuseCapacityStateRelated facts function before env store locals
+      witness)
+    (allocation : alloc before object false = (after, reference))
+    (leaf : object.ownedValues = #[]) :
+    ReuseTokenPublicationDisjoint facts after env (.object reference) := by
+  cases allocation
+  intro id available location tracked tokenLookup reachable
+  have beforeNext := related.retainedToken_beforeNext tracked tokenLookup
+  have rootOnly : location = before.nextLocation :=
+    reachable_eq_leafRoot (cell := { object })
+      (by simp [alloc, findCell?]) leaf reachable
+  exact Nat.ne_of_lt beforeNext rootOnly
+
+/-- Allocate and publish a fresh leaf, then bind its result, preserving the
+saved caller's retained facts. The allocation and publication are actual
+runtime operations; their graph separation is derived from entry refinement. -/
+theorem ReuseTokenOrdinaryBindTransport.allocLeaf_setGlobal
+    {facts : ReuseCapacityFacts} {function : Fir.Wasm.Function}
+    {before after : RuntimeState} {env : Env} {store : Wasm.Store Host}
+    {locals : Wasm.Locals} {witness : RefinementWitness}
+    {object : HeapObject} {reference : ObjectRef}
+    (related : ReuseCapacityStateRelated facts function before env store locals
+      witness)
+    (allocation : alloc before object false = (after, reference))
+    (leaf : object.ownedValues = #[])
+    (name : Name) (result : FVarId) :
+    ReuseTokenOrdinaryBindTransport facts result before
+      (after.setGlobal name (.object reference)) env (.object reference) :=
+  (ReuseTokenOrdinaryBindTransport.ofPublicationDisjoint name
+    (.of_allocLeaf related allocation leaf)).precompose
+      (alloc_ordinaryPersistenceTransport allocation)
+
 section InternalMiss
 
 variable

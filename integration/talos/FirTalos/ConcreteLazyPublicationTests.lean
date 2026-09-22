@@ -330,4 +330,98 @@ theorem publication_rejects_aliasingRetainedToken :
     exact .root (by simp)
   exact disjoint retainedToken 1 retainedLocation tracked tokenLookup reachable
 
+/-- Allocation freshness alone is insufficient: an owned field can still
+publish an older retained token. This is the existing alias-safety boundary,
+not a reason to weaken the concrete reuse protocol. -/
+theorem freshConstructorPublication_rejects_ownedRetainedToken :
+    let allocated := alloc publicationRuntime
+      (.ctor { tag := 0, objectFields := #[.object (.heap retainedLocation)],
+               usizeFields := #[], scalarFields := [] }) false
+    ¬ReuseTokenOrdinaryBindTransport retainedFacts resultId publicationRuntime
+      (allocated.1.setGlobal `bad (.object allocated.2)) retainedEnv
+      (.object allocated.2) := by
+  dsimp
+  intro transport
+  have ordinary := transport publication_initial_retainedToken_ordinary
+  have impossible := ordinary retainedToken 1 retainedLocation
+    { retainedCell with rc := 0, persistent := true }
+    (by simp [retainedFacts, resultId, retainedToken,
+      findReuseCapacityEvidence?, eraseReuseCapacityFact])
+    (by simp [Fir.LeanIR.Impure.bind, retainedEnv, resultId, retainedToken, lookup])
+    (by rfl)
+  cases impossible
+
+private def freshStringAllocation (text : String) : RuntimeState × ObjectRef :=
+  alloc publicationRuntime (.string text) false
+
+private def freshStringRuntime (text : String) : RuntimeState :=
+  (freshStringAllocation text).1.setGlobal `leafCache
+    (.object (freshStringAllocation text).2)
+
+/-- The actual pop consumer needs no supplied freshness, reachability, or
+ordinary-binding premise for this fresh string publication. Those facts follow
+from the saved caller's existing capacity/state relation and actual allocation.
+The nonempty token map is unchanged. Physical bind focus and callee frame remain
+explicit: this is not a proof of the preceding compiled callee execution. -/
+theorem freshString_advance_popRetainedCache
+    (text : String)
+    {context calleeContext : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction calleeFunction : Fir.Wasm.Function}
+    {labels : LabelContext} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {externals : ExternalImpl}
+    {outerRuntime : RuntimeState}
+    {outerStore callStore targetStore : Wasm.Store Host}
+    {outerWitness callWitness resultWitness : RefinementWitness}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv} {sourceFrames : List Frame}
+    {callerLocals calleeLocals : Wasm.Locals}
+    {callerRemainder returnedTail : List Wasm.Value}
+    {targetRest : Wasm.Program} {targetFrames : List StructuredWasmFrame}
+    {callerFunctionResult : AbiKind} {tailResult : Option AbiKind}
+    {kind : AbiKind} {physical : Wasm.Value} {resultIndex : Nat}
+    {source : MachineState} {target : StructuredWasmState Host}
+    {calleeFacts : ReuseCapacityFacts} {callerBytes resultBytes : Nat}
+    {calleeEnv : Env}
+    (related : ConcreteStructuredBindFrameFocus context sourceModule
+      sourceFunction labels (freshStringRuntime text) retainedEnv
+      (.object (freshStringAllocation text).2) resultId continuation callerJoins
+      sourceFrames targetStore callerLocals callerRemainder targetRest
+      targetFrames returnedTail resultWitness kind physical resultIndex source target)
+    (callerScope : ConcreteStructuredResourceScope context sourceModule
+      sourceFunction externals outerRuntime outerStore outerWitness retainedFacts
+      callerBytes publicationRuntime retainedEnv callStore callerLocals callWitness)
+    (callee : ConcreteReuseCapacityCacheAbiFrame calleeContext sourceModule
+      calleeFunction externals calleeFacts resultBytes (freshStringRuntime text)
+      calleeEnv targetStore calleeLocals resultWitness)
+    (witnessTransport : WitnessTransport callWitness resultWitness)
+    (capacityTransport : HeaderCapacityTransport callStore.host.runtime.heap
+      targetStore.host.runtime.heap callWitness)
+    (programEq : calleeContext.program = context.program)
+    (tail : ConcreteStructuredSuspendedResourceStack externals context.program
+      outerRuntime outerStore outerWitness callerFunctionResult tailResult
+      sourceFrames targetFrames) :
+    ∃ sourceAfter targetAfter resumedLocals,
+      executeStep externals source = .next sourceAfter ∧
+      FinitePath (StructuredWasmStep module hostEnv) 2 target targetAfter ∧
+      ConcreteStructuredStackRel sourceAfter targetAfter ∧
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+        (freshStringRuntime text)
+        (bind retainedEnv resultId (.object (freshStringAllocation text).2))
+        continuation targetStore resumedLocals targetRest resultWitness
+        sourceAfter targetAfter ∧
+      ConcreteReuseCapacityCacheAbiFrame context sourceModule sourceFunction
+        externals (eraseReuseCapacityFact retainedFacts resultId) resultBytes
+        (freshStringRuntime text)
+        (bind retainedEnv resultId (.object (freshStringAllocation text).2))
+        targetStore resumedLocals resultWitness ∧
+      sourceAfter.joins = callerJoins ∧
+      sourceAfter.frames = sourceFrames ∧
+      targetAfter.frames = targetFrames := by
+  have ordinaryTransport :=
+    ReuseTokenOrdinaryBindTransport.allocLeaf_setGlobal
+      callerScope.1.1.stateRelated (object := .string text) rfl rfl `leafCache resultId
+  exact related.advance_popRetainedCache callerScope callee witnessTransport
+    capacityTransport ordinaryTransport programEq tail
+
 end FirTalos.Concrete

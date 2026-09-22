@@ -1332,6 +1332,44 @@ transport remain open. Neither ABI typing, capacity transport nor ordinary
 token facts establishes graph separation. No runtime, compiler-admission,
 central relation, linker or artifact contract changes in this slice.
 
+### Fresh-leaf ownership producer at the actual pop consumer
+
+`ReuseCapacityStateRelated.retainedToken_beforeNext` derives a retained
+token's source location bound from the existing state relation: resolve the
+fact, recover its witness mapping, use `concreteToSemantic` to locate the cell,
+then `locationsBeforeNext`. No additional freshness hypothesis is needed.
+`ReuseTokenOrdinaryRel` alone could not justify this bound for absent cells.
+
+`reachable_eq_leafRoot` proves that an object with no owned values has only
+its root in the reachable graph. `ReuseTokenPublicationDisjoint.of_allocLeaf`
+combines that fact with the actual allocation equation and the derived bound.
+`ReuseTokenOrdinaryBindTransport.allocLeaf_setGlobal` consumes the resulting
+separation through allocation, cache publication and destination binding.
+The allocation equation and leaf shape describe this covered operation, not
+an arbitrary future callee execution or a caller-selected invariant.
+
+`freshString_advance_popRetainedCache` now invokes the actual pop theorem for
+arbitrary string contents. Its exact saved scope supplies the entry relation;
+the nonempty token map is retained. The theorem assumes neither freshness,
+graph disjointness nor ordinary binding transport. It preserves the original
+one-source/two-target transition, structural stack, full caller cache/ABI
+frame and joins/frame equations. Physical bind focus, callee frame and
+witness/capacity evidence remain explicit: preceding compiled initializer
+execution and the stronger hereditary resource stack are not proved here.
+
+`freshConstructorPublication_rejects_ownedRetainedToken` shows why freshness
+alone is insufficient for non-leaves: an owned field can publish an older
+tracked token. It starts with the existing ordinary nonempty token witness
+and computes the actual allocation/publication that invalidates the frame.
+This is a regression for the existing retained-token ordinaryness bug.
+
+Six exact dependency entries extend the inventory to 227. The frontier lemma
+uses `propext`/`Quot.sound`, the leaf reachability lemma uses `propext`, and
+the other four use the three standard axioms. No generated or semantic axiom
+is added. This source leaf law does not prove concrete ByteArray refinement,
+captured-program admission, resident linking or encoded bytes. Arbitrary owned
+graphs and facts-aware historical resource scopes remain separate work.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
