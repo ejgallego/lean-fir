@@ -1370,6 +1370,37 @@ is added. This source leaf law does not prove concrete ByteArray refinement,
 captured-program admission, resident linking or encoded bytes. Arbitrary owned
 graphs and facts-aware historical resource scopes remain separate work.
 
+### Fresh allocation regions with owned edges
+
+`HeapRegionClosed cutoff heap` is a local source-heap property: an object at or
+above `cutoff` has no heap-valued owned edge below it. It mentions neither the
+caller fact map nor a future execution. The existing concrete state relation
+establishes the initially empty region at `runtime.nextLocation`.
+`HeapRegionClosed.alloc` preserves closure from the new object's immediate
+field bounds. `HeapRegionClosed.reachable` derives that every reachable node
+from a region root stays inside, including shared graphs and cycles.
+
+`ReuseTokenPublicationDisjoint.of_freshRegion` combines this local closure
+with the original caller's token/frontier theorem; no separate token-alias
+premise is required. `ReuseTokenOrdinaryBindTransport.freshRegion_setGlobal`
+then composes the explicit facts-aware prefix with publication and binding.
+The prefix and per-allocation field bounds must still be proved for the actual
+body; this is not arbitrary initializer admission under a renamed invariant.
+
+`freshSharedGraph_publication` executes two source allocations: a string and
+a parent containing two references to that string. It derives region closure
+and prefix transport from those actual operations and the existing entry
+relation, preserving the fixture's nonempty caller token map. The separate
+`freshSharedGraph_reaches_leaf` theorem confirms nontrivial reachability. The
+older-token constructor remains rejected by the existing negative theorem.
+
+Seven exact audit entries extend the inventory to 234. Reachability uses no
+axioms; empty-region and token-disjointness use `propext`/`Quot.sound`; the
+other four use the standard three Lean axioms. No new native or semantic axiom
+is added. This is source-runtime transport, not a new compiled callee or pop
+execution theorem. General old-heap sharing, actual Stored body instantiation,
+concrete ByteArray refinement, and stronger historical scope remain separate.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
