@@ -1143,6 +1143,24 @@ dependencies are exactly the standard three axioms; the three executable
 endpoints inherit the same 57 generated dependencies as the accepted prefix.
 The exact compiled inventory now contains 159 endpoints. No new trust is added.
 
+### Static supported-export instantiation
+
+`ConcreteSupportedPipeline.lean` reuses the production-generated declaration
+row to construct an identity-retaining supported export, without asking for
+handwritten functions, numeric indices, local layouts or adapted bodies.
+`resolveHosts_preserves_import_keys`, its count corollary and indexed lookup
+theorem prove exact positional source/host identity. Adaptation then derives
+host-count alignment and `HostEnv.Satisfies`, not semantic operation refinement.
+The regression invokes the actual constructor and recovers the selected
+declaration, function name, canonical cache row and effective result ABI.
+
+Static runtime/external contract alignment and named export lookup remain
+explicit. `WasmSupported` is stronger than the current `validateSupported`
+gate; success of `lowerSupported` alone is not claimed to discharge it. This
+is not a capture-fidelity, closed-closure pruning, resident-linking or binary
+encoder theorem. The seven new static endpoints use exactly the standard
+three axioms; the exact compiled inventory now checks 166 endpoints.
+
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
@@ -1210,6 +1228,9 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | rooted finite-prefix and export-prefix composition | 3 | 57 |
 | rooted terminal-yield extraction | 3 | 0 |
 | exact-root function/export/interpreter executable return assembly | 3 | 57 |
+| concrete resolver positional keys, count and indexed key lookup | 3 | 0 |
+| adaptation/resolution alignment and exact host-contract satisfaction | 3 | 0 |
+| production supported-export construction and selected declaration/result projection | 3 | 0 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original UInt8-case wrapper, frame-exposing helper and rooted successor | 3 | 2 |

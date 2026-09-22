@@ -247,4 +247,62 @@ theorem ResolvedHosts.satisfies (resolved : ResolvedHosts) (module : Wasm.Module
   · intro store args
     rfl
 
+private theorem resolveImports_keys {index : Nat}
+    {imports : List Import} {resolved : List ResolvedHost}
+    (h : resolveImports index imports = .ok resolved) :
+    resolved.map (·.key) = imports.map (·.key) := by
+  induction imports generalizing index resolved with
+  | nil =>
+    simp only [resolveImports, Except.ok.injEq] at h
+    subst resolved
+    rfl
+  | cons imp rest ih =>
+    simp only [resolveImports, Bind.bind, Except.bind, pure, Except.pure,
+      throw] at h
+    repeat' split at h
+    all_goals simp_all
+    all_goals
+      subst resolved
+      simp only [List.map_cons]
+      congr 1
+      apply ih
+      assumption
+/-- Successful concrete resolution retains every positional import identity,
+including repeated identities; it does not deduplicate or reorder imports. -/
+theorem resolveHosts_preserves_import_keys
+    {source : Fir.Wasm.Module} {hosts : ResolvedHosts}
+    (resolved : resolveHosts source = .ok hosts) :
+    hosts.hosts.map (·.key) = source.imports.toList.map (·.key) := by
+  cases valid : validateModule source <;>
+    simp [resolveHosts, valid, Bind.bind, Except.bind, pure, Except.pure,
+      throw] at resolved
+  cases selected : resolveImports 0 source.imports.toList <;>
+    simp [selected] at resolved
+  subst hosts
+  exact resolveImports_keys selected
+
+/-- Host count is derived from exact positional identities, not supplied by a
+client attempting to instantiate a compiler theorem. -/
+theorem resolveHosts_preserves_import_count
+    {source : Fir.Wasm.Module} {hosts : ResolvedHosts}
+    (resolved : resolveHosts source = .ok hosts) :
+    hosts.hosts.length = source.imports.size := by
+  simpa using congrArg List.length (resolveHosts_preserves_import_keys resolved)
+
+/-- Select the concrete host at the original import slot. This records exact
+identity and position; operation-contract correspondence is a separate fact. -/
+theorem resolveHosts_import_key_at
+    {source : Fir.Wasm.Module} {hosts : ResolvedHosts}
+    (resolved : resolveHosts source = .ok hosts)
+    {index : Nat} {sourceImport : Import}
+    (found : source.imports[index]? = some sourceImport) :
+    ∃ host, hosts.hosts[index]? = some host ∧ host.key = sourceImport.key := by
+  have keyAt := congrArg (fun keys => keys[index]?)
+    (resolveHosts_preserves_import_keys resolved)
+  simp only [List.getElem?_map, Array.getElem?_toList, found, Option.map_some] at keyAt
+  cases selected : hosts.hosts[index]? with
+  | none => simp [selected] at keyAt
+  | some host =>
+    exact ⟨host, rfl, by simpa [selected] using keyAt⟩
+
 end FirTalos.Concrete

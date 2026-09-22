@@ -208,6 +208,17 @@ def literalExampleNativeDebt : Array String := #[
   "FirTalos.Correctness.abiLiteralSupportedExport._native.native_decide.ax_1"]
 
 def endpointInventory : Array (Lean.Name × Array String) := #[
+  -- Static production-row construction and positional resolver facts introduce
+  -- no generated native-evaluation dependencies.
+  (`FirTalos.Concrete.resolveHosts_preserves_import_keys, standardAxioms),
+  (`FirTalos.Concrete.resolveHosts_preserves_import_count, standardAxioms),
+  (`FirTalos.Concrete.resolveHosts_import_key_at, standardAxioms),
+  (`FirTalos.Concrete.resolveHosts_aligned_of_adapt, standardAxioms),
+  (`FirTalos.Concrete.resolveHosts_satisfy_of_adapt, standardAxioms),
+  (`FirTalos.Concrete.ConcreteSupportedExport.exists_ofSupportedPipeline,
+    standardAxioms),
+  (`FirTalos.Concrete.ConcreteSupportedExport.selectedDeclarationResult,
+    standardAxioms),
   -- Exact-root terminal extraction is standard-only. Executable return
   -- composition retains precisely the already measured prefix dependencies.
   (`FirTalos.Concrete.ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt.terminalYield_of_control,

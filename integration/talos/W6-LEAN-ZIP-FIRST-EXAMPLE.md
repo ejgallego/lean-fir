@@ -64,6 +64,40 @@ bound requires it and the full theorem reports that bound honestly.
    semantic or encoder/linker proof. Byte identity must be stated for the
    selected released package, not inferred from a prior diagnostic dump.
 
+## Reusable static export assembly
+
+`ConcreteSupportedExport.exists_ofSupportedPipeline` now reconstructs the
+canonical compiler context, local layout, selected symbolic and concrete
+function rows, numeric index and adapted body through the existing production
+declaration selector. It retains `spec.sourceDeclaration = declaration` and
+the context's canonical cache row. The effective result ABI is the lowerer's
+choice, not assumed equal to the declaration's unrefined public kind.
+
+Successful concrete resolution preserves every import key in order and its
+count. Together with adaptation this derives host-table alignment and the
+host environment's exact invocation-contract satisfaction. No application
+supplies a table-length proof. This does **not** yet derive correspondence to
+the compiler's semantic runtime/external contracts.
+
+Remaining constructor premises are static: `WasmSupported`, `NamesUnique`,
+actual lowering/adaptation/resolution equations, selected declaration/body/ABI
+classification, runtime/external contract alignment, and a named export lookup.
+The current `validateSupported` gate does not by itself provide the additional
+closure-flow condition in `WasmSupported`. These premises must not be disguised
+as execution certificates. Dynamic current-step admission, resource safety and
+entry-runtime refinement are separate subsequent obligations. All seven new
+static endpoints depend only on Lean's three standard axioms.
+
+Capture review found that the production `Artifact.program` and olean capture
+cache already retain full AST data, but as elaborator environment state, not
+a kernel-referable program definition. The missing reusable capture facility
+is structural reification of that same program into an ordinary checked Lean
+definition, with exact same-capture binding to the lowering input. Lean's
+`LCNF.ToExpr` is not this facility: it reconstructs source expressions, not an
+LCNF AST quotation. Pretty text or a hash cannot substitute for this definition
+or establish faithful source capture. Root coordinates this generic compiler
+surface and its W7/package wiring; W6 does not duplicate it locally.
+
 ## W6 proof slices after static evidence
 
 - Extend the existing concrete relation for semantic ByteArrays, including an

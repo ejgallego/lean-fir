@@ -422,6 +422,24 @@ Joint root/schema transport, schema dispatch and trap support remain separate;
 there is no new join/jump admission. The older global relation and all shared
 runtime/ABI contracts remain unchanged.
 
+The static-instantiation successor in `ConcreteSupportedPipeline.lean` now
+constructs a `ConcreteSupportedExport` from the existing production declaration
+selector. The client selects a source declaration, not a handwritten context,
+function, numeric slot or adapted body. The output retains the exact selected
+declaration and canonical cache row; its ABI is the production effective result
+kind. `ConcreteResolver` now proves exact positional key preservation and host
+count for successful resolution, so adaptation/resolution derive host-table
+alignment and `HostEnv.Satisfies` internally. The seven added endpoints use only
+the standard three axioms; the exact audit contains 166 endpoints.
+
+This removes static assembly work, not dynamic admission. `WasmSupported`, name
+uniqueness, runtime/external contract alignment, selected ABI classification,
+pipeline equations and named export lookup remain explicit static obligations.
+In particular `lowerSupported` success alone does not currently imply the
+stronger `WasmSupported` closure-flow check. Exact import keys do not establish
+semantic contract alignment. Captured-program reification and the distinct
+closed-closure/pruning production route remain separately coordinated.
+
 ### Intended result
 
 The production theorem is a compiler simulation, not a program-verification
