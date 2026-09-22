@@ -206,6 +206,15 @@ surface and its W7/package wiring; W6 does not duplicate it locally.
   obligation but still assumes physical frames and the bind focus. It does
   not reconstruct the stronger hereditary resource stack or establish an
   entire compiled callee execution.
+  The first ownership producer now derives fresh leaf publication disjointness
+  from the existing entry relation: tracked token mappings locate source cells
+  strictly below the allocation frontier, and an allocated leaf has no owned
+  path back to them. `allocLeaf_setGlobal` supplies binding transport directly
+  to the actual pop regression for arbitrary fresh string contents and a
+  nonempty caller-token map. No freshness/disjointness premise is supplied.
+  Source ByteArray objects are leaves too, but this does not add the missing
+  concrete ByteArray refinement or prove the retained initializer bodies.
+  A fresh constructor containing an old token is an explicit negative test.
 - Apply the existing rooted finite-trace/terminal theorem only after its
   explicit compiler-current-step admission, address-space/resource safety,
   entry/runtime contracts and argument arity have been constructed for this
@@ -231,7 +240,8 @@ Meanwhile, the independent W6 prefix-transport laws prepare the semantic
 obstacle demonstrated by those object-valued initializers. The next bounded
 proof work is to retain the caller-specific transport through the stronger
 hereditary resource history, beyond the now-proved structural frame and
-operational pop consumers, and derive publication disjointness from ownership.
+operational pop consumers, and extend the fresh-leaf ownership producer to
+the actual initializer graphs.
 Current capacity, ordinary-token and representation facts do not establish
 that a published graph cannot reach a saved token. Keep that separation
 obligation explicit. Do not remove the current admission exclusion

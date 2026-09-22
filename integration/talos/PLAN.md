@@ -98,6 +98,22 @@ resource stack and deriving graph disjointness for each suspended caller are
 still required before object/tobject miss admission. This advances the W1
 consumer gate; it does not close the full ownership/stack obligation.
 
+The first bounded ownership producer is now wired into that pop:
+`ReuseCapacityStateRelated.retainedToken_beforeNext` derives tracked-token
+freshness from the existing witness mapping and heap frontier invariant.
+`ReuseTokenPublicationDisjoint.of_allocLeaf` then proves separation for an
+actual allocation with `object.ownedValues = #[]`, and
+`ReuseTokenOrdinaryBindTransport.allocLeaf_setGlobal` composes allocation,
+publication and destination binding. No caller freshness or reachability
+premise is added. `freshString_advance_popRetainedCache` consumes this result
+using the exact saved scope and nonempty token map; physical bind focus and
+callee frame remain explicit. The negative fresh-constructor test confirms
+that an owned reference to an older token invalidates the conclusion.
+This covers source leaf allocation, not arbitrary initializer execution or
+the missing ByteArray concrete relation. General owned graphs and the stronger
+historical resource scope remain the next obligations; do not introduce a
+mirrored stack companion whose future pushes still require the old scope.
+
 The review follow-up in
 [`W6-OBSERVABLE-CONTRACT-AND-TRUST.md`](W6-OBSERVABLE-CONTRACT-AND-TRUST.md)
 strengthens the destination to include represented terminal results and faults
