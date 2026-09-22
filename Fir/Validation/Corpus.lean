@@ -3,6 +3,44 @@ import Init.Data.Ord.String
 
 namespace Fir.Validation.Corpus
 
+/-- The generic `Array.get!` external trace changed in Lean 4.34. Authenticate
+both the release name and compiler commit before selecting its exact audit
+obligation; an unreviewed toolchain must fail the corpus build. -/
+private def uint8ArrayGetExternalTrace?
+    (toolchain githash : String) : Option (Array Lean.Name) :=
+  if toolchain == "leanprover/lean4:4.33.0" &&
+      githash == "d8b18978322de05a8f3dba51ef03cf5461676c17" then
+    some #[``instInhabitedUInt8, ``Array.get!Internal]
+  else if toolchain == "leanprover/lean4:4.34.0-rc2" &&
+      githash == "6a10ac8c22beadecabdbb0919c2b50214762f91d" then
+    some #[``Array.get!Internal]
+  else
+    none
+
+#guard (uint8ArrayGetExternalTrace? Lean.toolchain Lean.githash).isSome
+
+private def uint8ArrayGetExternalTrace : Array Lean.Name :=
+  (uint8ArrayGetExternalTrace? Lean.toolchain Lean.githash).getD #[]
+
+#guard uint8ArrayGetExternalTrace?
+  "leanprover/lean4:4.33.0" "d8b18978322de05a8f3dba51ef03cf5461676c17" ==
+    some #[``instInhabitedUInt8, ``Array.get!Internal]
+#guard uint8ArrayGetExternalTrace?
+  "leanprover/lean4:4.34.0-rc2" "6a10ac8c22beadecabdbb0919c2b50214762f91d" ==
+    some #[``Array.get!Internal]
+#guard (uint8ArrayGetExternalTrace?
+  "leanprover/lean4:4.35.0" "unreviewed").isNone
+#guard (uint8ArrayGetExternalTrace?
+  "leanprover/lean4:4.33.0" "6a10ac8c22beadecabdbb0919c2b50214762f91d").isNone
+#guard (uint8ArrayGetExternalTrace?
+  "leanprover/lean4:4.34.0-rc2" "d8b18978322de05a8f3dba51ef03cf5461676c17").isNone
+#guard uint8ArrayGetExternalTrace?
+  "leanprover/lean4:4.34.0-rc2" "6a10ac8c22beadecabdbb0919c2b50214762f91d" !=
+    some #[``instInhabitedUInt8, ``Array.get!Internal]
+#guard uint8ArrayGetExternalTrace?
+  "leanprover/lean4:4.34.0-rc2" "6a10ac8c22beadecabdbb0919c2b50214762f91d" !=
+    some #[``Array.get!Internal, ``Array.get!Internal]
+
 /-!
 Source-level fixtures shared by the native oracle and candidate backends.
 
@@ -4828,12 +4866,12 @@ private def preConversionCases : Array Case := #[
     requiredLcnfForms := #["fap", "box", "dec", "unbox", "return", "extern"]
     requiredExecutedLcnfForms :=
       #["fap", "extern", "box", "dec", "unbox", "return"]
-    requiredExternals := #[``instInhabitedUInt8, ``Array.get!Internal]
-    requiredExecutedExternals := #[``instInhabitedUInt8, ``Array.get!Internal]
+    requiredExternals := uint8ArrayGetExternalTrace
+    requiredExecutedExternals := uint8ArrayGetExternalTrace
     requiredExecutedExternalCounts :=
-      exactlyOnceExternalCounts #[``instInhabitedUInt8, ``Array.get!Internal]
+      exactlyOnceExternalCounts uint8ArrayGetExternalTrace
     requiredExecutedExternalTrace :=
-      some #[``instInhabitedUInt8, ``Array.get!Internal]
+      some uint8ArrayGetExternalTrace
     provenance := firProvenance
       "Read and unbox a UInt8 through Array generic object-valued storage" },
   { id := "generic-float-array-get-heap"

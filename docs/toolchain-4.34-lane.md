@@ -128,3 +128,21 @@ These are owner decisions, not changes made by the tooling lane:
    should run unmodified `make check` and `make talos-check` only after the
    preceding contracts are reviewed and their exact gates pass locally. A
    migration of `main` remains a separate root decision with green evidence.
+
+## Versioned corpus checkpoint (2026-09-22)
+
+Under root's narrow shared-corpus lease, the `generic-uint8-array-get`
+external inventory, executed inventory, exact counts, and ordered trace now
+select one of two reviewed obligations by both `Lean.toolchain` and
+`Lean.githash`. The 4.33 obligation is unchanged; 4.34 requires exactly one
+`Array.get!Internal`. Compile-time guards reject unknown identities,
+cross-version identities, the 4.33 trace under 4.34, and a duplicate 4.34
+call. The case's value, box/unbox, projection, and ownership obligations are
+unchanged.
+
+Lean Beam reports zero diagnostics for the corpus module. The 4.34 `make
+check` differential and coverage phases now pass: 721/721 cases across
+native, LCNF, and V8, all 2,163 backend results and 2,172 comparisons equal,
+with zero findings. The full command still exits at the **unchanged**
+trusted-assumption validator, which accepts only the 4.33 toolchain. Thus the
+4.34 differential gate is green, while full migration readiness is not.
