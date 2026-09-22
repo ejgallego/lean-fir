@@ -208,6 +208,16 @@ def literalExampleNativeDebt : Array String := #[
   "FirTalos.Correctness.abiLiteralSupportedExport._native.native_decide.ax_1"]
 
 def endpointInventory : Array (Lean.Name × Array String) := #[
+  -- Exact-root terminal extraction is standard-only. Executable return
+  -- composition retains precisely the already measured prefix dependencies.
+  (`FirTalos.Concrete.ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt.terminalYield_of_control,
+    standardAxioms),
+  (`FirTalos.Concrete.ConcreteSupportedFunction.terminatesWith_of_rootedExecSteps,
+    standardAxioms ++ compilerExportNativeDebt),
+  (`FirTalos.Concrete.ConcreteSupportedExport.terminatesWith_of_rootedExecEvaluates,
+    standardAxioms ++ compilerExportNativeDebt),
+  (`FirTalos.Concrete.ConcreteSupportedExport.terminatesWith_of_rootedRun,
+    standardAxioms ++ compilerExportNativeDebt),
   -- Rooted initial/prefix composition inherits the accepted seven-focus debt;
   -- the actual export entry adds only the standard axioms.
   (`FirTalos.Concrete.ConcreteSupportedExport.rootedPreciseCodeGlobalRoot,

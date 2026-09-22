@@ -1111,17 +1111,45 @@ The entry theorem uses only the standard three axioms. Both prefix endpoints
 inherit exactly the accepted three plus 57 recorded generated dependencies;
 the compiled inventory now checks 155 endpoints. There are no new axioms.
 
-This is not compiler admission derivation or PA3 closure. Rooted terminal
-extraction/adequacy is the next separate slice. Joint root/schema transport,
+This is not compiler admission derivation or PA3 closure. The following slice
+supplies rooted terminal extraction/adequacy. Joint root/schema transport,
 schema dispatch, general semantic/resource premises and traps remain separate.
+
+### Exact-root executable return assembly
+
+`ConcreteRootedTerminal.lean` connects the preserved companion to executable
+return adequacy. `terminalYield_of_control` eliminates the six nonterminal
+focuses and exposes the actual witness and original root ABI in the returned
+focus. A staged external response still has a bind continuation and cannot be
+mistaken for completion. Empty source frames do not imply empty target frames:
+the accepted target case-label unwinding proof supplies the remaining path.
+
+`ConcreteSupportedFunction.terminatesWith_of_rootedExecSteps` composes that
+extraction with the actual rooted finite prefix, preserving any caller operand
+tail. `ConcreteSupportedExport.terminatesWith_of_rootedExecEvaluates` constructs
+the rooted entry from production validation and concludes executable export
+termination with `RefinedReturnPost` at exactly `spec.sourceResultKind`.
+`terminatesWith_of_rootedRun` derives the same result from successful source
+interpreter execution. Target fuel, target execution, and the result-kind
+identity are conclusions of the proof, not client obligations.
+
+Existing admission, address-space safety, entry-runtime compatibility and
+argument arity remain explicit. This is successful-return preservation, not
+unconditional PA3, fault correspondence, resident linking or encoded bytes.
+Regressions exercise actual extraction through target completion with remaining
+administrative labels, compatibility with the existential-kind endpoint shape,
+and rejection of an unjustified arbitrary-kind substitution. Measured extraction
+dependencies are exactly the standard three axioms; the three executable
+endpoints inherit the same 57 generated dependencies as the accepted prefix.
+The exact compiled inventory now contains 159 endpoints. No new trust is added.
 
 ### Remaining terminal assembly obligations
 
 | Obligation | Exact current evidence | Remaining work |
 |---|---|---|
 | Recover the terminal yield | `sourceExecReturned_terminal`, `ConcreteStructuredValidatedCodeGlobalOutcome.terminalYield_of_control`, and the function/export `terminatesWith_of_validatedReturn` lemmas | Discharged for the existing global relation and a successful final source step. |
-| Preserve the export's selected result ABI | `rootedPreciseCodeGlobalRoot` constructs the actual export entry; `rootedExecSteps_of_currentStepAdmission` preserves the selected root and precise relation over finite executions | Extract the terminal yield from this companion and feed it to executable adequacy at the exact export ABI. Compiler admission and resource premises remain explicit. |
-| Connect source termination to executable return | `terminatesWith_of_classifiedExecSteps`, `terminatesWith_of_classifiedExecEvaluates`, and `terminatesWith_of_classifiedRun` compose the existing ranked prefix with terminal extraction and adequacy | Discharged conditional on the existing universal classifier and entry contracts, with existential represented kind. Compiler admission closure and root-kind provenance are not discharged. |
+| Preserve the export's selected result ABI | `rootedPreciseCodeGlobalRoot`, `rootedExecSteps_of_currentStepAdmission`, and rooted `terminalYield_of_control` carry the selected kind from actual entry through terminal extraction | Discharged at the exact original export ABI, conditional on existing admission and resource laws. |
+| Connect source termination to executable return | `terminatesWith_of_rootedExecSteps`, `terminatesWith_of_rootedExecEvaluates`, and `terminatesWith_of_rootedRun` compose the rooted prefix with terminal extraction and adequacy | Discharged at `spec.sourceResultKind`; compiler admission closure and application instantiation remain open. |
 | Match faults | `StructuredWasmControl` has running/breaking/returning/halted states, and `StructuredWasmOutcome` describes successful control only | A trap-aware extension and its adequacy proof are a separately coordinated semantic change. Existing `ConcreteFaultSimulation` results do not automatically supply this missing structured-machine branch. |
 
 These are interface obligations, not evidence of incorrect generated code.
@@ -1180,6 +1208,8 @@ adds it to an expected list. Missing or non-theorem endpoints are errors.
 | returned-successor projection into the rooted precise companion | 3 | 0 |
 | actual export rooted precise entry | 3 | 0 |
 | rooted finite-prefix and export-prefix composition | 3 | 57 |
+| rooted terminal-yield extraction | 3 | 0 |
+| exact-root function/export/interpreter executable return assembly | 3 | 57 |
 | original default-only case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original object-case wrapper, frame-exposing helper and rooted successor | 3 | 0 |
 | original UInt8-case wrapper, frame-exposing helper and rooted successor | 3 | 2 |
@@ -1238,10 +1268,12 @@ state, and the local return producers now retain the exact active-function
 result kind. The classifier's simulation now also supplies the complete target
 prefix internally. The root-result foundation now supplies compiler-derived
 entry evidence, a shared caller push/pop law, and exact terminal consumption.
-Carry precise producer and root result identity through global simulation so
-the new classified terminal corollaries can state the
-root export's selected ABI, then discharge the universal compiler classifier
-through the ongoing admission work.
+The rooted terminal corollaries now state the root export's selected ABI.
+Discharge the universal compiler classifier through the ongoing admission work;
+do not replace it by an opaque per-program hypothesis. The concrete application
+direction is [captured final LCNF of lean-zip](W6-LEAN-ZIP-FIRST-EXAMPLE.md), first
+retaining a fresh proof subject and deriving its static export facts. Its
+ByteArray/input-result boundary and dynamic admission are not yet proved.
 Handle the trap-model extension separately.
 Do not reintroduce a client source invariant, target path, or ABI-provenance
 assumption in the final corollary.

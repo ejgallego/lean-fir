@@ -402,12 +402,25 @@ The initial theorem uses only the three standard axioms; the two prefix
 endpoints inherit exactly the existing 57 generated dependencies. The
 compiled audit now checks 155 endpoints, with no new axiom or trust approval.
 
-Next is terminal extraction from this preserved rooted companion, followed by
-executable return assembly at the export's exact result ABI rather than an
-existential kind. Compiler admission and address-space laws remain explicit:
-this is not PA3 closure. Joint root/schema transport, schema dispatch and
-trap support remain separate; there is no new join/jump admission. The older
-global relation and all shared runtime/ABI contracts remain unchanged.
+The exact-root terminal slice in `ConcreteRootedTerminal.lean` now extracts
+the yielded value and supported target continuation from that same companion.
+Its function, export-evaluation and interpreter-run endpoints derive executable
+Talos termination with `RefinedReturnPost` at `spec.sourceResultKind`, rather
+than an existential kind. Source completion, not universal termination, is the
+premise. The function form preserves an arbitrary caller operand tail; target
+case-label unwinding is derived without assuming the target stack is empty.
+The extraction uses only the standard three axioms; the three executable
+endpoints inherit the existing 57 generated dependencies. The compiled audit
+now checks 159 endpoints, with no new axiom or trust approval.
+
+Compiler admission and address-space laws remain explicit: this is not PA3
+closure. The next concrete application boundary is the actual captured final
+LCNF of lean-zip `compressStored`; see [the bounded first-example plan](W6-LEAN-ZIP-FIRST-EXAMPLE.md).
+Retaining a fresh proof-usable capture and static export evidence comes before
+claiming its dynamic admission, ByteArray refinement or resident linkage.
+Joint root/schema transport, schema dispatch and trap support remain separate;
+there is no new join/jump admission. The older global relation and all shared
+runtime/ABI contracts remain unchanged.
 
 ### Intended result
 
@@ -452,13 +465,16 @@ caller for an arbitrary source predicate, its `ready`/`preserved` laws, and an
 initial proof.  The schema-indexed form has the same logical gap while
 correctly avoiding the legacy arbitrary-witness field premise.
 
-The new companion
-`ConcreteSupportedExport.terminatesWith_of_classifiedExecEvaluates` derives
-actual target return correctness from successful source evaluation and the
-existing universal classifier. It no longer asks for a target prefix or an
-initial simulation witness, but retains an existential result kind. Deriving
-the classifier and identifying that kind with the root ABI remain necessary
-before this can become the closed application-facing terminal theorem.
+The exact-root companion
+`ConcreteSupportedExport.terminatesWith_of_rootedExecEvaluates` derives actual
+target return correctness from successful source evaluation at the export's
+selected result ABI. It asks for neither a target prefix, an initial simulation
+witness nor a root-kind equality. Its interpreter-run corollary has the same
+guarantee. The existing compiler-admission and address-space laws, entry/runtime
+invariant and arity remain explicit. Deriving admission is still necessary
+before this becomes the closed application-facing terminal theorem. The older
+`terminatesWith_of_classifiedExecEvaluates` retains its existential-kind shape
+as a compatibility endpoint.
 
 The remaining compiler-proof obligation is narrower than a new proof of the
 whole interpreter's type safety:
