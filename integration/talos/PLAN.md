@@ -80,11 +80,23 @@ uses this lemma; only its stronger historical entry package still requires
 all-location ordinaryness. `twoPublications_restoreCallerFrame` exercises the
 new consumer with the concrete nonempty caller-token map and two publications,
 while leaving physical frame/update premises explicit. It is not a nested
-compiled-call execution proof. Full historical-stack transport and ownership-
-derived publication disjointness remain the next semantic obligations.
-Consequently this is a consumer factoring checkpoint, not completion of the
-strategy review's W1 gate: the actual historical stack pop must eventually
-consume facts-aware transport without recovering blanket ordinaryness.
+compiled-call execution proof.
+
+The actual direct return/pop now consumes this boundary in
+`ConcreteStructuredBindFrameFocus.advance_popRetainedCache`: one source step
+and two target steps restore the complete caller cache/ABI frame and the
+structural stack relation. Saved-local transport and recursive historical
+frame reconstruction need only witness transport, not blanket ordinaryness.
+The exact saved scope, entry boundaries and older tail are retained; no
+post-hoc frame or reflexive replacement entry is selected. The callee supplies
+its current cache/ABI frame, witness/capacity transport and the caller-specific
+binding transport, not a strong entry-relative scope. The old resource-stack
+pop delegates to this theorem and retains its original stronger signature.
+The two-publication regression reaches this operational pop conditionally on
+the physical bind focus and frames. Reconstructing the stronger hereditary
+resource stack and deriving graph disjointness for each suspended caller are
+still required before object/tobject miss admission. This advances the W1
+consumer gate; it does not close the full ownership/stack obligation.
 
 The review follow-up in
 [`W6-OBSERVABLE-CONTRACT-AND-TRUST.md`](W6-OBSERVABLE-CONTRACT-AND-TRUST.md)

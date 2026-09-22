@@ -1280,8 +1280,9 @@ The ordinary binding premise is discharged, not assumed; representation,
 capacity, physical frames and local-update premises remain explicit. It is a
 conditional consumer regression, not a compiled nested-call execution proof.
 The independent non-vacuous initial ordinary-token witness and aliasing
-rejection tests remain. These three audited endpoints bring the inventory to
-212; this does not remove existing native debt from the executable endpoints.
+rejection tests remain. Those three audited endpoints brought the prior
+checkpoint's inventory to 212; they did not remove existing native debt from
+the executable endpoints.
 
 This follows the strategy review's instruction to consume the retained-frame
 law without designing another universal invariant. The remaining ownership
@@ -1290,6 +1291,46 @@ callers. The later historical-stack change must preserve each saved caller's
 own facts and environment; neither ABI typing nor a convenient post-hoc frame
 may supply that obligation. Capture reification, frontend source certificates,
 and production-pipeline correspondence remain separate work packages.
+
+### Witness-only historical frames and facts-aware operational pop
+
+`WitnessTransport.savedStateRelated`,
+`ConcreteStructuredFrameRel.transport_of_witness`, and
+`ConcreteStructuredSuspendedResourceStack.frameRel_of_witness` recover saved
+local representations and the recursive structural tail without all-location
+ordinaryness. They consume the existing exact historical stack, retaining
+each caller's entry boundary, environment and frame indices. The original
+stronger theorem signatures remain delegating compatibility forms.
+
+`ConcreteStructuredBindFrameFocus.advance_popRetainedCache` combines these
+lemmas with the actual destination-binding transition and the landed full
+caller-frame restoration. It returns one successful source step, exactly two
+target steps, `ConcreteStructuredStackRel`, the named resumed code focus, the
+complete caller cache/ABI frame, and exact joins/frame equations. The callee
+supplies a current cache/ABI frame, witness/capacity transports and the saved
+caller's `ReuseTokenOrdinaryBindTransport`; it does not supply a strong callee
+entry scope concealing the old blanket ordinaryness premise.
+
+The existing `advance_popResourceStack` delegates to this operational theorem,
+then uses its unchanged stronger premises to rebuild the historical resource
+package. This distinction is intentional: structural stack correctness and
+the current caller frame are proved under weaker conditions, but the complete
+hereditary resource invariant has not yet been generalized.
+
+`twoPublications_advance_popRetainedCache` reaches the actual pop consumer with
+the nonempty saved-token map and concrete two-publication heap. It discharges
+ordinary binding from the established regression, while leaving the bind
+focus, physical frames, witness and capacity premises explicit. It is not an
+end-to-end compiled nested-call execution proof. Existing non-vacuity and
+alias-rejection tests remain unchanged.
+
+Nine exact dependency entries extend the inventory to 221 endpoints. Both
+saved-state lemmas use `propext` and `Quot.sound`; the other seven use only the
+three standard axioms. No new generated or semantic axiom is introduced.
+Ownership-derived publication disjointness and stronger resource-history
+transport remain open. Neither ABI typing, capacity transport nor ordinary
+token facts establishes graph separation. No runtime, compiler-admission,
+central relation, linker or artifact contract changes in this slice.
 
 ### Remaining terminal assembly obligations
 

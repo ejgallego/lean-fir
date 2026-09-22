@@ -1,4 +1,5 @@
 import FirTalos.ConcreteLazyPublication
+import FirTalos.ConcreteStructuredSimulation
 
 namespace FirTalos.Concrete
 
@@ -31,6 +32,10 @@ private def retainedFacts : ReuseCapacityFacts :=
   [(retainedToken, .retainedAtLeast 1)]
 private def retainedEnv : Env :=
   [(retainedToken, .reuseToken (some retainedLocation))]
+
+private def twoPublicationRuntime : RuntimeState :=
+  (publicationRuntime.setGlobal `cache publishedRoot).setGlobal
+    `outerCache publishedRoot
 
 private theorem publication_marks_root_persistent :
     findCell? (publicationRuntime.setGlobal `cache publishedRoot).heap
@@ -228,6 +233,80 @@ theorem twoPublications_restoreCallerFrame
     caller callee witnessTransport capacityTransport
     twoPublications_preserve_retainedTokenFacts finalRelated finalAligned
     resultFound localUpdate
+
+/-- This conditional regression reaches the actual structured direct-pop
+    consumer. It keeps the suspended caller scope and historical tail explicit,
+    but returns the retained caller cache/ABI frame rather than claiming
+    reconstruction of the stronger entry-relative resource stack. -/
+theorem twoPublications_advance_popRetainedCache
+    {context calleeContext : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction calleeFunction : Fir.Wasm.Function}
+    {labels : LabelContext}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {outerRuntime : RuntimeState}
+    {outerStore callStore targetStore : Wasm.Store Host}
+    {outerWitness callWitness resultWitness : RefinementWitness}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {callerLocals calleeLocals : Wasm.Locals}
+    {callerRemainder returnedTail : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {callerFunctionResult : AbiKind}
+    {tailResult : Option AbiKind}
+    {kind : AbiKind}
+    {physical : Wasm.Value}
+    {resultIndex : Nat}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    {calleeFacts : ReuseCapacityFacts}
+    {callerBytes resultBytes : Nat}
+    {calleeEnv : Env}
+    (related : ConcreteStructuredBindFrameFocus context sourceModule
+      sourceFunction labels twoPublicationRuntime retainedEnv publishedRoot
+      resultId continuation callerJoins sourceFrames targetStore callerLocals
+      callerRemainder targetRest targetFrames returnedTail resultWitness kind
+      physical resultIndex source target)
+    (callerScope : ConcreteStructuredResourceScope context sourceModule
+      sourceFunction externals outerRuntime outerStore outerWitness retainedFacts
+      callerBytes publicationRuntime retainedEnv callStore callerLocals
+      callWitness)
+    (callee : ConcreteReuseCapacityCacheAbiFrame calleeContext sourceModule
+      calleeFunction externals calleeFacts resultBytes twoPublicationRuntime
+      calleeEnv targetStore calleeLocals resultWitness)
+    (witnessTransport : WitnessTransport callWitness resultWitness)
+    (capacityTransport : HeaderCapacityTransport callStore.host.runtime.heap
+      targetStore.host.runtime.heap callWitness)
+    (programEq : calleeContext.program = context.program)
+    (tail : ConcreteStructuredSuspendedResourceStack externals context.program
+      outerRuntime outerStore outerWitness callerFunctionResult tailResult
+      sourceFrames targetFrames) :
+    ∃ sourceAfter targetAfter resumedLocals,
+      executeStep externals source = .next sourceAfter ∧
+      FinitePath (StructuredWasmStep module hostEnv) 2 target targetAfter ∧
+      ConcreteStructuredStackRel sourceAfter targetAfter ∧
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+        twoPublicationRuntime (bind retainedEnv resultId publishedRoot)
+        continuation targetStore resumedLocals targetRest resultWitness
+        sourceAfter targetAfter ∧
+      ConcreteReuseCapacityCacheAbiFrame context sourceModule sourceFunction
+        externals (eraseReuseCapacityFact retainedFacts resultId) resultBytes
+        twoPublicationRuntime (bind retainedEnv resultId publishedRoot)
+        targetStore resumedLocals resultWitness ∧
+      sourceAfter.joins = callerJoins ∧
+      sourceAfter.frames = sourceFrames ∧
+      targetAfter.frames = targetFrames := by
+  have ordinaryTransport :
+      ReuseTokenOrdinaryBindTransport retainedFacts resultId
+        publicationRuntime twoPublicationRuntime retainedEnv publishedRoot := by
+    simpa [twoPublicationRuntime] using
+      twoPublications_preserve_retainedTokenFacts
+  exact related.advance_popRetainedCache callerScope callee witnessTransport
+    capacityTransport ordinaryTransport programEq tail
 
 theorem publication_post_retainedToken_ordinary :
     ReuseTokenOrdinaryRel (eraseReuseCapacityFact retainedFacts resultId)

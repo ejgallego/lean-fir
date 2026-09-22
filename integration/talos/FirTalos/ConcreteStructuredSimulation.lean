@@ -10057,16 +10057,14 @@ relation.  The current callee relation supplies the evolved runtime and clear
 failure channel; the accumulated witness transport reinterprets every saved
 caller local at the current witness without changing either the source
 environment or the physical local frame. -/
-theorem ReuseCapacityCodeEntryTransports.savedStateRelated
+theorem WitnessTransport.savedStateRelated
     {entryRuntime currentRuntime : RuntimeState}
     {entryStore currentStore : Wasm.Store Host}
     {entryWitness currentWitness : RefinementWitness}
     {entryFunction currentFunction : Fir.Wasm.Function}
     {entryEnv currentEnv : Env}
     {entryLocals currentLocals : Wasm.Locals}
-    (transports :
-      ReuseCapacityCodeEntryTransports entryRuntime currentRuntime entryStore
-        currentStore entryWitness currentWitness)
+    (transport : WitnessTransport entryWitness currentWitness)
     (entryRelated :
       StateRelated entryFunction entryRuntime entryEnv entryStore entryLocals
         entryWitness)
@@ -10076,7 +10074,26 @@ theorem ReuseCapacityCodeEntryTransports.savedStateRelated
     StateRelated entryFunction currentRuntime entryEnv currentStore entryLocals
       currentWitness := by
   exact ⟨currentRelated.1, currentRelated.2.1,
-    EnvLocalsRelated.witnessTransport transports.witness entryRelated.2.2⟩
+    EnvLocalsRelated.witnessTransport transport entryRelated.2.2⟩
+
+/-- Compatibility with the historical entry package. Saved-local transport
+itself requires only witness growth, not ordinaryness of every heap cell. -/
+theorem ReuseCapacityCodeEntryTransports.savedStateRelated
+    {entryRuntime currentRuntime : RuntimeState}
+    {entryStore currentStore : Wasm.Store Host}
+    {entryWitness currentWitness : RefinementWitness}
+    {entryFunction currentFunction : Fir.Wasm.Function}
+    {entryEnv currentEnv : Env}
+    {entryLocals currentLocals : Wasm.Locals}
+    (transports : ReuseCapacityCodeEntryTransports entryRuntime currentRuntime
+      entryStore currentStore entryWitness currentWitness)
+    (entryRelated : StateRelated entryFunction entryRuntime entryEnv entryStore
+      entryLocals entryWitness)
+    (currentRelated : StateRelated currentFunction currentRuntime currentEnv
+      currentStore currentLocals currentWitness) :
+    StateRelated entryFunction currentRuntime entryEnv currentStore entryLocals
+      currentWitness :=
+  WitnessTransport.savedStateRelated transports.witness entryRelated currentRelated
 
 /-- Strengthen a structured direct-call entry with the canonical hereditary
 cache frame used by the existing W6 operation-family induction.  The callee
@@ -10523,6 +10540,51 @@ inductive ConcreteStructuredFrameRel
 The current running focus supplies the evolved world/heap relation; witness
 transport reinterprets saved locals, while frame layout and compiler
 adaptation remain static. -/
+theorem ConcreteStructuredFrameRel.transport_of_witness
+    {program : Fir.LeanIR.ImpureProgram}
+    {entryRuntime currentRuntime : RuntimeState}
+    {entryStore currentStore : Wasm.Store Host}
+    {entryWitness currentWitness : RefinementWitness}
+    {expectedResult : Option AbiKind}
+    {sourceFrames : List Frame}
+    {targetFrames : List StructuredWasmFrame}
+    {currentFunction : Fir.Wasm.Function}
+    {currentEnv : Env}
+    {currentLocals : Wasm.Locals}
+    (related : ConcreteStructuredFrameRel program entryRuntime entryStore
+      entryWitness expectedResult sourceFrames targetFrames)
+    (transport : WitnessTransport entryWitness currentWitness)
+    (currentRelated :
+      StateRelated currentFunction currentRuntime currentEnv currentStore
+        currentLocals currentWitness) :
+    ConcreteStructuredFrameRel program currentRuntime currentStore
+      currentWitness expectedResult sourceFrames targetFrames := by
+  induction related with
+  | nil => exact .nil
+  | case _tail ih => exact .case ih
+  | direct programEq continuationAdapted callerStateRelated
+      callerFrameAligned resultFound kindAt _tail ih =>
+      exact .direct programEq continuationAdapted
+        (WitnessTransport.savedStateRelated transport callerStateRelated currentRelated)
+        (by
+          simpa [ConcreteLocalFrameAligned] using callerFrameAligned)
+        resultFound kindAt ih
+  | saturated programEq continuationAdapted callerStateRelated
+      callerFrameAligned resultFound kindAt _tail ih =>
+      exact .saturated programEq continuationAdapted
+        (WitnessTransport.savedStateRelated transport callerStateRelated currentRelated)
+        (by
+          simpa [ConcreteLocalFrameAligned] using callerFrameAligned)
+        resultFound kindAt ih
+  | lazy programEq continuationAdapted callerStateRelated callerFrameAligned
+      resultFound kindAt _tail ih =>
+      exact .lazy programEq continuationAdapted
+        (WitnessTransport.savedStateRelated transport callerStateRelated currentRelated)
+        (by
+          simpa [ConcreteLocalFrameAligned] using callerFrameAligned)
+        resultFound kindAt ih
+
+/-- Historical compatibility form of witness-only structural transport. -/
 theorem ConcreteStructuredFrameRel.transport
     {program : Fir.LeanIR.ImpureProgram}
     {entryRuntime currentRuntime : RuntimeState}
@@ -10536,38 +10598,13 @@ theorem ConcreteStructuredFrameRel.transport
     {currentLocals : Wasm.Locals}
     (related : ConcreteStructuredFrameRel program entryRuntime entryStore
       entryWitness expectedResult sourceFrames targetFrames)
-    (transports :
-      ReuseCapacityCodeEntryTransports entryRuntime currentRuntime entryStore
-        currentStore entryWitness currentWitness)
-    (currentRelated :
-      StateRelated currentFunction currentRuntime currentEnv currentStore
-        currentLocals currentWitness) :
+    (transports : ReuseCapacityCodeEntryTransports entryRuntime currentRuntime
+      entryStore currentStore entryWitness currentWitness)
+    (currentRelated : StateRelated currentFunction currentRuntime currentEnv
+      currentStore currentLocals currentWitness) :
     ConcreteStructuredFrameRel program currentRuntime currentStore
-      currentWitness expectedResult sourceFrames targetFrames := by
-  induction related with
-  | nil => exact .nil
-  | case _tail ih => exact .case ih
-  | direct programEq continuationAdapted callerStateRelated
-      callerFrameAligned resultFound kindAt _tail ih =>
-      exact .direct programEq continuationAdapted
-        (transports.savedStateRelated callerStateRelated currentRelated)
-        (by
-          simpa [ConcreteLocalFrameAligned] using callerFrameAligned)
-        resultFound kindAt ih
-  | saturated programEq continuationAdapted callerStateRelated
-      callerFrameAligned resultFound kindAt _tail ih =>
-      exact .saturated programEq continuationAdapted
-        (transports.savedStateRelated callerStateRelated currentRelated)
-        (by
-          simpa [ConcreteLocalFrameAligned] using callerFrameAligned)
-        resultFound kindAt ih
-  | lazy programEq continuationAdapted callerStateRelated callerFrameAligned
-      resultFound kindAt _tail ih =>
-      exact .lazy programEq continuationAdapted
-        (transports.savedStateRelated callerStateRelated currentRelated)
-        (by
-          simpa [ConcreteLocalFrameAligned] using callerFrameAligned)
-        resultFound kindAt ih
+      currentWitness expectedResult sourceFrames targetFrames :=
+  related.transport_of_witness transports.witness currentRelated
 
 /-- Stack evidence appropriate to each of the ten local control protocols.
 
@@ -11322,6 +11359,66 @@ structure ConcreteStructuredResourceStack
 The active scope transports each saved caller from the active function's
 entry boundary to the current state.  Recursion first reconstructs the older
 stack at that boundary, then transports it through the same active scope. -/
+theorem ConcreteStructuredSuspendedResourceStack.frameRel_of_witness
+    {externals : ExternalImpl}
+    {program : Fir.LeanIR.ImpureProgram}
+    {entryRuntime sourceRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {expectedResult : Option AbiKind}
+    {sourceFrames : List Frame}
+    {targetFrames : List StructuredWasmFrame}
+    {currentFunction : Fir.Wasm.Function}
+    {currentEnv : Env}
+    {currentLocals : Wasm.Locals}
+    (stack : ConcreteStructuredSuspendedResourceStack externals program
+      entryRuntime entryStore entryWitness functionResult expectedResult
+      sourceFrames targetFrames)
+    (transport : WitnessTransport entryWitness witness)
+    (currentRelated : StateRelated currentFunction sourceRuntime currentEnv
+      targetStore currentLocals witness) :
+    ConcreteStructuredFrameRel program sourceRuntime targetStore witness
+      expectedResult sourceFrames targetFrames := by
+  induction stack generalizing currentFunction sourceRuntime currentEnv
+      targetStore currentLocals witness with
+  | nil => exact .nil
+  | case _tail ih => exact .case (ih transport currentRelated)
+  | direct callerScope programEq continuationAdapted resultFound kindAt
+      _calleeCompatible _tail ih =>
+      have tailAtEntry := ih callerScope.transports.witness callerScope.stateRelated
+      have tailAtCurrent :=
+        tailAtEntry.transport_of_witness transport currentRelated
+      exact .direct programEq continuationAdapted
+        (WitnessTransport.savedStateRelated transport callerScope.stateRelated currentRelated)
+        (by
+          simpa [ConcreteLocalFrameAligned] using callerScope.frameAligned)
+        resultFound kindAt tailAtCurrent
+  | saturated callerScope programEq continuationAdapted resultFound kindAt
+      _calleeCompatible _tail ih =>
+      have tailAtEntry := ih callerScope.transports.witness callerScope.stateRelated
+      have tailAtCurrent :=
+        tailAtEntry.transport_of_witness transport currentRelated
+      exact .saturated programEq continuationAdapted
+        (WitnessTransport.savedStateRelated transport callerScope.stateRelated currentRelated)
+        (by
+          simpa [ConcreteLocalFrameAligned] using callerScope.frameAligned)
+        resultFound kindAt tailAtCurrent
+  | lazy callerScope programEq continuationAdapted resultFound kindAt
+      _initializerFound _signature _cacheSetCall _notObject _notTObject
+      _calleeCompatible _tail ih =>
+      have tailAtEntry := ih callerScope.transports.witness callerScope.stateRelated
+      have tailAtCurrent :=
+        tailAtEntry.transport_of_witness transport currentRelated
+      exact .lazy programEq continuationAdapted
+        (WitnessTransport.savedStateRelated transport callerScope.stateRelated currentRelated)
+        (by
+          simpa [ConcreteLocalFrameAligned] using callerScope.frameAligned)
+        resultFound kindAt tailAtCurrent
+
+/-- Compatibility projection from the active resource scope. The recursive
+historical stack theorem itself now needs only witness growth and a related
+current state; it neither reselects saved frames nor resets their boundaries. -/
 theorem ConcreteStructuredSuspendedResourceStack.frameRel
     {externals : ExternalImpl}
     {program : Fir.LeanIR.ImpureProgram}
@@ -11347,46 +11444,8 @@ theorem ConcreteStructuredSuspendedResourceStack.frameRel
       currentFacts currentBytes sourceRuntime currentEnv targetStore
       currentLocals witness) :
     ConcreteStructuredFrameRel program sourceRuntime targetStore witness
-      expectedResult sourceFrames targetFrames := by
-  induction stack generalizing currentContext currentModule currentFunction
-      currentFacts currentBytes sourceRuntime currentEnv targetStore
-      currentLocals witness with
-  | nil => exact .nil
-  | case _tail ih => exact .case (ih currentScope)
-  | direct callerScope programEq continuationAdapted resultFound kindAt
-      _calleeCompatible _tail ih =>
-      have tailAtEntry := ih callerScope
-      have tailAtCurrent :=
-        tailAtEntry.transport currentScope.transports currentScope.stateRelated
-      exact .direct programEq continuationAdapted
-        (currentScope.transports.savedStateRelated callerScope.stateRelated
-          currentScope.stateRelated)
-        (by
-          simpa [ConcreteLocalFrameAligned] using callerScope.frameAligned)
-        resultFound kindAt tailAtCurrent
-  | saturated callerScope programEq continuationAdapted resultFound kindAt
-      _calleeCompatible _tail ih =>
-      have tailAtEntry := ih callerScope
-      have tailAtCurrent :=
-        tailAtEntry.transport currentScope.transports currentScope.stateRelated
-      exact .saturated programEq continuationAdapted
-        (currentScope.transports.savedStateRelated callerScope.stateRelated
-          currentScope.stateRelated)
-        (by
-          simpa [ConcreteLocalFrameAligned] using callerScope.frameAligned)
-        resultFound kindAt tailAtCurrent
-  | lazy callerScope programEq continuationAdapted resultFound kindAt
-      _initializerFound _signature _cacheSetCall _notObject _notTObject
-      _calleeCompatible _tail ih =>
-      have tailAtEntry := ih callerScope
-      have tailAtCurrent :=
-        tailAtEntry.transport currentScope.transports currentScope.stateRelated
-      exact .lazy programEq continuationAdapted
-        (currentScope.transports.savedStateRelated callerScope.stateRelated
-          currentScope.stateRelated)
-        (by
-          simpa [ConcreteLocalFrameAligned] using callerScope.frameAligned)
-        resultFound kindAt tailAtCurrent
+      expectedResult sourceFrames targetFrames :=
+  stack.frameRel_of_witness currentScope.transports.witness currentScope.stateRelated
 
 theorem ConcreteStructuredResourceStack.frameRel
     {program : Fir.LeanIR.ImpureProgram}
@@ -18702,6 +18761,110 @@ theorem ConcreteStructuredBindFrameFocus.advance_stack_resource
     ⟨ConcreteStructuredControlRel.code focus, .code focus framesAfter⟩,
     resumedResource⟩
 
+/-- Execute an actual direct return/pop without demanding all-location
+ordinaryness from the callee. The saved caller scope and historical tail are
+the ones established at call entry; witness transport suffices to recover
+their structural relation at the current heap. The caller's retained binding
+transport supplies exactly the ordinary-token condition needed for its full
+cache/ABI frame.
+
+The result does not claim a rebuilt `ConcreteStructuredResourceStack`: its
+stronger historical ordinaryness component remains a separate obligation.
+No convenient post-hoc frame or reflexive replacement entry is selected. -/
+theorem ConcreteStructuredBindFrameFocus.advance_popRetainedCache
+    {context calleeContext : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction calleeFunction : Fir.Wasm.Function}
+    {labels : LabelContext}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {outerRuntime callRuntime sourceRuntime : RuntimeState}
+    {outerStore callStore targetStore : Wasm.Store Host}
+    {outerWitness callWitness witness : RefinementWitness}
+    {callerEnv calleeEnv : Env}
+    {sourceValue : Value}
+    {result : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {callerLocals calleeLocals : Wasm.Locals}
+    {callerRemainder returnedTail : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {kind callerFunctionResult : AbiKind}
+    {physical : Wasm.Value}
+    {resultIndex : Nat}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    {tailResult : Option AbiKind}
+    {facts calleeFacts : ReuseCapacityFacts}
+    {callerBytes resultBytes : Nat}
+    (related : ConcreteStructuredBindFrameFocus context sourceModule
+      sourceFunction labels sourceRuntime callerEnv sourceValue result
+      continuation callerJoins sourceFrames targetStore callerLocals
+      callerRemainder targetRest targetFrames returnedTail witness kind physical
+      resultIndex source target)
+    (callerScope : ConcreteStructuredResourceScope context sourceModule
+      sourceFunction externals outerRuntime outerStore outerWitness facts
+      callerBytes callRuntime callerEnv callStore callerLocals callWitness)
+    (callee : ConcreteReuseCapacityCacheAbiFrame calleeContext sourceModule
+      calleeFunction externals calleeFacts resultBytes sourceRuntime calleeEnv
+      targetStore calleeLocals witness)
+    (witnessTransport : WitnessTransport callWitness witness)
+    (capacityTransport : HeaderCapacityTransport callStore.host.runtime.heap
+      targetStore.host.runtime.heap callWitness)
+    (ordinaryTransport : ReuseTokenOrdinaryBindTransport facts result
+      callRuntime sourceRuntime callerEnv sourceValue)
+    (programEq : calleeContext.program = context.program)
+    (tail : ConcreteStructuredSuspendedResourceStack externals context.program
+      outerRuntime outerStore outerWitness callerFunctionResult tailResult
+      sourceFrames targetFrames) :
+    ∃ sourceAfter targetAfter resumedLocals,
+      executeStep externals source = .next sourceAfter ∧
+      FinitePath (StructuredWasmStep module hostEnv) 2 target targetAfter ∧
+      ConcreteStructuredStackRel sourceAfter targetAfter ∧
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+        sourceRuntime (bind callerEnv result sourceValue) continuation
+        targetStore resumedLocals targetRest witness sourceAfter targetAfter ∧
+      ConcreteReuseCapacityCacheAbiFrame context sourceModule sourceFunction
+        externals (eraseReuseCapacityFact facts result) resultBytes
+        sourceRuntime (bind callerEnv result sourceValue) targetStore
+        resumedLocals witness ∧
+      sourceAfter.joins = callerJoins ∧
+      sourceAfter.frames = sourceFrames ∧
+      targetAfter.frames = targetFrames := by
+  obtain ⟨sourceAfter, targetAfter, _updated, resumedLocals, sourceStep,
+      targetPath, targetSet, resumedEq, focus, joinsEq, sourceFramesEq,
+      targetFramesEq⟩ :=
+    related.advance (module := module) (hostEnv := hostEnv)
+      (externals := externals)
+  have resumedUpdate :
+      FirTalos.Correctness.LocalUpdate callerLocals resumedLocals resultIndex
+        physical := by
+    rw [resumedEq]
+    have base := FirTalos.Correctness.localUpdate_of_set? targetSet
+    refine ⟨?_, ?_⟩
+    · simpa [Wasm.Locals.get] using base.1
+    · intro other different
+      simpa [Wasm.Locals.get] using base.2 different
+  have restored := callerScope.1.1.restoreCaller_of_retainedTransport
+    callee.cacheFrame witnessTransport capacityTransport ordinaryTransport
+    focus.stateRelated focus.frameAligned related.resultFound resumedUpdate
+  have callerAbi : ClosureAllocationsAbiAligned context.program witness := by
+    rw [← programEq]
+    exact callee.closureAbi
+  have framesAfter :
+      ConcreteStructuredFrameRel sourceAfter.program sourceRuntime targetStore
+        witness tailResult sourceAfter.frames targetAfter.frames := by
+    rw [focus.sourceProgramEq, sourceFramesEq, targetFramesEq]
+    exact tail.frameRel_of_witness
+      (WitnessTransport.trans callerScope.transports.witness witnessTransport)
+      focus.stateRelated
+  exact ⟨sourceAfter, targetAfter, resumedLocals, sourceStep, targetPath,
+    ⟨ConcreteStructuredControlRel.code focus, .code focus framesAfter⟩,
+    focus, ⟨restored, callerAbi⟩, joinsEq, sourceFramesEq, targetFramesEq⟩
+
 /-- Pop a direct call from the unified hereditary resource stack. -/
 theorem ConcreteStructuredBindFrameFocus.advance_popResourceStack
     {context calleeContext : Fir.Wasm.Context}
@@ -18761,23 +18924,23 @@ theorem ConcreteStructuredBindFrameFocus.advance_popResourceStack
         callerFunctionResult tailResult sourceAfter.frames targetAfter.frames ∧
       sourceAfter.frames = sourceFrames ∧
       targetAfter.frames = targetFrames := by
-  obtain ⟨sourceAfter, targetAfter, _updated, resumedLocals, sourceStep,
-      targetPath, targetSet, resumedEq, focus, _joinsEq, sourceFramesEq,
-      targetFramesEq⟩ :=
-    related.advance (module := module) (hostEnv := hostEnv)
-      (externals := externals)
-  have resumedUpdate :
-      FirTalos.Correctness.LocalUpdate callerLocals resumedLocals resultIndex
-        physical := by
-    rw [resumedEq]
-    have base := FirTalos.Correctness.localUpdate_of_set? targetSet
-    refine ⟨?_, ?_⟩
-    · simpa [Wasm.Locals.get] using base.1
-    · intro other different
-      simpa [Wasm.Locals.get] using base.2 different
-  have restoredScope :=
-    callerScope.restoreCaller calleeScope programEq focus.stateRelated
-      focus.frameAligned related.resultFound resumedUpdate
+  obtain ⟨sourceAfter, targetAfter, resumedLocals, sourceStep, targetPath,
+      stack, focus, cacheFrame, _joinsEq, sourceFramesEq, targetFramesEq⟩ :=
+    related.advance_popRetainedCache (module := module) (hostEnv := hostEnv)
+      callerScope ⟨calleeScope.1.1, calleeScope.2⟩
+      calleeScope.transports.witness calleeScope.transports.capacity
+      (ReuseTokenOrdinaryBindTransport.ofOrdinaryPersistence
+        calleeScope.transports.ordinary) programEq tail
+  have restoredScope : ConcreteStructuredResourceScope context sourceModule
+      sourceFunction externals outerRuntime outerStore outerWitness
+      (eraseReuseCapacityFact facts result) resultBytes sourceRuntime
+      (bind callerEnv result sourceValue) targetStore resumedLocals witness :=
+    ⟨⟨cacheFrame.1, callerScope.transports.step
+      calleeScope.transports.witness
+      calleeScope.transports.closureAllocationsPersistent
+      calleeScope.transports.capacity calleeScope.transports.ordinary
+      calleeScope.transports.externals
+      calleeScope.transports.toClosureTablesTransport⟩, cacheFrame.2⟩
   have resources :
       ConcreteStructuredResourceStack context.program context sourceModule
         sourceFunction externals outerRuntime sourceRuntime outerStore
@@ -18785,16 +18948,6 @@ theorem ConcreteStructuredBindFrameFocus.advance_popResourceStack
         resultBytes (bind callerEnv result sourceValue) resumedLocals
         callerFunctionResult tailResult sourceFrames targetFrames :=
     ⟨restoredScope, tail⟩
-  have sourceProgramEq : sourceAfter.program = context.program :=
-    focus.sourceProgramEq
-  have framesAfter :
-      ConcreteStructuredFrameRel sourceAfter.program sourceRuntime targetStore
-        witness tailResult sourceAfter.frames targetAfter.frames := by
-    rw [sourceProgramEq, sourceFramesEq, targetFramesEq]
-    exact resources.frameRel
-  have stack : ConcreteStructuredStackRel sourceAfter targetAfter := by
-    exact ⟨ConcreteStructuredControlRel.code focus,
-      .code focus framesAfter⟩
   have resourcesAfter :
       ConcreteStructuredResourceStack context.program context sourceModule
         sourceFunction externals outerRuntime sourceRuntime outerStore

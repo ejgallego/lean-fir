@@ -197,6 +197,15 @@ surface and its W7/package wiring; W6 does not duplicate it locally.
   stronger entry-transport obligation. A conditional two-publication regression
   reaches this complete frame consumer; it is not compiled-call execution and
   does not close the historical suspended-stack or ownership obligations.
+  `ConcreteStructuredBindFrameFocus.advance_popRetainedCache` now also reaches
+  the actual return/pop transition: one source step, two target steps, the
+  structural tail and the full caller cache/ABI frame. Recursive historical
+  frame reconstruction uses only witness transport. The exact saved scope
+  and tail remain fixed; the callee need not supply blanket ordinaryness.
+  Its two-publication regression discharges the retained-token binding
+  obligation but still assumes physical frames and the bind focus. It does
+  not reconstruct the stronger hereditary resource stack or establish an
+  entire compiled callee execution.
 - Apply the existing rooted finite-trace/terminal theorem only after its
   explicit compiler-current-step admission, address-space/resource safety,
   entry/runtime contracts and argument arity have been constructed for this
@@ -220,9 +229,12 @@ the actual opaque production checker. No new native axiom is authorized.
 
 Meanwhile, the independent W6 prefix-transport laws prepare the semantic
 obstacle demonstrated by those object-valued initializers. The next bounded
-proof work is to connect fixed-caller facts-aware transport to suspended
-frames, retaining explicit publication disjointness, then derive that
-disjointness from ownership. Do not remove the current admission exclusion
+proof work is to retain the caller-specific transport through the stronger
+hereditary resource history, beyond the now-proved structural frame and
+operational pop consumers, and derive publication disjointness from ownership.
+Current capacity, ordinary-token and representation facts do not establish
+that a published graph cannot reach a saved token. Keep that separation
+obligation explicit. Do not remove the current admission exclusion
 before those consumers are justified. W7 owns capture/emitter/package changes,
 W6 owns these proof helpers, and root owns shared contracts and integration.
 Existing audited native-evaluation debt remains explicit.
