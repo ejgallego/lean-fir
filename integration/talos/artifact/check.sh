@@ -3,6 +3,19 @@ set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../../.." && pwd)"
+root_toolchain="$(tr -d '\r\n' < "$root/lean-toolchain")"
+case "$root_toolchain" in
+  leanprover/lean4:v4.34.0-rc2)
+    root_lake=(elan run "$root_toolchain" lake -d "$root")
+    ;;
+  leanprover/lean4:v4.33.0)
+    root_lake=(lake -d "$root")
+    ;;
+  *)
+    echo "unsupported FIR toolchain for Talos artifact check" >&2
+    exit 1
+    ;;
+esac
 mkdir -p "$here/_build/tmp"
 export TMPDIR="$here/_build/tmp"
 exhaustive_pretty="${FIR_PRETTYM_EXHAUSTIVE_CHECKPOINTS:-0}"
@@ -173,7 +186,7 @@ node run-resident-closure-projections.mjs \
   _build/resident-closure-matches.wasm
 node run-resident-closure-matches.mjs \
   _build/resident-closure-matches.wasm
-case "$(tr -d '\r\n' < "$root/lean-toolchain")" in
+case "$root_toolchain" in
   leanprover/lean4:v4.34.0-rc2)
     # The migration candidate's Talos package is the authenticated overlay.
     # Its setup checks the pinned sources and toolchain before Lake consumes it.
@@ -195,7 +208,7 @@ case "$(tr -d '\r\n' < "$root/lean-toolchain")" in
     exit 1
     ;;
 esac
-lake -d ../../.. build Fir.Wasm.Emit.SourceExamples Fir.Wasm.Emit.Command \
+"${root_lake[@]}" build Fir.Wasm.Emit.SourceExamples Fir.Wasm.Emit.Command \
   Fir.Wasm.Emit.ResidentPrettyFormat fir-prettyM-artifact
 pretty_generator="$root/.lake/build/bin/fir-prettyM-artifact"
 index_source_trace() {
@@ -215,11 +228,11 @@ generate_default_source_artifacts() {
   out="$(cd "$out" && pwd)"
   (
     cd "$out/work"
-    env -u FIR_PRETTYM_CHECKPOINTS lake -d "$root" env "$pretty_generator" \
+    env -u FIR_PRETTYM_CHECKPOINTS "${root_lake[@]}" env "$pretty_generator" \
       "$here/FirWasmSourceExample.lean" FirWasmSourceExample \
       Fir.Wasm.Emit.SourceFixture.prettyFormatRaw \
       "$out/source-pretty-format-resident-closed.wasm"
-    env -u FIR_PRETTYM_CHECKPOINTS lake -d "$root" env "$pretty_generator" \
+    env -u FIR_PRETTYM_CHECKPOINTS "${root_lake[@]}" env "$pretty_generator" \
       --instruction-origins \
       "$out/source-pretty-format-trace-resident-closed.origins.json" \
       --function-inventory \
@@ -231,11 +244,11 @@ generate_default_source_artifacts() {
 }
 
 generate_exhaustive_source_artifacts() {
-  FIR_PRETTYM_CHECKPOINTS=1 lake -d "$root" env lean \
+  FIR_PRETTYM_CHECKPOINTS=1 "${root_lake[@]}" env lean \
     "$here/FirWasmSourceExample.lean"
-  FIR_PRETTYM_CHECKPOINTS=1 lake -d "$root" env lean \
+  FIR_PRETTYM_CHECKPOINTS=1 "${root_lake[@]}" env lean \
     "$here/FirWasmPrettyTraceExample.lean"
-  env -u FIR_PRETTYM_CHECKPOINTS lake -d "$root" env "$pretty_generator" \
+  env -u FIR_PRETTYM_CHECKPOINTS "${root_lake[@]}" env "$pretty_generator" \
     --instruction-origins \
     "$here/_build/source-pretty-format-trace-resident-closed.origins.json" \
     --function-inventory \
@@ -734,7 +747,7 @@ generate_oracle_root() {
   local out="$1"
   local oracle_tmp="$out/.oracle-tmp"
   mkdir -p "$oracle_tmp"
-  case "$(tr -d '\r\n' < "$root/lean-toolchain")" in
+  case "$root_toolchain" in
     leanprover/lean4:v4.34.0-rc2)
       ( cd "$root/.deps/talos-434/project"
         TMPDIR="$oracle_tmp" lake env lean --run \
