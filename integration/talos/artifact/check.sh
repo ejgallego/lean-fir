@@ -733,8 +733,21 @@ generate_oracle_root() {
   local out="$1"
   local oracle_tmp="$out/.oracle-tmp"
   mkdir -p "$oracle_tmp"
-  TMPDIR="$oracle_tmp" lake -d .. env lean --run \
-    ../FirWasmOracleMain.lean all "$out"
+  case "$(tr -d '\r\n' < "$root/lean-toolchain")" in
+    leanprover/lean4:v4.34.0-rc2)
+      ( cd "$root/.deps/talos-434/project"
+        TMPDIR="$oracle_tmp" lake env lean --run \
+          "$root/integration/talos/FirWasmOracleMain.lean" all "$out" )
+      ;;
+    leanprover/lean4:v4.33.0)
+      TMPDIR="$oracle_tmp" lake -d .. env lean --run \
+        ../FirWasmOracleMain.lean all "$out"
+      ;;
+    *)
+      echo "unsupported FIR toolchain for Talos artifact oracle" >&2
+      return 1
+      ;;
+  esac
   rmdir "$oracle_tmp"
 }
 
