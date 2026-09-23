@@ -173,13 +173,27 @@ node run-resident-closure-projections.mjs \
   _build/resident-closure-matches.wasm
 node run-resident-closure-matches.mjs \
   _build/resident-closure-matches.wasm
-if python3 "$root/scripts/talos_build_attestation.py" verify \
-  --receipt "$root/_build/talos-check/build-receipt.json"; then
-  echo "reusing exact successful Talos build"
-else
-  echo "exact Talos build unavailable; rebuilding FirTalos.Differential"
-  lake -d .. build FirTalos.Differential
-fi
+case "$(tr -d '\r\n' < "$root/lean-toolchain")" in
+  leanprover/lean4:v4.34.0-rc2)
+    # The migration candidate's Talos package is the authenticated overlay.
+    # Its setup checks the pinned sources and toolchain before Lake consumes it.
+    bash "$root/tooling/talos-434/setup.sh"
+    lake -d "$root/.deps/talos-434/project" build FirTalos.Differential
+    ;;
+  leanprover/lean4:v4.33.0)
+    if python3 "$root/scripts/talos_build_attestation.py" verify \
+      --receipt "$root/_build/talos-check/build-receipt.json"; then
+      echo "reusing exact successful Talos build"
+    else
+      echo "exact Talos build unavailable; rebuilding FirTalos.Differential"
+      lake -d .. build FirTalos.Differential
+    fi
+    ;;
+  *)
+    echo "unsupported FIR toolchain for Talos artifact check" >&2
+    exit 1
+    ;;
+esac
 lake -d ../../.. build Fir.Wasm.Emit.SourceExamples Fir.Wasm.Emit.Command \
   Fir.Wasm.Emit.ResidentPrettyFormat fir-prettyM-artifact
 pretty_generator="$root/.lake/build/bin/fir-prettyM-artifact"
