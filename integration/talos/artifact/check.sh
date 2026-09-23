@@ -178,7 +178,8 @@ case "$(tr -d '\r\n' < "$root/lean-toolchain")" in
     # The migration candidate's Talos package is the authenticated overlay.
     # Its setup checks the pinned sources and toolchain before Lake consumes it.
     bash "$root/tooling/talos-434/setup.sh"
-    lake -d "$root/.deps/talos-434/project" build FirTalos.Differential
+    ( cd "$root/.deps/talos-434/project"
+      lake build +FirTalos.Differential )
     ;;
   leanprover/lean4:v4.33.0)
     if python3 "$root/scripts/talos_build_attestation.py" verify \
