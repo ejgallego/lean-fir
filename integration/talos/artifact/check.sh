@@ -4,18 +4,13 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../../.." && pwd)"
 root_toolchain="$(tr -d '\r\n' < "$root/lean-toolchain")"
-case "$root_toolchain" in
-  leanprover/lean4:v4.34.0-rc2)
-    root_lake=(elan run "$root_toolchain" lake -d "$root")
-    ;;
-  leanprover/lean4:v4.33.0)
-    root_lake=(lake -d "$root")
-    ;;
-  *)
-    echo "unsupported FIR toolchain for Talos artifact check" >&2
-    exit 1
-    ;;
-esac
+artifact_toolchain="$(tr -d '\r\n' < "$here/lean-toolchain")"
+if [[ "$root_toolchain" != leanprover/lean4:v4.34.0-rc2 ||
+      "$artifact_toolchain" != "$root_toolchain" ]]; then
+  echo "Talos artifact check requires the same Lean 4.34.0-rc2 toolchain in FIR and FirWasmArtifact" >&2
+  exit 1
+fi
+root_lake=(elan run "$root_toolchain" lake -d "$root")
 mkdir -p "$here/_build/tmp"
 export TMPDIR="$here/_build/tmp"
 exhaustive_pretty="${FIR_PRETTYM_EXHAUSTIVE_CHECKPOINTS:-0}"
@@ -186,28 +181,11 @@ node run-resident-closure-projections.mjs \
   _build/resident-closure-matches.wasm
 node run-resident-closure-matches.mjs \
   _build/resident-closure-matches.wasm
-case "$root_toolchain" in
-  leanprover/lean4:v4.34.0-rc2)
-    # The migration candidate's Talos package is the authenticated overlay.
-    # Its setup checks the pinned sources and toolchain before Lake consumes it.
-    bash "$root/tooling/talos-434/setup.sh"
-    ( cd "$root/.deps/talos-434/project"
-      lake build +FirTalos.Differential )
-    ;;
-  leanprover/lean4:v4.33.0)
-    if python3 "$root/scripts/talos_build_attestation.py" verify \
-      --receipt "$root/_build/talos-check/build-receipt.json"; then
-      echo "reusing exact successful Talos build"
-    else
-      echo "exact Talos build unavailable; rebuilding FirTalos.Differential"
-      lake -d .. build FirTalos.Differential
-    fi
-    ;;
-  *)
-    echo "unsupported FIR toolchain for Talos artifact check" >&2
-    exit 1
-    ;;
-esac
+# The migration candidate's Talos package is the authenticated RC2 overlay.
+# Its setup checks pinned sources and toolchain before Lake consumes it.
+bash "$root/tooling/talos-434/setup.sh"
+( cd "$root/.deps/talos-434/project"
+  lake build +FirTalos.Differential )
 "${root_lake[@]}" build Fir.Wasm.Emit.SourceExamples Fir.Wasm.Emit.Command \
   Fir.Wasm.Emit.ResidentPrettyFormat fir-prettyM-artifact
 pretty_generator="$root/.lake/build/bin/fir-prettyM-artifact"
@@ -747,21 +725,9 @@ generate_oracle_root() {
   local out="$1"
   local oracle_tmp="$out/.oracle-tmp"
   mkdir -p "$oracle_tmp"
-  case "$root_toolchain" in
-    leanprover/lean4:v4.34.0-rc2)
-      ( cd "$root/.deps/talos-434/project"
-        TMPDIR="$oracle_tmp" lake env lean --run \
-          "$root/integration/talos/FirWasmOracleMain.lean" all "$out" )
-      ;;
-    leanprover/lean4:v4.33.0)
-      TMPDIR="$oracle_tmp" lake -d .. env lean --run \
-        ../FirWasmOracleMain.lean all "$out"
-      ;;
-    *)
-      echo "unsupported FIR toolchain for Talos artifact oracle" >&2
-      return 1
-      ;;
-  esac
+  ( cd "$root/.deps/talos-434/project"
+    TMPDIR="$oracle_tmp" lake env lean --run \
+      "$root/integration/talos/FirWasmOracleMain.lean" all "$out" )
   rmdir "$oracle_tmp"
 }
 
