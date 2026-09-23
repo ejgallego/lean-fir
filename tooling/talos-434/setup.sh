@@ -24,7 +24,7 @@ hash_lean_tree() (
   find . -type f -name '*.lean' -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1
 )
 
-check_hash 3d72490f4bf785799082a70b5aabb1c4f86fd3ebd56ac897aed6f96e53652a64 "$overlay/talos.patch"
+check_hash 6ed9d6ea8db9a539a8278994c026c995a42534b5a3f2ec53faa41bebe4b482eb "$overlay/talos.patch"
 check_hash b45cdb52a2573023f0b3ce8e8e2bf15c799993ee91fb511dc65cf884ef647f6f "$overlay/float-normalization.patch"
 check_hash aed2e6cd0c594647d27c951936236740d6fd19ccd2e49eb6a647b0650d905c4b "$overlay/interpreter-lake-manifest.json"
 check_hash 722547c0b87f68efb046c33224d4429ae7bd02df774b456709f91120505defe2 "$overlay/lake-manifest.json"
