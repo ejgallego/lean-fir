@@ -2,6 +2,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
+bash "$root/tooling/talos-434/test-setup.sh"
 bash "$root/tooling/talos-434/setup.sh"
 mkdir -p "$root/.deps/tmp"
 export TMPDIR="$root/.deps/tmp"
@@ -13,3 +14,8 @@ python3 "$root/scripts/validate_trusted_assumptions.py" \
   --lean-project "$root/.deps/talos-434/project"
 lake -d "$root/.deps/talos-434/project" build FirTalos.ConcreteResidentFloat
 lake -d "$root/.deps/talos-434/project" build FirTalos
+source "$root/tooling/talos-434/identity-checks.sh"
+check_revision 0e05edbcfbb105b33e90c60b4f50e2cf193d9254 \
+  "$root/.deps/talos-434/talos" Talos
+check_revision 85e3a25e006c35636f0e53b0e9296caca2685bc0 \
+  "$root/.deps/talos-434/talos/.lake/packages/mathlib" Mathlib

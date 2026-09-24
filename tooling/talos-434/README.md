@@ -21,19 +21,29 @@ validator remains the Lean 4.33 audit. All mutable source and Lake state stays u
 manifest remains available for 4.33 compatibility work; the migration
 candidate's standard Talos targets select the authenticated 4.34 overlay.
 
+`setup.sh` mirrors the current complete `integration/talos/FirTalos` tree into
+the isolated project, deleting files removed upstream. It compares the source
+inventory and file hashes before and after copying and checks the copied tree
+before applying the reviewed Float normalization. Proof-only edits therefore
+reach the overlay gate without changing a fixed whole-tree digest. The Float
+file remains restricted to its exact reviewed original or normalized hash.
+`test-setup.sh` covers changed and deleted proof files, copy corruption,
+source mutation during copying, and changed pinned identities.
+
 The immutable inputs are Talos
 `0e05edbcfbb105b33e90c60b4f50e2cf193d9254`, mathlib
 `85e3a25e006c35636f0e53b0e9296caca2685bc0`, and Lean
 `4.34.0-rc2` (`6a10ac8c22beadecabdbb0919c2b50214762f91d`). The
 tracked manifests and patches have exact SHA-256 checks in `setup.sh`.
 `talos.patch` changes only the interpreter's toolchain and mathlib release;
-`float-normalization.patch` is retained as the independently reviewed source
-repair and is applied only when the copied source does not already contain the
-exact `dsimp only at h4 h5 h6 h7` line. The migration branch currently carries
-that repair in its tracked source, so setup verifies the newer full Talos source
-tree directly and does not duplicate the patch. It fails if a later FIR/W6 edit
-changes that reviewed source identity; update the overlay explicitly after a
-new proof checkpoint is integrated.
+`float-normalization.patch` applies W6's independently reviewed one-line
+`dsimp only at h4 h5 h6 h7` when the source is still at the original reviewed
+hash. It accepts the exact normalized hash when that line has already landed.
+The complete `FirTalos` proof tree is mirrored from the current checkout with
+before/after and copied-tree hash checks, so reviewed proof additions and
+deletions reach the isolated RC2 gate without changing a fixed whole-tree
+digest. The Float source and umbrella entry point remain individually pinned;
+other proof-tree edits must be reviewed through the normal W6 handoff.
 
 This is audited compatibility evidence, not a kernel proof of the universal
 bridge proposition. It is the migration candidate's official Talos gate for

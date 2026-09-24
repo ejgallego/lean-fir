@@ -34,6 +34,7 @@ unit-check: no-skips
 			tooling/profile/node-profile-unit.test.mjs \
 			tooling/profile/profile-contract-unit.test.mjs \
 			tooling/profile/profile-aggregate-unit.test.mjs
+	bash "$(TOOLING_DIR)/talos-434/test-setup.sh"
 
 binaryen-check:
 	@for tool in wasm-as wasm-opt; do \

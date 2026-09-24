@@ -8,32 +8,20 @@ talos="$scratch/talos"
 project="$scratch/project"
 talos_rev=0e05edbcfbb105b33e90c60b4f50e2cf193d9254
 mathlib_rev=85e3a25e006c35636f0e53b0e9296caca2685bc0
-
-check_hash() {
-  local actual
-  actual="$(sha256sum "$2")"
-  actual="${actual%% *}"
-  if [[ "$actual" != "$1" ]]; then
-    echo "overlay identity mismatch: $2 ($actual, expected $1)" >&2
-    exit 1
-  fi
-}
-
-hash_lean_tree() (
-  cd "$1"
-  find . -type f -name '*.lean' -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1
-)
+source "$overlay/identity-checks.sh"
 
 check_hash 6ed9d6ea8db9a539a8278994c026c995a42534b5a3f2ec53faa41bebe4b482eb "$overlay/talos.patch"
 check_hash b45cdb52a2573023f0b3ce8e8e2bf15c799993ee91fb511dc65cf884ef647f6f "$overlay/float-normalization.patch"
 check_hash aed2e6cd0c594647d27c951936236740d6fd19ccd2e49eb6a647b0650d905c4b "$overlay/interpreter-lake-manifest.json"
 check_hash 722547c0b87f68efb046c33224d4429ae7bd02df774b456709f91120505defe2 "$overlay/lake-manifest.json"
-check_hash f140b3a3e32620c8bc6d581bd649aac11bafb6f210d48b070b43bfe9c93de6cd "$root/integration/talos/FirTalos/ConcreteResidentFloat.lean"
+float_source="$root/integration/talos/FirTalos/ConcreteResidentFloat.lean"
+float_hash="$(sha256sum "$float_source" | cut -d' ' -f1)"
+case "$float_hash" in
+  a9413e752e6d64339fcc713a312a0e7d25ff5f26ce361a0f7a7e0af2a76b9a74|\
+  f140b3a3e32620c8bc6d581bd649aac11bafb6f210d48b070b43bfe9c93de6cd) ;;
+  *) echo "unreviewed ConcreteResidentFloat source: $float_hash" >&2; exit 1 ;;
+esac
 check_hash f367a0809cd57630f9f907da84ba4bc91661c22b52f401f03b7922e08185c454 "$root/integration/talos/FirTalos.lean"
-if [[ "$(hash_lean_tree "$root/integration/talos/FirTalos")" != e73b0c60c0bb1264504bcb47cebd4bd673486eee45eb3e70d7043a430d0e078f ]]; then
-  echo "FIR Talos source tree differs from the reviewed overlay base" >&2
-  exit 1
-fi
 
 if [[ ! -e "$talos/.git" ]]; then
   mkdir -p "$scratch"
@@ -41,10 +29,7 @@ if [[ ! -e "$talos/.git" ]]; then
   git -C "$talos" fetch origin "$talos_rev"
   git -C "$talos" checkout --detach "$talos_rev"
 fi
-if [[ "$(git -C "$talos" rev-parse HEAD)" != "$talos_rev" ]]; then
-  echo "Talos checkout is not pinned at $talos_rev" >&2
-  exit 1
-fi
+check_revision "$talos_rev" "$talos" Talos
 
 tc="$talos/interpreter/lean-toolchain"
 lakefile="$talos/interpreter/lakefile.toml"
@@ -64,26 +49,18 @@ while IFS= read -r -d '' changed; do
 done < <(git -C "$talos" diff --name-only -z)
 
 mkdir -p "$project"
-cp -a "$root/integration/talos/FirTalos" "$root/integration/talos/FirTalos.lean" "$project/"
+bash "$overlay/source-mirror.sh" copy \
+  "$root/integration/talos/FirTalos" "$project/FirTalos"
+cp "$root/integration/talos/FirTalos.lean" "$project/FirTalos.lean"
+check_hash f367a0809cd57630f9f907da84ba4bc91661c22b52f401f03b7922e08185c454 "$project/FirTalos.lean"
 cp "$overlay/lakefile.toml" "$overlay/lean-toolchain" "$overlay/lake-manifest.json" "$project/"
-if ! grep -Fqx '  dsimp only at h4 h5 h6 h7' \
-    "$project/FirTalos/ConcreteResidentFloat.lean"; then
+if [[ "$float_hash" == a9413e752e6d64339fcc713a312a0e7d25ff5f26ce361a0f7a7e0af2a76b9a74 ]]; then
   patch --batch -d "$project" -p1 -i "$overlay/float-normalization.patch"
 fi
 check_hash f140b3a3e32620c8bc6d581bd649aac11bafb6f210d48b070b43bfe9c93de6cd "$project/FirTalos/ConcreteResidentFloat.lean"
-if [[ "$(hash_lean_tree "$project/FirTalos")" != e73b0c60c0bb1264504bcb47cebd4bd673486eee45eb3e70d7043a430d0e078f ]]; then
-  echo "FIR Talos overlay source tree differs from the reviewed result" >&2
-  exit 1
-fi
 
 if [[ -d "$talos/.lake/packages/mathlib/.git" ]]; then
-  if [[ "$(git -C "$talos/.lake/packages/mathlib" rev-parse HEAD)" != "$mathlib_rev" ]]; then
-    echo "Mathlib checkout is not pinned at $mathlib_rev" >&2
-    exit 1
-  fi
+  check_revision "$mathlib_rev" "$talos/.lake/packages/mathlib" Mathlib
 fi
-if [[ "$(tr -d '\r\n' < "$project/lean-toolchain")" != leanprover/lean4:v4.34.0-rc2 ]]; then
-  echo "overlay toolchain mismatch" >&2
-  exit 1
-fi
+check_toolchain leanprover/lean4:v4.34.0-rc2 "$project/lean-toolchain"
 echo "Talos 4.34 overlay ready: Talos $talos_rev, mathlib $mathlib_rev"
