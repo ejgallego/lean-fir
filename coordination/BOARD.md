@@ -21,7 +21,10 @@ hashes below describe past acceptance, not a live registry or storage obligation
 W6's accumulated `_build` validation trees have been retired; their old receipts
 cannot be replayed after deletion. Source checkpoints, packages and lightweight
 logs remain. Fresh `make check` and Talos checks retain their existing gates;
-proof work remains parked until explicitly resumed. See `docs/validation.md`.
+W6 proof work was explicitly resumed by the maintainer on 2026-09-22; the
+current retained-initializer theorem still waits for W7's checked RC2 capture
+reification. Other parked proof work requires an explicit resume. See
+`docs/validation.md`.
 
 `fir/root` (the meta lane) is the maintainer-appointed standing integration
 owner from 2026-09-09 until explicitly reassigned. Root owns serial green
@@ -7324,6 +7327,20 @@ This section is authoritative for the current integration boundary; older
 candidate hashes in the lane and contract tables remain historical provenance
 until their stacks land and must not be used as current feature-branch
 identities.
+
+- `W6-PROOF-STACK-20260925` is linked/accepted at exact local main
+  `57eb8dfc2eccd086234f0413cb92ea0ee483d4ff`. Root replayed the six-commit W6
+  checkpoint `f5bcf3fd` over the separately landed autonomy/frontier docs
+  `f06eba8f`. The stack lands the facts-aware retained-caller pop, derived
+  fresh-leaf publication safety, and allocation-local fresh-region closure
+  with shared-graph regressions. It changes W6 proofs and documentation only;
+  no shared semantic/runtime/ABI contract or new axiom was introduced. Root's
+  independent `git diff --check`, `make check`, `make talos-setup`, and
+  `make talos-check` pass; the forced trust audit covers 234 endpoints. W6
+  continues toward actual retained-initializer construction once W7 supplies
+  the checked structural reification and same-input RC2 capture requested by
+  `ROOT-W7-20260925-001`; historical 4.33 or synthetic inputs are not
+  substitutes. Local integration only; no push or package publication.
 
 - `ELIMDEAD-ARBITRARY-LIVE-PREFIX` is linked/accepted through functional head
   `7fc463c2` and clean tracked handoff `f8998324`, based exactly on prior
