@@ -35,7 +35,10 @@ tc="$talos/interpreter/lean-toolchain"
 lakefile="$talos/interpreter/lakefile.toml"
 if [[ "$(sha256sum "$tc" | cut -d' ' -f1)" == 302cd63c54178885b89e669f33b38f12f4dd7ae7e5cac537b3203e3768d8fb2b &&
       "$(sha256sum "$lakefile" | cut -d' ' -f1)" == 582d1f169327fcb399145dfe2becbb3a7c3353958648a79308339b9c8b028a8a ]]; then
-  git -C "$talos" apply "$overlay/talos.patch"
+  # This patch has no trailing context on the pinned TOML revision line.
+  # The exact pre/post file hashes below are the application boundary.
+  git -C "$talos" apply --check --unidiff-zero "$overlay/talos.patch"
+  git -C "$talos" apply --unidiff-zero "$overlay/talos.patch"
 fi
 check_hash 8190e75a201741065fe508b28955dd64dd72d090babe5f70ce6848879d68ae88 "$tc"
 check_hash d3a81bdfc0f2c4747aace9f0a4089186557686d88f49083af57d9c60d7a3a35a "$lakefile"

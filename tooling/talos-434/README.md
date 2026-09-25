@@ -36,6 +36,11 @@ The immutable inputs are Talos
 `4.34.0-rc2` (`6a10ac8c22beadecabdbb0919c2b50214762f91d`). The
 tracked manifests and patches have exact SHA-256 checks in `setup.sh`.
 `talos.patch` changes only the interpreter's toolchain and mathlib release;
+`setup.sh` applies it with `--unidiff-zero` only after authenticating the exact
+Talos commit and both source-file hashes, then checks both resulting hashes.
+The focused setup test applies the patch to a fixture pinned by the same
+before/after hashes. This is necessary because the revision hunk has no
+trailing context; the expected identity and output are still fail-closed.
 `float-normalization.patch` applies W6's independently reviewed one-line
 `dsimp only at h4 h5 h6 h7` when the source is still at the original reviewed
 hash. It accepts the exact normalized hash when that line has already landed.
