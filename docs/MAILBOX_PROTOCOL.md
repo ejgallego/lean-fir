@@ -11,6 +11,20 @@ Mailbox contents are local coordination state. They are ignored by Git and do
 not replace commits, tracked design documents, issues, or pull requests as the
 durable record of a decision.
 
+## When to use the mailbox
+
+Use a thread for a cross-owner dependency, shared-contract decision, overlapping
+edit, blocker, or independently consumable integration result. Routine work
+inside an assigned lane and milestone does not require a new request or root
+permission for each lemma. Consult the relevant thread at task entry, handoff,
+or when a dependency changes; do not poll between local steps.
+
+Batch updates around changed decisions or consumable results. Do not send
+acknowledgements of acknowledgements, unchanged-blocker reminders, or new
+threads just to confirm closure. Existing acknowledgement/closure transitions
+below still apply once per actual request. The protocol is a handoff mechanism,
+not a per-commit work scheduler.
+
 ## Canonical Mailbox
 
 Each project has one canonical mailbox:
@@ -398,10 +412,12 @@ git merge --ff-only <complete-head>
 ```
 
 No tag is required: the immutable message and complete object ID already pin
-the checkpoint. The producer may immediately continue from that object on a
-separately named successor branch and opens a new thread whose request names
-the still-open integration thread in `depends-on`. It does not append successor
-work to the pinned integration thread.
+the checkpoint. Unless explicitly paused, the producer may continue in-scope
+work on the same lane branch or a successor while preserving that object.
+A separate successor branch is useful for isolation, not mandatory. Open a new
+thread only when the successor is independently consumable or needs a new
+cross-owner decision; name the preceding thread in `depends-on` if still open.
+Do not silently replace a pinned checkpoint with later branch-tip work.
 
 If another landing makes the pinned object non-fast-forwardable, integration
 stops. The producer rebases the checkpoint and then its successor in order and
@@ -514,13 +530,14 @@ FIR deliberately has two coordination layers:
   acknowledgements, decisions, blockers, handoffs, completions, and closures
   use the immutable protocol in this document.
 - `coordination/lanes/*.md` and `coordination/BOARD.md` are tracked portable
-  milestone snapshots. Lane owners continue committing their single-writer
-  status file, and the integration owner continues synthesizing the board.
+  milestone snapshots, updated at meaningful milestone or scope changes.
+  Lane owners edit their own snapshot; root synthesizes the board.
 
-A v1 completion does not replace the standard FIR handoff fields or authorize
-integration. When a slice becomes ready, its owner records the durable status
-in the assigned tracked lane file; integration verifies that commit and its
-checks as before.
+A v1 completion carries the standard FIR handoff fields but does not authorize
+integration. A clean exact integration checkpoint suffices to identify the
+candidate; no duplicate status-only commit is required. Keep lasting results
+in the code, tests, and relevant design document, and refresh the lane snapshot
+at milestone boundaries. Historical snapshot hashes are not live task state.
 
 Directional files such as `root-to-wasm-gen.md` created before this protocol
 are legacy ledgers. Preserve active evidence under an ignored `legacy/`

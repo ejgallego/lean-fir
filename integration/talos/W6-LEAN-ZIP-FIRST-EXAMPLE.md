@@ -1,5 +1,32 @@
 # First W6 lean-zip example: captured stored-block compressor
 
+## Active checkpoint — 2026-09-25
+
+The immediate target is one real initializer's publication-to-return/pop proof,
+not yet the complete compressor theorem. The live obligation table and scope
+limits are in [the W6 frontier](PLAN.md#current-verification-frontier--2026-09-25).
+`ConcreteSupportedExport.terminatesWith_of_rootedExecEvaluates` already gives
+conditional executable successful-return preservation at the exact export ABI;
+compiler admission, the ByteArray boundary, resident linking and bytes remain
+separate work.
+
+Root selected a new retained-input nomination under official Lean 4.34.0-rc2
+in `ROOT-W6-20260925-002`, with W7 implementation assigned by
+`ROOT-W7-20260925-001`. Preserve the exact nominated source/dependency bytes,
+but report the new compiler and artifact identity; the old 4.33 retained olean
+is historical evidence, not an RC2 proof input. The required delivery is a
+kernel-checked `ImpureProgram`, exact lookup/body equations for
+`Zip.Spec.DeflateStoredCorrect.deflateStoredPure._closed_0`, and production
+lowering using that same definition. Until delivered, the actual-body consumer
+is blocked. No diagnostic JSON, hand-copied LCNF or substitute capture suffices.
+
+The first W6 consumer must derive publication/binding transport from the real
+body's operations and apply `advance_popRetainedCache`, eliminating supplied
+graph-separation/ordinary-binding obligations for this body. It must retain
+the independent execution, representation, witness/capacity and historical-frame
+premises. Reconstructing the stronger hereditary resource scope is a distinct
+next proof obligation; a restored cache/ABI frame alone does not establish it.
+
 ## Target and boundary
 
 Prove the actual final impure LCNF captured for

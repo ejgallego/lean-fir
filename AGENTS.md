@@ -2,254 +2,166 @@
 
 These rules apply to every agent and worktree in this repository.
 
-## Branch and worktree discipline
+## Autonomy and coordination
 
-- `main` is integration-only and must stay green. Feature agents must not edit
-  or commit directly on it.
-- Lean pass-proof work uses branch `proof/simpcase` in
-  `.worktrees/proof-simpcase`.
-- W6 concrete-runtime and Wasm-proof work uses branch `wasm/talos-runtime` in
-  `.worktrees/wasm-talos`.
-- W7 resident-runtime generation work uses branch `wasm/generation` in
-  `.worktrees/wasm-generation`.
-- Lean 4.34 compatibility/tooling work uses branch `tooling/lean-4.34` in
-  `.worktrees/tooling-lean-4.34`. Workers compiling a user project whose Lake
-  setup requires 4.34 start from this official lane (or a short-lived
-  track-owned child rebased on it), rather than an ad-hoc source view or local
-  toolchain override. The tooling lane owns its pin and compatibility surface;
-  feature ownership is unchanged and a migration to `main` remains root-owned.
-- Lean-zip performance work uses branch `perf/lean-zip-loop` in
-  `.worktrees/lean-zip-perf`. This is the existing W7-2 optimization role under
-  a narrower name; it is not a second general generation lane.
-- Before editing, run `git status --short --branch` and confirm that the branch
-  and worktree match the assigned track.
-- Keep `.lake`, `.beam`, and `.deps` local to each worktree. Do not symlink or
-  share mutable build state between agents.
-- Share only Lake's content-addressed artifact cache across FIR worktrees. For
-  direct `lake` or `lean-beam` commands, first run:
-  `export LAKE_CACHE_DIR="$(bash "$(git rev-parse --show-toplevel)/scripts/fir-lake-cache-path.sh")" LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true`.
-  The root `Makefile` initializes and exports the same FIR-local,
-  toolchain-scoped location automatically. Its boundary is mode 700. The
-  cache is ignored; never commit it or use it in place of a worktree's
-  `.lake` state.
-- Never use the system `/tmp` directory for FIR source views, build inputs,
-  compiler state, package publication, test fixtures, or scratch data. It is
-  periodically cleaned. Use an ignored, worktree-local `.deps` path instead;
-  when a tool requires a temporary directory, set `TMPDIR` to that persistent
-  worktree-local location explicitly.
+- Work autonomously within the agreed milestone and lane: implementation, proof
+  iteration, tests, local commits, and selection of the next lemma do not need
+  root permission. Explicit user stops and narrower file leases still apply.
+- Coordinate when another owner must act: shared contracts, overlapping edits,
+  dependencies/blockers, material scope decisions, or useful integration results.
+  Do not turn local proof steps into permission requests.
+- Use one thread per independently consumable result, not per lemma. Update it
+  when a decision, dependency, ownership, or checkpoint changes. Do not acknowledge
+  acknowledgements, repeat unchanged blockers, or open closure-confirmation threads.
+- Read relevant mailbox state at task entry, handoff, or a dependency decision;
+  do not poll between proof steps. Unrelated arrivals do not preempt the active
+  milestone unless the maintainer or a shared-contract change requires it.
+- Judge proof progress by premises discharged and executable consequences, not
+  lemma counts. If blocked, advance an independent obligation of the same theorem
+  or report the blocker; do not manufacture wrappers or status chores.
+
+## Worktrees and build state
+
+`main` is integration-only. Before editing, run `git status --short --branch`
+and confirm the assigned branch/worktree. Before claiming a lane, also read
+`scripts/mailbox list --for <lane-address>` and `git worktree list`.
+
+| Track | Branch | Worktree under `.worktrees/` |
+| --- | --- | --- |
+| Pass proofs | `proof/simpcase` | `proof-simpcase` |
+| W6 concrete runtime/proofs | `wasm/talos-runtime` | `wasm-talos` |
+| W7 generation | `wasm/generation` | `wasm-generation` |
+| Compatibility/tooling | `tooling/lean-4.34` | `tooling-lean-4.34` |
+| Lean-zip performance | `perf/lean-zip-loop` | `lean-zip-perf` |
+
+Toolchain migrations and main pins are root-owned. Compatibility experiments
+use the official tooling lane or a track-owned child, not ad-hoc source views
+or local pin overrides. After migration, ordinary feature work uses accepted
+main's toolchain; no detour through an obsolete compatibility branch is needed.
+
+Keep mutable `.lake`, `.beam`, and `.deps` local to each worktree, without
+symlinks/shared state. Share only the ignored, mode-700, toolchain-scoped Lake
+content-addressed cache. Before direct Lake or Lean Beam commands run:
+
+```sh
+export LAKE_CACHE_DIR="$(bash "$(git rev-parse --show-toplevel)/scripts/fir-lake-cache-path.sh")" LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true
+```
+
+The root Makefile exports this automatically. Never substitute the cache for
+local `.lake` state. Never use system `/tmp` for FIR inputs, scratch, fixtures,
+source views, compiler state or publications; use ignored worktree-local
+`.deps` and set `TMPDIR` there when needed.
 
 ## Ownership
 
-- The proof track owns `Fir/LeanIR/Passes/`, proof-specific examples, and
-  proof-specific bug cards.
-- The W6 track owns the concrete layout/runtime and its proofs:
-  `Fir/Wasm/Concrete/`, `Fir/Wasm/Concrete.lean`, proof-side lowering and
-  handles, `integration/talos/FirTalos/`, W6 roadmap/coverage documents, and
-  W6-specific bug cards.
-- The W7 track owns resident-runtime generation and consumption:
-  `Fir/Wasm/Emit/`, `Fir/Wasm/PrettyFormat.lean`,
-  `integration/talos/artifact/`, and W7-specific bug cards. W7 supplies
-  executable helpers and acceptance artifacts; it does not claim their W6
-  refinement theorems.
-- The lean-zip performance lane owns lean-zip-specific benchmarks, package
-  ratchets, and performance evidence under `integration/lean-zip/`. Manifests
-  remain integration-owned. The lane has no standing ownership of
-  `Fir/Wasm/Emit/`; before an experiment edits a W7-owned implementation file,
-  `wasm-gen` grants a narrow non-overlapping file lease in the local mailbox.
-- The integration owner controls `Fir/LeanIR/Phase.lean`,
-  `Fir/LeanIR/Runtime.lean`, `Fir/LeanIR/Interpreter.lean`,
-  `Fir/LeanIR/PassCorrectness.lean`, shared examples, root umbrella modules,
-  the `main` toolchain and migration decisions, manifests outside
-  `integration/talos`, root build files, the symbolic Wasm instruction/module
-  surface, and cross-lane coordination files.
-- Documentation within a track may be updated by that track. Changes to
-  `README.md`, `docs/pass-correctness-plan.md`, or this file are coordinated
-  through the integration owner.
-- `coordination/BOARD.md` is the portable coordination snapshot. Only the
-  integration owner edits it; lane owners send board updates in the format
-  documented there so the board does not become a shared-file race.
-- `coordination/lanes/` contains single-writer lane mailboxes. Each lane owner
-  edits only its assigned file; the integration owner may seed a mailbox when
-  a milestone starts but does not edit another lane's subsequent updates.
-  `coordination/lanes/README.md` defines the schema and branch-head resolution
-  rule. These mailboxes are the sole exception to integration ownership of
-  cross-lane coordination files.
+| Owner | Write scope |
+| --- | --- |
+| Pass-proof lane | `Fir/LeanIR/Passes/`, proof examples and bug cards |
+| W6 | `Fir/Wasm/Concrete/`, `Fir/Wasm/Concrete.lean`, proof-side lowering/handles, `integration/talos/FirTalos/`, W6 plans/coverage and bug cards |
+| W7 | `Fir/Wasm/Emit/`, `Fir/Wasm/PrettyFormat.lean`, `integration/talos/artifact/`, W7 bug cards |
+| Lean-zip performance | `integration/lean-zip/` benchmarks, package ratchets and performance evidence; not manifests or general generation |
+| Root | Shared semantics/ABI/instruction surface, `Fir/LeanIR/{Phase,Runtime,Interpreter,PassCorrectness}.lean`, shared examples, root umbrellas/build files, main pins/migrations, manifests outside `integration/talos`, cross-lane coordination |
 
-## Standing integration owner and milestone leases
+Track owners may update their own documentation. Coordinate changes to
+`README.md`, `docs/pass-correctness-plan.md`, `AGENTS.md`, or another owner's
+files through root. Only root edits `coordination/BOARD.md`; each lane alone
+edits its `coordination/lanes/*.md` snapshot after initial root seeding.
+See `coordination/lanes/README.md` for the schema.
 
-- `fir/root` is the standing integration owner, assigned by the maintainer to
-  the meta lane on 2026-09-09 until explicitly reassigned. It owns queue
-  triage, shared-contract decisions, independent validation, the coordination
-  board, and green local-main landings. Routine in-scope integration does not
-  require a new maintainer approval for each slice.
-- `fir/wasm-gen` owns generation and `fir/wasm-proof` owns W6 proofs. Neither
-  implicitly inherits root ownership when root is idle. Route `fir/root` to
-  the current root session through `scripts/mailbox route`; session UUIDs
-  remain local routing state, not portable policy.
-- Root keeps one serial integration candidate at a time, records exact
-  producer checkpoints and acceptance evidence, settles completed requests,
-  and gives each lane a bounded next action. A milestone ending releases its
-  file lease, not the standing root role. Remote publication and destructive
-  cleanup still need separate maintainer authorization.
-
-- `coordination/BOARD.md` names one integration owner and integration branch
-  for each active cross-lane milestone. The lease ends when that milestone is
-  linked/accepted, explicitly parked, or explicitly reassigned on the board.
-- The integration owner may also own a feature lane when that lane is waiting
-  at the shared-contract boundary. The lease does not grant permission to edit
-  files owned by another lane.
-- Lane owners publish status by committing their own tracked mailbox file on
-  their own branch. A clean canonical ignored-mailbox event may pin the exact
-  containing handoff commit as its complete `integrationCheckpoint`; the
-  integration owner consumes that object even if the producer continues on a
-  separately named successor branch. Without such an event, the owner resolves
-  the containing status commit from the named branch and the branch remains
-  frozen through landing. The tracked mailbox never attempts to contain the
-  hash of the commit that contains itself.
-- The integration owner synthesizes accepted mailbox updates into
-  `coordination/BOARD.md`, validates candidate stacks, and alone fast-forwards
-  `main`. No coordination daemon or generated state is required.
-
-## Local agent mailbox
-
-- New operational coordination uses the ignored canonical mailbox at
-  `.fir-mailbox/` in the primary FIR checkout. Linked worktrees do not
-  create separate mailboxes.
-- Follow `docs/MAILBOX_PROTOCOL.md`. A cross-project thread lives in the
-  mailbox of the project that owns the requested code change.
-- Deliver new messages with `scripts/mailbox deliver /path/to/message.md`;
-  do not write directly into the canonical mailbox. Delivery resolves the
-  stable recipient through the ignored local route registry and automatically
-  invokes `codex queue` by default; manage mappings with
-  `scripts/mailbox route`. `--no-notify` skips the doorbell when needed, and
-  route or queue failures warn without changing authoritative delivery.
-- Read `scripts/mailbox list --for <lane-address>` and `git worktree list`
-  before claiming a lane. A
-  valid acknowledgement records the owner, project-relative worktree, branch,
-  base commit, write scope, and publication boundary.
-- The local event log complements rather than replaces the tracked
-  `coordination/lanes/` handoff and `coordination/BOARD.md` snapshot. Mailbox
-  completion does not authorize integration, pushing, publication, worktree
-  removal, or branch deletion.
+`fir/root` is the standing integration owner (maintainer assignment,
+2026-09-09, until reassigned). It serializes integration and resolves shared
+dependencies; lane owners choose local implementation steps. W6/W7 do not
+inherit root ownership when it is idle. A milestone ends its file lease, not
+the standing role. Root may also own a feature lane, but cannot implicitly edit
+another lane's files. The board records cross-lane milestone ownership/leases.
 
 ## Shared semantic contracts
 
-The following are shared contracts: impure values and runtime state,
-observations, interpreter steps/evaluation, `ObservationRel`, common example
-programs, the semantic Wasm ABI, the symbolic Wasm instruction/module surface,
-the W6 concrete layout/runtime surface consumed by W7, and resident-helper
-signatures consumed by W6 proofs.
+Shared contracts include impure values/runtime, observations and
+`ObservationRel`, interpreter execution, common examples, semantic Wasm ABI,
+symbolic instructions/modules, W6 layout/runtime consumed by W7, and resident
+helper signatures consumed by W6.
 
-If a track needs to change a shared contract:
+Isolate a shared change in its own commit, describe affected consumers, ask
+root to record the contract queue, and land through root. Affected lanes rebase
+before dependent work. Never duplicate or weaken a definition to evade this.
 
-1. isolate the contract change in its own commit;
-2. add a contract-queue record to the coordination board;
-3. describe its effect on every consumer;
-4. land it on `main` through the integration owner;
-5. rebase the affected feature branches before dependent work continues.
+W6/W7 proceed concurrently: W7's `generation-ready` means standalone/linked
+engine checks passed with signature, contract base and artifact digest; W6's
+`contract-proved` means implementation-to-host refinement and its proof cone
+passed; integration's `linked/accepted` means linked/import-closure checks
+landed. These claims are distinct. Signature/contract changes return to the queue.
 
-Do not duplicate or locally weaken a shared semantic definition to avoid this
-coordination step.
+Lean-zip performance runs one measured experiment from an immutable accepted
+package. It needs a narrow W7 lease before editing W7 implementation. Use
+focused differentials and balanced benchmarks; discard losers or hand repeatable
+winners to W7 for complete gates. Experiments do not open W6 proof requests;
+only generation-accepted winners do. Root integrates.
 
-## W6/W7 pipeline
+## Mailbox and checkpoints
 
-W6 and W7 are expected to proceed concurrently. W7 may implement and test
-resident helper `N + 1` while W6 proves that stable helper `N` implements its
-concrete-runtime contract.
+Use the primary checkout's ignored `.fir-mailbox/`, never a worktree copy.
+`docs/MAILBOX_PROTOCOL.md` defines event syntax and transitions; consult it
+when sending or deciding a handoff, not before every edit.
 
-- W7 marks a helper `generation-ready` only after its standalone and linked
-  external-engine checks pass. The handoff records the helper signature,
-  contract-base commit, and artifact digest.
-- W6 marks it `contract-proved` only after the implementation-to-concrete-host
-  theorem and its dependency-cone checks pass.
-- Integration marks it `linked/accepted` when the linked artifact and relevant
-  import-closure checks land.
+- Draft under local `.deps/`, then `scripts/mailbox deliver <draft>`; never
+  write canonical events directly. Delivery normally sends the `codex queue`
+  doorbell. `scripts/mailbox route` maps stable roles to current sessions;
+  session UUIDs are local state. Notification failure does not undo delivery.
+- A claim records owner, worktree, branch, base, write scope and publication
+  boundary. Cross-project requests live with the project owning the code.
+- A clean exact `integrationCheckpoint` pins what root reviews/lands. Preserve
+  that object; unless explicitly paused, continue in-scope on the same lane
+  branch or a successor. Root never substitutes the latest branch tip.
+  Without an exact checkpoint, the legacy branch-tip handoff stays frozen.
+- Update tracked lane snapshots at meaningful milestone/scope changes,
+  preferably in a functional commit. No separate status-only commit is required
+  per lemma, acknowledgement, rebase or handoff. Historical snapshots are not
+  live backlogs; use Git ancestry and current mailbox decisions.
+- Mailbox completion does not itself authorize landing, pushing, PRs, deletion
+  or cleanup. Root owns green main landings; remote publication and destructive
+  cleanup need separate maintainer authorization.
 
-A helper being generation-ready is deliberately distinct from its refinement
-theorem. Contract or signature changes return the helper to the contract queue;
-they do not silently invalidate proof work.
+## Integration and validation
 
-## Lean-zip optimization loop
+Commit coherent local steps; group them into a useful tested integration
+result. Do not wait for a whole research milestone, or hand off every helper.
+Rebase after relevant shared-contract changes and when needed for fast-forward
+integration; batch unrelated main advances at the next integration boundary.
+Never merge main into a feature branch or rewrite another agent's branch.
+If main advances during review, preserve the reviewed object and arrange one
+refreshed checkpoint. Root alone lands with `git merge --ff-only`.
 
-The `lean-zip-perf` lane runs one experiment at a time from an immutable
-accepted package:
+Use Lean Beam for Lean iteration and focused checks for local steps.
+At an integration candidate, run:
 
-1. profile and select one measured hotspot;
-2. implement one bounded candidate;
-3. run focused lean-zip differentials and balanced benchmarks;
-4. discard a loser, or hand a repeatable performance or size winner to
-   `wasm-gen` for the complete W7 gate and integration.
+- `git diff --check` and `make check`;
+- for Wasm/Talos code or proofs, `make talos-check` after worktree-local
+  `make talos-setup`, plus the focused `lake build` proof cone;
+- for W7 artifacts, `bash integration/talos/artifact/check.sh`
+  (browser checks through `FIR_BROWSER`).
 
-`wasm-gen` remains the stable generation owner and accepts performance winners
-into the W7 generation lane; `fir/root` owns their integration onto main. Experimental
-candidates do not open W6 proof requests. Only a winner accepted for generation
-integration creates its corresponding W6 refinement request.
+Documentation-only successors need not rebuild unchanged Talos code: cite its
+last checked commit separately, never as fresh exact-head evidence. Full gates
+belong at consumable checkpoints, not after every lemma or status message.
+A suspected semantic discrepancy gets a `bugs/` card before a workaround.
 
-## Integration cadence
+Make/tooling commands are concise by default; `FIR_VERBOSE=1` gives live output.
+Failures retain logs under `.deps/tool-logs/`; one-offs may use
+`bash scripts/quiet-run.sh <label> -- <command...>`. GitHub Actions is the durable
+validation record; local receipts/build outputs are disposable working state,
+not an approval registry. `make check` refreshes scratch and cleans on success;
+use `FIR_KEEP_VALIDATION=1` only for a specific investigation. No handoff requires
+retaining historical binaries/traces.
 
-- Commit small, coherent, tested vertical slices.
-- Rebase on local `main` after every shared-contract change and before every
-  handoff. Do not merge `main` into a feature branch.
-- Integrate a useful green slice promptly; do not wait for an entire research
-  milestone.
-- Only the integration owner merges to `main`, using `git merge --ff-only`
-  after the feature branch has rebased and passed its checks.
-- After one feature branch lands, the other branch rebases on the new `main`
-  before its next integration.
-- Do not force-push or rewrite another agent's branch.
+## Handoff
 
-## Required checks
+A clean handoff reports outcome, exact base/head and contract base, lane,
+changed files/contracts, checks/results, bug cards (or none), and follow-ups.
+Keep it review-sized: one line per check family; link large evidence by path
+and digest. Do not repeat header facts, inventories, JSON or command transcripts.
+State the exact failing symbol/invariant inline when blocked.
 
-- Root `make` and `tooling/Makefile` entry points are concise by default:
-  successful command families emit one `PASS` line, while failed logs are kept
-  under ignored `.deps/tool-logs/` and their tail is printed. Set
-  `FIR_VERBOSE=1` for live compiler/test output. Direct one-off commands may
-  use `bash scripts/quiet-run.sh <label> -- <command...>` for the same policy.
-- GitHub Actions is the durable validation run record. Local validation trees
-  and receipts are disposable working state, not a permanent approval registry.
-  `make check` starts fresh and removes validation scratch on success; failed
-  scratch remains until the next run. Use `FIR_KEEP_VALIDATION=1` only for a
-  specific investigation. Exact checkpoint/check reporting still applies, but
-  acceptance does not require retaining captured binaries or historical traces.
-- Every slice: `git diff --check` and `make check`.
-- Wasm/Talos slices: also `make talos-check` after `make talos-setup` has been
-  run in that worktree.
-- W7 artifact slices also run `bash integration/talos/artifact/check.sh`.
-  Browser checks run through that script when `FIR_BROWSER` is set.
-- During the lean-zip optimization loop, a candidate may use focused
-  differentials and balanced benchmarks. A losing experiment may be discarded
-  without the full repository gates; a winner becomes a W7 artifact slice and
-  must pass every applicable check above before handoff.
-- Lean source edits use the repository's Lean Beam workflow during iteration;
-  `lake build` remains the final dependency-cone check.
-- A failing proof, invariant, or differential test that may expose a semantic
-  discrepancy gets a card under `bugs/` before a workaround is added.
-
-## Handoff format
-
-Every handoff to the integration owner reports:
-
-- base commit and head commit;
-- completed vertical slice;
-- files and shared contracts changed;
-- lane name and contract-base commit;
-- exact checks run and their results;
-- bug-card IDs, or `none`;
-- known follow-ups.
-
-Keep the handoff itself review-sized: a short outcome, one line per check
-family, and an exact path plus digest for large logs, inventories, or reports.
-Do not paste command transcripts, raw JSON, repeated artifact inventories, or
-facts already carried by the mailbox header. State the exact failing symbol or
-invariant inline when blocked; keep its full reproducer in the referenced
-evidence. `scripts/mailbox list` is the normal first read; open a full event or
-evidence report only when making the corresponding decision.
-
-The worktree must be clean at handoff.
-
-For a parallel milestone, commit the same information in the lane's assigned
-`coordination/lanes/*.md` mailbox. `functional-head` identifies the last code
-or proof commit. The integration owner obtains the containing status commit
-from an exact clean ignored-mailbox `integrationCheckpoint` when present, or
-from the frozen branch named in the tracked mailbox otherwise. A `ready`
-mailbox with `clean-at-update: false` is invalid.
+An exact clean mailbox checkpoint is sufficient; no duplicate status-only
+commit is required. Keep enduring design/results in the relevant tracked docs.
+A tracked `ready` snapshot with `clean-at-update: false` is invalid.

@@ -6,8 +6,11 @@ worktrees, tests, or the integration owner's board.
 
 They are tracked milestone snapshots, not the local operational mailbox. New
 requests and acknowledgements use the primary checkout's ignored
-`.fir-mailbox/` and `docs/MAILBOX_PROTOCOL.md`; a ready lane still commits
-the schema below here before integration.
+`.fir-mailbox/` and `docs/MAILBOX_PROTOCOL.md`. Update the schema below at
+meaningful milestone or scope changes, preferably with the functional change.
+An exact clean mailbox integration checkpoint does not require a duplicate
+status-only commit. Routine lemmas, acknowledgements and rebases do not require
+snapshot updates.
 
 ## Single-writer ownership
 
@@ -54,7 +57,7 @@ next:
 not the tracked mailbox commit itself. A canonical ignored mailbox event may
 pin the containing handoff commit as its complete, clean
 `integrationCheckpoint`; integration consumes that exact object even if the
-producer has moved to a separately named successor branch. When no such event
+producer has continued on the same lane branch or a successor. When no such event
 exists, integration falls back to `git rev-parse <branch>`, verifies that the
 worktree is clean, and requires the branch to remain frozen through landing.
 Both paths avoid an impossible self-referential hash in this tracked record.

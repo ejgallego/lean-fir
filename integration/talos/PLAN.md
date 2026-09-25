@@ -4,17 +4,16 @@ This document is the source of truth for the WebAssembly track on branch
 `wasm/talos-runtime`. Work takes place in `.worktrees/wasm-talos` under the
 parallel-development rules in `AGENTS.md`.
 
-The track owns `Fir/Wasm/`, `integration/talos/`, and Wasm-specific bug cards.
-Changes to the semantic Wasm ABI are shared-contract changes: isolate them in
-their own commit, describe their effect on both tracks, and coordinate landing
-them through the integration owner before dependent work continues.
+W6 owns the concrete runtime and proofs; W7 owns generation and artifacts.
+`AGENTS.md` specifies the exact file boundaries. Shared semantic/ABI changes
+land through root; ordinary W6 proof steps do not need per-lemma coordination.
 
 ## Goal
 
-Relate executions of final impure LCNF to executions of generated WebAssembly
-in Talos. The first target is a semantic backend with an abstract host runtime;
-a later refinement will replace that host model with a concrete linear-memory
-runtime.
+Preserve final-impure LCNF behavior, including represented successful results,
+in executable Wasm. The conditional concrete-backend theorem exists; closing
+compiler admission and composing resident linking/encoding remain distinct
+obligations. This is not a termination proof for arbitrary source programs.
 
 ```text
 final impure LCNF
@@ -25,7 +24,7 @@ FIR symbolic Wasm -- static checker --> Talos Wasm.Module
                                               |
                          +--------------------+--------------------+
                          |                                         |
-                  semantic host runtime                later linear-memory runtime
+                  semantic host runtime                   linear-memory runtime
                          |                                         |
                          +------------ refinement proof -----------+
 ```
@@ -36,15 +35,100 @@ This layering separates three claims:
 2. Runtime imports implement their abstract FIR operations.
 3. A concrete memory layout refines the abstract runtime.
 
-The first proof should establish claims 1 and 2 without prematurely fixing a
-production heap layout.
+The concrete layout and many runtime refinements already exist. The original
+implementation sequence below is history, not an instruction to restart it.
 
-## Current verification frontier — 2026-09-22
+## Current verification frontier — 2026-09-25
 
-This section through **Premises deliberately retained** is the authoritative
-W6 roadmap. It supersedes every later chronological use of "next",
-"remaining", "queue", or "immediate" in this file. The detailed implementation
-ledger remains below as historical evidence, not as a competing backlog.
+This section, ending at **Implementation history**, is the live W6 priority.
+Later chronological uses of "next", "remaining", "queue", or "immediate" are
+historical. Measure progress by removing premises at the actual consumer, not
+by adding lemmas or advancing mailbox state.
+
+### What is proved, and what is not
+
+The strongest successful-return endpoint is
+`ConcreteSupportedExport.terminatesWith_of_rootedExecEvaluates` (and its
+executable-source companion `terminatesWith_of_rootedRun`) in
+[`ConcreteRootedTerminal.lean`](FirTalos/ConcreteRootedTerminal.lean).
+Given successful source evaluation, compiler current-step admission,
+address-space safety, cache alignment, arity and the entry runtime relation,
+it derives actual Talos export termination with `RefinedReturnPost` at the
+export's exact selected result ABI. The initial rooted relation and target
+execution are derived, not supplied by the client. This is stronger than
+external-event trace preservation, but **compiler admission is still a premise**.
+It does not yet prove general fault correspondence, resident linking, encoded
+bytes, or the complete lean-zip application.
+
+| Obligation | Current evidence | Remaining work |
+| --- | --- | --- |
+| Exact-root executable return | `terminatesWith_of_rootedExecEvaluates` | Discharge compiler-owned admission; retain explicit execution/resource contracts |
+| Static supported-export assembly | `exists_ofSupportedPipeline` and pipeline alignment/uniqueness lemmas | Apply to the same checked captured program; closure-flow condition remains visible |
+| Saved-caller return/pop | `advance_popRetainedCache` restores structural stack and full cache/ABI frame | Stronger hereditary resource scope for subsequent nested calls |
+| Publication separation | `of_allocLeaf`, `HeapRegionClosed.reachable`, `freshRegion_setGlobal` | Derive prefix/graph premises from a real initializer body |
+| First actual lean-zip initializer | Candidate identified; checked RC2 reification/recapture assigned to W7 by root | Exact kernel program, declaration/body equations and same-input lowering |
+| Whole `compressStored` boundary | Roadmap and conditional backend infrastructure | ByteArray relation/operations, remaining admission, then linking/encoding/decoding |
+
+In particular, `ConcreteStructuredLazyMissBackendCoverageAt` still explicitly
+excludes `.object` and `.tobject` initializer results. The local publication
+lemmas do not remove that central simulator/admission restriction yet.
+
+The fresh-region proof checkpoint `f5bcf3fd3` is based on accepted main
+`97c257cc4`. Its proof sources are unchanged from reviewed `c67c6ed21`;
+`make check`, `make talos-setup`, `make talos-check` (234-endpoint trust audit)
+and `git diff --check` passed on the rebased checkpoint. This is producer-side
+validation, not a claim of main landing. Subsequent documentation edits do not
+constitute new proof progress or new exact-head Talos validation.
+
+### Next meaningful proof result
+
+Use the checked body of
+`Zip.Spec.DeflateStoredCorrect.deflateStoredPure._closed_0` to derive its
+caller-specific publication/binding transport, then feed it into the existing
+return/pop theorem. The diagnostic inventory mentions `Array.mkEmpty` and
+`Array.push`; these are leads, not a proof of the body or permission to copy it.
+
+Acceptance is one consumer theorem with **no caller-supplied publication
+disjointness, fresh-region closure or ordinary-binding transport for that body**.
+Derive these facts from the body's operations and existing entry refinement.
+Retain independent source/target execution, witness/capacity transport, physical
+result, caller frame and historical scope until separately discharged. Do not
+rename these outstanding obligations or claim full application correctness.
+
+Root has selected a new exact-source nomination under official Lean 4.34.0-rc2
+(`ROOT-W6-20260925-002`, assigned as `ROOT-W7-20260925-001`). W7 supplies generic
+checked quotation/readback and same-definition lowering. The retained 4.33
+artifact is historical only: no cross-version olean import, silent substitute
+capture or asserted cross-version AST identity. Until delivery, this consumer
+is genuinely blocked on its proof input; do not replace it with another
+synthetic-body theorem or repeat the completed capture-API investigation.
+
+The separate reusable proof obligation is hereditary suspended-caller resource
+transport: the accepted pop restores a frame, not the scope needed for future
+nested pushes. Work here must discharge that stronger consumer, not introduce
+a parallel stack wrapper which still demands the old all-location ordinaryness.
+It can proceed independently when not explicitly paused; it does not remove
+the actual-input dependency or authorize shared relation redesign.
+
+### Scope guardrails
+
+- Retained-token ordinaryness says a tracked cell, **if found**, is not
+  persistent; it alone proves neither existence/liveness, uniqueness, payload
+  preservation nor physical allocation.
+- Fresh-region closure is sufficient, not necessary. Do not reject legitimate
+  older persistent sharing to make this proof convenient.
+- The shared-string graph fixture proves reachability/separation, not full
+  reference-count accounting or compiled initializer execution.
+- Close PA3 by deriving admission from compiler facts. Neither this first
+  initializer nor a new client invariant substitutes for that general theorem.
+- Treat resident linking, bytes and application decoding as separate later
+  theorem layers. Keep the earlier-pass composition interface, but do not start
+  a new backward pass campaign to evade the active backend obligations.
+
+## Implementation history
+
+The following records earlier proof steps and the broader PA0–PA4 design.
+Use the current frontier above for the next action.
 
 The repository-wide theorem-contract and assumption-budget tables live in
 [`docs/pass-correctness-plan.md`](../../docs/pass-correctness-plan.md). The
