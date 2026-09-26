@@ -23,8 +23,9 @@ cannot be replayed after deletion. Source checkpoints, packages and lightweight
 logs remain. Fresh `make check` and Talos checks retain their existing gates;
 W6 proof work was explicitly resumed by the maintainer on 2026-09-22. The
 retained-initializer input prerequisite and first checked-body source proof are
-now integrated on RC2; production external refinement and return/pop remain
-open. Other parked proof work requires an explicit resume. See
+now integrated on RC2; the bounded caller return/pop consumer is also landed.
+Production external refinement, target callee execution, and hereditary stack
+closure remain open. Other parked proof work requires an explicit resume. See
 `docs/validation.md`.
 
 `fir/root` (the meta lane) is the maintainer-appointed standing integration
@@ -69,14 +70,19 @@ successor checkpoint. W6 independently rebuilt the exact lean-zip/zip-common
 source objects, and root repeated the retained-initializer gate: checked
 program readback in a fresh process, exact body lookup, direct Lean elaboration
 and axiom audits all pass. The initializer reaches its published singleton
-Array containing tagged zero in 12 source steps, and the companion derives
-saved-caller token preservation from existing facts/witness/live-heap inputs.
-The two Array external behaviors remain an explicit primitive contract with an
+Array containing tagged zero in 12 source steps; it then executes through
+destination binding in 13. The caller-return successor `e6063ec4` is landed as
+`1e8f1e15`: it derives ordinary-binding transport from saved facts and connects
+that source prefix to the existing two-step target return/pop consumer. The
+target must already be at its return boundary, with the callee frame, witness
+and capacity transports, caller scope, and suspended tail supplied. The two
+Array external behaviors remain an explicit primitive contract with an
 executable source-model witness; production external admission/refinement,
-generated Wasm, destination bind/return-pop, and hereditary suspended-stack
-closure remain open. Exact-head `make check`, `make talos-setup`, and
-`make talos-check` pass; the trust inventory has 257 endpoints. No new axiom or
-shared contract was introduced. This is source-level execution, not end-to-end
+target callee execution, generated Wasm, and hereditary suspended-stack
+closure remain open. Root reran the retained-input consumer, `make check`,
+`make talos-setup`, and `make talos-check` (258 endpoints); all pass. Seven
+existing boxing-policy native axioms remain on the source/pop endpoints; no
+new axiom or shared contract was introduced. This does not prove end-to-end
 Array helper or Wasm correctness.
 
 ## Integration queue settled (2026-09-09)
