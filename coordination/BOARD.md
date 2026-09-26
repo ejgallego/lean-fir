@@ -7337,11 +7337,11 @@ identities.
   with shared-graph regressions. It changes W6 proofs and documentation only;
   no shared semantic/runtime/ABI contract or new axiom was introduced. Root's
   independent `git diff --check`, `make check`, `make talos-setup`, and
-  `make talos-check` pass; the forced trust audit covers 234 endpoints. W6
-  continues toward actual retained-initializer construction once W7 supplies
-  the checked structural reification and same-input RC2 capture requested by
-  `ROOT-W7-20260925-001`; historical 4.33 or synthetic inputs are not
-  substitutes. Local integration only; no push or package publication.
+  `make talos-check` pass; the forced trust audit covers 234 endpoints. W7 has
+  claimed `ROOT-W7-20260925-001` and verified source hashes, but checked
+  program/body equations and same-input RC2 lowering remain pending; historical
+  4.33 or synthetic inputs are not substitutes. Local integration only; no
+  push or package publication.
 
 - `W6-ARRAY-PUBLICATION-REGION` is linked/accepted at exact main
   `4bfd51f9d27e426a851f86d262ac60711b83e948`, based directly on `6fe70322`.
@@ -7356,6 +7356,24 @@ identities.
   `make check`, `make talos-setup`, and `make talos-check` with the 247-endpoint
   audit. Actual initializer-body execution and general lazy-miss admission
   remain open behind W7's checked RC2 structural reification/capture task.
+
+- `W6-HISTORICAL-CALLER-PUBLICATION` is linked/accepted at exact main
+  `a39a9d9ac72d5550398f0166c9363c384c2e0ea4`. Producer checkpoint
+  `6e7111f7b816565a601efb0af3f407675ccb354d` was based on `4bfd51f9`; root's
+  refreshed copy on top of the intervening board-only commit `11a52198` has
+  the identical stable patch ID. Saved capacity facts, witness transport and
+  the active entry heap relation now derive historical-token bounds without
+  reconstructing the old caller's current state/capacity relation. The
+  unbound publication transport preserves the older caller environment; the
+  two-publication regression preserves a nonempty token map while showing
+  blanket ordinaryness is false for the same execution. Source-prefix
+  preservation remains explicit; recursive suspended-stack closure, actual
+  initializer execution and admission closure are not claimed. No shared
+  contract changed, and new endpoints use standard axioms only. Root's
+  independent focused publication build, `git diff --check`, `make check`,
+  `make talos-setup`, and `make talos-check` pass, with the forced 252-endpoint
+  audit. W7's checked RC2 program/body equations remain the next real-input
+  dependency.
 
 - `ELIMDEAD-ARBITRARY-LIVE-PREFIX` is linked/accepted through functional head
   `7fc463c2` and clean tracked handoff `f8998324`, based exactly on prior
