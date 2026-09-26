@@ -178,6 +178,11 @@ def scalarInstallationNativeDebt : Array String := #[
   "FirTalos.Concrete.ResidentScalarBox.UInt64ObjectInstallation.signature._native.native_decide.ax_1_3",
   "_private.Fir.Wasm.Concrete.Memory.0.Fir.Wasm.Concrete.LinearMemory.assembleByte32._native.bv_decide.ax_1_6"]
 
+/-- Measured on both the original raw Array push refinement and its
+region-preserving extension. The extension adds no native dependency. -/
+def arrayPushMemoryNativeDebt : Array String := #[
+  "_private.Fir.Wasm.Concrete.Memory.0.Fir.Wasm.Concrete.LinearMemory.assembleByte32._native.bv_decide.ax_1_6"]
+
 def literalExampleNativeDebt : Array String := #[
   "FirTalos.compareObservations_returned_empty_tagged_42._native.native_decide.ax_1_5",
   "FirTalos.Correctness.abiLiteralAdaptedModule_adapted._native.native_decide.ax_1_1",
@@ -292,6 +297,12 @@ def endpointInventory : Array (Lean.Name × Array String) := #[
   (`FirTalos.Concrete.ReuseCapacityStateRelated.freshRegionClosed,
     #["propext", "Quot.sound"]),
   (`FirTalos.Concrete.HeapRegionClosed.alloc, standardAxioms),
+  (`FirTalos.Concrete.HeapRegionClosed.setCell, standardAxioms),
+  (`FirTalos.Concrete.HeapRegionClosed.pushArray, standardAxioms),
+  (`Fir.Wasm.Concrete.LiveHeapRel.pushResidentArrayElementInPlaceRaw_refines,
+    standardAxioms ++ arrayPushMemoryNativeDebt),
+  (`FirTalos.Concrete.pushResidentArrayElementInPlaceRaw_refines_region,
+    standardAxioms ++ arrayPushMemoryNativeDebt),
   (`FirTalos.Concrete.HeapRegionClosed.reachable, #[]),
   (`FirTalos.Concrete.ReuseTokenPublicationDisjoint.of_freshRegion,
     #["propext", "Quot.sound"]),
@@ -299,6 +310,15 @@ def endpointInventory : Array (Lean.Name × Array String) := #[
     standardAxioms),
   (`FirTalos.Concrete.freshSharedGraph_publication, standardAxioms),
   (`FirTalos.Concrete.freshSharedGraph_reaches_leaf, standardAxioms),
+  (`FirTalos.Concrete.inPlaceArrayPush_publication, standardAxioms),
+  (`FirTalos.Concrete.inPlaceArrayPush_rejects_oldRetainedToken, standardAxioms),
+  (`FirTalos.Concrete.HeapRegionClosed.setCell_sameObject, standardAxioms),
+  (`FirTalos.Concrete.HeapRegionClosed.incLocation, standardAxioms),
+  (`FirTalos.Concrete.HeapRegionClosed.retainOwnedValue, standardAxioms),
+  (`FirTalos.Concrete.HeapRegionClosed.foldlM, #["propext"]),
+  (`FirTalos.Concrete.HeapRegionClosed.decLocationFuel, standardAxioms),
+  (`FirTalos.Concrete.HeapRegionClosed.copiedArrayPush, standardAxioms),
+  (`FirTalos.Concrete.copiedArrayPush_publication, standardAxioms),
   (`FirTalos.Concrete.SourceLazyLetResult.miss_ordinaryBindTransport_of_internalCompiler,
     standardAxioms),
   (`FirTalos.Concrete.SourceLazyLetResult.miss_ordinaryBindTransport_of_publicationInduction,

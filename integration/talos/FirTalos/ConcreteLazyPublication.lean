@@ -222,6 +222,95 @@ theorem HeapRegionClosed.alloc
   · simp [Fir.LeanIR.Impure.alloc, findCell?, atNew] at found
     exact closed _ _ _ above found member
 
+/-- A real cell replacement preserves the region when its new immediate
+owned edges stay inside the region. Updates below the cutoff impose no new
+edge obligation: their outgoing edges are outside this predicate's scope. -/
+theorem HeapRegionClosed.setCell
+    {cutoff location : Location} {before after : RuntimeState}
+    {current replacement : HeapCell}
+    (closed : HeapRegionClosed cutoff before.heap)
+    (found : findCell? before.heap location = some current)
+    (operation : setCell before location replacement = .ok after)
+    (fields : cutoff ≤ location → ∀ child,
+      Value.object (.heap child) ∈ replacement.object.ownedValues.toList →
+      cutoff ≤ child) :
+    HeapRegionClosed cutoff after.heap := by
+  obtain ⟨expected, expectedStep, targetAfter, frame, _, _, _, _, _⟩ :=
+    Fir.LeanIR.Impure.setCell_spec_of_find before location current replacement found
+  have same : expected = after := Except.ok.inj (expectedStep.symm.trans operation)
+  subst expected
+  intro parent cell child above cellFound member
+  by_cases atTarget : parent = location
+  · subst parent
+    rw [targetAfter] at cellFound
+    cases cellFound
+    exact fields above child member
+  · rw [frame parent atTarget] at cellFound
+    exact closed parent cell child above cellFound member
+
+/-- An in-place Array push needs a bound only for the added owned value;
+the existing elements' bounds follow from the pre-state region. This is the
+exact semantic mutation exposed by the concrete raw-push refinement. -/
+theorem HeapRegionClosed.pushArray
+    {cutoff location : Location} {before after : RuntimeState}
+    {cell : HeapCell} {elements : Array Value} {capacity : Nat} {value : Value}
+    (closed : HeapRegionClosed cutoff before.heap)
+    (found : findCell? before.heap location = some cell)
+    (objectEq : cell.object = .array elements capacity)
+    (operation : Fir.LeanIR.Impure.setCell before location
+      { cell with object := .array (elements.push value) capacity } = .ok after)
+    (added : cutoff ≤ location → ∀ child,
+      value = .object (.heap child) → cutoff ≤ child) :
+    HeapRegionClosed cutoff after.heap := by
+  apply closed.setCell found operation
+  intro above child member
+  simp only [HeapObject.ownedValues, Array.toList_push, List.mem_append,
+    List.mem_singleton] at member
+  rcases member with old | new
+  · apply closed location cell child above found
+    simpa [objectEq, HeapObject.ownedValues] using old
+  · exact added above child new.symm
+
+/-- The existing concrete in-place push also preserves a source allocation
+region and ordinary caller tokens. The source mutation equation is obtained
+from the concrete refinement, not supplied as a separate client certificate.
+As in the raw-push theorem, retain/transfer policy is a caller obligation;
+this is not a compiler admission or initializer-execution theorem. -/
+theorem pushResidentArrayElementInPlaceRaw_refines_region
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {cutoff location : Location} {address : Word32} {cell : HeapCell}
+    {elements : Array Value} {capacity : Nat}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .array elements capacity)
+    (descriptorFound : witness.descriptors.lookup? address = some (.array capacity))
+    (value : Value) (word : Word32) (spare : elements.size < capacity)
+    (valueRelated : ValueRel witness .tobject (.word32 word) value)
+    (closed : HeapRegionClosed cutoff runtime.heap)
+    (added : cutoff ≤ location → ∀ child,
+      value = .object (.heap child) → cutoff ≤ child) :
+    ∃ result nextRuntime,
+      pushResidentArrayElementInPlaceRaw state address word = .ok result ∧
+      Fir.LeanIR.Impure.setCell runtime location
+          { cell with object := .array (elements.push value) capacity } =
+        .ok nextRuntime ∧
+      LiveHeapRel result witness nextRuntime ∧
+      MappedHeaderCapacityTransport state result witness ∧
+      result.heapCursor = state.heapCursor ∧
+      HeapRegionClosed cutoff nextRuntime.heap ∧
+      OrdinaryPersistenceTransport runtime nextRuntime := by
+  obtain ⟨result, nextRuntime, operation, mutation, nextRelated, capacityFrame,
+      cursor⟩ :=
+    related.pushResidentArrayElementInPlaceRaw_refines mapped found live objectEq
+      descriptorFound value word spare valueRelated
+  exact ⟨result, nextRuntime, operation, mutation, nextRelated, capacityFrame,
+    cursor, closed.pushArray found objectEq mutation added,
+    setCell_ordinaryPersistenceTransport
+      (replacement := { cell with object := .array (elements.push value) capacity })
+      found rfl mutation⟩
+
 /-- All paths from region roots stay in the region, including shared graphs
 and cycles. There is no acyclicity or traversal-fuel premise. -/
 theorem HeapRegionClosed.reachable

@@ -27,6 +27,125 @@ the independent execution, representation, witness/capacity and historical-frame
 premises. Reconstructing the stronger hereditary resource scope is a distinct
 next proof obligation; a restored cache/ABI frame alone does not establish it.
 
+## Next proof plan: actual initializer to caller restoration
+
+### Deliverable and proposed theorem names
+
+One reviewable proof milestone, with two endpoints in a focused W6 module
+(proposed name `ConcreteStoredInitializer.lean`):
+
+1. `RetainedStoredInitializer.publication_preservesCaller`: derive
+   `ReuseTokenOrdinaryBindTransport` for execution of the exact selected body,
+   followed by `setGlobal` and destination binding.
+2. `RetainedStoredInitializer.return_pop_preservesCaller`: supply that derived
+   transport to `ConcreteStructuredBindFrameFocus.advance_popRetainedCache`.
+
+These are proposed names, not declarations already present. The second theorem
+must expose the existing source/target transition and restored caller-frame
+conclusions. It must not merely wrap the first theorem or claim to rebuild the
+stronger hereditary resource scope.
+
+The premise removed is the caller-supplied publication/binding transport for
+this actual initializer. The body proof must also derive any graph separation,
+fresh-region closure, root bound and caller-prefix preservation that it uses.
+It may not reintroduce those obligations through a body-specific certificate.
+
+### 0. Consume the checked program, not its diagnostic inventory
+
+W7's `ROOT-W7-20260925-001` supplies a new exact-source RC2 nomination, a
+kernel-referable program, exact declaration/body equations and production
+lowering of that same definition. The request is open/unclaimed as of this
+plan; root owns assignment and landing coordination.
+
+Inspect the delivered body before choosing primitive lemmas. Confirm its
+parameters, return kind, calls, control flow and owned-field values from the
+checked equations. The historical `Array.mkEmpty`/`Array.push` inventory is a
+lead only. If the exact nominated declaration is absent or changed, report
+the difference rather than choose a convenient replacement. Capture fidelity
+and changed toolchain identity remain disclosed boundaries.
+
+### 1. Prove the body's source-side frame property
+
+Work from the actual body execution and exact primitive semantics. For the
+suspended caller's fixed facts `F` and environment `E`, derive:
+
+```text
+entry representation + execution of the checked body under specified externals
+  -> preservation of Q(F,E) through the body
+  -> separation of retained caller tokens from the returned owned graph
+  -> preservation of Q(F minus destination, E[destination := result])
+     after publication and binding
+```
+
+Here `Q` is `ReuseTokenOrdinaryRel`: each tracked token cell, if found, is
+nonpersistent. This theorem is not a claim of token liveness, uniqueness,
+payload preservation or complete memory safety.
+
+The external environment must implement the exact primitive semantics used
+by the body. Successful execution under arbitrary externals is insufficient.
+Keep those semantic implementation contracts explicit; do not replace them
+with assumptions that already assert the desired frame property.
+
+Reuse `retainedToken_beforeNext`, `HeapRegionClosed.alloc`/`reachable` and
+`freshRegion_setGlobal` if the body genuinely builds a closed fresh graph.
+For Array operations, inspect both ownership and capacity conditions:
+in-place push needs edge preservation through mutation, while copied push
+needs allocation and ownership-transfer facts. Discharge unreachable branches
+from the actual body/state facts, not a fixture-specific premise.
+
+Add only primitive-local lemmas needed by this proof. Existing concrete
+`LiveHeapRel.pushResidentArrayElementInPlaceRaw_refines` and
+`LiveHeapRel.pushResidentArrayElementCopied_refines` are candidate building
+blocks, not evidence that source frame preservation or compiler admission for
+these calls is already proved. If the body legitimately shares older
+persistent objects, prove the required token separation directly; do not
+restrict admission or force it into the fresh-region sufficient condition.
+
+### 2. Apply the result at the real return/pop consumer
+
+Match the actual final runtime and result to the existing bind focus. Use
+the derived publication/binding transport as the `ordinaryTransport` argument
+of `advance_popRetainedCache`. Keep the original saved caller boundary and
+historical tail; do not select a new reflexive entry after execution.
+
+Retain the independent physical bind focus, callee cache/ABI frame,
+witness/capacity transport, caller scope and suspended-stack premises. Their
+classification is explicit: representation/execution interfaces still to be
+composed, not facts proved by graph separation. The result is one source step,
+two target steps, restored structural stack/current code and full caller
+cache/ABI frame. No whole-initializer target execution is newly established
+merely by applying this consumer.
+
+### 3. Acceptance and scope
+
+- Quantify over arbitrary caller facts/environments satisfying the existing
+  entry relation; do not assume an empty token map or a fixed runtime fixture.
+- The public body endpoint takes no supplied publication separation, region
+  closure, caller-prefix preservation or ordinary-binding transport.
+- Retain a nonempty-token positive application and the existing negative
+  older-token-alias regression. Add a primitive regression only when the
+  selected body exposes an uncovered allocation/mutation/ownership case.
+- Do not edit the compiler, runtime ABI, central simulation relation or
+  `ConcreteStructuredLazyMissBackendCoverageAt` to make this milestone pass.
+  A semantic mismatch becomes a bug card, not a weakened contract.
+- Use Lean Beam during iteration. At the complete checkpoint run the focused
+  module/dependency-cone build, compiled endpoint axiom audit, `make check`,
+  `make talos-check` with current setup, and `git diff --check`. No new axiom,
+  native-evaluation shortcut or placeholder is allowed in these proof endpoints.
+- Hand off the two connected endpoints as one useful result. Meta/root owns
+  timely integration, board updates and dependency settlement; helper lemmas
+  do not each require a new administrative thread.
+
+### Following milestone, not hidden in this one
+
+Replace the excessive all-location ordinaryness requirement in the reusable
+call-history invariant with preservation of actual suspended-caller obligations,
+then prove its push/pop closure. Only after that composition can the heap-valued
+lazy-miss restriction be removed soundly from the central simulation. Keep
+compiler-derived admission, ByteArray coverage and resident/byte correspondence
+as separately visible obligations. This bounded initializer theorem is not a
+substitute for PA3 or a proof of all of `compressStored`.
+
 ## Target and boundary
 
 Prove the actual final impure LCNF captured for
@@ -248,6 +367,26 @@ surface and its W7/package wiring; W6 does not duplicate it locally.
   string/constructor test supplies those bounds from actual field construction
   and reaches a genuine owned child. This still does not certify the retained
   Stored initializer bodies or add a new general source-machine invariant.
+  Region preservation now also covers actual `setCell` mutation and in-place
+  Array push. Existing element bounds follow from the pre-state; only a newly
+  inserted heap reference needs a region bound. The concrete raw-push
+  refinement supplies its semantic mutation equation and derives both region
+  preservation and ordinary-cell transport. A positive allocation/push/cache
+  publication regression has a nonempty caller-token map; inserting an older
+  retained token gives a negative regression. These are reusable primitive
+  laws, not execution of the nominated initializer or a proof of Array
+  copy-on-write/ownership transfer. The concrete extension inherits exactly
+  the original refinement's one native memory-decoding dependency; the source
+  laws and regressions use only the standard axioms.
+  `ConcreteArrayPublication` covers the source retain/allocate/release sequence
+  exposed by the copied-push refinement. Header-only retention and recursive
+  release preserve the region, including dead cells; copied element bounds
+  come from the pre-state Array. Its regression exercises capacity exhaustion,
+  retaining a string, killing the old Array and releasing the old ownership
+  edge before publishing the copy. This source composition uses only standard
+  axioms. Concrete allocation/resource premises, actual body execution and
+  compiler admission remain separate; no copied-helper execution is inferred
+  from this source lemma alone.
 - Apply the existing rooted finite-trace/terminal theorem only after its
   explicit compiler-current-step admission, address-space/resource safety,
   entry/runtime contracts and argument arity have been constructed for this

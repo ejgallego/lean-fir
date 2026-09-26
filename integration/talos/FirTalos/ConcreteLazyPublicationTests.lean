@@ -1,4 +1,4 @@
-import FirTalos.ConcreteLazyPublication
+import FirTalos.ConcreteArrayPublication
 import FirTalos.ConcreteStructuredSimulation
 
 namespace FirTalos.Concrete
@@ -484,5 +484,158 @@ theorem freshSharedGraph_publication
   exact ReuseTokenOrdinaryBindTransport.freshRegion_setGlobal related
     (.ofOrdinaryPersistence (leafTransport.trans graphTransport)) graphClosed
     (by simp [freshSharedAllocation, freshStringAllocation, alloc]) `sharedCache resultId
+
+private def freshArrayBefore (text : String) : RuntimeState :=
+  (alloc (freshStringAllocation text).1 (.array #[] 1) false).1
+
+private def freshArrayLocation : Location := publicationRuntime.nextLocation + 1
+
+private def freshArrayPush (text : String) (value : Value) : RuntimeState :=
+  { freshArrayBefore text with
+    heap := (freshArrayLocation, { object := .array #[value] 1 }) ::
+      (freshStringAllocation text).1.heap }
+
+private theorem freshArrayPush_operation (text : String) (value : Value) :
+    setCell (freshArrayBefore text) freshArrayLocation
+      { object := .array ((#[] : Array Value).push value) 1 } =
+        .ok (freshArrayPush text value) := by
+  rfl
+
+/-- Allocate one string and an empty Array, then transfer the new string into
+the Array through the exact semantic in-place push. The region and prefix
+premises of publication follow from these operations, with a nonempty caller
+token map. This is a primitive composition, not the captured initializer. -/
+theorem inPlaceArrayPush_publication
+    (text : String)
+    {function : Fir.Wasm.Function} {store : Wasm.Store Host}
+    {locals : Wasm.Locals} {witness : RefinementWitness}
+    (related : ReuseCapacityStateRelated retainedFacts function publicationRuntime
+      retainedEnv store locals witness) :
+    ReuseTokenOrdinaryBindTransport retainedFacts resultId publicationRuntime
+      ((freshArrayPush text (.object (freshStringAllocation text).2)).setGlobal
+        `arrayCache (.object (.heap freshArrayLocation)))
+      retainedEnv (.object (.heap freshArrayLocation)) := by
+  have leafClosed : HeapRegionClosed publicationRuntime.nextLocation
+      (freshStringAllocation text).1.heap :=
+    related.freshRegionClosed.alloc (object := .string text)
+      (persistent := false) rfl (by simp [HeapObject.ownedValues])
+  have arrayClosed : HeapRegionClosed publicationRuntime.nextLocation
+      (freshArrayBefore text).heap :=
+    leafClosed.alloc (object := .array #[] 1) (persistent := false) rfl
+      (by simp [HeapObject.ownedValues])
+  have found : findCell? (freshArrayBefore text).heap freshArrayLocation =
+      some { object := .array #[] 1 } := by rfl
+  have pushedClosed := arrayClosed.pushArray found rfl
+    (freshArrayPush_operation text (.object (freshStringAllocation text).2)) (by
+      intro _ child equality
+      have same : publicationRuntime.nextLocation = child := by
+        simpa [freshStringAllocation, alloc] using equality
+      exact same.le)
+  have leafTransport : OrdinaryPersistenceTransport publicationRuntime
+      (freshStringAllocation text).1 :=
+    alloc_ordinaryPersistenceTransport (object := .string text) rfl
+  have arrayTransport : OrdinaryPersistenceTransport
+      (freshStringAllocation text).1 (freshArrayBefore text) :=
+    alloc_ordinaryPersistenceTransport (object := .array #[] 1) rfl
+  have pushTransport := setCell_ordinaryPersistenceTransport
+    (replacement := { object := .array #[.object (freshStringAllocation text).2] 1 })
+    found rfl (freshArrayPush_operation text (.object (freshStringAllocation text).2))
+  exact ReuseTokenOrdinaryBindTransport.freshRegion_setGlobal related
+    (.ofOrdinaryPersistence ((leafTransport.trans arrayTransport).trans pushTransport))
+    pushedClosed (by decide) `arrayCache resultId
+
+/-- An actual in-place push can create the forbidden old-token alias.
+Publication then makes that token persistent, so the intended caller property
+is false. This is an inadmissible ownership example, not a compiler bug. -/
+theorem inPlaceArrayPush_rejects_oldRetainedToken (text : String) :
+    ¬ReuseTokenOrdinaryBindTransport retainedFacts resultId publicationRuntime
+      ((freshArrayPush text (.object (.heap retainedLocation))).setGlobal
+        `badArray (.object (.heap freshArrayLocation)))
+      retainedEnv (.object (.heap freshArrayLocation)) := by
+  intro transport
+  have ordinary := transport publication_initial_retainedToken_ordinary
+  have impossible := ordinary retainedToken 1 retainedLocation
+    { retainedCell with rc := 0, persistent := true }
+    (by simp [retainedFacts, resultId, retainedToken,
+      findReuseCapacityEvidence?, eraseReuseCapacityFact])
+    (by simp [Fir.LeanIR.Impure.bind, retainedEnv, resultId, retainedToken, lookup])
+    (by rfl)
+  cases impossible
+
+private def copiedArrayRetained (text : String) : RuntimeState := {
+  freshArrayPush text (.object (freshStringAllocation text).2) with
+  heap :=
+    (freshArrayLocation,
+      { object := .array #[.object (freshStringAllocation text).2] 1 }) ::
+    (publicationRuntime.nextLocation, { object := .string text, rc := 2 }) ::
+    publicationRuntime.heap }
+
+private def copiedArrayAfter (text : String) : RuntimeState := {
+  semanticArrayResult (copiedArrayRetained text)
+    #[.object (freshStringAllocation text).2, .object (.tagged 7)] 2 with
+  heap :=
+    ((copiedArrayRetained text).nextLocation,
+      semanticArrayCell #[.object (freshStringAllocation text).2, .object (.tagged 7)] 2) ::
+    (freshArrayLocation,
+      { object := .array #[.object (freshStringAllocation text).2] 1,
+        rc := 0, live := false }) ::
+    (publicationRuntime.nextLocation, { object := .string text }) ::
+    publicationRuntime.heap }
+
+/-- The capacity-exhausted copy branch retains its element, transfers a tagged
+argument, then kills the old single-owner Array and recursively decrements its
+string. The resulting publication still preserves a nonempty caller token map.
+All source primitive equations are reduced here, not supplied as assumptions. -/
+theorem copiedArrayPush_publication
+    (text : String)
+    {function : Fir.Wasm.Function} {store : Wasm.Store Host}
+    {locals : Wasm.Locals} {witness : RefinementWitness}
+    (related : ReuseCapacityStateRelated retainedFacts function publicationRuntime
+      retainedEnv store locals witness) :
+    ReuseTokenOrdinaryBindTransport retainedFacts resultId publicationRuntime
+      ((copiedArrayAfter text).setGlobal `copiedArrayCache
+        (.object (.heap (copiedArrayRetained text).nextLocation)))
+      retainedEnv (.object (.heap (copiedArrayRetained text).nextLocation)) := by
+  have leafClosed : HeapRegionClosed publicationRuntime.nextLocation
+      (freshStringAllocation text).1.heap :=
+    related.freshRegionClosed.alloc (object := .string text)
+      (persistent := false) rfl (by simp [HeapObject.ownedValues])
+  have arrayClosed : HeapRegionClosed publicationRuntime.nextLocation
+      (freshArrayBefore text).heap :=
+    leafClosed.alloc (object := .array #[] 1) (persistent := false) rfl
+      (by simp [HeapObject.ownedValues])
+  have found : findCell? (freshArrayBefore text).heap freshArrayLocation =
+      some { object := .array #[] 1 } := by rfl
+  have pushedClosed := arrayClosed.pushArray found rfl
+    (freshArrayPush_operation text (.object (freshStringAllocation text).2)) (by
+      intro _ child equality
+      have same : publicationRuntime.nextLocation = child := by
+        simpa [freshStringAllocation, alloc] using equality
+      exact same.le)
+  have retained : [Value.object (freshStringAllocation text).2].foldlM
+      (init := freshArrayPush text (.object (freshStringAllocation text).2))
+      retainOwnedValue = .ok (copiedArrayRetained text) := by rfl
+  have consumed : decValueOnce
+      (semanticArrayResult (copiedArrayRetained text)
+        #[.object (freshStringAllocation text).2, .object (.tagged 7)] 2)
+      (.object (.heap freshArrayLocation)) true = .ok (copiedArrayAfter text) := by rfl
+  obtain ⟨copyClosed, copyTransport⟩ := pushedClosed.copiedArrayPush
+    (location := freshArrayLocation) (cell := {
+      object := .array #[.object (freshStringAllocation text).2] 1 })
+    (by rfl) rfl (by decide) (by intro child impossible; cases impossible)
+    retained consumed
+  have leafTransport : OrdinaryPersistenceTransport publicationRuntime
+      (freshStringAllocation text).1 :=
+    alloc_ordinaryPersistenceTransport (object := .string text) rfl
+  have arrayTransport : OrdinaryPersistenceTransport
+      (freshStringAllocation text).1 (freshArrayBefore text) :=
+    alloc_ordinaryPersistenceTransport (object := .array #[] 1) rfl
+  have pushTransport := setCell_ordinaryPersistenceTransport
+    (replacement := { object := .array #[.object (freshStringAllocation text).2] 1 })
+    found rfl (freshArrayPush_operation text (.object (freshStringAllocation text).2))
+  exact ReuseTokenOrdinaryBindTransport.freshRegion_setGlobal related
+    (.ofOrdinaryPersistence
+      (((leafTransport.trans arrayTransport).trans pushTransport).trans copyTransport))
+    copyClosed (by change 2 ≤ 4; decide) `copiedArrayCache resultId
 
 end FirTalos.Concrete
