@@ -57,6 +57,14 @@ represented result and cache-slot facts remain explicit; no target prefix,
 seven-instruction publication path, global-index alignment or full post-cache
 stack relation is claimed by this endpoint.
 
+`executes_and_restoresCallerScope` strengthens that result by recovering the
+suspended caller's full entry-relative resource scope: represented facts,
+ordinary saved tokens, cache-table agreement, external-handler contracts,
+allocation headroom and closure ABI. It uses the same restoration theorem as
+the central validated non-heap dispatcher. Its pre-publication callee scope and
+represented result remain premises; it does not prove the target callee prefix,
+destination bind, full stack assembly or central heap-result admission.
+
 The two source external contracts are uniform primitive laws, not a
 per-program invariant. `FreshArrayExternalContract` specifies empty allocation
 and the fresh/non-full tagged-push branch. `freshArrayExternals_contract`
@@ -95,4 +103,5 @@ also in the ordinary Talos trust inventory.
 The concrete publication endpoint additionally inherits the existing
 `LinearMemory.assembleByte32` native bitvector axiom through recursive cache
 persistence. Its separate exact audit records that dependency; the source-only
-endpoints keep their narrower inventory. There are eleven consumer endpoints.
+endpoints keep their narrower inventory. The full-scope consumer inherits the
+same exact dependencies. There are twelve consumer endpoints.

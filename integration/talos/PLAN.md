@@ -68,7 +68,7 @@ bytes, or the complete lean-zip application.
 | Publication separation | Derived for the actual singleton-Array initializer, including historical caller facts | Production external refinement; broader producers |
 | First actual lean-zip initializer | Kernel-checked RC2 program; source execution and caller-binding proof | Production Array contracts and preceding target execution |
 | Entry-relative caller preservation | Central active/suspended scopes use `RetainedCodeEntryTransports`; return/pop composes to the original caller entry | Derive heap-publication transports at the lazy-miss consumer |
-| Fresh heap cache publication | `RetainedCodeEntryTransports.publishFreshCache` derives executable host publication and cumulative transports; `RetainedInitializer.executes_and_publishesCache` supplies the actual source boundary and graph shape | Wire construction provenance into central lazy-miss admission; target prefix and full cache/stack relation remain separate |
+| Fresh heap cache publication | `ConcreteStructuredResourceScope.publishFreshCache` restores the full caller scope; `RetainedInitializer.executes_and_restoresCallerScope` supplies the checked source publication and graph shape | Wire construction provenance into central lazy-miss admission; target prefix and complete destination-bind/stack assembly remain separate |
 | Whole `compressStored` boundary | Roadmap and conditional backend infrastructure | ByteArray relation/operations, remaining admission, then linking/encoding/decoding |
 
 In particular, `ConcreteStructuredLazyMissBackendCoverageAt` still explicitly
@@ -125,6 +125,19 @@ the checked singleton-Array shape; callers do not supply them. Its pre-cache
 concrete relation, represented result, cumulative transport and slot metadata
 remain premises. Central object/tobject exclusions remain in force until the
 dispatcher retains and consumes the required construction provenance.
+
+`ConcretePublicationScope` now factors full scope restoration across this
+publication boundary. `afterCachePublication` consumes cumulative transport at
+the initializer entry and reconstructs saved caller facts, cache-table agreement,
+external contracts, remaining allocation budget and closure ABI, composing back
+to the original caller entry. `publishFreshCache` derives that transport from
+fresh-region construction. The validated non-heap lazy-return dispatcher uses
+the same restoration theorem; its seven-step target path and admission policy
+are unchanged. `RetainedInitializer.executes_and_restoresCallerScope` composes
+the checked source publication with full scope restoration, without asking for
+graph closure, a disjointness certificate, or blanket ordinaryness. It still
+assumes the related pre-publication callee scope and represented result; it does
+not derive the target prefix or close the suspended stack/destination bind.
 
 The fresh-region proof checkpoint `f5bcf3fd3` is based on accepted main
 `97c257cc4`. Its proof sources are unchanged from reviewed `c67c6ed21`;

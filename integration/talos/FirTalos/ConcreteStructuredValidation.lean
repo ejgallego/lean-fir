@@ -1,4 +1,4 @@
-import FirTalos.ConcreteStructuredSimulation
+import FirTalos.ConcretePublicationScope
 
 /-!
 # Residual source validation for the structured W6 simulation
@@ -6767,19 +6767,6 @@ theorem ConcreteStructuredValidatedReturnedOutcome.advance_lazyCacheWithSpine_of
             callerSpec.hostsSatisfy importInBounds contractFound
             parameterCount resultCount operationEq valueAfterCache valueStoreEq
             flagAfterValue (by omega)
-      have callerStateAtCurrent :
-          StateRelated callerFunction sourceRuntime callerEnv targetStore
-            callerLocals witness :=
-        currentScope.transports.savedStateRelated callerScope.stateRelated
-          currentScope.stateRelated
-      have nextStateRelated :
-          StateRelated callerFunction nextRuntime callerEnv nextStore
-            callerLocals witness := by
-        refine ⟨?_, ?_, callerStateAtCurrent.2.2⟩
-        · simpa [nextRuntime, nextStore, valueStore, afterCache,
-            writeWasmGlobal] using runtimeAfterRelated
-        · simp [nextStore, valueStore, afterCache, writeWasmGlobal,
-            replaceRuntime, clearFailure]
       have nonHeap : IsNonHeapReference sourceValue :=
         valueRelated.isNonHeapReference_of_kind notObject notTObject
       have publicationOrdinary :
@@ -6797,30 +6784,6 @@ theorem ConcreteStructuredValidatedReturnedOutcome.advance_lazyCacheWithSpine_of
           cacheSetStep_preserves_mappedHeaderCapacity_of_related
             currentScope.stateRelated.1 valueRelated cacheFound cacheKindEq
             cacheDescriptorsEq operationEq
-      have nextReuseRelated :
-          ReuseCapacityStateRelated callerFacts callerFunction nextRuntime
-            callerEnv nextStore callerLocals witness := by
-        have callerAtCurrent :
-            ReuseCapacityStateRelated callerFacts callerFunction sourceRuntime
-              callerEnv targetStore callerLocals witness :=
-          callerScope.1.1.1.1.1.1.transport callerStateAtCurrent
-            currentScope.transports.witness currentScope.transports.capacity
-        exact callerAtCurrent.transport nextStateRelated
-          (WitnessTransport.refl witness) publicationCapacity
-      have nextOrdinary :
-          ReuseTokenOrdinaryRel callerFacts nextRuntime callerEnv :=
-        (currentScope.transports.retained callerScope.1.1.stateRelated.2
-          (WitnessTransport.refl activeEntryWitness)
-          callerScope.1.1.1.1.1.2.1).transport publicationOrdinary
-      have nextAligned :
-          ConcreteLocalFrameAligned callerFunction nextRuntime callerEnv
-            nextStore callerLocals witness := by
-        simpa [ConcreteLocalFrameAligned] using callerScope.frameAligned
-      have nextBudget :
-          nextStore.host.runtime.heap.AddressSpaceBudget remainingBytes := by
-        simpa [nextStore] using
-          cachePublication_preserves_addressSpaceBudget operationEq valueStoreEq
-            currentScope.1.1.1.1.1.2.2.2
       have publicationExternals :
           nextStore.host.externals = targetStore.host.externals := by
         simp [nextStore, valueStore, afterCache, writeWasmGlobal,
@@ -6834,53 +6797,6 @@ theorem ConcreteStructuredValidatedReturnedOutcome.advance_lazyCacheWithSpine_of
           nextStore.host.closureDispatch = targetStore.host.closureDispatch := by
         simp [nextStore, valueStore, afterCache, writeWasmGlobal,
           replaceRuntime, clearFailure]
-      have nextInteger :
-          nextStore.host.externals.IntegerResultRefines externals := by
-        rw [publicationExternals, currentScope.transports.externals]
-        exact callerScope.1.1.1.1.2.1
-      have nextNatural :
-          FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
-            nextStore.host.externals externals := by
-        rw [publicationExternals, currentScope.transports.externals]
-        exact callerScope.1.1.1.1.2.2.1
-      have nextScalar :
-          FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
-            nextStore.host.externals externals := by
-        rw [publicationExternals, currentScope.transports.externals]
-        exact callerScope.1.1.1.1.2.2.2
-      have nextDescriptors :
-          nextStore.host.closureDescriptors = witness.closureDescriptors :=
-        publicationDescriptors.trans cacheDescriptorsEq
-      have nextCache :
-          LazyCacheGlobalsRel witness sourceModule nextRuntime nextStore := by
-        have afterHost := currentScope.1.1.2.1.afterCacheSet operationEq
-        simpa [nextRuntime, nextStore] using
-          afterHost.publish initializerFound signature rfl valueRelated
-            valueStoreEq
-      have nextClosureTables : ClosureTablesAgree nextStore witness := {
-        dispatch :=
-          currentScope.1.1.2.2.dispatch.trans publicationDispatch.symm
-        descriptors :=
-          publicationDescriptors.trans currentScope.1.1.2.2.descriptors }
-      have nextBase :
-          ConcreteReuseCapacityFrame callerFunction callerFacts remainingBytes
-            nextRuntime callerEnv nextStore callerLocals witness :=
-        ⟨nextReuseRelated, nextOrdinary, nextAligned, nextBudget⟩
-      have nextPure :
-          ConcreteReuseCapacityPureExternalFrame callerFunction externals
-            callerFacts remainingBytes nextRuntime callerEnv nextStore
-            callerLocals witness :=
-        ⟨nextBase, nextInteger, nextNatural, nextScalar⟩
-      have nextOwnership :
-          ConcreteReuseCapacityPureExternalOwnershipFrame callerFunction
-            externals callerFacts remainingBytes nextRuntime callerEnv nextStore
-            callerLocals witness :=
-        ⟨nextPure, nextDescriptors⟩
-      have nextFrame :
-          ConcreteReuseCapacityCacheFrame sourceModule callerFunction externals
-            callerFacts remainingBytes nextRuntime callerEnv nextStore
-            callerLocals witness :=
-        ⟨nextOwnership, nextCache, nextClosureTables⟩
       have publicationTables :
           ClosureTablesTransport targetStore nextStore witness witness := {
         hostDispatchPreserved := publicationDispatch
@@ -6893,20 +6809,14 @@ theorem ConcreteStructuredValidatedReturnedOutcome.advance_lazyCacheWithSpine_of
         currentScope.transports.step (WitnessTransport.refl witness)
           (ClosureAllocationsPersistent.refl witness) publicationCapacity
           publicationOrdinary publicationExternals publicationTables
-      have nextEntry :
-          RetainedCodeEntryTransports callerEntryRuntime nextRuntime
-            callerEntryStore nextStore callerEntryWitness witness :=
-        callerScope.transports.trans activeToNext
-      have nextAbi :
-          ClosureAllocationsAbiAligned callerContext.program witness := by
-        rw [← programEq, ← spec.contextProgram]
-        exact currentScope.2
       have nextScope :
           ConcreteStructuredResourceScope callerContext sourceModule
             callerFunction externals callerEntryRuntime callerEntryStore
             callerEntryWitness callerFacts remainingBytes nextRuntime callerEnv
             nextStore callerLocals witness :=
-        ⟨⟨nextFrame, nextEntry⟩, nextAbi⟩
+        callerScope.afterCachePublication currentScope
+          (spec.contextProgram.trans programEq) initializerFound signature
+          valueRelated operation runtimeAfterRelated activeToNext
       have bindFocus :
           ConcreteStructuredExternalBindFocus callerContext sourceModule
             callerFunction callerLabels nextRuntime callerEnv sourceValue result
@@ -6926,8 +6836,8 @@ theorem ConcreteStructuredValidatedReturnedOutcome.advance_lazyCacheWithSpine_of
         targetControlEq := by simp [targetAfter]
         targetFramesEq := by simp [targetAfter]
         continuationAdapted
-        stateRelated := nextStateRelated
-        frameAligned := nextAligned
+        stateRelated := nextScope.stateRelated
+        frameAligned := nextScope.frameAligned
         resultFound
         kindAt
         valueRelated }

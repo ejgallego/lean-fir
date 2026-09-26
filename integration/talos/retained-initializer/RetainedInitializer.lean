@@ -3,6 +3,7 @@ import FirTalos.ConcreteArrayExternal
 import FirTalos.ConcreteStructuredSimulation
 import FirTalos.ConcreteRetainedTransports
 import FirTalos.ConcreteRetainedPublication
+import FirTalos.ConcretePublicationScope
 import FirTalos.TrustAuditCore
 
 open Lean Lean.Compiler Fir.LeanIR.Impure Fir.Wasm.Concrete FirTalos.Concrete
@@ -211,6 +212,59 @@ theorem executes_and_publishesCache
   · exact runtimeRelated
   · exact transported
 
+/-- The checked initializer's publication step restores the caller's full
+entry-relative resource scope. The source run supplies graph construction;
+the scopes supply cache layout, host contracts and saved caller resources.
+The target callee prefix and destination bind remain separate obligations. -/
+theorem executes_and_restoresCallerScope
+    (externals : ExternalImpl) (contract : FreshArrayExternalContract externals)
+    (runtime : RuntimeState) (cold : findGlobal? runtime.globals name = none)
+    {callerContext calleeContext : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {callerEntryRuntime : RuntimeState} {callerEntryStore entryStore store : Wasm.Store Host}
+    {callerEntryWitness entryWitness witness : RefinementWitness}
+    {callerFacts calleeFacts : Fir.Wasm.ReuseCapacityFacts} {callerBytes remainingBytes : Nat}
+    {callerEnv calleeEnv : Env} {callerLocals calleeLocals : Wasm.Locals}
+    {kind : Fir.Wasm.AbiKind} {physical : Wasm.Value} {cacheIndex : Nat}
+    (callerScope : ConcreteStructuredResourceScope callerContext sourceModule
+      callerFunction externals callerEntryRuntime callerEntryStore callerEntryWitness
+      callerFacts callerBytes runtime callerEnv entryStore callerLocals entryWitness)
+    (currentScope : ConcreteStructuredResourceScope calleeContext sourceModule
+      calleeFunction externals runtime entryStore entryWitness calleeFacts remainingBytes
+      (publicationInput runtime) calleeEnv store calleeLocals witness)
+    (programEq : calleeContext.program = callerContext.program)
+    (initializerFound : sourceModule.initializers[cacheIndex]? = some name)
+    (signature : (sourceModule.callSignature? (.declaration name)).bind
+      (·.results[0]?) = some kind)
+    (valueRelated : PhysicalValueRel witness kind physical
+      (.object (.heap runtime.nextLocation))) :
+    ∃ before final runtimeAfter,
+      ExecSteps externals 11 (initialState RetainedRC2.program name #[] runtime) before ∧
+      before.runtime = publicationInput runtime ∧
+      executeStep externals before = .next final ∧
+      ExecSteps externals 12 (initialState RetainedRC2.program name #[] runtime) final ∧
+      final.runtime = resultRuntime runtime ∧
+      final.control = .yielded (.object (.heap runtime.nextLocation)) ∧
+      final.frames = [] ∧
+      cacheSetStep name kind store [physical] =
+        .Return [physical] (replaceRuntime store runtimeAfter) ∧
+      ConcreteStructuredResourceScope callerContext sourceModule callerFunction externals
+        callerEntryRuntime callerEntryStore callerEntryWitness callerFacts remainingBytes
+        final.runtime callerEnv
+        (writeWasmGlobal (writeWasmGlobal (replaceRuntime store runtimeAfter)
+          (2 * cacheIndex + 1) physical) (2 * cacheIndex) (.i32 1)) callerLocals witness := by
+  obtain ⟨slot, found, kindEq⟩ := currentScope.1.1.2.1.hostSlot initializerFound signature
+  obtain ⟨before, final, runtimeAfter, sourcePrefix, beforeEq, step, execution, finalEq,
+      control, frames, operation, related, history⟩ :=
+    executes_and_publishesCache externals contract runtime cold currentScope.transports
+      callerScope.stateRelated.1.heap currentScope.stateRelated.1 valueRelated found kindEq
+      currentScope.1.1.1.2 cacheIndex
+  refine ⟨before, final, runtimeAfter, sourcePrefix, beforeEq, step, execution, finalEq,
+    control, frames, operation, ?_⟩
+  rw [finalEq] at related history ⊢
+  exact callerScope.afterCachePublication currentScope programEq initializerFound signature
+    valueRelated operation related history
+
 /-- The caller state after binding the published result. The initializer's
 temporary environment and join environment are not retained. -/
 noncomputable def resumedCaller (runtime : RuntimeState) (env : Env) (result : FVarId)
@@ -387,6 +441,8 @@ run_cmd do
   -- Concrete cache publication additionally consumes the already audited
   -- byte-assembly theorem; source-only consumers above do not inherit it.
   FirTalos.TrustAudit.check `RetainedInitializer.executes_and_publishesCache
+    (expected ++ #["_private.Fir.Wasm.Concrete.Memory.0.Fir.Wasm.Concrete.LinearMemory.assembleByte32._native.bv_decide.ax_1_6"])
+  FirTalos.TrustAudit.check `RetainedInitializer.executes_and_restoresCallerScope
     (expected ++ #["_private.Fir.Wasm.Concrete.Memory.0.Fir.Wasm.Concrete.LinearMemory.assembleByte32._native.bv_decide.ax_1_6"])
   FirTalos.TrustAudit.check `RetainedInitializer.example_result_contents #["propext"]
   FirTalos.TrustAudit.check `RetainedInitializer.example_not_blanketOrdinary #["propext"]
