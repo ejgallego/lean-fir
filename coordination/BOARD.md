@@ -24,10 +24,11 @@ logs remain. Fresh `make check` and Talos checks retain their existing gates;
 W6 proof work was explicitly resumed by the maintainer on 2026-09-22. The
 retained-initializer input prerequisite and first checked-body source proof are
 now integrated on RC2; the bounded caller return/pop consumer is also landed.
-An entry-indexed retained-token proof seam is now available, but central
-active/suspended-scope migration is pending. Production external refinement,
-target callee execution, and hereditary stack closure remain open. Other
-parked proof work requires an explicit resume. See `docs/validation.md`.
+The entry-indexed retained-token transport is now used by the active and
+suspended structured resource scopes, composing through nested return/pop.
+Production external refinement, target callee execution, and full
+heap-publication/lazy-miss closure remain open. Other parked proof work
+requires an explicit resume. See `docs/validation.md`.
 
 `fir/root` (the meta lane) is the maintainer-appointed standing integration
 owner from 2026-09-09 until explicitly reassigned. Root owns serial green
@@ -86,21 +87,26 @@ existing boxing-policy native axioms remain on the source/pop endpoints; no
 new axiom or shared contract was introduced. This does not prove end-to-end
 Array helper or Wasm correctness.
 
-The entry-indexed transport successor `dc3926c0c` is landed as `7a6f004d4`.
-`ConcreteRetainedTransports` preserves every saved token fact represented at a
-fixed entry witness, composes that law across nested caller returns, and pairs
-it with the unchanged closure-table, witness, allocation, capacity, and external
-transports. The checked initializer supplies the new law for its actual
-publication; a negative theorem shows why the old all-location ordinaryness
-condition fails when the fresh result becomes persistent. This is a
-sufficient proof-local seam, not the weakest condition and not yet a migration
-of central active/suspended scope definitions. The negative and positive
-retained-consumer checks, `make check`, `make talos-setup`, and
-`make talos-check` (266 generic endpoints) pass. The retained consumer audits
-nine exact endpoints; existing seven boxing-policy native axioms remain.
-Next is migrating and closing the central scope push/pop consumers; only then
-can heap-result lazy-miss exclusions be reconsidered. No current exclusions
-or shared contracts changed.
+The entry-indexed transport checkpoint `dc3926c0c` landed as `7a6f004d4`;
+the central resource-stack migration is now integrated at `1291fecaf`.
+`ConcreteRetainedTransports` preserves saved token facts represented at a fixed
+entry witness alongside the unchanged closure-table, witness, allocation,
+capacity, and external transports. The active and suspended structured scopes
+now carry that package through call entry and nested return/pop. Legacy local
+operation proofs are lifted after their step, preserving—not resetting—the
+original caller entry. The checked initializer supplies the transport for its
+actual publication, and its negative theorem shows why blanket all-location
+ordinaryness fails when a fresh result becomes persistent.
+
+Root independently reran the retained-input capture/readback/direct consumer
+(nine exact retained endpoint audits), `make check`, `make talos-setup`,
+`make talos-check`, and a forced direct RC2 TrustAudit (271 endpoints); all
+pass. The five new audited entries use only `propext`/`Quot.sound`; the existing
+seven boxing-policy native axioms remain. No shared semantic/runtime contract
+changed. Next, derive cumulative transport at heap-result publication before
+lifting the object/tobject lazy-miss exclusions. Production external
+refinement, target callee execution, and full `compressStored` closure remain
+open; no current exclusions are lifted.
 
 ## Integration queue settled (2026-09-09)
 
