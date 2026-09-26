@@ -1,61 +1,44 @@
 # wasm-gen lane
 
-Continuous renderer investigation: `ROOT-W7-20260915-031`. Root accepted the
-provider-link checkpoint in `-035`; this successor supplies the two authorized
-existing-contract primitives. Routing update `-036` is acknowledged: subsequent
-VBP runs start from official `tooling/lean-4.34` or a W7-owned child, not another
-FIR source overlay. Root retains integration ownership; W6 remains untouched.
+Checked structural final-LCNF source boundary for `ROOT-W7-20260925-001`.
+Root remains integration owner; W6 owns the initializer proof downstream.
 
 ```text
 lane: wasm-gen
-owner: wasm-gen
-branch: wasm/generation
-worktree: .worktrees/wasm-generation
+owner: fir/wasm-gen
+branch: wasm/lcnf-reification-434
+worktree: .worktrees/wasm-lcnf-reification-434
 state: ready
-base: 4c0c8917a09f097dbe692fca50230dbe61a814cc
-functional-head: 422caea960af963026522b58e85c6e95f941dc32
-contract-base: ac9f728a609e82a9476027c0459dc73855c4e78a
+base: 97c257cc4e0ed815daedf47a5161bd0c958f63a0
+functional-head: 249f476d5c4b9f3bc08781a0fc9542d87f4f8b4d
+contract-base: 97c257cc4e0ed815daedf47a5161bd0c958f63a0
 clean-at-update: true
-slice: Arbitrary-limb natural literal allocation and ABI-exact UInt64.ofNatLT coverage.
-files: ResidentLiteral.lean; ResidentFixedWidth.lean; artifact primitive/metadata tests and gate; renderer diagnostic preparation/ratchet/README; bug card; lane status
-contracts: none; no W6, shared ABI/layout/effect, consumer source, host policy, toolchain pin or package-pointer changes
-checks: Beam implementation modules and installed-metadata test: zero errors. Focused production cone 20 jobs and direct metadata test pass, repeated after rebase. Installed 4.34 metadata test passes. make check: 730 cases/2172 comparisons, 235 bug cards. make talos-check: 3205 jobs and forced 3166-job trust audit. Artifact check.sh: pass. Standalone literals/fixed-width tests pass raw and Binaryen-optimized. Diff check passes. Rebase only adds AGENTS/board routing policy; implementation trees unchanged.
-bug-cards: FIR-BUG-wasm-none-arbitrary-natural-literal (fixed)
-boundary: single fresh renderer lowering reduces 17 imports to 15, with zero runtime operations; strict admission rejects String.Internal.atEnd. No full renderer execution or new two-run renderer acceptance claimed.
-handoff: Clean production primitive checkpoint for root review. Investigation remains in-progress; no W7 main landing, push or publication.
-next: Route the renderer fixture through official tooling/lean-4.34 at 348f42f832983949dd1514ed700820cf9c6c05c3, then address the three String declarations within root-authorized scope. JS stays audit-only pending an explicit host-boundary report.
+slice: Kernel-checked ImpureProgram definition, exact structural readback, initializer equations, and production lowering of that same checked program.
+files: Fir/Compiler/LCNF/{Structural,Reify,ReifyExamples}.lean; README and retained-example templates; this snapshot
+contracts: none; production capture-interface addition only, under root's narrow lease
+checks: On functional head 249f476d5, Beam and fresh batch codec/corpus checks pass; focused 7-job cone passes; retained source 65-job build and fresh-process import pass; git diff --check, make check, make talos-setup, make talos-check and bash integration/talos/artifact/check.sh pass. This snapshot is documentation-only. No fresh browser campaign claimed.
+bug-cards: none
+blockers: none for the nominated Stored entry. Original diagnostic's unrelated Level1/Entry imports hit RC2 kernel recursion in Zip.Native.DeflateParse:361,367; unchanged real Stored owning-module capture passes.
+handoff: Exact clean containing checkpoint is pinned by the canonical completion. Root reviews/lands; no main advance, push, package publication or W6 implementation by W7.
+next: W6 consumes RetainedRC2.program and initializer.findDecl/body; root serializes integration against newer main.
 ```
 
-## Representation and evidence
+The authenticated source commits remain lean-zip `273d0d6c` and zip-common
+`4425bab1`; no source file was ported or patched. Official Lean is 4.34.0-rc2,
+commit `6a10ac8c`. The historical 4.33 olean remains evidence only.
 
-Large natural literals use canonical `naturalLimbs`, checked limb count/extent,
-the big-natural marker, live/nonpersistent flags and reference count one.
-Immediate/promoted representations are unchanged; overlarge tagged results
-remain rejected. Tests cover the first one-limb big Nat, `2^64`, a four-limb
-mixed value, all payload/header words over poisoned memory, scratch restoration
-and independent ConcreteHost decoding.
+The new source artifact is under `.deps/retained-rc2/` in this worktree.
+`RetainedRC2.program` contains 21 declarations/14 externals. Its generated
+lookup equation inherits only standard `propext`; its concrete definition and
+initializer-body equation use no axioms. Fresh-process structural readback is
+checked without recapture. Production lowering uses that readback, not the
+transient capture or a printed/copied initializer.
 
-`UInt64.ofNatLT` retains its erased proof parameter and otherwise reuses the
-existing `UInt64.ofNat` body. Tests check the actual installed extern symbol,
-safe/pure UInt64 result, parameter types and borrowing under 4.33 and 4.34,
-plus execution through the full valid range including `2^64 - 1`.
+Ordinary/closed Wasm: 1,983 bytes each. Resident: 13,236 bytes, zero imports,
+zero remaining runtime operations; V8 validates its module-owned memory.
+All three byte sequences match the historical diagnostic, without claiming
+cross-version AST/proof identity or a new runtime-refinement theorem.
 
-The source closure remains 52 modules / 1535 bodies / 16 provider links.
-Base Wasm remains 839735 bytes, SHA-256
-`b154b7169d63c3aa02098b0f5936f0dee4d2fa5cc40a234ffcfaa8d602a0af9b`.
-The remaining native declarations are `String.Internal.atEnd`,
-`String.Internal.get`, and `String.Pos.Raw.atEnd`, alongside the unchanged 12
-VIR imports. No export provider remains unresolved.
-
-The completed single lowering is at `.deps/native-session-probe/runtime-frontier-lowering/`.
-It used the accepted compacted artifact whose SHA-256 remains
-`7d3124e258fe8e17964bb9a6d6c7b609bffddcf1669b12fdced077b0cb40d482`
-(preserved under `native-provider-product/repeat/`). The later fresh two-run
-capture was stopped after the official-lane directive; its `first/` is incomplete
-and is not evidence. No new work claims the official 4.34 baseline yet.
-
-Logs: `.deps/native-session-probe/control/runtime-frontier-*`. The first check
-attempt exposed bug-card formatting, then overlapping artifact/check scratch
-caused an operational file race. Formatting is fixed and the final gates ran
-successfully with artifact/check serialized. No semantic failure was hidden.
-Existing refinement theorems are not extended by this generation checkpoint.
+Reproduction, exact source/setup/output digests and limitations are in
+`Fir/Compiler/LCNF/README.md` (SHA-256
+`505d488f624a112805d04efba1cce95a05bc5af65c0eb4ccbc6a0be470f9ada1`).
