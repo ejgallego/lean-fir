@@ -91,4 +91,16 @@ theorem execSteps_of_run_outOfFuel
           rw [step] at execution
           exact .step step (ih execution)
 
+/-- Compose source prefixes while retaining the exact number of steps. -/
+theorem execSteps_trans_exact
+    {externals : ExternalImpl} {prefixCount suffixCount : Nat}
+    {first middle last : MachineState}
+    (steps : ExecSteps externals prefixCount first middle)
+    (suffix : ExecSteps externals suffixCount middle last) :
+    ExecSteps externals (prefixCount + suffixCount) first last := by
+  induction steps with
+  | refl => simpa using suffix
+  | step head tail ih => simpa [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm]
+      using ExecSteps.step head (ih suffix)
+
 end FirTalos.Concrete

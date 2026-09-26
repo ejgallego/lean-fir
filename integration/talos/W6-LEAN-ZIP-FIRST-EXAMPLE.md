@@ -26,12 +26,23 @@ The first actual-body connection is now implemented in
   for the two uniform primitive contracts used by the body. This is not a
   claim about the production external implementation or resident helpers.
 
+The caller-consumer connection is now implemented in the same proof cone:
+`reaches_published_withFrames` retains any suspended stack, `resumesCaller`
+derives the 13-step source prefix through destination binding, and
+`return_pop_preservesCaller` connects that prefix to the existing two-step
+target return/pop transition. The exact resumed source state has the caller's
+environment, joins and remaining frames; it is related to the resumed target
+with the full caller cache/ABI frame restored. The ordinary-binding premise is
+derived, not supplied.
+
 The independent external premise is `FreshArrayExternalContract`: exact empty
 allocation and unique, non-full, fresh-Array tagged push. Its production
-refinement, destination binding/return-pop composition, and hereditary
-suspended-stack restoration remain next obligations. In particular, the
-actual-body endpoint does not yet execute generated Wasm or remove central
-object/tobject lazy-miss exclusions.
+refinement, the target callee prefix, and hereditary suspended-stack restoration
+remain next obligations. The new connection retains the target return focus,
+callee frame, witness/capacity transports, original caller scope and historical
+tail. In particular, it executes only the target return/bind suffix, not the
+whole generated initializer, and does not remove central object/tobject
+lazy-miss exclusions.
 
 The [reproduction gate and trust boundary](retained-initializer/README.md)
 include exact compiled-dependency audits. The source theorem inherits seven
@@ -66,21 +77,20 @@ next proof obligation; a restored cache/ABI frame alone does not establish it.
 
 ## Next proof plan: actual initializer to caller restoration
 
-### Deliverable and proposed theorem names
+### Deliverable and theorem names
 
-One reviewable proof milestone, with two endpoints in a focused W6 module
-(proposed name `ConcreteStoredInitializer.lean`):
+The original two-part milestone is now realized in
+`retained-initializer/RetainedInitializer.lean`:
 
-1. `RetainedStoredInitializer.publication_preservesCaller`: derive
+1. `RetainedInitializer.resumesCaller`: derive
    `ReuseTokenOrdinaryBindTransport` for execution of the exact selected body,
    followed by `setGlobal` and destination binding.
-2. `RetainedStoredInitializer.return_pop_preservesCaller`: supply that derived
+2. `RetainedInitializer.return_pop_preservesCaller`: supply that derived
    transport to `ConcreteStructuredBindFrameFocus.advance_popRetainedCache`.
 
-These are proposed names, not declarations already present. The second theorem
-must expose the existing source/target transition and restored caller-frame
-conclusions. It must not merely wrap the first theorem or claim to rebuild the
-stronger hereditary resource scope.
+The second theorem exposes the checked body's source prefix, existing target
+return/pop transition and restored caller-frame conclusions. It does not claim
+to rebuild the stronger hereditary resource scope or execute the target callee.
 
 The premise removed is the caller-supplied publication/binding transport for
 this actual initializer. The body proof must also derive any graph separation,

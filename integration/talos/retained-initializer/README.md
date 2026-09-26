@@ -21,6 +21,20 @@ prefix preservation, body execution or target path. The caller environment
 stays fixed. This remains pointwise saved-caller preservation, not recursive
 suspended-stack reconstruction.
 
+`reaches_published_withFrames` generalizes the execution to an arbitrary
+suspended frame stack. `resumesCaller` derives the exact 13-step prefix through
+destination binding, restoring the caller's environment, joins and remaining
+frames, and discharges `ReuseTokenOrdinaryBindTransport` for that result.
+
+`return_pop_preservesCaller` applies this to the existing concrete return/pop
+consumer: the 13-step source prefix and the two target return/bind steps end
+in related states with the full caller cache/ABI frame restored. Its premises
+still include the target return focus, callee frame, witness/capacity transports,
+historical caller scope and suspended tail. It does not establish the target
+callee prefix or reconstruct the stronger hereditary resource stack.
+`resumedCaller` is a transparent proof-only state description, not an extra
+compiled executable or a replacement source program.
+
 The two source external contracts are uniform primitive laws, not a
 per-program invariant. `FreshArrayExternalContract` specifies empty allocation
 and the fresh/non-full tagged-push branch. `freshArrayExternals_contract`

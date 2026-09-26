@@ -1,5 +1,6 @@
 import RetainedDeclarations
 import FirTalos.ConcreteArrayExternal
+import FirTalos.ConcreteStructuredSimulation
 import FirTalos.TrustAuditCore
 
 open Lean Lean.Compiler Fir.LeanIR.Impure Fir.Wasm.Concrete FirTalos.Concrete
@@ -30,6 +31,35 @@ def resultRuntime (runtime : RuntimeState) : RuntimeState :=
 
 set_option maxRecDepth 8192 in
 set_option maxHeartbeats 2000000 in
+theorem reaches_published_withFrames
+    (externals : ExternalImpl) (contract : FreshArrayExternalContract externals)
+    (runtime : RuntimeState) (cold : findGlobal? runtime.globals name = none)
+    (frames : List Frame) :
+    ∃ final,
+      run 12 externals { initialState RetainedRC2.program name #[] runtime with frames } =
+        .outOfFuel final ∧
+      final.runtime = resultRuntime runtime ∧
+      final.control = .yielded (.object (.heap runtime.nextLocation)) ∧
+      final.frames = frames ∧ final.program = RetainedRC2.program := by
+  have boxed (state : RuntimeState) :
+      box state (.const `UInt8 []) (.scalar (.uint8 0)) =
+        .ok (state, .object (.tagged 0)) := by
+    exact semanticBox_tagged_eq state (.uint8 0) rfl (by decide)
+  have pushed := contract.pushFreshTagged
+    { runtime with trace := runtime.trace.push (mkEmptyEvent runtime) }
+    (pushDecl.params.map (·.type)) pushDecl.type 5 0 (by decide)
+  simp only [pushDecl, mkEmptyEvent, semanticArrayResult, arrayExternalResponse] at pushed
+  simp [initialState, run, executeStep, coreStep, invokeDecl,
+    RetainedRC2.initializer.findDecl, mkEmptyDecl.findDecl, pushDecl.findDecl,
+    RetainedRC2.initializer, mkEmptyDecl, pushDecl, bindParams, evalLetValue,
+    evalArgs, evalArg, lookupValue, lookup, Fir.LeanIR.Impure.bind, literal, pushBindFrame,
+    MachineState.withValue, resumeExternal, observe, cold, name,
+    Pure.pure, Bind.bind, Except.pure, Except.bind, maxTaggedPayload,
+    contract.mkEmpty, boxed, arrayExternalResponse, semanticArrayResult,
+    resultRuntime, mkEmptyEvent, pushEvent] at *
+  simp only [pushed]
+  exact ⟨_, rfl, rfl, rfl, rfl, rfl⟩
+
 theorem reaches_published
     (externals : ExternalImpl) (contract : FreshArrayExternalContract externals)
     (runtime : RuntimeState) (cold : findGlobal? runtime.globals name = none) :
@@ -39,24 +69,9 @@ theorem reaches_published
       final.runtime = resultRuntime runtime ∧
       final.control = .yielded (.object (.heap runtime.nextLocation)) ∧
       final.frames = [] := by
-  have boxed (state : RuntimeState) :
-      box state (.const `UInt8 []) (.scalar (.uint8 0)) =
-        .ok (state, .object (.tagged 0)) := by
-    exact semanticBox_tagged_eq state (.uint8 0) rfl (by decide)
-  have pushed := contract.pushFreshTagged
-    { runtime with trace := runtime.trace.push (mkEmptyEvent runtime) }
-    (pushDecl.params.map (·.type)) pushDecl.type 5 0 (by decide)
-  simp only [pushDecl, mkEmptyEvent, semanticArrayResult, arrayExternalResponse] at pushed
-  simp [runProgram, initialState, run, executeStep, coreStep, invokeDecl,
-    RetainedRC2.initializer.findDecl, mkEmptyDecl.findDecl, pushDecl.findDecl,
-    RetainedRC2.initializer, mkEmptyDecl, pushDecl, bindParams, evalLetValue,
-    evalArgs, evalArg, lookupValue, lookup, Fir.LeanIR.Impure.bind, literal, pushBindFrame,
-    MachineState.withValue, resumeExternal, observe, cold, name,
-    Pure.pure, Bind.bind, Except.pure, Except.bind, maxTaggedPayload,
-    contract.mkEmpty, boxed, arrayExternalResponse, semanticArrayResult, pushed,
-    resultRuntime, mkEmptyEvent, pushEvent, ReturnedObservation] at *
-  simp only [pushed]
-  exact ⟨_, rfl, rfl, rfl, rfl⟩
+  obtain ⟨final, execution, runtimeEq, control, frames, _⟩ :=
+    reaches_published_withFrames externals contract runtime cold []
+  exact ⟨final, execution, runtimeEq, control, frames⟩
 
 theorem evaluates_and_preservesCaller
     (externals : ExternalImpl) (contract : FreshArrayExternalContract externals)
@@ -80,6 +95,130 @@ theorem evaluates_and_preservesCaller
   · simp [executeStep, coreStep, control, frames, observe, ReturnedObservation]
   · rw [runtimeEq]
     exact freshEmptyArray_pushTagged_publication saved transport related 5 0 name
+
+/-- The caller state after binding the published result. The initializer's
+temporary environment and join environment are not retained. -/
+noncomputable def resumedCaller (runtime : RuntimeState) (env : Env) (result : FVarId)
+    (continuation : LCNF.Code .impure) (joins : JoinEnv) (frames : List Frame) :
+    MachineState :=
+  { program := RetainedRC2.program, runtime := resultRuntime runtime,
+    control := .code continuation,
+    env := bind env result (.object (.heap runtime.nextLocation)), joins, frames }
+
+/-- The actual cold initializer executes under a waiting caller and binds its
+result. No body-execution, graph-separation or ordinary-binding premise is
+supplied; the remaining external and representation premises are explicit. -/
+theorem resumesCaller
+    (externals : ExternalImpl) (contract : FreshArrayExternalContract externals)
+    (runtime : RuntimeState) (cold : findGlobal? runtime.globals name = none)
+    (env : Env) (result : FVarId) (continuation : LCNF.Code .impure)
+    (joins : JoinEnv) (frames : List Frame)
+    {facts : Fir.Wasm.ReuseCapacityFacts}
+    {bindings : List (FVarId × Fir.Wasm.AbiKind)}
+    {locals : Wasm.Locals} {savedHeap heap : MemoryState}
+    {savedWitness witness : RefinementWitness}
+    (saved : ReuseCapacityFactsRel facts bindings env locals savedHeap savedWitness)
+    (transport : WitnessTransport savedWitness witness)
+    (related : LiveHeapRel heap witness runtime) :
+    ExecSteps externals 13
+      { initialState RetainedRC2.program name #[] runtime with
+        frames := .bind result continuation env joins :: frames }
+      (resumedCaller runtime env result continuation joins frames) ∧
+    ReuseTokenOrdinaryBindTransport facts result runtime (resultRuntime runtime)
+      env (.object (.heap runtime.nextLocation)) := by
+  obtain ⟨final, execution, runtimeEq, control, stack, program⟩ :=
+    reaches_published_withFrames externals contract runtime cold
+      (.bind result continuation env joins :: frames)
+  have pop : executeStep externals final =
+      .next (resumedCaller runtime env result continuation joins frames) := by
+    simp only [executeStep, coreStep, control, stack]
+    cases final
+    simp_all [resumedCaller]
+  exact ⟨execSteps_trans_exact
+    (execSteps_of_run_outOfFuel execution) (.step pop (.refl _)),
+    (freshEmptyArray_pushTagged_publication saved transport related 5 0 name).eraseBind⟩
+
+/-- Connect execution of the checked body to the existing concrete caller-pop
+consumer. The target is already at its return boundary: target callee execution,
+its final frame and representation transports are still independent premises.
+The source prefix and ordinary-binding premise are derived here. -/
+theorem return_pop_preservesCaller
+    {context calleeContext : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction calleeFunction : Fir.Wasm.Function}
+    {labels : FirTalos.LabelContext} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {externals : ExternalImpl}
+    {outerRuntime runtime : RuntimeState}
+    {outerStore callStore targetStore : Wasm.Store Host}
+    {outerWitness callWitness witness : RefinementWitness}
+    {callerEnv calleeEnv : Env} {result : FVarId}
+    {continuation : LCNF.Code .impure} {callerJoins : JoinEnv}
+    {sourceFrames : List Frame} {callerLocals calleeLocals : Wasm.Locals}
+    {callerRemainder returnedTail : List Wasm.Value}
+    {targetRest : Wasm.Program} {targetFrames : List StructuredWasmFrame}
+    {kind callerFunctionResult : Fir.Wasm.AbiKind} {physical : Wasm.Value}
+    {resultIndex : Nat} {source : MachineState} {target : StructuredWasmState Host}
+    {tailResult : Option Fir.Wasm.AbiKind}
+    {facts calleeFacts : Fir.Wasm.ReuseCapacityFacts} {callerBytes resultBytes : Nat}
+    (contract : FreshArrayExternalContract externals)
+    (cold : findGlobal? runtime.globals name = none)
+    (checked : context.program = RetainedRC2.program)
+    (related : ConcreteStructuredBindFrameFocus context sourceModule
+      sourceFunction labels (resultRuntime runtime) callerEnv
+      (.object (.heap runtime.nextLocation)) result continuation callerJoins
+      sourceFrames targetStore callerLocals callerRemainder targetRest
+      targetFrames returnedTail witness kind physical resultIndex source target)
+    (callerScope : ConcreteStructuredResourceScope context sourceModule
+      sourceFunction externals outerRuntime outerStore outerWitness facts
+      callerBytes runtime callerEnv callStore callerLocals callWitness)
+    (callee : ConcreteReuseCapacityCacheAbiFrame calleeContext sourceModule
+      calleeFunction externals calleeFacts resultBytes (resultRuntime runtime)
+      calleeEnv targetStore calleeLocals witness)
+    (witnessTransport : WitnessTransport callWitness witness)
+    (capacityTransport : HeaderCapacityTransport callStore.host.runtime.heap
+      targetStore.host.runtime.heap callWitness)
+    (programEq : calleeContext.program = context.program)
+    (tail : ConcreteStructuredSuspendedResourceStack externals context.program
+      outerRuntime outerStore outerWitness callerFunctionResult tailResult
+      sourceFrames targetFrames) :
+    ∃ targetAfter resumedLocals,
+      ExecSteps externals 13
+        { initialState RetainedRC2.program name #[] runtime with
+          frames := .bind result continuation callerEnv callerJoins :: sourceFrames }
+        (resumedCaller runtime callerEnv result continuation callerJoins sourceFrames) ∧
+      FinitePath (StructuredWasmStep module hostEnv) 2 target targetAfter ∧
+      ConcreteStructuredStackRel
+        (resumedCaller runtime callerEnv result continuation callerJoins sourceFrames)
+        targetAfter ∧
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+        (resultRuntime runtime) (bind callerEnv result (.object (.heap runtime.nextLocation)))
+        continuation targetStore resumedLocals targetRest witness
+        (resumedCaller runtime callerEnv result continuation callerJoins sourceFrames)
+        targetAfter ∧
+      ConcreteReuseCapacityCacheAbiFrame context sourceModule sourceFunction
+        externals (Fir.Wasm.eraseReuseCapacityFact facts result) resultBytes
+        (resultRuntime runtime) (bind callerEnv result (.object (.heap runtime.nextLocation)))
+        targetStore resumedLocals witness ∧
+      targetAfter.frames = targetFrames := by
+  have saved := callerScope.1.1.stateRelated
+  obtain ⟨sourceSteps, ordinary⟩ := resumesCaller externals contract runtime cold
+    callerEnv result continuation callerJoins sourceFrames saved.2
+    (WitnessTransport.refl callWitness) saved.1.1.heap
+  obtain ⟨sourceAfter, targetAfter, resumedLocals, _sourceStep, path,
+      stack, focus, restored, joinsEq, framesEq, targetFramesEq⟩ :=
+    related.advance_popRetainedCache (module := module) (hostEnv := hostEnv)
+      callerScope callee witnessTransport capacityTransport ordinary programEq tail
+  have afterEq : sourceAfter =
+      resumedCaller runtime callerEnv result continuation callerJoins sourceFrames := by
+    have program := focus.sourceProgramEq.trans checked
+    have control := focus.sourceControlEq
+    have env := focus.sourceEnvEq
+    have state := focus.sourceRuntimeEq
+    cases sourceAfter
+    simp_all only [resumedCaller]
+  subst sourceAfter
+  exact ⟨targetAfter, resumedLocals, sourceSteps, path, stack, focus, restored,
+    targetFramesEq⟩
 
 /-- The external contract has an executable witness, so the body theorem is
 not relying on an uninhabited per-program assumption. -/
@@ -110,8 +249,11 @@ run_cmd do
     "Fir.Wasm.Concrete.boxUsesTaggedRepresentation_boxedScalar._native.native_decide.ax_1_13",
     "Fir.Wasm.Concrete.boxUsesTaggedRepresentation_boxedScalar._native.native_decide.ax_1_14",
     "Fir.Wasm.Concrete.boxUsesTaggedRepresentation_boxedScalar._native.native_decide.ax_1_15"]
-  for endpoint in #[`RetainedInitializer.reaches_published,
+  for endpoint in #[`RetainedInitializer.reaches_published_withFrames,
+      `RetainedInitializer.reaches_published,
       `RetainedInitializer.evaluates_and_preservesCaller,
+      `RetainedInitializer.resumesCaller,
+      `RetainedInitializer.return_pop_preservesCaller,
       `RetainedInitializer.executable_example] do
     FirTalos.TrustAudit.check endpoint expected
   FirTalos.TrustAudit.check `RetainedInitializer.example_result_contents #["propext"]
