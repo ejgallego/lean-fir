@@ -26,9 +26,11 @@ retained-initializer input prerequisite and first checked-body source proof are
 now integrated on RC2; the bounded caller return/pop consumer is also landed.
 The entry-indexed retained-token transport is now used by the active and
 suspended structured resource scopes, composing through nested return/pop.
-Production external refinement, target callee execution, and full
-heap-publication/lazy-miss closure remain open. Other parked proof work
-requires an explicit resume. See `docs/validation.md`.
+The checked initializer also has a bounded fresh-cache publication consumer
+with cumulative entry transport. The central lazy-miss dispatcher does not yet
+consume that construction provenance. Production external refinement, target
+callee execution, and full `compressStored` closure remain open. Other parked
+proof work requires an explicit resume. See `docs/validation.md`.
 
 `fir/root` (the meta lane) is the maintainer-appointed standing integration
 owner from 2026-09-09 until explicitly reassigned. Root owns serial green
@@ -103,10 +105,26 @@ Root independently reran the retained-input capture/readback/direct consumer
 `make talos-check`, and a forced direct RC2 TrustAudit (271 endpoints); all
 pass. The five new audited entries use only `propext`/`Quot.sound`; the existing
 seven boxing-policy native axioms remain. No shared semantic/runtime contract
-changed. Next, derive cumulative transport at heap-result publication before
-lifting the object/tobject lazy-miss exclusions. Production external
-refinement, target callee execution, and full `compressStored` closure remain
-open; no current exclusions are lifted.
+changed.
+
+The fresh-publication successor `6b447fd0a` is also landed. Generic
+`RetainedCodeEntryTransports.publishFreshCache` derives the concrete host
+publication and cumulative retained/capacity transports for a fresh graph.
+`RetainedInitializer.executes_and_publishesCache` reaches the pending cache
+marker in 11 source steps, takes the source publication transition, and
+connects it to the host rule; freshness/region closure follow from the checked
+singleton-Array shape. Pre-cache relation/history, represented value and slot
+metadata remain explicit. The two global updates are store expressions, not a
+target instruction or cache-index correctness theorem. Root reran retained
+input reconstruction/readback/direct consumer (11 exact endpoint audits),
+`make check`, `make talos-setup`, `make talos-check`, and direct RC2 TrustAudit
+(273 endpoints); all pass. The source-only audit inventories are unchanged;
+the concrete publication endpoint inherits the existing `assembleByte32`
+native bitvector axiom, with no new axiom introduced. Next, wire construction
+provenance into the central lazy-return dispatcher and prove the full
+post-cache resource invariant before lifting object/tobject exclusions.
+Production Array external refinement and the target callee prefix remain open;
+no admission exclusions were lifted.
 
 ## Integration queue settled (2026-09-09)
 
