@@ -28,7 +28,7 @@ cp integration/talos/retained-initializer/lakefile.lean.in "$project/lakefile.le
 cp integration/talos/retained-initializer/RetainedDeclarations.lean "$project/RetainedDeclarations.lean"
 cp integration/talos/retained-initializer/RetainedInitializer.lean "$project/RetainedInitializer.lean"
 make talos-setup
-lake -d .deps/talos-434/project build FirTalos.ConcreteArrayExternal
+lake -d .deps/talos-434/project build FirTalos.ConcreteArrayExternal FirTalos.ConcreteRetainedTransports
 cd "$project"
 lake build RetainedInitializer
 lake env lean Readback.lean

@@ -12,6 +12,7 @@ import FirTalos.ConcreteSupportedPipeline
 import FirTalos.ConcreteSourceValidationTests
 import FirTalos.ConcreteLazyPublicationTests
 import FirTalos.ConcreteArrayExternal
+import FirTalos.ConcreteRetainedTransports
 import FirTalos.ConcreteResumableWasm
 import FirTalos.ConcretePassComposition
 import FirTalos.ConcreteCompilerCorrectness

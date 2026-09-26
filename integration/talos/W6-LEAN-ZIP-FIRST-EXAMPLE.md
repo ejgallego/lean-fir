@@ -52,7 +52,7 @@ the broader publication-to-return/pop milestone below.
 
 The immediate target is one real initializer's publication-to-return/pop proof,
 not yet the complete compressor theorem. The live obligation table and scope
-limits are in [the W6 frontier](PLAN.md#current-verification-frontier--2026-09-25).
+limits are in [the W6 frontier](PLAN.md#current-verification-frontier--2026-09-26).
 `ConcreteSupportedExport.terminatesWith_of_rootedExecEvaluates` already gives
 conditional executable successful-return preservation at the exact export ABI;
 compiler admission, the ByteArray boundary, resident linking and bytes remain
@@ -183,7 +183,20 @@ merely by applying this consumer.
   timely integration, board updates and dependency settlement; helper lemmas
   do not each require a new administrative thread.
 
-### Following milestone, not hidden in this one
+### Following milestone: entry-relative preservation
+
+The focused `ConcreteRetainedTransports.lean` module now proves a replacement
+caller-restoration rule. Its `RetainedCallerTransport` ranges over saved facts
+represented at entry, rather than every source heap cell. Exact-boundary
+composition and `RetainedCacheEntryFrame.restoreCaller` preserve the original
+entry through nested returns, keeping every other physical/implementation
+transport. `RetainedInitializer.evaluates_and_retainsCallers` supplies the law
+for this body without asking the client to select saved facts; the exact result
+also has a negative regression against the old all-location requirement.
+
+The replacement is deliberately sufficient rather than weakest: it protects
+all representable saved fact maps, not only the current stack's actual maps.
+No central simulation definition or lazy-miss exclusion has changed yet.
 
 Replace the excessive all-location ordinaryness requirement in the reusable
 call-history invariant with preservation of actual suspended-caller obligations,

@@ -38,7 +38,7 @@ This layering separates three claims:
 The concrete layout and many runtime refinements already exist. The original
 implementation sequence below is history, not an instruction to restart it.
 
-## Current verification frontier — 2026-09-25
+## Current verification frontier — 2026-09-26
 
 This section, ending at **Implementation history**, is the live W6 priority.
 Later chronological uses of "next", "remaining", "queue", or "immediate" are
@@ -64,14 +64,43 @@ bytes, or the complete lean-zip application.
 | --- | --- | --- |
 | Exact-root executable return | `terminatesWith_of_rootedExecEvaluates` | Discharge compiler-owned admission; retain explicit execution/resource contracts |
 | Static supported-export assembly | `exists_ofSupportedPipeline` and pipeline alignment/uniqueness lemmas | Apply to the same checked captured program; closure-flow condition remains visible |
-| Saved-caller return/pop | `advance_popRetainedCache` restores structural stack and full cache/ABI frame | Stronger hereditary resource scope for subsequent nested calls |
-| Publication separation | `of_allocLeaf`, `HeapRegionClosed.reachable`, `freshRegion_setGlobal` | Derive prefix/graph premises from a real initializer body |
-| First actual lean-zip initializer | Candidate identified; checked RC2 reification/recapture assigned to W7 by root | Exact kernel program, declaration/body equations and same-input lowering |
+| Saved-caller return/pop | `RetainedInitializer.return_pop_preservesCaller` connects the checked source body to the existing target return/bind suffix | Target callee prefix and central hereditary resource-stack migration |
+| Publication separation | Derived for the actual singleton-Array initializer, including historical caller facts | Production external refinement; broader producers |
+| First actual lean-zip initializer | Kernel-checked RC2 program; source execution and caller-binding proof | Production Array contracts and preceding target execution |
+| Entry-relative caller preservation | `RetainedCacheEntryFrame.restoreCaller` composes entry-indexed token preservation through return | Migrate central active/suspended scope consumers; retain other transports |
 | Whole `compressStored` boundary | Roadmap and conditional backend infrastructure | ByteArray relation/operations, remaining admission, then linking/encoding/decoding |
 
 In particular, `ConcreteStructuredLazyMissBackendCoverageAt` still explicitly
 excludes `.object` and `.tobject` initializer results. The local publication
 lemmas do not remove that central simulator/admission restriction yet.
+
+### Current invariant migration boundary
+
+[`ConcreteRetainedTransports.lean`](FirTalos/ConcreteRetainedTransports.lean)
+isolates the proposed replacement of `ReuseCapacityCodeEntryTransports.ordinary`.
+`RetainedCallerTransport entryWitness before after` preserves any saved token
+facts whose physical representation transports into `entryWitness`. It is
+universal over valid saved facts, not a client-chosen map. Representation
+transport reindexes this law when entering a nested call; transitivity then
+composes it back to the original outer entry. All other transport fields remain
+unchanged. The new caller-restoration theorem rebuilds both the cache frame and
+this entry-relative package without all-location ordinaryness.
+
+This is a sufficient, not weakest, condition: it covers every representable
+saved fact map, not just the frames actually present. It permits fresh graph
+publication but does not automatically justify publishing an arbitrary old
+ordinary object. It is a proof-local migration seam, not a new public theorem
+premise and not a replacement already installed in the central simulator.
+
+The checked initializer supplies the new law in
+`RetainedInitializer.evaluates_and_retainsCallers` from primitive external laws
+and entry heap representation. `example_not_blanketOrdinary` proves that its
+published result violates the old blanket law (an absent entry cell satisfies
+that law's antecedent vacuously). The distinction is kernel checked, not a
+terminological weakening. Next migrate the active/suspended scope push/pop
+consumers to this package and prove their closure before lifting heap-result
+lazy-miss exclusions. Production Array implementation and the target prefix
+remain separate obligations.
 
 The fresh-region proof checkpoint `f5bcf3fd3` is based on accepted main
 `97c257cc4`. Its proof sources are unchanged from reviewed `c67c6ed21`;

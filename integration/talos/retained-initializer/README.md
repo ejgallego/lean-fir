@@ -35,6 +35,15 @@ callee prefix or reconstruct the stronger hereditary resource stack.
 `resumedCaller` is a transparent proof-only state description, not an extra
 compiled executable or a replacement source program.
 
+`evaluates_and_retainsCallers` additionally derives the new entry-indexed
+`RetainedCallerTransport` law for every representable historical caller map,
+not a caller-selected map. That law is the source component consumed by
+`RetainedCacheEntryFrame.restoreCaller`, which composes the entry package
+through return without blanket ordinaryness. The negative regression
+`example_not_blanketOrdinary` shows why the distinction matters: the actual
+fresh published Array violates the old all-location condition. The central
+active/suspended resource stack has not yet migrated to the replacement.
+
 The two source external contracts are uniform primitive laws, not a
 per-program invariant. `FreshArrayExternalContract` specifies empty allocation
 and the fresh/non-full tagged-push branch. `freshArrayExternals_contract`

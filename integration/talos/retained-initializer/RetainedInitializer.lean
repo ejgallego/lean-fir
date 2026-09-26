@@ -1,6 +1,7 @@
 import RetainedDeclarations
 import FirTalos.ConcreteArrayExternal
 import FirTalos.ConcreteStructuredSimulation
+import FirTalos.ConcreteRetainedTransports
 import FirTalos.TrustAuditCore
 
 open Lean Lean.Compiler Fir.LeanIR.Impure Fir.Wasm.Concrete FirTalos.Concrete
@@ -95,6 +96,25 @@ theorem evaluates_and_preservesCaller
   · simp [executeStep, coreStep, control, frames, observe, ReturnedObservation]
   · rw [runtimeEq]
     exact freshEmptyArray_pushTagged_publication saved transport related 5 0 name
+
+/-- The body supplies one entry-indexed law for every represented historical
+caller. Clients no longer need to select a saved fact map for this endpoint. -/
+theorem evaluates_and_retainsCallers
+    (externals : ExternalImpl) (contract : FreshArrayExternalContract externals)
+    (runtime : RuntimeState) (cold : findGlobal? runtime.globals name = none)
+    {heap : MemoryState} {witness : RefinementWitness}
+    (related : LiveHeapRel heap witness runtime) :
+    ∃ final,
+      ExecSteps externals 12 (initialState RetainedRC2.program name #[] runtime) final ∧
+      final.runtime = resultRuntime runtime ∧
+      final.control = .yielded (.object (.heap runtime.nextLocation)) ∧
+      final.frames = [] ∧
+      RetainedCallerTransport witness runtime final.runtime := by
+  obtain ⟨final, execution, runtimeEq, control, frames⟩ :=
+    reaches_published externals contract runtime cold
+  refine ⟨final, execSteps_of_run_outOfFuel execution, runtimeEq, control, frames, ?_⟩
+  rw [runtimeEq]
+  exact RetainedCallerTransport.freshArrayPublication related 5 0 name
 
 /-- The caller state after binding the published result. The initializer's
 temporary environment and join environment are not retained. -/
@@ -236,6 +256,17 @@ theorem example_result_contents :
     findCell? (resultRuntime {}).heap 0 =
       some { object := .array #[.object (.tagged 0)] 5, rc := 0, persistent := true } := by rfl
 
+/-- Fresh publication violates the old all-location condition: the absent
+entry cell vacuously counts as ordinary there. This does not refute preservation
+of represented caller tokens, which cannot point to that fresh location. -/
+theorem example_not_blanketOrdinary :
+    ¬ OrdinaryPersistenceTransport {} (resultRuntime {}) := by
+  intro ordinary
+  have impossible := ordinary 0
+    { object := .array #[.object (.tagged 0)] 5, rc := 0, persistent := true }
+    example_result_contents (by intro cell found; cases found)
+  cases impossible
+
 end RetainedInitializer
 
 -- Existing boxing-policy debt, inherited through semanticBox_tagged_eq.
@@ -252,8 +283,10 @@ run_cmd do
   for endpoint in #[`RetainedInitializer.reaches_published_withFrames,
       `RetainedInitializer.reaches_published,
       `RetainedInitializer.evaluates_and_preservesCaller,
+      `RetainedInitializer.evaluates_and_retainsCallers,
       `RetainedInitializer.resumesCaller,
       `RetainedInitializer.return_pop_preservesCaller,
       `RetainedInitializer.executable_example] do
     FirTalos.TrustAudit.check endpoint expected
   FirTalos.TrustAudit.check `RetainedInitializer.example_result_contents #["propext"]
+  FirTalos.TrustAudit.check `RetainedInitializer.example_not_blanketOrdinary #["propext"]
