@@ -27,10 +27,12 @@ now integrated on RC2; the bounded caller return/pop consumer is also landed.
 The entry-indexed retained-token transport is now used by the active and
 suspended structured resource scopes, composing through nested return/pop.
 The checked initializer also has a bounded fresh-cache publication consumer
-with cumulative entry transport. The central lazy-miss dispatcher does not yet
-consume that construction provenance. Production external refinement, target
-callee execution, and full `compressStored` closure remain open. Other parked
-proof work requires an explicit resume. See `docs/validation.md`.
+with cumulative entry transport and full saved-caller-scope restoration. The
+validated non-heap lazy-return path consumes the common restoration; central
+heap lazy-miss admission still does not consume construction provenance.
+Production external refinement, target callee execution, and full
+`compressStored` closure remain open. Other parked proof work requires an
+explicit resume. See `docs/validation.md`.
 
 `fir/root` (the meta lane) is the maintainer-appointed standing integration
 owner from 2026-09-09 until explicitly reassigned. Root owns serial green
@@ -120,11 +122,25 @@ input reconstruction/readback/direct consumer (11 exact endpoint audits),
 `make check`, `make talos-setup`, `make talos-check`, and direct RC2 TrustAudit
 (273 endpoints); all pass. The source-only audit inventories are unchanged;
 the concrete publication endpoint inherits the existing `assembleByte32`
-native bitvector axiom, with no new axiom introduced. Next, wire construction
-provenance into the central lazy-return dispatcher and prove the full
-post-cache resource invariant before lifting object/tobject exclusions.
-Production Array external refinement and the target callee prefix remain open;
-no admission exclusions were lifted.
+native bitvector axiom, with no new axiom introduced.
+
+The caller-scope restoration successor `33aef1b8` is now landed as root copy
+`83d6dbc20` (the exact producer checkpoint was based on `6b447fd0a`, before
+the intervening board-only root commit; stable patch IDs match). Generic
+`ConcreteStructuredResourceScope.afterCachePublication` rebuilds the complete
+saved caller scope from cumulative entry-indexed transport and the actual
+publication operation. The validated non-heap lazy-return dispatcher consumes
+this shared restoration; its seven target steps and `.object`/`.tobject`
+exclusions are unchanged. The checked initializer reaches publication and
+restores the caller without client graph-closure/disjointness evidence, while
+the pre-cache callee scope and represented result remain explicit. Root
+replayed exact lean-zip sources/readback/direct consumer (12 exact endpoint
+audits), `make check`, `make talos-setup`, `make talos-check`, and direct RC2
+TrustAudit (275 endpoints); all pass. No new axioms; the concrete publication
+retains the existing `assembleByte32` debt and the consumer its existing source
+boxing debt. Target callee prefix, destination bind/full stack assembly,
+central heap lazy-miss admission, and production Array external refinement
+remain open; no admission exclusions were lifted.
 
 ## Integration queue settled (2026-09-09)
 
