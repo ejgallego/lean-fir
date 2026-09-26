@@ -167,4 +167,104 @@ theorem HeapRegionClosed.copiedArrayPush
         (object := .array (elements.push value) capacity) rfl).trans
           (decValueOnce_ordinaryPersistenceTransport consume))
 
+/-- Allocate an empty Array, push an immediate, then publish it. Freshness,
+the prefix frame and graph separation are derived from these operations, not
+supplied by the caller. The saved facts may belong to any historical caller.
+This is a primitive composition, not an equation for a captured LCNF body. -/
+theorem freshEmptyArray_pushTagged_publication
+    {facts : Fir.Wasm.ReuseCapacityFacts}
+    {bindings : List (FVarId × Fir.Wasm.AbiKind)} {env : Env}
+    {locals : Wasm.Locals} {savedHeap heap : MemoryState}
+    {savedWitness witness : RefinementWitness} {entry : RuntimeState}
+    (saved : ReuseCapacityFactsRel facts bindings env locals savedHeap savedWitness)
+    (transport : WitnessTransport savedWitness witness)
+    (related : LiveHeapRel heap witness entry)
+    (capacity : Nat) (payload : UInt64) (name : Name) :
+    ReuseTokenOrdinaryTransport facts env entry
+      ((semanticArrayResult entry #[.object (.tagged payload)] capacity).setGlobal
+        name (.object (.heap entry.nextLocation))) := by
+  have allocated : alloc entry (.array #[] capacity) false =
+      (semanticArrayResult entry #[] capacity, .heap entry.nextLocation) := rfl
+  have found : findCell? (semanticArrayResult entry #[] capacity).heap
+      entry.nextLocation = some (semanticArrayCell #[] capacity) := by
+    simp [semanticArrayResult, findCell?]
+  have mutation : Fir.LeanIR.Impure.setCell (semanticArrayResult entry #[] capacity)
+      entry.nextLocation { semanticArrayCell #[] capacity with
+        object := .array #[.object (.tagged payload)] capacity } =
+      .ok (semanticArrayResult entry #[.object (.tagged payload)] capacity) := by
+    simp [Fir.LeanIR.Impure.setCell, semanticArrayResult, semanticArrayCell, replaceCell]
+  have closed := (HeapRegionClosed.of_liveHeapRel related).alloc allocated
+    (by simp [HeapObject.ownedValues])
+  have pushed := closed.pushArray (elements := #[]) (value := .object (.tagged payload))
+    found (by rfl) mutation
+    (by intro _ child impossible; cases impossible)
+  have prefixFrame := (alloc_ordinaryPersistenceTransport allocated).trans
+    (setCell_ordinaryPersistenceTransport
+      (replacement := semanticArrayCell #[.object (.tagged payload)] capacity)
+      found rfl mutation)
+  exact ReuseTokenOrdinaryTransport.freshRegion_setGlobal_of_witness
+    saved transport related (.ofOrdinaryPersistence prefixFrame) pushed
+    (Nat.le_refl _) name
+
+/-- Concrete allocation followed by raw in-place push of an immediate has the
+exact singleton-Array source result and preserves historical caller tokens
+after publication. Allocation supplies the location, descriptor, empty prefix
+and spare-capacity facts needed by the push theorem. Only allocation success
+and numeric bounds remain; no mutation equation, region or caller-preservation
+certificate is requested.
+
+This does not select the production external `Array.push` branch or execute
+the emitted helper. Tagged arguments own no heap reference, so this raw push
+needs no child retain/release. The post-publication claim is source-side;
+concrete cache execution remains the existing cache refinement's job. -/
+theorem allocateEmptyArray_pushTagged_refines_publication
+    {facts : Fir.Wasm.ReuseCapacityFacts}
+    {bindings : List (FVarId × Fir.Wasm.AbiKind)} {env : Env}
+    {locals : Wasm.Locals} {savedHeap state allocated : MemoryState}
+    {savedWitness witness : RefinementWitness} {entry : RuntimeState}
+    {capacity : Nat} {address : Word32}
+    (saved : ReuseCapacityFactsRel facts bindings env locals savedHeap savedWitness)
+    (transport : WitnessTransport savedWitness witness)
+    (related : LiveHeapRel state witness entry)
+    (spare : 0 < capacity) (capacityFits : capacity < UInt32.size)
+    (allocation : allocateResidentArray state #[] capacity = .ok (allocated, address))
+    (payload : UInt64) (fits : payload.toNat ≤ maxImmediatePayload) (name : Name) :
+    let nextWitness := witness.bindArray entry.nextLocation address capacity
+    ∃ final,
+      pushResidentArrayElementInPlaceRaw allocated address
+        (Word32.encodeImmediate payload.toNat fits) = .ok final ∧
+      LiveHeapRel final nextWitness
+        (semanticArrayResult entry #[.object (.tagged payload)] capacity) ∧
+      ValueRel nextWitness .object (.word32 address)
+        (.object (.heap entry.nextLocation)) ∧
+      WitnessTransport witness nextWitness ∧
+      MappedHeaderCapacityTransport allocated final nextWitness ∧
+      final.heapCursor = allocated.heapCursor ∧
+      ReuseTokenOrdinaryTransport facts env entry
+        ((semanticArrayResult entry #[.object (.tagged payload)] capacity).setGlobal
+          name (.object (.heap entry.nextLocation))) := by
+  dsimp only
+  obtain ⟨extension, _, allocatedRelated, resultRelated, _⟩ :=
+    allocateResidentArray_liveHeapRel state allocated witness entry #[] #[]
+      capacity address related rfl (Nat.zero_le _) (by decide) capacityFits
+      (by simp) allocation
+  have found : findCell? (semanticArrayResult entry #[] capacity).heap
+      entry.nextLocation = some (semanticArrayCell #[] capacity) := by
+    simp [semanticArrayResult, findCell?]
+  obtain ⟨final, after, operation, mutation, finalRelated, capacityFrame, cursor⟩ :=
+    allocatedRelated.pushResidentArrayElementInPlaceRaw_refines
+      (RefinementWitness.lookup_bindArray_location witness entry.nextLocation address capacity)
+      found rfl rfl
+      (RefinementWitness.lookup_bindArray_descriptor witness entry.nextLocation address capacity)
+      (.object (.tagged payload)) (Word32.encodeImmediate payload.toNat fits) spare
+      (.tobject (.tagged (.immediate payload fits)))
+  have afterEq : after =
+      semanticArrayResult entry #[.object (.tagged payload)] capacity := by
+    simpa [Fir.LeanIR.Impure.setCell, semanticArrayResult, semanticArrayCell,
+      replaceCell] using mutation.symm
+  subst after
+  exact ⟨final, operation, finalRelated, resultRelated,
+    WitnessTransport.ofExtension extension, capacityFrame, cursor,
+    freshEmptyArray_pushTagged_publication saved transport related capacity payload name⟩
+
 end FirTalos.Concrete

@@ -682,4 +682,33 @@ theorem historicalCaller_twoPublications
       rfl)
   cases impossible
 
+/-- The retained initializer's capacity and scalar exercise the reusable
+primitive composition with a nonempty historical token map. Boxing is an
+actual heap-neutral concrete operation. This does not stand in for the checked
+initializer body equation or for external-call admission. -/
+theorem emptyArray_boxUInt8Zero_push_publication
+    {bindings : List (FVarId × AbiKind)} {locals : Wasm.Locals}
+    {savedHeap state allocated : MemoryState}
+    {savedWitness witness : RefinementWitness} {address : Word32}
+    (saved : ReuseCapacityFactsRel retainedFacts bindings retainedEnv locals
+      savedHeap savedWitness)
+    (transport : WitnessTransport savedWitness witness)
+    (related : LiveHeapRel state witness publicationRuntime)
+    (allocation : allocateResidentArray state #[] 5 = .ok (allocated, address)) :
+    boxScalar allocated (.uint8 0) =
+        .ok (allocated, Word32.encodeImmediate 0 (by decide)) ∧
+    ∃ final,
+      pushResidentArrayElementInPlaceRaw allocated address
+        (Word32.encodeImmediate 0 (by decide)) = .ok final ∧
+      LiveHeapRel final (witness.bindArray publicationRuntime.nextLocation address 5)
+        (semanticArrayResult publicationRuntime #[.object (.tagged 0)] 5) ∧
+      ReuseTokenOrdinaryBindTransport retainedFacts resultId publicationRuntime
+        ((semanticArrayResult publicationRuntime #[.object (.tagged 0)] 5).setGlobal
+          `arrayCache (.object (.heap publicationRuntime.nextLocation)))
+        retainedEnv (.object (.heap publicationRuntime.nextLocation)) := by
+  obtain ⟨final, operation, finalRelated, _, _, _, _, callerFrame⟩ :=
+    allocateEmptyArray_pushTagged_refines_publication saved transport related
+      (by decide) (by decide) allocation 0 (by decide) `arrayCache
+  exact ⟨rfl, final, operation, finalRelated, callerFrame.eraseBind⟩
+
 end FirTalos.Concrete

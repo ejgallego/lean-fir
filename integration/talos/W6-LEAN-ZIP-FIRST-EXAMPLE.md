@@ -397,6 +397,18 @@ surface and its W7/package wiring; W6 does not duplicate it locally.
   blanket ordinaryness fails. Existing same-entry producers specialize the
   general law. This is a pointwise historical-caller producer, not yet the
   hereditary stack push/pop closure or an initializer execution theorem.
+  `allocateEmptyArray_pushTagged_refines_publication` now composes successful
+  concrete empty-Array allocation and raw immediate push. Allocation derives
+  the mapped reference, descriptor, live empty cell and push preconditions;
+  the exact singleton source result supplies graph closure and ordinary-token
+  prefix preservation internally. Historical-caller publication therefore
+  needs no separately supplied region, freshness or caller-preservation proof.
+  A capacity-5/UInt8-zero regression includes actual heap-neutral boxing and
+  immediate caller binding with a nonempty token map. Allocation success and
+  numeric bounds remain explicit. This is not production external dispatch,
+  helper branch selection, concrete cache execution or captured-body execution.
+  Its concrete theorem inherits only the existing raw-push native memory debt;
+  the source-only composition uses standard axioms.
 - Apply the existing rooted finite-trace/terminal theorem only after its
   explicit compiler-current-step admission, address-space/resource safety,
   entry/runtime contracts and argument arity have been constructed for this
@@ -406,17 +418,25 @@ surface and its W7/package wiring; W6 does not duplicate it locally.
 
 ## Next bounded action
 
-The authoritative `ROOT-W6-20260922-021` input is now retained
-`RetainedStored.olean`, SHA-256
-`e71219ab8443177481cfee3d940810942b165a61c7179e940664aba1b835119b`.
-Independent import recovers `Zip.Wasm.compressStored`, 21 declarations,
-14 external names and four object-valued cached initializers. Importability
-is established, but the artifact stores its program only in an environment
-extension and declares no kernel-referable program constant. Root must
-coordinate structural reification and the same-input lowering boundary;
-neither printed LCNF nor a fresh substitute capture closes this obligation.
-The diagnostic closure-flow Boolean also needs kernel proof evidence for
-the actual opaque production checker. No new native axiom is authorized.
+The historical 4.33 `RetainedStored.olean` is provenance evidence, not an
+importable proof input under RC2. `W7-ROOT-20260926-002` supplies an inspectable
+RC2 candidate at `249f476d5`: `RetainedRC2.program`,
+`RetainedRC2.initializer.findDecl` and `.body` are kernel-referable, and
+production lowering consumes the same program's readback. W6 inspected the
+recipe and matched the recorded source/olean/report hashes. Completion
+`W7-ROOT-20260926-003` records green full W7 gates at that functional head and
+the documentation-only successor `82f25e39c`. Root integration remains pending
+at this update; no W7 build state is shared with the W6 proof workspace.
+Reproduce from the accepted recipe after landing.
+
+The nominated initializer allocates an empty Array with capacity 5, boxes
+UInt8 zero, pushes it, and returns the Array. Use its checked body equation
+to connect the primitive composition above to actual source execution. In
+particular, specify the two external Array operations, derive the fresh
+unique/spare-capacity branch conditions, and connect their concrete refinements
+and cache publication. Do not replace these obligations with a hand-copied
+initializer or a per-body preservation certificate. The recorded closure-flow
+Boolean still needs kernel proof evidence for the actual checker.
 
 Meanwhile, the independent W6 prefix-transport laws prepare the semantic
 obstacle demonstrated by those object-valued initializers. The next bounded
