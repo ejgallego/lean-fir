@@ -387,6 +387,16 @@ surface and its W7/package wiring; W6 does not duplicate it locally.
   axioms. Concrete allocation/resource premises, actual body execution and
   compiler admission remain separate; no copied-helper execution is inferred
   from this source lemma alone.
+  Historical callers no longer need a reconstructed current state/capacity
+  relation to derive fresh-region separation. Their saved capacity-fact
+  interpretation, witness transport and the active entry's live heap relation
+  suffice to bound retained-token locations below the new region. The new
+  unbound transport preserves an older caller's environment; immediate return
+  binding reuses `eraseBind`. A two-publication regression derives the source
+  prefix and region and proves that retained-token preservation holds while
+  blanket ordinaryness fails. Existing same-entry producers specialize the
+  general law. This is a pointwise historical-caller producer, not yet the
+  hereditary stack push/pop closure or an initializer execution theorem.
 - Apply the existing rooted finite-trace/terminal theorem only after its
   explicit compiler-current-step admission, address-space/resource safety,
   entry/runtime contracts and argument arity have been constructed for this

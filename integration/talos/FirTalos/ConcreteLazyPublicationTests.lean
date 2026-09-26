@@ -638,4 +638,48 @@ theorem copiedArrayPush_publication
       (((leafTransport.trans arrayTransport).trans pushTransport).trans copyTransport))
     copyClosed (by change 2 ≤ 4; decide) `copiedArrayCache resultId
 
+/-- Historical fact evidence and an active heap suffice after an earlier
+publication. There is no current `StateRelated` premise for the saved caller,
+and the source prefix and new graph separation are derived, not supplied.
+The unchanged caller environment retains a nonempty token map; blanket
+ordinaryness is explicitly false across this very same pair of publications. -/
+theorem historicalCaller_twoPublications
+    (text : String)
+    {bindings : List (FVarId × AbiKind)} {savedLocals : Wasm.Locals}
+    {savedHeap activeHeap : MemoryState}
+    {savedWitness activeWitness : RefinementWitness}
+    (saved : ReuseCapacityFactsRel retainedFacts bindings retainedEnv
+      savedLocals savedHeap savedWitness)
+    (transport : WitnessTransport savedWitness activeWitness)
+    (active : LiveHeapRel activeHeap activeWitness
+      (publicationRuntime.setGlobal `cache publishedRoot)) :
+    let entry := publicationRuntime.setGlobal `cache publishedRoot
+    let allocated := alloc entry (.string text) false
+    let final := allocated.1.setGlobal `freshCache (.object allocated.2)
+    ReuseTokenOrdinaryTransport retainedFacts retainedEnv publicationRuntime final ∧
+      ¬ OrdinaryPersistenceTransport publicationRuntime final := by
+  dsimp only
+  let entry := publicationRuntime.setGlobal `cache publishedRoot
+  let allocated := alloc entry (.string text) false
+  have sourcePrefix : ReuseTokenOrdinaryTransport retainedFacts retainedEnv
+      publicationRuntime allocated.1 :=
+    (ReuseTokenOrdinaryTransport.ofPublicationDisjoint `cache publication_disjoint).trans
+      (.ofOrdinaryPersistence (alloc_ordinaryPersistenceTransport
+        (before := entry) (object := .string text) rfl))
+  have closed : HeapRegionClosed entry.nextLocation allocated.1.heap :=
+    (HeapRegionClosed.of_liveHeapRel active).alloc (object := .string text)
+      (persistent := false) rfl (by simp [HeapObject.ownedValues])
+  refine ⟨ReuseTokenOrdinaryTransport.freshRegion_setGlobal_of_witness
+    saved transport active sourcePrefix closed (Nat.le_refl _) `freshCache, ?_⟩
+  intro ordinary
+  have impossible := ordinary publishedLocation
+    { publishedCell with rc := 0, persistent := true } (by rfl)
+    (fun cell found => by
+      have same : cell = publishedCell := Option.some.inj
+        (found.symm.trans (show findCell? publicationRuntime.heap publishedLocation =
+          some publishedCell from rfl))
+      rw [same]
+      rfl)
+  cases impossible
+
 end FirTalos.Concrete

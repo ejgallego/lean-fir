@@ -100,8 +100,36 @@ theorem ReuseTokenOrdinaryBindTransport.precompose
   publication.precomposeRetained
     (ReuseTokenOrdinaryTransport.ofOrdinaryPersistence beforePublication)
 
-/-- A retained token resolved through the existing concrete state relation
-names an allocated source cell, hence precedes the next allocation frontier.
+/-- A saved caller's tokens remain below the active allocation frontier.
+Only its historical fact interpretation is needed: witness transport preserves
+the old location mapping, and the active heap relation supplies the bound.
+No current caller locals, capacity frame or ordinaryness invariant is assumed. -/
+theorem ReuseCapacityFactsRel.retainedToken_beforeNext_of_witness
+    {facts : ReuseCapacityFacts} {bindings : List (FVarId × AbiKind)}
+    {env : Env} {locals : Wasm.Locals} {savedHeap heap : MemoryState}
+    {savedWitness witness : RefinementWitness} {runtime : RuntimeState}
+    (saved : ReuseCapacityFactsRel facts bindings env locals savedHeap savedWitness)
+    (transport : WitnessTransport savedWitness witness)
+    (current : LiveHeapRel heap witness runtime)
+    {id : FVarId} {available location : Nat}
+    (tracked : findReuseCapacityEvidence? facts id = some (.retainedAtLeast available))
+    (tokenLookup : lookup env id = some (.reuseToken (some location))) :
+    location < runtime.nextLocation := by
+  obtain ⟨index, kind, lane, semantic, found, _, _, _, capacity⟩ :=
+    saved.resolve tracked
+  rw [tokenLookup] at found
+  cases Option.some.inj found
+  cases capacity with
+  | retainedToken value header owned minimum =>
+    cases value with
+    | reuseSome reference =>
+      cases reference with
+      | mapped mapped =>
+        obtain ⟨cell, found, _⟩ :=
+          current.concreteToSemantic _ _ (transport.location mapped)
+        exact current.locationsBeforeNext _ _ found
+
+/-- Current-state specialization of the historical token bound.
 Ordinaryness alone would not suffice: it permits absent token locations. -/
 theorem ReuseCapacityStateRelated.retainedToken_beforeNext
     {facts : ReuseCapacityFacts} {function : Fir.Wasm.Function}
@@ -112,19 +140,9 @@ theorem ReuseCapacityStateRelated.retainedToken_beforeNext
     {id : FVarId} {available location : Nat}
     (tracked : findReuseCapacityEvidence? facts id = some (.retainedAtLeast available))
     (tokenLookup : lookup env id = some (.reuseToken (some location))) :
-    location < runtime.nextLocation := by
-  obtain ⟨index, kind, lane, semantic, found, _, _, _, capacity⟩ :=
-    related.2.resolve tracked
-  rw [tokenLookup] at found
-  cases Option.some.inj found
-  cases capacity with
-  | retainedToken value header owned minimum =>
-    cases value with
-    | reuseSome reference =>
-      cases reference with
-      | mapped mapped =>
-        obtain ⟨cell, found, _⟩ := related.1.1.heap.concreteToSemantic _ _ mapped
-        exact related.1.1.heap.locationsBeforeNext _ _ found
+    location < runtime.nextLocation :=
+  related.2.retainedToken_beforeNext_of_witness (WitnessTransport.refl witness)
+    related.1.1.heap tracked tokenLookup
 
 /-- A heap object without owned values has a singleton reachable graph.
 This is a semantic object-shape fact, not a restriction on its ABI kind. -/
@@ -190,6 +208,16 @@ def HeapRegionClosed (cutoff : Location) (heap : Heap) : Prop :=
   ∀ parent cell child, cutoff ≤ parent → findCell? heap parent = some cell →
     Value.object (.heap child) ∈ cell.object.ownedValues.toList → cutoff ≤ child
 
+/-- Region initialization needs only the active heap relation, not a caller's
+locals or reuse-capacity facts. -/
+theorem HeapRegionClosed.of_liveHeapRel
+    {heap : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    (related : LiveHeapRel heap witness runtime) :
+    HeapRegionClosed runtime.nextLocation runtime.heap := by
+  intro parent cell child above found member
+  exact False.elim ((Nat.not_le_of_lt
+    (related.locationsBeforeNext _ _ found)) above)
+
 /-- Before the first allocation, the region above the source frontier is empty. -/
 theorem ReuseCapacityStateRelated.freshRegionClosed
     {facts : ReuseCapacityFacts} {function : Fir.Wasm.Function}
@@ -197,10 +225,8 @@ theorem ReuseCapacityStateRelated.freshRegionClosed
     {locals : Wasm.Locals} {witness : RefinementWitness}
     (related : ReuseCapacityStateRelated facts function runtime env store locals
       witness) :
-    HeapRegionClosed runtime.nextLocation runtime.heap := by
-  intro parent cell child above found member
-  exact False.elim ((Nat.not_le_of_lt
-    (related.1.1.heap.locationsBeforeNext _ _ found)) above)
+    HeapRegionClosed runtime.nextLocation runtime.heap :=
+  .of_liveHeapRel related.1.1.heap
 
 /-- Allocation preserves the region using only its new object's immediate
 owned fields; clients need not supply transitive reachability separation. -/
@@ -325,8 +351,29 @@ theorem HeapRegionClosed.reachable
     subst_vars
     exact closed _ _ _ ih found member
 
-/-- The original concrete caller relation places its tokens below the region;
-allocation-local closure places every published reachable node above it. -/
+/-- Separation for an arbitrary historical caller, measured at the active
+initializer's entry frontier. This does not require a reconstructed caller
+state relation at that entry, or any capacity/persistence transport to it. -/
+theorem ReuseTokenPublicationDisjoint.of_freshRegion_of_witness
+    {facts : ReuseCapacityFacts} {bindings : List (FVarId × AbiKind)}
+    {env : Env} {locals : Wasm.Locals} {savedHeap heap : MemoryState}
+    {savedWitness witness : RefinementWitness} {entry after : RuntimeState}
+    {root : Location}
+    (saved : ReuseCapacityFactsRel facts bindings env locals savedHeap savedWitness)
+    (transport : WitnessTransport savedWitness witness)
+    (current : LiveHeapRel heap witness entry)
+    (closed : HeapRegionClosed entry.nextLocation after.heap)
+    (rootBound : entry.nextLocation ≤ root) :
+    ReuseTokenPublicationDisjoint facts after env (.object (.heap root)) := by
+  intro id available location tracked tokenLookup reachable
+  have below := saved.retainedToken_beforeNext_of_witness transport current
+    tracked tokenLookup
+  have above := closed.reachable
+    (by intro candidate member; simpa using
+      (show candidate = root from by simpa using member) ▸ rootBound) reachable
+  exact (Nat.not_le_of_lt below) above
+
+/-- The original concrete caller relation is the same-entry specialization. -/
 theorem ReuseTokenPublicationDisjoint.of_freshRegion
     {facts : ReuseCapacityFacts} {function : Fir.Wasm.Function}
     {before after : RuntimeState} {env : Env} {store : Wasm.Store Host}
@@ -335,13 +382,30 @@ theorem ReuseTokenPublicationDisjoint.of_freshRegion
       witness)
     (closed : HeapRegionClosed before.nextLocation after.heap)
     (rootBound : before.nextLocation ≤ root) :
-    ReuseTokenPublicationDisjoint facts after env (.object (.heap root)) := by
-  intro id available location tracked tokenLookup reachable
-  have below := related.retainedToken_beforeNext tracked tokenLookup
-  have above := closed.reachable
-    (by intro candidate member; simpa using
-      (show candidate = root from by simpa using member) ▸ rootBound) reachable
-  exact (Nat.not_le_of_lt below) above
+    ReuseTokenPublicationDisjoint facts after env (.object (.heap root)) :=
+  .of_freshRegion_of_witness related.2 (WitnessTransport.refl witness) related.1.1.heap
+    closed rootBound
+
+/-- Preserve any historical caller without rebinding its environment. This
+form is intended for older suspended frames: only the immediate caller will
+later erase/bind a destination. The source prefix still needs its own frame
+proof; graph separation does not assert arbitrary program preservation. -/
+theorem ReuseTokenOrdinaryTransport.freshRegion_setGlobal_of_witness
+    {facts : ReuseCapacityFacts} {bindings : List (FVarId × AbiKind)}
+    {env : Env} {locals : Wasm.Locals} {savedHeap heap : MemoryState}
+    {savedWitness witness : RefinementWitness} {before entry after : RuntimeState}
+    {root : Location}
+    (saved : ReuseCapacityFactsRel facts bindings env locals savedHeap savedWitness)
+    (transport : WitnessTransport savedWitness witness)
+    (current : LiveHeapRel heap witness entry)
+    (calleePrefix : ReuseTokenOrdinaryTransport facts env before after)
+    (closed : HeapRegionClosed entry.nextLocation after.heap)
+    (rootBound : entry.nextLocation ≤ root)
+    (name : Name) :
+    ReuseTokenOrdinaryTransport facts env before
+      (after.setGlobal name (.object (.heap root))) :=
+  calleePrefix.trans (.ofPublicationDisjoint name
+    (.of_freshRegion_of_witness saved transport current closed rootBound))
 
 /-- Consume a locally established region at publication and bind. The prefix
 transport is explicit; this theorem does not certify arbitrary callee code. -/
@@ -357,8 +421,8 @@ theorem ReuseTokenOrdinaryBindTransport.freshRegion_setGlobal
     (name : Name) (result : FVarId) :
     ReuseTokenOrdinaryBindTransport facts result before
       (after.setGlobal name (.object (.heap root))) env (.object (.heap root)) :=
-  (ReuseTokenOrdinaryBindTransport.ofPublicationDisjoint name
-    (.of_freshRegion related closed rootBound)).precomposeRetained calleePrefix
+  (ReuseTokenOrdinaryTransport.freshRegion_setGlobal_of_witness related.2
+    (WitnessTransport.refl witness) related.1.1.heap calleePrefix closed rootBound name).eraseBind
 
 section InternalMiss
 
