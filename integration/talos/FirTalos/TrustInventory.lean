@@ -333,6 +333,8 @@ def endpointInventory : Array (Lean.Name × Array String) := #[
     standardAxioms ++ arrayPushMemoryNativeDebt),
   (`FirTalos.Concrete.emptyArray_boxUInt8Zero_push_publication,
     standardAxioms ++ arrayPushMemoryNativeDebt),
+  (`FirTalos.Concrete.freshArrayExternals_contract, standardAxioms),
+  (`FirTalos.Concrete.execSteps_of_run_outOfFuel, standardAxioms),
   (`FirTalos.Concrete.SourceLazyLetResult.miss_ordinaryBindTransport_of_internalCompiler,
     standardAxioms),
   (`FirTalos.Concrete.SourceLazyLetResult.miss_ordinaryBindTransport_of_publicationInduction,

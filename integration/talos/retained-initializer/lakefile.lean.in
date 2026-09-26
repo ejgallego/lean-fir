@@ -1,0 +1,20 @@
+import Lake
+open Lake DSL
+package retainedRC2
+require Fir from "../.."
+require FirTalos from "../talos-434/project"
+lean_lib ZipForStdSource where
+  srcDir := "zip-common"
+  globs := #[.submodules `ZipForStd]
+  leanOptions := #[⟨`compiler.postponeCompile, true⟩]
+lean_lib ZipCommonSource where
+  srcDir := "zip-common"
+  globs := #[.submodules `ZipCommon]
+  leanOptions := #[⟨`compiler.postponeCompile, true⟩]
+lean_lib LeanZipSource where
+  srcDir := "lean-zip"
+  globs := #[.submodules `Zip]
+  leanOptions := #[⟨`compiler.postponeCompile, true⟩, ⟨`maxRecDepth, 8192⟩]
+lean_lib RetainedRC2
+lean_lib RetainedDeclarations
+lean_lib RetainedInitializer

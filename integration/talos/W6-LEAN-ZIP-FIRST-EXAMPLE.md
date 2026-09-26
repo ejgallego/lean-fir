@@ -1,6 +1,43 @@
 # First W6 lean-zip example: captured stored-block compressor
 
-## Active checkpoint — 2026-09-25
+## Active checkpoint — 2026-09-26
+
+The checked input has arrived: W7 functional `249f476d5`, delivered by
+`W7-ROOT-20260926-003` at `82f25e39c`, defines `RetainedRC2.program` and
+kernel-checked initializer lookup/body equations. W6 reproduces it from the
+exact source Git objects in its own build directory. The source-body consumer
+is no longer blocked on capture. Root accepted the W7 dependency at
+`5c922bb65` on main, recorded in `ROOT-W6-20260926-006`; this remains distinct
+from acceptance of the W6 source-body proof.
+
+The first actual-body connection is now implemented in
+[`retained-initializer/RetainedInitializer.lean`](retained-initializer/RetainedInitializer.lean):
+
+- `RetainedInitializer.reaches_published` derives the exact 12-step source
+  prefix from a cold cache, using the checked program rather than a copied
+  AST. The result is a published singleton Array containing tagged zero,
+  unchanged world, and exactly two appended external events. The next step
+  returns that Array.
+- `RetainedInitializer.evaluates_and_preservesCaller` derives ordinary-token
+  preservation for arbitrary historical caller facts from their saved
+  interpretation, witness transport and current live-heap relation. It takes
+  no body-execution, graph-separation or publication-transport premise.
+- `freshArrayExternals_contract` provides an executable source-model witness
+  for the two uniform primitive contracts used by the body. This is not a
+  claim about the production external implementation or resident helpers.
+
+The independent external premise is `FreshArrayExternalContract`: exact empty
+allocation and unique, non-full, fresh-Array tagged push. Its production
+refinement, destination binding/return-pop composition, and hereditary
+suspended-stack restoration remain next obligations. In particular, the
+actual-body endpoint does not yet execute generated Wasm or remove central
+object/tobject lazy-miss exclusions.
+
+The [reproduction gate and trust boundary](retained-initializer/README.md)
+include exact compiled-dependency audits. The source theorem inherits seven
+existing boxing-policy native-evaluation axioms; no new axiom or native
+evaluation was added. This distinguishes the achieved source result from
+the broader publication-to-return/pop milestone below.
 
 The immediate target is one real initializer's publication-to-return/pop proof,
 not yet the complete compressor theorem. The live obligation table and scope
@@ -17,8 +54,8 @@ but report the new compiler and artifact identity; the old 4.33 retained olean
 is historical evidence, not an RC2 proof input. The required delivery is a
 kernel-checked `ImpureProgram`, exact lookup/body equations for
 `Zip.Spec.DeflateStoredCorrect.deflateStoredPure._closed_0`, and production
-lowering using that same definition. Until delivered, the actual-body consumer
-is blocked. No diagnostic JSON, hand-copied LCNF or substitute capture suffices.
+lowering using that same definition. That input is now delivered as recorded
+above. No diagnostic JSON, hand-copied LCNF or substitute capture suffices.
 
 The first W6 consumer must derive publication/binding transport from the real
 body's operations and apply `advance_popRetainedCache`, eliminating supplied
@@ -54,8 +91,8 @@ It may not reintroduce those obligations through a body-specific certificate.
 
 W7's `ROOT-W7-20260925-001` supplies a new exact-source RC2 nomination, a
 kernel-referable program, exact declaration/body equations and production
-lowering of that same definition. The request is open/unclaimed as of this
-plan; root owns assignment and landing coordination.
+lowering of that same definition. W7 has completed the input; root owns its
+landing coordination independently of this W6 proof successor.
 
 Inspect the delivered body before choosing primitive lemmas. Confirm its
 parameters, return kind, calls, control flow and owned-field values from the
