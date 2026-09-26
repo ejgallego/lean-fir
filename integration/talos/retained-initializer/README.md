@@ -47,6 +47,16 @@ heap-result publication rule must derive its cumulative transport before
 lifting object/tobject lazy-miss exclusions; this body theorem alone is not
 that central admission result.
 
+`reaches_publicationInput_withFrames` exposes the actual 11-step prefix with
+the cache marker still pending. `executes_and_publishesCache` takes that source
+publication step and derives the concrete cache host operation, post-runtime
+refinement, and cumulative entry transport including the two global-update
+store expressions. It derives the closed fresh graph from the checked body's
+singleton-Array result. The concrete pre-cache relation, entry transport,
+represented result and cache-slot facts remain explicit; no target prefix,
+seven-instruction publication path, global-index alignment or full post-cache
+stack relation is claimed by this endpoint.
+
 The two source external contracts are uniform primitive laws, not a
 per-program invariant. `FreshArrayExternalContract` specifies empty allocation
 and the fresh/non-full tagged-push branch. `freshArrayExternals_contract`
@@ -82,3 +92,7 @@ expression comparison. It introduces no new native evaluation or axiom.
 The captured program/body equations remain free of generated axioms. Generic
 external-model and finite-prefix helper proofs use standard axioms and are
 also in the ordinary Talos trust inventory.
+The concrete publication endpoint additionally inherits the existing
+`LinearMemory.assembleByte32` native bitvector axiom through recursive cache
+persistence. Its separate exact audit records that dependency; the source-only
+endpoints keep their narrower inventory. There are eleven consumer endpoints.

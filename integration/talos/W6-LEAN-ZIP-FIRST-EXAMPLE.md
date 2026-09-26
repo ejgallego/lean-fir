@@ -49,9 +49,14 @@ suspended callers retain entry-indexed `RetainedCallerTransport`, and the
 return/pop producer composes the callee transport back to the caller's original
 entry. Ordinary local operation laws are lifted by composition, not by resetting
 the saved scope. Legacy whole-declaration endpoints keep their stronger
-ordinary-persistence contract. The next heap-publication rule must derive the
-same cumulative transport before broadening lazy-miss admission; migration
-alone does not discharge that producer obligation.
+ordinary-persistence contract. The generic heap-publication rule now derives
+that cumulative transport from construction facts, and
+`executes_and_publishesCache` applies it at the actual body's eleventh-step
+publication boundary. Graph closure and root freshness are derived; pre-cache
+concrete refinement, transport and slot facts remain explicit. The two global
+updates are specified stores, not a generated instruction path or full
+cache/stack invariant. Broadening central lazy-miss admission still requires
+retaining and consuming this construction provenance there.
 
 The [reproduction gate and trust boundary](retained-initializer/README.md)
 include exact compiled-dependency audits. The source theorem inherits seven

@@ -2,6 +2,7 @@ import RetainedDeclarations
 import FirTalos.ConcreteArrayExternal
 import FirTalos.ConcreteStructuredSimulation
 import FirTalos.ConcreteRetainedTransports
+import FirTalos.ConcreteRetainedPublication
 import FirTalos.TrustAuditCore
 
 open Lean Lean.Compiler Fir.LeanIR.Impure Fir.Wasm.Concrete FirTalos.Concrete
@@ -25,10 +26,13 @@ def pushEvent (runtime : RuntimeState) : ExternalEvent := {
   args := #[.erased, .object (.heap runtime.nextLocation), .object (.tagged 0)],
   result := .object (.heap runtime.nextLocation) }
 
-def resultRuntime (runtime : RuntimeState) : RuntimeState :=
-  (semanticArrayResult { runtime with
+def publicationInput (runtime : RuntimeState) : RuntimeState :=
+  semanticArrayResult { runtime with
       trace := (runtime.trace.push (mkEmptyEvent runtime)).push (pushEvent runtime) }
-    #[.object (.tagged 0)] 5).setGlobal name (.object (.heap runtime.nextLocation))
+    #[.object (.tagged 0)] 5
+
+def resultRuntime (runtime : RuntimeState) : RuntimeState :=
+  (publicationInput runtime).setGlobal name (.object (.heap runtime.nextLocation))
 
 set_option maxRecDepth 8192 in
 set_option maxHeartbeats 2000000 in
@@ -57,7 +61,38 @@ theorem reaches_published_withFrames
     MachineState.withValue, resumeExternal, observe, cold, name,
     Pure.pure, Bind.bind, Except.pure, Except.bind, maxTaggedPayload,
     contract.mkEmpty, boxed, arrayExternalResponse, semanticArrayResult,
-    resultRuntime, mkEmptyEvent, pushEvent] at *
+    resultRuntime, publicationInput, mkEmptyEvent, pushEvent] at *
+  simp only [pushed]
+  exact ⟨_, rfl, rfl, rfl, rfl, rfl⟩
+
+set_option maxRecDepth 8192 in
+set_option maxHeartbeats 2000000 in
+theorem reaches_publicationInput_withFrames
+    (externals : ExternalImpl) (contract : FreshArrayExternalContract externals)
+    (runtime : RuntimeState) (cold : findGlobal? runtime.globals name = none)
+    (frames : List Frame) :
+    ∃ final,
+      run 11 externals { initialState RetainedRC2.program name #[] runtime with frames } =
+        .outOfFuel final ∧
+      final.runtime = publicationInput runtime ∧
+      final.control = .yielded (.object (.heap runtime.nextLocation)) ∧
+      final.frames = .cache name :: frames ∧ final.program = RetainedRC2.program := by
+  have boxed (state : RuntimeState) :
+      box state (.const `UInt8 []) (.scalar (.uint8 0)) =
+        .ok (state, .object (.tagged 0)) := by
+    exact semanticBox_tagged_eq state (.uint8 0) rfl (by decide)
+  have pushed := contract.pushFreshTagged
+    { runtime with trace := runtime.trace.push (mkEmptyEvent runtime) }
+    (pushDecl.params.map (·.type)) pushDecl.type 5 0 (by decide)
+  simp only [pushDecl, mkEmptyEvent, semanticArrayResult, arrayExternalResponse] at pushed
+  simp [initialState, run, executeStep, coreStep, invokeDecl,
+    RetainedRC2.initializer.findDecl, mkEmptyDecl.findDecl, pushDecl.findDecl,
+    RetainedRC2.initializer, mkEmptyDecl, pushDecl, bindParams, evalLetValue,
+    evalArgs, evalArg, lookupValue, lookup, Fir.LeanIR.Impure.bind, literal, pushBindFrame,
+    MachineState.withValue, resumeExternal, observe, cold, name,
+    Pure.pure, Bind.bind, Except.pure, Except.bind, maxTaggedPayload,
+    contract.mkEmpty, boxed, arrayExternalResponse, semanticArrayResult,
+    resultRuntime, publicationInput, mkEmptyEvent, pushEvent] at *
   simp only [pushed]
   exact ⟨_, rfl, rfl, rfl, rfl, rfl⟩
 
@@ -115,6 +150,66 @@ theorem evaluates_and_retainsCallers
   refine ⟨final, execSteps_of_run_outOfFuel execution, runtimeEq, control, frames, ?_⟩
   rw [runtimeEq]
   exact RetainedCallerTransport.freshArrayPublication related 5 0 name
+
+/-- Connect the checked body's source result to executable concrete cache
+publication and the cumulative resource transport. No graph closure or
+caller-specific publication certificate is supplied: the checked final heap
+shape and entry representation establish freshness. The concrete callee prefix
+is still explicit in `history` and `currentRelated`; this is not its execution
+proof or central lazy-miss admission. -/
+theorem executes_and_publishesCache
+    (externals : ExternalImpl) (contract : FreshArrayExternalContract externals)
+    (runtime : RuntimeState) (cold : findGlobal? runtime.globals name = none)
+    {entryStore store : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness} {kind : Fir.Wasm.AbiKind}
+    {physical : Wasm.Value} {slot : ConcreteGlobalSlot}
+    (history : RetainedCodeEntryTransports runtime (publicationInput runtime)
+      entryStore store entryWitness witness)
+    (entryRelated : LiveHeapRel entryStore.host.runtime.heap entryWitness runtime)
+    (currentRelated : ConcreteRuntimeRel store.host.runtime witness (publicationInput runtime))
+    (valueRelated : PhysicalValueRel witness kind physical
+      (.object (.heap runtime.nextLocation)))
+    (found : store.host.runtime.globals.find? name = some slot)
+    (kindEq : slot.kind = kind)
+    (descriptorsEq : store.host.closureDescriptors = witness.closureDescriptors)
+    (cacheIndex : Nat) :
+    ∃ before final runtimeAfter,
+      ExecSteps externals 11 (initialState RetainedRC2.program name #[] runtime) before ∧
+      before.runtime = publicationInput runtime ∧
+      executeStep externals before = .next final ∧
+      ExecSteps externals 12 (initialState RetainedRC2.program name #[] runtime) final ∧
+      final.runtime = resultRuntime runtime ∧
+      final.control = .yielded (.object (.heap runtime.nextLocation)) ∧
+      final.frames = [] ∧
+      cacheSetStep name kind store [physical] =
+        .Return [physical] (replaceRuntime store runtimeAfter) ∧
+      let nextStore := writeWasmGlobal
+        (writeWasmGlobal (replaceRuntime store runtimeAfter)
+          (2 * cacheIndex + 1) physical) (2 * cacheIndex) (.i32 1)
+      ConcreteRuntimeRel nextStore.host.runtime witness final.runtime ∧
+      RetainedCodeEntryTransports runtime final.runtime entryStore nextStore entryWitness witness := by
+  have closed : HeapRegionClosed runtime.nextLocation (publicationInput runtime).heap := by
+    apply (HeapRegionClosed.of_liveHeapRel entryRelated).alloc
+      (object := .array #[.object (.tagged 0)] 5) (persistent := false)
+      (after := semanticArrayResult runtime #[.object (.tagged 0)] 5) rfl
+    simp [HeapObject.ownedValues]
+  obtain ⟨runtimeAfter, operation, runtimeRelated, transported⟩ :=
+    history.publishFreshCache entryRelated currentRelated valueRelated found
+      kindEq descriptorsEq closed (Nat.le_refl _) cacheIndex
+  obtain ⟨before, execution, runtimeEq, control, frames, _⟩ :=
+    reaches_publicationInput_withFrames externals contract runtime cold []
+  let final : MachineState := { before with
+    runtime := resultRuntime runtime
+    control := .yielded (.object (.heap runtime.nextLocation))
+    frames := [] }
+  have sourceStep : executeStep externals before = .next final := by
+    simp [executeStep, coreStep, control, frames, runtimeEq, final, resultRuntime]
+  have sourcePrefix := execSteps_of_run_outOfFuel execution
+  refine ⟨before, final, runtimeAfter, sourcePrefix, runtimeEq, sourceStep,
+    execSteps_trans_exact sourcePrefix (.step sourceStep (.refl _)),
+    rfl, rfl, rfl, operation, ?_, ?_⟩
+  · exact runtimeRelated
+  · exact transported
 
 /-- The caller state after binding the published result. The initializer's
 temporary environment and join environment are not retained. -/
@@ -281,6 +376,7 @@ run_cmd do
     "Fir.Wasm.Concrete.boxUsesTaggedRepresentation_boxedScalar._native.native_decide.ax_1_14",
     "Fir.Wasm.Concrete.boxUsesTaggedRepresentation_boxedScalar._native.native_decide.ax_1_15"]
   for endpoint in #[`RetainedInitializer.reaches_published_withFrames,
+      `RetainedInitializer.reaches_publicationInput_withFrames,
       `RetainedInitializer.reaches_published,
       `RetainedInitializer.evaluates_and_preservesCaller,
       `RetainedInitializer.evaluates_and_retainsCallers,
@@ -288,5 +384,9 @@ run_cmd do
       `RetainedInitializer.return_pop_preservesCaller,
       `RetainedInitializer.executable_example] do
     FirTalos.TrustAudit.check endpoint expected
+  -- Concrete cache publication additionally consumes the already audited
+  -- byte-assembly theorem; source-only consumers above do not inherit it.
+  FirTalos.TrustAudit.check `RetainedInitializer.executes_and_publishesCache
+    (expected ++ #["_private.Fir.Wasm.Concrete.Memory.0.Fir.Wasm.Concrete.LinearMemory.assembleByte32._native.bv_decide.ax_1_6"])
   FirTalos.TrustAudit.check `RetainedInitializer.example_result_contents #["propext"]
   FirTalos.TrustAudit.check `RetainedInitializer.example_not_blanketOrdinary #["propext"]

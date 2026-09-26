@@ -68,6 +68,7 @@ bytes, or the complete lean-zip application.
 | Publication separation | Derived for the actual singleton-Array initializer, including historical caller facts | Production external refinement; broader producers |
 | First actual lean-zip initializer | Kernel-checked RC2 program; source execution and caller-binding proof | Production Array contracts and preceding target execution |
 | Entry-relative caller preservation | Central active/suspended scopes use `RetainedCodeEntryTransports`; return/pop composes to the original caller entry | Derive heap-publication transports at the lazy-miss consumer |
+| Fresh heap cache publication | `RetainedCodeEntryTransports.publishFreshCache` derives executable host publication and cumulative transports; `RetainedInitializer.executes_and_publishesCache` supplies the actual source boundary and graph shape | Wire construction provenance into central lazy-miss admission; target prefix and full cache/stack relation remain separate |
 | Whole `compressStored` boundary | Roadmap and conditional backend infrastructure | ByteArray relation/operations, remaining admission, then linking/encoding/decoding |
 
 In particular, `ConcreteStructuredLazyMissBackendCoverageAt` still explicitly
@@ -107,10 +108,23 @@ The checked initializer supplies the new law in
 and entry heap representation. `example_not_blanketOrdinary` proves that its
 published result violates the old blanket law (an absent entry cell satisfies
 that law's antecedent vacuously). The distinction is kernel checked, not a
-terminological weakening. Next derive the cache-publication transport at the
-heap-result lazy-miss consumer; its object/tobject exclusions remain in force.
-Production Array implementation and the target prefix remain separate
-obligations.
+terminological weakening. The general publication rule is now
+`RetainedCallerTransport.setGlobal_of_freshRegion`: a closed newly allocated
+graph can be published while keeping the original entry witness fixed.
+Reindexing this local step to the current witness would wrongly protect the
+new result against publication. `RetainedCodeEntryTransports.publishFreshCache`
+also derives the actual concrete cache operation, runtime refinement and
+physical capacity transport from existing cache correctness. Its two global
+updates are store expressions, not an instruction-execution or full cache-ABI
+theorem.
+
+`RetainedInitializer.executes_and_publishesCache` reaches the exact pending
+publication state in 11 source steps, takes its publication transition, and
+connects to that host rule. It derives region closure and root freshness from
+the checked singleton-Array shape; callers do not supply them. Its pre-cache
+concrete relation, represented result, cumulative transport and slot metadata
+remain premises. Central object/tobject exclusions remain in force until the
+dispatcher retains and consumes the required construction provenance.
 
 The fresh-region proof checkpoint `f5bcf3fd3` is based on accepted main
 `97c257cc4`. Its proof sources are unchanged from reviewed `c67c6ed21`;
@@ -125,10 +139,11 @@ Connect the checked singleton-Array initializer to heap-result cache
 publication in the central relation. The body-level source execution and
 caller-specific publication/binding transport already exist, and the
 hereditary scope now accepts entry-indexed retained transport. The remaining
-publication rule must preserve both current saved facts and the cumulative
-transport from the original entry, without caller-supplied graph-separation
-evidence or blanket ordinaryness. Do not simply delete the object/tobject
-exclusions before proving that rule's closure.
+publication consumer must now use the derived cumulative transport and retain
+the producer's construction provenance, without adding a public client
+graph-separation invariant. The generic host rule and actual-body instance
+are available; the central dispatcher has not been broadened. Do not simply
+delete the object/tobject exclusions before proving that rule's closure.
 
 In parallel proof order, discharge `FreshArrayExternalContract` against the
 production primitive implementation and construct the generated target callee
