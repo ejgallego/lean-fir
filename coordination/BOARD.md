@@ -21,10 +21,10 @@ hashes below describe past acceptance, not a live registry or storage obligation
 W6's accumulated `_build` validation trees have been retired; their old receipts
 cannot be replayed after deletion. Source checkpoints, packages and lightweight
 logs remain. Fresh `make check` and Talos checks retain their existing gates;
-W6 proof work was explicitly resumed by the maintainer on 2026-09-22; the
-current retained-initializer theorem still waits for W7's checked RC2 capture
-reification. Other parked proof work requires an explicit resume. See
-`docs/validation.md`.
+W6 proof work was explicitly resumed by the maintainer on 2026-09-22. The
+retained-initializer input prerequisite is now integrated on RC2; downstream
+W6 proof consumption remains open. Other parked proof work requires an explicit
+resume. See `docs/validation.md`.
 
 `fir/root` (the meta lane) is the maintainer-appointed standing integration
 owner from 2026-09-09 until explicitly reassigned. Root owns serial green
@@ -33,6 +33,33 @@ settlement. W7 owns generation; W6 owns concrete-runtime proofs. Root's local
 session mapping is maintained with `scripts/mailbox route` and does not fall
 back to W7 when root is idle. Routine integration within these boundaries is
 authorized; remote publication and destructive cleanup are separate actions.
+
+## Current RC2 retained-input handoff (2026-09-26)
+
+W7's checked structural LCNF reification is landed on main at `5c922bb6`
+(functional commit `e7136393`), rebased from exact W7 checkpoint
+`82f25e39` / functional `249f476d` onto the then-current main. It adds a
+constructor-only quote/readback boundary, synchronous safe kernel-checked
+program definition, exact initializer lookup/body equations, and lowers only
+the checked readback value. It changes no shared semantic/runtime/ABI or
+production lowering policy. The generic positive/negative corpus builds; the
+concrete RC2 capture finds the nominated declaration and reproduces the
+ordinary, closed, and resident production-lowering outputs. Only the lookup
+theorem carries standard `propext`; the program, declaration, and body equation
+have no axiom dependencies.
+
+W6 can consume `RetainedRC2.program`,
+`RetainedRC2.initializer.findDecl`, and `RetainedRC2.initializer.body`. The
+producer's ignored RC2 olean was SHA-256
+`7eb6d2adaf1f60e31cb7d53d5f1149593a3778084a3faaffc25ee3776efe2b0b`; recreate
+it from the exact source/toolchain recipe in
+`Fir/Compiler/LCNF/README.md` rather than treating that local build output as a
+portable package. The source/setup recipe and boundary limitations are recorded
+there. Root reran the focused corpus build, `make check`, `make talos-setup`,
+`make talos-check`, and the full W7 artifact gate on the refreshed candidate;
+all pass. This makes the proof input available, not the W6 retained-initializer
+theorem itself. The historical 4.33 artifact remains provenance only; matching
+Wasm bytes do not assert cross-version AST or proof identity.
 
 ## Integration queue settled (2026-09-09)
 
