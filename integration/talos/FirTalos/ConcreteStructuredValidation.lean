@@ -6809,8 +6809,9 @@ theorem ConcreteStructuredValidatedReturnedOutcome.advance_lazyCacheWithSpine_of
           (WitnessTransport.refl witness) publicationCapacity
       have nextOrdinary :
           ReuseTokenOrdinaryRel callerFacts nextRuntime callerEnv :=
-        (callerScope.1.1.1.1.1.2.1.transport
-          currentScope.transports.ordinary).transport publicationOrdinary
+        (currentScope.transports.retained callerScope.1.1.stateRelated.2
+          (WitnessTransport.refl activeEntryWitness)
+          callerScope.1.1.1.1.1.2.1).transport publicationOrdinary
       have nextAligned :
           ConcreteLocalFrameAligned callerFunction nextRuntime callerEnv
             nextStore callerLocals witness := by
@@ -6887,18 +6888,15 @@ theorem ConcreteStructuredValidatedReturnedOutcome.advance_lazyCacheWithSpine_of
         hostDescriptorsPreserved := publicationDescriptors
         witnessDescriptorsPreserved := rfl }
       have activeToNext :
-          ReuseCapacityCodeEntryTransports activeEntryRuntime nextRuntime
+          RetainedCodeEntryTransports activeEntryRuntime nextRuntime
             activeEntryStore nextStore activeEntryWitness witness :=
         currentScope.transports.step (WitnessTransport.refl witness)
           (ClosureAllocationsPersistent.refl witness) publicationCapacity
           publicationOrdinary publicationExternals publicationTables
       have nextEntry :
-          ReuseCapacityCodeEntryTransports callerEntryRuntime nextRuntime
+          RetainedCodeEntryTransports callerEntryRuntime nextRuntime
             callerEntryStore nextStore callerEntryWitness witness :=
-        callerScope.transports.step activeToNext.witness
-          activeToNext.closureAllocationsPersistent activeToNext.capacity
-          activeToNext.ordinary activeToNext.externals
-          activeToNext.toClosureTablesTransport
+        callerScope.transports.trans activeToNext
       have nextAbi :
           ClosureAllocationsAbiAligned callerContext.program witness := by
         rw [← programEq, ← spec.contextProgram]

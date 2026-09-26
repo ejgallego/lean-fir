@@ -37,12 +37,21 @@ derived, not supplied.
 
 The independent external premise is `FreshArrayExternalContract`: exact empty
 allocation and unique, non-full, fresh-Array tagged push. Its production
-refinement, the target callee prefix, and hereditary suspended-stack restoration
-remain next obligations. The new connection retains the target return focus,
+refinement and the target callee prefix remain next obligations. The new
+connection retains the target return focus,
 callee frame, witness/capacity transports, original caller scope and historical
 tail. In particular, it executes only the target return/bind suffix, not the
 whole generated initializer, and does not remove central object/tobject
 lazy-miss exclusions.
+
+The central resource-stack migration is now implemented: active scopes and
+suspended callers retain entry-indexed `RetainedCallerTransport`, and the
+return/pop producer composes the callee transport back to the caller's original
+entry. Ordinary local operation laws are lifted by composition, not by resetting
+the saved scope. Legacy whole-declaration endpoints keep their stronger
+ordinary-persistence contract. The next heap-publication rule must derive the
+same cumulative transport before broadening lazy-miss admission; migration
+alone does not discharge that producer obligation.
 
 The [reproduction gate and trust boundary](retained-initializer/README.md)
 include exact compiled-dependency audits. The source theorem inherits seven
@@ -72,8 +81,9 @@ The first W6 consumer must derive publication/binding transport from the real
 body's operations and apply `advance_popRetainedCache`, eliminating supplied
 graph-separation/ordinary-binding obligations for this body. It must retain
 the independent execution, representation, witness/capacity and historical-frame
-premises. Reconstructing the stronger hereditary resource scope is a distinct
-next proof obligation; a restored cache/ABI frame alone does not establish it.
+premises. The generic hereditary scope consumer is now migrated; deriving its
+complete transport package from actual target initializer execution remains
+distinct from restoring the caller cache/ABI frame alone.
 
 ## Next proof plan: actual initializer to caller restoration
 

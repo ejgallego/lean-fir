@@ -2,6 +2,7 @@ import FirTalos.ConcreteTraceSimulation
 import FirTalos.ConcreteCompilerCorrectness
 import FirTalos.ConcreteReuseCapacityCacheCorrectness
 import FirTalos.ConcreteResidualLocalAlignment
+import FirTalos.ConcreteRetainedTransports
 import FirTalos.Correctness.StructuredWasmAdequacy
 
 /-!
@@ -2956,7 +2957,7 @@ theorem ConcreteReuseCapacityCacheFrame.withValues
       budget⟩, integer, natural, scalar⟩, descriptors⟩, cache, closureTables⟩
 
 /-- Entry-relative transports are independent of the current operand stack. -/
-theorem ReuseCapacityEntryRelativeFrame.withValues
+theorem RetainedEntryRelativeFrame.withValues
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function} {externals : ExternalImpl}
     {entryRuntime currentRuntime : RuntimeState}
@@ -2965,12 +2966,12 @@ theorem ReuseCapacityEntryRelativeFrame.withValues
     {facts : ReuseCapacityFacts} {remainingBytes : Nat}
     {currentEnv : Env} {currentLocals : Wasm.Locals}
     (frame :
-      ReuseCapacityEntryRelativeFrame
+      RetainedEntryRelativeFrame
         (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
         entryRuntime entryStore entryWitness facts remainingBytes currentRuntime
         currentEnv currentStore currentLocals currentWitness)
     (values : List Wasm.Value) :
-    ReuseCapacityEntryRelativeFrame
+    RetainedEntryRelativeFrame
       (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
       entryRuntime entryStore entryWitness facts remainingBytes currentRuntime
       currentEnv currentStore { currentLocals with values } currentWitness :=
@@ -2981,7 +2982,7 @@ effect.  This is the common algebra behind reference-count and field-mutation
 steps: the operation law supplies the executable effect, capacity and source
 ownership transports, while this theorem preserves pure external handlers,
 cache globals, immutable closure tables, and the cumulative entry relation. -/
-theorem ReuseCapacityEntryRelativeFrame.ofReplaceHeapEffectStep
+theorem RetainedEntryRelativeFrame.ofReplaceHeapEffectStep
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
@@ -2997,7 +2998,7 @@ theorem ReuseCapacityEntryRelativeFrame.ofReplaceHeapEffectStep
     {code continuation : Lean.Compiler.LCNF.Code .impure}
     {target targetRest : Wasm.Program}
     (invariant :
-      ReuseCapacityEntryRelativeFrame
+      RetainedEntryRelativeFrame
         (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
         entryRuntime entryStore entryWitness facts remainingBytes sourceRuntime
         sourceEnv targetStore targetLocals witness)
@@ -3011,7 +3012,7 @@ theorem ReuseCapacityEntryRelativeFrame.ofReplaceHeapEffectStep
     (ordinary : OrdinaryPersistenceTransport sourceRuntime nextRuntime)
     (sourceGlobals : nextRuntime.globals = sourceRuntime.globals)
     (cursor : heap.heapCursor = targetStore.host.runtime.heap.heapCursor) :
-    ReuseCapacityEntryRelativeFrame
+    RetainedEntryRelativeFrame
       (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
       entryRuntime entryStore entryWitness facts remainingBytes nextRuntime
       sourceEnv (replaceHeap targetStore heap) targetLocals witness := by
@@ -3069,7 +3070,7 @@ theorem ReuseCapacityEntryRelativeFrame.ofReplaceHeapEffectStep
       ClosureTablesAgree (replaceHeap targetStore heap) witness :=
     transports.toClosureTablesTransport.agree invariant.1.2.2
   have nextEntry :
-      ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
+      RetainedCodeEntryTransports entryRuntime nextRuntime entryStore
         (replaceHeap targetStore heap) entryWitness witness :=
     invariant.2.step transports.witnessTransport
       transports.closureAllocationsPersistent transports.capacity
@@ -7637,7 +7638,7 @@ theorem
       ConcreteReuseCapacityCacheFrame sourceModule callerFunction externals
         facts remainingBytes sourceRuntime callerEnv targetStore callerLocals
         witness) :
-    ReuseCapacityEntryRelativeFrame
+    RetainedEntryRelativeFrame
       (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction externals)
       sourceRuntime targetStore witness [] remainingBytes sourceRuntime
       resolution.calleeEnv targetStore
@@ -7645,7 +7646,7 @@ theorem
   exact
     ⟨callerFrame.generatedSaturatedClosureCalleeEntryAtCost site resolution
       row entry.argumentsRelated (Nat.le_refl remainingBytes),
-      ReuseCapacityCodeEntryTransports.refl sourceRuntime targetStore witness⟩
+      RetainedCodeEntryTransports.refl sourceRuntime targetStore witness⟩
 
 /-- Close a saturated recursive callee at a related yield.  Entry-relative
 transports reinterpret the saved caller locals in the evolved store/witness;
@@ -7699,7 +7700,7 @@ theorem
       currentRuntime currentEnv sourceValue currentStore calleeLocals
       currentWitness actualKind physical source target)
     (invariant :
-      ReuseCapacityEntryRelativeFrame
+      RetainedEntryRelativeFrame
         (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction externals)
         entryRuntime entryStore entryWitness resultFacts remainingBytes
         currentRuntime currentEnv currentStore calleeLocals currentWitness)
@@ -10076,8 +10077,26 @@ theorem WitnessTransport.savedStateRelated
   exact ⟨currentRelated.1, currentRelated.2.1,
     EnvLocalsRelated.witnessTransport transport entryRelated.2.2⟩
 
-/-- Compatibility with the historical entry package. Saved-local transport
-itself requires only witness growth, not ordinaryness of every heap cell. -/
+/-- Saved-local transport requires only witness growth, not ordinaryness of
+every heap cell. -/
+theorem RetainedCodeEntryTransports.savedStateRelated
+    {entryRuntime currentRuntime : RuntimeState}
+    {entryStore currentStore : Wasm.Store Host}
+    {entryWitness currentWitness : RefinementWitness}
+    {entryFunction currentFunction : Fir.Wasm.Function}
+    {entryEnv currentEnv : Env}
+    {entryLocals currentLocals : Wasm.Locals}
+    (transports : RetainedCodeEntryTransports entryRuntime currentRuntime
+      entryStore currentStore entryWitness currentWitness)
+    (entryRelated : StateRelated entryFunction entryRuntime entryEnv entryStore
+      entryLocals entryWitness)
+    (currentRelated : StateRelated currentFunction currentRuntime currentEnv
+      currentStore currentLocals currentWitness) :
+    StateRelated entryFunction currentRuntime entryEnv currentStore entryLocals
+      currentWitness :=
+  WitnessTransport.savedStateRelated transports.witness entryRelated currentRelated
+
+/-- Preserve the historical transport API for whole-declaration clients. -/
 theorem ReuseCapacityCodeEntryTransports.savedStateRelated
     {entryRuntime currentRuntime : RuntimeState}
     {entryStore currentStore : Wasm.Store Host}
@@ -10139,14 +10158,14 @@ theorem
       ConcreteReuseCapacityCacheFrame sourceModule callerFunction externals
         facts remainingBytes entryRuntime callerEnv entryStore callerLocals
         entryWitness) :
-    ReuseCapacityEntryRelativeFrame
+    RetainedEntryRelativeFrame
       (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction externals)
       entryRuntime entryStore entryWitness [] remainingBytes entryRuntime
       site.calleeEnv entryStore (row.targetFunction.toLocals physicalArgs)
       entryWitness := by
   exact
     ⟨callerFrame.generatedDirectCalleeEntry site row entry.argumentsRelated,
-      ReuseCapacityCodeEntryTransports.refl entryRuntime entryStore
+      RetainedCodeEntryTransports.refl entryRuntime entryStore
         entryWitness⟩
 
 /-- One saved source bind frame corresponds to the generated call frame whose
@@ -10598,7 +10617,7 @@ theorem ConcreteStructuredFrameRel.transport
     {currentLocals : Wasm.Locals}
     (related : ConcreteStructuredFrameRel program entryRuntime entryStore
       entryWitness expectedResult sourceFrames targetFrames)
-    (transports : ReuseCapacityCodeEntryTransports entryRuntime currentRuntime
+    (transports : RetainedCodeEntryTransports entryRuntime currentRuntime
       entryStore currentStore entryWitness currentWitness)
     (currentRelated : StateRelated currentFunction currentRuntime currentEnv
       currentStore currentLocals currentWitness) :
@@ -10743,7 +10762,7 @@ theorem ConcreteStructuredStackRel.observes
 
 The existential entry anchor is fixed for the currently executing generated
 function.  The cache/ownership/fact/budget frame describes the current state,
-and `ReuseCapacityCodeEntryTransports` records everything that happened since
+and `RetainedCodeEntryTransports` records everything that happened since
 that entry.  Entering a nested call stores this predicate for the caller and
 starts a fresh reflexive anchor for the callee; returning composes the callee
 transports with the stored caller.  No result value, final state, or evaluation
@@ -10761,7 +10780,7 @@ def ConcreteStructuredCurrentResource
     (targetLocals : Wasm.Locals)
     (witness : RefinementWitness) : Prop :=
   ∃ entryRuntime entryStore entryWitness,
-    ReuseCapacityEntryRelativeFrame
+    RetainedEntryRelativeFrame
         (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
         entryRuntime entryStore entryWitness facts remainingBytes sourceRuntime
         sourceEnv targetStore targetLocals witness ∧
@@ -10788,7 +10807,7 @@ def ConcreteStructuredResourceScope
     (targetStore : Wasm.Store Host)
     (targetLocals : Wasm.Locals)
     (witness : RefinementWitness) : Prop :=
-  ReuseCapacityEntryRelativeFrame
+  RetainedEntryRelativeFrame
       (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
       entryRuntime entryStore entryWitness facts remainingBytes sourceRuntime
       sourceEnv targetStore targetLocals witness ∧
@@ -10836,7 +10855,7 @@ theorem ConcreteStructuredResourceScope.root
       externals sourceRuntime targetStore witness facts remainingBytes
       sourceRuntime sourceEnv targetStore targetLocals witness :=
   ⟨⟨invariant.cacheFrame,
-      ReuseCapacityCodeEntryTransports.refl sourceRuntime targetStore witness⟩,
+      RetainedCodeEntryTransports.refl sourceRuntime targetStore witness⟩,
     invariant.closureAbi⟩
 
 theorem ConcreteStructuredResourceScope.stateRelated
@@ -10917,7 +10936,7 @@ theorem ConcreteStructuredResourceScope.transports
     (scope : ConcreteStructuredResourceScope context sourceModule
       sourceFunction externals entryRuntime entryStore entryWitness facts
       remainingBytes sourceRuntime sourceEnv targetStore targetLocals witness) :
-    ReuseCapacityCodeEntryTransports entryRuntime sourceRuntime entryStore
+    RetainedCodeEntryTransports entryRuntime sourceRuntime entryStore
       targetStore entryWitness witness :=
   scope.1.2
 
@@ -11012,7 +11031,7 @@ theorem ConcreteStructuredResourceScope.afterExternalCall
   have nextClosureTables : ClosureTablesAgree nextStore nextWitness :=
     evidence.closureTables.agree closureTableAgreement
   have nextEntry :
-      ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
+      RetainedCodeEntryTransports entryRuntime nextRuntime entryStore
         nextStore entryWitness nextWitness :=
     entryTransports.step evidence.witnessTransport
       evidence.closureAllocationsPersistent evidence.capacityTransport
@@ -11517,7 +11536,7 @@ theorem ConcreteStructuredCurrentResource.root
       targetLocals witness :=
   ⟨sourceRuntime, targetStore, witness,
     ⟨invariant.cacheFrame,
-      ReuseCapacityCodeEntryTransports.refl sourceRuntime targetStore witness⟩,
+      RetainedCodeEntryTransports.refl sourceRuntime targetStore witness⟩,
     invariant.closureAbi⟩
 
 theorem ConcreteStructuredCurrentResource.entryFrame
@@ -11536,7 +11555,7 @@ theorem ConcreteStructuredCurrentResource.entryFrame
       sourceFunction externals facts remainingBytes sourceRuntime sourceEnv
       targetStore targetLocals witness) :
     ∃ entryRuntime entryStore entryWitness,
-      ReuseCapacityEntryRelativeFrame
+      RetainedEntryRelativeFrame
         (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
         entryRuntime entryStore entryWitness facts remainingBytes sourceRuntime
         sourceEnv targetStore targetLocals witness := by
@@ -11931,7 +11950,7 @@ theorem ConcreteStructuredDirectCallEntryFocus.bindFrame_of_yield
       currentRuntime currentEnv sourceValue currentStore calleeLocals
       currentWitness actualKind physical source target)
     (transports :
-      ReuseCapacityCodeEntryTransports entryRuntime currentRuntime entryStore
+      RetainedCodeEntryTransports entryRuntime currentRuntime entryStore
         currentStore entryWitness currentWitness)
     (sourceFramesEq :
       source.frames =
@@ -12021,7 +12040,7 @@ theorem
       currentRuntime currentEnv sourceValue currentStore calleeLocals
       currentWitness actualKind physical source target)
     (invariant :
-      ReuseCapacityEntryRelativeFrame
+      RetainedEntryRelativeFrame
         (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction externals)
         entryRuntime entryStore entryWitness resultFacts remainingBytes
         currentRuntime currentEnv currentStore calleeLocals currentWitness)
@@ -12286,7 +12305,7 @@ theorem ConcreteStructuredResourceScope.restoreCaller
       (bind callerEnv result sourceValue) currentStore resumedLocals
       currentWitness := by
   have restored :=
-    caller.1.restoreDirectCaller callee.1 finalRelated finalAligned resultFound
+    RetainedCacheEntryFrame.restoreCaller caller.1 callee.1 finalRelated finalAligned resultFound
       localUpdate
   have callerAbi :
       ClosureAllocationsAbiAligned callerContext.program currentWitness := by
@@ -12317,7 +12336,7 @@ theorem ConcreteStructuredCurrentResource.restoreCaller
     {sourceValue : Value}
     {physical : Wasm.Value}
     (caller :
-      ReuseCapacityEntryRelativeFrame
+      RetainedEntryRelativeFrame
         (ConcreteReuseCapacityCacheFrame sourceModule callerFunction externals)
         outerRuntime outerStore outerWitness facts callerBytes callRuntime
         callerEnv callStore callerLocals callWitness)
@@ -12343,7 +12362,7 @@ theorem ConcreteStructuredCurrentResource.restoreCaller
       resultBytes currentRuntime (bind callerEnv result sourceValue)
       currentStore resumedLocals currentWitness := by
   have restored :=
-    caller.restoreDirectCaller callee.1 finalRelated finalAligned resultFound
+    RetainedCacheEntryFrame.restoreCaller caller callee.1 finalRelated finalAligned resultFound
       localUpdate
   have callerAbi :
       ClosureAllocationsAbiAligned callerContext.program currentWitness := by
@@ -12973,7 +12992,7 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryIncrement
         sourceRuntime sourceEnv code targetStore targetLocals targetCode witness
         source target)
     (invariant :
-      ReuseCapacityEntryRelativeFrame
+      RetainedEntryRelativeFrame
         (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
         entryRuntime entryStore entryWitness facts remainingBytes sourceRuntime
         sourceEnv targetStore targetLocals witness) :
@@ -12987,7 +13006,7 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryIncrement
           ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
               nextRuntime sourceEnv continuation nextStore targetLocals
               targetRest witness sourceAfter targetAfter ∧
-            ReuseCapacityEntryRelativeFrame
+            RetainedEntryRelativeFrame
               (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
                 externals)
               entryRuntime entryStore entryWitness facts remainingBytes
@@ -13064,7 +13083,7 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryIncrement
             subst nextRuntime
             rfl
           have nextInvariant :
-              ReuseCapacityEntryRelativeFrame
+              RetainedEntryRelativeFrame
                 (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
                   externals)
                 entryRuntime entryStore entryWitness facts remainingBytes
@@ -13182,7 +13201,7 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryDecrement
         sourceRuntime sourceEnv code targetStore targetLocals targetCode witness
         source target)
     (invariant :
-      ReuseCapacityEntryRelativeFrame
+      RetainedEntryRelativeFrame
         (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
         entryRuntime entryStore entryWitness facts remainingBytes sourceRuntime
         sourceEnv targetStore targetLocals witness) :
@@ -13196,7 +13215,7 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryDecrement
           ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
               nextRuntime sourceEnv continuation nextStore targetLocals
               targetRest witness sourceAfter targetAfter ∧
-            ReuseCapacityEntryRelativeFrame
+            RetainedEntryRelativeFrame
               (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
                 externals)
               entryRuntime entryStore entryWitness facts remainingBytes
@@ -13274,7 +13293,7 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryDecrement
               nextRuntime.globals = sourceRuntime.globals :=
             (decValue_runtimeAux updated).globals
           have nextInvariant :
-              ReuseCapacityEntryRelativeFrame
+              RetainedEntryRelativeFrame
                 (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
                   externals)
                 entryRuntime entryStore entryWitness facts remainingBytes
@@ -13393,7 +13412,7 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryDelete
         sourceRuntime sourceEnv code targetStore targetLocals targetCode witness
         source target)
     (invariant :
-      ReuseCapacityEntryRelativeFrame
+      RetainedEntryRelativeFrame
         (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
         entryRuntime entryStore entryWitness facts remainingBytes sourceRuntime
         sourceEnv targetStore targetLocals witness) :
@@ -13407,7 +13426,7 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryDelete
           ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
               nextRuntime sourceEnv continuation nextStore targetLocals
               targetRest witness sourceAfter targetAfter ∧
-            ReuseCapacityEntryRelativeFrame
+            RetainedEntryRelativeFrame
               (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
                 externals)
               entryRuntime entryStore entryWitness facts remainingBytes
@@ -13479,7 +13498,7 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryDelete
               nextRuntime.globals = sourceRuntime.globals :=
             (deleteValue_runtimeAux updated).globals
           have nextInvariant :
-              ReuseCapacityEntryRelativeFrame
+              RetainedEntryRelativeFrame
                 (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
                   externals)
                 entryRuntime entryStore entryWitness facts remainingBytes
@@ -13600,7 +13619,7 @@ theorem ConcreteStructuredCodeFocus.advance_constructorTag
         sourceRuntime sourceEnv code targetStore targetLocals targetCode witness
         source target)
     (invariant :
-      ReuseCapacityEntryRelativeFrame
+      RetainedEntryRelativeFrame
         (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
         entryRuntime entryStore entryWitness facts remainingBytes sourceRuntime
         sourceEnv targetStore targetLocals witness) :
@@ -13614,7 +13633,7 @@ theorem ConcreteStructuredCodeFocus.advance_constructorTag
           ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
               nextRuntime sourceEnv continuation nextStore targetLocals
               targetRest witness sourceAfter targetAfter ∧
-            ReuseCapacityEntryRelativeFrame
+            RetainedEntryRelativeFrame
               (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
                 externals)
               entryRuntime entryStore entryWitness facts remainingBytes
@@ -13688,7 +13707,7 @@ theorem ConcreteStructuredCodeFocus.advance_constructorTag
               nextRuntime.globals = sourceRuntime.globals :=
             (setTag_runtimeAux updated).globals
           have nextInvariant :
-              ReuseCapacityEntryRelativeFrame
+              RetainedEntryRelativeFrame
                 (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
                   externals)
                 entryRuntime entryStore entryWitness facts remainingBytes
@@ -13805,7 +13824,7 @@ theorem ConcreteStructuredCodeFocus.advance_objectFieldFVarAt
         sourceRuntime sourceEnv code targetStore targetLocals targetCode witness
         source target)
     (invariant :
-      ReuseCapacityEntryRelativeFrame
+      RetainedEntryRelativeFrame
         (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
         entryRuntime entryStore entryWitness facts remainingBytes sourceRuntime
         sourceEnv targetStore targetLocals witness) :
@@ -13819,7 +13838,7 @@ theorem ConcreteStructuredCodeFocus.advance_objectFieldFVarAt
           ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
               nextRuntime sourceEnv continuation nextStore targetLocals
               targetRest witness sourceAfter targetAfter ∧
-            ReuseCapacityEntryRelativeFrame
+            RetainedEntryRelativeFrame
               (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
                 externals)
               entryRuntime entryStore entryWitness facts remainingBytes
@@ -13937,7 +13956,7 @@ theorem ConcreteStructuredCodeFocus.advance_objectFieldFVarAt
                   nextRuntime.globals = sourceRuntime.globals :=
                 (setObjectField_runtimeAux updated).globals
               have nextInvariant :
-                  ReuseCapacityEntryRelativeFrame
+                  RetainedEntryRelativeFrame
                     (ConcreteReuseCapacityCacheFrame sourceModule
                       sourceFunction externals)
                     entryRuntime entryStore entryWitness facts remainingBytes
@@ -14072,7 +14091,7 @@ theorem ConcreteStructuredCodeFocus.advance_objectFieldErasedAt
         sourceRuntime sourceEnv code targetStore targetLocals targetCode witness
         source target)
     (invariant :
-      ReuseCapacityEntryRelativeFrame
+      RetainedEntryRelativeFrame
         (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
         entryRuntime entryStore entryWitness facts remainingBytes sourceRuntime
         sourceEnv targetStore targetLocals witness) :
@@ -14086,7 +14105,7 @@ theorem ConcreteStructuredCodeFocus.advance_objectFieldErasedAt
           ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
               nextRuntime sourceEnv continuation nextStore targetLocals
               targetRest witness sourceAfter targetAfter ∧
-            ReuseCapacityEntryRelativeFrame
+            RetainedEntryRelativeFrame
               (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
                 externals)
               entryRuntime entryStore entryWitness facts remainingBytes
@@ -14192,7 +14211,7 @@ theorem ConcreteStructuredCodeFocus.advance_objectFieldErasedAt
               nextRuntime.globals = sourceRuntime.globals :=
             (setObjectField_runtimeAux updated).globals
           have nextInvariant :
-              ReuseCapacityEntryRelativeFrame
+              RetainedEntryRelativeFrame
                 (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
                   externals)
                 entryRuntime entryStore entryWitness facts remainingBytes
@@ -14311,7 +14330,7 @@ theorem ConcreteStructuredCodeFocus.advance_usizeField
         sourceRuntime sourceEnv code targetStore targetLocals targetCode witness
         source target)
     (invariant :
-      ReuseCapacityEntryRelativeFrame
+      RetainedEntryRelativeFrame
         (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
         entryRuntime entryStore entryWitness facts remainingBytes sourceRuntime
         sourceEnv targetStore targetLocals witness) :
@@ -14325,7 +14344,7 @@ theorem ConcreteStructuredCodeFocus.advance_usizeField
           ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
               nextRuntime sourceEnv continuation nextStore targetLocals
               targetRest witness sourceAfter targetAfter ∧
-            ReuseCapacityEntryRelativeFrame
+            RetainedEntryRelativeFrame
               (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
                 externals)
               entryRuntime entryStore entryWitness facts remainingBytes
@@ -14419,7 +14438,7 @@ theorem ConcreteStructuredCodeFocus.advance_usizeField
                       nextRuntime.globals = sourceRuntime.globals :=
                     (setUSizeSlot_runtimeAux updated).globals
                   have nextInvariant :
-                      ReuseCapacityEntryRelativeFrame
+                      RetainedEntryRelativeFrame
                         (ConcreteReuseCapacityCacheFrame sourceModule
                           sourceFunction externals)
                         entryRuntime entryStore entryWitness facts
@@ -14573,7 +14592,7 @@ private theorem ConcreteStructuredCodeFocus.advance_scalarFieldOperation
         ([.localGet objectIndex, .localGet fieldIndex, .call callIndex] ++
           targetCore))
     (invariant :
-      ReuseCapacityEntryRelativeFrame
+      RetainedEntryRelativeFrame
         (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
         entryRuntime entryStore entryWitness facts remainingBytes sourceRuntime
         sourceEnv targetStore targetLocals witness)
@@ -14607,7 +14626,7 @@ private theorem ConcreteStructuredCodeFocus.advance_scalarFieldOperation
           ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
               nextRuntime sourceEnv continuation nextStore targetLocals
               targetRest witness sourceAfter targetAfter ∧
-            ReuseCapacityEntryRelativeFrame
+            RetainedEntryRelativeFrame
               (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
                 externals)
               entryRuntime entryStore entryWitness facts remainingBytes
@@ -14651,7 +14670,7 @@ private theorem ConcreteStructuredCodeFocus.advance_scalarFieldOperation
   have sourceGlobals : nextRuntime.globals = sourceRuntime.globals :=
     (setScalarField_runtimeAux updated).globals
   have nextInvariant :
-      ReuseCapacityEntryRelativeFrame
+      RetainedEntryRelativeFrame
         (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
         entryRuntime entryStore entryWitness facts remainingBytes nextRuntime
         sourceEnv (replaceHeap targetStore heap) targetLocals witness :=
@@ -14763,7 +14782,7 @@ theorem ConcreteStructuredCodeFocus.advance_scalarField
         sourceRuntime sourceEnv code targetStore targetLocals targetCode witness
         source target)
     (invariant :
-      ReuseCapacityEntryRelativeFrame
+      RetainedEntryRelativeFrame
         (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
         entryRuntime entryStore entryWitness facts remainingBytes sourceRuntime
         sourceEnv targetStore targetLocals witness) :
@@ -14777,7 +14796,7 @@ theorem ConcreteStructuredCodeFocus.advance_scalarField
           ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
               nextRuntime sourceEnv continuation nextStore targetLocals
               targetRest witness sourceAfter targetAfter ∧
-            ReuseCapacityEntryRelativeFrame
+            RetainedEntryRelativeFrame
               (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
                 externals)
               entryRuntime entryStore entryWitness facts remainingBytes
@@ -15072,7 +15091,7 @@ theorem
         source target)
     (sourceJoins : source.joins = [])
     (invariant :
-      ReuseCapacityEntryRelativeFrame
+      RetainedEntryRelativeFrame
         (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
         entryRuntime entryStore entryWitness facts (requiredBytes + slack)
         sourceRuntime sourceEnv targetStore targetLocals witness)
@@ -15089,7 +15108,7 @@ theorem
           ConcreteStructuredYieldFocus context sourceFunction resultRuntime
               resultEnv resultValue resultStore resultLocals resultWitness kind
               physical sourceAfter targetAfter ∧
-            ReuseCapacityEntryRelativeFrame
+            RetainedEntryRelativeFrame
                 (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
                   externals)
                 entryRuntime entryStore entryWitness resultFacts slack
@@ -15489,7 +15508,7 @@ theorem
                 ConcreteStructuredYieldFocus context sourceFunction
                     resultRuntime resultEnv resultValue resultStore resultLocals
                     resultWitness kind physical sourceAfter targetAfter ∧
-                  ReuseCapacityEntryRelativeFrame
+                  RetainedEntryRelativeFrame
                       (ConcreteReuseCapacityCacheFrame sourceModule
                         sourceFunction externals)
                       entryRuntime entryStore entryWitness resultFacts slack
@@ -16302,13 +16321,16 @@ theorem
           _witnessDescriptorsPreserved, _transports, producedTransfer,
           nextInvariant⟩ :=
         (functionSpec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache
-          externals) supported stepFits invariant sourceStep valueCompiled
+          externals) supported stepFits
+            ⟨invariant.1, ReuseCapacityCodeEntryTransports.refl sourceRuntime targetStore witness⟩
+            sourceStep valueCompiled
             valueAdapted resultFound
+      have nextInvariant := invariant.2.afterLegacyFrame nextInvariant
       rw [transfer] at producedTransfer
       have factsEq := Option.some.inj producedTransfer
       subst producedFacts
       have continuationInvariant :
-          ReuseCapacityEntryRelativeFrame
+          RetainedEntryRelativeFrame
             (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
               externals)
             entryRuntime entryStore entryWitness nextFacts
@@ -16381,7 +16403,7 @@ theorem
       have calleeEntryInvariant :=
         entry.calleeEntryRelativeCacheFrame storedCallerFrame
       have calleeInvariantWithSlack :
-          ReuseCapacityEntryRelativeFrame
+          RetainedEntryRelativeFrame
             (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction
               externals)
             sourceRuntime targetStore witness []
@@ -16422,7 +16444,7 @@ theorem
           resumedTargetFramesEq⟩ :=
         bindFocus.advance
       have storedInvariant :
-          ReuseCapacityEntryRelativeFrame
+          RetainedEntryRelativeFrame
             (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
               externals)
             entryRuntime entryStore entryWitness facts
@@ -16447,18 +16469,18 @@ theorem
       have nextFactsEq : nextFacts = eraseReuseCapacityFact facts decl.fvarId :=
         Option.some.inj transfer.symm
       have callerAfterCall :=
-        storedInvariant.restoreDirectCaller calleeInvariant
+        RetainedCacheEntryFrame.restoreCaller storedInvariant calleeInvariant
           resumedFocus.stateRelated resumedFocus.frameAligned entry.resultFound
           resumedUpdate
       have continuationInvariant :
-          ReuseCapacityEntryRelativeFrame
+          RetainedEntryRelativeFrame
             (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
               externals)
             entryRuntime entryStore entryWitness nextFacts
             (continuationCost + slack) nextRuntime
             (bind sourceEnv decl.fvarId sourceValue) afterCall resumedLocals
             resultWitness := by
-        simpa only [nextFactsEq] using callerAfterCall
+        simpa only [nextFactsEq, RetainedCacheEntryFrame] using callerAfterCall
       obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals,
           finalWitness, kind, resultPhysical, continuationSourceCount,
           continuationTargetCount, continuationSourcePath,
@@ -16706,7 +16728,7 @@ theorem
       have calleeEntryInvariant :=
         entry.calleeEntryRelativeCacheFrame postMatcher
       have calleeInvariantWithSlack :
-          ReuseCapacityEntryRelativeFrame
+          RetainedEntryRelativeFrame
             (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction
               externals)
             callRuntime selected.nextStore witness []
@@ -16762,14 +16784,14 @@ theorem
         hostDescriptorsPreserved := matcherFrame.descriptors
         witnessDescriptorsPreserved := rfl }
       have matcherEntry :
-          ReuseCapacityCodeEntryTransports entryRuntime callRuntime entryStore
+          RetainedCodeEntryTransports entryRuntime callRuntime entryStore
             selected.nextStore entryWitness witness :=
         invariant.2.step (WitnessTransport.refl witness)
           (ClosureAllocationsPersistent.refl witness) matcherCapacity
           (takeClosureApplication_ordinaryPersistenceTransport application)
           matcherFrame.externals matcherTables
       have storedInvariant :
-          ReuseCapacityEntryRelativeFrame
+          RetainedEntryRelativeFrame
             (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
               externals)
             entryRuntime entryStore entryWitness facts
@@ -16793,18 +16815,18 @@ theorem
       have nextFactsEq : nextFacts = eraseReuseCapacityFact facts decl.fvarId :=
         Option.some.inj transfer.symm
       have callerAfterCall :=
-        storedInvariant.restoreDirectCaller calleeInvariant
+        RetainedCacheEntryFrame.restoreCaller storedInvariant calleeInvariant
           resumedFocus.stateRelated resumedFocus.frameAligned entry.resultFound
           resumedUpdate
       have continuationInvariant :
-          ReuseCapacityEntryRelativeFrame
+          RetainedEntryRelativeFrame
             (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
               externals)
             entryRuntime entryStore entryWitness nextFacts
             (continuationCost + slack) nextRuntime
             (bind sourceEnv decl.fvarId sourceValue) afterCall resumedLocals
             resultWitness := by
-        simpa only [nextFactsEq] using callerAfterCall
+        simpa only [nextFactsEq, RetainedCacheEntryFrame] using callerAfterCall
       obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals,
           finalWitness, kind, resultPhysical, continuationSourceCount,
           continuationTargetCount, continuationSourcePath,
@@ -16840,13 +16862,16 @@ theorem
           _externalsPreserved, _hostDescriptorsPreserved,
           _witnessDescriptorsPreserved, producedTransfer, nextInvariant⟩ :=
         (functionSpec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal_entryRelativeCache
-          externals) supported stepFits invariant sourceStep valueCompiled
+          externals) supported stepFits
+            ⟨invariant.1, ReuseCapacityCodeEntryTransports.refl sourceRuntime targetStore witness⟩
+            sourceStep valueCompiled
             valueAdapted resultFound
+      have nextInvariant := invariant.2.afterLegacyFrame nextInvariant
       rw [transfer] at producedTransfer
       have factsEq := Option.some.inj producedTransfer
       subst producedFacts
       have continuationInvariant :
-          ReuseCapacityEntryRelativeFrame
+          RetainedEntryRelativeFrame
             (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
               externals)
             entryRuntime entryStore entryWitness nextFacts
@@ -16928,13 +16953,13 @@ theorem
             OrdinaryPersistenceTransport sourceRuntime nextRuntime :=
           SourceLazyLetResult.hit_ordinaryTransport_of_supported call sourceStep
         have nextEntry :
-            ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
+            RetainedCodeEntryTransports entryRuntime nextRuntime entryStore
               targetStore entryWitness witness :=
           invariant.2.step hit.witnessTransport
             hit.closureAllocationsPersistent hit.capacityTransport ordinary
             hit.externalsPreserved hit.toClosureTablesTransport
         have continuationInvariant :
-            ReuseCapacityEntryRelativeFrame
+            RetainedEntryRelativeFrame
               (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
                 externals)
               entryRuntime entryStore entryWitness nextFacts
@@ -16943,7 +16968,7 @@ theorem
               witness := by
           simpa [nextFactsEq] using
             (show
-              ReuseCapacityEntryRelativeFrame
+              RetainedEntryRelativeFrame
                 (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
                   externals)
                 entryRuntime entryStore entryWitness
@@ -17189,14 +17214,14 @@ theorem
         stateRelated := calleeFrame.1.1.1.1.1
         frameAligned := calleeFrame.1.1.1.2.2.1 }
       have calleeEntryInvariant :
-          ReuseCapacityEntryRelativeFrame
+          RetainedEntryRelativeFrame
             (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction
               externals)
             sourceRuntime targetStore witness []
             (stepCost + (continuationCost + slack)) sourceRuntime []
             targetStore (generatedRow.targetFunction.toLocals []) witness :=
         ⟨calleeFrame,
-          ReuseCapacityCodeEntryTransports.refl sourceRuntime targetStore
+          RetainedCodeEntryTransports.refl sourceRuntime targetStore
             witness⟩
       have calleeEntryAbi :
           ClosureAllocationsAbiAligned loweredRow.context.program witness := by
@@ -17373,7 +17398,8 @@ theorem
           ReuseTokenOrdinaryRel (eraseReuseCapacityFact facts decl.fvarId)
             nextRuntime (bind sourceEnv decl.fvarId sourceValue) :=
         publicationOrdinary
-          (invariant.1.1.1.1.2.1.transport calleeInvariant.2.ordinary)
+          (calleeInvariant.2.retained invariant.1.stateRelated.2
+            (WitnessTransport.refl witness) invariant.1.1.1.1.2.1)
       have publicationCapacity :
           HeaderCapacityTransport afterCall.host.runtime.heap
             nextStore.host.runtime.heap callWitness := by
@@ -17487,19 +17513,16 @@ theorem
         hostDescriptorsPreserved := publicationDescriptors
         witnessDescriptorsPreserved := rfl }
       have currentToNext :
-          ReuseCapacityCodeEntryTransports sourceRuntime nextRuntime
+          RetainedCodeEntryTransports sourceRuntime nextRuntime
             targetStore nextStore witness callWitness :=
         calleeInvariant.2.step (WitnessTransport.refl callWitness)
           (ClosureAllocationsPersistent.refl callWitness)
           publicationCapacity publicationOrdinaryPersistence
           publicationExternals publicationClosureTables
       have nextEntry :
-          ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
+          RetainedCodeEntryTransports entryRuntime nextRuntime entryStore
             nextStore entryWitness callWitness :=
-        invariant.2.step currentToNext.witness
-          currentToNext.closureAllocationsPersistent currentToNext.capacity
-          currentToNext.ordinary currentToNext.externals
-          currentToNext.toClosureTablesTransport
+        invariant.2.trans currentToNext
       have expectedTransfer :
           reuseCapacityLetFacts? facts decl =
             some (eraseReuseCapacityFact facts decl.fvarId) := by
@@ -17508,7 +17531,7 @@ theorem
           nextFacts = eraseReuseCapacityFact facts decl.fvarId :=
         Option.some.inj (transfer.symm.trans expectedTransfer)
       have continuationInvariant :
-          ReuseCapacityEntryRelativeFrame
+          RetainedEntryRelativeFrame
             (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
               externals)
             entryRuntime entryStore entryWitness nextFacts
@@ -17517,7 +17540,7 @@ theorem
             callWitness := by
         simpa [nextFactsEq] using
           (show
-            ReuseCapacityEntryRelativeFrame
+            RetainedEntryRelativeFrame
               (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
                 externals)
               entryRuntime entryStore entryWitness
@@ -17627,7 +17650,7 @@ theorem
           ConcreteStructuredYieldFocus context sourceFunction resultRuntime
               resultEnv resultValue resultStore resultLocals resultWitness kind
               physical sourceAfter targetAfter ∧
-            ReuseCapacityEntryRelativeFrame
+            RetainedEntryRelativeFrame
                 (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
                   externals)
                 sourceRuntime initial initialWitness resultFacts 0 resultRuntime
@@ -17660,12 +17683,12 @@ theorem
     stateRelated := invariant.cacheFrame.stateRelated.stateRelated
     frameAligned := invariant.cacheFrame.1.1.1.2.2.1 }
   have entryInvariant :
-      ReuseCapacityEntryRelativeFrame
+      RetainedEntryRelativeFrame
         (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
         sourceRuntime initial initialWitness facts (requiredBytes + 0)
         sourceRuntime sourceEnv initial targetLocals initialWitness :=
     ⟨by simpa [targetLocals] using invariant.cacheFrame,
-      ReuseCapacityCodeEntryTransports.refl sourceRuntime initial
+      RetainedCodeEntryTransports.refl sourceRuntime initial
         initialWitness⟩
   obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals, resultWitness,
       kind, physical, sourceCount, targetCount, sourcePath, targetPath, yielded,
@@ -18468,9 +18491,9 @@ theorem ConcreteStructuredSaturatedCallReadyFocus.advance_enter_stack
     hostDescriptorsPreserved := matcherFrame.descriptors
     witnessDescriptorsPreserved := rfl }
   have matcherTransports :
-      ReuseCapacityCodeEntryTransports sourceRuntime callRuntime targetStore
+      RetainedCodeEntryTransports sourceRuntime callRuntime targetStore
         nextStore witness witness :=
-    (ReuseCapacityCodeEntryTransports.refl sourceRuntime targetStore
+    (RetainedCodeEntryTransports.refl sourceRuntime targetStore
       witness).step (WitnessTransport.refl witness)
         (ClosureAllocationsPersistent.refl witness) matcherCapacity
         (takeClosureApplication_ordinaryPersistenceTransport application)
@@ -18929,18 +18952,13 @@ theorem ConcreteStructuredBindFrameFocus.advance_popResourceStack
     related.advance_popRetainedCache (module := module) (hostEnv := hostEnv)
       callerScope ⟨calleeScope.1.1, calleeScope.2⟩
       calleeScope.transports.witness calleeScope.transports.capacity
-      (ReuseTokenOrdinaryBindTransport.ofOrdinaryPersistence
-        calleeScope.transports.ordinary) programEq tail
+      ((calleeScope.transports.retained callerScope.1.1.stateRelated.2
+        (WitnessTransport.refl callWitness)).eraseBind) programEq tail
   have restoredScope : ConcreteStructuredResourceScope context sourceModule
       sourceFunction externals outerRuntime outerStore outerWitness
       (eraseReuseCapacityFact facts result) resultBytes sourceRuntime
       (bind callerEnv result sourceValue) targetStore resumedLocals witness :=
-    ⟨⟨cacheFrame.1, callerScope.transports.step
-      calleeScope.transports.witness
-      calleeScope.transports.closureAllocationsPersistent
-      calleeScope.transports.capacity calleeScope.transports.ordinary
-      calleeScope.transports.externals
-      calleeScope.transports.toClosureTablesTransport⟩, cacheFrame.2⟩
+    ⟨⟨cacheFrame.1, callerScope.transports.trans calleeScope.transports⟩, cacheFrame.2⟩
   have resources :
       ConcreteStructuredResourceStack context.program context sourceModule
         sourceFunction externals outerRuntime sourceRuntime outerStore
@@ -20938,7 +20956,7 @@ theorem ConcreteStructuredLazyCallReadyCoreRel.advance_miss_of_step
         remainingBytes sourceRuntime [] targetStore
         (row.targetFunction.toLocals []) witness :=
     ⟨⟨calleeFrame,
-        ReuseCapacityCodeEntryTransports.refl sourceRuntime targetStore
+        RetainedCodeEntryTransports.refl sourceRuntime targetStore
           witness⟩,
       calleeAbi⟩
   have calleeFocus :
@@ -24262,8 +24280,9 @@ theorem ConcreteStructuredYieldFocus.advance_pop_supportedGlobal_of_step
           (WitnessTransport.refl witness) publicationCapacity
       have nextOrdinary :
           ReuseTokenOrdinaryRel facts nextRuntime callerEnv :=
-        (callerScope.1.1.1.1.1.2.1.transport
-          currentScope.transports.ordinary).transport publicationOrdinary
+        (currentScope.transports.retained callerScope.1.1.stateRelated.2
+          (WitnessTransport.refl activeEntryWitness)
+          callerScope.1.1.1.1.1.2.1).transport publicationOrdinary
       have nextAligned :
           ConcreteLocalFrameAligned callerFunction nextRuntime callerEnv
             nextStore callerLocals witness := by
@@ -24340,18 +24359,15 @@ theorem ConcreteStructuredYieldFocus.advance_pop_supportedGlobal_of_step
         hostDescriptorsPreserved := publicationDescriptors
         witnessDescriptorsPreserved := rfl }
       have activeToNext :
-          ReuseCapacityCodeEntryTransports activeEntryRuntime nextRuntime
+          RetainedCodeEntryTransports activeEntryRuntime nextRuntime
             activeEntryStore nextStore activeEntryWitness witness :=
         currentScope.transports.step (WitnessTransport.refl witness)
           (ClosureAllocationsPersistent.refl witness) publicationCapacity
           publicationOrdinary publicationExternals publicationTables
       have nextEntry :
-          ReuseCapacityCodeEntryTransports callerEntryRuntime nextRuntime
+          RetainedCodeEntryTransports callerEntryRuntime nextRuntime
             callerEntryStore nextStore callerEntryWitness witness :=
-        callerScope.transports.step activeToNext.witness
-          activeToNext.closureAllocationsPersistent activeToNext.capacity
-          activeToNext.ordinary activeToNext.externals
-          activeToNext.toClosureTablesTransport
+        callerScope.transports.trans activeToNext
       have nextAbi :
           ClosureAllocationsAbiAligned callerContext.program witness := by
         rw [← programEq, ← currentSpec.contextProgram]
@@ -24859,8 +24875,11 @@ theorem ConcreteStructuredCodePointwiseRel.advance_directLet
       _witnessDescriptorsPreserved, transports, _producedTransfer,
       nextInvariant⟩ :=
     (spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache
-      externals) supported fits related.resources.current.1 sourceResult
+      externals) supported fits
+        ⟨related.resources.current.1.1,
+          ReuseCapacityCodeEntryTransports.refl sourceRuntime targetStore witness⟩ sourceResult
         valueCompiled valueAdapted resultFound
+  have nextInvariant := related.resources.current.transports.afterLegacyFrame nextInvariant
   have flat : StructuredWasmFlatProgram targetModule.wasmModule
       (targetValue ++ [.localSet resultIndex]) :=
     spec.reuseCapacityDirectTargetFlat_reuseBudgetedDirect
@@ -24984,8 +25003,11 @@ theorem ConcreteStructuredCodePointwiseRel.advance_schemaChangingDirectLet
       _witnessDescriptorsPreserved, transports, _producedTransfer,
       nextInvariant, schemaUpdate⟩ :=
     (spec.reuseCapacityDirectLetRuntimeRefinesWithSchema_schemaChanging_pureExternalOwnership_entryRelativeCache
-      externals) schema supported fits related.resources.current.1 sourceResult
+      externals) schema supported fits
+        ⟨related.resources.current.1.1,
+          ReuseCapacityCodeEntryTransports.refl sourceRuntime targetStore witness⟩ sourceResult
         valueCompiled valueAdapted resultFound
+  have nextInvariant := related.resources.current.transports.afterLegacyFrame nextInvariant
   have flat : StructuredWasmFlatProgram targetModule.wasmModule
       (targetValue ++ [.localSet resultIndex]) :=
     spec.reuseCapacityDirectTargetFlat_reuseBudgetedDirect
@@ -25107,8 +25129,11 @@ theorem ConcreteStructuredCodePointwiseRel.advance_schemaPreservingDirectLet
       _witnessDescriptorsPreserved, transports, _producedTransfer,
       nextInvariant, extension⟩ :=
     (spec.reuseCapacityDirectLetRuntimeRefinesWithExtension_schemaPreserving_pureExternalOwnership_entryRelativeCache
-      externals) supported fits related.resources.current.1 sourceResult
+      externals) supported fits
+        ⟨related.resources.current.1.1,
+          ReuseCapacityCodeEntryTransports.refl sourceRuntime targetStore witness⟩ sourceResult
         valueCompiled valueAdapted resultFound
+  have nextInvariant := related.resources.current.transports.afterLegacyFrame nextInvariant
   have flat : StructuredWasmFlatProgram targetModule.wasmModule
       (targetValue ++ [.localSet resultIndex]) :=
     spec.reuseCapacityDirectTargetFlat_reuseBudgetedDirect
@@ -26382,7 +26407,7 @@ private theorem concreteStructuredCodeCore_advance_mutation_of_step
             ConcreteStructuredCodeFocus context sourceModule sourceFunction
                 labels nextRuntime sourceEnv continuation nextStore
                 targetLocals targetRest witness computedAfter targetAfter ∧
-              ReuseCapacityEntryRelativeFrame
+              RetainedEntryRelativeFrame
                 (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
                   externals)
                 entryRuntime entryStore entryWitness facts remainingBytes

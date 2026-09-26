@@ -64,10 +64,10 @@ bytes, or the complete lean-zip application.
 | --- | --- | --- |
 | Exact-root executable return | `terminatesWith_of_rootedExecEvaluates` | Discharge compiler-owned admission; retain explicit execution/resource contracts |
 | Static supported-export assembly | `exists_ofSupportedPipeline` and pipeline alignment/uniqueness lemmas | Apply to the same checked captured program; closure-flow condition remains visible |
-| Saved-caller return/pop | `RetainedInitializer.return_pop_preservesCaller` connects the checked source body to the existing target return/bind suffix | Target callee prefix and central hereditary resource-stack migration |
+| Saved-caller return/pop | `RetainedInitializer.return_pop_preservesCaller` connects the checked source body to the existing target return/bind suffix | Target callee prefix and heap-result lazy-miss admission |
 | Publication separation | Derived for the actual singleton-Array initializer, including historical caller facts | Production external refinement; broader producers |
 | First actual lean-zip initializer | Kernel-checked RC2 program; source execution and caller-binding proof | Production Array contracts and preceding target execution |
-| Entry-relative caller preservation | `RetainedCacheEntryFrame.restoreCaller` composes entry-indexed token preservation through return | Migrate central active/suspended scope consumers; retain other transports |
+| Entry-relative caller preservation | Central active/suspended scopes use `RetainedCodeEntryTransports`; return/pop composes to the original caller entry | Derive heap-publication transports at the lazy-miss consumer |
 | Whole `compressStored` boundary | Roadmap and conditional backend infrastructure | ByteArray relation/operations, remaining admission, then linking/encoding/decoding |
 
 In particular, `ConcreteStructuredLazyMissBackendCoverageAt` still explicitly
@@ -77,7 +77,8 @@ lemmas do not remove that central simulator/admission restriction yet.
 ### Current invariant migration boundary
 
 [`ConcreteRetainedTransports.lean`](FirTalos/ConcreteRetainedTransports.lean)
-isolates the proposed replacement of `ReuseCapacityCodeEntryTransports.ordinary`.
+provides the replacement of `ReuseCapacityCodeEntryTransports.ordinary` used by
+the structured small-step simulation (not the legacy declaration endpoints).
 `RetainedCallerTransport entryWitness before after` preserves any saved token
 facts whose physical representation transports into `entryWitness`. It is
 universal over valid saved facts, not a client-chosen map. Representation
@@ -89,18 +90,27 @@ this entry-relative package without all-location ordinaryness.
 This is a sufficient, not weakest, condition: it covers every representable
 saved fact map, not just the frames actually present. It permits fresh graph
 publication but does not automatically justify publishing an arbitrary old
-ordinary object. It is a proof-local migration seam, not a new public theorem
-premise and not a replacement already installed in the central simulator.
+ordinary object. It is an internal simulation invariant, not an additional
+public theorem premise.
+
+`ConcreteStructuredResourceScope` and the suspended resource stack now use
+this package. Named/closure/lazy entry starts the inner scope at the exact
+call boundary; `restoreCaller` and `advance_popResourceStack` compose back to
+the saved outer entry. Ordinary direct, schema-aware and external operation
+proofs are reused at their local boundary through `afterLegacyFrame`, which
+composes their result with the existing entry transport. It does not reset a
+saved historical scope. The older whole-declaration APIs still expose and
+prove their stronger all-location ordinaryness conclusions.
 
 The checked initializer supplies the new law in
 `RetainedInitializer.evaluates_and_retainsCallers` from primitive external laws
 and entry heap representation. `example_not_blanketOrdinary` proves that its
 published result violates the old blanket law (an absent entry cell satisfies
 that law's antecedent vacuously). The distinction is kernel checked, not a
-terminological weakening. Next migrate the active/suspended scope push/pop
-consumers to this package and prove their closure before lifting heap-result
-lazy-miss exclusions. Production Array implementation and the target prefix
-remain separate obligations.
+terminological weakening. Next derive the cache-publication transport at the
+heap-result lazy-miss consumer; its object/tobject exclusions remain in force.
+Production Array implementation and the target prefix remain separate
+obligations.
 
 The fresh-region proof checkpoint `f5bcf3fd3` is based on accepted main
 `97c257cc4`. Its proof sources are unchanged from reviewed `c67c6ed21`;
@@ -111,33 +121,22 @@ constitute new proof progress or new exact-head Talos validation.
 
 ### Next meaningful proof result
 
-Use the checked body of
-`Zip.Spec.DeflateStoredCorrect.deflateStoredPure._closed_0` to derive its
-caller-specific publication/binding transport, then feed it into the existing
-return/pop theorem. The diagnostic inventory mentions `Array.mkEmpty` and
-`Array.push`; these are leads, not a proof of the body or permission to copy it.
+Connect the checked singleton-Array initializer to heap-result cache
+publication in the central relation. The body-level source execution and
+caller-specific publication/binding transport already exist, and the
+hereditary scope now accepts entry-indexed retained transport. The remaining
+publication rule must preserve both current saved facts and the cumulative
+transport from the original entry, without caller-supplied graph-separation
+evidence or blanket ordinaryness. Do not simply delete the object/tobject
+exclusions before proving that rule's closure.
 
-Acceptance is one consumer theorem with **no caller-supplied publication
-disjointness, fresh-region closure or ordinary-binding transport for that body**.
-Derive these facts from the body's operations and existing entry refinement.
-Retain independent source/target execution, witness/capacity transport, physical
-result, caller frame and historical scope until separately discharged. Do not
-rename these outstanding obligations or claim full application correctness.
-
-Root has selected a new exact-source nomination under official Lean 4.34.0-rc2
-(`ROOT-W6-20260925-002`, assigned as `ROOT-W7-20260925-001`). W7 supplies generic
-checked quotation/readback and same-definition lowering. The retained 4.33
-artifact is historical only: no cross-version olean import, silent substitute
-capture or asserted cross-version AST identity. Until delivery, this consumer
-is genuinely blocked on its proof input; do not replace it with another
-synthetic-body theorem or repeat the completed capture-API investigation.
-
-The separate reusable proof obligation is hereditary suspended-caller resource
-transport: the accepted pop restores a frame, not the scope needed for future
-nested pushes. Work here must discharge that stronger consumer, not introduce
-a parallel stack wrapper which still demands the old all-location ordinaryness.
-It can proceed independently when not explicitly paused; it does not remove
-the actual-input dependency or authorize shared relation redesign.
+In parallel proof order, discharge `FreshArrayExternalContract` against the
+production primitive implementation and construct the generated target callee
+prefix. Keep witness/capacity, physical result and historical-frame obligations
+visible until derived. The source input is the delivered RC2
+`RetainedRC2.program`, reproduced from exact source Git objects; no copied AST,
+historical 4.33 olean or substituted capture is a proof input. This remains an
+initializer milestone, not a full `compressStored` or encoded-artifact theorem.
 
 ### Scope guardrails
 

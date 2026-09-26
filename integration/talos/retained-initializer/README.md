@@ -42,7 +42,10 @@ not a caller-selected map. That law is the source component consumed by
 through return without blanket ordinaryness. The negative regression
 `example_not_blanketOrdinary` shows why the distinction matters: the actual
 fresh published Array violates the old all-location condition. The central
-active/suspended resource stack has not yet migrated to the replacement.
+active/suspended resource stack now uses the replacement. The remaining
+heap-result publication rule must derive its cumulative transport before
+lifting object/tobject lazy-miss exclusions; this body theorem alone is not
+that central admission result.
 
 The two source external contracts are uniform primitive laws, not a
 per-program invariant. `FreshArrayExternalContract` specifies empty allocation

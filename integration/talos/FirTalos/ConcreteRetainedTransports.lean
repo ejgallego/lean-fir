@@ -4,7 +4,8 @@ import FirTalos.ConcreteArrayPublication
 Only token facts represented at entry need survive a callee. The universal
 quantification below includes arbitrary older callers through witness transport;
 it is not a caller-supplied list, source invariant or execution certificate.
-The central resource stack remains unchanged until its consumers are migrated.
+The structured small-step resource stack uses this package; legacy
+whole-declaration proofs retain their stronger ordinary-persistence interface.
 -/
 
 namespace FirTalos.Concrete
@@ -115,15 +116,76 @@ theorem RetainedCodeEntryTransports.trans
   externals := right.externals.trans left.externals }
 
 /-- The same cache frame as before, paired with the weaker entry transport. -/
+def RetainedEntryRelativeFrame
+    (Frame : ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+      Wasm.Locals → RefinementWitness → Prop)
+    (entryRuntime : RuntimeState) (entryStore : Wasm.Store Host)
+    (entryWitness : RefinementWitness) (facts : ReuseCapacityFacts)
+    (remainingBytes : Nat) (runtime : RuntimeState) (env : Env)
+    (store : Wasm.Store Host) (locals : Wasm.Locals) (witness : RefinementWitness) : Prop :=
+  Frame facts remainingBytes runtime env store locals witness ∧
+  RetainedCodeEntryTransports entryRuntime runtime entryStore store entryWitness witness
+
+/-- Existing ordinary operation laws remain usable one step at a time. -/
+theorem RetainedCodeEntryTransports.step
+    {entryRuntime currentRuntime nextRuntime : RuntimeState}
+    {entryStore currentStore nextStore : Wasm.Store Host}
+    {entryWitness currentWitness nextWitness : RefinementWitness}
+    (entry : RetainedCodeEntryTransports entryRuntime currentRuntime entryStore
+      currentStore entryWitness currentWitness)
+    (witness : WitnessTransport currentWitness nextWitness)
+    (closureAllocationsPersistent : ClosureAllocationsPersistent currentWitness nextWitness)
+    (capacity : HeaderCapacityTransport currentStore.host.runtime.heap
+      nextStore.host.runtime.heap currentWitness)
+    (ordinary : OrdinaryPersistenceTransport currentRuntime nextRuntime)
+    (externals : nextStore.host.externals = currentStore.host.externals)
+    (closureTables : ClosureTablesTransport currentStore nextStore currentWitness nextWitness) :
+    RetainedCodeEntryTransports entryRuntime nextRuntime entryStore nextStore
+      entryWitness nextWitness :=
+  entry.trans {
+    toClosureTablesTransport := closureTables
+    witness, closureAllocationsPersistent, capacity, externals
+    retained := RetainedCallerTransport.ofOrdinary ordinary }
+
+theorem RetainedEntryRelativeFrame.ofLegacy
+    {Frame : ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+      Wasm.Locals → RefinementWitness → Prop}
+    {entryRuntime runtime : RuntimeState} {entryStore store : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness} {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat} {env : Env} {locals : Wasm.Locals}
+    (frame : ReuseCapacityEntryRelativeFrame Frame entryRuntime entryStore
+      entryWitness facts remainingBytes runtime env store locals witness) :
+    RetainedEntryRelativeFrame Frame entryRuntime entryStore entryWitness facts
+      remainingBytes runtime env store locals witness :=
+  ⟨frame.1, RetainedCodeEntryTransports.ofLegacy frame.2⟩
+
+/-- Lift a legacy local operation result while preserving the original entry.
+The reflexive entry of the local proof is not substituted for the saved scope. -/
+theorem RetainedCodeEntryTransports.afterLegacyFrame
+    {Frame : ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+      Wasm.Locals → RefinementWitness → Prop}
+    {entryRuntime runtime nextRuntime : RuntimeState}
+    {entryStore store nextStore : Wasm.Store Host}
+    {entryWitness witness nextWitness : RefinementWitness}
+    {facts : ReuseCapacityFacts} {remainingBytes : Nat} {env : Env}
+    {locals : Wasm.Locals}
+    (entry : RetainedCodeEntryTransports entryRuntime runtime entryStore store
+      entryWitness witness)
+    (frame : ReuseCapacityEntryRelativeFrame Frame runtime store witness facts
+      remainingBytes nextRuntime env nextStore locals nextWitness) :
+    RetainedEntryRelativeFrame Frame entryRuntime entryStore entryWitness facts
+      remainingBytes nextRuntime env nextStore locals nextWitness :=
+  ⟨frame.1, entry.trans (.ofLegacy frame.2)⟩
+
 def RetainedCacheEntryFrame (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function) (externals : ExternalImpl)
     (entryRuntime : RuntimeState) (entryStore : Wasm.Store Host)
     (entryWitness : RefinementWitness) (facts : ReuseCapacityFacts)
     (remainingBytes : Nat) (runtime : RuntimeState) (env : Env)
     (store : Wasm.Store Host) (locals : Wasm.Locals) (witness : RefinementWitness) : Prop :=
-  ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals facts
-    remainingBytes runtime env store locals witness ∧
-  RetainedCodeEntryTransports entryRuntime runtime entryStore store entryWitness witness
+  RetainedEntryRelativeFrame
+    (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
+    entryRuntime entryStore entryWitness facts remainingBytes runtime env store locals witness
 
 /-- Hereditary caller restoration at the original entry boundary. In contrast
 to restoreDirectCaller, the callee may publish fresh heap objects. Its retained
